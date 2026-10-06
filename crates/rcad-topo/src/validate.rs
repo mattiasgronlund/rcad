@@ -2524,7 +2524,8 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// points and the two faces stop drawing the same side (`docs/decisions.md`
 /// §285.4). The zero ladder in [`how_much_space_a_curved_solid_encloses`]
 /// already retried a fold one step on (§208.3); this is the same retry at the
-/// first mesh.
+/// first mesh. It is asked further down than a crossing is, for the reason
+/// under "What stops a fold".
 ///
 /// # Why this is not a fixed finer deflection
 ///
@@ -2539,8 +2540,8 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// stops decides what it costs and never what it lets through: a solid that
 /// stops early is refused, never passed.
 ///
-/// It stops below half the distance between the two closest corners of the
-/// solid that are not in the same place — the finest feature the sweep can read
+/// A crossing stops below half the distance between the two closest corners of
+/// the solid that are not in the same place — the finest feature the sweep can read
 /// without meshing. That is **a cost bound and not a proof that finer would not
 /// help**: a wall thinner than half its nearest corner pair, between two arcs
 /// whose corners sit far apart, would still be refused, as a crossing. The model's own linear tolerance was the first floor tried, and it is
@@ -2554,9 +2555,48 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// [`Error::MoreMeshPointsThanASolidWillHold`] and a patch with more triangles
 /// than the triangulator will hold each end it too.
 ///
-/// A solid that folds at every deflection walks the same ladder, down to the
-/// same floor: the floor is the solid's corners and not which refusal came
-/// back, so a fold costs no more meshes than a crossing does.
+/// # What stops a fold
+///
+/// **The corner floor is argued for chords that cross, and a fold is not
+/// that.** A chord at deflection `d` strays at most `d`, so a crossing goes once
+/// `d` is under half the gap: linear in the gap. A fold is one side two patches
+/// both draw through their insides. A point a patch puts inside is its own, so
+/// both ends of that side are points the two faces share, on the edges between
+/// them, and where those are two curves apart the side spans the gap between
+/// them. It goes once one of the two patches will not draw a side that long and
+/// puts a point inside instead. `rcad-mesh` takes a point inside wherever a
+/// triangle's charge is over `d`, and charges a side `L` long across a curved
+/// surface at least `L²/(3ρ)`, with `ρ` the radius
+/// [`how_flat_a_curved_face_gets`] reads for it; so such a side is gone once
+/// `d < L²/(3ρ)`. **Quadratic in the gap**, where the corner
+/// floor is linear: the bulge a curved face has over a gap `L` is about
+/// `L²/(8ρ)`, which is small beside `L` whenever the face is wide beside the
+/// gap.
+///
+/// The ball less a pointed cone in `a_cone_hollowed_along_its_axis.rs` is that
+/// case: a ring of the ball's band and the cone's band between two circles 2
+/// apart, on a ball of radius 3. Both bands drew the same sides from circle to
+/// circle at every deflection down to the corner floor of 1 and were refused;
+/// the ball takes a point inside below `4/9`, and at 0.4375 the ring measures
+/// its closed form.
+///
+/// So a fold is asked down to `closest²/(6ρ)` — half of `closest²/(3ρ)`, so
+/// that the halving lands on a rung below it — with `closest` standing in for
+/// the gap the way it does for a crossing, and `ρ` the flattest radius any
+/// curved face of the solid bends at ([`how_flat_a_curved_face_gets`]). Never
+/// above the corner floor, and the corner floor alone when a face is on a
+/// surface that function has not been taught. That is again **a cost bound and
+/// not a proof**: two curves closer than any two corners still fold past it.
+/// What it costs is a mesh whose sides across the flattest face are about
+/// `closest / √2`, which is the size of the finest feature the corners show.
+///
+/// **It still ends.** The halving from half the box's width reaches the floor
+/// in about `log₂(3ρ·width/closest²)` rungs, and a solid that folds at every
+/// deflection walks those rungs and is refused with the finest fold. The three
+/// refusals that end a crossing's ladder before its floor end this one too.
+/// Where `closest²` rounds to zero, or `ρ` is out of range, the floor is zero,
+/// and `Deflection::of` refusing a length that is not above zero ends it, as it
+/// ends the zero ladder.
 ///
 /// Whichever ends it, **the finest mesh's crossing or fold is what is handed
 /// back**. A face that meshed at a finer deflection was not what stopped the
@@ -2591,10 +2631,23 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     let Some(closest) = how_close_two_corners_come(view) else {
         return Err(finest_refusal);
     };
-    let finest = closest / 2.0;
+    let finest_for_a_crossing = closest / 2.0;
+    let finest_for_a_fold = match how_flat_a_curved_face_gets(view, [low, high]) {
+        Some(flattest) if flattest > 0.0 => {
+            finest_for_a_crossing.min(closest * closest / (6.0 * flattest))
+        }
+        _ => finest_for_a_crossing,
+    };
+    let finest = |refusal: &Error| {
+        if its_sides_cross(refusal) {
+            finest_for_a_crossing
+        } else {
+            finest_for_a_fold
+        }
+    };
     let (low, high) = (low.coordinates(), high.coordinates());
     let mut room = (0..3).fold(0.0, |widest: f64, axis| widest.max(high[axis] - low[axis])) / 2.0;
-    while room >= finest {
+    while room >= finest(&finest_refusal) {
         let Ok(less) = Deflection::of(room) else {
             break;
         };
@@ -2657,6 +2710,58 @@ fn how_close_two_corners_come(view: SolidView<'_>) -> Option<f64> {
         }
     }
     closest
+}
+
+/// The largest `ρ` such that `rcad-mesh` charges a side `L` long across any
+/// curved face of the solid at least `L²/(3ρ)`, or `None` when a face's
+/// surface is one this has not been taught. Zero when every face is flat.
+///
+/// Each is read off how `rcad-mesh`'s `how_far_a_flat_piece_strays` charges
+/// a triangle, which `a_step_that_stays_within` turns round:
+///
+/// - **A ball or a pipe** is charged `L²/(3r)`, `L` the whole chord on a ball
+///   and the chord across the axis on a pipe, so `ρ` is its radius.
+/// - **A cone** is charged `L²/(2·w·√(1 + t²))` across a ruling, `w` the widest
+///   the patch is from the axis, so `ρ = w·√(1 + t²)` covers it with room. The
+///   face lies inside `within`, and a point of the cone is its slope times how
+///   far up the axis it is from the axis, which over a box is largest at one of
+///   its corners; so the widest corner of `within` bounds `w`.
+/// - **A torus** is charged `a²/(3r) + b²/(2S)` for a side `a` round the tube
+///   and `b` round the ring, `S ≤ R + r`. Its chord is at most `a + b`, so
+///   `L² ≤ 2(a² + b²)` and the charge is at least `L²/(6(R + r))`: `ρ` is
+///   `2(R + r)`.
+fn how_flat_a_curved_face_gets(view: SolidView<'_>, within: [Point; 2]) -> Option<f64> {
+    let [low, high] = within.map(|corner| corner.coordinates());
+    let corners_of_the_box = (0..8).map(|which: usize| {
+        let pick = |axis: usize| {
+            if which >> axis & 1 == 0 {
+                low[axis]
+            } else {
+                high[axis]
+            }
+        };
+        Point::new(pick(0), pick(1), pick(2))
+    });
+    let mut flattest = 0.0_f64;
+    for face in view.faces() {
+        let radius = match face.surface() {
+            Surface::Plane(_) => continue,
+            Surface::Sphere(ball) => ball.radius(),
+            Surface::Cylinder(pipe) => pipe.radius(),
+            Surface::Torus(ring) => 2.0 * (ring.ring_radius() + ring.tube_radius()),
+            Surface::Cone(cone) => {
+                let up = cone.axis().direction();
+                let widest = corners_of_the_box
+                    .clone()
+                    .map(|corner| cone.radius_at(up.dot(corner - cone.apex())))
+                    .fold(0.0, f64::max);
+                widest * cone.slope().hypot(1.0)
+            }
+            _ => return None,
+        };
+        flattest = flattest.max(radius);
+    }
+    Some(flattest)
 }
 
 /// Whether the triangulator refused a face because two pieces of its boundary
