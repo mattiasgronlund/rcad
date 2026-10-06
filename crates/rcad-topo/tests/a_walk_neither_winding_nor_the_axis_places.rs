@@ -57,7 +57,9 @@ use rcad_geom::{
     Surface, Vector,
 };
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{
+    DraftStep, Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+};
 
 mod cones;
 
@@ -508,14 +510,21 @@ fn the_top_of_a_plate_with_a_round_tab_and_a_round_hole_holds_neither_the_hole_n
 /// the prism along `y` whose face lies on `2x − z = 1` and then the one whose
 /// face lies on `2x + z = 11`, the rest of each prism clear of the frustum.
 ///
-/// The first cut answers one solid. The second is refused
-/// `AFaceTrimmedByACurveThisCannotFollow` naming a face on the cone, both ways
-/// round; only the intersection is asked, since the chip is what it is for.
-/// Cutting with one prism holding both faces is refused `ResultIsNotManifold`
-/// (`a_frustum_under_two_steep_planes_is_refused_as_not_a_manifold`). Not
-/// traced.
+/// The first cut answers one solid. The second was refused
+/// `AFaceTrimmedByACurveThisCannotFollow` in selection, both ways round (queue
+/// row Q1177): a ray from a point of the second prism's face met the half
+/// chip's skin, and `holds.rs` would not follow a cone face cut by one plane
+/// the apex is behind that does not close, `2x − z ≥ 1`, beside the top
+/// `z ≤ 8`. It does now, since a cut square to the axis keeps the rulings
+/// nearest the branch's vertex. The probe then printed selection keeping
+/// exactly the chip's three pieces, the lens on the cone and one piece on each
+/// plane, each with the two corners `(3, ±4, 5)`, and the fuse is refused
+/// `ResultIsNotManifold { count: 4 }` past selection, both ways round, as
+/// cutting with one prism holding both faces is
+/// (`a_frustum_under_two_steep_planes_is_refused_as_not_a_manifold`, queue row
+/// Q1176). Only the intersection is asked, since the chip is what it is for.
 #[test]
-fn a_chip_cut_from_a_frustum_in_two_steps_is_refused_on_its_cone_face_in_selection() {
+fn a_chip_cut_from_a_frustum_in_two_steps_is_refused_as_not_a_manifold() {
     for chip_first in [true, false] {
         let mut model = a_model();
         let cone = cones::a_frustum_seamed_towards(
@@ -540,16 +549,9 @@ fn a_chip_cut_from_a_frustum_in_two_steps_is_refused_on_its_cone_face_in_selecti
             10.0,
         );
         let refused = fuse(&mut model, half, falling, Rule::Intersection, chip_first);
-        let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
-            panic!("the half chip first {chip_first}: {refused:?}");
-        };
-        let surface = model
-            .face(face)
-            .expect("the refusal names a face of the model")
-            .surface();
         assert!(
-            matches!(surface, Surface::Cone(_)),
-            "the half chip first {chip_first}: refused on {surface:?}"
+            matches!(refused, Err(Error::ResultIsNotManifold { count: 4 })),
+            "the half chip first {chip_first}: {refused:?}"
         );
     }
 }
@@ -566,7 +568,7 @@ fn a_chip_cut_from_a_frustum_in_two_steps_is_refused_on_its_cone_face_in_selecti
 /// meet in a chord at `(3, y, 5)` inside it. Every one of these intersections is
 /// refused `ResultIsNotManifold { count: 4 }`, both ways round. The same roof
 /// over a frustum from `z = 2`, which both hyperbolas dip below, answers
-/// (`a_roofed_frustum_beside_a_plate_with_a_triangular_hole_never_draws_the_hole`).
+/// (`a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`).
 /// Not traced.
 #[test]
 fn a_frustum_under_two_steep_planes_is_refused_as_not_a_manifold() {
@@ -608,10 +610,33 @@ fn a_frustum_under_two_steep_planes_is_refused_as_not_a_manifold() {
 /// crossing with two nodes and one arc, and then no walk of that lump: it has no
 /// side of the face in it and no curve that closes, so
 /// `drop_the_lumps_of_straight_cuts_alone` throws it away, and §340.2 is never
-/// asked. Every fuse is refused later, in selection, naming a face on the cone.
-/// Not traced.
+/// asked.
+///
+/// Every fuse was refused `AFaceTrimmedByACurveThisCannotFollow` in selection,
+/// naming one of the two pieces of skin (queue row Q1177): a ray from a point of
+/// the plate's floor met it, and `holds.rs` would not follow a cone face cut by
+/// a floor and two planes neither of which is side by side with it. The part
+/// of the cone in front of all three is two pieces, one each side of `y = 0`:
+/// the roof's two planes meet in a ridge along `y`, square to the axis, and
+/// each crosses the floor's circle. Which of them a face is, its corners say,
+/// as they say which run of a bar's wall between two flats a face is.
+///
+/// **The answer.** The hole is nowhere near the roofed frustum: a point of it
+/// has `y ≥ 10`, so on the frustum `z ≥ 10`, and under `2x + z ≤ 3` with
+/// `x ≥ 0`, `z ≤ 3`. The roofed frustum reaches no higher than its ridge at
+/// `z = 15` and no further than 15 from the axis, so the plate, `17.75 ·
+/// (3600 − 1/100)`, holds all of it above `z = 9/4`. The roofed frustum is the
+/// integral over `2 ≤ z ≤ 15` of the disc `r ≤ z` between `x = −(3 + 3z)/8`
+/// and `x = (3 − z)/2`, which [`the_roofed_frustum_between`] works out slice
+/// by slice, below `9/4` and above it. So the union is the plate and the part
+/// below, the intersection the part above, the roofed frustum less the plate
+/// the part below, and the plate less it the plate less the part above: one
+/// solid each.
 #[test]
-fn a_roofed_frustum_beside_a_plate_with_a_triangular_hole_never_draws_the_hole() {
+fn a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule() {
+    let plate = 17.75 * (3600.0 - 0.01);
+    let below = the_roofed_frustum_between(2.0, 2.25);
+    let above = the_roofed_frustum_between(2.25, 15.0);
     for (rule, roofed_first) in every_rule_both_ways() {
         let mut model = a_model();
         let cone = cones::a_frustum(&mut model, 1.0, 2.0, 16.0);
@@ -626,22 +651,188 @@ fn a_roofed_frustum_beside_a_plate_with_a_triangular_hole_never_draws_the_hole()
         .with_hole(vec![[0.3, 10.0], [0.1, 10.6], [0.0, 11.0]])
         .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a plate with a hole");
-        let plate = model
+        let holed = model
             .add_extrusion(&profile, 17.75, &shift(0.0, 0.0, 2.25))
             .expect("a plate");
-        let refused = fuse(&mut model, roofed, plate, rule, roofed_first);
-        let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
-            panic!("{rule:?}, the roofed frustum first {roofed_first}: {refused:?}");
+        let what = format!("{rule:?}, the roofed frustum first {roofed_first}");
+        let answer = fuse(&mut model, roofed, holed, rule, roofed_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let volume = match (rule, roofed_first) {
+            (Rule::Union, _) => plate + below,
+            (Rule::Intersection, _) => above,
+            (Rule::Difference, true) => below,
+            (Rule::Difference, false) => plate - above,
+            (other, _) => panic!("not a rule this probes: {other:?}"),
         };
-        let surface = model
-            .face(face)
-            .expect("the refusal names a face of the model")
-            .surface();
-        assert!(
-            matches!(surface, Surface::Cone(_)),
-            "{rule:?}, the roofed frustum first {roofed_first}: refused on {surface:?}"
+        assert_each_holds(&model, &answer, &[volume], &what);
+    }
+}
+
+/// The skins `holds.rs` would not follow before queue row Q1177 hold their own
+/// points, asked through the public `face_holds_the_point`: the half chip of
+/// `a_chip_cut_from_a_frustum_in_two_steps_is_refused_as_not_a_manifold`, the
+/// frustum cut to `2x − z ≥ 1` under its top `z ≤ 8`, and the two pieces of
+/// skin of the roofed frustum of
+/// `a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`.
+///
+/// Every point is on the cone `r = z` exactly. `(0, 5/2, 5/2)` and its mirror
+/// `(0, −5/2, 5/2)` are in front of the roofed frustum's floor and of both its
+/// roof's planes, one in each piece of skin, so each piece holds one of them
+/// and not the other: read as the part in front of every cut, each piece would
+/// hold both. `(−3, 4, 5)` is past the roof's plane `8x + 3z ≥ −3` and
+/// `(3, 4, 5)` past `2x + z ≤ 3`, so neither piece holds them.
+#[test]
+fn the_skins_of_a_half_chip_and_a_roofed_frustum_hold_their_own_points() {
+    let held = |model: &Model, solid: SolidKey, face, [x, y, z]: [f64; 3]| {
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .face_holds_the_point(
+                face,
+                PredicatePoint::from([x, y, z]),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("({x}, {y}, {z}): {why:?}"))
+    };
+    let skins = |model: &Model, solid: SolidKey| -> Vec<FaceKey> {
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface::Cone(_)))
+            .map(|face| face.key())
+            .collect()
+    };
+
+    let mut model = a_model();
+    let cone = cones::a_frustum_seamed_towards(
+        &mut model,
+        1.0,
+        0.5,
+        8.0,
+        [-1.0, 0.0],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a frustum");
+    let rising = a_prism_along_y(
+        &mut model,
+        [[-4.5, -10.0], [20.0, -10.0], [9.0, 17.0]],
+        10.0,
+    );
+    let half = fuse_one(&mut model, cone, rising, Rule::Intersection);
+    let [skin] = skins(&model, half)[..] else {
+        panic!("the half chip has one face on the cone");
+    };
+    for (point, answer) in [
+        ([4.0, 3.0, 5.0], OnAFace::Held),
+        ([-4.0, 3.0, 5.0], OnAFace::NotHeld),
+        ([6.0, 8.0, 10.0], OnAFace::NotHeld),
+        ([4.0, 3.0, -5.0], OnAFace::NotHeld),
+    ] {
+        assert_eq!(
+            held(&model, half, skin, point),
+            answer,
+            "the half chip at {point:?}"
         );
     }
+
+    let mut model = a_model();
+    let cone = cones::a_frustum(&mut model, 1.0, 2.0, 16.0);
+    let roof = a_prism_along_y(&mut model, [[-6.0, 15.0], [0.0, -1.0], [2.0, -1.0]], 20.0);
+    let roofed = fuse_one(&mut model, cone, roof, Rule::Intersection);
+    let [one, other] = skins(&model, roofed)[..] else {
+        panic!("the roofed frustum has two faces on the cone");
+    };
+    for skin in [one, other] {
+        for point in [[-3.0, 4.0, 5.0], [3.0, 4.0, 5.0]] {
+            assert_eq!(
+                held(&model, roofed, skin, point),
+                OnAFace::NotHeld,
+                "the roofed frustum at {point:?}"
+            );
+        }
+    }
+    let answers = [one, other].map(|skin| {
+        [[0.0, 2.5, 2.5], [0.0, -2.5, 2.5]].map(|point| held(&model, roofed, skin, point))
+    });
+    let either_way = [
+        [
+            [OnAFace::Held, OnAFace::NotHeld],
+            [OnAFace::NotHeld, OnAFace::Held],
+        ],
+        [
+            [OnAFace::NotHeld, OnAFace::Held],
+            [OnAFace::Held, OnAFace::NotHeld],
+        ],
+    ];
+    assert!(
+        either_way.contains(&answers),
+        "each piece of skin holds the point on its own side of y = 0: {answers:?}"
+    );
+}
+
+/// The skin of [`a_chip_of_a_cone`] is still refused by `face_holds_the_point`,
+/// at `(3, 9/4, 15/4)`, on the cone `r = z` exactly and inside the chip. Its
+/// cuts are `2x − z ≥ 1`, which the apex is behind and which cuts a
+/// hyperbola, and `2x + z ≤ 11`, which leans across it rather than lying
+/// square to the axis or side by side with it. Such a cut can leave two pieces
+/// along the branch's two arms, and this one leaves one only because it keeps
+/// the branch's vertex, which nothing in `holds.rs` reads yet (queue row
+/// Q1177).
+#[test]
+fn the_skin_of_a_chip_between_two_hyperbolas_is_not_yet_followed() {
+    let mut model = a_model();
+    let chip = a_chip_of_a_cone(&mut model);
+    let solid = model.solid(chip).expect("this model made the key");
+    let skin = solid
+        .faces()
+        .find(|face| matches!(face.surface(), Surface::Cone(_)))
+        .expect("the chip has a face on the cone")
+        .key();
+    let refused = solid.face_holds_the_point(
+        skin,
+        PredicatePoint::from([3.0, 2.25, 3.75]),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(refused, Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == skin),
+        "{refused:?}"
+    );
+}
+
+/// The part of the roofed frustum of
+/// `a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`
+/// from `z = low` to `high`, by Simpson's rule over its slices.
+///
+/// The slice at height `z` is the disc `r ≤ z` between `x = −(3 + 3z)/8` and
+/// `x = (3 − z)/2`. Both lines cut the disc for every `z` from `2` to `15`,
+/// where they meet at `x = −6`, so the slice area is smooth there. The part of
+/// a disc of radius `r` past `x = a`, for `|a| < r`, is
+/// `r² acos(a/r) − a √(r² − a²)`.
+fn the_roofed_frustum_between(low: f64, high: f64) -> f64 {
+    let past = |radius: f64, from: f64| {
+        assert!(from.abs() < radius, "both lines cut the disc");
+        radius * radius * (from / radius).acos() - from * (radius * radius - from * from).sqrt()
+    };
+    let slice = |z: f64| {
+        let (left, right) = (-(3.0 + 3.0 * z) / 8.0, (3.0 - z) / 2.0);
+        if left >= right {
+            return 0.0;
+        }
+        past(z, left) - past(z, right)
+    };
+    let steps = 20_000;
+    let step = (high - low) / f64::from(steps);
+    let inner: f64 = (1..steps)
+        .map(|at| {
+            let weight = if at % 2 == 1 { 4.0 } else { 2.0 };
+            weight * slice(low + f64::from(at) * step)
+        })
+        .sum();
+    (slice(low) + inner + slice(high)) * step / 3.0
 }
 
 /// Three shapes built on the way that never reach the arrangement's cells: a
