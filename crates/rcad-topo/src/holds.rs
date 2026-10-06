@@ -675,7 +675,7 @@ fn what_a_curved_face_holds(
     }
     let trimmings = what_trims_this_face(solid, face)?;
     if is_a_ring_face_between_two_planes(surface, &trimmings) {
-        return what_a_ring_face_between_two_planes_holds(solid, face, point);
+        return what_a_ring_face_between_two_planes_holds(solid, face, point, policy, log);
     }
     let trimmed_once = trimmings.len() == 1;
     for trimming in trimmings {
@@ -770,7 +770,9 @@ fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) 
 ///    read against its own stored normal, and two normals along one line can
 ///    point opposite ways, so the two sides must differ exactly when the
 ///    normals do; a wire that leaves one circle on one side and the other on
-///    the other is not a half.
+///    the other is not a half. Nor is one whose two edges are both one of the
+///    circles, whichever sides it keeps there, so the two corners must lie on
+///    different circles ([`are_on_two_circles`]).
 /// 3. **Otherwise each circle must lie strictly in front of the other plane.**
 ///    A circle round the tube sits at one angle round the axis, so its
 ///    corner's side is the whole circle's. This is what turns away a stretch
@@ -800,8 +802,9 @@ fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) 
 /// [`Error::AFaceMissesPartOfWhereItsSurfacesCross`] when a plane neither
 /// holds the ring's axis nor is square to it, when one plane is square to it
 /// and the other is not, or is another plane, a circle is not in front of the
-/// other plane, or the wire keeps one plane's two sides, which is what the
-/// general rule gave every face of this shape.
+/// other plane, the wire keeps one plane's two sides, or both edges are along
+/// one of that plane's circles, which is what the general rule gave every face
+/// of this shape. Whatever [`intersect`] gives for one plane and the ring.
 /// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the closed-edge rule
 /// cannot, and [`Error::Undecidable`] when a side, or whether a plane holds the
 /// axis, could not be settled.
@@ -809,6 +812,8 @@ fn what_a_ring_face_between_two_planes_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
     point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> Result<OnAFace> {
     let refuse = || Error::AFaceMissesPartOfWhereItsSurfacesCross { face: face.key() };
     let ring = face.stored_surface();
@@ -875,7 +880,9 @@ fn what_a_ring_face_between_two_planes_holds(
     if let (Some(first), Some(second)) = (one.surface.as_plane(), other.surface.as_plane())
         && the_normals_lie_along_one_line(first, second)
     {
-        if (one.kept == other.kept) != point_the_same_way(first, second) {
+        if (one.kept == other.kept) != point_the_same_way(first, second)
+            || !are_on_two_circles(solid, &ring, [one, other], policy, log)?
+        {
             return Err(refuse());
         }
         return held_in_front_of_all(core::slice::from_ref(one), point);
@@ -912,6 +919,42 @@ fn point_the_same_way(one: &Plane, other: &Plane) -> bool {
         "two normals along one line are zero along the same axes: {one:?} and {other:?}"
     );
     (one[axis] > 0.0) == (other[axis] > 0.0)
+}
+
+/// Whether two cuts along one plane have their corners on the two different
+/// circles that plane cuts `ring` in, and not both on one of them.
+///
+/// **The side each cut keeps does not settle this.** The ring less one of those
+/// circles is one piece, which meets the circle from both sides, so no piece of
+/// the ring keeps one side of the circle at both of two edges along it. A wire
+/// that walks the circle twice, the same way round both times, keeps one side
+/// at both, as a half does, and was read as a half (row Q790).
+///
+/// Each corner's circle is named by the picker [`intersect`] tells it from the
+/// other circle by ([`the_picker_naming_the_circle_through`]). Both are named
+/// on the first cut's plane as stored: the two cuts may be one plane stored
+/// two ways, and two spellings of a plane can name its circles by pickers that
+/// are not equal by value. `false` also when a corner is not certainly on one
+/// circle, which leaves nothing to compare.
+///
+/// # Errors
+///
+/// Whatever [`intersect`] gives for the plane and the ring.
+fn are_on_two_circles(
+    solid: SolidView<'_>,
+    ring: &Surface,
+    cuts: [&Cut; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    let flat = &cuts[0].surface;
+    let mut circle_through = |cut: &Cut| {
+        let corner = where_it_is_stored(solid, cut.corners_on_it[0]).coordinates();
+        the_picker_naming_the_circle_through(flat, ring, PredicatePoint::from(corner), policy, log)
+    };
+    let one = circle_through(cuts[0])?;
+    let other = circle_through(cuts[1])?;
+    Ok(matches!((one, other), (Some(one), Some(other)) if one != other))
 }
 
 /// Whether the whole of `torus`'s axis lies on `flat`: [`Decision::Zero`] when
@@ -5797,7 +5840,32 @@ mod tests {
         seam: Option<EdgeRun>,
         near_circle_on_the_wall: Orientation,
     ) -> (Model, SolidKey, FaceKey) {
-        let far_circle_on_the_wall = near_circle_on_the_wall.reversed();
+        a_piece_of_pipe_walking_each_circle(
+            ring,
+            near,
+            far,
+            seam,
+            [near_circle_on_the_wall, near_circle_on_the_wall.reversed()],
+        )
+    }
+
+    /// [`a_piece_of_pipe`] with its wall walking the near circle `on_the_wall[0]`
+    /// and the far one `on_the_wall[1]`, and each cap walking its circle against
+    /// the wall.
+    ///
+    /// Two closed edges on one circle are stored running the same way round it,
+    /// because the way a closed edge is stored running is read off the ring
+    /// alone. So [`a_piece_of_pipe_walked`], which walks the far circle the
+    /// other way from the near one, walks a circle had twice once each way
+    /// round, and this is what walks it the same way round twice.
+    fn a_piece_of_pipe_walking_each_circle(
+        ring: rcad_geom::Torus,
+        near: End,
+        far: End,
+        seam: Option<EdgeRun>,
+        on_the_wall: [Orientation; 2],
+    ) -> (Model, SolidKey, FaceKey) {
+        let [near_circle_on_the_wall, far_circle_on_the_wall] = on_the_wall;
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let near_corner = model.add_vertex(near.corner);
         let far_corner = model.add_vertex(far.corner);
@@ -6271,6 +6339,70 @@ mod tests {
                     matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == wall),
                     "far cap facing {far_facing:?}, used {far_used:?}, {point:?}: {answer:?}"
                 );
+            }
+        }
+    }
+
+    /// The same wall walked the same way round its one circle both times is
+    /// refused too, and not read as a half of the ring (row Q790).
+    ///
+    /// The ring less the circle `y = 0` cuts at `x > 0` is one piece, which
+    /// meets that circle from both sides, so no piece of the ring keeps one
+    /// side of it at both of two edges along it. This wire does: walked the
+    /// same way round, the circle keeps the same side of `y = 0` at both
+    /// edges, and the side check passes it. Without the check that the two
+    /// corners lie on different circles of the plane, all six walls were read
+    /// as a half. Walked `Reversed`, as the half bend walks its near circle,
+    /// each held `(3, 4, 0)` and not `(3, −4, 0)`, walked `Forward` the other
+    /// way about, and either way `(−5, 0, 0)`, on the circle the wall does not
+    /// have, came back on its boundary.
+    #[test]
+    fn a_wall_round_one_circle_twice_the_same_way_is_refused_rather_than_read_as_a_half() {
+        let through_the_axis = |facing| {
+            Plane::from_point_and_normal(rcad_geom::Point::origin(), facing)
+                .expect("a coordinate direction is a unit normal")
+        };
+        for walked in [Orientation::Forward, Orientation::Reversed] {
+            for (far_facing, far_used) in [
+                (Vector::new(0.0, -1.0, 0.0), Orientation::Forward),
+                (Vector::new(0.0, 1.0, 0.0), Orientation::Forward),
+                (Vector::new(0.0, 1.0, 0.0), Orientation::Reversed),
+            ] {
+                let (model, solid, wall) = a_piece_of_pipe_walking_each_circle(
+                    rcad_geom::Torus::new(Axis::z(), 4.0, 1.0)
+                        .expect("a tube narrower than its ring"),
+                    End {
+                        corner: rcad_geom::Point::new(3.0, 0.0, 0.0),
+                        cap: through_the_axis(Vector::new(0.0, -1.0, 0.0)),
+                        used: Orientation::Forward,
+                    },
+                    End {
+                        corner: rcad_geom::Point::new(5.0, 0.0, 0.0),
+                        cap: through_the_axis(far_facing),
+                        used: far_used,
+                    },
+                    None,
+                    [walked, walked],
+                );
+                let bend = model.solid(solid).expect("this model made the key");
+                for point in [
+                    at(3.0, 4.0, 0.0),
+                    at(3.0, -4.0, 0.0),
+                    at(4.0, 0.0, 1.0),
+                    at(-5.0, 0.0, 0.0),
+                ] {
+                    let answer = bend.face_holds_the_point(
+                        wall,
+                        point,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    );
+                    assert!(
+                        matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == wall),
+                        "walked {walked:?}, far cap facing {far_facing:?}, used {far_used:?}, \
+                         {point:?}: {answer:?}"
+                    );
+                }
             }
         }
     }
