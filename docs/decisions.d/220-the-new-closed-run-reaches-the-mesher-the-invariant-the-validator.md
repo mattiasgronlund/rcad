@@ -212,3 +212,96 @@ Still open from §219.8 and untouched by this batch: `round_run`'s `==` misses t
 curved faces a hair apart at the importer's door; `mesh.rs:5148`'s oracle carries
 the bit equality §219.1 fixed; `arrange.rs:4489` respells `n·a`; `holds.rs`'s
 `is_a_family_this_follows` is a gap since §208.6.
+
+### 220.6 A rim cornered on the pole: the use is a label, and a lid is a disk
+
+*Queue row Q941, which was Q651. Lane `lane-q941-a-closed-rim-cornered-on-a-pole`,
+off `26086a58`. 2026-10-06.*
+
+**The question.** §220.1's half ball holed through its pole and capped on the
+same ball, its rim cornered on the north pole `N` and named by the plane
+`y + 3z = 15`, builds, validates and measures half the ball in all four ways of
+writing it — the plane either way round, the skin's use of the hole either way
+round. Q582 pinned two as right and called the other two wrongly walked, and the
+row asked which they are: two spellings of one solid, or a wrong spelling
+`Model::validate` lets through.
+
+**Two spellings of one solid, and the row's premise was wrong.** The row said
+the mesher keeps the walker's own order on this rim. It does not: the ball's
+longitude and latitude both vanish at `N`, so the rule reads nothing and
+validate skips the edge, but §341.5's reading answers — the skin's corner on the
+equator is on the plane's negative side, so its use walks the rim along
+`outward × ∇plane`, and the edge runs the way that use says. The skin's use is
+then a label for the edge's direction and not a claim about the shape. Measured
+in `the_four_ways_of_writing_the_rim_on_the_pole_are_one_solid`
+(`a_half_ball_holed_through_its_pole_and_capped_on_the_same_ball.rs`), on the
+base and after this lane alike, under `Policy::certified()`, in both wire
+orders:
+
+- the skin holds `(0, −0.3)`, `(0.3, 0)` and `(−0.3, 0)` beside the pole, off the
+  cap, and holds neither `(0, 0.3)` nor `(0, 1.5)`, on it — in all four;
+- the cap's own answer is one refusal in all four (below);
+- the two uses of one plane mesh **the same triangles**, compared as the three
+  corners of each in space, bit for bit, with its winding;
+- every skin triangle is short of the plane and every cap triangle beyond it;
+- the rim's mesh points leave `N` towards `+x` where the skin uses the hole
+  `Reversed` and towards `−x` where `Forward`, whichever way the plane faces, so
+  the skin walks away from `N` towards `−x` in all four.
+
+Volume would not have told: a solid walked the wrong way round can measure
+right. What each face holds is the same, so it is one solid.
+
+**Which direction defines the stored direction at a pole corner: neither of the
+two the row offered, and §341.5's stands.** Where the rule reads nothing the
+edge's stored direction is not a fact about the shape, and the way each face
+walks it is.
+
+- *The walker's own order* is what §341.5 replaced, and for the reason §341.4
+  measured: it turns round with the way the rim's plane faces, so which of two
+  writings of one solid builds would depend on the plane.
+- *The longitude at the walk's first point* is a fact on a circle through one
+  pole — the longitude grows the same way all round it off the pole — but not on
+  a great circle through both, where the longitude is square to the circle at
+  every point. §341.5's half ball on a pipe is that shape. It would also have
+  validate refuse writings measured above to be one solid, and read the
+  direction differently from the four other callers of
+  `a_closed_crossing_is_walked_the_way_it_is_stored` (the fuse, `bake.rs`,
+  `holds.rs`, the mesher's oracle), which all read `Zero` there: a second
+  authority for one question (§23.8).
+
+**So validate is given no new direction and keeps skipping the edge**, on
+purpose: against a label there is nothing to check a use by. What checks the
+faces' walks against each other on the pole is the sweep's mesh, and it does:
+the same half ball with a flat lid in place of the cap builds with the skin's use
+either way round and measures the same, and with the lid's plane turned to face
+into the solid it is refused `FacesDoNotAgreeWhichWayTheyFace` in every spelling
+(this lane's probe, not kept).
+
+**A lid is a disk, and that is what moved.** Q606's ball less a cap, and the cap,
+lidded by a flat face and cornered on `N`, have no corner off the rim on either
+face, so §341.5's reading said nothing and the walk kept the walker's order. One
+of the two lid uses built and the other was refused
+`FacesDoNotAgreeWhichWayTheyFace`, and which one turned with the lid's plane —
+§341.4's complaint again, on a shape §341.5 did not reach. A flat face whose one
+wire is the whole rim holds the disk inside the ball across it, which is a fact
+with no corner needed, so its use walks along `outward × ∇ball`. `walk` reads that
+where the faces' corners say nothing (`e4afc595`), and both lid uses now build,
+mesh closed and measure the closed form at three deflections and after a union
+(`a_rim_cornered_on_the_pole_builds_either_way_round_and_both_ways_measure`, which
+fails on the base). A lid turned to face into its piece is not a third case: by
+construction its faces are then exactly the other piece's — the same plane, the
+same ball, the same uses — and the probe found it builds.
+
+**What this leaves.**
+
+- The cap of the holed half ball refuses `face_holds_the_point` by
+  `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn` at every point asked, on the
+  pole only: its one corner is on the plane, and the wire's side
+  (`the_side_its_wire_keeps`, `holds.rs`) reads the shared rule, which says
+  nothing there. The same cap off the pole answers. A gap: the cap's side is a
+  fact, and §341.5's reading off the skin, or the disk's, would give it.
+- The disk reading sits inline in `walk` because the lane held `mesh.rs` only as
+  that function; it belongs beside `the_way_this_face_walks_a_closed_edge`.
+- Q630's spelling (the lid listed first, the rim named by the lid's plane turned
+  over) is still refused `TooFewCorners` both ways round, and is still left out
+  of the pin.

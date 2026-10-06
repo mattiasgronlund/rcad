@@ -906,12 +906,60 @@ impl BuildingAMesh {
             let corner = ends[0];
             let read_at_the_corner = the_way_a_closed_edge_is_stored_running(&along, corner)
                 .or_else(|| the_way_a_closed_edge_where_its_faces_touch_runs(&along, corner));
-            let stored_way = match read_at_the_corner {
+            let read_off_the_faces = match read_at_the_corner {
                 Some(way) => Some(way),
                 None => {
                     the_way_the_faces_along_a_closed_edge_walk_it(solid, face, edge, &back, corner)?
                 }
             };
+            // **A flat face whose one wire is the whole of this edge holds the
+            // disk inside the ball across it**, so it has a side with no corner
+            // off the ball to read it from (`docs/decisions.md` §220.6). A cap
+            // of a ball through its pole, lidded, has no corner off the rim at
+            // all, and before this its points kept the walker's order, which
+            // turns round with the way the rim's plane faces: one of the two
+            // ways of writing the lid's use was refused
+            // `FacesDoNotAgreeWhichWayTheyFace`, and which one depended on the
+            // plane (`a_closed_edge_neither_direction_rule_answers.rs`).
+            let stored_way =
+                match read_off_the_faces {
+                    Some(way) => Some(way),
+                    None => match the_face_across(solid, face, edge)? {
+                        None => None,
+                        Some(across) => [(face, across), (across, face)].into_iter().find_map(
+                            |(flat, round)| {
+                                let a_disk = flat.stored_surface().as_plane().is_some()
+                                    && flat.wire_count() == 1
+                                    && flat.outer_wire().closes_on_one_edge()
+                                    && matches!(round.stored_surface(), Surface::Sphere(_));
+                                if !a_disk {
+                                    return None;
+                                }
+                                let in_the_frame = |surface: Surface| {
+                                    SurfaceAlongAnEdge {
+                                        stored: surface,
+                                        placed_at: flat.location(),
+                                    }
+                                    .in_the_frame(&back)
+                                };
+                                let outward =
+                                    gradient_of(&in_the_frame(flat.stored_surface()), corner)
+                                        * flat.orientation().sign();
+                                let walked = outward.cross(gradient_of(
+                                    &in_the_frame(round.stored_surface()),
+                                    corner,
+                                ));
+                                let used = flat.outer_wire().coedges().next()?;
+                                (walked != Vector::zero()).then_some(
+                                    match used.orientation_on_its_edge() {
+                                        Orientation::Forward => walked,
+                                        Orientation::Reversed => -walked,
+                                    },
+                                )
+                            },
+                        ),
+                    },
+                };
             if let Some(first) = points.first()
                 && let Some(stored_way) = stored_way
                 && (*first - corner).dot(stored_way) < 0.0

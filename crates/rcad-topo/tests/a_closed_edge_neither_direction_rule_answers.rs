@@ -13,31 +13,32 @@
 //! (`the_way_the_faces_along_a_closed_edge_walk_it`) — and here it reads
 //! nothing too, because every face along this rim has only the rim's own
 //! corner, and that corner is never off either surface for either face to
-//! read a side from. So all three give nothing and the walk's own order is
-//! kept (`docs/decisions.md` §199.4, §202.1, §341.5). Which way that order
-//! runs is fixed by the run and its two surfaces alone; the `and` plane
-//! turned over turns it round.
+//! read a side from.
 //!
-//! **It is not a wrong mesh, and this file is the demonstration.**
-//! `SolidBuilder::build` runs `Model::validate`, whose sweep meshes the solid
-//! with the same walk and counts each side of the skin both ways round. A solid
-//! whose coedges run against the walk has its lid's triangles run round the rim
-//! the same way as its skin's, and is refused `FacesDoNotAgreeWhichWayTheyFace`.
-//! So of the two ways round each spelling can be written, exactly one builds,
-//! and that one meshes closed and measures at every deflection, alone and after
-//! a union.
+//! **The lid answers instead, because it is a disk** (Q941,
+//! `docs/decisions.md` §220.6). A flat face whose one wire is the whole rim
+//! holds the part of its plane inside the ball, so its use walks the rim along
+//! `outward × ∇ball`, and the edge runs the way that use says — §341.5's rule
+//! with the side known from the wire rather than read off a corner. Before
+//! that the walk's own order was kept, which the `and` plane turned over turns
+//! round, and of the two ways each spelling can be written exactly one built:
+//! the other had its lid's triangles run round the rim the same way as its
+//! skin's and was refused `FacesDoNotAgreeWhichWayTheyFace`, and which one
+//! depended on the plane (Q606's pin).
+//!
+//! On the pole the edge's stored direction is not a fact — the ball's
+//! longitude and latitude both vanish there — so the two ways of writing the
+//! lid's use are one solid with the edge's direction turned, as §341.5 found
+//! for a half ball on a pipe. Both build now, and both mesh closed and measure
+//! at every deflection, alone and after a union.
 //!
 //! Two solids on one circle, the plane `y + 3z = 15` through the north pole of
 //! a ball of radius 5: the ball less the small cap, and the small cap. Each is
 //! written with the rim named by its two faces, by the lid's plane, and by that
 //! plane turned over, and with the shell listing the skin first and the lid
-//! first. The lid's coedge that builds is pinned per spelling, because it is
-//! **not** the one the same solid builds with when the corner is off the pole:
-//! there `the_way_a_closed_edge_is_stored_running` answers, by the ball's
-//! longitude, and the small cap then builds with its lid's coedge reversed in
-//! every spelling. Q581 is what settles which of the two defines a pole corner's
-//! stored direction for `Model::validate`; whichever it takes, the walk here
-//! has to follow, and this pin says so when it moves.
+//! first. Off the pole, at `(0, 3, 4)`, `the_way_a_closed_edge_is_stored_running`
+//! answers by the ball's longitude, the stored direction is a fact, and one
+//! lid coedge per piece builds in every spelling.
 //!
 //! The lid listed first, with the rim named by the lid's plane turned over, is
 //! left out: on the pole that spelling is refused
@@ -50,7 +51,7 @@ use rcad_geom::{
     Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Invalid, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 const RADIUS: f64 = 5.0;
 
@@ -70,7 +71,7 @@ enum NamedBy {
 }
 
 #[test]
-fn a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures() {
+fn a_rim_cornered_on_the_pole_builds_either_way_round_and_both_ways_measure() {
     let spellings = [
         (NamedBy::ItsTwoFaces, false),
         (NamedBy::ItsTwoFaces, true),
@@ -83,48 +84,25 @@ fn a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures() {
         .into_iter()
         .flat_map(|piece| spellings.map(|(spelling, lid_first)| (piece, spelling, lid_first)));
     for (piece, spelling, lid_first) in pieces_and_spellings {
-        let builds = the_lid_coedge_that_builds_on_the_pole(spelling);
-        let what = format!("{piece:?}, rim named {spelling:?}, lid listed first {lid_first}");
-        let mut model = a_model();
-        let solid = a_piece_of_the_ball(&mut model, piece, spelling, north, builds, lid_first)
-            .unwrap_or_else(|why| panic!("{what}: lid {builds:?} builds: {why:?}"));
-        let refused = a_piece_of_the_ball(
-            &mut a_model(),
-            piece,
-            spelling,
-            north,
-            builds.reversed(),
-            lid_first,
-        );
-        assert!(
-            matches!(
-                refused,
-                Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
-            ),
-            "{what}: the lid {:?} is refused because its faces disagree: {refused:?}",
-            builds.reversed()
-        );
-        for deflection in [0.5, 0.05, 0.005] {
-            meshes_closed_and_measures(
-                &model,
-                solid,
-                deflection,
-                piece,
-                &format!("{what}, deflection {deflection}"),
+        for lid_way in [Orientation::Forward, Orientation::Reversed] {
+            let what = format!(
+                "{piece:?}, rim named {spelling:?}, lid listed first {lid_first}, lid {lid_way:?}"
             );
+            let mut model = a_model();
+            let solid = a_piece_of_the_ball(&mut model, piece, spelling, north, lid_way, lid_first)
+                .unwrap_or_else(|why| panic!("{what}: builds: {why:?}"));
+            for deflection in [0.5, 0.05, 0.005] {
+                meshes_closed_and_measures(
+                    &model,
+                    solid,
+                    deflection,
+                    piece,
+                    &format!("{what}, deflection {deflection}"),
+                );
+            }
+            let fused = united_with_a_block_clear_of_it(&mut model, solid);
+            meshes_closed_and_measures(&model, fused, 0.05, piece, &format!("{what}, united"));
         }
-        let fused = united_with_a_block_clear_of_it(&mut model, solid);
-        meshes_closed_and_measures(&model, fused, 0.05, piece, &format!("{what}, united"));
-    }
-}
-
-/// Which way round the lid walks the rim in the one solid that builds, with the
-/// corner on the pole: the walk's own order, which the lid's plane turned over
-/// turns round, whichever piece is kept.
-fn the_lid_coedge_that_builds_on_the_pole(spelling: NamedBy) -> Orientation {
-    match spelling {
-        NamedBy::ItsTwoFaces | NamedBy::TheLid => Orientation::Forward,
-        NamedBy::TheLidTurnedOver => Orientation::Reversed,
     }
 }
 

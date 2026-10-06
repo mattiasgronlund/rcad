@@ -24,12 +24,14 @@
 //! stored running the way the ball's longitude grows there, whichever way the
 //! plane faces, and the skin walks it `Reversed`; `Forward` is refused
 //! `AClosedEdgeIsWalkedAgainstItsSurface`. With the corner on the pole the
-//! ball's longitude says nothing, and the walk's own order is the one kept:
-//! measured from the pole, it leaves towards `+x` for the plane facing
-//! `(0, 1, 3)` and towards `−x` for it turned over. The skin walks the hole the
-//! same way round in space in every right spelling, so on the pole it is
-//! `Reversed` for the first and `Forward` for the second. The other two pole
-//! spellings get past `Model::validate` today, which is Q651's to settle.
+//! ball's longitude and latitude both vanish, so nothing about the edge says
+//! which way it is stored running, and `Model::validate` skips it. The mesher
+//! reads the way off the skin instead: its corner on the equator is on the
+//! plane's negative side, so its use walks the rim along `outward × ∇plane`,
+//! and the edge runs the way that use says (§341.5). So the skin's use of the
+//! hole is a label on the pole, and all four pole spellings are one solid —
+//! `the_four_ways_of_writing_the_rim_on_the_pole_are_one_solid` is the
+//! demonstration, and `docs/decisions.md` §220.6 the argument (Q941).
 //!
 //! The oracle is half the ball's volume, `250π/3 = 261.799388`.
 
@@ -37,26 +39,29 @@ use core::f64::consts::PI;
 use std::collections::HashMap;
 
 use rcad_geom::{Deflection, EdgeRun, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_topo::{
+    DraftStep, Error, FaceKey, FaceView, Mesh, Model, OnAFace, SolidBuilder, SolidKey, SolidView,
+};
 
 const RADIUS: f64 = 5.0;
 
-/// The four ways of writing the rim with its corner at `(0, 3, 4)` and the two
+/// The two ways of writing the rim with its corner at `(0, 3, 4)` and the four
 /// with it on the pole, each with the skin's hole listed after its equator and
 /// before it, at the four deflections the refusal was found at.
 #[test]
 fn every_right_spelling_meshes_closed_and_measures_half_the_ball() {
     let closed_form = 2.0 * PI * RADIUS.powi(3) / 3.0;
     assert_eq!(format!("{closed_form:.6}"), "261.799388");
-    let plane = Plane::from_point_and_normal(Point::new(0.0, 3.0, 4.0), Vector::new(0.0, 1.0, 3.0))
-        .expect("a plane");
+    let plane = the_rims_plane();
     let off_the_pole = Point::new(0.0, 3.0, 4.0);
     let on_the_pole = Point::new(0.0, 0.0, RADIUS);
     for (corner, and, hole_on_the_skin) in [
         (off_the_pole, plane, Orientation::Reversed),
         (off_the_pole, plane.reversed(), Orientation::Reversed),
         (on_the_pole, plane, Orientation::Reversed),
+        (on_the_pole, plane, Orientation::Forward),
+        (on_the_pole, plane.reversed(), Orientation::Reversed),
         (on_the_pole, plane.reversed(), Orientation::Forward),
     ] {
         for hole_first in [false, true] {
@@ -78,6 +83,186 @@ fn every_right_spelling_meshes_closed_and_measures_half_the_ball() {
             }
         }
     }
+}
+
+/// The four ways of writing the rim on the pole — the plane either way round,
+/// the skin's use of the hole either way round — are one solid, and not two
+/// right spellings beside two wrong ones that happen to measure right.
+///
+/// **What a face holds is what tells**, because a solid walked the wrong way
+/// round can still measure right. In all four, the skin holds the three points
+/// beside the pole off the cap and neither of the two on it; the cap's own
+/// answer is the same in all four; the mesh's triangles are the same triangles,
+/// corner for corner and wound the same way, for the two uses of one plane;
+/// every skin triangle is short of the plane and every cap triangle beyond it;
+/// and the skin walks away from the pole towards `−x`, the way that keeps the
+/// cap on its right. The rim's points leave the pole the way the skin's use
+/// says the edge runs, so the use is a label and the walk in space is not.
+///
+/// The cap's answer is a refusal, `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`:
+/// its one corner is on the plane, and the rule that would read its side off its
+/// wire reads nothing on the pole. That is a gap of its own (§220.6) and the
+/// same in every spelling, which is all this asks of it.
+#[test]
+fn the_four_ways_of_writing_the_rim_on_the_pole_are_one_solid() {
+    let plane = the_rims_plane();
+    let near_the_pole = |x: f64, y: f64| {
+        let point = Point::new(x, y, (RADIUS * RADIUS - x * x - y * y).sqrt());
+        PredicatePoint::from(point.coordinates())
+    };
+    let on_the_cap = [near_the_pole(0.0, 0.3), near_the_pole(0.0, 1.5)];
+    let off_the_cap = [
+        near_the_pole(0.0, -0.3),
+        near_the_pole(0.3, 0.0),
+        near_the_pole(-0.3, 0.0),
+    ];
+    for hole_first in [false, true] {
+        for and in [plane, plane.reversed()] {
+            let mut meshes = Vec::new();
+            for hole_on_the_skin in [Orientation::Reversed, Orientation::Forward] {
+                let what = format!(
+                    "and {:?}, hole {hole_on_the_skin:?} on the skin, hole first {hole_first}",
+                    and.normal()
+                );
+                let mut model = Model::new(Scale::millimetres(125.0).expect("a positive size"));
+                let solid = a_holed_half_ball(
+                    &mut model,
+                    Point::new(0.0, 0.0, RADIUS),
+                    and,
+                    hole_on_the_skin,
+                    hole_first,
+                );
+                let view = model.solid(solid).expect("this model made the key");
+                let [skin, cap] = the_skin_and_the_cap(view);
+                let holds = |face: FaceKey, point| {
+                    view.face_holds_the_point(
+                        face,
+                        point,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                };
+                for point in on_the_cap {
+                    assert_eq!(
+                        holds(skin.key(), point).expect("the skin answers"),
+                        OnAFace::NotHeld,
+                        "{what}: the skin does not hold {point:?}, on the cap"
+                    );
+                }
+                for point in off_the_cap {
+                    assert_eq!(
+                        holds(skin.key(), point).expect("the skin answers"),
+                        OnAFace::Held,
+                        "{what}: the skin holds {point:?}, off the cap"
+                    );
+                }
+                for point in on_the_cap.into_iter().chain(off_the_cap) {
+                    let answer = holds(cap.key(), point);
+                    assert!(
+                        matches!(
+                            answer,
+                            Err(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face })
+                                if face == cap.key()
+                        ),
+                        "{what}: the cap's answer at {point:?}: {answer:?}"
+                    );
+                }
+
+                let mesh = view
+                    .mesh(
+                        Deflection::of(0.05).expect("a positive length"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{what}: the solid meshes: {why:?}"));
+                for triangle in mesh.triangles() {
+                    let beyond = triangle
+                        .corners()
+                        .map(|corner| mesh.points()[corner as usize])
+                        .iter()
+                        .map(|point| point.y() + 3.0 * point.z())
+                        .sum::<f64>()
+                        > 45.0;
+                    if triangle.face() == skin.key() {
+                        assert!(!beyond, "{what}: a skin triangle beyond the plane");
+                    } else if triangle.face() == cap.key() {
+                        assert!(beyond, "{what}: a cap triangle short of the plane");
+                    }
+                }
+
+                let rim = cap
+                    .outer_wire()
+                    .coedges()
+                    .next()
+                    .expect("the cap's wire is the rim")
+                    .edge();
+                let skins_use = skin
+                    .wires()
+                    .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+                    .find(|coedge| coedge.edge().key() == rim.key())
+                    .expect("the skin walks the rim")
+                    .orientation_on_its_edge();
+                let along = mesh.points_along_edge(rim.key());
+                let leaves_towards = mesh.points()[along[1] as usize].x();
+                let skin_leaves_towards = match skins_use {
+                    Orientation::Forward => leaves_towards,
+                    Orientation::Reversed => -leaves_towards,
+                };
+                assert!(
+                    skin_leaves_towards < 0.0,
+                    "{what}: the rim's points leave the pole towards x {leaves_towards}, \
+                     and the skin walks them {skins_use:?}"
+                );
+                meshes.push(the_triangles_where_they_are(&mesh));
+            }
+            assert!(
+                meshes[0] == meshes[1],
+                "and {:?}, hole first {hole_first}: the two uses of the hole mesh the same \
+                 triangles",
+                and.normal()
+            );
+        }
+    }
+}
+
+/// The plane `y + 3z = 15`, facing away from the ball's centre.
+fn the_rims_plane() -> Plane {
+    Plane::from_point_and_normal(Point::new(0.0, 3.0, 4.0), Vector::new(0.0, 1.0, 3.0))
+        .expect("a plane")
+}
+
+/// The ball's face with two wires, and the one with one.
+fn the_skin_and_the_cap(solid: SolidView<'_>) -> [FaceView<'_>; 2] {
+    let on_the_ball = |wires: usize| {
+        solid
+            .faces()
+            .find(|face| face.surface().as_plane().is_none() && face.wire_count() == wires)
+            .expect("a face of the ball with that many wires")
+    };
+    [on_the_ball(2), on_the_ball(1)]
+}
+
+/// Every triangle of `mesh` as its three corners in space, each turned to
+/// start at its least corner so that its winding is kept, and sorted: two meshes
+/// with the same list are the same triangles, whatever their points are
+/// numbered.
+fn the_triangles_where_they_are(mesh: &Mesh) -> Vec<[[u64; 3]; 3]> {
+    let mut triangles: Vec<[[u64; 3]; 3]> = mesh
+        .triangles()
+        .iter()
+        .map(|triangle| {
+            let mut corners = triangle.corners().map(|corner| {
+                mesh.points()[corner as usize]
+                    .coordinates()
+                    .map(f64::to_bits)
+            });
+            let least = (0..3).min_by_key(|&at| corners[at]).expect("three corners");
+            corners.rotate_left(least);
+            corners
+        })
+        .collect();
+    triangles.sort_unstable();
+    triangles
 }
 
 /// The half ball `z ≥ 0` with its skin holed along `and` and the hole capped
