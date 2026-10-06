@@ -4035,11 +4035,12 @@ enum CornerName {
     Meet([[u64; 9]; 3], u8),
     /// The one point on a closed crossing that nothing else cuts, named by the
     /// two surfaces it runs between and which of their closed crossings it is
-    /// ([`name_of_the_closed_crossing_through`]).
-    RoundACurve(CurveName),
+    /// ([`name_of_the_closed_crossing_through`]), and by what picks that
+    /// crossing out of the others the two cross in ([`which_curve_of_the_pair`]).
+    RoundACurve(CurveName, WhichCurveOfThePair),
     /// The point across a closed crossing from where it starts, named the same
     /// way, for a crossing that starts at a pole.
-    HalfWayRoundACurve(CurveName),
+    HalfWayRoundACurve(CurveName, WhichCurveOfThePair),
     /// A pole of a closed surface, named by that surface and which of its two
     /// poles this is (§38.1).
     Pole([u64; 9], bool),
@@ -4160,6 +4161,12 @@ impl Corners {
             let only_closes_this = |slot: &Option<VertexSlot>| {
                 slot.is_some_and(|slot| closes[&slot] == BTreeSet::from([Some(curve)]))
             };
+            let mut round = BTreeSet::new();
+            for (_, _, end) in &starts {
+                if matches!(end, MeetPoint::WhereAClosedCurveStarts { .. }) {
+                    round.insert(corners.goes_by(corners.name_of(model, end, policy, log)?));
+                }
+            }
             starts.sort_by(|(one, one_named, at_one), (other, other_named, at_other)| {
                 one.is_none()
                     .cmp(&other.is_none())
@@ -4171,9 +4178,8 @@ impl Corners {
             starts.dedup_by_key(|(slot, named, _)| (*slot, slot.is_none().then_some(*named)));
             let (_, _, first) = starts[0];
             let start = corners.of(model, first, policy, log)?;
-            for name in names {
-                let round = corners.goes_by(CornerName::RoundACurve(name));
-                corners.taken_over.insert(round, start);
+            for name in round {
+                corners.taken_over.insert(name, start);
             }
             for (slot, _, _) in &starts[1..] {
                 if let Some(slot) = slot.filter(|slot| only_closes_this(&Some(*slot))) {
@@ -4368,14 +4374,22 @@ impl Corners {
             MeetPoint::OfThreeSurfaces {
                 surfaces, which, ..
             } => CornerName::Meet(names_of_the_three_surfaces(surfaces), *which),
-            MeetPoint::WhereAClosedCurveStarts { carried_by, point } => CornerName::RoundACurve(
+            MeetPoint::WhereAClosedCurveStarts {
+                carried_by,
+                picked_by,
+                point,
+            } => CornerName::RoundACurve(
                 name_of_the_closed_crossing_through(carried_by, *point, policy, log)?,
+                which_curve_of_the_pair(picked_by),
             ),
-            MeetPoint::HalfWayRoundAClosedCurve { carried_by, point } => {
-                CornerName::HalfWayRoundACurve(name_of_the_closed_crossing_through(
-                    carried_by, *point, policy, log,
-                )?)
-            }
+            MeetPoint::HalfWayRoundAClosedCurve {
+                carried_by,
+                picked_by,
+                point,
+            } => CornerName::HalfWayRoundACurve(
+                name_of_the_closed_crossing_through(carried_by, *point, policy, log)?,
+                which_curve_of_the_pair(picked_by),
+            ),
             MeetPoint::APoleOfAClosedSurface {
                 surface,
                 at_the_top,
@@ -5427,6 +5441,68 @@ fn which_meridian_circle_it_is(
     ))
 }
 
+/// Which curve of its pair a closed crossing's corner is on: what picks the
+/// curve out of the others its two surfaces cross in, written out as bits by
+/// [`which_curve_of_the_pair`], and `None` where nothing picks it.
+type WhichCurveOfThePair = Option<[u64; 10]>;
+
+/// The name of what picks a closed crossing out of the others its two surfaces
+/// cross in, for the corner it starts at: `None` where the pair crosses in one
+/// closed curve and nothing picks it.
+///
+/// **A bar down a pointed cone's axis is why.** The bar's wall crosses the
+/// cone's surface in a circle either side of the apex, at `z = −1` and `z = 1`
+/// for the cone of slope one, and named by the two surfaces alone both circles
+/// started at one corner. The union and the bar less the cone keep the bar's
+/// band between them, so the two circles were one closed edge with four faces
+/// along it — the band's two wires, the band below and the cone — and both
+/// were refused as not a manifold (`tests/a_pointed_cone_drilled_along_its_axis.rs`).
+///
+/// **The same from both faces along the curve and in both argument orders.**
+/// Both faces carry the one pair of surfaces, and `intersect` builds what picks
+/// each curve from the two whichever is handed to it first — the cone's apex
+/// and axis, for a cone and a pipe on one axis. A flat picker is written as its
+/// four numbers with each zero turned the right way up, as
+/// [`which_meridian_circle_it_is`] writes one: a cone or a pipe spelled with its
+/// axis turned round hands back the half-space holding a given curve as the
+/// reverse of the one picking the other, which is the same four numbers but
+/// for the sign of a zero. A curved picker is written as the surface named
+/// either way round ([`name_of_the_surface_either_way_round`]) and which side
+/// of it it keeps. The slot ahead of the numbers says which kind of picker it
+/// is, so a ball and a pipe never share a name.
+///
+/// # Panics
+///
+/// If more than one picker picks the curve, or if the picker is of a kind this
+/// crate has not been taught. `intersect` picks every closed curve it picks out
+/// with one picker, and [`Picker`] is `#[non_exhaustive]` and lives in another
+/// crate, so a change to either arrives with no compile error and this is what
+/// notices. Two curves under one name are a wrong answer; a crash is not.
+fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
+    let picker = match picked_by {
+        [] => return None,
+        [only] => only,
+        more => panic!("a closed crossing picked out by more than one picker: {more:?}"),
+    };
+    let mut name = [0; 10];
+    let (kind, surface) = match picker {
+        Picker::InFrontOf(half_space) => {
+            let [x, y, z] = half_space.normal().components();
+            for (slot, number) in name[1..].iter_mut().zip([x, y, z, half_space.offset()]) {
+                *slot = (number + 0.0).to_bits();
+            }
+            return Some(name);
+        }
+        Picker::OutsideABall(ball) => (1, Surface::Sphere(*ball)),
+        Picker::OutsideAPipe(pipe) => (2, Surface::Cylinder(*pipe)),
+        Picker::InsideAPipe(pipe) => (3, Surface::Cylinder(*pipe)),
+        other => panic!("a picker nothing here can name: {other:?}"),
+    };
+    name[0] = kind;
+    name[1..].copy_from_slice(&name_of_the_surface_either_way_round(&surface));
+    Some(name)
+}
+
 /// Which of the two arcs between its corners a side is of a closed crossing
 /// between a plane and a surface that curves right round — a ball's circle, or
 /// a cone's rim circle and the ellipse a steeper plane leaves — together with
@@ -5863,7 +5939,7 @@ fn the_seam_a_side_runs_along(
 mod tests {
     use rcad_geom::{
         Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Scale, Sphere, Surface,
-        SurfaceMeet, Torus,
+        SurfaceMeet, Torus, intersect,
     };
     use std::collections::BTreeSet;
 
@@ -5875,10 +5951,10 @@ mod tests {
     use super::super::select::choose;
     use super::{
         Assembly, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, JoinedFace, Lump,
-        MeetPoint, Model, Point, PredicatePoint, Side, Vector, VertexKey, WhichArc, WireStep,
-        Written, assemble, name_of_the_closed_crossing_through, names_of_the_three_surfaces,
-        the_crossing_of_these_runs_straight, the_half_space_both_ends_are_on,
-        vertices_that_only_start_a_closed_edge,
+        MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector, VertexKey, WhichArc,
+        WireStep, Written, assemble, name_of_the_closed_crossing_through,
+        names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
+        the_half_space_both_ends_are_on, vertices_that_only_start_a_closed_edge,
     };
 
     /// A corner that settles on a lower rounding leaves the coordinate it came
@@ -5902,6 +5978,7 @@ mod tests {
         let upright = flat(Vector::new(0.0, 0.0, 1.0));
         let starts = |carried_by: [Surface; 2], at: [f64; 3]| MeetPoint::WhereAClosedCurveStarts {
             carried_by,
+            picked_by: SmallVec::new(),
             point: PredicatePoint::from(at),
         };
 
@@ -5975,6 +6052,80 @@ mod tests {
         assert_eq!(round_plus_x.len(), 1, "{round_plus_x:?}");
         assert_eq!(round_minus_x.len(), 1, "{round_minus_x:?}");
         assert_ne!(round_plus_x, round_minus_x, "two circles named as one");
+    }
+
+    /// The two circles a bar of radius one down a cone's axis crosses the
+    /// cone's surface in, at `z = 1` and `z = −1`, start at corners of two
+    /// names, and each starts at a corner of one name whichever face asks,
+    /// in either order, with the cone's axis written either way round.
+    ///
+    /// The pickers are what `intersect` hands each face, so this asks it for
+    /// them as the arrangement does, the face's own surface first.
+    #[test]
+    fn each_circle_a_pipe_down_a_cones_axis_cuts_starts_at_a_corner_of_its_own() {
+        let model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a pipe of radius one"));
+        let cones = [Axis::z(), Axis::z().reversed()]
+            .map(|axis| Surface::Cone(Cone::new(axis, 1.0).expect("a cone leaning one")));
+        let corners = Corners::default();
+        let names_at = |height: f64| {
+            let on_it = PredicatePoint::from([1.0, 0.0, height]);
+            let mut names = BTreeSet::new();
+            for cone in cones {
+                for carried_by in [[pipe, cone], [cone, pipe]] {
+                    let SurfaceMeet::Curves(runs) = intersect(
+                        &carried_by[0],
+                        &carried_by[1],
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect("a pipe and a cone on one axis cross in circles") else {
+                        panic!("a pipe and a cone on one axis cross in curves");
+                    };
+                    let picked_by = runs
+                        .iter()
+                        .find_map(|run| match run.run() {
+                            EdgeRun::PartOfWhereItCrosses { picked_by, .. }
+                                if picked_by
+                                    .iter()
+                                    .all(|picker| picker.side_of_point(on_it) == Decision::Pos) =>
+                            {
+                                Some(picked_by.clone())
+                            }
+                            _ => None,
+                        })
+                        .expect("one of the two circles holds the point");
+                    let starts = MeetPoint::WhereAClosedCurveStarts {
+                        carried_by,
+                        picked_by,
+                        point: on_it,
+                    };
+                    names.insert(
+                        corners
+                            .name_of(
+                                &model,
+                                &starts,
+                                &Policy::certified(),
+                                &mut ProvenanceLog::new(),
+                            )
+                            .expect("no ring to ask about"),
+                    );
+                }
+            }
+            names
+        };
+        let (above, below) = (names_at(1.0), names_at(-1.0));
+        assert_eq!(
+            above.len(),
+            1,
+            "the circle at z = 1 under more than one name"
+        );
+        assert_eq!(
+            below.len(),
+            1,
+            "the circle at z = −1 under more than one name"
+        );
+        assert!(above.is_disjoint(&below), "two circles start at one corner");
     }
 
     /// Why every pair with a ball or a ring on it is answered `false`.
@@ -7308,6 +7459,7 @@ mod tests {
         let round_the_cap = |ends| side([cap(), pipe()], ends, &[circle]);
         let half_way = MeetPoint::HalfWayRoundAClosedCurve {
             carried_by: [cap(), pipe()],
+            picked_by: SmallVec::new(),
             point: PredicatePoint::from([-5.0, 0.0, 0.0]),
         };
 
