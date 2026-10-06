@@ -41,7 +41,10 @@
 //! corners that sweep no area and are not on one line is built with corners
 //! that cancel exactly, face by face, and the fuse that would join its cap
 //! puts a corner on its arc wherever one of its own walls would cross it, so
-//! the ring `rings_round` is handed winds (Q641).
+//! the ring `rings_round` is handed winds (Q641). A closed side that is one of
+//! several, its ring coming back through the side's one corner, is reached on
+//! a bored block's joined top, where the outline winds and places it; the probe
+//! with no ring that winds is refused before `rings_round` (Q802).
 
 use std::f64::consts::PI;
 
@@ -1565,9 +1568,10 @@ const LONG_STEP: [[f64; 2]; 4] = [[6.0, -8.0], [-8.0, -6.0], [-1.0, -6.0], [-1.0
 /// on the touching line, kept on both sides in both solids, until queue row
 /// Q760 parted that edge into one per input face in `fuse/assemble.rs`.
 ///
-/// **The ring above is still unreached.** The two caps on each end plane meet
+/// **The ring above is not reached here.** The two caps on each end plane meet
 /// only at the touching line's corner and share no edge, so nothing joins them
-/// into one face, and each lump keeps its own cap.
+/// into one face, and each lump keeps its own cap. A foot standing on a bored
+/// block's top joins it, and the next test reaches such a ring that way.
 #[test]
 fn a_bar_touching_a_tubes_inner_wall_is_answered_under_every_rule() {
     for (rule, swapped) in every_rule_both_ways() {
@@ -1612,6 +1616,210 @@ fn a_bar_touching_a_tubes_inner_wall_is_answered_under_every_rule() {
     }
 }
 
+/// **A closed side that is one of several, reached.** A block `[−10, 10]²`
+/// from `z = 0` to `4`, bored through by a bar of radius 3 about the `z` axis,
+/// and two tools: a bar of radius 1 at `(4, 0)` from `z = −1` to `5`, touching
+/// the bore's wall from outside along the line through `(3, 0)`, the bore's
+/// seam corner, and a foot `[−8, −5] × [4, 7]` from `z = 4` to `6` standing on
+/// the block's top. The fuse cuts the top and the floor along every plane of
+/// the foot's walls, and the pieces either side of those lines are one face
+/// again, so both are joined. None of those planes crosses either circle: with
+/// the foot at `[−8, −5] × [−2, 2]` the planes `y = ±2` put two more corners on
+/// the bore's circle, and the ring winds.
+///
+/// **Under the union and the bored block less the tools, both ways round, the
+/// joined top has the ring this family needs**: the bore's circle in two arcs,
+/// split at `(0, 3)`, and the small bar's circle as one closed side whose one
+/// corner is `(3, 0)`, where the ring comes back. With a print of each joined
+/// face's rings in `rings_round` (Q802), the union with the block handed over
+/// first gives, for the top,
+///
+/// ```text
+/// members 8 ring winds Ok(Zero): [3.0, 0.0, 4.0] -> [0.0, 3.0, 4.0] -> [3.0, 0.0, 4.0] CLOSED
+/// ```
+///
+/// and the same ring on the floor, split at `(0, −3)`. Its corners sweep
+/// nothing. The outline is the block's square, with corners where the foot's
+/// planes meet the block's walls, and it winds with the plane, so the ring is a
+/// hole by that and `holds_the_other_rings` is not asked. The answer keeps the
+/// ring as one wire of the top, through `(3, 0, 4)` twice.
+///
+/// The bored block holds `1600 − 36π`. Of the small bar's `6π`, `4π` lies in
+/// the block and `π` past each end; the foot, 18, shares nothing. So the union
+/// is `1618 − 34π`, the intersection `4π`, the bored block less the tools
+/// `1600 − 40π`, and the tools less the block the bar's two ends, `π` each,
+/// and the foot.
+#[test]
+fn a_bar_touching_a_blocks_bore_at_its_seam_leaves_one_hole_through_that_corner_twice() {
+    let seam = [3.0, 0.0, 4.0];
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let (bored, tools) = a_bored_block_a_bar_touching_its_bore_and_a_foot(&mut model);
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_groups_in_order(&mut model, &[bored], &tools, rule, swapped);
+        match (rule, swapped) {
+            (Rule::Union, _) => {
+                let union = the_only(answer, &what);
+                assert_holds(&model, union, 1618.0 - 34.0 * PI, &what);
+                assert!(
+                    a_flat_wire_comes_back_round_a_closed_side(&model, union, seam),
+                    "{what}"
+                );
+            }
+            (Rule::Intersection, _) => {
+                assert_holds(&model, the_only(answer, &what), 4.0 * PI, &what);
+            }
+            (Rule::Difference, false) => {
+                let left = the_only(answer, &what);
+                assert_holds(&model, left, 1600.0 - 40.0 * PI, &what);
+                assert!(
+                    a_flat_wire_comes_back_round_a_closed_side(&model, left, seam),
+                    "{what}"
+                );
+            }
+            (Rule::Difference, true) => {
+                let solids = the_smaller_first(&model, answer, &what);
+                let [one_end, other_end, foot] = solids[..] else {
+                    panic!("{what}: {solids:?}");
+                };
+                assert_holds(&model, one_end, PI, &what);
+                assert_holds(&model, other_end, PI, &what);
+                assert_holds(&model, foot, 18.0, &what);
+            }
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        }
+    }
+}
+
+/// **Two such rings on one face, and none that winds: refused before the
+/// rings are placed.** A bar of radius 7 and height 4 bored by a bar of radius
+/// 1 at `(−3, 0)`, and three tools: a bar of radius 3 at `(4, 0)` touching the
+/// big bar's wall from inside along the line through `(7, 0)`, the seam corner
+/// of both; a bar of radius 1 at `(−1, 0)` touching the bore from outside along
+/// the line through `(−2, 0)`, the bore's seam corner, both from `z = −1` to
+/// `5`; and a puck of radius 1 at `(0, 4)` from `z = 4` to `6`, standing on the
+/// top so the fuse cuts it along the puck's circle and joins it back. The top
+/// of the bored bar less the tools would be one joined face with two rings:
+/// the big bar's circle and the radius-3 bar's, both closed at `(7, 0)`, and
+/// the bore's circle and the radius-1 bar's through `(−2, 0)`. Neither winds
+/// round any area and `holds_the_other_rings` answers `None` for both, so
+/// `rings_round` would panic with two rings unplaced.
+///
+/// **Every rule, both ways round, is refused before that**: `Undecidable`, on
+/// `a point inside a piece of a face` in `select.rs`, whose record names the
+/// corners of the top's piece outside the puck, `(7, 0, 4)` twice, `(−2, 0, 4)`,
+/// `(−3, 1, 4)`, `(−2, 0, 4)` and `(0, 5, 4)` (Q802). The bar unbored, less the
+/// radius-3 bar and a puck at `(−3, 0)`, whose one such ring would be the
+/// outline, is refused the same way, its record naming the floor's piece with
+/// `(7, 0, 0)` twice; the same bar less the radius-3 bar alone answers every
+/// rule. Probed with a foot of straight walls, `[−1, 1] × [3, 5]`, instead of
+/// the puck, the foot's planes put corners on the circles and the rings wind;
+/// the union and the bored bar less the tools were then refused `Undecidable`
+/// on `area swept by a wire round a normal`, for a ring on the floor with
+/// `(−2, 0, 0)` twice among its four corners (not pinned).
+///
+/// The answers exist. The bored bar holds `192π`; of the radius-3 bar's `54π`,
+/// `36π` is inside it, and of the radius-1 bar's `6π`, `4π`; the puck, `2π`,
+/// shares nothing. So the union is `214π`, the intersection two solids of `36π`
+/// and `4π`, the bored bar less the tools `152π`, and the tools less the bar
+/// the two bars' ends, `9π` and `π` each, and the puck.
+#[test]
+fn a_bored_bar_touched_inside_its_wall_and_beside_its_bore_is_refused_before_its_rings_are_placed()
+{
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let (bored, tools) = a_bored_bar_touched_at_both_seams_and_a_puck(&mut model);
+        let what = format!("{rule:?}, swapped {swapped}");
+        let refused = fused_groups_in_order(&mut model, &[bored], &tools, rule, swapped);
+        let Err(Error::Undecidable { records }) = refused else {
+            panic!("{what}: {refused:?}");
+        };
+        assert!(
+            !records.records().is_empty()
+                && records
+                    .records()
+                    .iter()
+                    .all(|record| record.predicate() == "a point inside a piece of a face"),
+            "{what}: {records:?}"
+        );
+    }
+}
+
+/// The block `[−10, 10]²` from `z = 0` to `4` bored through by a bar of radius
+/// 3, and the tools: a bar of radius 1 at `(4, 0)` from `z = −1` to `5`, and the
+/// foot `[−8, −5] × [4, 7]` from `z = 4` to `6`.
+fn a_bored_block_a_bar_touching_its_bore_and_a_foot(
+    model: &mut Model,
+) -> (SolidKey, [SolidKey; 2]) {
+    let block = a_block(
+        model,
+        &[[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0], [-10.0, 10.0]],
+        0.0,
+        4.0,
+    );
+    let bore = model
+        .add_round_bar(3.0, 6.0, &at(0.0, 0.0, -1.0))
+        .expect("a bar of radius three");
+    let bored = the_one_solid(model, block, bore, Rule::Difference);
+    let touching = model
+        .add_round_bar(1.0, 6.0, &at(4.0, 0.0, -1.0))
+        .expect("a bar of radius one");
+    let foot = a_block(
+        model,
+        &[[-8.0, 4.0], [-5.0, 4.0], [-5.0, 7.0], [-8.0, 7.0]],
+        4.0,
+        2.0,
+    );
+    (bored, [touching, foot])
+}
+
+/// The bar of radius 7 bored at `(−3, 0)`, and the tools: the bars of radius 3
+/// at `(4, 0)` and radius 1 at `(−1, 0)`, from `z = −1` to `5`, and the puck.
+fn a_bored_bar_touched_at_both_seams_and_a_puck(model: &mut Model) -> (SolidKey, [SolidKey; 3]) {
+    let bar = model
+        .add_round_bar(7.0, 4.0, &Isometry::identity())
+        .expect("a bar of radius seven");
+    let bore = model
+        .add_round_bar(1.0, 6.0, &at(-3.0, 0.0, -1.0))
+        .expect("a bar of radius one");
+    let bored = the_one_solid(model, bar, bore, Rule::Difference);
+    let inside_the_wall = model
+        .add_round_bar(3.0, 6.0, &at(4.0, 0.0, -1.0))
+        .expect("a bar of radius three");
+    let beside_the_bore = model
+        .add_round_bar(1.0, 6.0, &at(-1.0, 0.0, -1.0))
+        .expect("a bar of radius one");
+    let puck = model
+        .add_round_bar(1.0, 2.0, &at(0.0, 4.0, 4.0))
+        .expect("a puck of radius one");
+    (bored, [inside_the_wall, beside_the_bore, puck])
+}
+
+/// Whether a wire of a flat face of `solid` runs a closed side round from
+/// `corner` and leaves `corner` along one other side too: one ring through
+/// that corner twice.
+fn a_flat_wire_comes_back_round_a_closed_side(
+    model: &Model,
+    solid: SolidKey,
+    corner: [f64; 3],
+) -> bool {
+    model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface::Plane(_)))
+        .any(|face| {
+            face.wires().any(|wire| {
+                let sides: Vec<[[f64; 3]; 2]> = wire
+                    .coedges()
+                    .map(|side| [side.start(), side.end()].map(|end| end.point().coordinates()))
+                    .collect();
+                sides.contains(&[corner, corner])
+                    && sides.iter().filter(|[start, _]| *start == corner).count() == 2
+            })
+        })
+}
+
 fn the_only(answer: rcad_topo::Result<Vec<SolidKey>>, what: &str) -> SolidKey {
     let solids = answer.unwrap_or_else(|why| panic!("{what} refused: {why}"));
     assert_eq!(solids.len(), 1, "{what}: {solids:?}");
@@ -1624,10 +1832,18 @@ fn the_two_smaller_first(
     answer: rcad_topo::Result<Vec<SolidKey>>,
     what: &str,
 ) -> [SolidKey; 2] {
-    let solids = answer.unwrap_or_else(|why| panic!("{what} refused: {why}"));
-    let mut two: [SolidKey; 2] = solids
+    the_smaller_first(model, answer, what)
         .try_into()
-        .unwrap_or_else(|solids| panic!("{what}: two lumps, got {solids:?}"));
+        .unwrap_or_else(|solids| panic!("{what}: two lumps, got {solids:?}"))
+}
+
+/// The solids of an answer, the ones with less inside them first.
+fn the_smaller_first(
+    model: &Model,
+    answer: rcad_topo::Result<Vec<SolidKey>>,
+    what: &str,
+) -> Vec<SolidKey> {
+    let mut solids = answer.unwrap_or_else(|why| panic!("{what} refused: {why}"));
     let volume = |solid: &SolidKey| {
         model
             .solid(*solid)
@@ -1640,8 +1856,8 @@ fn the_two_smaller_first(
             .unwrap_or_else(|why| panic!("{what} does not measure: {why}"))
             .volume()
     };
-    two.sort_by(|one, other| volume(one).total_cmp(&volume(other)));
-    two
+    solids.sort_by(|one, other| volume(one).total_cmp(&volume(other)));
+    solids
 }
 
 /// The corners of the bow tie cap, in the order its ring runs: two on the
@@ -1694,11 +1910,21 @@ fn fused_in_order(
     rule: Rule,
     swapped: bool,
 ) -> rcad_topo::Result<Vec<SolidKey>> {
+    fused_groups_in_order(model, &[one], &[other], rule, swapped)
+}
+
+fn fused_groups_in_order(
+    model: &mut Model,
+    one: &[SolidKey],
+    other: &[SolidKey],
+    rule: Rule,
+    swapped: bool,
+) -> rcad_topo::Result<Vec<SolidKey>> {
     let [one, other] = if swapped { [other, one] } else { [one, other] };
     model
         .fuse(
-            &[one],
-            &[other],
+            one,
+            other,
             rule,
             &Policy::certified(),
             &mut ProvenanceLog::new(),
