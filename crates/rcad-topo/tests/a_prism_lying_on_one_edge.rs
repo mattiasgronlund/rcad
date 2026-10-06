@@ -58,9 +58,10 @@ fn a_prism_lying_on_its_edge_on_a_blocks_top_answers_every_rule_both_ways_round(
                 });
                 let should: &[f64] = match (rule, swapped) {
                     (Rule::Union, _) => &[prism, BLOCK],
+                    (Rule::Intersection, _) => &[],
                     (Rule::Difference, false) => &[BLOCK],
                     (Rule::Difference, true) => &[prism],
-                    _ => &[],
+                    _ => unreachable!("EVERY_RULE holds only these three"),
                 };
                 if let Some(why) = differs(&model, answer, should) {
                     wrong.push(format!("{what}: {why}"));
