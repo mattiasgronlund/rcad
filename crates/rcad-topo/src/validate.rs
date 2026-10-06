@@ -2371,48 +2371,34 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     }
     let mut room = how_far_across(&coarsest) / 2.0;
     while let Ok(less) = Deflection::of(room) {
-        match what_a_finer_mesh_says(view.mesh(less, policy, log))? {
-            Rung::Encloses(enclosed) => return Ok(enclosed),
-            Rung::AskFiner => {}
-            Rung::Stop => break,
+        match view.mesh(less, policy, log) {
+            Ok(finer) => {
+                let enclosed = signed_volume_over(&finer);
+                if enclosed != 0.0 {
+                    return Ok(enclosed);
+                }
+            }
+            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
+            Err(why) => {
+                hand_on_a_refusal_that_found_the_space(why)?;
+                break;
+            }
         }
         room /= 2.0;
     }
     Ok(0.0)
 }
 
-/// What one rung of [`how_much_space_a_curved_solid_encloses`]'s ladder said.
+/// `Err(why)` when a finer mesh of the zero ladder was refused because it found
+/// the space and the placement took it away, and `Ok(())`, which stops the
+/// ladder, for any other refusal.
 ///
-/// Exhaustive on purpose: the ladder answers, asks again finer, or stops, and a
-/// fourth thing a rung could say would be a change to the ladder.
-#[derive(Debug, PartialEq)]
-enum Rung {
-    /// The finer mesh encloses this much, which is not zero.
-    Encloses(f64),
-    /// The finer mesh encloses exactly nothing too, or folded; ask finer again.
-    AskFiner,
-    /// The finer mesh was refused for something a finer one will not cure.
-    Stop,
-}
-
-/// Read one finer mesh of the zero ladder: a sign, a reason to ask again, a
-/// reason to stop, or a refusal to hand on.
-///
-/// The doc comment of [`how_much_space_a_curved_solid_encloses`] says why each
-/// refusal goes where it goes.
-fn what_a_finer_mesh_says(finer: Result<Mesh>) -> Result<Rung> {
-    match finer {
-        Ok(finer) => {
-            let enclosed = signed_volume_over(&finer);
-            if enclosed == 0.0 {
-                return Ok(Rung::AskFiner);
-            }
-            Ok(Rung::Encloses(enclosed))
-        }
-        Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => Ok(Rung::AskFiner),
-        Err(why @ Error::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }) => Err(why),
-        Err(_) => Ok(Rung::Stop),
+/// The doc comment of [`how_much_space_a_curved_solid_encloses`] says why.
+fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
+    if matches!(why, Error::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }) {
+        return Err(why);
     }
+    Ok(())
 }
 
 /// The solid meshed as coarsely as a mesh gets, or — when that mesh's own sides
@@ -4080,9 +4066,9 @@ mod tests {
     use smallvec::SmallVec;
 
     use super::{
-        Decision, Rung, Scope, a_circle_round_the_axis,
-        a_closed_crossing_is_walked_the_way_it_is_stored, as_coarse_as_a_mesh_gets, gradient_of,
-        what_a_finer_mesh_says, winding_of, winding_round,
+        Decision, Scope, a_circle_round_the_axis, a_closed_crossing_is_walked_the_way_it_is_stored,
+        as_coarse_as_a_mesh_gets, gradient_of, hand_on_a_refusal_that_found_the_space, winding_of,
+        winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -6084,14 +6070,15 @@ mod tests {
     /// was made and `0` where it lands, and those are the numbers used.
     #[test]
     fn a_finer_mesh_that_lost_its_space_to_the_placement_is_handed_on() {
-        let lost = || Error::PlacingItTookAwayTheSpaceItsMeshEncloses {
-            enclosed_where_made: 4.0 / 3.0,
-            enclosed_where_placed: 0.0,
-        };
         let Err(Error::PlacingItTookAwayTheSpaceItsMeshEncloses {
             enclosed_where_made,
             enclosed_where_placed,
-        }) = what_a_finer_mesh_says(Err(lost()))
+        }) = hand_on_a_refusal_that_found_the_space(
+            Error::PlacingItTookAwayTheSpaceItsMeshEncloses {
+                enclosed_where_made: 4.0 / 3.0,
+                enclosed_where_placed: 0.0,
+            },
+        )
         else {
             panic!("the refusal was not handed on");
         };
@@ -6100,22 +6087,12 @@ mod tests {
             (4.0 / 3.0, 0.0)
         );
 
-        assert_eq!(
-            what_a_finer_mesh_says(Err(Error::TwoPatchesOfTheMeshDrewTheSameSide {
-                drawn: 2,
-                used: 4,
-            }))
-            .expect("a fold is not handed on"),
-            Rung::AskFiner,
-            "a fold is asked again finer"
-        );
-        assert_eq!(
-            what_a_finer_mesh_says(Err(Error::DeflectionBelowWhatAMeshCanReach {
+        assert!(
+            hand_on_a_refusal_that_found_the_space(Error::DeflectionBelowWhatAMeshCanReach {
                 asked: 5.0,
                 closest: 1e217,
-            }))
-            .expect("the floor is not handed on"),
-            Rung::Stop,
+            })
+            .is_ok(),
             "the floor still stops the ladder"
         );
     }
