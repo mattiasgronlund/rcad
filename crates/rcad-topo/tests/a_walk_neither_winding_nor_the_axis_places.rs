@@ -1,16 +1,18 @@
 //! Shapes that reach the refusal of `docs/decisions.md` §340.2: a walk on a
 //! face whose signs match several walks of one other lump, where neither
-//! winding (a flat face with straight sides) nor going round the axis (a cone or
-//! a pipe) says which of them holds it. The fuse refuses
-//! `CannotTellTheCellsOfAFaceApart` in `arrange.rs`'s
-//! `the_walk_of_each_other_lump_each_walk_faces`.
+//! winding (a flat face) nor going round the axis (a cone or a pipe) says which
+//! of them holds it. The fuse refuses `CannotTellTheCellsOfAFaceApart` in
+//! `arrange.rs`'s `the_walk_of_each_other_lump_each_walk_faces`.
 //!
-//! **Two shapes reach it, one on a ball and one on a plane**, under every rule
-//! and with the arguments both ways round. A printed probe at each of the five
-//! places `arrange.rs` raises that refusal, since removed, named that one place
-//! for all twelve fuses. Both answers exist — each is two ordinary solids, and
-//! its volume is worked out by hand in each test's doc — so both refusals are
-//! gaps (§16.10).
+//! **Two shapes reached it, one on a ball and one on a plane**, under every
+//! rule and with the arguments both ways round. A printed probe at each of the
+//! five places `arrange.rs` raises that refusal, since removed, named that one
+//! place for all twelve fuses. Both answers exist — each is two ordinary
+//! solids, and its volume is worked out by hand in each test's doc — so both
+//! refusals were gaps (§16.10). **The one on a plane is answered now**, since
+//! winding on a flat face follows each curved side as well as the corners
+//! (queue row Q1053), and every fuse holds the volume its doc works out. The
+//! one on a ball still reaches it.
 //!
 //! **What makes two walks of one lump agree** is that only a curve drawn in
 //! full has a side, and a closed curve is drawn in full only when it is a cut.
@@ -24,14 +26,14 @@
 //!   side of every circle: a square rod through a ball leaves a patch at each
 //!   end, both inside all four of its circles.
 //! - **On a plane** a straight cut runs on, and two halves of a face either
-//!   side of it agree about every circle. Winding by corners places a walk there
-//!   only when every side is straight, so a face with a round notch is not
-//!   placed.
+//!   side of it agree about every circle. Winding by corners alone placed a
+//!   walk there only when every side was straight, so a face with a round
+//!   notch was not placed.
 //!
 //! The other shapes built on the way are pinned beside them, with what each
 //! gives instead.
 
-use rcad_geom::{Isometry, Scale, Surface, Vector};
+use rcad_geom::{Deflection, Isometry, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -71,39 +73,48 @@ fn a_dimpled_ball_through_a_square_rod_cannot_tell_the_two_ends_of_the_rod_apart
 /// `(0, 0)`, against a slab `[5, 20] × [−5, 15] × [1, 5]` less a bar of radius 1
 /// at `(7.5, 5)`.
 ///
-/// The slab's wall `x = 5` cuts the plate's floor and top in two, and the
-/// slab's hole cuts a whole circle in the half `x > 5`. The circle's outer walk
-/// agrees with both halves, and the other half's side is the notch's arc, so
-/// winding by corners is not asked.
+/// The slab's wall `x = 5` cuts the plate's top in two, and the slab's hole
+/// cuts a whole circle in the half `x > 5`. The circle's outer walk agrees with
+/// both halves, and the other half's side is the notch's arc. Its corners are
+/// not its shape, so this was refused here until the winding followed each arc
+/// as well (queue row Q1053): the notch's arc bulges towards `(0, 0)`, away from
+/// the circle, so the half `x < 5` winds no times round it and the half `x > 5`
+/// once.
 ///
-/// **The answer exists.** The plate is `200 − 4.5π`, the slab `1200 − 4π`, and
-/// they share `[5, 10] × [0, 10] × [1, 2]` less the hole, `50 − π`: so `1350 −
-/// 7.5π` united, `50 − π` in common, `150 − 3.5π` and `1150 − 3π` either way
-/// round less the other.
+/// The plate is `200 − 4.5π`, the slab `1200 − 4π`, and they share
+/// `[5, 10] × [0, 10] × [1, 2]` less the hole, `50 − π`: so `1350 − 7.5π`
+/// united, `50 − π` in common, `150 − 3.5π` and `1150 − 3π` either way round
+/// less the other. Every rule, both ways round, answers one solid holding that.
 #[test]
-fn a_plate_with_a_round_notch_cut_in_two_beside_a_hole_cannot_tell_its_halves_apart() {
-    every_rule_both_ways_refuses_on_a(
-        "a notched plate and a holed slab",
-        || {
-            let mut model = a_model();
-            let plate = block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 2.0]);
-            let notch = model
-                .add_round_bar(3.0, 4.0, &shift(0.0, 0.0, -1.0))
-                .expect("a bar");
-            let notched = fuse_one(&mut model, plate, notch, Rule::Difference);
-            let slab = block(&mut model, [5.0, -5.0, 1.0], [20.0, 15.0, 5.0]);
-            let hole = model
-                .add_round_bar(1.0, 6.0, &shift(7.5, 5.0, 0.0))
-                .expect("a bar");
-            let holed = fuse_one(&mut model, slab, hole, Rule::Difference);
-            (model, notched, holed)
-        },
-        |surface| {
-            surface
-                .as_plane()
-                .is_some_and(|plane| plane.normal().components()[2].abs() == 1.0)
-        },
-    );
+fn a_plate_with_a_round_notch_cut_in_two_beside_a_hole_is_answered_under_every_rule() {
+    use std::f64::consts::PI;
+    for (rule, plate_first) in every_rule_both_ways() {
+        let mut model = a_model();
+        let plate = block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 2.0]);
+        let notch = model
+            .add_round_bar(3.0, 4.0, &shift(0.0, 0.0, -1.0))
+            .expect("a bar");
+        let notched = fuse_one(&mut model, plate, notch, Rule::Difference);
+        let slab = block(&mut model, [5.0, -5.0, 1.0], [20.0, 15.0, 5.0]);
+        let hole = model
+            .add_round_bar(1.0, 6.0, &shift(7.5, 5.0, 0.0))
+            .expect("a bar");
+        let holed = fuse_one(&mut model, slab, hole, Rule::Difference);
+        let what = format!("{rule:?}, the plate first {plate_first}");
+        let answer = fuse(&mut model, notched, holed, rule, plate_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let [solid] = answer[..] else {
+            panic!("{what}: one solid, got {answer:?}");
+        };
+        let volume = match (rule, plate_first) {
+            (Rule::Union, _) => 1350.0 - 7.5 * PI,
+            (Rule::Intersection, _) => 50.0 - PI,
+            (Rule::Difference, true) => 150.0 - 3.5 * PI,
+            (Rule::Difference, false) => 1150.0 - 3.0 * PI,
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_holds(&model, solid, volume, &what);
+    }
 }
 
 /// A ball of radius 2 cut down to `x ≤ 1`, `y ≤ 1`, against a ball of radius
@@ -271,6 +282,28 @@ fn fuse(
             &mut ProvenanceLog::new(),
         )
         .map(|fused| fused.solids().to_vec())
+}
+
+/// `solid` validates and measures `volume`, give or take what the mesh says.
+fn assert_holds(model: &Model, solid: SolidKey, volume: f64, what: &str) {
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{what} left a model that does not validate: {why}"));
+    let measured = model
+        .solid(solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.001).expect("a fine mesh"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{what} does not measure: {why}"));
+    assert!(
+        (measured.volume() - volume).abs() <= measured.volume_error(),
+        "{what} holds {volume} and this one says {} give or take {}",
+        measured.volume(),
+        measured.volume_error()
+    );
 }
 
 /// The one solid a fuse that builds a shape gives.

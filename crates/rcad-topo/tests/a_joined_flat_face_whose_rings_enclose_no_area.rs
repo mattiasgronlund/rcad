@@ -941,32 +941,48 @@ fn a_bar_cut_to_a_bow_tie_cap_is_answered_with_corners_that_no_longer_cancel() {
 }
 
 /// The same bar with a bar of radius 2 through `(0, 4)` taken out of it first,
-/// so the bow tie cap would have a hole, and a block flush with it would join
-/// its pieces into a face with two rings that may enclose no area: the bow
-/// tie, if its corners cancelled, and the circle. Taking a
-/// ball's pocket out of the bow tie instead is refused as well, with
-/// `AFaceTrimmedByACurveThisCannotFollow`.
+/// so the bow tie cap has a hole, and a block flush with it would join its
+/// pieces into a face with two rings that may enclose no area: the bow tie, if
+/// its corners cancelled, and the circle. Taking a ball's pocket out of the bow
+/// tie instead is refused, with `AFaceTrimmedByACurveThisCannotFollow`.
 ///
-/// **Refused before any of that.** Cutting the holed bar to the bow tie is
-/// refused under every rule, both ways round, while a face is cut into cells
-/// in `fuse/arrange.rs` (Q616).
+/// **Cutting the holed bar to the bow tie is answered**, under every rule both
+/// ways round. It was refused `CannotTellTheCellsOfAFaceApart` while the bar's
+/// floor was cut into cells in `fuse/arrange.rs` (Q616): the hole's circle
+/// agrees with every piece of the floor about every closed curve, and the piece
+/// above the bow tie has the bar's arc for a side, so its corners — the bow
+/// tie, which winds no times round the hole — were not its shape. Counted with
+/// its arc, which bulges up past the hole from the chord `y = −8`, it winds
+/// once round the hole and every piece below the bow tie none (queue row Q1053).
+///
+/// The hole takes `16π` out of what the bar and the prism share and nothing out
+/// of the prism, so the bar less the prism is what it was without the hole, the
+/// prism less the bar holds `16π` more, and the union is the same.
 #[test]
-fn a_holed_bar_cut_to_a_bow_tie_cap_is_refused_while_a_face_is_cut_into_cells() {
+fn a_holed_bar_cut_to_a_bow_tie_cap_is_answered_under_every_rule() {
+    let above_the_chord = 100.0 * PI - (100.0 * 0.8_f64.acos() - 48.0);
+    let (round, sides, hole) = (400.0 * PI, 6.0 * 2280.0, 16.0 * PI);
+    let shared = 4.0 * above_the_chord - hole;
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let round = model
+        let whole = model
             .add_round_bar(10.0, 4.0, &Isometry::identity())
             .expect("a bar of radius ten");
         let through = model
             .add_round_bar(2.0, 6.0, &at(0.0, 4.0, -1.0))
             .expect("a bar of radius two");
-        let holed = the_one_solid(&mut model, round, through, Rule::Difference);
+        let holed = the_one_solid(&mut model, whole, through, Rule::Difference);
         let prism = a_block(&mut model, &BOW_TIE_SIDES, -1.0, 6.0);
-        let refused = fused_in_order(&mut model, [holed, prism], rule, swapped);
-        assert!(
-            matches!(refused, Err(Error::CannotTellTheCellsOfAFaceApart { .. })),
-            "{rule:?}, swapped {swapped}: {refused:?}"
-        );
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, [holed, prism], rule, swapped);
+        let volume = match (rule, swapped) {
+            (Rule::Union, _) => round - hole + sides - shared,
+            (Rule::Intersection, _) => shared,
+            (Rule::Difference, false) => round - hole - shared,
+            (Rule::Difference, true) => sides - shared,
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_holds(&model, the_only(answer, &what), volume, &what);
     }
 }
 
@@ -1108,14 +1124,21 @@ fn a_staircase_cap_whose_corners_cancel_is_cut_on_its_arc_by_its_own_walls() {
     }
 }
 
-/// The staircase of the test above less a bar of radius 2 at `(15, 3)`
-/// standing through it, which would give its cap a hole, is refused
-/// `CannotTellTheCellsOfAFaceApart` under every rule, both ways round. So is a
-/// holed bar cut to Q616's bow
-/// tie (`a_holed_bar_cut_to_a_bow_tie_cap_is_refused_while_a_face_is_cut_into_cells`),
-/// and both caps have corners that sweep no area.
+/// The staircase of the test above against a bar of radius 2 at `(15, 3)`
+/// standing through it, height 6 from `z = −1`, is answered under every rule
+/// both ways round. It was refused `CannotTellTheCellsOfAFaceApart`, for the
+/// reason the holed bar cut to Q616's bow tie was
+/// (`a_holed_bar_cut_to_a_bow_tie_cap_is_answered_under_every_rule`): the
+/// circle's walk on a cap agrees with every piece of it, and the piece it is in
+/// has the arc for a side, whose corners sweep no area. Counted with the arc it
+/// winds once round the circle (queue row Q1053).
+///
+/// The bar is `24π` and shares `16π` with the staircase, all of the bar
+/// between its caps, so the bar less the staircase is its two ends, `4π` each.
 #[test]
-fn a_staircase_cap_whose_corners_cancel_is_refused_a_hole_while_its_cap_is_cut_into_cells() {
+fn a_staircase_cap_whose_corners_cancel_is_given_a_hole_under_every_rule() {
+    let staircase_volume = 4.0 * (100.0 * PI - 200.0);
+    let (pin, shared) = (24.0 * PI, 16.0 * PI);
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let staircase = a_bar_cut_to(&mut model, 20.0, &STAIRCASE)
@@ -1123,11 +1146,31 @@ fn a_staircase_cap_whose_corners_cancel_is_refused_a_hole_while_its_cap_is_cut_i
         let through = model
             .add_round_bar(2.0, 6.0, &at(15.0, 3.0, -1.0))
             .expect("a bar of radius two");
-        let refused = fused_in_order(&mut model, [staircase, through], rule, swapped);
-        assert!(
-            matches!(refused, Err(Error::CannotTellTheCellsOfAFaceApart { .. })),
-            "{rule:?}, swapped {swapped}: {refused:?}"
-        );
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, [staircase, through], rule, swapped);
+        match (rule, swapped) {
+            (Rule::Union, _) => assert_holds(
+                &model,
+                the_only(answer, &what),
+                staircase_volume + pin - shared,
+                &what,
+            ),
+            (Rule::Intersection, _) => {
+                assert_holds(&model, the_only(answer, &what), shared, &what);
+            }
+            (Rule::Difference, false) => assert_holds(
+                &model,
+                the_only(answer, &what),
+                staircase_volume - shared,
+                &what,
+            ),
+            (Rule::Difference, true) => {
+                for end in the_two_smaller_first(&model, answer, &what) {
+                    assert_holds(&model, end, 4.0 * PI, &what);
+                }
+            }
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        }
     }
 }
 

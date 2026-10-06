@@ -4202,63 +4202,150 @@ impl<'f> Arrangement<'f> {
     /// the regions are there, and the walk is in one of them.
     fn which_of_them_holds(&self, walk: usize, candidates: &[usize]) -> Option<usize> {
         match self.surface.as_plane().and_then(InPlane::of) {
-            Some(in_plane) => self.which_straight_walk_winds_round(&in_plane, walk, candidates),
+            Some(in_plane) => self.which_walk_winds_once_round(&in_plane, walk, candidates),
             None => self.the_one_that_goes_round_the_axis_as_well(walk, candidates),
         }
     }
 
-    /// On a flat face: the one candidate whose corners wind once round a node
-    /// of `walk`, when every candidate is made of straight sides.
+    /// On a flat face: the one candidate that winds once round a node of
+    /// `walk`.
     ///
-    /// There the corners of a walk are its whole shape, so how often they wind
-    /// round a point is exact: once for a point inside a walk that goes
-    /// anticlockwise round a region of its own, and never for a point outside
-    /// it. The walk round the outside of a lump never winds once round
-    /// anything, so a point no candidate winds once round is in that one or in
-    /// none of them, and is not answered. A curved side is not answered either:
-    /// its corners are not its shape.
-    fn which_straight_walk_winds_round(
+    /// How often a walk winds round a point is counted exactly, curved sides
+    /// and all ([`Arrangement::how_often_a_walk_winds_round`]): once for a
+    /// point inside a walk that goes anticlockwise round a region of its own,
+    /// and never for a point outside it. The walk round the outside of a lump
+    /// never winds once round anything, so a point no candidate winds once
+    /// round is in that one or in none of them, and is not answered.
+    fn which_walk_winds_once_round(
         &self,
         in_plane: &InPlane,
         walk: usize,
         candidates: &[usize],
     ) -> Option<usize> {
-        let all_straight = candidates
-            .iter()
-            .flat_map(|&candidate| &self.cycles[candidate])
-            .all(|&half_edge| {
-                self.crossings[self.arcs[half_edge / 2].crossing]
-                    .order
-                    .runs_straight()
-            });
-        if !all_straight {
-            return None;
-        }
-        let corners: Vec<Vec<PredicatePoint>> = candidates
-            .iter()
-            .map(|&candidate| {
-                self.cycles[candidate]
-                    .iter()
-                    .map(|&half_edge| self.nodes[self.from(half_edge)].point)
-                    .collect()
-            })
-            .collect();
         // Every node of the walk is tried, for the reason
         // `say_whether_the_face_holds_each_lump_of_closed_cuts` gives: a node on
         // the line of one of a candidate's sides is one the count cannot answer
         // about, and another node of the same walk is not.
         self.cycles[walk].iter().find_map(|&half_edge| {
             let at = self.nodes[self.from(half_edge)].point;
-            let wound: Vec<i32> = corners
+            let wound: Vec<i32> = candidates
                 .iter()
-                .map(|corners| {
-                    how_often_the_rim_winds_round(in_plane, core::slice::from_ref(corners), at)
-                })
+                .map(|&candidate| self.how_often_a_walk_winds_round(in_plane, candidate, at))
                 .collect::<Option<_>>()?;
             let mut once = (0..candidates.len()).filter(|&index| wound[index] == 1);
             let only = once.next()?;
             once.next().is_none().then_some(candidates[only])
         })
+    }
+
+    /// How often `cycle` winds round `point` on a flat face, anticlockwise
+    /// counting one; `None` when a sign it needs is not settled, which takes
+    /// in a point on the line of one of the walk's sides or chords.
+    ///
+    /// **The corners first, then each curved side on its own.** A curved side
+    /// from `a` to `b` and its chord from `b` back to `a` make a loop, and the
+    /// walk winds round a point exactly as often as the polygon of its corners
+    /// does plus as often as each of those loops does: the chords cancel
+    /// ([`Arrangement::how_often_a_side_and_its_chord_wind_round`]).
+    ///
+    /// **A side that is the whole of a closed curve is not answered.** It comes
+    /// back to its one corner, so it has no chord. On a flat face it shares that
+    /// corner with another side only where a curve touches it there without
+    /// crossing, and none of this crate's tests puts one in a walk that reaches
+    /// here (queue row Q1053's probe).
+    fn how_often_a_walk_winds_round(
+        &self,
+        in_plane: &InPlane,
+        cycle: usize,
+        point: PredicatePoint,
+    ) -> Option<i32> {
+        if self.cycles[cycle]
+            .iter()
+            .any(|&half_edge| self.from(half_edge) == self.to(half_edge))
+        {
+            return None;
+        }
+        let corners: Vec<PredicatePoint> = self.cycles[cycle]
+            .iter()
+            .map(|&half_edge| self.nodes[self.from(half_edge)].point)
+            .collect();
+        let by_the_corners =
+            how_often_the_rim_winds_round(in_plane, core::slice::from_ref(&corners), point)?;
+        self.cycles[cycle]
+            .iter()
+            .try_fold(by_the_corners, |so_far, &half_edge| {
+                Some(
+                    so_far
+                        + self.how_often_a_side_and_its_chord_wind_round(
+                            in_plane, half_edge, point,
+                        )?,
+                )
+            })
+    }
+
+    /// How often one side of a walk on a flat face and its chord wind round
+    /// `point` between them, anticlockwise counting one: `0` for a straight
+    /// side, and `None` where a sign is not settled or the side's curve is not
+    /// one of those below.
+    ///
+    /// **A plane crosses a pipe, a ball or a cone in a circle, an ellipse, a
+    /// parabola or one branch of a hyperbola**, wherever it does not cross it
+    /// in straight lines, and each of those bounds a convex region: inside the
+    /// pipe, the ball or the cone, which is the partner's negative side. A
+    /// line meets such a curve twice at most, so a piece of it from `a` to `b`
+    /// lies wholly on one side of the chord's line, and the loop of the piece
+    /// and its chord goes round the points on that side that are inside the
+    /// curve, and round nothing else. It goes round them clockwise when the
+    /// piece bulges to the left of `a → b`, and anticlockwise when it bulges to
+    /// the right.
+    ///
+    /// **Which side the piece bulges to is the side its way out of `a` points
+    /// to.** The tangent line at `a` meets the curve nowhere else, so it is
+    /// not the chord's line and the sign is never zero, though a box can still
+    /// leave it unsettled.
+    ///
+    /// **Inside a cone is inside either nappe**, and the inside of the other
+    /// branch of a hyperbola is on the side of the chord a piece of one branch
+    /// bulges to as well. So a point on a cone's curve is also held to the
+    /// nappe `a` is on.
+    fn how_often_a_side_and_its_chord_wind_round(
+        &self,
+        in_plane: &InPlane,
+        half_edge: usize,
+        point: PredicatePoint,
+    ) -> Option<i32> {
+        let crossing = &self.crossings[self.arcs[half_edge / 2].crossing];
+        if crossing.order.runs_straight() {
+            return Some(0);
+        }
+        match crossing.partner {
+            Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_) => (),
+            Surface::Plane(_) | Surface::Torus(_) | _ => return None,
+        }
+        let left_or_right = |turn: Decision| -> Option<i32> {
+            match turn {
+                Decision::Pos => Some(1),
+                Decision::Neg => Some(-1),
+                Decision::Zero | Decision::Undecidable { .. } | _ => None,
+            }
+        };
+        let from = self.from(half_edge);
+        let (start, end) = (self.nodes[from].point, self.nodes[self.to(half_edge)].point);
+        let out = self.way_out_of(from, self.direction(half_edge));
+        let ahead = PredicatePoint::Constructed(core::array::from_fn(|axis| {
+            start.enclosure()[axis] + out[axis]
+        }));
+        let bulge = left_or_right(in_plane.turn(start, end, ahead))?;
+        if left_or_right(in_plane.turn(start, end, point))? != bulge {
+            return Some(0);
+        }
+        Some(
+            if inside_the_curve_a_plane_cuts(&crossing.partner, start, point)? {
+                -bulge
+            } else {
+                0
+            },
+        )
     }
 
     /// On a cone or a pipe: the one candidate that goes round the axis, when
@@ -5524,6 +5611,40 @@ fn how_often_the_rim_winds_round_aiming_at(
         }
     }
     Some(winding)
+}
+
+/// Whether `point`, on a plane, is inside the curve the plane cuts `partner`
+/// in — a pipe, a ball or a cone — where `on_it` is a point of that curve;
+/// `None` when a sign is not settled or `point` is on the partner.
+///
+/// Inside is the partner's negative side, and on a cone the same nappe as
+/// `on_it` as well: a cone's negative side is inside either nappe, and a plane
+/// that crosses both cuts a hyperbola, whose two branches each bound an inside
+/// of their own.
+fn inside_the_curve_a_plane_cuts(
+    partner: &Surface,
+    on_it: PredicatePoint,
+    point: PredicatePoint,
+) -> Option<bool> {
+    match side_of_surface(partner, point) {
+        Decision::Neg => (),
+        Decision::Pos => return Some(false),
+        Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+    }
+    let Surface::Cone(cone) = partner else {
+        return Some(true);
+    };
+    let apex = cone.apex().coordinates().map(Interval::exactly);
+    let up = cone.axis().direction().components().map(Interval::exactly);
+    let nappe = |at: PredicatePoint| -> Option<bool> {
+        let from_the_apex = core::array::from_fn(|axis| at.enclosure()[axis] - apex[axis]);
+        match dot_of(from_the_apex, up).sign() {
+            Decision::Pos => Some(true),
+            Decision::Neg => Some(false),
+            Decision::Zero | Decision::Undecidable { .. } | _ => None,
+        }
+    };
+    Some(nappe(on_it)? == nappe(point)?)
 }
 
 /// Where a closed crossing starts, as what is really known about it.
@@ -11627,5 +11748,40 @@ mod naming_a_surface {
         let (high, low) = two_product(a[next], b[after]);
         let (taken_high, taken_low) = two_product(a[after], b[next]);
         expansion_sum(&[low, high], &[-taken_low, -taken_high], out)
+    }
+}
+
+#[cfg(test)]
+mod inside_a_curve {
+    use rcad_geom::{Axis, Cone, Surface};
+    use rcad_predicates::Point as PredicatePoint;
+
+    use super::inside_the_curve_a_plane_cuts;
+
+    /// The plane `x = 2` cuts the cone `x² + y² = z²` in the hyperbola
+    /// `z² − y² = 4`, one branch above the apex and one below. The chord of the
+    /// upper branch from `(2, −√5, 3)` to `(2, √5, 3)` has the piece through
+    /// `(2, 0, 2)` bulging down, towards the lower branch, so `(2, 0, −3)` is on
+    /// the side it bulges to and inside the cone — and not between the piece and
+    /// its chord, because it is inside the other branch.
+    #[test]
+    fn a_point_inside_the_other_branch_of_a_hyperbola_is_not_inside_this_one() {
+        let cone = Surface::Cone(Cone::new(Axis::z(), 1.0).expect("a cone leaning one in one"));
+        let on_the_upper_branch = PredicatePoint::from([2.0, 0.0, 2.0]);
+        let inside = |at: [f64; 3]| {
+            inside_the_curve_a_plane_cuts(&cone, on_the_upper_branch, PredicatePoint::from(at))
+        };
+        assert_eq!(
+            inside([2.0, 0.0, 3.0]),
+            Some(true),
+            "inside the upper branch"
+        );
+        assert_eq!(
+            inside([2.0, 0.0, -3.0]),
+            Some(false),
+            "inside the lower branch"
+        );
+        assert_eq!(inside([2.0, 0.0, 1.0]), Some(false), "between the branches");
+        assert_eq!(inside([2.0, 0.0, 2.0]), None, "on the curve");
     }
 }
