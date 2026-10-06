@@ -3330,25 +3330,23 @@ fn which_way_round_the_tube_it_leaves(
         return Ok(None);
     };
     let corner = PredicatePoint::from(asked.at.coordinates());
-    let outer = match the_picker_naming_the_circle_through(
+    let Some(picker) = the_picker_naming_the_circle_through(
         &asked.names_it[1],
         &asked.names_it[0],
         corner,
         policy,
         log,
-    )? {
-        Some(Picker::OutsideAPipe(_)) => true,
-        Some(Picker::InsideAPipe(_)) => false,
-        None => return Ok(None),
-        Some(other @ (Picker::InFrontOf(_) | Picker::OutsideABall(_) | _)) => panic!(
-            "a plane square to a ring's axis names its circles by the pipe, and this one by {other:?}"
-        ),
+    )?
+    else {
+        return Ok(None);
     };
-    let keeps_the_side_the_axis_points_to = match kept {
-        Decision::Pos => faces_the_way_its_axis_points(&flat, &ring),
-        Decision::Neg => !faces_the_way_its_axis_points(&flat, &ring),
-        other => panic!("a side read off a wire is a side, not {other:?}"),
-    };
+    let outer = matches!(picker, Picker::OutsideAPipe(_));
+    assert!(
+        outer || matches!(picker, Picker::InsideAPipe(_)),
+        "a plane square to a ring's axis names its circles by the pipe, and this one by {picker:?}"
+    );
+    let keeps_the_side_the_axis_points_to =
+        (kept == Decision::Pos) == faces_the_way_its_axis_points(&flat, &ring);
     Ok(Some(keeps_the_side_the_axis_points_to == outer))
 }
 
