@@ -351,8 +351,6 @@ enum Outcome {
     Undecidable(&'static str),
     CannotTellTheCellsOfAFaceApart,
     TwoCurvesTouchWithoutCrossing,
-    /// `Error::Geometry` carrying `CannotNameWhichPieceOfACrossingThisIs`.
-    CannotNameWhichPieceOfACrossingThisIs,
 }
 
 #[test]
@@ -1134,8 +1132,7 @@ fn check(
         }
         Outcome::Undecidable(_)
         | Outcome::CannotTellTheCellsOfAFaceApart
-        | Outcome::TwoCurvesTouchWithoutCrossing
-        | Outcome::CannotNameWhichPieceOfACrossingThisIs => {
+        | Outcome::TwoCurvesTouchWithoutCrossing => {
             refuses_as(shape, moved_to, partner, rule, policy, outcome);
         }
     }
@@ -1169,10 +1166,6 @@ fn refuses_as(
         Outcome::TwoCurvesTouchWithoutCrossing => {
             matches!(refused, Error::TwoCurvesTouchWithoutCrossing { .. })
         }
-        Outcome::CannotNameWhichPieceOfACrossingThisIs => matches!(
-            refused,
-            Error::Geometry(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
-        ),
         Outcome::ItBlamesItself | Outcome::TheSoundAnswer => {
             unreachable!("{refusal:?} is not a refusal")
         }
