@@ -357,7 +357,15 @@ eight. On this base it does not.
   and `a_half_rings_wall_holds_its_half_with_one_circles_cap_stored_turned_round`).
   `Model::validate` passes the outer and the inner band between `z = ±3` at
   their one sound walk. The part of a ring in front of either plane, not both,
-  is still refused, and is Q1144.*
+  is still refused, and is Q1144.* *2026-10-06, Q1144: answered where each
+  circle is behind the other plane. For planes through the axis the face is the
+  part of the ring in front of either plane; for two planes square to it, the
+  ring less the band (`c4183211`, pinned by
+  `a_three_quarter_bends_wall_holds_the_three_quarters_between_its_caps_and_nothing_else`
+  and `a_grooved_rings_wall_holds_the_ring_less_the_band_the_groove_took`). One
+  circle in front of the other plane and one behind is still refused, Q1155.
+  `Model::validate` refuses the sound grooved ring, Q1153, and passes a ring
+  wall walked to keep the near side of both planes, Q1154.*
 - A wall whose two edges are one circle walked twice the same way round would
   pass the side check here as it would for a plane through the axis. That is
   Q790's question, not run for a plane square to the axis either.
