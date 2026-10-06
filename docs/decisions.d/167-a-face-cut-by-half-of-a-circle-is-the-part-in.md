@@ -184,4 +184,13 @@ turned or moved wedge says which points are inside it.
 > `a_block_with_a_bar_bored_through_one_corner_holds_the_points_of_its_floor_and_its_top`
 > (`crates/rcad-topo/tests/a_cap_trimmed_by_a_pipe_holds_its_points.rs`) are
 > their current names.
+>
+> **2026-10-06 note (Q880, §409): this bullet is about what cuts a *ball*, and
+> stays true there.** Nothing here changed what a cylinder, a cone or an
+> off-centre plane does to a sphere face. But read on its own, "cylinders ...
+> are refused by name" also sounds like it covers a cylinder's **own** face,
+> which is a different family (`Surface::Cylinder`, not a cut of
+> `Surface::Sphere`) that this section never touched — and there, since Q505,
+> it is no longer always true: a pipe face cut by two planes along its axis
+> that meet strictly inside it is now admitted. §409 has the argument.
 
