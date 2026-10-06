@@ -2552,7 +2552,8 @@ fn how_far_in_front(picker: HalfSpace, point: [f64; 3]) -> Interval {
 /// A ruling is one endless straight line and [`EdgeRun::Straight`] says exactly
 /// that — a plane resting along a pipe's own side is named that way already. Two
 /// rulings crossing at the apex are two of those, and
-/// [`two_lines_through_a_cones_apex`] says which is which. Neither asks the
+/// [`two_lines_through_a_cones_apex`] says which is which, or which of their four
+/// halves is which where no `f64` direction runs along them. Neither asks the
 /// walker for anything: [`walk`](crate::walk) puts no points between the ends of
 /// a straight run.
 ///
@@ -2979,23 +2980,20 @@ fn how_far_a_hyperbolas_vertex_stands_off_the_apex_plane(flat: &Plane, cone: &Co
 /// there is. The turned frustum of §294.10 is one
 /// (`a_turned_cone_cut_through_its_axis.rs`, §294.11).
 ///
-/// **Halves of the rulings can be named.** The flat surface through the apex
-/// facing `n × w` has one ruling's forward half and the other's backward half
-/// strictly on each side, and the one square to the axis splits each ruling at
-/// its nappes, so the four halves lie in four corners of the two. Neither needs
-/// an exact direction, only an offset that passes exactly through the apex
-/// (item 3). That is not done here, because `rcad-topo`'s arrangement reads a
-/// ruling's direction off its first picker as `n × p`, which only a picker
-/// holding the whole ruling makes right.
+/// **Halves of the rulings can be named, and that is what this hands back
+/// there.** Where either direction worked out in `f64` is not on both surfaces,
+/// the pair comes back as the four halves the apex cuts the two rulings into
+/// ([`four_half_rulings_through_a_cones_apex`]), each picked by a corner of two
+/// flat surfaces through the apex rather than by a pair of opposite half-spaces.
+/// So a picker of a ruling through an apex is one of two shapes, and a reader of
+/// one cannot take `[H, H.reversed()]` for granted (§294.11).
 ///
 /// # Errors
 ///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when any of those three
-/// cannot be had, and whatever [`HalfSpace::through_a_point_square_to`] refuses.
-/// A **gap** and not a limit (§16.10): the two lines are there and they are
-/// tellable apart. What runs out is `f64`'s supply of exact ruling directions
-/// and, where the direction is irrational, every picker's way of holding one
-/// whole line.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when item 3 cannot be had,
+/// and whatever [`HalfSpace::through_a_point_square_to`] refuses; and where the
+/// pair is named in halves, whatever
+/// [`four_half_rulings_through_a_cones_apex`] refuses.
 fn two_lines_through_a_cones_apex(flat: &Plane, cone: &Cone) -> Result<SurfaceMeet> {
     let normal = flat.normal();
     let along = cone.axis().direction();
@@ -3009,12 +3007,15 @@ fn two_lines_through_a_cones_apex(flat: &Plane, cone: &Cone) -> Result<SurfaceMe
     let spread = (-leaning * squared_axis).max(0.0).sqrt();
     let rulings =
         [1.0, -1.0].map(|side| down_the_plane * squared_axis + across_the_plane * (spread * side));
+    if !rulings
+        .iter()
+        .all(|&ruling| a_line_through_the_apex_along_it_lies_on_both(ruling, flat, cone))
+    {
+        return four_half_rulings_through_a_cones_apex(flat, cone);
+    }
 
     let mut runs = Vec::new();
     for [this, other] in [[rulings[0], rulings[1]], [rulings[1], rulings[0]]] {
-        if !a_line_through_the_apex_along_it_lies_on_both(this, flat, cone) {
-            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-        }
         let picker = HalfSpace::through_a_point_square_to(cone.apex(), this, other)?;
         if !it_holds_this_line_and_only_the_apex_of_the_other(&picker, cone.apex(), this, other) {
             return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
@@ -3025,6 +3026,126 @@ fn two_lines_through_a_cones_apex(flat: &Plane, cone: &Cone) -> Result<SurfaceMe
         })?);
     }
     Ok(SurfaceMeet::Curves(runs))
+}
+
+/// The four halves the apex cuts the two rulings into, for a plane through a
+/// cone's apex steeper than the cone, each picked out by one corner of two flat
+/// surfaces through the apex: the one facing `n × w` and the one facing the
+/// axis `w`.
+///
+/// # Why a corner holds one half and nothing else
+///
+/// The two rulings are mirror images across the flat surface through the apex
+/// holding the axis and `n`, which is the one facing `n × w`, and each crosses
+/// it at the apex: its forward half is strictly on one side and its backward
+/// half strictly on the other. The flat surface square to the axis parts the
+/// two nappes the same way. So each of the four halves is strictly inside one
+/// corner of the two, away from the apex, and where the four corners are four
+/// different ones, a corner holds one half and the apex. A picker is closed, so
+/// the apex is on all four, which is where they meet. Neither surface has to
+/// hold a ruling, so neither needs a direction that is exact, and that is why
+/// this works where the whole rulings cannot be named (§294.11).
+///
+/// # What is proved, and how
+///
+/// 1. **Both flat surfaces pass exactly through the apex**, each offset asked
+///    against the exact dot product, item 3 of
+///    [`two_lines_through_a_cones_apex`] over again. A surface a rounding off
+///    the apex would hand a corner a stub of a second half.
+/// 2. **Each half is strictly on one side of each surface.** Along a half
+///    `apex + t·d`, `t > 0`, a surface through the apex reads `t` times its
+///    normal against `d`, so that one sign is the whole half's. `d` is
+///    `±(‖w‖²·p ± √(−E·‖w‖²)·(n × w))` for `p = ‖n‖²·w − (n·w)·n`, worked out
+///    as an enclosure of the true direction from the stored numbers
+///    ([`the_four_ways_two_rulings_leave_a_cones_apex`]), and its sign against
+///    each stored normal is asked over the whole enclosure.
+/// 3. **The four halves are in four different corners.**
+///
+/// That the crossing *is* those four halves and nothing else is the caller's
+/// two exact signs: the apex on the plane, and `E` below nothing.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when any of the three
+/// cannot be shown, and whatever [`HalfSpace::through_a_point_facing`] refuses.
+/// A **gap** where it refuses (§16.10): the four halves are there and are
+/// four corners apart.
+fn four_half_rulings_through_a_cones_apex(flat: &Plane, cone: &Cone) -> Result<SurfaceMeet> {
+    let apex = cone.apex();
+    let along = cone.axis().direction();
+    let surfaces = [
+        HalfSpace::through_a_point_facing(apex, flat.normal().cross(along))?,
+        HalfSpace::through_a_point_facing(apex, along)?,
+    ];
+    if !surfaces
+        .iter()
+        .all(|surface| it_passes_exactly_through(surface, apex))
+    {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    }
+    let Some(halves) = the_four_ways_two_rulings_leave_a_cones_apex(flat, cone) else {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    };
+
+    let mut corners: Vec<[Decision; 2]> = Vec::new();
+    let mut runs = Vec::new();
+    for half in halves {
+        let corner = surfaces
+            .map(|surface| dot_enclosing(exactly(surface.normal().components()), half).sign());
+        let ([Decision::Pos | Decision::Neg, Decision::Pos | Decision::Neg], false) =
+            (corner, corners.contains(&corner))
+        else {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        };
+        corners.push(corner);
+        let [mirror, nappe] = [0, 1].map(|which| {
+            if corner[which] == Decision::Pos {
+                surfaces[which]
+            } else {
+                surfaces[which].reversed()
+            }
+        });
+        runs.push(NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Cone(*cone),
+            picked_by: smallvec![Picker::from(mirror), Picker::from(nappe)],
+        })?);
+    }
+    Ok(SurfaceMeet::Curves(runs))
+}
+
+/// The four ways the two rulings of a plane through a cone's apex leave it, each
+/// as an enclosure of the true direction: `±(‖w‖²·p + √(−E·‖w‖²)·(n × w))` and
+/// `±(‖w‖²·p − √(−E·‖w‖²)·(n × w))`, for `p = ‖n‖²·w − (n·w)·n`. `None` when
+/// the enclosure of `−E·‖w‖²` is wholly below nothing, which only a caller that
+/// has not proved `E` below nothing can hand in.
+///
+/// **The root is rounded outwards** by [`root_enclosing`], one `f64` step at
+/// each end where `f64::sqrt` landed inside, which is an enclosure because that
+/// square root is correctly rounded. Everything else is interval `+ − ×` on the
+/// stored numbers.
+fn the_four_ways_two_rulings_leave_a_cones_apex(
+    flat: &Plane,
+    cone: &Cone,
+) -> Option<[[Interval; 3]; 4]> {
+    let normal = exactly(flat.normal().components());
+    let along = exactly(cone.axis().direction().components());
+    let squared_axis = squared_length_enclosing(along);
+    let up = dot_enclosing(normal, along);
+    let across = cross_enclosing(normal, along);
+    let leaning = up * up - squared_enclosing(cone.slope()) * squared_length_enclosing(across);
+    let under_the_root = -(leaning * squared_axis);
+    if under_the_root.hi() < 0.0 {
+        return None;
+    }
+    let spread = root_enclosing(under_the_root);
+    let squared_normal = squared_length_enclosing(normal);
+    let down: [Interval; 3] = core::array::from_fn(|axis| {
+        squared_axis * (squared_normal * along[axis] - up * normal[axis])
+    });
+    let [ahead, other] =
+        [spread, -spread].map(|side| core::array::from_fn(|axis| down[axis] + across[axis] * side));
+    let back = |way: [Interval; 3]| way.map(|component| -component);
+    Some([ahead, other, back(ahead), back(other)])
 }
 
 /// Whether the endless line through the apex along `direction` is on the plane
@@ -3077,11 +3198,19 @@ fn it_holds_this_line_and_only_the_apex_of_the_other(
     let facing = picker.normal().components();
     let square_to_this = Exact::dot_of(facing, this.components()).map(|reach| reach.sign());
     let across_the_other = Exact::dot_of(facing, other.components()).map(|reach| reach.sign());
-    let through_the_apex = Exact::dot_of(facing, apex.coordinates())
-        .map(|reach| reach.minus(&Exact::of(picker.offset())).sign());
     matches!(square_to_this, Some(Decision::Zero))
         && matches!(across_the_other, Some(Decision::Pos | Decision::Neg))
-        && matches!(through_the_apex, Some(Decision::Zero))
+        && it_passes_exactly_through(picker, apex)
+}
+
+/// Whether `surface`'s flat surface passes exactly through `point`: its normal
+/// against the point, worked out exactly, is its offset.
+fn it_passes_exactly_through(surface: &HalfSpace, point: Point) -> bool {
+    matches!(
+        Exact::dot_of(surface.normal().components(), point.coordinates())
+            .map(|reach| reach.minus(&Exact::of(surface.offset())).sign()),
+        Some(Decision::Zero)
+    )
 }
 
 /// A cone and a pipe: two circles where they share an axis, refused where they

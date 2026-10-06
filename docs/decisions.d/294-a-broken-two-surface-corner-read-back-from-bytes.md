@@ -529,3 +529,75 @@ corner's box (Q1164) is still not known.
   tallies turned round under it and held to `26π/3` and to volumes. A row of its
   own, tier 1.
 - Q1164 waits on that row now, and not on Q1170.
+
+**2026-10-06, Q1171: the four halves are named, and the arrangement reads
+each one's own direction.** Lane
+`lane-q1171-the-four-half-rulings-of-a-turned-frustum`, base `d6386e04`.
+
+*In `intersect`.* `two_lines_through_a_cones_apex` names the two whole rulings
+where both `f64` directions lie on both surfaces, as before, and otherwise
+hands back the four halves (`four_half_rulings_through_a_cones_apex`). Each is
+picked by `[±M, ±A]`: `M` through the apex facing `n × w` as `f64` works it
+out, `A` facing `w`. Both offsets are asked against the exact dot product with
+the apex. Each half's direction is enclosed as
+`±(‖w‖²·p ± √(−E·‖w‖²)·(n × w))` from the stored numbers, the root rounded
+outwards by `root_enclosing`; its sign against both stored normals is read over
+the enclosure and must be strict; and the four corners must be four. Anything
+short of that refuses as before.
+
+*In `arrange.rs`.* `a_ruling_through_an_apex` tells the two shapes apart by
+whether the second picker is the first one reversed. For a half, `along` is
+`the_way_a_half_ruling_leaves_the_apex`: the same expression in intervals, its
+root rounded outwards by `root_rounded_outwards` (one step down from
+`f64::sqrt` of the low end, clamped at nothing, and one step up from that of the
+high end, which encloses because `sqrt` is correctly rounded; pinned by
+`the_root_rounded_outwards_encloses_the_root`), and of the four candidate ways
+out the one both pickers read strictly in front of them. So the sign comes from
+the corner, not from which picker is first. Two more changes were needed and
+were measured, not guessed:
+
+- `turns_anticlockwise` reads two halves of one ruling, named by opposite
+  corners, as two ways out along one line, `Zero`, as it reads two ways out
+  along one crossing. Without it the frustum whose apex is inside the block
+  refused `which way round a node two ways out of it turn`: `N · (d × −d)` is
+  nothing in the reals and an interval straddling nothing over enclosures.
+- `place_where_two_rulings_cross` adds each later pair's crossings to the one
+  apex node, where four halves would otherwise have placed six nodes there.
+
+*The pins.* The turned frustum, less or intersected with the half past its
+seam (`a_turned_frustum_cut_along_its_seam_is_named_through_its_apex_and_refused_at_its_seam_corner`):
+under `certified`, the sound frustum and every moved corner now refuse
+`Undecidable` on `side of plane` at the box round the bottom seam corner
+`(1, 0, 2)` turned, `(1, −0.7788, 1.8421)` give or take `5.7e-14`. That answers
+Q1164's first question: yes, it refuses there, as the bar did before §294.9.
+Under `tolerant(100)` the sound frustum answers both rules, validates, holds
+`26π/3` on a fine mesh, and its corners are the unturned answer's turned, each
+within `1e-12`; off the wall and off the cap give `CannotTellTheCellsOfAFaceApart`
+and a quarter turn round gives the sound answer to a rounding, as unturned.
+`the_face_along_a_turned_frustums_seam_crosses_its_cone_in_four_half_rulings`
+pins two runs unturned and four turned. The three tallies of 8 in
+`a_plane_cut_along_a_cones_other_nappe.rs` all moved to right answers, each held
+to that file's four checks (validates, solids, volume against the closed form
+and the column sum, every clear grid point): the frustum with its apex in the
+block 24 right and 8 refused to 32 right; the pointed cone at a quarter 38 right,
+8 refused and 2 that do not mesh to 46 right and the same 2; at three eighths 40
+and 8 to 48 right. `a_narrow_lune_from_a_pole_corner.rs`, whose
+`(45, 1000, Difference)` Q1072's note thought might move, did not: the file
+passes unchanged, and it has no cone in it.
+
+*Where `[H, H.reversed()]` was looked for.* `holds.rs`: no place reads a
+ruling's pickers. `is_a_piece_of_a_ruling` asks the plane through the apex and
+the ends on one line with it; `the_picker_naming_the_circle_through` takes only
+a run with **one** picker, so it skips whole rulings and halves alike; and
+`the_way_into_an_arc` needs `where_a_closed_crossing_is_centred`, which a cone
+refuses for a plane steeper than its side. `validate.rs`: the check that no
+corner of an edge is behind any of its pickers holds for a corner of a half,
+which is in the half's closed corner; `what_a_corner_past_the_picker_says`
+takes one picker only and never a plane against a cone. `length.rs`: an edge
+with a cone on either side is `CannotYetMeasureHowLongThisCurveIs` before any
+picker is read, whole ruling or half. So nothing there breaks, and no row is
+filed for it.
+
+**What this leaves.** Q1164, already filed and waiting on Q1171: extend
+`the_seam_plane_a_corner_is_on` to cones, now that the turned frustum is shown
+to refuse there.

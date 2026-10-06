@@ -1,13 +1,15 @@
 //! The cone of `cones::a_frustum(model, 0.5, 2, 6)` turned 0.4 about `x`, cut
 //! by the plane through its axis turned the same way: why `intersect` cannot
-//! name the two rulings the pair crosses in, and what would (§294.11).
+//! name the two rulings the pair crosses in whole, and how it names their four
+//! halves instead (§294.11).
 //!
 //! This is the pair `rcad-topo`'s
-//! `the_face_along_a_turned_frustums_seam_crosses_its_cone_in_two_rulings_nothing_names`
+//! `the_face_along_a_turned_frustums_seam_crosses_its_cone_in_four_half_rulings`
 //! finds inside a fuse, built here from the two surfaces alone. The plane runs
 //! through the cone's apex at the origin and is steeper than the cone, so the two
-//! cross in two rulings through the apex. Unturned, `intersect` names them;
-//! turned, it refuses `CannotNameWhichPieceOfACrossingThisIs`.
+//! cross in two rulings through the apex. Unturned, `intersect` names them
+//! whole; turned, it names the four halves the apex cuts them into. Until Q1171
+//! it refused the turned pair `CannotNameWhichPieceOfACrossingThisIs`.
 //!
 //! # The turned rulings run along no direction any `f64`s can write
 //!
@@ -43,7 +45,7 @@
 //! rulings can be named exactly, and the two whole ones cannot.
 
 use rcad_geom::{
-    Axis, Cone, Error, HalfSpace, Isometry, Plane, Point, Surface, SurfaceMeet, Vector,
+    Axis, Cone, EdgeRun, HalfSpace, Isometry, Picker, Plane, Point, Surface, SurfaceMeet, Vector,
 };
 use rcad_geom::{
     how_a_plane_leans_against_a_cone, intersect, where_a_cones_apex_stands_against_a_plane,
@@ -58,8 +60,13 @@ const THE_TURNED_AXIS: [f64; 3] = [0.0, -0.389_418_342_308_650_47, 0.921_060_994
 /// The turned plane's normal, as `rcad-topo`'s fuse finds it (§294.10).
 const THE_TURNED_NORMAL: [f64; 3] = [0.0, -0.921_060_994_002_885_1, -0.389_418_342_308_650_47];
 
+/// Unturned, each ruling is picked by a pair of opposite half-spaces whose flat
+/// surface holds it. Turned, each of the four halves is picked by two flat
+/// surfaces through the apex that are not opposite, and the box round each half
+/// one step out is held strictly by its own two and ruled out by every other
+/// half's.
 #[test]
-fn turned_the_two_rulings_through_the_apex_are_refused_and_unturned_they_are_named() {
+fn turned_the_rulings_through_the_apex_are_named_in_four_halves_and_unturned_whole() {
     for (turned, movement) in [(false, Isometry::identity()), (true, the_turn())] {
         let (flat, cone) = the_pair(&movement);
         assert_eq!(cone.apex(), Point::origin(), "turned {turned}");
@@ -79,19 +86,58 @@ fn turned_the_two_rulings_through_the_apex_are_refused_and_unturned_they_are_nam
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         );
-        if turned {
-            assert_eq!(cone.axis().direction().components(), THE_TURNED_AXIS);
-            assert_eq!(flat.normal().components(), THE_TURNED_NORMAL);
-            assert_eq!(flat.offset(), 0.0);
-            assert!(
-                matches!(met, Err(Error::CannotNameWhichPieceOfACrossingThisIs)),
-                "turned, the two rulings are not named: {met:?}"
+        let Ok(SurfaceMeet::Curves(runs)) = met else {
+            panic!("turned {turned}: the crossing is named: {met:?}");
+        };
+        let pickers: Vec<[HalfSpace; 2]> = runs
+            .iter()
+            .map(|run| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                    panic!("turned {turned}: a piece of the crossing: {run:?}");
+                };
+                let [Picker::InFrontOf(one), Picker::InFrontOf(other)] = picked_by.as_slice()
+                else {
+                    panic!("turned {turned}: two flat pickers: {picked_by:?}");
+                };
+                [*one, *other]
+            })
+            .collect();
+        if !turned {
+            assert_eq!(runs.len(), 2);
+            for [one, other] in pickers {
+                assert_eq!(other, one.reversed(), "unturned, a ruling is named whole");
+            }
+            continue;
+        }
+        assert_eq!(cone.axis().direction().components(), THE_TURNED_AXIS);
+        assert_eq!(flat.normal().components(), THE_TURNED_NORMAL);
+        assert_eq!(flat.offset(), 0.0);
+        assert_eq!(runs.len(), 4, "turned, four halves");
+        for [one, other] in &pickers {
+            assert_ne!(*other, one.reversed(), "turned, no pair is opposite");
+            assert_eq!(
+                [one.offset(), other.offset()],
+                [0.0, 0.0],
+                "both pass through the apex at the origin"
             );
-        } else {
-            let Ok(SurfaceMeet::Curves(rulings)) = met else {
-                panic!("unturned, the two rulings are named: {met:?}");
-            };
-            assert_eq!(rulings.len(), 2);
+        }
+        for the_box in the_box_round_each_half(&flat, &cone) {
+            let held: Vec<bool> = pickers
+                .iter()
+                .map(|pair| {
+                    let sides = pair.map(|picker| picker.side_of_point(the_box));
+                    assert!(
+                        sides == [Decision::Pos; 2] || sides.contains(&Decision::Neg),
+                        "each half is held strictly or ruled out: {sides:?}"
+                    );
+                    sides == [Decision::Pos; 2]
+                })
+                .collect();
+            assert_eq!(
+                held.iter().filter(|held| **held).count(),
+                1,
+                "one half holds {the_box:?}: {held:?}"
+            );
         }
     }
 }
@@ -159,29 +205,52 @@ fn the_turned_rulings_run_along_directions_no_fraction_writes() {
 /// facing `n × w` and the one facing `w` put each half of each ruling in a
 /// corner of its own, strictly, and both pass exactly through the apex.
 ///
-/// Each half is stood for by a box round its point one step out, `±(±½√q, −b,
-/// a)`, which holds a point of the ruling: the box is the segment between two
-/// exact points of the plane, and the cone reads inside at one and outside at the
-/// other. A flat surface through the apex reads one sign along a whole half
-/// ruling once it reads it strictly at one point, so a box decided strictly is
-/// that half decided.
+/// Each half is stood for by the box [`the_box_round_each_half`] gives. A flat
+/// surface through the apex reads one sign along a whole half ruling once it
+/// reads it strictly at one point, so a box decided strictly is that half
+/// decided.
 #[test]
 fn the_turned_rulings_four_halves_lie_in_four_corners_of_two_flat_surfaces_through_the_apex() {
     let (flat, cone) = the_pair(&the_turn());
     let along = cone.axis().direction();
-    let [_, minus_b, a] = along.components();
     let mirror = HalfSpace::through_a_point_facing(cone.apex(), flat.normal().cross(along))
         .expect("n × w is not nothing");
     let nappe = HalfSpace::through_a_point_facing(cone.apex(), along).expect("an axis direction");
     assert_eq!([mirror.offset(), nappe.offset()], [0.0, 0.0]);
 
+    let mut corners = Vec::new();
+    for the_box in the_box_round_each_half(&flat, &cone) {
+        let corner = [mirror.side_of_point(the_box), nappe.side_of_point(the_box)];
+        assert!(
+            corner
+                .iter()
+                .all(|sign| matches!(sign, Decision::Pos | Decision::Neg)),
+            "{the_box:?} is strictly to one side of both: {corner:?}"
+        );
+        corners.push(corner);
+    }
+    for (index, corner) in corners.iter().enumerate() {
+        assert!(
+            !corners[index + 1..].contains(corner),
+            "four halves, four corners: {corners:?}"
+        );
+    }
+}
+
+/// A box round a point of each of the turned pair's four half rulings, one
+/// step out from the apex along `±(±½√q, −b, a)`.
+///
+/// Each box is the segment between two exact points of the plane, and the cone
+/// reads inside at one and outside at the other, so it holds a point of the
+/// ruling; both are asserted here.
+fn the_box_round_each_half(flat: &Plane, cone: &Cone) -> Vec<PredicatePoint> {
+    let [_, minus_b, a] = cone.axis().direction().components();
     let half_root = (a * a + minus_b * minus_b).sqrt() / 2.0;
     let (inside, outside) = (
         half_root.next_down().next_down(),
         half_root.next_up().next_up(),
     );
-
-    let mut corners = Vec::new();
+    let mut boxes = Vec::new();
     for way in [1.0, -1.0] {
         for side in [1.0, -1.0] {
             let ends =
@@ -201,27 +270,14 @@ fn the_turned_rulings_four_halves_lie_in_four_corners_of_two_flat_surfaces_throu
             } else {
                 [ends[1][0], ends[0][0]]
             };
-            let the_box = PredicatePoint::Constructed([
+            boxes.push(PredicatePoint::Constructed([
                 Interval::new(low, high).expect("low is below high"),
                 Interval::exactly(way * minus_b),
                 Interval::exactly(way * a),
-            ]);
-            let corner = [mirror.side_of_point(the_box), nappe.side_of_point(the_box)];
-            assert!(
-                corner
-                    .iter()
-                    .all(|sign| matches!(sign, Decision::Pos | Decision::Neg)),
-                "{way} × ({side} × ½√q, −b, a) is strictly to one side of both: {corner:?}"
-            );
-            corners.push(corner);
+            ]));
         }
     }
-    for (index, corner) in corners.iter().enumerate() {
-        assert!(
-            !corners[index + 1..].contains(corner),
-            "four halves, four corners: {corners:?}"
-        );
-    }
+    boxes
 }
 
 /// The plane through the cone's axis and the cone of slope `½` with its apex at
