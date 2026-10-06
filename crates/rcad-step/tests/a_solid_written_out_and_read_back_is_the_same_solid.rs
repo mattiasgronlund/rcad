@@ -2013,15 +2013,17 @@ fn the_plane_its_seam_is_cut_from(solid: rcad_topo::SolidView<'_>) -> [u64; 4] {
         .faces()
         .flat_map(|face| face.wires().collect::<Vec<_>>())
         .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
-        .map(|coedge| match coedge.edge().run() {
-            EdgeRun::PartOfWhereItCrosses {
+        .map(|coedge| {
+            let run = coedge.edge().run();
+            let EdgeRun::PartOfWhereItCrosses {
                 and: Surface::Plane(cut),
                 ..
-            } => {
-                let [x, y, z] = cut.normal().components().map(f64::to_bits);
-                [x, y, z, cut.offset().to_bits()]
-            }
-            other => panic!("a ball's seam is cut from a plane, not run {other:?}"),
+            } = run
+            else {
+                panic!("a ball's seam is cut from a plane, not run {run:?}");
+            };
+            let [x, y, z] = cut.normal().components().map(f64::to_bits);
+            [x, y, z, cut.offset().to_bits()]
         })
         .collect();
     planes.dedup();
