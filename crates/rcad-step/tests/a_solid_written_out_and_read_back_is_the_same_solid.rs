@@ -1508,6 +1508,76 @@ fn every_turned_disc_drawn_by_a_pipe_off_its_top_comes_back_from_its_own_file() 
     assert_eq!((came_back, refused.first()), (744, None));
 }
 
+/// The same disc with its rim named by a pipe of radius `0.8` whose axis
+/// leans off the top's normal along `(3, 0, 4)`, so the rim is an ellipse of
+/// sizes `0.8` and `1` rather than a circle, is refused by name rather than
+/// written as that ellipse.
+///
+/// The pipe's axis runs through the disc's centre along `(3, 0, 4) / 5`, and
+/// crosses the top at `(±1, 0, 4)` along its long way and would cross it at
+/// `(0, ±0.8, 4)` along its short one — `1 = 0.8 / (4 / 5)`, the same
+/// sizes-from-a-lean arithmetic the slanted cap uses
+/// (`a_bar_with_a_slanted_cap_is_written_with_an_ellipse_and_comes_back_the_same`).
+/// The model is sound: `(1, 0, 4)` and `(-1, 0, 4)` are each exactly `0.8`
+/// from that axis, so this is the disc's own rim and not some other curve.
+///
+/// `an_arc_of_a_circle_on_a_flat_face` only ever writes a `CIRCLE` about the
+/// pipe's own axis — the curve the pipe's cross-section draws square to that
+/// axis — which is this rim only where the axis is square to the face. Here
+/// it leans, so the function's `held` check fails exactly as it does for a
+/// run named by a ball, and the write refuses by name instead of writing the
+/// ellipse the plane and pipe actually cross in.
+///
+/// **This is a limit, not a gap** (`docs/decisions.md` §16.10). The writer
+/// could draw that ellipse — `where_a_plane_crosses_a_pipe` is a pure
+/// function of the plane and the pipe, not of whether the pipe is a face —
+/// but two pipes leaning the opposite way off the rim's long axis cross the
+/// top in the same ellipse, and with no face here naming either pipe, no
+/// reader has grounds to pick one over the other. The reader already says as
+/// much for an `ELLIPSE` between two flat faces
+/// (`Walk::the_surface_that_names_the_curve`'s doc comment, `brep.rs`): "no
+/// single surface this kernel holds crosses a plane in a given ellipse and is
+/// written down from the ellipse alone without choosing a slope for it — … a
+/// tilted cylinder would do, and which tilt is a choice this reader has no
+/// consumer to make it for". So no file this reader reads could carry this
+/// rim: the curve alone does not say which pipe drew it, and the only face
+/// that could is the one Q775 found this exact model does not have.
+#[test]
+fn a_disc_drawn_on_a_bar_by_a_leaning_pipe_is_refused_by_name_rather_than_written_as_an_ellipse() {
+    use rcad_geom::{Axis, Cylinder};
+
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+    let leaning = Surface::Cylinder(
+        Cylinder::new(
+            Axis::new(the_discs_centre(), Vector::new(3.0, 0.0, 4.0)).expect("a direction"),
+            0.8,
+        )
+        .expect("a positive radius"),
+    );
+    let built = a_bar_with_a_disc_drawn_on_its_top_by(&mut model, leaning);
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the leaning pipe crosses the top in exactly the rim");
+    assert_eq!(
+        open_bends(&model, built),
+        [["plane", "plane"], ["plane", "plane"]],
+        "the two halves of the disc's rim"
+    );
+    let refused = rcad_step::write(&model, "a disc drawn on a bar by a leaning pipe")
+        .expect_err("an ellipse drawn by a leaning pipe is not written between two flat faces");
+    assert!(
+        matches!(
+            refused,
+            CannotWrite::ACurveTheFacesEitherSideOfItDoNotName {
+                first: "plane",
+                second: "plane",
+                closed: false,
+            }
+        ),
+        "refused as {refused:?}"
+    );
+}
+
 /// Every pipe a run of `solid` names, where the solid puts it, in the order
 /// its faces, wires and coedges are walked.
 fn the_pipes_its_runs_name(solid: rcad_topo::SolidView<'_>) -> Vec<rcad_geom::Cylinder> {
