@@ -142,6 +142,24 @@ cell, and that was the one walk going round nothing on a pipe that was tried. **
 cone was tried**, so a walk that goes round nothing is neither shown to reach it
 nor shown not to.
 
+**2026-10-06, queue row Q1136: a cone was tried, and it reached this row.** A
+pointed cone drilled along its axis by a bar from `z = -15` to `25` (Q1091,
+`db0edb6e`) reached `the_walk_of_each_other_lump_each_walk_faces` on the bar's
+wall, refused `CannotTellTheCellsOfAFaceApart` under every rule both ways
+round. `which_side_of_everything` read a walk's side of a closed curve as the
+*partner's* sign at one of its nodes, and the cone's two nappes meet the
+bar's wall in two circles, at `z = 1` on the solid's own nappe and `z = -1` on
+the other; past the second circle the cone's sign turns back, so a walk on
+one circle matched both walks of the other, and the bands `-15..-1` and
+`1..10` read the same sign against both circles and would have been glued.
+`whether_past_the_picker` in `fuse/arrange.rs` now reads a node past the flat
+half-space picking a curve out, on a pipe whose axis that half-space faces
+along, rather than the partner's sign. The intersection both ways round and
+the cone less the bar now answer, each one solid; the union both ways round
+and the bar less the cone still refuse one step later,
+`ResultIsNotManifold { count: 4 }` — Q1135's row, not this one's
+(`a_pointed_cone_drilled_along_its_axis.rs`).
+
 **A second gap came up on the way, with the same cause.** A pin through a
 plate's round tab is refused `ResultIsNotManifold`: the probe printed the pin's
 circle on the plate's floor wound no times, because the face's corners are all on

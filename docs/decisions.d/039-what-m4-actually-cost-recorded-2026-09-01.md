@@ -424,6 +424,23 @@ moved them.
 > the turn rounds a hair off the touch. The fold asks nothing under the
 > policy, so that refusal is not its.
 
+> **2026-10-06 note (Q1136): a pointed cone drilled along its axis reaches
+> `CannotTellTheCellsOfAFaceApart`.** A cone of slope one (base at `z = 10`)
+> drilled by a bar of radius one from `z = -15` to `25` reached
+> `the_walk_of_each_other_lump_each_walk_faces` on the bar's wall, under
+> every rule both ways round (Q1091, `db0edb6e`). `which_side_of_everything`
+> read a walk's side of a closed curve as the partner's sign at one of its
+> nodes, and past the second of the two circles where the bar's wall meets
+> the cone's two nappes (`z = 1` and `z = -1`) that sign turns back, so a
+> walk on one circle matched both walks of the other and the bands
+> `-15..-1` and `1..10` read the same sign and would have been glued.
+> `whether_past_the_picker` in `fuse/arrange.rs` now reads a node past the
+> flat half-space that picks a curve out, on a pipe whose axis that
+> half-space faces along. The intersection both ways round and the cone less
+> the bar now answer; the union both ways round and the bar less the cone
+> still refuse `ResultIsNotManifold { count: 4 }`, queue row Q1135's
+> (`a_pointed_cone_drilled_along_its_axis.rs`).
+
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot
 assemble what it cut, before writing anything — `two_balls_that_really_cross_are_refused_by_name`
