@@ -368,7 +368,10 @@ pub enum Error {
     /// measured that before it was written: this variant is raised zero times
     /// across all 367 files, and every file holding a coaxial cone-and-pipe
     /// neighbour refuses for something else. Its consumer is a fuse of a frustum
-    /// with a bar, not an import.
+    /// with a bar, not an import. The ball and the second cone were not measured
+    /// against the corpus; `rcad-topo`'s `a_cone_hollowed_along_its_axis.rs` fuses
+    /// them, and answers every rule where their circles fall off the faces and
+    /// refuses every rule, in the arrangement, where a circle falls on one.
     #[error("a cone crossing another curved surface is a degree-four space curve")]
     ACrossingBetweenAConeAndAnotherCurvedSurface,
 

@@ -32,7 +32,9 @@
 //! parabola, a tube and a cone cut by one leaning plane, is refused before
 //! `rings_round` under every rule (Q634), and so is the probe for two arcs
 //! along two cones' hyperbolas, a cut cone less a second cone on its axis,
-//! because two different cones cannot be crossed (Q636). The family of
+//! because two different cones could not be crossed (Q636) and now because
+//! the arrangement cannot order points round the circle they cross in (Q1122).
+//! The family of
 //! corners that sweep no area and are not on one line is built with corners
 //! that cancel exactly, face by face, and the fuse that would join its cap
 //! puts a corner on its arc wherever one of its own walls would cross it, so
@@ -41,8 +43,8 @@
 use std::f64::consts::PI;
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane,
-    Point, Scale, Surface, Torus, Vector,
+    Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, NamedRun, Orientation, Picker,
+    Plane, Point, Scale, Surface, SurfaceMeet, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftEdge, DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
@@ -530,16 +532,18 @@ fn a_cone_cut_by_a_block_wall_off_its_axis_is_answered_under_every_rule() {
 /// for.
 ///
 /// **That is not reached: the cut cone less the second cone is refused under
-/// every rule, both ways round**, in `cuts::gather` where it asks `intersect`
-/// how the two cones' faces meet (a breakpoint on `intersect`, Q636).
-/// `intersect` calls two cones one surface only when they are one cone, and
-/// refuses every other pair by name; these two differ in their apex. So
-/// whether two nested cups panic in `rings_round` cannot be asked through this
-/// shape while two different cones cannot be crossed, and the flush block is
-/// not built. The two surfaces do cross: a cone here is both nappes, and the
-/// first's upper nappe meets the second's lower one in the circle of radius 1
-/// at `z = 1`. That circle is on the first cone's face and below the second's
-/// apex, so the two faces never meet.
+/// every rule, both ways round**, and since Q1122 one step further on. The two
+/// surfaces cross: a cone here is both nappes, and the first's upper nappe
+/// meets the second's lower one in the circle of radius 1 at `z = 1`, which
+/// `intersect` names now — it used to refuse every pair of two different cones
+/// in `cuts::gather` (a breakpoint on `intersect`, Q636). That circle is on the
+/// first cone's face and below the second's apex, so the two faces never meet,
+/// and the arrangement of the first cone's face is what refuses it:
+/// `how_a_crossing_runs` in `fuse/arrange.rs` orders points only along the
+/// pairs `a_pair_that_crosses_in_a_conic` lists, and two cones are not one of
+/// them (a breakpoint on that refusal, `arrange.rs:6156`, under the union,
+/// Q1122). **So the nested cups still do not reach `rings_round`**, and the
+/// flush block is not built.
 ///
 /// Both solids are measured first: the cut cone holds what the test above
 /// says, and the second cone `2744π/3`.
@@ -565,18 +569,19 @@ fn a_cut_cone_less_a_second_cone_on_its_axis_is_refused_before_its_cups_are_join
         [Point::new(1.0, 0.0, 1.0); 2],
         "both cones hold the point one up and one out, the second on its lower nappe"
     );
-    let refused = rcad_geom::intersect(
+    let named = rcad_geom::intersect(
         &Surface::Cone(first_skin),
         &Surface::Cone(second_skin),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     );
-    assert!(
-        matches!(
-            refused,
-            Err(rcad_geom::Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
-        ),
-        "{refused:?}"
+    assert_eq!(
+        named,
+        Ok(SurfaceMeet::Curves(vec![
+            NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+                .expect("a whole circle needs nothing picking it")
+        ])),
+        "one slope, two apexes: the one circle halfway between them"
     );
 
     for (rule, swapped) in every_rule_both_ways() {
@@ -584,12 +589,7 @@ fn a_cut_cone_less_a_second_cone_on_its_axis_is_refused_before_its_cups_are_join
         let pair = a_cut_cone_and_a_second_cone_on_its_axis(&mut model);
         let refused = fused_in_order(&mut model, pair, rule, swapped);
         assert!(
-            matches!(
-                refused,
-                Err(Error::Geometry(
-                    rcad_geom::Error::ACrossingBetweenAConeAndAnotherCurvedSurface
-                ))
-            ),
+            matches!(refused, Err(Error::ACrossingThisCannotBeOrderedAlong)),
             "{rule:?}, swapped {swapped}: {refused:?}"
         );
     }
