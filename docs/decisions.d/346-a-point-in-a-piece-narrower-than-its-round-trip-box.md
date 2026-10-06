@@ -603,3 +603,78 @@ read as before. `mise exec -- just t -p rcad-topo --no-fail-fast`: 1474 run,
   candidate itself, when it asks whether a piece lies on a flat face of the
   same plane, so the same reading could put a piece on a face its foot is off.
   A guess nobody has run, so it has no class.
+
+### 346.7 A point in one face's sliver whose ray crosses the neighbour — 2026-10-06
+
+*Queue row Q997, finished by a second lane,
+`lane-q997-finish-the-sliver-fix-and-re-pin-the-apex`, off `f660ae39`, after a
+first lane, `lane-q997-a-point-by-an-edge-whose-ray-crosses-the-neighbour`
+(`75154f3f`), did the work and stopped on a pin outside its write set.*
+
+§346.6's "Why dropped and not narrowed" guessed that dropping the stored-plane
+guard left one case uncaught: a point in one flat face's sliver, within a few
+roundings of the edge it shares with a neighbour, whose ray line from
+`classify_uncertain_point` passes through the neighbour's triangle instead of
+its own. It was reasoned and not run, so it had no class. Q997 ran it, and it
+is real.
+
+**The probe.** A throwaway probe (not kept; its shape is in `75154f3f`'s commit
+message) walked 48 turned cubes of side 2, six axes — `(1, 2, 3)`,
+`(3, −1, 2)`, `(1, 1, 1)`, `(−2, 1, 5)`, `(0, 0, 1)`, `(5, 3, −1)` — by eight
+angles — `0.3, 0.5, 1, 1.5, 2, 2.5, 3, 5` — every edge, and every double within
+two spacings of 60 points along each edge: 4,320,000 points, each checked by
+`classify_point` (certified) against every stored plane's exact sign (the cube
+is convex, so the planes agree). On the base: 180,458 wrong, 38,943 of them in
+the row's exact shape (one face's corners and plane parting, the ray line
+through the neighbour's triangle and none of its own), 559,822 Undecidable.
+After the fix: 21,411 wrong, 3 in the row's shape, 1,212,465 Undecidable.
+
+**The fix, in `classify.rs`.** Before any ray, every straight-sided flat face
+whose triangles and stored plane part about the point is found
+(`its_corners_and_plane_part_at`): a face is beside the point unless it holds
+none of the point's box stretched to its plane, and where two faces part,
+both are. Each face beside the point is asked what its plane says
+(`what_its_plane_says_beside_it`); where none is beside it, the ray runs as
+before. `what_its_plane_says_beside_it` itself no longer trusts its own plane
+where another flat face's corners and plane part about the stretched box.
+
+**The cost.** Undecidable rose from 559,822 to 1,212,465 in the probe — about
+493,000 points the ray used to answer, right, are now refused rather than
+risk the 38,943 the row names.
+
+**The pins.** Two points in
+`tests/a_point_in_one_faces_sliver_by_its_edge.rs`, each checked against exact
+rationals: `a_point_past_a_faces_plane_whose_line_crosses_the_neighbour_is_not_put_inside`
+(a cube turned 3 about `(−2, 1, 5)`, where the base put it Inside and the
+stored planes say Outside) and
+`a_point_short_of_a_faces_plane_whose_line_crosses_no_triangle_is_not_put_outside`
+(turned 5, where the base put it Outside and the stored planes say Inside).
+Both now come back Undecidable under both policies; both failed on the base,
+where they came back Inside and Outside.
+
+**The apex re-pin.** The fix moves three entries of
+`meshing_a_plane_cut_along_a_cones_other_nappe.rs`'s
+`which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_it_measures`:
+`(0.25, 3.0)`, `(0.375, 0.0)` and `(0.375, 3.0)` go from Inside, Inside and
+Outside to OnBoundary. In each of the three, the steep face's stored plane has
+an offset of exactly `0.0` (`0000000000000000`, checked with a throwaway test
+that printed every face's plane offset and its bits, then taken out), so the
+apex sits exactly on that plane, and the other five stored planes put it 5 to
+12 units inside. OnBoundary is the stored planes' answer (§17.1); the pins
+being replaced were the corners' reading of the same face. The
+`does_not_measure` column did not move.
+
+**What this leaves.** Two rows, filed from Q997:
+
+- **A rebuild of Q997's own probe**, after Q997, since it was not kept: 21,411
+  of 4,320,000 points are still answered by the corners where the stored
+  planes say the other, and 1,212,465 are Undecidable, about 493,000 of them
+  answered right before Q997. Two shapes seen and not traced one by one: a
+  point exactly on a turned cube's top plane in a side face's sliver, which
+  `is_beside` lets through because the face's outline, read at the plane,
+  holds none of the stretched box; and points two faces apart, where
+  `what_its_plane_says_beside_it` still answers.
+- **`is_outside_the_box` answering Outside past a solid's outermost corner**,
+  where a turned solid's stored planes can meet past the box its corners
+  build, so a point between the two could be inside and still come back
+  Outside. A guess from Q997's lane, not run, so no class.
