@@ -353,4 +353,82 @@ does not reach it. Whether that is a limit is Q913's to pin.
 **Not tried.** A cone's seam corner: a frustum turned and cut by
 `THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM` turned the same way is the same shape
 on a cone, and `the_seam_plane_a_corner_is_on` looks only at pipes, so it would
-still ask.
+still ask. *Tried by Q1044 (§294.10): it never gets that far. The fuse refuses
+earlier, where the block's face crosses the cone, so nothing is asked about the
+corner.*
+
+### 294.10 Q1044: the turned frustum is refused where the cut runs through its apex — 2026-10-06
+
+*Queue row Q1044, from §294.9's "Not tried". Lane
+`lane-q1044-a-turned-frustum-cut-at-its-seam`, base `567e65ee`. No code
+changed.*
+
+**The case.** `cones::a_frustum(model, 0.5, 2, 6)`, turned 0.4 about `x`,
+less or intersected with `THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM` turned the
+same way. This is the bar of §294.9 on a cone: the block's face runs along the
+seam, through the top seam corner `(3, 0, 6)` and the bottom one `(1, 0, 2)`.
+The row asked whether it refuses `side of plane` at a seam corner's box the way
+the bar did before §294.9, and if so, to extend
+`the_seam_plane_a_corner_is_on` from pipes to cones.
+
+**It does not refuse there.** Both rules refuse with
+`Error::Geometry(CannotNameWhichPieceOfACrossingThisIs)`. So does every moved
+corner (off the wall, off the cap, a quarter turn round), and so does all of it
+under `Policy::tolerant(100.0)` as well as `certified`
+(`a_turned_frustum_cut_along_its_seam_is_refused_where_the_cut_runs_through_its_apex`).
+
+**Where it is raised: `rcad_geom::intersect`, on the frustum's cone and the
+block's face along the seam.** Turned, the cone's apex is still the origin and
+its axis direction is `(0, -0.38941834230865047, 0.9210609940028851)`; the face
+has normal `(0, -0.9210609940028851, -0.38941834230865047)` and offset `0`. The
+apex is exactly on the face, and the face is steeper than the cone, so
+`where_a_plane_and_a_cone_cross` takes the row of its table where the two cross
+in two rulings through the apex and calls `two_lines_through_a_cones_apex`
+(`crates/rcad-geom/src/intersect.rs`). That function works out each ruling's
+direction in `f64` and then asks, exactly, whether the line through the apex
+along it is on both surfaces. It refuses when it is not, at its first
+`return Err` (intersect.rs:2993 on the base). The first two facts are pinned
+(`the_face_along_a_turned_frustums_seam_crosses_its_cone_in_two_rulings_nothing_names`).
+The third was measured with a scratch probe, not kept, which did the same `f64`
+arithmetic and asked the public `Plane::side_of_point` and the cone's
+`SideOfSurface::side_of`. Turned, both directions come out
+`(±0.5, -0.38941834230865047, 0.9210609940028851)`, and each is on the face,
+`Zero`, and inside the cone, `Neg`. Unturned they are `(±0.5, 0, 1)`, `Zero` on
+both, and the crossing is named.
+
+Why inside: the direction is `±0.5` across and then the axis direction's own
+two numbers. Put that into the cone's expression and what is left is a quarter
+of `q·(1 − q)`, where `q` is the axis direction's squared length, worked out
+exactly. So it is on the cone exactly when `q` is exactly one, and `Neg` says
+the turned axis direction is a hair longer than one. That is algebra on the
+measured numbers, not a second measurement.
+
+**It is a gap, not a limit (§16.10).** The answer exists. Unturned, both rules
+give half the frustum, `26π/3`, and the answer validates and measures that with
+a fine mesh under both policies (pinned in the same test). A turn moves no
+volume, so the turned answer is that answer turned. `two_lines_through_a_cones_apex`'s
+own doc already calls its refusal a gap: the two lines are there and can be
+told apart, and what runs out is `f64`'s supply of exact ruling directions.
+
+**`the_seam_plane_a_corner_is_on` is left as it is.** There is no case yet that
+reaches a cone's seam corner to ask about it, so extending it would build a
+part nothing uses (§13), and nothing could show it right. Whether the turned
+frustum would refuse `side of plane` at a seam corner's box once `intersect`
+names its two rulings is not known. If it does, the cone's argument is §294.9's
+with one change: a cone's seam is a ruling, the line through the apex and the
+corner, and not a line parallel to the axis. The plane through the axis and the
+corner is built the same way, from the axis origin, which on a cone is the apex.
+It crosses the cone in two rulings that meet only at the apex, and a cap square
+to the axis in two points a diameter apart, as on a pipe.
+
+**What this leaves.**
+
+- The gap in `two_lines_through_a_cones_apex`: a cone whose axis direction is
+  not exactly of length one, cut by a plane through its apex steeper than the
+  cone, gets no name for the two rulings. A row of its own, tier 1.
+- Q1044's question asked again after that row: whether the turned frustum then
+  refuses `side of plane` at a seam corner's box, and if so, the seam plane
+  extended to cones. A row that waits on the first.
+- Not measured: whether a cone built along a slanted axis at no placement, cut
+  by a plane through its axis, meets the same refusal. The algebra above is
+  for this turn's numbers only, and nothing has run the other case.
