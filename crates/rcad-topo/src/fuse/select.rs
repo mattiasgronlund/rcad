@@ -1969,7 +1969,18 @@ impl InPlane {
 
     /// `1` or `-1` when `point` is strictly inside the triangle, signed the way
     /// the triangle turns; `0` when it is outside; `None` when it is on the
-    /// triangle's own boundary or a turn could not be decided.
+    /// triangle's own boundary, or when it might be inside and a turn could not
+    /// be decided.
+    ///
+    /// **Two turns of opposite sign put the point outside, whatever the third
+    /// one is**, so `0` does not wait for the third to be decided. A point
+    /// inside the triangle or on its boundary turns the same way about all
+    /// three sides, or not at all about some of them, and never one way about
+    /// one side and the other way about another; and every sign the third
+    /// turn could have gives `0` here once the other two disagree. That is the
+    /// piece three cut lines meeting at one point leave (Q1145): one side of it
+    /// is a rounding long, every fan from every corner holds a triangle on that
+    /// side, and the turn about it is undecidable for every point there is.
     fn inside_triangle(
         &self,
         first: PredicatePoint,
@@ -1980,18 +1991,20 @@ impl InPlane {
         let mut positives = 0;
         let mut negatives = 0;
         let mut zeros = 0;
+        let mut undecided = 0;
         for [from, to] in [[first, second], [second, third], [third, first]] {
             match self.turn(from, to, point) {
                 Decision::Pos => positives += 1,
                 Decision::Neg => negatives += 1,
                 Decision::Zero => zeros += 1,
-                Decision::Undecidable { .. } | _ => return None,
+                Decision::Undecidable { .. } => undecided += 1,
+                _ => return None,
             }
         }
         if positives > 0 && negatives > 0 {
             return Some(0);
         }
-        if zeros > 0 {
+        if zeros > 0 || undecided > 0 {
             return None;
         }
         Some(if positives > 0 { 1 } else { -1 })
@@ -2940,7 +2953,7 @@ mod tests {
         Axis, Cone, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
     };
     use rcad_predicates::{
-        Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
+        Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
     };
     use smallvec::SmallVec;
 
@@ -2973,6 +2986,39 @@ mod tests {
             PredicatePoint::from([3.0 * smallest, 0.0, 0.0]),
         );
         assert_eq!(middle, PredicatePoint::Exact([2.0 * smallest, 0.0, 0.0]));
+    }
+
+    /// The triangle a fan of the top of
+    /// `tests/three_cut_lines_through_one_corner_of_a_skew_pair.rs`'s two
+    /// leaning blocks holds: from `(1, 1)` to the corner `(3, 1)`, and on to a
+    /// second meet a rounding from that corner, all at `z = 2`. Its first and
+    /// last sides run along one line, opposite ways, so a point off that line
+    /// turns one way about the first and the other way about the last. Which
+    /// way it turns about the short side nothing can say, and that is not
+    /// needed to know the point is outside (Q1145).
+    #[test]
+    fn a_point_off_a_triangle_with_a_side_a_rounding_long_is_outside_it() {
+        let top = Plane::from_coefficients([0.0, 0.0, 1.0, -2.0]).expect("a normal");
+        let in_plane = InPlane::of(&top).expect("a plane with a point off it");
+        let apex = PredicatePoint::from([1.0, 1.0, 2.0]);
+        let corner = PredicatePoint::from([3.0, 1.0, 2.0]);
+        let a_rounding_away = PredicatePoint::Constructed([
+            Interval::around(3.0, 2e-15).expect("a finite box"),
+            Interval::around(1.0, 1e-15).expect("a finite box"),
+            Interval::exactly(2.0),
+        ]);
+        let well_inside_the_top = PredicatePoint::from([7.0 / 3.0, 4.0 / 3.0, 2.0]);
+        assert!(
+            matches!(
+                in_plane.turn(corner, a_rounding_away, well_inside_the_top),
+                Decision::Undecidable { .. }
+            ),
+            "the short side's turn is the one nothing can say"
+        );
+        assert_eq!(
+            in_plane.inside_triangle(apex, corner, a_rounding_away, well_inside_the_top),
+            Some(0)
+        );
     }
 
     /// The torus `a_quarter_bend(4, 1)` is drawn on, and the plane `y = 0` its

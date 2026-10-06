@@ -272,9 +272,9 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 ///
 /// Eighteen per cent. [`measured`] runs from a fixed seed, so the shipped corpus
 /// of 429 skew fuses refused 51 of them, 11.89%, every run on every machine.
-/// Measured on Q901's merge it is 441 fuses and 39 refused, 8.84%, which leaves
-/// this threshold further off than the drift below argues for; it was not moved
-/// down with it.
+/// Measured on Q901's merge it was 441 fuses and 39 refused, 8.84%, and since
+/// Q1145 it is 27 refused, 6.12%, which leaves this threshold further off than
+/// the drift below argues for; it was moved down with neither.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
 /// drift — 6.1 points is twenty-six fuses, nearly four times the headroom
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
@@ -1646,8 +1646,18 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
 /// meet of the face's plane, the crossing's partner and one plane more, and
 /// `which_meet_comes_first_along_a_line` settles their order exactly, a tie
 /// included. On the shipped corpus that took every refusal off the order: 441
-/// fuses, 39 refused, and all 39 named `"a point inside a piece of a face"`,
-/// one step further on. That is what the cause below now pins.
+/// fuses, 39 refused then, and all 39 named `"a point inside a piece of a
+/// face"`, one step further on. That is what the cause below now pins.
+///
+/// **Since Q1145 it is 27 refused, all 27 still under that name.** The 33 the
+/// corpus refused just before each stopped first, as Q1069 traced them, on a
+/// flat piece where three cut lines meet at one point, which leaves a side a
+/// rounding long, and a
+/// turn about that side settled nothing in the fan that was to prove a point
+/// inside. Two turns of opposite sign now put the point outside a triangle of
+/// the fan without it. `tests/three_cut_lines_through_one_corner_of_a_skew_pair.rs`
+/// pins the two pairs that answer now, all six of their fuses, and a third
+/// pair that gets past that piece and stops on the next.
 #[test]
 fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
     let tally = measured(a_skew_pair(), |configuration, tally| {
