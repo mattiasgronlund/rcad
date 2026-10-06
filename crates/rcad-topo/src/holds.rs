@@ -294,12 +294,24 @@ fn what_a_flat_face_holds(
 /// side of it a point is on ([`what_a_circle_round_the_axis_encloses`],
 /// `docs/decisions.md` §250.9).
 ///
+/// **Which circle the wire is, is read where the face is stored**, for §168's
+/// reason. A turn rounds the face's plane and the ring each on its own, so a
+/// plane through the ring's axis as stored lands a rounding off the turned
+/// axis, and [`intersect`] then reads the two as stored once moved, rightly, as
+/// a quartic with no circle to name. A movement keeps which circle a corner is
+/// on, so the picker is named from the stored plane, ring and corner, and moved
+/// into place; only `point` is asked where it sits, against the moved picker
+/// and the moved ring, the same rounded surfaces the ring's own face is asked
+/// against (row Q1168).
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the wire is not one
 /// whole closed crossing of two surfaces, or when its neighbour is a ring and
 /// [`intersect`] names no one circle through the wire's corner: a plane that
 /// rests on the tube and touches it in one circle has no picker to name it by.
+/// The same when the ring's face is placed apart from this one, so the two
+/// stored frames are not one.
 ///
 /// [`Error::Undecidable`] when the half-space naming a meridian circle, or the
 /// pipe naming a circle round the axis, cannot say which side of it `point` is
@@ -341,10 +353,13 @@ fn what_a_round_wire_encloses(
     if !matches!(surface, Surface::Torus(_)) {
         return Ok(side);
     }
-    let corner = wire.points().next().ok_or_else(cannot)?;
+    if partner.location() != face.location() {
+        return Err(cannot());
+    }
+    let corner = where_it_is_stored(solid, coedge.start().key());
     let Some(this_circle) = the_picker_naming_the_circle_through(
-        &face.surface(),
-        &surface,
+        &face.stored_surface(),
+        &partner.stored_surface(),
         PredicatePoint::from(corner.coordinates()),
         policy,
         log,
@@ -352,6 +367,7 @@ fn what_a_round_wire_encloses(
     else {
         return Err(cannot());
     };
+    let this_circle = this_circle.transformed(&face.location());
     match this_circle {
         Picker::InFrontOf(_) => {
             if side == Decision::Pos {
