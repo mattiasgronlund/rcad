@@ -250,7 +250,55 @@ impl PointsAlongACrossing {
     /// Public because `rcad-topo`'s mesher has to charge such a run by its
     /// ends where this walks it by them, and it does so past **twice** this,
     /// so that the two never disagree about a run on the line between them.
+    /// Which of the two arcs the run is, the mesher asks
+    /// [`PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of`].
     pub const WALKED_ROUND_THE_CONE_PAST: f64 = 1_048_576.0;
+
+    /// Whether [`walk`] places `run`'s points round a cone from its two ends,
+    /// so that no point of it is further from the apex than one of them.
+    ///
+    /// **That is the arc that misses the ellipse's far end, and only that
+    /// one.** Past [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`], the
+    /// walk asks the run's half-spaces which of the two arcs between its ends
+    /// they pick; the other arc is walked round the ellipse and charged at the
+    /// ellipse's size, since it runs out to the far end. A mesher that charged
+    /// that arc by its ends would hand the walk a deflection under what it can
+    /// place a point to: a face on a cone of slope a half, cut by a lid `2⁻²⁴`
+    /// off a ruling and a wall square to it, whose one curved edge runs from
+    /// two ends `1.25` up round the far side to `1.7e7` up, was refused
+    /// `CannotPlaceAPointThatCloseToACrossing` for a deflection `rcad-topo`
+    /// picked itself (`a_cone_arc_past_the_far_end_of_a_long_ellipse.rs`).
+    ///
+    /// **Asked under a certified policy, and `false` whenever that does not
+    /// settle it**: a run the walk could not name, a half-space it could not
+    /// decide, a crossing that is not a plane's long ellipse round a cone. So a
+    /// mesher that charges by the ends only on `true` can charge more than the
+    /// walk needs, and never less.
+    ///
+    /// `along` is the surfaces of the two faces either side, as [`walk`] takes
+    /// them, and `run` and `along` are in one frame.
+    #[must_use]
+    pub fn are_placed_round_the_cone_from_the_ends_of(
+        run: &NamedRun,
+        along: [&Surface; 2],
+    ) -> bool {
+        let pair = which_two_surfaces_a_run_is_between(run.run(), along);
+        let Some(arc) = AnArcRoundACone::of(pair, run) else {
+            return false;
+        };
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let Ok(WhatARunLiesOn::Conic(conic)) =
+            what_a_run_between_these_two_lies_on(pair, run, &policy, &mut log)
+        else {
+            return false;
+        };
+        let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * conic.the_size_it_was_worked_out_from();
+        matches!(
+            arc.which_arc(&conic, deviation, &policy, &mut log),
+            Ok(WhichArc::Near(..))
+        )
+    }
 
     /// The points, in the direction the run is stored running, **with neither
     /// end included**.
@@ -2143,7 +2191,10 @@ impl Conic {
 /// ways round to the near end; so on an arc that misses the far end it is
 /// least at one of the arc's ends. That is what lets the ends stand for the
 /// arc's size. The arc that passes the far end is walked round the ellipse as
-/// before, since its points are out where the ellipse's own numbers are.
+/// before, since its points are out where the ellipse's own numbers are, and
+/// `rcad-topo`'s mesher asks which of the two a run is through
+/// [`PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of`] before
+/// it charges a face by the ends.
 #[derive(Clone, Debug)]
 struct AnArcRoundACone {
     flat: Plane,
