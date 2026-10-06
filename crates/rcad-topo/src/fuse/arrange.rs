@@ -75,6 +75,7 @@ use rcad_geom::{
     intersect, meet_of_three_surfaces, where_a_closed_crossing_starts,
     where_a_cones_apex_stands_against_a_plane, which_comes_first_round_a_crossing,
 };
+use rcad_predicates::expansion::{difference_of_two_products, expansion_sign, expansion_sum};
 use rcad_predicates::{
     Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
     ProvenanceLog, orient2d, orient3d, orient3d_of_points,
@@ -5236,7 +5237,10 @@ impl<'f> Arrangement<'f> {
     /// that axis, and the axis is the cone's. On a ball it is a cone whose axis
     /// runs through the ball's centre, cutting it in two circles square to the
     /// cone's axis, and the axis is the cone's: `intersect` names no other cone
-    /// against a ball. Each curve then splits the surface in two, and so does
+    /// against a ball. A pipe through the ball's centre is the same, about the
+    /// pipe's axis; a pipe off the centre cuts it in quartic loops, which
+    /// [`how_a_crossing_runs`] refuses before anything asks this. Each curve
+    /// then splits the surface in two, and so does
     /// the surface's own curve on the half-space's flat surface, where there is
     /// one. The curve lies inside the half-space and the other curve outside it,
     /// so every point of the surface past the flat surface is on the curve's
@@ -5269,7 +5273,9 @@ impl<'f> Arrangement<'f> {
     fn whether_past_the_picker(&self, crossing: usize, at: PredicatePoint) -> PastThePicker {
         let partner = self.crossings[crossing].partner;
         let axis = match (self.surface, partner) {
-            (Surface::Cylinder(pipe), _) => pipe.axis(),
+            (Surface::Cylinder(pipe), _) | (Surface::Sphere(_), Surface::Cylinder(pipe)) => {
+                pipe.axis()
+            }
             (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) => cone.axis(),
             (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _) => {
                 return PastThePicker::No;
@@ -6668,15 +6674,17 @@ fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a pair whose crossing is
 /// none of an endless straight line, one closed curve lying in a plane, or a
-/// plane's endless bend across a cone — a ball against a pipe, or two pipes.
-/// That is a **gap**: the curve is there and ordering points along it takes the
-/// marcher rather than a determinant (§34.10).
+/// plane's endless bend across a cone — a ball against a pipe off its axis, or
+/// two pipes. That is a **gap**: the curve is there and ordering points along it
+/// takes the marcher rather than a determinant (§34.10).
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when the shape of the
 /// crossing itself cannot be told — two pipes whose axes cannot be shown to run
 /// along one line or shown not to, and a plane and a cone whose apex or whose
 /// lean cannot be placed, both of which are
-/// [`a_pair_that_crosses_in_straight_lines`]'s own refusal — or when the
+/// [`a_pair_that_crosses_in_straight_lines`]'s own refusal, and a ball whose
+/// centre cannot be shown on a pipe's axis or off it, which is
+/// [`a_pair_that_crosses_in_a_conic`]'s — or when the
 /// direction of a run that *is* straight comes out as a box straddling every
 /// axis, or when nothing can say which way round a bend's own direction runs.
 fn how_a_crossing_runs(
@@ -6748,7 +6756,7 @@ fn how_a_crossing_runs(
     // nothing about being able to order it, and reading the two as the same
     // question is what gave a ball with a pipe through it four pieces where it
     // has three.
-    if !a_pair_that_crosses_in_a_conic(surface, partner) {
+    if !a_pair_that_crosses_in_a_conic(surface, partner, log)? {
         return Err(Error::ACrossingThisCannotBeOrderedAlong);
     }
     match where_a_closed_crossing_starts(run, [surface, partner], log) {
@@ -7339,7 +7347,9 @@ fn along_a_bend(
 ///
 /// The same arms [`which_comes_first_round_a_crossing`] can answer about, asked
 /// before anything is built rather than after (§34.10's last two rows), and
-/// three arms more: a cone against a pipe, a second cone or a ball.
+/// three arms more: a cone against a pipe, a second cone or a ball. A ball
+/// against a pipe is one of the arms the ordering answers, and only where the
+/// ball is centred on the pipe's axis.
 ///
 /// # A cone against a pipe, a cone or a ball is a row that is started and not ordered
 ///
@@ -7358,9 +7368,24 @@ fn along_a_bend(
 /// refuses by name, which is what returning `true` too often costs, as for a
 /// torus below.
 ///
-/// A ball against a pipe is not listed, though a ball centred on a pipe's axis
-/// crosses it in two circles: `intersect` names that pair off the axis too, in
-/// loops that are quartics, so a run of it is not known to be a circle.
+/// # A ball against a pipe is a row that reads the placement
+///
+/// A ball centred on a pipe's axis crosses it in two circles square to the
+/// axis, and a ball off the axis in two quartic loops or one. `intersect` names
+/// both with the same runs — the part of the crossing in front of the plane
+/// through the ball's centre square to the axis, and the part behind it — so
+/// unlike the cone rows, the kind of the run says nothing about which this is.
+/// So this asks: [`how_far_a_ball_sits_off_a_pipes_axis`], exactly, and only
+/// [`Decision::Zero`] is a circle. A centre off the axis by one rounding is a
+/// quartic and is refused, and a centre that cannot be placed either way is
+/// refused as undecidable rather than read as either. The ordering asks the
+/// same exact question again, of the same stored numbers, before it winds the
+/// circle about the axis.
+///
+/// A ball inscribed in the pipe touches it round one circle rather than
+/// crossing it, and passes this gate as well. Nothing orders along a touch:
+/// where a start can be found on it, the ordering refuses it as a crossing
+/// whose surfaces are tangent.
 ///
 /// # A plane and a torus is a row, and it does not read the placement
 ///
@@ -7390,8 +7415,42 @@ fn along_a_bend(
 /// a match over it here must carry a wildcard; a sixth kind adding zero errors
 /// to `cargo check -p rcad-topo` is measured in
 /// `tests/a_sixth_kind_of_surface.rs`, which is the guard that does fire.
-fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
-    match (one, other) {
+///
+/// # Errors
+///
+/// [`Error::Undecidable`](crate::Error::Undecidable) when a ball's centre can
+/// be shown neither on a pipe's axis nor off it. Neither answer is the safe
+/// reading: `true` orders a quartic loop as a circle, and `false` refuses two
+/// circles under a name that says nothing ran out.
+fn a_pair_that_crosses_in_a_conic(
+    one: &Surface,
+    other: &Surface,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    Ok(match (one, other) {
+        // A ball centred on a pipe's axis crosses it in two circles square to
+        // the axis, and a ball off it in quartic loops `intersect` names with
+        // the same runs, so only the placement can tell the two apart.
+        (Surface::Sphere(ball), Surface::Cylinder(pipe))
+        | (Surface::Cylinder(pipe), Surface::Sphere(ball)) => {
+            match how_far_a_ball_sits_off_a_pipes_axis(ball, pipe) {
+                Decision::Zero => true,
+                Decision::Pos => false,
+                Decision::Neg => unreachable!("how far off an axis is never below nothing"),
+                Decision::Undecidable { .. } | _ => {
+                    return Err(gave_up(
+                        A_BALL_AGAINST_A_PIPES_AXIS,
+                        &[
+                            PredicatePoint::from(ball.centre().coordinates()),
+                            PredicatePoint::from(pipe.axis().origin().coordinates()),
+                            PredicatePoint::from(pipe.axis().direction().components()),
+                        ],
+                        Measures::Area,
+                        log,
+                    ));
+                }
+            }
+        }
         // A plane cuts a ball, a pipe and a cone in a conic lying in the plane.
         // The two that cut straight lines instead — a plane along a pipe's axis,
         // and a plane through a cone's apex leaning no shallower than the cone —
@@ -7416,11 +7475,9 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
         // Two planes cross in a straight line and are answered one step up, so
         // this arm is about the shape of the crossing and not about reaching it.
         (Surface::Plane(_), Surface::Plane(_))
-        // A ball against a pipe or a ring crosses in a quartic. A ball centred
-        // on a pipe's axis crosses it in two circles, but `intersect` names that
-        // pair off the axis as well, so a run of it is not known to be a circle.
-        | (Surface::Sphere(_), Surface::Cylinder(_) | Surface::Torus(_))
-        | (Surface::Cylinder(_) | Surface::Torus(_), Surface::Sphere(_))
+        // A ball against a ring crosses in a quartic.
+        | (Surface::Sphere(_), Surface::Torus(_))
+        | (Surface::Torus(_), Surface::Sphere(_))
         // So does every other pair among the pipe, the cone and the ring, bar
         // two side-by-side pipes, which cut straight lines. `false` is right
         // for them here — a pair of endless lines is not a closed conic — and
@@ -7433,6 +7490,123 @@ fn a_pair_that_crosses_in_a_conic(one: &Surface, other: &Surface) -> bool {
             Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
         ) => false,
         _ => false,
+    })
+}
+
+/// How far a ball's centre sits off a pipe's axis, **proved and not rounded**:
+/// [`Decision::Zero`] when it is on the axis, [`Decision::Pos`] when it is
+/// off it, and [`Decision::Undecidable`] when neither can be shown.
+///
+/// The sign of `‖(c − o) × w‖²`, which is the very question
+/// [`intersect`](rcad_geom::intersect) splits the ball-and-pipe row on before
+/// it names two circles or two quartic loops. It is asked here a component of
+/// `(c − o) × w` at a time, the way [`two_pipes_run_along_one_line`] asks its
+/// cross product: one component proved non-zero settles the centre off the
+/// axis on its own, and all three have to be proved zero together for it to
+/// be on it.
+///
+/// **No [`Policy`] is asked**, for the reason
+/// [`a_plane_cuts_a_cone_in_rulings`] gives: a tolerant one may read an
+/// enclosure the cascade could not settle as nothing, and a `Zero` nobody has
+/// earned orders a quartic loop as a circle. `intersect` asks the same sign
+/// through its caller's policy, so the two can part company only under a
+/// tolerant one, and only into a refusal here.
+fn how_far_a_ball_sits_off_a_pipes_axis(ball: &Sphere, pipe: &Cylinder) -> Decision {
+    let centre = ball.centre().coordinates();
+    let origin = pipe.axis().origin().coordinates();
+    let along = pipe.axis().direction().components();
+    let mut widest_that_was_not_told = None::<f64>;
+    for axis in 0..3 {
+        match rcad_predicates::decide(&AcrossTheAxis {
+            centre,
+            origin,
+            along,
+            axis,
+        })
+        .0
+        {
+            Decision::Zero => {}
+            Decision::Pos | Decision::Neg => return Decision::Pos,
+            Decision::Undecidable { enclosure } => {
+                widest_that_was_not_told = Some(
+                    widest_that_was_not_told.map_or(enclosure, |so_far| so_far.max(enclosure)),
+                );
+            }
+            other => panic!("one component of a cross product came back with no sign: {other:?}"),
+        }
+    }
+    match widest_that_was_not_told {
+        None => Decision::Zero,
+        Some(enclosure) => Decision::Undecidable { enclosure },
+    }
+}
+
+/// The name the question of whether a ball's centre is on a pipe's axis goes
+/// by in provenance records.
+const A_BALL_AGAINST_A_PIPES_AXIS: &str = "a ball against a pipe's axis";
+
+/// One component of `(c − o) × w`: how far a point sits off an axis, along one
+/// coordinate axis, times the axis direction's length.
+///
+/// `(c − o)ᵢ₊₁ wᵢ₊₂ − (c − o)ᵢ₊₂ wᵢ₊₁` is written out as `cᵢ₊₁ wᵢ₊₂ − cᵢ₊₂ wᵢ₊₁`
+/// less `oᵢ₊₁ wᵢ₊₂ − oᵢ₊₂ wᵢ₊₁`, two determinants of stored numbers, so the
+/// exact level is two [`difference_of_two_products`] summed. It stops where
+/// either does, at a product too small or too large to hold exactly.
+struct AcrossTheAxis {
+    centre: [f64; 3],
+    origin: [f64; 3],
+    along: [f64; 3],
+    axis: usize,
+}
+
+impl rcad_predicates::Predicate for AcrossTheAxis {
+    fn name(&self) -> &'static str {
+        A_BALL_AGAINST_A_PIPES_AXIS
+    }
+
+    /// No level 1, for the reason `rcad-geom`'s ordering round a crossing
+    /// gives: a forward error bound is a claim of its own that needs a test,
+    /// and level 2 decides everything it would.
+    fn on_floats(&self) -> Option<rcad_predicates::Filtered> {
+        None
+    }
+
+    fn on_intervals(&self) -> Interval {
+        let (next, after) = ((self.axis + 1) % 3, (self.axis + 2) % 3);
+        let off =
+            |at: usize| Interval::exactly(self.centre[at]) - Interval::exactly(self.origin[at]);
+        off(next) * Interval::exactly(self.along[after])
+            - off(after) * Interval::exactly(self.along[next])
+    }
+
+    fn exactly(&self) -> Option<Decision> {
+        let (next, after) = ((self.axis + 1) % 3, (self.axis + 2) % 3);
+        let swept = |from: [f64; 3]| {
+            difference_of_two_products(from[next], self.along[after], from[after], self.along[next])
+        };
+        let (centre, centre_used) = swept(self.centre)?;
+        let (origin, origin_used) = swept(self.origin)?;
+        let mut taken_away = [0.0; 4];
+        for (entry, into) in origin[..origin_used].iter().zip(&mut taken_away) {
+            *into = -entry;
+        }
+        let mut total = [0.0; 8];
+        let used = expansion_sum(
+            &centre[..centre_used],
+            &taken_away[..origin_used],
+            &mut total,
+        );
+        match expansion_sign(&total[..used]) {
+            Decision::Neg => Some(Decision::Neg),
+            Decision::Zero => Some(Decision::Zero),
+            Decision::Pos => Some(Decision::Pos),
+            // A sum overflowed. Exact arithmetic that is not exact has
+            // nothing to offer, so this level cannot run.
+            Decision::Undecidable { .. } => None,
+            other => {
+                panic!("exact arithmetic came back with a decision nothing here knows: {other:?}")
+            }
+        }
     }
 }
 
@@ -9885,41 +10059,66 @@ mod what_the_curved_arrangement_reaches {
         }
     }
 
-    /// A ball with a pipe through it, which is the shape §34.9 says this lane
-    /// meets its own refusal on, and it does.
+    /// A ball with a bar through its centre is cut in three — the cap above,
+    /// the band, the cap below — and a ball with a bar through it off its
+    /// centre is refused by name.
     ///
-    /// A ball and a pipe cross in a **quartic**, and ordering points along one
-    /// takes the marcher rather than a determinant. It closes, so a place to
-    /// start on it can be found — and reading that as "so it can be ordered" is
-    /// the mistake worth naming: it gave the ball four pieces where it has
-    /// three, silently, until the two questions were told apart.
+    /// Through the centre the two cross in two circles square to the bar's
+    /// axis, and off it in quartic loops, which `intersect` names with the
+    /// same runs. A quartic closes, so a place to start on it can be found —
+    /// and reading that as "so it can be ordered" is the mistake worth naming:
+    /// it gave the ball four pieces where it has three, silently, until the
+    /// two questions were told apart. They are told apart by the placement,
+    /// asked exactly ([`how_far_a_ball_sits_off_a_pipes_axis`]).
     ///
-    /// A **gap** (§16.10): the pieces are there. What closes it is
-    /// `which_comes_first_round_a_crossing` learning to order a marched loop.
+    /// **The three is the half-space's as well.** Each circle's walk lies
+    /// outside the pipe on the band's side and inside it on the cap's, and
+    /// every node of the other circle is on the pipe, so no node says which
+    /// side of a circle the other circle's walk is on. Until
+    /// [`Arrangement::whether_past_the_picker`] read a ball's side of a circle
+    /// off the half-space through its centre, as it already did against a
+    /// cone, the band came out as two pieces and the ball as four.
+    ///
+    /// The quartic is a **gap** (§16.10): the pieces are there. What closes it
+    /// is `which_comes_first_round_a_crossing` learning to order a marched
+    /// loop.
     #[test]
-    fn a_ball_with_a_pipe_through_it_is_refused_rather_than_cut_wrongly() {
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let ball = model
-            .add_ball(3.0, &Isometry::identity())
-            .expect("a ball of radius three");
-        let bar = model
-            .add_round_bar(
-                1.0,
-                12.0,
-                &Isometry::translation(Vector::new(0.0, 0.0, -6.0)).expect("a shift"),
-            )
-            .expect("a bar right through it");
+    fn a_ball_with_a_bar_through_its_centre_is_cut_in_three_and_one_off_it_is_refused() {
+        for (off, said_of_the_ball, said_of_the_wall) in [
+            (
+                0.0,
+                "ball cut by 1 -> [1, 2, 1]",
+                "pipe cut by 3 -> [2, 2, 2]",
+            ),
+            (
+                0.5,
+                "ball refused nothing can put points in order along this curve",
+                "pipe refused nothing can put points in order along this curve",
+            ),
+        ] {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let ball = model
+                .add_ball(3.0, &Isometry::identity())
+                .expect("a ball of radius three");
+            let bar = model
+                .add_round_bar(
+                    1.0,
+                    12.0,
+                    &Isometry::translation(Vector::new(off, 0.0, -6.0)).expect("a shift"),
+                )
+                .expect("a bar right through it");
 
-        let said = what_it_cuts(&model, ball, bar);
-        assert!(
-            said.iter()
-                .any(|row| row == "ball refused nothing can put points in order along this curve"),
-            "expected the quartic to be refused by name, got {said:?}"
-        );
-        assert!(
-            said.iter().any(|row| row.starts_with("pipe refused")),
-            "and the wall of the bar with it, got {said:?}"
-        );
+            let said = what_it_cuts(&model, ball, bar);
+            assert!(
+                said.iter().any(|row| row == said_of_the_ball),
+                "the bar {off} off the centre: expected {said_of_the_ball:?}, got {said:?}"
+            );
+            assert!(
+                said.iter().any(|row| row == said_of_the_wall),
+                "the bar {off} off the centre: expected {said_of_the_wall:?}, got {said:?}"
+            );
+        }
     }
 
     /// The three plane-and-torus crossings a capped bend of pipe has, ordered
