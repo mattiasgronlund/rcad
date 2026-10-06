@@ -496,6 +496,7 @@ fn a_cone_less_a_whole_ball_pushing_out_through_its_side() {
         panic!("six fuses, not {gives:?}");
     };
     let union_holds = pointed + ball - pointed_shares;
+    println!("the ball less the pointed cone, {ring} by its closed form: {less_cone:?}");
     assert!(
         holds(union, &[union_holds])
             && holds(swapped_union, &[union_holds])
