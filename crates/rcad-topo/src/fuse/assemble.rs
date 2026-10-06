@@ -59,8 +59,9 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    DynamicRange, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point,
-    Surface, SurfaceMeet, Vector, which_way_a_closed_crossing_turns,
+    DynamicRange, EdgeRun, HalfSpace, Isometry, MeetOfThree, Orientation, Picker, Plane,
+    PlaneAgreement, Point, Surface, SurfaceMeet, Vector, meet_of_three_surfaces,
+    which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{
     Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
@@ -241,7 +242,17 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
                 return Ok(None);
             }
             let seam = the_seam_a_side_runs_along(model, &piece.ancestors, meet);
-            let side = edges.of(meet, seam, from, to, piece.ancestors[0], false, policy, log)?;
+            let side = edges.of(
+                meet,
+                seam,
+                from,
+                to,
+                piece.ancestors[0],
+                false,
+                &corners,
+                policy,
+                log,
+            )?;
             of_this_piece.push(NamedSide {
                 side: meet.clone(),
                 edge: side.edge,
@@ -2706,6 +2717,11 @@ impl Assembly {
     /// walks as a straight line with no points on it
     /// (`two_bars_on_one_pipe_answer_the_same_however_the_pipe_is_written`).
     ///
+    /// **A rim between two different curved faces names the plane its edge was
+    /// cut out of**, where its edge was named by one:
+    /// [`the_plane_of_a_rim_between_two_curved_faces`] says why the two faces
+    /// alone may name nothing to follow.
+    ///
     /// `None` everywhere else, which is where [`EdgeRun::RightRoundWhereItsFacesCross`]
     /// stays. Three shapes come back `None` for a reason worth naming: an edge
     /// that is not closed, which is not this kind of run at all; an edge other
@@ -2730,7 +2746,10 @@ impl Assembly {
                 let [one, other] = <[usize; 2]>::try_from(by.as_slice()).ok()?;
                 let either_side = self.faces[one].surface;
                 if !one_surface(&self.faces[other].surface, &either_side) {
-                    return None;
+                    return the_plane_of_a_rim_between_two_curved_faces(
+                        [either_side, self.faces[other].surface],
+                        &edge.carried_by,
+                    );
                 }
                 match edge.carried_by {
                     [met, across]
@@ -2890,6 +2909,39 @@ impl Assembly {
         }
         worst.max(inherited.magnitude())
     }
+}
+
+/// The plane a closed rim between two different curved faces was cut out of,
+/// where its edge was named by one: the `and` its run carries.
+///
+/// **Two curved faces either side of a rim may touch rather than cross.** A
+/// ball of a bar's radius centred on the bar's top cap is tangent to the pipe
+/// all the way round the rim, so the union keeps the pipe below the rim and
+/// the ball above it, and `rcad_geom::walk` has no crossing of the two to
+/// follow: it refused the rim
+/// [`CannotFollowACrossingWhereItsSurfacesAreTangent`](rcad_geom::Error). The
+/// cap's plane cuts each of them in that one circle, and a run naming it is
+/// walked as the plane against a face.
+///
+/// **Only an edge whose name came under more than one pair reaches here with a
+/// plane in it.** The edge carries the pair of the first side that named it,
+/// and a side of a curved face names that face's surface and its partner. Two
+/// different curved faces whose sides are named alike are therefore each other's
+/// partners, with no plane between them, unless
+/// [`the_name_each_closed_curve_goes_by`] joined the names of two pairs, and it
+/// joins only a plane against a ball, a pipe or a cone whose one closed curve
+/// the other pair shares. So the plane here crosses each face in this rim.
+fn the_plane_of_a_rim_between_two_curved_faces(
+    faces: [Surface; 2],
+    carried_by: &[Surface; 2],
+) -> Option<Surface> {
+    if faces.iter().any(|surface| surface.as_plane().is_some()) {
+        return None;
+    }
+    carried_by
+        .iter()
+        .find(|surface| surface.as_plane().is_some())
+        .copied()
 }
 
 /// An arc of a ring, the surface it runs along, and whether it bulges
@@ -3537,7 +3589,13 @@ pub(super) fn one_surface(one: &Surface, other: &Surface) -> bool {
 /// **Only a side read against another spelling of that surface is turned.** A
 /// dot of two windings compares two spellings of one surface and nothing else,
 /// so a side read against a different surface altogether is left as it was
-/// read, as it was before §359; no shape has been measured reaching that.
+/// read, as it was before §359. Shapes reach that since a rim can come under
+/// two names ([`the_name_each_closed_curve_goes_by`]): uniting the dome on a
+/// shaft of its radius reads the pipe's side against the pipe and the ball's
+/// against the ball, and a frustum on a bar of its narrow radius the cone's
+/// against the cone. Every one of those answers passes the sweep, which reads
+/// the edge's way back off one surface for both sides (`fuses_that_touch.rs`,
+/// `how_often_a_fuse_with_a_cone_refuses.rs`).
 ///
 /// **Whether a spelling winds the other way is exact**: turning an axis round
 /// negates every product [`the_way_it_is_parametrised_about`] is made of, so
@@ -3937,6 +3995,21 @@ struct Corners {
     /// Where a point of more than one name goes when one of the names is an
     /// input corner, and which corner that is, by the name the point goes by.
     put_at: BTreeMap<CornerName, (PredicatePoint, VertexKey)>,
+    /// For every closed curve the kept sides bring under more than one name,
+    /// the one name each of them goes by. See
+    /// [`the_name_each_closed_curve_goes_by`].
+    curves: BTreeMap<CurveName, CurveName>,
+}
+
+/// What one closed curve of the answer is called and where it could start,
+/// gathered by [`Corners::with_each_closed_curve_started_once`].
+#[derive(Default)]
+struct OneClosedCurve<'a> {
+    /// Every name a kept side brings it under.
+    names: BTreeSet<CurveName>,
+    /// Where each kept side along it starts: the input vertex, or `None` where
+    /// its own two surfaces start it, with the name that side brings it under.
+    starts: Vec<(Option<VertexSlot>, CurveName, &'a MeetPoint)>,
 }
 
 /// What two faces agree to call the same corner.
@@ -4011,6 +4084,11 @@ impl Corners {
     /// `(−3, 0, 0)`, and the union was refused with four faces along one edge
     /// (§378.3).
     ///
+    /// **A curve cut by two pairs of surfaces is one curve and gets one
+    /// corner**, chosen the same way from the starts of both
+    /// ([`the_name_each_closed_curve_goes_by`]). Where none of them is an
+    /// input vertex, the lowest start either pair puts on it is the corner.
+    ///
     /// # Errors
     ///
     /// Whatever [`name_of_the_closed_crossing_through`] gives.
@@ -4022,8 +4100,7 @@ impl Corners {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Self> {
-        let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<CurveName>>> = BTreeMap::new();
-        let mut on_curve: BTreeMap<CurveName, Vec<(VertexSlot, &MeetPoint)>> = BTreeMap::new();
+        let mut sides: Vec<(&FaceMeet, Option<CurveName>)> = Vec::new();
         for meet in kept_sides {
             let curve = if closes_on_itself(meet) {
                 Some(name_of_the_closed_crossing_through(
@@ -4035,44 +4112,83 @@ impl Corners {
             } else {
                 None
             };
-            for end in &meet.ends {
-                let MeetPoint::Existing { vertex, .. } = end else {
-                    continue;
-                };
-                let slot = vertex.slot_in(model.id());
-                closes.entry(slot).or_default().insert(curve);
-                if let Some(curve) = curve {
-                    on_curve.entry(curve).or_default().push((slot, end));
-                }
-            }
+            sides.push((meet, curve));
         }
         let mut corners = Self {
             on_three_planes,
+            curves: the_name_each_closed_curve_goes_by(
+                sides
+                    .iter()
+                    .filter_map(|&(meet, curve)| Some((&meet.carried_by, curve?))),
+                policy,
+            ),
             ..Self::default()
         };
+        let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<CurveName>>> = BTreeMap::new();
+        let mut on_curve: BTreeMap<CurveName, OneClosedCurve<'_>> = BTreeMap::new();
+        for (meet, curve) in sides {
+            let one_name = curve.map(|curve| corners.curve_goes_by(curve));
+            if let (Some(curve), Some(one_name)) = (curve, one_name) {
+                on_curve.entry(one_name).or_default().names.insert(curve);
+            }
+            for end in &meet.ends {
+                let slot = match end {
+                    MeetPoint::Existing { vertex, .. } => Some(vertex.slot_in(model.id())),
+                    MeetPoint::WhereAClosedCurveStarts { .. } => None,
+                    MeetPoint::OfThreeSurfaces { .. }
+                    | MeetPoint::HalfWayRoundAClosedCurve { .. }
+                    | MeetPoint::APoleOfAClosedSurface { .. } => continue,
+                };
+                if let Some(slot) = slot {
+                    closes.entry(slot).or_default().insert(one_name);
+                }
+                if let (Some(curve), Some(one_name)) = (curve, one_name) {
+                    on_curve
+                        .entry(one_name)
+                        .or_default()
+                        .starts
+                        .push((slot, curve, end));
+                }
+            }
+        }
         corners.join_the_names_of_each_point(model, names_of_one_point, policy, log)?;
-        for (curve, mut candidates) in on_curve {
-            let only_closes_this =
-                |slot: &VertexSlot| closes[slot] == BTreeSet::from([Some(curve)]);
-            candidates.sort_by(|(one, at_one), (other, at_other)| {
-                only_closes_this(one)
-                    .cmp(&only_closes_this(other))
+        for (curve, OneClosedCurve { names, mut starts }) in on_curve {
+            if names.len() == 1 && starts.iter().all(|(slot, _, _)| slot.is_none()) {
+                continue;
+            }
+            let only_closes_this = |slot: &Option<VertexSlot>| {
+                slot.is_some_and(|slot| closes[&slot] == BTreeSet::from([Some(curve)]))
+            };
+            starts.sort_by(|(one, one_named, at_one), (other, other_named, at_other)| {
+                one.is_none()
+                    .cmp(&other.is_none())
+                    .then_with(|| only_closes_this(one).cmp(&only_closes_this(other)))
                     .then_with(|| lowest_first(at_one.point(), at_other.point()))
                     .then_with(|| one.cmp(other))
+                    .then_with(|| one_named.cmp(other_named))
             });
-            candidates.dedup_by_key(|(slot, _)| *slot);
-            let (_, first) = candidates[0];
+            starts.dedup_by_key(|(slot, named, _)| (*slot, slot.is_none().then_some(*named)));
+            let (_, _, first) = starts[0];
             let start = corners.of(model, first, policy, log)?;
-            let curve = corners.goes_by(CornerName::RoundACurve(curve));
-            corners.taken_over.insert(curve, start);
-            for (slot, _) in &candidates[1..] {
-                if only_closes_this(slot) {
-                    let vertex = corners.goes_by(CornerName::Vertex(*slot));
+            for name in names {
+                let round = corners.goes_by(CornerName::RoundACurve(name));
+                corners.taken_over.insert(round, start);
+            }
+            for (slot, _, _) in &starts[1..] {
+                if let Some(slot) = slot.filter(|slot| only_closes_this(&Some(*slot))) {
+                    let vertex = corners.goes_by(CornerName::Vertex(slot));
                     corners.taken_over.insert(vertex, start);
                 }
             }
         }
         Ok(corners)
+    }
+
+    /// The name every name of `curve`'s closed curve goes by: `curve` itself
+    /// unless [`the_name_each_closed_curve_goes_by`] found that curve brought
+    /// under more than one name.
+    fn curve_goes_by(&self, curve: CurveName) -> CurveName {
+        self.curves.get(&curve).copied().unwrap_or(curve)
     }
 
     /// Make every name of one point go by one name, and put the point where
@@ -4400,6 +4516,104 @@ fn closes_on_itself(meet: &FaceMeet) -> bool {
     }
 }
 
+/// For every closed curve that comes under more than one name, the one name
+/// all of them go by: the least, so that which side arrived first cannot
+/// matter.
+///
+/// **One circle can be where more than two surfaces cross**, and each face
+/// along it names it by its own surface and the partner it was cut by. A ball
+/// of a bar's radius centred on the bar's top cap cuts the cap's plane in the
+/// cap's own rim, which the pipe cuts it in too, and the pipe is tangent to
+/// the ball all the way round. Uniting the two, the pipe's side of the rim is
+/// the plane and the pipe, started at the bar's seam corner, and the ball's is
+/// the plane and the ball, started where that pair starts a circle. Named by
+/// its two surfaces alone that was two edges with one face along each, and
+/// every rule both ways round was refused as not a manifold; a frustum on a bar
+/// of its narrow cap's radius was the same with a cone for the ball (Q1118).
+///
+/// **Two names are one curve where both are one plane against a ball, a pipe
+/// or a cone, and the plane and the two curved surfaces share more than a
+/// point.** Such a pair crosses in one closed curve or in nothing that closes
+/// ([`which_of_them_a_closed_crossing_runs_round`]), and either curve is a
+/// conic in the plane. Two different conics in one plane share at most four
+/// points, so where the three share more than a point
+/// ([`MeetOfThree::MoreThanAPoint`]) the two are one conic. A ring is left
+/// out: a plane can cut it in two circles, and its pair's name tells only a
+/// plane through its axis's two apart (§378.4).
+///
+/// **Two curved surfaces with no plane between them are left apart.** A cone
+/// and a pipe on one axis cross in two circles, one either side of the apex,
+/// and their name does not say which, so the circle on the far nappe would be
+/// joined to the rim on the near one.
+///
+/// A meet of the three that cannot be worked out joins nothing, and its
+/// records are not kept, as `arrange.rs` keeps none for the fold it makes of
+/// the same three: the answer is then refused as not a manifold, as it was
+/// before anything was asked.
+fn the_name_each_closed_curve_goes_by<'a>(
+    closed: impl Iterator<Item = (&'a [Surface; 2], CurveName)>,
+    policy: &Policy,
+) -> BTreeMap<CurveName, CurveName> {
+    let mut cut_out_of: BTreeMap<CurveName, (Plane, Surface)> = BTreeMap::new();
+    for (carried_by, curve) in closed {
+        if let Some(pair) = the_plane_and_the_ball_pipe_or_cone_of(carried_by) {
+            cut_out_of.entry(curve).or_insert(pair);
+        }
+    }
+    let mut leads_to: BTreeMap<CurveName, CurveName> = BTreeMap::new();
+    let leader = |leads_to: &BTreeMap<CurveName, CurveName>, mut name: CurveName| {
+        while let Some(&next) = leads_to.get(&name) {
+            name = next;
+        }
+        name
+    };
+    let named: Vec<(&CurveName, &(Plane, Surface))> = cut_out_of.iter().collect();
+    for (at, &(&one, (flat, mine))) in named.iter().enumerate() {
+        for &(&other, (other_flat, theirs)) in &named[at + 1..] {
+            if !one_surface(&Surface::Plane(*flat), &Surface::Plane(*other_flat))
+                || !matches!(
+                    meet_of_three_surfaces(
+                        [&Surface::Plane(*flat), mine, theirs],
+                        policy,
+                        &mut ProvenanceLog::new(),
+                    ),
+                    Ok(MeetOfThree::MoreThanAPoint)
+                )
+            {
+                continue;
+            }
+            let (one, other) = (leader(&leads_to, one), leader(&leads_to, other));
+            match one.cmp(&other) {
+                Ordering::Less => leads_to.insert(other, one),
+                Ordering::Greater => leads_to.insert(one, other),
+                Ordering::Equal => None,
+            };
+        }
+    }
+    let mut goes_by = BTreeMap::new();
+    for &name in leads_to.keys() {
+        let least = leader(&leads_to, name);
+        goes_by.insert(name, least);
+        goes_by.insert(least, least);
+    }
+    goes_by
+}
+
+/// The plane and the ball, pipe or cone of a pair, or `None` for any other
+/// pair: two curved surfaces, two planes, or a plane and a ring.
+fn the_plane_and_the_ball_pipe_or_cone_of(carried_by: &[Surface; 2]) -> Option<(Plane, Surface)> {
+    let ([Surface::Plane(flat), round] | [round, Surface::Plane(flat)]) = carried_by else {
+        return None;
+    };
+    match round {
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) => Some((*flat, *round)),
+        Surface::Plane(_) | Surface::Torus(_) => None,
+        // A kind added to `rcad-geom` after this has not been shown to cross a
+        // plane in at most one closed curve.
+        _ => None,
+    }
+}
+
 /// The lower of two points, `x` first and then `y` and `z`, the order
 /// [`Assembly::which_to_keep_first`] breaks a tie between two corners by.
 fn lowest_first(one: PredicatePoint, other: PredicatePoint) -> Ordering {
@@ -4518,7 +4732,9 @@ impl Edges {
     /// corners no longer pick an edge out on their own: a closed edge starts and
     /// ends at the one corner it has, so a bar's two cap circles would be one
     /// edge if the pair were the key. Sorting the two surfaces is what makes the
-    /// faces either side agree about which edge they share.
+    /// faces either side agree about which edge they share, and where the two
+    /// faces were cut by two different pairs of surfaces, `corners` gives the
+    /// one name the curve goes by ([`the_name_each_closed_curve_goes_by`]).
     ///
     /// **The input edges it is a piece of are every side's along it**, and not
     /// the first side's. Where a cut on one face runs along the boundary of the
@@ -4563,6 +4779,7 @@ impl Edges {
         to: usize,
         face: FaceKey,
         turned_round: bool,
+        corners: &Corners,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Side> {
@@ -4576,7 +4793,8 @@ impl Edges {
             "a piece of a flat face has a side with no length"
         );
         let at = middle_of(meet.ends[0].point());
-        let named = which_curve_it_is(from, to, meet, policy, log)?;
+        let named = which_curve_it_is(from, to, meet, policy, log)?
+            .map(|curve| corners.curve_goes_by(curve));
         let key = (
             [from.min(to), from.max(to)],
             named,
@@ -5109,6 +5327,9 @@ fn which_curve_it_is(
 /// What names a closed crossing: the two surfaces it runs between, each named
 /// either way round and the two sorted, and which of their closed crossings it
 /// is ([`which_meridian_circle_it_is`]) where that is known to need saying.
+///
+/// One curve can come under two of these, cut by two pairs, and then goes by
+/// the least of them ([`the_name_each_closed_curve_goes_by`]).
 type CurveName = ([[u64; 9]; 2], Option<[u64; 4]>);
 
 /// The name of the closed crossing of `carried_by` through `point`, the same
@@ -5549,6 +5770,7 @@ fn sides_of(
             to,
             ancestors[0],
             turned_round,
+            corners,
             policy,
             log,
         )?);
