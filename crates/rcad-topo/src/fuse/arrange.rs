@@ -785,6 +785,18 @@ impl Crossing {
     }
 }
 
+/// What [`Arrangement::whether_past_the_picker`] makes of one node against one
+/// crossing.
+enum PastThePicker {
+    /// The partner's sign at the node is its side of the crossing.
+    No,
+    /// Past the half-space that picks the crossing out, so on the crossing's
+    /// side towards it, and this is the partner's sign there.
+    Yes(Decision),
+    /// Nothing here can say whether it is past, or which side that is.
+    CannotTell,
+}
+
 /// The crossings drawn so far, kept so that a new one is compared with only
 /// those that may be the same curve ([`Arrangement::crossing_like`]).
 ///
@@ -4777,6 +4789,13 @@ impl<'f> Arrangement<'f> {
     /// off the walk's own nodes where it does not. A crossing that does not
     /// touch this lump at all leaves the whole lump on one side of itself, so
     /// any node of the walk answers for all of them.
+    ///
+    /// **A node's sign against the partner is its side of the crossing only
+    /// where the partner cuts the surface in that one curve.** A cone round a
+    /// bar's axis cuts the bar's wall in two circles, and past the second one
+    /// the cone's sign turns back: a point below both circles has the sign of a
+    /// point above both. So a node past the flat half-space that picks the
+    /// crossing out is read by [`Arrangement::whether_past_the_picker`] first.
     fn which_side_of_everything(
         &self,
         cycle: usize,
@@ -4802,6 +4821,14 @@ impl<'f> Arrangement<'f> {
             let partner = self.crossings[crossing].partner;
             for &half_edge in &self.cycles[cycle] {
                 let node = &self.nodes[self.arcs[half_edge / 2].ends[half_edge % 2]];
+                match self.whether_past_the_picker(crossing, node.point) {
+                    PastThePicker::No => (),
+                    PastThePicker::Yes(facing) => {
+                        *side = Some(facing);
+                        break;
+                    }
+                    PastThePicker::CannotTell => continue,
+                }
                 if self.is_on_the_partner_of_a_crossing_through(node, &partner) {
                     continue;
                 }
@@ -4824,6 +4851,73 @@ impl<'f> Arrangement<'f> {
             }
         }
         Ok(sides)
+    }
+
+    /// Whether a point of a pipe's face lies past the flat half-space that picks
+    /// one closed curve out of two the partner cuts the pipe in, and if it does,
+    /// which side of the partner the curve has towards that half-space's edge.
+    ///
+    /// **Only on a pipe, and only where the half-space faces along the pipe's
+    /// axis** — the cone round a bar's axis cutting it in a circle in each
+    /// nappe, and a ball cutting it in two loops either side of its centre. Each
+    /// curve then crosses every straight line of the pipe once, so it goes
+    /// right round, and the pipe's circle on the half-space's flat surface goes
+    /// right round as well. The curve lies inside the half-space and the other
+    /// curve outside it, so every point of the pipe past the flat surface is on
+    /// the curve's near side, and the partner keeps one sign from the curve to
+    /// the flat surface and over it. That sign is the one a step down the pipe
+    /// towards the flat surface meets: the partner's gradient against the
+    /// half-space's normal turned round, at every node of the curve.
+    ///
+    /// Everywhere else a node's sign against the partner is its side of the
+    /// curve, as it always was, and [`PastThePicker::No`] says so: inside the
+    /// half-space the partner cuts the pipe in this one curve and nothing else.
+    fn whether_past_the_picker(&self, crossing: usize, at: PredicatePoint) -> PastThePicker {
+        let Surface::Cylinder(pipe) = self.surface else {
+            return PastThePicker::No;
+        };
+        let [Picker::InFrontOf(picker)] = self.crossings[crossing].picked_by() else {
+            return PastThePicker::No;
+        };
+        let facing = picker.normal().components().map(Interval::exactly);
+        let along = pipe.axis().direction().components().map(Interval::exactly);
+        if cross_of_intervals(facing, along)
+            .iter()
+            .any(|component| component.sign() != Decision::Zero)
+        {
+            return PastThePicker::No;
+        }
+        match picker.side_of_point(at) {
+            Decision::Pos | Decision::Zero => return PastThePicker::No,
+            Decision::Neg => (),
+            Decision::Undecidable { .. } | _ => return PastThePicker::CannotTell,
+        }
+
+        let partner = self.crossings[crossing].partner;
+        let down = facing.map(|component| -component);
+        let mut found = None;
+        for node in self
+            .nodes
+            .iter()
+            .filter(|node| node.crossings.contains(&crossing))
+        {
+            let here = dot_of(gradient_at(&partner, node.point).enclosure(), down).sign();
+            match (here, found) {
+                (Decision::Pos | Decision::Neg, None) => found = Some(here),
+                (Decision::Pos | Decision::Neg, Some(already)) if already == here => (),
+                (
+                    Decision::Pos
+                    | Decision::Neg
+                    | Decision::Zero
+                    | Decision::Undecidable { .. }
+                    | _,
+                    _,
+                ) => {
+                    return PastThePicker::CannotTell;
+                }
+            }
+        }
+        found.map_or(PastThePicker::CannotTell, PastThePicker::Yes)
     }
 
     /// Which side of `partner` a walk is on, read off a half-edge of it along a
