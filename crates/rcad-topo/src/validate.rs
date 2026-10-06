@@ -547,9 +547,9 @@ impl Model {
     /// curve on each plane can reach off the other, against `rounding`, the
     /// room [`Model::what_writing_a_plane_down_costs`] gives a corner against
     /// its own face's plane. A pipe, a ball and a torus have that bound, and a
-    /// cone where the plane crosses it in an ellipse (Q612) or in straight lines
+    /// cone where the plane crosses it in an ellipse (Q612), in straight lines
     /// through its apex ([`how_far_a_crossing_reaches_off_another_plane`],
-    /// Q613); an edge whose
+    /// Q613), or, for an arc, in a parabola or a hyperbola (Q1086); an edge whose
     /// crossing has none between two planes proved different is refused, which
     /// is the safe way for a missing bound to fall.
     ///
@@ -2065,6 +2065,12 @@ pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
 /// lines are kept the same way (Q613). A closed run there is left to the
 /// width, which has none for it.
 ///
+/// **A plane that misses a cone's apex, leaning at or past the cone's own
+/// angle**, crosses it in a parabola or a hyperbola, which runs on for ever and
+/// has no width. An arc of one gets the width of the arc instead, read off its
+/// two ends: [`how_wide_an_arc_of_one_branch_is`] (Q1086). A closed run there
+/// is left to the width, which has none for it, and the walk refuses it too.
+///
 /// **A ball** of radius `r` is crossed by any plane in a circle no wider than
 /// the ball, so the width is `2r`.
 ///
@@ -2079,8 +2085,8 @@ pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
 ///
 /// Worked in plain `f64` as [`off_a_plane_by_no_more_than_writing_it_down_cost`]
 /// is: the distances are what [`Plane::signed_distance_to`] rounds, and the
-/// caller's room is sixteen times that. The cone's width is the exception, and
-/// says why.
+/// caller's room is sixteen times that. The cone's two widths are the
+/// exception, and say why.
 fn how_far_a_crossing_reaches_off_another_plane(
     on: &Plane,
     off: &Plane,
@@ -2092,14 +2098,22 @@ fn how_far_a_crossing_reaches_off_another_plane(
     else {
         return None;
     };
-    if matches!(run, EdgeRun::PartOfWhereItCrosses { .. }) && the_walk_draws_it_straight(on, and) {
+    let an_arc = matches!(run, EdgeRun::PartOfWhereItCrosses { .. });
+    if an_arc && the_walk_draws_it_straight(on, and) {
         return Some(
             off.signed_distance_to(start)
                 .abs()
                 .max(off.signed_distance_to(end).abs()),
         );
     }
-    let widest = how_wide_a_plane_crosses(on, and)?;
+    let widest = if let Surface::Cone(cone) = and
+        && an_arc
+        && the_walk_draws_one_branch_of_an_endless_bend(on, cone)
+    {
+        how_wide_an_arc_of_one_branch_is(cone, [start, end])
+    } else {
+        how_wide_a_plane_crosses(on, and)?
+    };
     let tilt = on.normal().cross(off.normal()).length();
     Some(off.signed_distance_to(start).abs() + on.signed_distance_to(start).abs() + widest * tilt)
 }
@@ -2126,6 +2140,79 @@ fn the_walk_draws_it_straight(on: &Plane, and: &Surface) -> bool {
             );
     }
     false
+}
+
+/// Whether the walk draws a run between `on` and `cone` along a parabola or one
+/// branch of a hyperbola: the apex off `on`, and `E` at or below nothing.
+///
+/// The same two proved signs [`the_walk_draws_it_straight`] asks, with the
+/// apex's the other way round, and for the same reason: the walk turns on the
+/// signs of those same two numbers. A sign that could not be proved is neither
+/// shape, and leaves the arc to [`how_wide_a_plane_crosses_a_cone`], which has
+/// no width for it.
+fn the_walk_draws_one_branch_of_an_endless_bend(on: &Plane, cone: &Cone) -> bool {
+    matches!(
+        where_a_cones_apex_stands_against_a_plane(on, cone),
+        Decision::Pos | Decision::Neg
+    ) && matches!(
+        how_a_plane_leans_against_a_cone(on, cone),
+        Decision::Zero | Decision::Neg
+    )
+}
+
+/// How far apart two points of the arc between `ends` can be, where a plane
+/// that misses `cone`'s apex crosses it in a parabola or in a hyperbola: twice
+/// `H·√(1 + t²)`, for `t` the slope and `H` the larger of the two ends' heights
+/// `|(end − apex)·w|` up the unit axis `w`.
+///
+/// **An arc of one branch is highest at one of its ends.** Take two directions
+/// in the plane: `across`, square to the axis as well, and `down`, square to
+/// `across`. A step along `across` does not change the height `(X − apex)·w`,
+/// so along the branch the height changes only with how far along `down` a
+/// point is. The branch is `vertex + across·u + down·c·u²` for a parabola and
+/// `centre + down·c·cosh σ + across·b·sinh σ` for one branch of a hyperbola —
+/// the two `where_a_plane_cuts_a_cone` in `rcad-geom` derives and walks — so
+/// the height is `h₀ + k·u²` or `h₀ + k·cosh σ`. A cone holds one point at
+/// height nought, its apex, which the plane misses, so the height keeps one
+/// sign along the branch; and it grows without end, since `|X − apex|` does
+/// and is `|height|·√(1 + t²)` on a cone. So `k` has the height's sign, and
+/// `|height|` is `|h₀| + |k|·u²` or `|h₀| + |k|·cosh σ`. Both are least at the
+/// vertex and grow either side of it, and on any stretch of the parameter they
+/// are largest at one end of it. The walk draws a branch between the
+/// parameters of the run's two ends (`walk_an_endless_bend`), so an arc is one
+/// such stretch, whether it lies to one side of the vertex or runs through it.
+///
+/// **So the arc lies in the ball of radius `H·√(1 + t²)` about the apex**, and
+/// no two of its points are further apart than that ball is across.
+/// `every_point_of_an_arc_of_one_branch_is_within_the_reach_of_its_ends` walks
+/// arcs of both shapes, through the vertex and to one side of it, and finds
+/// none outside.
+///
+/// **No arc runs from one nappe to the other.** A parabola lies wholly on one;
+/// a hyperbola's two branches lie one on each, and the walk refuses a run whose
+/// two ends it cannot prove are on one side of the apex
+/// (`which_branch_of_a_hyperbola_this_run_is`), so no curve between two ends on
+/// two nappes is ever drawn for this to bound. The test file
+/// `a_closed_edge_between_two_planes_its_curve_leaves.rs` builds one, in
+/// `an_arc_from_one_branch_of_a_hyperbola_to_the_other_is_refused`.
+///
+/// What an end misses the branch by is left out, as it is for every width
+/// here: it moves `H` by no more than itself, and the width is multiplied by
+/// `|n × m|`. The heights are worked in intervals and taken at the most they
+/// can be, and `‖w‖` at the least; the products and the root at the end round
+/// by an ulp or two of the width, as the ellipse's do.
+fn how_wide_an_arc_of_one_branch_is(cone: &Cone, ends: [Point; 2]) -> f64 {
+    let along = cone.axis().direction().components().map(Interval::exactly);
+    let apex = cone.apex().coordinates().map(Interval::exactly);
+    let [one, other] = ends.map(|end| {
+        let at = end.coordinates().map(Interval::exactly);
+        let height = dot([0, 1, 2].map(|axis| at[axis] - apex[axis]), along);
+        height.lo().abs().max(height.hi().abs())
+    });
+    let slope = Interval::exactly(cone.slope());
+    // `height = (X − apex)·w/‖w‖`, and `|X − apex|` is `|height|·√(1 + t²)`.
+    let reach_per_height = (Interval::exactly(1.0) + slope * slope).hi() / dot(along, along).lo();
+    2.0 * one.max(other) * reach_per_height.sqrt()
 }
 
 /// How far apart two points of the curve `on` crosses `and` in can be, for the
@@ -2179,18 +2266,15 @@ fn how_wide_a_plane_crosses(on: &Plane, and: &Surface) -> Option<f64> {
 ///
 /// **A plane whose `E` is not proved above zero gets no width**: a parabola or
 /// a hyperbola runs on for ever, and a closed run on one names nothing the walk
-/// draws. An arc of one is refused here though the walk draws it — a bound for
-/// it would read the arc's ends, not the crossing. An arc along a straight line
-/// through the apex gets no width here either, and needs none: the caller has
-/// already bounded it by its two ends (Q613).
+/// draws. An arc of one gets no width here either, and needs none: the caller
+/// has already bounded it by its two ends, along a straight line through the
+/// apex (Q613) and along a parabola or a hyperbola alike
+/// ([`how_wide_an_arc_of_one_branch_is`], Q1086).
 fn how_wide_a_plane_crosses_a_cone(on: &Plane, cone: &Cone) -> Option<f64> {
     let normal = on.normal().components().map(Interval::exactly);
     let along = cone.axis().direction().components().map(Interval::exactly);
     let apex = cone.apex().coordinates().map(Interval::exactly);
     let slope = Interval::exactly(cone.slope());
-    let dot = |one: [Interval; 3], other: [Interval; 3]| {
-        one[0] * other[0] + one[1] * other[1] + one[2] * other[2]
-    };
     let square_to_both = [
         normal[1] * along[2] - normal[2] * along[1],
         normal[2] * along[0] - normal[0] * along[2],
@@ -2211,6 +2295,11 @@ fn how_wide_a_plane_crosses_a_cone(on: &Plane, cone: &Cone) -> Option<f64> {
             * dot(along, along).hi()
             / leaning.lo(),
     )
+}
+
+/// `one·other`, with every rounding on the way taken outward.
+fn dot(one: [Interval; 3], other: [Interval; 3]) -> Interval {
+    one[0] * other[0] + one[1] * other[1] + one[2] * other[2]
 }
 
 /// Every one of `held` named exactly once by `named`, and none of them left out.
@@ -4252,16 +4341,16 @@ fn magnitude_of(tag: Option<Approximation>) -> f64 {
 #[cfg(test)]
 mod tests {
     use rcad_geom::{
-        Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface,
-        Torus, Vector,
+        Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, NamedRun, Orientation,
+        Picker, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
     };
-    use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
+    use rcad_predicates::{Approximation, Cause, Point as PredicatePoint, Policy, ProvenanceLog};
     use smallvec::SmallVec;
 
     use super::{
         Decision, Scope, a_circle_round_the_axis, a_closed_crossing_is_walked_the_way_it_is_stored,
-        as_coarse_as_a_mesh_gets, gradient_of, hand_on_a_refusal_that_found_the_space, winding_of,
-        winding_round,
+        as_coarse_as_a_mesh_gets, gradient_of, hand_on_a_refusal_that_found_the_space,
+        how_wide_an_arc_of_one_branch_is, winding_of, winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -6288,5 +6377,97 @@ mod tests {
             .is_ok(),
             "the floor still stops the ladder"
         );
+    }
+
+    /// The bound [`how_wide_an_arc_of_one_branch_is`] publishes: every point of
+    /// an arc of a parabola or of one branch of a hyperbola is within half that
+    /// width of the cone's apex.
+    ///
+    /// Walked finely on the lid `z = 4`: arcs of a parabola running through its
+    /// vertex, evenly and not, to one side of it, and from it; arcs of a
+    /// hyperbola's branch on each nappe, through the vertex, from it and to one
+    /// side of it. Each is walked both ways round, and every point the walk puts
+    /// down is inside the ball, give or take how far the walk says its points may
+    /// stray.
+    #[test]
+    fn every_point_of_an_arc_of_one_branch_is_within_the_reach_of_its_ends() {
+        let lid =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a plane");
+        // The lid crosses this one in `x = 1 − y²`.
+        let parabola = Cone::new(
+            Axis::new(Point::new(1.0, 0.0, 3.5), Vector::new(-1.0, 0.0, 1.0)).expect("an axis"),
+            1.0,
+        )
+        .expect("a cone");
+        let on_the_parabola = |y: f64| Point::new(1.0 - y * y, y, 4.0);
+        // And this one in `(x − 1.25)² = y² + 0.75²`, whose branch at `x ≤ 0.5`
+        // is on one nappe and whose branch at `x ≥ 2` is on the other.
+        let hyperbola = Cone::new(
+            Axis::new(Point::new(1.25, 0.0, 3.25), Vector::new(-1.0, 0.0, 0.0)).expect("an axis"),
+            1.0,
+        )
+        .expect("a cone");
+        let near = |[y, x]: [f64; 2]| Point::new(1.25 - x, y, 4.0);
+        let far = |[y, x]: [f64; 2]| Point::new(1.25 + x, y, 4.0);
+        let below = |[y, x]: [f64; 2]| [-y, x];
+        // `y² + 0.75² = x²` at the vertex, and on the triangles 3-4-5 and 8-15-17.
+        let [vertex, three_four_five, eight_fifteen] =
+            [[0.0, 0.75], [1.0, 1.25], [1.40625, 1.59375]];
+        let arcs = [
+            (parabola, [on_the_parabola(-2.0), on_the_parabola(2.0)]),
+            (parabola, [on_the_parabola(-1.0), on_the_parabola(2.0)]),
+            (parabola, [on_the_parabola(0.5), on_the_parabola(2.0)]),
+            (parabola, [on_the_parabola(0.0), on_the_parabola(-1.5)]),
+            (
+                hyperbola,
+                [near(below(three_four_five)), near(eight_fifteen)],
+            ),
+            (hyperbola, [near(vertex), near(eight_fifteen)]),
+            (hyperbola, [near(three_four_five), near(eight_fifteen)]),
+            (hyperbola, [far(below(eight_fifteen)), far(three_four_five)]),
+            (hyperbola, [far(vertex), far(below(three_four_five))]),
+        ];
+        let under_everything = HalfSpace::through_a_point_facing(
+            Point::new(0.0, 0.0, 100.0),
+            Vector::new(0.0, 0.0, -1.0),
+        )
+        .expect("a half-space");
+        let mut outside = Vec::new();
+        for (cone, ends) in arcs {
+            let reach = how_wide_an_arc_of_one_branch_is(&cone, ends) / 2.0;
+            for [from, to] in [ends, [ends[1], ends[0]]] {
+                let run = NamedRun::new(
+                    EdgeRun::PartOfWhereItCrosses {
+                        and: Surface::Cone(cone),
+                        picked_by: smallvec::smallvec![Picker::from(under_everything)],
+                    },
+                    [from, to].map(|end| PredicatePoint::from(end.coordinates())),
+                )
+                .expect("a run");
+                let walked = rcad_geom::walk(
+                    &run,
+                    [&Surface::Plane(lid), &Surface::Plane(lid)],
+                    Deflection::of(1e-6).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("the walk draws the arc");
+                assert!(
+                    walked.points().len() > 10,
+                    "{from:?} to {to:?} walked too coarsely"
+                );
+                let stray = walked.deviation().magnitude();
+                for point in walked.points() {
+                    let from_the_apex = (*point - cone.apex()).length();
+                    if from_the_apex > reach + stray {
+                        outside.push(format!(
+                            "{point:?} on {from:?} to {to:?}: {from_the_apex} from the apex, past {reach}"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(outside.is_empty(), "{outside:#?}");
     }
 }

@@ -35,6 +35,12 @@
 //! circle is then off the other plane by less than writing a plane down costs.
 //! With the inner piece leaning a little further, so that the far side really
 //! is off by more than that, every one of them is still refused.
+//!
+//! **The half disc's arc may name a cone the lid crosses in a parabola or a
+//! hyperbola**, which runs on for ever and has no width. A hair off the lid
+//! that arc still builds, bounded by its two ends (Q1086), and leaning further
+//! it is still refused. An arc from one branch of a hyperbola to the other is
+//! no arc, and the walk refuses it.
 
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Scale,
@@ -367,6 +373,114 @@ fn a_disc_leaning_off_the_lid_past_what_writing_a_plane_down_costs_is_still_refu
     assert!(not_refused.is_empty(), "{not_refused:#?}");
 }
 
+/// The half disc's arc naming a cone the lid crosses in a parabola, or in one
+/// branch of a hyperbola, with the half disc one ulp above the lid and leaning
+/// `1e-14` off it. Each builds and passes the sweep (Q1086). The far side of
+/// the arc is then at most `1e-14` off the other plane, against the `5.7e-14`
+/// the bar has room for.
+///
+/// The lean is the way that keeps the half disc's own plane crossing the
+/// parabola's cone in a hyperbola, and that leaning half disc only with the lid
+/// listed first: with the half disc first the walk refuses to name which branch
+/// of that hyperbola, a lean off the lid's parabola, the arc is on —
+/// `CannotNameWhichPieceOfACrossingThisIs`, the walk's refusal and not this
+/// check's. Leaning the other way, the half disc's plane crosses that cone in an
+/// ellipse, whose width is the whole ellipse's, and the bar is refused
+/// `AnArcBetweenTwoFlatFacesOnDifferentPlanes` either way round.
+#[test]
+fn a_half_disc_a_hair_off_the_lid_builds_when_its_arc_is_a_parabola_or_a_hyperbola() {
+    let leaning = leaning_off_the_lid_through(Point::new(0.0, 0.0, 4.0), -1e-14);
+    let parabola = a_cone_the_lid_crosses_in_a_parabola();
+    let hyperbola = a_cone_the_lid_crosses_in_a_hyperbola();
+    let mut not_built = Vec::new();
+    for (named, half, half_first) in [
+        (parabola, the_lid_one_ulp_higher(), false),
+        (parabola, the_lid_one_ulp_higher(), true),
+        (parabola, leaning, false),
+        (hyperbola, the_lid_one_ulp_higher(), false),
+        (hyperbola, the_lid_one_ulp_higher(), true),
+        (hyperbola, leaning, false),
+        (hyperbola, leaning, true),
+    ] {
+        let (model, built) = a_bar_with_its_lid_split_by_a_half_disc(named, half, half_first);
+        let swept =
+            built.and_then(|_| model.validate(&Policy::certified(), &mut ProvenanceLog::new()));
+        if let Err(why) = swept {
+            not_built.push(format!(
+                "{named:?} on {half:?}, half disc first {half_first}: {why:?}"
+            ));
+        }
+    }
+    assert!(not_built.is_empty(), "{not_built:#?}");
+}
+
+/// An arc naming the cone the lid crosses in a hyperbola, from `(0, −1, 4)` on
+/// the branch nearer the bar's axis to `(2.5, 1, 4)` on the other branch, which
+/// is on the cone's other nappe. No curve on the lid runs between the two, so
+/// there is no arc for the bound read off its ends to cover: with the piece it
+/// closes off one ulp above the lid, which is where that bound is asked, the bar
+/// is refused whichever face is listed first, by the walk, which will not name
+/// a branch for two ends on two sides of the apex.
+#[test]
+fn an_arc_from_one_branch_of_a_hyperbola_to_the_other_is_refused() {
+    let y_at_least_minus_one =
+        HalfSpace::through_a_point_facing(Point::new(0.0, -1.0, 0.0), Vector::new(0.0, 1.0, 0.0))
+            .expect("a half-space");
+    let run = EdgeRun::PartOfWhereItCrosses {
+        and: a_cone_the_lid_crosses_in_a_hyperbola(),
+        picked_by: smallvec::smallvec![Picker::from(y_at_least_minus_one)],
+    };
+    for inner_first in [false, true] {
+        let (_, built) = a_bar_with_its_lid_split_by_an_arc_and_its_chord(
+            run.clone(),
+            [Point::new(0.0, -1.0, 4.0), Point::new(2.5, 1.0, 4.0)],
+            the_lid_one_ulp_higher(),
+            inner_first,
+        );
+
+        assert!(
+            matches!(
+                built,
+                Err(Error::Geometry(
+                    rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+                ))
+            ),
+            "inner piece first {inner_first}: the builder gave {built:?}"
+        );
+    }
+}
+
+/// The same two arcs with the half disc leaning `2e-13` off the lid either way,
+/// which puts the parabola's lowest point `(1, 0, 4)` `2e-13` off the other
+/// plane and the hyperbola's `(0.5, 0, 4)` `1e-13`, against the `5.7e-14` the
+/// bar has room for. Every one is still refused.
+#[test]
+fn a_half_disc_leaning_past_the_room_is_still_refused_when_its_arc_is_a_parabola_or_a_hyperbola() {
+    let mut not_refused = Vec::new();
+    for named in [
+        a_cone_the_lid_crosses_in_a_parabola(),
+        a_cone_the_lid_crosses_in_a_hyperbola(),
+    ] {
+        for lean in [2e-13, -2e-13] {
+            let half = leaning_off_the_lid_through(Point::new(0.0, 0.0, 4.0), lean);
+            for half_first in [false, true] {
+                let (_, built) = a_bar_with_its_lid_split_by_a_half_disc(named, half, half_first);
+                if !matches!(
+                    built,
+                    Err(Error::Invalid(
+                        Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes
+                    ))
+                ) {
+                    not_refused.push(format!(
+                        "{named:?} leaning {lean}, half disc first {half_first}: {built:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(not_refused.is_empty(), "{not_refused:#?}");
+}
+
 /// The bar whose circle names `named`, with the inner piece one ulp above the
 /// lid and then leaning `1e-14` off it, builds and passes the sweep.
 ///
@@ -418,6 +532,28 @@ fn three_cones() -> [Surface; 3] {
         let axis = Axis::new(Point::new(0.0, 0.0, apex), up()).expect("an axis");
         Surface::Cone(Cone::new(axis, slope).expect("a cone"))
     })
+}
+
+/// The cone of slope 1 with its apex at `(1, 0, 3.5)`, half a unit under the
+/// lid, about `(−1, 0, 1)`: one of its straight lines runs level along `−x`, so
+/// the lid crosses it in the parabola `x = 1 − y²`. That runs through the half
+/// disc's two corners `(0, ±1, 4)`, and the half of it at `x ≥ 0` goes round
+/// through `(1, 0, 4)`, its point nearest the apex.
+fn a_cone_the_lid_crosses_in_a_parabola() -> Surface {
+    let axis = Axis::new(Point::new(1.0, 0.0, 3.5), Vector::new(-1.0, 0.0, 1.0)).expect("an axis");
+    Surface::Cone(Cone::new(axis, 1.0).expect("a cone"))
+}
+
+/// The cone of slope 1 lying on its side, with its apex at `(1.25, 0, 3.25)`
+/// and its axis along `−x`, so the lid crosses it in the hyperbola
+/// `(x − 1.25)² = y² + 0.75²`. The branch nearer the bar's axis runs through
+/// the half disc's two corners `(0, ±1, 4)`, and the half of it at `x ≥ 0`
+/// goes round through `(0.5, 0, 4)`, its point nearest the apex. The other
+/// branch is on the other nappe, at `x ≥ 2`.
+fn a_cone_the_lid_crosses_in_a_hyperbola() -> Surface {
+    let axis =
+        Axis::new(Point::new(1.25, 0.0, 3.25), Vector::new(-1.0, 0.0, 0.0)).expect("an axis");
+    Surface::Cone(Cone::new(axis, 1.0).expect("a cone"))
 }
 
 /// The torus about the bar's axis, centred in the lid, whose outer circle on the
@@ -511,25 +647,28 @@ fn a_bar_with_its_lid_split_by_a_half_disc(
     half: Plane,
     half_first: bool,
 ) -> (Model, Result<SolidKey>) {
-    a_bar_whose_lid_is_split(half, half_first, |builder| {
-        let south = builder
-            .add_vertex(Point::new(0.0, -1.0, 4.0))
-            .expect("a corner");
-        let north = builder
-            .add_vertex(Point::new(0.0, 1.0, 4.0))
-            .expect("a corner");
-        let east = HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))
-            .expect("a half-space");
-        let arc = builder
-            .add_edge(
-                south,
-                north,
-                EdgeRun::PartOfWhereItCrosses {
-                    and: named,
-                    picked_by: smallvec::smallvec![Picker::from(east)],
-                },
-            )
-            .expect("an edge");
+    let east = HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+        .expect("a half-space");
+    let run = EdgeRun::PartOfWhereItCrosses {
+        and: named,
+        picked_by: smallvec::smallvec![Picker::from(east)],
+    };
+    let corners = [Point::new(0.0, -1.0, 4.0), Point::new(0.0, 1.0, 4.0)];
+    a_bar_with_its_lid_split_by_an_arc_and_its_chord(run, corners, half, half_first)
+}
+
+/// The lid split by an arc that runs `run` between two corners on it and by
+/// the chord back between them, the piece they close off on `inner`.
+fn a_bar_with_its_lid_split_by_an_arc_and_its_chord(
+    run: EdgeRun,
+    [from, to]: [Point; 2],
+    inner: Plane,
+    inner_first: bool,
+) -> (Model, Result<SolidKey>) {
+    a_bar_whose_lid_is_split(inner, inner_first, |builder| {
+        let south = builder.add_vertex(from).expect("a corner");
+        let north = builder.add_vertex(to).expect("a corner");
+        let arc = builder.add_edge(south, north, run).expect("an edge");
         let chord = builder
             .add_edge(north, south, EdgeRun::Straight)
             .expect("an edge");
