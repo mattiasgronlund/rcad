@@ -92,15 +92,16 @@
 //!   steps shorter as well, and one of them is inside the piece
 //!   (`a_frustums_wall_cut_below_a_blocks_floor.rs`).
 //!
-//!   **Turned 0.4 about `x`, the frustum cut along its seam is refused before
-//!   any corner is asked about** (Q1044, §294.10). The bar turned the same way
-//!   answers since §294.9, but the frustum and every moved corner refuse
-//!   `CannotNameWhichPieceOfACrossingThisIs`, under both policies. The block's
-//!   face along the seam runs through the cone's apex, so the two cross in two
-//!   rulings through it, and `rcad_geom::intersect` names those only along a
-//!   direction `f64` writes down exactly on both surfaces. Turned, the
-//!   directions it works out are in the face and inside the cone. Unturned,
-//!   the same cut is half the frustum, `26π/3`, so the answer exists.
+//!   **Turned 0.4 about `x`, the frustum cut along its seam refuses at its
+//!   bottom seam corner under `certified`, and answers under a tolerant
+//!   policy** (Q1171, §294.11). The block's face along the seam runs through
+//!   the cone's apex, so the two cross in two rulings through it, along
+//!   directions no `f64`s write. Until Q1171 `rcad_geom::intersect` refused
+//!   them, `CannotNameWhichPieceOfACrossingThisIs`, under both policies
+//!   (Q1044, §294.10); it names the four halves the apex cuts them into now.
+//!   The fuse then stops at `side of plane` at the bottom seam corner's box,
+//!   the bar's refusal before §294.9, and under `tolerant(100)` gives half the
+//!   frustum, `26π/3`, and the moved corners' unturned outcomes.
 //!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
@@ -108,7 +109,7 @@
 use std::f64::consts::PI;
 
 use rcad_geom::{
-    Axis, Cone, Deflection, Isometry, Plane, Point, Scale, Surface, Vector,
+    Axis, Cone, Deflection, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Vector,
     how_a_plane_leans_against_a_cone, intersect, where_a_cones_apex_stands_against_a_plane,
 };
 use rcad_predicates::{Decision, Policy, ProvenanceLog};
@@ -350,8 +351,6 @@ enum Outcome {
     Undecidable(&'static str),
     CannotTellTheCellsOfAFaceApart,
     TwoCurvesTouchWithoutCrossing,
-    /// `Error::Geometry` carrying `CannotNameWhichPieceOfACrossingThisIs`.
-    CannotNameWhichPieceOfACrossingThisIs,
 }
 
 #[test]
@@ -888,21 +887,31 @@ fn the_sound_frustum_less_a_block_over_its_top_or_its_rim_holds_what_the_two_say
     }
 }
 
-/// **Turned, the frustum cut along its seam is refused before any corner is
-/// asked about.** Turned 0.4 about `x`, the sound frustum less the half past
-/// its seam, and with it, refuse `CannotNameWhichPieceOfACrossingThisIs`, and
-/// so does every moved corner, under both policies. It is not the round bar's
-/// `side of plane` at a seam corner's box (§294.9): the fuse stops earlier,
-/// where the block's face crosses the cone
-/// (`the_face_along_a_turned_frustums_seam_crosses_its_cone_in_two_rulings_nothing_names`).
+/// **Turned, the frustum cut along its seam gets past its apex, and under
+/// `certified` refuses one step on, at its bottom seam corner.** Until Q1171
+/// every fuse here refused `CannotNameWhichPieceOfACrossingThisIs` where the
+/// block's face crosses the cone. `intersect` names the four half rulings now
+/// (`the_face_along_a_turned_frustums_seam_crosses_its_cone_in_four_half_rulings`),
+/// and the fuse goes on to the seam corner `(1, 0, 2)` turned, whose box it
+/// cannot place against the block's face: `side of plane` is `Undecidable`
+/// there for the sound frustum and every moved corner. That is the round bar's
+/// refusal before §294.9, on a cone (Q1164).
 ///
-/// The answer exists. Unturned, both rules give half the frustum, `26π/3`, and
-/// a turn moves no volume (§294.10).
+/// Under `tolerant(100)` the sound frustum answers both rules with half the
+/// frustum, `26π/3`, measured on a fine mesh, its corners the unturned answer's
+/// turned to a rounding. The moved corners give what they give unturned
+/// (`a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives`), with the
+/// turned bar's one difference: the corner moved a quarter turn round is cut
+/// away and gives the sound answer to a rounding, not to the bit, since the
+/// top seam corner is then placed where the block's face crosses the top
+/// circle.
 #[test]
-fn a_turned_frustum_cut_along_its_seam_is_refused_where_the_cut_runs_through_its_apex() {
+fn a_turned_frustum_cut_along_its_seam_is_named_through_its_apex_and_refused_at_its_seam_corner() {
     let half_the_frustum = 26.0 * PI / 3.0;
-    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        for rule in [Rule::Difference, Rule::Intersection] {
+    let tolerant = Policy::tolerant(100.0);
+    for rule in [Rule::Difference, Rule::Intersection] {
+        let mut unturned_under = Vec::new();
+        for policy in [Policy::certified(), tolerant] {
             let unturned = fuse(
                 Shape::Frustum(Isometry::identity()),
                 WHERE_THE_FRUSTUM_PUTS_IT,
@@ -912,34 +921,70 @@ fn a_turned_frustum_cut_along_its_seam_is_refused_where_the_cut_runs_through_its
             )
             .unwrap_or_else(|why| panic!("the unturned frustum, {rule:?}, refused: {why:?}"));
             holds(&unturned, half_the_frustum, rule, &policy);
-            for moved_to in [
-                WHERE_THE_FRUSTUM_PUTS_IT,
-                THE_FRUSTUMS_CORNER_OFF_THE_WALL,
-                THE_FRUSTUMS_CORNER_OFF_THE_CAP,
-                THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND,
-            ] {
-                check(
-                    Shape::Frustum(the_turn()),
-                    moved_to,
-                    THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
-                    rule,
-                    &policy,
-                    Outcome::CannotNameWhichPieceOfACrossingThisIs,
-                );
-            }
+            unturned_under.push(unturned);
+        }
+        for moved_to in [
+            WHERE_THE_FRUSTUM_PUTS_IT,
+            THE_FRUSTUMS_CORNER_OFF_THE_WALL,
+            THE_FRUSTUMS_CORNER_OFF_THE_CAP,
+            THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND,
+        ] {
+            check(
+                Shape::Frustum(the_turn()),
+                moved_to,
+                THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+                rule,
+                &Policy::certified(),
+                Outcome::Undecidable("side of plane"),
+            );
+        }
+
+        let turned = fuse(
+            Shape::Frustum(the_turn()),
+            WHERE_THE_FRUSTUM_PUTS_IT,
+            THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+            rule,
+            &tolerant,
+        )
+        .unwrap_or_else(|why| panic!("the turned frustum, {rule:?}, refused: {why:?}"));
+        holds(&turned, half_the_frustum, rule, &tolerant);
+        the_same_corners_to_a_rounding(&turned, &unturned_under[1], &the_turn(), rule);
+        let cut_away = fuse(
+            Shape::Frustum(the_turn()),
+            THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND,
+            THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+            rule,
+            &tolerant,
+        )
+        .unwrap_or_else(|why| panic!("the corner cut away, {rule:?}, refused: {why:?}"));
+        holds(&cut_away, half_the_frustum, rule, &tolerant);
+        the_same_corners_to_a_rounding(&cut_away, &turned, &Isometry::identity(), rule);
+        for moved_to in [
+            THE_FRUSTUMS_CORNER_OFF_THE_WALL,
+            THE_FRUSTUMS_CORNER_OFF_THE_CAP,
+        ] {
+            check(
+                Shape::Frustum(the_turn()),
+                moved_to,
+                THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+                rule,
+                &tolerant,
+                Outcome::CannotTellTheCellsOfAFaceApart,
+            );
         }
     }
 }
 
-/// **Where the turned frustum's refusal is raised: `rcad_geom::intersect`,
-/// on the frustum's cone and the block's face along the seam.** That face runs
+/// **The turned frustum's cone and the block's face along the seam cross in
+/// four half rulings, which `rcad_geom::intersect` names.** That face runs
 /// through the cone's apex at the origin and is steeper than the cone, so the
-/// two cross in two rulings through the apex, and `intersect` names them only
-/// along a direction `f64` writes down exactly on both surfaces. Unturned it
-/// does. Turned, the directions it works out lie in the face and inside the
-/// cone, and it refuses (§294.10).
+/// two cross in two rulings through the apex. Unturned, `intersect` names the
+/// two whole, along directions `f64` writes down exactly on both surfaces.
+/// Turned, no such direction exists (§294.11), and it names the four halves the
+/// apex cuts the two into, each by a corner of two flat surfaces through the
+/// apex. It refused the turned pair until Q1171 (§294.10).
 #[test]
-fn the_face_along_a_turned_frustums_seam_crosses_its_cone_in_two_rulings_nothing_names() {
+fn the_face_along_a_turned_frustums_seam_crosses_its_cone_in_four_half_rulings() {
     let policy = Policy::certified();
     for placement in [Isometry::identity(), the_turn()] {
         let (mut model, frustum) = read_back(Shape::Frustum(placement), WHERE_THE_FRUSTUM_PUTS_IT);
@@ -990,17 +1035,19 @@ fn the_face_along_a_turned_frustums_seam_crosses_its_cone_in_two_rulings_nothing
             &policy,
             &mut ProvenanceLog::new(),
         );
-        if placement == Isometry::identity() {
-            assert!(met.is_ok(), "unturned, the two rulings are named: {met:?}");
+        let Ok(SurfaceMeet::Curves(runs)) = met else {
+            panic!("{placement:?}: the crossing is named: {met:?}");
+        };
+        let how_many = if placement == Isometry::identity() {
+            2
         } else {
-            assert!(
-                matches!(
-                    met,
-                    Err(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
-                ),
-                "turned, the two rulings are not named: {met:?}"
-            );
-        }
+            4
+        };
+        assert_eq!(
+            runs.len(),
+            how_many,
+            "{placement:?}: two whole rulings unturned, four halves turned"
+        );
     }
 }
 
@@ -1085,8 +1132,7 @@ fn check(
         }
         Outcome::Undecidable(_)
         | Outcome::CannotTellTheCellsOfAFaceApart
-        | Outcome::TwoCurvesTouchWithoutCrossing
-        | Outcome::CannotNameWhichPieceOfACrossingThisIs => {
+        | Outcome::TwoCurvesTouchWithoutCrossing => {
             refuses_as(shape, moved_to, partner, rule, policy, outcome);
         }
     }
@@ -1120,10 +1166,6 @@ fn refuses_as(
         Outcome::TwoCurvesTouchWithoutCrossing => {
             matches!(refused, Error::TwoCurvesTouchWithoutCrossing { .. })
         }
-        Outcome::CannotNameWhichPieceOfACrossingThisIs => matches!(
-            refused,
-            Error::Geometry(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
-        ),
         Outcome::ItBlamesItself | Outcome::TheSoundAnswer => {
             unreachable!("{refusal:?} is not a refusal")
         }

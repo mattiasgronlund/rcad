@@ -135,6 +135,14 @@ fn steeper_planes_across_the_frustum(lean: f64) -> Vec<Case> {
 /// share both arcs and at the coarsest mesh both draw the side between the arcs'
 /// middles (§285.4). That mesh retries a fold at half the room now, and both
 /// answer right.
+///
+/// **All thirty-two answer right since Q1171.** The eight that were left
+/// refused `CannotNameWhichPieceOfACrossingThisIs` were the block whose steep
+/// face runs through the apex, lean a quarter and crossing `0`, turned 3 and
+/// 3.5. That face cuts the cone in two rulings along `(¼, ±√3/4, 1)`, which no
+/// three `f64`s write, so `intersect` could not name them whole; it names the
+/// four halves the apex cuts them into now (§294.11), and each of the eight is
+/// held to the four checks at the top of this file.
 #[test]
 fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
     let mut cases = Vec::new();
@@ -150,8 +158,8 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 24,
-            refused: [("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 8)].into()
+            right: 32,
+            refused: [].into()
         }
     );
 }
@@ -192,22 +200,25 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
 /// `0.002`. The two at lean one quarter still do not measure at `0.002`, and
 /// `the_eighteen_held_to_the_familys_four_checks` says why.
 ///
+/// **The sixteen that could not name a piece answer right since Q1171**, each
+/// held to the same four checks. They are the faces through the apex, turned
+/// `0` or `3`, eight at each lean. Such a face cuts the cone in two rulings
+/// along `(¼, ±√3/4, 1)` at a quarter and `(⅜, ±√7/8, 1)` at three eighths,
+/// which no three `f64`s write, so `intersect` could not name them whole; it
+/// names the four halves the apex cuts them into now (§294.11). The face runs
+/// down past the apex, so all four halves cross it, two of them along the
+/// other nappe.
+///
 /// **The family is two tests, one per lean**, so that neither sets the slow
 /// tier's wall (`docs/decisions.md` §397.4). Their tallies add up to the counts
-/// above: each lean has eight of the sixteen that cannot name a piece, all
-/// through the apex and turned `0` or `3`, and the two that do not measure are
-/// at a quarter.
+/// above: the two that do not measure are at a quarter.
 #[test]
 fn a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_a_quarter_answers_right_or_refuses() {
     assert_eq!(
         tally(&steeper_faces_near_the_pointed_cones_apex(0.25)),
         Tally {
-            right: 38,
-            refused: [
-                ("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 8),
-                ("the answer does not measure: CannotMeshAFace", 2),
-            ]
-            .into()
+            right: 46,
+            refused: [("the answer does not measure: CannotMeshAFace", 2)].into()
         }
     );
 }
@@ -217,8 +228,8 @@ fn a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_three_eighths_answers_r
     assert_eq!(
         tally(&steeper_faces_near_the_pointed_cones_apex(0.375)),
         Tally {
-            right: 40,
-            refused: [("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 8)].into()
+            right: 48,
+            refused: [].into()
         }
     );
 }
