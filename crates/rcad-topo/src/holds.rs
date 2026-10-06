@@ -1591,8 +1591,12 @@ fn is_one_circle_cut_in_two(
 /// **One face is one of two pieces in front of every cut, and is told from the
 /// other**: a wall of a bar with two flats, where the part of the pipe between
 /// the flats is a run of rulings round each side
-/// ([`one_of_two_runs_between_two_flats`]). Step 3 then holds of each piece on
-/// its own, and the point is asked which half of the pipe it is in as well.
+/// ([`one_of_two_runs_between_two_flats`]), and the skin of a frustum under a
+/// roof whose ridge is square to the axis, where the part of the cone between
+/// the roof's two planes is a run each side of the ridge
+/// ([`one_of_two_runs_of_a_cone_under_two_planes`]). Step 3 then holds of each
+/// piece on its own, and the point is asked which half round the axis it is in
+/// as well.
 ///
 /// **A ruling between two patches of one pipe may be read against more than one
 /// plane**, where no flat face of the solid holds it
@@ -1722,7 +1726,11 @@ fn what_the_part_in_front_of_its_cuts_holds(
     let one_of_two_runs = if is_a_family_this_follows(surface, &cuts) {
         None
     } else {
-        let Some(run) = one_of_two_runs_between_two_flats(face, surface, sides, &cuts)? else {
+        let run = match one_of_two_runs_between_two_flats(face, surface, sides, &cuts)? {
+            Some(run) => Some(run),
+            None => one_of_two_runs_of_a_cone_under_two_planes(face, surface, sides, &cuts)?,
+        };
+        let Some(run) = run else {
             return Ok(None);
         };
         Some(run)
@@ -3375,7 +3383,50 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// whose region is two pieces round `±90°` with nothing along `±x`. Telling that
 /// apart from a three-cut region that is one piece wants the arcs' ends compared,
 /// which is where two roofs meet on the cone — a part with no named consumer
-/// (§13); the lens, the one face that asked, has two cuts.
+/// (§13); the lens, the one face that asked, has two cuts. One such pair is told
+/// apart, and not here: a floor square to the axis under two planes that meet
+/// in a ridge square to the axis leaves a run each side of the plane through
+/// the axis along the ridge, and
+/// [`one_of_two_runs_of_a_cone_under_two_planes`] says which the face is.
+///
+/// # Or one cut the apex is behind that does not close, beside cuts square to the axis or side by side with it
+///
+/// A plane leaning more steeply than the cone's side cuts the face's nappe in
+/// a hyperbola's branch, or in a parabola, and a frustum's skin cut to
+/// `2x − z ≥ 1` is bounded by such a branch and by its top circle
+/// (`a_chip_cut_from_a_frustum_in_two_steps_is_refused_as_not_a_manifold`).
+/// With `g + t·a(φ)` the cut along the ruling at `φ` as above, `a(φ)` is
+/// positive now only on one arc `I` of the circle of rulings, since it is
+/// affine in `cos φ` and `sin φ` and the curve not closing is exactly a ruling
+/// along the plane, where `a(φ)` is zero. A ruling in `I` crosses the cut once,
+/// at `α(φ) = −g/a(φ)`, and keeps what lies past it; a ruling outside `I` never
+/// reaches it. So the part in front of this cut is the rulings of `I`, each
+/// past `α(φ)`, which run along the branch: one piece.
+///
+/// Another cut `h + t·b(φ) ≥ 0`, with the apex strictly in front, `h > 0`,
+/// leaves a ruling of `I` a point exactly where it holds the branch's point
+/// on it: `h + α(φ)·b(φ) ≥ 0`, which is `h·a(φ) − g·b(φ) ≥ 0` multiplied
+/// through by `a(φ) > 0`. **Two kinds of cut leave that one arc**, and only
+/// they are admitted:
+///
+/// - **Square to the axis**, `b(φ)` is one number `β` for every ruling, and the
+///   condition is `a(φ) ≥ g·β/h`: the rulings of `I` where `a` is at least some
+///   number, which, `a` being affine in `cos φ` and `sin φ`, is one arc inside
+///   `I`, or all of it, or none. The frustum's top is that.
+/// - **Side by side with it**, `b(φ) = μ·a(φ)` and the condition is
+///   `a(φ)·(h − g·μ) ≥ 0`: all of `I` or none, as above.
+///
+/// Each keeps the rulings where `a` is at least its own number, so any number
+/// of them keep the rulings where it is at least the largest: one arc, each
+/// ruling's piece hanging off the branch, one piece. **Any other cut is
+/// refused, and that is a gap**: its arc of rulings meets `I`, which is not the
+/// whole circle, and two arcs can meet in two, so the region can be two pieces
+/// along the branch's two arms with nothing at its vertex. A cut whose normal
+/// lies in the plane of the first's and the axis gives such a pair when it
+/// keeps the arms and not the vertex, and keeps one arc when it keeps the
+/// vertex; the second is the chip's `2x + z ≤ 11`, which this does not yet tell
+/// from the first. So is a cut through the apex beside a branch, whose
+/// `h·a(φ) − g·b(φ)` is `−g·b(φ)`, an arc of its own.
 ///
 /// **Two cuts the apex is behind are refused, and that is a gap and not a
 /// limit.** There the region really can be two pieces. On the cone of slope one
@@ -3444,18 +3495,27 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
                 }
                 behind.push(flat);
             }
+            let planes = || cuts.iter().filter_map(|cut| cut.surface.as_plane());
             match (through_the_apex.as_slice(), behind.as_slice()) {
                 ([] | [_], []) => true,
-                ([] | [_], [flat]) => {
-                    let not_side_by_side = cuts
-                        .iter()
-                        .filter_map(|cut| cut.surface.as_plane())
+                ([] | [_], [flat]) if cone.is_cut_in_a_closed_curve_by(flat) == Some(true) => {
+                    let not_side_by_side = planes()
                         .filter(|other| !the_normals_lie_along_one_line(flat, other))
                         .count();
-                    not_side_by_side <= 1 && cone.is_cut_in_a_closed_curve_by(flat) == Some(true)
+                    not_side_by_side <= 1
+                }
+                ([], [flat]) => {
+                    let up = cone.axis().direction().components();
+                    cone.is_cut_in_a_closed_curve_by(flat) == Some(false)
+                        && planes().all(|other| {
+                            the_normals_lie_along_one_line(flat, other)
+                                || lie_along_one_line(other.normal().components(), up)
+                        })
                 }
                 ([one, other], []) => do_two_planes_through_the_apex_meet_inside(cone, one, other),
-                ([] | [_], [_, _, ..]) | ([_, _], [_, ..]) | ([_, _, _, ..], _) => false,
+                ([_], [_]) | ([] | [_], [_, _, ..]) | ([_, _], [_, ..]) | ([_, _, _, ..], _) => {
+                    false
+                }
             }
         }
         Surface::Cylinder(pipe) => {
@@ -3697,10 +3757,12 @@ fn do_two_planes_along_the_axis_meet_inside(
     (dot(off_the_axis, off_the_axis) - radius * radius * squared * squared).sign() == Decision::Neg
 }
 
-/// A pipe face that is one of the two runs of rulings two parallel flats keep
-/// between them, moved into place, with the half of the pipe it is in.
+/// A pipe or cone face that is one of two runs of rulings, moved into place,
+/// with the half round the axis it is in: two parallel flats along a pipe
+/// ([`one_of_two_runs_between_two_flats`]), or two planes under a cone's floor
+/// ([`one_of_two_runs_of_a_cone_under_two_planes`]).
 struct OneOfTwoRuns {
-    pipe: rcad_geom::Cylinder,
+    axis: rcad_geom::Axis,
     flat: Plane,
     half: Decision,
 }
@@ -3796,7 +3858,8 @@ fn one_of_two_runs_between_two_flats(
 
     let mut half = None;
     for corner in sides.iter().flat_map(|side| [side.start, side.end]) {
-        let found = which_half_of_the_pipe(pipe, one_flat, exactly(corner.at.coordinates()));
+        let found =
+            which_half_round_the_axis(&pipe.axis(), one_flat, exactly(corner.at.coordinates()));
         match found {
             Decision::Pos | Decision::Neg if half.is_none_or(|known| known == found) => {
                 half = Some(found);
@@ -3817,7 +3880,7 @@ fn one_of_two_runs_between_two_flats(
         panic!("a plane moved into place is a plane");
     };
     Ok(Some(OneOfTwoRuns {
-        pipe: placed_pipe,
+        axis: placed_pipe.axis(),
         flat: placed_flat,
         half,
     }))
@@ -3852,17 +3915,202 @@ fn crosses_the_pipe_in_two_rulings(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
     off_the_axis_against_the_radius(pipe, flat) == Decision::Neg
 }
 
-/// Which side of the plane through `pipe`'s axis square to `flat` the box `at`
-/// is on: the sign of `(at − o)·(n × w)`, with `o` the axis origin, `w` its
-/// direction and `n` the flat's normal, as stored. Interval arithmetic: a sign
-/// it cannot settle reads [`Decision::Undecidable`].
-fn which_half_of_the_pipe(pipe: &rcad_geom::Cylinder, flat: &Plane, at: [Interval; 3]) -> Decision {
-    let origin = exactly(pipe.axis().origin().coordinates());
+/// Which side the box `at` is on of the plane through `axis` that holds the
+/// part of `flat`'s normal square to the axis: the sign of `(at − o)·(n × w)`,
+/// with `o` the axis origin, `w` its direction and `n` the flat's normal, as
+/// stored. Interval arithmetic: a sign it cannot settle reads
+/// [`Decision::Undecidable`].
+fn which_half_round_the_axis(axis: &rcad_geom::Axis, flat: &Plane, at: [Interval; 3]) -> Decision {
+    let origin = exactly(axis.origin().coordinates());
     let across = cross(
         exactly(flat.normal().components()),
-        exactly(pipe.axis().direction().components()),
+        exactly(axis.direction().components()),
     );
-    dot(core::array::from_fn(|axis| at[axis] - origin[axis]), across).sign()
+    dot(
+        core::array::from_fn(|at_axis| at[at_axis] - origin[at_axis]),
+        across,
+    )
+    .sign()
+}
+
+/// Whether `face`, on the cone `surface`, is one of the two runs of rulings
+/// that a floor and two planes leaning across the axis leave between them — a
+/// frustum under a roof whose two planes meet in a ridge square to the axis —
+/// and if it is, which half round the axis it is in. `None` when it is not,
+/// which the caller refuses by name.
+///
+/// # What is asked
+///
+/// - The **floor** is the one cut the apex is strictly behind, and it is
+///   square to the axis ([`lie_along_one_line`]), so it cuts the face's nappe
+///   in one circle and every ruling of that nappe once.
+/// - The apex is strictly in front of every other cut, and all of them but two,
+///   `G₁` and `G₂`, are square to the axis too.
+/// - `G₁`, `G₂` and the axis are coplanar as directions — their normals and the
+///   axis direction have a zero [`orient3d`](rcad_predicates::orient3d) from
+///   the origin, exactly — so the parts of the two normals square to the axis
+///   lie along one line `p`.
+/// - Those two parts point against each other once each is turned to the side
+///   its cut keeps, so the two keep a strip between them, as
+///   [`keep_the_strip_between_them`] asks of two flats along a pipe.
+/// - Each of `G₁` and `G₂` crosses the floor's circle in two points
+///   ([`crosses_the_circle_a_floor_cuts`]).
+///
+/// # Why the part of the nappe in front of every cut is then two pieces
+///
+/// Every ruling of the nappe crosses the floor once, at a point `P` of its
+/// circle, and keeps what lies past `P`. A plane the apex is strictly in front
+/// of keeps, along that ruling, either all of it or a piece from the apex out,
+/// so the ruling carries a point in front of every cut exactly when `P` itself
+/// is in front of every cut; and then it carries a whole piece, from `P` out to
+/// the nearest cut it leaves. So the part in front of every cut is the arcs of
+/// the floor's circle in front of every cut, with each ruling's piece hanging
+/// off its point.
+///
+/// A cut square to the axis has one value all round the circle, so it keeps
+/// every point of it or none. On the floor's plane, `G₁` and `G₂` are two lines
+/// square to `p`, keeping the strip between them, and each crosses the circle,
+/// so the strip meets the circle in two arcs, one each side of the line through
+/// the circle's centre along `p`, and the two points of the circle on that line
+/// are outside the strip. That line is where the floor's plane meets the plane
+/// through the axis that holds `p`, whose normal lies along `n₁ × w`
+/// ([`which_half_round_the_axis`]). So the part in front of every cut is two
+/// pieces, each one arc of rulings with a piece hanging off each, one strictly
+/// each side of that plane, and the plane meets neither.
+///
+/// So step 3 of [`what_a_face_cut_by_part_of_a_crossing_holds`] holds of each
+/// piece on its own, as [`one_of_two_runs_between_two_flats`] says of a pipe's:
+/// the face lies in the part in front of every cut, it is connected so it lies
+/// in one piece, and its boundary is on that piece's boundary, so it is all of
+/// it. Which piece is the half its corners are in. Every corner reads it where
+/// it is stored, and corners that do not all say one half are refused.
+///
+/// The roofed frustum of
+/// `a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`
+/// is that: the floor `z ≥ 2`, and the roof's two planes `2x + z ≤ 3` and
+/// `8x + 3z ≥ −3`, which meet in a ridge along `y` and leave a piece of skin
+/// each side of `y = 0`.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when a corner's half could not be settled.
+fn one_of_two_runs_of_a_cone_under_two_planes(
+    face: FaceView<'_>,
+    surface: &Surface,
+    sides: &[Side],
+    cuts: &[Cut],
+) -> Result<Option<OneOfTwoRuns>> {
+    let Surface::Cone(cone) = surface else {
+        return Ok(None);
+    };
+    let apex = PredicatePoint::from(cone.apex().coordinates());
+    let up = cone.axis().direction().components();
+    let mut floor = None;
+    let mut leaning = Vec::new();
+    for (at, cut) in cuts.iter().enumerate() {
+        let Some(flat) = cut.surface.as_plane() else {
+            return Ok(None);
+        };
+        let sits = flat.side_of_point(apex);
+        if !matches!(sits, Decision::Pos | Decision::Neg) {
+            return Ok(None);
+        }
+        let square = lie_along_one_line(flat.normal().components(), up);
+        if sits == cut.kept {
+            if !square {
+                leaning.push((at, flat));
+            }
+        } else if square && floor.is_none() {
+            floor = Some(flat);
+        } else {
+            return Ok(None);
+        }
+    }
+    let (Some(floor), [(one, one_flat), (other, other_flat)]) = (floor, leaning.as_slice()) else {
+        return Ok(None);
+    };
+    let across = |flat: &Plane| cross(exactly(flat.normal().components()), exactly(up));
+    let keep_a_strip = match dot(across(one_flat), across(other_flat)).sign() {
+        Decision::Pos => cuts[*one].kept != cuts[*other].kept,
+        Decision::Neg => cuts[*one].kept == cuts[*other].kept,
+        Decision::Zero | Decision::Undecidable { .. } => false,
+        found => panic!("a sign came back with a decision nothing here knows: {found:?}"),
+    };
+    let coplanar = rcad_predicates::orient3d(
+        [0.0; 3],
+        one_flat.normal().components(),
+        other_flat.normal().components(),
+        up,
+    ) == Decision::Zero;
+    if !coplanar
+        || !keep_a_strip
+        || !crosses_the_circle_a_floor_cuts(cone, floor, one_flat)
+        || !crosses_the_circle_a_floor_cuts(cone, floor, other_flat)
+    {
+        return Ok(None);
+    }
+
+    let mut half = None;
+    for corner in sides.iter().flat_map(|side| [side.start, side.end]) {
+        let found =
+            which_half_round_the_axis(&cone.axis(), one_flat, exactly(corner.at.coordinates()));
+        match found {
+            Decision::Pos | Decision::Neg if half.is_none_or(|known| known == found) => {
+                half = Some(found);
+            }
+            Decision::Pos | Decision::Neg | Decision::Zero => return Ok(None),
+            Decision::Undecidable { enclosure } => {
+                let at = PredicatePoint::from(corner.at.coordinates());
+                return Err(gave_up_on_which_half(at, enclosure));
+            }
+            found => panic!("a side came back with a decision nothing here knows: {found:?}"),
+        }
+    }
+    let half = half.expect("a face with three planes among its cuts has corners on them");
+    let Surface::Cone(placed_cone) = face.surface() else {
+        panic!("a cone moved into place is a cone");
+    };
+    let Surface::Plane(placed_flat) = cuts[*one].placed else {
+        panic!("a plane moved into place is a plane");
+    };
+    Ok(Some(OneOfTwoRuns {
+        axis: placed_cone.axis(),
+        flat: placed_flat,
+        half,
+    }))
+}
+
+/// Whether `flat` crosses the circle `floor`, a plane square to `cone`'s axis,
+/// cuts the cone in, at two points: the line the two planes meet in passes
+/// strictly inside that circle. `false` when the sign could not be settled.
+///
+/// With `o` the apex, `w` the stored axis direction and `s` the slope, a point
+/// of the floor's plane is `o + λw + y` with `y` square to `w`, and the cone's
+/// own sign there, `|y|²|w|² − s²λ²|w|⁴`, puts the circle at `|y|² = s²λ²|w|²`.
+/// The floor's normal lies along `w`, so `λ = E/D` with `E = d_f − n_f·o` and
+/// `D = n_f·w`. On that plane `flat`, `n·x = d`, is the line `p·y = e − λm`,
+/// with `e = d − n·o`, `m = n·w` and `p` the part of `n` square to `w`, whose
+/// distance from the centre is `|e − λm|/|p|`. So it crosses strictly inside
+/// when `(e − λm)² < s²λ²|w|²|p|²`, and `|w|²|p|² = |n × w|²`; multiplied
+/// through by `D²` that is the sign of
+///
+/// ```text
+/// (e·D − E·m)²  −  s²·E²·|n × w|²
+/// ```
+///
+/// which is a polynomial in stored numbers, read in interval arithmetic.
+fn crosses_the_circle_a_floor_cuts(cone: &rcad_geom::Cone, floor: &Plane, flat: &Plane) -> bool {
+    let apex = exactly(cone.apex().coordinates());
+    let up = exactly(cone.axis().direction().components());
+    let slope = Interval::exactly(cone.slope());
+    let [floor_normal, normal] = [floor, flat].map(|plane| exactly(plane.normal().components()));
+    let floor_height = Interval::exactly(floor.offset()) - dot(floor_normal, apex);
+    let floor_rate = dot(floor_normal, up);
+    let off = Interval::exactly(flat.offset()) - dot(normal, apex);
+    let sideways = cross(normal, up);
+    let along = off * floor_rate - floor_height * dot(normal, up);
+    (along * along - slope * slope * floor_height * floor_height * dot(sideways, sideways)).sign()
+        == Decision::Neg
 }
 
 /// Whether `cuts` are exactly two pipes whose axes run the same way, each cut
@@ -4701,8 +4949,9 @@ fn held_in_front_of_all(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> 
     })
 }
 
-/// The face is the part of its pipe in front of every cut that is in its own
-/// half ([`one_of_two_runs_between_two_flats`]). The other half's piece is
+/// The face is the part of its pipe or cone in front of every cut that is in
+/// its own half ([`one_of_two_runs_between_two_flats`],
+/// [`one_of_two_runs_of_a_cone_under_two_planes`]). The other half's piece is
 /// strictly in the other half, so a point on the plane between the halves is
 /// not on the face either.
 fn held_in_front_of_all_on_its_own_run(
@@ -4714,7 +4963,7 @@ fn held_in_front_of_all_on_its_own_run(
     if held == OnAFace::NotHeld {
         return Ok(held);
     }
-    match which_half_of_the_pipe(&run.pipe, &run.flat, point.enclosure()) {
+    match which_half_round_the_axis(&run.axis, &run.flat, point.enclosure()) {
         found if found == run.half => Ok(held),
         Decision::Pos | Decision::Neg | Decision::Zero => Ok(OnAFace::NotHeld),
         Decision::Undecidable { enclosure } => Err(gave_up_on_which_half(point, enclosure)),
@@ -5253,12 +5502,13 @@ fn gave_up_turning_a_corner(point: PredicatePoint, enclosure: f64) -> Error {
     gave_up(ORIENT3D, point, Level::Exact, enclosure, Measures::Volume)
 }
 
-/// The same, for which half of a pipe between two flats a point or a corner is
-/// in ([`which_half_of_the_pipe`]): a length, the distance off the plane through
+/// The same, for which half round the axis of a pipe between two flats or of a
+/// cone under two planes a point or a corner is in
+/// ([`which_half_round_the_axis`]): a length, the distance off the plane through
 /// the axis scaled by the lengths of the two directions.
 fn gave_up_on_which_half(point: PredicatePoint, enclosure: f64) -> Error {
     gave_up(
-        WHICH_HALF_OF_A_PIPE,
+        WHICH_HALF_ROUND_THE_AXIS,
         point,
         Level::Interval,
         enclosure,
@@ -5266,9 +5516,9 @@ fn gave_up_on_which_half(point: PredicatePoint, enclosure: f64) -> Error {
     )
 }
 
-/// The name which half of a pipe between two flats a point is in goes by in
-/// provenance records.
-const WHICH_HALF_OF_A_PIPE: &str = "which_half_of_a_pipe";
+/// The name which half round the axis a point is in goes by in provenance
+/// records.
+const WHICH_HALF_ROUND_THE_AXIS: &str = "which_half_round_the_axis";
 
 /// The name the ordering of a point along a side goes by in provenance records.
 const BETWEEN_TWO_CORNERS: &str = "between_two_corners";
@@ -6020,6 +6270,79 @@ mod tests {
             "one cut behind the apex that closes, and one other, are followed"
         );
         assert_eq!(runs_of_rulings_that_carry_a_point(&two), 1);
+    }
+
+    /// Why one cut the apex is behind that does not close is followed only
+    /// beside cuts square to the axis or side by side with it.
+    ///
+    /// On the cone of slope a half about `+z`, keep `2x − z/2 ≥ 1`. The apex is
+    /// behind it and it leans more steeply than the cone's side, so it cuts a
+    /// hyperbola's branch with its vertex at `(1, 0, 2)`, and only the rulings
+    /// with `cos φ > 1/2` reach it. Beside the top `z ≤ 8`, square to the axis,
+    /// or beside `2x − z/2 ≤ 5`, side by side with it, one run of rulings
+    /// carries a point, and the face is followed.
+    ///
+    /// Beside `x ≤ 0.4z + 0.1`, which the apex is in front of too, it is **two**
+    /// runs: that plane leaves out the branch's vertex, `−1 + 0.8 + 0.1 < 0`,
+    /// and keeps both its arms, so the rulings with `cos φ > 7/8` carry nothing
+    /// and those with `1/2 < cos φ ≤ 7/8` either side of them do. The same plane
+    /// moved to `x ≤ 0.4z + 0.3` keeps the vertex and leaves one run; it faces
+    /// the same way, so it is where such a cut sits that tells the two apart,
+    /// which nothing here reads, and both are refused.
+    #[test]
+    fn a_cut_behind_the_apex_that_does_not_close_leaves_two_pieces_beside_a_cut_that_leans_across_it()
+     {
+        let cone = rcad_geom::Cone::new(Axis::z(), 0.5).expect("a positive slope");
+        let cut = |through: [f64; 3], facing: [f64; 3]| {
+            let plane = Plane::from_point_and_normal(
+                Point::new(through[0], through[1], through[2]),
+                Vector::new(facing[0], facing[1], facing[2]),
+            )
+            .expect("a normal with a length");
+            Cut {
+                surface: Surface::Plane(plane),
+                placed: Surface::Plane(plane),
+                kept: Decision::Pos,
+                corners_on_it: Vec::new(),
+            }
+        };
+        let branch = || cut([0.5, 0.0, 0.0], [2.0, 0.0, -0.5]);
+        let top = || cut([0.0, 0.0, 8.0], [0.0, 0.0, -1.0]);
+        let side_by_side = || cut([2.5, 0.0, 0.0], [-2.0, 0.0, 0.5]);
+        let leaving_the_vertex = || cut([0.1, 0.0, 0.0], [-1.0, 0.0, 0.4]);
+        let keeping_the_vertex = || cut([0.3, 0.0, 0.0], [-1.0, 0.0, 0.4]);
+
+        let Surface::Plane(curve) = branch().surface else {
+            unreachable!("built as a plane")
+        };
+        assert_eq!(cone.is_cut_in_a_closed_curve_by(&curve), Some(false));
+        let apex = PredicatePoint::from(cone.apex().coordinates());
+        assert_eq!(side_of_surface(&branch().surface, apex), Decision::Neg);
+
+        for (what, other, followed, runs) in [
+            ("the top", top(), true, 1),
+            ("a cut side by side", side_by_side(), true, 1),
+            (
+                "a cut leaving the vertex out",
+                leaving_the_vertex(),
+                false,
+                2,
+            ),
+            ("a cut keeping the vertex", keeping_the_vertex(), false, 1),
+        ] {
+            assert_eq!(
+                side_of_surface(&other.surface, apex),
+                Decision::Pos,
+                "{what}"
+            );
+            let cuts = [branch(), other];
+            assert_eq!(
+                is_a_family_this_follows(&Surface::Cone(cone), &cuts),
+                followed,
+                "{what}"
+            );
+            assert_eq!(runs_of_rulings_that_carry_a_point(&cuts), runs, "{what}");
+        }
     }
 
     /// Why a cone face beside **two** cuts through its apex is followed only when
