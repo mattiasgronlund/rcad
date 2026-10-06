@@ -5339,9 +5339,10 @@ fn which_curve_it_is(
     )?))
 }
 
-/// What names a closed crossing: the two surfaces it runs between, each named
-/// either way round and the two sorted, and which of their closed crossings it
-/// is ([`which_meridian_circle_it_is`]) where that is known to need saying.
+/// What names a closed crossing: the two surfaces it runs between, a plane named
+/// at any scale and anything else either way round, the two sorted, and which
+/// of their closed crossings it is ([`which_meridian_circle_it_is`]) where that
+/// is known to need saying.
 ///
 /// One curve can come under two of these, cut by two pairs, and then goes by
 /// the least of them ([`the_name_each_closed_curve_goes_by`]).
@@ -5364,6 +5365,17 @@ type CurveName = ([[u64; 9]; 2], Option<[u64; 4]>);
 /// outer circle, and two rings — are still named by their surfaces alone, and
 /// no fuse of either has been run (§378.4).
 ///
+/// **A plane is named at any scale** ([`name_of_the_plane_at_any_scale`]), as
+/// the arcs of these crossings are, because two turned faces can spell one
+/// plane in a ratio an ulp from one. A ball's skin carries the circle as the
+/// spelling of whichever block's face cut it first, and the flat face along it
+/// can be the other block's. Named either way round only, every fuse of a ball,
+/// or a bar crossing the plane, with a block whose face holds the whole circle
+/// and a second block spelling that plane at the other scale gave the circle's
+/// two sides two names, two edges of one face each, and was refused
+/// `ResultIsNotManifold { count: 1 }`
+/// (`tests/a_turned_plane_exactly_proportional_to_another.rs`).
+///
 /// # Errors
 ///
 /// Whatever [`which_meridian_circle_it_is`] gives.
@@ -5373,7 +5385,13 @@ fn name_of_the_closed_crossing_through(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<CurveName> {
-    let mut named = carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
+    let mut named = carried_by.map(|surface| {
+        if surface.as_plane().is_some() {
+            name_of_the_plane_at_any_scale(&surface)
+        } else {
+            name_of_the_surface_either_way_round(&surface)
+        }
+    });
     named.sort_unstable();
     Ok((
         named,
@@ -5675,7 +5693,9 @@ fn is_written_the_other_way_round(flat: &Surface) -> bool {
 /// spell it `(−c, c, 0, 0)` and `(c′, −c′, 0, 0)` with `c` and `c′` an ulp
 /// apart. [`name_of_the_surface_either_way_round`] folds only the negation and
 /// gave those two names, so the arc they both run along was two edges of one
-/// face each (`tests/a_turned_plane_exactly_proportional_to_another.rs`).
+/// face each, and so was a whole circle
+/// ([`name_of_the_closed_crossing_through`],
+/// `tests/a_turned_plane_exactly_proportional_to_another.rs`).
 ///
 /// **The fold is exact.** Each coefficient that is not zero is an odd whole
 /// number times a power of two. Multiplying all four by one number multiplies
