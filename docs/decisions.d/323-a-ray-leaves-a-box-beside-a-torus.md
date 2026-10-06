@@ -79,8 +79,30 @@ The brief's condition was that a ray from a box be shown to classify every
 point of the box the same way. A box is convex, so the segment between any two
 of its points stays inside it. A segment that meets no face of the solid does
 not cross its skin, so its two ends are both inside or both outside. So when no
-face meets the grown box, the exact point's answer is the answer for every
-point of it, and the box the caller handed over is inside the grown one.
+face meets the grown box by its corners, the exact point's answer is the
+answer for every point of it, and the box the caller handed over is inside the
+grown one — **that held only for the corners, not yet for the stored planes**
+(queue row Q1068, below).
+
+*2026-10-06, Q1068: the gap between the corners and the stored planes is
+real. `no_face_meets` reads a straight-sided face by its fan triangles, built
+from the face's corners; on a turned face the fan is a rounding off the
+face's stored plane, so the grown box round a point `P` and the exact point
+`B` beside it can miss every triangle while the stored plane still passes
+between them. The ray from `B` then parts at that face, and the old winding
+left the crossing out, counting one off, so `P` could come out on the wrong
+side of the plane. The fix asks the face's own stored plane to place `P`
+directly where `B`'s ray parts there (`what_its_plane_says_beside_it`, already
+used for a ray from `P` itself), since that function's proof is about `P`'s
+own box stretched to the plane and does not lean on `B` or on
+`no_face_meets`. A turned bend-and-block probe over 270,000 points found 271
+wrong before the fix and 3 after — each a point whose own line is exact,
+Q1156's shape, not this path — and 76 refuse
+`CannotFireARayAtAFacesSurface` (`4bb0e7b2`, pinned by
+`a_point_inside_whose_ray_from_beside_parts_at_the_floor_is_not_put_outside`
+and
+`a_point_outside_whose_ray_from_beside_parts_at_the_top_is_not_put_inside` in
+`tests/a_point_beside_a_turned_flat_face.rs`).*
 
 `no_face_meets` asks each face by the description the ray counts it by. A flat
 face with straight sides is its fanned triangles, so the box has to miss every

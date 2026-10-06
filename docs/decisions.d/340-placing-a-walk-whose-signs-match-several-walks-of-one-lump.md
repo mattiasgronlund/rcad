@@ -36,6 +36,13 @@ of them holds it, two ways:
   corners wind once round a node of `W` holds it. A point no candidate winds
   once round is in the walk round the outside of the lump or in none, and is not
   answered.
+
+  *2026-10-06, Q1053: extended to a curved side. `which_walk_winds_once_round`
+  in `fuse/arrange.rs` now counts a curved side by which side of its chord it
+  bulges to — left of `a → b` is −1, right is +1 — and holds the point to a
+  cone's own nappe as well, so a candidate need not be straight-sided to be
+  counted. A side that is a whole closed curve is still not answered
+  (`e7d81db6`).*
 - **On a cone or a pipe, by what goes round the axis.** One nappe, or a pipe,
   is a ring. When `W` goes round the axis, its lump cannot sit in a region of
   the candidates' lump whose walk goes round nothing, because that region is a
@@ -132,6 +139,18 @@ Both answers exist, and the test docs work out their volumes, so both are gaps
 `a_holed_bar_cut_to_a_bow_tie_cap_is_refused_while_a_face_is_cut_into_cells`
 (Q639's row) named the same place, on the bar's floor, six times: a curved side
 on a plane as well. So the bullet above was stale from Q616 on.
+
+*2026-10-06, Q1053: both curved-side gaps above are closed.
+`which_walk_winds_once_round` in `fuse/arrange.rs` now counts a curved side by
+which side of its chord it bulges to, and holds the point to a cone's own
+nappe as well, so a candidate need not be straight-sided. The plate with the
+round notch
+(`a_plate_with_a_round_notch_cut_in_two_beside_a_hole_is_answered_under_every_rule`)
+and Q616's holed bow tie, now
+`a_holed_bar_cut_to_a_bow_tie_cap_is_answered_under_every_rule`, both answer
+under every rule, both ways round; so does the staircase cap given a hole,
+`a_staircase_cap_whose_corners_cancel_is_given_a_hole_under_every_rule`. A side
+that is a whole closed curve is still not answered (`e7d81db6`).*
 
 What the file pins that does not reach it, each with what the probe printed: a
 ball face bounded by two arcs places its hole, because every face is cut by its
