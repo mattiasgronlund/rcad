@@ -60,7 +60,8 @@
 
 use rcad_geom::{
     EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, SurfaceMeet, Vector,
-    WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS, intersect,
+    WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS,
+    how_a_plane_leans_against_a_cone, intersect, where_a_cones_apex_stands_against_a_plane,
     which_two_surfaces_a_run_is_between,
 };
 use rcad_predicates::expansion::{
@@ -1897,7 +1898,8 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 
 /// Whether a flat face holds `point`, which is taken as being on that face's
 /// plane, read off the face's own sides: each straight, or an arc of the closed
-/// curve where the plane cuts a ball, a cone or a pipe.
+/// curve where the plane cuts a ball, a cone or a pipe, or of the parabola or
+/// hyperbola where it cuts a cone.
 ///
 /// **Each arc is read as its chord, and the piece between the two is added or
 /// taken away.** The sides with every arc put back as its chord are a polygon,
@@ -1912,6 +1914,14 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 /// piece where the point is in it. Being in it is two signs: the round
 /// surface's own, and the side of the chord line the point is on against the
 /// side [`the_way_into_an_arc`] says the arc is on. Nothing is built.
+///
+/// **A parabola or a hyperbola's branch reads the same**, with the inside of
+/// the curve the convex region `K` the branch bounds
+/// ([`the_way_into_an_arc_that_does_not_close`] has why the chord line meets it
+/// in the chord and the arc is all of the branch on its side). The cone's own
+/// sign holds a second region on a hyperbola's plane, inside the other branch,
+/// so a third sign is read there: which nappe the point is on
+/// ([`is_on_the_other_nappe_from_the_arc`]).
 ///
 /// **The arc goes round its piece the way the polygon goes round a piece on its
 /// left exactly when the arc is on the chord's right.** Seen from the side the
@@ -1989,7 +1999,15 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
         } else {
             [Decision::Neg, Decision::Pos]
         };
-        match side_of_surface(&side.across_placed, point) {
+        let inside = match side_of_surface(&side.across_placed, point) {
+            Decision::Neg | Decision::Zero
+                if is_on_the_other_nappe_from_the_arc(flat, side, point)? =>
+            {
+                Decision::Pos
+            }
+            read => read,
+        };
+        match inside {
             Decision::Zero if beside == arcs_side || beside == Decision::Zero => {
                 return Ok(OnAFace::OnItsBoundary);
             }
@@ -2075,6 +2093,45 @@ fn is_the_arc_left_of_its_chord(
     }
 }
 
+/// Whether `point`, on the plane `flat`, is on the other nappe of the cone
+/// across `side` from the one the arc is on, where `flat` cuts that cone in a
+/// curve that does not close. On a hyperbola's plane the inside of the cone is
+/// a region on each nappe with nothing between them, and only the arc's own is
+/// the piece between the arc and its chord
+/// ([`the_way_into_an_arc_that_does_not_close`]). `false` for a side across
+/// anything else, and for a point level with the apex, which is outside the
+/// cone there because the plane misses the apex.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when the point's nappe could not be settled.
+fn is_on_the_other_nappe_from_the_arc(
+    flat: &Plane,
+    side: &Side,
+    point: PredicatePoint,
+) -> Result<bool> {
+    let (Surface::Cone(cone), Surface::Cone(placed)) = (side.across, side.across_placed) else {
+        return Ok(false);
+    };
+    if !matches!(
+        how_a_plane_leans_against_a_cone(flat, &cone),
+        Decision::Zero | Decision::Neg
+    ) {
+        return Ok(false);
+    }
+    let Some(arcs) = the_nappe_both_ends_are_on(&cone, [side.start.at, side.end.at]) else {
+        return Ok(false);
+    };
+    match the_nappe_of(&placed, point.enclosure()) {
+        found @ (Decision::Pos | Decision::Neg) => Ok(found != arcs),
+        Decision::Zero => Ok(false),
+        Decision::Undecidable { enclosure } => {
+            Err(gave_up_on_a_side(&side.across_placed, point, enclosure))
+        }
+        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
 /// Whether a flat face whose every side lies behind the other cut is the
 /// insides of two pipes running the same way taken together, the cap of two
 /// side-by-side bars fused into one (`docs/decisions.md` §331.5).
@@ -2122,10 +2179,11 @@ struct Corner {
 #[derive(Clone)]
 enum SideRun {
     Straight,
-    /// Part of a circle, carrying the one thing about it the steps below read:
-    /// a direction square to the chord, in the circle's own plane, pointing from
+    /// Part of a conic, carrying the one thing about it the steps below read:
+    /// a direction square to the chord, in the conic's own plane, pointing from
     /// the chord into this arc rather than into its sibling
-    /// ([`the_way_into_an_arc`]).
+    /// ([`the_way_into_an_arc`]) or into the rest of its branch
+    /// ([`the_way_into_an_arc_that_does_not_close`]).
     Arc {
         into_the_arc: [Interval; 3],
     },
@@ -2264,9 +2322,10 @@ fn every_reading_of_the_sides_of(
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for an arc no half-space
-/// tells from its sibling, a whole closed crossing among parts of others, or a
-/// kind of run this has not been taught, and whatever [`the_face_across`] gives
-/// for the edge.
+/// tells from its sibling and that is not an arc of a cone's face along a curve
+/// that does not close ([`the_way_into_an_arc_that_does_not_close`]), a whole
+/// closed crossing among parts of others, or a kind of run this has not been
+/// taught, and whatever [`the_face_across`] gives for the edge.
 fn the_way_a_side_runs(
     solid: SolidView<'_>,
     face: FaceView<'_>,
@@ -2280,15 +2339,20 @@ fn the_way_a_side_runs(
         EdgeRun::PartOfWhereItCrosses { .. } if is_a_piece_of_a_ruling(solid, face, edge)? => {
             SideRun::Straight
         }
-        EdgeRun::PartOfWhereItCrosses { picked_by, .. } if start.key != end.key => SideRun::Arc {
-            into_the_arc: the_way_into_an_arc(
-                &face.stored_surface(),
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } if start.key != end.key => {
+            let surface = face.stored_surface();
+            let ends = [start.at, end.at];
+            let into_the_arc = the_way_into_an_arc(
+                &surface,
                 across,
-                [start.at, end.at].map(|at| PredicatePoint::from(at.coordinates())),
+                ends.map(|at| PredicatePoint::from(at.coordinates())),
                 picked_by,
             )
-            .ok_or_else(cannot)?,
-        },
+            .or_else(|| the_way_into_an_arc_that_does_not_close(&surface, across, ends));
+            SideRun::Arc {
+                into_the_arc: into_the_arc.ok_or_else(cannot)?,
+            }
+        }
         // A whole closed crossing among parts of others, or a kind of run
         // this has not been taught.
         EdgeRun::PartOfWhereItCrosses { .. }
@@ -2298,6 +2362,103 @@ fn the_way_a_side_runs(
             return Err(cannot());
         }
     })
+}
+
+/// The way into an arc of the curve a plane cuts a cone in when that curve does
+/// not close — a parabola, or one branch of a hyperbola — as
+/// [`the_way_into_an_arc`] reads it of a curve that does: square to the chord,
+/// in the plane, pointing from the chord into the arc. `None` unless one of
+/// `surface` and `across` is the cone and the other the plane, the apex is
+/// strictly off the plane, the curve does not close, and both ends are on one
+/// nappe, each read exactly off the stored numbers.
+///
+/// **The ends alone say which arc this is.** Between two points of a curve that
+/// does not close there is one arc that is bounded, and an edge is: the rest
+/// of the branch is two pieces that each run off to infinity. So no picker is
+/// asked, and the one the fuse writes — `z ≥ 0` for the branch on the upper
+/// nappe — says only which branch, which the ends already do.
+///
+/// **That arc is on the side of the chord away from where the branch runs
+/// off.** On the plane, the inside of the cone on the ends' nappe is a convex
+/// region `K` bounded by the branch, and nowhere else does the plane meet that
+/// nappe's inside. `K` runs off to infinity along the directions inside the
+/// nappe that lie in the plane, and the axis direction projected into the
+/// plane, `|n|²w − (n·w)n` turned towards that nappe, is one of them: of every
+/// direction in the plane it is the one nearest the axis, and the plane holds
+/// one within the cone's half angle of the axis because the curve does not
+/// close — strictly within for a hyperbola, and for a parabola that one is the
+/// only one. The line through the chord meets the branch only at the two ends,
+/// a line meeting a conic in at most two points, so it crosses the branch there
+/// and does not touch it, and leaves `K` in the chord alone. No direction `K`
+/// runs off along lies along the chord: a hyperbola's asymptotes would meet its
+/// branch once, not twice, and along any other such direction the chord would
+/// run from one end into the inside of `K` and could not come out at the
+/// other. So all of them, the projected axis with them, point across the
+/// chord's line to one side, the side where `K` is unbounded. The two pieces
+/// running off to infinity are on the boundary of `K` and off the line, so they
+/// are on that side; the arc leaves each end on the other side from the piece
+/// it meets there, so it is on the side away, where `K` is bounded.
+///
+/// The projected axis reads against `n × chord` as `|n|²·(w · (n × chord))`,
+/// so the sign wanted is the sign of `w · (n × chord)` times the nappe's: one
+/// determinant of stored numbers, in interval arithmetic, and a sign it cannot
+/// settle is `None`.
+///
+/// **On a hyperbola's plane the inside of the cone is two regions**, one on
+/// each nappe, and only `K` is the arc's: a flat face reads the piece between
+/// an arc and its chord with the other one left out
+/// ([`is_on_the_other_nappe_from_the_arc`]).
+fn the_way_into_an_arc_that_does_not_close(
+    surface: &Surface,
+    across: &Surface,
+    ends: [Point; 2],
+) -> Option<[Interval; 3]> {
+    let ((Surface::Cone(cone), Surface::Plane(flat)) | (Surface::Plane(flat), Surface::Cone(cone))) =
+        (surface, across)
+    else {
+        return None;
+    };
+    let apex_is_off_the_plane = matches!(
+        where_a_cones_apex_stands_against_a_plane(flat, cone),
+        Decision::Pos | Decision::Neg
+    );
+    let does_not_close = matches!(
+        how_a_plane_leans_against_a_cone(flat, cone),
+        Decision::Zero | Decision::Neg
+    );
+    if !apex_is_off_the_plane || !does_not_close {
+        return None;
+    }
+    let nappe_of_the_ends = the_nappe_both_ends_are_on(cone, ends)?;
+    let [from, to] = ends.map(|end| exactly(end.coordinates()));
+    let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
+    let square_to_the_chord = cross(exactly(flat.normal().components()), chord);
+    let up = exactly(cone.axis().direction().components());
+    match (dot(up, square_to_the_chord).sign(), nappe_of_the_ends) {
+        (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => {
+            Some(square_to_the_chord)
+        }
+        (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => {
+            Some(square_to_the_chord.map(core::ops::Neg::neg))
+        }
+        (Decision::Zero | Decision::Undecidable { .. } | _, _) => None,
+    }
+}
+
+/// [`Decision::Pos`] when both `ends` are strictly up `cone`'s axis from its
+/// apex and [`Decision::Neg`] when both are strictly down it, read exactly off
+/// the stored numbers; `None` otherwise.
+fn the_nappe_both_ends_are_on(cone: &rcad_geom::Cone, ends: [Point; 2]) -> Option<Decision> {
+    let [from, to] = ends.map(|end| the_nappe_of(cone, exactly(end.coordinates())));
+    (matches!(from, Decision::Pos | Decision::Neg) && to == from).then_some(from)
+}
+
+/// Which way up `cone`'s axis from its apex `at` is, as a sign: the nappe it is
+/// on, or [`Decision::Zero`] level with the apex.
+fn the_nappe_of(cone: &rcad_geom::Cone, at: [Interval; 3]) -> Decision {
+    let apex = exactly(cone.apex().coordinates());
+    let up = exactly(cone.axis().direction().components());
+    dot(core::array::from_fn(|axis| at[axis] - apex[axis]), up).sign()
 }
 
 /// A flat face of `solid` whose plane holds a straight side between two patches
@@ -2792,7 +2953,9 @@ pub(crate) struct WhereTheCurveIsCentred {
 ///
 /// **The parabola and the hyperbola are refused**, and that is a limit rather
 /// than a gap: a parabola has no centre at all, and a hyperbola's two branches
-/// are not one closed curve for a chord to split in two.
+/// are not one closed curve for a chord to split in two. An arc of either
+/// needs no centre, since its ends alone say which arc it is, and
+/// [`the_way_into_an_arc_that_does_not_close`] reads it.
 ///
 /// A **pipe** hands back its axis origin and its stored axis direction, turned
 /// round where it reads negative against the plane's normal

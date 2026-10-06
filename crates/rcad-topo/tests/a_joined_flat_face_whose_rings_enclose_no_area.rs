@@ -34,8 +34,9 @@
 //! along two cones' hyperbolas, a cut cone less a second cone on its axis,
 //! because two different cones could not be crossed (Q636), then because the
 //! arrangement could not order points round the circle they cross in (Q1122),
-//! and now because a point cannot be tested against the cut cone's face
-//! (Q1129).
+//! then because a point could not be tested against the cut cone's face
+//! (Q1129), and now, the cups made, because the fuse with the flush block
+//! cannot tell the cells of the cups' ceiling apart (Q1139).
 //! The family of
 //! corners that sweep no area and are not on one line is built with corners
 //! that cancel exactly, face by face, and the fuse that would join its cap
@@ -49,7 +50,9 @@ use rcad_geom::{
     Plane, Point, Scale, Surface, SurfaceMeet, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftEdge, DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{
+    DraftEdge, DraftStep, Error, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+};
 use smallvec::smallvec;
 
 mod rings;
@@ -494,8 +497,8 @@ fn two_holed_bars_turned_a_quarter_are_answered_with_the_hole_placed_by_the_outl
 /// (§365.2, Q635), and that piece is now placed by the side it shares with a
 /// piece of the other solid's face instead (§365.3, Q712). Moving the wall to
 /// `x = −11` or the top above the cone's base was refused the same way, and
-/// has not been run since. The probe of two cones is refused at its second
-/// fuse (the next test, Q636); the ball's pocket has not been run since, so
+/// has not been run since. The probe of two cones answers its second fuse
+/// (the next test, Q1139); the ball's pocket has not been run since, so
 /// whether it now reaches `holds_the_other_rings` is not known.
 ///
 /// The part of the cone the block holds is the cone up to `z = 18`, `1944π`,
@@ -533,28 +536,34 @@ fn a_cone_cut_by_a_block_wall_off_its_axis_is_answered_under_every_rule() {
 /// hyperbola between two corners, which `holds_the_other_rings` answers `None`
 /// for.
 ///
-/// **That is not reached: the cut cone less the second cone is refused under
-/// every rule, both ways round**, and each of Q1122 and Q1129 took it one step
-/// further on. The two surfaces cross: a cone here is both nappes, and the
-/// first's upper nappe meets the second's lower one in the circle of radius 1
-/// at `z = 1`, which `intersect` names now — it used to refuse every pair of
-/// two different cones in `cuts::gather` (a breakpoint on `intersect`, Q636).
-/// That circle is on the first cone's face and below the second's apex, so the
-/// two faces never meet. The arrangement of the first cone's face refused it
-/// next, `ACrossingThisCannotBeOrderedAlong`, because two cones were not a pair
-/// `a_pair_that_crosses_in_a_conic` in `fuse/arrange.rs` listed (Q1122), and
-/// then `CannotTellTheCellsOfAFaceApart`, because the circle's walks could not
-/// be placed round the cone's axis against the face's own outline (Q1129).
-/// Both are answered now, and every rule is refused
-/// `AFaceTrimmedByACurveThisCannotFollow` on the first cone's face, which
-/// comes from `holds.rs`, where a point is tested against a face; which of its
-/// tests gives up was not traced. **So the nested cups still do not reach
-/// `rings_round`**, and the flush block is not built.
+/// **The cut cone and the second cone, the first fuse that needs, are
+/// answered under every rule, both ways round**, and each answer holds what
+/// the cones and the wall say. The two surfaces cross: a cone here is both
+/// nappes, and the first's upper nappe meets the second's lower one in the
+/// circle of radius 1 at `z = 1`, which `intersect` names now — it used to
+/// refuse every pair of two different cones in `cuts::gather` (a breakpoint on
+/// `intersect`, Q636). That circle is on the first cone's face and below the
+/// second's apex, so the two faces never meet. The arrangement of the first
+/// cone's face refused it next, `ACrossingThisCannotBeOrderedAlong`, because
+/// two cones were not a pair `a_pair_that_crosses_in_a_conic` in
+/// `fuse/arrange.rs` listed (Q1122), and then `CannotTellTheCellsOfAFaceApart`
+/// (Q1129). Then every rule was refused `AFaceTrimmedByACurveThisCannotFollow`
+/// from `select::place_the_piece`: every point offered for a piece sent a ray
+/// through the cut cone's side face, and `holds.rs` could not say which side of
+/// the hyperbola's chord its arc on `x = −12` is on, since
+/// `the_way_into_an_arc` reads that only of a curve that closes. Fixed there,
+/// the wall `x = −12` refused the same way for its own arc of that hyperbola
+/// (Q1139, with a print in `holds.rs`). An arc between two points of a curve
+/// that does not close is the bounded piece of it, on the side of its chord
+/// away from where the branch runs off, and both faces read it so now.
 ///
-/// Both solids are measured first: the cut cone holds what the test above
-/// says, and the second cone `2744π/3`.
+/// The second cone holds `2744π/3`, of which
+/// [`what_the_second_cone_holds_past_the_wall`] lies past `x = −12`; the rest
+/// is inside the cut cone, which reaches past the second cone's base and round
+/// its apex. Both solids are measured first, the cut cone against what the
+/// test above says.
 #[test]
-fn a_cut_cone_less_a_second_cone_on_its_axis_is_refused_before_its_cups_are_joined() {
+fn a_cut_cone_less_a_second_cone_on_its_axis_is_answered_under_every_rule() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let [cut, second] = a_cut_cone_and_a_second_cone_on_its_axis(&mut model);
     assert_holds(
@@ -590,18 +599,136 @@ fn a_cut_cone_less_a_second_cone_on_its_axis_is_refused_before_its_cups_are_join
         "one slope, two apexes: the one circle halfway between them"
     );
 
+    let cut = what_the_block_holds_of_the_cone();
+    let second = 2744.0 * PI / 3.0;
+    let past_the_wall = what_the_second_cone_holds_past_the_wall();
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let pair = a_cut_cone_and_a_second_cone_on_its_axis(&mut model);
-        let refused = fused_in_order(&mut model, pair, rule, swapped);
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, pair, rule, swapped);
+        let volume = match (rule, swapped) {
+            (Rule::Union, _) => cut + past_the_wall,
+            (Rule::Intersection, _) => second - past_the_wall,
+            (Rule::Difference, false) => cut - second + past_the_wall,
+            (Rule::Difference, true) => past_the_wall,
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_holds(&model, the_only(answer, &what), volume, &what);
+    }
+}
+
+/// **The cut cone's two faces along the hyperbola hold their own points**: its
+/// skin is the cone up to `z = 18` with `x ≥ −12`, on the upper nappe alone,
+/// and its wall is the part of `x = −12` inside that, between the hyperbola's
+/// upper branch and `z = 18`. Every point asked is on its face's surface
+/// exactly. On the wall, `(−12, 0, −20)` is inside the cone too, inside the
+/// lower branch, on the side of the chord the arc is on: the part of the
+/// plane inside the cone is two regions there, and only the arc's is the
+/// wall's (Q1139).
+#[test]
+fn the_cut_cones_faces_along_the_hyperbola_hold_their_own_points() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let [cone, block] = a_cone_and_a_block_across_it(&mut model);
+    let cut = the_one_solid(&mut model, cone, block, Rule::Intersection);
+    let solid = model.solid(cut).expect("this model made the key");
+    let wall_plane =
+        Plane::from_point_and_normal(Point::new(-12.0, 0.0, 0.0), Vector::new(-1.0, 0.0, 0.0))
+            .expect("the x axis is a unit normal");
+    let skin = solid
+        .faces()
+        .find(|face| matches!(face.surface(), Surface::Cone(_)))
+        .expect("the cut cone has a skin");
+    let wall = solid
+        .faces()
+        .find(|face| face.surface() == Surface::Plane(wall_plane))
+        .expect("the cut cone has a wall on x = -12");
+    let asked = |face: rcad_topo::FaceKey, at: [f64; 3]| {
+        solid
+            .face_holds_the_point(
+                face,
+                rcad_predicates::Point::from(at),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{at:?} is answered: {why:?}"))
+    };
+    assert_eq!(asked(skin.key(), [3.0, 4.0, 5.0]), OnAFace::Held);
+    assert_eq!(asked(skin.key(), [0.0, -10.0, 10.0]), OnAFace::Held);
+    assert_eq!(asked(skin.key(), [-13.0, 0.0, 13.0]), OnAFace::NotHeld);
+    assert_eq!(asked(skin.key(), [0.0, 20.0, 20.0]), OnAFace::NotHeld);
+    assert_eq!(asked(skin.key(), [0.0, 5.0, -5.0]), OnAFace::NotHeld);
+    assert_eq!(asked(wall.key(), [-12.0, 0.0, 15.0]), OnAFace::Held);
+    assert_eq!(asked(wall.key(), [-12.0, 0.0, 10.0]), OnAFace::NotHeld);
+    assert_eq!(asked(wall.key(), [-12.0, 10.0, 15.0]), OnAFace::NotHeld);
+    assert_eq!(asked(wall.key(), [-12.0, 0.0, -20.0]), OnAFace::NotHeld);
+}
+
+/// **The nested cups against the flush block are refused before their rings
+/// are placed**, under every rule both ways round: the cut cone less the second
+/// cone, and the block `[−12, −11] × [10, 12] × [17.25, 17.75]` flush with its
+/// wall `x = −12`, refuse `CannotTellTheCellsOfAFaceApart` on the cups' face on
+/// `z = 16` — the second cone's base, facing down into the pocket, with the
+/// corners `(−12, ±√52, 16)` where the wall cuts its circle — while the
+/// arrangement cuts that face into cells, so `rings_round` is not reached
+/// (Q1139). The block lies nowhere near that face. Which cells could not be
+/// told apart was not traced.
+#[test]
+fn the_nested_cups_and_a_block_flush_with_their_wall_are_refused_while_a_face_is_cut_into_cells() {
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let [cut, second] = a_cut_cone_and_a_second_cone_on_its_axis(&mut model);
+        let cups = the_one_solid(&mut model, cut, second, Rule::Difference);
+        let block = a_block(
+            &mut model,
+            &[[-12.0, 10.0], [-11.0, 10.0], [-11.0, 12.0], [-12.0, 12.0]],
+            17.25,
+            0.5,
+        );
+        let refused = fused_in_order(&mut model, [cups, block], rule, swapped);
+        let what = format!("{rule:?}, swapped {swapped}");
+        let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = refused else {
+            panic!("{what}: {refused:?}");
+        };
+        let named = model
+            .solid(cups)
+            .expect("this model made the key")
+            .faces()
+            .find(|one| one.key() == face)
+            .unwrap_or_else(|| panic!("{what}: the refusal names a face of the block"));
+        let base =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 16.0), Vector::new(0.0, 0.0, -1.0))
+                .expect("the z axis is a unit normal");
+        assert_eq!(named.surface(), Surface::Plane(base), "{what}");
+        let mut corners: Vec<[f64; 3]> = named
+            .wires()
+            .flat_map(|wire| wire.points().collect::<Vec<_>>())
+            .map(|corner| corner.coordinates())
+            .collect();
+        corners.sort_by(|one, other| one[1].total_cmp(&other[1]));
+        let half_chord = 52.0_f64.sqrt();
+        let [[x, low, z], [other_x, high, other_z]] = corners[..] else {
+            panic!("{what}: {corners:?}");
+        };
+        assert_eq!(
+            [x, z, other_x, other_z],
+            [-12.0, 16.0, -12.0, 16.0],
+            "{what}"
+        );
         assert!(
-            matches!(
-                refused,
-                Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
-            ),
-            "{rule:?}, swapped {swapped}: {refused:?}"
+            (low + half_chord).abs() < 1e-12 && (high - half_chord).abs() < 1e-12,
+            "{what}: {corners:?}"
         );
     }
+}
+
+/// The part of the second cone past the wall `x = −12`, where its radius
+/// `u = z − 2` is more than 12: `∫₁₂¹⁴ (u² acos(12/u) − 12√(u² − 144)) du`,
+/// whose antiderivative is `(u³/3) acos(12/u) − 8u√(u² − 144) + 576 ln(u + √(u² − 144))`,
+/// the same as [`what_the_block_holds_of_the_cone`]'s.
+fn what_the_second_cone_holds_past_the_wall() -> f64 {
+    let rise = 52.0_f64.sqrt();
+    2744.0 / 3.0 * (6.0_f64 / 7.0).acos() - 112.0 * rise + 576.0 * ((14.0 + rise) / 12.0).ln()
 }
 
 /// The pointed cone of slope 1 with its base at `z = 20`, and the block from
