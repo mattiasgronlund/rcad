@@ -139,6 +139,10 @@ ignored in `44a6b707994866a8ff1b3eb41b6d4877975cfa9d`.
 - **The sweep half of §187.1**: `Model::validate` passing a flat-only bent
   edge that nothing names.
 - **The turned-bend band**, §187.4 item 2.
+
+  **2026-10-05 note (Q1102): no longer open.** Item 2's band no longer
+  refuses, as of this base; see the note under item 2 above. Un-ignored in
+  `44a6b707994866a8ff1b3eb41b6d4877975cfa9d`.
 - **The 6 far-pipe refusals**, checked against the anchor between the lines
   before anyone calls them a limit.
 
