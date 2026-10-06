@@ -57,9 +57,9 @@ mod pairs;
 
 use std::collections::BTreeMap;
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
+use rcad_geom::{Deflection, Isometry, Scale, Surface, Vector};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_topo::{Model, OnAFace, ProfileBuilder, Rule, SolidKey};
 
 use cones::{a_frustum, a_pointed_cone};
 use pairs::{FrustumAndBlock, WORKING_SIZE};
@@ -114,19 +114,23 @@ fn a_block_united_with_what_it_shares_with_a_cone_is_the_block() {
     .print_and_check("absorption A ∪ (A ∩ B), A the block", 5);
 }
 
-/// `A ∪ (A ∩ B)` is `A`, with `A` the cone.
+/// `A ∪ (A ∩ B)` is `A`, with `A` the cone, over every pair but the rows of
+/// [`UNITED_WITH_THE_SHARE_IN_PIECES`], which
+/// [`a_frustum_beside_a_block_comes_back_from_absorption_with_its_wall_in_pieces`]
+/// pins.
 ///
-/// Only the rows whose block misses the frustum answer, so `A ∩ B` is empty and
-/// this is `A ∪ ∅` — the corners and the volume still have to come back.
+/// Only the rows whose block misses the frustum answered until a cone face came
+/// to be read off its sides seen down the axis (row Q1227), so `A ∩ B` was
+/// empty and this was `A ∪ ∅` — the corners and the volume still have to come
+/// back. Every row answers now.
 #[test]
 fn a_cone_united_with_what_it_shares_with_a_block_is_the_cone() {
-    absorption(
-        &every_pair(),
-        Which::TheCone,
-        Rule::Intersection,
-        Rule::Union,
-    )
-    .print_and_check("absorption A ∪ (A ∩ B), A the cone", 4);
+    let pairs: Vec<Pair> = every_pair()
+        .into_iter()
+        .filter(|pair| !is_one_of(*pair, &UNITED_WITH_THE_SHARE_IN_PIECES))
+        .collect();
+    absorption(&pairs, Which::TheCone, Rule::Intersection, Rule::Union)
+        .print_and_check("absorption A ∪ (A ∩ B), A the cone", 12);
 }
 
 /// `A ∩ (A ∪ B)` is `A`, with `A` the block.
@@ -143,15 +147,78 @@ fn a_block_shared_with_its_union_with_a_cone_is_the_block() {
 
 /// `A ∩ (A ∪ B)` is `A`, with `A` the cone, over every pair but the three of
 /// [`FRUSTUMS_WHOSE_SHARE_KEEPS_THE_CIRCLE`], which the next test pins as the
-/// wrong answers they are.
+/// wrong answers they are, and the rows of [`SHARED_WITH_THE_UNION_IN_PIECES`],
+/// which [`a_frustum_beside_a_block_comes_back_from_absorption_with_its_wall_in_pieces`]
+/// pins.
 #[test]
 fn a_cone_shared_with_its_union_with_a_block_is_the_cone() {
     let pairs: Vec<Pair> = every_pair()
         .into_iter()
-        .filter(|pair| !its_share_keeps_the_circle(*pair))
+        .filter(|pair| {
+            !its_share_keeps_the_circle(*pair)
+                && !is_one_of(*pair, &SHARED_WITH_THE_UNION_IN_PIECES)
+        })
         .collect();
     absorption(&pairs, Which::TheCone, Rule::Union, Rule::Intersection)
-        .print_and_check("absorption A ∩ (A ∪ B), A the cone", 2);
+        .print_and_check("absorption A ∩ (A ∪ B), A the cone", 8);
+}
+
+/// `A ∪ (A ∩ B)` and `A ∩ (A ∪ B)`, with `A` a frustum and `B` a block beside
+/// it, in the rows where each answers with the frustum's wall in pieces. **A
+/// known wrong B-rep, pinned as it is and not as right.**
+///
+/// Each was refused `AFaceTrimmedByACurveThisCannotFollow` until a cone face
+/// came to be read off its sides seen down the axis (row Q1227). Each answer
+/// now validates and measures what `A` measures within `measure`'s own bounds,
+/// so it is the solid `A`; but its wall comes back cut along the whole of where
+/// the block's walls `x = 1` and `y = 1` cross the cone, into pieces of one
+/// cone that the fuse does not join, so it has corners `A` never had, and
+/// lacks the corners of `A`'s seam. The day the fuse joins those pieces this
+/// fails, and the rows go back to the two laws.
+#[test]
+fn a_frustum_beside_a_block_comes_back_from_absorption_with_its_wall_in_pieces() {
+    let policy = Policy::certified();
+    let laws = [
+        (
+            &UNITED_WITH_THE_SHARE_IN_PIECES[..],
+            Rule::Intersection,
+            Rule::Union,
+        ),
+        (
+            &SHARED_WITH_THE_UNION_IN_PIECES[..],
+            Rule::Union,
+            Rule::Intersection,
+        ),
+    ];
+    for (rows, inner, outer) in laws {
+        for &(slope, near, far) in rows {
+            let pair = Pair::BesideABlock { slope, near, far };
+            let law = format!("{pair:?}: A {outer:?} (A {inner:?} B)");
+            let mut model = a_model();
+            let (block, cone) = pair.build_into(&mut model);
+            let (after_inner, inner_pieces) = fused(&model, &[cone], &[block], inner)
+                .unwrap_or_else(|why| panic!("{law}: the inner fuse refused at {why}"));
+            let (answer, pieces) = fused(&after_inner, &[cone], &inner_pieces, outer)
+                .unwrap_or_else(|why| panic!("{law}: refused at {why}"));
+            answer
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{law}: not a sound solid: {why:?}"));
+            assert_eq!(pieces.len(), 1, "{law}: one solid");
+            assert_ne!(
+                corners_of(&answer, &pieces),
+                corners_of(&model, &[cone]),
+                "{law}: the wall came back whole — move the row back to the law"
+            );
+            let found = volume_of(&answer, &pieces);
+            let want = volume_of(&model, &[cone]);
+            assert!(
+                (found.volume - want.volume).abs() <= found.bound + want.bound,
+                "{law}: measures {} where A measures {}",
+                found.volume,
+                want.volume
+            );
+        }
+    }
 }
 
 /// `A ∩ (A ∪ B)` with `A` the frustum, in the three rows where it answers with
@@ -239,20 +306,22 @@ fn a_frustum_shared_with_its_union_with_a_block_beside_it_keeps_the_circle_the_u
 #[test]
 fn uniting_a_block_a_cone_and_a_cube_does_not_depend_on_which_two_go_first() {
     associativity(&TRIOS_THAT_AGREE_ABOUT_ANSWERING)
-        .print_and_check("associativity, a block, a cone and a cube", 4);
+        .print_and_check("associativity, a block, a cone and a cube", 5);
 }
 
 /// Two trios that refused both ways round until `select.rs` counted the bulge
-/// of a hyperbola arc on the arc's own half of the cone, and answer one way
-/// round now.
+/// of a hyperbola arc on the arc's own half of the cone, and answered one way
+/// round after it.
 ///
-/// Neither grouping of either gives a second answer to compare, so no law is
-/// broken; one grouping gets further than it did. Where each of the other
-/// groupings stops is pinned by name, so that when it answers too the trio goes
-/// back to [`TRIOS_THAT_AGREE_ABOUT_ANSWERING`] and is compared. A third, the
-/// pointed cone up through the block's floor with a far cube, went back when a
-/// closed edge came to say which side of the face across it its face lies on
-/// (`docs/decisions.md` §340.9).
+/// Neither grouping gives a second answer to compare, so no law is broken; one
+/// grouping gets further than it did. Where the other grouping stops is pinned
+/// by name, so that when it answers too the trio goes back to
+/// [`TRIOS_THAT_AGREE_ABOUT_ANSWERING`] and is compared. A third, the pointed
+/// cone up through the block's floor with a far cube, went back when a closed
+/// edge came to say which side of the face across it its face lies on
+/// (`docs/decisions.md` §340.9). The second of the two went back when a cone
+/// face came to be read off its own sides seen down the axis (row Q1227), so
+/// one is left here.
 #[test]
 fn two_trios_that_refused_both_ways_now_answer_one_way_round() {
     for (trio, want) in TRIOS_THAT_ANSWER_ONE_WAY_ROUND {
@@ -558,6 +627,54 @@ fn a_frustum_a_block_and_a_cube_beside_the_frustum_unite_one_way_and_not_the_oth
     .print_and_check("associativity, a cube beside the frustum", 1);
 }
 
+/// The skin of `cone ∪ cube` for the frustum of
+/// [`TRIOS_THAT_AGREE_ABOUT_ANSWERING`]'s last trio, asked through the public
+/// API whether it holds a point on each side of the notch the cube's corner
+/// cuts out of it.
+///
+/// The skin is the band between the caps `z = −1` and `z = 1` less the part
+/// with `x ≥ 3.5`, `y ≤ 4.5` and `z ≤ 0.5`. Its five cuts are no family
+/// `holds.rs` follows, and every point was refused
+/// `AFaceTrimmedByACurveThisCannotFollow` until the face came to be read off
+/// its sides seen down the cone's axis (row Q1227). `(4.5, 3, 0)` is where a ray
+/// from the block's floor leaves the cone in `(cone ∪ cube) ∪ block`; it is in
+/// the notch. `(1.5, 3, 0)` is across the axis from it, and `(4.875, 3, 0.75)`
+/// above the cube's roof, both on the skin. `(4, 3, −5)` is on the cone's
+/// other nappe, below the apex.
+#[test]
+fn the_skin_of_a_frustum_notched_by_a_cubes_corner_holds_the_points_off_the_notch() {
+    let mut model = a_model();
+    let (_, cone) = on_the_grid(6, 2, [3, 3]).build_into(&mut model);
+    let cube = a_cube_at(&mut model, 4.0, [3.5, 0.5, -3.5]);
+    let (united, pieces) =
+        fused(&model, &[cone], &[cube], Rule::Union).expect("cone ∪ cube answers");
+    let solid = united.solid(pieces[0]).expect("this model made the key");
+    let skins: Vec<_> = solid
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface::Cone(_)))
+        .map(|face| face.key())
+        .collect();
+    let [skin] = skins[..] else {
+        panic!("cone ∪ cube has one face on the cone, not {}", skins.len());
+    };
+    for (at, want) in [
+        ([4.5, 3.0, 0.0], OnAFace::NotHeld),
+        ([1.5, 3.0, 0.0], OnAFace::Held),
+        ([4.875, 3.0, 0.75], OnAFace::Held),
+        ([4.0, 3.0, -5.0], OnAFace::NotHeld),
+    ] {
+        let found = solid
+            .face_holds_the_point(
+                skin,
+                PredicatePoint::from(at),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("the notched skin at {at:?} refused: {why:?}"));
+        assert_eq!(found, want, "the notched skin at {at:?}");
+    }
+}
+
 /// A cube and a cone-faced solid.
 #[derive(Clone, Copy, Debug)]
 enum Pair {
@@ -610,12 +727,26 @@ const POINTED: [Pair; 3] = [
 ///
 /// Three more used to be here refusing both ways, so that a change making one
 /// grouping answer would be seen. Counting the bulge of a hyperbola arc was
-/// that change, and two of them are [`TRIOS_THAT_ANSWER_ONE_WAY_ROUND`] now.
-/// The third is the last one here: the tip of its cone hangs under the floor,
+/// that change, and two of them went to [`TRIOS_THAT_ANSWER_ONE_WAY_ROUND`].
+/// The third is the fourth one here: the tip of its cone hangs under the floor,
 /// and `(block ∪ cone) ∪ third` turned that tip inside out until the circle
 /// it hangs from said which side of the floor it is on (`docs/decisions.md`
 /// §340.9).
-const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 4] = [
+///
+/// The last, a cube of four notching the frustum's skin at its corner, came
+/// back from [`TRIOS_THAT_ANSWER_ONE_WAY_ROUND`] by row Q1227. `(cone ∪ third)
+/// ∪ block` used to stop on `AFaceTrimmedByACurveThisCannotFollow`: the skin of
+/// `cone ∪ third` is the band between the caps `z = −1` and `z = 1` less the
+/// cube's corner `x ≥ 3.5, y ≤ 4.5, z ≤ 0.5`, with a seam up `x = 3.5` from the
+/// cube's roof to the top cap, and `select.rs`'s `place_the_piece` asks it
+/// whether it holds `(4.5, 3, 0)`, where a ray from the piece of the block's
+/// floor inside the cube leaves the cone (Q1200). Its five cuts are no family
+/// `holds.rs` follows, and `holds.rs` now reads such a face off its own sides
+/// seen down the cone's axis instead. Before that, sharing the arc picker
+/// between `holds.rs` and `arrange.rs` (Q1033) had moved the refusal to
+/// `CannotTellTheCellsOfAFaceApart` on the same face, and holding a lump on the
+/// other nappe from the whole rim outside the face (Q1112) moved it back.
+const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 5] = [
     Trio {
         pair: on_the_grid(6, 2, [3, 3]),
         third_side: 2.0,
@@ -636,65 +767,32 @@ const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 4] = [
         third_side: 2.0,
         third_at: [20.0, 20.0, 20.0],
     },
+    Trio {
+        pair: on_the_grid(6, 2, [3, 3]),
+        third_side: 4.0,
+        third_at: [3.5, 0.5, -3.5],
+    },
 ];
 
 /// Trios on which one grouping answers and the other refuses, with where each
 /// grouping stops: `(block ∪ cone) ∪ third` first, then `(cone ∪ third) ∪
 /// block`, and `None` for the one that answers.
-const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 2] = [
-    (
-        Trio {
-            pair: on_the_grid(8, 2, [4, 4]),
-            third_side: 8.0,
-            third_at: [5.0, 0.5, -2.5],
-        },
-        // The first union stopped on *side of plane* until a corner moved by a
-        // shift that rounds nothing was handed on exact (Q509). The second was
-        // `Undecidable` on *a point in a piece that every solid could place*
-        // until a point whose ray met a face nobody follows named that face
-        // (Q882).
-        [
-            None,
-            Some("the second union: AFaceTrimmedByACurveThisCannotFollow"),
-        ],
-    ),
-    (
-        Trio {
-            pair: on_the_grid(6, 2, [3, 3]),
-            third_side: 4.0,
-            third_at: [3.5, 0.5, -3.5],
-        },
-        // The second union used to stop on `AFaceTrimmedByACurveThisCannotFollow`;
-        // sharing the arc picker between `holds.rs` and `arrange.rs` (Q1033)
-        // took it one step further, to `CannotTellTheCellsOfAFaceApart`, on the
-        // cone face of `cone ∪ third`. The cube's floor `z = −3.5` cuts the
-        // cone's lower nappe there in a circle of radius 1/4, inside the face's
-        // loose box; its walk towards the apex agreed with both walks of the
-        // notched bottom rim and with the walk inside the top rim. A lump on the
-        // other nappe from the whole rim is now held outside the face (Q1112),
-        // and the same face stops on `AFaceTrimmedByACurveThisCannotFollow`
-        // again, one step later.
-        //
-        // Where (Q1200): that face is the band of cone between the caps
-        // `z = −1` and `z = 1` less the cube's corner `x ≥ 3.5, y ≤ 4.5,
-        // z ≤ 0.5`, with a seam up `x = 3.5` from the cube's roof to the top
-        // cap. The block's floor `z = 0` is cut into a piece inside the cube,
-        // and `select.rs`'s `place_the_piece` fires a ray from it that leaves
-        // the cone at `(4.5, 3, 0)`. `holds.rs`'s
-        // `what_a_face_cut_by_part_of_a_crossing_holds` is asked whether the
-        // face holds that point. Its five cuts, the two caps and the cube's
-        // `x = 3.5`, `y = 4.5` and `z = 0.5`, are no family
-        // `is_a_family_this_follows` takes and no run between two flats, so
-        // its last arm, for a curved face, refuses, and `place_the_piece`
-        // hands that on. A gap: the face is the part of the band in front of
-        // both caps and in front of any of the three cube planes, and the
-        // point reads behind all three, every sign decided.
-        [
-            None,
-            Some("the second union: AFaceTrimmedByACurveThisCannotFollow"),
-        ],
-    ),
-];
+const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 1] = [(
+    Trio {
+        pair: on_the_grid(8, 2, [4, 4]),
+        third_side: 8.0,
+        third_at: [5.0, 0.5, -2.5],
+    },
+    // The first union stopped on *side of plane* until a corner moved by a
+    // shift that rounds nothing was handed on exact (Q509). The second was
+    // `Undecidable` on *a point in a piece that every solid could place*
+    // until a point whose ray met a face nobody follows named that face
+    // (Q882).
+    [
+        None,
+        Some("the second union: AFaceTrimmedByACurveThisCannotFollow"),
+    ],
+)];
 
 /// A frustum of slope `1 / up_per_unit_wider` from a cap of radius one a unit
 /// below the floor of a block `side` across, to a cap of radius two, with its
@@ -729,6 +827,40 @@ const FRUSTUMS_WHOSE_SHARE_KEEPS_THE_CIRCLE: [(f64, [f64; 3]); 3] = [
     (2.0, [0.0, -0.375, 3.0]),
     (4.0, [0.0, -0.625, 5.0]),
 ];
+
+/// The rows of [`the_rows_the_answered_block_family_draws`], as `(slope, near,
+/// far)`, whose `A ∪ (A ∩ B)`, with `A` the cone, comes back with the frustum's
+/// wall in pieces.
+const UNITED_WITH_THE_SHARE_IN_PIECES: [(f64, f64, f64); 10] = [
+    (0.5, 4.0, 9.0),
+    (0.5, 2.0, 10.0),
+    (0.5, 3.0, 11.0),
+    (0.5, 2.0, 11.0),
+    (0.5, 1.0, 6.0),
+    (0.25, 3.0, 10.0),
+    (0.25, 3.0, 6.0),
+    (0.25, 2.0, 12.0),
+    (0.25, 1.0, 8.0),
+    (0.25, 1.0, 12.0),
+];
+
+/// The same for `A ∩ (A ∪ B)`.
+const SHARED_WITH_THE_UNION_IN_PIECES: [(f64, f64, f64); 4] = [
+    (0.5, 4.0, 9.0),
+    (0.5, 2.0, 10.0),
+    (0.5, 3.0, 11.0),
+    (0.5, 2.0, 11.0),
+];
+
+/// Whether `pair` is a frustum beside a block with one of `rows`' numbers.
+fn is_one_of(pair: Pair, rows: &[(f64, f64, f64)]) -> bool {
+    let Pair::BesideABlock { slope, near, far } = pair else {
+        return false;
+    };
+    let bits = |row: (f64, f64, f64)| [row.0, row.1, row.2].map(f64::to_bits);
+    rows.iter()
+        .any(|&row| bits(row) == bits((slope, near, far)))
+}
 
 /// Whether `pair` is one of [`FRUSTUMS_WHOSE_SHARE_KEEPS_THE_CIRCLE`].
 fn its_share_keeps_the_circle(pair: Pair) -> bool {
