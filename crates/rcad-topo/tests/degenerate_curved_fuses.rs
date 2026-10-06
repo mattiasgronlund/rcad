@@ -2388,10 +2388,11 @@ fn a_ball_with_a_bar_through_its_centre_is_refused_after_its_faces_are_cut() {
             } else {
                 Pair::of(bar, ball)
             };
-            let why = refusal(&mut model, &pair, rule, &policy);
-            assert!(
-                is_refused_after_its_faces_are_cut(&why, rule, ball_first),
-                "{rule:?}, the ball first {ball_first}, {policy:?}: {why:?}"
+            assert_refused_after_its_faces_are_cut(
+                refusal(&mut model, &pair, rule, &policy),
+                rule,
+                ball_first,
+                &format!("{policy:?}"),
             );
         }
     }
@@ -2429,9 +2430,11 @@ fn a_ball_one_rounding_off_a_bars_axis_is_refused_before_any_order() {
             };
             let why = refusal(&mut model, &pair, rule, &Policy::certified());
             if on_the_axis {
-                assert!(
-                    is_refused_after_its_faces_are_cut(&why, rule, ball_first),
-                    "centred at x = {centre}, {rule:?}, the ball first {ball_first}: {why:?}"
+                assert_refused_after_its_faces_are_cut(
+                    why,
+                    rule,
+                    ball_first,
+                    &format!("centred at x = {centre}"),
                 );
             } else {
                 assert!(
@@ -2447,20 +2450,17 @@ fn a_ball_one_rounding_off_a_bars_axis_is_refused_before_any_order() {
 /// less the ball by faces that do not agree which way they face, and every
 /// other rule and order by the result's mesh finding two corners of a face in
 /// one place. Not traced past the name (Q1140).
-fn is_refused_after_its_faces_are_cut(why: &Error, rule: Rule, ball_first: bool) -> bool {
-    if matches!(rule, Rule::Difference) && !ball_first {
-        return matches!(
-            why,
-            Error::Invalid(rcad_topo::Invalid::FacesDoNotAgreeWhichWayTheyFace)
-        );
-    }
-    matches!(
-        why,
+fn assert_refused_after_its_faces_are_cut(why: Error, rule: Rule, ball_first: bool, what: &str) {
+    let the_bar_less_the_ball = matches!(rule, Rule::Difference) && !ball_first;
+    match why {
+        Error::Invalid(rcad_topo::Invalid::FacesDoNotAgreeWhichWayTheyFace)
+            if the_bar_less_the_ball => {}
         Error::CannotMeshAFace {
             why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
             ..
-        }
-    )
+        } if !the_bar_less_the_ball => {}
+        other => panic!("{what}, {rule:?}, the ball first {ball_first}: refused with {other:?}"),
+    }
 }
 
 /// Each rule, with `true` for the ball named first.
