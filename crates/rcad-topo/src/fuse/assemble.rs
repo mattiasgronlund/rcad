@@ -24,10 +24,11 @@
 //! [`Error::ResultIsNotManifold`]. That is the whole manifold check, and it
 //! lands here because this is where an edge with three claimants is *discovered*
 //! rather than searched for. The one edge with four claimants that is not
-//! refused is a line two input faces rest against each other along, with both
-//! sides of each kept: it is no edge of either input, and
-//! [`Assembly::part_each_line_two_faces_rest_against_each_other_along`] gives
-//! each face its own before anything is counted.
+//! refused is a line two faces rest against each other along, with both sides
+//! of each kept: it is no edge of either input, or — since Q803 — one input's
+//! own edge resting on a face of the other, kept as that input's edge; either
+//! way [`Assembly::part_each_line_two_faces_rest_against_each_other_along`]
+//! gives each face its own before anything is counted.
 //!
 //! # Two pieces on one plane are one face
 //!
