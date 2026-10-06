@@ -234,8 +234,10 @@ pub enum EdgeRun {
         picked_by: SmallVec<[Picker; 1]>,
     },
     /// Right round the closed curve where the face crosses `and`, so it starts
-    /// and ends at the same vertex — for when the faces either side are the
-    /// same surface and so name no crossing at all.
+    /// and ends at the same vertex — for when the faces either side name no
+    /// crossing at all: the same surface, as a frustum's split wall or a ball's
+    /// seam, or, since Q1118, two different curved surfaces whose names
+    /// `rcad-topo`'s `the_name_each_closed_curve_goes_by` has joined into one.
     ///
     /// **A frustum's wall split in two by a leaning plane is why this exists.**
     /// Both bands are on the one cone, so the pair either side of the rim
@@ -248,6 +250,16 @@ pub enum EdgeRun {
     /// not name an ellipse: it names the circle through it, which is a
     /// **different curve**, and that wrong answer is measured at 1.45 mm on a
     /// 100 mm solid by `rcad-topo/tests/a_leaning_cut_round_one_cone.rs`.
+    ///
+    /// **A dome on a shaft of the dome's own radius is the same with two
+    /// different faces either side.** The rim where the cap's plane crosses
+    /// the ball and the pipe is a closed curve under two names, one from each
+    /// face, and `rcad-topo`'s fuse joins them before this is written only
+    /// where the plane and the two curved surfaces meet in more than a point
+    /// (`meet_of_three_surfaces`), so `and` is that plane rather than the
+    /// pipe's or the ball's own partner. A frustum against a bar of the
+    /// frustum's narrow radius, and two pointed cones base to base, are the
+    /// same join with a cone standing in for the ball (Q1118).
     ///
     /// So `and` is the missing second surface, the same job it does in
     /// [`EdgeRun::PartOfWhereItCrosses`], and no `picked_by`: the edge is the

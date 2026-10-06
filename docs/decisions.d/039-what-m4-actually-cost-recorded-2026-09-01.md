@@ -371,6 +371,20 @@ moved them.
 > `ResultIsNotManifold { count: 4 }`, and §80.9's decision that two solids
 > touching along an edge of both are not built is untouched.
 
+> **2026-10-06 note (Q803): a prism lying on one of its own edges parts four
+> darts too.** `part_each_line_two_faces_rest_against_each_other_along` now
+> also parts a line into two edges where only one of its two pairs is pieces of
+> one input face and the other pair is two faces of the other solid — a prism
+> resting on a block's top face along one of the prism's own edges — but only
+> where those two faces lie on the outer side of the face they rest on and no
+> other edge joins the two pairs into one shell
+> (`a_prism_lying_on_one_edge.rs`). A block less a prism lying inside it along
+> its edge
+> (`a_block_less_a_prism_lying_inside_it_along_its_edge_is_refused_and_the_rest_answer`)
+> and a solid lying on a block along one edge and reaching into it elsewhere
+> (`a_solid_lying_on_a_block_along_an_edge_and_reaching_into_it_is_refused_united`)
+> stay refused `ResultIsNotManifold { count: 4 }`.
+
 > **2026-10-04 note (Q473): a plane lying along a cone's ruling runs along the
 > ruling.** The gap above, closed: `AlongATouch` carries the ruling,
 > `(n·n)w − (n·w)n` for the plane's normal and the cone's axis, read only once
