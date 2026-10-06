@@ -944,18 +944,21 @@ fn a_flat_face(
 }
 
 /// **A tube cut by a block whose floor crosses it and whose top clears it is
-/// refused**, both ways round: the tube of the test above, holed before it is
-/// cut, and the block `[−14, 14] × [−14, 14] × [0, 22]`. The block's top,
-/// `z = 22`, is two above the tube's, yet the fuse cuts it along the circles of
-/// radius 4 and 12 where the two pipes would cross it, and cannot find a point
-/// inside the ring between them to place it by (Q634, with a print in
-/// `select::choose`). Nothing of the tube reaches `z = 22`, so there is nothing
-/// there to cut along. The wedge above, holding the holed tube, refuses the
-/// same way with its top at 21, 22, 24 or 30. A bar of radius 12 gets the
-/// circle of radius 12 on the block's top as well, and is answered; so is the
-/// tube against a block reaching down past it, `z = −30` to `22`.
+/// the tube from the block's floor up**, both ways round: the tube of the test
+/// above, holed before it is cut, and the block `[−14, 14] × [−14, 14] × [0,
+/// 22]`. That is the ring between radius 4 and 12 stood from `z = 0` to `20`,
+/// `128π · 20 = 2560π`.
+///
+/// The block's top, `z = 22`, is two above the tube's, and the two pipes cross
+/// its plane in circles of radius 4 and 12 there. Until Q1090 the fuse cut the
+/// top along both, and could not find a point inside the ring between them to
+/// place it by (Q634, with a print in `select::choose`). Each circle meets
+/// nothing else on the top and the pipe face carrying it ends at `z = 20`, so
+/// `cuts::gather` leaves it off now. A bar of radius 12 got the circle of
+/// radius 12 on the block's top as well and was answered; so was the tube
+/// against a block reaching down past it, `z = −30` to `22`.
 #[test]
-fn a_tube_cut_by_a_block_whose_top_clears_it_is_refused_on_circles_its_walls_never_reach() {
+fn a_tube_cut_by_a_block_whose_top_clears_it_is_the_tube_from_the_blocks_floor_up() {
     for swapped in [false, true] {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let outer = model
@@ -971,24 +974,60 @@ fn a_tube_cut_by_a_block_whose_top_clears_it_is_refused_on_circles_its_walls_nev
             0.0,
             22.0,
         );
-        let refused = fused_in_order(&mut model, [tube, block], Rule::Intersection, swapped);
-        let Err(Error::Undecidable { records }) = &refused else {
-            panic!("swapped {swapped}: {refused:?}");
+        let answer = fused_in_order(&mut model, [tube, block], Rule::Intersection, swapped)
+            .unwrap_or_else(|why| panic!("swapped {swapped}: {why:?}"));
+        let [solid] = answer[..] else {
+            panic!("swapped {swapped}: {answer:?}");
         };
-        let [record] = records.records() else {
-            panic!("swapped {swapped}: {records:?}");
+        assert_holds(&model, solid, 2560.0 * PI, &format!("swapped {swapped}"));
+    }
+}
+
+/// **The same tube and a block narrower than it, whose top clears it**, under
+/// every rule, both ways round: the block `[−10, 10] × [−10, 10] × [0, 22]`.
+/// The circle of radius 12 on the block's top crosses its four sides, so it
+/// splits their edges where the pipe splits the walls', and it stays on
+/// although the pipe face never reaches `z = 22`. Left off, the top's edges
+/// and the walls' disagree about their corners, and the union is refused with
+/// an edge that has one face along it. What they share is the ring between
+/// radius 4 and the square's part of the disk of radius 12, from `z = 0` to
+/// `20`.
+#[test]
+fn a_tube_and_a_narrower_block_whose_top_clears_it_are_answered_under_every_rule() {
+    let past_the_side = 44.0_f64.sqrt();
+    let quarter =
+        10.0 * past_the_side + 72.0 * ((10.0_f64 / 12.0).asin() - (past_the_side / 12.0).asin());
+    let shared = 20.0 * (4.0 * quarter - 16.0 * PI);
+    let (tube_alone, block_alone) = (30.0 * 128.0 * PI, 20.0 * 20.0 * 22.0);
+    for (rule, swapped) in every_rule_both_ways() {
+        let volume = match (rule, swapped) {
+            (Rule::Union, _) => tube_alone + block_alone - shared,
+            (Rule::Intersection, _) => shared,
+            (Rule::Difference, false) => tube_alone - shared,
+            (Rule::Difference, true) => block_alone - shared,
+            (other, _) => panic!("not a rule this probes: {other:?}"),
         };
-        assert_eq!(record.predicate(), "a point inside a piece of a face");
-        let corners: Vec<Option<[f64; 3]>> = record
-            .inputs()
-            .iter()
-            .map(|corner| corner.exact_coordinates())
-            .collect();
-        assert_eq!(
-            corners,
-            [Some([0.0, 4.0, 22.0]), Some([0.0, 12.0, 22.0])],
-            "swapped {swapped}"
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let outer = model
+            .add_round_bar(12.0, 30.0, &at(0.0, 0.0, -10.0))
+            .expect("a bar of radius twelve");
+        let through = model
+            .add_round_bar(4.0, 34.0, &at(0.0, 0.0, -12.0))
+            .expect("a bar of radius four");
+        let tube = the_one_solid(&mut model, outer, through, Rule::Difference);
+        let block = a_block(
+            &mut model,
+            &[[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0], [-10.0, 10.0]],
+            0.0,
+            22.0,
         );
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, [tube, block], rule, swapped)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let [solid] = answer[..] else {
+            panic!("{what}: {answer:?}");
+        };
+        assert_holds(&model, solid, volume, &what);
     }
 }
 

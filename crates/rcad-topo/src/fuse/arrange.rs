@@ -9291,12 +9291,13 @@ mod what_the_curved_arrangement_reaches {
     /// second half, where the hole does not go all the way through.
     ///
     /// The wall of the bar is cut by the block's top into what is inside the
-    /// block and what is above it, and the block's *bottom* is cut too — a cut
-    /// is by a surface and a cylinder reaches past the bar carrying it, which is
-    /// what keeps the two faces either side of an edge split at the same place
-    /// (§17.4, one word changed).
+    /// block and what is above it. The block's *bottom* is left whole, though
+    /// the bar's pipe crosses its plane in a circle: the bar's wall stops at
+    /// `z = 5` and never reaches it, and the circle meets none of the bottom's
+    /// sides, so it is no edge of the answer and splits no edge either
+    /// (`cuts::gather`, Q1090). Until Q1090 it was cut there too.
     #[test]
-    fn a_blind_hole_cuts_the_face_it_stops_short_of_as_well() {
+    fn a_blind_hole_leaves_the_face_it_stops_short_of_whole() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let block = a_block(&mut model);
         let bar = model
@@ -9311,9 +9312,9 @@ mod what_the_curved_arrangement_reaches {
             what_it_cuts(&model, block, bar),
             [
                 "pipe cut by 4 -> [2, 2]",
+                "plane cut by 4 -> [1]",
                 "plane cut by 5 -> [1]",
                 "plane cut by 5 -> [1]",
-                "plane cut by 5 -> [2, 1]",
                 "plane cut by 5 -> [2, 1]",
                 "plane cut by 6 -> [1, 1]",
                 "plane cut by 6 -> [1, 1]",

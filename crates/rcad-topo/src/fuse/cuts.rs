@@ -60,6 +60,34 @@
 //! face and drops the corners that stopped being corners, so nothing of the
 //! split reaches the answer.
 //!
+//! # A crossing that splits nothing and is no edge is left off
+//!
+//! The argument above is about edges: a crossing has to be on a face because
+//! it splits the face's edges where it splits its neighbours'. A crossing that
+//! **shares no point with any other surface the face is bounded or cut by**
+//! splits no edge, of this face or any other, so that argument asks nothing of
+//! it. Every edge of the face's pieces lies along one of those other surfaces.
+//! What such a crossing still does is cut the face's inside into the part on
+//! either side of it, and that is wanted only where it is an edge of the
+//! answer: where the face that carries it reaches it.
+//!
+//! **So it is left off when that face provably misses the whole surface it
+//! cuts** (Q1090). A tube from `z = −10` to `20` and a block from `0` to `22`
+//! about it: the pipes cross the block's top in circles of radius 4 and 12
+//! that meet nothing else on it, and the tube's walls never come within two of
+//! `z = 22`. Cut along them, the ring between was a piece that selection could
+//! not find a point inside, and the fuse was refused. Left off, the circles
+//! are no loss. No boundary of either solid passes within reach of them,
+//! because any surface that did would share a point with them, so the top on
+//! one side of each circle is inside or outside each solid exactly where the
+//! other side is.
+//!
+//! The face missing the surface is read off the band round its axis, the test
+//! [`two_faces_provably_apart`] uses, and that the crossing meets nothing else
+//! is asked the way the arrangement places its nodes; both are proofs and
+//! neither is a box. A surface carried by two faces stays on wherever one of
+//! them does not say so.
+//!
 //! # Two gaps, left open on purpose
 //!
 //! A solid is only refused for running through itself when the overlap is
@@ -75,7 +103,7 @@
 //! §7.4's catalogue of degenerate inputs, which is where the cases that would
 //! close them get written.
 
-use rcad_geom::{Surface, SurfaceMeet, intersect};
+use rcad_geom::{MeetOfThree, Surface, SurfaceMeet, intersect, meet_of_three_surfaces};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::{Error, Result};
@@ -88,7 +116,8 @@ use super::bake::{BakedFace, BakedSolid};
 ///
 /// Every face is cut against every other face, in its own solid and in every
 /// other, whichever group each came from. The header says why the solid's own
-/// planes are in there.
+/// planes are in there, and why a crossing that splits nothing and lies where
+/// its face never reaches is then left off.
 ///
 /// # Errors
 ///
@@ -107,7 +136,10 @@ pub(crate) fn gather(
     }
 
     let within_reach = solids_within_reach_of_each_other(solids);
-    let mut found: Vec<(usize, usize, Surface)> = Vec::new();
+    let mut found: Vec<Vec<Vec<ACutFound>>> = solids
+        .iter()
+        .map(|solid| vec![Vec::new(); solid.faces.len()])
+        .collect();
     for one in 0..solids.len() {
         for other in one..solids.len() {
             if within_reach.leader(one) != within_reach.leader(other) {
@@ -119,17 +151,91 @@ pub(crate) fn gather(
                     let face = &solids[one].faces[mine];
                     let against = &solids[other].faces[theirs];
                     let (onto_face, onto_against) = cuts_between(face, against, policy, log)?;
-                    found.extend(onto_face.into_iter().map(|cut| (one, mine, cut)));
-                    found.extend(onto_against.into_iter().map(|cut| (other, theirs, cut)));
+                    found[one][mine].extend(found_on(face, against, onto_face));
+                    found[other][theirs].extend(found_on(against, face, onto_against));
                 }
             }
         }
     }
 
-    for (solid, face, cut) in found {
-        solids[solid].faces[face].cuts.push(cut);
+    for (solid, faces) in found.into_iter().enumerate() {
+        for (face, cuts) in faces.into_iter().enumerate() {
+            let kept = the_cuts_left_on(&solids[solid].faces[face], &cuts);
+            solids[solid].faces[face].cuts.extend(kept);
+        }
     }
     Ok(())
+}
+
+/// A cut found for a face, before it is hung on it.
+#[derive(Clone, Copy, Debug)]
+struct ACutFound {
+    cut: Surface,
+    /// Whether the face that carries `cut` provably shares no point with the
+    /// whole surface of the face it cuts, so that no point of their crossing is
+    /// on that face.
+    its_face_misses_this_surface: bool,
+}
+
+fn found_on(face: &BakedFace, against: &BakedFace, cuts: Vec<Surface>) -> Vec<ACutFound> {
+    let its_face_misses_this_surface =
+        !cuts.is_empty() && a_face_misses_a_surface_by_its_band(against, &face.surface);
+    cuts.into_iter()
+        .map(|cut| ACutFound {
+            cut,
+            its_face_misses_this_surface,
+        })
+        .collect()
+}
+
+/// The cuts to hang on `face`: every one found, but a crossing that splits
+/// nothing on the face and lies where the face carrying it never reaches
+/// (the header's last section).
+///
+/// Such a crossing is one whose carrying face provably misses `face`'s whole
+/// surface, and which provably shares no point with any other surface `face`
+/// is bounded or cut by. One surface carried by two faces is left off only
+/// where both say so, since each finding is weighed on its own.
+fn the_cuts_left_on(face: &BakedFace, found: &[ACutFound]) -> Vec<Surface> {
+    let others: Vec<Surface> = face
+        .wires
+        .iter()
+        .flatten()
+        .map(|edge| edge.across)
+        .chain(found.iter().map(|one| one.cut))
+        .collect();
+    found
+        .iter()
+        .filter(|one| {
+            !(one.its_face_misses_this_surface
+                && the_crossing_meets_none_of(&face.surface, &one.cut, &others))
+        })
+        .map(|one| one.cut)
+        .collect()
+}
+
+/// Whether the crossing of `surface` and `cut` provably shares no point with
+/// any of `others` but `cut` itself.
+///
+/// Asked the way [`place_the_meets`](super::arrange) asks for a node: where
+/// the three surfaces meet, and where that cannot be worked out, whether the
+/// two partners meet at all. Under a certified policy, with its records
+/// dropped, for the reason [`two_faces_provably_apart`] gives: a crossing left
+/// off on a guess is an edge of the answer lost.
+fn the_crossing_meets_none_of(surface: &Surface, cut: &Surface, others: &[Surface]) -> bool {
+    let policy = Policy::certified();
+    others.iter().filter(|other| *other != cut).all(|other| {
+        let mut dropped = ProvenanceLog::new();
+        match meet_of_three_surfaces([surface, cut, other], &policy, &mut dropped) {
+            Ok(MeetOfThree::Nowhere) => true,
+            Ok(MeetOfThree::At(_) | MeetOfThree::MoreThanAPoint) => false,
+            Ok(_) => false,
+            Err(_) => matches!(
+                intersect(cut, other, &policy, &mut dropped),
+                Ok(SurfaceMeet::Nothing)
+            ),
+        }
+    })
 }
 
 /// Which solids are joined to each other by a chain of solids that may meet.
@@ -234,10 +340,9 @@ fn two_faces_provably_apart(face: &BakedFace, against: &BakedFace) -> bool {
     }) {
         return true;
     }
-    let banded = |one: &BakedFace, other: &BakedFace| {
-        band_a_face_is_inside(one).is_some_and(|band| a_surface_misses_a_band(&other.surface, band))
-    };
-    if banded(face, against) || banded(against, face) {
+    if a_face_misses_a_surface_by_its_band(face, &against.surface)
+        || a_face_misses_a_surface_by_its_band(against, &face.surface)
+    {
         return true;
     }
     let Ok(meet) = intersect(
@@ -252,6 +357,12 @@ fn two_faces_provably_apart(face: &BakedFace, against: &BakedFace) -> bool {
         return both.is_some_and(|both| where_two_boxes_overlap(both, at.enclosure()).is_none());
     }
     matches!(meet, SurfaceMeet::Nothing)
+}
+
+/// Whether `face` provably shares no point with `surface`, read off the band
+/// round an axis the face lies in.
+fn a_face_misses_a_surface_by_its_band(face: &BakedFace, surface: &Surface) -> bool {
+    band_a_face_is_inside(face).is_some_and(|band| a_surface_misses_a_band(surface, band))
 }
 
 /// A box the face is certainly inside, rounded outward, or `None` where this
