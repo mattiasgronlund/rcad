@@ -703,45 +703,74 @@ impl Assembly {
     /// seam that piece is cut open along. The answer is the two solids as they
     /// stood, two lumps.
     ///
-    /// **Only where each pair is pieces of one input face, walking the line
-    /// opposite ways.** Four darts from four input faces is a line both solids
-    /// have an edge along — two cubes touching along part of an edge, or the
-    /// frame and the comb of `degenerate_fuses.rs` — and those stay one edge and
-    /// are refused: no `Model` holds four faces along one edge, and §80.9 leaves
-    /// two touching solids as an answer for that relation unbuilt.
+    /// **A prism lying along one of its edges on a block's top face** is the
+    /// same with one difference: the prism's two darts are its two faces either
+    /// side of its own edge, two input faces and not one. The top face's two
+    /// pieces are parted off them, the top face is one face again, and the
+    /// prism keeps its edge. That is parted only where it is two lumps:
+    ///
+    /// - **The prism's faces lie on the outer side of the face they rest on**
+    ///   ([`Assembly::rest_on_the_outer_side_of`]). Inside it, they are the
+    ///   walls of a prism lying in the block along its edge, kept turned round
+    ///   in the block less the prism, and the answer is one solid pinched along
+    ///   the line, not two.
+    /// - **Nothing else joins the two pairs into one shell**
+    ///   ([`Assembly::a_line_whose_two_sides_are_joined_some_other_way`]). A
+    ///   solid lying on a block along one edge and reaching down into it
+    ///   somewhere else is one solid that touches itself along the line, and a
+    ///   shell that touches itself is what §17.4 refuses.
+    ///
+    /// **Four darts from four input faces stay one edge and are refused**: a
+    /// line both solids have an edge along — two cubes touching along part of
+    /// an edge, or the frame and the comb of `degenerate_fuses.rs`. No `Model`
+    /// holds four faces along one edge, and §80.9 leaves two touching solids as
+    /// an answer for that relation unbuilt.
     ///
     /// Which pair keeps the edge is the one whose first dart comes first; the
     /// other is moved onto a copy. **Each takes the input edges of its own input
-    /// face**, so that a bar whose seam is the touching line hands the seam to
-    /// the skin's edge and not to the wall's, which is dissolved; the line is no
-    /// edge of the wall, so the wall's takes none.
+    /// faces**, so that a bar whose seam is the touching line hands the seam to
+    /// the skin's edge and not to the wall's, which is dissolved, and the
+    /// prism's edge goes to the prism's; the line is no edge of the wall or the
+    /// top face, so theirs takes none.
     ///
     /// # Panics
     ///
-    /// If an input edge the line is a piece of runs along neither input face.
-    /// Every one was named by a side of a piece of one of them, along that
-    /// face's own boundary or its seam.
+    /// If an input edge the line is a piece of runs along none of the four
+    /// faces' input faces. Every one was named by a side of a piece of one of
+    /// them, along that face's own boundary or its seam.
     fn part_each_line_two_faces_rest_against_each_other_along(&mut self, model: &Model) {
-        for by in self.claimants_of_each_edge() {
-            let Some(moving) = self.the_second_of_two_input_faces_along(&by) else {
+        let claimants = self.claimants_of_each_edge();
+        let mut partings: Vec<Option<[[Dart; 2]; 2]>> = claimants
+            .iter()
+            .map(|by| self.the_two_pairs_along(by))
+            .collect();
+        while let Some(joined) =
+            self.a_line_whose_two_sides_are_joined_some_other_way(&claimants, &partings)
+        {
+            partings[joined] = None;
+        }
+        for (kept, parting) in partings.into_iter().enumerate() {
+            let Some([staying, moving]) = parting else {
                 continue;
             };
-            let kept = self.edge_of(by[0]);
-            let runs_along = |input: EdgeKey, dart: Dart| {
+            let runs_along = |input: EdgeKey, pair: [Dart; 2]| {
                 model
                     .edge(input)
                     .expect("a side of a piece runs along an edge of the model the fuse was given")
                     .neighbouring_faces()
-                    .any(|face| self.faces[dart.face].ancestors.contains(&face))
+                    .any(|face| {
+                        pair.iter()
+                            .any(|dart| self.faces[dart.face].ancestors.contains(&face))
+                    })
             };
             let (keeping, parting): (Vec<EdgeKey>, Vec<EdgeKey>) = self.edges[kept]
                 .from
                 .iter()
-                .partition(|&&input| !runs_along(input, moving[0]));
+                .partition(|&&input| !runs_along(input, moving));
             for &input in &keeping {
                 assert!(
-                    runs_along(input, by[0]),
-                    "an input edge a parted line is a piece of runs along one of the two faces"
+                    runs_along(input, staying),
+                    "an input edge a parted line is a piece of runs along one of its faces"
                 );
             }
             let original = &self.edges[kept];
@@ -760,24 +789,126 @@ impl Assembly {
         }
     }
 
-    /// The two darts to move onto an edge of their own, where four darts along
-    /// one edge are two pairs, each pair from pieces of one input face and
-    /// walking the edge opposite ways; `None` for anything else.
-    fn the_second_of_two_input_faces_along(&self, by: &[Dart]) -> Option<[Dart; 2]> {
-        let &[first, _, _, _] = by else {
+    /// The two pairs four darts along one edge part into, the pair holding the
+    /// first dart first; `None` where they do not part.
+    ///
+    /// Each pair walks the edge opposite ways and at least one is pieces of one
+    /// input face. Where both are, it is a bar's skin on a wall or on another
+    /// bar. Where only one is, the other two must rest on its outer side.
+    fn the_two_pairs_along(&self, by: &[Dart]) -> Option<[[Dart; 2]; 2]> {
+        let &[first, second, third, fourth] = by else {
             return None;
         };
-        let ancestors = |dart: Dart| &self.faces[dart.face].ancestors;
-        let (keeping, moving): (Vec<Dart>, Vec<Dart>) = by
-            .iter()
-            .partition(|&&dart| ancestors(dart) == ancestors(first));
-        let keeping = <[Dart; 2]>::try_from(keeping).ok()?;
-        let moving = <[Dart; 2]>::try_from(moving).ok()?;
-        let one_face_both_ways = |[one, other]: [Dart; 2]| {
-            ancestors(one) == ancestors(other)
-                && self.side_of(one).forward != self.side_of(other).forward
+        let both_ways =
+            |[one, other]: [Dart; 2]| self.side_of(one).forward != self.side_of(other).forward;
+        [
+            [[first, second], [third, fourth]],
+            [[first, third], [second, fourth]],
+            [[first, fourth], [second, third]],
+        ]
+        .into_iter()
+        .filter(|&[staying, moving]| both_ways(staying) && both_ways(moving))
+        .find(|&[staying, moving]| {
+            match (
+                self.pieces_of_one_input_face(staying),
+                self.pieces_of_one_input_face(moving),
+            ) {
+                (true, true) => {
+                    self.faces[staying[0].face].ancestors != self.faces[moving[0].face].ancestors
+                }
+                (true, false) => self.rest_on_the_outer_side_of(moving, staying),
+                (false, true) => self.rest_on_the_outer_side_of(staying, moving),
+                (false, false) => false,
+            }
+        })
+    }
+
+    fn pieces_of_one_input_face(&self, [one, other]: [Dart; 2]) -> bool {
+        self.faces[one.face].ancestors == self.faces[other.face].ancestors
+    }
+
+    /// Whether two faces resting along a line lie on the side the face they
+    /// rest on points to: every corner of theirs on that side of its plane or
+    /// on the plane, and at least one off it.
+    ///
+    /// The face rested on is stored with its plane pointing out of the
+    /// material, turned round where the rule turned it, so the side it points
+    /// to is outside whatever the rule.
+    ///
+    /// **Only flat faces resting on a flat face are asked**, and anything
+    /// curved stays one edge and refused: a straight-sided flat face lies
+    /// within its corners, and a curved one can bulge past them. **Every
+    /// corner is asked, not only those near the line**, so a face with a corner
+    /// on the inner side anywhere, or one the arithmetic cannot place, leaves
+    /// the line one edge and refused. A piece of the face rested on has every
+    /// corner on its plane and none off it, so it is never taken for one
+    /// resting there.
+    fn rest_on_the_outer_side_of(&self, resting: [Dart; 2], on: [Dart; 2]) -> bool {
+        let Some(plane) = self.faces[on[0].face].surface.as_plane() else {
+            return false;
         };
-        (one_face_both_ways(keeping) && one_face_both_ways(moving)).then_some(moving)
+        resting.iter().all(|dart| {
+            let face = &self.faces[dart.face];
+            if face.surface.as_plane().is_none() {
+                return false;
+            }
+            let mut off_the_plane = false;
+            for corner in face
+                .wires
+                .iter()
+                .flatten()
+                .flat_map(|side| self.edges[side.edge].ends)
+            {
+                match plane.side_of_point(PredicatePoint::from(
+                    self.corners[corner].point.coordinates(),
+                )) {
+                    Decision::Pos => off_the_plane = true,
+                    Decision::Zero => {}
+                    Decision::Neg | Decision::Undecidable { .. } => return false,
+                    other => panic!(
+                        "which side of a plane a corner is on came back as a decision nothing \
+                         here knows: {other:?}"
+                    ),
+                }
+            }
+            off_the_plane
+        })
+    }
+
+    /// An edge parted onto two faces of one solid resting on a face of another
+    /// whose two pairs other edges join into one shell all the same, or `None`
+    /// when no parting leaves one.
+    ///
+    /// Each line a parting is kept for joins only its own pairs, and every
+    /// other edge joins every face along it. Dropping one parting can only join
+    /// more, so the caller asks again until this answers `None`. A bar's skin
+    /// parted off a wall is not asked, and is parted as Q760 left it.
+    fn a_line_whose_two_sides_are_joined_some_other_way(
+        &self,
+        claimants: &[Vec<Dart>],
+        partings: &[Option<[[Dart; 2]; 2]>],
+    ) -> Option<usize> {
+        let mut shells = Sameness::of(self.faces.len());
+        for (by, parting) in claimants.iter().zip(partings) {
+            match parting {
+                Some(pairs) => {
+                    for [one, other] in pairs {
+                        shells.join(one.face, other.face);
+                    }
+                }
+                None => {
+                    for dart in by {
+                        shells.join(by[0].face, dart.face);
+                    }
+                }
+            }
+        }
+        partings.iter().position(|parting| {
+            parting.is_some_and(|[staying, moving]| {
+                !(self.pieces_of_one_input_face(staying) && self.pieces_of_one_input_face(moving))
+                    && shells.leader(staying[0].face) == shells.leader(moving[0].face)
+            })
+        })
     }
 
     /// Fold every run of faces that is really one flat region into one face.
