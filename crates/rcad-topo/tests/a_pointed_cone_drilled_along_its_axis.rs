@@ -22,25 +22,27 @@
 //! point past the half-space that picks a circle out is now on the circle's side
 //! towards it, and the sign there is the one a step down the pipe meets.
 //!
-//! **Three of the six fuses answer, and three are refused a step later.** The
-//! union and the bar less the cone keep the bar's band between the two circles.
-//! While the corner each circle starts at was named by the two surfaces alone
+//! **The union and the bar less the cone keep the bar's band between the two
+//! circles**, and were refused twice over before they answered. While the
+//! corner each circle starts at was named by the two surfaces alone
 //! (`MeetPoint::WhereAClosedCurveStarts`), both circles got one corner and one
 //! edge, claimed four times — by the band's two wires, by the band below and by
 //! the cone — and the three were refused `ResultIsNotManifold { count: 4 }`.
 //! The corner is now named by what picks its circle out of the two as well
-//! (Q1148), and the three get as far as the sweep of the answer they write.
+//! (Q1148).
 //!
-//! **The sweep refuses that answer, and the answer is sound.** The bar's wall
-//! from `z = −15` up to the circle at `z = 1` is one face of the answer, the two
-//! bands either side of `z = −1` joined into it, and that face crosses the cone's
-//! other nappe at `z = −1`. The sweep reads which side of the cone the face
-//! lies on at the circle `z = 1` off the one corner it has off the cone, the
-//! seam corner at `z = −15`, which is inside the other nappe. Next to `z = 1`
-//! the face is outside the cone. So the edge reads as walked against its
-//! surfaces, and every one of the three is refused
+//! **Then the sweep refused the answer, and the answer was sound.** The bar's
+//! wall from `z = −15` up to the circle at `z = 1` is one face of the answer,
+//! the two bands either side of `z = −1` joined into it, and that face crosses
+//! the cone's other nappe at `z = −1`. The sweep read which side of the cone the
+//! face lies on at the circle `z = 1` off the one corner it has off the cone, the
+//! seam corner at `z = −15`, which is inside the other nappe; next to `z = 1` the
+//! face is outside the cone. So the edge read as walked against its surfaces,
+//! and all three were refused
 //! `TheFuseWroteABrokenAnswer { broken: AClosedEdgeIsWalkedAgainstItsSurface }`.
-//! A **gap** in `validate.rs`, outside the files that name the corner.
+//! A **gap** (Q1190): a corner past the flat half-space that picks the circle
+//! out now says the side a step from the circle towards that half-space meets,
+//! which is the side the wall keeps next to the circle.
 //!
 //! The closed forms, from the slices of the shared piece: inside the bar the cone
 //! holds a disc of radius `z` for `z` up to one and the whole unit disc above it,
@@ -51,7 +53,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
+use rcad_topo::{Error, Model, Rule, SolidKey};
 
 mod cones;
 
@@ -64,8 +66,15 @@ const CONE: f64 = 1000.0 * PI / 3.0;
 const BAR: f64 = 40.0 * PI;
 const SHARED: f64 = 28.0 * PI / 3.0;
 
-/// The shared piece, whichever goes first, and the cone less the bar, each one
-/// solid that the sweep accepts and that holds its closed form.
+/// Every rule, whichever goes first, answers with solids the sweep accepts, each
+/// holding its closed form.
+///
+/// The union is `CONE + BAR − SHARED = 364π` and the bar less the cone
+/// `BAR − SHARED = 92π/3` in two solids: the bar above `z = 10`, `15π`, and the
+/// bar below `z = 1` with the cone's tip taken out of its top, `16π − π/3`. The
+/// union and the bar less the cone keep the bar's wall from `z = −15` up to the
+/// circle at `z = 1` in one face, which crosses the cone's other nappe at
+/// `z = −1`.
 ///
 /// **The slack is what the two bare solids fall short by at this deflection**,
 /// measured here rather than written down: a mesh is drawn through points on the
@@ -73,55 +82,40 @@ const SHARED: f64 = 28.0 * PI / 3.0;
 /// together. The bare cone carries no published bound to use instead — a cone
 /// face that reaches its apex has a radius of nothing in `measure.rs`.
 #[test]
-fn the_shared_piece_and_the_cone_less_the_bar_hold_their_closed_forms() {
+fn every_rule_either_way_round_holds_its_closed_form_across_the_cones_other_nappe() {
     let slack = the_two_solids_fall_short_by();
+    let the_bar_less_the_cone = [15.0 * PI, 16.0 * PI - PI / 3.0];
     for (rule, cone_first, want) in [
-        (Rule::Intersection, true, SHARED),
-        (Rule::Intersection, false, SHARED),
-        (Rule::Difference, true, CONE - SHARED),
+        (Rule::Union, true, &[CONE + BAR - SHARED][..]),
+        (Rule::Union, false, &[CONE + BAR - SHARED][..]),
+        (Rule::Intersection, true, &[SHARED][..]),
+        (Rule::Intersection, false, &[SHARED][..]),
+        (Rule::Difference, true, &[CONE - SHARED][..]),
+        (Rule::Difference, false, &the_bar_less_the_cone[..]),
     ] {
         let (model, answer) = fused(rule, cone_first)
             .unwrap_or_else(|why| panic!("{rule:?} (cone first: {cone_first}): {why:?}"));
-        assert_eq!(
-            answer.len(),
-            1,
-            "{rule:?} (cone first: {cone_first}): how many solids"
-        );
         model
             .validate(&Policy::certified(), &mut ProvenanceLog::new())
             .unwrap_or_else(|why| panic!("{rule:?} (cone first: {cone_first}): {why:?}"));
-        let got = volume_of(&model, answer[0]);
-        assert!(
-            (got - want).abs() <= slack,
-            "{rule:?} (cone first: {cone_first}) holds {got}, where the shapes say {want} \
-             and the bare solids fall {slack} short"
+        let mut got: Vec<f64> = answer
+            .iter()
+            .map(|&solid| volume_of(&model, solid))
+            .collect();
+        got.sort_by(f64::total_cmp);
+        assert_eq!(
+            got.len(),
+            want.len(),
+            "{rule:?} (cone first: {cone_first}): solids holding {got:?}, where the shapes say \
+             {want:?}"
         );
-    }
-}
-
-/// The union, whichever goes first, and the bar less the cone are refused where
-/// the bar's wall crosses the cone's other nappe inside one face.
-///
-/// They would be `CONE + BAR − SHARED = 364π` and `BAR − SHARED = 92π/3`, the
-/// second in two solids: the bar below `z = 1` with the cone's tip taken out of
-/// its top, and the bar above `z = 10`.
-#[test]
-fn the_union_and_the_bar_less_the_cone_are_refused_where_the_bars_wall_crosses_the_other_nappe() {
-    for (rule, cone_first) in [
-        (Rule::Union, true),
-        (Rule::Union, false),
-        (Rule::Difference, false),
-    ] {
-        let refused = fused(rule, cone_first).map(|(_, answer)| answer);
-        assert!(
-            matches!(
-                refused,
-                Err(Error::TheFuseWroteABrokenAnswer {
-                    broken: Invalid::AClosedEdgeIsWalkedAgainstItsSurface
-                })
-            ),
-            "{rule:?} (cone first: {cone_first}): {refused:?}"
-        );
+        for (got, want) in got.iter().zip(want) {
+            assert!(
+                (got - want).abs() <= slack,
+                "{rule:?} (cone first: {cone_first}) holds {got}, where the shapes say {want} \
+                 and the bare solids fall {slack} short"
+            );
+        }
     }
 }
 
