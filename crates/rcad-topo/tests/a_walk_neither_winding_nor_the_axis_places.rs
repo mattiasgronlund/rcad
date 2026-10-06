@@ -199,27 +199,94 @@ fn a_plate_with_a_round_notch_cut_in_two_beside_a_hole_is_answered_under_every_r
 /// ball's circle is a lump of its own inside it. The probe printed both arcs'
 /// circles drawn in full, cut by the solid's own planes, and the circle's outer
 /// walk agreeing with the one walk inside the face: §340.2 is not asked. Every
-/// fuse is refused later, in selection, by a ray that meets the face its arcs
-/// trim (§35).
+/// fuse was refused later, in selection, by a ray that met the face its arcs
+/// trim (§35), until `holds.rs` followed a ball's skin cut by any two planes
+/// (queue row Q1162). Every rule, both ways round, now answers one solid.
+///
+/// The small ball, `π/6`, lies in `x ≤ −0.7`, `y ≤ −1.1`, clear of both cuts,
+/// with its centre on the big ball's skin. The two skins cross on the plane
+/// `1.9375` along the line of centres, so they share the big ball's cap past it,
+/// `π · 0.0625² · (6 − 0.0625)/3`, and the small ball's cap on the near side,
+/// `π · 0.4375² · (1.5 − 0.4375)/3`: `29π/384` in all. The cut ball is
+/// [`a_ball_cut_to_x_and_y_at_one`].
 #[test]
 fn a_ball_face_bounded_by_two_arcs_places_a_hole_by_the_arcs_own_circles() {
+    use std::f64::consts::PI;
+    let cut = a_ball_cut_to_x_and_y_at_one();
+    let small = PI / 6.0;
+    let shared = 29.0 * PI / 384.0;
     for (rule, cut_ball_first) in every_rule_both_ways() {
         let mut model = a_model();
         let ball = model.add_ball(2.0, &Isometry::identity()).expect("a ball");
         let corner = block(&mut model, [-10.0, -10.0, -10.0], [1.0, 1.0, 10.0]);
         let cut_ball = fuse_one(&mut model, ball, corner, Rule::Intersection);
-        let small = model
+        assert_holds(&model, cut_ball, cut, "the cut ball");
+        let small_ball = model
             .add_ball(0.5, &shift(-1.2, -1.6, 0.0))
             .expect("a small ball");
-        let refused = fuse(&mut model, cut_ball, small, rule, cut_ball_first);
-        assert!(
-            matches!(
-                refused,
-                Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
-            ),
-            "{rule:?}, the cut ball first {cut_ball_first}: {refused:?}"
-        );
+        let what = format!("{rule:?}, the cut ball first {cut_ball_first}");
+        let answer = fuse(&mut model, cut_ball, small_ball, rule, cut_ball_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let [solid] = answer[..] else {
+            panic!("{what}: one solid, got {answer:?}");
+        };
+        let volume = match (rule, cut_ball_first) {
+            (Rule::Union, _) => cut + small - shared,
+            (Rule::Intersection, _) => shared,
+            (Rule::Difference, true) => cut - shared,
+            (Rule::Difference, false) => small - shared,
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_holds(&model, solid, volume, &what);
     }
+}
+
+/// A ball of radius 2 at the origin cut to `x ≤ 1`, `y ≤ 1`, worked out slice
+/// by slice up `z`.
+///
+/// The slice at height `z` is a disc of radius `ρ = √(4 − z²)` less the part
+/// past `x = 1`, less the part past `y = 1`, plus the corner past both, which
+/// was taken away twice. Past a line `p` from the centre is
+/// `ρ² acos(p/ρ) − p √(ρ² − p²)` while `p < ρ`, and the corner past both is
+/// `∫ (√(ρ² − x²) − 1) dx` from `x = 1` to `√(ρ² − 1)` while `ρ² > 2`. The
+/// slice area is smooth between `ρ = √2` and `ρ = 1`, where the corner and then
+/// the parts past each line run out, so each stretch is summed on its own.
+fn a_ball_cut_to_x_and_y_at_one() -> f64 {
+    use std::f64::consts::PI;
+    let past = |radius: f64, from: f64| {
+        if from >= radius {
+            0.0
+        } else {
+            radius * radius * (from / radius).acos() - from * (radius * radius - from * from).sqrt()
+        }
+    };
+    let corner = |radius: f64| {
+        if radius * radius <= 2.0 {
+            return 0.0;
+        }
+        let up_to = |x: f64| {
+            (x * (radius * radius - x * x).sqrt() + radius * radius * (x / radius).asin()) / 2.0
+        };
+        let far = (radius * radius - 1.0).sqrt();
+        up_to(far) - up_to(1.0) - (far - 1.0)
+    };
+    let slice = |z: f64| {
+        let radius = (4.0 - z * z).max(0.0).sqrt();
+        PI * radius * radius - 2.0 * past(radius, 1.0) + corner(radius)
+    };
+    let simpson = |low: f64, high: f64| {
+        let steps = 20_000;
+        let step = (high - low) / f64::from(steps);
+        let inner: f64 = (1..steps)
+            .map(|at| {
+                let weight = if at % 2 == 1 { 4.0 } else { 2.0 };
+                weight * slice(low + f64::from(at) * step)
+            })
+            .sum();
+        (slice(low) + inner + slice(high)) * step / 3.0
+    };
+    let [two, three] = [2.0f64.sqrt(), 3.0f64.sqrt()];
+    2.0 * (simpson(0.0, two) + simpson(two, three) + simpson(three, 2.0))
 }
 
 /// A plate `10 × 10 × 2` with a round tab, a bar of radius 3 at `(10, 5)`,
