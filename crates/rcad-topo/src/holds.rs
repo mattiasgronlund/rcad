@@ -2369,10 +2369,14 @@ fn what_a_cone_face_seen_down_its_axis_holds(
             [Decision::Neg, Decision::Pos]
         };
         let read = side_of_surface(&side.across_placed, point);
-        let inside = match read {
-            Decision::Pos if facing != nappe => Decision::Neg,
-            Decision::Neg if facing != nappe => Decision::Pos,
-            _ => read,
+        let inside = if facing == nappe {
+            read
+        } else if read == Decision::Pos {
+            Decision::Neg
+        } else if read == Decision::Neg {
+            Decision::Pos
+        } else {
+            read
         };
         match inside {
             Decision::Zero if beside == arcs_side || beside == Decision::Zero => {
