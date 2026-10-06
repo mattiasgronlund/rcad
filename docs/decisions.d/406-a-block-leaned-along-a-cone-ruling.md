@@ -172,6 +172,17 @@ each of the three. One run of it took 25.6 s on the lane's commit against
   that reaches it has been built; a face on a pointed cone whose only curved
   edge runs round the far side from two ends a millionth of the way up is the
   one to try.
+  *2026-10-06, Q1082 (`593ecb26`): the shape is built, the sliver in
+  `a_cone_arc_past_the_far_end_of_a_long_ellipse.rs`. It is also closed:
+  `mesh.rs` now asks
+  `PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of` which arc
+  an edge's walk will place before charging the edge by its ends, rather than
+  always by the ends, and the sliver is refused
+  `DeflectionBelowWhatAMeshCanReach` at a floor of `6.1e-4` under every
+  policy asked. Two rows are left: the tip's
+  `TooManyPointsAlongOneCrossing { most: 1048576 }` at the floor the mesher
+  picks for a tolerant caller, `9.1e-11` (Q1186), and the sliver's fold,
+  `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` (Q1187).*
 - **The turn read off the root on a curved face** was Q914's, and §317.7
   closed it: the `curved == 0` stop in `the_turn_where_two_planes_cross_a_quadric`
   is gone, the two places along the edge, `16 ∓ 2⁻⁵¹`, are ordered, and the
