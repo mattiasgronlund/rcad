@@ -35,7 +35,9 @@
 //! bar's cap answered 36 of 66 touching and the frustum's 0 of 90, every other
 //! fuse of both refused `Undecidable` at *a point in a piece that every solid
 //! could place*, and every other cell printed what it prints here; what moved
-//! the other cells since the table before was not traced.
+//! the other cells since the table before was not traced. Queue row Q1118
+//! moved one cell since, the dome's touching row, from none answered to all
+//! 66; only that cell's line was printed again.
 //!
 //! | cell | touching | clear by one | what the touch alone refuses |
 //! |---|---|---|---|
@@ -49,7 +51,7 @@
 //! | a bar inside a bar, touching | panics on its control | — | see below |
 //! | two balls touching at a point | 60 of 60 | 96 of 96 | — |
 //! | a ball inside a ball, touching once | 60 of 60 | 96 of 96 | — |
-//! | the dome on a shaft of its radius | 0 of 66 | 90 of 90 | `ResultIsNotManifold` 66 |
+//! | the dome on a shaft of its radius | 66 of 66 | 90 of 90 | — |
 //! | a ball against a bar's wall | 60 of 60 | 96 of 96 | — |
 //! | a ball inside a bar, touching | 60 of 60 | 96 of 96 | — |
 //! | a cone's apex on a block | 90 of 90 | 66 of 66 | — |
@@ -131,11 +133,12 @@
 //! answers as `MoreThanAPoint` since Q981. The fuse then went on and refused
 //! every rule `TwoCurvesTouchWithoutCrossing`: the cap's rim and the circle the
 //! ball cuts the cap in are one curve drawn twice. Since Q987 the arrangement
-//! draws it once, and every fuse refuses one step on as an edge with one face
-//! along it, because the rim comes out of the bar and out of the ball under two
-//! names.
+//! draws it once, and every fuse refused one step on as an edge with one face
+//! along it, because the rim came out of the bar and out of the ball under two
+//! names. Since Q1118 `fuse/assemble.rs` gives the rim one name and one corner,
+//! and every fuse of the touching row answers.
 //! [`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`]
-//! is that trace, with the closed forms waiting for the day it answers.
+//! checks nine domes by every rule against their closed forms.
 //!
 //! **A bend's touch is not reached.** Every fuse of a bend lying on a block is
 //! refused as a quartic, touching or one unit clear, so that cell is pinned at
@@ -159,9 +162,8 @@
 //! - **A cone against a ball or a bar**: not built yet, and nothing here says
 //!   whether they would reach their touch. A cone's side against another cone
 //!   *is* built now, as one hand-written pair rather than a cell —
-//!   [`two_cones_sharing_one_rim_circle_are_refused_before_the_join_could_see_them`]
-//!   — and every rule of it is refused by name before the fuse assembles
-//!   anything. A torus against anything curved is refused by name before it could
+//!   [`two_cones_sharing_one_rim_circle_fuse_by_every_rule`] — and every rule
+//!   of it answers. A torus against anything curved is refused by name before it could
 //!   (`how_often_a_fuse_with_a_torus_refuses.rs`'s last three rows).
 
 use std::cell::{Cell, RefCell};
@@ -301,7 +303,7 @@ fn a_ball_on_a_bar_of_the_same_radius() {
 }
 
 /// The dome on a shaft of its radius, every rule both ways round, against the
-/// closed forms — and what still stops it, by name.
+/// closed forms.
 ///
 /// A ball of radius `R` centred on the top of a bar of radius `R` and height
 /// `h` shares one circle with the bar, the rim of its top cap, and is tangent
@@ -319,18 +321,21 @@ fn a_ball_on_a_bar_of_the_same_radius() {
 /// is one curve: the arrangement folds it into one crossing now, on the cap, on
 /// the pipe and on the ball, and every face is cut into the pieces it has.
 ///
-/// **What stops it now is joining those pieces.** The rim comes out of the
-/// bar's two faces named by the cap's plane and the pipe, at the bar's seam
-/// corner `(R, 0, h)`, and out of the ball named by the cap's plane and the
-/// ball, at `(0, R, h)` where that pair starts a circle. `fuse/assemble.rs`
-/// names a closed edge by the two surfaces either side, so that is two edges
-/// with one face each, refused `ResultIsNotManifold { count: 1 }`. The count
-/// is pinned so that the day it moves, the answers above are checked.
+/// **What stopped it next was joining those pieces, traced by Q1118.** The
+/// rim came out of the bar's two faces named by the cap's plane and the pipe,
+/// at the bar's seam corner `(R, 0, h)`, and out of the ball named by the
+/// cap's plane and the ball, at `(0, R, h)` where that pair starts a circle.
+/// `fuse/assemble.rs` named a closed edge by the two surfaces either side, so
+/// that was two edges with one face each, and all 54 fuses here were refused
+/// `ResultIsNotManifold { count: 1 }`. It gives the two names one now, and
+/// the rim one corner, the seam's. Past that the union and the bar less the
+/// ball keep the pipe and the ball either side of the rim, which touch and do
+/// not cross, and were refused `ACrossingAlongThisEdgeCouldNotBeFollowed`
+/// until the rim was written as the cap's plane against a face.
 #[test]
 fn a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms() {
     let policy = Policy::certified();
     let third = std::f64::consts::PI / 3.0;
-    let mut refused = 0;
     for radius in 1..=3 {
         for height in radius + 1..=radius + 3 {
             let (r, h) = (f64::from(radius), f64::from(height));
@@ -356,34 +361,32 @@ fn a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms() {
                 (dome, shaft, Rule::Difference, half_ball),
             ] {
                 let mut fused = model.clone();
-                match fused.fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new()) {
-                    Ok(answer) => {
-                        fused
-                            .validate(&policy, &mut ProvenanceLog::new())
-                            .unwrap_or_else(|why| panic!("{rule:?} does not validate: {why}"));
-                        let (volume, error) = volume_and_error(&fused, answer.solids());
-                        assert!(
-                            (volume - holds).abs() <= error,
-                            "{rule:?} of R = {r}, h = {h} (shaft first: {}) measures {volume} \
-                             against {holds}, out by more than the {error} its mesh declares",
-                            one == shaft
-                        );
-                    }
-                    Err(Error::ResultIsNotManifold { count: 1 }) => refused += 1,
-                    Err(why) => panic!(
-                        "{rule:?} of R = {r}, h = {h} (shaft first: {}) refused {why}",
-                        one == shaft
-                    ),
-                }
+                let shaft_first = one == shaft;
+                let answer = fused
+                    .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| {
+                        panic!(
+                            "{rule:?} of R = {r}, h = {h} (shaft first: {shaft_first}) refused \
+                             {why}; every fuse of these nine domes answers since Q1118"
+                        )
+                    });
+                fused
+                    .validate(&policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{rule:?} does not validate: {why}"));
+                assert_eq!(
+                    answer.solids().len(),
+                    1,
+                    "{rule:?} of R = {r}, h = {h} (shaft first: {shaft_first}) is one solid"
+                );
+                let (volume, error) = volume_and_error(&fused, answer.solids());
+                assert!(
+                    (volume - holds).abs() <= error,
+                    "{rule:?} of R = {r}, h = {h} (shaft first: {shaft_first}) measures {volume} \
+                     against {holds}, out by more than the {error} its mesh declares"
+                );
             }
         }
     }
-    assert_eq!(
-        refused, 54,
-        "every fuse of these nine domes was refused as two names for the rim, one face each \
-         (Q987); now {refused} of 54 are. Check what answers against the closed forms above, \
-         re-derive this count, and move the table at the top of this file with it"
-    );
 }
 
 #[test]
@@ -522,8 +525,7 @@ fn a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule() 
 
 /// Two pointed cones base to base on one circle, their rim vertices half a turn
 /// apart — the shape that would hand §204.1's join a run of pieces carrying two
-/// input edges. **Their intersection and both differences answer, and their
-/// union is refused as an edge with one face along it.**
+/// input edges. **Every rule answers, both ways round.**
 ///
 /// §204.1 joins a closed curve that was cut into pieces back into one edge only
 /// **when every piece came from one input edge**. A run whose pieces are an
@@ -539,23 +541,25 @@ fn a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule() 
 /// side is the one face here with a closed wire and no seam, so both solids
 /// have to be pointed cones on one circle, which is two cone faces meeting one
 /// curve. The same family with a sphere in place of the second cone is
-/// [`a_ball_on_a_bar_of_the_same_radius`], whose touching row answers none of
-/// its fuses either.
+/// [`a_ball_on_a_bar_of_the_same_radius`].
 ///
 /// **That curve used to be refused by name and is named now** (Q1122): two
 /// cones of one slope on one axis, apexes four apart, cross in the one circle
 /// halfway between them, which is this rim. The fuse then gets past it, and
 /// what it gives is measured here rather than predicted: the two lumps touch
-/// along a curve and nowhere else, so their intersection holds nothing and each
-/// difference is the first cone, `8π/3`, unchanged. The union stops in
-/// `fuse/assemble.rs` with `ResultIsNotManifold { count: 1 }` — no panic, so
-/// the join §204.1 feared did not turn this into a crash — and a second pair
-/// whose rim vertices are **one** point refuses it the same way, so the half
-/// turn is not what it turns on. The rim is the cap plane's circle with each
-/// cone, the shape `Q1118` traces for a frustum against a bar; whether it is
-/// that one was not traced.
+/// along a curve and nowhere else, so their intersection holds nothing, each
+/// difference is the first cone, `8π/3`, unchanged, and the union is one solid
+/// of both, `16π/3`. A second pair whose rim vertices are **one** point is
+/// asked the same, so the half turn is not what it turns on.
+///
+/// **The union used to stop** in `fuse/assemble.rs` with
+/// `ResultIsNotManifold { count: 1 }` — no panic, so the join §204.1 feared
+/// did not turn this into a crash. Both caps lie flush on one plane and go, so
+/// the rim comes out of each cone named by its cap's plane and that cone: two
+/// names, two edges with one face each. Queue row Q1118 gave a rim that one
+/// plane cuts two cones in, a ball or a pipe in one name and one corner.
 #[test]
-fn two_cones_sharing_one_rim_circle_answer_all_but_their_union() {
+fn two_cones_sharing_one_rim_circle_fuse_by_every_rule() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let lower = a_pointed_cone_with_its_vertex_at(
         &mut model,
@@ -587,10 +591,17 @@ fn two_cones_sharing_one_rim_circle_answer_all_but_their_union() {
                 (fused, answer)
             };
 
-            let (_, union) = fused(Rule::Union);
+            let (joined, union) = fused(Rule::Union);
+            let solids = union.unwrap_or_else(|why| panic!("the union: {why}"));
+            assert_eq!(solids.len(), 1, "{solids:?}");
+            joined
+                .validate(&policy, &mut ProvenanceLog::new())
+                .expect("a fuse hands back a sound model");
+            let (volume, error) = volume_and_error(&joined, &solids);
             assert!(
-                matches!(union, Err(Error::ResultIsNotManifold { count: 1 })),
-                "the union: {union:?}"
+                (volume - 2.0 * one_cone).abs() <= error,
+                "the two cones hold {} and their union holds {volume} give or take {error}",
+                2.0 * one_cone
             );
 
             let (_, intersection) = fused(Rule::Intersection);
