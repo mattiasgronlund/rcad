@@ -1673,13 +1673,16 @@ fn nothing_between_the_ends() -> PointsAlongACrossing {
 /// **This trusts the plane, and the trust is earned upstream, not here.** A
 /// plane crosses a torus in up to two circles and a slanted pipe in an ellipse,
 /// so a plane that is not the curve's own would hand back a curve nobody drew.
-/// Nothing the kernel builds names a plane beside two curved faces — its own
-/// runs name one of the two faces, or, on a seam, have both faces the one
-/// surface and are caught above. So the name is a reader's, and `rcad-step`
-/// writes a plane there only for a circle it has checked lies on every face
-/// along it, and one of the two faces everywhere else — every ellipse, and
-/// every arc along a cone or a torus. Moving that check moves this arm's
-/// premise.
+/// Since Q1118, the kernel's own fuse can be where the name comes from:
+/// `rcad-topo`'s `the_plane_of_a_rim_between_two_curved_faces` puts the cap's
+/// plane in `and` for a closed rim between two different curved faces — the
+/// dome's pipe and ball, a frustum's cone and a bar's pipe, two cones base to
+/// base — once `meet_of_three_surfaces` says the plane and the two curved
+/// surfaces share more than a point, and that check is the trust earned there.
+/// Everywhere else the name is a reader's, and `rcad-step` writes a plane
+/// there only for a circle it has checked lies on every face along it, and one
+/// of the two faces everywhere else — every ellipse, and every arc along a
+/// cone or a torus. Moving either check moves this arm's premise.
 ///
 /// **Two curved faces that name a third curved surface are a face and that
 /// surface.** This is the paragraph above one surface up, and it is the one
