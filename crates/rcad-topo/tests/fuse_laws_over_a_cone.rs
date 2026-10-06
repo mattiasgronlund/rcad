@@ -666,10 +666,17 @@ const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 2] = [
         },
         // The second union used to stop on `AFaceTrimmedByACurveThisCannotFollow`;
         // sharing the arc picker between `holds.rs` and `arrange.rs` (Q1033)
-        // takes it one step further, to `CannotTellTheCellsOfAFaceApart`.
+        // took it one step further, to `CannotTellTheCellsOfAFaceApart`, on the
+        // cone face of `cone ∪ third`. The cube's floor `z = −3.5` cuts the
+        // cone's lower nappe there in a circle of radius 1/4, inside the face's
+        // loose box; its walk towards the apex agreed with both walks of the
+        // notched bottom rim and with the walk inside the top rim. A lump on the
+        // other nappe from the whole rim is now held outside the face (Q1112),
+        // and the same face stops on `AFaceTrimmedByACurveThisCannotFollow`
+        // again, later and not traced.
         [
             None,
-            Some("the second union: CannotTellTheCellsOfAFaceApart"),
+            Some("the second union: AFaceTrimmedByACurveThisCannotFollow"),
         ],
     ),
 ];
