@@ -1526,8 +1526,8 @@ fn is_one_circle_cut_in_two(
 /// the face's boundary, and borders the face's own side along that neighbour on
 /// the side the face does not keep. So the face sits inside the part in front
 /// of all of them; and that part is connected — a plane cut by half-planes and
-/// round discs, or a sphere cut by planes through its centre — with the face's
-/// boundary on its boundary, so the face is all of it.
+/// round discs, or a sphere cut by planes through its centre or by any two
+/// planes — with the face's boundary on its boundary, so the face is all of it.
 ///
 /// **A cone leaves one convex region on a plane it cuts in a closed curve, and
 /// that is the whole of why one is admitted.** Square to the axis the curve is
@@ -1549,7 +1549,8 @@ fn is_one_circle_cut_in_two(
 /// it lies inside and crosses in a closed curve, a flat face that is a polygon
 /// with one bite out of its edge where it lies outside a pipe
 /// ([`is_a_polygon_less_one_bite_of_a_pipe`]), a sphere face whose sides are
-/// arcs cut by planes through its centre, and a cone face or a pipe face cut by
+/// arcs cut by planes through its centre or by two planes, and a cone face or a
+/// pipe face cut by
 /// planes as [`is_a_family_this_follows`] sets out. Each arc must be picked by a
 /// half-space that tells it from its sibling ([`the_way_into_an_arc`]), which
 /// asks the picker to hold both its ends exactly, or to have the arc's whole
@@ -3144,9 +3145,27 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// pieces, so this says no to them, and the caller asks
 /// [`one_of_two_runs_between_two_flats`] which piece the face is.
 ///
-/// On a sphere, it is planes through the centre: each cuts the sphere into two
-/// halves, and any number of halves meet in one piece, where planes that miss
-/// the centre can leave two caps with nothing between them.
+/// On a sphere, it is planes through the centre, or any two planes. Each plane
+/// through the centre cuts the sphere into two halves, and any number of halves
+/// meet in one piece. **Two planes leave one piece whatever they keep** (row
+/// Q1162). They cut the sphere in two circles, which meet in at most two
+/// points. Where they cross at two, the part in front of both has its edge on
+/// the arc of each circle in front of the other plane, and those two arcs run
+/// between the same two points: one closed curve, which cuts the sphere into
+/// two pieces and no more. The part in front of both is one of them, since the
+/// rest of either circle lies on neither. Where they do not cross, one circle
+/// lies wholly on one side of the other plane, and the part in front of both is
+/// a cap, a band or nothing. So a ball cut to `x ≤ 26`, `y ≤ 10`, both planes
+/// well off its centre, has a skin that is the part in front of both
+/// (`tests/a_rung_whose_ray_meets_a_face_nobody_follows.rs`). Turning which side
+/// each keeps round does not touch that argument, so the part behind both, which
+/// the sphere's "in front of any" reading needs as one piece, is one too.
+/// **A third plane that misses the centre is refused, and that is a limit of
+/// the argument and not a gap**: three caps lost can go right round a patch and
+/// leave the part in front of all three in two pieces with nothing between
+/// them (`three_planes_that_miss_a_balls_centre_leave_its_skin_in_two_pieces`
+/// below), and telling the face's piece from the other wants where the circles
+/// meet, which nothing here reads.
 ///
 /// # On a cone it is planes the apex is in front of, any number of them, and one it is on or two that meet inside the cone
 ///
@@ -3320,11 +3339,14 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
         }),
         Surface::Sphere(ball) => {
             let centre = PredicatePoint::from(ball.centre().coordinates());
-            cuts.iter().all(|cut| {
-                cut.surface
-                    .as_plane()
-                    .is_some_and(|flat| flat.side_of_point(centre) == Decision::Zero)
-            })
+            let all_planes = cuts.iter().all(|cut| cut.surface.as_plane().is_some());
+            all_planes
+                && (cuts.len() <= 2
+                    || cuts.iter().all(|cut| {
+                        cut.surface
+                            .as_plane()
+                            .is_some_and(|flat| flat.side_of_point(centre) == Decision::Zero)
+                    }))
         }
         Surface::Cone(cone) => {
             let apex = PredicatePoint::from(cone.apex().coordinates());
@@ -5776,6 +5798,91 @@ mod tests {
         assert!(
             !carries_a_point(0.0) && !carries_a_point(core::f64::consts::PI),
             "the rulings along and against +x carry nothing, which is what parts them"
+        );
+    }
+
+    /// What [`is_a_family_this_follows`] lets through on a ball's skin and what
+    /// it refuses: any two planes, and no third that misses the centre, because
+    /// three can leave the part of the sphere in front of them all in two pieces.
+    ///
+    /// A ball of radius 2 at the origin kept to `x, y, z ≤ 1.3`. Each two of the
+    /// three caps it loses overlap, `2 · 1.3² < 4`, and no point is in all three,
+    /// `3 · 1.3² > 4`, so the lost caps go right round `(1, 1, 1)` and leave a
+    /// three-sided patch there apart from the rest. On the sphere a point with
+    /// no coordinate below zero and none past `1.3` has each at least
+    /// `√(4 − 2 · 1.3²) ≈ 0.787`, the other two squared adding up to no more
+    /// than `2 · 1.3²`. So nothing in front of all three has its smallest
+    /// coordinate between `0` and `0.787`, and a path from the patch to
+    /// `(−2, 0, 0)` would have to pass one. This samples the sphere for such a
+    /// point, finds none, and finds both ends of the path in front of all three.
+    #[test]
+    fn three_planes_that_miss_a_balls_centre_leave_its_skin_in_two_pieces() {
+        let ball = Surface::Sphere(
+            rcad_geom::Sphere::new(Point::origin(), 2.0).expect("a ball of radius two"),
+        );
+        let planes = [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+        ]
+        .map(|normal| {
+            Plane::from_point_and_normal(Point::origin() + normal * 1.3, normal)
+                .expect("a plane square to an axis")
+        });
+        let cuts: Vec<Cut> = planes
+            .map(|plane| Cut {
+                surface: Surface::Plane(plane),
+                placed: Surface::Plane(plane),
+                kept: Decision::Neg,
+                corners_on_it: Vec::new(),
+            })
+            .into_iter()
+            .collect();
+        assert!(
+            !is_a_family_this_follows(&ball, &cuts),
+            "three planes that miss the centre are refused"
+        );
+        for left_out in 0..3 {
+            let two: Vec<Cut> = (0..3)
+                .filter(|which| *which != left_out)
+                .map(|which| cuts[which].clone())
+                .collect();
+            assert!(
+                is_a_family_this_follows(&ball, &two),
+                "any two planes are followed"
+            );
+        }
+
+        let in_front_of_all = |at: [f64; 3]| at.iter().all(|coordinate| *coordinate <= 1.3);
+        let how_many = 1000u32;
+        let mut across_the_gap = 0;
+        for up in 0..=how_many {
+            let latitude = core::f64::consts::PI * f64::from(up) / f64::from(how_many);
+            for round in 0..2 * how_many {
+                let longitude = core::f64::consts::PI * f64::from(round) / f64::from(how_many);
+                let at = [
+                    2.0 * latitude.sin() * longitude.cos(),
+                    2.0 * latitude.sin() * longitude.sin(),
+                    2.0 * latitude.cos(),
+                ];
+                let smallest = at.iter().copied().fold(f64::INFINITY, f64::min);
+                if in_front_of_all(at) && (0.0..0.78).contains(&smallest) {
+                    across_the_gap += 1;
+                }
+            }
+        }
+        assert_eq!(
+            across_the_gap, 0,
+            "no point in front of all three has its smallest coordinate in [0, 0.78)"
+        );
+        let patch = 2.0 / 3.0f64.sqrt();
+        assert!(
+            in_front_of_all([patch; 3]) && patch >= 0.78,
+            "the patch round (1, 1, 1) is in front of all three"
+        );
+        assert!(
+            in_front_of_all([-2.0, 0.0, 0.0]),
+            "and so is the far side of the ball"
         );
     }
 
