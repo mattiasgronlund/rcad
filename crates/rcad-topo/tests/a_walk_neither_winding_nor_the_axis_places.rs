@@ -773,6 +773,36 @@ fn the_skins_of_a_half_chip_and_a_roofed_frustum_hold_their_own_points() {
     );
 }
 
+/// The skin of [`a_chip_of_a_cone`] is still refused by `face_holds_the_point`,
+/// at `(3, 9/4, 15/4)`, on the cone `r = z` exactly and inside the chip. Its
+/// cuts are `2x − z ≥ 1`, which the apex is behind and which cuts a
+/// hyperbola, and `2x + z ≤ 11`, which leans across it rather than lying
+/// square to the axis or side by side with it. Such a cut can leave two pieces
+/// along the branch's two arms, and this one leaves one only because it keeps
+/// the branch's vertex, which nothing in `holds.rs` reads yet (queue row
+/// Q1177).
+#[test]
+fn the_skin_of_a_chip_between_two_hyperbolas_is_not_yet_followed() {
+    let mut model = a_model();
+    let chip = a_chip_of_a_cone(&mut model);
+    let solid = model.solid(chip).expect("this model made the key");
+    let skin = solid
+        .faces()
+        .find(|face| matches!(face.surface(), Surface::Cone(_)))
+        .expect("the chip has a face on the cone")
+        .key();
+    let refused = solid.face_holds_the_point(
+        skin,
+        PredicatePoint::from([3.0, 2.25, 3.75]),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(refused, Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == skin),
+        "{refused:?}"
+    );
+}
+
 /// The part of the roofed frustum of
 /// `a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`
 /// from `z = low` to `high`, by Simpson's rule over its slices.
