@@ -3343,7 +3343,9 @@ fn where_two_cones_cross(
     )? {
         Decision::Zero => (),
         Decision::Pos => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-        leaning => unreachable!("a sum of squares is never below zero: {leaning:?}"),
+        Decision::Neg | Decision::Undecidable { .. } | _ => {
+            unreachable!("a sum of squares asked through `ask` is never below zero nor undecided")
+        }
     }
     match ask(
         &a_point_sits_on_a_cones_axis(WHERE_TWO_CONES_CROSS, other.apex(), one),
@@ -3354,7 +3356,9 @@ fn where_two_cones_cross(
     )? {
         Decision::Zero => two_cones_on_one_axis(one, other),
         Decision::Pos => Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-        apart => unreachable!("a sum of squares is never below zero: {apart:?}"),
+        Decision::Neg | Decision::Undecidable { .. } | _ => {
+            unreachable!("a sum of squares asked through `ask` is never below zero nor undecided")
+        }
     }
 }
 
@@ -3468,7 +3472,9 @@ fn where_a_cone_and_a_ball_cross(
     )? {
         Decision::Zero => (),
         Decision::Pos => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-        off => unreachable!("a sum of squares is never below zero: {off:?}"),
+        Decision::Neg | Decision::Undecidable { .. } | _ => {
+            unreachable!("a sum of squares asked through `ask` is never below zero nor undecided")
+        }
     }
 
     match ask(
@@ -3494,10 +3500,12 @@ fn where_a_cone_and_a_ball_cross(
                 Decision::Neg | Decision::Pos => {
                     two_circles_a_ball_cuts_round_a_cones_axis(cone, ball)
                 }
-                other => unreachable!("a sign question answers with a sign: {other:?}"),
+                Decision::Undecidable { .. } | _ => {
+                    unreachable!("`ask` hands back a sign or an error")
+                }
             }
         }
-        other => unreachable!("a sign question answers with a sign: {other:?}"),
+        Decision::Undecidable { .. } | _ => unreachable!("`ask` hands back a sign or an error"),
     }
 }
 
@@ -3600,17 +3608,16 @@ fn two_circles_round_a_cones_axis(
 /// this to decide which shape it is drawing, and a `Zero` it has not earned
 /// would draw circles where two cones cross in a quartic.
 pub(crate) fn whether_two_cones_share_an_axis(one: &Cone, other: &Cone) -> Decision {
-    match decide(&two_cones_point_along_one_direction(one, other)).0 {
-        Decision::Zero => {
-            decide(&a_point_sits_on_a_cones_axis(
-                WHERE_TWO_CONES_CROSS,
-                other.apex(),
-                one,
-            ))
-            .0
-        }
-        leaning => leaning,
+    let directions = decide(&two_cones_point_along_one_direction(one, other)).0;
+    if directions != Decision::Zero {
+        return directions;
     }
+    decide(&a_point_sits_on_a_cones_axis(
+        WHERE_TWO_CONES_CROSS,
+        other.apex(),
+        one,
+    ))
+    .0
 }
 
 /// Whether a ball's centre is on a cone's axis, proved the same way and for

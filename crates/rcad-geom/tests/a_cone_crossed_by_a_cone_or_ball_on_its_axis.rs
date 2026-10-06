@@ -116,7 +116,9 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
                 / (along.length() * cone.slope().hypot(1.0))
         }
         Surface::Sphere(ball) => ((point - ball.centre()).length() - ball.radius()).abs(),
-        other => panic!("this file crosses cones and balls, not {other:?}"),
+        Surface::Plane(_) | Surface::Cylinder(_) | Surface::Torus(_) | _ => {
+            panic!("this file crosses cones and balls, not {surface:?}")
+        }
     }
 }
 
