@@ -37,9 +37,11 @@
 //! then because a point could not be tested against the cut cone's face
 //! (Q1129), then, the cups made, because the check that the cups do not run
 //! through themselves could not tell the cells of their ceiling and then of
-//! their skin apart (Q1139, Q1161), and now because the fuse with the flush
-//! block finds no point inside a strip of the ceiling with the cups first and
-//! cannot follow the skin's curve with the block first.
+//! their skin apart (Q1139, Q1161), and then because the fuse with the flush
+//! block found no point inside a band of the second cone's skin with the cups
+//! first and could not follow the cut cone's skin with the block first. Every
+//! rule is answered now (Q1224) and reaches `rings_round`, but the joined
+//! wall's outline winds, so `holds_the_other_rings` is not asked of it.
 //! The family of
 //! corners that sweep no area and are not on one line is built with corners
 //! that cancel exactly, face by face, and the fuse that would join its cap
@@ -670,83 +672,123 @@ fn the_cut_cones_faces_along_the_hyperbola_hold_their_own_points() {
     assert_eq!(asked(wall.key(), [-12.0, 0.0, -20.0]), OnAFace::NotHeld);
 }
 
-/// **The nested cups against the flush block are refused while their pieces
-/// are placed**, under every rule both ways round, so `rings_round` is not
-/// reached: the cut cone less the second cone, and the block
-/// `[−12, −11] × [10, 12] × [17.25, 17.75]` flush with its wall `x = −12`.
-/// The block is wholly inside the cups — its far corner is `√288` from the
-/// axis, under the cone's `17.25` — so the union holds the cups,
+/// **The nested cups against the flush block are answered under every rule,
+/// both ways round**, and each answer holds what the cones say: the cut cone
+/// less the second cone, and the block `[−12, −11] × [10, 12] × [17.25, 17.75]`
+/// flush with its wall `x = −12`.
+///
+/// **The block is wholly inside the cups and shares one face with them.** Its
+/// face on `x = −12` lies on the cups' wall, both facing `−x`, and inside it:
+/// the wall at height `z` reaches `√(z² − 144)` either side of `y = 0`, which
+/// is `√153.5625`, more than 12, at the block's floor. Every other face of the
+/// block is clear of the cups' skin: its corner furthest from the axis,
+/// `(−12, 12)`, is `√288` from it, under the cut cone's `17.25` at the floor;
+/// its floor is above the cavity's ceiling `z = 16` and its top below the cups'
+/// top `z = 18`. So the union holds the cups,
 /// `what_the_block_holds_of_the_cone() − 2744π/3 +
-/// what_the_second_cone_holds_past_the_wall()`, the intersection the block's
-/// `1`, the cups less the block one less than the cups, and the block less the
-/// cups nothing.
+/// what_the_second_cone_holds_past_the_wall()`, the intersection the whole
+/// block, `1`, the cups less the block one less than the cups, and the block
+/// less the cups nothing.
 ///
-/// **With the cups first, every rule is refused `a point inside a piece of a
-/// face`** on the strip of the cups' face on `z = 16` between `x = −12` and the
-/// block's wall `x = −11`, which cuts that face because every plane of solids
-/// within reach cuts every face. **With the block first, every rule is refused
-/// `AFaceTrimmedByACurveThisCannotFollow` on the cut cone's skin.** Both are
-/// in `select.rs` and `holds.rs`.
+/// **The joined wall reaches `rings_round`, and with an outline that winds**,
+/// so `holds_the_other_rings` is not asked (a temporary print in `rings_round`,
+/// Q1224): the second cone's base plane `z = 16` left two corners on the
+/// wall's hyperbola at `(−12, ±√112, 16)`, so its outline has four corners off
+/// one line, and the ring along the second cone's hyperbola, two corners on the
+/// chord `z = 16`, is taken for a hole. The family this file probes, an outline
+/// and a hole that each enclose no area, is not what this pair builds.
 ///
-/// Until Q1161 every rule was refused `CannotTellTheCellsOfAFaceApart`, first
-/// on the cups' face on `z = 16` and then on the cut cone's skin, and the block
-/// had nothing to do with either: both came from the check that the cups do not
-/// run through themselves, which arranges a face against each surface of its
-/// own solid it may cross, and which every fuse of the cups asks. The cut
-/// cone's skin crosses `z = 16` in the circle of radius 16, outside the base
-/// and across the line of its straight side at `(−12, ±√112, 16)`, the only two
-/// nodes it has; every corner of the base is on that line too, so no count of
-/// how often the base's rim winds round those nodes could be made. And the
-/// second cone crosses the skin in the circle of radius 1 at `z = 1`, which
-/// goes round the axis, as both walks of the skin's rim do.
+/// Until Q1224, with the cups first every rule was refused `a point inside a
+/// piece of a face` on the band of the second cone's skin between the cups'
+/// wall and the block's plane `x = −11`: its four corners are all on the
+/// circle of radius 14 at `z = 16`, so every blend of them came back onto that
+/// circle, and the band hangs below it. With the block first, every rule was
+/// refused `AFaceTrimmedByACurveThisCannotFollow` on the cut cone's skin, whose
+/// hyperbola the base plane split, so its middle piece ran below `z = 18` with
+/// both ends behind it and `holds.rs` read only an arc of a curve that closes
+/// against a plane like that. Until Q1161 every rule was refused
+/// `CannotTellTheCellsOfAFaceApart` by the check that the cups do not run
+/// through themselves, first on the cups' face on `z = 16` and then on the cut
+/// cone's skin.
 #[test]
-fn the_nested_cups_and_a_block_flush_with_their_wall_are_refused_while_their_pieces_are_placed() {
-    let skin = Surface::Cone(Cone::new(Axis::z(), 1.0).expect("a positive slope"));
+fn the_nested_cups_and_a_block_flush_with_their_wall_are_answered_under_every_rule() {
+    let cups = what_the_block_holds_of_the_cone() - 2744.0 * PI / 3.0
+        + what_the_second_cone_holds_past_the_wall();
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let [cut, second] = a_cut_cone_and_a_second_cone_on_its_axis(&mut model);
-        let cups = the_one_solid(&mut model, cut, second, Rule::Difference);
-        let block = a_block(
-            &mut model,
-            &[[-12.0, 10.0], [-11.0, 10.0], [-11.0, 12.0], [-12.0, 12.0]],
-            17.25,
-            0.5,
-        );
-        let refused = fused_in_order(&mut model, [cups, block], rule, swapped);
+        let pair = the_nested_cups_and_the_flush_block(&mut model);
         let what = format!("{rule:?}, swapped {swapped}");
-        if swapped {
-            let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
-                panic!("{what}: {refused:?}");
-            };
-            let named = model
-                .solid(cups)
-                .expect("this model made the key")
-                .faces()
-                .find(|one| one.key() == face)
-                .unwrap_or_else(|| panic!("{what}: the refusal names a face of the block"));
-            assert_eq!(named.surface(), skin, "{what}");
-            continue;
-        }
-        let Err(Error::Undecidable { records }) = &refused else {
-            panic!("{what}: {refused:?}");
+        let answer = fused_in_order(&mut model, pair, rule, swapped);
+        let volume = match (rule, swapped) {
+            (Rule::Union, _) => cups,
+            (Rule::Intersection, _) => 1.0,
+            (Rule::Difference, false) => cups - 1.0,
+            (Rule::Difference, true) => {
+                let nothing = answer.unwrap_or_else(|why| panic!("{what} refused: {why}"));
+                assert!(nothing.is_empty(), "{what}: {nothing:?}");
+                continue;
+            }
+            (other, _) => panic!("not a rule this probes: {other:?}"),
         };
-        let [record] = records.records() else {
-            panic!("{what}: {records:?}");
-        };
-        assert_eq!(
-            record.predicate(),
-            "a point inside a piece of a face",
-            "{what}"
-        );
-        assert_eq!(record.inputs().len(), 4, "{what}: {record:?}");
-        for corner in record.inputs() {
-            let [x, _, z] = corner.enclosure();
-            assert!(
-                x.lo() >= -12.0 && x.hi() <= -11.0 && z.lo() == 16.0 && z.hi() == 16.0,
-                "{what}: a corner of the strip on z = 16 between the two walls: {record:?}"
-            );
-        }
+        assert_holds(&model, the_only(answer, &what), volume, &what);
     }
+}
+
+/// **The cups' skin holds its own points**: the cut cone's skin, its
+/// hyperbola on `x = −12` split at `(−12, ±√112, 16)` where the second cone's
+/// base plane crossed it, so one piece of it runs from there down through
+/// `(−12, 0, 12)` with both ends behind the top `z = 18`. `holds.rs` refused
+/// every point of this skin `AFaceTrimmedByACurveThisCannotFollow` until it
+/// read an arc of a hyperbola against a plane both its ends are behind
+/// (Q1224); the cut cone's skin, unsplit, was read already
+/// ([`the_cut_cones_faces_along_the_hyperbola_hold_their_own_points`]).
+#[test]
+fn the_cups_skin_holds_its_own_points() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let [cut, second] = a_cut_cone_and_a_second_cone_on_its_axis(&mut model);
+    let cups = the_one_solid(&mut model, cut, second, Rule::Difference);
+    let solid = model.solid(cups).expect("this model made the key");
+    let cone = Surface::Cone(Cone::new(Axis::z(), 1.0).expect("a positive slope"));
+    let skin = solid
+        .faces()
+        .find(|face| face.surface() == cone)
+        .expect("the cups have the cut cone's skin");
+    let corners_on_the_wall = skin
+        .wires()
+        .flat_map(|wire| wire.points().collect::<Vec<_>>())
+        .filter(|corner| corner.coordinates()[0] == -12.0)
+        .count();
+    assert_eq!(corners_on_the_wall, 4, "the hyperbola is split in three");
+    let asked = |at: [f64; 3]| {
+        solid
+            .face_holds_the_point(
+                skin.key(),
+                rcad_predicates::Point::from(at),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{at:?} is answered: {why:?}"))
+    };
+    assert_eq!(asked([3.0, 4.0, 5.0]), OnAFace::Held);
+    assert_eq!(asked([0.0, -10.0, 10.0]), OnAFace::Held);
+    assert_eq!(asked([-11.0, 0.0, 11.0]), OnAFace::Held);
+    assert_eq!(asked([-13.0, 0.0, 13.0]), OnAFace::NotHeld);
+    assert_eq!(asked([0.0, 20.0, 20.0]), OnAFace::NotHeld);
+    assert_eq!(asked([0.0, 5.0, -5.0]), OnAFace::NotHeld);
+}
+
+/// The cut cone less the second cone, and the block flush with its wall,
+/// cups first.
+fn the_nested_cups_and_the_flush_block(model: &mut Model) -> [SolidKey; 2] {
+    let [cut, second] = a_cut_cone_and_a_second_cone_on_its_axis(model);
+    let cups = the_one_solid(model, cut, second, Rule::Difference);
+    let block = a_block(
+        model,
+        &[[-12.0, 10.0], [-11.0, 10.0], [-11.0, 12.0], [-12.0, 12.0]],
+        17.25,
+        0.5,
+    );
+    [cups, block]
 }
 
 /// The part of the second cone past the wall `x = −12`, where its radius

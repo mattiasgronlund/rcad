@@ -138,8 +138,8 @@ pub(crate) struct Chosen {
 /// a plane ([`by_a_plane`]) placed it: under [`INSIDE_A_PIECE`] when no point
 /// inside it was found, and under [`PLACED_AGAINST_EVERY_SOLID`] when a point
 /// was found and could not be placed, or only a rung of
-/// [`rungs_towards_each_crossing`] or [`shorter_steps_across_a_curved_piece`]
-/// was found.
+/// [`rungs_towards_each_crossing`], [`shorter_steps_across_a_curved_piece`] or
+/// [`between_the_middles_of_a_cone_pieces_sides`] was found.
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
 /// a point offered before the rungs was found inside the piece and the ray
 /// from a point tried met a face of a solid that nothing here can follow; no
@@ -422,9 +422,10 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// refusal here: before the rungs it was a piece with no point found, which a
 /// side it shares or a corner could place, and a rung that cannot be
 /// classified must not take that away (`docs/decisions.md` §365.6). A curved
-/// piece's rungs are [`shorter_steps_across_a_curved_piece`], offered only
-/// where no earlier point was found inside the piece, so a piece one was found
-/// in and not placed is refused or placed as it was.
+/// piece's rungs are [`shorter_steps_across_a_curved_piece`] and then
+/// [`between_the_middles_of_a_cone_pieces_sides`], offered only where no
+/// earlier point was found inside the piece, so a piece one was found in and
+/// not placed is refused or placed as it was.
 ///
 /// **A point whose ray met a face nobody can follow was never placed, and the
 /// refusal says which face**, as `assemble.rs`'s `one_shell_is_inside_another`
@@ -514,6 +515,7 @@ fn place_the_piece(
     let mut rungs = rungs_towards_each_crossing(piece);
     if !one_was_inside {
         rungs.extend(shorter_steps_across_a_curved_piece(piece));
+        rungs.extend(between_the_middles_of_a_cone_pieces_sides(piece));
     }
     for rung in rungs {
         let Some(settled) = try_one(rung, log)? else {
@@ -542,9 +544,10 @@ enum Search {
     Placed(Placement),
     /// No point offered was proved inside the piece.
     NoPointInside,
-    /// Only rungs of [`rungs_towards_each_crossing`] or
-    /// [`shorter_steps_across_a_curved_piece`] were, and none of them could be
-    /// classified against every solid in the set.
+    /// Only rungs of [`rungs_towards_each_crossing`],
+    /// [`shorter_steps_across_a_curved_piece`] or
+    /// [`between_the_middles_of_a_cone_pieces_sides`] were, and none of them
+    /// could be classified against every solid in the set.
     OnlyRungsInside {
         /// The first face a rung's ray met whose trimming nothing here
         /// follows, if one did.
@@ -2167,6 +2170,63 @@ fn shorter_steps_across_a_curved_piece(piece: &Piece) -> Vec<PredicatePoint> {
         .into_iter()
         .flat_map(|shorter| steps_from_the_middle(piece, middle, reach / shorter))
         .filter_map(|step| back_onto_the_surface(&piece.surface, step))
+        .collect()
+}
+
+/// For a piece of a cone, the point half way between each two places where a
+/// side cut by a plane is crossed square to its chord, put back onto the cone;
+/// offered after [`shorter_steps_across_a_curved_piece`], under the same rule.
+///
+/// **Every corner of a piece can lie on one circle while the piece hangs below
+/// it.** The nested cups of
+/// `tests/a_joined_flat_face_whose_rings_enclose_no_area.rs` have their second
+/// cone's skin cut by the cups' wall `x = −12` and a flush block's wall
+/// `x = −11`: the piece between them is a band hanging off the circle of radius
+/// 14 at `z = 16`, its four corners all on that circle and its two hyperbola
+/// sides reaching down to `(−12, 0, 14)` and `(−11, 0, 13)`. Every blend of the
+/// corners comes back onto that circle, which is the piece's own side, and the
+/// steps from their middle go down the cone by `14/2ᵏ`, while the band at
+/// `y = 0` is between `z = 13` and `14`, two to three below them: no point
+/// offered was inside it, and every fuse with the cups first was refused
+/// [`INSIDE_A_PIECE`] (row Q1224).
+///
+/// A side's curve is crossed square to its chord where
+/// [`half_way_across_the_chord_to_a_cone`] aims, once on each nappe for a
+/// hyperbola, and half way between the two sides' crossings on the band's own
+/// nappe is `(−11.5, 0, 13.5)`, which is on the cone exactly and inside the
+/// band. Nothing is trusted: the caller proves each point inside the piece or
+/// drops it.
+fn between_the_middles_of_a_cone_pieces_sides(piece: &Piece) -> Vec<PredicatePoint> {
+    let Surface::Cone(cone) = &piece.surface else {
+        return Vec::new();
+    };
+    let mut crossed = Vec::new();
+    for side in piece.wires.iter().flatten() {
+        let Some(flat) = side.carried_by[1].as_plane() else {
+            continue;
+        };
+        let Some(chord) = Chord::of(flat, side) else {
+            continue;
+        };
+        crossed.extend(
+            chord
+                .where_the_cone_crosses(cone)
+                .into_iter()
+                .map(|step| chord.middle + chord.across * step)
+                .filter(Point::is_finite),
+        );
+    }
+    let mut candidates = Vec::new();
+    for (index, &one) in crossed.iter().enumerate() {
+        for &other in &crossed[index + 1..] {
+            candidates.push(PredicatePoint::from(
+                (one + (other - one) * 0.5).coordinates(),
+            ));
+        }
+    }
+    candidates
+        .into_iter()
+        .filter_map(|candidate| back_onto_the_surface(&piece.surface, candidate))
         .collect()
 }
 
