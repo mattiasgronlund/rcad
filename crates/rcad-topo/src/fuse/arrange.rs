@@ -82,7 +82,7 @@ use rcad_predicates::{
 
 use smallvec::SmallVec;
 
-use crate::holds::{a_picker_that_tells_the_two_arcs_apart, where_a_closed_crossing_is_centred};
+use crate::holds::the_way_into_an_arc;
 use crate::mesh::the_surface_pinches_at;
 use crate::validate::{name_of_surface, side_of_surface};
 use crate::{Error, FaceKey, Invalid, Result, VertexKey};
@@ -3110,11 +3110,12 @@ impl<'f> Arrangement<'f> {
     /// sign cannot be proved.
     ///
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the edge is not an
-    /// arc of a closed crossing between a plane and a round surface with a
-    /// picker that tells its two arcs apart — a ball's circle, or a cone's
-    /// circle or ellipse, which are the arcs anything in this kernel has been
-    /// taught to read a picker of, here or in [`holds`](crate::holds). A gap
-    /// and not a limit: the edge is one arc or the other.
+    /// arc of a closed crossing between a plane and a round surface — a ball's
+    /// circle, or a cone's or a pipe's circle or ellipse — with a picker that
+    /// tells its two arcs apart by one of the three ways [`the_way_into_an_arc`]
+    /// sets out, which is the one reading of a picker this and
+    /// [`holds`](crate::holds) share. A gap and not a limit: the edge is one arc
+    /// or the other.
     ///
     /// # Panics
     ///
@@ -3131,7 +3132,8 @@ impl<'f> Arrangement<'f> {
         let ends = [from, self.node_of_the_end[wire][position]].map(|node| self.nodes[node].point);
         let partner = self.crossings[crossing].partner;
         let into_the_arc = the_way_into_an_arc(
-            [&self.surface, &partner],
+            &self.surface,
+            &partner,
             ends,
             &self.face.wires[wire][position].picked_by,
         )
@@ -5556,9 +5558,10 @@ fn the_one_the_start_is(
 /// plane either way round and for two balls. Then `(P − from) · (w × (from − c))`
 /// is `det(w, from − c, P − c)`, the same polynomial term for term. Nothing
 /// here forms the centre, so there is no second spelling of it to disagree with
-/// [`where_a_closed_crossing_is_centred`] (§23.8, §211.5). On a pipe's or a
-/// cone's ellipse the two are not one polynomial: this reads the side the
-/// curve turns to off the run, and that would read it off the centre.
+/// [`where_a_closed_crossing_is_centred`](crate::holds::where_a_closed_crossing_is_centred)
+/// (§23.8, §211.5). On a pipe's or a cone's ellipse the two are not one
+/// polynomial: this reads the side the curve turns to off the run, and that
+/// would read it off the centre.
 ///
 /// **A box that holds the start at one end** is read by which end it is
 /// ([`ahead_by_the_end_of_its_box_the_start_is_at`]), where the box read as a
@@ -5655,51 +5658,6 @@ fn ahead_by_the_end_of_its_box_the_start_is_at(
     } else {
         Decision::Neg
     }
-}
-
-/// A direction square to the chord between `ends`, in the plane of the closed
-/// curve a round surface and a plane cross in, pointing from the chord into the
-/// arc `picked_by` picks rather than into the other arc with the same two ends.
-/// `None` when the pair is not a plane and a round surface whose crossing
-/// closes, or no picker says.
-///
-/// This is `holds`'s own reading of a picker, [`the_way_into_an_arc`], taken on
-/// the world boxes the arrangement holds rather than on stored points. **The
-/// argument is that function's and is not repeated here**, and neither is its
-/// centre: both callers ask [`where_a_closed_crossing_is_centred`] and
-/// [`a_picker_that_tells_the_two_arcs_apart`], so a ball's circle and a cone's
-/// ellipse are one spelling rather than two that can come to disagree (§23.8,
-/// §211.5). Only the sign of the picker's normal against the chord is ever read.
-///
-/// [`the_way_into_an_arc`]: crate::holds
-fn the_way_into_an_arc(
-    pair: [&Surface; 2],
-    ends: [PredicatePoint; 2],
-    picked_by: &[Picker],
-) -> Option<[Interval; 3]> {
-    let flat = pair[0].as_plane().or_else(|| pair[1].as_plane())?;
-    let centred = where_a_closed_crossing_is_centred(pair[0], flat)
-        .or_else(|| where_a_closed_crossing_is_centred(pair[1], flat))?;
-    let [start, end] = ends.map(|at| at.enclosure());
-    let chord = PredicatePoint::Constructed([0, 1, 2].map(|axis| end[axis] - start[axis]));
-    let square_to_the_chord = cross_of(PredicatePoint::from(flat.normal().components()), chord);
-    picked_by.iter().find_map(|picker| {
-        let Picker::InFrontOf(half) = picker else {
-            return None;
-        };
-        if !a_picker_that_tells_the_two_arcs_apart(half, flat, &centred, ends) {
-            return None;
-        }
-        let facing = half.normal().components().map(Interval::exactly);
-        let sign = dot_of(facing, square_to_the_chord).sign();
-        if sign == Decision::Pos {
-            Some(square_to_the_chord)
-        } else if sign == Decision::Neg {
-            Some(square_to_the_chord.map(|component| Interval::exactly(0.0) - component))
-        } else {
-            None
-        }
-    })
 }
 
 /// What picks one curve of a crossing out of the others, empty when the pair

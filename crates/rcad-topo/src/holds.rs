@@ -1305,7 +1305,8 @@ fn is_one_circle_cut_in_two(
             return Ok(false);
         }
         ball = Some(across_surface);
-        let Some(way) = the_way_into_an_arc(&surface, &across_surface, ends, picked_by) else {
+        let asked = ends.map(|at| PredicatePoint::from(at.coordinates()));
+        let Some(way) = the_way_into_an_arc(&surface, &across_surface, asked, picked_by) else {
             return Ok(false);
         };
         ways.push(way);
@@ -2119,7 +2120,7 @@ fn the_way_a_side_runs(
             into_the_arc: the_way_into_an_arc(
                 &face.stored_surface(),
                 across,
-                [start.at, end.at],
+                [start.at, end.at].map(|at| PredicatePoint::from(at.coordinates())),
                 picked_by,
             )
             .ok_or_else(cannot)?,
@@ -2362,27 +2363,37 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 /// conic at two points, so a chord tangent at one of its ends has its two ends at
 /// one point. That is why steps 1 and 3 can read a *direction* off this same
 /// vector.
-fn the_way_into_an_arc(
+///
+/// # Ends that are boxes
+///
+/// The fuse's arrangement asks this too, of the boxes it solved each end into
+/// rather than of stored corners (`which_way_an_edge_runs_round` in
+/// `fuse/arrange.rs`), so the two read an arc by one spelling and cannot come to
+/// disagree (§23.8). Every sign above is then read over the whole of both
+/// boxes, the chord and the direction square to it included, so a sign that
+/// comes back certified is the sign at the true ends wherever in their boxes
+/// they are, and one the boxes leave open is `None`. A stored corner is a box
+/// with no width, and is read as the exact point it always was.
+pub(crate) fn the_way_into_an_arc(
     surface: &Surface,
     across: &Surface,
-    ends: [Point; 2],
+    ends: [PredicatePoint; 2],
     picked_by: &[Picker],
 ) -> Option<[Interval; 3]> {
     let flat = surface.as_plane().or_else(|| across.as_plane())?;
     let centred = where_a_closed_crossing_is_centred(surface, flat)
         .or_else(|| where_a_closed_crossing_is_centred(across, flat))?;
-    let [from, to] = ends.map(|at| at.coordinates());
-    let chord =
-        core::array::from_fn(|axis| Interval::exactly(to[axis]) - Interval::exactly(from[axis]));
+    let boxes = ends.map(PredicatePoint::enclosure);
+    let [from, to] = boxes;
+    let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
     let square_to_the_chord = cross(exactly(flat.normal().components()), chord);
-    let asked = ends.map(|at| PredicatePoint::from(at.coordinates()));
 
     let mut halves = picked_by.iter().filter_map(|picker| match picker {
         Picker::InFrontOf(half) => Some(half),
         Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) | _ => None,
     });
     let by_its_normal = halves.clone().find_map(|half| {
-        if !a_picker_that_tells_the_two_arcs_apart(half, flat, &centred, asked) {
+        if !a_picker_that_tells_the_two_arcs_apart(half, flat, &centred, ends) {
             return None;
         }
         match dot(exactly(half.normal().components()), square_to_the_chord).sign() {
@@ -2398,7 +2409,14 @@ fn the_way_into_an_arc(
             surface
         };
         halves.find_map(|half| {
-            into_the_arc_on_the_centres_side(half, flat, round, &centred, ends, square_to_the_chord)
+            into_the_arc_on_the_centres_side(
+                half,
+                flat,
+                round,
+                &centred,
+                boxes,
+                square_to_the_chord,
+            )
         })
     })
 }
@@ -2406,12 +2424,10 @@ fn the_way_into_an_arc(
 /// Whether `half` says which of the two arcs between `ends` an edge is, by one
 /// of the first two ways [`the_way_into_an_arc`] sets out.
 ///
-/// The fuse's own arrangement asks the same question of the same two ways, on
-/// the boxes it solved for rather than on stored corners, so it asks this
-/// (§23.8, and §211.5 for the three spellings of the closed-curve test that
-/// went the same way). It does not yet ask the third,
-/// [`into_the_arc_on_the_centres_side`], so a longer arc `holds.rs` reads is one
-/// the arrangement still refuses.
+/// The fuse's own arrangement asks this through [`the_way_into_an_arc`], on the
+/// boxes it solved for rather than on stored corners, and so asks the third way,
+/// [`into_the_arc_on_the_centres_side`], as well (§23.8, and §211.5 for the
+/// three spellings of the closed-curve test that went the same way).
 pub(crate) fn a_picker_that_tells_the_two_arcs_apart(
     half: &HalfSpace,
     flat: &Plane,
@@ -2493,19 +2509,23 @@ fn where_the_curves_centre_sits(
 /// so `f(m) < 0` follows from `Δ = f(c) − f(M) > 0` and `Δ² > λ²·f(c)²`, which
 /// give `Δ > λ·|f(c)| ≥ λ·f(c)`. Every one of those is multiplied through by
 /// powers of `n·along`, which is positive, so the centre is never formed and
-/// no division is taken: the signs read are of polynomials in stored numbers,
-/// in interval arithmetic, and an interval that straddles zero is `None`.
+/// no division is taken: the signs read are of polynomials in stored numbers
+/// and the ends' boxes, in interval arithmetic, and an interval that straddles
+/// zero is `None`.
 ///
-/// **The stored ends are taken as the arc's ends**, the premise every other
-/// reading in this file makes of them. What is asked of the far arc is a long
-/// way from either end — its middle — so an end off the curve by a rounding
-/// does not move it onto the near arc.
+/// **The arc's ends are somewhere in `ends`**: a stored corner as a box with no
+/// width, the premise every other reading in this file makes of it, or the box
+/// the fuse's arrangement solved a corner into. Every sign is read over the
+/// whole of both boxes, so it is the sign at the true ends wherever in their
+/// boxes they are. What is asked of the far arc is a long way from either end —
+/// its middle — so an end off the curve by a rounding does not move it onto the
+/// near arc.
 fn into_the_arc_on_the_centres_side(
     half: &HalfSpace,
     flat: &Plane,
     round: &Surface,
     centred: &WhereTheCurveIsCentred,
-    ends: [Point; 2],
+    ends: [[Interval; 3]; 2],
     square_to_the_chord: [Interval; 3],
 ) -> Option<[Interval; 3]> {
     let normal = exactly(flat.normal().components());
@@ -2516,7 +2536,7 @@ fn into_the_arc_on_the_centres_side(
     }
     let up = Interval::exactly(flat.offset()) - dot(normal, from);
     let to_the_centre = centred.along.map(|step| step * up);
-    let [start, end] = ends.map(|at| exactly(at.coordinates()));
+    let [start, end] = ends;
     let middle: [Interval; 3] =
         core::array::from_fn(|axis| (start[axis] + end[axis]) * Interval::exactly(0.5));
 
