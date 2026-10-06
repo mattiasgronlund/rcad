@@ -49,7 +49,7 @@
 //! | a bar inside a bar, touching | panics on its control | — | see below |
 //! | two balls touching at a point | 60 of 60 | 96 of 96 | — |
 //! | a ball inside a ball, touching once | 60 of 60 | 96 of 96 | — |
-//! | the dome on a shaft of its radius | 0 of 66 | 90 of 90 | `TwoCurvesTouchWithoutCrossing` 66 |
+//! | the dome on a shaft of its radius | 0 of 66 | 90 of 90 | `ResultIsNotManifold` 66 |
 //! | a ball against a bar's wall | 60 of 60 | 96 of 96 | — |
 //! | a ball inside a bar, touching | 60 of 60 | 96 of 96 | — |
 //! | a cone's apex on a block | 90 of 90 | 66 of 66 | — |
@@ -128,9 +128,14 @@
 //! plane, the ball and the bar meet, refused
 //! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`; the cap is square to the axis
 //! the two share and cuts both in one circle, which `three_surfaces.rs`
-//! answers as `MoreThanAPoint` since Q981. The fuse then goes on and refuses
-//! every rule `TwoCurvesTouchWithoutCrossing`, measured with that road
-//! switched off and on; which two curves touch is not worked out here.
+//! answers as `MoreThanAPoint` since Q981. The fuse then went on and refused
+//! every rule `TwoCurvesTouchWithoutCrossing`: the cap's rim and the circle the
+//! ball cuts the cap in are one curve drawn twice. Since Q987 the arrangement
+//! draws it once, and every fuse refuses one step on as an edge with one face
+//! along it, because the rim comes out of the bar and out of the ball under two
+//! names.
+//! [`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`]
+//! is that trace, with the closed forms waiting for the day it answers.
 //!
 //! **A bend's touch is not reached.** Every fuse of a bend lying on a block is
 //! refused as a quartic, touching or one unit clear, so that cell is pinned at
@@ -292,6 +297,92 @@ fn a_ball_on_a_bar_of_the_same_radius() {
         "the dome on a shaft of its radius",
         touching::a_dome_on_a_shaft(),
         Expect::TheControlAnswers,
+    );
+}
+
+/// The dome on a shaft of its radius, every rule both ways round, against the
+/// closed forms — and what still stops it, by name.
+///
+/// A ball of radius `R` centred on the top of a bar of radius `R` and height
+/// `h` shares one circle with the bar, the rim of its top cap, and is tangent
+/// to the pipe all the way round it. So the answers are a hemisphere and a
+/// bar: `A ∪ B = πR²h + ⅔πR³`, `A ∩ B = ⅔πR³` (the lower half of the ball,
+/// inside the bar since `h > R`), `bar \ ball = πR²h − ⅔πR³`, and
+/// `ball \ bar = ⅔πR³`. An answer is checked against those, to within what
+/// its mesh declares.
+///
+/// **What used to stop every fuse, traced by Q987.** The cap's plane cuts the
+/// ball in the cap's own rim, and so does the pipe it is tangent to. Drawn as
+/// two crossings of the cap, each node of the rim had two ways out leaving it
+/// the same way and bending alike, and `fuse/arrange.rs` refused all 66 fuses
+/// of the touching row `TwoCurvesTouchWithoutCrossing`. The same circle twice
+/// is one curve: the arrangement folds it into one crossing now, on the cap, on
+/// the pipe and on the ball, and every face is cut into the pieces it has.
+///
+/// **What stops it now is joining those pieces.** The rim comes out of the
+/// bar's two faces named by the cap's plane and the pipe, at the bar's seam
+/// corner `(R, 0, h)`, and out of the ball named by the cap's plane and the
+/// ball, at `(0, R, h)` where that pair starts a circle. `fuse/assemble.rs`
+/// names a closed edge by the two surfaces either side, so that is two edges
+/// with one face each, refused `ResultIsNotManifold { count: 1 }`. The count
+/// is pinned so that the day it moves, the answers above are checked.
+#[test]
+fn a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms() {
+    let policy = Policy::certified();
+    let third = std::f64::consts::PI / 3.0;
+    let mut refused = 0;
+    for radius in 1..=3 {
+        for height in radius + 1..=radius + 3 {
+            let (r, h) = (f64::from(radius), f64::from(height));
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let shaft = model
+                .add_round_bar(r, h, &Isometry::identity())
+                .expect("a whole-number bar");
+            let dome = model
+                .add_ball(
+                    r,
+                    &Isometry::translation(Vector::new(0.0, 0.0, h)).expect("a whole-number shift"),
+                )
+                .expect("a whole-number ball");
+            let bar = 3.0 * third * r * r * h;
+            let half_ball = 2.0 * third * r * r * r;
+            for (one, other, rule, holds) in [
+                (shaft, dome, Rule::Union, bar + half_ball),
+                (dome, shaft, Rule::Union, bar + half_ball),
+                (shaft, dome, Rule::Intersection, half_ball),
+                (dome, shaft, Rule::Intersection, half_ball),
+                (shaft, dome, Rule::Difference, bar - half_ball),
+                (dome, shaft, Rule::Difference, half_ball),
+            ] {
+                let mut fused = model.clone();
+                match fused.fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new()) {
+                    Ok(answer) => {
+                        fused
+                            .validate(&policy, &mut ProvenanceLog::new())
+                            .unwrap_or_else(|why| panic!("{rule:?} does not validate: {why}"));
+                        let (volume, error) = volume_and_error(&fused, answer.solids());
+                        assert!(
+                            (volume - holds).abs() <= error,
+                            "{rule:?} of R = {r}, h = {h} (shaft first: {}) measures {volume} \
+                             against {holds}, out by more than the {error} its mesh declares",
+                            one == shaft
+                        );
+                    }
+                    Err(Error::ResultIsNotManifold { count: 1 }) => refused += 1,
+                    Err(why) => panic!(
+                        "{rule:?} of R = {r}, h = {h} (shaft first: {}) refused {why}",
+                        one == shaft
+                    ),
+                }
+            }
+        }
+    }
+    assert_eq!(
+        refused, 54,
+        "every fuse of these nine domes was refused as two names for the rim, one face each \
+         (Q987); now {refused} of 54 are. Check what answers against the closed forms above, \
+         re-derive this count, and move the table at the top of this file with it"
     );
 }
 

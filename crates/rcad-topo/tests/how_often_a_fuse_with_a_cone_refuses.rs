@@ -32,7 +32,8 @@
 //!   cone the refusal is the degree-four space curve; for a cone coaxial with a
 //!   pipe it is two circles, which `intersect` names now, and where a cap plane
 //!   square to their axis meets both, which `three_surfaces.rs` answers now too
-//!   (Q981). The refusal has moved past both, into the fuse.
+//!   (Q981). The arrangement draws that pair since Q987, and the refusal has
+//!   moved on to joining the pieces.
 //!
 //! The families are chosen to measure each of those rather than to average them
 //! away.
@@ -78,19 +79,16 @@ use cones::{a_frustum, a_pointed_cone};
 /// How many pairs each family draws.
 const DRAWS: usize = 16;
 
-/// What half the refusals of a cone against a coaxial pipe say today:
-/// `rcad_topo::Error::ACrossingThisCannotBeOrderedAlong`, printed.
+/// What every refusal of a cone against a coaxial pipe says today:
+/// `rcad_topo::Error::ResultIsNotManifold { count: 1 }`, printed.
 ///
-/// Written out, with its sibling below, because the assertion that uses them is
-/// the record of *which* walls the family sits behind, and a message compared
-/// against itself would record nothing. Both are what `Display` prints for a
-/// refusal by name; a refusal that turned into `Error::Undecidable` would be
-/// counted under its last predicate's name instead and break the pin.
-const NOTHING_CAN_ORDER_POINTS_ALONG_IT: &str = "nothing can put points in order along this curve";
-
-/// What the other half say: `rcad_topo::Error::TwoCurvesTouchWithoutCrossing`,
-/// printed.
-const TWO_CURVES_ON_ONE_FACE_TOUCH: &str = "two curves on one face touch without crossing";
+/// Written out because the assertion that uses it is the record of *which*
+/// wall the family sits behind, and a message compared against itself would
+/// record nothing. It is what `Display` prints for a refusal by name; a
+/// refusal that turned into `Error::Undecidable` would be counted under its
+/// last predicate's name instead and break the pin.
+const AN_EDGE_WITH_ONE_FACE: &str =
+    "the result would not be a solid: an edge would have 1 faces along it";
 
 /// A deterministic sequence, so that a rate is one number and not a range.
 struct Draw(u64);
@@ -302,22 +300,34 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// 96 again.** A plane square to the axis a cone and a pipe share cuts each in a
 /// circle about one centre, so the three meet in a whole circle or nowhere, and
 /// `what_a_plane_square_to_their_one_axis_leaves` tells which from the squared
-/// radii (Q981). Every refusal moved on past that meet, and they no longer share
-/// one wall: 48 say *nothing can put points in order along this curve* and 48
-/// say *two curves on one face touch without crossing*. Why each stands is
-/// Q987's to trace.
+/// radii (Q981). Every refusal moved on past that meet, and they no longer
+/// shared one wall: 48 said *nothing can put points in order along this curve*
+/// and 48 said *two curves on one face touch without crossing*.
 ///
-/// **Neither is a worse answer for a caller than the one it replaced**
-/// (§16.10). The old one was `Error::Geometry` carrying
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, a refusal by name that
-/// `rcad_geom` documents as a gap. The new ones are
-/// `Error::ACrossingThisCannotBeOrderedAlong` and
-/// `Error::TwoCurvesTouchWithoutCrossing`, refusals by name that `rcad_topo`
-/// documents as gaps, and the second also names the face. None of the 96 is
-/// `Error::Undecidable`, before or after: the count keys an `Undecidable` by its
-/// last predicate's name, so one turning up would break the pin below. A caller
-/// is told no, by name, either way; what moved is which step of the fuse says
-/// it.
+/// **Both were the frustum's narrow rim, which is one circle three surfaces
+/// cut, and Q987 traced and drew it: 0 of 96 again.** The bar has the narrow
+/// cap's radius, so the cap's plane, the cone and the pipe all pass through
+/// the rim. Traced on slope a half, near 2 and far 8: with the frustum handed
+/// over first, the cap was arranged first, and the pipe's circle was drawn
+/// beside the rim it is, so two crossings left each node the same way and bent
+/// alike: the touch. With the bar first, its skin was, and the cone's two
+/// circles there were refused as a pair nothing could put points in order
+/// along: the order. `fuse/arrange.rs` now folds a curve
+/// two partners cut a face in into one crossing, starts a circle a cone and a
+/// pipe cross in, and reads the side of the cone off the rim it also cuts. Every
+/// face is cut into the pieces it has, and all 96 refuse one step on, in
+/// `fuse/assemble.rs`, as an edge with one face along it. The rim comes out of
+/// the frustum's faces named by the cap's plane and the cone, at the frustum's
+/// seam corner, and out of the bar's skin named by the cap's plane and the pipe,
+/// started where that pair starts a circle: two names for one edge, each with
+/// one face.
+///
+/// **None is a worse answer for a caller than the one it replaced** (§16.10).
+/// Each is a refusal by name, none of the 96 is `Error::Undecidable`, before or
+/// after, and none is an answer: the count keys an `Undecidable` by its last
+/// predicate's name, so one turning up would break the pin below. What moved
+/// is which step of the fuse says no, and the step now saying it is the one
+/// the answer is waiting on.
 ///
 /// A pin that holds for a new reason is a pin saying nothing until the reason is
 /// written down, so the refusals are asserted by name here and not only counted.
@@ -471,24 +481,23 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                     answered,
                     0,
                     "{}: this is a cone coaxial with a pipe, which crosses in exactly two \
-                     circles (§50.11). `intersect` names that pair and `three_surfaces.rs` \
-                     answers a cap square to their axis now (Q981), so what holds this family \
-                     at nothing answered is further down, in the fuse. It answered {answered} \
-                     of {fuses} here. When this breaks, re-derive the number over this whole \
-                     family and pin the measured one — do not relax it to a floor and do not \
-                     guess it (§19.1)",
+                     circles (§50.11). `intersect` names that pair, `three_surfaces.rs` \
+                     answers a cap square to their axis (Q981) and the arrangement draws the \
+                     narrow rim the cap, the cone and the pipe share (Q987), so what holds \
+                     this family at nothing answered is joining the pieces. It answered \
+                     {answered} of {fuses} here. When this breaks, re-derive the number over \
+                     this whole family and pin the measured one — do not relax it to a floor \
+                     and do not guess it (§19.1)",
                     family.named()
                 );
                 assert_eq!(
                     gave_up,
-                    BTreeMap::from([
-                        (NOTHING_CAN_ORDER_POINTS_ALONG_IT.to_owned(), 48),
-                        (TWO_CURVES_ON_ONE_FACE_TOUCH.to_owned(), 48),
-                    ]),
-                    "{}: these refusals were measured as 48 that cannot order points along a \
-                     curve and 48 where two curves on one face touch, both by name and none \
-                     Undecidable. A different name or split here means a wall moved and this \
-                     pin's reason has to be re-derived with it (§15.10)",
+                    BTreeMap::from([(AN_EDGE_WITH_ONE_FACE.to_owned(), 96)]),
+                    "{}: these refusals were measured as 96 edges with one face along them, \
+                     by name and none Undecidable: the narrow rim, named by the cap's plane and \
+                     the cone on the frustum's side and by the cap's plane and the pipe on the \
+                     bar's. A different name or split here means a wall moved and this pin's \
+                     reason has to be re-derived with it (§15.10)",
                     family.named()
                 );
             }
