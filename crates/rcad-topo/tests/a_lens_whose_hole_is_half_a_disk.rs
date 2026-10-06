@@ -48,12 +48,34 @@
 //! with at most one of them flat, and `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
 //! still refuses every one of those twelve fuses.
 //!
-//! None of the fuses here panics. Past the fuses that still refuse, a half
-//! disk strictly inside the lens, with both of its corners outside the lens's
-//! own two, is placed as holding nothing by `holds_the_other_rings`, and
-//! `rings_round` takes the lens for the outline — read off that function as it
-//! stands rather than run, since every route that reaches it now answers
-//! before any ring would be placed.
+//! A half bar of radius 4 at the origin, whose flat side is the whole chord,
+//! puts both of its corners on the lens's own. Against the two bars united or
+//! where they overlap it refuses `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` the
+//! same way. Against one bar alone it answers, bar the one fuse whose answer
+//! pinches; so do the two D's side by side without the half bar. Q625 found
+//! both refused `TwoCurvesTouchWithoutCrossing` before Q930 and did not pin
+//! them.
+//!
+//! **Which ring is the outline, run rather than read.** On base `90c2e6a9`,
+//! with a print in `rings_round` and `holds_the_other_rings` in
+//! `fuse/assemble.rs` that was not kept, ten fuses of the lens's four routes
+//! keep a cap with the half disk in it: every union both ways round, and the
+//! bars united or the lens less the half bar. Each asks
+//! `holds_the_other_rings` of both rings. The half disk answers that it holds
+//! nothing: the outline's corner `(0, −4)` or `(0, 4)` is on the line through
+//! its chord but past its ends, and its arc winds round it no times. The
+//! outline, two arcs on two pipes, answers `None`: both of the half disk's
+//! corners lie on its chord inside both pipes, and such a corner is passed
+//! over. So `rings_round` takes the outline as the one ring nothing could
+//! place. On one pipe, in the first union of the third route, the outline
+//! answers that it holds the other, as under gdb above. A second ring that
+//! nothing could place would reach the panic in `rings_round`; none of the
+//! shapes here builds one, and none of the fuses here panics.
+//!
+//! `the_rings_of_the_cap` reads the outline first, as the face stores it, so
+//! the pins hold `rings_round` to that choice. Nothing else here would notice
+//! a swap: with `rings_round` made to take the other ring, every fuse still
+//! validated and held its volume, and only those pins failed.
 
 use core::f64::consts::PI;
 
@@ -75,6 +97,12 @@ type Route = (
 /// the volume and solid count every fuse of them is expected to give, for
 /// `[union, intersection, first less second, second less first]`.
 type AnswerRoute = (&'static str, fn(&mut Model) -> [SolidKey; 2], [Expect; 4]);
+
+/// The rings of a cap kept with the half disk of radius 1 in it, as
+/// [`the_rings_of_the_cap`] reads them: the outline of two arcs from
+/// `(0, −4)` to `(0, 4)`, then the hole from `(0, −1)` to `(0, 1)`.
+const THE_OUTLINE_THEN_THE_HALF_DISK: &[&[[f64; 2]]] =
+    &[&[[0.0, -4.0], [0.0, 4.0]], &[[0.0, -1.0], [0.0, 1.0]]];
 
 /// A bar of radius 5 at `(−3, 0)` and the half bar rising out of its cap, by
 /// every rule and both ways round.
@@ -112,8 +140,8 @@ fn a_half_bar_rising_out_of_a_bars_cap_is_fused_by_every_rule_either_way_round()
         if keeps_the_cap {
             assert_eq!(
                 the_rings_of_the_cap(&model, solid),
-                [[[0.0, -4.0], [0.0, 4.0]], [[0.0, -1.0], [0.0, 1.0]]],
-                "{asked}: the corners of the cap's outline and of its hole"
+                THE_OUTLINE_THEN_THE_HALF_DISK,
+                "{asked}: the corners of the cap's outline, then of its hole"
             );
         }
     }
@@ -153,11 +181,17 @@ fn a_half_bar_rising_out_of_a_bars_cap_is_fused_by_every_rule_either_way_round()
 ///   intersection (the two D's meet only along `x = 0`, which has no volume),
 ///   the bitten D less the other D is itself, `D − 1.5π`, and the other way
 ///   round is `D`.
+///
+/// Every union keeps a cap with the half disk in it, and so does the union
+/// of the bars, or the lens, less the half bar: the outline is two arcs on two
+/// pipes from `(0, −4)` to `(0, 4)` and the hole is the half disk from
+/// `(0, −1)` to `(0, 1)`. The outline comes first as the face stores it, which
+/// is the ring `rings_round` took for it.
 #[test]
 fn a_lens_of_two_pipes_with_a_half_bar_on_its_chord_answers_by_every_rule() {
-    let lens = 50.0 * f64::acos(0.6) - 24.0;
+    let lens = the_lens();
     let bars_united = 4.0 * (50.0 * PI - lens);
-    let d = 4.0 * (25.0 * PI - (25.0 * f64::acos(0.6) - 12.0));
+    let d = the_volume_of_a_d();
     let routes: [AnswerRoute; 4] = [
         (
             "the two bars united, then the half bar",
@@ -166,9 +200,9 @@ fn a_lens_of_two_pipes_with_a_half_bar_on_its_chord_answers_by_every_rule() {
                 [bars, a_half_bar_bulging_left(model, 1.0, 0.0)]
             },
             [
-                Expect::one(bars_united + PI),
+                Expect::one(bars_united + PI).with_the_cap(THE_OUTLINE_THEN_THE_HALF_DISK),
                 Expect::one(1.5 * PI),
-                Expect::one(bars_united - 1.5 * PI),
+                Expect::one(bars_united - 1.5 * PI).with_the_cap(THE_OUTLINE_THEN_THE_HALF_DISK),
                 Expect::one(PI),
             ],
         ),
@@ -179,9 +213,9 @@ fn a_lens_of_two_pipes_with_a_half_bar_on_its_chord_answers_by_every_rule() {
                 [lens, a_half_bar_bulging_left(model, 1.0, 0.0)]
             },
             [
-                Expect::one(4.0 * lens + PI),
+                Expect::one(4.0 * lens + PI).with_the_cap(THE_OUTLINE_THEN_THE_HALF_DISK),
                 Expect::one(1.5 * PI),
-                Expect::one(4.0 * lens - 1.5 * PI),
+                Expect::one(4.0 * lens - 1.5 * PI).with_the_cap(THE_OUTLINE_THEN_THE_HALF_DISK),
                 Expect::one(PI),
             ],
         ),
@@ -198,11 +232,12 @@ fn a_lens_of_two_pipes_with_a_half_bar_on_its_chord_answers_by_every_rule() {
                 [both, a_bar_at(model, 3.0)]
             },
             [
-                Expect::one(bars_united + PI),
+                Expect::one(bars_united + PI).with_the_cap(THE_OUTLINE_THEN_THE_HALF_DISK),
                 Expect::one(4.0 * lens),
                 Expect {
                     volume: 101.0 * PI - 4.0 * lens,
                     solids: 2,
+                    cap: None,
                 },
                 Expect::one(100.0 * PI - 4.0 * lens),
             ],
@@ -219,11 +254,8 @@ fn a_lens_of_two_pipes_with_a_half_bar_on_its_chord_answers_by_every_rule() {
                 [bitten, a_d_of_the_bar_at(model, 3.0)]
             },
             [
-                Expect::one(2.0 * d - 1.5 * PI),
-                Expect {
-                    volume: 0.0,
-                    solids: 0,
-                },
+                Expect::one(2.0 * d - 1.5 * PI).with_the_cap(THE_OUTLINE_THEN_THE_HALF_DISK),
+                Expect::nothing(),
                 Expect::one(d - 1.5 * PI),
                 Expect::one(d),
             ],
@@ -234,17 +266,143 @@ fn a_lens_of_two_pipes_with_a_half_bar_on_its_chord_answers_by_every_rule() {
     }
 }
 
-/// The closed-form volume a fuse is expected to answer, and how many solids
-/// it comes back as.
+/// The two D's side by side without the half bar, which Q625 found refused
+/// `TwoCurvesTouchWithoutCrossing` before Q930 and did not pin, answer every
+/// rule both ways round.
+///
+/// The union is `2D`, one solid whose cap is the two D's caps joined across
+/// `x = 0` into one ring of two arcs from `(0, −4)` to `(0, 4)`, the outline
+/// by being the only ring. The two meet only on `x = 0`, so there is no
+/// intersection and each less the other is itself, `D`.
+#[test]
+fn the_two_ds_side_by_side_answer_by_every_rule() {
+    let d = the_volume_of_a_d();
+    assert_every_fuse_answers(
+        "the D on each side",
+        |model| {
+            let left = a_d_of_the_bar_at(model, -3.0);
+            [left, a_d_of_the_bar_at(model, 3.0)]
+        },
+        [
+            Expect::one(2.0 * d).with_the_cap(&[&[[0.0, -4.0], [0.0, 4.0]]]),
+            Expect::nothing(),
+            Expect::one(d),
+            Expect::one(d),
+        ],
+    );
+}
+
+/// A half bar of radius 4 at the origin, whose flat side is the whole chord
+/// from `(0, −4)` to `(0, 4)`. Q625 found it refused
+/// `TwoCurvesTouchWithoutCrossing` against one bar before Q930 and did not
+/// pin it.
+///
+/// The bar at `(−3, 0)` holds the half disk and its circle runs through both
+/// of its corners. The union is the bar and the half bar's two units above
+/// the cap, `100π + 16π`; the intersection both ways round is the half bar's
+/// three units up to the cap, `24π`; the half bar less the bar is `16π`. The
+/// bar less the half bar refuses `ResultIsNotManifold { count: 4 }`, and that
+/// is a limit, since the answer is not a manifold. What is left of the bar's
+/// section holds `(0.1, 3.9)` on one side of `x = 0` and `(−0.1, 4)` on the
+/// other, and near `(0, 4)` it cannot cross that line: just below the corner
+/// the line is the half disk's flat side, and just above it is outside the
+/// bar. So the section is two pieces meeting at a point there, and at
+/// `(0, −4)` the same, and the solid pinches along the vertical lines through
+/// `(0, ±4)` from `z = 1` to the cap.
+///
+/// The half disk holds the part of the bar at `(3, 0)` on its side of
+/// `x = 0`, half the lens, so the two share `1.5L` from `z = 1` to the cap:
+/// union `140π − 1.5L`, intersection `1.5L`, the bar less the half bar
+/// `100π − 1.5L`, and the half bar less the bar `40π − 1.5L`.
+///
+/// Against the two bars united or where they overlap, both its corners are
+/// the lens's own, the shape
+/// `a_half_bar_whose_corner_is_the_lens_corner_mostly_answers` builds at one
+/// corner, and every fuse refuses `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
+/// the same way.
+#[test]
+fn a_half_bar_whose_flat_side_is_the_whole_chord_answers_against_either_bar_alone() {
+    assert_the_bar_at_minus_three_and_a_half_bar(
+        "the half bar of radius 4",
+        [4.0, 0.0],
+        [
+            (Rule::Union, true, Some(116.0 * PI)),
+            (Rule::Union, false, Some(116.0 * PI)),
+            (Rule::Intersection, true, Some(24.0 * PI)),
+            (Rule::Intersection, false, Some(24.0 * PI)),
+            (Rule::Difference, true, None),
+            (Rule::Difference, false, Some(16.0 * PI)),
+        ],
+    );
+    let shared = 1.5 * the_lens();
+    assert_every_fuse_answers(
+        "the bar at (3, 0) and the half bar of radius 4",
+        |model| {
+            let bar = a_bar_at(model, 3.0);
+            [bar, a_half_bar_bulging_left(model, 4.0, 0.0)]
+        },
+        [
+            Expect::one(140.0 * PI - shared),
+            Expect::one(shared),
+            Expect::one(100.0 * PI - shared),
+            Expect::one(40.0 * PI - shared),
+        ],
+    );
+    let routes: [Route; 2] = [
+        (
+            "the two bars united, then the half bar of radius 4",
+            |model| {
+                let bars = two_bars_united(model);
+                [bars, a_half_bar_bulging_left(model, 4.0, 0.0)]
+            },
+            the_three_surfaces_need_two_flat,
+        ),
+        (
+            "where the two bars overlap, then the half bar of radius 4",
+            |model| {
+                let lens = where_two_bars_overlap(model);
+                [lens, a_half_bar_bulging_left(model, 4.0, 0.0)]
+            },
+            the_three_surfaces_need_two_flat,
+        ),
+    ];
+    for (route, build, refused_as_expected) in routes {
+        assert_every_fuse_refuses(route, build, refused_as_expected);
+    }
+}
+
+/// The closed-form volume a fuse is expected to answer, how many solids it
+/// comes back as, and, where it is checked, the rings of its cap as
+/// [`the_rings_of_the_cap`] reads them.
 #[derive(Clone, Copy)]
 struct Expect {
     volume: f64,
     solids: usize,
+    cap: Option<&'static [&'static [[f64; 2]]]>,
 }
 
 impl Expect {
     fn one(volume: f64) -> Self {
-        Expect { volume, solids: 1 }
+        Expect {
+            volume,
+            solids: 1,
+            cap: None,
+        }
+    }
+
+    fn nothing() -> Self {
+        Expect {
+            volume: 0.0,
+            solids: 0,
+            cap: None,
+        }
+    }
+
+    fn with_the_cap(self, rings: &'static [&'static [[f64; 2]]]) -> Self {
+        Expect {
+            cap: Some(rings),
+            ..self
+        }
     }
 }
 
@@ -281,6 +439,17 @@ fn assert_every_fuse_answers(
             "{asked} came back as {answer:?}"
         );
         assert_total_holds(&model, &answer, expect.volume, &asked);
+        let Some(rings) = expect.cap else {
+            continue;
+        };
+        let [solid] = answer[..] else {
+            panic!("{asked}: a cap is read off one solid, not {answer:?}");
+        };
+        assert_eq!(
+            the_rings_of_the_cap(&model, solid),
+            rings,
+            "{asked}: the corners of the cap's outline, then of its holes"
+        );
     }
 }
 
@@ -306,7 +475,18 @@ fn assert_every_fuse_answers(
 /// twelve fuses.
 #[test]
 fn a_half_bar_whose_corner_is_the_lens_corner_mostly_answers() {
-    assert_one_bar_and_the_half_bar_at_the_lens_corner();
+    assert_the_bar_at_minus_three_and_a_half_bar(
+        "the half bar at the lens corner",
+        [1.0, -3.0],
+        [
+            (Rule::Union, true, Some(101.0 * PI)),
+            (Rule::Union, false, Some(101.0 * PI)),
+            (Rule::Intersection, true, Some(1.5 * PI)),
+            (Rule::Intersection, false, Some(1.5 * PI)),
+            (Rule::Difference, true, None),
+            (Rule::Difference, false, Some(PI)),
+        ],
+    );
     let routes: [Route; 2] = [
         (
             "the two bars united, then the half bar",
@@ -330,25 +510,20 @@ fn a_half_bar_whose_corner_is_the_lens_corner_mostly_answers() {
     }
 }
 
-/// One bar and the half bar whose corner sits on its rim: the union, the
-/// intersection both ways round, and the half bar less the bar all answer and
-/// hold their closed forms; the bar less the half bar refuses
-/// `ResultIsNotManifold { count: 4 }`.
-fn assert_one_bar_and_the_half_bar_at_the_lens_corner() {
-    for (rule, bar_first, answers) in [
-        (Rule::Union, true, Some(101.0 * PI)),
-        (Rule::Union, false, Some(101.0 * PI)),
-        (Rule::Intersection, true, Some(1.5 * PI)),
-        (Rule::Intersection, false, Some(1.5 * PI)),
-        (Rule::Difference, true, None),
-        (Rule::Difference, false, Some(PI)),
-    ] {
-        let asked = format!(
-            "one bar and the half bar at the lens corner, {rule:?}, the bar first {bar_first}"
-        );
+/// The bar at `(−3, 0)` and a half bar of `radius` about `(0, y)`, whose
+/// corners sit on the bar's rim, fused by each rule and way round in
+/// `answers`: one solid holding the volume it gives, or where it gives
+/// `None`, a refusal `ResultIsNotManifold { count: 4 }`.
+fn assert_the_bar_at_minus_three_and_a_half_bar(
+    half_bar: &str,
+    [radius, y]: [f64; 2],
+    answers: [(Rule, bool, Option<f64>); 6],
+) {
+    for (rule, bar_first, answers) in answers {
+        let asked = format!("one bar and {half_bar}, {rule:?}, the bar first {bar_first}");
         let mut model = a_model();
         let bar = a_bar_at(&mut model, -3.0);
-        let half = a_half_bar_bulging_left(&mut model, 1.0, -3.0);
+        let half = a_half_bar_bulging_left(&mut model, radius, y);
         let [one, other] = if bar_first { [bar, half] } else { [half, bar] };
         match (fuse(&mut model, one, other, rule), answers) {
             (Ok(answer), Some(volume)) => {
@@ -476,6 +651,18 @@ fn a_d_of_the_bar_at(model: &mut Model, x: f64) -> SolidKey {
     the_one_solid(model, bar, block, Rule::Difference)
 }
 
+/// `L`, the area where the circles of radius 5 about `(−3, 0)` and `(3, 0)`
+/// overlap.
+fn the_lens() -> f64 {
+    50.0 * f64::acos(0.6) - 24.0
+}
+
+/// `D`, the volume of [`a_d_of_the_bar_at`]: the bar less the piece the
+/// chord `x = 0` cuts off, which is half the lens.
+fn the_volume_of_a_d() -> f64 {
+    4.0 * (25.0 * PI - the_lens() / 2.0)
+}
+
 /// A block over the rectangle from `low` to `high`, from `z = −5` to
 /// `z = 15`, well past everything else here.
 fn a_block_over(model: &mut Model, low: [f64; 2], high: [f64; 2]) -> SolidKey {
@@ -550,7 +737,8 @@ fn assert_total_holds(model: &Model, answer: &[SolidKey], volume: f64, what: &st
 }
 
 /// The corners of each ring of the face at `z = 4` facing up, each ring's
-/// corners in order of `y` and the rings in order of their lowest corner.
+/// corners in order of `y`: the outline first, as the face stores it, then
+/// the holes in order of their lowest corner.
 fn the_rings_of_the_cap(model: &Model, solid: SolidKey) -> Vec<Vec<[f64; 2]>> {
     let solid = model.solid(solid).expect("this model made the key");
     let [cap] = solid
@@ -582,7 +770,7 @@ fn the_rings_of_the_cap(model: &Model, solid: SolidKey) -> Vec<Vec<[f64; 2]>> {
             corners
         })
         .collect();
-    rings.sort_by(|one, other| one[0][1].total_cmp(&other[0][1]));
+    rings[1..].sort_by(|one, other| one[0][1].total_cmp(&other[0][1]));
     rings
 }
 
