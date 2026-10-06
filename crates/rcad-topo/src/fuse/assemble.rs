@@ -2519,6 +2519,13 @@ impl Assembly {
     /// nothing can place, is abandoned for the next one — choosing which corner
     /// to look at decides nothing (§5).
     ///
+    /// **Each side is asked from the corner it starts at**, so every corner of
+    /// every wire is asked. Asking the first end of each edge instead asked a
+    /// ball's one pole twice, down its seam and back up it, and its other pole
+    /// never: a ball touching a block's top with its north pole was refused for
+    /// want of the south pole, which is inside
+    /// (`tests/a_shell_inside_another_names_its_refusal.rs`).
+    ///
     /// **Running out of corners is a refusal, and it says which one.** A corner
     /// whose ray met a face of `outer` that [`SolidView::face_holds_the_point`]
     /// cannot follow was never asked at all, and that is
@@ -2567,7 +2574,7 @@ impl Assembly {
         let mut unfollowed = None;
         for &face in &self.shells[hollow] {
             for side in self.faces[face].wires.iter().flatten() {
-                let at = self.corners[self.edges[side.edge].ends[0]].point;
+                let at = self.corners[self.edges[side.edge].ends[usize::from(!side.forward)]].point;
                 let mut trial = ProvenanceLog::new();
                 match solid.classify_point(at, policy, &mut trial) {
                     Containment::Inside => {

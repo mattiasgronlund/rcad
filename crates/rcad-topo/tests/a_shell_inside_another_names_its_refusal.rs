@@ -1,5 +1,8 @@
-//! A block with a box-shaped hollow in it, and a bar standing through one of
-//! the block's upright edges.
+//! Hollows whose corners are asked whether they are inside the shell round
+//! them: a box in a notched block, and a ball touching a block's skin with its
+//! poles.
+//!
+//! # A box in a block with a bar through its edge
 //!
 //! The block runs from the origin to `(10, 10, 4)` and the hollow from
 //! `(2, 2, 1)` to `(4, 4, 3)`, clear of every face. The bar has radius 2 and
@@ -24,6 +27,17 @@
 //! fuse here. Each answer is checked against the volume worked out by hand: the
 //! block's 400, less the hollow's 8, with the quarter of the bar inside the
 //! block, `4π`, taken away or the rest of the bar, `20π`, added.
+//!
+//! # A ball touching the block's top with its north pole
+//!
+//! The same block less a ball of radius 1 centred at `(5, 5, 3)`. The ball's
+//! north pole, `(5, 5, 4)`, is on the block's top and its south pole,
+//! `(5, 5, 2)`, is inside the block. A ball's one face is walked down its seam
+//! from the north pole and back up it from the south pole, and the hollow's
+//! corners were asked as the **first end of each edge**, so the north pole was
+//! asked twice, came back on the skin twice, and the south pole was never asked
+//! at all: `Undecidable`, for a hollow whose other corner answers. Each side is
+//! now asked from the corner it starts at (row Q883).
 
 use core::f64::consts::PI;
 
@@ -80,6 +94,23 @@ fn a_block_less_a_box_and_a_bar_at_once_keeps_its_hollow() {
     );
 }
 
+/// The block less a ball whose north pole is on the block's top: one solid,
+/// the block's skin and the ball's, holding the block's 400 less the ball's
+/// `4π/3`.
+#[test]
+fn a_block_less_a_ball_touching_its_top_with_one_pole_keeps_the_ball_as_a_hollow() {
+    let mut model = a_model();
+    let block = a_block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
+    let ball = a_ball(&mut model, 1.0, at(5.0, 5.0, 3.0));
+    the_one_solid_with_its_hollow(
+        &mut model,
+        &[block],
+        &[ball],
+        Rule::Difference,
+        400.0 - 4.0 * PI / 3.0,
+    );
+}
+
 fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
 }
@@ -129,6 +160,12 @@ fn a_block(model: &mut Model, low: [f64; 3], size: [f64; 3]) -> SolidKey {
     model
         .add_extrusion(&rectangle, z, &at(low[0], low[1], low[2]))
         .expect("a positive height")
+}
+
+fn a_ball(model: &mut Model, radius: f64, centre: Isometry) -> SolidKey {
+    model
+        .add_ball(radius, &centre)
+        .expect("a ball of positive radius")
 }
 
 fn at(x: f64, y: f64, z: f64) -> Isometry {
