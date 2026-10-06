@@ -4598,6 +4598,16 @@ impl<'f> Arrangement<'f> {
     /// 5 of §31.6 makes one. Nothing here is wrong when it arrives: an unknown
     /// winding rules nothing out, and what follows either places the lump some
     /// other way or refuses by name.
+    ///
+    /// **A lump on the other nappe of a cone from the whole rim is outside the
+    /// face**, whatever the face's box says
+    /// ([`Arrangement::on_the_nappe_the_rim_never_reaches`]). The box is loose:
+    /// a frustum's face cut by a cube's wall `y = 4.5` reaches down to the far
+    /// branch's tip at `z = −6` in it, and the cube's floor `z = −3.5` cuts the
+    /// lower nappe in a circle inside that box. Placing that circle's lump by
+    /// facing alone joined its walk towards the apex to the walk inside the
+    /// frustum's top rim, past the notched bottom rim between them, and the
+    /// fuse was refused `CannotTellTheCellsOfAFaceApart`.
     fn say_whether_the_face_holds_each_lump_of_closed_cuts(&mut self, lump: &[usize]) {
         let flat = self
             .surface
@@ -4643,7 +4653,8 @@ impl<'f> Arrangement<'f> {
             // that far away is worth deciding about more carefully.
             let outside = nodes
                 .iter()
-                .all(|&node| self.face.bounds.provably_misses(self.nodes[node].point));
+                .all(|&node| self.face.bounds.provably_misses(self.nodes[node].point))
+                || self.on_the_nappe_the_rim_never_reaches(&nodes);
             let held = if outside {
                 Some(0)
             } else {
@@ -4664,6 +4675,58 @@ impl<'f> Arrangement<'f> {
             for cycle in its_walks {
                 self.winding_of_cycle[cycle] = Some(held);
             }
+        }
+    }
+
+    /// Whether the face's surface is a cone, every node of the face's rim is on
+    /// one nappe of it and every one of `nodes` on the other; so that no point
+    /// of the face is on the nappe `nodes` are on.
+    ///
+    /// **The face holds all of the other nappe or none of it, and it cannot
+    /// hold all of it.** Every curve on a cone here is a plane's crossing with
+    /// it or a circle square to its axis — `intersect` names a cone against a
+    /// pipe, a cone or a ball only on one axis, and refuses a torus — and a
+    /// conic between two points of one nappe, a circle, or a stretch of a
+    /// ruling between two points on one side of the apex, stays on that nappe.
+    /// So the rim never reaches the other nappe, which without its apex is one
+    /// connected ring: the rim winds round every point of it the same number
+    /// of times. A ring that runs on for ever cannot all be in a face of a
+    /// solid, which is bounded, so none of it is.
+    ///
+    /// The nappe is read off the sign of `(x − apex)·w` for each node's box, so
+    /// a node at the apex or a box across it says no.
+    fn on_the_nappe_the_rim_never_reaches(&self, nodes: &[usize]) -> bool {
+        let Surface::Cone(cone) = self.surface else {
+            return false;
+        };
+        let apex = cone.apex().coordinates().map(Interval::exactly);
+        let up = cone.axis().direction().components().map(Interval::exactly);
+        let above_the_apex = |node: usize| -> Option<bool> {
+            let from_the_apex =
+                core::array::from_fn(|axis| self.nodes[node].point.enclosure()[axis] - apex[axis]);
+            match dot_of(from_the_apex, up).sign() {
+                Decision::Pos => Some(true),
+                Decision::Neg => Some(false),
+                Decision::Zero | Decision::Undecidable { .. } | _ => None,
+            }
+        };
+        let one_nappe = |these: &[usize]| -> Option<bool> {
+            let (&first, rest) = these.split_first()?;
+            let first = above_the_apex(first)?;
+            rest.iter()
+                .all(|&node| above_the_apex(node) == Some(first))
+                .then_some(first)
+        };
+        let rim: Vec<usize> = self
+            .node_of_corner
+            .iter()
+            .chain(&self.node_of_the_end)
+            .flatten()
+            .copied()
+            .collect();
+        match (one_nappe(&rim), one_nappe(nodes)) {
+            (Some(the_rims), Some(theirs)) => the_rims != theirs,
+            (Some(_) | None, Some(_) | None) => false,
         }
     }
 
