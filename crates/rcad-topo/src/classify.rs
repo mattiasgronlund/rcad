@@ -74,8 +74,9 @@ pub enum Containment {
         /// Zero when no predicate was in doubt and the geometry was: every ray
         /// tried met an edge or a corner dead on, which is exact and still
         /// tells us nothing; or a ray met a flat face whose stored corners and
-        /// stored plane put the point on different sides, and another face
-        /// was too near for the plane alone to place it.
+        /// stored plane put the point on different sides, or the point is
+        /// beside such a face, and another face was too near for the plane
+        /// alone to place it.
         enclosure: f64,
     },
     /// One face of the solid is trimmed in a way
@@ -183,6 +184,9 @@ impl SolidView<'_> {
     /// is asked too; where the two part, no count is trusted and the plane next
     /// to the point places it, or nothing does and the answer is
     /// [`Containment::Undecidable`] (`SolidView::what_its_plane_says_beside_it`).
+    /// A point beside a face whose corners and plane part about it is placed
+    /// the same way before any ray is fired, whether a ray's line would meet
+    /// that face or not (`SolidView::what_a_face_it_is_beside_says`).
     ///
     /// The ray's far target is picked from [`SolidView::box_around_it`] and is
     /// exact. `point` is the only thing the *caller* may hand over as a box, and
@@ -231,6 +235,9 @@ impl SolidView<'_> {
         if is_outside_the_box(point, low, high) {
             return Containment::Outside;
         }
+        if let Some(placed) = self.what_a_face_it_is_beside_says(point, policy, log) {
+            return placed;
+        }
 
         let mut worst_enclosure = 0.0f64;
         for target in ray_targets(low, high) {
@@ -263,6 +270,83 @@ impl SolidView<'_> {
         Containment::Undecidable {
             enclosure: worst_enclosure,
         }
+    }
+
+    /// What a flat face whose corners and stored plane read the point
+    /// differently says of it, where the point is beside that face; `None` when
+    /// it is beside no such face, and the ray is to count it.
+    ///
+    /// **The ray asks a face's stored plane only where its line passes through
+    /// one of that face's triangles**, and it finds those by the triangles'
+    /// sides, which are the corners'. The line from a point in one face's
+    /// sliver within a sliver's depth of an edge can pass through the
+    /// neighbouring face's triangle instead, or through neither, and then the
+    /// plane was never asked and the corners' answer came back where the stored
+    /// planes say the other (`docs/decisions.md` §346.6, Q997). So every flat
+    /// face whose corners and plane part about the point is found first
+    /// ([`its_corners_and_plane_part_at`]), whatever the line meets.
+    ///
+    /// **Such a face matters only beside the point.** Its plane runs on past
+    /// its edges, and so does the sliver between that plane and its triangles'
+    /// planes. A point in that sliver far from the face, as the cap a turned
+    /// block's face cuts off a ball `0.3` past the block is, is left to the
+    /// ray, which reads it the same both ways. A face is beside the point
+    /// unless it holds none of the point's box stretched to its plane. Where
+    /// two faces part about the point both are taken as beside it: that is the
+    /// strip between their corners' edge and their planes' meeting, which
+    /// neither face's corners hold and only their planes place.
+    ///
+    /// Each face beside the point is asked what its plane says
+    /// ([`SolidView::what_its_plane_says_beside_it`]), and the first that can
+    /// show it answers. If none can, the answer is [`Containment::Undecidable`].
+    fn what_a_face_it_is_beside_says(
+        self,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Option<Containment> {
+        let parted: Vec<FaceView<'_>> = self
+            .faces()
+            .filter(|&face| {
+                let surface = face.surface();
+                surface.as_plane().is_some_and(|flat| {
+                    every_side_of_it_is_straight(face)
+                        && its_corners_and_plane_part_at(face, flat, point)
+                })
+            })
+            .collect();
+        let beside: Vec<FaceView<'_>> = if parted.len() > 1 {
+            parted
+        } else {
+            parted
+                .into_iter()
+                .filter(|&face| self.is_beside(face, point, policy, log))
+                .collect()
+        };
+        if beside.is_empty() {
+            return None;
+        }
+        Some(
+            beside
+                .into_iter()
+                .find_map(|face| self.what_its_plane_says_beside_it(face.key(), point, policy, log))
+                .unwrap_or(Containment::Undecidable { enclosure: 0.0 }),
+        )
+    }
+
+    /// Whether `face` may hold a point of `point`'s box stretched to its plane:
+    /// anything short of a proof that it holds none.
+    fn is_beside(
+        self,
+        face: FaceView<'_>,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        let Some(reach) = stretched_to_the_plane(&face.plane(), point) else {
+            return true;
+        };
+        !self.face_holds_none_of(face, reach, policy, log)
     }
 
     /// What every point of `point`'s box is, read off one exact point beside
@@ -337,7 +421,9 @@ impl SolidView<'_> {
     /// side of the face by the ray and on the other by the plane, or the ray
     /// could not settle its sign at all where the plane could: a ball whose cap
     /// a turned block's face takes off is a rounding deep, and every point of it
-    /// is in that sliver (§346.6).
+    /// is in that sliver (§346.6). Asked too of a face the point is beside
+    /// whose corners and plane part about it, wherever the ray's line goes
+    /// ([`SolidView::what_a_face_it_is_beside_says`]).
     ///
     /// **The plane speaks for the point when no other face is near.** The box is
     /// stretched along an axis until it holds a point of the plane as well
@@ -345,7 +431,14 @@ impl SolidView<'_> {
     /// stretched box and no other face holds any, the skin inside that box is
     /// `face` and nothing else, so the segment from the point to the plane
     /// reaches the skin only at the plane, where the face's material is on its
-    /// inner side. The point is inside exactly when it is on that side. Every
+    /// inner side. The point is inside exactly when it is on that side.
+    ///
+    /// **No other flat face may part from its own plane about the stretched
+    /// box**, even one whose plane the box is clear of. `face`'s corners say
+    /// how far it reaches, and by its edge a neighbour's plane and corners can
+    /// put the box on opposite sides: the box is then held by `face`'s corners
+    /// and past the edge the stored planes meet along, and `face`'s plane
+    /// placed it where the neighbour's plane says the other (Q997). Every
     /// sign here is decided about a whole box, so nothing is a tolerance; where
     /// a sign cannot be decided, or another face is near, the answer is `None`
     /// and the caller does not fall back on the ray it already distrusts.
@@ -375,6 +468,12 @@ impl SolidView<'_> {
         }
         for other in self.faces().filter(|other| other.key() != face.key()) {
             let surface = other.surface();
+            if surface.as_plane().is_some_and(|other_flat| {
+                every_side_of_it_is_straight(other)
+                    && its_corners_and_plane_part_at(other, other_flat, reach)
+            }) {
+                return None;
+            }
             let side = surface.as_plane().map_or_else(
                 || side_of_surface(&surface, reach),
                 |other_flat| side_of_a_flat_face(other_flat, reach),
@@ -783,6 +882,93 @@ fn is_outside_the_box(point: PredicatePoint, low: Point, high: Point) -> bool {
     let low = low.coordinates();
     let high = high.coordinates();
     (0..3).any(|axis| point[axis].hi() < low[axis] || point[axis].lo() > high[axis])
+}
+
+/// Whether some triangle of `face`'s fan and its stored plane `flat` do not
+/// both put every point of `point`'s box on the same side.
+///
+/// **A side is read against a point well in front of the plane**, which every
+/// triangle's own plane puts in front too: a turn leaves the corners a
+/// rounding off the plane, so each triangle is tilted from it by about a
+/// rounding, and a triangle of a hole or of a fan that doubles back is wound
+/// the other way round, which reading against that point undoes. A triangle
+/// with no area has no side and is passed over, and so is one no point in
+/// front of the plane can be found for ([`a_point_in_front_of`]); the ray
+/// still asks the plane wherever its line passes through either.
+///
+/// A point exactly on a triangle's plane is no parting, since every stored
+/// corner is one and the outline is what places it (`look_at_triangle`). A box
+/// that both the triangle and the plane straddle is left to the ray, which
+/// grazes it there as it always has. Every other case short of both settling
+/// the same side is a parting: the box holds a point the two readings place
+/// differently, or may.
+fn its_corners_and_plane_part_at(face: FaceView<'_>, flat: &Plane, point: PredicatePoint) -> bool {
+    let by_the_plane = in_front_of_it(side_of_a_flat_face(flat, point), Decision::Pos);
+    let mut parted = false;
+    face.for_each_triangle(|corners| {
+        let [a, b, c] = corners.map(|corner| PredicatePoint::from(corner.coordinates()));
+        if parted {
+            return;
+        }
+        let Some(ahead) = a_point_in_front_of(flat, corners) else {
+            return;
+        };
+        let front = orient3d_of_points(a, b, c, ahead);
+        if front == Decision::Zero {
+            return;
+        }
+        let by_the_triangle = in_front_of_it(orient3d_of_points(a, b, c, point), front);
+        parted = match (by_the_triangle, by_the_plane) {
+            (Reading::On, _) | (Reading::Unsettled, Reading::Unsettled) => false,
+            (Reading::Side(one), Reading::Side(other)) => one != other,
+            (Reading::Unsettled, Reading::Side(_) | Reading::On)
+            | (Reading::Side(_), Reading::On | Reading::Unsettled) => true,
+        };
+    });
+    parted
+}
+
+/// What one plane says of a point, against the sign it gives a point in
+/// front of it.
+#[derive(Clone, Copy)]
+enum Reading {
+    /// Off the plane: in front of it, or behind.
+    Side(bool),
+    /// Exactly on it.
+    On,
+    /// A box the plane straddles.
+    Unsettled,
+}
+
+fn in_front_of_it(side: Decision, front: Decision) -> Reading {
+    match side {
+        Decision::Pos | Decision::Neg => Reading::Side(side == front),
+        Decision::Zero => Reading::On,
+        Decision::Undecidable { .. } => Reading::Unsettled,
+        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
+/// A point a step along `flat`'s normal from the first of `corners`, where the
+/// plane puts it in front, or `None`.
+///
+/// The step is a thousandth of the largest coordinate of the three corners or
+/// of the plane's offset, far more than the rounding a corner sits off its
+/// plane and far less than the top of the range, which a step as long as the
+/// coordinates overflows past at `1e308`. A triangle whose corners are all the
+/// origin gets no step, and has no area to read a side by either.
+fn a_point_in_front_of(flat: &Plane, corners: [Point; 3]) -> Option<PredicatePoint> {
+    let normal = flat.normal().components();
+    let reach = corners
+        .iter()
+        .flat_map(|corner| corner.coordinates())
+        .fold(flat.offset().abs(), |far, part| far.max(part.abs()))
+        / 1024.0;
+    let at = corners[0].coordinates();
+    let ahead = PredicatePoint::from(core::array::from_fn::<f64, 3, _>(|axis| {
+        at[axis] + normal[axis] * reach
+    }));
+    (flat.side_of_point(ahead) == Decision::Pos).then_some(ahead)
 }
 
 /// Three far-off points to aim at, in turn.
