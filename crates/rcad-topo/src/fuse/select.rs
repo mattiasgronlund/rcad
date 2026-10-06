@@ -143,7 +143,9 @@ pub(crate) struct Chosen {
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
 /// a point offered before the rungs was found inside the piece and the ray
 /// from a point tried met a face of a solid that nothing here can follow; no
-/// side, corner or plane is tried then.
+/// side, corner or plane is tried then. The same refusal, naming the same kind
+/// of face, when only a rung was found inside and a rung's ray met such a face,
+/// once no side, corner or plane has placed the piece.
 pub(crate) fn choose(
     model: &Model,
     scratch: &Scratch,
@@ -176,7 +178,7 @@ pub(crate) fn choose(
         };
         let candidates = candidate_points(piece, &corners);
         let mut place = |against: &[usize], log: &mut ProvenanceLog| -> Result<Placement> {
-            let (unplaced, the_plane_first) = match place_the_piece(
+            let (unplaced, the_plane_first, unfollowed) = match place_the_piece(
                 model,
                 &solids,
                 against,
@@ -187,9 +189,11 @@ pub(crate) fn choose(
                 log,
             )? {
                 Search::Placed(placement) => return Ok(placement),
-                Search::NoPointInside => (INSIDE_A_PIECE, false),
-                Search::OnlyRungsInside => (PLACED_AGAINST_EVERY_SOLID, false),
-                Search::NoPointInsidePlaced => (PLACED_AGAINST_EVERY_SOLID, true),
+                Search::NoPointInside => (INSIDE_A_PIECE, false, None),
+                Search::OnlyRungsInside { unfollowed } => {
+                    (PLACED_AGAINST_EVERY_SOLID, false, unfollowed)
+                }
+                Search::NoPointInsidePlaced => (PLACED_AGAINST_EVERY_SOLID, true, None),
             };
             let mut by_its_sides_or_corners = |log: &mut ProvenanceLog| {
                 by_a_shared_side
@@ -202,7 +206,10 @@ pub(crate) fn choose(
             } else {
                 by_its_sides_or_corners(log).or_else(by_its_plane)
             };
-            placed.ok_or_else(|| gave_up(unplaced, &corners.concat(), Measures::Length, log))
+            placed.ok_or_else(|| match unfollowed {
+                Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
+                None => gave_up(unplaced, &corners.concat(), Measures::Length, log),
+            })
         };
 
         let own_group: Vec<usize> = (0..solids.len())
@@ -426,6 +433,14 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// a refusal no policy moves. It wins over another point left undecided, when
 /// both happen, for the reason that function gives.
 ///
+/// **A rung's ray that met such a face is named too, but by the caller**, and
+/// only once a side, a corner and a plane have each failed to place the piece:
+/// [`Search::OnlyRungsInside`] carries the face, so §365.6's order stands. Q1040
+/// found the piece that reaches it, the skin of a ball poking out of a half
+/// ball's rim, placed against a cut ball in its own group whose skin nobody
+/// follows (`tests/a_rung_whose_ray_meets_a_face_nobody_follows.rs`); it was
+/// refused under [`PLACED_AGAINST_EVERY_SOLID`].
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] naming the caller's face,
@@ -516,7 +531,7 @@ fn place_the_piece(
         return Ok(Search::NoPointInsidePlaced);
     }
     Ok(if a_rung_was_inside {
-        Search::OnlyRungsInside
+        Search::OnlyRungsInside { unfollowed }
     } else {
         Search::NoPointInside
     })
@@ -530,7 +545,11 @@ enum Search {
     /// Only rungs of [`rungs_towards_each_crossing`] or
     /// [`shorter_steps_across_a_curved_piece`] were, and none of them could be
     /// classified against every solid in the set.
-    OnlyRungsInside,
+    OnlyRungsInside {
+        /// The first face a rung's ray met whose trimming nothing here
+        /// follows, if one did.
+        unfollowed: Option<FaceKey>,
+    },
     /// A point offered before the rungs was proved inside the piece, and no
     /// point inside it could be classified against every solid in the set.
     NoPointInsidePlaced,
