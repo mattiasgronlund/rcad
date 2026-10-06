@@ -7638,14 +7638,15 @@ mod tests {
     /// With the comparison of the two circles switched off in place, and the
     /// corners not read at them, the barrel walked `[Reversed, Reversed]` and
     /// the outer-and-inner wall walked `[Reversed, Reversed]` passed
-    /// `Model::validate`. Before row Q1153 the corner read refused the barrel
-    /// and passed the outer-and-inner wall, and refused that wall's sound walk,
-    /// the outer band and the top of the tube, which passes now.
+    /// `Model::validate`. The sound walk of each validates, the outer-and-inner
+    /// wall's being the outer band and the top of the tube, and so does the
+    /// ring with its hole plugged between the planes: the ring less the inner
+    /// band, used as stored, with the two caps facing out.
     ///
-    /// The ring with its hole plugged between the planes, the ring less the
-    /// inner band used as stored with the two caps facing out, passes too:
-    /// read off the corners, each circle's other circle said the wall was the
-    /// band.
+    /// With `validate.rs` put back to `55a27b3d`, the first shape this asks
+    /// fails: the barrel turned over at both circles was refused
+    /// `AClosedEdgeIsWalkedAgainstItsSurface` off the corners, where the mesh
+    /// now refuses it `FacesDoNotAgreeWhichWayTheyFace`.
     #[test]
     fn a_bands_wall_walking_both_circles_the_same_way_round_the_tube_is_refused() {
         let facing = |up: f64| {
