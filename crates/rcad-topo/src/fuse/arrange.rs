@@ -5619,12 +5619,17 @@ fn where_a_ball_pinches(ball: &Sphere, at_the_top: bool) -> PredicatePoint {
     ]))
 }
 
-/// How many times a face's own rim winds round a point on its surface: one
-/// inside the material, zero outside it.
+/// How many times the polygons of a rim's corners wind round a point on their
+/// plane, anticlockwise counting one: for a rim of straight sides, one inside
+/// the material and none outside it.
 ///
 /// A half-line runs from the point towards the first corner of the rim and the
-/// sides crossing it are counted, `+1` one way round and `-1` the other, so a
-/// hole subtracts itself. Which side of the half-line's line each corner falls
+/// sides crossing it are counted, `+1` one way round and `-1` the other. **Each
+/// ring is counted the way it is walked.** A face's wires keep its material on
+/// their left, so a hole is walked the other way round from the outline and
+/// subtracts itself. Turning a hole round as well, as this once did, counted a
+/// pin through a square hole in a plate inside the plate twice over (queue row
+/// Q1054). Which side of the half-line's line each corner falls
 /// is read as a **half-open** range — a corner exactly on it counts as below —
 /// and that is what leaves no tie to break however many corners the line runs
 /// through.
@@ -5675,8 +5680,7 @@ fn how_often_the_rim_winds_round_aiming_at(
     aim: PredicatePoint,
 ) -> Option<i32> {
     let mut winding = 0;
-    for (position, ring) in rim.iter().enumerate() {
-        let inwards = if position == 0 { 1 } else { -1 };
+    for ring in rim {
         for index in 0..ring.len() {
             let (from, to) = (ring[index], ring[(index + 1) % ring.len()]);
             let along = in_plane.turn(from, to, point);
@@ -5699,12 +5703,11 @@ fn how_often_the_rim_winds_round_aiming_at(
                     Decision::Undecidable { .. } | _ => None,
                 }
             };
-            winding += inwards
-                * match (above(from)?, above(to)?, along) {
-                    (false, true, Decision::Pos) => 1,
-                    (true, false, Decision::Neg) => -1,
-                    _ => 0,
-                };
+            winding += match (above(from)?, above(to)?, along) {
+                (false, true, Decision::Pos) => 1,
+                (true, false, Decision::Neg) => -1,
+                _ => 0,
+            };
         }
     }
     Some(winding)

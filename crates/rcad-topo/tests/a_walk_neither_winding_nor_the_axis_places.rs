@@ -225,8 +225,45 @@ fn a_pin_standing_in_a_plates_round_notch_is_answered_under_every_rule() {
     }
 }
 
-/// The plate with a round tab of the test above, with a round hole of radius 1
-/// at `(3, 5)` as well, against the same pin through the tab.
+/// A plate `10 × 10 × 2` with a square hole `[3, 7] × [3, 7]`, against a pin
+/// of radius `0.5` and height 4 standing in the hole at `(5, 5)`, clear of the
+/// plate.
+///
+/// The hole's wire is walked clockwise, with the plate on its left, so it
+/// subtracts itself from the outline's count. The count turned it round as
+/// well, wound the pin's circle on the floor twice, and every fuse was refused
+/// `CannotTellTheCellsOfAFaceApart` naming the floor (queue row Q1054).
+///
+/// The plate is `168` and the pin `π`, and they share nothing.
+#[test]
+fn a_pin_standing_in_a_plates_square_hole_is_answered_under_every_rule() {
+    use std::f64::consts::PI;
+    for (rule, plate_first) in every_rule_both_ways() {
+        let mut model = a_model();
+        let plate = block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 2.0]);
+        let hole = block(&mut model, [3.0, 3.0, -1.0], [7.0, 7.0, 3.0]);
+        let holed = fuse_one(&mut model, plate, hole, Rule::Difference);
+        let pin = model
+            .add_round_bar(0.5, 4.0, &shift(5.0, 5.0, -1.0))
+            .expect("a bar");
+        let what = format!("{rule:?}, the plate first {plate_first}");
+        let answer = fuse(&mut model, holed, pin, rule, plate_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let volumes: &[f64] = match (rule, plate_first) {
+            (Rule::Union, _) => &[PI, 168.0],
+            (Rule::Intersection, _) => &[],
+            (Rule::Difference, true) => &[168.0],
+            (Rule::Difference, false) => &[PI],
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_each_holds(&model, &answer, volumes, &what);
+    }
+}
+
+/// The plate with a round tab of
+/// `a_pin_through_a_plates_round_tab_is_answered_under_every_rule`, with a
+/// round hole of radius 1 at `(3, 5)` as well, against the same pin through
+/// the tab.
 ///
 /// The hole's circle is one side that closes on its own corner, with no chord,
 /// so the floor's rim is not counted round the pin's circle and the lump is
