@@ -793,8 +793,8 @@ fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) 
 /// must be along the one stored plane, its normal along the axis
 /// ([`lie_along_one_line`]), and the two sides must agree: a wire keeping one
 /// side at one circle and the other side at the other walks its two circles the
-/// same way round, which no half's does. Then `point` is asked against that
-/// plane alone. A plane that rests on the tube touches it along one circle, and
+/// same way round, which no half's does. The two corners must lie on different
+/// circles, as in step 2. Then `point` is asked against that plane alone. A plane that rests on the tube touches it along one circle, and
 /// step 1 finds no way to read a side there (`docs/decisions.md` §243.8).
 ///
 /// # Errors
@@ -872,7 +872,10 @@ fn what_a_ring_face_between_two_planes_holds(
     };
     match square_to_the_axis {
         0 => (),
-        2 if one.surface == other.surface && one.kept == other.kept => {
+        2 if one.surface == other.surface
+            && one.kept == other.kept
+            && are_on_two_circles(solid, &ring, [one, other], policy, log)? =>
+        {
             return held_in_front_of_all(core::slice::from_ref(one), point);
         }
         _ => return Err(refuse()),
@@ -6403,6 +6406,60 @@ mod tests {
                          {point:?}: {answer:?}"
                     );
                 }
+            }
+        }
+    }
+
+    /// A wall whose two edges both run round the outer circle `z = 0` cuts the
+    /// ring in, walked the same way round both times, is refused, and not read
+    /// as the top or the bottom half of the ring (§243.8).
+    ///
+    /// The plane `z = 0` is square to the ring's axis, and the ring less its
+    /// outer circle is one piece that meets that circle from above and from
+    /// below. The wire keeps the same side of the plane at both edges, so the
+    /// side check passes it. Without the check that the two corners lie on
+    /// different circles of the plane, both walls were read as a half. Walked
+    /// `Forward`, each held `(4, 0, −1)` and not `(4, 0, 1)`, walked `Reversed`
+    /// the other way about, and either way `(0, −3, 0)`, on the inner circle
+    /// the wall does not have, came back on its boundary.
+    #[test]
+    fn a_wall_round_one_circle_round_the_axis_twice_the_same_way_is_refused() {
+        let flat =
+            Plane::from_point_and_normal(rcad_geom::Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal");
+        for walked in [Orientation::Forward, Orientation::Reversed] {
+            let (model, solid, wall) = a_piece_of_pipe_walking_each_circle(
+                rcad_geom::Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring"),
+                End {
+                    corner: rcad_geom::Point::new(5.0, 0.0, 0.0),
+                    cap: flat,
+                    used: Orientation::Forward,
+                },
+                End {
+                    corner: rcad_geom::Point::new(-5.0, 0.0, 0.0),
+                    cap: flat,
+                    used: Orientation::Forward,
+                },
+                None,
+                [walked, walked],
+            );
+            let ring = model.solid(solid).expect("this model made the key");
+            for point in [
+                at(4.0, 0.0, 1.0),
+                at(4.0, 0.0, -1.0),
+                at(0.0, 5.0, 0.0),
+                at(0.0, -3.0, 0.0),
+            ] {
+                let answer = ring.face_holds_the_point(
+                    wall,
+                    point,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                assert!(
+                    matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == wall),
+                    "walked {walked:?}, {point:?}: {answer:?}"
+                );
             }
         }
     }
