@@ -49,7 +49,8 @@
 //! out is the piece between it and the arc, which is two signs to be in. So a
 //! flat face whose sides are straight or arcs of a closed crossing, and which
 //! nothing below follows, winds its own sides
-//! ([`what_a_flat_face_of_chords_and_arcs_holds`], row Q1002).
+//! ([`what_a_flat_face_of_chords_and_arcs_holds`], row Q1002), and counts a
+//! round hole among them as a whole (row Q1165).
 //!
 //! **One family of arcs is followed now** (§167): a wedge of a ball, whose skin
 //! and whose two half-discs are each bounded by half of a circle. Those faces are
@@ -239,16 +240,12 @@ fn what_a_flat_face_holds(
 
     let mut winding = 0i64;
     for ((position, wire), is_round) in face.wires().enumerate().zip(round) {
-        let inwards = if position == 0 { 1 } else { -1 };
         if is_round {
-            match what_a_round_wire_encloses(solid, face, wire, point, policy, log)? {
-                Decision::Neg => winding += inwards,
-                Decision::Pos => (),
-                Decision::Zero => return Ok(OnAFace::OnItsBoundary),
-                // A side nobody could settle came back as a refusal a moment
-                // ago, so what is left is a `Decision` variant a later milestone
-                // added, and guessing what it means is worse than stopping.
-                other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+            match how_often_a_round_wire_winds_round(
+                solid, face, position, wire, point, policy, log,
+            )? {
+                Some(count) => winding += count,
+                None => return Ok(OnAFace::OnItsBoundary),
             }
             continue;
         }
@@ -267,6 +264,37 @@ fn what_a_flat_face_holds(
     } else {
         OnAFace::Held
     })
+}
+
+/// One round wire's contribution to a flat face's crossing count, or `None`
+/// when `point` sits on it: `1` inside the outline, `-1` inside a hole, `0`
+/// outside either. The first wire of a flat face is its outline and the rest
+/// are holes, which is what `Model::validate` holds every flat face to.
+///
+/// # Errors
+///
+/// What [`what_a_round_wire_encloses`] gives.
+fn how_often_a_round_wire_winds_round(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    position: usize,
+    wire: WireView<'_>,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<i64>> {
+    let inwards = if position == 0 { 1 } else { -1 };
+    Ok(
+        match what_a_round_wire_encloses(solid, face, wire, point, policy, log)? {
+            Decision::Neg => Some(inwards),
+            Decision::Pos => Some(0),
+            Decision::Zero => None,
+            // A side nobody could settle came back as a refusal a moment ago,
+            // so what is left is a `Decision` variant a later milestone added,
+            // and guessing what it means is worse than stopping.
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        },
+    )
 }
 
 /// Which side of the surface a round wire is cut from `point` is on:
@@ -1611,6 +1639,15 @@ fn is_one_circle_cut_in_two(
 /// flat face takes it wherever the steps above say nothing
 /// (`docs/decisions.md` §35, row Q1002).
 ///
+/// **A flat face with a round wire takes it straight away** (row Q1165). Such
+/// a wire, a round hole beside a tab's arc, is one whole closed curve with no
+/// two ends, so it is no side the steps above can read
+/// ([`every_reading_of_the_sides_of`] leaves it out), and the steps read
+/// without it would take the hole for material. The winding counts it as a
+/// whole, as [`what_a_flat_face_holds`] counts the round hole of a top with
+/// straight sides. Before, every reading refused such a face, so no face the
+/// steps answered is answered differently now.
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a curved face outside
@@ -1626,18 +1663,23 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
 ) -> Result<OnAFace> {
     let surface = face.stored_surface();
     let readings = every_reading_of_the_sides_of(solid, face)?;
-    let mut refused = None;
-    for sides in &readings {
-        match what_the_part_in_front_of_its_cuts_holds(face, &surface, sides, point) {
-            Ok(Some(held)) => return Ok(held),
-            Ok(None) => {}
-            Err(why) => {
-                refused.get_or_insert(why);
+    let with_a_round_wire = face
+        .wires()
+        .any(|wire| is_a_round_wire_of_a_flat_face(face, wire));
+    if !with_a_round_wire {
+        let mut refused = None;
+        for sides in &readings {
+            match what_the_part_in_front_of_its_cuts_holds(face, &surface, sides, point) {
+                Ok(Some(held)) => return Ok(held),
+                Ok(None) => {}
+                Err(why) => {
+                    refused.get_or_insert(why);
+                }
             }
         }
-    }
-    if let Some(why) = refused {
-        return Err(why);
+        if let Some(why) = refused {
+            return Err(why);
+        }
     }
     match surface {
         Surface::Plane(flat) => {
@@ -1646,7 +1688,7 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
                     "a flat face's sides are read one way, since only a ruling of a pipe is read more ways than one"
                 );
             };
-            what_a_flat_face_of_chords_and_arcs_holds(face, &flat, sides, point, policy, log)
+            what_a_flat_face_of_chords_and_arcs_holds(solid, face, &flat, sides, point, policy, log)
         }
         Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) | _ => {
             Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
@@ -1951,6 +1993,12 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 /// polygon that goes round anticlockwise adds its piece, and one bulging into
 /// it takes its piece away, and a hole's arcs do the same turned round.
 ///
+/// **A round wire is counted as a whole**, through
+/// [`how_often_a_round_wire_winds_round`]: once where its surface holds the
+/// point, inwards for the outline and outwards for a hole, as
+/// [`what_a_flat_face_holds`] counts one. `sides` leaves such wires out. The
+/// count round the face is the sum of each wire's, so the two add.
+///
 /// **This reads the face's boundary, and never asks whether the part in front of
 /// every cut is one piece.** That is why it answers the cap of a slab with a
 /// round scoop out of its top, which keeps the outside of the pipe and is one of
@@ -1978,6 +2026,7 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 /// the plane can be found ([`a_point_off_the_plane`]), and [`Error::Undecidable`]
 /// when a sign could not be settled.
 fn what_a_flat_face_of_chords_and_arcs_holds(
+    solid: SolidView<'_>,
     face: FaceView<'_>,
     flat: &Plane,
     sides: &[Side],
@@ -1993,6 +2042,15 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
         .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
 
     let mut winding = 0i64;
+    for (position, wire) in face.wires().enumerate() {
+        if !is_a_round_wire_of_a_flat_face(face, wire) {
+            continue;
+        }
+        match how_often_a_round_wire_winds_round(solid, face, position, wire, point, policy, log)? {
+            Some(count) => winding += count,
+            None => return Ok(OnAFace::OnItsBoundary),
+        }
+    }
     let mut on_a_chord: Option<(usize, Decision)> = None;
     let mut along = Vec::with_capacity(sides.len());
     for (index, side) in sides.iter().enumerate() {
@@ -2257,13 +2315,21 @@ enum Lies {
 /// `x = 2` all twelve, so it takes the second reading to answer the same
 /// whichever comes first. Where no such plane holds the ruling either, the side
 /// is left as it was, which step 1 refuses.
+///
+/// **A flat face's round wires are left out too** ([`is_a_round_wire_of_a_flat_face`]):
+/// a whole closed curve has no two ends to read a chord between, and
+/// [`what_a_flat_face_of_chords_and_arcs_holds`] counts it as a whole instead.
 fn every_reading_of_the_sides_of(
     solid: SolidView<'_>,
     face: FaceView<'_>,
 ) -> Result<Vec<Vec<Side>>> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let mut readings: Vec<Vec<Side>> = vec![Vec::new()];
-    for coedge in face.wires().flat_map(WireView::coedges) {
+    let coedges = face
+        .wires()
+        .filter(|&wire| !is_a_round_wire_of_a_flat_face(face, wire))
+        .flat_map(WireView::coedges);
+    for coedge in coedges {
         let edge = coedge.edge();
         let Some(across) = the_face_across(solid, face, edge)? else {
             continue;
@@ -2331,6 +2397,15 @@ fn every_reading_of_the_sides_of(
             .collect();
     }
     Ok(readings)
+}
+
+/// Whether `wire` is one whole closed curve on one edge of a flat face: a round
+/// hole through a plate, or a bar's round cap. Such a wire has no corner to
+/// walk between, so [`what_a_flat_face_holds`] counts it through
+/// [`how_often_a_round_wire_winds_round`], and so does
+/// [`what_a_flat_face_of_chords_and_arcs_holds`] beside its other wires' arcs.
+fn is_a_round_wire_of_a_flat_face(face: FaceView<'_>, wire: WireView<'_>) -> bool {
+    face.stored_surface().as_plane().is_some() && wire.closes_on_one_edge()
 }
 
 /// What `edge`, a side of `face` between `ends` with `across` across it, runs

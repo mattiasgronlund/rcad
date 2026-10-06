@@ -56,8 +56,8 @@ use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
     Surface, Vector,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_topo::{DraftStep, Error, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 mod cones;
 
@@ -409,10 +409,22 @@ fn a_pin_standing_in_a_plates_square_hole_is_answered_under_every_rule() {
 ///
 /// The hole's circle is one side that closes on its own corner, with no chord,
 /// so the floor's rim is not counted round the pin's circle and the lump is
-/// placed by the walks round it instead. Every fuse is refused later, in
-/// selection, naming the plate's top.
+/// placed by the walks round it instead. Every fuse was refused later, in
+/// selection, naming the plate's top (queue row Q1165): a ray from a point of
+/// the pin's wall met the top's plane at `(14.19, 7.04, 2)`, and `holds.rs`
+/// read the top's sides to wind them, the tab's arc among them, and refused the
+/// hole's circle, a side with no two ends to read a chord between. It counts
+/// that circle as a whole now, the way it counts the hole of a top with
+/// straight sides.
+///
+/// The plate is `200` and the tab's half disc past `x = 10` is `9π`, less the
+/// hole's `2π`: `200 + 7π`. The pin is `π`, and it lies inside the tab's
+/// circle (`1.5 + 0.5 < 3`), so they share its stretch from `z = 0` to `2`,
+/// `π/2`. So `200 + 7.5π` united, `π/2` in common, `200 + 6.5π` the plate less
+/// the pin, and the pin less the plate is its two ends, `π/4` each.
 #[test]
-fn a_pin_through_the_round_tab_of_a_plate_with_a_round_hole_is_refused_in_selection() {
+fn a_pin_through_the_round_tab_of_a_plate_with_a_round_hole_is_answered_under_every_rule() {
+    use std::f64::consts::PI;
     for (rule, plate_first) in every_rule_both_ways() {
         let mut model = a_model();
         let plate = block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 2.0]);
@@ -427,18 +439,65 @@ fn a_pin_through_the_round_tab_of_a_plate_with_a_round_hole_is_refused_in_select
         let pin = model
             .add_round_bar(0.5, 4.0, &shift(11.5, 5.0, -1.0))
             .expect("a bar");
-        let refused = fuse(&mut model, holed, pin, rule, plate_first);
-        let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
-            panic!("{rule:?}, the plate first {plate_first}: {refused:?}");
+        assert_holds(&model, holed, 200.0 + 7.0 * PI, "the plate");
+        let what = format!("{rule:?}, the plate first {plate_first}");
+        let answer = fuse(&mut model, holed, pin, rule, plate_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let volumes: &[f64] = match (rule, plate_first) {
+            (Rule::Union, _) => &[200.0 + 7.5 * PI],
+            (Rule::Intersection, _) => &[PI / 2.0],
+            (Rule::Difference, true) => &[200.0 + 6.5 * PI],
+            (Rule::Difference, false) => &[PI / 4.0, PI / 4.0],
+            (other, _) => panic!("not a rule this probes: {other:?}"),
         };
-        let surface = model
-            .face(face)
-            .expect("the refusal names a face of the model")
-            .surface();
-        assert!(
-            matches!(surface, Surface::Plane(top) if top.origin().coordinates()[2] == 2.0),
-            "{rule:?}, the plate first {plate_first}: refused on {surface:?}"
-        );
+        assert_each_holds(&model, &answer, volumes, &what);
+    }
+}
+
+/// The top of the plate of
+/// `a_pin_through_the_round_tab_of_a_plate_with_a_round_hole_is_answered_under_every_rule`
+/// holds what its outline, tab and hole say, the hole's circle counted as a
+/// whole beside the tab's arc (queue row Q1165). Each point is on the top's
+/// plane `z = 2`. The hole's centre is inside the outline and inside the hole,
+/// so it is held only if the hole is taken away; `(12, 5)` is in the tab and
+/// past the square; `(14.19, 7.04)` is where the fuse's ray met the plane, past
+/// the tab; `(4, 5)` is on the hole's circle.
+#[test]
+fn the_top_of_a_plate_with_a_round_tab_and_a_round_hole_holds_neither_the_hole_nor_past_the_tab() {
+    let mut model = a_model();
+    let plate = block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 2.0]);
+    let tab = model
+        .add_round_bar(3.0, 2.0, &shift(10.0, 5.0, 0.0))
+        .expect("a bar");
+    let tabbed = fuse_one(&mut model, plate, tab, Rule::Union);
+    let hole = model
+        .add_round_bar(1.0, 4.0, &shift(3.0, 5.0, -1.0))
+        .expect("a bar");
+    let holed = fuse_one(&mut model, tabbed, hole, Rule::Difference);
+    let solid = model.solid(holed).expect("this model made the key");
+    let top = solid
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface::Plane(flat) if flat.origin().coordinates()[2] == 2.0)
+        })
+        .expect("the plate has a top")
+        .key();
+    for (x, y, held) in [
+        (3.0, 5.0, OnAFace::NotHeld),
+        (6.0, 5.0, OnAFace::Held),
+        (12.0, 5.0, OnAFace::Held),
+        (14.19, 7.04, OnAFace::NotHeld),
+        (4.0, 5.0, OnAFace::OnItsBoundary),
+    ] {
+        let answer = solid
+            .face_holds_the_point(
+                top,
+                PredicatePoint::from([x, y, 2.0]),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("({x}, {y}): {why:?}"));
+        assert_eq!(answer, held, "({x}, {y})");
     }
 }
 
