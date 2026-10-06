@@ -6,8 +6,9 @@
 //! pipe's radius is above zero, so `slope·|h| = r` has exactly two roots
 //! whatever the two surfaces are. So this file has no table of shapes to walk.
 //! What it has instead is the boundary: the pairs that share an axis are named,
-//! the pairs that lean or stand off it are refused, and nothing else in the
-//! cone's row moved.
+//! the pairs that lean or stand off it are refused, and a ball or a second cone
+//! keeps the same boundary (`a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs`
+//! is theirs).
 //!
 //! # Why the pairs are written on coordinate axes
 //!
@@ -264,15 +265,19 @@ fn a_pipe_laid_along_one_of_a_cones_rulings_is_refused_rather_than_named() {
     }
 }
 
-/// Nothing else in the cone's row moved: a ball and a second cone are refused
-/// whether or not they share the axis.
+/// A ball and a second cone are named where they share the axis, as the pipe
+/// is, and refused where they do not.
 ///
-/// **The second cone is the one that matters.** `rcad-topo`'s `assemble.rs`
-/// answers *this crossing holds no straight line* for the whole cone-and-cone
-/// row on the strength of this refusal, and two cones that share an apex meet
-/// along rulings, which are lines (`docs/decisions.md` §50.2 item 4).
+/// On the axis they cross in circles square to it, or not at all: the ball of
+/// radius two four up sits inside the upper nappe, `4/√2` from its side, and
+/// misses it; the cone of slope two with its apex nine up meets the one of
+/// slope one where `|z| = 2|z − 9|`, at `z = 6` and `z = 18`. **No row of that
+/// holds a straight line**, which is what `rcad-topo`'s `assemble.rs` answers
+/// the whole cone-and-cone row with. Two cones meet along rulings only where
+/// they share an apex and their axes lean apart (`docs/decisions.md` §50.2 item
+/// 4), and the second cone off the axis here is that shape's refusal.
 #[test]
-fn a_cone_against_a_ball_or_another_cone_is_refused_axis_or_no_axis() {
+fn a_cone_against_a_ball_or_another_cone_is_named_on_the_axis_and_refused_off_it() {
     let cone = a_cone_about_z(1.0);
     let on_the_axis = [
         Surface::Sphere(Sphere::new(Point::new(0.0, 0.0, 4.0), 2.0).expect("a radius")),
@@ -297,11 +302,40 @@ fn a_cone_against_a_ball_or_another_cone_is_refused_axis_or_no_axis() {
         ),
     ];
 
-    for partner in on_the_axis.into_iter().chain(off_it) {
-        for pair in [
+    let pairs = |partner: Surface| {
+        [
             [Surface::Cone(cone), partner],
             [partner, Surface::Cone(cone)],
-        ] {
+        ]
+    };
+    let [ball, second_cone] = on_the_axis;
+    for pair in pairs(ball) {
+        assert_eq!(
+            intersect(
+                &pair[0],
+                &pair[1],
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            ),
+            Ok(SurfaceMeet::Nothing),
+            "{pair:?}"
+        );
+    }
+    for pair in pairs(second_cone) {
+        let named = intersect(
+            &pair[0],
+            &pair[1],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("two cones on one axis are named");
+        let SurfaceMeet::Curves(runs) = &named else {
+            panic!("two circles, and not {named:?}");
+        };
+        assert_eq!(runs.len(), 2, "{pair:?}");
+    }
+    for partner in off_it {
+        for pair in pairs(partner) {
             assert_eq!(
                 intersect(
                     &pair[0],

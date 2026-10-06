@@ -38,8 +38,10 @@ use smallvec::SmallVec;
 
 use crate::exact::Exact;
 use crate::intersect::{
-    Question, WHERE_TWO_PIPES_CROSS, ask, one_cone_either_way_round,
-    whether_a_cone_and_a_pipe_share_an_axis,
+    Question, WHERE_TWO_PIPES_CROSS, ask, how_a_ball_on_a_cones_axis_meets_it,
+    one_cone_either_way_round, whether_a_ball_runs_through_a_cones_apex,
+    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
+    whether_two_cones_share_an_axis,
 };
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
@@ -327,7 +329,8 @@ impl PointsAlongACrossing {
 /// surfaces cross in a conic and they do not: a plane that misses the ball it is
 /// named against, or touches it at one point, leaves a circle of no radius, and
 /// there is no angle to walk round one. Two balls round one centre with two
-/// radii get it too, for the same reason and one surface up. A **limit** and not
+/// radii get it too, for the same reason and one surface up, and so does a ball
+/// on a cone's axis that misses the cone. A **limit** and not
 /// a gap (§16.10) — the curve the run names does not exist at any precision.
 ///
 /// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
@@ -337,10 +340,10 @@ impl PointsAlongACrossing {
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a run between a
 /// cone or a torus and another curved surface — the same two refusals
-/// [`intersect`](crate::intersect) gives those pairs, and a cone against a pipe
-/// that shares its axis is drawn here exactly as it is named there. Nothing in
-/// this crate builds a refused run, and a file read in states one whenever it
-/// holds a pipe running into a bend.
+/// [`intersect`](crate::intersect) gives those pairs, and a cone against a pipe,
+/// a ball or a second cone that shares its axis is drawn here exactly as it is
+/// named there. Nothing in this crate builds a refused run, and a file read in
+/// states one whenever it holds a pipe running into a bend.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run a caller
 /// states as going right round a crossing that runs on for ever — a plane and a
@@ -631,10 +634,17 @@ enum WhatARunLiesOn {
 /// same order — a cone against a torus is the torus's refusal in both halves,
 /// so the namer and the evaluator never disagree about what a pair is called.
 /// **The evaluator refuses exactly what the namer refuses**, which is why the
-/// cone-and-pipe arm asks whether the two share an axis rather than taking the
-/// caller's word for it. Both refusals are gaps: the crossing is there and none
-/// of the machinery for a degree-four or degree-eight curve with a cone or a
-/// torus in it exists.
+/// cone's arms against a pipe, a ball and a second cone ask whether the two
+/// share an axis rather than taking the caller's word for it. Both refusals are
+/// gaps: the crossing is there and none of the machinery for a degree-four or
+/// degree-eight curve with a cone or a torus in it exists. A ball through a
+/// cone's apex is refused under the cone's name in both halves too, for the
+/// reason `intersect`'s cone-and-ball arm gives.
+///
+/// **One pair is refused here under that name and answered there**: two cones
+/// on one axis with one apex and two slopes, which `intersect` answers as
+/// touching at the apex. A closed run stated on them names nothing, and the
+/// refusal keeps an older name — `where_two_coaxial_cones_cut` says why.
 ///
 /// **One cone twice is not one of those pairs**, and that is the one place the
 /// evaluator says more than the namer's table does: the namer answers it as one
@@ -660,7 +670,8 @@ enum WhatARunLiesOn {
 /// altogether, or touches it at one point, is the shape a stranger's model
 /// reached this by. See [`Conic::has_an_angle_round_it`]. Two balls round one
 /// centre with two radii are the same thing one surface up, refused by
-/// [`where_two_balls_cut`] before a conic is built at all.
+/// [`where_two_balls_cut`] before a conic is built at all, and so is a ball on
+/// a cone's axis that misses the cone.
 ///
 /// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
 /// one centre with one radius.
@@ -799,9 +810,16 @@ fn what_a_run_between_these_two_lies_on(
             };
             the_circle_a_closed_run_round_one_cone_lies_on(&first, run).map(WhatARunLiesOn::Conic)
         }
-        [Surface::Cone(_), Surface::Sphere(_) | Surface::Cone(_)]
-        | [Surface::Sphere(_), Surface::Cone(_)] => {
-            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+        // Two cones on one axis cross in one circle or two, and a ball on a
+        // cone's axis in none, one or two; which one this run is, is its ends'
+        // and its picker's to say, as for the coaxial pipe.
+        [Surface::Cone(one), Surface::Cone(other)] => {
+            where_two_coaxial_cones_cut(&one, &other, run, policy, log).map(WhatARunLiesOn::Conic)
+        }
+        [Surface::Cone(cone), Surface::Sphere(ball)]
+        | [Surface::Sphere(ball), Surface::Cone(cone)] => {
+            where_a_ball_on_a_cones_axis_cuts_it(&cone, &ball, run, policy, log)
+                .map(WhatARunLiesOn::Conic)
         }
         [
             Surface::Torus(_),
@@ -3241,6 +3259,175 @@ fn where_a_coaxial_cone_and_pipe_cut(
         policy,
         log,
     )
+}
+
+/// The circle two cones on one axis cross in that the run names: the one
+/// halfway between their apexes where they have one slope, and one of the two
+/// `intersect` names where they have two.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two are not
+/// **proved** to share an axis, asked here for the reason
+/// [`where_a_coaxial_cone_and_pipe_cut`] gives.
+///
+/// **The same name where they share an apex, and there it is the wrong name.**
+/// Two cones on one axis with one apex and two slopes meet at the apex and
+/// nowhere else — `intersect` answers them
+/// [`SurfaceMeet::TouchAtOnePoint`](crate::SurfaceMeet::TouchAtOnePoint) — so a
+/// closed run stated on them names a curve that is not there, and
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] is what a plane touching a
+/// ball gets for the same thing. `a_circle_walked_between_two_spellings_of_one_cone.rs`
+/// pins the old name on one such pair and is outside the change that named
+/// these cones, so the two move together or not at all. One cone twice under
+/// any run but a whole circle is refused here too, as it always was.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] as
+/// [`which_of_these_circles_this_run_is`] gives them.
+fn where_two_coaxial_cones_cut(
+    one: &Cone,
+    other: &Cone,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    if whether_two_cones_share_an_axis(one, other) != Decision::Zero || one.apex() == other.apex() {
+        return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+    }
+    which_of_these_circles_this_run_is(
+        the_circles_two_coaxial_cones_cut(one, other),
+        run,
+        policy,
+        log,
+    )
+}
+
+/// The circles two cones on one axis with two apexes cross in, where
+/// `intersect` names them: from the steeper cone's apex, `d` up its axis to the
+/// other apex, at `d·s_shallow/(s_steep + s_shallow)` and
+/// `−d·s_shallow/(s_steep − s_shallow)`, or the one at `d/2` where the slopes
+/// are one.
+///
+/// **Drawn round the steeper cone, or the one that sorts first where neither
+/// is**, so the pair handed over either way round starts each circle at one
+/// point and walks it one way.
+fn the_circles_two_coaxial_cones_cut(one: &Cone, other: &Cone) -> Vec<Conic> {
+    let (steep, shallow) = match one.slope().total_cmp(&other.slope()) {
+        Ordering::Greater => (one, other),
+        Ordering::Less => (other, one),
+        Ordering::Equal => match Surface::Cone(*one).how_it_sorts_against(&Surface::Cone(*other)) {
+            Ordering::Greater => (other, one),
+            Ordering::Less | Ordering::Equal => (one, other),
+        },
+    };
+    let along = steep.axis().direction();
+    let apart = (shallow.apex() - steep.apex()).dot(along * along.length().recip());
+    let reaches = if steep.slope() == shallow.slope() {
+        vec![apart / 2.0]
+    } else {
+        let tilted = apart * shallow.slope();
+        vec![
+            tilted / (steep.slope() + shallow.slope()),
+            -tilted / (steep.slope() - shallow.slope()),
+        ]
+    };
+    reaches
+        .into_iter()
+        .map(|reach| a_circle_round_a_cones_axis(steep, reach, shallow.apex(), apart))
+        .collect()
+}
+
+/// The circle of the crossing of a cone and a ball on its axis that the run
+/// names.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the ball's
+/// centre is not **proved** on the axis, and where its skin runs through the
+/// apex — the two refusals `intersect` gives the pair, under the same name.
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the ball misses the cone,
+/// so the run names a circle that is not there — a **limit**, as for a plane
+/// that misses a ball.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] where a sign the circles turn on
+/// could not be settled, which takes a product leaving `f64`'s range, and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] as
+/// [`which_of_these_circles_this_run_is`] gives it.
+fn where_a_ball_on_a_cones_axis_cuts_it(
+    cone: &Cone,
+    ball: &Sphere,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    if whether_a_ball_sits_on_a_cones_axis(cone, ball) != Decision::Zero {
+        return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+    }
+    let two = match how_a_ball_on_a_cones_axis_meets_it(cone, ball) {
+        Decision::Neg => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        Decision::Zero => false,
+        Decision::Pos => match whether_a_ball_runs_through_a_cones_apex(cone, ball) {
+            Decision::Neg | Decision::Pos => true,
+            Decision::Zero => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+            Decision::Undecidable { .. } | _ => {
+                return Err(Error::CannotWorkOutHowBigACrossingIs);
+            }
+        },
+        Decision::Undecidable { .. } | _ => return Err(Error::CannotWorkOutHowBigACrossingIs),
+    };
+    which_of_these_circles_this_run_is(
+        the_circles_a_ball_on_a_cones_axis_cuts(cone, ball, two),
+        run,
+        policy,
+        log,
+    )
+}
+
+/// The one circle or the two a ball on a cone's axis cuts it in: `h` along the
+/// axis from the apex with `(1 + s²)h² − 2eh + e² − R² = 0`, `e` how far up the
+/// axis the centre sits.
+///
+/// The discriminant over four is written `R² + s²(R − |e|)(R + |e|)` rather than
+/// `(1 + s²)R² − s²e²`, which is the same number without the two large squares
+/// cancelling. It is only read where `intersect`'s exact sign said it is above
+/// zero, so a value that rounded below is taken as nothing.
+fn the_circles_a_ball_on_a_cones_axis_cuts(cone: &Cone, ball: &Sphere, two: bool) -> Vec<Conic> {
+    let along = cone.axis().direction();
+    let centre_at = (ball.centre() - cone.apex()).dot(along * along.length().recip());
+    let radius = ball.radius();
+    let squared_slope = cone.slope() * cone.slope();
+    let widening = 1.0 + squared_slope;
+    let middle = centre_at / widening;
+    let reaches = if two {
+        let room = radius * radius
+            + squared_slope * (radius - centre_at.abs()) * (radius + centre_at.abs());
+        let half = room.max(0.0).sqrt() / widening;
+        vec![middle + half, middle - half]
+    } else {
+        vec![middle]
+    };
+    reaches
+        .into_iter()
+        .map(|reach| a_circle_round_a_cones_axis(cone, reach, ball.centre(), radius))
+        .collect()
+}
+
+/// The circle on `cone` square to its axis, `reach` up it from the apex, sized
+/// against `beside` and `length` too, which are what `reach` was worked out
+/// from.
+fn a_circle_round_a_cones_axis(cone: &Cone, reach: f64, beside: Point, length: f64) -> Conic {
+    let along = cone.axis().direction();
+    let middle = cone.apex() + along * (reach / along.length());
+    let radius = cone.radius_at(reach);
+    let (across, and) = cone.basis();
+    Conic {
+        centre: middle,
+        across: across * radius,
+        and: and * radius,
+        size: how_big_this_is(&[middle, cone.apex(), beside], &[radius, reach, length]),
+    }
 }
 
 /// The two circles a cone and a pipe on one axis cross in, the one the axis
