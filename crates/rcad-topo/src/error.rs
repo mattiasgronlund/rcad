@@ -698,6 +698,29 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
+    /// A fuse had to say whether a hollow of its answer is inside another
+    /// shell, and no point of the hollow it asked could fire a ray at the
+    /// other shell: the ray would have had to meet this face, which sits on a
+    /// ring.
+    ///
+    /// Where a ray meets a ring is worked out only for a ray whose numbers are
+    /// exact, and when they are not, an exact point beside the asked one is
+    /// fired from instead — but only where no face of the shell comes near it,
+    /// and a corner of a hollow that is on the shell's skin has a face right
+    /// there ([`Containment::CannotFireARayAtAFacesSurface`](crate::Containment)).
+    ///
+    /// Deliberately not [`Error::Undecidable`], which says every predicate
+    /// was asked and none could prove an answer: here the question was never
+    /// put, so no policy makes it go away (`docs/decisions.md` §4.2, §35.6).
+    /// What a caller can change is the shape: a corner of the hollow clear of
+    /// the other shell's skin is placed by a point beside it (§323). `face` is
+    /// the caller's face the ring face was cut from.
+    #[error("no ray could be fired at this face's surface to place a hollow")]
+    CannotFireARayAtAFacesSurface {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
     /// A face runs along some but not all of the curves its surface and a
     /// neighbour's cross in.
     ///

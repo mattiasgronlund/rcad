@@ -2539,13 +2539,27 @@ impl Assembly {
     /// crate's tests reaches it as of this writing (`docs/decisions.md`
     /// §35.6).
     ///
+    /// **So is a corner whose ray could not be fired at a face on a ring**,
+    /// [`Containment::CannotFireARayAtAFacesSurface`], which is refused
+    /// [`Error::CannotFireARayAtAFacesSurface`] for the same reason: that
+    /// question was never put either. It used to stay with the undecided
+    /// corners, for want of a variant that said so. No fuse is known to reach
+    /// it: a fuse with a ring in it crosses every surface of the other solid
+    /// with the ring, wherever the two faces are, and row Q883's probes were
+    /// refused there — a ball inside a bend or under the top half of a ring
+    /// `ACrossingBetweenATorusAndAnotherCurvedSurface`, and a block grooved by
+    /// a half ring `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` for a wall
+    /// five clear of the ring.
+    ///
     /// **A face nobody can follow wins over a corner left undecided**, when
-    /// both happen. Either refusal is true, and only one can be returned;
-    /// naming the face folds an undecided corner into "never asked", which
-    /// costs a caller a policy that might have helped, where the other way
-    /// round folds "never asked" into "undecided", which is the mistake §35.6
-    /// keeps the two apart to stop. The face named is the caller's: `apart` is
-    /// thrown away when the fuse returns, so a key into it names nothing.
+    /// both happen, and so does a face no ray could be fired at; the first of
+    /// those two wins over the second. Either refusal is true, and only one can
+    /// be returned; naming the face folds an undecided corner into "never
+    /// asked", which costs a caller a policy that might have helped, where the
+    /// other way round folds "never asked" into "undecided", which is the
+    /// mistake §35.6 keeps the two apart to stop. The face named is the
+    /// caller's: `apart` is thrown away when the fuse returns, so a key into it
+    /// names nothing.
     ///
     /// **The record names the corners that were asked.** When every corner came
     /// back on the skin of `outer` or undecided, the one record says "one shell
@@ -2556,17 +2570,14 @@ impl Assembly {
     /// a gap, since the ball is a hollow of the block and a point of it off its
     /// poles would say so.
     ///
-    /// **What is left is not yet right, and nothing is known to reach it.** A
-    /// corner whose ray could not be fired at a ring's surface stays with the
-    /// undecided ones, because this crate's [`Error`] has nothing yet that says
-    /// so.
-    ///
     /// # Errors
     ///
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] naming the input face
     /// a face of `outer` was cut from, when a corner of `hollow` met that face
-    /// and none was placed. [`Error::Undecidable`] when no corner of `hollow`
-    /// could be placed for any other reason.
+    /// and none was placed. [`Error::CannotFireARayAtAFacesSurface`] the same
+    /// way, when a corner's ray could not be fired at a face of `outer` on a
+    /// ring and none was placed. [`Error::Undecidable`] when every corner of
+    /// `hollow` asked came back on the skin of `outer` or undecided.
     fn one_shell_is_inside_another(
         &self,
         apart: &Model,
@@ -2578,6 +2589,7 @@ impl Assembly {
     ) -> Result<bool> {
         let solid = apart.solid_at(written.solids[outer]);
         let mut unfollowed = None;
+        let mut unfired = None;
         let mut not_placed = Vec::new();
         for &face in &self.shells[hollow] {
             for side in self.faces[face].wires.iter().flatten() {
@@ -2596,7 +2608,9 @@ impl Assembly {
                     Containment::CannotFollowAFacesTrimming { face } => {
                         unfollowed.get_or_insert(face);
                     }
-                    Containment::CannotFireARayAtAFacesSurface { .. } => (),
+                    Containment::CannotFireARayAtAFacesSurface { face } => {
+                        unfired.get_or_insert(face);
+                    }
                     Containment::OnBoundary | Containment::Undecidable { .. } => {
                         if !not_placed.contains(&corner) {
                             not_placed.push(corner);
@@ -2607,6 +2621,11 @@ impl Assembly {
         }
         if let Some(face) = unfollowed {
             return Err(Error::AFaceTrimmedByACurveThisCannotFollow {
+                face: self.the_input_face_it_was_cut_from(apart, written, face),
+            });
+        }
+        if let Some(face) = unfired {
+            return Err(Error::CannotFireARayAtAFacesSurface {
                 face: self.the_input_face_it_was_cut_from(apart, written, face),
             });
         }
