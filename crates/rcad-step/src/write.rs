@@ -702,7 +702,6 @@ impl Writing {
             }
             (Surface::Sphere(ball), Surface::Sphere(other)) if !closed && ball == other => self
                 .a_seam_of_one_ball(ball, run, start, end)
-                .map(Curve::along)
                 .or_else(|| self.an_arc_its_own_plane_names(first, second, run, start, end))
                 .ok_or_else(refuse),
             (Surface::Torus(ring), Surface::Torus(other)) if !closed && ring == other => self
@@ -761,8 +760,9 @@ impl Writing {
         }
     }
 
-    /// The half of a great circle a ball's seam runs along from `start` to
-    /// `end`, or `None` where this is not one.
+    /// The great circle a ball's seam runs half of from `start` to `end`, and
+    /// whether the seam runs round it the way it turns, or `None` where this is
+    /// not one.
     ///
     /// **Only between the two poles**, where the ball has no way round
     /// ([`Surface::the_way_its_first_coordinate_runs_at`]), which is exactly on
@@ -772,12 +772,17 @@ impl Writing {
     /// the one ball on both sides and its ends anywhere else could be an arc of
     /// a smaller circle, and is refused rather than written as a great one.
     ///
-    /// **Which half is the way the circle turns.** A `CIRCLE` runs the way a
-    /// right hand turns about its axis `w`, and the reader names the arc from
-    /// `A` to `B` by the half-space facing `(B − A) × w`, which every point of
-    /// that arc is strictly in front of (`Walk::the_arc_between`). So `w` is the
-    /// plane's normal turned whichever way puts `(B − A) × w` on the side the
-    /// run's own half-space faces. The sign is read in plain `f64`: the two
+    /// **Which half is the way the edge runs along the circle.** A `CIRCLE`
+    /// runs the way a right hand turns about its axis `w`, and the reader names
+    /// the arc from `A` to `B` by the half-space facing `(B − A) × w`, which
+    /// every point of that arc is strictly in front of, or facing the other way
+    /// where `EDGE_CURVE.same_sense` is false (`Walk::the_arc_between`). It
+    /// names the run by the plane about `w`, so `w` is the plane's own normal
+    /// and the edge runs along the circle where `(B − A) × w` faces the side
+    /// the run's own half-space faces, and against it where it faces away.
+    /// Turned over to about the reversed normal instead, the circle picked the
+    /// same half and came back with the seam's plane reversed, which measured a
+    /// different volume (Q776). The sign is read in plain `f64`: the two
     /// directions are along each other or opposite, never square, so a dot
     /// that comes out zero is a run this does not recognise and is refused.
     ///
@@ -793,7 +798,7 @@ impl Writing {
         run: &EdgeRun,
         start: Point,
         end: Point,
-    ) -> Option<u64> {
+    ) -> Option<Curve> {
         let skin = Surface::Sphere(*ball);
         let at_a_pole = |corner: Point| skin.the_way_its_first_coordinate_runs_at(corner).is_none();
         if start == end || !at_a_pole(start) || !at_a_pole(end) {
@@ -810,15 +815,18 @@ impl Writing {
             return None;
         };
         let leaning = (end - start).cross(cut.normal()).dot(picking.normal());
-        let axis = if leaning > 0.0 {
-            cut.normal()
+        let the_edge_runs_its_way = if leaning > 0.0 {
+            true
         } else if leaning < 0.0 {
-            -cut.normal()
+            false
         } else {
             return None;
         };
         let centre = a_centre_its_plane_reads_back_from(cut, ball.centre())?;
-        Some(self.circle(centre, axis, ball.radius()))
+        Some(Curve {
+            id: self.circle(centre, cut.normal(), ball.radius()),
+            the_edge_runs_its_way,
+        })
     }
 
     /// The `EDGE_LOOP` of a whole ball on the chart the reader reads every
@@ -854,7 +862,11 @@ impl Writing {
             let at = self.cartesian_point(corner);
             self.entity(&format!("VERTEX_POINT('',#{at})"))
         });
-        let seam = self.entity(&format!("EDGE_CURVE('',#{from},#{to},#{curve},.T.)"));
+        let seam = self.entity(&format!(
+            "EDGE_CURVE('',#{from},#{to},#{},{})",
+            curve.id,
+            flag(curve.the_edge_runs_its_way)
+        ));
         let there = self.entity(&format!("ORIENTED_EDGE('',*,*,#{seam},.T.)"));
         let back = self.entity(&format!("ORIENTED_EDGE('',*,*,#{seam},.F.)"));
         Ok(self.entity(&format!("EDGE_LOOP('',(#{there},#{back}))")))

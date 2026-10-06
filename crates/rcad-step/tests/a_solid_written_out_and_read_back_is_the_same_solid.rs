@@ -213,8 +213,9 @@ fn where_its_corners_are(solid: rcad_topo::SolidView<'_>) -> Vec<[u64; 3]> {
 /// The file leaves both poles unwritten and walks the seam there and back, the
 /// way `kicad/LED_D5.0mm.step` writes its dome, and the reader puts a pole
 /// back at each turn. The seam is half of a great circle, which is written as
-/// the `CIRCLE` of the ball's own centre and radius turned the way that picks
-/// the half the model's seam is.
+/// the `CIRCLE` of the ball's own centre and radius about its plane's normal,
+/// with the seam running along it or against it to pick the half the model's
+/// seam is.
 #[test]
 fn a_ball_written_out_and_read_back_is_the_same_ball() {
     let mut covered = Covered::new();
@@ -1247,6 +1248,74 @@ fn a_slice_off_the_side_of_a_ball_is_written_with_its_arcs_and_comes_back_the_sa
     });
 }
 
+/// A whole ball of radius four whose seam, from pole to pole on the side
+/// facing `+x`, has its plane facing the other way from the edge's own turn:
+/// once with the plane turned round to face `−y` and the seam drawn down from
+/// the north pole, and once with the plane facing `+y` and the seam drawn up
+/// from the south pole. `add_ball` draws it down with the plane facing `+y`.
+///
+/// **How the plane was chosen.** Writing `A`, `B` for the seam's ends and `n`
+/// for its plane's normal, the circle about `n` runs from `A` to `B` along the
+/// half in front of `(B − A) × n` (`Walk::the_arc_between`). Either choice
+/// above puts `(B − A) × n` along `−x`, away from the half the run picks, so
+/// the edge cannot run along the circle about `n`: the writer either turns
+/// the circle over to about `−n` or runs the edge against the circle.
+///
+/// The reader names the seam by the plane through the circle's centre about
+/// the circle's own axis (`Walk::the_surface_that_names_the_curve`), so the
+/// circle turned over came back with the seam's plane reversed: `(0, 1, 0)`
+/// for `(0, −1, 0)` and the other way round, and the ball facing `−y`
+/// measured `267.77308911728187` read back where it measured
+/// `267.7805495679834` built. No ball test before this one drew such a seam:
+/// `add_ball`'s runs along the circle about its plane's normal. Since Q776 the
+/// writer writes the circle about `n` and runs the edge against it
+/// (`EDGE_CURVE` `same_sense` false), as every other seam on a ball has done
+/// since Q767, and the plane comes back bit for bit.
+#[test]
+fn a_ball_whose_seam_runs_against_its_planes_turn_comes_back_with_the_same_plane() {
+    let north = Point::new(0.0, 0.0, 4.0);
+    let south = Point::new(0.0, 0.0, -4.0);
+    for (called, from, to, facing) in [
+        (
+            "a ball whose seam's plane faces -y",
+            north,
+            south,
+            Vector::new(0.0, -1.0, 0.0),
+        ),
+        (
+            "a ball whose seam runs up from the south pole",
+            south,
+            north,
+            Vector::new(0.0, 1.0, 0.0),
+        ),
+    ] {
+        let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+        let built = a_whole_ball_drawn_face_by_face(&mut model, [from, to], facing);
+        let text = rcad_step::write(&model, called)
+            .unwrap_or_else(|why| panic!("{called} is not written: {why}"));
+        let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
+        let import = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{called} is refused on the way back in: {why}"));
+        let [(_, came)] = import.solids() else {
+            panic!("one solid came back as {}", import.solids().len());
+        };
+        let [here, back] = [(&model, built), (import.model(), *came)].map(|(from, key)| {
+            the_plane_its_seam_is_cut_from(from.solid(key).expect("this model made the key"))
+        });
+        assert_eq!(
+            back, here,
+            "{called}: the seam's plane, as the bits of its normal and its offset"
+        );
+        assert!(
+            text.contains(",.F.);"),
+            "{called}: the seam runs against its circle, or this does not reach same_sense"
+        );
+        comes_back_the_same(called, &model, built, &|model| {
+            a_block(model, [10.0, 10.0, 5.0], Vector::new(-5.0, -5.0, -5.0))
+        });
+    }
+}
+
 /// Two bars of radius five meeting at a mitre, sliced along their length by
 /// `z = −3`: the two pipes cross in an arc of an ellipse in the mitre's plane.
 ///
@@ -1907,6 +1976,59 @@ fn a_slice_off_the_side_of_a_ball(model: &mut Model) -> SolidKey {
         ],
         &[],
     )
+}
+
+/// The whole ball of radius four about the origin, one face, with its seam
+/// from `ends[0]` to `ends[1]` on the side facing `+x`, cut from the plane
+/// `y = 0` facing `facing`.
+fn a_whole_ball_drawn_face_by_face(
+    model: &mut Model,
+    ends: [Point; 2],
+    facing: Vector,
+) -> SolidKey {
+    use Step::{Forward, Pole, Reversed};
+    use rcad_geom::Sphere;
+
+    let cut = Surface::Plane(a_plane(Point::origin(), facing));
+    a_solid_drawn_face_by_face(
+        model,
+        &ends,
+        vec![(
+            0,
+            1,
+            part_of(cut, Point::origin(), Vector::new(1.0, 0.0, 0.0)),
+        )],
+        vec![(
+            Surface::Sphere(Sphere::new(Point::origin(), 4.0).expect("a positive radius")),
+            vec![vec![Forward(0), Pole(1), Reversed(0), Pole(0)]],
+        )],
+        &[],
+    )
+}
+
+/// The plane the one seam of `solid` is cut from, as the bits of its normal
+/// and then of its offset.
+fn the_plane_its_seam_is_cut_from(solid: rcad_topo::SolidView<'_>) -> [u64; 4] {
+    let mut planes: Vec<[u64; 4]> = solid
+        .faces()
+        .flat_map(|face| face.wires().collect::<Vec<_>>())
+        .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+        .map(|coedge| match coedge.edge().run() {
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(cut),
+                ..
+            } => {
+                let [x, y, z] = cut.normal().components().map(f64::to_bits);
+                [x, y, z, cut.offset().to_bits()]
+            }
+            other => panic!("a ball's seam is cut from a plane, not run {other:?}"),
+        })
+        .collect();
+    planes.dedup();
+    let [plane] = planes[..] else {
+        panic!("a whole ball has one seam, not {planes:?}");
+    };
+    plane
 }
 
 /// A bar of radius five along `x` from its cap at `x = −8` and one along `y` to
