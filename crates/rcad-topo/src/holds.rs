@@ -2122,14 +2122,11 @@ fn is_on_the_other_nappe_from_the_arc(
     let Some(arcs) = the_nappe_both_ends_are_on(&cone, [side.start.at, side.end.at]) else {
         return Ok(false);
     };
-    match the_nappe_of(&placed, point.enclosure()) {
-        found @ (Decision::Pos | Decision::Neg) => Ok(found != arcs),
-        Decision::Zero => Ok(false),
-        Decision::Undecidable { enclosure } => {
-            Err(gave_up_on_a_side(&side.across_placed, point, enclosure))
-        }
-        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    let found = the_nappe_of(&placed, point.enclosure());
+    if let Decision::Undecidable { enclosure } = found {
+        return Err(gave_up_on_a_side(&side.across_placed, point, enclosure));
     }
+    Ok(matches!(found, Decision::Pos | Decision::Neg) && found != arcs)
 }
 
 /// Whether a flat face whose every side lies behind the other cut is the
@@ -2434,15 +2431,15 @@ fn the_way_into_an_arc_that_does_not_close(
     let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
     let square_to_the_chord = cross(exactly(flat.normal().components()), chord);
     let up = exactly(cone.axis().direction().components());
-    match (dot(up, square_to_the_chord).sign(), nappe_of_the_ends) {
-        (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => {
-            Some(square_to_the_chord)
-        }
-        (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => {
-            Some(square_to_the_chord.map(core::ops::Neg::neg))
-        }
-        (Decision::Zero | Decision::Undecidable { .. } | _, _) => None,
+    let towards_the_axis = dot(up, square_to_the_chord).sign();
+    if !matches!(towards_the_axis, Decision::Pos | Decision::Neg) {
+        return None;
     }
+    Some(if towards_the_axis == nappe_of_the_ends {
+        square_to_the_chord.map(core::ops::Neg::neg)
+    } else {
+        square_to_the_chord
+    })
 }
 
 /// [`Decision::Pos`] when both `ends` are strictly up `cone`'s axis from its
