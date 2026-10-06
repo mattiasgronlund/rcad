@@ -42,89 +42,211 @@ enum Outcome {
     Failed(String),
 }
 
-#[test]
-fn every_kicad_file_that_imports_round_trips_to_the_same_solid() {
-    let root = corpus();
-    let files = files_under(&root.join("kicad"));
-    assert!(
-        !files.is_empty(),
-        "kicad holds no STEP files, so this test would pass by doing nothing"
-    );
+mod every_kicad_file_that_imports_round_trips_to_the_same_solid {
+    use super::*;
 
-    let mut denominator = 0;
-    let mut round_tripped: BTreeSet<String> = BTreeSet::new();
-    let mut pieces_compared = 0;
-    let mut no_fuse_to_compare = 0;
-    let mut scale_metadata_differed = 0;
-    let mut failures: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut no_fuse_reasons: BTreeMap<&'static str, usize> = BTreeMap::new();
+    /// Which test a KiCad file's round trip belongs to, decided from its file
+    /// name alone, so a file added to the corpus lands in exactly one test —
+    /// by construction, not because somebody kept a list in step.
+    ///
+    /// The three named here are the corpus's slow files, and nothing else
+    /// comes close: each is a **vertical, through-hole** pin header — named
+    /// `PinHeader_<n>x<pins>_P2.54mm_Vertical.step`, with no `_SMD_` in it —
+    /// whose round, drilled pins cost far more fuse work than every other
+    /// file put together. Timed alone on the base this split was measured
+    /// against (`docs/queue.md` Q1238), `PinHeader_1x39_P2.54mm_Vertical.step`
+    /// took about 156 s, `PinHeader_1x32_P2.54mm_Vertical.step` about 88 s and
+    /// `PinHeader_1x25_P2.54mm_Vertical.step` about 64 s — against roughly
+    /// 94 s for the other 162 files combined. Each of the three gets its own
+    /// test so no test runs much longer than the one dear file in it; the
+    /// rest, cheap even together, share `every_other_file`.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Group {
+        PinHeader1x39,
+        PinHeader1x32,
+        PinHeader1x25,
+        EveryOtherFile,
+    }
 
-    for path in &files {
-        let bytes = fs::read(path).expect("a file the walk just listed");
-        let file = StepFile::read(&bytes).expect("every file in the corpus parses");
-        let mut log = ProvenanceLog::new();
-        let Ok(import) = Import::read(&file, &Policy::certified(), &mut log) else {
-            continue;
-        };
-        denominator += 1;
-
-        match round_trip_one(&name_of(path), import.model()) {
-            Outcome::Compared {
-                pieces,
-                scale_metadata_differed: differed,
-                no_fuse,
-            } => {
-                round_tripped.insert(name_of(path));
-                if pieces > 0 {
-                    pieces_compared += pieces;
-                } else {
-                    no_fuse_to_compare += 1;
-                }
-                if differed {
-                    scale_metadata_differed += 1;
-                }
-                for because in no_fuse {
-                    *no_fuse_reasons.entry(because).or_default() += 1;
-                }
-            }
-            Outcome::Failed(reason) => {
-                failures
-                    .entry(canonical(&reason))
-                    .or_default()
-                    .push(name_of(path));
-            }
+    fn group_of(name: &str) -> Group {
+        match name {
+            "PinHeader_1x39_P2.54mm_Vertical.step" => Group::PinHeader1x39,
+            "PinHeader_1x32_P2.54mm_Vertical.step" => Group::PinHeader1x32,
+            "PinHeader_1x25_P2.54mm_Vertical.step" => Group::PinHeader1x25,
+            _ => Group::EveryOtherFile,
         }
     }
 
-    println!(
-        "corpus round trip: {} / {denominator} imported KiCad files round-tripped \
-         to the same solid, {pieces_compared} fused piece(s) compared, {no_fuse_to_compare} had \
-         no fuse to compare, {scale_metadata_differed} matched as a solid despite \
-         Scale::nominal_size changing",
-        round_tripped.len()
+    const PIN_HEADER_1X39_IMPORTS: usize = 1;
+    const PIN_HEADER_1X32_IMPORTS: usize = 1;
+    const PIN_HEADER_1X25_IMPORTS: usize = 1;
+    const EVERY_OTHER_FILE_IMPORTS: usize = 162;
+
+    // The four groups must add up to the 165 KiCad files that import — the
+    // same number `every_kicad_file_that_imports_round_trips_to_the_same_solid`
+    // pinned as one test's `denominator`. Checked by the compiler so a group
+    // added or resized without updating another cannot pass silently.
+    const _: () = assert!(
+        PIN_HEADER_1X39_IMPORTS
+            + PIN_HEADER_1X32_IMPORTS
+            + PIN_HEADER_1X25_IMPORTS
+            + EVERY_OTHER_FILE_IMPORTS
+            == 165
     );
-    for (because, count) in &no_fuse_reasons {
-        println!("    {count:>4}  no fuse to compare: {because}");
-    }
-    let mut reasons: Vec<_> = failures.iter().collect();
-    reasons.sort_by_key(|&(reason, names)| (std::cmp::Reverse(names.len()), reason.clone()));
-    for (reason, names) in reasons {
-        println!("    {:>4}  {reason}", names.len());
-        for name in names {
-            println!("            {name}");
-        }
+
+    #[test]
+    fn pin_header_1x39() {
+        round_trips_a_group(
+            "pin_header_1x39",
+            Group::PinHeader1x39,
+            PIN_HEADER_1X39_IMPORTS,
+        );
     }
 
-    assert_eq!(
-        denominator, 165,
-        "the count of KiCad files that import must not shift without somebody saying so"
-    );
-    assert_eq!(
-        scale_metadata_differed, 0,
-        "Scale::nominal_size is set from the file's vertices alone, so a round trip must not \
-         move it even when a LINE's own point or a PLANE's placement origin rounds"
-    );
-    assert_pinned_round_trips(&round_tripped);
+    #[test]
+    fn pin_header_1x32() {
+        round_trips_a_group(
+            "pin_header_1x32",
+            Group::PinHeader1x32,
+            PIN_HEADER_1X32_IMPORTS,
+        );
+    }
+
+    #[test]
+    fn pin_header_1x25() {
+        round_trips_a_group(
+            "pin_header_1x25",
+            Group::PinHeader1x25,
+            PIN_HEADER_1X25_IMPORTS,
+        );
+    }
+
+    #[test]
+    fn every_other_file() {
+        round_trips_a_group(
+            "every_other_file",
+            Group::EveryOtherFile,
+            EVERY_OTHER_FILE_IMPORTS,
+        );
+    }
+
+    /// One group's share of the round trip: the same walk, the same
+    /// per-file comparison, and the same printed tallies
+    /// `every_kicad_file_that_imports_round_trips_to_the_same_solid` used to
+    /// print once for all 165 files, now printed once per group.
+    fn round_trips_a_group(group_name: &str, group: Group, expected_imports: usize) {
+        let root = corpus();
+        let files: Vec<PathBuf> = files_under(&root.join("kicad"))
+            .into_iter()
+            .filter(|path| group_of(&name_of(path)) == group)
+            .collect();
+        assert!(
+            !files.is_empty(),
+            "{group_name} names no corpus file, so this test would pass by doing nothing"
+        );
+
+        let mut denominator = 0;
+        let mut round_tripped: BTreeSet<String> = BTreeSet::new();
+        let mut pieces_compared = 0;
+        let mut no_fuse_to_compare = 0;
+        let mut scale_metadata_differed = 0;
+        let mut failures: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut no_fuse_reasons: BTreeMap<&'static str, usize> = BTreeMap::new();
+
+        for path in &files {
+            let bytes = fs::read(path).expect("a file the walk just listed");
+            let file = StepFile::read(&bytes).expect("every file in the corpus parses");
+            let mut log = ProvenanceLog::new();
+            let Ok(import) = Import::read(&file, &Policy::certified(), &mut log) else {
+                continue;
+            };
+            denominator += 1;
+
+            match round_trip_one(&name_of(path), import.model()) {
+                Outcome::Compared {
+                    pieces,
+                    scale_metadata_differed: differed,
+                    no_fuse,
+                } => {
+                    round_tripped.insert(name_of(path));
+                    if pieces > 0 {
+                        pieces_compared += pieces;
+                    } else {
+                        no_fuse_to_compare += 1;
+                    }
+                    if differed {
+                        scale_metadata_differed += 1;
+                    }
+                    for because in no_fuse {
+                        *no_fuse_reasons.entry(because).or_default() += 1;
+                    }
+                }
+                Outcome::Failed(reason) => {
+                    failures
+                        .entry(canonical(&reason))
+                        .or_default()
+                        .push(name_of(path));
+                }
+            }
+        }
+
+        println!(
+            "{group_name}: {} / {denominator} imported KiCad files round-tripped \
+             to the same solid, {pieces_compared} fused piece(s) compared, {no_fuse_to_compare} had \
+             no fuse to compare, {scale_metadata_differed} matched as a solid despite \
+             Scale::nominal_size changing",
+            round_tripped.len()
+        );
+        for (because, count) in &no_fuse_reasons {
+            println!("    {count:>4}  no fuse to compare: {because}");
+        }
+        let mut reasons: Vec<_> = failures.iter().collect();
+        reasons.sort_by_key(|&(reason, names)| (std::cmp::Reverse(names.len()), reason.clone()));
+        for (reason, names) in reasons {
+            println!("    {:>4}  {reason}", names.len());
+            for name in names {
+                println!("            {name}");
+            }
+        }
+
+        assert_eq!(
+            denominator, expected_imports,
+            "{group_name}: the count of KiCad files that import must not shift without somebody \
+             saying so"
+        );
+        assert_eq!(
+            scale_metadata_differed, 0,
+            "{group_name}: Scale::nominal_size is set from the file's vertices alone, so a round \
+             trip must not move it even when a LINE's own point or a PLANE's placement origin \
+             rounds"
+        );
+        assert_pinned_round_trips(group_name, &round_tripped, group);
+    }
+
+    /// Every KiCad file in this group that round-trips must be one of
+    /// [`super::KICAD_FILES_THAT_ROUND_TRIP`] filtered to this group, and
+    /// every one of those must round trip — checked as a set so a failure
+    /// names what appeared and what disappeared, the same way
+    /// `every_kicad_file_that_imports_round_trips_to_the_same_solid` used to
+    /// check it for all 165 at once.
+    fn assert_pinned_round_trips(group_name: &str, round_tripped: &BTreeSet<String>, group: Group) {
+        let pinned: BTreeSet<&str> = KICAD_FILES_THAT_ROUND_TRIP
+            .iter()
+            .copied()
+            .filter(|name| group_of(name) == group)
+            .collect();
+        let got: BTreeSet<&str> = round_tripped.iter().map(String::as_str).collect();
+        let newly_round_tripping: Vec<&str> = got.difference(&pinned).copied().collect();
+        let stopped_round_tripping: Vec<&str> = pinned.difference(&got).copied().collect();
+        assert!(
+            newly_round_tripping.is_empty() && stopped_round_tripping.is_empty(),
+            "{group_name}: the kicad files that round trip moved (docs/decisions.md §44.10): \
+             {} file(s) now round trip and are not pinned: {newly_round_tripping:?}; \
+             {} pinned file(s) stopped: {stopped_round_tripping:?}",
+            newly_round_tripping.len(),
+            stopped_round_tripping.len()
+        );
+    }
 }
 
 /// All 165 imported KiCad files, each written back out and read back as the
@@ -356,24 +478,6 @@ const KICAD_FILES_THAT_ROUND_TRIP: &[&str] = &[
     "SW_DIP_SPSTx12_Piano_CTS_Series194-12MSTN_W7.62mm_P2.54mm.step",
     "SW_NKK_BB15AH.step",
 ];
-
-/// Every KiCad file that round-trips must be one of
-/// [`KICAD_FILES_THAT_ROUND_TRIP`], and every one of those must round trip —
-/// checked as a set so a failure names what appeared and what disappeared.
-fn assert_pinned_round_trips(round_tripped: &BTreeSet<String>) {
-    let pinned: BTreeSet<&str> = KICAD_FILES_THAT_ROUND_TRIP.iter().copied().collect();
-    let got: BTreeSet<&str> = round_tripped.iter().map(String::as_str).collect();
-    let newly_round_tripping: Vec<&str> = got.difference(&pinned).copied().collect();
-    let stopped_round_tripping: Vec<&str> = pinned.difference(&got).copied().collect();
-    assert!(
-        newly_round_tripping.is_empty() && stopped_round_tripping.is_empty(),
-        "the kicad files that round trip moved (docs/decisions.md §44.10): \
-         {} file(s) now round trip and are not pinned: {newly_round_tripping:?}; \
-         {} pinned file(s) stopped: {stopped_round_tripping:?}",
-        newly_round_tripping.len(),
-        stopped_round_tripping.len()
-    );
-}
 
 /// Write `source` out, read it back, and compare every question this kernel
 /// can ask of it against the original — bit for bit.
