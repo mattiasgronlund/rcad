@@ -4816,12 +4816,27 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
     (off_the_axis * off_the_axis - radius * radius * dot(normal, normal)).sign()
 }
 
-/// Whether an arc of the closed curve the plane `own` cuts `round` in never
-/// reaches the plane `cut`: the line the two planes meet in misses the curve,
-/// or meets it only behind the arc's chord. `start` is either end of the arc and
+/// Whether an arc of the curve the plane `own` cuts `round` in never reaches
+/// the plane `cut`: the line the two planes meet in misses the curve, or meets
+/// it only behind the arc's chord. `start` is either end of the arc and
 /// `into_the_arc` is [`the_way_into_an_arc`]. `false` when the two planes are
-/// side by side, when the curve does not close, and when a sign could not be
-/// settled.
+/// side by side, when a ball's or a pipe's curve does not close, when the line
+/// runs along a direction the round surface's part of degree two is not
+/// positive at, and when a sign could not be settled.
+///
+/// **A cone's hyperbola or parabola is read too** (row Q1224). Nothing below
+/// leans on the curve closing but `a > 0` and the arc lying in front of its
+/// chord: a line meets any curve a plane cuts a cone in where one quadratic in
+/// `t` is zero, so in at most two points, and an arc between two points of one
+/// branch lies in front of its chord as an arc of an ellipse does, because the
+/// branch bounds a convex region ([`the_way_into_an_arc_that_does_not_close`]).
+/// What the curve closing bought was a point to walk from about which the
+/// surface's sign has no linear part, and a cone has that point whatever the
+/// plane: its apex. The cups of
+/// `tests/a_joined_flat_face_whose_rings_enclose_no_area.rs` have their cut
+/// cone's hyperbola on `x = −12` split at `z = 16` by the second cone's base
+/// plane, so the middle piece runs below `z = 18` with both ends behind it, and
+/// the skin was refused for want of this.
 ///
 /// **Why that is enough.** The arc lies on `own`, so it can be on `cut` only on
 /// that line, and only where the line meets its curve. The arc is all of the
@@ -4836,7 +4851,8 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// `x₀ = (e(h × u) + d(u × n))/|u|²` is on both planes, and the line is
 /// `(|u|²x₀ + t·u)/|u|²`. [`how_far_outside`] at that point, scaled by `|u|²`,
 /// is `a·t² + 2b·t + c`: `a` is the round surface's part of degree two at `u`,
-/// positive because the curve closes; `c` is its value at `|u|²x₀`; and `b`, the
+/// positive wherever the curve closes and asked to be where it does not; `c` is
+/// its value at `|u|²x₀`; and `b`, the
 /// cross term, is a quarter of its value a step of `u` past that point less its
 /// value a step before, since the two squares cancel. The meets are
 /// `t = (−b ± √(b² − ac))/a`, and `b² − ac` negative is the line missing the
@@ -4855,8 +4871,14 @@ fn an_arc_never_reaches_the_plane(
     into_the_arc: [Interval; 3],
     cut: &Plane,
 ) -> bool {
-    let Some(centred) = where_a_closed_crossing_is_centred(round, own) else {
-        return false;
+    let from = match round {
+        Surface::Cone(cone) => cone.apex(),
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Plane(_) | Surface::Torus(_) | _ => {
+            let Some(centred) = where_a_closed_crossing_is_centred(round, own) else {
+                return false;
+            };
+            centred.from
+        }
     };
     let normal = exactly(own.normal().components());
     let facing = exactly(cut.normal().components());
@@ -4871,7 +4893,7 @@ fn an_arc_never_reaches_the_plane(
         let point = exactly(point.coordinates());
         core::array::from_fn(|axis| on_both[axis] - scale * point[axis])
     };
-    let off_from = less(centred.from);
+    let off_from = less(from);
     let step = |by: Interval| -> [Interval; 3] {
         core::array::from_fn(|axis| off_from[axis] + by * along[axis])
     };
