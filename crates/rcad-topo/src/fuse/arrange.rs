@@ -4416,8 +4416,8 @@ impl<'f> Arrangement<'f> {
                 Surface::Cylinder(_),
                 Surface::Cylinder(_) | Surface::Sphere(_) | Surface::Torus(_),
             )
-            | (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _)
-            | _ => return None,
+            | (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _) => return None,
+            _ => return None,
         }
         let way_round = cross_of_intervals(up, start);
         let anticlockwise =
@@ -4916,9 +4916,10 @@ impl<'f> Arrangement<'f> {
         let axis = match (self.surface, partner) {
             (Surface::Cylinder(pipe), _) => pipe.axis(),
             (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) => cone.axis(),
-            (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _) | _ => {
+            (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _) => {
                 return PastThePicker::No;
             }
+            _ => return PastThePicker::No,
         };
         let [Picker::InFrontOf(picker)] = self.crossings[crossing].picked_by() else {
             return PastThePicker::No;
