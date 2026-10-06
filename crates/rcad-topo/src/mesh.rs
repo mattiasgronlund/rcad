@@ -7305,11 +7305,7 @@ fn how_far_along_its_axis_this_face_runs(
                     &other,
                 );
                 if a_plane_cuts_this_cone_in_an_ellipse_its_ends_are_walked_by(
-                    &ours,
-                    &other,
-                    edge.stored_run(),
-                    whole,
-                    its_ends,
+                    &ours, &other, edge, whole, its_ends,
                 ) {
                     return Some(its_ends);
                 }
@@ -7363,7 +7359,7 @@ fn a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever(
 /// places the edge's points round the cone from its ends — so that the ends,
 /// and not the ellipse, are how far up the axis the edge gets.
 ///
-/// Only for a `run` that is a piece of the crossing: one that goes right round
+/// Only for an edge that is a piece of the crossing: one that goes right round
 /// is the whole ellipse and is walked round it.
 ///
 /// `whole` is how far the whole ellipse reaches, from
@@ -7376,31 +7372,52 @@ fn a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever(
 /// rounding between the frame the face is stored in and the one it is meshed
 /// in cannot put the two on opposite sides of the line.
 ///
-/// **What it rests on is that the edge is the arc that misses the ellipse's far
-/// end.** The walk asks the edge's half-spaces which arc it is, and only the
-/// arc that misses the far end is walked from its ends: a block leaned along a
-/// ruling of the frustum in `a_plane_cut_along_a_cones_other_nappe.rs` cuts an
-/// ellipse `4.5e16` long, and every piece of a face the fuse cuts there lies
-/// within `8` of the origin (§406.4). An edge whose half-spaces pick the arc
-/// past the far end is charged its ends here and walked round the ellipse
-/// there, so unless another edge of its face reaches as far, the walk is handed
-/// a deflection under what it can place a point to, and refuses it or waves it
-/// through with a record as its policy says (§406.5).
+/// **And only for the arc that misses the ellipse's far end**, which the walk
+/// is asked about through
+/// [`PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of`](rcad_geom::PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of):
+/// the edge's half-spaces pick one of the two arcs between its ends, and the
+/// arc past the far end is walked round the ellipse and runs out to it. Charged
+/// by its ends, a face on a cone of slope a half whose one curved edge runs from
+/// two ends `1.25` up round the far side to `1.7e7` up had a floor of
+/// `4.5e-11`, and the walk refused every deflection between that and `5.3e-7`:
+/// `CannotPlaceAPointThatCloseToACrossing` under a certified policy, and under a
+/// tolerant one a walk with nothing between the ends, which left the face
+/// `ACurvedFaceGoesRightRoundWithNoSeam`
+/// (`a_cone_arc_past_the_far_end_of_a_long_ellipse.rs`, §406.5). The walk
+/// answers under a certified policy and says no where that does not settle it,
+/// so an edge it cannot name is charged the whole ellipse: more than its walk
+/// needs, which is a mesh refused that could have been cut, and never less.
+///
+/// The edge's run and ends are read where the solid sits, as `ours` and `other`
+/// are, and not in the frame the face is meshed in; a half-space decides which
+/// arc at each arc's middle, far from both ends, where a shift that loses
+/// nothing moves no answer.
 fn a_plane_cuts_this_cone_in_an_ellipse_its_ends_are_walked_by(
     ours: &Surface,
     other: &Surface,
-    run: &EdgeRun,
+    edge: EdgeView<'_>,
     whole: Option<f64>,
     its_ends: f64,
 ) -> bool {
     let (Surface::Cone(_), Surface::Plane(_), EdgeRun::PartOfWhereItCrosses { .. }) =
-        (ours, other, run)
+        (ours, other, edge.stored_run())
     else {
         return false;
     };
-    whole.is_none_or(|whole| {
+    let reaches_far_past_its_ends = whole.is_none_or(|whole| {
         whole > 2.0 * rcad_geom::PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST * its_ends
-    })
+    });
+    if !reaches_far_past_its_ends {
+        return false;
+    }
+    let (from, to) = ends_in_the_stored_order(edge);
+    let Ok(run) = NamedRun::new(
+        edge.run(),
+        [from, to].map(|end| PredicatePoint::from(end.point().coordinates())),
+    ) else {
+        return false;
+    };
+    rcad_geom::PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of(&run, [ours, other])
 }
 
 /// How far along `straight_on` from `origin` a point can be that is on both a
