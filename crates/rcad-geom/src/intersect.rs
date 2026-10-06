@@ -2966,13 +2966,36 @@ fn how_far_a_hyperbolas_vertex_stands_off_the_apex_plane(flat: &Plane, cone: &Co
 ///    usual *"a rounded offset only slides the surface"* argument fails, because
 ///    both lines lie in it.
 ///
+/// # Where a ruling's direction is irrational, nothing names it whole
+///
+/// Item 1 is not a shortage a better order or scale of the arithmetic fills.
+/// Where `−E·‖w‖²` is not the square of a fraction, the ruling runs along no
+/// direction three `f64`s write, at any scale. Then no flat surface but the
+/// plane itself holds it: a stored normal square to `‖w‖²·p ± √(−E·‖w‖²)·(n × w)`
+/// is square to `p` and to `n × w` separately, so it is along `n`, and the plane
+/// holds both rulings. No pipe or ball picker does better: one that holds a
+/// whole endless line and only the apex of a second needs an axis along the
+/// first. So such a pair cannot be named as two whole lines by any [`Picker`]
+/// there is. The turned frustum of §294.10 is one
+/// (`a_turned_cone_cut_through_its_axis.rs`, §294.11).
+///
+/// **Halves of the rulings can be named.** The flat surface through the apex
+/// facing `n × w` has one ruling's forward half and the other's backward half
+/// strictly on each side, and the one square to the axis splits each ruling at
+/// its nappes, so the four halves lie in four corners of the two. Neither needs
+/// an exact direction, only an offset that passes exactly through the apex
+/// (item 3). That is not done here, because `rcad-topo`'s arrangement reads a
+/// ruling's direction off its first picker as `n × p`, which only a picker
+/// holding the whole ruling makes right.
+///
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when any of those three
 /// cannot be had, and whatever [`HalfSpace::through_a_point_square_to`] refuses.
 /// A **gap** and not a limit (§16.10): the two lines are there and they are
-/// tellable apart, and what runs out is `f64`'s supply of exact ruling
-/// directions.
+/// tellable apart. What runs out is `f64`'s supply of exact ruling directions
+/// and, where the direction is irrational, every picker's way of holding one
+/// whole line.
 fn two_lines_through_a_cones_apex(flat: &Plane, cone: &Cone) -> Result<SurfaceMeet> {
     let normal = flat.normal();
     let along = cone.axis().direction();

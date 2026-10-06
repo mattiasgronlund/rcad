@@ -432,3 +432,100 @@ to the axis in two points a diameter apart, as on a pipe.
 - Not measured: whether a cone built along a slanted axis at no placement, cut
   by a plane through its axis, meets the same refusal. The algebra above is
   for this turn's numbers only, and nothing has run the other case.
+
+### 294.11 Q1170: the turned frustum's two rulings cannot be named whole, and their four halves can — 2026-10-06
+
+*Queue row Q1170, Q1163 filed again with the nappe tallies added. Lane
+`lane-q1170-two-rulings-through-a-turned-cones-apex`, base `e4ea60b8`. No line
+that runs changed: a new test file and a doc comment.*
+
+**What refused.** §294.10's pair: the frustum's cone turned 0.4 about `x`, and
+the block's face along the seam turned the same way. `intersect` refuses
+`CannotNameWhichPieceOfACrossingThisIs` at the first check of
+`two_lines_through_a_cones_apex`, and unturned it names two rulings. Both are
+pinned again on the two surfaces alone, with no fuse round them
+(`turned_the_two_rulings_through_the_apex_are_refused_and_unturned_they_are_named`
+in `crates/rcad-geom/tests/a_turned_cone_cut_through_its_axis.rs`).
+
+**No `f64` direction lies on both surfaces, because the true one is
+irrational.** Turned, the axis direction is `w = (0, −b, a)` and the face's
+normal is `n = (0, −a, −b)`, with `a = 0.9210609940028851` and
+`b = 0.38941834230865047`. `n` is `x̂ × w` bit for bit, so the face holds `x̂`
+and `w`, and a direction `c·x̂ + w` in it is on the cone of slope `½` exactly
+when `c² = q/4`, for `q = a² + b²` worked out exactly. Written as a whole number
+times a power of four, `q`'s whole number is not a square (checked in `u128`),
+so `√q` is irrational and the two rulings run along `(±½√q, −b, a)`. No three
+fractions write that direction, at any scale. That is the measured fact, and
+three families of fix fall to it on this pair
+(`the_turned_rulings_run_along_directions_no_fraction_writes`):
+
+1. **Working the direction out in another order or at another scale.** Every
+   result is three `f64`s, so three fractions. The test asks the plane and the
+   cone, exactly, about the function's own `(±0.5, −b, a)`, about `½√q` rounded
+   and its four neighbours either way, each at three scales and both signs:
+   every one is on the plane and off the cone.
+2. **A pair of opposite half-spaces whose flat surface holds the ruling**, which
+   is what the function builds. A stored normal `p` square to `(±½√q, −b, a)`
+   has `p_x·(±½√q) + p·w = 0`, a fraction times an irrational plus a fraction,
+   so `p_x = 0` and `p·w = 0`, and then `p` is along `x̂ × w`, which is `n`. The
+   only flat surface through the apex that holds one ruling is the face itself,
+   and it holds the other too.
+3. **Any other picker.** One that holds a whole endless line and only the apex
+   of a second cannot be *outside a ball* or *outside a pipe*: the second line,
+   apex left out, would have to lie strictly inside, which a ball never holds,
+   and which inside a pipe forces the line to run along the axis and puts the
+   apex strictly inside as well. *Inside a pipe* needs its axis along the first
+   line, which is irrational again.
+
+So no set of today's pickers names a whole ruling of this pair. In general it is
+the pairs where `−E·‖w‖²` is not the square of a fraction; here that comes down
+to `q`, which is why §294.10 found the unturned axis, of length exactly one,
+named.
+
+**What does tell them apart: the row's candidate, changed.** Leg (a) holds: the
+rulings are mirror images across the flat surface through the apex holding the
+axis and `n`, whose normal is `n × w`, and they are strictly on its two sides.
+The row's worry, that a face holding the axis would mirror them across `n`
+instead, does not happen: `n × w` is not nothing whenever the face is steeper
+than the cone, and this face holds the axis and is split by it all the same.
+**But a ruling is endless both ways and crosses that surface at the apex**, so
+a half-space bounded by it holds the forward half of one ruling and the backward
+half of the other, not one ruling. The change: add the flat surface through the
+apex square to the axis, facing `w`, which cuts each ruling at the apex into the
+half in each nappe. Then the four halves lie in four corners of the two surfaces,
+strictly, and neither surface needs an exact direction
+(`the_turned_rulings_four_halves_lie_in_four_corners_of_two_flat_surfaces_through_the_apex`,
+which stands each half for by a box between two exact points of the face that
+the cone reads inside and outside). Leg (b): both surfaces must pass exactly
+through the apex, and here they do, since the apex is the origin and both
+offsets are `0`. Elsewhere each offset is one dot product, and where it rounds
+the halves stay refused, as item 3 of the function's doc already refuses.
+
+**Leg (c) is what keeps this from being the fix.** `rcad-topo`'s
+`a_ruling_through_an_apex` (`fuse/arrange.rs`) reads a ruling's direction as
+`n × p` for its first picker `p`, and `ThroughAnApex::along` carries it into the
+order along the crossing and the turns at its nodes. That is right only for a
+picker whose flat surface holds the ruling. For a corner's two pickers, `n × p`
+runs along the axis or along `n × w`, and neither is a ruling. Naming halves in
+`intersect` alone would hand the arrangement a direction that is not the
+line's. Nothing has run that, so whether it would answer wrong or refuse is not
+known; and `arrange.rs` is outside this row's files. `walk.rs` says it walks a
+ruling by its ends and reads no direction off a picker. So the fix is a row of
+its own with both files: name the four halves where the direction is
+irrational, and let the arrangement take a half's direction as an enclosure of
+`‖w‖²·p ± √(−E·‖w‖²)·(n × w)`, its sign read off the corner.
+
+**The pins.** None moved, since nothing that runs changed.
+`a_turned_frustum_cut_along_its_seam_is_refused_where_the_cut_runs_through_its_apex`
+and `the_face_along_a_turned_frustums_seam_crosses_its_cone_in_two_rulings_nothing_names`
+still refuse, and the three tallies of `CannotNameWhichPieceOfACrossingThisIs`
+in `a_plane_cut_along_a_cones_other_nappe.rs` stay at 8 each: 0 of each 8
+moved. Whether the turned frustum then refuses `side of plane` at a seam
+corner's box (Q1164) is still not known.
+
+**What this leaves.**
+
+- The fix above, with `arrange.rs` in its files, and the two pins and three
+  tallies turned round under it and held to `26π/3` and to volumes. A row of its
+  own, tier 1.
+- Q1164 waits on that row now, and not on Q1170.
