@@ -154,7 +154,7 @@ pub enum CannotWrite {
     /// seam.
     ///
     /// This writer derives the curve from the two surfaces either
-    /// side, which is what §24.3 says an edge *is*. It reads five things off
+    /// side, which is what §24.3 says an edge *is*. It reads six things off
     /// the run instead. An open edge whose run is straight is a `LINE`,
     /// because the reader reads every `LINE` back as straight. A ball's
     /// seam: it runs between the two poles, which are in a line with the
@@ -164,9 +164,10 @@ pub enum CannotWrite {
     /// open edge between a flat face and a pipe or a ball is, which the two
     /// ends do not say and the run's pickers do (Q766). The plane an open arc
     /// between two curved faces lies in, which the reader walks and which the
-    /// faces cross in no single curve of their own (Q767). And the pipe an arc
-    /// drawn on a flat face is named by, since the faces either side are one
-    /// plane.
+    /// faces cross in no single curve of their own (Q767). The plane a closed
+    /// circle where a ball touches a pipe lies in, for the same reason (Q777).
+    /// And the pipe an arc drawn on a flat face is named by, since the faces
+    /// either side are one plane.
     ///
     /// So an arc drawn on a flat face whose run names a ball, a cone or a ring
     /// is refused here, and so is a seam of one pipe whose run names a curved
@@ -576,7 +577,10 @@ impl Writing {
     ///   beside it, as a crossing in two pieces it could not tell apart;
     /// - **an arc where a plane crosses a ball** is one of the two arcs its ends
     ///   cut the circle into, which [`where_a_plane_crosses_a_ball`] names and
-    ///   the run picks, as for a pipe;
+    ///   the run picks, as for a pipe. **A closed edge there** is the whole
+    ///   circle, turned the way the ball winds at its corner
+    ///   ([`Crossing::it_runs_the_way_a_closed_edge_is_stored`]), and only where
+    ///   its run names nothing but the two faces (Q777);
     /// - **an arc where a plane rests on a ring**, square to its axis and on
     ///   top of its tube, is an arc of the circle of the ring's own radius,
     ///   which [`where_a_plane_crosses_a_ring`] names and the run picks, as for
@@ -589,11 +593,13 @@ impl Writing {
     ///   the end of a bend of pipe — is the circle round the tube that
     ///   [`where_a_cap_holding_a_rings_axis_crosses_it`] works out the same way.
     ///
-    /// And two the surfaces do not name, which are read off the run instead:
+    /// And three the surfaces do not name, which are read off the run instead:
     /// **a seam of one ball from pole to pole** — see
-    /// [`Writing::a_seam_of_one_ball`] — and **an arc between two curved faces
+    /// [`Writing::a_seam_of_one_ball`] — **an arc between two curved faces
     /// that lies in a plane the run names** — see
-    /// [`Writing::an_arc_its_own_plane_names`].
+    /// [`Writing::an_arc_its_own_plane_names`] — and **a closed circle where a
+    /// ball touches a pipe, in the plane the run names** — see
+    /// [`Writing::a_closed_circle_where_a_ball_touches_a_pipe`].
     ///
     /// Everything else refuses by name, and
     /// [`CannotWrite::ACurveTheFacesEitherSideOfItDoNotName`] says what closes
@@ -651,12 +657,23 @@ impl Writing {
             }
             (Surface::Plane(flat), Surface::Sphere(ball))
             | (Surface::Sphere(ball), Surface::Plane(flat))
-                if !closed =>
+                if !closed || *run == EdgeRun::RightRoundWhereItsFacesCross =>
             {
                 let crossing = where_a_plane_crosses_a_ball(flat, ball).ok_or_else(refuse)?;
-                let turning = crossing
-                    .the_way_round_the_arc(run, start, end)
-                    .ok_or_else(refuse)?;
+                let turning = if closed {
+                    let its_own_way = crossing
+                        .it_runs_the_way_a_closed_edge_is_stored([first, second], start)
+                        .ok_or_else(refuse)?;
+                    if its_own_way {
+                        crossing.turning
+                    } else {
+                        -crossing.turning
+                    }
+                } else {
+                    crossing
+                        .the_way_round_the_arc(run, start, end)
+                        .ok_or_else(refuse)?
+                };
                 Ok(Curve::along(self.round(&crossing, turning)))
             }
             (Surface::Plane(flat), Surface::Torus(ring))
@@ -718,6 +735,10 @@ impl Writing {
                 self.an_arc_its_own_plane_names(first, second, run, start, end)
                     .ok_or_else(refuse)
             }
+            (Surface::Cylinder(pipe), Surface::Sphere(_))
+            | (Surface::Sphere(_), Surface::Cylinder(pipe)) => self
+                .a_closed_circle_where_a_ball_touches_a_pipe(pipe, [first, second], run, start)
+                .ok_or_else(refuse),
             (Surface::Plane(_), Surface::Plane(_))
             | (Surface::Cylinder(_), Surface::Cylinder(_))
             | (Surface::Plane(_), Surface::Sphere(_))
@@ -726,8 +747,6 @@ impl Writing {
             | (Surface::Cone(_), Surface::Plane(_))
             | (Surface::Plane(_), Surface::Torus(_))
             | (Surface::Torus(_), Surface::Plane(_))
-            | (Surface::Cylinder(_), Surface::Sphere(_))
-            | (Surface::Sphere(_), Surface::Cylinder(_))
             | (Surface::Cylinder(_), Surface::Cone(_))
             | (Surface::Cone(_), Surface::Cylinder(_))
             | (Surface::Cylinder(_), Surface::Torus(_))
@@ -964,6 +983,68 @@ impl Writing {
             shape: crossing.shape,
         };
         let the_edge_runs_its_way = crossing.the_arc_runs_its_own_way(run, start, end)?;
+        Some(Curve {
+            id: self.round(&crossing, crossing.turning),
+            the_edge_runs_its_way,
+        })
+    }
+
+    /// The closed circle a ball touches a pipe round, in the plane its run
+    /// names, or `None` where the run names no plane or the circle would not
+    /// read back on both faces.
+    ///
+    /// **A ball touches a pipe round a circle only where its centre is on the
+    /// pipe's axis and the two radii are one**, and then it does not cross the
+    /// pipe at all (§124). So the two faces name no curve, and the run carries
+    /// the plane the circle lies in, square to the axis through the ball's
+    /// centre: [`EdgeRun::RightRoundWhereItCrosses`], the kind a closed edge
+    /// takes when the faces either side name nothing.
+    ///
+    /// **The reader cuts such a circle in two at its far point** and walks each
+    /// half in the plane the file's circle lies in, once it has checked that
+    /// both faces hold the circle (`Walk::describe_the_halves_of_a_circle`).
+    /// So the circle is written as [`Writing::an_arc_its_own_plane_names`]
+    /// writes an arc, in that plane and about its normal, at a centre the
+    /// reader's [`plane_through`] reads the plane back from; and only where
+    /// [`a_surface_holds_the_circle`], shared with the reader, says both faces
+    /// hold it, since elsewhere the reader names the edge by its faces, which
+    /// only touch, and refuses.
+    ///
+    /// **The way round is `same_sense`**, and the plane keeps the way it faces:
+    /// the halves run the way the file's curve runs, so the edge runs along the
+    /// circle where the circle turns at the corner the way the model stores the
+    /// edge running ([`Crossing::it_runs_the_way_a_closed_edge_is_stored`]).
+    fn a_closed_circle_where_a_ball_touches_a_pipe(
+        &mut self,
+        pipe: &Cylinder,
+        either_side: [&Surface; 2],
+        run: &EdgeRun,
+        corner: Point,
+    ) -> Option<Curve> {
+        let EdgeRun::RightRoundWhereItCrosses {
+            and: Surface::Plane(cut),
+        } = run
+        else {
+            return None;
+        };
+        let touching = where_a_plane_crosses_a_pipe(cut, pipe)?;
+        let Shape::Circle { radius } = touching.shape else {
+            return None;
+        };
+        let centre = a_centre_its_plane_reads_back_from(cut, touching.centre)?;
+        if !either_side
+            .iter()
+            .all(|face| a_surface_holds_the_circle(face, centre, cut.normal(), radius))
+        {
+            return None;
+        }
+        let crossing = Crossing {
+            centre,
+            turning: cut.normal(),
+            shape: Shape::Circle { radius },
+        };
+        let the_edge_runs_its_way =
+            crossing.it_runs_the_way_a_closed_edge_is_stored(either_side, corner)?;
         Some(Curve {
             id: self.round(&crossing, crossing.turning),
             the_edge_runs_its_way,
@@ -1891,6 +1972,46 @@ impl Crossing {
             [Verdict::Holds, Verdict::RuledOut] => Some(true),
             [Verdict::RuledOut, Verdict::Holds] => Some(false),
             _ => None,
+        }
+    }
+
+    /// Whether this curve, about its own way round, turns at `corner` the way
+    /// a closed edge between `either_side` is stored running; `None` where
+    /// the two are square there or the curved face has no way round at it.
+    ///
+    /// **A closed edge is stored running the way the curved face beside it
+    /// winds at its one corner**, and of two curved faces the one
+    /// [`Surface::how_it_sorts_against`] puts first, which is a ball before a
+    /// pipe: `rcad-topo`'s and the reader's `the_curved_one_of`. The reader
+    /// reads which way a use of the edge goes by dotting the file's curve's
+    /// turn, `w × (corner − centre)`, with that winding in plain `f64`
+    /// (`Walk::which_way_round_a_closed_edge_is_stored`), so this asks the
+    /// same dot of the curve it is about to write. A plane through a ball's
+    /// poles crosses it in a circle square to its winding everywhere, and is
+    /// refused here as the model's own rule refuses it.
+    ///
+    /// [`where_a_plane_crosses_a_ball`] turns its circle about the plane's
+    /// normal, and a flat face under a ball faces away from the way the ball
+    /// winds: written about that normal, the cap
+    /// `a_cap_cut_off_a_ball_along_one_closed_circle_is_written_and_comes_back_the_same`
+    /// draws was refused by the reader as "not a solid this kernel can hold".
+    fn it_runs_the_way_a_closed_edge_is_stored(
+        &self,
+        either_side: [&Surface; 2],
+        corner: Point,
+    ) -> Option<bool> {
+        let curved = either_side
+            .into_iter()
+            .filter(|face| face.as_plane().is_none())
+            .min_by(|one, other| one.how_it_sorts_against(other))?;
+        let winding = curved.the_way_its_first_coordinate_runs_at(corner)?;
+        let leaning = self.turning.cross(corner - self.centre).dot(winding);
+        if leaning > 0.0 {
+            Some(true)
+        } else if leaning < 0.0 {
+            Some(false)
+        } else {
+            None
         }
     }
 
