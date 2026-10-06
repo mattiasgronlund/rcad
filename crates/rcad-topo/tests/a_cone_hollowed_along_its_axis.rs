@@ -21,10 +21,10 @@
 //!   while `fuse/assemble.rs` named the corner a closed crossing starts at by
 //!   its two surfaces alone and the two circles got one. Named by what picks
 //!   each circle out as well (Q1148), a pointed cone less a steeper cone two up
-//!   answers every rule, and a pointed cone less a whole ball pushing out
-//!   through its side every rule but the ball less the cone, which the check's
-//!   mesh refuses. A frustum less that ball is still refused, under another
-//!   name, by selection (Q1138).
+//!   answers every rule, and so does a pointed cone less a whole ball pushing
+//!   out through its side, since the check's mesh is asked fine enough to stop
+//!   the ball's band and the cone's folding onto each other (Q1198). A frustum
+//!   less that ball is still refused, under another name, by selection (Q1138).
 //!
 //! Every cone here is built by `tests/cones`, face by face through
 //! `SolidBuilder` with a power-of-two slope, and every ball by `Model::add_ball`.
@@ -415,27 +415,38 @@ fn a_pointed_cone_less_a_steeper_one_whose_circles_both_fall_on_its_side() {
 ///
 /// The ball's slices hold `π[9u − u³/3]` with `u` measured from its centre,
 /// so the pointed cone shares the ball below `z₁`, its own slices from `z₁`
-/// to `z₂`, and the ball above. The ball less the pointed cone is the ring
-/// round its side, `π∫(8z − 7 − 2z²) dz = π(z₂ − z₁)³/3 = 2√2π/3`. The pointed
-/// cone less the ball is its tip below `z₁` less the ball's bottom, and the
-/// rest above. The frustum less the ball is one solid, cut through from its
-/// bottom to `z₂`, and the ball less the frustum is one too, its bottom joined
-/// to the ring round the frustum's side.
+/// to `z₂`, and the ball above. The pointed cone less the ball is its tip
+/// below `z₁` less the ball's bottom, and the rest above. The frustum less the
+/// ball is one solid, cut through from its bottom to `z₂`, and the ball less
+/// the frustum is one too, its bottom joined to the ring round the frustum's
+/// side.
+///
+/// **The ball less the pointed cone is the ring round the cone's side.** At
+/// height `z` the ball's slice reaches `9 − (z − 4)² = 8z − 7 − z²` squared out
+/// from the axis and the cone's `z²`, and the first is the wider exactly where
+/// `2z² − 8z + 7 = 2(z − z₁)(z − z₂)` is below zero. So the cone leaves the
+/// ball nothing below `z₁`, where its bottom is inside the cone, and nothing
+/// above `z₂`, and between them the slice is the annulus
+/// `π(8z − 7 − 2z²) = −2π(z − z₁)(z − z₂)`, which adds up to
+/// `π(z₂ − z₁)³/3`. With `z₂ − z₁ = √2` that is `2√2π/3 = 2.9619`.
 ///
 /// **Every fuse of the pointed cone was refused after the faces were cut,
 /// and every fuse of the frustum `ResultIsNotManifold { count: 3 }`**, while
 /// the corner each circle starts at was named by the two surfaces alone and
-/// both circles got one (Q1148). Five of the pointed cone's answer now.
+/// both circles got one (Q1148).
 ///
-/// **The ball less the pointed cone is refused by the check's mesh, not by
-/// how the fuse names its edges** (Q1138). The answer is a ring of two faces,
-/// the ball's band outside and the cone's band inside, between the same two
-/// circles. Meshed coarsely, both faces draw the same sides between the
-/// circles' points. `validate.rs`'s `the_coarsest_mesh_whose_sides_do_not_cross`
-/// asks for finer meshes only down to half the distance between the two
-/// closest corners, and here those are the two circles' starts, 2 apart. With
-/// that floor at a sixty-fourth of it, the ring measured `2.9595 ± 0.0517`
-/// against `2√2π/3 = 2.9619`.
+/// **Then the ball less the pointed cone was refused by the check's mesh**,
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` (Q1198). The
+/// ring is two faces between the same two circles, the ball's band outside and
+/// the cone's band inside. Neither had a point inside it at deflections 7, 3.5
+/// and 1.75 (8, 11 and 14 points in all), so each drew sides straight from one
+/// circle to the other, and both drew the same ones. `validate.rs`'s
+/// `the_coarsest_mesh_whose_sides_do_not_cross` stopped there, at half the
+/// distance between the circles' starts, which are the two closest corners, 2
+/// apart. A side from one circle to the other is at least 2 long, and the ball
+/// charges a side `L²/(3r)`, so below `4/9` its band takes a point inside and
+/// the two stop drawing the same sides: at 0.875 they still folded, and at
+/// 0.4375 the mesh was taken.
 ///
 /// **Every fuse of the frustum is refused `ResultIsNotManifold { count: 1 }`
 /// by selection** (Q1138). The ball's face is cut in three, the cap below
@@ -459,6 +470,7 @@ fn a_cone_less_a_whole_ball_pushing_out_through_its_side() {
     let pointed_shares = slices(low) - slices(1.0) + a_frustum_holds(1.0, low, high) + above;
     let frustum_shares = a_frustum_holds(1.0, 2.0, high) + above;
     let tip = a_frustum_holds(1.0, 0.0, low) - (slices(low) - slices(1.0));
+    let ring = PI * (high - low).powi(3) / 3.0;
 
     let gives = what_each_rule_gives(|model| {
         let ball = a_ball_four_up(model, 3.0);
@@ -489,16 +501,9 @@ fn a_cone_less_a_whole_ball_pushing_out_through_its_side() {
             && holds(swapped_union, &[union_holds])
             && holds(intersection, &[pointed_shares])
             && holds(swapped_intersection, &[pointed_shares])
-            && holds(cone_less, &[tip, pointed - pointed_shares - tip]),
+            && holds(cone_less, &[tip, pointed - pointed_shares - tip])
+            && holds(less_cone, &[ring]),
         "{gives:?}"
-    );
-    assert!(
-        matches!(
-            less_cone,
-            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })
-        ),
-        "the ball less the pointed cone, {} if it answered: {less_cone:?}",
-        2.0 * 2.0_f64.sqrt() * PI / 3.0
     );
 
     let frustum_gives = what_each_rule_gives(|model| {
