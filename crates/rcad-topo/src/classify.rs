@@ -373,6 +373,19 @@ impl SolidView<'_> {
     /// classified with an ordinary ray: what it gets, every point of the box
     /// gets. A target whose grown box a face meets, or whose ray grazes
     /// something, hands over to the next.
+    ///
+    /// **Except where its ray parts at a flat face** ([`Hit::ReadingsPart`]).
+    /// [`SolidView::no_face_meets`] reads such a face by its triangles, so the
+    /// grown box can be clear of them while the face's stored plane, which is
+    /// the face, passes through it over the face: a point a rounding off a
+    /// turned block's side, and a point beside it a few spacings away in the
+    /// sliver between the side's triangles and its plane. The ray from the
+    /// point beside leaves out the crossing it parts at, so its count is one
+    /// off, and it put points on the wrong side of a turned block's side
+    /// (`tests/a_point_beside_a_turned_flat_face.rs`, Q1068). So the face's
+    /// plane places `point` itself, as it does where a ray from `point` parts
+    /// ([`SolidView::what_its_plane_says_beside_it`]), and where it cannot the
+    /// next target is tried.
     fn what_a_point_beside_it_says(
         self,
         point: PredicatePoint,
@@ -397,6 +410,15 @@ impl SolidView<'_> {
                 "{beside:?} is in a box round {point:?} that no face of the solid meets, and a \
                  ray from it says it is on the solid's skin"
             );
+            if let Some(face) = pass.parted_at {
+                let Some(placed) =
+                    self.what_its_plane_says_beside_it(face, point, policy, &mut trial)
+                else {
+                    continue;
+                };
+                trial.drain_into(log);
+                return Some(placed);
+            }
             if !pass.grazed_something {
                 trial.drain_into(log);
                 return Some(if pass.winding == 0 {
@@ -423,7 +445,9 @@ impl SolidView<'_> {
     /// a turned block's face takes off is a rounding deep, and every point of it
     /// is in that sliver (§346.6). Asked too of a face the point is beside
     /// whose corners and plane part about it, wherever the ray's line goes
-    /// ([`SolidView::what_a_face_it_is_beside_says`]).
+    /// ([`SolidView::what_a_face_it_is_beside_says`]), and of a face where the
+    /// ray from an exact point beside the point's box parted
+    /// ([`SolidView::what_a_point_beside_it_says`]).
     ///
     /// **The plane speaks for the point when no other face is near.** The box is
     /// stretched along an axis until it holds a point of the plane as well
@@ -452,7 +476,7 @@ impl SolidView<'_> {
         let face = self
             .faces()
             .find(|used| used.key() == face)
-            .expect("the ray parted at a face of this solid");
+            .expect("a ray parted at a face of this solid");
         let flat = face
             .surface()
             .as_plane()
@@ -512,6 +536,14 @@ impl SolidView<'_> {
     /// nothing there ([`SolidView::its_fan_adds_up_to_nothing_over`]). Every
     /// other face is the part of its surface it holds, so the box has to be off
     /// the surface, or the face has to hold none of the box.
+    ///
+    /// **Clear of a turned face's triangles is not clear of its stored
+    /// plane**, which the triangles are a rounding off. A box a rounding off
+    /// such a face, over it, can miss every triangle and still hold points on
+    /// both sides of the plane. A ray from a point of the box between the two
+    /// parts at the face wherever its line passes through it, and
+    /// [`SolidView::what_a_point_beside_it_says`] then asks the plane rather
+    /// than the ray (Q1068).
     fn no_face_meets(
         self,
         point: PredicatePoint,
