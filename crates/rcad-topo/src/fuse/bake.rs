@@ -231,8 +231,22 @@ pub(crate) struct BakedCorner {
     /// and a surface that proves it off is a refusal. Fewer than three, and the
     /// corner was read out of the model and nothing here asked (§286).
     /// `a_corner_is_this_place` in the arrangement leans on the first half:
-    /// a meet of three planes from this list is this corner (§356).
+    /// a meet of three planes from this list is this corner while it lies
+    /// within [`BakedCorner::room_its_planes_were_asked_with`] of it (§356,
+    /// §395.8).
     pub(crate) around: Vec<Surface>,
+    /// How far the corner was grown before each plane in `around` was asked
+    /// about it: the room `Model::validate_solid` grants a corner off a plane
+    /// plus [`what_writing_the_corner_down_cost`], the sum [`derive_a_corner`]
+    /// asks with. `None` for a corner read out of the model, which nothing
+    /// asked.
+    ///
+    /// **Kept so the arrangement reads the room `bake` used, and does not work
+    /// it out again.** A meet of three planes from `around` is this corner as
+    /// long as every point of it lies within this room of the corner, and no
+    /// further: three planes that share a line in the file meet wherever
+    /// rounding puts them on it, 326 units off in a KiCad relay (§395.7).
+    pub(crate) room_its_planes_were_asked_with: Option<f64>,
     /// For a corner read out of the model on a pipe's wall, the plane through
     /// the pipe's axis and the corner, moved into place — the plane a round
     /// bar's seam lies in — when the stored corner is exactly on it as stored.
@@ -926,6 +940,7 @@ fn place_a_corner(
         point: where_the_model_puts_it,
         around: distinct,
         seam_plane: the_seam_plane_a_corner_is_on(model, slot, around),
+        room_its_planes_were_asked_with: None,
     })
 }
 
@@ -1067,7 +1082,9 @@ fn where_the_model_puts_a_corner(
 /// solid's size is read where its corners are stored or where its placement
 /// puts them, whichever is smaller (§363), and the fuse meets the corner where
 /// the placement puts it. A surface the grown box straddles answers
-/// [`Decision::Undecidable`].
+/// [`Decision::Undecidable`]. The sum a plane was asked with is kept on the
+/// corner ([`BakedCorner::room_its_planes_were_asked_with`]), because the
+/// arrangement's fold reads it (§395.8).
 ///
 /// **This does not reopen §70.3.** That corner is three surfaces at a grazing
 /// angle and a stored corner far from where they cross, and what stops it is
@@ -1156,6 +1173,7 @@ fn derive_a_corner(
         point,
         around,
         seam_plane: None,
+        room_its_planes_were_asked_with: Some(writing_it_down + validate_allows.off_a_plane),
     })
 }
 
