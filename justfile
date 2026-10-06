@@ -134,6 +134,8 @@ gate_steps := "check-plugins \
     check-fuzz-triage-selftest \
     check-systemd-units \
     check-systemd-units-selftest \
+    check-triage-waits-for-the-night \
+    check-triage-waits-for-the-night-selftest \
     check-fuzz-yield-selftest \
     check-spend-selftest \
     check-fmt \
@@ -3444,8 +3446,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "57" ]; then \
-        echo "found $n check-* recipes, expected 57"; \
+    if [ "$n" != "59" ]; then \
+        echo "found $n check-* recipes, expected 59"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -5695,8 +5697,9 @@ fuzz-overnight window="28800":
     # §90 then made it follow the last *green* commit, and that bought the same
     # staleness back in a smaller size: the night of 2026-09-21 fuzzed a commit
     # from before §182's fix and re-found that fix's family. Every morning's
-    # finding is replayed against `main` by `fuzz-triage` anyway, so a tip that
-    # nothing has read yet costs at most a finding that triage calls stale.
+    # finding is replayed against `main` by `fuzz-triage`, which
+    # `rcad-fuzz-triage.timer` runs at 08:30 (§410), so a tip that nothing has
+    # read yet costs at most a finding that triage calls stale.
     #
     # Deciding is separate from doing, in `fuzz-watermark` below, so that what
     # the night would move to can be asked without moving anything.
@@ -6241,7 +6244,7 @@ fuzz-overnight window="28800":
 # not a question the night needs answered — and waiting for it cost the night of
 # 2026-09-21 its freshness: it fuzzed a commit from before §182's fix. A finding
 # on a tip that turns out broken is replayed against `main` by `fuzz-triage`,
-# which is the check that was always doing the work.
+# which is the check that does the work, every morning at 08:30 (§410).
 #
 # Two conditions, each of them a way the night could otherwise go wrong:
 #
@@ -8102,6 +8105,10 @@ check-gate-fresh-cleanup-selftest:
 
 # The morning after a night's fuzzing, in one call.
 #
+# **`rcad-fuzz-triage.timer` runs it at 08:30, with no arguments** (§410).
+# Before that timer a night was replayed when somebody remembered to, and of
+# the eighteen nights up to 2026-10-05 that left inputs, one had been.
+#
 # What this replaces is four or five calls that each had to read a directory
 # somebody else wrote: the `latest` line, then the night's directory, then the
 # artifacts under it, then the decoder on each one, then whether any of it still
@@ -8769,6 +8776,209 @@ check-systemd-units-selftest:
     # Seven: a service tracked with no timer beside it is half a pair in the tree.
     printf '[Service]\n' >"$tracked/rcad-alone.service"
     check "service with no timer" 1 "no rcad-alone.timer beside it"
+
+    [ "$failed" -eq 0 ]
+
+# `fuzz-triage` with no argument replays the night `latest` names, and `latest`
+# is written when a night finishes. A replay that starts while the night still
+# runs reads the night before instead, and every morning's verdicts are then a
+# day behind with nothing to say so. This holds the triage timer's hour clear of
+# the night's hard stop, and its own backstop clear of the next night (§410).
+#
+# **The hard stop is a sum, read out of the files:** the timer's hour, plus its
+# `AccuracySec=` (systemd's one minute when unset) and `RandomizedDelaySec=`,
+# plus the service's `TimeoutStartSec=` and `TimeoutStopSec=`. The replay's end
+# is the same sum over its own pair. Both are counted from the night's start, so
+# a night that crosses midnight needs no case of its own.
+#
+# **What it cannot read, it refuses.** An `OnCalendar=` that is not one time
+# every day, a span in a unit it does not know, a missing timeout, a key written
+# twice: each fails naming the line, because a guess here is a pass that holds
+# nothing. So does `Persistent=true` on either timer, since a catch-up run fires
+# at boot, at an hour no line here says.
+[doc("The morning's fuzz triage timer fires after the night's hard stop and ends before the next night.")]
+check-triage-waits-for-the-night tracked="tooling/systemd":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # What `key=` is set to in a unit file, or nothing. systemd adds up a key
+    # like `OnCalendar=` written twice and keeps the last of most others, so
+    # reading one of them would be a guess either way.
+    value() {
+        local file=$1 key=$2 count
+        count=$(grep -cE "^[[:space:]]*$key[[:space:]]*=" "$file" || true)
+        [ "$count" -le 1 ] || { echo "$file sets $key= $count times, and this reads one"; exit 1; }
+        sed -nE "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*(.*[^[:space:]])?[[:space:]]*\$/\1/p" "$file"
+    }
+
+    # A span in seconds: a bare number, or a number of s, min or h. systemd
+    # reads `8h 10min` and `infinity` too, and this refuses both.
+    seconds() {
+        local file=$1 key=$2 default=${3:-} span
+        span=$(value "$file" "$key") || { echo "$span"; exit 1; }
+        if [ -z "$span" ]; then
+            [ -n "$default" ] || { echo "$file sets no $key=, and this adds up only what is written"; exit 1; }
+            span=$default
+        fi
+        [[ "$span" =~ ^([0-9]+)(s|min|h)?$ ]] \
+            || { echo "$file: $key=$span is a span this cannot read; write seconds, or one number of s, min or h"; exit 1; }
+        case "${BASH_REMATCH[2]}" in
+            "" | s) echo $((10#${BASH_REMATCH[1]})) ;;
+            min) echo $((10#${BASH_REMATCH[1]} * 60)) ;;
+            h) echo $((10#${BASH_REMATCH[1]} * 3600)) ;;
+        esac
+    }
+
+    # Seconds after midnight, for the one `OnCalendar=` form that fires once a day.
+    at() {
+        local file=$1 cal daily='^\*-\*-\* ([0-9]{2}):([0-9]{2})(:([0-9]{2}))?$'
+        cal=$(value "$file" OnCalendar) || { echo "$cal"; exit 1; }
+        [[ "$cal" =~ $daily ]] \
+            || { echo "$file: OnCalendar=$cal is not one time every day (*-*-* HH:MM:SS), and this reads no other form"; exit 1; }
+        echo $((10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[4]:-0}))
+    }
+
+    # The longest a run can last past its timer's hour: how late the timer may
+    # fire, then how long the service may take to start and to stop.
+    runs_for() {
+        local unit=$1 late spread start stop
+        late=$(seconds "$unit.timer" AccuracySec 1min) || { echo "$late"; exit 1; }
+        spread=$(seconds "$unit.timer" RandomizedDelaySec 0) || { echo "$spread"; exit 1; }
+        start=$(seconds "$unit.service" TimeoutStartSec) || { echo "$start"; exit 1; }
+        stop=$(seconds "$unit.service" TimeoutStopSec) || { echo "$stop"; exit 1; }
+        echo $((late + spread + start + stop))
+    }
+
+    clock() {
+        printf '%02d:%02d:%02d' $(($1 / 3600 % 24)) $(($1 / 60 % 60)) $(($1 % 60))
+    }
+
+    night="{{tracked}}/rcad-fuzz"
+    triage="{{tracked}}/rcad-fuzz-triage"
+    for unit in "$night.service" "$night.timer" "$triage.service" "$triage.timer"; do
+        [ -f "$unit" ] || { echo "$unit is not there, so there is no morning to hold clear of the night"; exit 1; }
+    done
+
+    for timer in "$night.timer" "$triage.timer"; do
+        persistent=$(value "$timer" Persistent) || { echo "$persistent"; exit 1; }
+        case "$persistent" in
+            "" | 0 | no | false | off) ;;
+            *)
+                echo "$timer sets Persistent=$persistent: a catch-up run fires at boot, whatever the hour, and no sum here bounds it"
+                exit 1
+                ;;
+        esac
+    done
+
+    night_at=$(at "$night.timer") || { echo "$night_at"; exit 1; }
+    night_end=$(runs_for "$night") || { echo "$night_end"; exit 1; }
+    triage_clock=$(at "$triage.timer") || { echo "$triage_clock"; exit 1; }
+    triage_runs=$(runs_for "$triage") || { echo "$triage_runs"; exit 1; }
+    triage_at=$(( (triage_clock - night_at + 86400) % 86400 ))
+    triage_end=$((triage_at + triage_runs))
+
+    if [ "$triage_at" -lt "$night_end" ]; then
+        echo "the night can run until $(clock $((night_at + night_end))), and the triage timer fires at $(clock "$triage_clock")"
+        echo "a replay started then reads the night before's latest, so every morning's verdicts would be a day behind"
+        exit 1
+    fi
+    if [ "$triage_end" -gt 86400 ]; then
+        echo "the triage can run until $(clock $((night_at + triage_end))), past the next night's start at $(clock "$night_at")"
+        exit 1
+    fi
+    echo "the triage timer fires at $(clock "$triage_clock"), after the night's hard stop at $(clock $((night_at + night_end))), and is stopped by $(clock $((night_at + triage_end))), before the next night at $(clock "$night_at")"
+
+# Pins `check-triage-waits-for-the-night` against unit files this writes itself,
+# so each way the morning can land on the night is tried without touching the
+# real timers. Each arm asserts the sentence its case produces, for the reason
+# `check-systemd-units-selftest` gives: an always-failing check passes every
+# failing arm, and only the passing arms catch it.
+[private]
+check-triage-waits-for-the-night-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    work=$(mktemp -d -- "${TMPDIR:-/tmp}/rcad-triage-waits-selftest.XXXXXX")
+    trap 'rm -rf -- "$work"' EXIT
+    tracked="$work/tracked"
+    mkdir -p "$tracked"
+
+    units() {
+        printf '[Timer]\nOnCalendar=*-*-* 00:10:00\nPersistent=false\nAccuracySec=1min\n' >"$tracked/rcad-fuzz.timer"
+        printf '[Service]\nTimeoutStartSec=29400\nTimeoutStopSec=120\n' >"$tracked/rcad-fuzz.service"
+        printf '[Timer]\nOnCalendar=*-*-* 08:30:00\nPersistent=false\n' >"$tracked/rcad-fuzz-triage.timer"
+        printf '[Service]\nTimeoutStartSec=14400\nTimeoutStopSec=120\n' >"$tracked/rcad-fuzz-triage.service"
+    }
+
+    failed=0
+    check() {
+        local name=$1 want_rc=$2 needle=$3
+        local out rc=0
+        out=$({{ just_executable() }} check-triage-waits-for-the-night "$tracked" 2>&1) || rc=$?
+        if [ "$rc" -ne "$want_rc" ]; then
+            echo "check-triage-waits-for-the-night drifted from its own fixtures: $name wanted exit $want_rc, got $rc"
+            sed 's/^/    /' <<<"$out"
+            failed=1
+            return
+        fi
+        if ! grep -qF -- "$needle" <<<"$out"; then
+            echo "check-triage-waits-for-the-night drifted from its own fixtures: $name did not say \"$needle\""
+            sed 's/^/    /' <<<"$out"
+            failed=1
+        fi
+    }
+
+    # One: the units as tracked. 00:10, plus a minute of AccuracySec, plus
+    # 29400 s and 120 s, is 08:23:00. The triage timer sets no AccuracySec, so
+    # its minute is systemd's default: 08:30 plus 60, 14400 and 120 s is 12:33.
+    units
+    check "08:30" 0 "fires at 08:30:00, after the night's hard stop at 08:23:00, and is stopped by 12:33:00"
+
+    # Two: inside the night's backstop, which is the morning a day behind.
+    sed -i 's/08:30:00/08:15:00/' "$tracked/rcad-fuzz-triage.timer"
+    check "08:15 names the night's stop" 1 "the night can run until 08:23:00"
+    check "08:15 names its own hour" 1 "the triage timer fires at 08:15:00"
+
+    # Three: one minute is the difference. 08:22 is before the stop that the
+    # AccuracySec minute moves to 08:23; a sum that left it out would pass this.
+    units
+    sed -i 's/08:30:00/08:22:00/' "$tracked/rcad-fuzz-triage.timer"
+    check "08:22 is inside the AccuracySec minute" 1 "the night can run until 08:23:00"
+
+    # Four: a backstop that runs into the next night.
+    units
+    sed -i 's/TimeoutStartSec=14400/TimeoutStartSec=16h/' "$tracked/rcad-fuzz-triage.service"
+    check "a sixteen-hour backstop" 1 "past the next night's start at 00:10:00"
+
+    # Five: a night that crosses midnight is counted from its own start. 22:00
+    # plus 29580 s is 06:13 the next day, and 06:30 is after it.
+    units
+    sed -i 's/00:10:00/22:00:00/' "$tracked/rcad-fuzz.timer"
+    sed -i 's/08:30:00/06:30:00/' "$tracked/rcad-fuzz-triage.timer"
+    check "a night across midnight" 0 "after the night's hard stop at 06:13:00"
+
+    # Six: forms this does not read are refused, not guessed at.
+    units
+    sed -i 's/^OnCalendar=.*/OnCalendar=daily/' "$tracked/rcad-fuzz-triage.timer"
+    check "OnCalendar=daily" 1 "OnCalendar=daily is not one time every day"
+    units
+    sed -i 's/TimeoutStartSec=14400/TimeoutStartSec=infinity/' "$tracked/rcad-fuzz-triage.service"
+    check "an unbounded triage" 1 "TimeoutStartSec=infinity is a span this cannot read"
+    units
+    sed -i '/TimeoutStopSec/d' "$tracked/rcad-fuzz.service"
+    check "a missing timeout" 1 "sets no TimeoutStopSec="
+    units
+    printf 'OnCalendar=*-*-* 04:00:00\n' >>"$tracked/rcad-fuzz-triage.timer"
+    check "a second OnCalendar" 1 "sets OnCalendar= 2 times"
+
+    # Seven: a catch-up run starts at boot, at no hour the files say.
+    units
+    sed -i 's/Persistent=false/Persistent=true/' "$tracked/rcad-fuzz-triage.timer"
+    check "Persistent=true" 1 "sets Persistent=true"
+
+    # Eight: no triage pair at all, which is the tree before §410.
+    units
+    rm "$tracked/rcad-fuzz-triage.timer"
+    check "no triage timer" 1 "rcad-fuzz-triage.timer is not there"
 
     [ "$failed" -eq 0 ]
 

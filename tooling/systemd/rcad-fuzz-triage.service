@@ -1,0 +1,29 @@
+[Unit]
+Description=rcad: replay the night's fuzz findings against main (docs/decisions.md §410)
+
+[Service]
+Type=oneshot
+
+# The night's own tree, which nobody else uses and `clean-targets` never sweeps.
+# It stands on the night's commit rather than `main`, so `fuzz-triage` borrows a
+# detached worktree of `main` under /tmp for the replay and removes it after.
+WorkingDirectory=%h/git/mattiasgronlund/rcad-nightly-fuzz
+
+# The same PATH as rcad-fuzz.service, for its reason: the replay is a
+# `cargo run`, and rustup's `cargo` is in `~/.cargo/bin`, which systemd --user
+# does not put on any PATH.
+Environment=PATH=%h/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+
+# No `night` argument: `fuzz-triage` reads the one `~/rcad-fuzz-logs/latest`
+# names, which is the night that finished before this timer fired.
+ExecStart=%h/.local/bin/mise exec -- just fuzz-triage
+
+# The night of 2026-10-06 took 14.7 minutes to replay. Four hours is the
+# backstop, and `check-triage-waits-for-the-night` holds it clear of the next
+# night's start.
+TimeoutStartSec=14400
+TimeoutStopSec=120
+
+# The morning is when lanes compile, so the replay takes what they leave.
+Nice=10
+IOSchedulingClass=idle
