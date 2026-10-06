@@ -2350,30 +2350,125 @@ fn a_bar_cut_by_one_plane_off_its_axis_is_answered() {
     );
 }
 
-/// A ball with a pipe through it refuses by name, and it is §36.20's quartic
-/// rather than anything about arcs or seams.
+/// A ball of radius four with a bar of radius one through its centre gets
+/// past the order along its two circles under every rule both ways, and is
+/// refused after its faces are cut: the result's mesh finds two corners of a
+/// face in one place, and the bar less the ball has faces that do not agree
+/// which way they face. A tolerant policy changes nothing.
 ///
-/// A tolerant policy changes nothing, which is the half §36.20 did not measure:
-/// ordering points along a crossing of two quadrics is not a budget question.
+/// It was refused `ACrossingThisCannotBeOrderedAlong` for every rule, as
+/// §36.20's quartic, while the arrangement could not tell the two circles
+/// square to the axis from the quartic loops of a ball off it, which
+/// `intersect` names with the same runs. The arrangement now asks exactly
+/// whether the centre is on the axis, and orders round each circle about it.
+///
+/// **What it should answer**, and will be moved to once the cut faces are
+/// joined (Q1140's row for after): the bar reaches past the ball both ends, so
+/// the ball less the bar is `(4π/3)(R² − r²)^(3/2) = (4π/3)·15^(3/2)`, about
+/// 243.35, the two share `(4π/3)(R³ − (R² − r²)^(3/2))`, about 24.74, the union
+/// is that ball and the bar's `12π` less what they share, and the bar less the
+/// ball is `12π` less what they share, in two pieces.
 #[test]
-fn a_ball_with_a_pipe_through_it_is_refused_by_name() {
+fn a_ball_with_a_bar_through_its_centre_is_refused_after_its_faces_are_cut() {
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        let mut model = a_model();
-        let ball = model
-            .add_ball(4.0, &Isometry::identity())
-            .expect("a ball of radius four");
-        let pipe = model
-            .add_round_bar(
-                1.0,
-                12.0,
-                &Isometry::translation(Vector::new(0.0, 0.0, -6.0)).expect("a shift"),
-            )
-            .expect("a pipe long enough to go right through");
-        match refusal(&mut model, &Pair::of(ball, pipe), Rule::Difference, &policy) {
-            Error::ACrossingThisCannotBeOrderedAlong => (),
-            other => panic!("a ball with a pipe through it refused with {other:?}"),
+        for (rule, ball_first) in every_rule_both_ways() {
+            let mut model = a_model();
+            let ball = model
+                .add_ball(4.0, &Isometry::identity())
+                .expect("a ball of radius four");
+            let bar = model
+                .add_round_bar(
+                    1.0,
+                    12.0,
+                    &Isometry::translation(Vector::new(0.0, 0.0, -6.0)).expect("a shift"),
+                )
+                .expect("a bar long enough to go right through");
+            let pair = if ball_first {
+                Pair::of(ball, bar)
+            } else {
+                Pair::of(bar, ball)
+            };
+            assert_refused_after_its_faces_are_cut(
+                refusal(&mut model, &pair, rule, &policy),
+                rule,
+                ball_first,
+                &format!("{policy:?}"),
+            );
         }
     }
+}
+
+/// A ball one rounding off a bar's axis crosses it in two quartic loops and
+/// not in two circles, so it is still refused before any order is asked, under
+/// every rule both ways. The bar's axis runs up `z` through `(1, 0, 0)` and the
+/// ball's centre is the next `f64` past it along `x`, `2⁻⁵²` out; centred on
+/// `(1, 0, 0)` itself, the same pair gets past the order and is refused after
+/// its faces are cut, as the pair above is.
+#[test]
+fn a_ball_one_rounding_off_a_bars_axis_is_refused_before_any_order() {
+    let one_past = f64::from_bits(1.0_f64.to_bits() + 1);
+    for (centre, on_the_axis) in [(1.0, true), (one_past, false)] {
+        for (rule, ball_first) in every_rule_both_ways() {
+            let mut model = a_model();
+            let ball = model
+                .add_ball(
+                    4.0,
+                    &Isometry::translation(Vector::new(centre, 0.0, 0.0)).expect("a shift"),
+                )
+                .expect("a ball of radius four");
+            let bar = model
+                .add_round_bar(
+                    1.0,
+                    12.0,
+                    &Isometry::translation(Vector::new(1.0, 0.0, -6.0)).expect("a shift"),
+                )
+                .expect("a bar long enough to go right through");
+            let pair = if ball_first {
+                Pair::of(ball, bar)
+            } else {
+                Pair::of(bar, ball)
+            };
+            let why = refusal(&mut model, &pair, rule, &Policy::certified());
+            if on_the_axis {
+                assert_refused_after_its_faces_are_cut(
+                    why,
+                    rule,
+                    ball_first,
+                    &format!("centred at x = {centre}"),
+                );
+            } else {
+                assert!(
+                    matches!(why, Error::ACrossingThisCannotBeOrderedAlong),
+                    "centred at x = {centre}, {rule:?}, the ball first {ball_first}: {why:?}"
+                );
+            }
+        }
+    }
+}
+
+/// What a ball with a bar through its centre is refused with today: the bar
+/// less the ball by faces that do not agree which way they face, and every
+/// other rule and order by the result's mesh finding two corners of a face in
+/// one place. Not traced past the name (Q1140).
+fn assert_refused_after_its_faces_are_cut(why: Error, rule: Rule, ball_first: bool, what: &str) {
+    let the_bar_less_the_ball = matches!(rule, Rule::Difference) && !ball_first;
+    match why {
+        Error::Invalid(rcad_topo::Invalid::FacesDoNotAgreeWhichWayTheyFace)
+            if the_bar_less_the_ball => {}
+        Error::CannotMeshAFace {
+            why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
+            ..
+        } if !the_bar_less_the_ball => {}
+        other => panic!("{what}, {rule:?}, the ball first {ball_first}: refused with {other:?}"),
+    }
+}
+
+/// Each rule, with `true` for the ball named first.
+fn every_rule_both_ways() -> Vec<(Rule, bool)> {
+    [Rule::Union, Rule::Intersection, Rule::Difference]
+        .into_iter()
+        .flat_map(|rule| [(rule, true), (rule, false)])
+        .collect()
 }
 
 // §31.7 criterion 14's table, and the rest of the catalogue beside it.

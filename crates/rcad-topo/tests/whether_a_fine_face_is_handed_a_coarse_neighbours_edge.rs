@@ -313,11 +313,18 @@ fn no_triangle_of_either_face_strays_further_than_the_deflection_asked_for() {
 /// A bar down a ball's own axis crosses its skin in two circles, which would be
 /// a pipe of radius a fifth against a ball of radius ten sharing an edge — a
 /// fifty-fold difference in curvature where the lens manages twenty. The fuse
-/// never gets that far: `intersect` gives a sphere against a cylinder a shape
-/// `fuse::cuts::how_two_faces_meet` has no order for, and it refuses by name.
-/// Turned to lie along `x` instead, so that the crossing misses the ball's
-/// poles and its seam, it refuses the same way — so it is the pair of surfaces
-/// and not where they were put.
+/// never gets that far, and the two placements stop in two places.
+///
+/// **Down `z`, through the centre**, the union gets past the order along the
+/// two circles and is refused after the faces are cut: the result's mesh finds
+/// two corners of a face in one place (Q1140). It was refused
+/// `ACrossingThisCannotBeOrderedAlong` while the arrangement could not tell two
+/// circles from a quartic. What it should answer is the ball and the bar less
+/// what they share: `4000π/3 + 40π·0.04 − (4π/3)(1000 − (100 − 0.04)^(3/2))`.
+///
+/// **Turned to lie along `x`** by a quarter turn about `y`, it is still
+/// refused by name before any order is asked. Why the turned bar's axis is not
+/// read as through the centre is not traced here.
 #[test]
 fn a_ball_against_a_bar_never_gets_as_far_as_a_mesh() {
     for turned in [false, true] {
@@ -344,9 +351,20 @@ fn a_ball_against_a_bar_never_gets_as_far_as_a_mesh() {
                 &mut ProvenanceLog::new(),
             )
             .expect_err("a ball and a bar have no fuse here");
+        let refused_where_it_should_be = if turned {
+            matches!(why, Error::ACrossingThisCannotBeOrderedAlong)
+        } else {
+            matches!(
+                why,
+                Error::CannotMeshAFace {
+                    why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
+                    ..
+                }
+            )
+        };
         assert!(
-            matches!(why, Error::ACrossingThisCannotBeOrderedAlong),
-            "a bar {} a ball was refused with {why:?} rather than for the crossing",
+            refused_where_it_should_be,
+            "a bar {} a ball was refused with {why:?}",
             if turned { "across" } else { "down" }
         );
     }

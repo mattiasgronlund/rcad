@@ -836,13 +836,24 @@ fn the_roofed_frustum_between(low: f64, high: f64) -> f64 {
 }
 
 /// Three shapes built on the way that never reach the arrangement's cells: a
-/// ball against a pipe crosses in a quartic, which nothing orders (§34.10).
+/// ball against a pipe off its centre crosses in a quartic, which nothing
+/// orders (§34.10).
 ///
 /// - the ball of radius 2 against the square rod with a hole of radius `0.3`
-///   down its axis, and down `(0.4, 0.3)`;
+///   down `(0.4, 0.3)`;
 /// - a bar of radius 2, height 10, against a slab `|x| < 1` along it and a ball
 ///   of radius `0.5` on its wall at `(2, 0, 5)`, which was to be a walk going
 ///   round nothing on a pipe.
+///
+/// **The rod holed down its own axis does reach the cells now**, and a face of
+/// it cannot have them told apart, under every rule both ways (Q1140). Its
+/// hole crosses the ball in two circles square to the axis, which the
+/// arrangement could not tell from the quartic loops of a hole off the centre
+/// until it asked exactly whether the centre is on the axis. What it should
+/// answer: the rod `[−1, 1]² × [−5, 5]` holds the whole square inside the
+/// ball's radius, so the two share `∫∫ 2√(4 − x² − y²)` over the square less
+/// the hole's `(4π/3)(8 − 3.91^(3/2))`, and the square's part works out to
+/// `76π/3 − 72·atan √2 + 8√2/3`.
 #[test]
 fn a_ball_against_a_pipe_is_refused_before_any_cell() {
     for (rule, first) in every_rule_both_ways() {
@@ -855,8 +866,13 @@ fn a_ball_against_a_pipe_is_refused_before_any_cell() {
                 .expect("a bar");
             let holed = fuse_one(&mut model, rod, bar, Rule::Difference);
             let refused = fuse(&mut model, ball, holed, rule, first);
+            let on_the_axis = hole == [0.0, 0.0];
             assert!(
-                matches!(refused, Err(Error::ACrossingThisCannotBeOrderedAlong)),
+                if on_the_axis {
+                    matches!(refused, Err(Error::CannotTellTheCellsOfAFaceApart { .. }))
+                } else {
+                    matches!(refused, Err(Error::ACrossingThisCannotBeOrderedAlong))
+                },
                 "the rod holed at {hole:?}, {rule:?}, the ball first {first}: {refused:?}"
             );
         }
