@@ -29,6 +29,13 @@
 //! on: the arc of the ball's crossing along the second block was named once by
 //! the skin and once by the flat face, with two different names.
 //!
+//! **A whole circle cost the same.** A ball or a bar that the plane cuts in one
+//! closed curve nothing else cuts, with one block holding the whole of it on its
+//! face and the other block's face elsewhere on the plane, was refused
+//! `ResultIsNotManifold { count: 1 }` in every fuse: the round wall carried the
+//! circle as one spelling and the flat face as the other, so the closed edge
+//! was named twice (`a_ball_cut_whole_by_a_plane_two_blocks_spell_an_ulp_apart_in_scale`).
+//!
 //! # What each volume is held to
 //!
 //! Each block takes half of the cap of height two, `26π/3`, and half of its
@@ -37,7 +44,7 @@
 //! its closed form and one that is a hole measures over, by no more than that
 //! wall's area times [`DEFLECTION`].
 
-use core::f64::consts::{FRAC_1_SQRT_2, PI};
+use core::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI};
 
 use rcad_geom::{Axis, Deflection, Isometry, PlaneAgreement, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -72,21 +79,28 @@ const TO_THE_SHORTER_SPELLING: [f64; 2] = [0.29, 0.495_398_163_397_448_4];
 /// which is [`FRAC_1_SQRT_2`] and the `f64` just above `c`.
 const TO_THE_LONGER_SPELLING: [f64; 2] = [0.45, 0.335_398_163_397_448_05];
 
+/// Before its turns, the block whose face on `x = y` holds the whole circle a
+/// round solid is cut in: `12 × 6 × 20`, every other face of it at least six
+/// from the axis.
+const THE_NEAR_BLOCK: [[f64; 2]; 2] = [[-6.0, -6.0], [6.0, 0.0]];
+
+/// What [`THE_NEAR_BLOCK`] holds.
+const THE_NEAR_BLOCKS_VOLUME: f64 = 1440.0;
+
+/// Before its turns, the block half a unit clear of [`THE_NEAR_BLOCK`] whose
+/// face on `x = y` misses every round solid here: `3.5 × 10 × 20`.
+const THE_FAR_BLOCK: [[f64; 2]; 2] = [[6.5, -10.0], [10.0, 0.0]];
+
+/// What [`THE_FAR_BLOCK`] holds.
+const THE_FAR_BLOCKS_VOLUME: f64 = 700.0;
+
 /// The two blocks' faces on `x = y` hold four numbers each in a ratio of
 /// `c′/c`: one plane to `intersect`, and not one spelling or its negation.
 #[test]
 fn two_turns_put_a_face_on_one_plane_with_coefficients_an_ulp_apart_in_scale() {
     let mut model = a_model();
     let (_, [left, right]) = the_ball_and_two_blocks_on_one_side(&mut model, true);
-    let [shorter, longer] = [left, right].map(|block| {
-        model
-            .solid(block)
-            .expect("this model made the key")
-            .faces()
-            .map(|face| face.plane())
-            .find(|plane| plane.coefficients()[3] == 0.0)
-            .expect("each block has a face through the turn's axis")
-    });
+    let [shorter, longer] = [left, right].map(|block| the_face_on_x_equals_y(&model, block));
     let c = f64::from_bits(FRAC_1_SQRT_2.to_bits() - 1);
     assert_eq!(shorter.coefficients(), [-c, c, 0.0, 0.0]);
     assert_eq!(
@@ -203,6 +217,115 @@ fn two_blocks_facing_apart_across_a_plane_spelled_an_ulp_apart_in_scale_are_stil
     }
 }
 
+/// **A ball cut in a whole great circle, the plane spelled one way by its skin
+/// and the other by the face along it.** The ball is turned about `x` so that
+/// neither pole is on `x = y`, and nothing but the plane cuts the circle: every
+/// other plane of the two blocks is at least six from the centre. The near
+/// block, spelling the plane with `c`, holds the whole circle on its face; the
+/// far block, spelling it with `c′`, touches nothing, but nothing proves it
+/// apart from the near one, so its planes cut the ball's skin too and the skin
+/// carried the circle as `c′` in both orders of the blocks. Before the closed
+/// edge's name folded the plane at any scale, a print of it showed the skin's
+/// side and the flat face's side named apart in the bits of `c` and `c′`, and
+/// all twelve fuses were refused `ResultIsNotManifold { count: 1 }`.
+///
+/// The ball's half inside the near block is `250π/3` with a skin of `50π`, and
+/// so is the half outside.
+#[test]
+fn a_ball_cut_whole_by_a_plane_two_blocks_spell_an_ulp_apart_in_scale() {
+    every_fuse_with_the_two_blocks_answers(&CutWhole {
+        made: a_ball_with_its_poles_off_the_plane,
+        whole: 4.0 * PI * RADIUS * RADIUS * RADIUS / 3.0,
+        in_the_near_block: 2.0 * PI * RADIUS * RADIUS * RADIUS / 3.0,
+        wall_inside: 2.0 * PI * RADIUS * RADIUS,
+        wall_outside: 2.0 * PI * RADIUS * RADIUS,
+        pieces_outside: 1,
+    });
+}
+
+/// **A bar crossing the plane square to it, cut in a whole circle the same
+/// way.** The bar is of radius two, from eight on one side of `x = y` to eight
+/// on the other, and the near block's face `y = −6` cuts its wall in a second
+/// circle, parallel to the first, which meets nothing either. Named either way
+/// round only, all twelve fuses were refused `ResultIsNotManifold { count: 1 }`.
+///
+/// The bar holds `64π`, of which the near block holds the six between the two
+/// circles, `24π` behind a wall of `24π`; the ten outside it are two pieces
+/// behind a wall of `40π`.
+#[test]
+fn a_bar_cut_whole_by_a_plane_two_blocks_spell_an_ulp_apart_in_scale() {
+    every_fuse_with_the_two_blocks_answers(&CutWhole {
+        made: a_bar_square_to_the_plane,
+        whole: 64.0 * PI,
+        in_the_near_block: 24.0 * PI,
+        wall_inside: 24.0 * PI,
+        wall_outside: 40.0 * PI,
+        pieces_outside: 2,
+    });
+}
+
+/// **Two blocks overlapping, their faces on `x = y` side by side, are refused
+/// one way round with nothing round about.** The near block, and a block
+/// reaching back over it to `x = 5.5` before the turns, so that the two share
+/// `0.5 × 6 × 20` and their faces on `x = y`, spelled with `c` and `c′`, overlap.
+/// The near block first, their intersection and the near block less the other
+/// are refused `ResultIsNotManifold { count: 1 }`; the other first, their union
+/// is. The rest answer their closed forms. Nobody has traced it: no closed
+/// crossing is in it, so the name of one is not the cause.
+#[test]
+fn two_blocks_overlapping_on_a_plane_spelled_an_ulp_apart_in_scale_are_refused_one_way_round() {
+    let reaching_back = [[5.5, -10.0], [10.0, 0.0]];
+    let (shared, its_volume) = (60.0, 900.0);
+    for (near_first, rule, closed_form) in [
+        (true, Rule::Intersection, None),
+        (
+            true,
+            Rule::Union,
+            Some(THE_NEAR_BLOCKS_VOLUME + its_volume - shared),
+        ),
+        (true, Rule::Difference, None),
+        (false, Rule::Intersection, Some(shared)),
+        (false, Rule::Union, None),
+        (false, Rule::Difference, Some(its_volume - shared)),
+    ] {
+        let mut model = a_model();
+        let near = block(&mut model, THE_NEAR_BLOCK, TO_THE_SHORTER_SPELLING);
+        let other = block(&mut model, reaching_back, TO_THE_LONGER_SPELLING);
+        let (one, other) = if near_first {
+            (near, other)
+        } else {
+            (other, near)
+        };
+        let answer = model.fuse(
+            &[one],
+            &[other],
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Some(closed_form) = closed_form else {
+            assert!(
+                matches!(answer, Err(Error::ResultIsNotManifold { count: 1 })),
+                "{rule:?}, the near block first {near_first}: {answer:?}"
+            );
+            continue;
+        };
+        let solids = answer
+            .unwrap_or_else(|why| panic!("this {rule:?} is answered: {why:?}"))
+            .solids()
+            .to_vec();
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a fuse writes a sound model or writes nothing");
+        assert_eq!(solids.len(), 1, "{rule:?}");
+        let found = volume_of(&model, &solids);
+        assert!(
+            (found - closed_form).abs() <= 1e-9 * closed_form,
+            "{rule:?}: measured {found}, closed form {closed_form}"
+        );
+    }
+}
+
 /// Which way a round wall of this area bounds the solid being measured.
 enum Wall {
     /// The solid is on the ball's side of it, so its mesh measures under.
@@ -210,6 +333,22 @@ enum Wall {
     /// The solid is round it, so its mesh leaves the hole too small and measures
     /// over.
     AHole(f64),
+}
+
+/// A round solid that `x = y` cuts in one whole closed curve, and what each
+/// fuse of it with [`THE_NEAR_BLOCK`] and [`THE_FAR_BLOCK`] is held to.
+struct CutWhole {
+    made: fn(&mut Model) -> SolidKey,
+    /// What the whole of it holds.
+    whole: f64,
+    /// What of it the near block holds.
+    in_the_near_block: f64,
+    /// The area of its round wall inside the near block.
+    wall_inside: f64,
+    /// The area of its round wall outside the near block.
+    wall_outside: f64,
+    /// How many solids what is left of it outside the near block is.
+    pieces_outside: usize,
 }
 
 fn a_model() -> Model {
@@ -241,6 +380,118 @@ fn the_ball_and_two_blocks_on_one_side(
     (ball, blocks)
 }
 
+/// The plane of `block`'s face through the turns' axis, which is `x = y`.
+fn the_face_on_x_equals_y(model: &Model, block: SolidKey) -> rcad_geom::Plane {
+    model
+        .solid(block)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.plane())
+        .find(|plane| plane.coefficients()[3] == 0.0)
+        .expect("each block has a face through the turn's axis")
+}
+
+/// Fuse the round solid `round.made` builds with [`THE_NEAR_BLOCK`] and
+/// [`THE_FAR_BLOCK`] under every rule, whichever block is named first and
+/// whichever side the round solid is on, and hold each answer to its closed
+/// form.
+fn every_fuse_with_the_two_blocks_answers(round: &CutWhole) {
+    let mut model = a_model();
+    let [near, far] = the_near_and_the_far_block(&mut model, true);
+    let c = f64::from_bits(FRAC_1_SQRT_2.to_bits() - 1);
+    assert_eq!(
+        the_face_on_x_equals_y(&model, near).coefficients(),
+        [-c, c, 0.0, 0.0]
+    );
+    assert_eq!(
+        the_face_on_x_equals_y(&model, far).coefficients(),
+        [-FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0, 0.0]
+    );
+
+    let both_blocks = THE_NEAR_BLOCKS_VOLUME + THE_FAR_BLOCKS_VOLUME;
+    let outside = round.whole - round.in_the_near_block;
+    for near_first in [true, false] {
+        for round_first in [true, false] {
+            let fuse = |rule| {
+                let mut model = a_model();
+                let solid = (round.made)(&mut model);
+                let blocks = the_near_and_the_far_block(&mut model, near_first);
+                let answer = fused(&mut model, round_first, solid, blocks, rule);
+                (answer.len(), volume_of(&model, &answer))
+            };
+
+            let (count, volume) = fuse(Rule::Intersection);
+            assert_eq!(count, 1, "only the near block holds any of it");
+            measures(
+                volume,
+                round.in_the_near_block,
+                Wall::Outside(round.wall_inside),
+            );
+
+            let (count, volume) = fuse(Rule::Union);
+            assert_eq!(count, 2, "the far block stands apart");
+            measures(
+                volume,
+                both_blocks + outside,
+                Wall::Outside(round.wall_outside),
+            );
+
+            let (count, volume) = fuse(Rule::Difference);
+            if round_first {
+                assert_eq!(count, round.pieces_outside);
+                measures(volume, outside, Wall::Outside(round.wall_outside));
+            } else {
+                assert_eq!(count, 2, "the far block stands apart");
+                measures(
+                    volume,
+                    both_blocks - round.in_the_near_block,
+                    Wall::AHole(round.wall_inside),
+                );
+            }
+        }
+    }
+}
+
+/// The ball of radius five about the origin, turned about `x` so that neither
+/// pole is on `x = y` and the plane cuts it in a circle no pole starts.
+fn a_ball_with_its_poles_off_the_plane(model: &mut Model) -> SolidKey {
+    model
+        .add_ball(
+            RADIUS,
+            &Isometry::rotation(&Axis::x(), 0.3).expect("a finite turn"),
+        )
+        .expect("a ball of radius five")
+}
+
+/// A bar of radius two along the normal of `x = y`, from eight on one side of
+/// it to eight on the other.
+fn a_bar_square_to_the_plane(model: &mut Model) -> SolidKey {
+    let bar = model
+        .add_round_bar(
+            2.0,
+            16.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, -8.0)).expect("a finite placement"),
+        )
+        .expect("a bar of radius two");
+    for (axis, angle) in [(Axis::x(), -FRAC_PI_2), (Axis::z(), FRAC_PI_4)] {
+        model
+            .place_solid(
+                bar,
+                &Isometry::rotation(&axis, angle).expect("a finite turn"),
+            )
+            .expect("this model made the key");
+    }
+    bar
+}
+
+/// [`THE_NEAR_BLOCK`] turned to spell `x = y` with `c` and [`THE_FAR_BLOCK`]
+/// turned to spell it with `c′`, the near one first when `near_first`.
+fn the_near_and_the_far_block(model: &mut Model, near_first: bool) -> [SolidKey; 2] {
+    let near = block(model, THE_NEAR_BLOCK, TO_THE_SHORTER_SPELLING);
+    let far = block(model, THE_FAR_BLOCK, TO_THE_LONGER_SPELLING);
+    if near_first { [near, far] } else { [far, near] }
+}
+
 /// The block over the rectangle from `low` to `high`, from `z = −10` to
 /// `z = 10`, turned about `z` by each of `turns` in order.
 ///
@@ -269,19 +520,19 @@ fn block(model: &mut Model, [low, high]: [[f64; 2]; 2], turns: [f64; 2]) -> Soli
     solid
 }
 
-/// Fuse the ball with the two blocks, the ball first when `ball_first`, under a
+/// Fuse `round` with the two blocks, `round` first when `round_first`, under a
 /// certified policy, and insist the model it leaves is valid.
 fn fused(
     model: &mut Model,
-    ball_first: bool,
-    ball: SolidKey,
+    round_first: bool,
+    round: SolidKey,
     blocks: [SolidKey; 2],
     rule: Rule,
 ) -> Vec<SolidKey> {
-    let (arguments, tools) = if ball_first {
-        (vec![ball], blocks.to_vec())
+    let (arguments, tools) = if round_first {
+        (vec![round], blocks.to_vec())
     } else {
-        (blocks.to_vec(), vec![ball])
+        (blocks.to_vec(), vec![round])
     };
     let answer = model
         .fuse(
