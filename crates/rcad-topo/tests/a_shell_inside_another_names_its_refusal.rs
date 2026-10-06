@@ -1,5 +1,8 @@
-//! A block with a box-shaped hollow in it, and a bar standing through one of
-//! the block's upright edges.
+//! Hollows whose corners are asked whether they are inside the shell round
+//! them: a box in a notched block, and a ball touching a block's skin with its
+//! poles.
+//!
+//! # A box in a block with a bar through its edge
 //!
 //! The block runs from the origin to `(10, 10, 4)` and the hollow from
 //! `(2, 2, 1)` to `(4, 4, 3)`, clear of every face. The bar has radius 2 and
@@ -24,12 +27,32 @@
 //! fuse here. Each answer is checked against the volume worked out by hand: the
 //! block's 400, less the hollow's 8, with the quarter of the bar inside the
 //! block, `4π`, taken away or the rest of the bar, `20π`, added.
+//!
+//! # A ball touching the block's top with its north pole
+//!
+//! The same block less a ball of radius 1 centred at `(5, 5, 3)`. The ball's
+//! north pole, `(5, 5, 4)`, is on the block's top and its south pole,
+//! `(5, 5, 2)`, is inside the block. A ball's one face is walked down its seam
+//! from the north pole and back up it from the south pole, and the hollow's
+//! corners were asked as the **first end of each edge**, so the north pole was
+//! asked twice, came back on the skin twice, and the south pole was never asked
+//! at all: `Undecidable`, for a hollow whose other corner answers. Each side is
+//! now asked from the corner it starts at (row Q883).
+//!
+//! # A ball touching the block's top and bottom with its poles
+//!
+//! A ball of radius 2 centred at `(5, 5, 2)` touches the top with its north
+//! pole and the bottom with its south pole, so every corner of the hollow is on
+//! the block's skin and none places it. The refusal is `Undecidable`, with one
+//! record over the two poles; until row Q883 that record named the block's
+//! corner at the origin, which nothing asked about. The other five fuses of the
+//! pair answer.
 
 use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 /// The block with its hollow, less the bar: the hollow stays a shell of its
 /// own, and the notch takes a quarter of the bar out of the block.
@@ -78,6 +101,126 @@ fn a_block_less_a_box_and_a_bar_at_once_keeps_its_hollow() {
         Rule::Difference,
         392.0 - 4.0 * PI,
     );
+}
+
+/// The block less a ball whose north pole is on the block's top: one solid,
+/// the block's skin and the ball's, holding the block's 400 less the ball's
+/// `4π/3`.
+#[test]
+fn a_block_less_a_ball_touching_its_top_with_one_pole_keeps_the_ball_as_a_hollow() {
+    let mut model = a_model();
+    let block = a_block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
+    let ball = a_ball(&mut model, 1.0, at(5.0, 5.0, 3.0));
+    the_one_solid_with_its_hollow(
+        &mut model,
+        &[block],
+        &[ball],
+        Rule::Difference,
+        400.0 - 4.0 * PI / 3.0,
+    );
+}
+
+/// The block less a ball of radius 2 centred at `(5, 5, 2)`, which touches the
+/// block's top with its north pole and its bottom with its south pole: both
+/// corners of the hollow are on the block's skin, and the refusal names the
+/// two of them and nothing else.
+///
+/// A gap and not a limit (§16.10): the ball is a hollow of the block, and any
+/// point of the ball off its poles would say so. Pinned as it stands.
+#[test]
+fn a_block_less_a_ball_touching_its_top_and_bottom_is_refused_naming_both_poles() {
+    let mut model = a_model();
+    let (block, ball) = a_block_and_a_ball_touching_its_top_and_bottom(&mut model);
+    let refusal = model
+        .fuse(
+            &[block],
+            &[ball],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect_err("every corner of the hollow is on the block's skin");
+    let Error::Undecidable { records } = refusal else {
+        panic!("refused as undecided, not {refusal:?}");
+    };
+    let [record] = records.records() else {
+        panic!("one record, not {records:?}");
+    };
+    assert_eq!(record.predicate(), "one shell inside another");
+    let mut asked = record.inputs().to_vec();
+    asked.sort_by(|one, other| {
+        one.enclosure()[2]
+            .lo()
+            .total_cmp(&other.enclosure()[2].lo())
+    });
+    assert_eq!(
+        asked,
+        [
+            PredicatePoint::from([5.0, 5.0, 0.0]),
+            PredicatePoint::from([5.0, 5.0, 4.0])
+        ],
+        "the two poles, each once"
+    );
+}
+
+/// The other five fuses of that block and ball, which leave no hollow and so
+/// ask nothing of the poles, answer: the block less the ball's union is the
+/// block, their intersection is the ball, and the ball less the block is
+/// nothing.
+#[test]
+fn the_other_fuses_of_a_block_and_a_ball_touching_its_top_and_bottom_answer() {
+    let ball = 32.0 * PI / 3.0;
+    for (rule, block_first, by_hand) in [
+        (Rule::Union, true, Some(400.0)),
+        (Rule::Union, false, Some(400.0)),
+        (Rule::Intersection, true, Some(ball)),
+        (Rule::Intersection, false, Some(ball)),
+        (Rule::Difference, false, None),
+    ] {
+        let mut model = a_model();
+        let (block, round) = a_block_and_a_ball_touching_its_top_and_bottom(&mut model);
+        let (one, other) = if block_first {
+            (block, round)
+        } else {
+            (round, block)
+        };
+        let policy = Policy::certified();
+        let answer = model
+            .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?}, block first {block_first}: {why:?}"));
+        let Some(by_hand) = by_hand else {
+            assert!(
+                answer.solids().is_empty(),
+                "the ball less the block is nothing, not {:?}",
+                answer.solids()
+            );
+            continue;
+        };
+        let [solid] = answer.solids()[..] else {
+            panic!("{rule:?} is one solid, not {:?}", answer.solids());
+        };
+        let measured = model
+            .solid(solid)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a solid measures");
+        assert!(
+            (measured.volume() - by_hand).abs() <= measured.volume_error(),
+            "{rule:?}, block first {block_first}: measured {} ± {} against {by_hand}",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
+}
+
+fn a_block_and_a_ball_touching_its_top_and_bottom(model: &mut Model) -> (SolidKey, SolidKey) {
+    let block = a_block(model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
+    let ball = a_ball(model, 2.0, at(5.0, 5.0, 2.0));
+    (block, ball)
 }
 
 fn a_model() -> Model {
@@ -129,6 +272,12 @@ fn a_block(model: &mut Model, low: [f64; 3], size: [f64; 3]) -> SolidKey {
     model
         .add_extrusion(&rectangle, z, &at(low[0], low[1], low[2]))
         .expect("a positive height")
+}
+
+fn a_ball(model: &mut Model, radius: f64, centre: Isometry) -> SolidKey {
+    model
+        .add_ball(radius, &centre)
+        .expect("a ball of positive radius")
 }
 
 fn at(x: f64, y: f64, z: f64) -> Isometry {
