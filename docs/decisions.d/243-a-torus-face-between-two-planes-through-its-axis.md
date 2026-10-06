@@ -366,6 +366,13 @@ eight. On this base it does not.
   circle in front of the other plane and one behind is still refused, Q1155.
   `Model::validate` refuses the sound grooved ring, Q1153, and passes a ring
   wall walked to keep the near side of both planes, Q1154.*
+  *2026-10-06, Q1153: answered. `Model::validate` now holds a ring face's two
+  circles round the axis to opposite ways round the tube, rather than reading
+  a corner off the other circle, and so it passes the sound grooved ring
+  (`a_grooved_rings_wall_holds_the_ring_less_the_band_the_groove_took`) and
+  refuses the ring wall walked to keep the near side of both planes, Q1154's
+  wall
+  (`a_bands_wall_walking_both_circles_the_same_way_round_the_tube_is_refused`).*
 - A wall whose two edges are one circle walked twice the same way round would
   pass the side check here as it would for a plane through the axis. That is
   Q790's question, not run for a plane square to the axis either.
