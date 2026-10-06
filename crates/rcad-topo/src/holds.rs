@@ -2025,11 +2025,6 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 /// [`Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`] when no point off
 /// the plane can be found ([`a_point_off_the_plane`]), and [`Error::Undecidable`]
 /// when a sign could not be settled.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the solid is what a round wire's face across is found in, and every other one \
-              was here before it"
-)]
 fn what_a_flat_face_of_chords_and_arcs_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
