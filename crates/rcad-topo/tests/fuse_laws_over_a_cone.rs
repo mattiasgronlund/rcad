@@ -673,7 +673,22 @@ const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 2] = [
         // notched bottom rim and with the walk inside the top rim. A lump on the
         // other nappe from the whole rim is now held outside the face (Q1112),
         // and the same face stops on `AFaceTrimmedByACurveThisCannotFollow`
-        // again, later and not traced.
+        // again, one step later.
+        //
+        // Where (Q1200): that face is the band of cone between the caps
+        // `z = −1` and `z = 1` less the cube's corner `x ≥ 3.5, y ≤ 4.5,
+        // z ≤ 0.5`, with a seam up `x = 3.5` from the cube's roof to the top
+        // cap. The block's floor `z = 0` is cut into a piece inside the cube,
+        // and `select.rs`'s `place_the_piece` fires a ray from it that leaves
+        // the cone at `(4.5, 3, 0)`. `holds.rs`'s
+        // `what_a_face_cut_by_part_of_a_crossing_holds` is asked whether the
+        // face holds that point. Its five cuts, the two caps and the cube's
+        // `x = 3.5`, `y = 4.5` and `z = 0.5`, are no family
+        // `is_a_family_this_follows` takes and no run between two flats, so
+        // its last arm, for a curved face, refuses, and `place_the_piece`
+        // hands that on. A gap: the face is the part of the band in front of
+        // both caps and in front of any of the three cube planes, and the
+        // point reads behind all three, every sign decided.
         [
             None,
             Some("the second union: AFaceTrimmedByACurveThisCannotFollow"),
