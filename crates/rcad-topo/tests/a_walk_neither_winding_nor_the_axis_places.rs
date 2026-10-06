@@ -148,15 +148,20 @@ fn a_ball_face_bounded_by_two_arcs_places_a_hole_by_the_arcs_own_circles() {
 }
 
 /// A plate `10 × 10 × 2` with a round tab, a bar of radius 3 at `(10, 5)`,
-/// against a pin of radius `0.5` through the tab at `(11.5, 5)`.
+/// against a pin of radius `0.5` and height 4 through the tab at `(11.5, 5)`.
 ///
-/// The probe printed the pin's circle on the plate's floor wound no times: the
-/// face's own corners are all on the plate's square, and the circle is outside
-/// the square. So its lump is left out as outside the face and every fuse is
-/// refused `ResultIsNotManifold`. It is a gap: the plate is `200 + 9π` and
-/// shares `π/2` with the pin.
+/// The face's own corners are all on the plate's square and the pin's circle
+/// on the plate's floor is outside it, so counting the corners alone wound the
+/// circle no times, left its lump out as outside the face, and refused every
+/// fuse `ResultIsNotManifold` (queue row Q1054). The tab's arc bulges out past
+/// the circle, and the count follows it now.
+///
+/// The plate is `200 + 9π` and the pin `π`, and they share `π/2`: so
+/// `200 + 9.5π` united, `π/2` in common, `200 + 8.5π` the plate less the pin,
+/// and the pin less the plate is its two ends, `π/4` each.
 #[test]
-fn a_pin_through_a_plates_round_tab_is_put_outside_the_plate() {
+fn a_pin_through_a_plates_round_tab_is_answered_under_every_rule() {
+    use std::f64::consts::PI;
     for (rule, plate_first) in every_rule_both_ways() {
         let mut model = a_model();
         let plate = block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 2.0]);
@@ -167,10 +172,93 @@ fn a_pin_through_a_plates_round_tab_is_put_outside_the_plate() {
         let pin = model
             .add_round_bar(0.5, 4.0, &shift(11.5, 5.0, -1.0))
             .expect("a bar");
-        let refused = fuse(&mut model, tabbed, pin, rule, plate_first);
+        let what = format!("{rule:?}, the plate first {plate_first}");
+        let answer = fuse(&mut model, tabbed, pin, rule, plate_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let volumes: &[f64] = match (rule, plate_first) {
+            (Rule::Union, _) => &[200.0 + 9.5 * PI],
+            (Rule::Intersection, _) => &[PI / 2.0],
+            (Rule::Difference, true) => &[200.0 + 8.5 * PI],
+            (Rule::Difference, false) => &[PI / 4.0, PI / 4.0],
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_each_holds(&model, &answer, volumes, &what);
+    }
+}
+
+/// A plate `10 × 10 × 2` with a round notch, less a bar of radius 3 at
+/// `(10, 5)`, against a pin of radius `0.5` and height 4 standing in the notch
+/// at `(8.5, 5)`, clear of the plate.
+///
+/// The tab's shape the other way round: the notch's corners are the tab's, the
+/// pin's circle on the plate's floor is inside their square, and the corners
+/// alone wound it once. Its lump was taken for a hole in the floor and every
+/// fuse was refused `ResultIsNotManifold` (queue row Q1054). The notch's arc
+/// bulges in past the circle, and the count follows it now.
+///
+/// The plate is `200 − 9π` and the pin `π`, and they share nothing: so the two
+/// of them united, nothing in common, and each one less the other is itself.
+#[test]
+fn a_pin_standing_in_a_plates_round_notch_is_answered_under_every_rule() {
+    use std::f64::consts::PI;
+    for (rule, plate_first) in every_rule_both_ways() {
+        let mut model = a_model();
+        let plate = block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 2.0]);
+        let notch = model
+            .add_round_bar(3.0, 4.0, &shift(10.0, 5.0, -1.0))
+            .expect("a bar");
+        let notched = fuse_one(&mut model, plate, notch, Rule::Difference);
+        let pin = model
+            .add_round_bar(0.5, 4.0, &shift(8.5, 5.0, -1.0))
+            .expect("a bar");
+        let what = format!("{rule:?}, the plate first {plate_first}");
+        let answer = fuse(&mut model, notched, pin, rule, plate_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let volumes: &[f64] = match (rule, plate_first) {
+            (Rule::Union, _) => &[PI, 200.0 - 9.0 * PI],
+            (Rule::Intersection, _) => &[],
+            (Rule::Difference, true) => &[200.0 - 9.0 * PI],
+            (Rule::Difference, false) => &[PI],
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_each_holds(&model, &answer, volumes, &what);
+    }
+}
+
+/// The plate with a round tab of the test above, with a round hole of radius 1
+/// at `(3, 5)` as well, against the same pin through the tab.
+///
+/// The hole's circle is one side that closes on its own corner, with no chord,
+/// so the floor's rim is not counted round the pin's circle and the lump is
+/// placed by the walks round it instead. Every fuse is refused later, in
+/// selection, naming the plate's top.
+#[test]
+fn a_pin_through_the_round_tab_of_a_plate_with_a_round_hole_is_refused_in_selection() {
+    for (rule, plate_first) in every_rule_both_ways() {
+        let mut model = a_model();
+        let plate = block(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 2.0]);
+        let tab = model
+            .add_round_bar(3.0, 2.0, &shift(10.0, 5.0, 0.0))
+            .expect("a bar");
+        let tabbed = fuse_one(&mut model, plate, tab, Rule::Union);
+        let hole = model
+            .add_round_bar(1.0, 4.0, &shift(3.0, 5.0, -1.0))
+            .expect("a bar");
+        let holed = fuse_one(&mut model, tabbed, hole, Rule::Difference);
+        let pin = model
+            .add_round_bar(0.5, 4.0, &shift(11.5, 5.0, -1.0))
+            .expect("a bar");
+        let refused = fuse(&mut model, holed, pin, rule, plate_first);
+        let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
+            panic!("{rule:?}, the plate first {plate_first}: {refused:?}");
+        };
+        let surface = model
+            .face(face)
+            .expect("the refusal names a face of the model")
+            .surface();
         assert!(
-            matches!(refused, Err(Error::ResultIsNotManifold { count: 1 })),
-            "{rule:?}, the plate first {plate_first}: {refused:?}"
+            matches!(surface, Surface::Plane(top) if top.origin().coordinates()[2] == 2.0),
+            "{rule:?}, the plate first {plate_first}: refused on {surface:?}"
         );
     }
 }
@@ -282,6 +370,38 @@ fn fuse(
             &mut ProvenanceLog::new(),
         )
         .map(|fused| fused.solids().to_vec())
+}
+
+/// `answer` is one solid per entry of `volumes`, smallest first, each holding
+/// that volume.
+fn assert_each_holds(model: &Model, answer: &[SolidKey], volumes: &[f64], what: &str) {
+    assert_eq!(
+        answer.len(),
+        volumes.len(),
+        "{what}: {} solids, got {answer:?}",
+        volumes.len()
+    );
+    let mut by_size: Vec<(f64, SolidKey)> = answer
+        .iter()
+        .map(|&solid| (volume_of(model, solid, what), solid))
+        .collect();
+    by_size.sort_by(|one, other| one.0.total_cmp(&other.0));
+    for ((_, solid), &volume) in by_size.into_iter().zip(volumes) {
+        assert_holds(model, solid, volume, what);
+    }
+}
+
+fn volume_of(model: &Model, solid: SolidKey, what: &str) -> f64 {
+    model
+        .solid(solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.001).expect("a fine mesh"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{what} does not measure: {why}"))
+        .volume()
 }
 
 /// `solid` validates and measures `volume`, give or take what the mesh says.
