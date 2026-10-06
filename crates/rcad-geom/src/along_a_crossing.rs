@@ -29,6 +29,8 @@
 //! | a plane and a torus, cut in the two meridian circles | the plane's stored normal |
 //! | a plane square to a torus's axis, the circle outside the ring | the plane's stored normal |
 //! | a plane square to a torus's axis, the circle inside the ring | the same normal negated |
+//! | a ball centred on a pipe's axis, the circle ahead of the centre along it | the pipe's stored axis direction |
+//! | a ball centred on a pipe's axis, the circle behind the centre | the same direction negated |
 //! | any of those the other way round | the same answer negated |
 //! | two balls | the second centre minus the first |
 //!
@@ -55,6 +57,16 @@
 //! the point the ordering starts from, against the pipe of the ring's own radius
 //! — the very pipe [`intersect`](crate::intersect) hands back as the picker that
 //! tells the two circles apart.
+//!
+//! # A ball on a pipe's axis is the same shape again
+//!
+//! Its two circles sit either side of the ball's centre, square to the axis,
+//! and wind opposite ways: `∇S × ∇T` there is `h ŵ × ρ`, for `h` how far along
+//! the axis the circle sits from the centre. So which way a run winds is read
+//! off the point it starts from too, against the half-space through the centre
+//! facing along the axis, which is `intersect`'s picker on those two runs. A
+//! ball off the axis by any amount crosses the pipe in a quartic, and is
+//! refused; whether it is off is asked exactly.
 
 use rcad_predicates::{
     Decision, Filtered, Interval, NOTHING_IS_KNOWN, Point as PredicatePoint, Predicate,
@@ -64,7 +76,8 @@ use rcad_predicates::{
 use crate::enclosure::{cross_enclosing, dot_enclosing, exactly};
 use crate::exact::Exact;
 use crate::{
-    Cylinder, Error, Plane, Result, Surface, Torus, Vector, WhereFollowingACrossingGaveUp,
+    Cylinder, Error, HalfSpace, Plane, Result, Sphere, Surface, Torus, Vector,
+    WhereFollowingACrossingGaveUp,
 };
 
 /// The name the ordering question goes by in provenance records.
@@ -89,13 +102,15 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair whose crossing is
 /// not one closed curve lying in a plane: two planes, a plane along a pipe's
-/// axis, two pipes, a ball against a pipe, a plane cutting a torus in a quartic,
-/// and every pair with a cone or a torus on it but a plane against either.
+/// axis, two pipes, a ball against a pipe whose axis misses its centre, a plane
+/// cutting a torus in a quartic, and every pair with a cone or a torus on it
+/// but a plane against either.
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
 /// resting on a torus's tube, which touches it all the way round one circle
 /// instead of crossing it, so `∇S × ∇T` is zero everywhere on that circle and
-/// there is no direction to run round it in.
+/// there is no direction to run round it in — and for a ball inscribed in a
+/// pipe, which touches it round one circle the same way.
 ///
 /// **"A plane along a pipe's axis" is decided here by a rounded `f64` and by
 /// [`intersect`](crate::intersect) exactly**, so the two disagree about a plane
@@ -196,14 +211,24 @@ fn the_way_this_crossing_winds(
         [Surface::Plane(_), Surface::Plane(_)] => {
             return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
         }
-        // A ball against a pipe and two pipes cross in a degree-four space curve
-        // that is neither flat nor convex, so neither the determinant nor the
-        // argument behind it applies.
-        [Surface::Sphere(_), Surface::Cylinder(_)]
-        | [
-            Surface::Cylinder(_),
-            Surface::Sphere(_) | Surface::Cylinder(_),
-        ] => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        // A ball centred on a pipe's axis crosses it in two circles square to
+        // the axis, and every other ball in a degree-four loop, refused inside.
+        [Surface::Sphere(ball), Surface::Cylinder(pipe)] => {
+            return the_way_a_circle_round_a_pipes_axis_winds(ball, pipe, from);
+        }
+        [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
+            return Ok(
+                match the_way_a_circle_round_a_pipes_axis_winds(ball, pipe, from)? {
+                    WhichWayItWinds::About(normal) => WhichWayItWinds::About(-normal),
+                    WhichWayItWinds::CannotTell => WhichWayItWinds::CannotTell,
+                },
+            );
+        }
+        // Two pipes cross in a degree-four space curve that is neither flat nor
+        // convex, so neither the determinant nor the argument behind it applies.
+        [Surface::Cylinder(_), Surface::Cylinder(_)] => {
+            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        }
         // The two flat families a plane cuts a torus in are circles, and only
         // those two reach a normal — everything else a plane and a torus make is
         // a quartic and is refused by name, here as in
@@ -331,6 +356,83 @@ fn the_way_a_circle_round_the_axis_winds(
         }),
         Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
         other => unreachable!("which side of a pipe a point is on is a sign: {other:?}"),
+    }
+}
+
+/// Which way one of the two circles a ball centred on a pipe's axis crosses it
+/// in runs, for the pair taken ball first.
+///
+/// # Which circle, and why the two wind opposite ways
+///
+/// With the centre `c` on the axis, a point `p` of the crossing is `ρ + hŵ` on
+/// from `c`, for `ρ` the step out from the axis and `h` how far along it `p`
+/// sits. So `∇S × ∇T` is `(ρ + hŵ) × ρ = h ŵ × ρ`, and `ŵ × ρ` runs
+/// anticlockwise about `ŵ`: the circle at `h = +√(R² − r²)` winds about the
+/// axis direction and the one at `−√(R² − r²)` about its opposite.
+///
+/// Which of the two a run is on is read off the point the ordering starts from,
+/// against the half-space through the centre facing along the axis — the very
+/// one [`intersect`](crate::intersect) hands back as the picker on these two
+/// runs, built here from the same two numbers, so a run that names the circle
+/// in front of it is ordered by that circle's normal. The torus row reads its
+/// two circles apart the same way.
+///
+/// # Whether the centre is on the axis is asked exactly
+///
+/// `(c − o) × w` through [`Exact`], for the reason
+/// [`the_way_a_plane_cuts_a_torus`] gives: there is no policy here to run a
+/// cascade with, and the exact level decides every pair it can multiply out.
+/// That is the sign `intersect` splits this pair on, and the one the
+/// arrangement asks before it lets the pair through to be ordered.
+///
+/// # Errors
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a ball whose centre is off
+/// the axis, by however little: it crosses the pipe in a quartic.
+///
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for `from` on the
+/// plane through the centre, which is on the crossing only where the ball is
+/// inscribed in the pipe and touches it round that one circle. `h` is nothing
+/// there, so `∇S × ∇T` is nothing all the way round.
+fn the_way_a_circle_round_a_pipes_axis_winds(
+    ball: &Sphere,
+    pipe: &Cylinder,
+    from: PredicatePoint,
+) -> Result<WhichWayItWinds> {
+    let centre = ball.centre().coordinates();
+    let origin = pipe.axis().origin().coordinates();
+    let along = pipe.axis().direction().components();
+    if !(are_real_numbers(centre) && are_real_numbers(origin) && are_real_numbers(along)) {
+        return Ok(WhichWayItWinds::CannotTell);
+    }
+    let Some(across) = Exact::cross_of(&Exact::gap_between(origin, centre), along) else {
+        return Ok(WhichWayItWinds::CannotTell);
+    };
+    let mut off_the_axis = Decision::Zero;
+    for part in &across {
+        match part.sign() {
+            Decision::Zero => {}
+            Decision::Pos | Decision::Neg => {
+                return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+            }
+            undecided @ Decision::Undecidable { .. } => off_the_axis = undecided,
+            other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+        }
+    }
+    if off_the_axis != Decision::Zero {
+        return Ok(WhichWayItWinds::CannotTell);
+    }
+
+    let between = HalfSpace::through_a_point_facing(ball.centre(), pipe.axis().direction())?;
+    match between.side_of_point(from) {
+        Decision::Pos => Ok(WhichWayItWinds::About(between.normal())),
+        Decision::Neg => Ok(WhichWayItWinds::About(-between.normal())),
+        Decision::Zero => Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+            surfaces: Box::new([Surface::Sphere(*ball), Surface::Cylinder(*pipe)]),
+            at: WhereFollowingACrossingGaveUp::CrossingTheTwoNormalsForADirection,
+        }),
+        Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
+        other => unreachable!("which side of a half-space a point is on is a sign: {other:?}"),
     }
 }
 
@@ -674,6 +776,127 @@ mod tests {
         );
     }
 
+    /// A ball of five centred on the origin and a pipe of four up `z`, which
+    /// cross in two circles of radius four at `z = ±3`.
+    fn a_ball_on_a_pipes_axis() -> (Surface, Surface) {
+        (
+            a_ball(5.0),
+            Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius")),
+        )
+    }
+
+    /// The point `eighths` of a turn round the circle of radius four at height
+    /// `z`, anticlockwise about `+z`.
+    fn round_the_pipe(z: f64, eighths: i32) -> [f64; 3] {
+        let angle = core::f64::consts::TAU * f64::from(eighths) / 8.0;
+        [4.0 * angle.cos(), 4.0 * angle.sin(), z]
+    }
+
+    /// That the step from `at` to `next` runs the way the crossing of a ball
+    /// centred on the origin and a pipe up `z` does: `∇S × ∇T`, with `∇S` the
+    /// way out of the ball, `at` itself, and `∇T` the way out of the pipe.
+    fn the_step_runs_the_way_the_ball_and_the_pipe_cross(at: [f64; 3], next: [f64; 3]) {
+        let runs = Vector::new(at[0], at[1], at[2]).cross(Vector::new(at[0], at[1], 0.0));
+        let step = Vector::new(next[0] - at[0], next[1] - at[1], next[2] - at[2]);
+        assert!(
+            runs.dot(step) > 0.0,
+            "the crossing runs {runs:?} at {at:?} and the step to {next:?} is {step:?}"
+        );
+    }
+
+    /// The two circles a ball centred on a pipe's axis crosses it in run
+    /// **opposite ways** round the axis: the one ahead of the centre along the
+    /// axis winds about the axis direction, and the one behind about its
+    /// opposite. So the same three eighths are in order on one and out of
+    /// order on the other, which is why this row reads the point it starts
+    /// from.
+    #[test]
+    fn the_two_circles_a_ball_on_a_pipes_axis_crosses_it_in_run_opposite_ways() {
+        let (ball, pipe) = a_ball_on_a_pipes_axis();
+        for (z, ahead) in [(3.0, true), (-3.0, false)] {
+            let at = |eighths| PredicatePoint::from(round_the_pipe(z, eighths));
+            let forwards = if ahead { 1 } else { -1 };
+            the_step_runs_the_way_the_ball_and_the_pipe_cross(
+                round_the_pipe(z, 0),
+                round_the_pipe(z, forwards),
+            );
+            let (in_order, out_of_order) = if ahead {
+                (Decision::Pos, Decision::Neg)
+            } else {
+                (Decision::Neg, Decision::Pos)
+            };
+            assert_eq!(
+                which_comes_first_round_a_crossing([&ball, &pipe], at(0), at(1), at(3)),
+                Ok(in_order),
+                "the circle at z = {z}"
+            );
+            assert_eq!(
+                which_comes_first_round_a_crossing([&ball, &pipe], at(0), at(3), at(1)),
+                Ok(out_of_order)
+            );
+            assert_eq!(
+                which_comes_first_round_a_crossing([&pipe, &ball], at(0), at(1), at(3)),
+                Ok(out_of_order),
+                "and the pair the other way round runs the other way"
+            );
+        }
+    }
+
+    /// A ball one rounding off a pipe's axis crosses it in a quartic, and is
+    /// refused however close the quartic lies to the two circles, while the
+    /// same ball on the axis is ordered.
+    ///
+    /// The pipe's axis runs up `z` through `(1, 0, 0)` and the ball's centre is
+    /// the next `f64` past it along `x`, `2⁻⁵²` out.
+    #[test]
+    fn a_ball_one_rounding_off_a_pipes_axis_is_refused_and_one_on_it_is_ordered() {
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(1.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
+                4.0,
+            )
+            .expect("a radius"),
+        );
+        let one_past = f64::from_bits(1.0_f64.to_bits() + 1);
+        assert_eq!(one_past - 1.0, f64::EPSILON, "one rounding of 1 out");
+        let at = |eighths| {
+            let [x, y, z] = round_the_pipe(3.0, eighths);
+            PredicatePoint::from([x + 1.0, y, z])
+        };
+        for (centre, ordered) in [(1.0, true), (one_past, false)] {
+            let ball =
+                Surface::Sphere(Sphere::new(Point::new(centre, 0.0, 0.0), 5.0).expect("a radius"));
+            let said = which_comes_first_round_a_crossing([&ball, &pipe], at(0), at(1), at(3));
+            if ordered {
+                assert_eq!(said, Ok(Decision::Pos), "the ball centred at x = {centre}");
+            } else {
+                assert_eq!(
+                    said,
+                    Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+                    "the ball centred at x = {centre}"
+                );
+            }
+        }
+    }
+
+    /// A ball inscribed in a pipe touches it round one circle, through its
+    /// centre, instead of crossing it, so `∇S × ∇T` is nothing all the way
+    /// round and there is nothing to order along — a limit, the same one as a
+    /// plane resting on a ring's tube.
+    #[test]
+    fn a_ball_inscribed_in_a_pipe_has_no_direction_to_be_ordered_along() {
+        let ball = a_ball(4.0);
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius"));
+        let on_it = PredicatePoint::from([4.0, 0.0, 0.0]);
+        assert_eq!(
+            which_comes_first_round_a_crossing([&ball, &pipe], on_it, on_it, on_it),
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                surfaces: Box::new([ball, pipe]),
+                at: WhereFollowingACrossingGaveUp::CrossingTheTwoNormalsForADirection,
+            })
+        );
+    }
+
     /// The pairs whose crossing is not one closed curve in a plane are refused
     /// rather than ordered by a rule that does not hold for them.
     #[test]
@@ -685,6 +908,10 @@ mod tests {
         );
         let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius"));
         let ball = a_ball(5.0);
+        // Off the pipe's axis, which crosses it in a quartic. A ball centred on
+        // it is ordered, below.
+        let ball_beside =
+            Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 0.0), 5.0).expect("a radius"));
         let cone = Surface::Cone(crate::Cone::new(Axis::z(), 1.0).expect("a slope"));
         let bend = a_ring();
         // Parallel to the ring's axis but off it, which cuts a quartic.
@@ -703,7 +930,8 @@ mod tests {
             [&ground, &wall],
             // A plane down the pipe's own axis: two straight lines, not a conic.
             [&wall, &pipe],
-            [&ball, &pipe],
+            [&ball_beside, &pipe],
+            [&pipe, &ball_beside],
             [&pipe, &pipe],
             // Two balls with the same centre have no line between them.
             [&ball, &ball],
