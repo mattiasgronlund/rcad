@@ -35,8 +35,11 @@
 //! because two different cones could not be crossed (Q636), then because the
 //! arrangement could not order points round the circle they cross in (Q1122),
 //! then because a point could not be tested against the cut cone's face
-//! (Q1129), and now, the cups made, because the fuse with the flush block
-//! cannot tell the cells of the cups' ceiling apart (Q1139).
+//! (Q1129), then, the cups made, because the check that the cups do not run
+//! through themselves could not tell the cells of their ceiling and then of
+//! their skin apart (Q1139, Q1161), and now because the fuse with the flush
+//! block finds no point inside a strip of the ceiling with the cups first and
+//! cannot follow the skin's curve with the block first.
 //! The family of
 //! corners that sweep no area and are not on one line is built with corners
 //! that cancel exactly, face by face, and the fuse that would join its cap
@@ -667,17 +670,38 @@ fn the_cut_cones_faces_along_the_hyperbola_hold_their_own_points() {
     assert_eq!(asked(wall.key(), [-12.0, 0.0, -20.0]), OnAFace::NotHeld);
 }
 
-/// **The nested cups against the flush block are refused before their rings
-/// are placed**, under every rule both ways round: the cut cone less the second
-/// cone, and the block `[−12, −11] × [10, 12] × [17.25, 17.75]` flush with its
-/// wall `x = −12`, refuse `CannotTellTheCellsOfAFaceApart` on the cups' face on
-/// `z = 16` — the second cone's base, facing down into the pocket, with the
-/// corners `(−12, ±√52, 16)` where the wall cuts its circle — while the
-/// arrangement cuts that face into cells, so `rings_round` is not reached
-/// (Q1139). The block lies nowhere near that face. Which cells could not be
-/// told apart was not traced.
+/// **The nested cups against the flush block are refused while their pieces
+/// are placed**, under every rule both ways round, so `rings_round` is not
+/// reached: the cut cone less the second cone, and the block
+/// `[−12, −11] × [10, 12] × [17.25, 17.75]` flush with its wall `x = −12`.
+/// The block is wholly inside the cups — its far corner is `√288` from the
+/// axis, under the cone's `17.25` — so the union holds the cups,
+/// `what_the_block_holds_of_the_cone() − 2744π/3 +
+/// what_the_second_cone_holds_past_the_wall()`, the intersection the block's
+/// `1`, the cups less the block one less than the cups, and the block less the
+/// cups nothing.
+///
+/// **With the cups first, every rule is refused `a point inside a piece of a
+/// face`** on the strip of the cups' face on `z = 16` between `x = −12` and the
+/// block's wall `x = −11`, which cuts that face because every plane of solids
+/// within reach cuts every face. **With the block first, every rule is refused
+/// `AFaceTrimmedByACurveThisCannotFollow` on the cut cone's skin.** Both are
+/// in `select.rs` and `holds.rs`.
+///
+/// Until Q1161 every rule was refused `CannotTellTheCellsOfAFaceApart`, first
+/// on the cups' face on `z = 16` and then on the cut cone's skin, and the block
+/// had nothing to do with either: both came from the check that the cups do not
+/// run through themselves, which arranges a face against each surface of its
+/// own solid it may cross, and which every fuse of the cups asks. The cut
+/// cone's skin crosses `z = 16` in the circle of radius 16, outside the base
+/// and across the line of its straight side at `(−12, ±√112, 16)`, the only two
+/// nodes it has; every corner of the base is on that line too, so no count of
+/// how often the base's rim winds round those nodes could be made. And the
+/// second cone crosses the skin in the circle of radius 1 at `z = 1`, which
+/// goes round the axis, as both walks of the skin's rim do.
 #[test]
-fn the_nested_cups_and_a_block_flush_with_their_wall_are_refused_while_a_face_is_cut_into_cells() {
+fn the_nested_cups_and_a_block_flush_with_their_wall_are_refused_while_their_pieces_are_placed() {
+    let skin = Surface::Cone(Cone::new(Axis::z(), 1.0).expect("a positive slope"));
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let [cut, second] = a_cut_cone_and_a_second_cone_on_its_axis(&mut model);
@@ -690,38 +714,38 @@ fn the_nested_cups_and_a_block_flush_with_their_wall_are_refused_while_a_face_is
         );
         let refused = fused_in_order(&mut model, [cups, block], rule, swapped);
         let what = format!("{rule:?}, swapped {swapped}");
-        let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = refused else {
+        if swapped {
+            let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
+                panic!("{what}: {refused:?}");
+            };
+            let named = model
+                .solid(cups)
+                .expect("this model made the key")
+                .faces()
+                .find(|one| one.key() == face)
+                .unwrap_or_else(|| panic!("{what}: the refusal names a face of the block"));
+            assert_eq!(named.surface(), skin, "{what}");
+            continue;
+        }
+        let Err(Error::Undecidable { records }) = &refused else {
             panic!("{what}: {refused:?}");
         };
-        let named = model
-            .solid(cups)
-            .expect("this model made the key")
-            .faces()
-            .find(|one| one.key() == face)
-            .unwrap_or_else(|| panic!("{what}: the refusal names a face of the block"));
-        let base =
-            Plane::from_point_and_normal(Point::new(0.0, 0.0, 16.0), Vector::new(0.0, 0.0, -1.0))
-                .expect("the z axis is a unit normal");
-        assert_eq!(named.surface(), Surface::Plane(base), "{what}");
-        let mut corners: Vec<[f64; 3]> = named
-            .wires()
-            .flat_map(|wire| wire.points().collect::<Vec<_>>())
-            .map(|corner| corner.coordinates())
-            .collect();
-        corners.sort_by(|one, other| one[1].total_cmp(&other[1]));
-        let half_chord = 52.0_f64.sqrt();
-        let [[x, low, z], [other_x, high, other_z]] = corners[..] else {
-            panic!("{what}: {corners:?}");
+        let [record] = records.records() else {
+            panic!("{what}: {records:?}");
         };
         assert_eq!(
-            [x, z, other_x, other_z],
-            [-12.0, 16.0, -12.0, 16.0],
+            record.predicate(),
+            "a point inside a piece of a face",
             "{what}"
         );
-        assert!(
-            (low + half_chord).abs() < 1e-12 && (high - half_chord).abs() < 1e-12,
-            "{what}: {corners:?}"
-        );
+        assert_eq!(record.inputs().len(), 4, "{what}: {record:?}");
+        for corner in record.inputs() {
+            let [x, _, z] = corner.enclosure();
+            assert!(
+                x.lo() >= -12.0 && x.hi() <= -11.0 && z.lo() == 16.0 && z.hi() == 16.0,
+                "{what}: a corner of the strip on z = 16 between the two walls: {record:?}"
+            );
+        }
     }
 }
 
