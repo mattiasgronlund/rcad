@@ -22,8 +22,9 @@
 //!   its two surfaces alone and the two circles got one. Named by what picks
 //!   each circle out as well (Q1148), a pointed cone less a steeper cone two up
 //!   answers every rule, and a pointed cone less a whole ball pushing out
-//!   through its side every rule but the ball less the cone. A frustum less
-//!   that ball is still refused, under another name.
+//!   through its side every rule but the ball less the cone, which the check's
+//!   mesh refuses. A frustum less that ball is still refused, under another
+//!   name, by selection (Q1138).
 //!
 //! Every cone here is built by `tests/cones`, face by face through
 //! `SolidBuilder` with a power-of-two slope, and every ball by `Model::add_ball`.
@@ -424,12 +425,29 @@ fn a_pointed_cone_less_a_steeper_one_whose_circles_both_fall_on_its_side() {
 /// **Every fuse of the pointed cone was refused after the faces were cut,
 /// and every fuse of the frustum `ResultIsNotManifold { count: 3 }`**, while
 /// the corner each circle starts at was named by the two surfaces alone and
-/// both circles got one (Q1148). Five of the pointed cone's answer now. The
-/// ball less the pointed cone is refused still, by its mesh: two patches draw
-/// one side through their insides. And every fuse of the frustum is refused
-/// `ResultIsNotManifold { count: 1 }`: the circle at `z₁`, which only the
-/// ball's face holds, comes out as two closed edges at its one corner, each
-/// with one of the ball's faces along it. Not traced past that.
+/// both circles got one (Q1148). Five of the pointed cone's answer now.
+///
+/// **The ball less the pointed cone is refused by the check's mesh, not by
+/// how the fuse names its edges** (Q1138). The answer is a ring of two faces,
+/// the ball's band outside and the cone's band inside, between the same two
+/// circles. Meshed coarsely, both faces draw the same sides between the
+/// circles' points. `validate.rs`'s `the_coarsest_mesh_whose_sides_do_not_cross`
+/// asks for finer meshes only down to half the distance between the two
+/// closest corners, and here those are the two circles' starts, 2 apart. With
+/// that floor at a sixty-fourth of it, the ring measured `2.9595 ± 0.0517`
+/// against `2√2π/3 = 2.9619`.
+///
+/// **Every fuse of the frustum is refused `ResultIsNotManifold { count: 1 }`
+/// by selection** (Q1138). The ball's face is cut in three, the cap below
+/// `z₁`, the band and the cap above `z₂`, and the circle at `z₁` is one edge
+/// with one corner. But `select.rs`'s `the_piece_holds` asks a curved piece
+/// only which side of each bounding circle's partner a point is on, and both
+/// caps are inside the cone. So the lower cap is placed by a point of the
+/// upper one, the step up from its corner, `(2.93, 0, 4.66)`, and found inside
+/// the frustum, which it is wholly below. Every rule then keeps the band or
+/// the lower cap and not both, and the circle has one face along it. With the
+/// point also asked against what picks the circle out of the two, all six
+/// answered the volumes below.
 #[test]
 fn a_cone_less_a_whole_ball_pushing_out_through_its_side() {
     let [low, high] = [-1.0, 1.0].map(|side| 2.0 + side * 2.0_f64.sqrt() / 2.0);
