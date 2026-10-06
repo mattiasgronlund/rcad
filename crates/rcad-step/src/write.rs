@@ -581,11 +581,13 @@ impl Writing {
     ///   circle, turned the way the ball winds at its corner
     ///   ([`Crossing::it_runs_the_way_a_closed_edge_is_stored`]), and only where
     ///   its run names nothing but the two faces (Q777);
-    /// - **an arc where a plane rests on a ring**, square to its axis and on
-    ///   top of its tube, is an arc of the circle of the ring's own radius,
+    /// - **an arc where a plane square to a ring's axis crosses it** is an arc
+    ///   of one of the circles round the axis the plane crosses the ring in,
     ///   which [`where_a_plane_crosses_a_ring`] names and the run picks, as for
-    ///   a pipe. That is the only crossing of a plane and a ring the KiCad
-    ///   corpus carries (Q774); the others refuse;
+    ///   a pipe: the circle of the ring's own radius where the plane rests on
+    ///   top of its tube, which is the one the KiCad corpus carries (Q774), and
+    ///   of the two where it cuts the tube, the one the edge's corners are on
+    ///   (Q778). Any other plane refuses;
     /// - **a closed edge where a flat cap crosses a cone** square to its axis
     ///   is the circle [`where_a_cap_square_to_a_cone_crosses_it`] works out in
     ///   the frame the two faces are stored in, and then places;
@@ -680,7 +682,8 @@ impl Writing {
             | (Surface::Torus(ring), Surface::Plane(flat))
                 if !closed =>
             {
-                let crossing = where_a_plane_crosses_a_ring(flat, ring).ok_or_else(refuse)?;
+                let crossing =
+                    where_a_plane_crosses_a_ring(flat, ring, [start, end]).ok_or_else(refuse)?;
                 let turning = crossing
                     .the_way_round_the_arc(run, start, end)
                     .ok_or_else(refuse)?;
@@ -1521,36 +1524,53 @@ fn where_a_plane_crosses_a_ball(flat: &Plane, ball: &Sphere) -> Option<Crossing>
     })
 }
 
-/// The circle a plane resting on a ring touches it along, about the plane's
-/// normal, or `None` for every other plane.
+/// The circle round its axis a plane square to a ring crosses it in, the one
+/// both `corners` are on, about the plane's normal; `None` for every other
+/// plane, and where the corners do not say which circle.
 ///
-/// **A plane square to the ring's axis and as far along it from the centre as
-/// the tube's radius `r` rests on the tube**, and touches the ring all the way
-/// round one circle: of the ring's own radius `R`, centred where the axis
-/// meets the plane. A flat face resting on a bend like that is the one
-/// crossing of a plane and a ring the KiCad corpus carries: the eight such
-/// edges of the two `Relay_1-Form-*_Schrack-RYII_RM5mm` relays and
+/// **A plane square to the ring's axis crosses it in circles about the axis**,
+/// centred where the axis meets the plane. As far along the axis from the
+/// centre as the tube's radius `r`, the plane rests on the tube and touches the
+/// ring all the way round one circle, of the ring's own radius `R`. A flat face
+/// resting on a bend like that is the one crossing of a plane and a ring the
+/// KiCad corpus carries: the eight such edges of the two
+/// `Relay_1-Form-*_Schrack-RYII_RM5mm` relays and
 /// `Relay_SPDT_Finder_34.51_Vertical` are each a quarter of that circle
 /// (`the_edges_where_a_relay_pin_rests_on_a_ring_are_quarters_of_its_own_circle`).
+/// Nearer the centre than `r`, at `h` along the axis, the plane crosses the
+/// tube in two circles, of radii `R ± √(r² − h²)`: the top of a bent rod sawn
+/// off flat meets its ring along both
+/// (`the_top_of_a_bent_rod_sawn_off_flat_is_written_with_both_circles_the_cut_crosses_its_ring_in`).
 ///
-/// **Which planes rest on the tube is asked the way `rcad_geom::walk` asks
-/// it**, so that this writes the circle the walk draws for the pair either
-/// side: square where `n × w` is exactly zero, and resting where `r² − h²`,
-/// with `h` how far along the axis the plane is from the centre, is not
-/// positive (`circles_round_the_axis` in `crates/rcad-geom/src/walk.rs`). The
-/// reader reads none of this back but the circle's axis, which with
-/// `same_sense` picks the arc, so a centre or a radius rounded differently
-/// from the walk's would still read back as the same edge; it is the walk's
-/// own circle so that what the file says is where the edge is.
+/// **The circles are worked out the way `rcad_geom::walk` works them out**, so
+/// that this writes the circle the walk draws for the pair either side: square
+/// where `n × w` is exactly zero, resting where `r² − h²` is not positive, and
+/// the two radii `R` plus and minus the root of it
+/// (`circles_round_the_axis` in `crates/rcad-geom/src/walk.rs`). The reader
+/// reads none of this back but the circle's axis, which with `same_sense`
+/// picks the arc, so a centre or a radius rounded differently from the walk's
+/// would still read back as the same edge; it is the walk's own circle so that
+/// what the file says is where the edge is. The radius is not idle here,
+/// though: [`Crossing::the_way_round_the_arc`] asks the run's pickers about
+/// points a radius out from the centre.
 ///
-/// **The rest are not built** (`docs/decisions.md` §13). A plane square to
-/// the axis nearer the centre than `r` crosses the ring in two circles, of
-/// radii `R ± √(r² − h²)`, and nothing in the corpus carries one; a plane
-/// holding the axis crosses it in the tube's own two circles, which a closed
-/// edge at the end of a bend is written as, by
+/// **Which of the two circles is the side of the ring's own radius both
+/// corners are on**, outside it for the outer circle and inside it for the
+/// inner one. The two circles are `√(r² − h²)` either side of `R`, so a corner
+/// on one is that far from `R`, on its own circle's side. That is the rule the reader names
+/// the arc by when it reads it back (`which_of_a_rings_two_circles` in
+/// `brep.rs`), so the circle this writes is the one the reader picks. Corners
+/// on two sides, or exactly `R` from the axis, are refused.
+///
+/// A plane holding the axis crosses the ring in the tube's own two circles,
+/// which a closed edge at the end of a bend is written as, by
 /// [`where_a_cap_holding_a_rings_axis_crosses_it`]; and any other plane crosses
 /// a ring in a curve with no name in this kernel.
-fn where_a_plane_crosses_a_ring(flat: &Plane, ring: &Torus) -> Option<Crossing> {
+fn where_a_plane_crosses_a_ring(
+    flat: &Plane,
+    ring: &Torus,
+    corners: [Point; 2],
+) -> Option<Crossing> {
     let along = ring.axis().direction();
     if flat.normal().cross(along) != Vector::zero() {
         return None;
@@ -1559,16 +1579,36 @@ fn where_a_plane_crosses_a_ring(flat: &Plane, ring: &Torus) -> Option<Crossing> 
     let reach = (flat.offset() - flat.normal().dot(ring.centre() - Point::origin()))
         / flat.normal().dot(up);
     let axial = reach * along.length();
-    let tube = ring.tube_radius();
-    if !axial.is_finite() || tube * tube - axial * axial > 0.0 {
+    if !axial.is_finite() {
         return None;
     }
+    let centre = ring.centre() + up * reach;
+    let tube = ring.tube_radius();
+    let half_width = (tube * tube - axial * axial).max(0.0).sqrt();
+    let radius = if half_width == 0.0 {
+        ring.ring_radius()
+    } else {
+        let outside_the_ring_radius = |corner: Point| {
+            let out = corner - centre;
+            let from_the_axis = (out - along * out.dot(up)).length();
+            if from_the_axis > ring.ring_radius() {
+                Some(true)
+            } else if from_the_axis < ring.ring_radius() {
+                Some(false)
+            } else {
+                None
+            }
+        };
+        match corners.map(outside_the_ring_radius) {
+            [Some(true), Some(true)] => ring.ring_radius() + half_width,
+            [Some(false), Some(false)] => ring.ring_radius() - half_width,
+            _ => return None,
+        }
+    };
     Some(Crossing {
-        centre: ring.centre() + up * reach,
+        centre,
         turning: flat.normal(),
-        shape: Shape::Circle {
-            radius: ring.ring_radius(),
-        },
+        shape: Shape::Circle { radius },
     })
 }
 
