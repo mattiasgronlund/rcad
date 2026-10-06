@@ -348,6 +348,16 @@ eight. On this base it does not.
   washer's rounded rim between `z = ±h`, the band is told from its twin by the
   pipe of the ring's own radius, which `intersect` names each circle by. Where
   the planes rest on the tube, it is 243.4's rim, which Q104 holds.
+  *2026-10-06, Q950: answered where the planes cut the tube.
+  `what_a_ring_face_between_two_planes_holds` asks `intersect` whether two
+  planes square to the axis are one plane. One plane takes the rule above as it
+  stands; two take step 3, and then the side of the pipe of the ring's own
+  radius must name both circles (`e43dbc55`, pinned by
+  `a_washers_rounded_rim_holds_the_outer_band_between_its_planes_and_a_spools_waist_the_inner`
+  and `a_half_rings_wall_holds_its_half_with_one_circles_cap_stored_turned_round`).
+  `Model::validate` passes the outer and the inner band between `z = ±3` at
+  their one sound walk. The part of a ring in front of either plane, not both,
+  is still refused, and is Q1144.*
 - A wall whose two edges are one circle walked twice the same way round would
   pass the side check here as it would for a plane through the axis. That is
   Q790's question, not run for a plane square to the axis either.
