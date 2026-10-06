@@ -822,8 +822,8 @@ fn a_tube_and_a_cone_cut_by_one_leaning_plane_are_refused_before_their_rings_are
 }
 
 /// The tube and the cone, each cut to the far side of the leaning plane, tube
-/// first. The bar is cut before it is holed: holed first, cutting it is
-/// refused (the next test).
+/// first. The bar is cut before it is holed; holed first, it is cut to the
+/// same tube (`a_holed_tube_cut_by_the_wedge_is_the_tube_past_the_leaning_plane`).
 fn a_tube_and_a_cone_cut_by_one_leaning_plane(model: &mut Model) -> [SolidKey; 2] {
     let outer = model
         .add_round_bar(12.0, 30.0, &at(0.0, 0.0, -10.0))
@@ -980,6 +980,34 @@ fn a_tube_cut_by_a_block_whose_top_clears_it_is_the_tube_from_the_blocks_floor_u
             panic!("swapped {swapped}: {answer:?}");
         };
         assert_holds(&model, solid, 2560.0 * PI, &format!("swapped {swapped}"));
+    }
+}
+
+/// **The holed tube cut to the far side of the leaning plane by the wedge**,
+/// both ways round, is the tube
+/// `a_tube_and_a_cone_cut_by_one_leaning_plane_are_refused_before_their_rings_are_placed`
+/// measures, `2048π`. The
+/// wedge's top, `z = 22`, clears the tube as the block's above does, and was
+/// cut along the same two circles and refused the same way until Q1090.
+#[test]
+fn a_holed_tube_cut_by_the_wedge_is_the_tube_past_the_leaning_plane() {
+    for swapped in [false, true] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let outer = model
+            .add_round_bar(12.0, 30.0, &at(0.0, 0.0, -10.0))
+            .expect("a bar of radius twelve");
+        let through = model
+            .add_round_bar(4.0, 34.0, &at(0.0, 0.0, -12.0))
+            .expect("a bar of radius four");
+        let tube = the_one_solid(&mut model, outer, through, Rule::Difference);
+        let wedge = the_wedge_past_the_leaning_plane(&mut model)
+            .unwrap_or_else(|why| panic!("the wedge: {why:?}"));
+        let answer = fused_in_order(&mut model, [tube, wedge], Rule::Intersection, swapped)
+            .unwrap_or_else(|why| panic!("swapped {swapped}: {why:?}"));
+        let [solid] = answer[..] else {
+            panic!("swapped {swapped}: {answer:?}");
+        };
+        assert_holds(&model, solid, 2048.0 * PI, &format!("swapped {swapped}"));
     }
 }
 
