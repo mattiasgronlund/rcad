@@ -4,15 +4,21 @@
 //! of them holds it. The fuse refuses `CannotTellTheCellsOfAFaceApart` in
 //! `arrange.rs`'s `the_walk_of_each_other_lump_each_walk_faces`.
 //!
-//! **Two shapes reached it, one on a ball and one on a plane**, under every
-//! rule and with the arguments both ways round. A printed probe at each of the
-//! five places `arrange.rs` raises that refusal, since removed, named that one
-//! place for all twelve fuses. Both answers exist — each is two ordinary
-//! solids, and its volume is worked out by hand in each test's doc — so both
-//! refusals were gaps (§16.10). **The one on a plane is answered now**, since
+//! **Three shapes reached it: one on a ball, one on a plane and one on a
+//! cone**, each under every rule and with the arguments both ways round. A
+//! printed probe at each of the five places `arrange.rs` raises that refusal,
+//! since removed, named that one place for every fuse. Each answer exists — two
+//! ordinary solids, whose volumes each test's doc works out by hand — so each
+//! refusal was a gap (§16.10). **The one on a plane is answered now**, since
 //! winding on a flat face follows each curved side as well as the corners
 //! (queue row Q1053), and every fuse holds the volume its doc works out. The
-//! one on a ball still reaches it.
+//! ones on a ball and on a cone still reach it.
+//!
+//! **The one on a cone is the axis rule giving up on a walk that goes round
+//! nothing** (queue row Q1056): `the_one_that_goes_round_the_axis_as_well`
+//! returns `None` at `its_own == 0`. The face is a chip of a cone bounded by
+//! two arcs of hyperbolas alone, described face by face, and the other lump is
+//! a circle with two hyperbola arcs on it.
 //!
 //! **What makes two walks of one lump agree** is that only a curve drawn in
 //! full has a side, and a closed curve is drawn in full only when it is a cut.
@@ -29,13 +35,31 @@
 //!   side of it agree about every circle. Winding by corners alone placed a
 //!   walk there only when every side was straight, so a face with a round
 //!   notch was not placed.
+//! - **On a cone** a plane cuts an ellipse or a circle, which goes once round
+//!   the axis, or a hyperbola or a parabola, which runs on away from the apex,
+//!   or lines through the apex. A walk that goes round nothing has no closed
+//!   curve in it. A curve that runs on is drawn only between its outermost
+//!   nodes, and it meets every closed curve that is anywhere above it, so a
+//!   lump of such arcs lies above every closed curve on the face. A lump of
+//!   them with no side of the face in it is thrown away before any walk is
+//!   compared (`drop_the_lumps_of_straight_cuts_alone`): a plate's triangular
+//!   hole drawn above a roofed frustum is, below. So the route found to the
+//!   axis rule's `its_own == 0` is a face whose own sides are such arcs alone,
+//!   above every closed curve: the chip. Built by fusing a frustum with planes
+//!   it is refused before that (two shapes below); described face by face it
+//!   reaches it.
 //!
 //! The other shapes built on the way are pinned beside them, with what each
 //! gives instead.
 
-use rcad_geom::{Deflection, Isometry, Scale, Surface, Vector};
+use rcad_geom::{
+    Axis, Cone, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
+    Surface, Vector,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+
+mod cones;
 
 /// A ball of radius 2 at the origin, less a ball of radius `0.3` at
 /// `(0.5, 0.25, 1.9)`, against the square rod `|x|, |y| < 1`, `|z| < 5`.
@@ -66,6 +90,57 @@ fn a_dimpled_ball_through_a_square_rod_cannot_tell_the_two_ends_of_the_rod_apart
             (model, dimpled, rod)
         },
         |surface| matches!(surface, Surface::Sphere(ball) if ball.radius() == 2.0),
+    );
+}
+
+/// A chip of the cone `r = z` (slope 1, apex at the origin), described face by
+/// face: the part of the solid cone where `2x − z ≥ 1` and `2x + z ≤ 11`.
+/// Against it, a tent: the prism along `y`, `|y| ≤ 10`, over the triangle
+/// `(−11/16, 3/4)`, `(−11/8, 7/4)`, `(−13/16, 3/4)` in `xz`.
+///
+/// The chip's face on the cone is bounded by one arc of the hyperbola each of
+/// its planes cuts, both from `(3, 4, 5)` to `(3, −4, 5)`, so its walk goes
+/// round nothing and its lump has no closed curve in it. The tent stands on the
+/// far side of the axis, clear of the chip, and §400 cannot prove the two apart,
+/// so the tent's planes are drawn on the chip's face as well. Its floor
+/// `z = 3/4` cuts a circle round the axis, below the chip. Its two walls lean
+/// more steeply than the cone's side and cut hyperbolas round the `−x` side
+/// only: the one through `(−11/16, 3/4)` dips below the circle and crosses it,
+/// and the other crosses the first twice above the circle. Above the circle that
+/// lump has two walks, the patch between the three and the rest, and the chip's
+/// walk is above the circle like both of them. The printed probe said:
+///
+/// ```text
+/// axis rule: walk 0: its_own == 0, candidates [2, 3]
+/// site the_walk_of_each_other_lump_each_walk_faces: walk 0 (lump 0, winding Some(1), 2 sides)
+///     against [2, 3] of lump 14 on Cone(..)
+/// ```
+///
+/// **The answer exists**: the two do not meet. The tent is `20 · (1/8 · 1)/2 =
+/// 5/4`, and the chip is the integral over `1 ≤ z ≤ 5` of the part of the disc
+/// `r ≤ z` between `x = (1 + z)/2` and `x = (11 − z)/2`, which
+/// [`the_chips_volume`] works out slice by slice. So the union is the two of
+/// them, the intersection nothing, and each less the other is itself. The walk
+/// that goes round nothing bounds a disc, the other lump holds a circle round
+/// the axis and so is in no disc, and the chip's walk faces neither of its
+/// walks: a gap (§16.10).
+#[test]
+fn a_chip_of_a_cone_beside_a_tent_cannot_tell_the_tents_two_walks_apart() {
+    let mut model = a_model();
+    let chip = a_chip_of_a_cone(&mut model);
+    let tent = a_tent(&mut model);
+    assert_holds(&model, chip, the_chips_volume(), "the chip");
+    assert_holds(&model, tent, 1.25, "the tent");
+
+    every_rule_both_ways_refuses_on_a(
+        "a chip of a cone beside a tent",
+        || {
+            let mut model = a_model();
+            let chip = a_chip_of_a_cone(&mut model);
+            let tent = a_tent(&mut model);
+            (model, chip, tent)
+        },
+        |surface| matches!(surface, Surface::Cone(_)),
     );
 }
 
@@ -300,6 +375,149 @@ fn a_pin_through_the_round_tab_of_a_plate_with_a_round_hole_is_refused_in_select
     }
 }
 
+/// The chip of
+/// `a_chip_of_a_cone_beside_a_tent_cannot_tell_the_tents_two_walks_apart`, cut
+/// from a frustum of slope 1 from `z = 1/2` to `8` instead of described: the
+/// frustum, seamed down `−x` so that the seam stays clear of the chip, against
+/// the prism along `y` whose face lies on `2x − z = 1` and then the one whose
+/// face lies on `2x + z = 11`, the rest of each prism clear of the frustum.
+///
+/// The first cut answers one solid. The second is refused
+/// `AFaceTrimmedByACurveThisCannotFollow` naming a face on the cone, both ways
+/// round; only the intersection is asked, since the chip is what it is for.
+/// Cutting with one prism holding both faces is refused `ResultIsNotManifold`
+/// (`a_frustum_under_two_steep_planes_is_refused_as_not_a_manifold`). Not
+/// traced.
+#[test]
+fn a_chip_cut_from_a_frustum_in_two_steps_is_refused_on_its_cone_face_in_selection() {
+    for chip_first in [true, false] {
+        let mut model = a_model();
+        let cone = cones::a_frustum_seamed_towards(
+            &mut model,
+            1.0,
+            0.5,
+            8.0,
+            [-1.0, 0.0],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a frustum");
+        let rising = a_prism_along_y(
+            &mut model,
+            [[-4.5, -10.0], [20.0, -10.0], [9.0, 17.0]],
+            10.0,
+        );
+        let half = fuse_one(&mut model, cone, rising, Rule::Intersection);
+        let falling = a_prism_along_y(
+            &mut model,
+            [[-20.0, -10.0], [10.5, -10.0], [-3.0, 17.0]],
+            10.0,
+        );
+        let refused = fuse(&mut model, half, falling, Rule::Intersection, chip_first);
+        let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
+            panic!("the half chip first {chip_first}: {refused:?}");
+        };
+        let surface = model
+            .face(face)
+            .expect("the refusal names a face of the model")
+            .surface();
+        assert!(
+            matches!(surface, Surface::Cone(_)),
+            "the half chip first {chip_first}: refused on {surface:?}"
+        );
+    }
+}
+
+/// A frustum of slope 1 from `z = 1/2` to `16`, and the pointed cone of slope 1
+/// to `16`, each cut by the prism along `y` (`|y| ≤ 20`) whose faces lie on
+/// `2x + z = 3` and `8x + 3z = −3`; and the frustum from `1/2` to `8` cut by
+/// the prism whose faces lie on `2x − z = 1` and `2x + z = 11`, the chip of
+/// `a_chip_of_a_cone_beside_a_tent_cannot_tell_the_tents_two_walks_apart`.
+///
+/// Each plane leans more steeply than the cone's side and cuts a hyperbola.
+/// The first pair meet in a ridge at `(−6, y, 15)` and cut away the whole top
+/// of the cone, dipping to `z = 1` and `z = 0.6` below its two ends; the second
+/// meet in a chord at `(3, y, 5)` inside it. Every one of these intersections is
+/// refused `ResultIsNotManifold { count: 4 }`, both ways round. The same roof
+/// over a frustum from `z = 2`, which both hyperbolas dip below, answers
+/// (`a_roofed_frustum_beside_a_plate_with_a_triangular_hole_never_draws_the_hole`).
+/// Not traced.
+#[test]
+fn a_frustum_under_two_steep_planes_is_refused_as_not_a_manifold() {
+    let roof = [[-6.0, 15.0], [0.0, -1.0], [2.0, -1.0]];
+    let chip = [[3.0, 5.0], [-0.5, -2.0], [6.5, -2.0]];
+    for (what, cone_is_pointed, near, far, prism, half) in [
+        ("a frustum under the roof", false, 0.5, 16.0, roof, 20.0),
+        ("a pointed cone under the roof", true, 0.0, 16.0, roof, 20.0),
+        ("a frustum cut to the chip", false, 0.5, 8.0, chip, 10.0),
+    ] {
+        for cone_first in [true, false] {
+            let mut model = a_model();
+            let cone = if cone_is_pointed {
+                cones::a_pointed_cone(&mut model, 1.0, far)
+            } else {
+                cones::a_frustum(&mut model, 1.0, near, far)
+            };
+            let prism = a_prism_along_y(&mut model, prism, half);
+            let refused = fuse(&mut model, cone, prism, Rule::Intersection, cone_first);
+            assert!(
+                matches!(refused, Err(Error::ResultIsNotManifold { count: 4 })),
+                "{what}, the cone first {cone_first}: {refused:?}"
+            );
+        }
+    }
+}
+
+/// The frustum of slope 1 from `z = 2` to `16` under the roof of
+/// `a_frustum_under_two_steep_planes_is_refused_as_not_a_manifold`, which
+/// answers, against a plate from `z = 9/4` to `20` over `[−30, 30]²` with a
+/// triangular hole `(3/10, 10)`, `(1/10, 53/5)`, `(0, 11)`.
+///
+/// Both of the roof's hyperbolas dip below the bottom cap, so the cut frustum's
+/// cone face is two pieces, one each side of `y = 0`. The hole's three walls
+/// lean towards `+x` by less than the roof's other plane leaves room for, so
+/// each cuts a hyperbola on the cone wholly above the roof, and the three cut a
+/// triangle there about `z = 10`, on the face's box and off the face: a walk that
+/// goes round nothing in a lump of its own. The probe printed each wall's
+/// crossing with two nodes and one arc, and then no walk of that lump: it has no
+/// side of the face in it and no curve that closes, so
+/// `drop_the_lumps_of_straight_cuts_alone` throws it away, and §340.2 is never
+/// asked. Every fuse is refused later, in selection, naming a face on the cone.
+/// Not traced.
+#[test]
+fn a_roofed_frustum_beside_a_plate_with_a_triangular_hole_never_draws_the_hole() {
+    for (rule, roofed_first) in every_rule_both_ways() {
+        let mut model = a_model();
+        let cone = cones::a_frustum(&mut model, 1.0, 2.0, 16.0);
+        let roof = a_prism_along_y(&mut model, [[-6.0, 15.0], [0.0, -1.0], [2.0, -1.0]], 20.0);
+        let roofed = fuse_one(&mut model, cone, roof, Rule::Intersection);
+        let profile = ProfileBuilder::new(vec![
+            [-30.0, -30.0],
+            [30.0, -30.0],
+            [30.0, 30.0],
+            [-30.0, 30.0],
+        ])
+        .with_hole(vec![[0.3, 10.0], [0.1, 10.6], [0.0, 11.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a plate with a hole");
+        let plate = model
+            .add_extrusion(&profile, 17.75, &shift(0.0, 0.0, 2.25))
+            .expect("a plate");
+        let refused = fuse(&mut model, roofed, plate, rule, roofed_first);
+        let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
+            panic!("{rule:?}, the roofed frustum first {roofed_first}: {refused:?}");
+        };
+        let surface = model
+            .face(face)
+            .expect("the refusal names a face of the model")
+            .surface();
+        assert!(
+            matches!(surface, Surface::Cone(_)),
+            "{rule:?}, the roofed frustum first {roofed_first}: refused on {surface:?}"
+        );
+    }
+}
+
 /// Three shapes built on the way that never reach the arrangement's cells: a
 /// ball against a pipe crosses in a quartic, which nothing orders (§34.10).
 ///
@@ -494,4 +712,207 @@ fn block(model: &mut Model, low: [f64; 3], high: [f64; 3]) -> SolidKey {
     model
         .add_extrusion(&rectangle, high[2] - low[2], &shift(0.0, 0.0, low[2]))
         .expect("a block")
+}
+
+/// The part of the solid cone `r ≤ z` where `2x − z ≥ 1` and `2x + z ≤ 11`,
+/// described face by face: a face on the cone bounded by an arc of the
+/// hyperbola each plane cuts, from `(3, 4, 5)` to `(3, −4, 5)`, and a flat face
+/// on each plane between its arc and the chord the two planes meet along.
+///
+/// The two corners are exact on the cone (`3² + 4² = 5²`) and on both planes.
+/// Each arc is picked out of its plane's two branches, one on each nappe, by
+/// the half-space `z ≥ 0`.
+fn a_chip_of_a_cone(model: &mut Model) -> SolidKey {
+    let skin = Cone::new(Axis::z(), 1.0).expect("a positive slope");
+    let rising =
+        Plane::from_point_and_normal(Point::new(3.0, 4.0, 5.0), Vector::new(-2.0, 0.0, 1.0))
+            .expect("a plane");
+    let falling =
+        Plane::from_point_and_normal(Point::new(3.0, 4.0, 5.0), Vector::new(2.0, 0.0, 1.0))
+            .expect("a plane");
+    let upper = HalfSpace::through_a_point_facing(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+        .expect("a half-space");
+    let on_the_upper_nappe = |plane| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(plane),
+        picked_by: smallvec::smallvec![Picker::from(upper)],
+    };
+
+    let mut builder = SolidBuilder::new();
+    let left = builder
+        .add_vertex(Point::new(3.0, 4.0, 5.0))
+        .expect("a corner");
+    let right = builder
+        .add_vertex(Point::new(3.0, -4.0, 5.0))
+        .expect("a corner");
+    let low = builder
+        .add_edge(right, left, on_the_upper_nappe(rising))
+        .expect("an arc");
+    let high = builder
+        .add_edge(left, right, on_the_upper_nappe(falling))
+        .expect("an arc");
+    let chord = builder
+        .add_edge(left, right, EdgeRun::Straight)
+        .expect("a chord");
+    let face = |builder: &mut SolidBuilder, surface, steps: [_; 2]| {
+        let steps: Vec<DraftStep> = steps
+            .into_iter()
+            .map(|(edge, way)| DraftStep::Along(builder.add_coedge(edge, way).expect("a coedge")))
+            .collect();
+        let wire = builder.add_wire(&steps).expect("a wire");
+        builder.add_face(surface, &[wire]).expect("a face")
+    };
+    let lens = face(
+        &mut builder,
+        Surface::Cone(skin),
+        [(low, Orientation::Forward), (high, Orientation::Forward)],
+    );
+    let under = face(
+        &mut builder,
+        Surface::Plane(rising),
+        [(low, Orientation::Reversed), (chord, Orientation::Reversed)],
+    );
+    let over = face(
+        &mut builder,
+        Surface::Plane(falling),
+        [(high, Orientation::Reversed), (chord, Orientation::Forward)],
+    );
+    builder
+        .add_shell(&[
+            (lens, Orientation::Forward),
+            (under, Orientation::Forward),
+            (over, Orientation::Forward),
+        ])
+        .expect("three faces close");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a chip of a cone")
+}
+
+/// The volume of [`a_chip_of_a_cone`], by Simpson's rule over its slices.
+///
+/// The slice at height `z` is the disc `r ≤ z` between `x = (1 + z)/2` and
+/// `x = (11 − z)/2`, nonempty for `1 ≤ z ≤ 5`, and the second bound cuts the
+/// disc only from `z = 11/3` up. The part of a disc of radius `r` past `x = a`
+/// is `r² acos(a/r) − a √(r² − a²)`. The slice area is smooth on each side of
+/// `11/3`, so each side is summed on its own.
+fn the_chips_volume() -> f64 {
+    let past = |radius: f64, from: f64| {
+        if from >= radius {
+            0.0
+        } else {
+            radius * radius * (from / radius).acos() - from * (radius * radius - from * from).sqrt()
+        }
+    };
+    let slice = |z: f64| past(z, (1.0 + z) / 2.0) - past(z, (11.0 - z) / 2.0);
+    let simpson = |low: f64, high: f64| {
+        let steps = 20_000;
+        let step = (high - low) / f64::from(steps);
+        let inner: f64 = (1..steps)
+            .map(|at| {
+                let weight = if at % 2 == 1 { 4.0 } else { 2.0 };
+                weight * slice(low + f64::from(at) * step)
+            })
+            .sum();
+        (slice(low) + inner + slice(high)) * step / 3.0
+    };
+    simpson(1.0, 11.0 / 3.0) + simpson(11.0 / 3.0, 5.0)
+}
+
+/// The tent of
+/// `a_chip_of_a_cone_beside_a_tent_cannot_tell_the_tents_two_walks_apart`: a
+/// prism along `y`, `|y| ≤ 10`, over the triangle `(−11/16, 3/4)`,
+/// `(−11/8, 7/4)`, `(−13/16, 3/4)`.
+///
+/// Its walls lie on `x + 11z/16 = −11/64` and `x + 9z/16 = −25/64`. Each leans
+/// more steeply than the cone's side, and on the cone each is a hyperbola
+/// round the `−x` side alone, `46.6°` and `55.8°` either side of it: neither
+/// comes within `120°` of `+x`, where the chip's wider hyperbola reaches, so
+/// neither crosses the chip's. The first dips to `z = 0.55`, below the floor's
+/// circle at `3/4`; the second to `0.89`, above it.
+fn a_tent(model: &mut Model) -> SolidKey {
+    a_prism_along_y(
+        model,
+        [[-0.6875, 0.75], [-1.375, 1.75], [-0.8125, 0.75]],
+        10.0,
+    )
+}
+
+/// A prism along `y` from `−half` to `half` over a triangle in the `xz` plane,
+/// its corners listed anticlockwise seen from `−y`.
+fn a_prism_along_y(model: &mut Model, [a, b, c]: [[f64; 2]; 3], half: f64) -> SolidKey {
+    let at = |[x, z]: [f64; 2], y: f64| [x, y, z];
+    a_polyhedron(
+        model,
+        &[
+            at(a, -half),
+            at(b, -half),
+            at(c, -half),
+            at(a, half),
+            at(b, half),
+            at(c, half),
+        ],
+        &[
+            &[0, 1, 2],
+            &[3, 5, 4],
+            &[0, 3, 4, 1],
+            &[1, 4, 5, 2],
+            &[2, 5, 3, 0],
+        ],
+    )
+}
+
+/// A solid with flat faces through `corners`, each face listed anticlockwise
+/// seen from outside, so that its first three corners give its outward normal.
+fn a_polyhedron(model: &mut Model, corners: &[[f64; 3]], faces: &[&[usize]]) -> SolidKey {
+    let mut builder = SolidBuilder::new();
+    let vertices: Vec<_> = corners
+        .iter()
+        .map(|&[x, y, z]| builder.add_vertex(Point::new(x, y, z)).expect("a corner"))
+        .collect();
+    let mut edges = std::collections::BTreeMap::new();
+    let mut drafted = Vec::new();
+    for face in faces {
+        let mut steps = Vec::new();
+        for (at, &from) in face.iter().enumerate() {
+            let to = face[(at + 1) % face.len()];
+            let ends = (from.min(to), from.max(to));
+            let edge = *edges.entry(ends).or_insert_with(|| {
+                builder
+                    .add_edge(vertices[ends.0], vertices[ends.1], EdgeRun::Straight)
+                    .expect("an edge")
+            });
+            let way = if from < to {
+                Orientation::Forward
+            } else {
+                Orientation::Reversed
+            };
+            steps.push(DraftStep::Along(
+                builder.add_coedge(edge, way).expect("a coedge"),
+            ));
+        }
+        let wire = builder.add_wire(&steps).expect("a wire");
+        let [a, b, c] = [face[0], face[1], face[2]].map(|index| corners[index]);
+        let along = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let next = [c[0] - b[0], c[1] - b[1], c[2] - b[2]];
+        let outward = Vector::new(
+            along[1] * next[2] - along[2] * next[1],
+            along[2] * next[0] - along[0] * next[2],
+            along[0] * next[1] - along[1] * next[0],
+        );
+        let plane = Plane::from_point_and_normal(Point::new(a[0], a[1], a[2]), outward)
+            .expect("three corners not in a line");
+        drafted.push(
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a face"),
+        );
+    }
+    let shell: Vec<_> = drafted
+        .into_iter()
+        .map(|face| (face, Orientation::Forward))
+        .collect();
+    builder.add_shell(&shell).expect("the faces close");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a polyhedron")
 }
