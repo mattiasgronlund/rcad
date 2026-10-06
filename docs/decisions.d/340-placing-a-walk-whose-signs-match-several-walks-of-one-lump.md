@@ -186,6 +186,28 @@ the plate's square and `say_whether_the_face_holds_each_lump_of_closed_cuts`
 counts round the corners alone. Where a side is curved, the corners are not the
 face's shape there either.
 
+*2026-10-06, Q1054: answered. `say_whether_the_face_holds_each_lump_of_closed_cuts`
+now counts a flat face's rim the way `how_often_the_faces_rim_winds_round`
+does, each wire by how it runs round its curved sides as well as its corners
+(through Q1053's `how_often_a_side_and_its_chord_wind_round`), so the pin
+through a plate's round tab, and its mirror, a pin standing in a round notch,
+answer every fuse. Before, each wire was counted the same way whichever way it
+ran, so a pin standing in a square hole was counted twice and refused
+`CannotTellTheCellsOfAFaceApart`. A rim with a whole closed curve, a round
+hole, is still not counted.*
+
+*2026-10-06, Q1056: the "No cone was tried" bullet above is answered. A chip
+of the cone `r = z`, described face by face (the solid cone where
+`2x − z ≥ 1` and `2x + z ≤ 11`), beside a tent reaches
+`the_one_that_goes_round_the_axis_as_well`'s `its_own == 0` in `fuse/arrange.rs`
+under every rule both ways round
+(`a_chip_of_a_cone_beside_a_tent_cannot_tell_the_tents_two_walks_apart`,
+`c1ab64b9`). A lump of hyperbola arcs with no side of the face in it is thrown
+away by `drop_the_lumps_of_straight_cuts_alone`, so that route on a cone goes
+through a face bounded by such arcs alone, above every closed curve on it; the
+same chip, cut from a frustum with planes, is refused one step earlier,
+`ResultIsNotManifold { count: 4 }` or `AFaceTrimmedByACurveThisCannotFollow`.*
+
 ### 340.5 The half ball the second fuse turns inside out
 
 *Queue row Q412, which replaced Q204 to land this section's fix with the four
