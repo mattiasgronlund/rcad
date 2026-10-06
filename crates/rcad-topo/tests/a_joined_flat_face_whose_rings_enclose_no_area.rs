@@ -637,15 +637,18 @@ fn a_cut_cone_and_a_second_cone_on_its_axis(model: &mut Model) -> [SolidKey; 2] 
 /// runs along a parabola, which `holds_the_other_rings` answers `None` for.
 ///
 /// **That is not reached: every rule, both ways round, is refused before
-/// `rings_round`.** Tube first, on `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`;
-/// cone first, on `AFaceTrimmedByACurveThisCannotFollow` naming a face of the
-/// cone. The hole's corners are where the cone, the inner pipe and the leaning
-/// plane meet, and `rcad-geom` works out a meet of two curved surfaces and a
-/// plane about one axis only when the plane is square to that axis (a gap,
-/// `docs/decisions.md` §31.2). Two other shapes were run on the way, and their
-/// set-up fuses refused as well (Q634): the bar of radius 12 cut to this side
-/// less the cut cone, the same three-surface refusal, and the cut cone less a
-/// bar of radius 1 up its axis, `AFaceTrimmedByACurveThisCannotFollow`.
+/// `rings_round`, on `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.** Cone first
+/// used to stop earlier, on `AFaceTrimmedByACurveThisCannotFollow` naming a
+/// face of the tube; sharing the arc picker between `holds.rs` and
+/// `arrange.rs` (Q1033) takes it one step further, to the same three-surface
+/// meet as tube first. The hole's corners are where the cone, the inner pipe
+/// and the leaning plane meet, and `rcad-geom` works out a meet of two curved
+/// surfaces and a plane about one axis only when the plane is square to that
+/// axis (a gap, `docs/decisions.md` §31.2). Two other shapes were run on the
+/// way, and their set-up fuses refused as well (Q634): the bar of radius 12
+/// cut to this side less the cut cone, and the cut cone less a bar of radius
+/// 1 up its axis, both the same three-surface refusal since Q1033 (Q1092 had
+/// the second one on `AFaceTrimmedByACurveThisCannotFollow`, before it).
 ///
 /// Both solids are measured before they are fused. The tube holds the ring's
 /// area times its mean height, `128π · 16 = 2048π`. The cone holds
@@ -665,26 +668,16 @@ fn a_tube_and_a_cone_cut_by_one_leaning_plane_are_refused_before_their_rings_are
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let pair = a_tube_and_a_cone_cut_by_one_leaning_plane(&mut model);
         let refused = fused_in_order(&mut model, pair, rule, swapped);
-        if swapped {
-            let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
-                panic!("{rule:?}, cone first: {refused:?}");
-            };
-            let cone = model.solid(pair[1]).expect("this model made the key");
-            assert!(
-                cone.faces().any(|mine| mine.key() == face),
-                "{rule:?}, cone first: the refusal names a face of the tube"
-            );
-        } else {
-            assert!(
-                matches!(
-                    refused,
-                    Err(Error::Geometry(
-                        rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                    ))
-                ),
-                "{rule:?}, tube first: {refused:?}"
-            );
-        }
+        let first = if swapped { "cone" } else { "tube" };
+        assert!(
+            matches!(
+                refused,
+                Err(Error::Geometry(
+                    rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
+                ))
+            ),
+            "{rule:?}, {first} first: {refused:?}"
+        );
     }
 }
 

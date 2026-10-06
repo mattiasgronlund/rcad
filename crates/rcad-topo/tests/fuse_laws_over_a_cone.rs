@@ -664,9 +664,12 @@ const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 2] = [
             third_side: 4.0,
             third_at: [3.5, 0.5, -3.5],
         },
+        // The second union used to stop on `AFaceTrimmedByACurveThisCannotFollow`;
+        // sharing the arc picker between `holds.rs` and `arrange.rs` (Q1033)
+        // takes it one step further, to `CannotTellTheCellsOfAFaceApart`.
         [
             None,
-            Some("the second union: AFaceTrimmedByACurveThisCannotFollow"),
+            Some("the second union: CannotTellTheCellsOfAFaceApart"),
         ],
     ),
 ];
