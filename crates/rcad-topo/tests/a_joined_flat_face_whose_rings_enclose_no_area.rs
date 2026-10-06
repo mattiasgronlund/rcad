@@ -32,7 +32,11 @@
 //! parabola, a tube and a cone cut by one leaning plane, is refused before
 //! `rings_round` under every rule (Q634), and so is the probe for two arcs
 //! along two cones' hyperbolas, a cut cone less a second cone on its axis,
-//! because two different cones cannot be crossed (Q636).
+//! because two different cones cannot be crossed (Q636). The family of
+//! corners that sweep no area and are not on one line is built with corners
+//! that cancel exactly, face by face, and the fuse that would join its cap
+//! puts a corner on its arc wherever one of its own walls would cross it, so
+//! the ring `rings_round` is handed winds (Q641).
 
 use std::f64::consts::PI;
 
@@ -956,6 +960,343 @@ fn a_holed_bar_cut_to_a_bow_tie_cap_is_refused_while_a_face_is_cut_into_cells() 
         );
     }
 }
+
+/// **Corners that cancel exactly, written by hand: the fuse cuts the arc
+/// wherever a wall of the cap would cross it, and the ring it hands
+/// `rings_round` winds.** A bar of radius 20 and height 4, cut to the piece
+/// between its arc from `(20, 0)` to `(0, 20)` and a staircase down through
+/// `(0, 18)`, `(8, 18)`, `(8, 14)`, `(12, 14)` and `(12, 0)`, built face by face
+/// ([`a_bar_cut_to`]). The area under the staircase is
+/// `8·18 + 4·14 = 200`, the same as under the arc's chord `x + y = 20`, so the
+/// seven corners sweep no area, and they are not on one line. Every corner is a
+/// whole number and every wall square to an axis, so nothing written rounds:
+/// read back off the model, the cap's corners are the seven as written, and
+/// their sweep is exactly 0. The cap holds what the arc's segment holds,
+/// `100π − 200`.
+///
+/// Against a bar of radius 2 at `(15, 8)`, flush with both of its caps or
+/// standing on its top, the cap is cut in two along that bar's circle, and
+/// where the two pieces are one face again the fuse joins them, so the cap
+/// reaches `rings_round`. **It does not reach it with these corners.** The
+/// fuse also cuts the bar's wall along every wall of the staircase that would
+/// cross it, `x = 8` at `(8, √336)`, `x = 12` at `(12, 16)`, `y = 14` at
+/// `(√204, 14)` and `y = 18` at `(√76, 18)`, though none of those walls reaches
+/// the arc. Where pieces of one pipe meet, the corner stays
+/// (`what_is_left` in `fuse/assemble.rs`), so the joined cap comes back with
+/// eleven corners, four of them on the arc. Their sweep is what the corners
+/// on the arc add over its chord, so the ring winds with the plane and is the
+/// outline by that, before any ring enclosing nothing is looked at. Over the
+/// twelve fuses `rings_round` is reached four times, and each time one ring
+/// winds with the plane and `holds_the_other_rings` is never asked
+/// (breakpoints on `outline = Some(ring)` and on the closure that asks it,
+/// Q641).
+///
+/// **So a ring of one arc and straight sides does not reach `rings_round` with
+/// its corners cancelling**, wherever the fuse cuts the arc along every wall
+/// the way it does here. If every side ran on the centre's side of every
+/// chord between corners on the arc, the corners would go round a polygon
+/// that does not cross itself, which sweeps some area. So some side runs
+/// between a chord and its arc. The line along it meets the chord's line only
+/// once, so it leaves that piece of the disk through the arc, and the fuse
+/// puts a corner there: the arc that chord stood for is not one arc of the
+/// ring after all. Nor can the arc be longer than half its circle with no
+/// corner on it: the bar cut to the step from `(−8, −6)` along `y = −6` to
+/// `(−1, −6)`, down to `(−1, −8)` and along `y = −8` to `(6, −8)`, the arc
+/// running the long way round, built face by face, is refused
+/// `AFaceTrimmedByACurveThisCannotFollow` against a bar of radius 2 standing
+/// through it, under every rule both ways round
+/// (`a_step_cap_whose_arc_runs_the_long_way_round_is_refused_by_the_next_fuse`,
+/// `docs/decisions.md` §224.1). The same step
+/// cut out of a bar by a prism comes back with a corner on the arc at
+/// `(−1, √99)`, where `x = −1` crosses it, and one at `(8, −6)`, where
+/// `y = −6` does (Q641's probes). Not tried: sides along other pipes, which
+/// the line argument does not cover.
+///
+/// What each fuse answers is pinned: the union, the intersection and both
+/// differences, both ways round, with the second bar in both places. Five of
+/// the twelve are refused `ResultIsNotManifold { count: 1 }`, among them the
+/// flush union with the second bar handed over first, whose other order is
+/// answered.
+#[test]
+fn a_staircase_cap_whose_corners_cancel_is_cut_on_its_arc_by_its_own_walls() {
+    let as_written = STAIRCASE.map(|[x, y]| [x, y, 4.0]);
+    let staircase_volume = 4.0 * (100.0 * PI - 200.0);
+    {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let staircase = a_bar_cut_to(&mut model, 20.0, &STAIRCASE)
+            .unwrap_or_else(|why| panic!("the staircase: {why:?}"));
+        assert_holds(&model, staircase, staircase_volume, "the staircase");
+        let corners = the_outline_of_the_cap(&model, staircase, as_written[0]);
+        assert_eq!(corners, as_written, "read back as written");
+        assert_eq!(swept_by(&corners), 0.0, "the staircase's corners cancel");
+    }
+
+    let on_the_arc = [
+        [8.0, 336.0_f64.sqrt()],
+        [12.0, 16.0],
+        [204.0_f64.sqrt(), 14.0],
+        [76.0_f64.sqrt(), 18.0],
+    ];
+    for on_top in [false, true] {
+        for (rule, swapped) in every_rule_both_ways() {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let staircase = a_bar_cut_to(&mut model, 20.0, &STAIRCASE)
+                .unwrap_or_else(|why| panic!("the staircase: {why:?}"));
+            let pin = if on_top {
+                model.add_round_bar(2.0, 2.0, &at(15.0, 8.0, 4.0))
+            } else {
+                model.add_round_bar(2.0, 4.0, &at(15.0, 8.0, 0.0))
+            }
+            .expect("a bar of radius two");
+            let what = format!("{rule:?}, swapped {swapped}, on top {on_top}");
+            let answer = fused_in_order(&mut model, [staircase, pin], rule, swapped);
+            let pin_volume = if on_top { 8.0 * PI } else { 16.0 * PI };
+            let with_the_cap = match (on_top, rule, swapped) {
+                (false, Rule::Union, false) | (true, Rule::Difference, false) => {
+                    let solid = the_only(answer, &what);
+                    assert_holds(&model, solid, staircase_volume, &what);
+                    solid
+                }
+                (false, Rule::Intersection, true) | (true, Rule::Difference, true) => {
+                    assert_holds(&model, the_only(answer, &what), pin_volume, &what);
+                    continue;
+                }
+                (false, Rule::Difference, true) | (true, Rule::Intersection, _) => {
+                    let solids = answer.unwrap_or_else(|why| panic!("{what} refused: {why}"));
+                    assert_eq!(solids, Vec::new(), "{what}: no solid is shared");
+                    continue;
+                }
+                (false, Rule::Union | Rule::Intersection, _)
+                | (false, Rule::Difference, false)
+                | (true, Rule::Union, _) => {
+                    assert!(
+                        matches!(answer, Err(Error::ResultIsNotManifold { count: 1, .. })),
+                        "{what}: {answer:?}"
+                    );
+                    continue;
+                }
+                (_, other, _) => panic!("not a rule this probes: {other:?}"),
+            };
+            let written = the_outline_of_the_cap(&model, with_the_cap, as_written[0]);
+            for corner in as_written {
+                assert!(
+                    written.contains(&corner),
+                    "{what}: {corner:?} is not in {written:?}"
+                );
+            }
+            for [x, y] in on_the_arc {
+                assert!(
+                    written
+                        .iter()
+                        .any(|at| (at[0] - x).abs() < 1e-12 && (at[1] - y).abs() < 1e-12),
+                    "{what}: no corner at ({x}, {y}) in {written:?}"
+                );
+            }
+            assert_eq!(written.len(), 11, "{what}: {written:?}");
+            assert!(swept_by(&written) > 1.0, "{what}: {written:?}");
+        }
+    }
+}
+
+/// The staircase of the test above less a bar of radius 2 at `(15, 3)`
+/// standing through it, which would give its cap a hole, is refused
+/// `CannotTellTheCellsOfAFaceApart` under every rule, both ways round. So is a
+/// holed bar cut to Q616's bow
+/// tie (`a_holed_bar_cut_to_a_bow_tie_cap_is_refused_while_a_face_is_cut_into_cells`),
+/// and both caps have corners that sweep no area.
+#[test]
+fn a_staircase_cap_whose_corners_cancel_is_refused_a_hole_while_its_cap_is_cut_into_cells() {
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let staircase = a_bar_cut_to(&mut model, 20.0, &STAIRCASE)
+            .unwrap_or_else(|why| panic!("the staircase: {why:?}"));
+        let through = model
+            .add_round_bar(2.0, 6.0, &at(15.0, 3.0, -1.0))
+            .expect("a bar of radius two");
+        let refused = fused_in_order(&mut model, [staircase, through], rule, swapped);
+        assert!(
+            matches!(refused, Err(Error::CannotTellTheCellsOfAFaceApart { .. })),
+            "{rule:?}, swapped {swapped}: {refused:?}"
+        );
+    }
+}
+
+/// The step of [`LONG_STEP`] holds what the circle above the chord `y = −8`
+/// holds, `75π + 50` on its cap, and its four corners, read back as written,
+/// sweep no area. Its arc runs three quarters of the way round with no corner
+/// on it, and no fuse that would join its cap gets that far: taking a bar of
+/// radius 2 at `(3, 2)` out of it is refused while its cap is cut, under every
+/// rule, both ways round (`docs/decisions.md` §224.1: an arc longer than half
+/// its circle has its centre in front of any picker that holds the whole arc).
+#[test]
+fn a_step_cap_whose_arc_runs_the_long_way_round_is_refused_by_the_next_fuse() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let step = a_bar_cut_to(&mut model, 10.0, &LONG_STEP)
+        .unwrap_or_else(|why| panic!("the step: {why:?}"));
+    assert_holds(&model, step, 4.0 * (75.0 * PI + 50.0), "the step");
+    let corners = the_outline_of_the_cap(&model, step, [6.0, -8.0, 4.0]);
+    assert_eq!(
+        corners,
+        LONG_STEP.map(|[x, y]| [x, y, 4.0]),
+        "read back as written"
+    );
+    assert_eq!(swept_by(&corners), 0.0, "the step's corners cancel");
+
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let step = a_bar_cut_to(&mut model, 10.0, &LONG_STEP)
+            .unwrap_or_else(|why| panic!("the step: {why:?}"));
+        let through = model
+            .add_round_bar(2.0, 6.0, &at(3.0, 2.0, -1.0))
+            .expect("a bar of radius two");
+        let refused = fused_in_order(&mut model, [step, through], rule, swapped);
+        let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
+            panic!("{rule:?}, swapped {swapped}: {refused:?}");
+        };
+        let the_step = model.solid(step).expect("this model made the key");
+        assert!(
+            the_step.faces().any(|mine| mine.key() == face),
+            "{rule:?}, swapped {swapped}: the refusal names a face of the step"
+        );
+    }
+}
+
+/// What the corners sweep round `z`, twice over: the shoelace sum.
+fn swept_by(corners: &[[f64; 3]]) -> f64 {
+    (0..corners.len())
+        .map(|at| {
+            let [p, q] = [corners[at], corners[(at + 1) % corners.len()]];
+            p[0] * q[1] - p[1] * q[0]
+        })
+        .sum()
+}
+
+/// The corners of the outline of `solid`'s face on `z = 4` that holds the
+/// corner `start`, as its ring runs from there.
+fn the_outline_of_the_cap(model: &Model, solid: SolidKey, start: [f64; 3]) -> Vec<[f64; 3]> {
+    let solid = model.solid(solid).expect("this model made the key");
+    let mut outlines = solid.faces().filter_map(|face| {
+        let corners: Vec<[f64; 3]> = face
+            .outer_wire()
+            .points()
+            .map(|point| point.coordinates())
+            .collect();
+        let from = corners.iter().position(|&corner| corner == start)?;
+        corners
+            .iter()
+            .all(|corner| corner[2] == 4.0)
+            .then(|| [&corners[from..], &corners[..from]].concat())
+    });
+    let outline = outlines.next().expect("a cap holds the staircase's corner");
+    assert!(outlines.next().is_none(), "one cap holds it");
+    outline
+}
+
+/// A round bar of `radius` about the `z` axis, height 4, cut to the piece
+/// whose cap runs round `corners`: along the bar's circle anticlockwise from
+/// the first to the second, picked by the side of the line between them that
+/// is on the right going from the first to the second, then straight from
+/// corner to corner back to the first. Built face by face, so every corner is
+/// where it is written.
+fn a_bar_cut_to(
+    model: &mut Model,
+    radius: f64,
+    corners: &[[f64; 2]],
+) -> rcad_topo::Result<SolidKey> {
+    use Orientation::{Forward, Reversed};
+    let mut builder = SolidBuilder::new();
+    let mut low = Vec::with_capacity(corners.len());
+    let mut high = Vec::with_capacity(corners.len());
+    for &[x, y] in corners {
+        low.push(builder.add_vertex(Point::new(x, y, 0.0))?);
+        high.push(builder.add_vertex(Point::new(x, y, 4.0))?);
+    }
+    let top = Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+        .expect("a unit normal");
+    let bottom = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+        .expect("a unit normal");
+    let [[from_x, from_y], [to_x, to_y]] = [corners[0], corners[1]];
+    let the_arc = Picker::InFrontOf(
+        HalfSpace::new(
+            Vector::new(to_y - from_y, from_x - to_x, 0.0),
+            from_x * to_y - from_y * to_x,
+        )
+        .expect("a normal with a length"),
+    );
+    let next = |index: usize| (index + 1) % corners.len();
+    let mut up = Vec::with_capacity(corners.len());
+    let mut along_the_top = Vec::with_capacity(corners.len());
+    let mut along_the_bottom = Vec::with_capacity(corners.len());
+    for index in 0..corners.len() {
+        up.push(builder.add_edge(low[index], high[index], EdgeRun::Straight)?);
+        let [run_high, run_low] = if index == 0 {
+            [top, bottom].map(|plane| EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(plane),
+                picked_by: smallvec![the_arc],
+            })
+        } else {
+            [EdgeRun::Straight, EdgeRun::Straight]
+        };
+        along_the_top.push(builder.add_edge(high[index], high[next(index)], run_high)?);
+        along_the_bottom.push(builder.add_edge(low[index], low[next(index)], run_low)?);
+    }
+    let mut faces = Vec::with_capacity(corners.len() + 2);
+    let top_steps: Vec<_> = along_the_top.iter().map(|&edge| (edge, Forward)).collect();
+    let top_wire = a_wire(&mut builder, &top_steps)?;
+    faces.push(builder.add_face(Surface::Plane(top), &[top_wire])?);
+    let bottom_steps: Vec<_> = along_the_bottom
+        .iter()
+        .rev()
+        .map(|&edge| (edge, Reversed))
+        .collect();
+    let bottom_wire = a_wire(&mut builder, &bottom_steps)?;
+    faces.push(builder.add_face(Surface::Plane(bottom), &[bottom_wire])?);
+    for index in 0..corners.len() {
+        let wire = a_wire(
+            &mut builder,
+            &[
+                (along_the_bottom[index], Forward),
+                (up[next(index)], Forward),
+                (along_the_top[index], Reversed),
+                (up[index], Reversed),
+            ],
+        )?;
+        let surface = if index == 0 {
+            Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a positive radius"))
+        } else {
+            let ([x, y], [to_x, to_y]) = (corners[index], corners[next(index)]);
+            Surface::Plane(
+                Plane::from_point_and_normal(
+                    Point::new(x, y, 0.0),
+                    Vector::new(to_y - y, x - to_x, 0.0),
+                )
+                .expect("a side with a length"),
+            )
+        };
+        faces.push(builder.add_face(surface, &[wire])?);
+    }
+    let shell: Vec<_> = faces.into_iter().map(|face| (face, Forward)).collect();
+    builder.add_shell(&shell)?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// The corners of the staircase cap, in the order its ring runs: the arc of
+/// radius 20 from `(20, 0)` to `(0, 20)`, then the six straight sides.
+const STAIRCASE: [[f64; 2]; 7] = [
+    [20.0, 0.0],
+    [0.0, 20.0],
+    [0.0, 18.0],
+    [8.0, 18.0],
+    [8.0, 14.0],
+    [12.0, 14.0],
+    [12.0, 0.0],
+];
+
+/// The bar of radius 10 cut to the step of the test above it, its arc the long
+/// way round from `(6, −8)` to `(−8, −6)`: the polygon through its corners
+/// crosses itself where the chord meets the riser, and the two halves cancel.
+const LONG_STEP: [[f64; 2]; 4] = [[6.0, -8.0], [-8.0, -6.0], [-1.0, -6.0], [-1.0, -8.0]];
 
 /// **A closed side that is one of several.** A tube, radius 7 less a bar of
 /// radius 3 through it, and a bar of radius 1 at `(2, 0)` inside its hole,
