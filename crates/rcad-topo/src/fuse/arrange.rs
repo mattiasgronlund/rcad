@@ -5517,15 +5517,22 @@ impl<'f> Arrangement<'f> {
                 point: self.nodes[node].point,
             },
             (None, None) => {
-                let carried_by = [
-                    self.surface,
-                    self.crossings[self.nodes[node].crossings[0]].partner,
-                ];
+                let crossing = &self.crossings[self.nodes[node].crossings[0]];
+                let carried_by = [self.surface, crossing.partner];
+                let picked_by = SmallVec::from_slice(crossing.picked_by());
                 let point = self.nodes[node].point;
                 if self.nodes[node].half_way_round {
-                    MeetPoint::HalfWayRoundAClosedCurve { carried_by, point }
+                    MeetPoint::HalfWayRoundAClosedCurve {
+                        carried_by,
+                        picked_by,
+                        point,
+                    }
                 } else {
-                    MeetPoint::WhereAClosedCurveStarts { carried_by, point }
+                    MeetPoint::WhereAClosedCurveStarts {
+                        carried_by,
+                        picked_by,
+                        point,
+                    }
                 }
             }
         }
@@ -9114,10 +9121,16 @@ mod curved {
             MeetPoint::OfThreeSurfaces {
                 surfaces, which, ..
             } => format!("{surfaces:?}/{which}"),
-            MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => format!("{carried_by:?}"),
-            MeetPoint::HalfWayRoundAClosedCurve { carried_by, .. } => {
-                format!("{carried_by:?}/half way round")
-            }
+            MeetPoint::WhereAClosedCurveStarts {
+                carried_by,
+                picked_by,
+                ..
+            } => format!("{carried_by:?}/{picked_by:?}"),
+            MeetPoint::HalfWayRoundAClosedCurve {
+                carried_by,
+                picked_by,
+                ..
+            } => format!("{carried_by:?}/{picked_by:?}/half way round"),
             MeetPoint::APoleOfAClosedSurface {
                 surface,
                 at_the_top,

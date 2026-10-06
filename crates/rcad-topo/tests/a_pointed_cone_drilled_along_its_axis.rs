@@ -23,13 +23,24 @@
 //! towards it, and the sign there is the one a step down the pipe meets.
 //!
 //! **Three of the six fuses answer, and three are refused a step later.** The
-//! union and the bar less the cone keep the bar's band between the two circles,
-//! and the corner each circle starts at is named by the two surfaces alone
-//! (`MeetPoint::WhereAClosedCurveStarts`). Both circles are where the bar's wall
-//! crosses the cone, so they get one corner and one edge, and that edge is
-//! claimed four times: by the band's two wires, by the band below and by the cone.
-//! `ResultIsNotManifold { count: 4 }`, a gap whose fix is in the name, outside
-//! `arrange.rs`.
+//! union and the bar less the cone keep the bar's band between the two circles.
+//! While the corner each circle starts at was named by the two surfaces alone
+//! (`MeetPoint::WhereAClosedCurveStarts`), both circles got one corner and one
+//! edge, claimed four times — by the band's two wires, by the band below and by
+//! the cone — and the three were refused `ResultIsNotManifold { count: 4 }`.
+//! The corner is now named by what picks its circle out of the two as well
+//! (Q1148), and the three get as far as the sweep of the answer they write.
+//!
+//! **The sweep refuses that answer, and the answer is sound.** The bar's wall
+//! from `z = −15` up to the circle at `z = 1` is one face of the answer, the two
+//! bands either side of `z = −1` joined into it, and that face crosses the cone's
+//! other nappe at `z = −1`. The sweep reads which side of the cone the face
+//! lies on at the circle `z = 1` off the one corner it has off the cone, the
+//! seam corner at `z = −15`, which is inside the other nappe. Next to `z = 1`
+//! the face is outside the cone. So the edge reads as walked against its
+//! surfaces, and every one of the three is refused
+//! `TheFuseWroteABrokenAnswer { broken: AClosedEdgeIsWalkedAgainstItsSurface }`.
+//! A **gap** in `validate.rs`, outside the files that name the corner.
 //!
 //! The closed forms, from the slices of the shared piece: inside the bar the cone
 //! holds a disc of radius `z` for `z` up to one and the whole unit disc above it,
@@ -40,7 +51,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 
 mod cones;
 
@@ -89,13 +100,13 @@ fn the_shared_piece_and_the_cone_less_the_bar_hold_their_closed_forms() {
 }
 
 /// The union, whichever goes first, and the bar less the cone are refused where
-/// the two circles get one corner.
+/// the bar's wall crosses the cone's other nappe inside one face.
 ///
 /// They would be `CONE + BAR − SHARED = 364π` and `BAR − SHARED = 92π/3`, the
 /// second in two solids: the bar below `z = 1` with the cone's tip taken out of
 /// its top, and the bar above `z = 10`.
 #[test]
-fn the_union_and_the_bar_less_the_cone_are_refused_where_two_circles_get_one_corner() {
+fn the_union_and_the_bar_less_the_cone_are_refused_where_the_bars_wall_crosses_the_other_nappe() {
     for (rule, cone_first) in [
         (Rule::Union, true),
         (Rule::Union, false),
@@ -103,7 +114,12 @@ fn the_union_and_the_bar_less_the_cone_are_refused_where_two_circles_get_one_cor
     ] {
         let refused = fused(rule, cone_first).map(|(_, answer)| answer);
         assert!(
-            matches!(refused, Err(Error::ResultIsNotManifold { count: 4 })),
+            matches!(
+                refused,
+                Err(Error::TheFuseWroteABrokenAnswer {
+                    broken: Invalid::AClosedEdgeIsWalkedAgainstItsSurface
+                })
+            ),
             "{rule:?} (cone first: {cone_first}): {refused:?}"
         );
     }
