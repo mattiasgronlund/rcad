@@ -1852,11 +1852,13 @@ fn the_runs_its_closed_edges_name(
                 if !edge.is_closed().expect("a run kind this test knows") {
                     continue;
                 }
-                let and = match edge.run() {
-                    EdgeRun::RightRoundWhereItCrosses {
-                        and: Surface::Plane(cut),
-                    } => Some(the_bits_of(cut)),
-                    _ => None,
+                let and = if let EdgeRun::RightRoundWhereItCrosses {
+                    and: Surface::Plane(cut),
+                } = edge.run()
+                {
+                    Some(the_bits_of(cut))
+                } else {
+                    None
                 };
                 uses.push((coedge.orientation_on_its_edge().is_reversed(), and));
             }
