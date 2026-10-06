@@ -4240,7 +4240,7 @@ impl<'f> Arrangement<'f> {
 
     /// How often `cycle` winds round `point` on a flat face, anticlockwise
     /// counting one; `None` when a sign it needs is not settled, which takes
-    /// in a point on the line of one of the walk's sides or chords.
+    /// in a point on one of the walk's sides or on a curved side's chord.
     ///
     /// **The corners first, then each curved side on its own.** A curved side
     /// from `a` to `b` and its chord from `b` back to `a` make a loop, and the
@@ -4269,8 +4269,12 @@ impl<'f> Arrangement<'f> {
             .iter()
             .map(|&half_edge| self.nodes[self.from(half_edge)].point)
             .collect();
-        let by_the_corners =
-            how_often_the_rim_winds_round(in_plane, core::slice::from_ref(&corners), point)?;
+        let by_the_corners = how_often_the_rim_winds_round(
+            in_plane,
+            self.normal_of_the_flat_face(),
+            core::slice::from_ref(&corners),
+            point,
+        )?;
         self.cycles[cycle]
             .iter()
             .try_fold(by_the_corners, |so_far, &half_edge| {
@@ -4312,6 +4316,16 @@ impl<'f> Arrangement<'f> {
     /// branch of a hyperbola is on the side of the chord a piece of one branch
     /// bulges to as well. So a point on a cone's curve is also held to the
     /// nappe `a` is on.
+    ///
+    /// **A point outside the curve is wound round no times, on whichever side
+    /// of the chord it is**, so a point on the chord's line is answered too
+    /// where it is outside. The chord lies inside the curve, between two points
+    /// of it, and the chord's line meets the curve at `a` and `b` alone, so the
+    /// points of that line inside the curve are the chord and nothing else.
+    /// In `a_joined_flat_face_whose_rings_enclose_no_area.rs` the cut cone's
+    /// skin crosses the second cone's base in a circle whose only two nodes are
+    /// on the line of the base's straight side, past its ends, and that side
+    /// is the chord of the base's arc (Q1161).
     fn how_often_a_side_and_its_chord_wind_round(
         &self,
         in_plane: &InPlane,
@@ -4340,16 +4354,12 @@ impl<'f> Arrangement<'f> {
             start.enclosure()[axis] + out[axis]
         }));
         let bulge = left_or_right(in_plane.turn(start, end, ahead))?;
-        if left_or_right(in_plane.turn(start, end, point))? != bulge {
-            return Some(0);
+        let inside = || inside_the_curve_a_plane_cuts(&crossing.partner, start, point);
+        match left_or_right(in_plane.turn(start, end, point)) {
+            Some(side) if side != bulge => Some(0),
+            Some(_) => Some(if inside()? { -bulge } else { 0 }),
+            None => (!inside()?).then_some(0),
         }
-        Some(
-            if inside_the_curve_a_plane_cuts(&crossing.partner, start, point)? {
-                -bulge
-            } else {
-                0
-            },
-        )
     }
 
     /// On a cone or a pipe: the one candidate that goes round the axis, when
@@ -4365,7 +4375,21 @@ impl<'f> Arrangement<'f> {
     /// one of those regions, and when `walk` goes round the axis that region
     /// cannot be a disc: nothing in a disc goes round anything. So a candidate
     /// that goes round nothing is ruled out, and one left standing is the
-    /// answer. Both ends left standing is not answered.
+    /// answer.
+    ///
+    /// **Both ends left standing, the one that goes round the other way from
+    /// `walk` is the answer.** The region `walk` and its candidate bound
+    /// between them is a band round the axis, between the two lumps' loops,
+    /// and its two walks each keep it on their left. Walked so, the two edges
+    /// of a band go round opposite ways: a walk along the edge nearer the apex
+    /// and one along the edge further from it, each with the band on its left,
+    /// go round anticlockwise and clockwise. The two ends of a ring go round
+    /// opposite ways for the same reason, so one of them goes round the way
+    /// `walk` does and the other is the answer. The cut cone of
+    /// `a_joined_flat_face_whose_rings_enclose_no_area.rs` is the shape: a
+    /// second cone on its axis crosses its skin in a circle near the apex,
+    /// and the skin's rim, which goes round the apex, is two such ends
+    /// (Q1161).
     ///
     /// That is §282's frustum: the bottom rim goes round, the patch a leaning
     /// plane cuts off below the top rim goes round nothing, and the rest of the
@@ -4457,9 +4481,20 @@ impl<'f> Arrangement<'f> {
             else {
                 continue;
             };
-            let mut going_round = (0..candidates.len()).filter(|&index| theirs[index] != 0);
-            let only = going_round.next()?;
-            return going_round.next().is_none().then_some(candidates[only]);
+            let going_round: Vec<usize> = (0..candidates.len())
+                .filter(|&index| theirs[index] != 0)
+                .collect();
+            if let [only] = going_round[..] {
+                return Some(candidates[only]);
+            }
+            let mut round_the_other_way = going_round
+                .into_iter()
+                .filter(|&index| theirs[index] == -its_own);
+            let only = round_the_other_way.next()?;
+            return round_the_other_way
+                .next()
+                .is_none()
+                .then_some(candidates[only]);
         }
         None
     }
@@ -4762,8 +4797,8 @@ impl<'f> Arrangement<'f> {
 
     /// How often the face's own rim winds round `point` on a flat face: once
     /// inside the material and never outside it; `None` when a sign it needs is
-    /// not settled, which takes in a point on the line of one of the rim's
-    /// sides or chords.
+    /// not settled, which takes in a point on one of the rim's sides or on a
+    /// curved side's chord.
     ///
     /// **Counted the way a walk is**
     /// ([`Arrangement::how_often_a_walk_winds_round`]): the polygons of the
@@ -4798,7 +4833,8 @@ impl<'f> Arrangement<'f> {
         if closed_side {
             return None;
         }
-        let mut wound = how_often_the_rim_winds_round(in_plane, rim, point)?;
+        let mut wound =
+            how_often_the_rim_winds_round(in_plane, self.normal_of_the_flat_face(), rim, point)?;
         for (wire, sides) in ways.iter().enumerate() {
             for (position, &way) in sides.iter().enumerate() {
                 wound += self.how_often_a_side_and_its_chord_wind_round(
@@ -4810,6 +4846,19 @@ impl<'f> Arrangement<'f> {
             }
         }
         Some(wound)
+    }
+
+    /// The normal of the plane the face is on.
+    ///
+    /// # Panics
+    ///
+    /// If the face is curved: a winding is counted on a flat face alone, and
+    /// the [`InPlane`] every caller holds was built from this same plane.
+    fn normal_of_the_flat_face(&self) -> Vector {
+        self.surface
+            .as_plane()
+            .expect("a winding is counted on a flat face alone")
+            .normal()
     }
 
     /// The lumps of the drawing holding a curve that runs on for ever, other
@@ -5722,24 +5771,44 @@ fn where_a_ball_pinches(ball: &Sphere, at_the_top: bool) -> PredicatePoint {
 /// changes nothing but whether it can be counted: the count is the same along
 /// every half-line from the point.
 ///
-/// `None` when the point sits on the line of one of the rim's own sides, or when
-/// no half-line settles. Both mean "ask about another point", which the caller
+/// **A side with both corners strictly on one side of the half-line's line
+/// is not asked which side of it the point is**, since it crosses nothing the
+/// count reads. That is what answers about a point on the line of a side, past
+/// its end: aimed square to that side, both its corners are on one side of
+/// the half-line. Every other side is still asked, and one through the point
+/// is never wholly on one side of a line through the point, so a point on the
+/// rim itself is not answered. The second cone's base in
+/// `a_joined_flat_face_whose_rings_enclose_no_area.rs` is a ring of two
+/// corners on `x = −12`, every corner and middle of it on that line, and the
+/// cut cone's circle crosses that line outside the base at the only two nodes
+/// it has (Q1161). Aimed at a corner or a middle, the half-line ran along the
+/// line and could not be counted; aimed square to it, it can.
+///
+/// `None` when the point sits on one of the rim's own sides, or when no
+/// half-line settles. Both mean "ask about another point", which the caller
 /// may have.
 fn how_often_the_rim_winds_round(
     in_plane: &InPlane,
+    normal: Vector,
     rim: &[Vec<PredicatePoint>],
     point: PredicatePoint,
 ) -> Option<i32> {
-    let corners = rim.iter().flatten().copied();
-    let middles = rim.iter().flat_map(|ring| {
-        (0..ring.len()).map(|index| {
-            let [from, to] = [ring[index], ring[(index + 1) % ring.len()]].map(middle_of);
-            PredicatePoint::from((from + (to - from) * 0.5).coordinates())
+    let sides = || {
+        rim.iter().flat_map(|ring| {
+            (0..ring.len())
+                .map(|index| [ring[index], ring[(index + 1) % ring.len()]].map(middle_of))
         })
+    };
+    let corners = rim.iter().flatten().copied();
+    let middles =
+        sides().map(|[from, to]| PredicatePoint::from((from + (to - from) * 0.5).coordinates()));
+    let square_to_each_side = sides().map(|[from, to]| {
+        PredicatePoint::from((middle_of(point) + normal.cross(to - from)).coordinates())
     });
     corners
         .take(1)
         .chain(middles)
+        .chain(square_to_each_side)
         .find_map(|aim| how_often_the_rim_winds_round_aiming_at(in_plane, rim, point, aim))
 }
 
@@ -5749,34 +5818,43 @@ fn how_often_the_rim_winds_round_aiming_at(
     point: PredicatePoint,
     aim: PredicatePoint,
 ) -> Option<i32> {
+    let side_of_the_half_lines_line = |at: PredicatePoint| -> Option<Decision> {
+        // The corner the half-line is aimed at is on it by construction, and
+        // the half-open rule counts that as below. It has to be said rather
+        // than worked out: the determinant has the same box in two of its rows,
+        // and an interval evaluation of one like that straddles zero however
+        // far the point is from anything. Every corner of a placed solid is
+        // such a box.
+        if at == aim {
+            return Some(Decision::Zero);
+        }
+        match in_plane.turn(point, aim, at) {
+            decided @ (Decision::Pos | Decision::Neg | Decision::Zero) => Some(decided),
+            Decision::Undecidable { .. } | _ => None,
+        }
+    };
     let mut winding = 0;
     for ring in rim {
         for index in 0..ring.len() {
             let (from, to) = (ring[index], ring[(index + 1) % ring.len()]);
-            let along = in_plane.turn(from, to, point);
-            if !matches!(along, Decision::Pos | Decision::Neg) {
-                return None;
+            let ends = [
+                side_of_the_half_lines_line(from)?,
+                side_of_the_half_lines_line(to)?,
+            ];
+            if matches!(
+                ends,
+                [Decision::Pos, Decision::Pos] | [Decision::Neg, Decision::Neg]
+            ) {
+                continue;
             }
-            let above = |at: PredicatePoint| {
-                // The corner the half-line is aimed at is on it by
-                // construction, and the half-open rule counts that as below. It
-                // has to be said rather than worked out: the determinant has the
-                // same box in two of its rows, and an interval evaluation of one
-                // like that straddles zero however far the point is from
-                // anything. Every corner of a placed solid is such a box.
-                if at == aim {
-                    return Some(false);
-                }
-                match in_plane.turn(point, aim, at) {
-                    Decision::Pos => Some(true),
-                    Decision::Neg | Decision::Zero => Some(false),
-                    Decision::Undecidable { .. } | _ => None,
-                }
-            };
-            winding += match (above(from)?, above(to)?, along) {
+            let along = in_plane.turn(from, to, point);
+            let [from_above, to_above] = ends.map(|end| end == Decision::Pos);
+            winding += match (from_above, to_above, along) {
+                (_, _, Decision::Zero | Decision::Undecidable { .. }) => return None,
                 (false, true, Decision::Pos) => 1,
                 (true, false, Decision::Neg) => -1,
-                _ => 0,
+                (_, _, Decision::Pos | Decision::Neg) => 0,
+                (_, _, _) => return None,
             };
         }
     }
