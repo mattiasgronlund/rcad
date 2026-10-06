@@ -270,6 +270,24 @@ they are lane 5's files and lane 5 should read them.
 > notched block's top is no longer such a face and every fuse in that file
 > answers, each checked against its volume by hand. The file's name is now
 > about what it used to pin rather than what it pins.
+>
+> **2026-10-06 note (Q883): each side is asked from the corner it starts at,
+> and a ball's other pole is now reached.** `one_shell_is_inside_another` used
+> to ask each side at `self.edges[side.edge].ends[0]`, the first end of its
+> edge whichever way the side walks it, so a ball's one face — walked down its
+> seam and back up it — had its north pole asked twice and its south pole
+> never (16330bc9). Each side is now asked from `ends[!forward]`, the corner
+> `Assembly::starts_at` reads off a dart, so every corner of every wire is
+> asked. The `Error::Undecidable` record raised when every corner comes back
+> `OnBoundary` or `Undecidable` now names the corners actually asked, not
+> `self.corners[0]`, the whole answer's first corner and not a corner anyone
+> asked about (28fa7550). And a corner whose `Containment` comes back
+> `CannotFireARayAtAFacesSurface` — a ray that could not be fired at a ring
+> face — is refused by the new `Error::CannotFireARayAtAFacesSurface`, naming
+> the caller's face the ring face was cut from, rather than folded into
+> `Undecidable` for want of a variant (b6e47fa6). No fuse is known to reach
+> that last arm: every probe with a ring in it was refused earlier, at a
+> curved-surface crossing, before `nest_the_shells` runs.
 
 ### 35.7 §31.10 item 5, scored: nothing this lane builds reaches `mesh.rs`'s two claims
 
