@@ -119,7 +119,7 @@ fn the_turned_rulings_run_along_directions_no_fraction_writes() {
         shifts.iter().all(|shift| *shift <= 16),
         "{shifts:?} fits in u128"
     );
-    let whole_q = (whole_a * whole_a << shifts[0]) + (whole_b * whole_b << shifts[1]);
+    let whole_q = ((whole_a * whole_a) << shifts[0]) + ((whole_b * whole_b) << shifts[1]);
     let root = whole_q.isqrt();
     assert_ne!(
         root * root,
