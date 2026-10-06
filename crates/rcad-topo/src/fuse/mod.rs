@@ -74,7 +74,7 @@
 //! the selection table, the image maps history is derived from, and
 //! `Model::fuse` itself.
 
-use rcad_geom::{DynamicRange, Point, Surface};
+use rcad_geom::{DynamicRange, Picker, Point, Surface};
 use rcad_predicates::{
     Approximation, Decision, Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     Record, resolve_under_policy,
@@ -526,10 +526,21 @@ pub(crate) enum MeetPoint {
     /// corner on it still needs one. Where it goes depends on the two surfaces
     /// and on nothing else, which is what keeps `fuse(A, B)` and `fuse(B, A)`
     /// agreeing (§31.3, §34.4).
+    ///
+    /// **Two surfaces can cross in two closed curves**, and then the two
+    /// surfaces do not say which one this starts: a bar down a pointed cone's
+    /// axis crosses the cone's surface in a circle either side of the apex.
+    /// Named by the two alone, both circles got one corner and so one edge,
+    /// with four faces along it. `picked_by` is what says which.
     WhereAClosedCurveStarts {
         /// The two surfaces whose crossing this starts, in the order the face
         /// asking carries them.
         carried_by: [Surface; 2],
+        /// What picks this curve out of the others the two cross in, as
+        /// `intersect` named it, and empty where they cross in one closed curve.
+        /// The same from both faces along the curve, in both argument orders:
+        /// `intersect` builds it from the two surfaces whichever comes first.
+        picked_by: SmallVec<[Picker; 1]>,
         /// Where it is.
         point: PredicatePoint,
     },
@@ -538,13 +549,16 @@ pub(crate) enum MeetPoint {
     ///
     /// A closed edge starting at a pole has no direction anyone can read, so
     /// the circle is cut in two there and each half runs between two corners
-    /// (§194). Named apart from where the curve starts by the two surfaces
-    /// alone, which is what keeps both faces along it and both argument orders
-    /// agreeing.
+    /// (§194). Named apart from where the curve starts by the two surfaces and
+    /// what picks the curve out of the others they cross in, which is what
+    /// keeps both faces along it and both argument orders agreeing.
     HalfWayRoundAClosedCurve {
         /// The two surfaces whose crossing this is, in the order the face
         /// asking carries them.
         carried_by: [Surface; 2],
+        /// What picks this curve out of the others the two cross in, as
+        /// [`MeetPoint::WhereAClosedCurveStarts`] carries it.
+        picked_by: SmallVec<[Picker; 1]>,
         /// Where it is.
         point: PredicatePoint,
     },

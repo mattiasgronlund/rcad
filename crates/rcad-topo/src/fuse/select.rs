@@ -3489,6 +3489,7 @@ mod tests {
             .collect();
         let hole_starts = MeetPoint::WhereAClosedCurveStarts {
             carried_by: [Surface::Plane(flat), Surface::Sphere(ball)],
+            picked_by: SmallVec::new(),
             point: PredicatePoint::from([0.4375_f64.sqrt(), 0.0, 0.0]),
         };
         let hole = vec![FaceMeet {
@@ -3673,6 +3674,7 @@ mod tests {
             .map(|&corner| {
                 let starts = MeetPoint::WhereAClosedCurveStarts {
                     carried_by,
+                    picked_by: SmallVec::new(),
                     point: PredicatePoint::from(corner),
                 };
                 vec![FaceMeet {

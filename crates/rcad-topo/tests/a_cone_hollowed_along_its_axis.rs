@@ -16,12 +16,14 @@
 //!   cone's or a ball's face is on — a frustum less a steeper cone, with one
 //!   node on the circle or two, and a frustum less a ball cut flat below its
 //!   lower circle;
-//! - **both circles of one pair drawn on a face**, and every rule that keeps a
-//!   piece either side of both circles is refused after the faces are cut:
-//!   `fuse/assemble.rs` names a closed crossing by its two surfaces alone, so
-//!   the two circles look like one curve there. A pointed cone less a steeper
-//!   cone two up, and a pointed cone or a frustum less a whole ball pushing out
-//!   through its side, are the shapes.
+//! - **both circles of one pair drawn on a face**, and every rule that kept a
+//!   piece either side of both circles was refused after the faces were cut,
+//!   while `fuse/assemble.rs` named the corner a closed crossing starts at by
+//!   its two surfaces alone and the two circles got one. Named by what picks
+//!   each circle out as well (Q1148), a pointed cone less a steeper cone two up
+//!   answers every rule, and a pointed cone less a whole ball pushing out
+//!   through its side every rule but the ball less the cone. A frustum less
+//!   that ball is still refused, under another name.
 //!
 //! Every cone here is built by `tests/cones`, face by face through
 //! `SolidBuilder` with a power-of-two slope, and every ball by `Model::add_ball`.
@@ -133,6 +135,9 @@ fn what_each_rule_gives(
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             )?;
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("an answer validates");
             let mut volumes: Vec<(f64, f64)> = answer
                 .solids()
                 .iter()
@@ -370,31 +375,84 @@ fn a_frustum_less_a_ball_cut_flat_below_its_lower_circle() {
 
 /// The pointed cone of slope 1 up to `z = 8`, `512π/3`, less the steep
 /// pointed cone of the frustum above. Now both circles are on the first
-/// cone's face, `z = 4/3` as well as `z = 4`, and a rule that keeps the
-/// pieces either side of both is refused `ResultIsNotManifold { count: 4 }`:
-/// the union and the first less the second. The other two keep no piece
-/// either side of `z = 4/3` and answer, as the frustum above does: the shared
-/// `184π/3`, and the steep cone less the first, `24π`.
+/// cone's face, `z = 4/3` as well as `z = 4`. They share the `184π/3` the
+/// frustum above shares with it, since below `z = 2` the steep cone holds
+/// nothing. The first less the second is two solids: the cone below `z = 4`
+/// less the steep cone's tip, `64π/3 − 32π/3`, and the top above `z = 6`,
+/// `296π/3`. The steep cone less the first is `24π`.
 ///
-/// **What refuses is the name the two circles share.** `fuse/assemble.rs`
-/// names a closed crossing by its two surfaces alone, and only a plane
-/// through a ring's axis is told apart further, so two closed edges between
-/// one pair of cones look like one edge with four faces along it. Not traced
-/// to the edge: the frustum above, whose face is off the lower circle, is
-/// the same pair less that circle, and it answers every rule (Q1129).
+/// **The union and the first less the second were refused
+/// `ResultIsNotManifold { count: 4 }`** while the corner each circle starts
+/// at was named by the two cones alone: both circles started at one corner,
+/// so they were one closed edge with four faces along it. The corner is now
+/// named by what picks its circle out of the two as well (Q1148).
 #[test]
 fn a_pointed_cone_less_a_steeper_one_whose_circles_both_fall_on_its_side() {
+    let cone = 512.0 * PI / 3.0;
+    let steep = 256.0 * PI / 3.0;
     let shared = 184.0 * PI / 3.0;
+    fuses_hold(
+        |model| {
+            let steeper = a_pointed_cone(model, 2.0, 4.0);
+            [a_pointed_cone(model, 1.0, 8.0), up(model, steeper, 2.0)]
+        },
+        [
+            &[cone + steep - shared],
+            &[shared],
+            &[32.0 * PI / 3.0, 296.0 * PI / 3.0],
+            &[steep - shared],
+        ],
+    );
+}
+
+/// A cone of slope 1 less a whole ball of radius 3 four up its axis, pointed
+/// up to `z = 8` and then a frustum from `z = 2`. `(1 + s²)R² − s²e² = 18 − 16`
+/// is above zero, so the ball pushes out through the side between
+/// `z₁ = 2 − √2/2` and `z₂ = 2 + √2/2`, where `2z² − 8z + 7` is below zero and
+/// the cone is the narrower. Both circles are on both faces of the pointed
+/// cone; the frustum's face holds the upper one alone.
+///
+/// The ball's slices hold `π[9u − u³/3]` with `u` measured from its centre,
+/// so the pointed cone shares the ball below `z₁`, its own slices from `z₁`
+/// to `z₂`, and the ball above. The ball less the pointed cone is the ring
+/// round its side, `π∫(8z − 7 − 2z²) dz = π(z₂ − z₁)³/3 = 2√2π/3`. The pointed
+/// cone less the ball is its tip below `z₁` less the ball's bottom, and the
+/// rest above. The frustum less the ball is one solid, cut through from its
+/// bottom to `z₂`, and the ball less the frustum is one too, its bottom joined
+/// to the ring round the frustum's side.
+///
+/// **Every fuse of the pointed cone was refused after the faces were cut,
+/// and every fuse of the frustum `ResultIsNotManifold { count: 3 }`**, while
+/// the corner each circle starts at was named by the two surfaces alone and
+/// both circles got one (Q1148). Five of the pointed cone's answer now. The
+/// ball less the pointed cone is refused still, by its mesh: two patches draw
+/// one side through their insides. And every fuse of the frustum is refused
+/// `ResultIsNotManifold { count: 1 }`: the circle at `z₁`, which only the
+/// ball's face holds, comes out as two closed edges at its one corner, each
+/// with one of the ball's faces along it. Not traced past that.
+#[test]
+fn a_cone_less_a_whole_ball_pushing_out_through_its_side() {
+    let [low, high] = [-1.0, 1.0].map(|side| 2.0 + side * 2.0_f64.sqrt() / 2.0);
+    let slices = |z: f64| PI * (9.0 * (z - 4.0) - (z - 4.0).powi(3) / 3.0);
+    let ball = 36.0 * PI;
+    let pointed = 512.0 * PI / 3.0;
+    let frustum = a_frustum_holds(1.0, 2.0, 8.0);
+    let above = slices(7.0) - slices(high);
+    let pointed_shares = slices(low) - slices(1.0) + a_frustum_holds(1.0, low, high) + above;
+    let frustum_shares = a_frustum_holds(1.0, 2.0, high) + above;
+    let tip = a_frustum_holds(1.0, 0.0, low) - (slices(low) - slices(1.0));
+
     let gives = what_each_rule_gives(|model| {
-        let steeper = a_pointed_cone(model, 2.0, 4.0);
-        [a_pointed_cone(model, 1.0, 8.0), up(model, steeper, 2.0)]
+        let ball = a_ball_four_up(model, 3.0);
+        [a_pointed_cone(model, 1.0, 8.0), ball]
     });
-    let not_a_manifold = |answer: &Result<Vec<(f64, f64)>, Error>| {
-        matches!(answer, Err(Error::ResultIsNotManifold { count: 4 }))
-    };
-    let holds = |answer: &Result<Vec<(f64, f64)>, Error>, wanted: f64| {
+    let holds = |answer: &Result<Vec<(f64, f64)>, Error>, wanted: &[f64]| {
         matches!(answer, Ok(volumes)
-            if matches!(volumes[..], [(volume, error)] if (volume - wanted).abs() <= error))
+            if volumes.len() == wanted.len()
+                && volumes
+                    .iter()
+                    .zip(wanted)
+                    .all(|(&(volume, error), &wanted)| (volume - wanted).abs() <= error))
     };
     let [
         union,
@@ -407,51 +465,37 @@ fn a_pointed_cone_less_a_steeper_one_whose_circles_both_fall_on_its_side() {
     else {
         panic!("six fuses, not {gives:?}");
     };
+    let union_holds = pointed + ball - pointed_shares;
     assert!(
-        not_a_manifold(union) && not_a_manifold(swapped_union) && not_a_manifold(cone_less),
+        holds(union, &[union_holds])
+            && holds(swapped_union, &[union_holds])
+            && holds(intersection, &[pointed_shares])
+            && holds(swapped_intersection, &[pointed_shares])
+            && holds(cone_less, &[tip, pointed - pointed_shares - tip]),
         "{gives:?}"
     );
     assert!(
-        holds(intersection, shared)
-            && holds(swapped_intersection, shared)
-            && holds(less_cone, 256.0 * PI / 3.0 - shared),
-        "{gives:?}"
+        matches!(
+            less_cone,
+            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })
+        ),
+        "the ball less the pointed cone, {} if it answered: {less_cone:?}",
+        2.0 * 2.0_f64.sqrt() * PI / 3.0
     );
-}
 
-/// The pointed cone of slope 1 up to `z = 8`, less a whole ball of radius 3
-/// four up its axis. `(1 + s²)R² − s²e² = 18 − 16` is above zero, so the ball
-/// pushes out through the side between `z = 2 − √2/2` and `z = 2 + √2/2`, and
-/// both circles are on both faces. Every rule is refused after the faces are
-/// cut: the mesh of a face finds two of its corners are one point
-/// (`CannotMeshAFace` with `CornersCoincide`), except the cone less the ball,
-/// which cannot say whether one shell is inside another. With the frustum in
-/// place of the pointed cone, so that only the ball's face holds the lower
-/// circle, every rule is refused `ResultIsNotManifold { count: 3 }` instead.
-/// The frustum less the same ball cut flat below its lower circle answers
-/// every rule (the test above), so this is the shared name again (Q1129).
-#[test]
-fn a_cone_less_a_whole_ball_pushing_out_through_its_side_is_refused_after_its_faces_are_cut() {
-    let pointed = what_each_rule_gives(|model| {
-        let ball = a_ball_four_up(model, 3.0);
-        [a_pointed_cone(model, 1.0, 8.0), ball]
-    });
-    for (index, answer) in pointed.iter().enumerate() {
-        let refused_right = match index {
-            4 => matches!(answer, Err(Error::Undecidable { .. })),
-            _ => matches!(answer, Err(Error::CannotMeshAFace { .. })),
-        };
-        assert!(refused_right, "fuse {index} of {pointed:?}");
-    }
-
-    let frustum = what_each_rule_gives(|model| {
+    let frustum_gives = what_each_rule_gives(|model| {
         let ball = a_ball_four_up(model, 3.0);
         [a_frustum(model, 1.0, 2.0, 8.0), ball]
     });
     assert!(
-        frustum
+        frustum_gives
             .iter()
-            .all(|answer| matches!(answer, Err(Error::ResultIsNotManifold { count: 3 }))),
-        "{frustum:?}"
+            .all(|answer| matches!(answer, Err(Error::ResultIsNotManifold { count: 1 }))),
+        "every rule leaves the lower circle with one face along it, where they would hold \
+         {} together, {frustum_shares} shared, {} of the frustum and {} of the ball alone: \
+         {frustum_gives:?}",
+        frustum + ball - frustum_shares,
+        frustum - frustum_shares,
+        ball - frustum_shares
     );
 }
