@@ -1242,15 +1242,29 @@ fn is_on_the_nappe_the_face_is_on(
     cone: &rcad_geom::Cone,
     point: PredicatePoint,
 ) -> Result<Decision> {
-    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
-    let apex = exactly(cone.apex().coordinates());
-    let up = exactly(cone.axis().direction().components());
-    let how_far_up =
-        |at: [Interval; 3]| dot(core::array::from_fn(|axis| at[axis] - apex[axis]), up).sign();
+    let faces_half = the_nappe_a_face_is_on(face, cone)?;
+    Ok(match the_nappe_of(cone, point.enclosure()) {
+        Decision::Zero => Decision::Zero,
+        Decision::Pos if faces_half == Decision::Pos => Decision::Pos,
+        Decision::Neg if faces_half == Decision::Neg => Decision::Pos,
+        Decision::Pos | Decision::Neg => Decision::Neg,
+        Decision::Undecidable { enclosure } => Decision::Undecidable { enclosure },
+        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    })
+}
 
+/// Which half of `cone` `face` is on, as [`the_nappe_of`] reads it off the
+/// face's corners: [`Decision::Pos`] up the axis from the apex and
+/// [`Decision::Neg`] down it.
+///
+/// # Errors
+///
+/// As [`is_on_the_nappe_the_face_is_on`]'s, for the face.
+fn the_nappe_a_face_is_on(face: FaceView<'_>, cone: &rcad_geom::Cone) -> Result<Decision> {
+    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let mut faces_half: Option<Decision> = None;
     for corner in face.wires().flat_map(WireView::points) {
-        let side = how_far_up(exactly(corner.coordinates()));
+        let side = the_nappe_of(cone, exactly(corner.coordinates()));
         match side {
             Decision::Zero => (),
             Decision::Pos | Decision::Neg => match faces_half {
@@ -1265,15 +1279,7 @@ fn is_on_the_nappe_the_face_is_on(
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
     }
-    let faces_half = faces_half.ok_or_else(cannot)?;
-    Ok(match how_far_up(point.enclosure()) {
-        Decision::Zero => Decision::Zero,
-        Decision::Pos if faces_half == Decision::Pos => Decision::Pos,
-        Decision::Neg if faces_half == Decision::Neg => Decision::Pos,
-        Decision::Pos | Decision::Neg => Decision::Neg,
-        Decision::Undecidable { enclosure } => Decision::Undecidable { enclosure },
-        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
-    })
+    faces_half.ok_or_else(cannot)
 }
 
 /// Which side of its one trimming a cone face lies on when none of its corners
@@ -1652,11 +1658,21 @@ fn is_one_circle_cut_in_two(
 /// straight sides. Before, every reading refused such a face, so no face the
 /// steps answered is answered differently now.
 ///
+/// # A cone face outside that family is seen down its axis
+///
+/// Seen down its axis, one nappe of a cone is a plane, and a face on it is a
+/// flat region whose sides are rulings, straight pieces and arcs bulging off
+/// their chords. [`what_a_cone_face_seen_down_its_axis_holds`] winds those,
+/// as the flat face's sides are wound, wherever the steps above say nothing
+/// (row Q1227): the skin of a frustum notched by a cube's corner, the part of
+/// its band in front of either cap and in front of any of three planes, is one.
+///
 /// # Errors
 ///
-/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a curved face outside
-/// that family and for the shapes
-/// [`what_a_flat_face_of_chords_and_arcs_holds`] refuses, and
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a face on a ball, a
+/// pipe or a ring outside that family, and for the shapes
+/// [`what_a_flat_face_of_chords_and_arcs_holds`] and
+/// [`what_a_cone_face_seen_down_its_axis_holds`] refuse, and
 /// [`Error::Undecidable`] when a sign could not be settled.
 fn what_a_face_cut_by_part_of_a_crossing_holds(
     solid: SolidView<'_>,
@@ -1694,7 +1710,15 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             };
             what_a_flat_face_of_chords_and_arcs_holds(solid, face, &flat, sides, point, policy, log)
         }
-        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_) | _ => {
+        Surface::Cone(cone) => {
+            let [sides] = readings.as_slice() else {
+                panic!(
+                    "a cone face's sides are read one way, since only a ruling of a pipe is read more ways than one"
+                );
+            };
+            what_a_cone_face_seen_down_its_axis_holds(face, &cone, sides, point)
+        }
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Torus(_) | _ => {
             Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
         }
     }
@@ -2213,6 +2237,293 @@ fn is_on_the_other_nappe_from_the_arc(
         return Err(gave_up_on_a_side(&side.across_placed, point, enclosure));
     }
     Ok(matches!(found, Decision::Pos | Decision::Neg) && found != arcs)
+}
+
+/// Whether a cone face holds `point`, taken as being on the cone, read off the
+/// face's own sides **seen down the cone's axis**: the winding of
+/// [`what_a_flat_face_of_chords_and_arcs_holds`], with every turn read square
+/// to the axis instead of square to a plane (row Q1227).
+///
+/// # Why one nappe seen down its axis is a flat face
+///
+/// Every point of one nappe sits at one distance from the axis, and the nappe
+/// rises along the axis by that distance over the slope. So looking down the
+/// axis, which drops how far along it a point is, sends each point of the
+/// nappe to its own point of a plane square to the axis, the apex to where the
+/// axis crosses it: one to one, without a fold, and turning every part of the
+/// nappe the same way round. A face on one nappe is then seen as a flat region
+/// whose boundary is its sides seen the same way, and `point` is on the face
+/// exactly when what it is seen as is in that region — the count round its
+/// sides is non-zero there and zero off it, as on a flat face. A seam is walked
+/// once each way, so leaving it out, as [`every_reading_of_the_sides_of`] does,
+/// changes no count. [`is_on_the_nappe_the_face_is_on`] turns away a point on
+/// the other nappe first, which is seen among the face's points too.
+///
+/// # How each side is seen
+///
+/// - **A ruling** is seen as a straight piece out from where the apex is seen.
+/// - **An arc on a plane along the axis** is seen as the straight piece between
+///   its ends. The plane is seen as a line, and the curve it cuts the nappe in
+///   is a graph over that line, rising with the distance from the axis, so the
+///   arc is seen as exactly the piece of the line between its ends.
+/// - **An arc on any other plane `P`** is seen as an arc bulging off its chord,
+///   on the side [`the_way_into_an_arc`] or
+///   [`the_way_into_an_arc_that_does_not_close`] points: seeing `P` down the
+///   axis is a one-to-one flat map that keeps straight lines straight, so the
+///   arc's side of its chord is kept. The arc is all of its curve on that side
+///   of the chord, and the piece between the two is the part of `P` inside the
+///   nappe's solid cone on that side, as [`what_a_flat_face_of_chords_and_arcs_holds`]
+///   reads a cone's piece on a flat face. So `point` is in the piece seen down
+///   the axis when two signs say so: it is on the arc's side of the chord seen
+///   down the axis, and the point of `P` straight up or down the axis from it is
+///   inside the solid cone. Inside is the half-line from `point` the way the
+///   nappe opens, because the solid cone is convex and `point` on its skin, so
+///   that is where `point + λw` meets `P` exactly when `P(point)` has the sign
+///   of `−(n·w)` times the nappe's, with `n` the plane's normal and `w` the
+///   axis. No point is built.
+///
+/// A side across anything but a plane, or a ruling, is refused, since its curve
+/// is not flat and has no chord to read a piece off. So is `point` at the apex,
+/// which is where every ruling is seen, and a point on the chords of two arcs
+/// at once, as the flat face refuses it.
+///
+/// # Why the steps before this could not answer such a face
+///
+/// The skin of a frustum notched by a cube's corner is this face: a band
+/// between two caps less the part behind all three of the cube's planes that
+/// cross it, `x = 3.5`, `y = 4.5` and `z = 0.5`, which is the part of the band
+/// in front of either cap and in front of **any** of the three. The steps read
+/// it as five cuts with the apex behind three of them, which
+/// [`is_a_family_this_follows`] refuses, and the part in front of all five is
+/// empty. This reads the boundary and not the cuts, so it never asks whether a
+/// region is one piece, and it answers the whole of `point`'s question with
+/// signs of planes and of determinants of stored numbers in interval
+/// arithmetic. Before, every such face was refused, so no face the steps
+/// answered is answered differently now.
+///
+/// # Errors
+///
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a side across a surface
+/// that is not a plane, `point` at the apex or on two chords at once, and a
+/// face whose corners disagree on the nappe; [`Error::Undecidable`] when a sign
+/// could not be settled.
+fn what_a_cone_face_seen_down_its_axis_holds(
+    face: FaceView<'_>,
+    cone: &rcad_geom::Cone,
+    sides: &[Side],
+    point: PredicatePoint,
+) -> Result<OnAFace> {
+    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
+    let Surface::Cone(placed) = face.surface() else {
+        unreachable!("a face stored on a cone sits on one once moved")
+    };
+    match is_on_the_nappe_the_face_is_on(face, &placed, point)? {
+        Decision::Pos => (),
+        Decision::Neg => return Ok(OnAFace::NotHeld),
+        Decision::Zero => return Err(cannot()),
+        Decision::Undecidable { enclosure } => {
+            return Err(gave_up_on_a_side(&Surface::Cone(placed), point, enclosure));
+        }
+        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    }
+    let nappe = the_nappe_a_face_is_on(face, &placed)?;
+    let up = exactly(placed.axis().direction().components());
+    let at = point.enclosure();
+    let gave_up_seeing = |enclosure| {
+        gave_up(
+            SEEN_DOWN_THE_AXIS,
+            point,
+            Level::Interval,
+            enclosure,
+            Measures::Area,
+        )
+    };
+
+    let mut winding = 0i64;
+    let mut on_a_chord: Option<(usize, Decision)> = None;
+    let mut along = Vec::with_capacity(sides.len());
+    for (index, side) in sides.iter().enumerate() {
+        let [from, to] = [side.start.placed, side.end.placed];
+        let beside = seen_down_the_axis(up, from, to, at);
+        if let Decision::Undecidable { enclosure } = beside {
+            return Err(gave_up_seeing(enclosure));
+        }
+        along.push(beside);
+        let SeenDownTheAxis::AsAnArc {
+            on_the_left,
+            facing,
+        } = how_a_side_is_seen_down_the_axis(cone, side).ok_or_else(cannot)?
+        else {
+            if beside == Decision::Zero {
+                match lies_between_seen_down_the_axis(up, from, to, at) {
+                    Ok(true) => return Ok(OnAFace::OnItsBoundary),
+                    Ok(false) => (),
+                    Err(enclosure) => return Err(gave_up_seeing(enclosure)),
+                }
+            }
+            continue;
+        };
+        let [arcs_side, away] = if on_the_left {
+            [Decision::Pos, Decision::Neg]
+        } else {
+            [Decision::Neg, Decision::Pos]
+        };
+        let read = side_of_surface(&side.across_placed, point);
+        let inside = match read {
+            Decision::Pos if facing != nappe => Decision::Neg,
+            Decision::Neg if facing != nappe => Decision::Pos,
+            _ => read,
+        };
+        match inside {
+            Decision::Zero if beside == arcs_side || beside == Decision::Zero => {
+                return Ok(OnAFace::OnItsBoundary);
+            }
+            Decision::Neg if beside == arcs_side => winding += if on_the_left { -1 } else { 1 },
+            Decision::Neg if beside == Decision::Zero => {
+                if on_a_chord.is_some() {
+                    return Err(cannot());
+                }
+                on_a_chord = Some((index, away));
+            }
+            Decision::Zero | Decision::Neg | Decision::Pos => (),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_a_side(&side.across_placed, point, enclosure));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+
+    let mut corners = sides.iter().map(|side| side.start.placed);
+    let aim = match on_a_chord {
+        None => corners.next(),
+        Some((chord, _)) => {
+            let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
+            corners.find(|corner| {
+                matches!(
+                    seen_down_the_axis(up, from, to, exactly(corner.coordinates())),
+                    Decision::Pos | Decision::Neg
+                )
+            })
+        }
+    }
+    .ok_or_else(cannot)?;
+
+    for (index, side) in sides.iter().enumerate() {
+        let along = match on_a_chord {
+            Some((chord, away)) if chord == index => away,
+            _ => along[index],
+        };
+        let [from, to] = [side.start.placed, side.end.placed].map(|corner| {
+            if corner == aim {
+                Decision::Zero
+            } else {
+                seen_down_the_axis(up, corner, aim, at)
+            }
+        });
+        winding += crossing(from, to, along)
+            .ok_or_else(|| gave_up_seeing(whichever_of_them_was_not_read(from, to)))?;
+    }
+    Ok(if winding == 0 {
+        OnAFace::NotHeld
+    } else {
+        OnAFace::Held
+    })
+}
+
+/// The name a turn read down a cone's axis goes by in provenance records.
+const SEEN_DOWN_THE_AXIS: &str = "seen_down_a_cones_axis";
+
+/// How a side of a cone face is seen down the axis.
+enum SeenDownTheAxis {
+    /// A straight piece: a ruling, or an arc on a plane along the axis.
+    Straight,
+    /// An arc bulging off its chord: to which side, as [`seen_down_the_axis`]
+    /// reads a side, and the sign of its plane's normal against the axis.
+    AsAnArc { on_the_left: bool, facing: Decision },
+}
+
+/// How a side of a cone face is seen down the axis; `None` for an arc across
+/// anything but a plane, and where a sign could not be settled.
+///
+/// Whether the plane lies along the axis is asked exactly
+/// ([`SquareToTheAxis`]). Which side the arc bulges to is
+/// `into_the_arc · (chord × w)`, which is how [`seen_down_the_axis`] reads a
+/// point `into_the_arc` past the chord's start, read where the face is stored
+/// as [`is_the_arc_left_of_its_chord`] reads it: a movement never mirrors, so
+/// it keeps the sign.
+fn how_a_side_is_seen_down_the_axis(
+    cone: &rcad_geom::Cone,
+    side: &Side,
+) -> Option<SeenDownTheAxis> {
+    let SideRun::Arc { into_the_arc } = &side.run else {
+        return Some(SeenDownTheAxis::Straight);
+    };
+    let own = side.across.as_plane()?;
+    let along = cone.axis().direction().components();
+    let (facing, _) = rcad_predicates::decide(&SquareToTheAxis {
+        named: SEEN_DOWN_THE_AXIS,
+        normal: own.normal().components(),
+        along,
+    });
+    match facing {
+        Decision::Zero => return Some(SeenDownTheAxis::Straight),
+        Decision::Pos | Decision::Neg => (),
+        Decision::Undecidable { .. } | _ => return None,
+    }
+    let [from, to] = [side.start.at, side.end.at].map(|corner| exactly(corner.coordinates()));
+    let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
+    let on_the_left = match dot(*into_the_arc, cross(chord, exactly(along))).sign() {
+        Decision::Pos => true,
+        Decision::Neg => false,
+        Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+    };
+    Some(SeenDownTheAxis::AsAnArc {
+        on_the_left,
+        facing,
+    })
+}
+
+/// Which side of the line from `from` to `to` the point `at` is seen on,
+/// looking down `up`: the sign of `(at − from) · ((to − from) × up)`, in
+/// interval arithmetic.
+fn seen_down_the_axis(up: [Interval; 3], from: Point, to: Point, at: [Interval; 3]) -> Decision {
+    let [from, to] = [from, to].map(|corner| exactly(corner.coordinates()));
+    let step = core::array::from_fn(|axis| to[axis] - from[axis]);
+    let off = core::array::from_fn(|axis| at[axis] - from[axis]);
+    dot(off, cross(step, up)).sign()
+}
+
+/// Whether `at`, already seen on the line through `from` and `to` looking down
+/// `up`, is seen between them: how far along the line it is seen, against how
+/// long the piece is seen, each with the part along `up` taken out. `Err` with
+/// the width of whichever sign could not be settled.
+fn lies_between_seen_down_the_axis(
+    up: [Interval; 3],
+    from: Point,
+    to: Point,
+    at: [Interval; 3],
+) -> Result<bool, f64> {
+    let [from, to] = [from, to].map(|corner| exactly(corner.coordinates()));
+    let step: [Interval; 3] = core::array::from_fn(|axis| to[axis] - from[axis]);
+    let off: [Interval; 3] = core::array::from_fn(|axis| at[axis] - from[axis]);
+    let squared = dot(up, up);
+    let seen = |one: [Interval; 3], other: [Interval; 3]| {
+        dot(one, other) * squared - dot(one, up) * dot(other, up)
+    };
+    let how_far = seen(off, step);
+    let how_long = seen(step, step);
+    let signs = [how_far.sign(), (how_long - how_far).sign()];
+    if signs.contains(&Decision::Neg) {
+        return Ok(false);
+    }
+    for sign in signs {
+        match sign {
+            Decision::Pos | Decision::Zero | Decision::Neg => (),
+            Decision::Undecidable { enclosure } => return Err(enclosure),
+            other => panic!("a sign came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+    Ok(true)
 }
 
 /// Whether a flat face whose every side lies behind the other cut is the
