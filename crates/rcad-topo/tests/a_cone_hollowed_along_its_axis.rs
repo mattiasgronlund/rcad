@@ -23,8 +23,9 @@
 //!   each circle out as well (Q1148), a pointed cone less a steeper cone two up
 //!   answers every rule, and so does a pointed cone less a whole ball pushing
 //!   out through its side, since the check's mesh is asked fine enough to stop
-//!   the ball's band and the cone's folding onto each other (Q1198). A frustum
-//!   less that ball is still refused, under another name, by selection (Q1138).
+//!   the ball's band and the cone's folding onto each other (Q1198). So does a
+//!   frustum less that ball, since a side along one of the two circles also asks
+//!   what picks its circle out (Q1197).
 //!
 //! Every cone here is built by `tests/cones`, face by face through
 //! `SolidBuilder` with a power-of-two slope, and every ball by `Model::add_ball`.
@@ -448,17 +449,29 @@ fn a_pointed_cone_less_a_steeper_one_whose_circles_both_fall_on_its_side() {
 /// the two stop drawing the same sides: at 0.875 they still folded, and at
 /// 0.4375 the mesh was taken.
 ///
-/// **Every fuse of the frustum is refused `ResultIsNotManifold { count: 1 }`
+/// **The frustum shares `(100 − √2)π/3` with the ball.** It starts at `z = 2`,
+/// between `z₁` and `z₂`, where the ball's slice is the wider, so up to `z₂`
+/// the two share the frustum's own slices, `π(z₂³ − 8)/3`, and above it the
+/// ball's, `π∫(8z − 7 − z²)dz` from `z₂` to 7. By hand, with
+/// `z₂² = 9/2 + 2√2` and `z₂³ = 11 + 25√2/4`, the first is `π(1 + 25√2/12)`;
+/// `4z² − 7z − z³/3` is `98/3` at 7 and `1/3 + 29√2/12` at `z₂`, so the second
+/// is `π(97/3 − 29√2/12)`, and together they are `π(100/3 − √2/3)`. The ball
+/// less the frustum checks it from the other side: its bottom below `z = 2`,
+/// `π∫₁²(8z − 7 − z²)dz = 8π/3`, and the ring round the frustum's side from 2
+/// to `z₂`, `π∫(8z − 7 − 2z²)dz = √2π/3`, are `36π` less it, `(8 + √2)π/3`.
+/// The union is `(512 + √2)π/3` and the frustum less the ball `(404 + √2)π/3`.
+///
+/// **Every fuse of the frustum was refused `ResultIsNotManifold { count: 1 }`
 /// by selection** (Q1138). The ball's face is cut in three, the cap below
 /// `z₁`, the band and the cap above `z₂`, and the circle at `z₁` is one edge
-/// with one corner. But `select.rs`'s `the_piece_holds` asks a curved piece
+/// with one corner. But `select.rs`'s `the_piece_holds` asked a curved piece
 /// only which side of each bounding circle's partner a point is on, and both
-/// caps are inside the cone. So the lower cap is placed by a point of the
+/// caps are inside the cone. So the lower cap was placed by a point of the
 /// upper one, the step up from its corner, `(2.93, 0, 4.66)`, and found inside
-/// the frustum, which it is wholly below. Every rule then keeps the band or
-/// the lower cap and not both, and the circle has one face along it. With the
-/// point also asked against what picks the circle out of the two, all six
-/// answered the volumes below.
+/// the frustum, which it is wholly below. Every rule then kept the band or the
+/// lower cap and not both, and the circle had one face along it. A side along
+/// one of two circles now also asks what picks its circle out, unless its piece
+/// has a side along the other circle too (Q1197).
 #[test]
 fn a_cone_less_a_whole_ball_pushing_out_through_its_side() {
     let [low, high] = [-1.0, 1.0].map(|side| 2.0 + side * 2.0_f64.sqrt() / 2.0);
@@ -468,7 +481,6 @@ fn a_cone_less_a_whole_ball_pushing_out_through_its_side() {
     let frustum = a_frustum_holds(1.0, 2.0, 8.0);
     let above = slices(7.0) - slices(high);
     let pointed_shares = slices(low) - slices(1.0) + a_frustum_holds(1.0, low, high) + above;
-    let frustum_shares = a_frustum_holds(1.0, 2.0, high) + above;
     let tip = a_frustum_holds(1.0, 0.0, low) - (slices(low) - slices(1.0));
     let ring = PI * (high - low).powi(3) / 3.0;
 
@@ -507,19 +519,17 @@ fn a_cone_less_a_whole_ball_pushing_out_through_its_side() {
         "{gives:?}"
     );
 
-    let frustum_gives = what_each_rule_gives(|model| {
-        let ball = a_ball_four_up(model, 3.0);
-        [a_frustum(model, 1.0, 2.0, 8.0), ball]
-    });
-    assert!(
-        frustum_gives
-            .iter()
-            .all(|answer| matches!(answer, Err(Error::ResultIsNotManifold { count: 1 }))),
-        "every rule leaves the lower circle with one face along it, where they would hold \
-         {} together, {frustum_shares} shared, {} of the frustum and {} of the ball alone: \
-         {frustum_gives:?}",
-        frustum + ball - frustum_shares,
-        frustum - frustum_shares,
-        ball - frustum_shares
+    let frustum_shares = (100.0 - 2.0_f64.sqrt()) * PI / 3.0;
+    fuses_hold(
+        |model| {
+            let ball = a_ball_four_up(model, 3.0);
+            [a_frustum(model, 1.0, 2.0, 8.0), ball]
+        },
+        [
+            &[frustum + ball - frustum_shares],
+            &[frustum_shares],
+            &[frustum - frustum_shares],
+            &[ball - frustum_shares],
+        ],
     );
 }

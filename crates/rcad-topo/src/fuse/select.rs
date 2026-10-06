@@ -978,7 +978,9 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// bounded, a circle on a sphere leaves two caps and neither is the outer one,
 /// so there is nothing to wind and what answers instead is which side of each
 /// bounding curve the piece's own material lies on — which the arrangement
-/// already worked out and put on [`FaceMeet::material_side`].
+/// already worked out and put on [`FaceMeet::material_side`]. Where two
+/// surfaces cross in two closed curves that side holds more than the piece, and
+/// the side also asks what picks its curve out ([`what_else_a_curved_side_asks`]).
 ///
 /// The one thing a *flat* piece may not have any more is a polygon: the disk a
 /// bar takes out of a block's face is bounded by one closed curve and has one
@@ -1028,13 +1030,23 @@ fn the_piece_holds(
         {
             return Some(false);
         }
-        return Some(piece.wires.iter().flatten().all(|side| {
+        for side in piece.wires.iter().flatten() {
             let found = match side.carried_by[1].as_plane() {
                 Some(flat) => side_of_a_flat_face(flat, point),
                 None => side_of_surface(&side.carried_by[1], point),
             };
-            found == side.material_side
-        }));
+            if found != side.material_side {
+                return Some(false);
+            }
+            for picker in what_else_a_curved_side_asks(piece, side) {
+                match picker.side_of_point(point) {
+                    Decision::Pos => (),
+                    Decision::Neg | Decision::Zero => return Some(false),
+                    Decision::Undecidable { .. } | _ => return None,
+                }
+            }
+        }
+        return Some(true);
     };
     // **A flat piece's corners are a polygon and its sides need not be**
     // (§38.5). Where a bar's wall cuts a plane the side between two corners is an
@@ -1185,6 +1197,77 @@ fn how_far_up_the_axis(cone: &Cone, point: PredicatePoint) -> Decision {
         .map(|axis| (at[axis] - Interval::exactly(apex[axis])) * Interval::exactly(up[axis]))
         .fold(Interval::exactly(0.0), |so_far, term| so_far + term)
         .sign()
+}
+
+/// What a side of a curved piece asks a point besides which side of its
+/// partner the point is on: what picks the closed curve it runs along out of
+/// the other one its two surfaces cross in, which must hold the point strictly
+/// inside. Nothing where the piece has a side along that other curve too, or
+/// where the side's ends do not say which curve it runs along.
+///
+/// **Two surfaces can cross in two closed curves, and then the partner's side
+/// does not say which piece holds a point.** A ball on a cone's axis pushing
+/// out through its side crosses the cone in two circles, and they cut each
+/// surface in three: a band between them, bounded by both, and beyond each
+/// circle a part bounded by that circle alone. Crossing a circle crosses to the
+/// other side of the partner, so the two parts beyond are on one side of it and
+/// the band is alone on the other. The ball's cap below the lower circle and
+/// its cap above the upper one are both inside the cone, and a point of the
+/// upper one, `(2.93, 0, 4.66)`, was taken as a point of the lower one and
+/// found inside a frustum the lower cap is wholly below (Q1197).
+///
+/// What tells the two parts beyond apart is what `intersect` names each curve
+/// by, the `picked_by` of [`MeetPoint::WhereAClosedCurveStarts`]. For a ball,
+/// a pipe or a second cone on a cone's axis, and for a pipe through a ball,
+/// that is a half-space square to the axis whose plane lies between the two
+/// curves, facing its own. That plane meets each surface only inside its band
+/// — on the cone and the ball a circle between the two, on a pipe through a
+/// ball a circle inside the ball and the ball's equator outside the pipe — so
+/// each part beyond a curve, which does not meet the plane, lies wholly on its
+/// own curve's side of it: the half-space holds the cap beyond its circle, or
+/// everything of the cone past it, the other nappe included, and nothing of the
+/// part beyond the other curve. For two curves of another shape a picker can
+/// still only rule points out, so asking it never holds a point that the
+/// partner alone did not.
+///
+/// **A piece with sides along both curves asks neither.** It is the band, alone
+/// on its side of the partner, so the partner already says, and the two
+/// pickers hold opposite halves of it: asked both, the band of a pointed cone
+/// inside the ball of `tests/a_cone_hollowed_along_its_axis.rs` held no point,
+/// and was placed only by a side it shares. A side between two corners where a
+/// third surface cuts its curve does not say which curve it is, so a piece with
+/// such a side along the partner asks nothing of it, as before.
+///
+/// **A piece with a side along one curve only can still be part of the band**,
+/// where its face stops short of the other curve: the frustum from `z = 2` of
+/// that file holds only the upper circle, and its piece inside the ball runs
+/// from its own rim up to it. The picker then rules out the points of the piece
+/// beyond the half-space's plane, which costs candidates and keeps nothing it
+/// should not; there the plane is the frustum's rim, `z = 2`, and costs none.
+fn what_else_a_curved_side_asks<'a>(piece: &'a Piece, side: &'a FaceMeet) -> &'a [Picker] {
+    let Some(mine) = which_curve_it_runs_along(side) else {
+        return &[];
+    };
+    let along_one_curve = piece
+        .wires
+        .iter()
+        .flatten()
+        .filter(|other| other.carried_by[1] == side.carried_by[1])
+        .all(|other| which_curve_it_runs_along(other) == Some(mine));
+    if along_one_curve { mine } else { &[] }
+}
+
+/// What picks the closed curve `side` runs along out of the others its two
+/// surfaces cross in, as an end of it where the curve starts or half way round
+/// carries it, or `None` when neither end is one.
+fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
+    side.ends.iter().find_map(|end| match end {
+        MeetPoint::WhereAClosedCurveStarts { picked_by, .. }
+        | MeetPoint::HalfWayRoundAClosedCurve { picked_by, .. } => Some(picked_by.as_slice()),
+        MeetPoint::Existing { .. }
+        | MeetPoint::OfThreeSurfaces { .. }
+        | MeetPoint::APoleOfAClosedSurface { .. } => None,
+    })
 }
 
 /// One when `point` is between a curved side of a flat piece and the chord
@@ -3029,7 +3112,8 @@ fn nothing_to_measure_from(piece: &Piece, log: &mut ProvenanceLog) -> Error {
 #[cfg(test)]
 mod tests {
     use rcad_geom::{
-        Axis, Cone, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
+        Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface,
+        SurfaceMeet, Torus, Vector, intersect,
     };
     use rcad_predicates::{
         Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
@@ -3347,6 +3431,77 @@ mod tests {
         assert_eq!(holds([2.0, 0.0, 10.0]), Some(true), "inside the triangle");
         assert_eq!(holds([0.0, 0.0, -10.0]), Some(false), "the opposite wedge");
         assert_eq!(holds([1.0, 0.0, -10.0]), Some(false), "the opposite wedge");
+    }
+
+    /// A ball of radius 3 four up a cone of slope 1 crosses it in two circles,
+    /// at `z = 2 ∓ √2/2`, and `intersect` picks each out by a half-space
+    /// either side of `z = 2`. The ball's cap below the lower circle and its cap
+    /// above the upper one are both inside the cone, so the lower cap's side
+    /// alone held `(2.93, 0, 4.66)`, a point of the upper cap (Q1197). The
+    /// cone's band between the circles has a side along each, whose pickers
+    /// hold opposite halves of it, and it holds points either side of `z = 2`.
+    #[test]
+    fn a_balls_cap_below_a_cone_holds_nothing_of_its_cap_above() {
+        let cone = Surface::Cone(Cone::new(Axis::z(), 1.0).expect("a positive slope"));
+        let ball =
+            Surface::Sphere(Sphere::new(Point::from([0.0, 0.0, 4.0]), 3.0).expect("a radius"));
+        let SurfaceMeet::Curves(circles) = intersect(
+            &ball,
+            &cone,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a ball on a cone's axis crosses it") else {
+            panic!("a ball pushing out through a cone's side crosses it in curves");
+        };
+        let side = |on: Surface, partner: Surface, height: f64| {
+            let at = PredicatePoint::from([height, 0.0, height]);
+            let picked_by = circles
+                .iter()
+                .find_map(|circle| {
+                    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = circle.run() else {
+                        panic!("each of the two circles is picked out: {circle:?}");
+                    };
+                    picked_by
+                        .iter()
+                        .all(|picker| picker.side_of_point(at) == Decision::Pos)
+                        .then(|| picked_by.clone())
+                })
+                .expect("one of the two circles holds the point");
+            let starts = MeetPoint::WhereAClosedCurveStarts {
+                carried_by: [on, partner],
+                picked_by,
+                point: at,
+            };
+            vec![FaceMeet {
+                carried_by: [on, partner],
+                ends: [starts.clone(), starts],
+                material_side: Decision::Neg,
+                along: SmallVec::new(),
+                approximation: None,
+            }]
+        };
+        let piece = |surface: Surface, wires: Vec<Vec<FaceMeet>>| Piece {
+            ancestors: Vec::new(),
+            surface,
+            orientation: Orientation::Forward,
+            wires,
+            is_the_whole_surface: false,
+        };
+        let [low, high] = [-1.0, 1.0].map(|way| 2.0 + way * 2.0_f64.sqrt() / 2.0);
+        let lower_cap = piece(ball, vec![side(ball, cone, low)]);
+        let band = piece(cone, vec![side(cone, ball, low), side(cone, ball, high)]);
+        let holds = |piece: &Piece, at: [f64; 3]| {
+            the_piece_holds(piece, None, &[], PredicatePoint::from(at))
+        };
+        assert_eq!(holds(&lower_cap, [0.75, 0.0, 1.1]), Some(true), "the cap");
+        assert_eq!(
+            holds(&lower_cap, [2.93, 0.0, 4.66]),
+            Some(false),
+            "the cap above"
+        );
+        assert_eq!(holds(&band, [1.5, 0.0, 1.5]), Some(true), "below z = 2");
+        assert_eq!(holds(&band, [2.5, 0.0, 2.5]), Some(true), "above z = 2");
     }
 
     /// A disk on `z = 0` cut by a ball of radius 1 round `(0, 0, −0.75)`, so
