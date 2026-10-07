@@ -20,9 +20,9 @@
 use std::collections::{HashMap, HashSet};
 
 use rcad_geom::{
-    Axis, Deflection, EdgeRun, Isometry, MOST_POINTS_ALONG_ONE_CROSSING, NamedRun, Orientation,
-    POINT_ALONG_A_CROSSING_ROUNDOFF, Point, SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Vector,
-    which_two_surfaces_a_run_is_between,
+    Axis, Deflection, DynamicRange, EdgeRun, Isometry, MOST_POINTS_ALONG_ONE_CROSSING, NamedRun,
+    Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface,
+    Vector, which_two_surfaces_a_run_is_between,
 };
 use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate};
 use rcad_predicates::{
@@ -600,6 +600,25 @@ const MOST_POINTS_A_MESH_WILL_HOLD: usize = 4 * 1024 * 1024;
 /// It is [`Error::ACurvedFaceCannotBeCutSmallEnoughToMesh`] rather than an assert
 /// because `validate` walks this and a face can arrive from a file (§16.11).
 const MOST_PIECES_A_FACE_IS_CUT_INTO: usize = 16;
+
+/// How far a longitude read off a point can be from the one the point stands
+/// at, in radians, and so how far past a quarter turn a piece may reach before
+/// [`BuildingAMesh::cut_in_two`] cuts it.
+///
+/// A point carries roundings of about `f64::EPSILON` times its largest
+/// coordinate — from its placement, from a file's decimals, from the frame it
+/// is read in — and read as an angle round a circle of radius `ρ` that is
+/// `f64::EPSILON · |P| / ρ`. `ρ` is a tube's, a pipe's or a ball's radius, a
+/// feature of the model, so [`DynamicRange::LARGEST_SUPPORTED_RATIO`] bounds
+/// `|P| / ρ` and this is four such roundings at that ratio, `8.9e-5`.
+///
+/// **What it is set against is a quarter turn, `1.57`, and not anything the
+/// mesh is measured by.** Any piece narrower than half a turn is one whose
+/// triangles the triangulator can see straying, so a piece this much over a
+/// quarter meshes as one at a quarter does; see `cut_in_two` for what cutting
+/// it costs instead.
+const HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF: f64 =
+    4.0 * DynamicRange::LARGEST_SUPPORTED_RATIO * f64::EPSILON;
 
 /// A mesh part way through being built.
 struct BuildingAMesh {
@@ -2955,9 +2974,39 @@ impl BuildingAMesh {
     /// the next — and those are never more than a quarter turn apart, because
     /// [`how_many_steps`] will not walk further than that in one step. A piece
     /// that no cut makes smaller is therefore already about as narrow as this is
-    /// asking for, and saying so is better than a fudge factor on the
-    /// comparison, which is what a piece a rounding over a quarter turn would
-    /// otherwise need.
+    /// asking for.
+    ///
+    /// **A piece no further over `widest` than its longitudes can be read off
+    /// by is not cut either** ([`HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF`]), because
+    /// a cut can make it smaller by a rounding and what it cuts off is a sliver.
+    /// A quarter bend of ring 8 and tube 1 from `(7, 0, 0)` round to
+    /// `(0, 7, 0)`, turned 27.1 degrees about `x`, written to a file and read
+    /// back, reads its seam's points an ulp either side of `π`, so the quarter
+    /// of its wall between the cut at `π/2` and the seam went
+    /// `1.5707963267948974` round against `1.5707963267948966`. The middle of
+    /// that is a rounding nearer the seam than the cut, so [`where_to_cut`]
+    /// pulled both ends onto the seam's two corners; [`a_chord_stays_inside`]
+    /// passed the chord, since the seam's points between them are an ulp off
+    /// it; and the half between the chord and the seam was `1.8e-15` wide, the
+    /// other half two ulps narrower than the whole. The triangulator fanned the
+    /// sliver from its one corner off the line and left the rest of it empty,
+    /// and at a deflection of 1.8 the read-back bend was refused
+    /// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 1, used: 1 }` at 20 of
+    /// 3600 tenth-degree turns; at 137 degrees and a deflection of 2 the same
+    /// sliver was refused `CornersCoincide`
+    /// (`a_quarter_bend_turned_about_x_measures_after_its_file.rs`).
+    ///
+    /// **A sliver comes only off a piece within that margin of `widest`.** A
+    /// half only roundings wide has both ends of the cut at one end of the
+    /// piece's longitudes, or the other half would reach as far round as the
+    /// whole. Each end is the corner nearer the middle of a side the middle
+    /// crosses, so that side's other corner is about as far the other way: it
+    /// runs the piece's whole width, and no side runs further than a quarter
+    /// turn. **And a piece left whole meshes**: a triangle's chord grows with
+    /// the turn it spans until that turn reaches a half, so the triangulator
+    /// sees how far its triangles stray on a piece of any width short of half a
+    /// turn, and this margin is `6e-5` of a quarter. Cutting it instead buys a
+    /// rounding of width and a patch with no area.
     ///
     /// **A piece that is still one whole closed curve gets a cut carrying a
     /// point of its own**, however little curve there is to step. A cut's two
@@ -3060,7 +3109,7 @@ impl BuildingAMesh {
         room: f64,
     ) -> Result<Option<(WalkedLoop, WalkedLoop)>> {
         let span = how_far_round(piece);
-        if span <= widest {
+        if span <= widest + HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF {
             return Ok(None);
         }
         let (least, most) = longitudes_of(piece);
