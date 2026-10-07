@@ -1597,7 +1597,10 @@ fn is_one_circle_cut_in_two(
 /// **One face is one of two pieces in front of every cut, and is told from the
 /// other**: a wall of a bar with two flats, where the part of the pipe between
 /// the flats is a run of rulings round each side
-/// ([`one_of_two_runs_between_two_flats`]), and the skin of a frustum under a
+/// ([`one_of_two_runs_between_two_flats`]), a wall of a bar cut by two cuts
+/// along its axis that meet off it, planes or pipes running the same way, where
+/// the part outside both is a near run and a far one
+/// ([`one_of_two_runs_between_two_cuts_meeting_off_the_pipe`]), and the skin of a frustum under a
 /// roof whose ridge is square to the axis, where the part of the cone between
 /// the roof's two planes is a run each side of the ridge
 /// ([`one_of_two_runs_of_a_cone_under_two_planes`]). Step 3 then holds of each
@@ -1769,10 +1772,14 @@ fn what_the_part_in_front_of_its_cuts_holds(
     let one_of_two_runs = if is_a_family_this_follows(surface, &cuts, nappe) {
         None
     } else {
-        let run = match one_of_two_runs_between_two_flats(face, surface, sides, &cuts)? {
-            Some(run) => Some(run),
-            None => one_of_two_runs_of_a_cone_under_two_planes(face, surface, sides, &cuts)?,
-        };
+        let mut run = one_of_two_runs_between_two_flats(face, surface, sides, &cuts)?;
+        if run.is_none() {
+            run =
+                one_of_two_runs_between_two_cuts_meeting_off_the_pipe(face, surface, sides, &cuts)?;
+        }
+        if run.is_none() {
+            run = one_of_two_runs_of_a_cone_under_two_planes(face, surface, sides, &cuts)?;
+        }
         let Some(run) = run else {
             return Ok(None);
         };
@@ -2023,8 +2030,13 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
     } else {
         return None;
     };
-    let leaves =
-        the_side_an_arc_leaves_its_end_on(surface, rim, *into_the_arc, one_flat, end_on_one.at);
+    let leaves = the_side_an_arc_leaves_its_end_on(
+        surface,
+        rim,
+        *into_the_arc,
+        &Surface::Plane(**one_flat),
+        end_on_one.at,
+    );
     (leaves == Some(one.kept)).then(|| InFrontOfEither {
         cap: (*cap).clone(),
         either: [(*one).clone(), (*other).clone()],
@@ -3840,7 +3852,9 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// planes along the axis meeting inside the pipe in place of its one
 /// ([`is_a_wedge_of_a_pipe`]). Two parallel planes along the axis leave two
 /// pieces, so this says no to them, and the caller asks
-/// [`one_of_two_runs_between_two_flats`] which piece the face is.
+/// [`one_of_two_runs_between_two_flats`] which piece the face is; two cuts
+/// along the axis meeting off the pipe can too, and the caller asks
+/// [`one_of_two_runs_between_two_cuts_meeting_off_the_pipe`].
 ///
 /// On a sphere, it is planes through the centre, or any two planes. Each plane
 /// through the centre cuts the sphere into two halves, and any number of halves
@@ -4380,9 +4394,11 @@ fn added(left: &[f64], right: &[f64]) -> Vec<f64> {
 /// `+y` and a run round `−y`, and each is a wall of its own. Those are answered
 /// by [`one_of_two_runs_between_two_flats`], which tells the two runs apart by
 /// the plane through the axis square to the flats. Two planes that are not
-/// parallel and meet outside the pipe are still refused by name. Their face's
-/// answer exists too, so that is a gap, and nothing here tells their two runs
-/// apart.
+/// parallel and meet outside the pipe, each in front of the other where it
+/// crosses the pipe, are answered by
+/// [`one_of_two_runs_between_two_cuts_meeting_off_the_pipe`]. Two that meet
+/// outside it in any other way keep one run or none and are still refused by
+/// name, which is a gap: nothing here reads which.
 ///
 /// A cut that is a second pipe running the same way is left to
 /// [`leaves_a_pipe_in_one_piece`], which counts it beside the plane kept here
@@ -4453,14 +4469,29 @@ fn do_two_planes_along_the_axis_meet_inside(
     (dot(off_the_axis, off_the_axis) - radius * radius * squared * squared).sign() == Decision::Neg
 }
 
-/// A pipe or cone face that is one of two runs of rulings, moved into place,
-/// with the half round the axis it is in: two parallel flats along a pipe
-/// ([`one_of_two_runs_between_two_flats`]), or two planes under a cone's floor
-/// ([`one_of_two_runs_of_a_cone_under_two_planes`]).
+/// A pipe or cone face that is one of two runs of rulings, with what tells the
+/// two apart moved into place, and the side of it the face is on: two parallel
+/// flats along a pipe ([`one_of_two_runs_between_two_flats`]), two cuts along
+/// a pipe's axis that meet off it
+/// ([`one_of_two_runs_between_two_cuts_meeting_off_the_pipe`]), or two planes
+/// under a cone's floor ([`one_of_two_runs_of_a_cone_under_two_planes`]).
 struct OneOfTwoRuns {
-    axis: rcad_geom::Axis,
-    flat: Plane,
+    apart: TellsTheRunsApart,
     half: Decision,
+}
+
+/// What a [`OneOfTwoRuns`] reads to say which run a point is on.
+enum TellsTheRunsApart {
+    /// The half round `axis` that [`which_half_round_the_axis`] reads against
+    /// `flat`.
+    AHalfRoundTheAxis { axis: rcad_geom::Axis, flat: Plane },
+    /// The side of the line where the tangents to `pipe` from the line two
+    /// `cuts` along its axis meet in touch it
+    /// ([`which_side_of_where_the_tangents_touch`]).
+    WhereTheTangentsTouch {
+        pipe: rcad_geom::Cylinder,
+        cuts: [Surface; 2],
+    },
 }
 
 /// Whether `face`, on the pipe `surface`, is one of the two runs of rulings that
@@ -4576,8 +4607,10 @@ fn one_of_two_runs_between_two_flats(
         panic!("a plane moved into place is a plane");
     };
     Ok(Some(OneOfTwoRuns {
-        axis: placed_pipe.axis(),
-        flat: placed_flat,
+        apart: TellsTheRunsApart::AHalfRoundTheAxis {
+            axis: placed_pipe.axis(),
+            flat: placed_flat,
+        },
         half,
     }))
 }
@@ -4627,6 +4660,258 @@ fn which_half_round_the_axis(axis: &rcad_geom::Axis, flat: &Plane, at: [Interval
         across,
     )
     .sign()
+}
+
+/// Whether `face`, on the pipe `surface`, is one of the two runs of rulings
+/// that two cuts along the axis leave where they meet **off** the pipe, and if
+/// it is, which side of what tells the two runs apart it is on. A cut along the
+/// axis is a plane along it or a second pipe running the same way. `None` when
+/// it is not, which the caller refuses by name.
+///
+/// The wall on the bar's circle of the cap along four pipes in
+/// `tests/a_joined_flat_face_whose_rings_enclose_no_area.rs` is that (row
+/// Q1252). It is cut by its floor, its roof, and the pipes of radius 5 about
+/// `(7, −4)` and `(−5, 2)` its two straight sides run along, and keeps the
+/// outside of both pipes. That is two runs of the bar's circle: the face's,
+/// from `(10, 0)` round through `(0, 10)` to `(−8, 6)`, and one through
+/// `(0, −10)`, which is outside both pipes as well.
+///
+/// # Each cut along the axis is a line, seen down the axis
+///
+/// Look down the axis, with `o` the axis origin, `w` its direction and `r` the
+/// radius: the pipe is the circle `|y| = r`, `y` the part of `x − o` square to
+/// `w`. A plane along the axis, `n·x = d`, is the line `n·y = d − n·o` there. A
+/// second pipe running the same way is a line too, **on the pipe** ([`a_line_on`]).
+/// So each cut keeps the rulings through the points of the circle on one side
+/// of a line `a·y = b`: one arc of them.
+///
+/// # When the two arcs leave two runs
+///
+/// Let `L₁` and `L₂` be the two lines, `K₁` and `K₂` the arcs of the circle in
+/// front of them, and `R₁` and `R₂` the arcs behind. What is asked:
+///
+/// 1. Each line crosses the circle at two points, `b² < r²|a|²`.
+/// 2. The point `c` the lines meet at is strictly outside the circle, or there
+///    is none: `|C|² > r²k²`, with `k = (a₁ × a₂)·w` and
+///    `C = b₁(a₂ × w) − b₂(a₁ × w)`, so that `c = C/k`. Parallel lines read
+///    `k = 0`, and pass unless they are one line, which is `C = 0`.
+/// 3. The middle of each line's chord, `b₁a₁/|a₁|²`, is strictly in front of
+///    the other line: `b₁(a₁·a₂) − b₂|a₁|²` has the sign the second cut keeps,
+///    and the same with the two turned round.
+///
+/// **Then `R₁` and `R₂` do not meet.** By 2, `L₂` crosses `L₁` nowhere inside
+/// the circle, so both ends of `L₁`'s chord are on the side of `L₂` its middle
+/// is on, which by 3 is the side kept: both ends of `R₁` are strictly inside
+/// `K₂`, and both ends of `R₂` strictly inside `K₁`. So `R₁` holds neither end
+/// of `R₂`, and since `R₂` is one arc it is then wholly inside `R₁` or wholly
+/// outside it; inside would put the ends of `R₂` behind `L₁`. The circle less
+/// two arcs that do not meet is two arcs, and those are the two runs.
+///
+/// # What tells the two runs apart
+///
+/// **The line through the two points where the tangents from `c` touch the
+/// circle**, `y·c = r²`, which is `y·C = r²k` multiplied through by `k`
+/// ([`which_side_of_where_the_tangents_touch`]). Every line through `c` that
+/// crosses the circle crosses it once on the side of that line `c` is on and
+/// once on the other, and the two touching points are where one side turns into
+/// the other. So, going round the circle from one touching point: `L₁`'s near
+/// point, `L₂`'s near point, the other touching point, `L₂`'s far point, `L₁`'s
+/// far point. `R₁` and `R₂` do not meet, so `R₁` is the arc between `L₁`'s two
+/// points through the first touching point and `R₂` the arc between `L₂`'s
+/// through the second, and the runs are the near arc between the two lines and
+/// the far one: one strictly on each side. Parallel lines are `c` gone off to
+/// infinity, and the line is then the one through the axis square to them,
+/// which is what [`one_of_two_runs_between_two_flats`] reads for two flats.
+///
+/// **Nothing on that line has to be exact.** It meets the circle only inside
+/// `R₁` and `R₂`, away from both runs, so it is read off the cuts as they are
+/// stored for the corners and as they are moved into place for the point, and
+/// a rounding of either moves it about inside `R₁` and `R₂` only.
+///
+/// # And the floor and the roof
+///
+/// Each run is one arc, and one arc is what [`leaves_a_pipe_in_one_piece`]
+/// reads off one cut along the axis, so its argument for a floor and a roof
+/// carries over, and it is asked with the second cut along the axis left out,
+/// as [`one_of_two_runs_between_two_flats`] asks it. Step 3 of
+/// [`what_a_face_cut_by_part_of_a_crossing_holds`] then holds of each piece on
+/// its own, and which piece the face is, is the side every one of its corners
+/// is on where it is stored. Corners that do not all say one side are refused.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when a corner's side could not be settled.
+fn one_of_two_runs_between_two_cuts_meeting_off_the_pipe(
+    face: FaceView<'_>,
+    surface: &Surface,
+    sides: &[Side],
+    cuts: &[Cut],
+) -> Result<Option<OneOfTwoRuns>> {
+    let Surface::Cylinder(pipe) = surface else {
+        return Ok(None);
+    };
+    let along_the_axis: Vec<usize> = cuts
+        .iter()
+        .enumerate()
+        .filter(|(_, cut)| match cut.surface {
+            Surface::Plane(flat) => lies_along_the_axis(pipe, &flat),
+            Surface::Cylinder(_) => are_pipes_running_the_same_way(surface, &cut.surface),
+            Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_) | _ => false,
+        })
+        .map(|(at, _)| at)
+        .collect();
+    let [one, other] = along_the_axis[..] else {
+        return Ok(None);
+    };
+    let (Some(one_line), Some(other_line)) = (
+        a_line_on(pipe, &cuts[one].surface),
+        a_line_on(pipe, &cuts[other].surface),
+    ) else {
+        return Ok(None);
+    };
+    let all_but_one: Vec<Cut> = cuts
+        .iter()
+        .enumerate()
+        .filter(|&(at, _)| at != other)
+        .map(|(_, cut)| cut.clone())
+        .collect();
+    let radius = Interval::exactly(pipe.radius());
+    let crosses_twice = |line: &ALine| {
+        (line.b * line.b - radius * radius * dot(line.a, line.a)).sign() == Decision::Neg
+    };
+    let middle_in_front = |line: &ALine, of: &ALine, kept: Decision| {
+        (line.b * dot(line.a, of.a) - of.b * dot(line.a, line.a)).sign() == kept
+    };
+    let up = exactly(pipe.axis().direction().components());
+    let (meet, scale) = where_two_lines_meet(up, [&one_line, &other_line]);
+    let off_the_circle =
+        (dot(meet, meet) - radius * radius * scale * scale).sign() == Decision::Pos;
+    if !crosses_twice(&one_line)
+        || !crosses_twice(&other_line)
+        || !off_the_circle
+        || !middle_in_front(&one_line, &other_line, cuts[other].kept)
+        || !middle_in_front(&other_line, &one_line, cuts[one].kept)
+        || !leaves_a_pipe_in_one_piece(pipe, &all_but_one)
+    {
+        return Ok(None);
+    }
+
+    let lines = [&one_line, &other_line];
+    let mut half = None;
+    for corner in sides.iter().flat_map(|side| [side.start, side.end]) {
+        let found =
+            which_side_of_where_the_tangents_touch(pipe, lines, exactly(corner.at.coordinates()));
+        match found {
+            Decision::Pos | Decision::Neg if half.is_none_or(|known| known == found) => {
+                half = Some(found);
+            }
+            Decision::Pos | Decision::Neg | Decision::Zero => return Ok(None),
+            Decision::Undecidable { enclosure } => {
+                let at = PredicatePoint::from(corner.at.coordinates());
+                return Err(gave_up_beside_where_the_tangents_touch(
+                    at, enclosure, lines,
+                ));
+            }
+            found => panic!("a side came back with a decision nothing here knows: {found:?}"),
+        }
+    }
+    let half = half.expect("a face with two cuts along its axis has corners on them");
+    let Surface::Cylinder(placed_pipe) = face.surface() else {
+        panic!("a pipe moved into place is a pipe");
+    };
+    Ok(Some(OneOfTwoRuns {
+        apart: TellsTheRunsApart::WhereTheTangentsTouch {
+            pipe: placed_pipe,
+            cuts: [cuts[one].placed, cuts[other].placed],
+        },
+        half,
+    }))
+}
+
+/// A cut along a pipe's axis read as a line seen down that axis
+/// ([`a_line_on`]): on the pipe, the cut's sign is the sign of `a·(x − o) − b`,
+/// with `o` the axis origin, and `a` is square to the axis.
+struct ALine {
+    a: [Interval; 3],
+    b: Interval,
+    /// How many lengths `b` is: one for a plane, two for a pipe.
+    lengths: u32,
+}
+
+/// `cut`, a plane along `pipe`'s axis or a second pipe running the same way,
+/// read as the line it is on `pipe` seen down the axis; `None` for any other
+/// surface. Whether `cut` does lie along the axis is the caller's to ask.
+///
+/// A plane `n·x = d` is `n·(x − o) − (d − n·o)`, its own sign moved to the
+/// axis origin. A pipe with origin `p` and radius `ρ`, running along `w` as
+/// `pipe` does, has the sign `|w|²|x − p|² − (w·(x − p))² − ρ²|w|²` up to a
+/// positive factor, and `pipe`'s own, which is zero on it, is the same with `o`
+/// and `r`. Their difference has no squares of `x` in it: with `δ = p − o`,
+/// `Δ = |w|²δ − (w·δ)w` and `u = x − o` it is
+/// `|w|²|δ|² − (w·δ)² + (r² − ρ²)|w|² − 2Δ·u`. So on `pipe`, `a = −2Δ` and `b`
+/// is the rest turned round. `Δ` is `δ`'s part square to the axis, scaled.
+fn a_line_on(pipe: &rcad_geom::Cylinder, cut: &Surface) -> Option<ALine> {
+    let origin = exactly(pipe.axis().origin().coordinates());
+    match cut {
+        Surface::Plane(flat) => {
+            let normal = exactly(flat.normal().components());
+            Some(ALine {
+                a: normal,
+                b: Interval::exactly(flat.offset()) - dot(normal, origin),
+                lengths: 1,
+            })
+        }
+        Surface::Cylinder(other) => {
+            let up = exactly(pipe.axis().direction().components());
+            let other_origin = exactly(other.axis().origin().coordinates());
+            let apart: [Interval; 3] =
+                core::array::from_fn(|axis| other_origin[axis] - origin[axis]);
+            let squared = dot(up, up);
+            let along = dot(up, apart);
+            let [radius, other_radius] = [pipe.radius(), other.radius()].map(Interval::exactly);
+            let rest = squared * dot(apart, apart) - along * along
+                + (radius * radius - other_radius * other_radius) * squared;
+            Some(ALine {
+                a: core::array::from_fn(|axis| {
+                    Interval::exactly(-2.0) * (squared * apart[axis] - along * up[axis])
+                }),
+                b: -rest,
+                lengths: 2,
+            })
+        }
+        Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_) | _ => None,
+    }
+}
+
+/// Where two lines seen down an axis along `up` meet, as `(C, k)` with the
+/// point `C/k` measured from the axis origin:
+/// `C = b₁(a₂ × up) − b₂(a₁ × up)` and `k = (a₁ × a₂)·up`. Both lines hold it,
+/// since `a₁·C = b₁k` and `a₂·C = b₂k` by the triple product, and `C` is square
+/// to `up`. `k` is zero for parallel lines.
+fn where_two_lines_meet(up: [Interval; 3], [one, other]: [&ALine; 2]) -> ([Interval; 3], Interval) {
+    let [one_across, other_across] = [one, other].map(|line| cross(line.a, up));
+    let meet = core::array::from_fn(|axis| one.b * other_across[axis] - other.b * one_across[axis]);
+    (meet, dot(cross(one.a, other.a), up))
+}
+
+/// Which side the box `at` is on of the line, seen down `pipe`'s axis, through
+/// the two points where the tangents to the pipe from where the two `lines`
+/// meet touch it: the sign of `(at − o)·C − r²k`, with `(C, k)` from
+/// [`where_two_lines_meet`], `o` the axis origin and `r` the radius. A point
+/// `y` of the plane square to the axis is on that line when `y·c = r²`, and
+/// `c = C/k` is square to the axis, so the part of `at − o` along it does not
+/// count. Interval arithmetic: a sign it cannot settle reads
+/// [`Decision::Undecidable`].
+fn which_side_of_where_the_tangents_touch(
+    pipe: &rcad_geom::Cylinder,
+    lines: [&ALine; 2],
+    at: [Interval; 3],
+) -> Decision {
+    let origin = exactly(pipe.axis().origin().coordinates());
+    let (meet, scale) = where_two_lines_meet(exactly(pipe.axis().direction().components()), lines);
+    let radius = Interval::exactly(pipe.radius());
+    let from_the_axis = core::array::from_fn(|axis| at[axis] - origin[axis]);
+    (dot(from_the_axis, meet) - radius * radius * scale).sign()
 }
 
 /// Whether `face`, on the cone `surface`, is one of the two runs of rulings
@@ -4770,8 +5055,10 @@ fn one_of_two_runs_of_a_cone_under_two_planes(
         panic!("a plane moved into place is a plane");
     };
     Ok(Some(OneOfTwoRuns {
-        axis: placed_cone.axis(),
-        flat: placed_flat,
+        apart: TellsTheRunsApart::AHalfRoundTheAxis {
+            axis: placed_cone.axis(),
+            flat: placed_flat,
+        },
         half,
     }))
 }
@@ -4981,8 +5268,11 @@ fn is_a_polygon_less_one_bite_of_a_pipe(flat: &Plane, cuts: &[Cut]) -> bool {
 /// along the axis or two floors are each two arcs, which can meet in two pieces
 /// as above (a slab `|x| ≤ ½` across the same pipe), and telling that from one
 /// piece wants the arcs' ends compared; a floor and a roof that are not side by
-/// side beside a cut along the axis could be settled the same way. No face here
-/// has asked for either (§13). A cut that is not a plane, or a sign that could
+/// side beside a cut along the axis could be settled the same way. Two cuts
+/// along the axis that do leave two pieces are told apart by the caller, when
+/// they are parallel planes ([`one_of_two_runs_between_two_flats`]) or meet off
+/// the pipe ([`one_of_two_runs_between_two_cuts_meeting_off_the_pipe`]); two
+/// that leave one piece, and two floors, no face here has asked for (§13). A cut that is not a plane, or a sign that could
 /// not be settled, is refused too, so an undecided sign costs a refusal and
 /// never a wrong answer.
 fn leaves_a_pipe_in_one_piece(pipe: &rcad_geom::Cylinder, cuts: &[Cut]) -> bool {
@@ -5176,6 +5466,9 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 /// - A straight side of a flat face against a pipe that face's plane crosses in
 ///   a curve that closes, **outside** it but for an end:
 ///   [`a_straight_side_stays_outside_the_pipe`].
+/// - A straight side along a pipe's axis against that pipe
+///   ([`runs_along_the_axis_of`]): the pipe's sign does not change along it, so
+///   it lies where its ends do when both say the same.
 /// - An arc against a plane that holds both its ends: that plane meets the arc's
 ///   own plane in the line through the two ends, which is the chord, and the arc
 ///   is the whole of the side of the chord [`the_way_into_an_arc`] points to. So
@@ -5183,7 +5476,10 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 ///   way too, which is the sign of `(n × p) · (h × p)` — the cut's and the arc's
 ///   in-plane directions compared.
 /// - An arc against a plane that holds **one** of its ends, which is the pie
-///   slice: [`where_an_arc_with_one_end_on_a_cut_lies`].
+///   slice: [`where_an_arc_with_one_end_on_a_cut_lies`]. So is an arc of a pipe
+///   against a second pipe running the same way that holds one of its ends, and
+///   one against such a pipe that holds both is
+///   [`where_an_arc_between_two_points_of_a_pipe_lies`].
 /// - An arc against a plane side by side with the arc's own plane
 ///   ([`the_normals_lie_along_one_line`]), both ends on the same side of it: the
 ///   two planes never meet, so the whole of the arc's plane is on that side. A
@@ -5258,6 +5554,11 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
             {
                 Lies::Beside(Decision::Pos)
             }
+            Surface::Cylinder(pipe) if runs_along_the_axis_of(&pipe, side) => match ends {
+                [Decision::Zero, Decision::Zero] => Lies::On,
+                [one @ (Decision::Pos | Decision::Neg), other] if one == other => Lies::Beside(one),
+                [..] => Lies::Across,
+            },
             Surface::Sphere(_)
             | Surface::Cylinder(_)
             | Surface::Cone(_)
@@ -5271,30 +5572,39 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
                 (Some(_), Some(_)) | (None, None) => None,
             };
             let own_plane = surface.as_plane().or(side.across.as_plane());
-            let Surface::Plane(flat) = cut.surface else {
-                let on_a_pipe_running_the_same_way = arcs_own_round_surface
-                    .is_some_and(|own| are_pipes_running_the_same_way(own, &cut.surface));
-                return if on_a_pipe_running_the_same_way && ends == [Decision::Zero, Decision::Zero]
-                {
-                    where_an_arc_between_two_points_of_a_pipe_lies(
-                        surface,
-                        side,
-                        *into_the_arc,
-                        &cut.surface,
-                    )
-                } else {
-                    Lies::Across
-                };
-            };
             let on_the_cut = |end: Corner, far| {
                 where_an_arc_with_one_end_on_a_cut_lies(
                     surface,
                     side,
                     *into_the_arc,
-                    &flat,
+                    &cut.surface,
                     end.at,
                     far,
                 )
+            };
+            let Surface::Plane(flat) = cut.surface else {
+                let on_a_pipe_running_the_same_way = arcs_own_round_surface
+                    .is_some_and(|own| are_pipes_running_the_same_way(own, &cut.surface));
+                if !on_a_pipe_running_the_same_way {
+                    return Lies::Across;
+                }
+                return match ends {
+                    [Decision::Zero, Decision::Zero] => {
+                        where_an_arc_between_two_points_of_a_pipe_lies(
+                            surface,
+                            side,
+                            *into_the_arc,
+                            &cut.surface,
+                        )
+                    }
+                    [Decision::Zero, far @ (Decision::Pos | Decision::Neg)] => {
+                        on_the_cut(side.start, far)
+                    }
+                    [far @ (Decision::Pos | Decision::Neg), Decision::Zero] => {
+                        on_the_cut(side.end, far)
+                    }
+                    [..] => Lies::Across,
+                };
             };
             match ends {
                 [Decision::Zero, Decision::Zero] => {
@@ -5368,11 +5678,21 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
 /// — and a graze is a side that stays where it starts, so those are answers this
 /// refuses rather than answers it gets wrong. A gap, left for the face that
 /// needs it.
+///
+/// **The cut may be a second pipe running the same way as the arc's own**, with
+/// the arc's plane cutting both in a curve that closes (row Q1252). Then the
+/// arc's curve and the cut's meet on that plane in at most two points
+/// ([`is_a_pair_of_pipes_running_the_same_way`]), and they cross at each,
+/// since one sign less the other is a line's there, and a line meets a closed
+/// convex curve by crossing it in two points or by touching it in one. So the
+/// argument above holds word for word, with `∇T` at the end, read where the end
+/// is stored, for the plane's normal: one end the cut holds and at most one
+/// other point.
 fn where_an_arc_with_one_end_on_a_cut_lies(
     surface: &Surface,
     side: &Side,
     into_the_arc: [Interval; 3],
-    cut: &Plane,
+    cut: &Surface,
     at: Point,
     far: Decision,
 ) -> Lies {
@@ -5385,18 +5705,30 @@ fn where_an_arc_with_one_end_on_a_cut_lies(
 
 /// The side of `cut` an arc leaves its end `at` on, as
 /// [`where_an_arc_with_one_end_on_a_cut_lies`] reads it:
-/// `(∇S × ∇T · into_the_arc)(∇S × ∇T · cut)`. [`Decision::Zero`] for a graze
+/// `(∇S × ∇T · into_the_arc)(∇S × ∇T · ∇cut)`. [`Decision::Zero`] for a graze
 /// and [`Decision::Undecidable`] for a sign not settled, which no caller takes
 /// for a side; `None` for a surface [`gradient_at`] does not read.
 fn the_side_an_arc_leaves_its_end_on(
     surface: &Surface,
     side: &Side,
     into_the_arc: [Interval; 3],
-    cut: &Plane,
+    cut: &Surface,
     at: Point,
 ) -> Option<Decision> {
     let along = the_way_the_crossing_runs(surface, &side.across, at)?;
-    Some((dot(along, into_the_arc) * dot(along, exactly(cut.normal().components()))).sign())
+    Some((dot(along, into_the_arc) * dot(along, gradient_at(cut, at)?)).sign())
+}
+
+/// Whether a straight `side` runs along `pipe`'s axis: the step from its start
+/// to its end, where they are stored, crossed with the stored axis direction is
+/// exactly nothing. The pipe's sign does not change along such a side, so it
+/// lies wholly on whichever side of the pipe its ends are on.
+fn runs_along_the_axis_of(pipe: &rcad_geom::Cylinder, side: &Side) -> bool {
+    let [from, to] = [side.start.at, side.end.at].map(|corner| exactly(corner.coordinates()));
+    let step = core::array::from_fn(|axis| to[axis] - from[axis]);
+    cross(step, exactly(pipe.axis().direction().components()))
+        .iter()
+        .all(|component| component.sign() == Decision::Zero)
 }
 
 /// Where an arc of the curve a plane cuts one pipe in lies against another pipe
@@ -5667,10 +5999,9 @@ fn held_in_front_of_all(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> 
     })
 }
 
-/// The face is the part of its pipe or cone in front of every cut that is in
-/// its own half ([`one_of_two_runs_between_two_flats`],
-/// [`one_of_two_runs_of_a_cone_under_two_planes`]). The other half's piece is
-/// strictly in the other half, so a point on the plane between the halves is
+/// The face is the part of its pipe or cone in front of every cut that is on
+/// its own side of what tells the two runs apart ([`OneOfTwoRuns`]). The other
+/// run is strictly on the other side, so a point on what is between them is
 /// not on the face either.
 fn held_in_front_of_all_on_its_own_run(
     run: &OneOfTwoRuns,
@@ -5681,7 +6012,27 @@ fn held_in_front_of_all_on_its_own_run(
     if held == OnAFace::NotHeld {
         return Ok(held);
     }
-    match which_half_round_the_axis(&run.axis, &run.flat, point.enclosure()) {
+    let found = match &run.apart {
+        TellsTheRunsApart::AHalfRoundTheAxis { axis, flat } => {
+            which_half_round_the_axis(axis, flat, point.enclosure())
+        }
+        TellsTheRunsApart::WhereTheTangentsTouch { pipe, cuts } => {
+            let [one, other] = cuts.each_ref().map(|cut| {
+                a_line_on(pipe, cut).expect("a cut read as a line where it is stored is one moved")
+            });
+            match which_side_of_where_the_tangents_touch(pipe, [&one, &other], point.enclosure()) {
+                Decision::Undecidable { enclosure } => {
+                    return Err(gave_up_beside_where_the_tangents_touch(
+                        point,
+                        enclosure,
+                        [&one, &other],
+                    ));
+                }
+                found => found,
+            }
+        }
+    };
+    match found {
         found if found == run.half => Ok(held),
         Decision::Pos | Decision::Neg | Decision::Zero => Ok(OnAFace::NotHeld),
         Decision::Undecidable { enclosure } => Err(gave_up_on_which_half(point, enclosure)),
@@ -6237,6 +6588,33 @@ fn gave_up_on_which_half(point: PredicatePoint, enclosure: f64) -> Error {
 /// The name which half round the axis a point is in goes by in provenance
 /// records.
 const WHICH_HALF_ROUND_THE_AXIS: &str = "which_half_round_the_axis";
+
+/// The same, for which side a point or a corner is on of the line where the
+/// tangents to a pipe from where two cuts along its axis meet touch it
+/// ([`which_side_of_where_the_tangents_touch`]). Its value is as many lengths
+/// as the two lines' offsets together: one for a plane's, two for a pipe's.
+fn gave_up_beside_where_the_tangents_touch(
+    point: PredicatePoint,
+    enclosure: f64,
+    [one, other]: [&ALine; 2],
+) -> Error {
+    let measures = match one.lengths + other.lengths {
+        2 => Measures::Area,
+        3 => Measures::Volume,
+        how_many => Measures::ManyLengths { how_many },
+    };
+    gave_up(
+        WHERE_THE_TANGENTS_TOUCH,
+        point,
+        Level::Interval,
+        enclosure,
+        measures,
+    )
+}
+
+/// The name which side of where the tangents touch a point is on goes by in
+/// provenance records.
+const WHERE_THE_TANGENTS_TOUCH: &str = "which_side_of_where_the_tangents_touch";
 
 /// The name the ordering of a point along a side goes by in provenance records.
 const BETWEEN_TWO_CORNERS: &str = "between_two_corners";

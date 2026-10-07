@@ -2290,19 +2290,23 @@ fn a_cut_cone_and_a_cone_closed_by_a_ball(model: &mut Model) -> [SolidKey; 2] {
 /// asked (a temporary print in `rings_round`, Q1120). The fuse puts no corner on
 /// the arc here.
 ///
-/// **Flush with the cap, the same bar is refused under every rule, both ways
-/// round, `AFaceTrimmedByACurveThisCannotFollow` on the cap's wall on the bar's
-/// circle**, from `select.rs`: a ray from a point inside the bar meets that
-/// wall, and `face_holds_the_point` refuses every point of it, `(0, 10, 2)`
-/// among them, though the cap validates and measures. A bar of radius 1 through
-/// the cap at `(−2, 8)`, and the cap's own shape at an eighth of its size moved
-/// to `(−2, 8)` and stood through it, are refused the same way when taken out of
-/// the cap (a print in `select.rs`; not pinned). So a second ring enclosing no
-/// area does not reach `rings_round` beside this one yet; with the small copy
-/// as the hole, it would be two rings `holds_the_other_rings` answers `None`
-/// for.
+/// **Flush with the cap, the same bar is answered under every rule, both ways
+/// round** (row Q1252). It stands inside the cap from `z = 0` to `4`: its
+/// circle reaches `√58 + 2 < 10` from the bar's axis, and stays outside each
+/// pipe, `√137`, `√74` and `√89` from their axes against `7`, `8` and `7`. So
+/// the union is the cap, the intersection is the bar, `16π`, the cap less the
+/// bar is the cap with a hole through it, and the bar less the cap is nothing.
+///
+/// Before, every one of those was refused `AFaceTrimmedByACurveThisCannotFollow`
+/// on the cap's wall on the bar's circle, from `select.rs`: a ray from a point
+/// inside the bar meets that wall, and `face_holds_the_point` refused every
+/// point of it. That wall is cut by its floor, its roof and the two pipes its
+/// straight sides run along, and the part of the bar's circle outside both
+/// pipes is two runs, the wall's through `(0, 10)` and another through
+/// `(0, −10)`. `holds.rs` now tells the two apart, and `(0, −10, 2)`, in front
+/// of every cut the wall has, is not on it.
 #[test]
-fn a_cap_along_four_pipes_whose_corners_cancel_is_answered_with_a_bar_on_top_and_refused_flush() {
+fn a_cap_along_four_pipes_whose_corners_cancel_is_answered_with_a_bar_on_top_or_flush() {
     let segment = |radius: f64, angle: f64| radius * radius / 2.0 * (angle - angle.sin());
     let small_angle = (7.0_f64 / 25.0).acos();
     let cap_volume = 4.0
@@ -2323,18 +2327,28 @@ fn a_cap_along_four_pipes_whose_corners_cancel_is_answered_with_a_bar_on_top_and
         .faces()
         .find(|face| face.surface() == bar_wall)
         .expect("the cap has a wall on the bar's circle");
-    let asked = solid.face_holds_the_point(
-        wall.key(),
-        rcad_predicates::Point::from([0.0, 10.0, 2.0]),
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(asked, Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == wall.key()),
-        "{asked:?}"
-    );
+    for (point, held) in [
+        ([0.0, 10.0, 2.0], OnAFace::Held),
+        ([0.0, -10.0, 2.0], OnAFace::NotHeld),
+        ([10.0, 0.0, 2.0], OnAFace::OnItsBoundary),
+        ([0.0, 10.0, 4.0], OnAFace::OnItsBoundary),
+        ([0.0, 10.0, 5.0], OnAFace::NotHeld),
+    ] {
+        let asked = solid.face_holds_the_point(
+            wall.key(),
+            rcad_predicates::Point::from(point),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert_eq!(
+            asked.unwrap_or_else(|why| panic!("the wall at {point:?} refused: {why}")),
+            held,
+            "the wall at {point:?}"
+        );
+    }
 
     let on_top = 8.0 * PI;
+    let inside = 16.0 * PI;
     for flush in [true, false] {
         for (rule, swapped) in every_rule_both_ways() {
             let mut model =
@@ -2350,16 +2364,26 @@ fn a_cap_along_four_pipes_whose_corners_cancel_is_answered_with_a_bar_on_top_and
             let what = format!("{rule:?}, swapped {swapped}, flush {flush}");
             let answer = fused_in_order(&mut model, [cap, bar], rule, swapped);
             if flush {
-                let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = answer else {
-                    panic!("{what}: {answer:?}");
-                };
-                let the_cap = model.solid(cap).expect("this model made the key");
-                assert!(
-                    the_cap
-                        .faces()
-                        .any(|mine| mine.key() == face && mine.surface() == bar_wall),
-                    "{what}: the refusal names the cap's wall on the bar's circle"
-                );
+                match (rule, swapped) {
+                    (Rule::Union, _) => {
+                        assert_holds(&model, the_only(answer, &what), cap_volume, &what);
+                    }
+                    (Rule::Intersection, _) => {
+                        assert_holds(&model, the_only(answer, &what), inside, &what);
+                    }
+                    (Rule::Difference, false) => {
+                        let left = the_only(answer, &what);
+                        assert_holds(&model, left, cap_volume - inside, &what);
+                        let corners = the_outline_of_the_cap(&model, left, as_written[0]);
+                        assert_eq!(corners, as_written, "{what}");
+                    }
+                    (Rule::Difference, true) => assert_eq!(
+                        answer.unwrap_or_else(|why| panic!("{what} refused: {why}")),
+                        Vec::new(),
+                        "{what}: the bar is inside the cap"
+                    ),
+                    (other, _) => panic!("not a rule this probes: {other:?}"),
+                }
                 continue;
             }
             match (rule, swapped) {
