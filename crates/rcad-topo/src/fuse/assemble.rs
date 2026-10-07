@@ -4798,9 +4798,11 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// closed crossing between a plane and a surface that curves right round — a
 /// ball's circle, or a cone's rim circle — that curved surface and that plane,
 /// and which of the crossing's two arcs between the same two corners it is; see
-/// [`which_arc_of_a_circle_this_is`].
+/// [`which_arc_of_a_circle_this_is`]. The fourth is, for an arc of a
+/// hyperbola or a parabola a plane cuts on a cone, that cone and that plane;
+/// see [`which_open_crossing_of_a_cone_this_is`].
 ///
-/// The fourth is whether the edge is straight: both surfaces either side are
+/// The fifth is whether the edge is straight: both surfaces either side are
 /// planes. **A straight side and a curved one can share both corners**, and
 /// they are two edges. A half disk is one: `z ≤ 0.5` cut out of a half ball
 /// leaves on the plane `z = 0.5` a chord along `x = 0` and an arc round the
@@ -4812,6 +4814,7 @@ type EdgeName = (
     [usize; 2],
     Option<CurveName>,
     Option<([[u64; 9]; 2], bool)>,
+    Option<[[u64; 9]; 2]>,
     bool,
 );
 
@@ -4897,6 +4900,7 @@ impl Edges {
             [from.min(to), from.max(to)],
             named,
             which_arc_of_a_circle_this_is(meet, from, to),
+            which_open_crossing_of_a_cone_this_is(meet, from, to),
             carried_by
                 .iter()
                 .all(|surface| surface.as_plane().is_some()),
@@ -5754,6 +5758,53 @@ fn which_arc_of_a_circle_this_is(
         (along_the_round_one_then_the_plane != walked_from_the_far_corner)
             != is_written_the_other_way_round(flat),
     ))
+}
+
+/// Which crossing of a plane and a cone a side is on, when that crossing is a
+/// hyperbola or a parabola, as the cone named either way round and the plane
+/// named at any scale; `None` for any other side.
+///
+/// **Two planes that each cut a cone in an open curve can cross it at the same
+/// two points**, the two where the line the planes meet along goes through the
+/// cone, and an answer can keep an arc of each between them. A frustum of slope
+/// 1 under the planes `2x + z = 3` and `8x + 3z = −3` keeps an arc of each from
+/// `(−6, −13.75, 15)` to `(−6, 13.75, 15)`, and the frustum the planes
+/// `2x − z = 1` and `2x + z = 11` cut to a chip keeps an arc of each from
+/// `(3, −4, 5)` to `(3, 4, 5)`. Named by their corners alone, the two arcs were
+/// one edge with four faces along it, the cone's face twice and each plane's
+/// once, and every fuse of either shape was refused
+/// `ResultIsNotManifold { count: 4 }` (queue row Q1176,
+/// `tests/a_walk_neither_winding_nor_the_axis_places.rs`).
+///
+/// **Which crossing is all there is to say, and no sign is.** A branch of a
+/// hyperbola and a parabola are open curves, and two points of one bound one
+/// piece of it. [`which_arc_of_a_circle_this_is`] needs a sign as well because
+/// a crossing that closes leaves two arcs between two points.
+///
+/// **The names do not split one arc in two.** A hyperbola or a parabola does
+/// not lie on a line, so it spans one plane, and the two faces along one arc
+/// both carry that plane, whose name at any scale is the same for every
+/// spelling of it ([`name_of_the_plane_at_any_scale`]). As with a closed
+/// crossing (§330), a spelling of the cone the fold leaves apart can only split
+/// an edge, which is refused, and never pairs the faces of two different arcs.
+fn which_open_crossing_of_a_cone_this_is(
+    meet: &FaceMeet,
+    from: usize,
+    to: usize,
+) -> Option<[[u64; 9]; 2]> {
+    let (flat, cone) = match meet.carried_by {
+        [flat @ Surface::Plane(_), cone @ Surface::Cone(_)]
+        | [cone @ Surface::Cone(_), flat @ Surface::Plane(_)] => (flat, cone),
+        [_, _] => return None,
+    };
+    let open = the_crossing_of_these_runs_straight(&meet.carried_by) == Some(false)
+        && which_of_them_a_closed_crossing_runs_round(&meet.carried_by).is_none();
+    (from != to && open).then(|| {
+        [
+            name_of_the_surface_either_way_round(&cone),
+            name_of_the_plane_at_any_scale(&flat),
+        ]
+    })
 }
 
 /// Whether a plane is spelled facing the other way from the spelling its name

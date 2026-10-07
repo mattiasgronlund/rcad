@@ -4089,7 +4089,7 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// A plane leaning more steeply than the cone's side cuts the face's nappe in
 /// a hyperbola's branch, or in a parabola, and a frustum's skin cut to
 /// `2x − z ≥ 1` is bounded by such a branch and by its top circle
-/// (`a_chip_cut_from_a_frustum_in_two_steps_is_refused_as_not_a_manifold`).
+/// (`a_chip_cut_from_a_frustum_in_two_steps_is_answered_under_every_rule`).
 /// With `g + t·a(φ)` the cut along the ruling at `φ` as above, `a(φ)` is
 /// positive now only on one arc `I` of the circle of rulings, since it is
 /// affine in `cos φ` and `sin φ` and the curve not closing is exactly a ruling

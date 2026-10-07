@@ -212,7 +212,8 @@ same chip, cut from a frustum with planes, is refused one step earlier,
 (`lane-q1177-cone-faces-bounded-by-hyperbola-arcs`, `bbee409c`), both ways of
 cutting the frustum chip are refused `ResultIsNotManifold { count: 4 }` after
 selection now passes
-(`a_chip_cut_from_a_frustum_in_two_steps_is_refused_as_not_a_manifold`), rather
+(`a_chip_cut_from_a_frustum_in_two_steps_is_refused_as_not_a_manifold`, which
+Q1176's note below renames), rather
 than stopping at `AFaceTrimmedByACurveThisCannotFollow` or splitting on which
 way the cuts are made. Q1177 also answers a second shape in the same file: a
 roofed frustum against a plate with a triangular hole answers every rule, both
@@ -220,6 +221,21 @@ ways round
 (`a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`),
 where before it never drew the hole (Q1177's own row, and Q1179's doc note on
 `drop_the_lumps_of_straight_cuts_alone`).*
+
+*2026-10-07, Q1176 (`bf19b21e`): the frustum chip of the Q1226 note above now
+answers. Two planes that each cut a cone in a hyperbola or a parabola can cross
+it at the same two points, and `Edges::of` in `fuse/assemble.rs` named such an
+arc by its two corners alone, so an arc of each plane between those points was
+one edge with four faces along it, and every fuse was refused
+`ResultIsNotManifold { count: 4 }`. `which_open_crossing_of_a_cone_this_is`
+adds the cone and the plane to such an arc's name. Both ways of cutting the
+chip now answer every rule, held to its volume
+(`a_chip_cut_from_a_frustum_in_two_steps_is_answered_under_every_rule`), and
+so do the frustum and the pointed cone under the roof `2x + z = 3`,
+`8x + 3z = −3` and the frustum cut by `2x − z = 1` and `2x + z = 11` at once,
+every rule both ways round
+(`a_frustum_under_two_steep_planes_is_answered_under_every_rule`). The new
+name covers a cone alone; whether a ring needs the same is Q1327's.*
 
 *2026-10-07, Q1191, recording Q1148 (`6ce74099`) and its own follow-on, Q1190
 (`9528b7d8`): the pointed cone drilled along its axis of Q1136's note above
