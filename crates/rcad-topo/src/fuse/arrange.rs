@@ -2535,7 +2535,7 @@ impl<'f> Arrangement<'f> {
     /// The same, without asking a policy: [`Decision::Undecidable`] comes back
     /// as `None` for a caller that has another route to try.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
-        let decided = self.as_the_boxes_say(crossing, first, second).ok()?;
+        let (decided, _) = self.as_the_boxes_say(crossing, first, second).ok()?;
         matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero).then_some(decided)
     }
 
@@ -2552,10 +2552,9 @@ impl<'f> Arrangement<'f> {
     /// against `n × w`, the plane's normal and the cone's axis, both of length
     /// one ([`along_a_bend`]): a length either way. Round a closed crossing it
     /// depends on the arm that answered
-    /// ([`round_a_closed_crossing_and_what_it_measures`]), which is asked again
-    /// here because [`Arrangement::as_the_boxes_say`] hands back the answer
-    /// without it. Only the nodes' own boxes leave that order undecided, so
-    /// asking again gives the same answer, and the assert says so.
+    /// ([`round_a_closed_crossing_and_what_it_measures`]), and
+    /// [`Arrangement::as_the_boxes_say`] hands back that measure alongside the
+    /// answer, so it is not asked a second time here.
     fn order_along(
         &self,
         crossing: usize,
@@ -2564,7 +2563,7 @@ impl<'f> Arrangement<'f> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Decision> {
-        let mut decided = self.as_the_boxes_say(crossing, first, second)?;
+        let (mut decided, measures) = self.as_the_boxes_say(crossing, first, second)?;
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_the_planes_say(crossing, first, second)
         {
@@ -2577,24 +2576,6 @@ impl<'f> Arrangement<'f> {
         }
         let Decision::Undecidable { .. } = decided else {
             return Ok(decided);
-        };
-        let measures = match self.crossings[crossing].order {
-            HowItRuns::AlongAnAxis { .. } | HowItRuns::AlongABend { .. } => Measures::Length,
-            HowItRuns::RoundAClosedCurve { from, node } => {
-                let [one, other] = [first, second].map(|node| self.nodes[node].point);
-                let partner = self.crossings[crossing].partner;
-                let (asked_again, measures) = round_a_closed_crossing_and_what_it_measures(
-                    [&self.surface, &partner],
-                    [from, node],
-                    one,
-                    other,
-                )?;
-                assert_eq!(
-                    asked_again, decided,
-                    "round a closed crossing only the nodes' own boxes leave an order undecided"
-                );
-                measures
-            }
         };
         must_decide(
             decided,
@@ -2633,37 +2614,47 @@ impl<'f> Arrangement<'f> {
     /// with the two solids and their volumes (Q866).
     ///
     /// **Round a closed crossing the tighter boxes are swept and not named.**
-    /// [`round_a_closed_crossing`] recognises the start by comparing a node's
-    /// box with the start's, bit for bit, which is a name and not a place. A
-    /// tighter box is a place, and two equal ones need not be one point. The
-    /// node's own box has been asked by name already, and an undecided answer
-    /// means neither node was the start.
+    /// [`round_a_closed_crossing_and_what_it_measures`] recognises the start by
+    /// comparing a node's box with the start's, bit for bit, which is a name
+    /// and not a place. A tighter box is a place, and two equal ones need not
+    /// be one point. The node's own box has been asked by name already, and an
+    /// undecided answer means neither node was the start.
+    ///
+    /// **Hands back what an undecided answer's enclosure measures, alongside
+    /// the answer**, so [`Arrangement::order_along`] does not ask
+    /// [`round_a_closed_crossing_and_what_it_measures`] a second time for it.
     fn as_the_boxes_say(
         &self,
         crossing: usize,
         first: usize,
         second: usize,
-    ) -> rcad_geom::Result<Decision> {
+    ) -> rcad_geom::Result<(Decision, Measures)> {
         let [one, other] = [first, second].map(|node| self.nodes[node].point);
-        let decided = match self.crossings[crossing].order {
+        let (decided, measures) = match self.crossings[crossing].order {
             HowItRuns::RoundAClosedCurve { from, node } => {
                 let partner = self.crossings[crossing].partner;
-                round_a_closed_crossing([&self.surface, &partner], [from, node], one, other)?
+                round_a_closed_crossing_and_what_it_measures(
+                    [&self.surface, &partner],
+                    [from, node],
+                    one,
+                    other,
+                )?
             }
-            HowItRuns::AlongAnAxis { .. } | HowItRuns::AlongABend { .. } => {
-                self.how_far_apart_along(crossing, one, other)?
-            }
+            HowItRuns::AlongAnAxis { .. } | HowItRuns::AlongABend { .. } => (
+                self.how_far_apart_along(crossing, one, other)?,
+                Measures::Length,
+            ),
         };
         if !matches!(decided, Decision::Undecidable { .. }) {
-            return Ok(decided);
+            return Ok((decided, measures));
         }
         let tight = [first, second].map(|node| self.narrowed_box_of(node));
         if tight == [one, other] {
-            return Ok(decided);
+            return Ok((decided, measures));
         }
         match self.how_far_apart_along(crossing, tight[0], tight[1]) {
-            Ok(proved @ (Decision::Pos | Decision::Neg)) => Ok(proved),
-            Ok(_) | Err(_) => Ok(decided),
+            Ok(proved @ (Decision::Pos | Decision::Neg)) => Ok((proved, measures)),
+            Ok(_) | Err(_) => Ok((decided, measures)),
         }
     }
 
@@ -5419,8 +5410,9 @@ impl<'f> Arrangement<'f> {
     /// made for it, or because a sign was proved zero. [`Arrangement::fold_the_nodes`]
     /// gives the node two nodes fold into every crossing either had, and under
     /// this policy two nodes fold only where they were proved one point, so the
-    /// node is on every one of them. Until §244.5 [`round_a_closed_crossing`]
-    /// folded two nodes whose boxes were equal, or touched, without that proof,
+    /// node is on every one of them. Until §244.5
+    /// [`round_a_closed_crossing_and_what_it_measures`] folded two nodes whose
+    /// boxes were equal, or touched, without that proof,
     /// and a wrong fold listed a crossing only one of them was on. Under
     /// [`Policy::tolerant`], [`Arrangement::passes_through`] and
     /// [`Arrangement::order_along`] read a narrow undecided sign as zero, so a
@@ -6189,7 +6181,8 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
     (0..3).all(|axis| mine[axis].lo() <= theirs[axis].hi() && theirs[axis].lo() <= mine[axis].hi())
 }
 
-/// Which of two points comes first going round a closed crossing from `from`.
+/// Which of two points comes first going round a closed crossing from `from`,
+/// with what an undecided answer's enclosure measures.
 ///
 /// [`which_comes_first_round_a_crossing`] answers [`Decision::Zero`] when the
 /// three points sweep no area, which on a conic means two of them are the same
@@ -6237,17 +6230,6 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// [`the_one_ahead_of_the_start`] reads that, and only where it puts one place
 /// ahead and the other behind are the two ordered: two places either side of a
 /// point are two places.
-fn round_a_closed_crossing(
-    pair: [&Surface; 2],
-    start: [PredicatePoint; 2],
-    one: PredicatePoint,
-    other: PredicatePoint,
-) -> rcad_geom::Result<Decision> {
-    Ok(round_a_closed_crossing_and_what_it_measures(pair, start, one, other)?.0)
-}
-
-/// [`round_a_closed_crossing`], with what an undecided answer's enclosure
-/// measures.
 ///
 /// **Every arm but the sweep answers as wide as a box**, which is a length:
 /// [`one_point_if_both_are_exact`], [`the_one_the_start_is`] and the
@@ -9888,7 +9870,7 @@ mod what_the_curved_arrangement_reaches {
         a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
         a_plane_lies_along_a_pipes_axis, along_a_bend, cross_of, dominant_axis_of_a_direction,
         gradient_at, how_a_crossing_runs, how_a_plane_leans_against_a_cone,
-        round_a_closed_crossing, side_of_surface, split_a_face,
+        round_a_closed_crossing_and_what_it_measures, side_of_surface, split_a_face,
         the_turn_where_two_planes_cross_a_quadric, two_pipes_run_along_one_line,
         where_a_cones_apex_stands_against_a_plane, where_the_crossing_starts,
     };
@@ -10240,13 +10222,14 @@ mod what_the_curved_arrangement_reaches {
             let point = |angle: f64| {
                 PredicatePoint::from([radius * angle.cos(), radius * angle.sin(), 0.0])
             };
-            round_a_closed_crossing(
+            round_a_closed_crossing_and_what_it_measures(
                 [&across, &ring],
                 [point(0.0), point(0.0)],
                 point(core::f64::consts::FRAC_PI_2),
                 point(core::f64::consts::PI),
             )
             .expect("a circle round the axis is ordered")
+            .0
         };
         let outer = ordered_round_the_axis(5.0);
         let inner = ordered_round_the_axis(3.0);
@@ -10299,8 +10282,9 @@ mod what_the_curved_arrangement_reaches {
             ] {
                 let node = where_the_crossing_starts(pair[0], pair[1], start);
                 let order = |one, other| {
-                    round_a_closed_crossing(pair, [from, node], one, other)
+                    round_a_closed_crossing_and_what_it_measures(pair, [from, node], one, other)
                         .unwrap_or_else(|why| panic!("{named} is a circle: {why:?}"))
+                        .0
                 };
                 let sweep = |one, other| {
                     which_comes_first_round_a_crossing(pair, from, one, other)
@@ -10408,8 +10392,9 @@ mod what_the_curved_arrangement_reaches {
                     };
                     let from = PredicatePoint::from(start.coordinates());
                     let node = where_the_crossing_starts(pair[0], pair[1], start);
-                    round_a_closed_crossing(pair, [from, node], one, other)
+                    round_a_closed_crossing_and_what_it_measures(pair, [from, node], one, other)
                         .unwrap_or_else(|why| panic!("{named} is a circle: {why:?}"))
+                        .0
                 };
                 let at_0 = ordered(&ball_at_0, start_at_0, past_at_0, short_at_0);
                 let [first, second] = if at_0 == Decision::Pos {
@@ -10498,8 +10483,10 @@ mod what_the_curved_arrangement_reaches {
         let short = along_x(3.0_f64.next_down(), 3.0);
         for pair in [[&ball, &floor], [&floor, &ball]] {
             let node = where_the_crossing_starts(pair[0], pair[1], start);
-            let order = round_a_closed_crossing(pair, [from, node], past, short)
-                .expect("a ball and a plane cross in a circle");
+            let order =
+                round_a_closed_crossing_and_what_it_measures(pair, [from, node], past, short)
+                    .expect("a ball and a plane cross in a circle")
+                    .0;
             assert!(
                 matches!(order, Decision::Undecidable { .. }),
                 "{pair:?}: {order:?}"
