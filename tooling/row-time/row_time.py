@@ -131,11 +131,8 @@ def load(root, repo, claims_path):
 
 def run_of(path, record):
     """One `lanes` run: its lanes by label, and its agents with the times the record gives them."""
-    args = record.get("args")
-    if isinstance(args, str):
-        args = json.loads(args)
     lanes = {}
-    for lane in (args or {}).get("lanes") or []:
+    for lane in (record.get("args") or {}).get("lanes") or []:
         rows = [row for row in (lane.get("queueId") or "").split(",") if row]
         lanes[lane["label"]] = {"label": lane["label"], "rows": rows,
                                 "branch": lane.get("branch") or f"lane-{lane['label']}"}
@@ -249,8 +246,11 @@ def assemble(loaded, options):
     """The picked rows with their attempts, every step they ran, and what has no row (§411.7)."""
     attempts = collections.defaultdict(list)
     unattributed = []
+    never_started = []
     branches = set()
     for run in loaded["runs"]:
+        if picked_time(run["start"], options):
+            never_started += run["never_started"]
         by_lane = collections.defaultdict(list)
         for agent in run["agents"]:
             by_lane[agent["lane"]].append(agent)
@@ -296,7 +296,8 @@ def assemble(loaded, options):
     outside = sorted({take["row"] for row_takes in takes.values() for take in row_takes
                       if take["branch"] not in branches
                       and (take["row"] in options["rows"] if options["rows"] else picked_time(take["time"], options))})
-    return {"rows": rows, "steps": steps, "unattributed": unattributed, "outside": outside}
+    return {"rows": rows, "steps": steps, "unattributed": unattributed, "outside": outside,
+            "never started": never_started}
 
 
 def row_of(row_id, attempts, takes, releases, claims_start):
@@ -314,8 +315,8 @@ def row_of(row_id, attempts, takes, releases, claims_start):
                     and (previous_last is None or take["time"] >= previous_last)]
         take = matching[-1]["time"] if matching else None
         if take is None and previous_last is None:
-            row["marks"].add("no take before 2026-09-26" if claims_start is None or first < claims_start
-                             else "no take with its branch")
+            row["marks"].add("no take: run before the claims file starts"
+                             if claims_start is None or first < claims_start else "no take with its branch")
         previous_last = max(agent["end"] for agent in attempt["agents"])
         row["attempts"].append({
             "run": attempt["run"]["id"], "lane": attempt["lane"]["label"], "rows": attempt["lane"]["rows"],
@@ -862,6 +863,7 @@ def summarise(assembled, loaded, options):
         "summary": summary_of(rows, steps),
         "unattributed": {"lanes": len(unattributed), "time": sum(item["time"] for item in unattributed)},
         "worked outside a workflow": assembled["outside"],
+        "agents that never started": assembled["never started"],
         "empty run records": [os.path.basename(path) for path in loaded["empty"]],
     }
 
@@ -955,6 +957,8 @@ def print_report(report, detail):
           f"{fmt_span(report['unattributed']['time'])} of agent time")
     outside = report["worked outside a workflow"]
     print(f"worked outside a workflow: {len(outside)} rows" + (f": {', '.join(outside)}" if outside else ""))
+    never = report["agents that never started"]
+    print(f"agents that never started: {len(never)}" + (f": {', '.join(never)}" if never else ""))
     empty = report["empty run records"]
     print(f"empty run records: {len(empty)}" + (f": {', '.join(empty)}" if empty else ""))
 
