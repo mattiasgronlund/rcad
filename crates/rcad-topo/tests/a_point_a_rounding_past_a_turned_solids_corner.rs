@@ -73,15 +73,18 @@ fn how_often_a_point_past_a_turned_cubes_box_that_every_plane_puts_inside_is_ans
             let view = model.solid(cube).expect("this model made the key");
             for point in points_past_its_box_every_plane_puts_inside(view) {
                 points += 1;
-                match view.classify_point(
+                let answer = view.classify_point(
                     Point::new(point[0], point[1], point[2]),
                     &Policy::certified(),
                     &mut ProvenanceLog::new(),
-                ) {
-                    Containment::Inside => inside += 1,
-                    Containment::Undecidable { .. } => undecided += 1,
-                    Containment::Outside => outside += 1,
-                    other => panic!("{point:?} came back {other:?}"),
+                );
+                if answer == Containment::Inside {
+                    inside += 1;
+                } else if matches!(answer, Containment::Undecidable { .. }) {
+                    undecided += 1;
+                } else {
+                    assert_eq!(answer, Containment::Outside, "{point:?}");
+                    outside += 1;
                 }
             }
         }
