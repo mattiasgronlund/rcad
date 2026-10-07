@@ -906,8 +906,8 @@ fn how_a_ring_is_cut(name: &str, outline: Vec<[f64; 2]>, hole: Vec<[f64; 2]>) ->
                 Decision::Pos => '+',
                 Decision::Neg => '-',
                 Decision::Zero => '0',
-                undecided @ Decision::Undecidable { .. } => {
-                    panic!("{name}: orient2d could not settle a side of the hole: {undecided:?}")
+                Decision::Undecidable { .. } => {
+                    panic!("{name}: orient2d could not settle a side of the hole")
                 }
                 other => {
                     panic!("{name}: orient2d came back with a decision nobody knows: {other:?}")
