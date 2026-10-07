@@ -49,7 +49,14 @@
 //! the ring `rings_round` is handed winds (Q641). A closed side that is one of
 //! several, its ring coming back through the side's one corner, is reached on
 //! a bored block's joined top, where the outline winds and places it; the probe
-//! with no ring that winds is refused before `rings_round` (Q802).
+//! with no ring that winds is refused before `rings_round` (Q802). A hole
+//! along the cut cone's hyperbola closed by a ball, which no plane can close
+//! without putting corners on the outline, is refused before `rings_round`
+//! where the wall, the cone and the ball meet (Q1233). A cap whose sides all
+//! run along pipes reaches `rings_round` with corners that cancel exactly, the
+//! one ring there and the outline by that; a second such ring, as a hole, is
+//! refused before it, because nothing can say which side of that cap's wall on
+//! the bar a point is (Q1120).
 
 use std::f64::consts::PI;
 
@@ -1996,4 +2003,297 @@ fn fused_groups_in_order(
             &mut ProvenanceLog::new(),
         )
         .map(|answer| answer.solids().to_vec())
+}
+
+/// **A hole along a cone's hyperbola, closed by a ball, is refused before its
+/// rings are placed** (Q1233). The nested cups reach `rings_round` with an
+/// outline that winds, because the second cone's base plane `z = 16` puts two
+/// corners on the cut cone's hyperbola
+/// ([`the_nested_cups_and_a_block_flush_with_their_wall_are_answered_under_every_rule`]).
+/// A plane cannot close the second cone's cup on `x = −12` without doing the
+/// same: the outline there is the hyperbola and its chord on `z = 18`, a line
+/// across the cup leaves that outline on both sides, and it meets the chord
+/// once at most, so it leaves through the hyperbola at least once.
+///
+/// So here a ball closes the cup: the second cone, apex at `z = 3`, run on
+/// past the top, cut by a ball of radius `√148` about `(0, 0, 15)`. The ball
+/// crosses the cut cone's skin only in circles of radius under 12, so on
+/// `x = −12` it is the circle of radius 2 about `z = 15`, clear of the outline,
+/// and the hole would be that circle's arc above the second cone's hyperbola,
+/// two corners, with an outline of two corners: the face `holds_the_other_rings`
+/// answers `None` for twice. The cone cut by the ball holds the cone up to where
+/// the ball crosses it, `w = 6 + √38` above the apex, and the ball's cap above
+/// that.
+///
+/// **Taking it out of the cut cone is refused under every rule, both ways
+/// round, `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`**: the hole's corners are
+/// where the plane `x = −12`, the second cone and the ball meet, and `rcad-geom`
+/// works out a meet of two curved surfaces and a plane about one axis only when
+/// the plane is square to it (`docs/decisions.md` §31.2). A plane that cuts a
+/// cone in a hyperbola runs along its axis, so on such a face a hole of two
+/// corners along a hyperbola is closed by a plane, which puts corners on the
+/// outline, or by a ball or cone about that axis, which is this refusal. A
+/// curved surface about another axis was not tried.
+#[test]
+fn a_cut_cone_less_a_cone_closed_by_a_ball_is_refused_where_three_surfaces_meet() {
+    let (crossing, radius) = (6.0 + 38.0_f64.sqrt(), 148.0_f64.sqrt());
+    let cap_height = radius + 12.0 - crossing;
+    let closed_by_the_ball = PI * crossing.powi(3) / 3.0
+        + PI * cap_height * cap_height * (3.0 * radius - cap_height) / 3.0;
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let [_, closed] = a_cut_cone_and_a_cone_closed_by_a_ball(&mut model);
+    assert_holds(
+        &model,
+        closed,
+        closed_by_the_ball,
+        "the cone the ball closes",
+    );
+
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pair = a_cut_cone_and_a_cone_closed_by_a_ball(&mut model);
+        let refused = fused_in_order(&mut model, pair, rule, swapped);
+        assert!(
+            matches!(
+                refused,
+                Err(Error::Geometry(
+                    rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
+                ))
+            ),
+            "{rule:?}, swapped {swapped}: {refused:?}"
+        );
+    }
+}
+
+/// The cut cone, and the second cone with its apex at `z = 3` cut by the ball
+/// of radius `√148` about `(0, 0, 15)`.
+fn a_cut_cone_and_a_cone_closed_by_a_ball(model: &mut Model) -> [SolidKey; 2] {
+    let [cone, block] = a_cone_and_a_block_across_it(model);
+    let cut = the_one_solid(model, cone, block, Rule::Intersection);
+    let second = cones::a_pointed_cone(model, 1.0, 26.0);
+    model
+        .place_solid(second, &at(0.0, 0.0, 3.0))
+        .expect("this model made the key");
+    let ball = model
+        .add_ball(148.0_f64.sqrt(), &at(0.0, 0.0, 15.0))
+        .expect("a ball of radius √148");
+    let closed = the_one_solid(model, second, ball, Rule::Intersection);
+    [cut, closed]
+}
+
+/// **Corners that cancel exactly and sides along pipes** (Q1120). A bar of
+/// radius 10 cut to the cap from `(10, 0)` anticlockwise round its circle to
+/// `(−8, 6)`, then clockwise round three pipes: radius 5 about `(−5, 2)` to
+/// `(−2, 6)`, radius 6 about `(−2, 0)` to `(4, 0)`, and radius 5 about
+/// `(7, −4)` back to `(10, 0)`, the cap outside each, built face by face
+/// ([`a_bar_cut_to_pipes`]). The four corners sweep `60 − 36 − 24 + 0 = 0`, and
+/// they are not on one line. No side is straight: the line along a straight
+/// side next to `(−2, 6)`, which lies between the chord `y = (10 − x)/3` and the
+/// arc, would leave through the arc (the staircase above), and each of these
+/// pipes crosses the bar's circle nowhere on its arc. The cap holds the arc's
+/// segment less the three pipes' segments, each read off its angle.
+///
+/// **Read back, the corners are the four as written and sweep exactly 0.**
+/// Against a bar of radius 2 at `(3, 7)` standing on the top, every rule both
+/// ways round answers what the volumes say, and the cap less that bar reaches
+/// `rings_round` with this ring and no other: it winds round nothing, so it is
+/// the outline by the rule for one such ring, and `holds_the_other_rings` is not
+/// asked (a temporary print in `rings_round`, Q1120). The fuse puts no corner on
+/// the arc here.
+///
+/// **Flush with the cap, the same bar is refused under every rule, both ways
+/// round, `AFaceTrimmedByACurveThisCannotFollow` on the cap's wall on the bar's
+/// circle**, from `select.rs`: a ray from a point inside the bar meets that
+/// wall, and `face_holds_the_point` refuses every point of it, `(0, 10, 2)`
+/// among them, though the cap validates and measures. A bar of radius 1 through
+/// the cap at `(−2, 8)`, and the cap's own shape at an eighth of its size moved
+/// to `(−2, 8)` and stood through it, are refused the same way when taken out of
+/// the cap (a print in `select.rs`; not pinned). So a second ring enclosing no
+/// area does not reach `rings_round` beside this one yet; with the small copy
+/// as the hole, it would be two rings `holds_the_other_rings` answers `None`
+/// for.
+#[test]
+fn a_cap_along_four_pipes_whose_corners_cancel_is_answered_with_a_bar_on_top_and_refused_flush() {
+    let segment = |radius: f64, angle: f64| radius * radius / 2.0 * (angle - angle.sin());
+    let small_angle = (7.0_f64 / 25.0).acos();
+    let cap_volume = 4.0
+        * (segment(10.0, PI - 0.75_f64.atan())
+            - 2.0 * segment(5.0, small_angle)
+            - segment(6.0, PI / 2.0));
+    let bar_wall = Surface::Cylinder(Cylinder::new(Axis::z(), 10.0).expect("a positive radius"));
+    let as_written = PIPE_CAP.map(|[x, y]| [x, y, 4.0]);
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES)
+        .unwrap_or_else(|why| panic!("the cap: {why:?}"));
+    assert_holds(&model, cap, cap_volume, "the cap");
+    let corners = the_outline_of_the_cap(&model, cap, as_written[0]);
+    assert_eq!(corners, as_written, "read back as written");
+    assert_eq!(swept_by(&corners), 0.0, "the cap's corners cancel");
+    let solid = model.solid(cap).expect("this model made the key");
+    let wall = solid
+        .faces()
+        .find(|face| face.surface() == bar_wall)
+        .expect("the cap has a wall on the bar's circle");
+    let asked = solid.face_holds_the_point(
+        wall.key(),
+        rcad_predicates::Point::from([0.0, 10.0, 2.0]),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(asked, Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == wall.key()),
+        "{asked:?}"
+    );
+
+    let on_top = 8.0 * PI;
+    for flush in [true, false] {
+        for (rule, swapped) in every_rule_both_ways() {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES)
+                .unwrap_or_else(|why| panic!("the cap: {why:?}"));
+            let bar = if flush {
+                model.add_round_bar(2.0, 4.0, &at(3.0, 7.0, 0.0))
+            } else {
+                model.add_round_bar(2.0, 2.0, &at(3.0, 7.0, 4.0))
+            }
+            .expect("a bar of radius two");
+            let what = format!("{rule:?}, swapped {swapped}, flush {flush}");
+            let answer = fused_in_order(&mut model, [cap, bar], rule, swapped);
+            if flush {
+                let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = answer else {
+                    panic!("{what}: {answer:?}");
+                };
+                let the_cap = model.solid(cap).expect("this model made the key");
+                assert!(
+                    the_cap
+                        .faces()
+                        .any(|mine| mine.key() == face && mine.surface() == bar_wall),
+                    "{what}: the refusal names the cap's wall on the bar's circle"
+                );
+                continue;
+            }
+            match (rule, swapped) {
+                (Rule::Union, _) => {
+                    assert_holds(&model, the_only(answer, &what), cap_volume + on_top, &what)
+                }
+                (Rule::Intersection, _) => assert_eq!(
+                    answer.unwrap_or_else(|why| panic!("{what} refused: {why}")),
+                    Vec::new(),
+                    "{what}: the two share no solid"
+                ),
+                (Rule::Difference, false) => {
+                    let left = the_only(answer, &what);
+                    assert_holds(&model, left, cap_volume, &what);
+                    let corners = the_outline_of_the_cap(&model, left, as_written[0]);
+                    assert_eq!(corners, as_written, "{what}");
+                }
+                (Rule::Difference, true) => {
+                    assert_holds(&model, the_only(answer, &what), on_top, &what);
+                }
+                (other, _) => panic!("not a rule this probes: {other:?}"),
+            }
+        }
+    }
+}
+
+/// The corners of the cap along four pipes, in the order its ring runs.
+const PIPE_CAP: [[f64; 2]; 4] = [[10.0, 0.0], [-8.0, 6.0], [-2.0, 6.0], [4.0, 0.0]];
+
+/// The pipe each side after the arc runs clockwise round, `(centre, radius)`.
+const PIPE_CAP_SIDES: [([f64; 2], f64); 3] =
+    [([-5.0, 2.0], 5.0), ([-2.0, 0.0], 6.0), ([7.0, -4.0], 5.0)];
+
+/// [`a_bar_cut_to`], with every side after the arc along a pipe: side `i + 1`
+/// runs clockwise round `pipes[i]`, `(centre, radius)`, the shorter way from its
+/// corner to the next, and the cap is outside that pipe.
+fn a_bar_cut_to_pipes(
+    model: &mut Model,
+    radius: f64,
+    corners: &[[f64; 2]],
+    pipes: &[([f64; 2], f64)],
+) -> rcad_topo::Result<SolidKey> {
+    use Orientation::{Forward, Reversed};
+    let mut builder = SolidBuilder::new();
+    let mut low = Vec::with_capacity(corners.len());
+    let mut high = Vec::with_capacity(corners.len());
+    for &[x, y] in corners {
+        low.push(builder.add_vertex(Point::new(x, y, 0.0))?);
+        high.push(builder.add_vertex(Point::new(x, y, 4.0))?);
+    }
+    let top = Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+        .expect("a unit normal");
+    let bottom = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+        .expect("a unit normal");
+    let right_of = |[from_x, from_y]: [f64; 2], [to_x, to_y]: [f64; 2]| {
+        Picker::InFrontOf(
+            HalfSpace::new(
+                Vector::new(to_y - from_y, from_x - to_x, 0.0),
+                from_x * to_y - from_y * to_x,
+            )
+            .expect("a normal with a length"),
+        )
+    };
+    let next = |index: usize| (index + 1) % corners.len();
+    let mut up = Vec::with_capacity(corners.len());
+    let mut along_the_top = Vec::with_capacity(corners.len());
+    let mut along_the_bottom = Vec::with_capacity(corners.len());
+    for index in 0..corners.len() {
+        up.push(builder.add_edge(low[index], high[index], EdgeRun::Straight)?);
+        // A shorter arc clockwise round its pipe bulges to the left of its
+        // chord, which is the right going the other way.
+        let picker = if index == 0 {
+            right_of(corners[0], corners[1])
+        } else {
+            right_of(corners[next(index)], corners[index])
+        };
+        let [run_high, run_low] = [top, bottom].map(|plane| EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(plane),
+            picked_by: smallvec![picker],
+        });
+        along_the_top.push(builder.add_edge(high[index], high[next(index)], run_high)?);
+        along_the_bottom.push(builder.add_edge(low[index], low[next(index)], run_low)?);
+    }
+    let mut faces = Vec::with_capacity(corners.len() + 2);
+    let top_steps: Vec<_> = along_the_top.iter().map(|&edge| (edge, Forward)).collect();
+    let top_wire = a_wire(&mut builder, &top_steps)?;
+    faces.push((builder.add_face(Surface::Plane(top), &[top_wire])?, Forward));
+    let bottom_steps: Vec<_> = along_the_bottom
+        .iter()
+        .rev()
+        .map(|&edge| (edge, Reversed))
+        .collect();
+    let bottom_wire = a_wire(&mut builder, &bottom_steps)?;
+    faces.push((
+        builder.add_face(Surface::Plane(bottom), &[bottom_wire])?,
+        Forward,
+    ));
+    for index in 0..corners.len() {
+        let wire = a_wire(
+            &mut builder,
+            &[
+                (along_the_bottom[index], Forward),
+                (up[next(index)], Forward),
+                (along_the_top[index], Reversed),
+                (up[index], Reversed),
+            ],
+        )?;
+        let (surface, used) = if index == 0 {
+            (
+                Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a positive radius")),
+                Forward,
+            )
+        } else {
+            let ([x, y], pipe) = pipes[index - 1];
+            let axis = Axis::new(Point::new(x, y, 0.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a finite axis");
+            (
+                Surface::Cylinder(Cylinder::new(axis, pipe).expect("a positive radius")),
+                Reversed,
+            )
+        };
+        faces.push((builder.add_face(surface, &[wire])?, used));
+    }
+    builder.add_shell(&faces)?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
