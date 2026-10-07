@@ -219,6 +219,7 @@ fn measures(found: f64, closed_form: f64, side: Side) {
     match side {
         Side::Under => assert!(found < closed_form, "{found} is not under {closed_form}"),
         Side::Over => assert!(found > closed_form, "{found} is not over {closed_form}"),
+        Side::EitherWay => {}
     }
 }
 
@@ -231,6 +232,9 @@ enum Side {
     /// The same inscribed wall bounding a *hole* leaves the hole too small, so
     /// what is left round it measures more.
     Over,
+    /// A round outer wall pulls the measure under and a round hole pulls it
+    /// over, so which way it lands is the mesh's doing and not the shape's.
+    EitherWay,
 }
 
 // 1. Tangent spheres — §31.7 criterion 14's first entry.
@@ -2482,6 +2486,133 @@ fn assert_refused_for_want_of_an_order(why: Error, what: &str) {
         Error::ACrossingThisCannotBeOrderedAlong => {}
         other => panic!("{what}: refused with {other:?}"),
     }
+}
+
+/// A ball of radius four in a bar of radius four down its axis touches the
+/// bar's wall all the way round its middle, and every rule is answered both
+/// ways round and under either policy, with no edge where the two touch. A bar
+/// a unit wider, which the ball touches nowhere, is the control, and it answers
+/// the same shapes.
+///
+/// It was expected to be refused (Q1244). Since Q1140 the arrangement lets a
+/// ball centred on a pipe's axis through as a pair that crosses in circles
+/// (`how_far_a_ball_sits_off_a_pipes_axis` in `fuse/arrange.rs`), and the
+/// ordering refuses a touch,
+/// `CannotFollowACrossingWhereItsSurfacesAreTangent` (`rcad-geom`'s
+/// `a_ball_inscribed_in_a_pipe_has_no_direction_to_be_ordered_along`). None of
+/// the twelve fuses of the touching bar meets that refusal, and where the
+/// arrangement stops asking about the circle was not traced.
+///
+/// **Each answer is the two inputs' faces whole**: the union is the bar, what
+/// they share is the ball, the ball less the bar is nothing, and the bar less
+/// the ball is one solid, the bar's skin with the ball's skin inside it as a
+/// void. At equal radii that void touches the wall round the circle, so the
+/// inside of the answer is two pieces, above and below it, held as one solid —
+/// the inputs as they stand, which is how `fuses_that_touch.rs` finds a ball
+/// inside a bar touching it at one point answered, and §80.9 is where the form
+/// of an answer that touches itself was left open. Every volume is the closed
+/// form's.
+///
+/// [`what_a_ball_in_a_bar_leaves`] has the closed forms.
+#[test]
+fn a_ball_in_a_bar_of_its_own_radius_is_answered_under_every_rule() {
+    for bar_radius in [4.0, 5.0] {
+        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            for (rule, ball_first, left) in what_a_ball_in_a_bar_leaves(bar_radius) {
+                let said = format!(
+                    "a bar of radius {bar_radius}, {policy:?}, {rule:?}, the ball first {ball_first}"
+                );
+                let mut model = a_model();
+                let pair = a_ball_in_a_bar(&mut model, bar_radius, ball_first);
+                let answer = fused_under(&mut model, &pair, rule, &policy);
+                let Some(left) = left else {
+                    assert!(answer.solids().is_empty(), "{said}: {answer:?}");
+                    continue;
+                };
+                assert_eq!(answer.solids().len(), 1, "{said}");
+                let mut faces_of_each_shell: Vec<usize> = model
+                    .solid(answer.solids()[0])
+                    .expect("this model made the key")
+                    .shells()
+                    .map(|shell| shell.face_count())
+                    .collect();
+                faces_of_each_shell.sort_unstable();
+                assert_eq!(faces_of_each_shell, left.faces_of_each_shell, "{said}");
+                measures(
+                    volume_of(&model, answer.solids()),
+                    left.closed_form,
+                    left.side,
+                );
+            }
+        }
+    }
+}
+
+/// A ball of radius four about the origin, and a bar of `bar_radius` twelve
+/// long down the `z` axis through it, reaching two past the ball either end.
+fn a_ball_in_a_bar(model: &mut Model, bar_radius: f64, ball_first: bool) -> Pair {
+    let ball = model
+        .add_ball(4.0, &Isometry::identity())
+        .expect("a ball of radius four");
+    let bar = model
+        .add_round_bar(
+            bar_radius,
+            12.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, -6.0)).expect("a shift"),
+        )
+        .expect("a bar longer than the ball");
+    if ball_first {
+        Pair::of(ball, bar)
+    } else {
+        Pair::of(bar, ball)
+    }
+}
+
+/// Each rule, with `true` for the ball named first, and the one solid
+/// [`a_ball_in_a_bar`] leaves under it, or `None` for no solid at all.
+///
+/// The ball is wholly inside the bar, so the union is the bar,
+/// `12π·bar_radius²`, what they share is the ball, `256π/3`, the ball less the
+/// bar is nothing, and the bar less the ball is the one less the other. That
+/// last has a round wall outside and a round hole inside, so its mesh lands on
+/// whichever side the two errors leave it: at equal radii they all but cancel,
+/// 335.1056 against 335.1032.
+fn what_a_ball_in_a_bar_leaves(bar_radius: f64) -> [(Rule, bool, Option<Left>); 6] {
+    let the_bar = 12.0 * PI * bar_radius * bar_radius;
+    let the_bar_alone = || Left {
+        faces_of_each_shell: vec![3],
+        closed_form: the_bar,
+        side: Side::Under,
+    };
+    let the_ball_alone = || Left {
+        faces_of_each_shell: vec![1],
+        closed_form: A_BIG_BALL,
+        side: Side::Under,
+    };
+    [
+        (Rule::Union, true, Some(the_bar_alone())),
+        (Rule::Union, false, Some(the_bar_alone())),
+        (Rule::Intersection, true, Some(the_ball_alone())),
+        (Rule::Intersection, false, Some(the_ball_alone())),
+        (Rule::Difference, true, None),
+        (
+            Rule::Difference,
+            false,
+            Some(Left {
+                faces_of_each_shell: vec![1, 3],
+                closed_form: the_bar - A_BIG_BALL,
+                side: Side::EitherWay,
+            }),
+        ),
+    ]
+}
+
+/// The one solid a fuse leaves: how many faces each of its shells has, fewest
+/// first, how much space it holds, and which side of that its mesh lands.
+struct Left {
+    faces_of_each_shell: Vec<usize>,
+    closed_form: f64,
+    side: Side,
 }
 
 // §31.7 criterion 14's table, and the rest of the catalogue beside it.
