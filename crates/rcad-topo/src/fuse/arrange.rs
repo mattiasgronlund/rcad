@@ -3201,6 +3201,14 @@ impl<'f> Arrangement<'f> {
     /// said nothing about straight lines. A cut that *closes* — the circle a
     /// bar's wall cuts in a block's face — lies wholly inside the face and
     /// touches no boundary at all, and dropping it would lose the hole.
+    ///
+    /// **Despite its name, this drops a lump of curved cuts that run on just
+    /// as it drops a lump of straight ones** — the check is `order.closes()`,
+    /// not "is straight". A roofed frustum's cone face against a plate with a
+    /// triangular hole cuts three hyperbola arcs with no boundary in them, and
+    /// all three are thrown away here
+    /// (`a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`,
+    /// Q1056's probe).
     fn drop_the_lumps_of_straight_cuts_alone(&mut self) {
         let mut same = Sameness::of(self.nodes.len());
         for arc in &self.arcs {
