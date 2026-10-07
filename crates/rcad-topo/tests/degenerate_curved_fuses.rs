@@ -129,15 +129,15 @@ impl Pair {
 /// so the incidences are exact and the boxes the arrangement solves for collapse
 /// onto one. A record here would be a decision nobody proved.
 fn fused(model: &mut Model, pair: &Pair, rule: Rule) -> Fused {
+    fused_under(model, pair, rule, &Policy::certified())
+}
+
+/// The same under `policy`, which still records nothing: a tolerant policy
+/// only loosens what a proof could not settle, and here every sign is proved.
+fn fused_under(model: &mut Model, pair: &Pair, rule: Rule, policy: &Policy) -> Fused {
     let mut log = ProvenanceLog::new();
     let answer = model
-        .fuse(
-            &pair.arguments,
-            &pair.tools,
-            rule,
-            &Policy::certified(),
-            &mut log,
-        )
+        .fuse(&pair.arguments, &pair.tools, rule, policy, &mut log)
         .unwrap_or_else(|why| panic!("this {rule:?} is decided by proof alone: {why}"));
     assert!(
         log.records().is_empty(),
@@ -2350,28 +2350,28 @@ fn a_bar_cut_by_one_plane_off_its_axis_is_answered() {
     );
 }
 
-/// A ball of radius four with a bar of radius one through its centre gets
-/// past the order along its two circles under every rule both ways, and is
-/// refused after its faces are cut: the result's mesh finds two corners of a
-/// face in one place, and the bar less the ball has faces that do not agree
-/// which way they face. A tolerant policy changes nothing.
+/// A ball of radius four with a bar of radius one through its centre is
+/// answered under every rule both ways, and a tolerant policy answers the same.
 ///
-/// It was refused `ACrossingThisCannotBeOrderedAlong` for every rule, as
-/// §36.20's quartic, while the arrangement could not tell the two circles
-/// square to the axis from the quartic loops of a ball off it, which
-/// `intersect` names with the same runs. The arrangement now asks exactly
-/// whether the centre is on the axis, and orders round each circle about it.
+/// It was refused after its faces were cut: the result's mesh found two corners
+/// of a face in one place, and the bar less the ball had faces that did not
+/// agree which way they face (Q1241). The fuse writes each of the two circles
+/// as a closed run with its corner on it and nothing picking it, and
+/// `rcad_geom::walk` marched every such run from the seed on the circle ahead
+/// of the centre, so the circle behind was walked round the one ahead. Each is
+/// drawn in closed form now and told apart by its corner. Before that it was
+/// refused `ACrossingThisCannotBeOrderedAlong` for every rule, as §36.20's
+/// quartic, while the arrangement could not tell the two circles from the
+/// quartic loops of a ball off the axis, which `intersect` names with the same
+/// runs (Q1140).
 ///
-/// **What it should answer**, and will be moved to once the cut faces are
-/// joined (Q1140's row for after): the bar reaches past the ball both ends, so
-/// the ball less the bar is `(4π/3)(R² − r²)^(3/2) = (4π/3)·15^(3/2)`, about
-/// 243.35, the two share `(4π/3)(R³ − (R² − r²)^(3/2))`, about 24.74, the union
-/// is that ball and the bar's `12π` less what they share, and the bar less the
-/// ball is `12π` less what they share, in two pieces.
+/// [`what_a_ball_with_a_bar_through_its_centre_leaves`] has the closed forms.
 #[test]
-fn a_ball_with_a_bar_through_its_centre_is_refused_after_its_faces_are_cut() {
+fn a_ball_with_a_bar_through_its_centre_is_answered_under_every_rule() {
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        for (rule, ball_first) in every_rule_both_ways() {
+        for (rule, ball_first, pieces, closed_form, how_fine) in
+            what_a_ball_with_a_bar_through_its_centre_leaves()
+        {
             let mut model = a_model();
             let ball = model
                 .add_ball(4.0, &Isometry::identity())
@@ -2388,11 +2388,12 @@ fn a_ball_with_a_bar_through_its_centre_is_refused_after_its_faces_are_cut() {
             } else {
                 Pair::of(bar, ball)
             };
-            assert_refused_after_its_faces_are_cut(
-                refusal(&mut model, &pair, rule, &policy),
-                rule,
-                ball_first,
-                &format!("{policy:?}"),
+            let answer = fused_under(&mut model, &pair, rule, &policy);
+            assert_eq!(answer.solids().len(), pieces, "{policy:?}, {rule:?}");
+            measures(
+                volume_of_at(&model, answer.solids(), how_fine),
+                closed_form,
+                Side::Under,
             );
         }
     }
@@ -2402,13 +2403,14 @@ fn a_ball_with_a_bar_through_its_centre_is_refused_after_its_faces_are_cut() {
 /// not in two circles, so it is still refused before any order is asked, under
 /// every rule both ways. The bar's axis runs up `z` through `(1, 0, 0)` and the
 /// ball's centre is the next `f64` past it along `x`, `2⁻⁵²` out; centred on
-/// `(1, 0, 0)` itself, the same pair gets past the order and is refused after
-/// its faces are cut, as the pair above is.
+/// `(1, 0, 0)` itself, the same pair is answered, as the pair above is.
 #[test]
 fn a_ball_one_rounding_off_a_bars_axis_is_refused_before_any_order() {
     let one_past = f64::from_bits(1.0_f64.to_bits() + 1);
     for (centre, on_the_axis) in [(1.0, true), (one_past, false)] {
-        for (rule, ball_first) in every_rule_both_ways() {
+        for (rule, ball_first, pieces, closed_form, how_fine) in
+            what_a_ball_with_a_bar_through_its_centre_leaves()
+        {
             let mut model = a_model();
             let ball = model
                 .add_ball(
@@ -2428,47 +2430,58 @@ fn a_ball_one_rounding_off_a_bars_axis_is_refused_before_any_order() {
             } else {
                 Pair::of(bar, ball)
             };
-            let why = refusal(&mut model, &pair, rule, &Policy::certified());
             if on_the_axis {
-                assert_refused_after_its_faces_are_cut(
-                    why,
-                    rule,
-                    ball_first,
-                    &format!("centred at x = {centre}"),
+                let answer = fused(&mut model, &pair, rule);
+                assert_eq!(answer.solids().len(), pieces, "{rule:?}");
+                measures(
+                    volume_of_at(&model, answer.solids(), how_fine),
+                    closed_form,
+                    Side::Under,
                 );
             } else {
-                assert!(
-                    matches!(why, Error::ACrossingThisCannotBeOrderedAlong),
-                    "centred at x = {centre}, {rule:?}, the ball first {ball_first}: {why:?}"
+                assert_refused_for_want_of_an_order(
+                    refusal(&mut model, &pair, rule, &Policy::certified()),
+                    &format!("centred at x = {centre}, {rule:?}, the ball first {ball_first}"),
                 );
             }
         }
     }
 }
 
-/// What a ball with a bar through its centre is refused with today: the bar
-/// less the ball by faces that do not agree which way they face, and every
-/// other rule and order by the result's mesh finding two corners of a face in
-/// one place. Not traced past the name (Q1140).
-fn assert_refused_after_its_faces_are_cut(why: Error, rule: Rule, ball_first: bool, what: &str) {
-    let the_bar_less_the_ball = matches!(rule, Rule::Difference) && !ball_first;
-    match why {
-        Error::Invalid(rcad_topo::Invalid::FacesDoNotAgreeWhichWayTheyFace)
-            if the_bar_less_the_ball => {}
-        Error::CannotMeshAFace {
-            why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
-            ..
-        } if !the_bar_less_the_ball => {}
-        other => panic!("{what}, {rule:?}, the ball first {ball_first}: refused with {other:?}"),
-    }
+/// Each rule, with `true` for the ball named first, and what a ball of radius
+/// four with a bar of radius one and length twelve through its centre leaves
+/// under it: how many solids, how much space they hold, and the deflection to
+/// measure that at.
+///
+/// The bar reaches past the ball both ends, so the ball less the bar is
+/// `(4π/3)(R² − r²)^(3/2) = (4π/3)·15^(3/2)`, about 243.35; the two share the
+/// ball less that, about 24.74; the union is the ball and the bar's `12π` less
+/// what they share; and the bar less the ball is `12π` less what they share, in
+/// two pieces. The two that are no wider than the bar are measured at a
+/// quarter of [`A_DEFLECTION`], which leaves what they share 0.52% short.
+fn what_a_ball_with_a_bar_through_its_centre_leaves() -> [(Rule, bool, usize, f64, f64); 6] {
+    let left = 4.0 * PI / 3.0 * 15.0_f64.powf(1.5);
+    let shared = A_BIG_BALL - left;
+    let the_bar = 12.0 * PI;
+    let union = A_BIG_BALL + the_bar - shared;
+    let thin = A_DEFLECTION / 4.0;
+    [
+        (Rule::Union, true, 1, union, A_DEFLECTION),
+        (Rule::Union, false, 1, union, A_DEFLECTION),
+        (Rule::Intersection, true, 1, shared, thin),
+        (Rule::Intersection, false, 1, shared, thin),
+        (Rule::Difference, true, 1, left, A_DEFLECTION),
+        (Rule::Difference, false, 2, the_bar - shared, thin),
+    ]
 }
 
-/// Each rule, with `true` for the ball named first.
-fn every_rule_both_ways() -> Vec<(Rule, bool)> {
-    [Rule::Union, Rule::Intersection, Rule::Difference]
-        .into_iter()
-        .flat_map(|rule| [(rule, true), (rule, false)])
-        .collect()
+/// What a ball off a bar's axis is refused with: no order along the two loops
+/// it crosses the bar in, and a panic naming any other refusal.
+fn assert_refused_for_want_of_an_order(why: Error, what: &str) {
+    match why {
+        Error::ACrossingThisCannotBeOrderedAlong => {}
+        other => panic!("{what}: refused with {other:?}"),
+    }
 }
 
 // §31.7 criterion 14's table, and the rest of the catalogue beside it.

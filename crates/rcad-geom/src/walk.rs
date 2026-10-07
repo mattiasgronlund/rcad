@@ -36,12 +36,13 @@ use rcad_predicates::{
 };
 use smallvec::SmallVec;
 
+use crate::enclosure::{cross_enclosing, exactly, gap_enclosing, squared_length_enclosing};
 use crate::exact::Exact;
 use crate::intersect::{
-    Question, WHERE_TWO_PIPES_CROSS, ask, how_a_ball_on_a_cones_axis_meets_it,
-    one_cone_either_way_round, whether_a_ball_runs_through_a_cones_apex,
-    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
-    whether_two_cones_share_an_axis,
+    Question, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_TWO_PIPES_CROSS, ask,
+    how_a_ball_on_a_cones_axis_meets_it, one_cone_either_way_round,
+    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
+    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
@@ -785,9 +786,26 @@ fn what_a_run_between_these_two_lies_on(
             };
             where_two_balls_cut(&first, &second).map(WhatARunLiesOn::Conic)
         }
+        // A ball centred on a pipe's axis and wider than it crosses it in two
+        // circles square to the axis, and which of them this run is, is its
+        // ends' and its picker's to say, as for a cone and a pipe on one axis.
+        // Marched instead, a closed run with a corner on the second circle was
+        // walked round the first, because a run nothing picks starts at the
+        // first seed (Q1241). A ball no wider than the pipe is marched as
+        // before: drawing the one circle a ball of the pipe's own width touches
+        // it round lets `SolidBuilder` build a rim it refuses today, which
+        // `rcad-step` pins.
         [Surface::Sphere(ball), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
-            a_quartic_picked_up_at(where_a_ball_reaches_across_a_pipe(&ball, &pipe))
+            if ball.radius() > pipe.radius()
+                && whether_a_ball_sits_on_a_pipes_axis(&ball, &pipe) == Decision::Zero
+            {
+                let ball_first = matches!(pair[0], Surface::Sphere(_));
+                where_a_ball_on_a_pipes_axis_cuts_it(&ball, &pipe, ball_first, run, policy, log)
+                    .map(WhatARunLiesOn::Conic)
+            } else {
+                a_quartic_picked_up_at(where_a_ball_reaches_across_a_pipe(&ball, &pipe))
+            }
         }
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
             // Two pipes down one direction cross in straight lines, and a run
@@ -1028,10 +1046,17 @@ fn the_corner_a_closed_run_starts_at(run: &NamedRun) -> Option<Point> {
 /// The place on the loop this run names that the marcher starts from, settled
 /// onto both surfaces.
 ///
-/// A run that nothing picks is the whole of a single loop, and the two seeds are
-/// two places on it — either will do. A run that *is* picked is one of two loops,
-/// and then exactly one of the seeds may pass: both or neither and the
+/// A run that nothing picks is taken to be the whole of a single loop, and the
+/// two seeds two places on it — either will do. A run that *is* picked is one of
+/// two loops, and then exactly one of the seeds may pass: both or neither and the
 /// half-spaces have not told them apart after all.
+///
+/// **That first reading is wrong for a closed run with its corner on the second
+/// of two loops**, which nothing picks because its corner names it. A ball
+/// `0.1` off a pipe's axis has two such loops, and the run with its corner at
+/// `z = −3.9` is walked round the loop at `z = +3.9`. A ball centred on the axis
+/// no longer comes here: its circles are drawn in closed form and told apart by
+/// the corner (Q1241).
 ///
 /// # Errors
 ///
@@ -1400,6 +1425,100 @@ fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point;
     let reach = (radius * radius - nearest * nearest).max(0.0).sqrt();
     let middle = pipe.axis().origin() + along * up + towards * skin;
     [middle + along * reach, middle - along * reach]
+}
+
+/// Whether a ball's centre is on a pipe's axis, **proved and not rounded**: the
+/// sign of `‖(c − o) × w‖²`, which is the question
+/// [`intersect`](crate::intersect) splits the pair on before it names two
+/// circles or two quartic loops, and the one `rcad-topo`'s arrangement asks
+/// before it orders round a circle.
+///
+/// **No [`Policy`]**, for the reason [`whether_a_cone_and_a_pipe_share_an_axis`]
+/// gives: a `Zero` nobody earned would draw two circles where the two cross in
+/// a quartic. Anything but `Zero` is marched, as every ball and pipe was before.
+fn whether_a_ball_sits_on_a_pipes_axis(ball: &Sphere, pipe: &Cylinder) -> Decision {
+    let centre = ball.centre().coordinates();
+    let origin = pipe.axis().origin().coordinates();
+    let along = pipe.axis().direction().components();
+    decide(&Question {
+        named: WHERE_A_BALL_AND_A_PIPE_CROSS,
+        enclosing: || {
+            squared_length_enclosing(cross_enclosing(
+                gap_enclosing(origin, centre),
+                exactly(along),
+            ))
+        },
+        exactly: || {
+            Exact::squared_length_of(&Exact::cross_of(
+                &Exact::gap_between(origin, centre),
+                along,
+            )?)
+        },
+    })
+    .0
+}
+
+/// The circle of the crossing of a pipe and a ball centred on its axis and
+/// wider than it that the run names.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] as
+/// [`which_of_these_circles_this_run_is`] gives them.
+fn where_a_ball_on_a_pipes_axis_cuts_it(
+    ball: &Sphere,
+    pipe: &Cylinder,
+    ball_first: bool,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    which_of_these_circles_this_run_is(
+        the_two_circles_a_ball_on_a_pipes_axis_cuts(ball, pipe, ball_first),
+        run,
+        policy,
+        log,
+    )
+}
+
+/// The two circles a ball centred on a pipe's axis and wider than it crosses
+/// it in, `√(R² − r²)` either way along the axis from the centre, each of the
+/// pipe's radius. `R² − r²` is written `(R − r)(R + r)`, which does not cancel.
+///
+/// # Which way round each goes
+///
+/// Each starts on the pipe's own first direction across, where the marcher's
+/// seed for it was, and runs the way `along_a_crossing` orders it: the crossing
+/// of `S` and `T` runs along `∇S × ∇T`, which for the ball first is
+/// anticlockwise about the axis on the circle ahead of the centre and about its
+/// opposite on the circle behind (`the_way_a_circle_round_a_pipes_axis_winds`
+/// derives it). The pipe first turns both round.
+fn the_two_circles_a_ball_on_a_pipes_axis_cuts(
+    ball: &Sphere,
+    pipe: &Cylinder,
+    ball_first: bool,
+) -> Vec<Conic> {
+    let radius = ball.radius();
+    let skin = pipe.radius();
+    let reach = ((radius - skin) * (radius + skin)).sqrt();
+    let along = pipe.axis().direction();
+    let up = along * along.length().recip();
+    let (across, and) = pipe.basis();
+    [reach, -reach]
+        .into_iter()
+        .map(|reach| {
+            let middle = ball.centre() + up * reach;
+            let about_the_axis = (reach > 0.0) == ball_first;
+            let and = if about_the_axis { and } else { -and };
+            Conic {
+                centre: middle,
+                across: across * skin,
+                and: and * skin,
+                size: how_big_this_is(&[middle, ball.centre()], &[skin, radius, reach]),
+            }
+        })
+        .collect()
 }
 
 /// Whether two pipes that do not point one way are the same width **and** have
@@ -4267,6 +4386,54 @@ mod tests {
                 gap <= longest_step,
                 "the {which} point is {gap} from the corner, past the longest step {longest_step}"
             );
+        }
+    }
+
+    /// A ball of radius four centred on a pipe of radius one crosses it in two
+    /// circles, at `z = ±√15`, and a closed run whose corner is on either of
+    /// them is walked round that one, whichever face is listed first.
+    ///
+    /// A fuse writes each circle of its answer as a closed run with its corner
+    /// on it and nothing picking it. The marcher started every such run at the
+    /// first of its two seeds, the one ahead along the axis, so the circle
+    /// behind the centre was walked round the circle ahead, and a ball with a
+    /// bar through its centre was refused by its own mesh (Q1241).
+    #[test]
+    fn a_closed_run_round_either_circle_of_a_ball_on_a_pipes_axis_is_walked_round_that_one() {
+        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 1.0).expect("a radius"));
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 4.0).expect("a radius"));
+        let height = 15.0_f64.sqrt();
+        for level in [height, -height] {
+            let corner = Point::new(1.0, 0.0, level);
+            let run = NamedRun::new(
+                EdgeRun::RightRoundWhereItsFacesCross,
+                [corner, corner].map(|end| PredicatePoint::from(end.coordinates())),
+            )
+            .expect("a closed run with one corner");
+            for pair in [[&ball, &pipe], [&pipe, &ball]] {
+                let walked = walk(
+                    &run,
+                    pair,
+                    Deflection::of(0.01).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a circle of a ball on a pipe's axis is walked");
+                let off = walked.deviation().magnitude();
+                assert!(
+                    walked.points().len() > 2,
+                    "the circle at {level} has points"
+                );
+                for point in walked.points() {
+                    let [x, y, z] = point.coordinates();
+                    assert!(
+                        (z - level).abs() <= off
+                            && how_far_off(&ball, *point) <= off
+                            && how_far_off(&pipe, *point) <= off,
+                        "the run round the circle at {level} was walked through ({x}, {y}, {z})"
+                    );
+                }
+            }
         }
     }
 }
