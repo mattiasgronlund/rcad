@@ -24,14 +24,16 @@
 //!
 //! The lens between two overlapping balls of radius 10 and 0.5. It has exactly
 //! two faces, both spheres, twenty times apart in how tightly they bend, and
-//! they share one edge — the circle where the two balls cross. It is the
-//! sharpest form of the question this kernel can build. A ball against a bar
-//! would be sharper still and there is no such solid to mesh:
-//! [`a_ball_against_a_bar_never_gets_as_far_as_a_mesh`] is the demonstration
-//! §16.10 asks for rather than this sentence. Two *coaxial* bars of different
-//! radii, the other shape to reach for, meet along a flat annulus and not along
-//! an edge at all, so the annulus is a plane face between them and neither
-//! curved face ever sees the other's boundary.
+//! they share one edge — the circle where the two balls cross. A ball against
+//! a bar is sharper still, fifty-fold, and it is a solid to mesh now: down the
+//! ball's own axis ([`a_bar_down_a_balls_axis_is_answered_under_every_rule`])
+//! and turned onto `x` by an exact quarter turn
+//! ([`a_bar_turned_exactly_onto_x_is_answered_under_every_rule`]). It is not
+//! the shape the two questions are asked of because its wall is a pipe, and
+//! the closed-form oracle below is written for a sphere. Two *coaxial* bars of
+//! different radii, the other shape to reach for, meet along a flat annulus and
+//! not along an edge at all, so the annulus is a plane face between them and
+//! neither curved face ever sees the other's boundary.
 //!
 //! Fusing the small ball as the argument rather than the tool reverses the
 //! stored order of the two faces, which is the knob that decides who walks the
@@ -59,7 +61,7 @@
 //! says the measurement has teeth: the same machinery, pointed at a mesh cut
 //! ten times too coarse for the number it is checked against, sees it.
 
-use core::f64::consts::PI;
+use core::f64::consts::{FRAC_PI_2, PI};
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Sphere, Surface, Vector};
 use rcad_predicates::{Cause, Policy, ProvenanceLog};
@@ -336,6 +338,110 @@ fn no_triangle_of_either_face_strays_further_than_the_deflection_asked_for() {
 /// the rest at a fiftieth.
 #[test]
 fn a_bar_down_a_balls_axis_is_answered_under_every_rule() {
+    answered_under_every_rule(
+        &Isometry::translation(Vector::new(0.0, 0.0, -20.0)).expect("a shift"),
+    );
+}
+
+/// The same bar **turned to lie along `x`** by an exact quarter turn about
+/// `y`, against the same closed forms, and answered the same way.
+///
+/// It was refused `ACrossingThisCannotBeOrderedAlong` under every rule while
+/// the only quarter turn to hand was `Isometry::rotation` by `FRAC_PI_2`
+/// (Q1245, Q1320): see the next test for why. `Isometry::quarter_turns` turns
+/// the bar's axis onto `(1, 0, 0)` bit for bit, through the ball's centre.
+#[test]
+fn a_bar_turned_exactly_onto_x_is_answered_under_every_rule() {
+    let along_x = Isometry::translation(Vector::new(-20.0, 0.0, 0.0))
+        .expect("a shift")
+        .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is a coordinate axis"));
+    let (origin, direction) = the_bar_axis(&along_x);
+    assert_eq!(
+        (origin, direction),
+        ([-20.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        "the bar does not lie along x"
+    );
+    answered_under_every_rule(&along_x);
+}
+
+/// The bar turned by `Isometry::rotation(&Axis::y(), FRAC_PI_2)` is still
+/// refused by name under every rule, both ways round, under either policy, and
+/// this is the traced cause (Q1245).
+///
+/// `FRAC_PI_2` is not `π/2`, and Rodrigues' form sends `z` to
+/// `(1, 0, 1 − fl(j·2j))` with `j` the turn's stored `j` coefficient, which no
+/// `f64` makes exactly `1`. So the pipe's axis is stored leaning `2⁻⁵²` off
+/// `x`, and misses the ball's centre by `20·2⁻⁵²`. A pipe whose axis misses a
+/// ball's centre crosses it in one quartic rather than two circles, and the
+/// quartic is the order §36.20 weighed and left.
+#[test]
+fn a_bar_turned_by_frac_pi_2_leans_off_the_balls_centre_and_is_refused() {
+    let along_x = Isometry::translation(Vector::new(-20.0, 0.0, 0.0))
+        .expect("a shift")
+        .compose(&Isometry::rotation(&Axis::y(), FRAC_PI_2).expect("a finite angle"));
+    let (origin, direction) = the_bar_axis(&along_x);
+    assert_eq!(
+        (origin, direction),
+        ([-20.0, 0.0, 0.0], [1.0, 0.0, 2f64.powi(-52)]),
+        "the turned bar's axis is not the one Q1245 traced"
+    );
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            for ball_first in [true, false] {
+                let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+                let ball = model
+                    .add_ball(10.0, &Isometry::identity())
+                    .expect("a ball at the origin");
+                let bar = model
+                    .add_round_bar(0.2, 40.0, &along_x)
+                    .expect("a bar right through it");
+                let (argument, tool) = if ball_first { (ball, bar) } else { (bar, ball) };
+                let why = model
+                    .fuse(
+                        &[argument],
+                        &[tool],
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect_err("a bar leaning off a ball's centre has no fuse here");
+                assert!(
+                    matches!(why, Error::ACrossingThisCannotBeOrderedAlong),
+                    "{policy:?}, {rule:?}, the ball first {ball_first}: refused with {why:?}"
+                );
+            }
+        }
+    }
+}
+
+/// Where the pipe of a bar of radius 0.2 and length 40 placed by `placement`
+/// is stored, as its axis's origin and direction.
+fn the_bar_axis(placement: &Isometry) -> ([f64; 3], [f64; 3]) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let bar = model
+        .add_round_bar(0.2, 40.0, placement)
+        .expect("a bar of a working size");
+    let mut pipes = model
+        .solid(bar)
+        .expect("this model made the key")
+        .faces()
+        .filter_map(|face| {
+            let Surface::Cylinder(pipe) = face.surface() else {
+                return None;
+            };
+            Some(pipe.axis())
+        });
+    let (Some(axis), None) = (pipes.next(), pipes.next()) else {
+        panic!("a round bar has one pipe");
+    };
+    (axis.origin().coordinates(), axis.direction().components())
+}
+
+/// A ball of radius 10 at the origin, and a bar of radius 0.2 and length 40
+/// placed by `placement` so that it runs right through the ball's centre,
+/// fused under every rule both ways round under either policy, and each answer
+/// measured short of its closed form by under half a per cent.
+fn answered_under_every_rule(placement: &Isometry) {
     let (ball_volume, bar_volume) = (4000.0 * PI / 3.0, 40.0 * PI * 0.04);
     let left = 4.0 * PI / 3.0 * (100.0_f64 - 0.04).powf(1.5);
     let shared = ball_volume - left;
@@ -365,11 +471,7 @@ fn a_bar_down_a_balls_axis_is_answered_under_every_rule() {
                 .add_ball(10.0, &Isometry::identity())
                 .expect("a ball at the origin");
             let bar = model
-                .add_round_bar(
-                    0.2,
-                    40.0,
-                    &Isometry::translation(Vector::new(0.0, 0.0, -20.0)).expect("a shift"),
-                )
+                .add_round_bar(0.2, 40.0, placement)
                 .expect("a bar right through it");
             let (argument, tool) = if ball_first { (ball, bar) } else { (bar, ball) };
             let what = format!("{policy:?}, {rule:?}, the ball first {ball_first}");
@@ -405,39 +507,6 @@ fn a_bar_down_a_balls_axis_is_answered_under_every_rule() {
             );
         }
     }
-}
-
-/// The same bar **turned to lie along `x`** by a quarter turn about `y` never
-/// gets as far as a mesh: it is still refused by name before any order is
-/// asked. Why the turned bar's axis is not read as through the centre is not
-/// traced here (Q1245).
-#[test]
-fn a_ball_against_a_bar_never_gets_as_far_as_a_mesh() {
-    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-    let ball = model
-        .add_ball(10.0, &Isometry::identity())
-        .expect("a ball at the origin");
-    let along_x = Isometry::translation(Vector::new(-20.0, 0.0, 0.0))
-        .expect("a shift")
-        .compose(
-            &Isometry::rotation(&Axis::y(), core::f64::consts::FRAC_PI_2).expect("a quarter turn"),
-        );
-    let bar = model
-        .add_round_bar(0.2, 40.0, &along_x)
-        .expect("a bar right through it");
-    let why = model
-        .fuse(
-            &[ball],
-            &[bar],
-            Rule::Union,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .expect_err("a ball and a bar have no fuse here");
-    assert!(
-        matches!(why, Error::ACrossingThisCannotBeOrderedAlong),
-        "a bar across a ball was refused with {why:?}"
-    );
 }
 
 /// One mesh, cut under a certified policy with nothing left unsettled.

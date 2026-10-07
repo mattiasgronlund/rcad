@@ -20,7 +20,9 @@ use crate::{Error, Result};
 /// cannot hand us a movement that also stretches the part. That scaling can move
 /// the last bit or two of a rotation that was already very nearly unit length,
 /// so a movement that has been written and read back puts points in the same
-/// places to within rounding, not bit for bit.
+/// places to within rounding, not bit for bit — **except a turn of a cube**,
+/// which reads back as the very numbers it was written as (see
+/// [`Isometry::quarter_turns`]).
 ///
 /// The scale the four coefficients are written at makes no difference to the
 /// rotation they name, and none to the one that comes back: they are brought
@@ -81,7 +83,9 @@ impl Isometry {
     /// The arithmetic, given the numbers this movement holds. It says nothing
     /// about how well those numbers match the movement a caller asked for:
     /// `cos(π/2)` in `f64` is `6.1e-17` rather than zero, so even a quarter turn
-    /// arrives a rounding away from the turn that was named. A caller deciding
+    /// built by [`Isometry::rotation`] arrives a rounding away from the turn that
+    /// was named. [`Isometry::quarter_turns`] is how to name one exactly, and
+    /// moves a point by one addition per coordinate. A caller deciding
     /// how far apart two differently routed movements of the same point may
     /// land wants this times a slack factor of its own, and that factor belongs
     /// at the caller with its own reason (`docs/decisions.md` §15.6).
@@ -137,6 +141,11 @@ impl Isometry {
     /// A turn of `angle_in_radians` about `axis`, right-handed about the axis
     /// direction. Points on the axis stay where they are.
     ///
+    /// **`FRAC_PI_2` is not a quarter turn**: it is the `f64` nearest `π/2`,
+    /// and the turn it names sends `z` to `(1, 0, 2⁻⁵²)` about `y` rather than
+    /// to `x`. A shape that rests on the turn being exact — a bar turned onto
+    /// `x` through a ball's centre — wants [`Isometry::quarter_turns`].
+    ///
     /// # Errors
     ///
     /// [`Error::NotFinite`] if the angle or the axis is not made of finite
@@ -158,6 +167,73 @@ impl Isometry {
         )))
     }
 
+    /// `quarters` quarter turns about `axis`, right-handed about its direction,
+    /// said exactly. Any number of quarters, negative ones turning the other
+    /// way; four is no turn at all.
+    ///
+    /// ```
+    /// use rcad_geom::{Axis, Isometry, Vector};
+    ///
+    /// let onto_x = Isometry::quarter_turns(&Axis::y(), 1)?;
+    /// assert_eq!(onto_x.apply_to_vector(Vector::new(0.0, 0.0, 1.0)), Vector::new(1.0, 0.0, 0.0));
+    /// # Ok::<(), rcad_geom::Error>(())
+    /// ```
+    ///
+    /// **Exactly, where [`Isometry::rotation`] by `FRAC_PI_2` is not.** A turn
+    /// about `x`, `y` or `z` by a whole number of quarters takes each
+    /// coordinate onto another, so turning a point moves its coordinates about
+    /// and negates some, and nothing rounds. Such a turn stays exact through
+    /// [`Isometry::compose`] with another of its kind, through
+    /// [`Isometry::inverse`], and through being written and read back.
+    ///
+    /// **Points on the axis stay where they are to within the one subtraction
+    /// per coordinate the shift costs.** A turn about an axis through `o` is
+    /// the turn about a parallel one through the origin and then the shift
+    /// `o − turned(o)`, which rounds by at most `f64::EPSILON` times the
+    /// largest coordinate of `o`. A point on the axis is turned exactly and
+    /// lands on itself plus that slip, rounded, so within twice the slip of
+    /// where it was.
+    /// `a_point_on_an_axis_through_anywhere_stays_within_two_epsilon_of_itself`
+    /// is the demonstration. Where the subtractions are exact — an axis through
+    /// a point with small whole coordinates, say — the points on it stay where
+    /// they are bit for bit.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotFinite`] if the axis is not made of finite numbers, and
+    /// [`Error::QuarterTurnsNeedAnAxisAlongXYOrZ`] if its direction does not
+    /// run exactly along `x`, `y` or `z`.
+    pub fn quarter_turns(axis: &Axis, quarters: i32) -> Result<Self> {
+        if !axis.origin().is_finite() || !axis.direction().is_finite() {
+            return Err(Error::NotFinite { what: "axis" });
+        }
+        let direction = axis.direction().components();
+        let mut along = direction
+            .iter()
+            .enumerate()
+            .filter(|(_, component)| **component != 0.0);
+        let (Some((which, component)), None) = (along.next(), along.next()) else {
+            return Err(Error::QuarterTurnsNeedAnAxisAlongXYOrZ {
+                direction: axis.direction(),
+            });
+        };
+        let way = if *component > 0.0 { 1 } else { -1 };
+        let mut signs = [0; 4];
+        match quarters.rem_euclid(4) {
+            0 => signs[0] = 1,
+            1 => [signs[0], signs[1 + which]] = [1, way],
+            2 => signs[1 + which] = way,
+            3 => [signs[0], signs[1 + which]] = [1, -way],
+            more => unreachable!("rem_euclid(4) gave {more}"),
+        }
+        let turn = TurnOfACube(signs);
+        let through = na::Vector3::from(axis.origin().coordinates());
+        Ok(Self(na::Isometry3::from_parts(
+            na::Translation3::from(turn.turned(-through) + through),
+            turn.as_stored(),
+        )))
+    }
+
     /// The single movement that does `inner` first and then `self`.
     ///
     /// ```
@@ -173,15 +249,32 @@ impl Isometry {
     ///
     /// This is the order topology needs: a parent's placement composed with a
     /// child's places the child in the parent's frame first, then the world.
+    ///
+    /// Two turns of a cube compose to the turn of a cube they make, worked out
+    /// on the signs of their coefficients and stored the one way that turn is
+    /// always stored. Multiplying the stored coefficients would round, and a
+    /// product that came out with its coefficients no longer all of one size
+    /// would no longer be turned exactly.
     #[must_use]
     pub fn compose(&self, inner: &Isometry) -> Isometry {
-        Self(self.0 * inner.0)
+        let turn = if let (Some(outer), Some(first)) = (
+            TurnOfACube::named_by(&self.0.rotation),
+            TurnOfACube::named_by(&inner.0.rotation),
+        ) {
+            outer.after(first).as_stored()
+        } else {
+            self.0.rotation * inner.0.rotation
+        };
+        let shift =
+            self.0.translation.vector + turned_by(&self.0.rotation, inner.0.translation.vector);
+        turn_then_shift(turn, shift)
     }
 
     /// The movement that undoes this one.
     #[must_use]
     pub fn inverse(&self) -> Isometry {
-        Self(self.0.inverse())
+        let undoing = self.0.rotation.inverse();
+        turn_then_shift(undoing, turned_by(&undoing, -self.0.translation.vector))
     }
 
     /// Where `point` ends up.
@@ -189,18 +282,21 @@ impl Isometry {
     /// Within [`Isometry::POINT_ROUNDOFF`] times the largest number involved of
     /// where the true movement would put it.
     ///
-    /// **A movement with no turn does better than that, and something rests on
-    /// it.** It comes to one addition per coordinate and nothing else, so a
-    /// shift a caller has arranged to be exact — where Sterbenz's condition
-    /// holds, say — really does come out exact. `rcad-topo`'s mesher rests the
-    /// whole of the frame it works a far-off face out in on that (§39.7 item 2),
-    /// and it is a fact about what this delegates to rather than one this crate
-    /// arranges, so
+    /// **A turn of a cube does better than that, and something rests on it.**
+    /// It moves each coordinate onto another and negates some, which rounds
+    /// nothing, so the whole movement comes to one addition per coordinate. No
+    /// turn at all is one of those, so a shift a caller has arranged to be
+    /// exact — where Sterbenz's condition holds, say — really does come out
+    /// exact. `rcad-topo`'s mesher rests the whole of the frame it works a
+    /// far-off face out in on that (§39.7 item 2), and
     /// `a_movement_with_no_turn_moves_a_point_by_one_addition_and_nothing_else`
     /// is the demonstration rather than this sentence.
     #[must_use]
     pub fn apply_to_point(&self, point: Point) -> Point {
-        self.0.transform_point(&point.into()).into()
+        let at: na::Point3<f64> = point.into();
+        Point::from(na::Point3::from(
+            turned_by(&self.0.rotation, at.coords) + self.0.translation.vector,
+        ))
     }
 
     /// Which way `vector` ends up pointing.
@@ -209,13 +305,15 @@ impl Isometry {
     /// and only the turn acts on it. Applying the translation here is the
     /// classic way to move a normal to the wrong place.
     ///
-    /// A movement with no turn hands the vector straight back, bit for bit —
-    /// same demonstration as [`Isometry::apply_to_point`], and it is what keeps
-    /// a shifted pipe's axis direction and a shifted plane's normal exactly what
-    /// they were.
+    /// A turn of a cube hands the vector back with its components moved about
+    /// and some negated, bit for bit, and a movement with no turn hands it
+    /// straight back — same demonstration as [`Isometry::apply_to_point`]. It
+    /// is what keeps a shifted pipe's axis direction and a shifted plane's
+    /// normal exactly what they were, and a bar turned a quarter turn onto `x`
+    /// pointing exactly along it.
     #[must_use]
     pub fn apply_to_vector(&self, vector: Vector) -> Vector {
-        self.0.transform_vector(&vector.into()).into()
+        turned_by(&self.0.rotation, vector.into()).into()
     }
 
     /// The shift part, applied after the turn.
@@ -269,10 +367,10 @@ impl TryFrom<([f64; 3], [f64; 4])> for Isometry {
             return Err(Error::ZeroLength { what: "rotation" });
         }
         let [w, i, j, k] = brought_into_the_range_its_squares_fit_in(stored);
-        Ok(Self(na::Isometry3::from_parts(
-            na::Translation3::new(offset.x(), offset.y(), offset.z()),
+        Ok(turn_then_shift(
             na::UnitQuaternion::from_quaternion(na::Quaternion::new(w, i, j, k)),
-        )))
+            offset.into(),
+        ))
     }
 }
 
@@ -331,6 +429,167 @@ fn brought_into_the_range_its_squares_fit_in(coefficients: [f64; 4]) -> [f64; 4]
     coefficients.map(|coefficient| multiplied_by_a_power_of_two(coefficient, exponent))
 }
 
+/// The movement that turns by `turn` and then shifts by `shift`, with a turn of
+/// a cube stored the one way every route to it stores it.
+///
+/// So the same turn of a cube compares equal however it was reached — built,
+/// composed, undone, or read back from a file that wrote its coefficients at
+/// some other size — and is written back out as the numbers it was read as.
+/// Nothing else is touched: a turn that is not one of the 24 keeps the bits it
+/// came with.
+fn turn_then_shift(turn: na::UnitQuaternion<f64>, shift: na::Vector3<f64>) -> Isometry {
+    let turn = TurnOfACube::named_by(&turn).map_or(turn, TurnOfACube::as_stored);
+    Isometry(na::Isometry3::from_parts(
+        na::Translation3::from(shift),
+        turn,
+    ))
+}
+
+/// `vector` turned by `turn`: as the coordinate swap it is when `turn` is a
+/// turn of a cube, and through Rodrigues' form otherwise.
+fn turned_by(turn: &na::UnitQuaternion<f64>, vector: na::Vector3<f64>) -> na::Vector3<f64> {
+    match TurnOfACube::named_by(turn) {
+        Some(swap) => swap.turned(vector),
+        None => turn.transform_vector(&vector),
+    }
+}
+
+/// One of the 24 turns that take a cube onto itself, named by the signs of the
+/// four coefficients `[w, i, j, k]` of a quaternion that names it.
+///
+/// A quaternion names a turn by the direction of its four coefficients, so
+/// coefficients that are one, two or four non-zero numbers, all of one size,
+/// name one of these turns exactly whatever that size is and however it was
+/// rounded: the size divides out. The 48 sign patterns of that shape are the 24
+/// turns, each named twice, by `q` and by `−q`.
+///
+/// **Why the turn is not left to Rodrigues' form.** Each of these sends every
+/// axis onto an axis, so it turns a vector by moving its components about and
+/// negating some, which rounds nothing. Rodrigues' form rounds, and for a
+/// quarter turn about `y` it cannot help it: `z` turns to `1 − fl(j·2j)` along
+/// `z`, where `j` is the stored `j` coefficient, and no `f64` `j` has
+/// `fl(j·2j) = 1`. So a bar turned onto `x` came out leaning `2⁻⁵²` off it, and
+/// missed the centre of a ball it was meant to pass through (Q1245).
+/// `rodrigues_form_cannot_turn_z_exactly_onto_x_whatever_the_stored_numbers` is
+/// the demonstration of the "no `j`".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TurnOfACube([i8; 4]);
+
+impl TurnOfACube {
+    /// The turn of a cube `turn`'s stored coefficients name, if they name one.
+    fn named_by(turn: &na::UnitQuaternion<f64>) -> Option<Self> {
+        let stored = turn.quaternion();
+        let coefficients = [stored.w, stored.i, stored.j, stored.k];
+        let size = coefficients
+            .iter()
+            .copied()
+            .map(f64::abs)
+            .fold(0.0, f64::max);
+        let non_zero = coefficients.iter().filter(|c| **c != 0.0).count();
+        let all_one_size = coefficients.iter().all(|c| *c == 0.0 || c.abs() == size);
+        (matches!(non_zero, 1 | 2 | 4) && all_one_size).then(|| {
+            Self(coefficients.map(|c| {
+                if c > 0.0 {
+                    1
+                } else if c < 0.0 {
+                    -1
+                } else {
+                    0
+                }
+            }))
+        })
+    }
+
+    /// `self` after `first`: the product of the two sign quaternions, which is
+    /// a whole-number quaternion whose non-zero coefficients are again one,
+    /// two or four of one size.
+    fn after(self, first: Self) -> Self {
+        let [a, b, c, d] = self.0.map(i32::from);
+        let [e, f, g, h] = first.0.map(i32::from);
+        let product = [
+            a * e - b * f - c * g - d * h,
+            a * f + b * e + c * h - d * g,
+            a * g - b * h + c * e + d * f,
+            a * h + b * g - c * f + d * e,
+        ];
+        let size = product.iter().map(|c| c.abs()).max().unwrap_or(0);
+        let non_zero = product.iter().filter(|c| **c != 0).count();
+        assert!(
+            matches!(non_zero, 1 | 2 | 4) && product.iter().all(|c| *c == 0 || c.abs() == size),
+            "two turns of a cube made {product:?}, which is not a turn of a cube"
+        );
+        Self(product.map(|c| match c.signum() {
+            1 => 1,
+            -1 => -1,
+            _ => 0,
+        }))
+    }
+
+    /// For each component of a turned vector, which component of the vector
+    /// it is and whether it is negated.
+    ///
+    /// The turn's matrix is the usual one of a quaternion, written on its sign
+    /// pattern and divided by the pattern's own squared length, so every entry
+    /// is a whole number and every row has exactly one that is not zero.
+    fn rows(self) -> [(usize, bool); 3] {
+        let [a, b, c, d] = self.0.map(i32::from);
+        let length_squared = a * a + b * b + c * c + d * d;
+        let matrix = [
+            [
+                a * a + b * b - c * c - d * d,
+                2 * (b * c - a * d),
+                2 * (b * d + a * c),
+            ],
+            [
+                2 * (b * c + a * d),
+                a * a - b * b + c * c - d * d,
+                2 * (c * d - a * b),
+            ],
+            [
+                2 * (b * d - a * c),
+                2 * (c * d + a * b),
+                a * a - b * b - c * c + d * d,
+            ],
+        ];
+        matrix.map(|row| {
+            let mut entries = row.iter().enumerate().filter(|(_, entry)| **entry != 0);
+            let (Some((from, entry)), None) = (entries.next(), entries.next()) else {
+                panic!("the turn of a cube {self:?} has the row {row:?}, which is not one axis");
+            };
+            assert_eq!(
+                entry.abs(),
+                length_squared,
+                "the turn of a cube {self:?} stretches along a row"
+            );
+            (from, *entry < 0)
+        })
+    }
+
+    /// `vector` turned, with nothing rounded.
+    fn turned(self, vector: na::Vector3<f64>) -> na::Vector3<f64> {
+        let [x, y, z] = self.rows().map(
+            |(from, negated)| {
+                if negated { -vector[from] } else { vector[from] }
+            },
+        );
+        na::Vector3::new(x, y, z)
+    }
+
+    /// The coefficients this turn is stored as: its signs times `1`, `1/√2` or
+    /// `1/2` for one, two or four of them, the `f64` nearest the size that
+    /// makes the four a unit quaternion.
+    fn as_stored(self) -> na::UnitQuaternion<f64> {
+        let size = match self.0.iter().filter(|sign| **sign != 0).count() {
+            1 => 1.0,
+            2 => core::f64::consts::FRAC_1_SQRT_2,
+            4 => 0.5,
+            other => unreachable!("a turn of a cube has {other} non-zero coefficients"),
+        };
+        let [w, i, j, k] = self.0.map(|sign| f64::from(sign) * size);
+        na::UnitQuaternion::new_unchecked(na::Quaternion::new(w, i, j, k))
+    }
+}
+
 impl From<Isometry> for ([f64; 3], [f64; 4]) {
     fn from(movement: Isometry) -> Self {
         (
@@ -367,13 +626,13 @@ mod tests {
     /// §16.10 for [`Isometry::apply_to_point`]'s "one addition per coordinate
     /// and nothing else".
     ///
-    /// **This is a claim about a dependency and not about arithmetic written
-    /// here**, which is exactly the kind that stops being true without anybody
-    /// touching this file. `rcad-topo`'s mesher shifts a face stored far from
-    /// the origin into a frame where its numbers are small, and the whole reason
-    /// that is allowed is that the shift is *exact*; a turn of the identity that
-    /// cost a rounding would make it inexact and the mesh floor would be
-    /// understating what a point costs.
+    /// **It was a claim about a dependency** until no turn at all went through
+    /// [`TurnOfACube`] like the other 23, and a claim that rests on which road
+    /// the identity takes is one an edit elsewhere can break. `rcad-topo`'s
+    /// mesher shifts a face stored far from the origin into a frame where its
+    /// numbers are small, and the whole reason that is allowed is that the
+    /// shift is *exact*; a turn of the identity that cost a rounding would make
+    /// it inexact and the mesh floor would be understating what a point costs.
     ///
     /// So: over two hundred thousand draws sixty octaves wide, a shift moves a
     /// point by exactly what adding its three components does, bit for bit, and
