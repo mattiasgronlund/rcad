@@ -138,11 +138,11 @@ fn holds_the_cut_balls_centre(model: &Model, solid: SolidKey) -> bool {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         );
-    match placed {
-        Containment::Inside => true,
-        Containment::Outside => false,
-        other => panic!("the cut ball's centre placed against a solid of the answer: {other:?}"),
-    }
+    assert!(
+        matches!(placed, Containment::Inside | Containment::Outside),
+        "the cut ball's centre placed against a solid of the answer: {placed:?}"
+    );
+    placed == Containment::Inside
 }
 
 /// Points on the small ball's skin, in the cut ball and outside it, each of
