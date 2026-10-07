@@ -208,6 +208,72 @@ through a face bounded by such arcs alone, above every closed curve on it; the
 same chip, cut from a frustum with planes, is refused one step earlier,
 `ResultIsNotManifold { count: 4 }` or `AFaceTrimmedByACurveThisCannotFollow`.*
 
+*2026-10-07, Q1226, bringing the Q1056 note above up to date: since Q1177
+(`lane-q1177-cone-faces-bounded-by-hyperbola-arcs`, `bbee409c`), both ways of
+cutting the frustum chip are refused `ResultIsNotManifold { count: 4 }` after
+selection now passes
+(`a_chip_cut_from_a_frustum_in_two_steps_is_refused_as_not_a_manifold`), rather
+than stopping at `AFaceTrimmedByACurveThisCannotFollow` or splitting on which
+way the cuts are made. Q1177 also answers a second shape in the same file: a
+roofed frustum against a plate with a triangular hole answers every rule, both
+ways round
+(`a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`),
+where before it never drew the hole (Q1177's own row, and Q1179's doc note on
+`drop_the_lumps_of_straight_cuts_alone`).*
+
+*2026-10-07, Q1191, recording Q1148 (`6ce74099`) and its own follow-on, Q1190
+(`9528b7d8`): the pointed cone drilled along its axis of Q1136's note above
+moves twice more. `MeetPoint::WhereAClosedCurveStarts` named a closed
+crossing's start corner by its two surfaces alone, so the cone's two circles
+on the bar's wall got one corner and one edge, claimed four times; Q1148 names
+that corner by which of the two circles picked it out as well
+(`CornerName::RoundACurve`), and the union and the bar less the cone moved
+from `ResultIsNotManifold { count: 4 }` to
+`TheFuseWroteABrokenAnswer { broken: AClosedEdgeIsWalkedAgainstItsSurface }`,
+which `validate.rs` gave when it read the bar's face's side of the cone off
+its far corner, the seam at `z = −15`, rather than where the face meets the
+edge at `z = 1`. Q1190 reads it there instead, and now all six fuses of
+`a_pointed_cone_drilled_along_its_axis.rs` answer, held to `364π` for the
+union and `92π/3` in two solids for the bar less the cone. Q1148 also reaches
+`a_cone_hollowed_along_its_axis.rs`: the pointed cone less a steeper one,
+whose two circles both fall on the first cone's face, moved the same way from
+`ResultIsNotManifold { count: 4 }` to answering every rule
+(`a_pointed_cone_less_a_steeper_one_whose_circles_both_fall_on_its_side`).*
+
+*2026-10-07, Q1201, recording Q1112 (`3af9333a`): a lump of closed cuts on the
+other nappe of a cone from every node of the face's rim is now wound 0 by
+`say_whether_the_face_holds_each_lump_of_closed_cuts`
+(`on_the_nappe_the_rim_never_reaches`, `fuse/arrange.rs`): the rim never
+reaches that nappe, which without its apex is one connected ring, and a
+bounded face cannot hold an endless ring. That was the trio
+`on_the_grid(6, 2, [3, 3])` with a cube of side 4 at `[3.5, 0.5, −3.5]`: the
+cube floor's circle on the lower nappe sat inside the face's loose box (it
+reaches `z = −6`), and `the_one_that_goes_round_the_axis_as_well` refused at
+its one-nappe check, neither `its_own == 0` nor both walks going round.
+Answering the axis rule across the apex alone left the cell `[0, 1, 2, 4]`,
+refused at `no_cell_holds_two_walks_of_one_lump`, because matching walks by
+sign one pair of lumps at a time cannot see a ring of rim arcs between them.
+That moved the refusal back from `CannotTellTheCellsOfAFaceApart`, which
+sharing the arc picker between `holds.rs` and `arrange.rs` (Q1033) had reached,
+to `AFaceTrimmedByACurveThisCannotFollow` one step later in selection (Q1200),
+and `holds.rs` reading such a cone face off its own sides seen down the axis,
+rather than by the family it had been following, closed that (Q1227,
+`02cad8c8`, `8d12b25f`). The trio is now the fifth of
+`TRIOS_THAT_AGREE_ABOUT_ANSWERING` in `fuse_laws_over_a_cone.rs`, both
+groupings of `(block ∪ cone) ∪ cube` answering and compared bit for bit by
+`uniting_a_block_a_cone_and_a_cube_does_not_depend_on_which_two_go_first`.*
+
+*2026-10-07, Q1203, recording Q1165 (`0e337c68`): the plate with a round tab
+and a round hole, against a pin through the tab, now answers every fuse both
+ways round
+(`a_pin_through_the_round_tab_of_a_plate_with_a_round_hole_is_answered_under_every_rule`).
+`holds.rs` leaves a flat face's whole-closed-curve wire out of its sides and
+counts it as a whole beside the arcs' chords (`is_a_round_wire_of_a_flat_face`,
+`how_often_a_round_wire_winds_round`). Before, `the_way_a_side_runs` refused
+the hole's circle, a side with no two ends to read a chord between, and
+selection refused `AFaceTrimmedByACurveThisCannotFollow` naming the top. The
+arrange.rs rim-count note above (Q1056, Q1112) is unchanged.*
+
 ### 340.5 The half ball the second fuse turns inside out
 
 *Queue row Q412, which replaced Q204 to land this section's fix with the four
