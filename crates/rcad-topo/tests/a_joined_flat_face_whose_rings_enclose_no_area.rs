@@ -225,15 +225,22 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 /// United, the two floors would join into the whole flat ring between the
 /// circles of radius 3 and 5, each a ring along the torus alone, which is the
 /// case `holds_the_other_rings` answers `None` for. **That is not reached.**
-/// Every rule, both ways round, is refused while the first solid's cap is cut
-/// into arcs (`which_way_an_edge_runs_round`, from
-/// `arrange::cut_the_crossings_into_arcs`): the cap's arc is half of one of the
-/// two circles `y = 0` cuts the torus in, and the arrangement has been taught to
-/// read a picker only on a ball's circle or a cone's circle or ellipse. A gap by
-/// that function's own account. Whether the union panics once it is closed is
-/// not shown here; the breakpoint on `select::choose` was never reached.
+/// Every rule, both ways round, is refused `a point inside a piece of a face`
+/// in `fuse/select.rs`, on the first solid's floor, named by its four corners
+/// `(±5, 0, 0)` and `(±3, 0, 0)`. All four are on the `x` axis, where the half
+/// ring's two straight sides lie.
+///
+/// Until Q617 every one was refused a step earlier, while that floor was cut
+/// into arcs (`which_way_an_edge_runs_round` in `fuse/arrange.rs`),
+/// `AFaceTrimmedByACurveThisCannotFollow`. The arc it stopped on was the
+/// floor's inner side, half of the circle of radius 3 that `z = 0` cuts the
+/// torus in, picked by `y ≥ 0` (a temporary print, Q617). Q597 had put it on
+/// the cap's half of a circle `y = 0` cuts. The arrangement read a picker only
+/// on a ball's circle or a cone's or a pipe's circle or ellipse. It now also
+/// reads a picker whose plane holds both ends on any circle a plane cuts a
+/// ring in, and so reads every arc of both solids' floors, caps and walls.
 #[test]
-fn the_top_halves_of_two_half_bends_are_refused_while_a_cap_is_cut_into_arcs() {
+fn the_top_halves_of_two_half_bends_are_refused_with_no_point_found_inside_a_floor() {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for turned_first in [false, true] {
             let mut model =
@@ -255,6 +262,72 @@ fn the_top_halves_of_two_half_bends_are_refused_while_a_cap_is_cut_into_arcs() {
                     "the top half of a half bend",
                 );
             }
+            let what = format!("{rule:?}, turned first {turned_first}");
+            let refused = match model.fuse(
+                &[one],
+                &[other],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            ) {
+                Err(Error::Undecidable { records }) => records.records().to_vec(),
+                other => panic!("{what}: {other:?}"),
+            };
+            let [refused] = &refused[..] else {
+                panic!("{what}: one record, not {refused:#?}");
+            };
+            assert_eq!(
+                refused.predicate(),
+                "a point inside a piece of a face",
+                "{what}: {refused:#?}"
+            );
+            let floor = [5.0, 3.0, -3.0, -5.0].map(|x| rcad_predicates::Point::from([x, 0.0, 0.0]));
+            assert!(
+                refused.inputs().len() == floor.len()
+                    && floor.iter().all(|corner| refused.inputs().contains(corner)),
+                "{what}: the piece is not named by the floor's four corners: {refused:#?}"
+            );
+        }
+    }
+}
+
+/// **Half-meridians the arrangement reads, and a floor `holds.rs` cannot.**
+/// The top halves, `z ≥ 0`, of two quarter bends of one ring, ring 4 and tube
+/// 1: one from `+x` round to `+y`, the other from `+y` round to `−x`, meeting
+/// flush on `x = 0`. Pappus gives each `π/2 · 4 · π/2 = π²`, so the union is
+/// the top half of a half bend, `2π²`, the intersection is nothing, and each
+/// difference is the first quarter, `π²`. Unlike the half bends' floors above,
+/// each floor's four corners are not on one line.
+///
+/// **Every rule, both ways round, is refused `AFaceTrimmedByACurveThisCannotFollow`
+/// on the second solid's floor**, from `the_way_a_side_runs` in `holds.rs`
+/// (a temporary print, Q617): asked about a point, it cannot read the floor's
+/// quarter of a circle round the axis, because `the_way_into_an_arc` reads no
+/// arc of a ring's circle. Until Q617 every one was refused a step earlier, in
+/// the arrangement, on the first solid's start cap: its side over the tube is
+/// half of a meridian circle, picked by the start's own side of the axis and
+/// `z ≥ 0` (a print in `which_way_an_edge_runs_round`, Q617).
+///
+/// So no answer here or above yet checks which way round the arrangement reads
+/// such an arc; flipping that reading's sign leaves both refusals as they are.
+/// Once `holds.rs` reads these arcs, this pair's volumes are what checks it.
+#[test]
+fn the_top_halves_of_two_quarter_bends_are_refused_where_the_second_floor_is_asked_a_point() {
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for turned_first in [false, true] {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let [one, other] = [turned_first, !turned_first].map(|turned| {
+                the_top_half_of_a_quarter_bend(&mut model, turned)
+                    .unwrap_or_else(|why| panic!("the top half of a quarter bend: {why:?}"))
+            });
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("both quarters are sound");
+            for quarter in [one, other] {
+                assert_measures(&model, quarter, PI * PI, "the top half of a quarter bend");
+            }
+            let what = format!("{rule:?}, turned first {turned_first}");
             let refused = model.fuse(
                 &[one],
                 &[other],
@@ -263,13 +336,18 @@ fn the_top_halves_of_two_half_bends_are_refused_while_a_cap_is_cut_into_arcs() {
                 &mut ProvenanceLog::new(),
             );
             let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
-                panic!("{rule:?}, turned first {turned_first}: {refused:?}");
+                panic!("{what}: {refused:?}");
             };
-            let first = model.solid(one).expect("this model made the key");
+            let floor = Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                    .expect("the z axis is a unit normal"),
+            );
+            let second = model.solid(other).expect("this model made the key");
             assert!(
-                first.faces().any(|mine| mine.key() == face),
-                "{rule:?}, turned first {turned_first}: the refusal names a face of the second \
-                 solid"
+                second
+                    .faces()
+                    .any(|its| its.key() == face && its.surface() == floor),
+                "{what}: the refusal names {face:?}, not the second solid's floor"
             );
         }
     }
@@ -394,6 +472,117 @@ fn the_top_half_of_a_half_bend(model: &mut Model, turned: bool) -> rcad_topo::Re
         (floor_face, Orientation::Forward),
         (start_cap, Orientation::Forward),
         (end_cap, Orientation::Forward),
+        (wall_face, Orientation::Forward),
+    ])?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// The top half, `z ≥ 0`, of a quarter bend about `+z` with ring 4 and tube 1,
+/// from `+x` round to `+y`; `turned`, a quarter turn on, from `+y` round to
+/// `−x`. Written out as [`the_top_half_of_a_half_bend`] is. Each side of its
+/// floor is a quarter of a circle round the axis, of radius `r`, and is picked
+/// by the plane through its two ends, `x + y ≥ r` (`y − x ≥ r` turned), which
+/// holds both ends exactly and has the whole quarter on or in front of it.
+fn the_top_half_of_a_quarter_bend(model: &mut Model, turned: bool) -> rcad_topo::Result<SolidKey> {
+    let (ring, tube) = (4.0, 1.0);
+    let (start, end) = if turned {
+        ([0.0, 1.0], [-1.0, 0.0])
+    } else {
+        ([1.0, 0.0], [0.0, 1.0])
+    };
+    let flat = |[x, y]: [f64; 2]| Vector::new(x, y, 0.0);
+    let away = |[x, y]: [f64; 2]| [written_out(-x), written_out(-y)];
+    let at =
+        |[x, y]: [f64; 2], out: f64| Point::new(written_out(x * out), written_out(y * out), 0.0);
+    let wall =
+        Surface::Torus(Torus::new(Axis::z(), ring, tube).expect("a tube narrower than its ring"));
+    let floor = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+        .expect("the z axis is a unit normal");
+    // The way round at the start is `end`, and at the end it is `−start`: the
+    // start cap faces back along it and the end cap on along it.
+    let start_cap = Plane::from_point_and_normal(Point::origin(), flat(away(end)))
+        .expect("an axis is a unit normal");
+    let end_cap = Plane::from_point_and_normal(Point::origin(), flat(away(start)))
+        .expect("an axis is a unit normal");
+    let pipe = Cylinder::new(Axis::z(), ring).expect("the ring's own radius");
+    let side = |normal: Vector, offset: f64| {
+        Picker::from(HalfSpace::new(normal, offset).expect("a normal with a length"))
+    };
+    let both_ends = Vector::new(start[0] + end[0], start[1] + end[1], 0.0);
+
+    let mut builder = SolidBuilder::new();
+    let outer_start = builder.add_vertex(at(start, ring + tube))?;
+    let inner_start = builder.add_vertex(at(start, ring - tube))?;
+    let outer_end = builder.add_vertex(at(end, ring + tube))?;
+    let inner_end = builder.add_vertex(at(end, ring - tube))?;
+
+    let along_the_floor = |inside: Picker, out: f64| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(floor),
+        picked_by: smallvec![inside, side(both_ends, out)],
+    };
+    let over_the_tube = |cap: Plane, towards: [f64; 2]| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(cap),
+        picked_by: smallvec![
+            side(flat(towards), 0.0),
+            side(Vector::new(0.0, 0.0, 1.0), 0.0)
+        ],
+    };
+    let outer = builder.add_edge(
+        outer_start,
+        outer_end,
+        along_the_floor(Picker::OutsideAPipe(pipe), ring + tube),
+    )?;
+    let inner = builder.add_edge(
+        inner_start,
+        inner_end,
+        along_the_floor(Picker::InsideAPipe(pipe), ring - tube),
+    )?;
+    let over_the_start =
+        builder.add_edge(outer_start, inner_start, over_the_tube(start_cap, start))?;
+    let over_the_end = builder.add_edge(inner_end, outer_end, over_the_tube(end_cap, end))?;
+    let under_the_start = builder.add_edge(inner_start, outer_start, EdgeRun::Straight)?;
+    let under_the_end = builder.add_edge(outer_end, inner_end, EdgeRun::Straight)?;
+
+    let floor_wire = a_wire(
+        &mut builder,
+        &[
+            (under_the_start, Orientation::Reversed),
+            (inner, Orientation::Forward),
+            (under_the_end, Orientation::Reversed),
+            (outer, Orientation::Reversed),
+        ],
+    )?;
+    let floor_face = builder.add_face(Surface::Plane(floor), &[floor_wire])?;
+    let start_wire = a_wire(
+        &mut builder,
+        &[
+            (under_the_start, Orientation::Forward),
+            (over_the_start, Orientation::Forward),
+        ],
+    )?;
+    let start_face = builder.add_face(Surface::Plane(start_cap), &[start_wire])?;
+    let end_wire = a_wire(
+        &mut builder,
+        &[
+            (under_the_end, Orientation::Forward),
+            (over_the_end, Orientation::Forward),
+        ],
+    )?;
+    let end_face = builder.add_face(Surface::Plane(end_cap), &[end_wire])?;
+    let wall_wire = a_wire(
+        &mut builder,
+        &[
+            (outer, Orientation::Forward),
+            (over_the_end, Orientation::Reversed),
+            (inner, Orientation::Reversed),
+            (over_the_start, Orientation::Reversed),
+        ],
+    )?;
+    let wall_face = builder.add_face(wall, &[wall_wire])?;
+    builder.add_shell(&[
+        (floor_face, Orientation::Forward),
+        (start_face, Orientation::Forward),
+        (end_face, Orientation::Forward),
         (wall_face, Orientation::Forward),
     ])?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())

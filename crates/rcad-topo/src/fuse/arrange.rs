@@ -3273,6 +3273,39 @@ impl<'f> Arrangement<'f> {
     /// refuse — where the tangent is one sign of one product at a node the
     /// arrangement already holds.
     ///
+    /// **An arc of a circle a plane cuts a ring in is read here too.** A plane
+    /// square to a ring's axis, or through it, cuts the ring in two circles, each
+    /// a crossing of its own; no other plane gets this far
+    /// ([`a_pair_that_crosses_in_a_conic`]). Two circles have two centres, so
+    /// [`the_way_into_an_arc`] has no one centre to start from and answers
+    /// `None`. Its first way never asks for a centre, and that is the way read
+    /// here: a picker whose plane holds both ends. That is how a bend built by
+    /// hand picks half a circle: `y ≥ 0` for the floor's half of the circle of
+    /// radius 3 that `z = 0` cuts, `z ≥ 0` for a cap's half of a meridian circle.
+    /// With `h` the picker's normal, `n` the flat surface's and `s = n × chord`:
+    ///
+    /// - Both ends are on the picker's plane, as a sign of zero over the whole
+    ///   of both boxes, so the true ends are too and `h · chord = 0`.
+    /// - Both ends are on the flat surface, so `chord` is square to `n`, and
+    ///   `chord` and `s` are two directions square to each other along it. A
+    ///   point `p` of the flat surface is `end + α·chord + β·s`, and
+    ///   `h · (p − end) = β·(h · s)`.
+    /// - Every point of the arc is on or in front of the picker, as for every
+    ///   picker, and every point but its ends is off the chord's line, since a
+    ///   line meets a circle in two points at most. So with `h · s` not zero,
+    ///   such a point has `β` of the sign of `h · s`: the arc lies on the side
+    ///   of the chord that `s`, turned to read positive against `h`, points to.
+    /// - `h · s` of zero, with `h · chord = 0`, makes `h` square to the flat
+    ///   surface, so the picker's plane is the flat surface and tells neither
+    ///   arc from the other. That picker is passed over, and so is a sign the
+    ///   boxes leave open.
+    ///
+    /// The tangent's argument above never asks for a centre either, so it
+    /// holds for a ring's circle as it stands. `holds.rs` does not read these
+    /// arcs yet, so this one reading is not shared (§23.8): where a point is
+    /// asked of such a face, `holds.rs` refuses rather than reading it another
+    /// way.
+    ///
     /// # Errors
     ///
     /// [`Error::Undecidable`] naming [`WHICH_WAY_AN_EDGE_RUNS_ROUND`] when the
@@ -3280,11 +3313,11 @@ impl<'f> Arrangement<'f> {
     ///
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the edge is not an
     /// arc of a closed crossing between a plane and a round surface — a ball's
-    /// circle, or a cone's or a pipe's circle or ellipse — with a picker that
-    /// tells its two arcs apart by one of the four ways [`the_way_into_an_arc`]
-    /// sets out, which is the one reading of a picker this and
-    /// [`holds`](crate::holds) share. A gap and not a limit: the edge is one arc
-    /// or the other.
+    /// circle, a cone's or a pipe's circle or ellipse, or a ring's circle —
+    /// with a picker that tells its two arcs apart: by one of the four ways
+    /// [`the_way_into_an_arc`] sets out, the reading of a picker this and
+    /// [`holds`](crate::holds) share, or on a ring's circle by the first of
+    /// them. A gap and not a limit: the edge is one arc or the other.
     ///
     /// # Panics
     ///
@@ -3300,15 +3333,40 @@ impl<'f> Arrangement<'f> {
         let from = self.node_of_corner[wire][position];
         let ends = [from, self.node_of_the_end[wire][position]].map(|node| self.nodes[node].point);
         let partner = self.crossings[crossing].partner;
-        let into_the_arc = the_way_into_an_arc(
-            &self.surface,
-            &partner,
-            ends,
-            &self.face.wires[wire][position].picked_by,
-        )
-        .ok_or(Error::AFaceTrimmedByACurveThisCannotFollow {
-            face: self.face.keys[0],
-        })?;
+        let picked_by = &self.face.wires[wire][position].picked_by;
+        let into_an_arc_of_a_rings_circle = || {
+            let ((Surface::Plane(flat), Surface::Torus(_))
+            | (Surface::Torus(_), Surface::Plane(flat))) = (&self.surface, &partner)
+            else {
+                return None;
+            };
+            let [start, end] = ends.map(PredicatePoint::enclosure);
+            let chord = core::array::from_fn(|axis| end[axis] - start[axis]);
+            let square_to_the_chord =
+                cross_of_intervals(flat.normal().components().map(Interval::exactly), chord);
+            picked_by.iter().find_map(|picker| {
+                let Picker::InFrontOf(half) = picker else {
+                    return None;
+                };
+                if ends
+                    .iter()
+                    .any(|&at| half.side_of_point(at) != Decision::Zero)
+                {
+                    return None;
+                }
+                let normal = half.normal().components().map(Interval::exactly);
+                match dot_of(normal, square_to_the_chord).sign() {
+                    Decision::Pos => Some(square_to_the_chord),
+                    Decision::Neg => Some(square_to_the_chord.map(core::ops::Neg::neg)),
+                    Decision::Zero | Decision::Undecidable { .. } | _ => None,
+                }
+            })
+        };
+        let into_the_arc = the_way_into_an_arc(&self.surface, &partner, ends, picked_by)
+            .or_else(into_an_arc_of_a_rings_circle)
+            .ok_or(Error::AFaceTrimmedByACurveThisCannotFollow {
+                face: self.face.keys[0],
+            })?;
         let forward = self.way_out_of(
             from,
             Direction {
