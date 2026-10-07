@@ -177,6 +177,49 @@ fn ask(surface: impl Into<Surface>, asked: &[([f64; 3], bool)]) {
     }
 }
 
+/// Q1188: the skin's upper arc truly reaches `z = 8` in the middle, not `z = 4`
+/// at its two ends, so the floor the mesher picks for it has to be charged
+/// from the true reach and not the ends.
+///
+/// Before `how_far_along_its_axis_this_face_runs` stopped pushing a crossing
+/// edge's `and` into `others` unconditionally, the chord plane `x = 0` — which
+/// runs through the cone's apex and so cuts it in two rulings rather than a
+/// closed curve — charged the upper arc its two ends at `z = 4`, folded in
+/// beside the correct bound of `8.0` the upper lid plane gives, and
+/// `f64::min` took the wrong, smaller one. That halved the floor
+/// [`SolidView::mesh`] computes for a deflection this crate picks itself, from
+/// `2.9092923360587807e-10` to `1.4546461680293906e-10` — exactly half, since
+/// the floor is proportional to how far along the axis the face is charged.
+///
+/// **That changes an answer.** At `Policy::tolerant(15000.0)`, whose
+/// `max_wobble` of about `2.13e-10` sits between the two, the wrong floor was
+/// below it — so the mesher accepted a deflection finer than the face's own
+/// true `z = 8` reach can be placed to, a mesh that misses the bound it
+/// claims — and the right floor is above it, so the fix refuses honestly
+/// instead.
+#[test]
+fn the_skin_faces_floor_is_charged_from_its_true_reach_and_not_its_arcs_ends() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let lens = a_lens_of_a_cone(&mut model);
+    let view = model.solid(lens).expect("this model made the key");
+
+    let refused = view
+        .mesh(
+            Deflection::of(1e-300).expect("a positive length"),
+            &Policy::tolerant(15000.0),
+            &mut ProvenanceLog::new(),
+        )
+        .expect_err("a deflection far below any floor is refused, not silently loosened");
+    assert!(
+        matches!(
+            refused,
+            rcad_topo::Error::DeflectionBelowWhatAMeshCanReach { closest, .. }
+            if closest == 2.909_292_336_058_780_7e-10
+        ),
+        "got {refused:?}"
+    );
+}
+
 fn the_face_on(view: SolidView<'_>, surface: &Surface) -> FaceKey {
     let mut on_it = view.faces().filter(|face| face.surface() == *surface);
     let face = on_it.next().expect("the lens has a face on this surface");

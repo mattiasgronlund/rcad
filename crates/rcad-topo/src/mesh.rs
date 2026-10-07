@@ -7319,8 +7319,19 @@ fn how_far_along_its_axis_this_face_runs(
             .collect();
         // A seam has this face's own surface on both sides of it, and a surface
         // crossed with itself names nothing; the run carries the second surface
-        // for exactly that reason.
-        if let EdgeRun::PartOfWhereItCrosses { and, .. } = edge.run() {
+        // for exactly that reason, and only that reason — an edge with a
+        // different face either side already has its second surface in
+        // `others`, and `and` there can be any plane that picks out this edge's
+        // own piece of a curve shared with other edges, not a bound on where
+        // this one runs. A chord through a cone's apex is such a plane: it cuts
+        // the cone in two rulings, which run on for ever, and folding that in
+        // charged a face's own upper arc its two ends at `z = 4` though the arc
+        // reaches `z = 8` between them, bounded correctly by the plane the two
+        // faces already named (`a_plane_face_cut_by_a_cone_it_crosses_in_an_ellipse.rs`,
+        // §406).
+        if others.iter().all(|other| *other == ours)
+            && let EdgeRun::PartOfWhereItCrosses { and, .. } = edge.run()
+        {
             others.push(and);
         }
         let bounded = others
