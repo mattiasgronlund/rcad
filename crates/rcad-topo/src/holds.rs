@@ -1667,6 +1667,13 @@ fn is_one_circle_cut_in_two(
 /// (row Q1227): the skin of a frustum notched by a cube's corner, the part of
 /// its band in front of either cap and in front of any of three planes, is one.
 ///
+/// **A cone face with a side right round the curve a plane cuts it in goes
+/// there straight away** (row Q1246). Such a side has no two ends, so the steps
+/// above have nothing to read it by and every reading of them would take the
+/// face for the part bounded by its other sides alone. Before, such a side
+/// refused every reading, so no face the steps answered is answered
+/// differently now.
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a face on a ball, a
@@ -1682,11 +1689,14 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
     log: &mut ProvenanceLog,
 ) -> Result<OnAFace> {
     let surface = face.stored_surface();
-    let readings = every_reading_of_the_sides_of(solid, face)?;
+    let Readings {
+        sides: readings,
+        whole_curves,
+    } = every_reading_of_the_sides_of(solid, face)?;
     let with_a_round_wire = face
         .wires()
         .any(|wire| is_a_round_wire_of_a_flat_face(face, wire));
-    if !with_a_round_wire {
+    if !with_a_round_wire && whole_curves.is_empty() {
         let mut refused = None;
         for sides in &readings {
             match what_the_part_in_front_of_its_cuts_holds(face, &surface, sides, point) {
@@ -1708,6 +1718,10 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
                     "a flat face's sides are read one way, since only a ruling of a pipe is read more ways than one"
                 );
             };
+            assert!(
+                whole_curves.is_empty(),
+                "only a cone face's sides are read as whole curves"
+            );
             what_a_flat_face_of_chords_and_arcs_holds(solid, face, &flat, sides, point, policy, log)
         }
         Surface::Cone(cone) => {
@@ -1716,7 +1730,7 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
                     "a cone face's sides are read one way, since only a ruling of a pipe is read more ways than one"
                 );
             };
-            what_a_cone_face_seen_down_its_axis_holds(face, &cone, sides, point)
+            what_a_cone_face_seen_down_its_axis_holds(face, &cone, sides, &whole_curves, point)
         }
         Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Torus(_) | _ => {
             Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
@@ -2314,6 +2328,42 @@ fn is_on_the_other_nappe_from_the_arc(
 /// which is where every ruling is seen, and a point on the chords of two arcs
 /// at once, as the flat face refuses it.
 ///
+/// # A side right round a closed curve
+///
+/// A [`WholeCurve`] is all of the curve a plane `P` cuts the cone in, from one
+/// corner back to it, so it has no chord, and it is read whole, with signs
+/// (row Q1246). The skin of a frustum whose bottom circle a cube's wall touches
+/// at one point has one: the wall cuts the skin in a branch of a hyperbola
+/// whose tip is that point, and the circle is a side from the tip back to it.
+///
+/// - **`P` is asked to cut the cone in a closed curve**
+///   ([`Cone::is_cut_in_a_closed_curve_by`](rcad_geom::Cone::is_cut_in_a_closed_curve_by)).
+///   Then `P` meets every ruling of that curve's nappe once and the other nappe
+///   nowhere, so where `P` meets the face's nappe is the curve and nothing
+///   else, and the curve is seen down the axis as a closed curve meeting every
+///   half-line out from the apex once. A point of the nappe is seen inside it
+///   exactly when it is on the apex's side of `P`, since along its ruling the
+///   side of `P` changes once, where the ruling meets the curve.
+/// - **The face is on one side of `P`, the side any corner of it off `P` is
+///   on.** Its inside is one piece and holds no point of the curve, which is its
+///   boundary, so it lies in one of the two pieces the curve cuts the nappe in,
+///   and its corners lie in that piece or on the curve. A point strictly on the
+///   other side is not held, and one on `P` is on the curve, which is the face's
+///   boundary. No corner off `P`, or two on different sides, is refused.
+/// - **Kept on the side away from the apex, the curve counts nothing at any
+///   point on that side**, since every such point is seen outside it. So the
+///   count round the other sides is the count round all of them there, and is
+///   read as it is for any face. Leaving out a side that leaves a corner and
+///   comes back to it leaves the rest of its wire closed, so what is left is
+///   still counted round.
+///
+/// A curve kept on the apex's side is refused. There the point is seen inside
+/// it, and what the curve counts depends on which way round it is walked, which
+/// nothing here reads. No face it was tried on has one: a box's wall along the
+/// axis that touches such a cap's circle at one point cuts the cone only past
+/// the cap, where the hyperbola runs on from its tip, and one that crosses the
+/// circle splits it in two arcs.
+///
 /// # Why the steps before this could not answer such a face
 ///
 /// The skin of a frustum notched by a cube's corner is this face: a band
@@ -2331,13 +2381,15 @@ fn is_on_the_other_nappe_from_the_arc(
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a side across a surface
-/// that is not a plane, `point` at the apex or on two chords at once, and a
-/// face whose corners disagree on the nappe; [`Error::Undecidable`] when a sign
-/// could not be settled.
+/// that is not a plane, `point` at the apex or on two chords at once, a face
+/// whose corners disagree on the nappe, a whole curve on a plane that does not
+/// cut the cone in a closed curve, whose side no corner settles or that keeps
+/// the apex's side; [`Error::Undecidable`] when a sign could not be settled.
 fn what_a_cone_face_seen_down_its_axis_holds(
     face: FaceView<'_>,
     cone: &rcad_geom::Cone,
     sides: &[Side],
+    whole_curves: &[WholeCurve],
     point: PredicatePoint,
 ) -> Result<OnAFace> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
@@ -2352,6 +2404,23 @@ fn what_a_cone_face_seen_down_its_axis_holds(
             return Err(gave_up_on_a_side(&Surface::Cone(placed), point, enclosure));
         }
         other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    }
+    for curve in whole_curves {
+        let kept = the_side_away_from_the_apex_a_face_keeps(cone, sides, whole_curves, curve)
+            .ok_or_else(cannot)?;
+        match curve.across_placed.side_of_point(point) {
+            Decision::Zero => return Ok(OnAFace::OnItsBoundary),
+            found @ (Decision::Pos | Decision::Neg) if found == kept => (),
+            Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_a_side(
+                    &Surface::Plane(curve.across_placed),
+                    point,
+                    enclosure,
+                ));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
     }
     let nappe = the_nappe_a_face_is_on(face, &placed)?;
     let up = exactly(placed.axis().direction().components());
@@ -2459,6 +2528,46 @@ fn what_a_cone_face_seen_down_its_axis_holds(
     } else {
         OnAFace::Held
     })
+}
+
+/// Which side of `curve`'s plane a cone face keeps, read off every corner of
+/// the face off that plane where it is stored; `None` where the plane does not
+/// cut the cone in a closed curve, where no corner is off it or two are on
+/// different sides, where that side is the apex's, and where a sign could not
+/// be settled. The argument is [`what_a_cone_face_seen_down_its_axis_holds`]'s.
+fn the_side_away_from_the_apex_a_face_keeps(
+    cone: &rcad_geom::Cone,
+    sides: &[Side],
+    whole_curves: &[WholeCurve],
+    curve: &WholeCurve,
+) -> Option<Decision> {
+    if cone.is_cut_in_a_closed_curve_by(&curve.across) != Some(true) {
+        return None;
+    }
+    let side_of = |at: Point| {
+        curve
+            .across
+            .side_of_point(PredicatePoint::from(at.coordinates()))
+    };
+    let apex = side_of(cone.apex());
+    if !matches!(apex, Decision::Pos | Decision::Neg) {
+        return None;
+    }
+    let corners = sides
+        .iter()
+        .flat_map(|side| [side.start.at, side.end.at])
+        .chain(whole_curves.iter().map(|other| other.corner));
+    let mut kept = None;
+    for corner in corners {
+        match side_of(corner) {
+            Decision::Zero => {}
+            found @ (Decision::Pos | Decision::Neg) if kept.is_none_or(|known| known == found) => {
+                kept = Some(found);
+            }
+            Decision::Pos | Decision::Neg | Decision::Undecidable { .. } | _ => return None,
+        }
+    }
+    kept.filter(|&kept| kept != apex)
 }
 
 /// The name a turn read down a cone's axis goes by in provenance records.
@@ -2669,12 +2778,13 @@ enum Lies {
 /// **A flat face's round wires are left out too** ([`is_a_round_wire_of_a_flat_face`]):
 /// a whole closed curve has no two ends to read a chord between, and
 /// [`what_a_flat_face_of_chords_and_arcs_holds`] counts it as a whole instead.
-fn every_reading_of_the_sides_of(
-    solid: SolidView<'_>,
-    face: FaceView<'_>,
-) -> Result<Vec<Vec<Side>>> {
+/// So, for the same reason, is a cone face's side right round the curve a
+/// plane cuts it in ([`a_whole_curve_round_a_cone`]), which
+/// [`what_a_cone_face_seen_down_its_axis_holds`] reads as a whole.
+fn every_reading_of_the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Readings> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let mut readings: Vec<Vec<Side>> = vec![Vec::new()];
+    let mut whole_curves = Vec::new();
     let coedges = face
         .wires()
         .filter(|&wire| !is_a_round_wire_of_a_flat_face(face, wire))
@@ -2692,6 +2802,12 @@ fn every_reading_of_the_sides_of(
             at: where_it_is_stored(solid, corner.key()),
             placed: corner.point(),
         });
+        if start.key == end.key
+            && let Some(curve) = a_whole_curve_round_a_cone(face, edge, across, start.at)
+        {
+            whole_curves.push(curve);
+            continue;
+        }
         let one_surface = across.stored_surface() == face.stored_surface();
         let as_it_is = || vec![(across.stored_surface(), across.surface())];
         let read_against = match edge.stored_run() {
@@ -2746,7 +2862,56 @@ fn every_reading_of_the_sides_of(
             })
             .collect();
     }
-    Ok(readings)
+    Ok(Readings {
+        sides: readings,
+        whole_curves,
+    })
+}
+
+/// What [`every_reading_of_the_sides_of`] reads off a face.
+struct Readings {
+    /// Every way to read the sides that run between two corners.
+    sides: Vec<Vec<Side>>,
+    /// The sides that run right round a closed curve, on a cone face only.
+    whole_curves: Vec<WholeCurve>,
+}
+
+/// A side of a cone face that runs right round the closed curve a plane cuts
+/// the cone in, from its one corner back to it: that plane where the face is
+/// stored and once moved into place, and the corner where it is stored.
+struct WholeCurve {
+    across: Plane,
+    across_placed: Plane,
+    corner: Point,
+}
+
+/// The side `edge` of `face`, which leaves `corner` and comes back to it, read
+/// as a [`WholeCurve`]; `None` unless `face` is on a cone, the face `across` is
+/// flat, and `edge` runs along where the two cross.
+fn a_whole_curve_round_a_cone(
+    face: FaceView<'_>,
+    edge: EdgeView<'_>,
+    across: FaceView<'_>,
+    corner: Point,
+) -> Option<WholeCurve> {
+    let (Surface::Cone(_), Surface::Plane(flat), Surface::Plane(placed)) = (
+        face.stored_surface(),
+        across.stored_surface(),
+        across.surface(),
+    ) else {
+        return None;
+    };
+    matches!(
+        edge.stored_run(),
+        EdgeRun::PartOfWhereItCrosses { .. }
+            | EdgeRun::RightRoundWhereItsFacesCross
+            | EdgeRun::RightRoundWhereItCrosses { .. }
+    )
+    .then_some(WholeCurve {
+        across: flat,
+        across_placed: placed,
+        corner,
+    })
 }
 
 /// Whether `wire` is one whole closed curve on one edge of a flat face: a round
@@ -2766,7 +2931,8 @@ fn is_a_round_wire_of_a_flat_face(face: FaceView<'_>, wire: WireView<'_>) -> boo
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for an arc no half-space
 /// tells from its sibling and that is not an arc of a cone's face along a curve
 /// that does not close ([`the_way_into_an_arc_that_does_not_close`]), a whole
-/// closed crossing among parts of others, or a kind of run this has not been
+/// closed crossing among parts of others that is not a cone face's
+/// [`WholeCurve`], which never reaches here, or a kind of run this has not been
 /// taught, and whatever [`the_face_across`] gives for the edge.
 fn the_way_a_side_runs(
     solid: SolidView<'_>,
