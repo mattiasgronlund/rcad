@@ -1556,8 +1556,12 @@ impl Assembly {
     ///   `a_lens_whose_hole_is_half_a_disk.rs`, Q1290).
     /// - **Two or more rings enclosing nothing that nothing could place** — a
     ///   ring along a torus, or with a side along a hyperbola (Q1253). No shape
-    ///   is known to reach it: a torus refuses every fuse before here
-    ///   (`how_often_a_fuse_with_a_torus_refuses.rs`).
+    ///   is known to reach it. It is not that a torus refuses every fuse before
+    ///   the joining: a bend fused with a copy of itself reaches
+    ///   [`Assembly::join_up_what_is_one_face`] under all three rules (Q597).
+    ///   What keeps two rings along one torus off one joined flat face so far
+    ///   is the gap in `which_way_an_edge_runs_round` (`fuse/arrange.rs`) that
+    ///   stops the one probe that would put them there.
     /// - **Two or more rings each holding the others**, which would mean the
     ///   answer's rings cross. Nobody has traced whether any shape reaches it.
     fn rings_round(
