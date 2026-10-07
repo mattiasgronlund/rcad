@@ -6727,7 +6727,11 @@ mod tests {
             "the naive f64 cross still rounds to the zero vector at one ulp"
         );
         assert!(
-            !a_circle_round_the_axis([Surface::Torus(ring), Surface::Plane(flat)]),
+            a_circle_round_the_axis(
+                Surface::Torus(ring),
+                [Surface::Torus(ring), Surface::Plane(flat)]
+            )
+            .is_none(),
             "the exact cross is not zero, so this is not a circle round the axis"
         );
     }
