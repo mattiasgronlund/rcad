@@ -436,3 +436,41 @@ off `9e6da7e1`.
   conditions and whose hole is a circle read at the same height everywhere,
   plus `mesh.rs`'s ask for it — not measured whether that is sufficient, so
   no class.
+
+**2026-10-07, Q1109: a pipe's rings are cut by corner order, and all twelve
+placements are 0 off.** Lane `lane-q1109-a-placed-pipes-rings-cut-by-corner-order`,
+off `9e02c8f0`, merged at `6710f521`.
+
+- On the base, Q797's test printed its twelve rows as pinned.
+- The ring's outline has 126 corners and its hole 73. The outline's corner 0
+  is a quarter turn from the hole's corner 0, so a cut that starts both loops
+  at corner 0 turns triangles over and falls back to spade (measured with a
+  probe).
+- **What landed.** `triangulate.rs` cuts a flat patch with one hole that turns
+  against its outline by stepping round both loops together
+  (`in_step_round_a_ring`). The hole starts at the middle of the run of its
+  sides that the outline's corner 0 sees from outside
+  (`the_corner_of_the_hole_across_from`, `orient2d` signs only). Which loop
+  steps next is a whole-number comparison of equal shares of a turn. The cut
+  is taken only when every triangle turns the outline's way by `orient2d`.
+  With that, the triangles' sides add up to the two loops, so they cover the
+  ring exactly once; any other ring is cut by spade as though not asked.
+- `mesh.rs` asks on a flat face of one or two wires. Each must be one closed
+  edge that every curved face across reads at one height of a second
+  coordinate that does not wrap. For a ring, no face may be across both rims.
+- **Results.** All twelve rows are 0 off on both rings, corner for corner and
+  in order (`a_placed_pipes_flat_ends_are_cut_into_the_unplaced_pipes_triangles`).
+  These pass as pinned: `a_placed_bar_is_cut_into_the_unplaced_bars_triangles`,
+  the read-back file,
+  `a_rim_cornered_on_the_pole_builds_either_way_round_and_both_ways_measure`,
+  and `no_sliver_cut_through_a_balls_pole_folds_at_any_deflection`, which has
+  been pinned at 2 folds since Q1027. rcad-mesh, rcad-topo and rcad-step: 1956
+  of 1956 pass.
+- **The Q796 entry's command no longer runs the rim test**: that test was
+  renamed from `…_builds_one_way_round_and_that_way_measures`. The four tests
+  run now as
+  `mise exec -- just t -E 'binary(a_placed_bar_is_meshed_from_the_corners_it_stores) | binary(a_flat_cap_is_cut_up_the_same_after_its_own_file) | test(=a_rim_cornered_on_the_pole_builds_either_way_round_and_both_ways_measure) | test(=no_sliver_cut_through_a_balls_pole_folds_at_any_deflection)' --no-capture --no-fail-fast`.
+- **Left, not run (Q1274).** A ring whose outline's corner 0 lies within a
+  rounding of the line through one of its hole's sides could see another run
+  of sides once placed, start the hole at another corner, and be cut into
+  other triangles than the unplaced ring.
