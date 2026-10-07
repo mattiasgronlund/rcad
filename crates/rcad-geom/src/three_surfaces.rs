@@ -2452,7 +2452,9 @@ fn what_a_plane_beside_their_one_axis_leaves(
     };
     let shared = [squared, half_linear, constant];
 
-    let mut cuts: SmallVec<[(Interval, Decision); 2]> = SmallVec::new();
+    // A height whose circle the plane misses is dropped here, and each that is
+    // kept says whether the plane only touches its circle.
+    let mut cuts: SmallVec<[(Interval, bool); 2]> = SmallVec::new();
     for (step, root) in steps.iter().zip(roots) {
         let height = match step {
             MeetsAt::Here(height) => *height,
@@ -2465,7 +2467,9 @@ fn what_a_plane_beside_their_one_axis_leaves(
         let Some(how) = the_sign_of_the_chord_at(root, &chord, &shared) else {
             return Err(refused());
         };
-        cuts.push((height, how));
+        if how != Decision::Neg {
+            cuts.push((height, how == Decision::Zero));
+        }
     }
     // Lower heights first, as on the road through the axis.
     if heights.squared.sign() == Decision::Neg {
@@ -2473,9 +2477,14 @@ fn what_a_plane_beside_their_one_axis_leaves(
     }
 
     let mut places: SmallVec<[PredicatePoint; 2]> = SmallVec::new();
-    for (height, how) in cuts {
+    for (height, it_only_touches) in cuts {
         places.extend(the_ends_of_the_chord_at(
-            flat, &axis, &reach, &off_it, height, how,
+            flat,
+            &axis,
+            &reach,
+            &off_it,
+            height,
+            it_only_touches,
         ));
     }
     if places.iter().any(|place| !place.uncertainty().is_finite()) {
@@ -2614,16 +2623,17 @@ fn the_sign_with_a_root_in_it(plain: &Exact, rooted: &Exact, under: &Exact) -> O
     })
 }
 
-/// Where the plane beside the axis meets the circle at `height`: nothing where
-/// `how` is below zero, the foot of the plane on the axis where it is zero,
-/// and the chord's two ends, the `−(n × w)` side first, where it is above.
+/// Where the plane beside the axis meets the circle at `height`, which it
+/// does not miss: the foot of the plane on the axis where it only touches the
+/// circle, and the chord's two ends, the `−(n × w)` side first, where it cuts
+/// it.
 fn the_ends_of_the_chord_at(
     flat: &Plane,
     axis: &AnAxis,
     reach: &Quadratic,
     off_it: &Exact,
     height: Interval,
-    how: Decision,
+    it_only_touches: bool,
 ) -> SmallVec<[PredicatePoint; 2]> {
     let normal = flat.normal().components();
     let squared_normal = dot_enclosing(exactly(normal), exactly(normal));
@@ -2637,30 +2647,25 @@ fn the_ends_of_the_chord_at(
             )
             - quotient_or_everything(off * Interval::exactly(normal[coordinate]), squared_normal)
     });
-    match how {
-        Decision::Neg => SmallVec::new(),
-        Decision::Zero => smallvec![the_point_a_box_names(foot)],
-        Decision::Pos => {
-            let out_there = reach.squared.enclosure() * (height * height)
-                + Interval::exactly(2.0) * reach.half_linear.enclosure() * height
-                + reach.constant.enclosure();
-            let across = quotient_or_everything(
-                root_enclosing(out_there * squared_normal - off * off * squared_axis),
-                squared_normal,
-            );
-            let sideways = cross_enclosing(exactly(normal), exactly(axis.along));
-            [-across, across]
-                .into_iter()
-                .map(|side| {
-                    the_point_a_box_names(core::array::from_fn(|coordinate| {
-                        foot[coordinate]
-                            + quotient_or_everything(side * sideways[coordinate], squared_axis)
-                    }))
-                })
-                .collect()
-        }
-        other => unreachable!("an exact sign is a sign: {other:?}"),
+    if it_only_touches {
+        return smallvec![the_point_a_box_names(foot)];
     }
+    let out_there = reach.squared.enclosure() * (height * height)
+        + Interval::exactly(2.0) * reach.half_linear.enclosure() * height
+        + reach.constant.enclosure();
+    let across = quotient_or_everything(
+        root_enclosing(out_there * squared_normal - off * off * squared_axis),
+        squared_normal,
+    );
+    let sideways = cross_enclosing(exactly(normal), exactly(axis.along));
+    [-across, across]
+        .into_iter()
+        .map(|side| {
+            the_point_a_box_names(core::array::from_fn(|coordinate| {
+                foot[coordinate] + quotient_or_everything(side * sideways[coordinate], squared_axis)
+            }))
+        })
+        .collect()
 }
 
 /// A line, written as `(through + s · direction) / divided_by`.
