@@ -195,9 +195,11 @@ fn every_corner_of_each_cube_is_in_front_of_the_others_touching_face_only_when_a
 /// between its face `x = 2` and the plane of the second cube's face `x = 0`,
 /// are placed outside by the second cube's bottom plane since Q991, and the
 /// refusal moved to the strip between the same two planes on the first cube's
-/// top, from `y = 0` to `0.5`. That strip is outside the second cube too, but
-/// two of its corners lie on the plane of the second cube's face `y = 0.5`
-/// rather than in front of it, which `by_a_plane` does not take.
+/// top, from `y = 0` to `0.5`. That strip is outside the second cube too, with
+/// two of its corners on the plane of the second cube's face `y = 0.5` and the
+/// other two in front of it, and since Q1288 `by_a_plane` takes that and places
+/// it. The refusal moved on to the rest of that strip, from `y = 0.5` to `2`,
+/// which is inside the second cube, so no plane of it has a corner in front.
 #[test]
 fn two_cubes_overlapping_by_a_rounding_are_refused_for_the_sliver_between_them() {
     for (what, refused_at) in every_fuse_refused(A_ROUNDING_INTO_EACH_OTHER) {

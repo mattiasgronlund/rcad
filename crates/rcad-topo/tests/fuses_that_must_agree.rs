@@ -144,7 +144,7 @@ use rcad_geom::{
     Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Invalid, Model, Rule, SolidBuilder, SolidKey};
 
 use comparison::{
     Answer, Face, Picking, Run, Step, WhatItSitsOn, answer_of, bits, turned_to_its_smallest,
@@ -227,8 +227,10 @@ const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 ///
 /// Twenty-four per cent, chosen from measurement rather than from taste, and it
 /// is a threshold on a **deterministic** number: [`measured`] runs from a fixed
-/// seed, so the shipped corpus of 429 turned fuses refuses 96 of them, 22.38%,
-/// every run on every machine. There is no sampling noise for the threshold to
+/// seed, so the shipped corpus of 429 turned fuses refused 96 of them, 22.38%,
+/// every run on every machine, when it was chosen. Just before Q1288 it was 45
+/// of 447, 10.07%, and since Q1288 it is 39 of 447, 8.72%. There is no sampling
+/// noise for the threshold to
 /// have to clear, so what it has to clear instead is ordinary drift — 1.6 points
 /// is seven fuses — and what it has to catch is a regression. The three undeserved
 /// refusals recorded so far are each worth several times that on their own: the
@@ -274,7 +276,9 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// of 429 skew fuses refused 51 of them, 11.89%, every run on every machine.
 /// Measured on Q901's merge it was 441 fuses and 39 refused, 8.84%, and since
 /// Q1145 it is 27 refused, 6.12%, which leaves this threshold further off than
-/// the drift below argues for; it was moved down with neither.
+/// the drift below argues for; it was moved down with neither. Just before
+/// Q1279 it was 30 of 447, 6.71%, and since Q1279 it is 16 of 447, 3.58%;
+/// the threshold was not moved then either.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
 /// drift — 6.1 points is twenty-six fuses, nearly four times the headroom
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
@@ -911,6 +915,11 @@ fn swapping_the_two_sides_of_a_lattice_pair_changes_not_one_bit() {
     tally.report_what_it_compared("commutativity, lattice pairs");
 }
 
+/// Commutativity over the turned pairs.
+///
+/// **Since Q1288 a fuse here may be refused for an answer with an edge too
+/// short beside its coordinates**, counted by name ([`a_flat_refusal`]) rather
+/// than failed: 8 of its 276 fuses are, and 12 are refused in all, from 20.
 #[test]
 fn swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit() {
     let tally = over(CASES, a_turned_pair(), |configuration, tally| {
@@ -1604,6 +1613,15 @@ fn every_certified_fuse_of_a_pair_somewhere_else_in_f64_is_decided() {
 /// agreeing in the last bits, which is where most of the refusals come from. So
 /// the rate is as much a statement about how degenerate the corpus is as about
 /// the filters, and the two families have to be read together.
+///
+/// **Since Q1288 it is 39 of 447 refused, from 45**, all 45 then under *a
+/// point inside a piece of a face*. A plane of one solid now places a piece
+/// with every corner on or in front of it and one strictly, so a piece a
+/// rounding across whose corners lie on that solid's planes is placed. 33
+/// still name the point, and 6 are [`AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES`]:
+/// fuses that get as far as an answer and find its shortest edge `7.7e15` to
+/// `2.9e16` times shorter than its largest coordinate, a limit
+/// ([`a_flat_refusal`]).
 #[test]
 fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
     let tally = measured(a_turned_pair(), |configuration, tally| {
@@ -1657,7 +1675,15 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
 /// inside. Two turns of opposite sign now put the point outside a triangle of
 /// the fan without it. `tests/three_cut_lines_through_one_corner_of_a_skew_pair.rs`
 /// pins the two pairs that answer now, all six of their fuses, and a third
-/// pair that gets past that piece and stops on the next.
+/// pair that got past that piece and stopped on the next.
+///
+/// **Since Q1279 it is 16 of 447 refused, from 30**, all 30 then under that
+/// name. Q1146 found the stops on slivers that hold no `f64` point, where
+/// three planes meet by design, and a plane of one solid now places a piece
+/// with every corner on or in front of it and one strictly. 15 still name the
+/// point, and one is [`AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES`], at a spread
+/// of `5 · 2^51`, which is what the third pair's union is refused at: an edge
+/// `2^-51` long beside a coordinate of 5, a limit ([`a_flat_refusal`]).
 #[test]
 fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
     let tally = measured(a_skew_pair(), |configuration, tally| {
@@ -1724,6 +1750,10 @@ fn how_often_a_certified_fuse_of_a_pair_leaning_the_same_way_refuses() {
 /// [`the_same_wall_built_from_a_longer_edge_is_the_same_plane`] — so the last
 /// bit of a coefficient is a fair thing to ask about, and the diff was the one
 /// word that section predicted.
+///
+/// **Since Q1279 a fuse here may be refused for an answer with an edge too
+/// short beside its coordinates**, counted by name ([`a_flat_refusal`]) rather
+/// than failed: 2 of its 276 fuses are, and 22 are refused in all, from 28.
 #[test]
 fn swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit() {
     let tally = over(CASES, a_skew_pair(), |configuration, tally| {
@@ -3904,6 +3934,12 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
 /// planes two points a rounding apart are the meets of.
 const A_POINT_INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 
+/// What a flat fuse refuses when its answer keeps an edge too short to stand
+/// beside its own coordinates: [`Invalid::DynamicRangeTooWide`], as
+/// [`a_flat_refusal`] names it.
+const AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES: &str =
+    "an answer with an edge too short beside its coordinates";
+
 // `"a point in a piece that every solid could place"` is what the fuse gives
 // up on when it is handed two curved faces lying on the same surface (§36.16's
 // row; `a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all` is the
@@ -4293,10 +4329,10 @@ fn fused(
                 Coordinates::LieOnARoundWallAndMayCoincide | Coordinates::LieOnAConesWall => {
                     a_curved_refusal(&why)
                 }
-                Coordinates::AreExactlyRepresentable
-                | Coordinates::AreUnderAGeneralRotation
-                | Coordinates::SitOnTiltedWalls
-                | Coordinates::LieOnARoundWall => None,
+                Coordinates::AreUnderAGeneralRotation | Coordinates::SitOnTiltedWalls => {
+                    a_flat_refusal(&why)
+                }
+                Coordinates::AreExactlyRepresentable | Coordinates::LieOnARoundWall => None,
             };
             let Some(named) = allowed else {
                 return Err(TestCaseError::fail(format!("{rule:?} went wrong: {why}")));
@@ -4306,6 +4342,28 @@ fn fused(
             Ok(Fused::Refused)
         }
     }
+}
+
+/// The one refusal a flat fuse whose corners are not all exact is allowed to
+/// hit by name, rather than as a predicate giving up: an answer with an edge
+/// too short to stand beside its largest coordinate in `f64`,
+/// [`Invalid::DynamicRangeTooWide`]. Anything else is a bug, so this hands back
+/// `None` for it and [`fused`] fails.
+///
+/// **A limit and not a gap**, by `Assembly::check_dynamic_range`'s argument in
+/// `fuse/assemble.rs`: the ratio is a length over a length, so no scaling of
+/// the answer fits the two in `f64` together, and the short edge is where the
+/// two inputs' stored planes really put it.
+///
+/// **The turned and skew families reach it since Q1279 and Q1288**, which let
+/// `by_a_plane` in `fuse/select.rs` place a piece with corners on the plane, so
+/// fuses that stopped for want of a point inside a piece of a face now get as
+/// far as the answer, and some answers keep a side a rounding long.
+/// `tests/three_cut_lines_through_one_corner_of_a_skew_pair.rs` pins one: an
+/// edge `2^-51` long beside a coordinate of 5.
+fn a_flat_refusal(why: &Error) -> Option<&'static str> {
+    matches!(why, Error::Invalid(Invalid::DynamicRangeTooWide { .. }))
+        .then_some(AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES)
 }
 
 /// The refusals a curved fuse is allowed to hit today, by name.
