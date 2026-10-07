@@ -66,6 +66,13 @@ use rcad_topo::{
 
 mod cones;
 
+// Shared with `fuses_that_must_agree.rs` and `fuzzing/fuse.rs`, which each
+// reach the same file by `#[path]` from their own directory (§129.5 item 3).
+#[path = "fuzzing/comparison.rs"]
+mod comparison;
+
+use comparison::{answer_of, same_answer};
+
 /// A ball of radius 2 at the origin, less a ball of radius `0.3` at
 /// `(0.5, 0.25, 1.9)`, against the square rod `|x|, |y| < 1`, `|z| < 5`.
 ///
@@ -695,6 +702,69 @@ fn a_frustum_under_two_steep_planes_is_answered_under_every_rule() {
             assert_each_holds(&model, &answer, &[volume], &what);
         }
     }
+}
+
+/// The frustum cut to the chip
+/// (`a_frustum_under_two_steep_planes_is_answered_under_every_rule`'s third
+/// row), union'd with its prism cone first and prism first, write out the
+/// same solid bit for bit — compared the way `fuses_that_must_agree.rs`'s
+/// `swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit` compares its
+/// two orders. Both answers hold the volume that test already checks, `give
+/// or take` a mesh error of its own; what this pins is that **the two give or
+/// take different amounts, by about `1.4e-6`, because each run's mesh starts
+/// from a different corner of the cone face**, not because the two runs built
+/// different solids (queue row Q1328).
+#[test]
+fn a_frustum_and_a_prism_fused_both_ways_write_out_the_same_solid() {
+    let chip = [[3.0, 5.0], [-0.5, -2.0], [6.5, -2.0]];
+    let build = || {
+        let mut model = a_model();
+        let cone = cones::a_frustum(&mut model, 1.0, 0.5, 8.0);
+        let prism = a_prism_along_y(&mut model, chip, 10.0);
+        (model, cone, prism)
+    };
+    let measure = |model: &Model, solid: SolidKey| {
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.001).expect("a fine mesh"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a frustum fused with a prism measures")
+    };
+
+    let (mut cone_first_model, cone, prism) = build();
+    let cone_first = fuse_one(&mut cone_first_model, cone, prism, Rule::Union);
+    let cone_first_measured = measure(&cone_first_model, cone_first);
+
+    let (mut prism_first_model, cone, prism) = build();
+    let prism_first = fuse_one(&mut prism_first_model, prism, cone, Rule::Union);
+    let prism_first_measured = measure(&prism_first_model, prism_first);
+
+    if let Err(why) = same_answer(
+        &answer_of(&cone_first_model, &[cone_first]),
+        &answer_of(&prism_first_model, &[prism_first]),
+        Rule::Union,
+        "swapping the cone and the prism",
+    ) {
+        panic!("one solid fused both ways wrote out as two different answers: {why}");
+    }
+
+    let apart = (cone_first_measured.volume() - prism_first_measured.volume()).abs();
+    assert!(
+        apart > 0.0,
+        "the two meshes agreed about the volume exactly; the mesh no longer starts from a \
+         different corner each way round, so the doc comment above is stale"
+    );
+    assert!(
+        apart <= cone_first_measured.volume_error() && apart <= prism_first_measured.volume_error(),
+        "the two meshes' volumes differ by {apart}, more than either run's own \
+         volume_error ({}, {}) says the mesh could be out",
+        cone_first_measured.volume_error(),
+        prism_first_measured.volume_error(),
+    );
 }
 
 /// The frustum of slope 1 from `z = 2` to `16` under the roof of
