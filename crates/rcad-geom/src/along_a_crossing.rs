@@ -615,7 +615,10 @@ fn unless_proved_on_one_axis(sharing: Decision) -> Option<Result<WhichWayItWinds
         Decision::Zero => None,
         Decision::Pos => Some(Err(Error::TheseTwoSurfacesDoNotCrossInAConic)),
         Decision::Undecidable { .. } => Some(Ok(WhichWayItWinds::CannotTell)),
-        other => unreachable!("how far off an axis is a sum of squares: {other:?}"),
+        Decision::Neg => {
+            unreachable!("how far off an axis is a sum of squares, never below nothing")
+        }
+        other => unreachable!("unhandled decision: {other:?}"),
     }
 }
 
