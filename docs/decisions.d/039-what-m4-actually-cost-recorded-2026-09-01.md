@@ -478,10 +478,11 @@ moved them.
 > model supports (`docs/decisions.md` §3.5): **a limit**, pinned by
 > `the_prism_with_its_edge_a_rounding_into_the_blocks_top_is_refused`. At
 > `−2.5`, `−1.25` and `1.5` the edge stands a rounding above the top instead,
-> so the two share no point and every answer is the two as they stand, yet
-> every rule both ways round still refuses the same way: **a gap**, pinned by
-> `a_prism_standing_a_rounding_above_the_blocks_top_is_refused_though_the_two_
-> share_no_point`. Open queue row Q1279 is the one that moves that gap.
+> so the two share no point and every answer is the two as they stand. Every
+> rule both ways round refused the same way there, **a gap**, until Q1279:
+> `by_a_plane` now places a piece with corners on the plane and one strictly
+> in front, and all 18 fuses answer, held against volumes in
+> `a_prism_lying_on_one_edge.rs`'s `LAID` (§365.8).
 
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot

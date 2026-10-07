@@ -38,7 +38,9 @@
 //! the block, so the two overlap in a sliver, and every answer then needs a
 //! side shorter than the gap between two doubles: a limit. At `x = −2.5`,
 //! `−1.25` and `1.5` it stands a rounding above the top, the two share no
-//! point, and every answer is the two as they stand: a gap, still refused.
+//! point, and every answer is the two as they stand. That was a gap, refused
+//! for want of a point inside a piece of a face, until queue row Q1279 let a
+//! plane place a piece with corners on it (`docs/decisions.md` §365.8).
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
@@ -52,21 +54,33 @@ const BLOCK: f64 = 240.0;
 /// The prism's triangle, its corner at the origin, both walls leaning up.
 const RESTING: [[f64; 2]; 3] = [[0.0, 0.0], [3.0, 2.0], [-1.0, 2.0]];
 
-/// Where each prism is moved to, and how long it is.
-const LAID: [([f64; 3], f64); 2] = [([0.0, 0.0, 2.0], 6.0), ([-1.0, 0.0, 2.5], 4.75)];
+/// Where each prism is moved to, and how long it is. The first two leave its
+/// edge on the block's top, and the last three, six long, a rounding above it.
+const LAID: [([f64; 3], f64); 5] = [
+    ([0.0, 0.0, 2.0], 6.0),
+    ([-1.0, 0.0, 2.5], 4.75),
+    ([-2.5, 0.0, 2.0], 6.0),
+    ([-1.25, 0.0, 2.0], 6.0),
+    ([1.5, 0.0, 2.0], 6.0),
+];
 
 /// Where a prism six long is moved to for its walls' rounding to leave its
 /// edge `3.1e-17` inside the block's top.
 const A_ROUNDING_INTO_THE_TOP: [f64; 3] = [-1.5, 0.0, 2.0];
 
-/// Where a prism six long is moved to for its walls' rounding to leave its
-/// edge a rounding above the block's top.
-const A_ROUNDING_ABOVE_THE_TOP: [[f64; 3]; 3] =
-    [[-2.5, 0.0, 2.0], [-1.25, 0.0, 2.0], [1.5, 0.0, 2.0]];
-
 /// The regression: every rule both ways round, checked against volumes. The
 /// union is the block and the prism as they stood, two lumps; the
 /// intersection is no solid; each difference is the first solid whole.
+///
+/// **With the edge a rounding above the top**, the last three of [`LAID`], the
+/// two share no point (the test below), so the answers are the same. Every
+/// rule both ways round was refused there for want of a point inside a piece
+/// of a face until queue row Q1279 (`docs/decisions.md` §365.8). Under the
+/// union at `x = −2.5`, either way round, the piece is the sliver of the
+/// block's top from `z = 0` to `z = 2` between where the two walls' planes
+/// meet it, outside the prism, with two of its corners on the plane of the
+/// prism's end and the others in front of it; `by_a_plane` in `fuse/select.rs`
+/// asked for every corner strictly in front.
 #[test]
 fn a_prism_lying_on_its_edge_on_a_blocks_top_answers_every_rule_both_ways_round() {
     let mut wrong = Vec::new();
@@ -97,29 +111,27 @@ fn a_prism_lying_on_its_edge_on_a_blocks_top_answers_every_rule_both_ways_round(
 
 /// **Where the edge lies is the walls' rounding.** Each end of the edge is the
 /// meet of the two walls and that end's plane, and asked exactly of those
-/// planes it lies on the block's top at every placement of [`LAID`], strictly
-/// below it at `x = −1.5`, inside the block, and strictly above it at
-/// `x = −2.5`, `−1.25` and `1.5`, clear of the block.
+/// planes it lies on the block's top at `x = 0` and `x = −1`, strictly above
+/// it at `x = −2.5`, `−1.25` and `1.5`, clear of the block, and strictly below
+/// it at `x = −1.5`, inside the block.
 #[test]
-fn the_prisms_edge_is_on_the_blocks_top_only_where_every_fuse_answers() {
-    for (at, length) in LAID {
-        assert_eq!(
-            sides_of_the_prisms_edge_against_the_blocks_top(at, length),
+fn the_prisms_edge_is_on_the_blocks_top_or_above_it_wherever_every_fuse_answers() {
+    let sides =
+        LAID.map(|(at, length)| sides_of_the_prisms_edge_against_the_blocks_top(at, length));
+    assert_eq!(
+        sides,
+        [
             [Decision::Zero; 2],
-            "{at:?}"
-        );
-    }
+            [Decision::Zero; 2],
+            [Decision::Pos; 2],
+            [Decision::Pos; 2],
+            [Decision::Pos; 2],
+        ]
+    );
     assert_eq!(
         sides_of_the_prisms_edge_against_the_blocks_top(A_ROUNDING_INTO_THE_TOP, 6.0),
         [Decision::Neg; 2]
     );
-    for at in A_ROUNDING_ABOVE_THE_TOP {
-        assert_eq!(
-            sides_of_the_prisms_edge_against_the_blocks_top(at, 6.0),
-            [Decision::Pos; 2],
-            "{at:?}"
-        );
-    }
 }
 
 /// **At `x = −1.5` every answer has a side shorter than the gap between two
@@ -156,32 +168,16 @@ fn every_answer_with_the_edge_a_rounding_into_the_top_needs_a_side_shorter_than_
 /// side shorter than one double (the test above).
 ///
 /// With the block first the piece is the sliver of the block's top from
-/// `z = 0` to `z = 2` between where the two walls' planes meet it, outside the
-/// prism. With the prism first it is the part of the prism's end at `z = 2`
-/// below the block's top, inside the block. Each has every corner on a plane
-/// of the other solid, so neither a corner nor a plane places it.
+/// `z = 2` to `z = 8` between where the two walls' planes meet it, inside the
+/// prism, so no plane of the prism has a corner of it in front. Until queue
+/// row Q1279 the fuse stopped sooner, on the
+/// sliver from `z = 0` to `z = 2`, outside the prism, which the plane of the
+/// prism's end now places (`docs/decisions.md` §365.8). With the prism first
+/// the piece is the part of the prism's end at `z = 2` below the block's top,
+/// inside the block, its three corners a rounding from `(−1.5, 0, 2)`.
 #[test]
 fn the_prism_with_its_edge_a_rounding_into_the_blocks_top_is_refused() {
     let wrong = what_is_not_refused_for_want_of_a_point_inside_a_piece(A_ROUNDING_INTO_THE_TOP);
-    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
-}
-
-/// **A gap**: with the edge a rounding above the block's top the two share no
-/// point (the first test above), so the union is the two as they stand, the
-/// intersection nothing and each difference its first solid whole, and every
-/// rule both ways round is refused all the same, `Undecidable` for want of *a
-/// point inside a piece of a face*. Under the union at `x = −2.5`, either way
-/// round, the piece is the sliver of the block's top from `z = 0` to `z = 2`
-/// between where the two walls' planes meet it, outside the prism; two of its
-/// corners lie on the plane of the prism's end rather than in front of it,
-/// which `by_a_plane` in `fuse/select.rs` does not take. This pin fails the day
-/// it closes, and then these placements belong in [`LAID`].
-#[test]
-fn a_prism_standing_a_rounding_above_the_blocks_top_is_refused_though_the_two_share_no_point() {
-    let wrong: Vec<String> = A_ROUNDING_ABOVE_THE_TOP
-        .into_iter()
-        .flat_map(what_is_not_refused_for_want_of_a_point_inside_a_piece)
-        .collect();
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
@@ -382,7 +378,10 @@ fn fuse(
 }
 
 /// What is wrong with an answer that should be one solid per volume in
-/// `should`, in any order, each measured exactly; `None` when nothing is.
+/// `should`, in any order, each measured to within the rounding its measure
+/// owns up to; `None` when nothing is. That rounding is nothing where every
+/// corner is on whole and half numbers, and a few `1e-15` where the prism's
+/// walls are stored a rounding off them.
 fn differs(model: &Model, answer: rcad_topo::Result<Fused>, should: &[f64]) -> Option<String> {
     let fused = match answer {
         Ok(fused) => fused,
@@ -391,7 +390,7 @@ fn differs(model: &Model, answer: rcad_topo::Result<Fused>, should: &[f64]) -> O
     if let Err(why) = model.validate(&Policy::certified(), &mut ProvenanceLog::new()) {
         return Some(format!("wrote a model that does not validate: {why}"));
     }
-    let mut found: Vec<f64> = fused
+    let mut found: Vec<(f64, f64)> = fused
         .solids()
         .iter()
         .map(|&solid| {
@@ -404,18 +403,19 @@ fn differs(model: &Model, answer: rcad_topo::Result<Fused>, should: &[f64]) -> O
                     &mut ProvenanceLog::new(),
                 )
                 .expect("a flat solid this size measures");
-            assert_eq!(
-                measured.volume_error(),
-                0.0,
-                "a flat solid on these whole and half numbers measures exactly"
-            );
-            measured.volume()
+            (measured.volume(), measured.volume_error())
         })
         .collect();
-    found.sort_by(f64::total_cmp);
+    found.sort_by(|one, other| one.0.total_cmp(&other.0));
     let mut should = should.to_vec();
     should.sort_by(f64::total_cmp);
-    (found != should).then(|| format!("solids of {found:?}, and the answer is {should:?}"))
+    let agrees = found.len() == should.len()
+        && found
+            .iter()
+            .zip(&should)
+            .all(|(&(volume, error), &should)| (volume - should).abs() <= error);
+    (!agrees)
+        .then(|| format!("solids of {found:?}, each with its error, and the answer is {should:?}"))
 }
 
 fn refused_as_four_faces_along_one_edge(answer: rcad_topo::Result<Fused>) -> Option<String> {

@@ -11,15 +11,17 @@
 //! way. A point well inside the piece is outside each of those triangles all
 //! the same, as two of their sides turn round it opposite ways, and since
 //! Q1145 that is enough. Two of the pairs answer now. The third gets past
-//! its top and stops on a wall.
+//! its top and stopped on a wall until Q1279; now its intersection and
+//! difference answer, and its union is refused as a limit, for an edge a
+//! rounding long.
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 mod cones;
 mod pairs;
 
 use rcad_geom::Deflection;
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
+use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 
 use pairs::{Configuration, Elsewhere, Placed, Shape, Skew};
 
@@ -103,15 +105,99 @@ fn a_leaning_tooth_and_a_leaning_frame_around_it_share_no_space() {
 ///
 /// Before Q1145 every rule stopped on the first block's top, `z = 2`, on a
 /// piece with corners at `(3, 1)` twice, `(5/3, 5/3)` and `(1, 1)`, though
-/// `(7/3, 4/3)` is well inside it. It gets past that now and stops on the
-/// first block's leaning wall instead, on a piece between `z = 0` and `z = 1`
-/// whose four corners are all a rounding from the upright line through
-/// `(3, 1)`: the cut lines of `y = 1` and `x + 2y = 5` on that wall are one
-/// line, and the piece between them holds nothing. This pins that stop, so a
-/// fix of it moves this test.
+/// `(7/3, 4/3)` is well inside it. It got past that and stopped on the first
+/// block's leaning wall instead, on a piece between `z = 0` and `z = 1` whose
+/// four corners are all a rounding from the upright line through `(3, 1)`.
+/// Since Q1279 a plane of the second block with every corner of the piece on
+/// or in front of it, and one strictly, places it.
+///
+/// So the intersection answers, the parallelogram the two share between
+/// `y = 1` and `y = 2`, area `7/6`, one high from `z = 1` to `z = 2`, and the
+/// first less the second holds `8 − 7/6 = 41/6`.
+///
+/// **The union is a limit**, refused [`Invalid::DynamicRangeTooWide`]. The
+/// strip of the second block's wall `x + 2y = 5` from `z = 1` to `z = 2` is
+/// placed outside the first, and its end runs along that block's floor edge,
+/// from its corner on `y = 1` to where the stored plane of the first block's
+/// wall `x − y = 2` crosses it. Those two points are not one, the planes being
+/// stored rounded (the test below shows it exactly), and they round to
+/// `(3.0000000000000004, 1, 1)` and `(3, 1, 1)`: an edge `2^-51` long, beside
+/// a largest coordinate of 5, a spread of `5 · 2^51` against the `1e11` a model
+/// supports (`docs/decisions.md` §3.5). It is a length over a length, so no
+/// scaling of the answer fits the two together (`Assembly::check_dynamic_range`
+/// in `fuse/assemble.rs`).
 #[test]
-fn two_leaning_blocks_meeting_on_one_upright_line_stop_on_a_piece_of_wall_holding_nothing() {
-    let (model, keys) = Configuration {
+fn two_leaning_blocks_meeting_on_one_upright_line_answer_but_their_union_needs_an_edge_too_short() {
+    let (model, keys) = two_leaning_blocks_meeting_on_one_upright_line().build();
+    holds_exactly(&model, &keys[..1], 8.0, "the first");
+    holds_exactly(&model, &keys[1..], 12.0, "the second");
+
+    let (both, solids) = fused(&model, keys[0], keys[1], Rule::Intersection);
+    holds_exactly(&both, &solids, 7.0 / 6.0, "the intersection");
+
+    let (less, solids) = fused(&model, keys[0], keys[1], Rule::Difference);
+    holds_exactly(&less, &solids, 41.0 / 6.0, "the difference");
+
+    let mut model = model.clone();
+    let union = model.fuse(
+        &[keys[0]],
+        &[keys[1]],
+        Rule::Union,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    let Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) = union else {
+        panic!("the union should be refused for an edge too short: {union:?}");
+    };
+    assert_eq!(ratio, 5.0 * 2.0_f64.powi(51));
+}
+
+/// **The second block's corner is a rounding off the first block's wall.**
+/// The corner is the meet of the second block's floor `z = 1`, its wall
+/// `y = 1` and its wall `x + 2y = 5`, and asked exactly of the planes the model
+/// stores, it is strictly in front of the first block's wall `x − y = 2`,
+/// outside that block, though `(3, 1, 1)` is on that wall. So the edge of the
+/// union's answer from that corner along the floor to the wall has a length,
+/// which is what the test above finds too short.
+#[test]
+fn the_second_blocks_corner_is_a_rounding_outside_the_first_blocks_wall() {
+    let (model, keys) = two_leaning_blocks_meeting_on_one_upright_line().build();
+    let planes_of = |solid: SolidKey| -> Vec<[f64; 4]> {
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .map(|face| face.plane().coefficients())
+            .collect()
+    };
+    let one_of = |planes: &[[f64; 4]], which: &dyn Fn(&[f64; 4]) -> bool| -> [f64; 4] {
+        let found: Vec<[f64; 4]> = planes
+            .iter()
+            .copied()
+            .filter(|plane| which(plane))
+            .collect();
+        let [plane] = found[..] else {
+            panic!("one plane, not {found:?}");
+        };
+        plane
+    };
+    let first = planes_of(keys[0]);
+    let second = planes_of(keys[1]);
+    let leaning_out_along_x = one_of(&first, &|plane| plane[0] > 0.0 && plane[1] < 0.0);
+    let corner = [
+        one_of(&second, &|plane| plane[2] < 0.0),
+        one_of(&second, &|plane| plane[1] < 0.0 && plane[0] == 0.0),
+        one_of(&second, &|plane| plane[0] < 0.0 && plane[1] < 0.0),
+    ];
+    assert_eq!(
+        side_of_a_plane_where_three_planes_meet(corner, leaning_out_along_x),
+        Ok(Decision::Pos),
+        "{corner:?} against {leaning_out_along_x:?}"
+    );
+}
+
+fn two_leaning_blocks_meeting_on_one_upright_line() -> Configuration {
+    Configuration {
         solids: vec![
             Placed {
                 shape: Shape::Block { width: 2, depth: 2 },
@@ -128,48 +214,6 @@ fn two_leaning_blocks_meeting_on_one_upright_line_stop_on_a_piece_of_wall_holdin
         ],
         turn: None,
         elsewhere: Elsewhere::here(),
-    }
-    .build();
-    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-        let mut model = model.clone();
-        let refusal = model.fuse(
-            &[keys[0]],
-            &[keys[1]],
-            rule,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        );
-        let Err(Error::Undecidable { records }) = refusal else {
-            panic!("the {rule:?} should still refuse as undecidable: {refusal:?}");
-        };
-        let [record] = records.records() else {
-            panic!("the {rule:?} records one refusal: {records:?}");
-        };
-        assert_eq!(
-            record.predicate(),
-            "a point inside a piece of a face",
-            "the {rule:?}"
-        );
-        let heights: Vec<Option<f64>> = record
-            .inputs()
-            .iter()
-            .map(|corner| {
-                let holds = |axis: usize, value: f64| {
-                    let side = corner.enclosure()[axis];
-                    side.lo() <= value && value <= side.hi()
-                };
-                assert!(
-                    holds(0, 3.0) && holds(1, 1.0),
-                    "the {rule:?} stops on a corner off the line through (3, 1): {corner:?}"
-                );
-                [0.0, 1.0].into_iter().find(|&height| holds(2, height))
-            })
-            .collect();
-        assert_eq!(
-            heights,
-            [Some(0.0), Some(0.0), Some(1.0), Some(1.0)],
-            "the {rule:?}"
-        );
     }
 }
 
