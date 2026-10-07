@@ -1943,10 +1943,11 @@ fn the_nappe_its_sides_are_on(cone: &rcad_geom::Cone, sides: &[Side]) -> Option<
 fn turned_round(cuts: &[Cut]) -> Vec<Cut> {
     cuts.iter()
         .map(|cut| Cut {
-            kept: match cut.kept {
-                Decision::Pos => Decision::Neg,
-                Decision::Neg => Decision::Pos,
-                other => panic!("a cut keeps one side or the other, not {other:?}"),
+            kept: if cut.kept == Decision::Pos {
+                Decision::Neg
+            } else {
+                assert_eq!(cut.kept, Decision::Neg, "a cut keeps one side or the other");
+                Decision::Pos
             },
             ..cut.clone()
         })
