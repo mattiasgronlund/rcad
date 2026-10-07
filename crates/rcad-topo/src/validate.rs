@@ -969,7 +969,10 @@ impl Model {
     ///
     /// So at a circle round the axis ([`a_circle_round_the_axis`]), the side of
     /// the plane the ring's face keeps is read off the way its wire walks the
-    /// circle ([`the_side_its_wire_keeps`]). **With two such circles, along one
+    /// circle ([`the_side_its_wire_keeps`]). The plane is the face across, or
+    /// the circle's own plane where the run names one beside a pipe, cone or
+    /// ball across: a ring with its rim turned down to a pipe has the same two
+    /// pieces with the same corners (row Q1173). **With two such circles, along one
     /// plane or two**, the face is one of the two pieces of the ring between
     /// them, and each leaves its two circles going opposite ways round the
     /// tube: that is what the face is held to, by each circle's side and the
@@ -1112,7 +1115,7 @@ impl Model {
                 let asked = what_the_rule_is_asked_at(face, across, edge);
                 let names_it = asked.names_it;
                 let partner = names_it[1];
-                if a_circle_round_the_axis(names_it) {
+                if a_circle_round_the_axis(face.stored_surface(), names_it).is_some() {
                     if bounds_a_band_of_the_tube {
                         continue;
                     }
@@ -3558,21 +3561,40 @@ struct SideKept {
     kept: Decision,
 }
 
-/// Whether `names_it`, the face's own surface and the one across a closed
-/// edge, are a ring and a plane square to its axis: the edge is then one of the
-/// two circles round the axis that the plane cuts the ring in.
+/// The ring and the plane, when a closed edge of a face stored on `on` is one
+/// of the two circles round the axis that a plane square to the ring's axis
+/// cuts it in: `on` is a ring and `names_it[1]`, the partner the edge's run
+/// names, is that plane.
+///
+/// **`names_it[0]` need not be the ring.** Where the face across is a pipe, a
+/// cone or a ball and the run names the circle's own plane, which is how
+/// `rcad-step` reads a circle between two different curved faces and the
+/// fuse's `the_plane_of_a_rim_between_two_curved_faces` writes one,
+/// [`which_two_surfaces_a_run_is_between`] puts whichever of the two curved
+/// faces sorts first beside the plane, and a ring sorts after all three. The
+/// edge is still on the ring, since it is an edge of a ring face, and on the
+/// plane, since the run says so, so it is still one of those two circles. Read
+/// as the pair alone, it was not, and the ring face's side of the plane was
+/// read off the other circle's corner: a ring with its rim turned down to a
+/// pipe was refused (row Q1173).
 ///
 /// Asked exactly, the way `holds.rs`'s `what_a_ring_face_between_two_planes_holds`
 /// reads the same pair, through [`lie_along_one_line`]: every component of the
 /// stored normal crossed into the stored axis direction is exactly zero. A
 /// plane whose normal is not exactly along the axis is not asked about, and
 /// its edges are read off the corners as before.
-fn a_circle_round_the_axis(names_it: [Surface; 2]) -> bool {
-    matches!(
-        names_it,
-        [Surface::Torus(ring), Surface::Plane(flat)]
-            if lie_along_one_line(flat.normal().components(), ring.axis().direction().components())
+fn a_circle_round_the_axis(
+    on: Surface,
+    names_it: [Surface; 2],
+) -> Option<(rcad_geom::Torus, Plane)> {
+    let (Surface::Torus(ring), Surface::Plane(flat)) = (on, names_it[1]) else {
+        return None;
+    };
+    lie_along_one_line(
+        flat.normal().components(),
+        ring.axis().direction().components(),
     )
+    .then_some((ring, flat))
 }
 
 /// What the closed-edge rule is asked with at one closed edge of a face.
@@ -3727,10 +3749,12 @@ fn its_circles_round_the_axis_bound_a_band_of_the_tube(
             continue;
         };
         let asked = what_the_rule_is_asked_at(face, across, edge);
-        if !a_circle_round_the_axis(asked.names_it) {
+        let Some((ring, flat)) = a_circle_round_the_axis(face.stored_surface(), asked.names_it)
+        else {
             continue;
-        }
-        let Some(up_the_outside) = which_way_round_the_tube_it_leaves(&asked, coedge, policy, log)?
+        };
+        let Some(up_the_outside) =
+            which_way_round_the_tube_it_leaves(&asked, &ring, &flat, coedge, policy, log)?
         else {
             return Ok(false);
         };
@@ -3764,30 +3788,30 @@ fn its_circles_round_the_axis_bound_a_band_of_the_tube(
 /// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the rule cannot, and
 /// whatever [`intersect`] gives for the plane and the ring.
 ///
+/// `ring` is the face's own surface and `flat` the plane `asked.names_it[1]`,
+/// as [`a_circle_round_the_axis`] found them. The side is read against `flat`
+/// with the pair the run names, whichever curved surface is first in it, since
+/// that pair is what both faces along the edge read its walk by.
+///
 /// # Panics
 ///
-/// When `asked` is not a ring and a plane square to its axis, which
-/// [`a_circle_round_the_axis`] has shown, or [`intersect`] names a circle that
-/// such a plane cuts the ring in by anything but the pipe.
+/// When [`intersect`] names a circle that a plane square to the ring's axis
+/// cuts it in by anything but the pipe.
 fn which_way_round_the_tube_it_leaves(
     asked: &AskedAt,
+    ring: &rcad_geom::Torus,
+    flat: &Plane,
     coedge: CoedgeView<'_>,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<bool>> {
-    let [Surface::Torus(ring), Surface::Plane(flat)] = asked.names_it else {
-        panic!(
-            "only a ring and a plane square to its axis are asked this, not {:?}",
-            asked.names_it
-        );
-    };
     let Some(kept) = the_side_its_wire_keeps(asked, coedge)? else {
         return Ok(None);
     };
     let corner = PredicatePoint::from(asked.at.coordinates());
     let Some(picker) = the_picker_naming_the_circle_through(
-        &asked.names_it[1],
-        &asked.names_it[0],
+        &Surface::Plane(*flat),
+        &Surface::Torus(*ring),
         corner,
         policy,
         log,
@@ -3801,7 +3825,7 @@ fn which_way_round_the_tube_it_leaves(
         "a plane square to a ring's axis names its circles by the pipe, and this one by {picker:?}"
     );
     let keeps_the_side_the_axis_points_to =
-        (kept == Decision::Pos) == faces_the_way_its_axis_points(&flat, &ring);
+        (kept == Decision::Pos) == faces_the_way_its_axis_points(flat, ring);
     Ok(Some(keeps_the_side_the_axis_points_to == outer))
 }
 
