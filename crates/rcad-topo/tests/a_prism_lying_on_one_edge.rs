@@ -26,6 +26,11 @@
 //! with a solid lying on it along one edge and reaching down into it somewhere
 //! else. Both validate if they are parted, which is why the parting asks.
 //!
+//! **A solid whose upright wall rests along the edge and turns back below the
+//! top past the block's end answers too** (queue row Q1117, which guessed it
+//! refused): the parting asks every corner of a piece of the wall, and the
+//! top's plane cuts the wall into pieces each on one side of it.
+//!
 //! **Moved elsewhere along `x`, the edge need not lie on the top at all**
 //! (queue row Q1114). The edge is where the prism's two walls meet, and moving
 //! the prism rounds the offset of each wall's plane. At `x = 0` and `x = −1`
@@ -243,6 +248,116 @@ fn a_solid_lying_on_a_block_along_an_edge_and_reaching_into_it_is_refused_united
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// The solid [`a_solid_whose_wall_turns_back_past_the_blocks_end`] builds is
+/// what queue row Q1117 asked for: one solid of 19 that validates, whose
+/// upright wall `x = 0` is one face running along its edge on the block's top
+/// and reaching two below the top past the block's end.
+///
+/// It is three pieces united. A wedge, the triangle `(0, 0)`, `(0, 2)`,
+/// `(−2, 2)` from `z = 2` to `z = 8`, area 2 and volume 12, lies on the top
+/// along its edge `x = y = 0`, its upright wall rising from the edge and its
+/// other wall leaning away. A bar, `−1 ≤ x ≤ 0` and `1 ≤ y ≤ 2` from `z = 5` to
+/// `z = 12`, volume 7, has the 3 up to `z = 8` inside the wedge, which at
+/// height `y` spans `−y ≤ x ≤ 0`. A tab, `−1 ≤ x ≤ 0` and `−2 ≤ y ≤ 2` from
+/// `z = 11` to `z = 12`, volume 4, has the 1 above `y = 1` inside the bar. The
+/// solid is `12 + 7 − 3 + 4 − 1 = 19`. Each piece's wall on `x = 0` overlaps
+/// the next one's, so the solid's is one face, a hook: along the edge from
+/// `z = 2` to `8`, over the block's end at `y = 1`, and down to `y = −2`
+/// between `z = 11` and `12`.
+#[test]
+fn the_wall_that_turns_back_is_one_face_reaching_two_below_the_blocks_top() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let turning = a_solid_whose_wall_turns_back_past_the_blocks_end(&mut model);
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("three flat solids united on whole numbers validate");
+    let solid = model.solid(turning).expect("this model made the key");
+    let measured = solid
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a flat solid this size measures");
+    assert_eq!((measured.volume(), measured.volume_error()), (19.0, 0.0));
+    let walls: Vec<Vec<[f64; 3]>> = solid
+        .faces()
+        .filter(|face| face.plane().coefficients() == [1.0, 0.0, 0.0, 0.0])
+        .map(|face| {
+            let mut corners: Vec<[f64; 3]> = face
+                .wires()
+                .flat_map(|wire| wire.points().map(|point| point.coordinates()))
+                .collect();
+            corners.sort_by(|one, other| {
+                one.partial_cmp(other)
+                    .expect("a corner of a solid has real coordinates")
+            });
+            corners
+        })
+        .collect();
+    assert_eq!(
+        walls,
+        [[
+            [0.0, -2.0, 11.0],
+            [0.0, -2.0, 12.0],
+            [0.0, 0.0, 2.0],
+            [0.0, 0.0, 8.0],
+            [0.0, 1.0, 8.0],
+            [0.0, 1.0, 11.0],
+            [0.0, 2.0, 2.0],
+            [0.0, 2.0, 12.0],
+        ]]
+    );
+}
+
+/// The solid whose wall turns back below the top, on the block: every rule
+/// both ways round, checked against volumes. The two share only the wedge's
+/// edge, `x = y = 0` from `z = 2` to `z = 8`, since the bar is above `y = 1`
+/// and the tab is past the block's end at `z = 10`. So the union is the two as
+/// they stood, 240 and 19, the intersection no solid, and each difference its
+/// first solid whole.
+///
+/// **Queue row Q1117 guessed the union refused** `ResultIsNotManifold { count:
+/// 4 }`: `rest_on_the_outer_side_of` in `fuse/assemble.rs` parts the line only
+/// where every corner of the two faces resting along it is on the outer side
+/// of the top, and this wall has two corners at `y = −2`. It answers because
+/// what is asked is a piece of the wall, never the wall whole, and the fuse
+/// cuts each flat face along the line of every plane that crosses it, its own
+/// solid's and the other's (`fuse/cuts.rs`). That makes the piece along the
+/// edge lie on one side of the edge twice over. The lines the wall's own edges
+/// lie on cut it, so each piece is convex, and a convex piece with a side on a
+/// line lies on one side of that line. And the top's plane cuts it along
+/// `y = 0` right across, past the block's end too, since the top touches the
+/// wall along the edge and so is not a face that misses the wall's plane. On
+/// one side of the top's plane, every corner of the piece being on the outer
+/// side is the side the face leaves the line to.
+#[test]
+fn a_wall_that_turns_back_below_the_top_past_the_blocks_end_answers_every_rule_both_ways_round() {
+    let mut wrong = Vec::new();
+    for swapped in [false, true] {
+        for rule in EVERY_RULE {
+            let what = format!("{rule:?}, the solid that turns back first {swapped}");
+            let (model, answer) = fuse(swapped, rule, |model| {
+                [
+                    a_block(model),
+                    a_solid_whose_wall_turns_back_past_the_blocks_end(model),
+                ]
+            });
+            let should: &[f64] = match (rule, swapped) {
+                (Rule::Union, _) => &[19.0, BLOCK],
+                (Rule::Intersection, _) => &[],
+                (Rule::Difference, false) => &[BLOCK],
+                (Rule::Difference, true) => &[19.0],
+                _ => unreachable!("EVERY_RULE holds only these three"),
+            };
+            if let Some(why) = differs(&model, answer, should) {
+                wrong.push(format!("{what}: {why}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// The block and the other solid fused, the block first unless `swapped`.
 fn fuse(
     swapped: bool,
@@ -431,6 +546,51 @@ fn a_hook(model: &mut Model) -> SolidKey {
         [0.0, 0.0, 2.0],
         6.0,
     )
+}
+
+/// A wedge lying on the block's top along its edge, united with a bar and a
+/// tab that carry its upright wall over the block's end and down below the
+/// top; the first test of the pair above has the shape and its volume.
+fn a_solid_whose_wall_turns_back_past_the_blocks_end(model: &mut Model) -> SolidKey {
+    let wedge = a_prism(
+        model,
+        [[0.0, 0.0], [0.0, 2.0], [-2.0, 2.0]],
+        [0.0, 0.0, 2.0],
+        6.0,
+    );
+    let bar = a_prism(
+        model,
+        [[-1.0, 1.0], [0.0, 1.0], [0.0, 2.0], [-1.0, 2.0]],
+        [0.0, 0.0, 5.0],
+        7.0,
+    );
+    let tab = a_prism(
+        model,
+        [[-1.0, -2.0], [0.0, -2.0], [0.0, 2.0], [-1.0, 2.0]],
+        [0.0, 0.0, 11.0],
+        1.0,
+    );
+    let one = united(model, wedge, bar);
+    united(model, one, tab)
+}
+
+fn united(model: &mut Model, one: SolidKey, other: SolidKey) -> SolidKey {
+    let fused = model
+        .fuse(
+            &[one],
+            &[other],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("two flat solids that overlap unite");
+    let &[solid] = fused.solids() else {
+        panic!(
+            "two solids that overlap unite into one, not {:?}",
+            fused.solids()
+        );
+    };
+    solid
 }
 
 /// An outline stood `length` long along `z`, moved by `at`.
