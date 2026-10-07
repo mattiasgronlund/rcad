@@ -927,16 +927,187 @@ fn a_bar_leaning_to_the_plane_is_still_refused_though_a_ball_sits_on_its_axis() 
     );
 }
 
-/// Three curved surfaces and no plane at all is refused before either road is
-/// tried, because both of them start from a plane.
+/// **Three curved surfaces, two of which bend the same way, are a plane and
+/// two curved surfaces** (Q1284). Two quadrics that square `p` the same way
+/// differ by a plane: every point both hold is on it, and every point on it
+/// and on one of them is on the other. So the plane takes the place of one of
+/// the two, and the roads above answer the triple.
+///
+/// A cut cone less a cone closed by a ball, in `rcad-topo`'s
+/// `a_joined_flat_face_whose_rings_enclose_no_area.rs`, asks this of a cone of
+/// slope one up `z` with its apex at the origin, a second with its apex at
+/// `z = 3`, and the ball of radius `√148` about `(0, 0, 15)`. The cones are
+/// `x² + y² = z²` and `x² + y² = (z − 3)²`, which differ by `6z = 9`, the
+/// plane `z = 1.5`, and the ball reaches down to `15 − √148`, about `2.83`, and
+/// no lower. So the three share nothing.
 #[test]
-fn three_curved_surfaces_are_refused_before_either_road_is_tried() {
-    let here = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0);
-    let there = pipe([6.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0);
+fn two_cones_of_one_slope_and_a_ball_above_the_plane_between_them_share_nothing() {
+    let lower = cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+    let upper = cone([0.0, 0.0, 3.0], [0.0, 0.0, 1.0], 1.0);
+    let round = ball([0.0, 0.0, 15.0], 148.0_f64.sqrt());
+
+    for triple in [
+        [&lower, &upper, &round],
+        [&round, &lower, &upper],
+        [&upper, &round, &lower],
+    ] {
+        assert_eq!(meet(triple), Ok(MeetOfThree::Nowhere), "{triple:?}");
+    }
+}
+
+/// **Where the plane two of them differ by does cut the third**, by two of
+/// the roads. Each corner is checked exactly on all three surfaces.
+///
+/// - Three cones of slope one up `z`, with their apexes at the origin, at
+///   `z = 10` and at `(6, 0, 0)`. The first two differ by `z = 5`, where each
+///   is the circle `x² + y² = 25`, and the third is `(x − 6)² + y² = 25`
+///   there: all three bend the same way, so the plane and the first and third
+///   cones are two planes and a cone, and they meet at `(3, ±4, 5)`.
+/// - Two bars of radius five up `z`, six apart, and a ball of radius 13 about
+///   the origin. The bars differ by `x = 3`, beside the axis the first bar
+///   and the ball share, and those two share the circles of radius five at
+///   `z = ±12`. The plane cuts each at `y = ±4`: four corners, `(3, ±4, ±12)`.
+#[test]
+fn three_curved_surfaces_meet_where_the_plane_two_of_them_differ_by_cuts_the_third() {
+    let up = [0.0, 0.0, 1.0];
+    let cones = [
+        cone([0.0, 0.0, 0.0], up, 1.0),
+        cone([0.0, 0.0, 10.0], up, 1.0),
+        cone([6.0, 0.0, 0.0], up, 1.0),
+    ];
+    let bars_and_a_ball = [
+        pipe([0.0, 0.0, 0.0], up, 5.0),
+        pipe([6.0, 0.0, 0.0], up, 5.0),
+        ball([0.0, 0.0, 0.0], 13.0),
+    ];
+
+    for (triple, wanted) in [
+        (&cones, vec![[3.0, -4.0, 5.0], [3.0, 4.0, 5.0]]),
+        (
+            &bars_and_a_ball,
+            vec![
+                [3.0, 4.0, -12.0],
+                [3.0, -4.0, -12.0],
+                [3.0, 4.0, 12.0],
+                [3.0, -4.0, 12.0],
+            ],
+        ),
+    ] {
+        let [one, other, third] = triple.each_ref();
+        assert_eq!(corners_of([one, other, third]), wanted, "{triple:?}");
+        for order in [
+            [third, one, other],
+            [other, third, one],
+            [other, one, third],
+        ] {
+            assert_eq!(
+                meet(order),
+                meet([one, other, third]),
+                "the answer depends on which three they are, not the order"
+            );
+        }
+    }
+}
+
+/// **Two cones of a slope whose square no `f64` holds still differ by a
+/// stored plane.** Cones of slope `s` up `z`, with their apexes at heights
+/// `h₁` and `h₂`, differ by `2s²(h₁ − h₂)·z = s²(h₁² − h₂²)`, each side
+/// several `f64` long where `s²` is, and the plane is `z = (h₁ + h₂)/2`
+/// whatever `s` is. A bar of radius 100 about the same axis is wider there
+/// than the cones' circle, so each three share nothing.
+///
+/// Slopes `0.01` to `0.99` by hundredths, against 38 pairs of whole heights
+/// with the lower one below 4 and the upper below 12: 3762 triples, all
+/// answered. With the two sides rounded to the nearest `f64` before
+/// [`Plane::from_coefficients`] divides them, rather than divided exactly
+/// first, 641 of them were refused, the stored plane an ulp off the true one
+/// (Q1284, the division swapped out by hand and the sweep counted).
+#[test]
+fn two_cones_of_a_slope_no_f64_squares_still_differ_by_a_stored_plane() {
+    let bar = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 100.0);
+    for hundredths in 1..100 {
+        let slope = f64::from(hundredths) / 100.0;
+        for low in 0..4 {
+            for high in (low + 1)..12 {
+                let lower = cone([0.0, 0.0, f64::from(low)], [0.0, 0.0, 1.0], slope);
+                let upper = cone([0.0, 0.0, f64::from(high)], [0.0, 0.0, 1.0], slope);
+                assert_eq!(
+                    meet([&lower, &upper, &bar]),
+                    Ok(MeetOfThree::Nowhere),
+                    "slope {slope}, apexes at {low} and {high}"
+                );
+            }
+        }
+    }
+}
+
+/// **Two quadrics that bend the same way and differ by a number share
+/// nothing**, and neither does any third surface with them. Two bars up `z`
+/// of radius three and five are `x² + y² = 9` and `x² + y² = 25`, and `0 = 16`
+/// holds nowhere.
+#[test]
+fn two_bars_on_one_axis_with_two_radii_and_a_ball_share_nothing() {
+    let thin = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 3.0);
+    let thick = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0);
+    let round = ball([4.0, 0.0, 0.0], 5.0);
+    assert_eq!(meet([&thin, &thick, &round]), Ok(MeetOfThree::Nowhere));
+    assert_eq!(meet([&round, &thick, &thin]), Ok(MeetOfThree::Nowhere));
+}
+
+/// **One surface written twice is no plane**, so a triple with a repeat in it
+/// is refused as it was before any pair was read as a plane, whether or not
+/// the third bends the same way.
+#[test]
+fn a_surface_written_twice_beside_a_third_curved_one_is_still_refused() {
     let round = ball([0.0, 0.0, 0.0], 5.0);
+    for third in [
+        pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 3.0),
+        ball([6.0, 0.0, 0.0], 5.0),
+    ] {
+        assert_eq!(
+            meet([&round, &round, &third]),
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat),
+            "{third:?}"
+        );
+        assert_eq!(
+            meet([&third, &round, &round]),
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat),
+            "{third:?}"
+        );
+    }
+}
+
+/// **A plane no stored plane is exactly is still refused, and that is a gap.**
+/// Two balls of radius five about the origin and `(3, 3, 0)` differ by
+/// `6x + 6y = 18`, the plane `x + y = 3`. A stored plane's normal has length
+/// one, `(1/√2, 1/√2, 0)` rounded, and its offset is `3/√2` rounded, and
+/// three times that rounded normal is not an `f64`, so no stored plane is
+/// `x + y = 3`. A bar of radius three up `z` with them meets both balls at
+/// `(3, 0, ±4)` and `(0, 3, ±4)`, whole numbers on all three, and the points
+/// are there.
+#[test]
+fn two_balls_whose_plane_no_stored_plane_is_and_a_bar_are_still_refused() {
+    let here = ball([0.0, 0.0, 0.0], 5.0);
+    let there = ball([3.0, 3.0, 0.0], 5.0);
+    let bar = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 3.0);
+
+    for corner in [
+        [3.0, 0.0, 4.0],
+        [3.0, 0.0, -4.0],
+        [0.0, 3.0, 4.0],
+        [0.0, 3.0, -4.0],
+    ] {
+        for surface in [&here, &there, &bar] {
+            assert_eq!(
+                which_side_of(surface, PredicatePoint::from(corner)),
+                Decision::Zero,
+                "{corner:?} is exactly on {surface:?}"
+            );
+        }
+    }
 
     assert_eq!(
-        meet([&here, &there, &round]),
+        meet([&here, &there, &bar]),
         Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
     );
 }

@@ -683,19 +683,27 @@ pub enum Error {
     /// is the second, a wall through the circle a frustum crosses a bar in is
     /// the third, a ball and a bar both resting on a block's floor is the
     /// fourth, and a D-flat on a shaft across the circle a chamfer cone crosses
-    /// it in is the fifth. All five are answered, and this is what is left over
-    /// — among it a plane leaning to the axis a ball and a pipe share, which
-    /// cuts the pipe in an ellipse (`a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses`
-    /// in `rcad-topo`).
+    /// it in is the fifth. All five are answered, and so are three curved
+    /// surfaces two of which square `p` the same way, since the plane those two
+    /// differ by takes one of their places (Q1284): two cones of one slope
+    /// about one axis and a ball. This is what is left over — among it a plane
+    /// leaning to the axis a ball and a pipe share, which cuts the pipe in an
+    /// ellipse (`a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses`
+    /// in `rcad-topo`), and three curved surfaces two of which differ by a
+    /// plane that no stored [`Plane`](crate::Plane) is exactly, such as two
+    /// balls whose centres lie along a diagonal.
     ///
     /// A **gap** and not a limit (§16.10): the points are there, and a real
     /// algebraic solver reaches them. The family of fixes is the
     /// Dupont–Lazard–Lazard–Petitjean machinery or a certified numerical solver
     /// with a separation bound of its own, and both are a milestone rather than
     /// a lane (`docs/decisions.md` §31.2). The consumer that calls it due is
-    /// named there too: two capped bars crossing near one of their caps.
-    /// `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved`
-    /// and `two_bars_leaning_across_each_other_and_a_plane_are_still_refused`
+    /// named there too: two capped bars crossing near one of their caps. For
+    /// the plane no stored plane is, the fix is smaller: roads that take the
+    /// plane as the exact numbers it is, as the first family's road already
+    /// does. `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved`,
+    /// `two_bars_leaning_across_each_other_and_a_plane_are_still_refused` and
+    /// `two_balls_whose_plane_no_stored_plane_is_and_a_bar_are_still_refused`
     /// are the demonstrations that the points exist.
     #[error(
         "where three surfaces meet is only worked out when two of them are flat, and fewer than \

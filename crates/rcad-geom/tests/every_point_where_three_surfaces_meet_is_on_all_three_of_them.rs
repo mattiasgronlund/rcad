@@ -282,14 +282,16 @@ fn the_seeds_three_at(size: f64) -> [Surface; 3] {
 /// refused by name, and the refusal is a gap: the points are there and this is
 /// the demonstration. A plane that holds the axis the two curved surfaces are
 /// turned about is the exception Q1259 added: that case is answered even
-/// though only one of the three is flat.
+/// though only one of the three is flat, and three curved surfaces two of
+/// which differ by a plane are the other, which Q1284 added.
 ///
 /// A pipe of radius three down `z`, a ball of radius five at the origin and a
 /// plane. The pipe and the ball meet where `x² + y² = 9` and `x² + y² + z² =
 /// 25`, so at `z = ±4` — and the point `(3, 0, 4)` is exactly on both, in whole
 /// numbers, with nothing rounded anywhere. Add a third curved surface through it
 /// and the corner still exists and is still exact; what changes is that no
-/// discriminant this milestone writes can reach it.
+/// discriminant this milestone writes can reach it, unless that surface and
+/// one of the two bend the same way.
 #[test]
 fn three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved() {
     let corner = Point::new(3.0, 0.0, 4.0);
@@ -297,6 +299,7 @@ fn three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved() {
     let ball = Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a radius"));
     let second_ball =
         Surface::Sphere(Sphere::new(Point::new(3.0, 0.0, 0.0), 4.0).expect("a radius"));
+    let pipe_across = Surface::Cylinder(Cylinder::new(Axis::x(), 4.0).expect("a radius"));
     let cap = Surface::Plane(
         Plane::from_point_and_normal(corner, Vector::new(0.0, 0.0, 1.0))
             .expect("the z axis is a unit normal"),
@@ -306,8 +309,8 @@ fn three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved() {
             .expect("the y axis is a unit normal"),
     );
 
-    // The corner is exactly on all five, with no rounding anywhere.
-    for surface in [&pipe, &ball, &second_ball, &cap, &wall] {
+    // The corner is exactly on all six, with no rounding anywhere.
+    for surface in [&pipe, &ball, &second_ball, &pipe_across, &cap, &wall] {
         assert_eq!(
             which_side_of(surface, PredicatePoint::from(corner.coordinates())),
             Decision::Zero,
@@ -315,14 +318,30 @@ fn three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved() {
         );
     }
 
-    // Three quadrics, with no flat surface among them at all, refuse by name.
+    // Three quadrics, with no flat surface among them and no two that bend
+    // the same way, refuse by name.
+    assert_eq!(
+        meet_of_three_surfaces(
+            [&pipe_across, &ball, &pipe],
+            &Policy::certified(),
+            &mut ProvenanceLog::new()
+        ),
+        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+    );
+
+    // Two balls bend the same way, and these two differ by the plane x = 3,
+    // which touches the pipe along the line x = 3, y = 0. That line crosses
+    // the circles the pipe and the first ball share at z = ±4.
     assert_eq!(
         meet_of_three_surfaces(
             [&second_ball, &ball, &pipe],
             &Policy::certified(),
             &mut ProvenanceLog::new()
         ),
-        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+        Ok(MeetOfThree::At(smallvec![
+            PredicatePoint::Exact([3.0, 0.0, -4.0]),
+            PredicatePoint::Exact([3.0, 0.0, 4.0]),
+        ]))
     );
 
     // The wall runs along the axis the ball and the pipe share and cuts the
