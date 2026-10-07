@@ -99,7 +99,7 @@ use rcad_geom::{
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
-use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey, SolidView, WireView};
+use rcad_topo::{CoedgeView, DraftStep, Model, SolidBuilder, SolidKey, SolidView, WireView};
 
 use the_door::every_number_the_door_promised_is_real;
 
@@ -305,11 +305,15 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
 /// reader reads it off the circle's placement, and the writer places the
 /// circle at a centre that plane reads back from (Q822).
 ///
-/// **A whole ball a turn moved its poles off the `z` line is the one face not
-/// compared corner by corner.** The writer writes it as the same ball cut open
-/// on that line, and [`assert_cut_again_on_the_z_line`] compares it by its
-/// surface, its poles and its seam; its solid is not then measured bit for
-/// bit, which a turned solid is not anyway (`docs/decisions.md` §404).
+/// **A whole ball the writer put back on the world's chart is the one face
+/// not compared corner by corner.** Two kinds end up there
+/// (`docs/decisions.md` §404): a turn that moved the ball's poles off the `z`
+/// line it pinches on, and a turn about `z` itself whose own seam no centre
+/// the reader holds can carry, in the bands
+/// [`a_whole_ball_whose_seam_was_rewritten`] finds by comparing seams rather
+/// than by the poles. Either way [`assert_cut_again_on_the_z_line`] compares
+/// the face by its surface, its poles and its seam; its solid is not then
+/// measured bit for bit, which a turned solid is not anyway.
 ///
 /// # Panics
 ///
@@ -350,7 +354,9 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) -> bool {
                 "a sound solid's face came back from its own file with a different surface"
             );
         }
-        if let Some(ball) = a_whole_ball_turned_off_z(here_face) {
+        if let Some(ball) = a_whole_ball_turned_off_z(here_face)
+            .or_else(|| a_whole_ball_whose_seam_was_rewritten(here_face, back_face))
+        {
             assert_cut_again_on_the_z_line(ball, back_face);
             every_number_the_same_bits = false;
             continue;
@@ -406,9 +412,61 @@ fn a_whole_ball_turned_off_z(face: &rcad_topo::FaceView<'_>) -> Option<rcad_geom
         .then_some(ball)
 }
 
+/// The ball `here_face` covers whole, where its poles stand where the ball
+/// pinches (so [`a_whole_ball_turned_off_z`] does not catch it) but its own
+/// seam came back from the file as a different run than the one it went in
+/// with, or `None`.
+///
+/// A turn about `z` leaves a ball's poles on the line it pinches on — only a
+/// turn about some other axis moves them off it. For most such turns the
+/// writer carries the seam as it is, and the seam that comes back is still
+/// compared corner by corner. For a turn in the bands
+/// `docs/decisions.md` §404 names, no centre the reader holds can carry that
+/// seam's own plane, and the writer puts the whole ball back on the world's
+/// chart instead, with its seam wherever `add_ball` cuts that
+/// (`rcad_step::write`'s `a_whole_ball_written_on_its_chart`). Comparing the
+/// two seams by [`the_same_run`] is how this tells the two apart without
+/// asking the writer which one it did (Q1319).
+fn a_whole_ball_whose_seam_was_rewritten(
+    here_face: &rcad_topo::FaceView<'_>,
+    back_face: &rcad_topo::FaceView<'_>,
+) -> Option<rcad_geom::Sphere> {
+    let Surface::Sphere(ball) = here_face.surface() else {
+        return None;
+    };
+    let here_seam = the_seam_of_a_whole_ball(here_face)?;
+    let back_seam = the_seam_of_a_whole_ball(back_face)?;
+    let chord = here_seam.end().point() - here_seam.start().point();
+    let same = the_same_run(
+        &here_seam.edge().run(),
+        &back_seam.edge().run(),
+        chord,
+        here_face.surface(),
+    );
+    (!same).then_some(ball)
+}
+
 /// The two poles of a wire that walks one edge there and back with a pole at
 /// each turn, in walk order, or `None` for any other wire.
 fn the_poles_of_a_whole_ball(wire: WireView) -> Option<[Point; 2]> {
+    the_seam_and_poles_of_a_whole_ball(wire).map(|(_, poles)| poles)
+}
+
+/// The seam of the one wire of `face`, the way [`the_seam_and_poles_of_a_whole_ball`]
+/// finds it, or `None` where `face` is not one wire walking one edge there and
+/// back with a pole at each turn.
+fn the_seam_of_a_whole_ball<'m>(face: &rcad_topo::FaceView<'m>) -> Option<CoedgeView<'m>> {
+    let mut wires = face.wires();
+    let (Some(wire), None) = (wires.next(), wires.next()) else {
+        return None;
+    };
+    the_seam_and_poles_of_a_whole_ball(wire).map(|(seam, _)| seam)
+}
+
+/// The seam of a wire that walks one edge there and back with a pole at each
+/// turn, as the coedge walking it the first time, and the two poles in walk
+/// order, or `None` for any other wire.
+fn the_seam_and_poles_of_a_whole_ball(wire: WireView<'_>) -> Option<(CoedgeView<'_>, [Point; 2])> {
     use rcad_topo::WireStepView::{Along, Pole};
     let walk: Vec<_> = wire.steps().collect();
     let [first, second, third, fourth] = walk[..] else {
@@ -419,7 +477,7 @@ fn the_poles_of_a_whole_ball(wire: WireView) -> Option<[Point; 2]> {
     else {
         return None;
     };
-    (there.edge().key() == back.edge().key()).then(|| [one.point(), other.point()])
+    (there.edge().key() == back.edge().key()).then(|| (there, [one.point(), other.point()]))
 }
 
 /// That `back` is the whole of `ball` cut open again on the `z` line, the way

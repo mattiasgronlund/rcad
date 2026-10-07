@@ -59,6 +59,20 @@ write. This is a limit of that chart, and a ball of radius one at
 `the_poles_of_a_ball_on_its_chart` in `brep.rs` is the one place both sides
 work the two poles out.
 
+**2026-10-07:** `a_whole_ball_turned_off_its_chart` is now
+`a_whole_ball_written_on_its_chart`. Since Q1308 it also catches the second
+kind named there: a ball turned about `z` keeps its poles on the line, but for
+a turn in the two bands `a_ball_turned_about_z_is_written.rs` names, no centre
+the reader holds carries the seam's own plane, and the writer rewrites it onto
+the world chart the same as a ball whose poles left the line — a ball turned
+about `z` outside those bands is still written seam and all. The writer's
+fuzz harness (`tests/fuzzing/writer.rs`) only told the first kind apart from
+an ordinary ball, by the poles, and so compared the second kind's rewritten
+seam corner by corner and panicked on it as a false crash; it now accepts
+either kind the same way the writer picks them, by comparing the seam that
+went in against the one that came back, through
+`assert_cut_again_on_the_z_line` (Q1319).
+
 ### 404.4 The reader, and the two choices the row left open
 
 A file from elsewhere cuts a turned ball open along a slit between two corners
