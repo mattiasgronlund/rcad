@@ -118,6 +118,15 @@
 //!   of its unions refused that way on `a7ad3f4b`;
 //!   [`a_ball_whose_skin_the_blocks_walls_cut_into_a_rim_of_arcs_fuses_by_every_rule`]
 //!   pins three shapes of it by every rule.
+//! - `CannotMeshAFace` with `BoundaryCrossesItself` on a ball of radius four
+//!   resting a unit in from two walls of a block four wide: **closed** by
+//!   Q1099, where the mesher learnt to leave whole a piece of the ball's skin
+//!   that no straight cut between its corners narrows, rather than cut it along
+//!   a chord that leaves it. A sweep of 16 200 fuses of whole-number balls
+//!   resting on whole-number blocks counted 180 refused that way on
+//!   `3741c5a7`, union both ways and ball less block, and none since;
+//!   [`a_ball_whose_skin_the_walls_cut_into_a_piece_no_straight_cut_narrows_fuses_by_every_rule`]
+//!   pins five shapes of it by every rule.
 //!
 //! **The dome is known: §124.** A ball on a bar of its own radius, centred on
 //! the bar's axis, shares exactly one circle with it **only** because it is
@@ -886,52 +895,97 @@ fn a_ball_whose_skin_the_blocks_walls_cut_into_a_rim_of_arcs_fuses_by_every_rule
         ([4, 4, 2], [2, 1], 3),
         ([4, 4, 2], [3, 3], 2),
     ] {
-        let case = format!("a ball of {radius} at {at:?} on a block of {size:?}");
-        let [x, y, z] = size.map(f64::from);
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let rectangle = ProfileBuilder::new(vec![[0.0, 0.0], [x, 0.0], [x, y], [0.0, y]])
-            .build(&Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a rectangle");
-        let block = model
-            .add_extrusion(&rectangle, z, &Isometry::identity())
-            .expect("building a box needs no decision");
-        let r = f64::from(radius);
-        let [across, along] = at.map(f64::from);
-        let ball = model
-            .add_ball(
-                r,
-                &Isometry::translation(Vector::new(across, along, z + r))
-                    .expect("a whole-number shift"),
-            )
-            .expect("a whole-number ball");
-        let block_holds = x * y * z;
-        let ball_holds = 4.0 / 3.0 * std::f64::consts::PI * r.powi(3);
-        for (one, other, rule, solids, holds) in [
-            (block, ball, Rule::Union, 2, block_holds + ball_holds),
-            (ball, block, Rule::Union, 2, block_holds + ball_holds),
-            (block, ball, Rule::Intersection, 0, 0.0),
-            (ball, block, Rule::Intersection, 0, 0.0),
-            (block, ball, Rule::Difference, 1, block_holds),
-            (ball, block, Rule::Difference, 1, ball_holds),
-        ] {
-            let held = match fused(&model, one, other, rule) {
-                Ok(Outcome::Answered(held)) => held,
-                Ok(Outcome::Refused(why)) => panic!("{case}: {rule:?} refused {why}"),
-                Err(why) => panic!("{case}: {rule:?} {why}"),
-            };
-            let block_first = one == block;
-            assert_eq!(
-                held.solids, solids,
-                "{case}: {rule:?} (block first: {block_first}), how many solids"
-            );
-            assert!(
-                (held.volume - holds).abs() <= held.error,
-                "{case}: {rule:?} (block first: {block_first}) measures {} against {holds}, \
-                 out by more than the {} its measurements declare",
-                held.volume,
-                held.error
-            );
-        }
+        a_ball_resting_on_a_block_fuses_by_every_rule(size, at, radius);
+    }
+}
+
+/// A ball of radius four at `(1, 1, 5)` resting on the block
+/// `[0, 4] × [0, 4] × [0, 1]`, and four more of the same family, answer every
+/// rule both ways round: the union is the two solids as they stand,
+/// `16 + 256π/3` for the first, the intersection is nothing, and each
+/// difference is its first solid.
+///
+/// The planes `x = 0` and `y = 0`, a unit from the centre, and `x = 4` and
+/// `y = 4`, three units from it, cut the ball's skin into pieces, and one of
+/// them, past `x = 0` between `y = 0` and `y = 4`, goes `2.03` round in the
+/// mesher's chart, so the mesher cuts it narrower. The lens `y = 4` cuts off it
+/// reaches in past the only chord that would, and until Q1099 that chord was
+/// kept and the piece refused `CannotMeshAFace` with `BoundaryCrossesItself`,
+/// union both ways and the ball less the block. Now the piece is left whole
+/// (`cut_in_two` in `mesh.rs`, whose doc has the numbers). A sweep of every
+/// whole-number ball of radius one to four resting strictly inside the top of
+/// a whole-number block, sides two to six and heights one to three, refused
+/// 180 of its 16 200 fuses that way on `3741c5a7`, all of them a ball of
+/// radius four a unit in from a wall of a side four long, and answers all of
+/// them with the change.
+///
+/// The five shapes: the row's own; the same ball on the far corner of that
+/// block; on a block `6 × 4 × 2`, where no plane reaches the ball's seam;
+/// on `4 × 6 × 3` a unit in from its far corner; and on `5 × 4 × 1`. The
+/// sweep printed each of them refusing those three fuses on `3741c5a7`.
+#[test]
+fn a_ball_whose_skin_the_walls_cut_into_a_piece_no_straight_cut_narrows_fuses_by_every_rule() {
+    for (size, at) in [
+        ([4, 4, 1], [1, 1]),
+        ([4, 4, 1], [3, 3]),
+        ([6, 4, 2], [1, 1]),
+        ([4, 6, 3], [3, 5]),
+        ([5, 4, 1], [4, 3]),
+    ] {
+        a_ball_resting_on_a_block_fuses_by_every_rule(size, at, 4);
+    }
+}
+
+/// A ball of `radius` resting at `at` on the top of the block from the origin
+/// to `size`, fused with it by every rule both ways round, each answer checked
+/// against the closed form: the union is the two as they stand, the
+/// intersection is nothing, and each difference is its first solid.
+fn a_ball_resting_on_a_block_fuses_by_every_rule(size: [i32; 3], at: [i32; 2], radius: i32) {
+    let case = format!("a ball of {radius} at {at:?} on a block of {size:?}");
+    let [x, y, z] = size.map(f64::from);
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let rectangle = ProfileBuilder::new(vec![[0.0, 0.0], [x, 0.0], [x, y], [0.0, y]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+    let block = model
+        .add_extrusion(&rectangle, z, &Isometry::identity())
+        .expect("building a box needs no decision");
+    let r = f64::from(radius);
+    let [across, along] = at.map(f64::from);
+    let ball = model
+        .add_ball(
+            r,
+            &Isometry::translation(Vector::new(across, along, z + r))
+                .expect("a whole-number shift"),
+        )
+        .expect("a whole-number ball");
+    let block_holds = x * y * z;
+    let ball_holds = 4.0 / 3.0 * std::f64::consts::PI * r.powi(3);
+    for (one, other, rule, solids, holds) in [
+        (block, ball, Rule::Union, 2, block_holds + ball_holds),
+        (ball, block, Rule::Union, 2, block_holds + ball_holds),
+        (block, ball, Rule::Intersection, 0, 0.0),
+        (ball, block, Rule::Intersection, 0, 0.0),
+        (block, ball, Rule::Difference, 1, block_holds),
+        (ball, block, Rule::Difference, 1, ball_holds),
+    ] {
+        let held = match fused(&model, one, other, rule) {
+            Ok(Outcome::Answered(held)) => held,
+            Ok(Outcome::Refused(why)) => panic!("{case}: {rule:?} refused {why}"),
+            Err(why) => panic!("{case}: {rule:?} {why}"),
+        };
+        let block_first = one == block;
+        assert_eq!(
+            held.solids, solids,
+            "{case}: {rule:?} (block first: {block_first}), how many solids"
+        );
+        assert!(
+            (held.volume - holds).abs() <= held.error,
+            "{case}: {rule:?} (block first: {block_first}) measures {} against {holds}, \
+             out by more than the {} its measurements declare",
+            held.volume,
+            held.error
+        );
     }
 }
 
