@@ -306,33 +306,7 @@ fn a_frustum_shared_with_its_union_with_a_block_beside_it_keeps_the_circle_the_u
 #[test]
 fn uniting_a_block_a_cone_and_a_cube_does_not_depend_on_which_two_go_first() {
     associativity(&TRIOS_THAT_AGREE_ABOUT_ANSWERING)
-        .print_and_check("associativity, a block, a cone and a cube", 5);
-}
-
-/// Two trios that refused both ways round until `select.rs` counted the bulge
-/// of a hyperbola arc on the arc's own half of the cone, and answered one way
-/// round after it.
-///
-/// Neither grouping gives a second answer to compare, so no law is broken; one
-/// grouping gets further than it did. Where the other grouping stops is pinned
-/// by name, so that when it answers too the trio goes back to
-/// [`TRIOS_THAT_AGREE_ABOUT_ANSWERING`] and is compared. A third, the pointed
-/// cone up through the block's floor with a far cube, went back when a closed
-/// edge came to say which side of the face across it its face lies on
-/// (`docs/decisions.md` §340.9). The second of the two went back when a cone
-/// face came to be read off its own sides seen down the axis (row Q1227), so
-/// one is left here.
-#[test]
-fn two_trios_that_refused_both_ways_now_answer_one_way_round() {
-    for (trio, want) in TRIOS_THAT_ANSWER_ONE_WAY_ROUND {
-        let (left, right) = both_groupings(trio);
-        let found = [left.err(), right.err()];
-        assert_eq!(
-            found.each_ref().map(Option::as_deref),
-            want,
-            "{trio:?}: where (block ∪ cone) ∪ third and (cone ∪ third) ∪ block stop"
-        );
-    }
+        .print_and_check("associativity, a block, a cone and a cube", 6);
 }
 
 /// A frustum up through a block's floor, and a small cube wholly inside the
@@ -628,7 +602,7 @@ fn a_frustum_a_block_and_a_cube_beside_the_frustum_unite_one_way_and_not_the_oth
 }
 
 /// The skin of `cone ∪ cube` for the frustum of
-/// [`TRIOS_THAT_AGREE_ABOUT_ANSWERING`]'s last trio, asked through the public
+/// [`TRIOS_THAT_AGREE_ABOUT_ANSWERING`]'s fifth trio, asked through the public
 /// API whether it holds a point on each side of the notch the cube's corner
 /// cuts out of it.
 ///
@@ -672,6 +646,59 @@ fn the_skin_of_a_frustum_notched_by_a_cubes_corner_holds_the_points_off_the_notc
             )
             .unwrap_or_else(|why| panic!("the notched skin at {at:?} refused: {why:?}"));
         assert_eq!(found, want, "the notched skin at {at:?}");
+    }
+}
+
+/// The skin of `cone ∪ cube` for the frustum of
+/// [`TRIOS_THAT_AGREE_ABOUT_ANSWERING`]'s last trio, whose cube's wall `x = 5`
+/// touches the frustum's bottom circle at one point.
+///
+/// The circle is radius one at `z = −1` round `(4, 4)`, so the wall cuts the
+/// skin in a branch of a hyperbola whose tip is `(5, 4, −1)`, on the circle.
+/// The skin is the band between the caps less the part with `x > 5`, and its
+/// one wire runs right round the circle from the tip back to it, up the branch,
+/// round the top cap's arc and down the branch again. Every point was refused
+/// `AFaceTrimmedByACurveThisCannotFollow` at that circle, a side with no two
+/// ends, until the face came to read it whole (row Q1246). `(5.5, 4, 0)` is
+/// where a ray from the block's floor leaves the cone in `(cone ∪ cube) ∪
+/// block`; it is past the wall. `(4.5, 4, −2)` is on the cone below the bottom
+/// cap and is seen inside every side but the circle, so only the circle turns it
+/// away. `(5, 4, −5)` is on the other nappe.
+#[test]
+fn the_skin_of_a_frustum_whose_bottom_circle_a_wall_touches_holds_the_band_short_of_the_wall() {
+    let mut model = a_model();
+    let (_, cone) = on_the_grid(8, 2, [4, 4]).build_into(&mut model);
+    let cube = a_cube_at(&mut model, 8.0, [5.0, 0.5, -2.5]);
+    let (united, pieces) =
+        fused(&model, &[cone], &[cube], Rule::Union).expect("cone ∪ cube answers");
+    let solid = united.solid(pieces[0]).expect("this model made the key");
+    let skins: Vec<_> = solid
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface::Cone(_)))
+        .map(|face| face.key())
+        .collect();
+    let [skin] = skins[..] else {
+        panic!("cone ∪ cube has one face on the cone, not {}", skins.len());
+    };
+    for (at, want) in [
+        ([5.5, 4.0, 0.0], OnAFace::NotHeld),
+        ([6.0, 4.0, 1.0], OnAFace::NotHeld),
+        ([4.0, 5.5, 0.0], OnAFace::Held),
+        ([2.5, 4.0, 0.0], OnAFace::Held),
+        ([4.0, 2.5, 0.0], OnAFace::Held),
+        ([4.0, 3.0, -1.0], OnAFace::OnItsBoundary),
+        ([4.5, 4.0, -2.0], OnAFace::NotHeld),
+        ([5.0, 4.0, -5.0], OnAFace::NotHeld),
+    ] {
+        let found = solid
+            .face_holds_the_point(
+                skin,
+                PredicatePoint::from(at),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("the skin at {at:?} refused: {why:?}"));
+        assert_eq!(found, want, "the skin at {at:?}");
     }
 }
 
@@ -727,14 +754,14 @@ const POINTED: [Pair; 3] = [
 ///
 /// Three more used to be here refusing both ways, so that a change making one
 /// grouping answer would be seen. Counting the bulge of a hyperbola arc was
-/// that change, and two of them went to [`TRIOS_THAT_ANSWER_ONE_WAY_ROUND`].
-/// The third is the fourth one here: the tip of its cone hangs under the floor,
-/// and `(block ∪ cone) ∪ third` turned that tip inside out until the circle
-/// it hangs from said which side of the floor it is on (`docs/decisions.md`
-/// §340.9).
+/// that change, and two of them came to answer one way round only, which a
+/// test pinned by where the other grouping stopped. The third is the fourth one
+/// here: the tip of its cone hangs under the floor, and `(block ∪ cone) ∪
+/// third` turned that tip inside out until the circle it hangs from said which
+/// side of the floor it is on (`docs/decisions.md` §340.9).
 ///
-/// The last, a cube of four notching the frustum's skin at its corner, came
-/// back from [`TRIOS_THAT_ANSWER_ONE_WAY_ROUND`] by row Q1227. `(cone ∪ third)
+/// The fifth, a cube of four notching the frustum's skin at its corner, came
+/// back from answering one way round by row Q1227. `(cone ∪ third)
 /// ∪ block` used to stop on `AFaceTrimmedByACurveThisCannotFollow`: the skin of
 /// `cone ∪ third` is the band between the caps `z = −1` and `z = 1` less the
 /// cube's corner `x ≥ 3.5, y ≤ 4.5, z ≤ 0.5`, with a seam up `x = 3.5` from the
@@ -746,7 +773,18 @@ const POINTED: [Pair; 3] = [
 /// between `holds.rs` and `arrange.rs` (Q1033) had moved the refusal to
 /// `CannotTellTheCellsOfAFaceApart` on the same face, and holding a lump on the
 /// other nappe from the whole rim outside the face (Q1112) moved it back.
-const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 5] = [
+///
+/// The last, a cube of eight whose wall `x = 5` touches the frustum's bottom
+/// circle at one point, was the other of the two that answered one way round.
+/// Its first union stopped on *side of plane* until a corner moved by a shift
+/// that rounds nothing was handed on exact (Q509); then `(cone ∪ third) ∪
+/// block` was `Undecidable` on *a point in a piece that every solid could
+/// place* until a point whose ray met a face nobody follows named that face
+/// (Q882), and stopped on `AFaceTrimmedByACurveThisCannotFollow` after it: the
+/// skin of `cone ∪ third` has the whole bottom circle as a side from the tip of
+/// the wall's hyperbola back to it, and `holds.rs` read no side with no two
+/// ends until row Q1246.
+const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 6] = [
     Trio {
         pair: on_the_grid(6, 2, [3, 3]),
         third_side: 2.0,
@@ -772,27 +810,12 @@ const TRIOS_THAT_AGREE_ABOUT_ANSWERING: [Trio; 5] = [
         third_side: 4.0,
         third_at: [3.5, 0.5, -3.5],
     },
-];
-
-/// Trios on which one grouping answers and the other refuses, with where each
-/// grouping stops: `(block ∪ cone) ∪ third` first, then `(cone ∪ third) ∪
-/// block`, and `None` for the one that answers.
-const TRIOS_THAT_ANSWER_ONE_WAY_ROUND: [(Trio, [Option<&str>; 2]); 1] = [(
     Trio {
         pair: on_the_grid(8, 2, [4, 4]),
         third_side: 8.0,
         third_at: [5.0, 0.5, -2.5],
     },
-    // The first union stopped on *side of plane* until a corner moved by a
-    // shift that rounds nothing was handed on exact (Q509). The second was
-    // `Undecidable` on *a point in a piece that every solid could place*
-    // until a point whose ray met a face nobody follows named that face
-    // (Q882).
-    [
-        None,
-        Some("the second union: AFaceTrimmedByACurveThisCannotFollow"),
-    ],
-)];
+];
 
 /// A frustum of slope `1 / up_per_unit_wider` from a cap of radius one a unit
 /// below the floor of a block `side` across, to a cap of radius two, with its
