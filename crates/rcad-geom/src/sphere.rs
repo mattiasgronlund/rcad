@@ -99,13 +99,20 @@ impl Sphere {
     /// placement's three numbers through as they came, but none of those three
     /// files carries a `SPHERICAL_SURFACE` for such a point to be the centre of.
     ///
-    /// A turn is folded here rather than argued away. Every coordinate a
-    /// movement hands back leaves an addition — Rodrigues' form ends
-    /// `(… + centreᵢ) + shiftᵢ`, see [`Isometry::apply_to_point`] — and an
-    /// addition gives `-0.0` only when both sides are already `-0.0`, so a
-    /// centre folded on the way in stays folded. That argument is about
-    /// `nalgebra`'s arithmetic rather than this crate's, and §32.5's guarantee is
-    /// not one to rest on a dependency's choice of formula.
+    /// A turn is folded here rather than argued away. [`Isometry::apply_to_point`]
+    /// takes one of two roads. Rodrigues' form ends `(… + centreᵢ) + shiftᵢ`,
+    /// the same centre coordinate carried through to the last addition, and
+    /// an addition gives `-0.0` only when both sides are already `-0.0`, so a
+    /// centre folded on the way in stays folded there — `nalgebra`'s own
+    /// arithmetic, not this crate's. The other road, one of the 24 turns that
+    /// take a cube onto itself (`apply_to_point`'s own doc names it), moves
+    /// each coordinate onto another and negates some instead of rounding, so
+    /// a folded centre can arrive at coordinate `i` as `−centreⱼ`: negating a
+    /// folded `+0.0` gives `-0.0`, and `-0.0 + -0.0` is `-0.0`, so that
+    /// argument does not cover those 24 turns — and this time the arithmetic
+    /// is this crate's own. The fold here does not rest on either argument:
+    /// it turns whatever either road hands back the right way up on its own,
+    /// which is the reason it is done here rather than argued away.
     ///
     /// The radius is not folded because it cannot be a zero of either sign:
     /// [`Sphere::new`] refuses anything not greater than zero, and a rigid
