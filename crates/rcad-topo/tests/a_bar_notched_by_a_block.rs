@@ -63,9 +63,11 @@ const STEP: f64 = 0.2;
 /// answer 110 points more held and 43 more not held than they were asked
 /// before, each the solid's answer.
 ///
-/// - **The box through the caps' `4`**: each quarter of the wall inside the box
-///   is cut by two of its sides, which meet outside the pipe, so the part in
-///   front of both is two runs of rulings. A gap.
+/// - **The box through the caps** used to refuse 4 faces each way round: each
+///   quarter of the wall inside the box is cut by two of its sides, which meet
+///   outside the pipe, so the part in front of both is two runs of rulings.
+///   `holds.rs`'s `one_of_two_runs_between_two_cuts_meeting_off_the_pipe`
+///   (row Q1252) now answers that shape, so none of the four refuse any more.
 /// - **The box through a cap and the wall's `1`** is the wall, which keeps the
 ///   outside of the strip `|y| ≤ 2` where one of two flats is read for a strip
 ///   kept between them. A gap.
@@ -91,9 +93,9 @@ const REFUSED: [(&str, Rule, bool, usize); 30] = [
     ("a box through the caps", Rule::Union, true, 0),
     ("a box through the caps", Rule::Union, false, 0),
     ("a box through the caps", Rule::Difference, true, 0),
-    ("a box through the caps", Rule::Difference, false, 4),
-    ("a box through the caps", Rule::Intersection, true, 4),
-    ("a box through the caps", Rule::Intersection, false, 4),
+    ("a box through the caps", Rule::Difference, false, 0),
+    ("a box through the caps", Rule::Intersection, true, 0),
+    ("a box through the caps", Rule::Intersection, false, 0),
     ("a box through a cap and the wall", Rule::Union, true, 1),
     ("a box through a cap and the wall", Rule::Union, false, 1),
     (
