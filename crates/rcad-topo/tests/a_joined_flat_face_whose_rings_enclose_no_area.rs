@@ -2215,14 +2215,16 @@ fn fused_groups_in_order(
 /// that.
 ///
 /// **Taking it out of the cut cone is refused under every rule, both ways
-/// round, `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`**: the hole's corners are
-/// where the plane `x = −12`, the second cone and the ball meet, and `rcad-geom`
-/// works out a meet of two curved surfaces and a plane about one axis only when
-/// the plane is square to it (`docs/decisions.md` §31.2). A plane that cuts a
-/// cone in a hyperbola runs along its axis, so on such a face a hole of two
-/// corners along a hyperbola is closed by a plane, which puts corners on the
-/// outline, or by a ball or cone about that axis, which is this refusal. A
-/// curved surface about another axis was not tried.
+/// round, `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`**, and since Q1271 not
+/// where it was. The hole's corners are where the plane `x = −12`, the second
+/// cone and the ball meet, a plane beside the axis of two surfaces turned about
+/// it, and `rcad-geom` answers that now. What refuses, once a rule, is the meet
+/// of the ball and the two cones, three curved surfaces and no plane, which
+/// every road in `three_surfaces.rs` starts from. The two cones are of one
+/// slope about one axis, so they bend the same way and share only the plane
+/// `z = 1.5`, which the ball, `13.5` below its centre against a radius of
+/// `√148`, does not reach (a temporary print in
+/// `where_one_plane_and_two_curved_surfaces_meet`, Q1271).
 #[test]
 fn a_cut_cone_less_a_cone_closed_by_a_ball_is_refused_where_three_surfaces_meet() {
     let (crossing, radius) = (6.0 + 38.0_f64.sqrt(), 148.0_f64.sqrt());
