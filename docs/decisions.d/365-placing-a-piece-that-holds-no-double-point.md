@@ -18,6 +18,7 @@ throwaway probe that is taken out (365.2); everything else in 365.2 was read.*
   365.5   What building the rule ran
   365.6   Rungs nearer each crossing, after every other point
   365.7   A piece placed by a corner, and a strip whose corners round to two
+  365.8   A plane places a piece with corners on it
 
 ### 365.1 What each family has to change
 
@@ -628,3 +629,92 @@ compare, and catches no panic. So landing the rule without the change to
 leaving it out as `sides_of` now does, so a fuse that has one places no piece
 by a side. Leaving it out there too was not tried. Q993 traces the families
 that may stop on the same kind of strip.
+
+### 365.8 A plane places a piece with corners on it
+
+*Queue rows Q1288 and Q1279. Q1288's lane changed the rule, on
+`lane-q1288-a-turned-cube-cornered-on-a-face` (`63a3cce8`, off `924e2d98`);
+lane `lane-q1279-q1288-a-corner-on-a-separating-plane`, off `bff35f27`,
+merged it and moved the pins it moves. Each count below says which of the two
+ran it.*
+
+**The rule.** `by_a_plane` in `fuse/select.rs` places a flat piece with
+straight sides outside a solid with only flat faces by the plane `σ` of one of
+that solid's faces, turned to face out, that has every corner of the solid on
+or behind it. Since Q991 it asked for every corner of the piece **strictly**
+in front of `σ`. It now asks for every corner **on or in front** of `σ`, and
+**one strictly** in front. Each corner is still asked as the meet of three
+planes, exactly.
+
+**Why it holds.** The solid lies in the hull of its corners, so all of it is on
+or behind `σ`. The piece lies in the hull of its own corners, so all of it is
+on or in front. One corner strictly in front puts the piece's plane off `σ`,
+so the two planes cross in a line and the piece lies on one side of it; the
+piece's inside, open in its plane, is then strictly in front of `σ` and shares
+no point with the solid. A side of the piece may lie on `σ`, and a piece
+placed outside is placed by its inside. A piece with every corner on `σ` is
+not placed: it may lie in `σ`, on the solid's face.
+
+**Why it was needed.** A sliver a rounding across, whose corners are where
+planes of the other solid cross by design, holds no `f64` point, so the point
+search finds none, and its corners lie on those planes rather than in front of
+them:
+
+- **A turned cube with its corner on a block's face** (Q1288). Turned by 1.5
+  about `(1, 1, 0)` with the corner at `(0, 2, 4)`, the cube's three planes
+  meet `1.03e-16` inside the block's face `x = 0`, and cross it in three lines
+  that cut out a triangle a rounding across, in front of all three, two of
+  its corners on each. Q1288's lane ran Q1208's 400 random turns once: the
+  planes meet a rounding inside the face in 201, whose unions were all refused
+  `Undecidable` *a point inside a piece of a face* under both policies; every
+  rule both ways round now answers each of them, and their volumes agree. The
+  other 199 meet outside the face and are unchanged.
+  `a_turned_cube_with_its_corner_on_a_face.rs` pins the corner at `(0, 2, 4)`
+  under each policy, at `(0, 2, 5)`, where the planes meet exactly on the face,
+  and the first 60 random turns, 29 of which meet inside.
+- **A prism standing a rounding above a block's top** (Q1255, dropped for
+  Q1279). At `x = −2.5`, `−1.25` and `1.5` the piece was the sliver of the
+  block's top between where the prism's walls meet it, from `z = 0` to `2`,
+  two of its corners on the plane of the prism's end. All 18 fuses (three
+  placements, three rules, both orders) now answer, and
+  `a_prism_lying_on_one_edge.rs` holds them against volumes in `LAID`.
+- **The skew family** (Q1279, from Q1146's list). Its headline row,
+  `how_often_a_certified_fuse_of_a_skew_pair_refuses`, refused 30 of 447 fuses
+  on `bff35f27`, all for want of a point inside a piece, and refuses 16 now:
+  15 still for that, and one is the limit below. The turned family's row went
+  from 45 refused of 447 to 39: 33 for a point, 6 the limit below. Both counts
+  were run by this lane, on its base and on its branch.
+
+**A limit some of them reach next: an edge too short.** A fuse that gets past
+the sliver can then write an answer whose own shortest edge is a rounding long,
+and `Assembly::check_dynamic_range` refuses it `Invalid::DynamicRangeTooWide`.
+The skew pair `three_cut_lines_through_one_corner_of_a_skew_pair.rs` pins third
+— a block two by two leaning one, and a block two by three leaning two the
+other way at `(5, 1, 1)` — answers its intersection (`7/6`) and difference
+(`41/6`), and its union is refused at a spread of `5 · 2^51` exactly. The
+strip of the second block's wall `x + 2y = 5` from `z = 1` to `2` is placed
+outside the first block, and its end runs from that block's corner on `y = 1`
+to where the first block's stored wall `x − y = 2` crosses its floor edge; the
+corner is strictly in front of that wall over the stored planes (the file's
+second test), and the two ends round to `(3.0000000000000004, 1, 1)` and
+`(3, 1, 1)`, an edge `2^-51` long beside a coordinate of 5. That is a length
+over a length, so no scaling fits the two in `f64` together: a limit, class D
+by §3.5's `1e11`. `fuses_that_must_agree.rs` counts it by name for the turned
+and skew families (`a_flat_refusal`) instead of failing on it; the six turned
+ones run at spreads of `7.7e15` to `2.9e16`.
+
+**Pins that moved, and where a refusal moved to.** In
+`two_turned_cubes_a_rounding_apart.rs` the pair overlapping by `2^-52` is still
+refused, a limit; with the first cube as argument the stop moved off the strip
+of its top from `y = 0` to `0.5`, now placed by the second cube's plane
+`y = 0.5`, onto the rest of that strip, inside the second cube. In
+`a_prism_lying_on_one_edge.rs` the prism a rounding into the top is still
+refused, a limit; with the block first the stop moved off the sliver from
+`z = 0` to `2`, now placed by the prism's end, onto the one from `z = 2` to
+`8`, inside the prism. Every other `rcad-topo` test passed as it stood.
+
+**What this leaves.** A turned cube whose three planes meet a rounding
+**outside** the block's face is still refused in 148 of Q1208's 199 under a
+tolerant policy (Q1288's lane's count); filed as a row of its own. Q1280
+traces the four skew pairs Q1146's probe of this rule left refused, each on a
+sliver in the plane of a face of the non-convex solid.
