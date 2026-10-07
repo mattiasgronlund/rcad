@@ -25,7 +25,16 @@
 //!   out through its side, since the check's mesh is asked fine enough to stop
 //!   the ball's band and the cone's folding onto each other (Q1198). So does a
 //!   frustum less that ball, since a side along one of the two circles also asks
-//!   what picks its circle out (Q1197).
+//!   what picks its circle out (Q1197);
+//! - **a wall through a circle**, and every rule is refused before anything is
+//!   ordered round it, since the wall, the cone and the partner meet there and
+//!   two of them are curved.
+//!
+//! So no fuse here asks the order round one of these circles. A seam puts one
+//! node on a face's circle beside its start, and each face has one seam, which
+//! is why two frustums seamed off where their circle starts answer as well;
+//! `rcad-geom`'s `along_a_crossing.rs` orders points round them all the same
+//! since Q1141, for whatever reaches it first.
 //!
 //! Every cone here is built by `tests/cones`, face by face through
 //! `SolidBuilder` with a power-of-two slope, and every ball by `Model::add_ball`.
@@ -319,6 +328,155 @@ fn a_frustum_less_a_steeper_frustum_seamed_a_quarter_turn_round_from_it() {
             &[steep - shared],
         ],
     );
+}
+
+/// The pair above with the wide frustum seamed up `−x` and the steep one up
+/// `+y`, so **neither seam is where the circle at `z = 4` starts**, which is
+/// `(4, 0, 4)`: `walk` starts a circle round a cone's axis along the cone's
+/// own first basis direction, `+x` here. Every rule answers the volumes above.
+///
+/// What orders the nodes is that each face's circle holds its own seam's node
+/// and the start and nothing else, so a node is only ever put after the start
+/// by name and the order round the circle is never asked. That was measured
+/// with `which_comes_first_round_a_crossing` refusing every pair with a cone in
+/// it, as it did before Q1141: this pair, the seams `(+y, −x)` and `(−y, +y)`,
+/// and a frustum and a bar of radius 4 with the bar's seam at the start each
+/// answered every rule both ways all the same.
+#[test]
+fn a_frustum_less_a_steeper_frustum_both_seamed_off_where_their_circle_starts() {
+    let wide = a_frustum_holds(1.0, 2.0, 8.0);
+    let steep = 511.0 * PI / 6.0;
+    let shared = 367.0 * PI / 6.0;
+    fuses_hold(
+        |model| {
+            let steeper = seamed(model, 2.0, 0.5, 4.0, [0.0, 1.0]);
+            [
+                seamed(model, 1.0, 2.0, 8.0, [-1.0, 0.0]),
+                up(model, steeper, 2.0),
+            ]
+        },
+        [
+            &[wide + steep - shared],
+            &[shared],
+            &[49.0 * PI / 6.0, 296.0 * PI / 3.0],
+            &[steep - shared],
+        ],
+    );
+}
+
+/// The wide frustum seamed up `−x`, `168π`, and a bar of radius 4 from `z = 0`
+/// to `z = 10`, `160π`, whose seam is up `+x`. The cone crosses the pipe at
+/// `z = ±4`, and only `z = 4` is on both sides. Below it the frustum is the
+/// narrower and above it the bar, so the two share `π(4³ − 2³)/3 + 16π·4 =
+/// 248π/3`. The frustum less the bar is the ring between them from `z = 4` up,
+/// `256π/3`, and the bar less the frustum is two solids: its top above `z = 8`,
+/// `32π`, and its bottom below `z = 4` less the frustum's, `32π + 40π/3`.
+#[test]
+fn a_frustum_and_a_bar_of_radius_four_cross_in_one_circle_on_both_sides() {
+    let wide = a_frustum_holds(1.0, 2.0, 8.0);
+    let bar = 160.0 * PI;
+    let shared = 248.0 * PI / 3.0;
+    fuses_hold(
+        |model| {
+            let bar = model
+                .add_round_bar(4.0, 10.0, &Isometry::identity())
+                .expect("a bar of radius four");
+            [seamed(model, 1.0, 2.0, 8.0, [-1.0, 0.0]), bar]
+        },
+        [
+            &[wide + bar - shared],
+            &[shared],
+            &[wide - shared],
+            &[32.0 * PI, 136.0 * PI / 3.0],
+        ],
+    );
+}
+
+/// **A wall through the circle is refused before any order is asked.** The
+/// wide frustum seamed up `−x` and cut down to `x ≥ 0` by a block, against the
+/// steep frustum, the bar of radius 4 and a whole ball of radius 3 four up. The
+/// wall `x = 0` crosses each pair's circle on the half frustum's side, at
+/// `(0, ±4, 4)` for the first two and `(0, ±z₂, z₂)`, `z₂ = 2 + √2/2`, for the
+/// ball, so the circle there has two nodes off its start. Each is where the
+/// wall, the cone and the partner meet, two of them curved, and every rule
+/// both ways is refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in
+/// `rcad-geom`'s `three_surfaces.rs`.
+///
+/// Each partner turns about the axis, so it holds the same either side of the
+/// wall and the half frustum shares half of what the whole one does. With `W`
+/// the whole frustum's volume, `P` the partner's and `S` what the two share,
+/// the answers are `W/2 + P − S/2`, `S/2`, `(W − S)/2` and `P − S/2`: for the
+/// steep frustum `1663π/12`, `367π/12`, `49π/12` with `148π/3`, and `655π/12`;
+/// for the bar `608π/3`, `124π/3`, `128π/3` and `356π/3`; for the ball, with
+/// `S = (100 − √2)π/3`, `(620 + √2)π/6`, `(100 − √2)π/6`, `(404 + √2)π/6` and
+/// `(116 + √2)π/6`.
+#[test]
+fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_refused() {
+    let half = |model: &mut Model| {
+        let wide = seamed(model, 1.0, 2.0, 8.0, [-1.0, 0.0]);
+        the_x_positive_half_of(model, wide)
+    };
+    let partners: [fn(&mut Model) -> SolidKey; 3] = [
+        |model| {
+            let steeper = a_frustum(model, 2.0, 0.5, 4.0);
+            up(model, steeper, 2.0)
+        },
+        |model| {
+            model
+                .add_round_bar(4.0, 10.0, &Isometry::identity())
+                .expect("a bar of radius four")
+        },
+        |model| a_ball_four_up(model, 3.0),
+    ];
+    for partner in partners {
+        let gives = what_each_rule_gives(|model| [half(model), partner(model)]);
+        assert!(
+            gives.iter().all(|answer| matches!(
+                answer,
+                Err(Error::Geometry(
+                    rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
+                ))
+            )),
+            "{gives:?}"
+        );
+    }
+}
+
+fn seamed(model: &mut Model, slope: f64, near: f64, far: f64, seam: [f64; 2]) -> SolidKey {
+    a_frustum_seamed_towards(
+        model,
+        slope,
+        near,
+        far,
+        seam,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a frustum seamed up a whole direction")
+}
+
+/// What of `solid` lies in `x ≥ 0`, cut by a block from `z = 1` to `z = 9`.
+fn the_x_positive_half_of(model: &mut Model, solid: SolidKey) -> SolidKey {
+    let profile = ProfileBuilder::new(vec![[0.0, -10.0], [10.0, -10.0], [10.0, 10.0], [0.0, 10.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+    let block = model
+        .add_extrusion(
+            &profile,
+            8.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, 1.0)).expect("a shift"),
+        )
+        .expect("a block");
+    model
+        .fuse(
+            &[solid],
+            &[block],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("half a frustum")
+        .solids()[0]
 }
 
 /// The wide frustum less a ball of radius 3 four up its axis, cut flat at
