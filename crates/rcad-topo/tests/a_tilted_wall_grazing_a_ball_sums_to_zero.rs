@@ -146,7 +146,7 @@ fn a_certified_fuse_refuses_on_the_order_of_the_two_places() {
                 "{rule:?}, ball first {ball_first}: {refused:#?}"
             );
             if ball_first {
-                assert_eq!(refused.measures(), Measures::Volume, "{rule:?}");
+                assert_eq!(refused.measures(), Measures::Length, "{rule:?}");
                 assert_eq!(refused.enclosure(), widest, "{rule:?}");
             } else {
                 assert_eq!(refused.measures(), Measures::Length, "{rule:?}");
