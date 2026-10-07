@@ -377,9 +377,11 @@ fn every_other_corner_cut_off(count: usize) -> Vec<[u32; 3]> {
 /// each side of the outline reaches about the hole's corner across from its
 /// middle, and each side of the hole the outline's. No coordinate chooses a
 /// step, so a ring moved or turned is cut into the same triangles corner for
-/// corner, where the Delaunay test is tied wherever a side of the outline and
-/// a side of the hole face each other square: those four corners are on one
-/// circle (`docs/decisions.md` §379.5).
+/// corner once it starts from the same corner, where the Delaunay test is tied
+/// wherever a side of the outline and a side of the hole face each other
+/// square: those four corners are on one circle (`docs/decisions.md` §379.5).
+/// The start, `across`, is chosen from coordinates, and
+/// [`the_corner_of_the_hole_across_from`] says where a rounding can move it.
 ///
 /// **Why they are a triangulation of the ring when every one of them turns the
 /// way the outline does**, which [`cut_by_corner_order`] settles with
@@ -445,12 +447,37 @@ fn comes_no_later_round(one: usize, ones: usize, other: usize, others: usize) ->
 /// outline's corner `first`, which turns the way `anticlockwise` says: the
 /// middle of the run of the hole's sides that `first` sees from outside, or
 /// the first corner of the middle side when the run is odd. `None` when
-/// `first` sees no side from outside, or lies on the line of one, or
-/// [`orient2d`] cannot settle which side of one it is on.
+/// `first` sees no side from outside, or [`orient2d`] cannot settle which side
+/// of one it is on.
 ///
-/// Read from signs alone, so a ring moved by a rounding starts from the same
-/// corner unless `first` lies within a rounding of the line through one of the
-/// hole's sides.
+/// **A side whose line `first` lies on is not seen**, since it is not seen
+/// from outside. It used to give `None` and send the ring to the Delaunay
+/// triangulation, so an octagon round an octagon with its corner exactly on
+/// that line was cut by spade, and the same ring placed, a rounding off the
+/// line, by corner order: 14 of its 16 triangles apart under each of the
+/// twelve placements of `docs/decisions.md` §333.2 (Q1274). Any start is safe
+/// to try, because [`cut_by_corner_order`] takes the cut only when every
+/// triangle turns the outline's way.
+///
+/// **Read from signs alone, so a ring moved by a rounding starts from the same
+/// corner unless `first` lies within a rounding of the line through a side at
+/// one end of the run.** Even then it holds at the end where that side joining
+/// or leaving the run leaves the middle where it was. At the other end the
+/// start moves one corner, and the ring is cut into other triangles, a whole
+/// cut of the ring each time: 15 of 36 placed copies of that octagon ring,
+/// cornered on the other end's line or a rounding to either side of it
+/// (`a_ring_whose_corner_is_a_rounding_off_a_hole_sides_line_starts_where_the_corner_sees`
+/// in `cutting_a_patch_into_triangles.rs`).
+///
+/// **No start read from the corners handed in holds for every ring.** Turned
+/// a whole turn against the outline, the hole's start has to walk once round
+/// it, or some triangle turns over — a start fixed at the hole's corner 0 does
+/// on a pipe's ring (§379.5, Q1109) — so the start changes somewhere as the
+/// hole turns, and a ring there and the same ring placed are a rounding apart.
+/// Of rules that read only which sides `first` sees, none holds at both ends
+/// of the run either: one that kept its start whichever end's side joined or
+/// left would keep it as the run walks round, and so never move. What would
+/// hold is a start read where the solid is stored, which only the caller has.
 fn the_corner_of_the_hole_across_from(
     first: [f64; 2],
     hole: &[[f64; 2]],
@@ -459,7 +486,14 @@ fn the_corner_of_the_hole_across_from(
     let count = hole.len();
     let mut seen = Vec::with_capacity(count);
     for at in 0..count {
-        seen.push(which_way_it_turns(hole[at], hole[(at + 1) % count], first)? == anticlockwise);
+        let sees_it_from_outside = match orient2d(hole[at], hole[(at + 1) % count], first) {
+            Decision::Pos => anticlockwise,
+            Decision::Neg => !anticlockwise,
+            Decision::Zero => false,
+            Decision::Undecidable { .. } => return None,
+            other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
+        };
+        seen.push(sees_it_from_outside);
     }
     let start = (0..count).find(|&at| seen[at] && !seen[(at + count - 1) % count])?;
     let run = seen.iter().filter(|&&sees| sees).count();
