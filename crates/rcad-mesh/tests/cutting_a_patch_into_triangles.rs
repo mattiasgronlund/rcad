@@ -592,16 +592,149 @@ fn a_clockwise_disc_cut_by_corner_order_turns_every_triangle_anticlockwise() {
     );
 }
 
-/// Corner order cuts only a flat patch with no hole and an outline that turns
-/// one way at every corner. Every other patch asked for it is cut as though it
-/// had not been asked.
+/// A ring between a circle of 40 corners and one of 24 inside it, both about
+/// `(3, −5)`, the outline anticlockwise from `turn` and the hole clockwise from
+/// `turn + offset`, the way a face's hole runs against its outline.
+fn a_ring_turned_and_moved(turn: f64, offset: f64) -> (Vec<[f64; 2]>, Vec<[f64; 2]>) {
+    let round = |count: u32, radius: f64, from: f64| -> Vec<[f64; 2]> {
+        (0..count)
+            .map(|step| {
+                let angle = TAU * f64::from(step) / f64::from(count) + from;
+                [3.0 + radius * angle.cos(), -5.0 + radius * angle.sin()]
+            })
+            .collect()
+    };
+    let mut hole = round(24, 0.8, turn + offset);
+    hole.reverse();
+    (round(40, 2.0, turn), hole)
+}
+
+/// A ring's outline and hole are near-ties for the Delaunay test wherever a
+/// side of one faces a side of the other square, so the same ring turned and
+/// moved is cut into other triangles. Asked to be cut by the order of its
+/// corners, it is cut the same every time, whether or not the hole's first
+/// corner is across from the outline's (`docs/decisions.md` §379.5, Q1109).
+#[test]
+fn a_ring_cut_by_corner_order_is_cut_the_same_however_it_is_turned_and_moved() {
+    let turns = (0..12).map(|step| 0.3 * f64::from(step) + 0.01);
+    let by_delaunay: Vec<Vec<[u32; 3]>> = turns
+        .clone()
+        .map(|turn| {
+            let (outer, hole) = a_ring_turned_and_moved(turn, 0.0);
+            let mut triangles = triangulate(&domain_of(flat(), outer, vec![hole]))
+                .expect("a ring")
+                .triangles()
+                .to_vec();
+            for triangle in &mut triangles {
+                triangle.sort_unstable();
+            }
+            triangles.sort_unstable();
+            triangles
+        })
+        .collect();
+    let cut_differently = by_delaunay
+        .iter()
+        .filter(|triangles| **triangles != by_delaunay[0])
+        .count();
+    println!(
+        "the Delaunay test cut {cut_differently} of 11 turned rings differently from the first"
+    );
+    assert!(
+        cut_differently > 0,
+        "the Delaunay test cut every turned ring the same, so this tells corner order from it \
+         by nothing"
+    );
+
+    for offset in [0.0, 1.0, -2.5] {
+        let mut by_corner_order = Vec::new();
+        for turn in turns.clone() {
+            let name = format!("a ring turned by {turn}, its hole by {offset} more");
+            let (outer, hole) = a_ring_turned_and_moved(turn, offset);
+            let domain = domain_of(flat(), outer, vec![hole]).cut_by_corner_order();
+            check_everything(&name, &domain);
+            let patch = triangulate(&domain).expect("checked just above");
+            every_triangle_turns_anticlockwise(&name, &patch);
+            by_corner_order.push(patch.triangles().to_vec());
+        }
+        assert!(
+            by_corner_order
+                .iter()
+                .all(|triangles| *triangles == by_corner_order[0]),
+            "cut by corner order, the rings whose hole is turned {offset} more still came out in \
+             different triangles"
+        );
+        let (outer, hole) = a_ring_turned_and_moved(0.01, offset);
+        assert_ne!(
+            triangulate(
+                &domain_of(flat(), outer.clone(), vec![hole.clone()]).cut_by_corner_order()
+            ),
+            triangulate(&domain_of(flat(), outer, vec![hole])),
+            "the ring whose hole is turned {offset} more came out as spade cuts it, so it was \
+             not cut by corner order"
+        );
+    }
+}
+
+/// A ring whose outline runs clockwise and hole anticlockwise is cut into
+/// triangles that turn anticlockwise, like every other patch's.
+#[test]
+fn a_clockwise_ring_cut_by_corner_order_turns_every_triangle_anticlockwise() {
+    let (mut outer, mut hole) = a_ring_turned_and_moved(0.0, 0.0);
+    outer.reverse();
+    hole.reverse();
+    let domain = domain_of(flat(), outer, vec![hole]).cut_by_corner_order();
+    check_everything("a clockwise ring", &domain);
+    every_triangle_turns_anticlockwise(
+        "a clockwise ring",
+        &triangulate(&domain).expect("checked just above"),
+    );
+}
+
+/// Corner order cuts only a flat patch with no hole or one, an outline that
+/// turns one way at every corner and a hole that turns the other way, and on a
+/// ring only where every triangle of the cut turns the outline's way. Every
+/// other patch asked for it is cut as though it had not been asked.
 #[test]
 fn a_patch_corner_order_cannot_cut_is_cut_as_though_it_had_not_been_asked() {
-    let disc = a_disc_turned_and_moved(0.0);
-    let hole: Vec<[f64; 2]> = a_disc_turned_and_moved(0.0)
-        .into_iter()
+    let (disc, hole) = a_ring_turned_and_moved(0.0, 0.0);
+    let small_hole_at = |centre: [f64; 2]| -> Vec<[f64; 2]> {
+        (0..12)
+            .rev()
+            .map(|step| {
+                let angle = TAU * f64::from(step) / 12.0;
+                [centre[0] + 0.3 * angle.cos(), centre[1] + 0.3 * angle.sin()]
+            })
+            .collect()
+    };
+    let mut the_same_way_round = hole.clone();
+    the_same_way_round.reverse();
+    let a_hole_with_petals: Vec<[f64; 2]> = (0..60)
         .rev()
-        .map(|[u, v]| [3.0 + (u - 3.0) / 4.0, -5.0 + (v + 5.0) / 4.0])
+        .map(|step| {
+            let angle = TAU * f64::from(step) / 60.0;
+            let reach = 0.8 + 0.2 * (5.0 * angle).cos();
+            [3.0 + reach * angle.cos(), -5.0 + reach * angle.sin()]
+        })
+        .collect();
+    // 39 corners in a tenth of a turn and one across from them: stepped round
+    // in equal shares, the far side of the outline reaches across the hole.
+    let a_hole_bunched_up: Vec<[f64; 2]> = (0..40)
+        .rev()
+        .map(|step| {
+            let angle = if step == 39 {
+                TAU / 2.0 + TAU / 36.0
+            } else {
+                TAU / 36.0 + TAU / 10.0 * f64::from(step) / 38.0
+            };
+            [3.0 + 0.8 * angle.cos(), -5.0 + 0.8 * angle.sin()]
+        })
+        .collect();
+    // Touching the outline at its corner 0, (5, −5), with its own corner 0.
+    let a_hole_touching_the_outline: Vec<[f64; 2]> = (0..24)
+        .map(|step| {
+            let angle = -TAU * f64::from(step) / 24.0;
+            [4.0 + angle.cos(), -5.0 + angle.sin()]
+        })
         .collect();
     let five_petals: Vec<[f64; 2]> = (0..60)
         .map(|step| {
@@ -613,7 +746,36 @@ fn a_patch_corner_order_cannot_cut_is_cut_as_though_it_had_not_been_asked() {
     let with_a_straight_corner = vec![[0.0, 0.0], [2.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
     let on_a_pipe = Surface::from(Cylinder::new(Axis::z(), 2.0).expect("a pipe"));
     for (name, surface, outer, holes) in [
-        ("a disc with a hole", flat(), disc.clone(), vec![hole]),
+        (
+            "a disc with two holes",
+            flat(),
+            disc.clone(),
+            vec![small_hole_at([2.0, -5.0]), small_hole_at([4.0, -5.0])],
+        ),
+        (
+            "a hole that runs the same way round as its outline",
+            flat(),
+            disc.clone(),
+            vec![the_same_way_round],
+        ),
+        (
+            "a hole with petals",
+            flat(),
+            disc.clone(),
+            vec![a_hole_with_petals],
+        ),
+        (
+            "a hole whose corners are bunched up on one side",
+            flat(),
+            disc.clone(),
+            vec![a_hole_bunched_up],
+        ),
+        (
+            "a hole touching the outline at a corner",
+            flat(),
+            disc.clone(),
+            vec![a_hole_touching_the_outline],
+        ),
         ("five petals", flat(), five_petals, Vec::new()),
         (
             "a corner that does not turn",

@@ -329,8 +329,9 @@ impl SolidView<'_> {
     /// frame every copy of a flat face shares, so moving a flat face can change
     /// which of two tied triangles it gets, and a placed flat face is cut the
     /// same way as its read-back — see [`the_surface_this_face_is_cut_up_on`].
-    /// A disc whose rim the face across reads at one height is cut by the order
-    /// of its corners instead, which no movement changes
+    /// A disc whose rim the face across reads at one height, or a ring whose
+    /// two rims are each read that way, is cut by the order of its corners
+    /// instead, which no movement changes
     /// ([`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`]).
     ///
     /// [`Sphere::transformed`]: rcad_geom::Sphere::transformed
@@ -1109,12 +1110,21 @@ impl BuildingAMesh {
         twice
     }
 
-    /// Whether `face` is bounded by one closed edge and every face across it
+    /// Whether `face` is bounded by one closed edge, or by two — an outline
+    /// and one hole, a ring between two circles — and every face across each
     /// reads every point of it at one height of its own chart, so that none of
     /// them can draw a side between two of those points. A flat `face` that
     /// passes is cut by the order of its corners
     /// ([`TrimmedDomain::cut_by_corner_order`]), the same way however the
     /// solid is placed.
+    ///
+    /// **A ring also needs no face across both rims.** Its cut joins a corner
+    /// of the outline to a corner of the hole and never two of one rim, and
+    /// only a face that holds points of both rims could draw one of those. So
+    /// a ring needs less of each rim than a disc does; it is asked on the same
+    /// read of each rim all the same, the one that keeps a ball's lids with
+    /// the Delaunay cut, since that is the read measured against them
+    /// (`docs/decisions.md` §379.5, Q1109).
     ///
     /// **Why one height is enough, and exact.** The face across hands its
     /// triangulator these points on one straight line, at the second
@@ -1127,7 +1137,8 @@ impl BuildingAMesh {
     ///
     /// **Why it is needed.** The cut joins corners that are not next to each
     /// other, and a ball's patch along a lid's rim joins some of the same two
-    /// points: the lid of `a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures`
+    /// points: the lid of `a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures`,
+    /// now `a_rim_cornered_on_the_pole_builds_either_way_round_and_both_ways_measure`,
     /// was refused as two patches drawing one side, and 68 of the 1440 meshes
     /// of `no_sliver_cut_through_a_balls_pole_folds_at_any_deflection` folded
     /// where 38 did then (`docs/decisions.md` §379.5), and 2 have since Q1027
@@ -1142,32 +1153,50 @@ impl BuildingAMesh {
         face: FaceView<'_>,
         solid: SolidView<'_>,
     ) -> bool {
-        let mut wires = face.wires();
-        let (Some(wire), None) = (wires.next(), wires.next()) else {
-            return false;
-        };
-        if !wire.closes_on_one_edge() {
+        if !(1..=2).contains(&face.wire_count()) {
             return false;
         }
-        let Some(rim) = wire.coedges().next().map(|coedge| coedge.edge().key()) else {
-            return false;
-        };
-        let Some(walked) = self.along_edge.get(&rim) else {
-            return false;
-        };
-        let mut faces_across = 0;
+        let mut across_each_rim = Vec::with_capacity(2);
+        for wire in face.wires() {
+            let Some(across) = self.the_faces_across_a_rim_read_at_one_height(wire, face, solid)
+            else {
+                return false;
+            };
+            across_each_rim.push(across);
+        }
+        match &across_each_rim[..] {
+            [_] => true,
+            [outline, hole] => outline.iter().all(|key| !hole.contains(key)),
+            _ => unreachable!("a face of one or two wires has one or two rims"),
+        }
+    }
+
+    /// The faces across `wire`, when it is one closed edge and every face
+    /// across reads every point of it at one height of a second coordinate
+    /// that does not wrap; `None` otherwise.
+    fn the_faces_across_a_rim_read_at_one_height(
+        &self,
+        wire: WireView<'_>,
+        face: FaceView<'_>,
+        solid: SolidView<'_>,
+    ) -> Option<Vec<FaceKey>> {
+        if !wire.closes_on_one_edge() {
+            return None;
+        }
+        let rim = wire.coedges().next()?.edge().key();
+        let walked = self.along_edge.get(&rim)?;
+        let mut across = Vec::new();
         for other in solid.faces().filter(|other| other.key() != face.key()) {
             for coedge in other
                 .wires()
                 .flat_map(WireView::coedges)
                 .filter(|coedge| coedge.edge().key() == rim)
             {
-                faces_across += 1;
                 let chart = the_surface_this_face_is_cut_up_on(other);
                 if chart.as_plane().is_some()
                     || how_far_the_second_coordinate_wraps(&chart).is_some()
                 {
-                    return false;
+                    return None;
                 }
                 let reads = HowAFaceReadsThePointsRoundIt::of(other);
                 let height = |at: Point| chart.coordinates_of(at).1.to_bits();
@@ -1176,11 +1205,12 @@ impl BuildingAMesh {
                     .iter()
                     .any(|&at| height(reads.a_point(at, self)) != corner)
                 {
-                    return false;
+                    return None;
                 }
+                across.push(other.key());
             }
         }
-        faces_across > 0
+        (!across.is_empty()).then_some(across)
     }
 
     /// The patches to hand over for one face: usually the one, but a face that
@@ -6812,8 +6842,10 @@ fn how_far_moving_this_face_rounds(
 /// **A cap of a bar is no longer cut by that test at all**, but by the order
 /// of its corners, because the same cap placed and unplaced still came out in
 /// other triangles: 141 to 199 of a bar's 500 under twelve placements (§379.5).
-/// Only a disc whose rim the face across cannot join two points of is cut that
-/// way ([`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`]);
+/// Nor is a pipe's flat end, a ring between two circles, which moved 2 of its
+/// triangles in nine of the same twelve (Q1109). Only a disc or a ring whose
+/// rims the faces across cannot join two points of is cut that way
+/// ([`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`]);
 /// every other flat face is still decided here, on these numbers.
 ///
 /// A flat face at no placement was cut up there already. A plane is never

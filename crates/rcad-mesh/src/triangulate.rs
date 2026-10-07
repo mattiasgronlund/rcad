@@ -247,7 +247,7 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
         }
     }
 
-    if let Some(triangles) = cut_by_corner_order(domain) {
+    if let Some(triangles) = cut_by_corner_order(domain, &corners) {
         return Ok(Patch {
             corners,
             triangles,
@@ -273,9 +273,53 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
 
 /// The triangles of a patch cut by the order of its corners, when the caller
 /// asked for that ([`TrimmedDomain::cut_by_corner_order`]) and the patch is one
-/// it can be done to: flat, with no holes, and an outline that turns the same
-/// way at every corner and goes round once. `None` leaves the patch to the
-/// Delaunay triangulation.
+/// it can be done to: flat, with an outline that turns the same way at every
+/// corner and goes round once, and either no hole
+/// ([`every_other_corner_cut_off`]) or one hole that turns the other way at
+/// every corner and goes round once ([`in_step_round_a_ring`]). `None` leaves
+/// the patch to the Delaunay triangulation.
+///
+/// `corners` is [`every_corner`]'s list, the outline's first and then the
+/// hole's.
+///
+/// Turned anticlockwise when the outline runs clockwise, since that is how
+/// every triangle [`triangulate`] hands back is turned.
+fn cut_by_corner_order(domain: &TrimmedDomain, corners: &[[f64; 2]]) -> Option<Vec<[u32; 3]>> {
+    if !domain.is_cut_by_corner_order() || !matches!(domain.surface(), Surface::Plane(_)) {
+        return None;
+    }
+    let outline = domain.outer().corners();
+    let anticlockwise = turns_one_way_once_round(outline)?;
+    let mut triangles = match domain.holes() {
+        [] => every_other_corner_cut_off(outline.len()),
+        [hole] => {
+            let hole = hole.corners();
+            if turns_one_way_once_round(hole)? == anticlockwise {
+                return None;
+            }
+            let across = the_corner_of_the_hole_across_from(outline[0], hole, anticlockwise)?;
+            let triangles = in_step_round_a_ring(outline.len(), hole.len(), across);
+            let every_one_turns_with_the_outline = triangles.iter().all(|triangle| {
+                let [a, b, c] = triangle.map(|corner| corners[corner as usize]);
+                which_way_it_turns(a, b, c) == Some(anticlockwise)
+            });
+            if !every_one_turns_with_the_outline {
+                return None;
+            }
+            triangles
+        }
+        _ => return None,
+    };
+    if !anticlockwise {
+        for triangle in &mut triangles {
+            triangle.swap(1, 2);
+        }
+    }
+    Some(triangles)
+}
+
+/// A convex outline of `count` corners cut into triangles that turn the way it
+/// does.
 ///
 /// **Every other corner is cut off, round after round.** The first round joins
 /// each corner to the one after next, the next round does the same among the
@@ -295,22 +339,9 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
 /// then falling once, since an outline that turns one way and goes round twice
 /// climbs and falls twice. A turn of zero, or one that cannot be settled, is
 /// not one way, and leaves the patch to the Delaunay triangulation.
-///
-/// Turned anticlockwise when the outline runs clockwise, since that is how
-/// every triangle [`triangulate`] hands back is turned.
-fn cut_by_corner_order(domain: &TrimmedDomain) -> Option<Vec<[u32; 3]>> {
-    if !domain.is_cut_by_corner_order()
-        || !matches!(domain.surface(), Surface::Plane(_))
-        || !domain.holes().is_empty()
-    {
-        return None;
-    }
-    let corners = domain.outer().corners();
-    let anticlockwise = turns_one_way_once_round(corners)?;
-    let mut left: Vec<u32> = (0..corners.len())
-        .map(|position| u32::try_from(position).expect("a loop of fewer than four billion corners"))
-        .collect();
-    let mut triangles = Vec::with_capacity(corners.len() - 2);
+fn every_other_corner_cut_off(count: usize) -> Vec<[u32; 3]> {
+    let mut left: Vec<u32> = (0..count).map(a_corner_number).collect();
+    let mut triangles = Vec::with_capacity(count - 2);
     while left.len() >= 3 {
         let mut kept = Vec::with_capacity(left.len() / 2 + 1);
         let mut at = 0;
@@ -327,35 +358,131 @@ fn cut_by_corner_order(domain: &TrimmedDomain) -> Option<Vec<[u32; 3]>> {
         }
         left = kept;
     }
-    if !anticlockwise {
-        for triangle in &mut triangles {
-            triangle.swap(1, 2);
+    triangles
+}
+
+/// The band of triangles between an outline of `outline` corners and a hole
+/// of `hole` corners inside it, numbered as [`every_corner`] numbers them, cut
+/// by stepping round both loops together from the outline's corner 0 and the
+/// hole's corner `across`: each triangle stands on one side of one loop and
+/// reaches across to the corner the other loop has got to. They turn the way
+/// the outline does when the hole runs round the other way.
+///
+/// **Which loop steps next is read from the corner numbers alone.** The
+/// outline is walked the way it runs and the hole the other way, so that both
+/// go round the same way; each loop's steps are taken as equal shares of a
+/// turn, and the step whose middle comes first round goes next, the outline's
+/// on a tie. That is a comparison of whole numbers, so exact. On two circles
+/// cut into even steps, which is how a pipe's two rims come to its flat end,
+/// each side of the outline reaches about the hole's corner across from its
+/// middle, and each side of the hole the outline's. No coordinate chooses a
+/// step, so a ring moved or turned is cut into the same triangles corner for
+/// corner, where the Delaunay test is tied wherever a side of the outline and
+/// a side of the hole face each other square: those four corners are on one
+/// circle (`docs/decisions.md` §379.5).
+///
+/// **Why they are a triangulation of the ring when every one of them turns the
+/// way the outline does**, which [`cut_by_corner_order`] settles with
+/// [`orient2d`] before it takes them. A triangle's sides are one side of a loop
+/// and two rungs across: the rung it starts from, and the one it hands to the
+/// next triangle, and the last hands back the first. So the triangles' sides
+/// taken together run every rung once each way, and what is left is the
+/// outline once round its way and the hole once round the other. That pair
+/// winds once round every point of the ring and not at all round a point of
+/// the hole or outside, and a triangle that turns the outline's way winds once
+/// round each point inside it and not at all round any other. So every point
+/// of the ring is under exactly one triangle, and no point outside the ring
+/// under any; every side of either loop is a side of exactly one triangle. No
+/// corner lies along another triangle's side either: the triangles at a corner
+/// run round it in order from one of its loop's sides to the other, and so
+/// already cover the ring beside it once.
+///
+/// Any other ring turns some triangle the wrong way or none, and is left to the
+/// Delaunay triangulation: a hole far off to one side, say, or two loops that
+/// touch, where the rung between the two corners in one place has no length.
+///
+/// **No side joins two corners of one loop**, only a corner of the outline to
+/// a corner of the hole, so a face across either rim draws none of them unless
+/// it reaches the other rim too (§187.4).
+fn in_step_round_a_ring(outline: usize, hole: usize, across: usize) -> Vec<[u32; 3]> {
+    let on_the_outline = |step: usize| a_corner_number(step % outline);
+    let on_the_hole = |step: usize| a_corner_number(outline + (across + hole - step % hole) % hole);
+    let (mut round_the_outline, mut round_the_hole) = (0, 0);
+    let mut triangles = Vec::with_capacity(outline + hole);
+    while round_the_outline < outline || round_the_hole < hole {
+        let the_outline_steps = round_the_hole == hole
+            || (round_the_outline < outline
+                && comes_no_later_round(round_the_outline, outline, round_the_hole, hole));
+        if the_outline_steps {
+            triangles.push([
+                on_the_outline(round_the_outline),
+                on_the_outline(round_the_outline + 1),
+                on_the_hole(round_the_hole),
+            ]);
+            round_the_outline += 1;
+        } else {
+            triangles.push([
+                on_the_outline(round_the_outline),
+                on_the_hole(round_the_hole + 1),
+                on_the_hole(round_the_hole),
+            ]);
+            round_the_hole += 1;
         }
     }
-    Some(triangles)
+    triangles
+}
+
+/// Whether the middle of step `one` of `ones` equal steps round comes no later
+/// than the middle of step `other` of `others`: `(one + ½) / ones ≤ (other +
+/// ½) / others`, multiplied out into whole numbers wide enough not to
+/// overflow.
+fn comes_no_later_round(one: usize, ones: usize, other: usize, others: usize) -> bool {
+    let wide = |count: usize| u128::from(a_corner_number(count));
+    (2 * wide(one) + 1) * wide(others) <= (2 * wide(other) + 1) * wide(ones)
+}
+
+/// The corner of `hole` that [`in_step_round_a_ring`] starts from beside the
+/// outline's corner `first`, which turns the way `anticlockwise` says: the
+/// middle of the run of the hole's sides that `first` sees from outside, or
+/// the first corner of the middle side when the run is odd. `None` when
+/// `first` sees no side from outside, or lies on the line of one, or
+/// [`orient2d`] cannot settle which side of one it is on.
+///
+/// Read from signs alone, so a ring moved by a rounding starts from the same
+/// corner unless `first` lies within a rounding of the line through one of the
+/// hole's sides.
+fn the_corner_of_the_hole_across_from(
+    first: [f64; 2],
+    hole: &[[f64; 2]],
+    anticlockwise: bool,
+) -> Option<usize> {
+    let count = hole.len();
+    let mut seen = Vec::with_capacity(count);
+    for at in 0..count {
+        seen.push(which_way_it_turns(hole[at], hole[(at + 1) % count], first)? == anticlockwise);
+    }
+    let start = (0..count).find(|&at| seen[at] && !seen[(at + count - 1) % count])?;
+    let run = seen.iter().filter(|&&sees| sees).count();
+    Some((start + run / 2) % count)
+}
+
+/// The number a triangle names the corner at `position` by.
+fn a_corner_number(position: usize) -> u32 {
+    u32::try_from(position).expect("a loop of fewer than four billion corners")
 }
 
 /// Whether an outline turns anticlockwise at every corner (`Some(true)`) or
 /// clockwise at every corner (`Some(false)`) and goes round once; `None` for
 /// any other outline.
-///
-/// # Panics
-///
-/// On a [`Decision`] this file has not been taught.
 fn turns_one_way_once_round(corners: &[[f64; 2]]) -> Option<bool> {
     let count = corners.len();
     let mut way = None;
     for at in 0..count {
-        let anticlockwise = match orient2d(
+        let anticlockwise = which_way_it_turns(
             corners[at],
             corners[(at + 1) % count],
             corners[(at + 2) % count],
-        ) {
-            Decision::Pos => true,
-            Decision::Neg => false,
-            Decision::Zero | Decision::Undecidable { .. } => return None,
-            other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
-        };
+        )?;
         if *way.get_or_insert(anticlockwise) != anticlockwise {
             return None;
         }
@@ -372,6 +499,22 @@ fn turns_one_way_once_round(corners: &[[f64; 2]]) -> Option<bool> {
         return None;
     }
     way
+}
+
+/// Whether `a`, `b`, `c` turn anticlockwise (`Some(true)`) or clockwise
+/// (`Some(false)`), by [`orient2d`]; `None` for no turn, or one it cannot
+/// settle.
+///
+/// # Panics
+///
+/// On a [`Decision`] this file has not been taught.
+fn which_way_it_turns(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<bool> {
+    match orient2d(a, b, c) {
+        Decision::Pos => Some(true),
+        Decision::Neg => Some(false),
+        Decision::Zero | Decision::Undecidable { .. } => None,
+        other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
+    }
 }
 
 /// The first corner with a scaled coordinate that is not zero and is under
