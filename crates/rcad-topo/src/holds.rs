@@ -3046,7 +3046,7 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 /// the chord", and `square_to_the_chord` below names the two sides — the chord
 /// read off the corners as they are stored, which for a fused solid is a rounded
 /// world frame and is the same frame every other step here reads (§17.3, §168).
-/// The picker has to settle which side, and it does so in one of three ways:
+/// The picker has to settle which side, and it does so in one of four ways:
 ///
 /// - **Its plane holds both ends**, which is §167's test and what a face built
 ///   by hand gives. That plane then meets the curve's plane in the chord line
@@ -3060,6 +3060,12 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 ///   ends, has the centre in front. The arc is then the one on the centre's side
 ///   of the chord, and [`into_the_arc_on_the_centres_side`] carries that
 ///   argument, which reads where the plane sits and not only its normal.
+/// - **The middle of the other arc is behind it, the other arc being the one on
+///   the centre's side**, which is what the shorter arc gives when its ends are
+///   boxes the picker's plane runs through: the first way then cannot say an end
+///   is on the plane, nor the second that it is in front. The arc is the one
+///   away from the centre, and [`into_the_arc_away_from_the_centre`] carries
+///   that argument.
 ///
 /// # Why the second way works, on a circle and then on an ellipse
 ///
@@ -3157,6 +3163,9 @@ pub(crate) fn the_way_into_an_arc(
                 boxes,
                 square_to_the_chord,
             )
+            .or_else(|| {
+                into_the_arc_away_from_the_centre(half, flat, &centred, boxes, square_to_the_chord)
+            })
         })
     })
 }
@@ -3165,9 +3174,17 @@ pub(crate) fn the_way_into_an_arc(
 /// of the first two ways [`the_way_into_an_arc`] sets out.
 ///
 /// The fuse's own arrangement asks this through [`the_way_into_an_arc`], on the
-/// boxes it solved for rather than on stored corners, and so asks the third way,
-/// [`into_the_arc_on_the_centres_side`], as well (§23.8, and §211.5 for the
+/// boxes it solved for rather than on stored corners, and so asks the third and
+/// fourth ways, [`into_the_arc_on_the_centres_side`] and
+/// [`into_the_arc_away_from_the_centre`], as well (§23.8, and §211.5 for the
 /// three spellings of the closed-curve test that went the same way).
+///
+/// **Those two stay out of here.** `the_half_space_both_ends_are_on` in
+/// `fuse/assemble.rs` lowers a picker until this says yes, and neither of them
+/// asks where the ends are. The fourth would say yes to the first plane it is
+/// handed, at the smaller of two rounded dot products, which can sit a rounding
+/// in front of a stored end — and the fuse would write down a picker that end
+/// is behind.
 pub(crate) fn a_picker_that_tells_the_two_arcs_apart(
     half: &HalfSpace,
     flat: &Plane,
@@ -3338,6 +3355,95 @@ fn how_far_outside(round: &Surface, x: [Interval; 3], k: Interval) -> Option<Int
             Some(squared(cross(x, axis)) - radius * radius * squared(axis) * k * k)
         }
         Surface::Plane(_) | Surface::Torus(_) | _ => None,
+    }
+}
+
+/// The way into an arc on the far side of its chord from the curve's centre,
+/// when the middle of the **other** arc, the one on the centre's side, is
+/// certainly behind `half`; `None` otherwise.
+///
+/// This is the fourth way [`the_way_into_an_arc`] reads an arc, and the one for
+/// the shorter of the two when its ends are boxes. A fuse names an arc by the
+/// plane through its chord, and when both stored ends read exactly on that
+/// plane it keeps it as it is (`the_half_space_both_ends_are_on` in
+/// `fuse/assemble.rs`). The next fuse solves each end again into a box, which
+/// that plane then runs through: the first way cannot say an end is on it and
+/// the second cannot say one is in front. A window a box cuts in a pipe's wall
+/// has its bottom arc named so, its ends at `x = ±1.9364916731037085` and its
+/// picker `0.5x ≥ 0.9682458365518543`, and the next fuse solves each end into
+/// `x ∈ [1.9364916731037083, 1.9364916731037085]`.
+///
+/// **This is the third way's argument turned round.** The arc lies wholly on or
+/// in front of `half`, because that is what a picker is, so a point of the
+/// curve strictly behind `half` is on the other arc. With `c` the centre, `M`
+/// the chord's middle and `f` the picker's own affine function, the line from
+/// `M` through `c` meets the curve at `c + (M − c)/λ` and `c − (M − c)/λ`, for
+/// one `λ > 0`: restricted to the curve's plane, the round surface's polynomial is
+/// its value at `c` plus a form that is positive and has no part linear in
+/// `p − c`, and `M − c` is not zero because `c` is off the chord line, which is
+/// read below. The point `m = c − (M − c)/λ` lies past `c` from `M`, so on the
+/// centre's side of the chord line, and the curve on that side is one arc,
+/// since a line meets a closed conic in two points and those are the ends. And
+///
+/// ```text
+/// f(m) = f(c) − (f(M) − f(c))/λ
+/// ```
+///
+/// is strictly negative when `f(c) < 0` and `f(M) ≥ f(c)`, whatever `λ` is.
+/// Those two signs therefore say the arc picked is the one away from the
+/// centre, and the way into it is `square_to_the_chord` turned to read negative
+/// towards the centre. No `λ` is asked for, so the round surface itself is never
+/// read here.
+///
+/// With `n` and `e` the curve plane's normal and offset and `h` the picker's
+/// normal, every sign is multiplied through by `k = n·along`, which is
+/// positive, so the centre is never formed and no division is taken:
+///
+/// - `k·f(c)` is [`where_the_curves_centre_sits`];
+/// - `k·(f(M) − f(c))` is `k·h·(M − from) − (e − n·from)·h·along`, in which the
+///   picker's offset cancels;
+/// - which side of the chord the centre is on is the sign of
+///   `k·(from − start)·s + (e − n·from)·along·s`, with `s` the direction square
+///   to the chord, which is how the third way reads it too.
+///
+/// **The arc's ends are somewhere in `ends`**, as for the third way. Every sign
+/// is read over the whole of both boxes, so it is the sign at the true ends
+/// wherever in their boxes they are, and an interval that straddles zero is
+/// `None`. What is asked of the other arc is its middle, a long way from either
+/// end, so an end a rounding off the curve does not move it.
+fn into_the_arc_away_from_the_centre(
+    half: &HalfSpace,
+    flat: &Plane,
+    centred: &WhereTheCurveIsCentred,
+    ends: [[Interval; 3]; 2],
+    square_to_the_chord: [Interval; 3],
+) -> Option<[Interval; 3]> {
+    let normal = exactly(flat.normal().components());
+    let from = exactly(centred.from.coordinates());
+    let across = dot(normal, centred.along);
+    if across.sign() != Decision::Pos
+        || where_the_curves_centre_sits(half, flat, centred) != Decision::Neg
+    {
+        return None;
+    }
+    let up = Interval::exactly(flat.offset()) - dot(normal, from);
+    let [start, end] = ends;
+    let from_to_the_middle: [Interval; 3] = core::array::from_fn(|axis| {
+        (start[axis] + end[axis]) * Interval::exactly(0.5) - from[axis]
+    });
+    let facing = exactly(half.normal().components());
+    let rises = dot(facing, from_to_the_middle) * across - up * dot(facing, centred.along);
+    if !matches!(rises.sign(), Decision::Pos | Decision::Zero) {
+        return None;
+    }
+    let start_to_from: [Interval; 3] = core::array::from_fn(|axis| from[axis] - start[axis]);
+    match (dot(start_to_from, square_to_the_chord) * across
+        + up * dot(centred.along, square_to_the_chord))
+    .sign()
+    {
+        Decision::Pos => Some(square_to_the_chord.map(core::ops::Neg::neg)),
+        Decision::Neg => Some(square_to_the_chord),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
     }
 }
 
@@ -8690,6 +8796,53 @@ mod tests {
                 let held = ask(point).expect("a half ring is a face this can follow");
                 assert_eq!(held, answer, "walked {walk:?}, {point:?}");
             }
+        }
+    }
+
+    /// **The bottom arc of a window a box cuts in a pipe's wall is read where
+    /// the next fuse's boxes for its ends straddle its picker**, and the other
+    /// arc of the same circle, picked by the same plane turned round, is read
+    /// the other way.
+    ///
+    /// The numbers are the ones the first fuse wrote and the second solved in
+    /// `two_bars_on_one_pipe_and_a_box_united_in_one_call.rs`: a pipe of radius
+    /// 2 up the `z` axis cut by `z = 0.5`, the ends at `y = ±0.5` solved into
+    /// `x ∈ [1.9364916731037083, 1.9364916731037085]`, and the window's arc
+    /// picked by `0.5x ≥ 0.9682458365518543`, a plane through both boxes. The
+    /// window's arc is the short one, away from the axis, and none of the ways
+    /// read it until [`into_the_arc_away_from_the_centre`]. The long one has the
+    /// axis in front of its picker, and [`into_the_arc_on_the_centres_side`]
+    /// reads it.
+    #[test]
+    fn the_bottom_arc_of_a_window_is_read_where_its_end_boxes_straddle_its_picker() {
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+                2.0,
+            )
+            .expect("a positive radius"),
+        );
+        let floor = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.5), Vector::new(0.0, 0.0, -1.0))
+                .expect("a unit normal"),
+        );
+        let across = Interval::new(1.9364916731037083, 1.9364916731037085).expect("an interval");
+        let ends = [0.5, -0.5].map(|y| {
+            PredicatePoint::Constructed([across, Interval::exactly(y), Interval::exactly(0.5)])
+        });
+        let picked_by = |facing: f64| {
+            [Picker::from(
+                HalfSpace::new(
+                    Vector::new(0.5 * facing, 0.0, 0.0),
+                    0.9682458365518543 * facing,
+                )
+                .expect("a half-space"),
+            )]
+        };
+        for (facing, along_x) in [(1.0, Decision::Pos), (-1.0, Decision::Neg)] {
+            let way = the_way_into_an_arc(&pipe, &floor, ends, &picked_by(facing))
+                .unwrap_or_else(|| panic!("facing {facing}: no way into the arc"));
+            assert_eq!(way[0].sign(), along_x, "facing {facing}: {way:?}");
         }
     }
 }

@@ -5236,7 +5236,17 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
 /// the room is not granted: the picker is the one the stored ends alone earn,
 /// exactly as before the room existed, and the next fuse may refuse it as it
 /// always did — `a_near_semicircle_keeps_its_centre_behind_its_picker` measures
-/// the band. Two exact ends on the chord's own plane need neither, and keep it.
+/// the band.
+///
+/// **Two exact ends on the chord's own plane keep it, with no room**, and the
+/// next fuse's boxes for them straddle it: the bottom arc of a window a box
+/// cuts in a pipe's wall is stored with its ends at `x = 1.9364916731037085`
+/// and picked by `0.5x ≥ 0.9682458365518543`, and the next fuse solves each end
+/// into `x ∈ [1.9364916731037083, 1.9364916731037085]`. Neither of the two ways
+/// [`a_picker_that_tells_the_two_arcs_apart`] knows can read such a picker. The
+/// next fuse reads the arc by where the middle of the other arc sits instead:
+/// `into_the_arc_away_from_the_centre` in `holds.rs` for the shorter, as the
+/// window's is, and `into_the_arc_on_the_centres_side` for the longer.
 fn the_half_space_both_ends_are_on(
     facing: Vector,
     ends: [Point; 2],

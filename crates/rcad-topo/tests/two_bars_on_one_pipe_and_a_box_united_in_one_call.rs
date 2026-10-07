@@ -54,12 +54,27 @@
 //!   call ([`a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it`]).
 //! - **The lower bar and a box through its wall, then the upper bar**
 //!   ([`uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_two_boxes`]).
-//!   The first union answers and validates. The second is refused
-//!   `AFaceTrimmedByACurveThisCannotFollow` on that union's wall, where
-//!   `select.rs` asks the wall, through `SolidView::face_holds_the_point` in
-//!   `holds.rs`, whether it holds a point of the upper bar's wall on the same
-//!   pipe. A window cut opposite the seam is refused the same, so the seam is
-//!   not what stops it
+//!   The first union answers and validates. Until Q1093 the second was refused
+//!   `AFaceTrimmedByACurveThisCannotFollow` on that union's wall before any
+//!   face was asked whether it holds a point: the arrangement cutting the wall
+//!   (`which_way_an_edge_runs_round` in `fuse/arrange.rs`) could not say which
+//!   of the two arcs of its circle the bottom edge of the window or notch is,
+//!   on `z = 0.5`, or `z = 1` for the box across the meeting. The first union
+//!   named that arc by a half-space through both its stored ends, which sit
+//!   exactly on its plane at `x = ±1.9364916731037085`. The second fuse solves
+//!   each end again from the pipe and two planes, into a box from
+//!   `1.9364916731037083` to `1.9364916731037085` across that plane, and
+//!   `a_picker_that_tells_the_two_arcs_apart` in `holds.rs`, which asks each
+//!   end to be on or in front, cannot tell (Q1063). `holds.rs` now reads the
+//!   arc by the middle of the other arc, which is behind the picker
+//!   (`into_the_arc_away_from_the_centre`), and the second fuse refuses later,
+//!   by how the wall is written. With the upper wall's axis turned round it is
+//!   `Undecidable` at "side of cylinder" on a bottom corner of the window or
+//!   notch, for all three boxes. Otherwise a window is refused
+//!   `ResultIsNotManifold` at one edge, and the notch
+//!   `AFaceTrimmedByACurveThisCannotFollow` on the first union's wall, by
+//!   `SolidView::what_this_face_holds` in `holds.rs` (Q1094). A window cut
+//!   opposite the seam is refused the same, so the seam is not what stops it
 //!   ([`a_window_cut_opposite_the_seam_is_refused_the_same`]).
 
 use core::f64::consts::PI;
@@ -145,9 +160,14 @@ fn a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it() {
 /// **The lower bar united with the box first, and the upper bar after, is
 /// refused for two of the seven boxes**, by every spelling of the wall, where
 /// the other two ways of asking answer: the box across the meeting and the box
-/// on the lower wall, at the second, `AFaceTrimmedByACurveThisCannotFollow`
-/// naming the first union's wall. Each refusal is a gap: the same three solids
-/// unite in one call, and with the bars first.
+/// on the lower wall, at the second fuse, as [`the_second_union_is_refused`]
+/// sets out. Each refusal is a gap: the same three solids unite in one call,
+/// and with the bars first.
+///
+/// Until Q1093 every one of those refusals was
+/// `AFaceTrimmedByACurveThisCannotFollow` naming the first union's wall, from
+/// the arrangement that cuts it, which could not read the bottom arc of the
+/// window or notch. That arc is read now, and the second fuse refuses later.
 ///
 /// The other five answer by hand. Two of them were refused at the second fuse,
 /// under "a point in a piece that every solid could place", because the ray
@@ -183,21 +203,21 @@ fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_two_boxes(
         }
 
         for the_box in [TheBox::AcrossTheMeeting, TheBox::OnTheLowerWallOnly] {
-            refuses_on_the_first_unions_wall(the_box, wall);
+            the_second_union_is_refused(the_box, wall);
         }
     }
 }
 
 /// **A window cut through the lower bar's wall opposite its seam is refused
 /// the same** as the box on the lower wall, which cuts one through the seam:
-/// so the seam running through the window is not what `holds.rs` cannot
+/// so the seam running through the window is not what the second fuse cannot
 /// follow. The same three united in one call, or with the bars first, are the
 /// mirror image of the box on the lower wall's union, and hold as much.
 #[test]
 fn a_window_cut_opposite_the_seam_is_refused_the_same() {
     let the_box = TheBox::OnTheLowerWallOppositeTheSeam;
     for wall in EVERY_WALL {
-        refuses_on_the_first_unions_wall(the_box, wall);
+        the_second_union_is_refused(the_box, wall);
         for call in [
             Call::LowerAgainstUpperAndBox,
             Call::UpperAndBoxAgainstLower,
@@ -211,9 +231,18 @@ fn a_window_cut_opposite_the_seam_is_refused_the_same() {
     }
 }
 
-/// `(lower ∪ box) ∪ upper` refused `AFaceTrimmedByACurveThisCannotFollow`,
-/// naming the first union's wall: a face of it on a pipe.
-fn refuses_on_the_first_unions_wall(the_box: TheBox, wall: Wall) {
+/// `(lower ∪ box) ∪ upper`, for a box that cuts a window or a notch in the
+/// lower bar's wall: the first union answers, validates and is one solid, and
+/// the second is refused, by how the wall is written:
+///
+/// - with the upper wall's axis turned round, `Undecidable` at "side of
+///   cylinder", whichever the box;
+/// - otherwise, for the box across the meeting,
+///   `AFaceTrimmedByACurveThisCannotFollow` naming the first union's wall, a
+///   face of it on a pipe;
+/// - otherwise, for a box on the lower wall alone, `ResultIsNotManifold` at one
+///   edge.
+fn the_second_union_is_refused(the_box: TheBox, wall: Wall) {
     let asked = format!("{the_box:?}, {wall:?}");
     let asked = asked.as_str();
     let policy = Policy::certified();
@@ -247,20 +276,54 @@ fn refuses_on_the_first_unions_wall(the_box: TheBox, wall: Wall) {
             &mut ProvenanceLog::new(),
         )
         .expect_err(asked);
-    let Error::AFaceTrimmedByACurveThisCannotFollow { face } = refused else {
-        panic!("{asked}: {refused:?}");
-    };
-    let named = model
-        .solid(*solid)
-        .expect("this model made the key")
-        .faces()
-        .find(|used| used.key() == face)
-        .unwrap_or_else(|| panic!("{asked}: {face:?} is not a face of the first union"));
-    assert!(
-        matches!(named.surface(), Surface::Cylinder(_)),
-        "{asked}: {:?}",
-        named.surface()
-    );
+    match (wall, the_box) {
+        (
+            Wall::AxisTurnedRound,
+            TheBox::AcrossTheMeeting
+            | TheBox::OnTheLowerWallOnly
+            | TheBox::OnTheLowerWallOppositeTheSeam,
+        ) => {
+            let Error::Undecidable { records } = &refused else {
+                panic!("{asked}: {refused:?}");
+            };
+            assert_eq!(
+                records.records().last().map(|record| record.predicate()),
+                Some("side of cylinder"),
+                "{asked}: {refused:?}"
+            );
+        }
+        (Wall::SpelledOnce | Wall::OriginSlidUp | Wall::TwoRoundBars, TheBox::AcrossTheMeeting) => {
+            let Error::AFaceTrimmedByACurveThisCannotFollow { face } = refused else {
+                panic!("{asked}: {refused:?}");
+            };
+            let named = model
+                .solid(*solid)
+                .expect("this model made the key")
+                .faces()
+                .find(|used| used.key() == face)
+                .unwrap_or_else(|| panic!("{asked}: {face:?} is not a face of the first union"));
+            assert!(
+                matches!(named.surface(), Surface::Cylinder(_)),
+                "{asked}: {:?}",
+                named.surface()
+            );
+        }
+        (
+            Wall::SpelledOnce | Wall::OriginSlidUp | Wall::TwoRoundBars,
+            TheBox::OnTheLowerWallOnly | TheBox::OnTheLowerWallOppositeTheSeam,
+        ) => assert!(
+            matches!(refused, Error::ResultIsNotManifold { count: 1 }),
+            "{asked}: {refused:?}"
+        ),
+        (
+            Wall::SpelledOnce | Wall::OriginSlidUp | Wall::AxisTurnedRound | Wall::TwoRoundBars,
+            TheBox::BlockOverNegativeX
+            | TheBox::OnTheUpperWallOnly
+            | TheBox::FarAway
+            | TheBox::TopSlicedOffAbove
+            | TheBox::SlicedAtTheMeeting,
+        ) => panic!("{asked}: this box cuts no window or notch in the lower wall"),
+    }
 }
 
 /// The two bars stacked on one pipe, each [`MEETING`] tall.

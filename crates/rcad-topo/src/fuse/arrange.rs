@@ -3281,7 +3281,7 @@ impl<'f> Arrangement<'f> {
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the edge is not an
     /// arc of a closed crossing between a plane and a round surface — a ball's
     /// circle, or a cone's or a pipe's circle or ellipse — with a picker that
-    /// tells its two arcs apart by one of the three ways [`the_way_into_an_arc`]
+    /// tells its two arcs apart by one of the four ways [`the_way_into_an_arc`]
     /// sets out, which is the one reading of a picker this and
     /// [`holds`](crate::holds) share. A gap and not a limit: the edge is one arc
     /// or the other.
