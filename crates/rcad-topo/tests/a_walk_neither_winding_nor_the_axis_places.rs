@@ -11,8 +11,11 @@
 //! ordinary solids, whose volumes each test's doc works out by hand — so each
 //! refusal was a gap (§16.10). **The one on a plane is answered now**, since
 //! winding on a flat face follows each curved side as well as the corners
-//! (queue row Q1053), and every fuse holds the volume its doc works out. The
-//! ones on a ball and on a cone still reach it.
+//! (queue row Q1053), and every fuse holds the volume its doc works out. **So
+//! is the one on a ball**, since a ball's skin is opened out flat from a point
+//! of the walk and wound round there (queue row Q1242), and so is a second
+//! shape on a ball that reached it, a square rod holed down its own axis. The
+//! one on a cone still reaches it.
 //!
 //! **The one on a cone is the axis rule giving up on a walk that goes round
 //! nothing** (queue row Q1056): `the_one_that_goes_round_the_axis_as_well`
@@ -71,28 +74,67 @@ mod cones;
 /// all four at each end. The dimple's circle is a lump of its own in the top
 /// patch. Its outer walk agrees with both patches about every circle, the face
 /// is a ball's, and the dimple's lump has the face's own boundary in it, so it
-/// is wound once and not left out.
+/// is wound once and not left out. That outer walk was refused
+/// `CannotTellTheCellsOfAFaceApart` under every rule both ways round until a
+/// ball's skin was opened out flat from a node of the dimple's circle, where
+/// the patch holding it is the one whose walk goes round the far patch's
+/// corners (queue row Q1242).
 ///
-/// **The answer exists.** With `Q = ∫∫ 2√(4 − x² − y²)` over the square
-/// `|x|, |y| < 1`, the part of the ball in the rod, and `L` the lens the two balls
-/// share, the dimpled ball is `32π/3 − L`, the rod `40`, and the two share
-/// `Q − L`, since the small ball lies inside the rod.
+/// **The answer.** With `Q` [`the_square_part_of_the_ball`] and `L` the lens
+/// the two balls share, the dimpled ball is `32π/3 − L`, the rod `40`, and the
+/// two share `Q − L`, since the small ball lies inside the rod. Each answer
+/// is one solid but the rod less the ball, which leaves the rod's two ends,
+/// the top one holding the lens as well.
 #[test]
-fn a_dimpled_ball_through_a_square_rod_cannot_tell_the_two_ends_of_the_rod_apart() {
-    every_rule_both_ways_refuses_on_a(
-        "a dimpled ball through a square rod",
-        || {
-            let mut model = a_model();
-            let ball = model.add_ball(2.0, &Isometry::identity()).expect("a ball");
-            let small = model
-                .add_ball(0.3, &shift(0.5, 0.25, 1.9))
-                .expect("a small ball");
-            let dimpled = fuse_one(&mut model, ball, small, Rule::Difference);
-            let rod = block(&mut model, [-1.0, -1.0, -5.0], [1.0, 1.0, 5.0]);
-            (model, dimpled, rod)
-        },
-        |surface| matches!(surface, Surface::Sphere(ball) if ball.radius() == 2.0),
-    );
+fn a_dimpled_ball_through_a_square_rod_is_answered_under_every_rule() {
+    use std::f64::consts::PI;
+    let (ball, square) = (32.0 * PI / 3.0, the_square_part_of_the_ball());
+    let lens = the_lens_two_balls_share(2.0, 0.3, (0.5f64 * 0.5 + 0.25 * 0.25 + 1.9 * 1.9).sqrt());
+    let end = (40.0 - square) / 2.0;
+    for (rule, ball_first) in every_rule_both_ways() {
+        let mut model = a_model();
+        let big = model.add_ball(2.0, &Isometry::identity()).expect("a ball");
+        let small = model
+            .add_ball(0.3, &shift(0.5, 0.25, 1.9))
+            .expect("a small ball");
+        let dimpled = fuse_one(&mut model, big, small, Rule::Difference);
+        let rod = block(&mut model, [-1.0, -1.0, -5.0], [1.0, 1.0, 5.0]);
+        let what = format!("{rule:?}, the dimpled ball first {ball_first}");
+        let answer = fuse(&mut model, dimpled, rod, rule, ball_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let volumes = match (rule, ball_first) {
+            (Rule::Union, _) => vec![ball + 40.0 - square],
+            (Rule::Intersection, _) => vec![square - lens],
+            (Rule::Difference, true) => vec![ball - square],
+            (Rule::Difference, false) => vec![end, end + lens],
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_each_holds(&model, &answer, &volumes, &what);
+    }
+}
+
+/// The part of the ball of radius 2 at the origin inside the square rod
+/// `|x|, |y| < 1`: `∫∫ 2√(4 − x² − y²)` over the square, which works out to
+/// `76π/3 − 72·atan √2 + 8√2/3`.
+fn the_square_part_of_the_ball() -> f64 {
+    use std::f64::consts::PI;
+    let root_two = 2.0f64.sqrt();
+    76.0 * PI / 3.0 - 72.0 * root_two.atan() + 8.0 * root_two / 3.0
+}
+
+/// The lens two balls of radius `big` and `small` share, their centres
+/// `apart` from each other: `π (big + small − apart)² (apart² + 2·apart·small
+/// − 3 small² + 2·apart·big + 6 small·big − 3 big²) / (12 apart)`.
+fn the_lens_two_balls_share(big: f64, small: f64, apart: f64) -> f64 {
+    use std::f64::consts::PI;
+    let overlap = big + small - apart;
+    PI * overlap
+        * overlap
+        * (apart * apart + 2.0 * apart * small - 3.0 * small * small
+            + 2.0 * apart * big
+            + 6.0 * small * big
+            - 3.0 * big * big)
+        / (12.0 * apart)
 }
 
 /// A chip of the cone `r = z` (slope 1, apex at the origin), described face by
@@ -856,7 +898,57 @@ fn the_roofed_frustum_between(low: f64, high: f64) -> f64 {
     (slice(low) + inner + slice(high)) * step / 3.0
 }
 
-/// Three shapes built on the way that never reach the arrangement's cells: a
+/// The ball of radius 2 at the origin against the square rod
+/// `[−1, 1]² × [−5, 5]` holed down its own axis by a bar of radius `0.3`.
+///
+/// The rod's four walls cut the ball's skin in four circles that are one lump,
+/// with a patch inside all four at each end, and the hole cuts it in two
+/// circles square to the axis, one in each patch. Each circle's outer walk is
+/// on the same side of every circle as both patches, so which patch holds it
+/// is asked, and it was refused `CannotTellTheCellsOfAFaceApart` under every
+/// rule both ways round from Q1140 on. Opened out flat from a node of the
+/// circle, the patch holding it is the one whose walk goes round the far
+/// patch's corners. Then each outer walk faced the other's, since neither
+/// circle has the other inside it, and joining them glued both patches into
+/// one cell, which was refused the same way; two walks each one cell with a
+/// different patch are not joined now (queue row Q1242).
+///
+/// **The answer.** The rod holds the whole square inside the ball's radius, so
+/// the two share [`the_square_part_of_the_ball`] less the hole's
+/// `(4π/3)(8 − 3.91^(3/2))`, the part of the ball within `0.3` of the axis. The
+/// holed rod is `40 − 0.9π`. The ball less the rod leaves the ball outside the
+/// square and the core inside the hole, apart; the rod less the ball leaves its
+/// two ends, alike.
+#[test]
+fn a_ball_against_a_square_rod_holed_down_its_axis_is_answered_under_every_rule() {
+    use std::f64::consts::PI;
+    let (ball, square) = (32.0 * PI / 3.0, the_square_part_of_the_ball());
+    let hole = 4.0 * PI / 3.0 * (8.0 - 3.91f64.powf(1.5));
+    let holed = 40.0 - 0.9 * PI;
+    let shared = square - hole;
+    for (rule, ball_first) in every_rule_both_ways() {
+        let mut model = a_model();
+        let sphere = model.add_ball(2.0, &Isometry::identity()).expect("a ball");
+        let rod = block(&mut model, [-1.0, -1.0, -5.0], [1.0, 1.0, 5.0]);
+        let bar = model
+            .add_round_bar(0.3, 12.0, &shift(0.0, 0.0, -6.0))
+            .expect("a bar");
+        let rod = fuse_one(&mut model, rod, bar, Rule::Difference);
+        let what = format!("{rule:?}, the ball first {ball_first}");
+        let answer = fuse(&mut model, sphere, rod, rule, ball_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let volumes = match (rule, ball_first) {
+            (Rule::Union, _) => vec![ball + holed - shared],
+            (Rule::Intersection, _) => vec![shared],
+            (Rule::Difference, true) => vec![hole, ball - square],
+            (Rule::Difference, false) => vec![(holed - shared) / 2.0; 2],
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_each_holds(&model, &answer, &volumes, &what);
+    }
+}
+
+/// Two shapes built on the way that never reach the arrangement's cells: a
 /// ball against a pipe off its centre crosses in a quartic, which nothing
 /// orders (§34.10).
 ///
@@ -866,37 +958,24 @@ fn the_roofed_frustum_between(low: f64, high: f64) -> f64 {
 ///   of radius `0.5` on its wall at `(2, 0, 5)`, which was to be a walk going
 ///   round nothing on a pipe.
 ///
-/// **The rod holed down its own axis does reach the cells now**, and a face of
-/// it cannot have them told apart, under every rule both ways (Q1140). Its
-/// hole crosses the ball in two circles square to the axis, which the
-/// arrangement could not tell from the quartic loops of a hole off the centre
-/// until it asked exactly whether the centre is on the axis. What it should
-/// answer: the rod `[−1, 1]² × [−5, 5]` holds the whole square inside the
-/// ball's radius, so the two share `∫∫ 2√(4 − x² − y²)` over the square less
-/// the hole's `(4π/3)(8 − 3.91^(3/2))`, and the square's part works out to
-/// `76π/3 − 72·atan √2 + 8√2/3`.
+/// The rod holed down its own axis reaches them since Q1140, and is answered
+/// since Q1242:
+/// [`a_ball_against_a_square_rod_holed_down_its_axis_is_answered_under_every_rule`].
 #[test]
 fn a_ball_against_a_pipe_is_refused_before_any_cell() {
     for (rule, first) in every_rule_both_ways() {
-        for hole in [[0.0, 0.0], [0.4, 0.3]] {
-            let mut model = a_model();
-            let ball = model.add_ball(2.0, &Isometry::identity()).expect("a ball");
-            let rod = block(&mut model, [-1.0, -1.0, -5.0], [1.0, 1.0, 5.0]);
-            let bar = model
-                .add_round_bar(0.3, 12.0, &shift(hole[0], hole[1], -6.0))
-                .expect("a bar");
-            let holed = fuse_one(&mut model, rod, bar, Rule::Difference);
-            let refused = fuse(&mut model, ball, holed, rule, first);
-            let on_the_axis = hole == [0.0, 0.0];
-            assert!(
-                if on_the_axis {
-                    matches!(refused, Err(Error::CannotTellTheCellsOfAFaceApart { .. }))
-                } else {
-                    matches!(refused, Err(Error::ACrossingThisCannotBeOrderedAlong))
-                },
-                "the rod holed at {hole:?}, {rule:?}, the ball first {first}: {refused:?}"
-            );
-        }
+        let mut model = a_model();
+        let ball = model.add_ball(2.0, &Isometry::identity()).expect("a ball");
+        let rod = block(&mut model, [-1.0, -1.0, -5.0], [1.0, 1.0, 5.0]);
+        let bar = model
+            .add_round_bar(0.3, 12.0, &shift(0.4, 0.3, -6.0))
+            .expect("a bar");
+        let holed = fuse_one(&mut model, rod, bar, Rule::Difference);
+        let refused = fuse(&mut model, ball, holed, rule, first);
+        assert!(
+            matches!(refused, Err(Error::ACrossingThisCannotBeOrderedAlong)),
+            "the rod holed at (0.4, 0.3), {rule:?}, the ball first {first}: {refused:?}"
+        );
 
         let mut model = a_model();
         let bar = model
