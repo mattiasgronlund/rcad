@@ -4,7 +4,7 @@
 //! names the **points** a third surface cuts out of that curve, which is what a
 //! corner of an arrangement is (`docs/decisions.md` §31.2 rows 4 and 5).
 //!
-//! # Two planes and a quadric is the road, and four ways round it
+//! # Two planes and a quadric is the road, and five ways round it
 //!
 //! Two planes cross in a line, and a line cut by a quadric is a quadratic in one
 //! unknown whose discriminant is a polynomial in the stored numbers. That is the
@@ -14,7 +14,7 @@
 //! One plane and two quadrics is a quartic in general — the plane crosses each
 //! quadric in a conic and two conics in one plane meet where a quartic is zero —
 //! and reaching *that* takes an algebraic solver rather than a discriminant. But
-//! **four families of it are not a quartic at all**, and all four are
+//! **five families of it are not a quartic at all**, and all five are
 //! ordinary mechanical CAD rather than curiosities:
 //!
 //! - **Two quadrics that bend the same way.** Write a quadric out as
@@ -42,13 +42,18 @@
 //!   leaves the three sharing nothing, and a plane that *touches* one at a single
 //!   point leaves one candidate — so the whole question is which side of the
 //!   third surface that point is on. [`what_a_plane_that_grazes_one_of_them_leaves`].
+//! - **Two surfaces turned about one axis, and a plane beside it.** The same
+//!   circles, each cut in a chord, touched or missed by a plane parallel to the
+//!   axis and off it, as a sign at a root of that quadratic says — a D-flat on
+//!   a shaft across the circle a chamfer cone crosses it in.
+//!   [`what_a_plane_beside_their_one_axis_leaves`].
 //!
 //! What is left over is refused by name (§16.10, §31.2): one plane and two
-//! quadrics that bend differently, cross the plane in curves, and neither are
-//! cut square about one axis nor share one the plane holds — a pipe and a ball
-//! off its axis, two pipes leaning against each other, or a cone and a bar on
-//! one axis with a wall beside the axis rather than through it — and any
-//! triple with a torus and fewer than two planes.
+//! quadrics that bend differently, cross the plane in curves, and neither
+//! share an axis the plane is square or parallel to — a pipe and a ball off
+//! its axis, two pipes leaning against each other, or a plane leaning to the
+//! axis a ball and a pipe share — and any triple with a torus and fewer than
+//! two planes.
 //! [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] says which of the two
 //! kinds of refusal it is in its own doc.
 //!
@@ -115,7 +120,9 @@ pub enum MeetOfThree {
     /// two curved surfaces are turned about, there is no such line, and the up
     /// to four points come in the order
     /// [`what_a_plane_through_their_one_axis_leaves`] gives: two circles, two
-    /// points on each, or a cone's apex and one circle.
+    /// points on each, or a cone's apex and one circle. A plane beside that
+    /// axis gives them in the same order, two on a circle it cuts and one on a
+    /// circle it touches ([`what_a_plane_beside_their_one_axis_leaves`]).
     ///
     /// Most are a box the true meeting point is somewhere inside, because
     /// solving a quadratic divides and a quotient of two ranges almost never
@@ -343,7 +350,7 @@ impl MeetOfThree {
 /// # Errors
 ///
 /// [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] when fewer than two of
-/// the three are planes and none of the four ways round that the module doc
+/// the three are planes and none of the five ways round that the module doc
 /// names runs.
 ///
 /// [`Error::Undecidable`] when a sign the answer depends on could not be
@@ -1307,7 +1314,7 @@ fn what_one_plane_and_one_curved_surface_share(
     }
 }
 
-/// One plane and two curved surfaces, by the four roads the module doc names.
+/// One plane and two curved surfaces, by the five roads the module doc names.
 ///
 /// **Nothing here guesses.** Each road either reaches an answer it has earned or
 /// hands the question on, and what nothing reaches is the refusal that was here
@@ -1320,6 +1327,11 @@ fn what_one_plane_and_one_curved_surface_share(
 /// that holds the axis is never square to it, and it cuts a pipe or a cone
 /// about that axis in two lines, so it neither misses nor grazes one: that road
 /// shares no triple with the two either side of it.
+///
+/// The road for a plane beside the axis comes last. Such a plane can miss a
+/// pipe or a ball, or touch one, and the road for a plane that grazes answered
+/// those before the last road existed; they keep that answer, and the last road
+/// takes only a plane that cuts both surfaces in curves.
 fn where_one_plane_and_two_curved_surfaces_meet(
     first: &Surface,
     second: &Surface,
@@ -1346,6 +1358,11 @@ fn where_one_plane_and_two_curved_surfaces_meet(
     }
     if let Some(answer) =
         what_a_plane_that_grazes_one_of_them_leaves(flat, second, third, &at, policy, log)?
+    {
+        return Ok(answer);
+    }
+    if let Some(answer) =
+        what_a_plane_beside_their_one_axis_leaves(flat, second, third, &at, policy, log)?
     {
         return Ok(answer);
     }
@@ -1933,9 +1950,9 @@ fn how_far_a_plane_is_from(flat: &Plane, place: [f64; 3]) -> Option<Exact> {
 ///
 /// **A plane parallel to the axis but off it is not this road.** It cuts each
 /// circle in a chord, touches it or misses it, and which of the three takes the
-/// sign of `G·(n·n) − (n·o − d)²·W` at a root, which a box decides only where
-/// the plane is clear of touching. It is handed on, and refused by name
-/// (`a_wall_beside_the_axis_of_a_cone_and_a_bar_is_still_refused`).
+/// sign of `G·(n·n) − (n·o − d)²·W` at a root, decided exactly. It is handed
+/// on, past the road for a plane that grazes, to
+/// [`what_a_plane_beside_their_one_axis_leaves`].
 fn what_a_plane_through_their_one_axis_leaves(
     flat: &Plane,
     one: &Surface,
@@ -1954,17 +1971,8 @@ fn what_a_plane_through_their_one_axis_leaves(
     // Past here the family is settled, so arithmetic that runs out is a
     // refusal about *this* triple, which a slide along the range can retry.
     let refused = || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at);
-    let (Some(mine), Some(theirs), Some(reach)) = (
-        how_far_out_it_reaches(one, &axis),
-        how_far_out_it_reaches(other, &axis),
-        how_far_out_it_reaches(&axis.read_off, &axis),
-    ) else {
+    let Some((heights, reach)) = the_heights_they_share_circles_at(one, other, &axis) else {
         return Err(refused());
-    };
-    let heights = Quadratic {
-        squared: mine.squared.minus(&theirs.squared),
-        half_linear: mine.half_linear.minus(&theirs.half_linear),
-        constant: mine.constant.minus(&theirs.constant),
     };
     let mut steps =
         match where_a_line_meets_a_quadric(WHERE_THREE_SURFACES_MEET, &heights, at, policy, log)? {
@@ -2087,6 +2095,26 @@ fn it_holds_the_axis(flat: &Plane, axis: &AnAxis) -> bool {
         && zero(how_far_a_plane_is_from(flat, axis.through))
 }
 
+/// `g₁ − g₂`, whose roots are the heights at which `one` and `other` share a
+/// circle, and `g` of the surface `axis` is read off, both as
+/// [`how_far_out_it_reaches`] writes them — or `None` where a product falls
+/// out of range.
+fn the_heights_they_share_circles_at(
+    one: &Surface,
+    other: &Surface,
+    axis: &AnAxis,
+) -> Option<(Quadratic, Quadratic)> {
+    let mine = how_far_out_it_reaches(one, axis)?;
+    let theirs = how_far_out_it_reaches(other, axis)?;
+    let reach = how_far_out_it_reaches(&axis.read_off, axis)?;
+    let heights = Quadratic {
+        squared: mine.squared.minus(&theirs.squared),
+        half_linear: mine.half_linear.minus(&theirs.half_linear),
+        constant: mine.constant.minus(&theirs.constant),
+    };
+    Some((heights, reach))
+}
+
 /// `g(t)`, how far out from `axis` a ball, a pipe or a cone turned about it
 /// reaches at each height, as `W·ρ²` — the table in
 /// [`what_a_plane_through_their_one_axis_leaves`] — or `None` where a product
@@ -2190,22 +2218,26 @@ fn the_two_points_at(
     let sideways = cross_enclosing(exactly(normal), exactly(axis.along));
     let squared_axis = dot_enclosing(exactly(axis.along), exactly(axis.along));
     [-across, across].map(|side| {
-        let boxed: [Interval; 3] = core::array::from_fn(|coordinate| {
+        the_point_a_box_names(core::array::from_fn(|coordinate| {
             Interval::exactly(axis.through[coordinate])
                 + quotient_or_everything(
                     height * Interval::exactly(axis.along[coordinate])
                         + side * sideways[coordinate],
                     squared_axis,
                 )
-        });
-        if boxed.iter().all(|range| range.lo() == range.hi()) {
-            // An interval's zero lower end reads back as `−0.0`, and adding
-            // `0.0` writes it as the `0.0` a stored point would hold.
-            PredicatePoint::Exact(boxed.map(|range| range.lo() + 0.0))
-        } else {
-            PredicatePoint::Constructed(boxed)
-        }
+        }))
     })
+}
+
+/// The point a box of no width names, and the box itself where it has width.
+fn the_point_a_box_names(boxed: [Interval; 3]) -> PredicatePoint {
+    if boxed.iter().all(|range| range.lo() == range.hi()) {
+        // An interval's zero lower end reads back as `−0.0`, and adding `0.0`
+        // writes it as the `0.0` a stored point would hold.
+        PredicatePoint::Exact(boxed.map(|range| range.lo() + 0.0))
+    } else {
+        PredicatePoint::Constructed(boxed)
+    }
 }
 
 /// What a plane that misses one of the two curved surfaces, or touches it at a
@@ -2314,6 +2346,326 @@ fn a_touching_point_could_not_be_placed(
         Measures::Area,
     ));
     Error::Undecidable { records }
+}
+
+/// What a plane that runs beside the one axis two curved surfaces are turned
+/// about — parallel to it and off it — leaves of the three, or `None` where
+/// the three are not that.
+///
+/// A D-flat ground along a shaft is one. The flat runs along the shaft's axis
+/// and clear of it, and crosses the chamfer cone at the shaft's end, or a ball
+/// on its axis, where the two round surfaces share a circle.
+///
+/// **The circles are the ones a plane through the axis cuts**, at the roots of
+/// `g₁ − g₂` that [`what_a_plane_through_their_one_axis_leaves`] works out,
+/// with the same `o`, `w`, `W` and `g`. The plane's normal `n` is square to
+/// `w`, and the plane is `e/‖n‖` from the axis, for `e = n·o − d`. So at a
+/// height whose circle is `W·ρ² = G` the plane misses the circle, touches it
+/// or cuts it in a chord as `K = G·(n·n) − e²·W` is below, at or above zero,
+/// and the chord's ends are
+/// `o + (t·w ± (√K/(n·n))·(n × w))/W − (e/(n·n))·n`: the foot of the plane
+/// on the axis at height `t`, and `√K/((n·n)·W)` along `n × w` either side of
+/// it. A touch is the foot alone.
+///
+/// **Which of the three is decided exactly, at the root itself and not at a
+/// box round it.** `K` is `k(t) = κ₂t² + 2κ₁t + κ₀` for `κ = (n·n)·g`, with
+/// `e²W` taken off `κ₀`, and [`the_sign_of_the_chord_at`] puts the root into
+/// it with nothing rounded: a root that is a fraction as the fraction, and one
+/// that is a square root — which is where a cone meets a ball — through the
+/// one comparison of two squares that tells a chord from a touch. The plane
+/// `x + y = 2` touches both circles a cone of slope one and a ball of radius
+/// two about its apex share, at `(1, 1, ±√2)`, and the comparison there is of
+/// two numbers that are both exactly zero.
+///
+/// **It is asked after [`what_a_plane_that_grazes_one_of_them_leaves`]**,
+/// which already answered a plane beside the axis that misses a pipe or a
+/// ball, or touches one: those answers stand as they were, and this road
+/// takes what that one hands on, a plane that cuts both surfaces in curves.
+/// The road through the axis is asked before either, so `e` here is never
+/// zero.
+///
+/// Arithmetic that runs out after the family is settled is
+/// [`an_exact_step_could_not_be_taken`], a **gap**: the points are there, and
+/// the same three slid along the range are asked again.
+fn what_a_plane_beside_their_one_axis_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<MeetOfThree>> {
+    let Some(axis) = the_axis_both_are_turned_about(one, other) else {
+        return Ok(None);
+    };
+    let normal = flat.normal().components();
+    let (Some(leaning), Some(off_it)) = (
+        Exact::dot_of(normal, axis.along),
+        how_far_a_plane_is_from(flat, axis.through),
+    ) else {
+        return Ok(None);
+    };
+    if leaning.sign() != Decision::Zero {
+        return Ok(None);
+    }
+    let side = off_it.sign();
+    assert!(
+        side != Decision::Zero,
+        "a plane holding the axis is answered by the road through it, asked before this one"
+    );
+    if !matches!(side, Decision::Pos | Decision::Neg) {
+        return Ok(None);
+    }
+
+    // Past here the family is settled, so arithmetic that runs out is a
+    // refusal about *this* triple, which a slide along the range can retry.
+    let refused = || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at);
+    let Some((heights, reach)) = the_heights_they_share_circles_at(one, other, &axis) else {
+        return Err(refused());
+    };
+    let steps =
+        match where_a_line_meets_a_quadric(WHERE_THREE_SURFACES_MEET, &heights, at, policy, log)? {
+            WhereALineMeetsIt::Nowhere => return Ok(Some(MeetOfThree::Nowhere)),
+            WhereALineMeetsIt::MoreThanAPoint => {
+                return what_one_plane_and_one_curved_surface_share(flat, one, policy, log)
+                    .map(Some);
+            }
+            WhereALineMeetsIt::At(steps) => steps,
+        };
+    let roots: SmallVec<[WhichRoot; 2]> = match (heights.squared.sign(), steps.len()) {
+        (Decision::Zero, 1) => smallvec![WhichRoot::OfALine],
+        (Decision::Pos | Decision::Neg, 1) => smallvec![WhichRoot::Twice],
+        (Decision::Pos | Decision::Neg, 2) => {
+            smallvec![WhichRoot::TakingTheRootAway, WhichRoot::AddingTheRoot]
+        }
+        (squared, found) => unreachable!(
+            "a quadratic has one root or two and a line has one, not {found} with A {squared:?}"
+        ),
+    };
+    let (Some(chord), Some(squared), Some(half_linear), Some(constant)) = (
+        how_wide_the_chord_is(flat, &axis, &reach, &off_it),
+        heights.squared.exactly(),
+        heights.half_linear.exactly(),
+        heights.constant.exactly(),
+    ) else {
+        return Err(refused());
+    };
+    let shared = [squared, half_linear, constant];
+
+    // A height whose circle the plane misses is dropped here, and each that is
+    // kept says whether the plane only touches its circle.
+    let mut cuts: SmallVec<[(Interval, bool); 2]> = SmallVec::new();
+    for (step, root) in steps.iter().zip(roots) {
+        let height = match step {
+            MeetsAt::Here(height) => *height,
+            MeetsAt::MaybeATouch { .. } => {
+                unreachable!(
+                    "a quadratic's roots are read off its discriminant, never searched for"
+                )
+            }
+        };
+        let Some(how) = the_sign_of_the_chord_at(root, &chord, &shared) else {
+            return Err(refused());
+        };
+        if how != Decision::Neg {
+            cuts.push((height, how == Decision::Zero));
+        }
+    }
+    // Lower heights first, as on the road through the axis.
+    if heights.squared.sign() == Decision::Neg {
+        cuts.reverse();
+    }
+
+    let mut places: SmallVec<[PredicatePoint; 2]> = SmallVec::new();
+    for (height, it_only_touches) in cuts {
+        places.extend(the_ends_of_the_chord_at(
+            flat,
+            &axis,
+            &reach,
+            &off_it,
+            height,
+            it_only_touches,
+        ));
+    }
+    if places.iter().any(|place| !place.uncertainty().is_finite()) {
+        return Err(refused());
+    }
+    if places.is_empty() {
+        return Ok(Some(MeetOfThree::Nowhere));
+    }
+    Ok(Some(MeetOfThree::At(places)))
+}
+
+/// Which root of the heights' quadratic `A t² + 2B t + C` a height is, in the
+/// form [`where_a_line_meets_a_quadric`] worked it out in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WhichRoot {
+    /// `−C/(2B)`, the one root where `A` is zero.
+    OfALine,
+    /// `−B/A`, the one root where the discriminant `Δ = B² − AC` is zero.
+    Twice,
+    /// `(−B − √Δ)/A`.
+    TakingTheRootAway,
+    /// `(−B + √Δ)/A`.
+    AddingTheRoot,
+}
+
+/// `κ₂`, `κ₁` and `κ₀` of `k(t) = (n·n)·g(t) − e²·W`, whose sign at a height
+/// says whether the plane misses, touches or cuts the circle there — or `None`
+/// where a product falls out of range.
+fn how_wide_the_chord_is(
+    flat: &Plane,
+    axis: &AnAxis,
+    reach: &Quadratic,
+    off_it: &Exact,
+) -> Option<[Exact; 3]> {
+    let normal = flat.normal().components();
+    let squared_normal = Exact::dot_of(normal, normal)?;
+    let squared_axis = Exact::dot_of(axis.along, axis.along)?;
+    let scaled = |term: &Term| squared_normal.times(&term.exactly()?);
+    Some([
+        scaled(&reach.squared)?,
+        scaled(&reach.half_linear)?,
+        scaled(&reach.constant)?.minus(&off_it.times(off_it)?.times(&squared_axis)?),
+    ])
+}
+
+/// The sign of `k` at `root` of `A t² + 2B t + C`, for `chord` `k`'s three
+/// numbers and `shared` the quadratic's, exactly — or `None` where a product
+/// falls out of range.
+///
+/// - **A root that is a fraction `X/Y`** — `−C/(2B)`, or `−B/A` — is put in
+///   over its denominator squared: `Y²·k(X/Y) = κ₂X² + 2κ₁XY + κ₀Y²`, which has
+///   the sign of `k` there because `Y²` is above zero.
+/// - **A root `(−B ± √Δ)/A`** is a square root. There `A·k − κ₂·(A t² + 2B t +
+///   C)` has no `t²` left in it, and the quadratic is zero at the root, so
+///   `A·k(t) = L·t + M` for `L = 2(A·κ₁ − κ₂·B)` and `M = A·κ₀ − κ₂·C`. Put the
+///   root in and `A²·k(t) = P ± L·√Δ`, for `P = M·A − L·B`. Its sign is
+///   [`the_sign_with_a_root_in_it`].
+fn the_sign_of_the_chord_at(
+    root: WhichRoot,
+    chord: &[Exact; 3],
+    shared: &[Exact; 3],
+) -> Option<Decision> {
+    let [squared, half_linear, constant] = chord;
+    let [a, b, c] = shared;
+    let nothing = Exact::of(0.0);
+    let over_its_denominator = |over: &Exact, under: &Exact| -> Option<Exact> {
+        let across = half_linear.times(over)?.times(under)?;
+        Some(
+            squared
+                .times(over)?
+                .times(over)?
+                .plus(&across)
+                .plus(&across)
+                .plus(&constant.times(under)?.times(under)?),
+        )
+    };
+    let sign = match root {
+        WhichRoot::OfALine => over_its_denominator(&nothing.minus(c), &b.plus(b))?.sign(),
+        WhichRoot::Twice => over_its_denominator(&nothing.minus(b), a)?.sign(),
+        WhichRoot::TakingTheRootAway | WhichRoot::AddingTheRoot => {
+            let half_the_lean = a.times(half_linear)?.minus(&squared.times(b)?);
+            let lean = half_the_lean.plus(&half_the_lean);
+            let level = a.times(constant)?.minus(&squared.times(c)?);
+            let plain = level.times(a)?.minus(&lean.times(b)?);
+            let rooted = if root == WhichRoot::AddingTheRoot {
+                lean
+            } else {
+                nothing.minus(&lean)
+            };
+            let discriminant = b.times(b)?.minus(&a.times(c)?);
+            the_sign_with_a_root_in_it(&plain, &rooted, &discriminant)?
+        }
+    };
+    matches!(sign, Decision::Pos | Decision::Neg | Decision::Zero).then_some(sign)
+}
+
+/// The sign of `plain + rooted·√under`, exactly, for `under` not below zero —
+/// or `None` where a sign is not one or a product falls out of range.
+///
+/// Where `plain` and `rooted` point the same way, or one of the two parts is
+/// nothing, the sum points that way. Where they point opposite ways, the
+/// larger part wins, and which is larger is the sign of `plain² − rooted²·under`;
+/// the two equal is the sum at zero.
+///
+/// # Panics
+///
+/// If `under` is below zero: it is a discriminant the cascade has already
+/// found above zero.
+fn the_sign_with_a_root_in_it(plain: &Exact, rooted: &Exact, under: &Exact) -> Option<Decision> {
+    let [mine, theirs, inside] = [plain, rooted, under].map(Exact::sign);
+    if ![mine, theirs, inside]
+        .iter()
+        .all(|sign| matches!(sign, Decision::Pos | Decision::Neg | Decision::Zero))
+    {
+        return None;
+    }
+    assert!(
+        inside != Decision::Neg,
+        "a square root is only taken of a discriminant found above zero: {under:?}"
+    );
+    if theirs == Decision::Zero || inside == Decision::Zero || mine == theirs {
+        return Some(mine);
+    }
+    if mine == Decision::Zero {
+        return Some(theirs);
+    }
+    let larger = plain
+        .square_minus(&rooted.times(rooted)?.times(under)?)?
+        .sign();
+    Some(match larger {
+        Decision::Pos => mine,
+        Decision::Neg => theirs,
+        Decision::Zero => Decision::Zero,
+        Decision::Undecidable { .. } => return None,
+        other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
+    })
+}
+
+/// Where the plane beside the axis meets the circle at `height`, which it
+/// does not miss: the foot of the plane on the axis where it only touches the
+/// circle, and the chord's two ends, the `−(n × w)` side first, where it cuts
+/// it.
+fn the_ends_of_the_chord_at(
+    flat: &Plane,
+    axis: &AnAxis,
+    reach: &Quadratic,
+    off_it: &Exact,
+    height: Interval,
+    it_only_touches: bool,
+) -> SmallVec<[PredicatePoint; 2]> {
+    let normal = flat.normal().components();
+    let squared_normal = dot_enclosing(exactly(normal), exactly(normal));
+    let squared_axis = dot_enclosing(exactly(axis.along), exactly(axis.along));
+    let off = off_it.enclosure();
+    let foot: [Interval; 3] = core::array::from_fn(|coordinate| {
+        Interval::exactly(axis.through[coordinate])
+            + quotient_or_everything(
+                height * Interval::exactly(axis.along[coordinate]),
+                squared_axis,
+            )
+            - quotient_or_everything(off * Interval::exactly(normal[coordinate]), squared_normal)
+    });
+    if it_only_touches {
+        return smallvec![the_point_a_box_names(foot)];
+    }
+    let out_there = reach.squared.enclosure() * (height * height)
+        + Interval::exactly(2.0) * reach.half_linear.enclosure() * height
+        + reach.constant.enclosure();
+    let across = quotient_or_everything(
+        root_enclosing(out_there * squared_normal - off * off * squared_axis),
+        squared_normal,
+    );
+    let sideways = cross_enclosing(exactly(normal), exactly(axis.along));
+    [-across, across]
+        .into_iter()
+        .map(|side| {
+            the_point_a_box_names(core::array::from_fn(|coordinate| {
+                foot[coordinate] + quotient_or_everything(side * sideways[coordinate], squared_axis)
+            }))
+        })
+        .collect()
 }
 
 /// A line, written as `(through + s · direction) / divided_by`.
@@ -4118,17 +4470,156 @@ mod tests {
     }
 
     /// The wall `x = 1` runs beside the axis and cuts each circle the cone and
-    /// the bar cross in, at `t = ±4`, in a chord `(1, ±√15, ±4)`. That is not
-    /// the road a wall through the axis takes, and it is still refused by name.
+    /// the bar cross in, at `t = ±4`, in a chord: `(1, ±√15, ±4)`, since
+    /// `1 + 15 = 16`. The lower circle first and `−y` first on each, since
+    /// `n × w` is `+y`.
     #[test]
-    fn a_wall_beside_the_axis_of_a_cone_and_a_bar_is_still_refused() {
+    fn a_wall_beside_the_axis_of_a_cone_and_a_bar_cuts_both_their_circles_in_a_chord() {
         let wall = flat([-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
         let cone = a_cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
         let bar = Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius"));
+        let answer = meet([&wall, &cone, &bar]).expect("a wall beside the axis is answered");
+        on_all_three([&wall, &cone, &bar], &answer);
+        let MeetOfThree::At(points) = &answer else {
+            panic!("expected points, got {answer:?}");
+        };
+        let across = 15.0_f64.sqrt();
+        let wanted = [
+            [1.0, -across, -4.0],
+            [1.0, across, -4.0],
+            [1.0, -across, 4.0],
+            [1.0, across, 4.0],
+        ];
+        assert_eq!(points.len(), 4, "{answer:?}");
+        for (point, wanted) in points.iter().zip(wanted) {
+            let boxed = point.enclosure();
+            assert!(
+                (0..3).all(|axis| {
+                    let middle = (boxed[axis].lo() + boxed[axis].hi()) / 2.0;
+                    (middle - wanted[axis]).abs() < 1e-14 && boxed[axis].width() < 1e-14
+                }),
+                "{point:?} is not a narrow box round {wanted:?}"
+            );
+        }
         assert_eq!(
-            meet([&wall, &cone, &bar]),
-            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+            meet([&bar, &wall, &cone]),
+            Ok(answer),
+            "the answer depends on which three they are, not the order they are asked in"
         );
+    }
+
+    /// A ball of radius 3 four up the cone's axis crosses it at
+    /// `t = 2 ± √2/2`, about `1.29` and `2.71`, in circles of those radii. The
+    /// wall `x = 2` cuts the ball and the cone, misses the lower circle and
+    /// cuts the upper in `(2, ±√(t² − 4), t)`; the wall `x = 2.75` cuts both
+    /// surfaces still and misses both circles. Each is decided at the square
+    /// root itself.
+    #[test]
+    fn a_wall_beside_the_axis_of_a_cone_and_a_ball_misses_one_circle_and_cuts_the_other() {
+        let cone = a_cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+        let ball = Surface::Sphere(Sphere::new(Point::new(0.0, 0.0, 4.0), 3.0).expect("a radius"));
+
+        let wall = flat([1.0, 0.0, 0.0], [2.0, 0.0, 0.0]);
+        let answer = meet([&wall, &cone, &ball]).expect("a wall beside the axis is answered");
+        on_all_three([&wall, &cone, &ball], &answer);
+        let MeetOfThree::At(points) = &answer else {
+            panic!("expected points, got {answer:?}");
+        };
+        let height = 2.0 + 2.0_f64.sqrt() / 2.0;
+        let across = (height * height - 4.0).sqrt();
+        assert_eq!(points.len(), 2, "{answer:?}");
+        for (point, wanted) in points
+            .iter()
+            .zip([[2.0, across, height], [2.0, -across, height]])
+        {
+            let boxed = point.enclosure();
+            assert!(
+                (0..3).all(|axis| {
+                    let middle = (boxed[axis].lo() + boxed[axis].hi()) / 2.0;
+                    (middle - wanted[axis]).abs() < 1e-14 && boxed[axis].width() < 1e-13
+                }),
+                "{point:?} is not a narrow box round {wanted:?}"
+            );
+        }
+
+        let further = flat([1.0, 0.0, 0.0], [2.75, 0.0, 0.0]);
+        assert_eq!(meet([&further, &cone, &ball]), Ok(MeetOfThree::Nowhere));
+    }
+
+    /// A ball of radius 2 about a cone's apex crosses the cone of slope one at
+    /// `t = ±√2`, in circles of radius `√2`, and the wall `x + y = 2` is `√2`
+    /// from the axis: it touches both circles, at `(1, 1, ±√2)`, one point
+    /// each. The bar of radius 4 and the cone share circles of radius 4, and
+    /// the wall `x = 4` touches them at `(4, 0, ±4)`, which are `f64`.
+    #[test]
+    fn a_wall_beside_the_axis_that_touches_the_circles_two_surfaces_share_meets_them_once_each() {
+        let cone = a_cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 2.0).expect("a radius"));
+        let wall = flat([1.0, 1.0, 0.0], [1.0, 1.0, 0.0]);
+        let answer = meet([&wall, &cone, &ball]).expect("a wall beside the axis is answered");
+        on_all_three([&wall, &cone, &ball], &answer);
+        let MeetOfThree::At(points) = &answer else {
+            panic!("expected points, got {answer:?}");
+        };
+        let height = 2.0_f64.sqrt();
+        assert_eq!(points.len(), 2, "{answer:?}");
+        for (point, wanted) in points.iter().zip([[1.0, 1.0, -height], [1.0, 1.0, height]]) {
+            let boxed = point.enclosure();
+            assert!(
+                (0..3).all(|axis| {
+                    let middle = (boxed[axis].lo() + boxed[axis].hi()) / 2.0;
+                    (middle - wanted[axis]).abs() < 1e-14 && boxed[axis].width() < 1e-14
+                }),
+                "{point:?} is not a narrow box round {wanted:?}"
+            );
+        }
+
+        let bar = Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius"));
+        let touching = flat([1.0, 0.0, 0.0], [4.0, 0.0, 0.0]);
+        assert_eq!(
+            meet([&touching, &cone, &bar]),
+            Ok(MeetOfThree::At(smallvec![
+                PredicatePoint::Exact([4.0, 0.0, -4.0]),
+                PredicatePoint::Exact([4.0, 0.0, 4.0]),
+            ]))
+        );
+    }
+
+    /// The sign of `P + L·√Δ` for every way the two parts can point, a tie
+    /// among them, against the same sum worked out in `f64`, which holds every
+    /// one of these exactly.
+    #[test]
+    fn a_sum_with_a_square_root_in_it_takes_the_sign_of_the_larger_part() {
+        for (plain, rooted, under) in [
+            (3.0, 1.0, 4.0),
+            (-3.0, -1.0, 4.0),
+            (3.0, -1.0, 4.0),
+            (1.0, -1.0, 4.0),
+            (-3.0, 1.0, 4.0),
+            (-1.0, 1.0, 4.0),
+            (2.0, -1.0, 4.0),
+            (0.0, -1.0, 4.0),
+            (5.0, 0.0, 4.0),
+            (-5.0, 3.0, 0.0),
+        ] {
+            let sum = f64::mul_add(rooted, f64::sqrt(under), plain);
+            let wanted = if sum > 0.0 {
+                Decision::Pos
+            } else if sum < 0.0 {
+                Decision::Neg
+            } else {
+                Decision::Zero
+            };
+            assert_eq!(
+                the_sign_with_a_root_in_it(
+                    &Exact::of(plain),
+                    &Exact::of(rooted),
+                    &Exact::of(under)
+                ),
+                Some(wanted),
+                "{plain} + {rooted}·√{under}"
+            );
+        }
     }
 
     /// What the degree of the discriminant costs in `f64`, measured.

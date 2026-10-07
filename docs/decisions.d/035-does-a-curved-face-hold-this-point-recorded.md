@@ -26,6 +26,16 @@ row). `a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuse
 is that, with the same call and two planes in it as the control, because what is
 refused has to be shown to be the degree and not the call.
 
+**Corrected for Q1271.** Where the ball is centred on the pipe's axis, a plane
+square to that axis, one holding it (Q1259) and one parallel to it and off it
+(Q1271) are answered now, because the ball and the pipe share circles square
+to the axis and each of those planes cuts them without a quartic. The
+demonstration's first ray plane, `z = 0.5`, is the third kind, and is kept as a
+control that is answered. Its ray plane is now `x + 16z = 8`, which leans to the
+pipe's axis and cuts the pipe in an ellipse and the ball in a circle: that is
+the quartic, and it is refused, with four points there to find. Nearly every
+ray through a point is such a plane, so the route's verdict stands.
+
 That is a demonstration and not a paragraph, which is what CLAUDE.md asks of a
 claim that something cannot be done. **The family of fixes is named and it is
 one**: an algebraic solver for a plane and two quadrics, which §31.2 already
