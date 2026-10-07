@@ -61,8 +61,9 @@
 //! **Lying on the same side of every one is not enough**, though this said so
 //! until §282 caught it: a lump's walks can be told apart only by a curve that
 //! runs on for ever, and a walk elsewhere then agrees with several of them.
-//! Which of those it faces is settled by winding on a flat face and by what
-//! goes round the axis on a cone or a pipe
+//! Which of those it faces is settled by winding on a flat face, by winding on
+//! a ball opened out flat from a point of the walk, and by what goes round the
+//! axis on a cone or a pipe
 //! ([`Arrangement::the_walk_of_each_other_lump_each_walk_faces`]), and a cell
 //! left holding two walks of one lump is refused (§36.3).
 
@@ -4181,8 +4182,9 @@ impl<'f> Arrangement<'f> {
     /// to each glued them into one cell with no point in it (§282, and the
     /// panic of queue row Q20). So a walk is joined to a walk of another lump
     /// only when each is the one walk of the other's lump it faces
-    /// ([`Arrangement::the_walk_of_each_other_lump_each_walk_faces`]), and a
-    /// cell holding two walks of one lump is refused.
+    /// ([`Arrangement::the_walk_of_each_other_lump_each_walk_faces`]) and no
+    /// third lump keeps them apart ([`a_third_lump_keeps_apart`]), and a cell
+    /// holding two walks of one lump is refused.
     ///
     /// **A lump with a curve that runs on for ever** is placed by following one
     /// of them until it runs into the rest of the drawing, which is what
@@ -4211,9 +4213,12 @@ impl<'f> Arrangement<'f> {
 
         let facing = self.the_walk_of_each_other_lump_each_walk_faces(&lump, &sides)?;
         let mut same = Sameness::of(self.cycles.len());
+        let torus = matches!(self.surface, Surface::Torus(_));
         for (one, its) in facing.iter().enumerate() {
             for &other in its {
-                if facing[other].contains(&one) {
+                if facing[other].contains(&one)
+                    && (torus || !a_third_lump_keeps_apart(&facing, &lump, one, other))
+                {
                     same.join(one, other);
                 }
             }
@@ -4333,10 +4338,14 @@ impl<'f> Arrangement<'f> {
     /// they all agree with it about every closed curve; `None` when nothing here
     /// can say.
     ///
-    /// Two ways, one for a flat face and one for a face round an axis, and
-    /// neither for a ball or a torus. What neither answers is a gap (§16.10):
-    /// the regions are there, and the walk is in one of them.
+    /// Three ways, one for a flat face, one for a ball and one for a face
+    /// round an axis, and none for a torus. What none answers is a gap
+    /// (§16.10): the regions are there, and the walk is in one of them.
     fn which_of_them_holds(&self, walk: usize, candidates: &[usize]) -> Option<usize> {
+        if let Surface::Sphere(ball) = self.surface {
+            return self
+                .the_one_that_parts_the_walk_from_the_rest_of_its_lump(ball, walk, candidates);
+        }
         match self.surface.as_plane().and_then(InPlane::of) {
             Some(in_plane) => self.which_walk_winds_once_round(&in_plane, walk, candidates),
             None => self.the_one_that_goes_round_the_axis_as_well(walk, candidates),
@@ -4366,7 +4375,9 @@ impl<'f> Arrangement<'f> {
             let at = self.nodes[self.from(half_edge)].point;
             let wound: Vec<i32> = candidates
                 .iter()
-                .map(|&candidate| self.how_often_a_walk_winds_round(in_plane, candidate, at))
+                .map(|&candidate| {
+                    self.how_often_a_walk_winds_round(Picture::Flat(in_plane), candidate, at)
+                })
                 .collect::<Option<_>>()?;
             let mut once = (0..candidates.len()).filter(|&index| wound[index] == 1);
             let only = once.next()?;
@@ -4374,7 +4385,82 @@ impl<'f> Arrangement<'f> {
         })
     }
 
-    /// How often `cycle` winds round `point` on a flat face, anticlockwise
+    /// On a ball: the one candidate that parts `walk` from the rest of the
+    /// candidates' lump.
+    ///
+    /// **Opened out flat from a point `P` of `walk`, the region holding `P` is
+    /// the one round the outside.** A ball's skin less one point opens out
+    /// flat, the way a map is drawn from a globe, and every circle on it stays
+    /// a circle. The candidates' lump is connected and misses `P`, so each of
+    /// its walks bounds a region of its own
+    /// ([`Arrangement::no_cell_holds_two_walks_of_one_lump`]), and seen flat
+    /// the one holding `P` reaches out for ever. Its walk goes once round
+    /// every point of the lump that is not on it, since all of the lump is
+    /// outside that region. The walk of any other region goes round its own
+    /// region and nothing else, and none of the lump is in there. So the one
+    /// candidate that winds round a node of the lump off itself holds `P`, and
+    /// `walk` with it: `walk`'s lump is connected and misses the candidates'.
+    ///
+    /// **Seen flat, a turn is the sign of `orient3d` with `P` as the fourth
+    /// point.** The map is what turning space inside out about `P` does to
+    /// the ball. That moves each point along the line from `P` through it, so
+    /// it takes a plane through `P` to itself and keeps every point on its own
+    /// side of one; and on the map the plane through `P`, `a` and `b` is the
+    /// line through `a` and `b`. A circle on the ball is where the plane it
+    /// lies in cuts it, and seen flat its inside is the cap on the far side of
+    /// that plane from `P` ([`Picture::inside`]). Those two are all
+    /// [`Arrangement::how_often_a_walk_winds_round`] reads.
+    ///
+    /// Every node of `walk` is tried as `P`, and every node of the lump off a
+    /// candidate as the point it winds round, until one is answered: any one
+    /// answers for all of them.
+    fn the_one_that_parts_the_walk_from_the_rest_of_its_lump(
+        &self,
+        ball: Sphere,
+        walk: usize,
+        candidates: &[usize],
+    ) -> Option<usize> {
+        let lump = self.lump_of_each_cycle();
+        let nodes_of = |cycle: usize| {
+            self.cycles[cycle]
+                .iter()
+                .map(|&half_edge| self.from(half_edge))
+        };
+        let mut theirs: Vec<usize> = (0..self.cycles.len())
+            .filter(|&cycle| lump[cycle] == lump[candidates[0]])
+            .flat_map(nodes_of)
+            .collect();
+        theirs.sort_unstable();
+        theirs.dedup();
+        self.cycles[walk].iter().find_map(|&half_edge| {
+            let picture = Picture::OpenedOut {
+                ball,
+                from: self.nodes[self.from(half_edge)].point,
+            };
+            let round: Vec<bool> = candidates
+                .iter()
+                .map(|&candidate| {
+                    let on_it: Vec<usize> = nodes_of(candidate).collect();
+                    theirs
+                        .iter()
+                        .filter(|node| !on_it.contains(node))
+                        .find_map(|&node| {
+                            self.how_often_a_walk_winds_round(
+                                picture,
+                                candidate,
+                                self.nodes[node].point,
+                            )
+                        })
+                        .map(|wound| wound != 0)
+                })
+                .collect::<Option<_>>()?;
+            let mut holding = (0..candidates.len()).filter(|&index| round[index]);
+            let only = holding.next()?;
+            holding.next().is_none().then_some(candidates[only])
+        })
+    }
+
+    /// How often `cycle` winds round `point` seen in `picture`, anticlockwise
     /// counting one; `None` when a sign it needs is not settled, which takes
     /// in a point on one of the walk's sides or on a curved side's chord.
     ///
@@ -4391,7 +4477,7 @@ impl<'f> Arrangement<'f> {
     /// here (queue row Q1053's probe).
     fn how_often_a_walk_winds_round(
         &self,
-        in_plane: &InPlane,
+        picture: Picture,
         cycle: usize,
         point: PredicatePoint,
     ) -> Option<i32> {
@@ -4405,19 +4491,27 @@ impl<'f> Arrangement<'f> {
             .iter()
             .map(|&half_edge| self.nodes[self.from(half_edge)].point)
             .collect();
-        let by_the_corners = how_often_the_rim_winds_round(
-            in_plane,
-            self.normal_of_the_flat_face(),
-            core::slice::from_ref(&corners),
-            point,
-        )?;
+        let rim = core::slice::from_ref(&corners);
+        let by_the_corners = match picture {
+            Picture::Flat(in_plane) => {
+                how_often_the_rim_winds_round(in_plane, self.normal_of_the_flat_face(), rim, point)?
+            }
+            Picture::OpenedOut { ball, from } => corners
+                .iter()
+                .copied()
+                .chain(Picture::aims_round_the_middle_of(ball))
+                .filter(|&aim| not_in_one_line([from, point, aim]))
+                .find_map(|aim| {
+                    how_often_the_rim_winds_round_aiming_at(picture, rim, point, aim)
+                })?,
+        };
         self.cycles[cycle]
             .iter()
             .try_fold(by_the_corners, |so_far, &half_edge| {
                 Some(
                     so_far
                         + self.how_often_a_side_and_its_chord_wind_round(
-                            in_plane,
+                            picture,
                             self.direction(half_edge),
                             [self.from(half_edge), self.to(half_edge)],
                             point,
@@ -4426,16 +4520,19 @@ impl<'f> Arrangement<'f> {
             })
     }
 
-    /// How often one side on a flat face, of a walk or of the face's own rim,
-    /// and its chord wind round `point` between them, anticlockwise counting
-    /// one: `0` for a straight side, and `None` where a sign is not settled or
-    /// the side's curve is not one of those below. The side leaves the node
-    /// `from` along `direction` and stops at the node `to`.
+    /// How often one side, of a walk or of a flat face's own rim, and its chord
+    /// wind round `point` between them seen in `picture`, anticlockwise
+    /// counting one: `0` for a straight side, and `None` where a sign is not
+    /// settled or the side's curve is not one of those below. The side leaves
+    /// the node `from` along `direction` and stops at the node `to`.
     ///
     /// **A plane crosses a pipe, a ball or a cone in a circle, an ellipse, a
     /// parabola or one branch of a hyperbola**, wherever it does not cross it
     /// in straight lines, and each of those bounds a convex region: inside the
-    /// pipe, the ball or the cone, which is the partner's negative side. A
+    /// pipe, the ball or the cone, which is the partner's negative side. **A
+    /// ball opened out flat** is crossed by a plane or a second ball in a
+    /// circle that stays one, round the cap on the far side from the point it
+    /// is opened out from ([`Picture::inside`]). A
     /// line meets such a curve twice at most, so a piece of it from `a` to `b`
     /// lies wholly on one side of the chord's line, and the loop of the piece
     /// and its chord goes round the points on that side that are inside the
@@ -4464,7 +4561,7 @@ impl<'f> Arrangement<'f> {
     /// is the chord of the base's arc (Q1161).
     fn how_often_a_side_and_its_chord_wind_round(
         &self,
-        in_plane: &InPlane,
+        picture: Picture,
         direction: Direction,
         [from, to]: [usize; 2],
         point: PredicatePoint,
@@ -4473,9 +4570,8 @@ impl<'f> Arrangement<'f> {
         if crossing.order.runs_straight() {
             return Some(0);
         }
-        match crossing.partner {
-            Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_) => (),
-            Surface::Plane(_) | Surface::Torus(_) | _ => return None,
+        if !picture.sees_a_round_curve_where_it_is_cut_by(&crossing.partner) {
+            return None;
         }
         let left_or_right = |turn: Decision| -> Option<i32> {
             match turn {
@@ -4489,9 +4585,9 @@ impl<'f> Arrangement<'f> {
         let ahead = PredicatePoint::Constructed(core::array::from_fn(|axis| {
             start.enclosure()[axis] + out[axis]
         }));
-        let bulge = left_or_right(in_plane.turn(start, end, ahead))?;
-        let inside = || inside_the_curve_a_plane_cuts(&crossing.partner, start, point);
-        match left_or_right(in_plane.turn(start, end, point)) {
+        let bulge = left_or_right(picture.turn(start, end, ahead))?;
+        let inside = || picture.inside(&crossing.partner, start, point);
+        match left_or_right(picture.turn(start, end, point)) {
             Some(side) if side != bulge => Some(0),
             Some(_) => Some(if inside()? { -bulge } else { 0 }),
             None => (!inside()?).then_some(0),
@@ -4974,7 +5070,7 @@ impl<'f> Arrangement<'f> {
         for (wire, sides) in ways.iter().enumerate() {
             for (position, &way) in sides.iter().enumerate() {
                 wound += self.how_often_a_side_and_its_chord_wind_round(
-                    in_plane,
+                    Picture::Flat(in_plane),
                     way,
                     ends(wire, position),
                     point,
@@ -4988,8 +5084,9 @@ impl<'f> Arrangement<'f> {
     ///
     /// # Panics
     ///
-    /// If the face is curved: a winding is counted on a flat face alone, and
-    /// the [`InPlane`] every caller holds was built from this same plane.
+    /// If the face is curved: only a winding counted on a flat face reads a
+    /// normal, and the [`InPlane`] every caller holds was built from this same
+    /// plane.
     fn normal_of_the_flat_face(&self) -> Vector {
         self.surface
             .as_plane()
@@ -5811,6 +5908,43 @@ impl<'f> Arrangement<'f> {
 /// Whether two walks are on the same side of every curve drawn in full that
 /// both can say something about, with at least one such curve.
 ///
+/// Whether `one` and `other`, each the walk of the other's lump the other
+/// faces, each face back and forth with a different walk of one third lump.
+///
+/// **Then they are not one cell, and joining them would glue two.** A walk
+/// joined to a walk it faces back and forth is one cell with it, and two walks
+/// of one lump are two cells on any surface but a torus
+/// ([`Arrangement::no_cell_holds_two_walks_of_one_lump`]). So where `one` is
+/// one cell with `a` and `other` with `a′`, both of lump `A`, `one` and
+/// `other` are two. A ball's skin through a square rod holed down its own axis
+/// is the shape: the hole's two circles each face the other's walk round the
+/// outside, since neither curve has the other inside it and nothing else
+/// closed parts them, yet the rod's four circles lie between them, the one
+/// circle in the patch at the top and the other in the patch at the bottom
+/// (queue row Q1242).
+///
+/// **What it rests on is the facing it reads**, which already joins `one` to
+/// `a` and `other` to `a′` here: a join it skips is one those two joins could
+/// not both stand with. Read on a torus it is not, since a circle round the
+/// tube leaves two walks of one lump in one cell there.
+fn a_third_lump_keeps_apart(
+    facing: &[Vec<usize>],
+    lump: &[usize],
+    one: usize,
+    other: usize,
+) -> bool {
+    let back_and_forth = |walk: usize| {
+        facing[walk]
+            .iter()
+            .copied()
+            .filter(move |&faced| facing[faced].contains(&walk))
+    };
+    back_and_forth(one).any(|mine| {
+        lump[mine] != lump[other]
+            && back_and_forth(other).any(|theirs| lump[theirs] == lump[mine] && theirs != mine)
+    })
+}
+
 /// Read [`Arrangement::which_side_of_everything`] for what a side is. Two walks
 /// that agree may still be in different cells —
 /// [`Arrangement::the_walk_of_each_other_lump_each_walk_faces`] says when — but
@@ -5951,11 +6085,15 @@ fn how_often_the_rim_winds_round(
         .take(1)
         .chain(middles)
         .chain(square_to_each_side)
-        .find_map(|aim| how_often_the_rim_winds_round_aiming_at(in_plane, rim, point, aim))
+        .find_map(|aim| {
+            how_often_the_rim_winds_round_aiming_at(Picture::Flat(in_plane), rim, point, aim)
+        })
 }
 
+/// [`how_often_the_rim_winds_round`] along the half-line from `point` towards
+/// `aim`, with every turn read in `picture`.
 fn how_often_the_rim_winds_round_aiming_at(
-    in_plane: &InPlane,
+    picture: Picture,
     rim: &[Vec<PredicatePoint>],
     point: PredicatePoint,
     aim: PredicatePoint,
@@ -5970,7 +6108,7 @@ fn how_often_the_rim_winds_round_aiming_at(
         if at == aim {
             return Some(Decision::Zero);
         }
-        match in_plane.turn(point, aim, at) {
+        match picture.turn(point, aim, at) {
             decided @ (Decision::Pos | Decision::Neg | Decision::Zero) => Some(decided),
             Decision::Undecidable { .. } | _ => None,
         }
@@ -5989,7 +6127,7 @@ fn how_often_the_rim_winds_round_aiming_at(
             ) {
                 continue;
             }
-            let along = in_plane.turn(from, to, point);
+            let along = picture.turn(from, to, point);
             let [from_above, to_above] = ends.map(|end| end == Decision::Pos);
             winding += match (from_above, to_above, along) {
                 (_, _, Decision::Zero | Decision::Undecidable { .. }) => return None,
@@ -6001,6 +6139,126 @@ fn how_often_the_rim_winds_round_aiming_at(
         }
     }
     Some(winding)
+}
+
+/// Where the turns of a walk are read when how often it winds round a point
+/// is counted.
+#[derive(Clone, Copy)]
+enum Picture<'a> {
+    /// A flat face, in its own plane.
+    Flat(&'a InPlane),
+    /// A ball's skin opened out flat from `from`, a point of it
+    /// ([`Arrangement::the_one_that_parts_the_walk_from_the_rest_of_its_lump`]).
+    OpenedOut { ball: Sphere, from: PredicatePoint },
+}
+
+impl Picture<'_> {
+    /// Which way `first`, `second`, `third` turn: [`Decision::Pos`] one way
+    /// round and [`Decision::Neg`] the other, the same way for every turn read
+    /// in this picture.
+    fn turn(
+        self,
+        first: PredicatePoint,
+        second: PredicatePoint,
+        third: PredicatePoint,
+    ) -> Decision {
+        match self {
+            Self::Flat(in_plane) => in_plane.turn(first, second, third),
+            Self::OpenedOut { from, .. } => orient3d_of_points(first, second, third, from),
+        }
+    }
+
+    /// Whether the curve `partner` cuts the face's surface in is seen here as
+    /// a curve round a convex region, which a line meets twice at most.
+    ///
+    /// On a ball that is a plane or a second ball, each of which cuts it in a
+    /// circle lying in a plane. A cone or a pipe cuts it in two circles or in
+    /// a quartic loop, and its sign does not say which cap of one circle a
+    /// point is in.
+    fn sees_a_round_curve_where_it_is_cut_by(self, partner: &Surface) -> bool {
+        match (self, partner) {
+            (Self::Flat(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_))
+            | (Self::OpenedOut { .. }, Surface::Plane(_) | Surface::Sphere(_)) => true,
+            (Self::Flat(_), Surface::Plane(_) | Surface::Torus(_))
+            | (
+                Self::OpenedOut { .. },
+                Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+            )
+            | (_, _) => false,
+        }
+    }
+
+    /// Whether `point` is inside the curve `partner` cuts the face's surface
+    /// in, as seen here, where `on_it` is a point of that curve; `None` when a
+    /// sign is not settled or `point` is on the partner.
+    ///
+    /// **Opened out from `from`, inside is the cap on the far side from it.**
+    /// The circle a plane or a second ball cuts the ball in is where one plane
+    /// cuts it — the plane itself, or the one the two balls' signs differ by a
+    /// multiple of on the first ball's skin, since there each is its distance
+    /// squared from the centre less its radius squared, and the first is zero.
+    /// So the partner's sign at a point of the ball is its side of that plane.
+    /// The cap holding `from` is the one round the outside, and the other is
+    /// inside the circle.
+    fn inside(
+        self,
+        partner: &Surface,
+        on_it: PredicatePoint,
+        point: PredicatePoint,
+    ) -> Option<bool> {
+        match self {
+            Self::Flat(_) => inside_the_curve_a_plane_cuts(partner, on_it, point),
+            Self::OpenedOut { from, .. } => {
+                let side = |at: PredicatePoint| match side_of_surface(partner, at) {
+                    Decision::Pos => Some(true),
+                    Decision::Neg => Some(false),
+                    Decision::Zero | Decision::Undecidable { .. } | _ => None,
+                };
+                Some(side(point)? != side(from)?)
+            }
+        }
+    }
+
+    /// Where a half-line from a point of `ball` can be aimed, other than at a
+    /// corner: seen opened out, the half-line runs along where the plane
+    /// through the point it is opened out from, the point and the aim cuts the
+    /// ball, so any point off the line through the first two will do
+    /// ([`not_in_one_line`] is asked of each). The centre and a step from it
+    /// along each axis are four planes, of which one through a corner rules
+    /// out only one.
+    fn aims_round_the_middle_of(ball: Sphere) -> impl Iterator<Item = PredicatePoint> {
+        let centre = ball.centre().coordinates();
+        let radius = ball.radius();
+        [None, Some(0), Some(1), Some(2)]
+            .into_iter()
+            .map(move |along| {
+                PredicatePoint::from(core::array::from_fn::<f64, 3, _>(|axis| {
+                    if along == Some(axis) {
+                        centre[axis] + radius
+                    } else {
+                        centre[axis]
+                    }
+                }))
+            })
+    }
+}
+
+/// Whether three points are proved not to lie on one line, so that one plane
+/// runs through them.
+///
+/// A half-line aimed along a line through the point it starts from and the
+/// point a ball is opened out from has every turn about it exactly zero, which
+/// the count reads as every corner on one side of it: a winding of none, and
+/// not a refusal. That is a ball's centre with the two on opposite ends of a
+/// line through it.
+fn not_in_one_line([first, second, third]: [PredicatePoint; 3]) -> bool {
+    let [first, second, third] = [first, second, third].map(|point| point.enclosure());
+    let from_the_first = |to: [Interval; 3]| -> [Interval; 3] {
+        core::array::from_fn(|axis| to[axis] - first[axis])
+    };
+    cross_of_intervals(from_the_first(second), from_the_first(third))
+        .iter()
+        .any(|component| matches!(component.sign(), Decision::Pos | Decision::Neg))
 }
 
 /// Whether `point`, on a plane, is inside the curve the plane cuts `partner`
