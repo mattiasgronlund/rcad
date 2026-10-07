@@ -12,17 +12,20 @@
 //! ball, such caps meet in one piece, and the patch is that piece, so it is
 //! followed now: the proof is in that function's doc comment.
 //!
-//! **The union, and the ball less the box, are still refused at those points**,
-//! and by name. Both keep the ball's skin outside the box, and the fuse leaves
-//! part of it as a face of its own: the part with `x, y ≥ 0.5` and `z ≤ 0.5`,
-//! cut by the same three planes with the centre *in front of* `z ≤ 0.5`. That
-//! is one piece, but three planes with the centre in front of one can leave
-//! two (`one_plane_with_a_balls_centre_in_front_beside_two_with_it_behind_leaves_two_pieces`
-//! in `holds.rs`), and nothing there tells this one from those yet.
+//! **The union, and the ball less the box, are followed too** (row Q1342).
+//! Both keep the ball's skin outside the box, and the fuse leaves part of it
+//! as a face of its own: the part with `x, y ≥ 0.5` and `z ≤ 0.5`, cut by the
+//! same three planes with the centre *in front of* `z ≤ 0.5`. Three planes
+//! with the centre in front of one can leave two pieces
+//! (`one_plane_with_a_balls_centre_in_front_beside_two_with_it_behind_leaves_two_pieces`
+//! in `holds.rs`), and these do not because they meet at the box's corner,
+//! `(0.5, 0.5, 0.5)`, inside the ball: the same proof, pushing the sphere out
+//! from that corner rather than from the centre. Every point whose ray met that
+//! face was refused `CannotFollowAFacesTrimming` before.
 
 use std::f64::consts::PI;
 
-use rcad_geom::{Deflection, Isometry, Point, Scale, Surface, Vector};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -46,9 +49,7 @@ fn the_corner_of_a_ball_is_an_eighth_of_it_at_the_centre_and_a_quarter_cap_off_o
 }
 
 /// Every rule, both ways round, answers one solid holding the volume worked
-/// out by hand, and the solid places points as the hand does — or, for the
-/// union and the ball less the box, refuses them naming a face of the ball's
-/// skin, as the module's doc comment says.
+/// out by hand, and the solid places points as the hand does.
 ///
 /// The corner piece is `corner_of_a_ball(2, [0.5, 0.5, 0.5])`, `0.91785…`;
 /// the ball is `32π/3` and the box `2.5³`, so the union is their sum less the
@@ -69,7 +70,7 @@ fn a_ball_and_the_corner_of_a_box_answer_every_rule_both_ways() {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for ball_first in [true, false] {
             let what = format!("{rule:?}, the ball first {ball_first}");
-            let (model, solid) = fused(rule, ball_first, corner, &what);
+            let (model, solid) = fused(rule, ball_first, corner, FAR_CORNER, &what);
             let volume = match (rule, ball_first) {
                 (Rule::Union, _) => ball + block - piece,
                 (Rule::Intersection, _) => piece,
@@ -78,10 +79,6 @@ fn a_ball_and_the_corner_of_a_box_answer_every_rule_both_ways() {
                 (other, _) => panic!("not a rule this probes: {other:?}"),
             };
             assert_holds(&model, solid, volume, &what);
-            let follows_the_patch = matches!(
-                (rule, ball_first),
-                (Rule::Intersection, _) | (Rule::Difference, false)
-            );
             for at in points {
                 let placed = model
                     .solid(solid)
@@ -91,25 +88,11 @@ fn a_ball_and_the_corner_of_a_box_answer_every_rule_both_ways() {
                         &Policy::certified(),
                         &mut ProvenanceLog::new(),
                     );
-                let by_hand = by_hand(rule, ball_first, corner, at);
-                if follows_the_patch || matches!(at, [1.2, 1.2, 1.2] | [2.5, 2.5, 2.5]) {
-                    assert_eq!(placed, by_hand, "{what} placed {at:?}");
-                } else {
-                    let Containment::CannotFollowAFacesTrimming { face } = placed else {
-                        panic!("{what}: {at:?} is refused on the ball's skin, got {placed:?}");
-                    };
-                    let on = model
-                        .solid(solid)
-                        .expect("this model made the key")
-                        .faces()
-                        .find(|one| one.key() == face)
-                        .expect("the refused face is the solid's own")
-                        .surface();
-                    assert!(
-                        matches!(on, Surface::Sphere(_)),
-                        "{what}: {at:?} is refused on {on:?}, not on the ball's skin"
-                    );
-                }
+                assert_eq!(
+                    placed,
+                    by_hand(rule, ball_first, corner, FAR_CORNER, at),
+                    "{what} placed {at:?}"
+                );
             }
         }
     }
@@ -131,7 +114,7 @@ fn a_ball_kept_past_a_plane_through_its_centre_and_two_that_miss_it() {
         (Rule::Difference, false, block - piece),
     ] {
         let what = format!("{rule:?}, the ball first {ball_first}");
-        let (model, solid) = fused(rule, ball_first, corner, &what);
+        let (model, solid) = fused(rule, ball_first, corner, FAR_CORNER, &what);
         assert_holds(&model, solid, volume, &what);
         for at in [
             [1.0, 1.0, 1.0],
@@ -151,12 +134,76 @@ fn a_ball_kept_past_a_plane_through_its_centre_and_two_that_miss_it() {
                 );
             assert_eq!(
                 placed,
-                by_hand(rule, ball_first, corner, at),
+                by_hand(rule, ball_first, corner, FAR_CORNER, at),
                 "{what} placed {at:?}"
             );
         }
     }
 }
+
+/// The box turned upside down: `[0.5, 3]² × [−3, 0.5]` holds the ball's skin
+/// with `x, y ≥ 0.5` and `z ≤ 0.5`, the piece the centre is in front of
+/// `z ≤ 0.5` for, and its corner `(0.5, 0.5, 0.5)` is inside the ball as
+/// before. So every rule, both ways round, answers here as the hand does,
+/// where without the corner every point whose ray met that piece was refused.
+/// The union and the ball less the box do not read the rest of the skin as the
+/// part in front of *any* of `x ≤ 0.5`, `y ≤ 0.5` and `z ≥ 0.5`: following
+/// only two cuts that way changes no answer here, so `holds.rs`'s
+/// `the_part_behind_three_planes_meeting_inside_a_ball_is_one_piece` is what
+/// shows that reading stays right.
+///
+/// **The piece is the corner of a ball with one offset below the centre.**
+/// Every point of the ball with `x, y ≥ 0.5` has `z ≥ 0.5` or `z ≤ 0.5`, and the
+/// part with `z ≤ 0.5` is the part with `z ≥ −0.5` turned upside down; the part
+/// with `z ≥ −0.5` is the part with `z ≥ 0` twice over, less the part with
+/// `z ≥ 0.5`. So it is `2·corner(0.5, 0.5, 0) − corner(0.5, 0.5, 0.5)`.
+#[test]
+fn a_ball_and_a_box_holding_the_part_of_its_skin_below_the_corner_answer_every_rule() {
+    let (low, high) = ([0.5, 0.5, -3.0], [3.0, 3.0, 0.5]);
+    let piece = 2.0 * corner_of_a_ball(2.0, [0.5, 0.5, 0.0]) - corner_of_a_ball(2.0, [0.5; 3]);
+    let (ball, block) = (32.0 * PI / 3.0, 2.5 * 2.5 * 3.5);
+    let points = [
+        [1.0, 1.0, -1.0],
+        [0.6, 0.6, 0.4],
+        [1.0, 1.0, 1.0],
+        [-1.0, 0.0, 0.0],
+        [1.0, 1.0, -1.9],
+        [0.4, 1.0, -1.0],
+        [2.5, 2.5, 0.0],
+    ];
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for ball_first in [true, false] {
+            let what = format!("{rule:?}, the ball first {ball_first}");
+            let (model, solid) = fused(rule, ball_first, low, high, &what);
+            let volume = match (rule, ball_first) {
+                (Rule::Union, _) => ball + block - piece,
+                (Rule::Intersection, _) => piece,
+                (Rule::Difference, true) => ball - piece,
+                (Rule::Difference, false) => block - piece,
+                (other, _) => panic!("not a rule this probes: {other:?}"),
+            };
+            assert_holds(&model, solid, volume, &what);
+            for at in points {
+                let placed = model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .classify_point(
+                        Point::from(at),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    );
+                assert_eq!(
+                    placed,
+                    by_hand(rule, ball_first, low, high, at),
+                    "{what} placed {at:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The far corner of every box here but the one turned upside down.
+const FAR_CORNER: [f64; 3] = [3.0; 3];
 
 /// The volume of the part of a ball of radius `r` about the origin with
 /// `x ≥ a`, `y ≥ b` and `z ≥ c`, for `a, b, c ≥ 0` and the corner `(a, b, c)`
@@ -199,12 +246,18 @@ fn corner_of_a_ball(r: f64, offsets: [f64; 3]) -> f64 {
 }
 
 /// Where `at` is against the answer of `rule` on the ball of radius 2 and the
-/// box from `low` to `3`, worked out by hand: in the ball is within 2 of the
-/// origin, in the box is between `low` and `3` on each axis. No point asked is
-/// on either skin.
-fn by_hand(rule: Rule, ball_first: bool, low: [f64; 3], at: [f64; 3]) -> Containment {
+/// box from `low` to `high`, worked out by hand: in the ball is within 2 of
+/// the origin, in the box is between `low` and `high` on each axis. No point
+/// asked is on either skin.
+fn by_hand(
+    rule: Rule,
+    ball_first: bool,
+    low: [f64; 3],
+    high: [f64; 3],
+    at: [f64; 3],
+) -> Containment {
     let in_ball = at.iter().map(|x| x * x).sum::<f64>() < 4.0;
-    let in_box = (0..3).all(|axis| low[axis] < at[axis] && at[axis] < 3.0);
+    let in_box = (0..3).all(|axis| low[axis] < at[axis] && at[axis] < high[axis]);
     let inside = match (rule, ball_first) {
         (Rule::Union, _) => in_ball || in_box,
         (Rule::Intersection, _) => in_ball && in_box,
@@ -219,15 +272,21 @@ fn by_hand(rule: Rule, ball_first: bool, low: [f64; 3], at: [f64; 3]) -> Contain
     }
 }
 
-/// The ball and the box from `low` to `(3, 3, 3)` fused under `rule`, the ball
+/// The ball and the box from `low` to `high` fused under `rule`, the ball
 /// first or the box, and the one solid that answers, in a model that
 /// validates.
-fn fused(rule: Rule, ball_first: bool, low: [f64; 3], what: &str) -> (Model, SolidKey) {
+fn fused(
+    rule: Rule,
+    ball_first: bool,
+    low: [f64; 3],
+    high: [f64; 3],
+    what: &str,
+) -> (Model, SolidKey) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let ball = model
         .add_ball(2.0, &Isometry::identity())
         .expect("a ball of radius 2");
-    let block = block(&mut model, low, [3.0, 3.0, 3.0]);
+    let block = block(&mut model, low, high);
     let (arguments, tools) = if ball_first {
         (vec![ball], vec![block])
     } else {
