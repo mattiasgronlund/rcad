@@ -1735,10 +1735,77 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             };
             what_a_cone_face_seen_down_its_axis_holds(face, &cone, sides, &whole_curves, point)
         }
-        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Torus(_) | _ => {
+        Surface::Cylinder(_) => {
+            in_front_of_a_plane_every_side_is_behind(face, &surface, &readings, point)?
+                .ok_or(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
+        }
+        Surface::Sphere(_) | Surface::Torus(_) | _ => {
             Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
         }
     }
+}
+
+/// [`OnAFace::NotHeld`] for a point strictly in front of a plane cutting a
+/// face on a pipe that every side of the face lies on or behind, and `None`
+/// where no plane cutting the face says that.
+///
+/// **On a pipe, what lies in front of a plane is one piece that runs on for
+/// ever.** A plane not along the axis meets each ruling once, so the part of
+/// the pipe in front of it is everything past one height on every ruling; a
+/// plane along the axis that crosses the pipe leaves the strip between two
+/// rulings in front, and one that misses it leaves all of it or none. Each is
+/// in one piece and unbounded. No side of the face reaches into that part, so
+/// it lies wholly inside the face or wholly outside, and a face is bounded:
+/// outside. So a point there is not held, whatever shape the rest of the face
+/// is. A ball and a ring leave a bounded cap in front of a plane, which a face
+/// round the rest of the ball can hold, so this is the pipe's alone.
+///
+/// The first union of a bar and a box notched across its top is the face
+/// (`tests/two_bars_on_one_pipe_and_a_box_united_in_one_call.rs`, Q1094): its
+/// wall is one face, notched, so no reading of its sides is in front of every
+/// cut, and every ray fired at it from the bar stood on top met the pipe above
+/// its top cap, which no step before this could answer.
+///
+/// # Errors
+///
+/// Whatever reading which side of a plane the face keeps along a side refuses.
+fn in_front_of_a_plane_every_side_is_behind(
+    face: FaceView<'_>,
+    surface: &Surface,
+    readings: &[Vec<Side>],
+    point: PredicatePoint,
+) -> Result<Option<OnAFace>> {
+    for sides in readings {
+        for along in sides.iter().filter(|side| side.across.as_plane().is_some()) {
+            let cut = Cut {
+                surface: along.across,
+                placed: along.across_placed,
+                kept: which_side_of_its_neighbour_a_side_keeps(face, surface, along)?,
+                corners_on_it: sides
+                    .iter()
+                    .filter(|side| side.across == along.across)
+                    .flat_map(|side| [side.start.key, side.end.key])
+                    .collect(),
+            };
+            let every_side_is_behind =
+                sides
+                    .iter()
+                    .filter(|side| side.across != cut.surface)
+                    .all(|side| match where_a_side_lies(surface, side, &cut) {
+                        Lies::On => true,
+                        Lies::Beside(found) => found == cut.kept,
+                        Lies::Across => false,
+                    });
+            let in_front = matches!(
+                (cut.kept, side_of_surface(&cut.placed, point)),
+                (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos)
+            );
+            if every_side_is_behind && in_front {
+                return Ok(Some(OnAFace::NotHeld));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Steps 1 to 3 of [`what_a_face_cut_by_part_of_a_crossing_holds`], or `None`

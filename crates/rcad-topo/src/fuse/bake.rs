@@ -262,8 +262,22 @@ pub(crate) struct BakedCorner {
 
 impl BakedCorner {
     /// Whether `surface` runs through this corner by construction, so that
-    /// nothing has to ask it: one of the surfaces round it, or its
-    /// [`BakedCorner::seam_plane`] either way round.
+    /// nothing has to ask it: one of the surfaces round it, however either is
+    /// written ([`one_surface`]), or its [`BakedCorner::seam_plane`] either way
+    /// round.
+    ///
+    /// **Another spelling of a surface round the corner is that surface**, so
+    /// it runs through the corner as surely. A pipe with its axis turned round,
+    /// or its origin slid along the axis where that folds exactly, is the same
+    /// point set ([`name_of_the_surface_either_way_round`]). Two bars on one
+    /// pipe, the upper one's axis turned round, and a box cutting a window in
+    /// the lower one were refused at the window's corners: each was asked of
+    /// the upper pipe as a box solved from the lower pipe and two planes, which
+    /// straddles the pipe it is on, so "side of cylinder" could not be told
+    /// (Q1094). The same pipe written the one way was taken through them
+    /// unasked.
+    ///
+    /// [`name_of_the_surface_either_way_round`]: super::arrange::name_of_the_surface_either_way_round
     ///
     /// **The seam plane is through the corner because both were moved from
     /// one exact incidence.** A round bar turned 0.4 about `x` and cut by a
@@ -297,7 +311,7 @@ impl BakedCorner {
     /// is still asked: the bar turned and then shifted meets a block face whose
     /// offset is one ulp off the seam plane's, and refuses as it did.
     pub(crate) fn is_on_by_construction(&self, surface: &Surface) -> bool {
-        self.around.contains(surface)
+        self.around.iter().any(|round| one_surface(round, surface))
             || self.seam_plane.is_some_and(|seam| {
                 surface
                     .as_plane()
