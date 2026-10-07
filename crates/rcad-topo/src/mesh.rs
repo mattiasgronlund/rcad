@@ -1279,7 +1279,7 @@ impl BuildingAMesh {
         if walked.len() == 1
             && (walked[0].closes_on_one_curve || it_passes_each_of_its_points_once(&walked[0]))
             && !walked[0].goes_right_round
-            && where_this_surface_pinches(stored).is_some()
+            && stored.where_it_pinches().is_some()
             && how_much_of_the_chart_this_loop_encloses(&walked[0]) <= 0.0
         {
             let Some(outer) = self.open_the_ball_along_a_seam(face, stored, &walked[0], room)?
@@ -1308,7 +1308,7 @@ impl BuildingAMesh {
         // holds the holes between its two meridians, and each strip is cut up
         // to both poles the way a ball less one disc is.
         if walked.len() > 1
-            && where_this_surface_pinches(stored) == Some(core::f64::consts::FRAC_PI_2)
+            && stored.where_it_pinches() == Some(core::f64::consts::FRAC_PI_2)
             && walked.iter().all(|around| {
                 !around.goes_right_round
                     && it_passes_each_of_its_points_once(around)
@@ -1580,7 +1580,7 @@ impl BuildingAMesh {
     ) -> Result<Option<WalkedLoop>> {
         let (Some(whole), Some(pole)) = (
             how_far_the_longitude_wraps(stored),
-            where_this_surface_pinches(stored),
+            stored.where_it_pinches(),
         ) else {
             return Ok(None);
         };
@@ -1637,7 +1637,7 @@ impl BuildingAMesh {
     ) -> Result<Option<Vec<AStripAndItsHoles>>> {
         let (Some(whole), Some(pole)) = (
             how_far_the_longitude_wraps(stored),
-            where_this_surface_pinches(stored),
+            stored.where_it_pinches(),
         ) else {
             return Ok(None);
         };
@@ -1887,7 +1887,7 @@ impl BuildingAMesh {
         whole_turn: f64,
         room: f64,
     ) -> Result<Option<Vec<Vec<WalkedLoop>>>> {
-        let Some(pinch) = where_this_surface_pinches(stored) else {
+        let Some(pinch) = stored.where_it_pinches() else {
             return Ok(None);
         };
         let Some(towards) = self.which_pole_this_cap_reaches(face, stored, cap) else {
@@ -2363,7 +2363,7 @@ impl BuildingAMesh {
         stored: &Surface,
         cap: &WalkedLoop,
     ) -> Option<f64> {
-        let pinch = where_this_surface_pinches(stored)?;
+        let pinch = stored.where_it_pinches()?;
         let up = runs_up(cap);
         [pinch, -pinch].into_iter().find(|&towards| {
             cap.corners.iter().all(|&[_, latitude]| {
@@ -2441,7 +2441,7 @@ impl BuildingAMesh {
         let from = up.corners[0][0];
         let quarters: [f64; 4] = [0, 1, 2, 3].map(|step| from + f64::from(step) * whole_turn / 4.0);
         let pinch = match chart {
-            Chart::Upright => where_this_surface_pinches(stored),
+            Chart::Upright => stored.where_it_pinches(),
             Chart::OnItsSide => None,
         };
         let (up, down) =
@@ -2598,7 +2598,7 @@ impl BuildingAMesh {
         holes: &[WalkedLoop],
         room: f64,
     ) -> Result<Option<Vec<WalkedLoop>>> {
-        if where_this_surface_pinches(stored) != Some(core::f64::consts::FRAC_PI_2)
+        if stored.where_it_pinches() != Some(core::f64::consts::FRAC_PI_2)
             || outer.goes_right_round
             || holes.iter().any(|hole| hole.goes_right_round)
         {
@@ -3898,28 +3898,6 @@ fn gradient_of(surface: &Surface, at: Point) -> Vector {
     }
 }
 
-/// The latitude a surface pinches to a point at, or `None` for one that does
-/// not pinch at all.
-fn where_this_surface_pinches(surface: &Surface) -> Option<f64> {
-    match surface {
-        Surface::Sphere(_) => Some(core::f64::consts::FRAC_PI_2),
-        // **A cone pinches at zero and only there**, where a ball pinches at
-        // both `±π/2`. The caller tries `pole` and then `-pole`, and for a cone
-        // those are the same place — `Cone::point_at(·, 0)` is the apex whatever
-        // the angle — so the second try costs one predicate call and answers the
-        // same, which is right rather than merely harmless: there is one apex.
-        Surface::Cone(_) => Some(0.0),
-        // **A torus pinches nowhere, and that is the whole of what makes its
-        // chart different from a ball's.** A step of one radian round the ring
-        // carries `R + r·cos v`, which is never less than `R − r` and so is
-        // never nothing; a step round the tube carries `r` everywhere. Both
-        // coordinates run right round instead, which costs a torus **two**
-        // seams where a ball has one seam and two poles.
-        Surface::Plane(_) | Surface::Cylinder(_) | Surface::Torus(_) => None,
-        other => panic!("this crate cannot say whether {other:?} pinches"),
-    }
-}
-
 /// Whether a face's loops are the rim of a cap on a ball with islands in it:
 /// one loop right round, and at least one more, each passing each of its
 /// points once with the material outside it.
@@ -3932,7 +3910,7 @@ fn a_cap_on_a_ball_with_islands_in_it(stored: &Surface, walked: &[WalkedLoop]) -
         walked.iter().partition(|around| around.goes_right_round);
     rims.len() == 1
         && !islands.is_empty()
-        && where_this_surface_pinches(stored) == Some(core::f64::consts::FRAC_PI_2)
+        && stored.where_it_pinches() == Some(core::f64::consts::FRAC_PI_2)
         && how_far_the_second_coordinate_wraps(stored).is_none()
         && islands.iter().all(|island| {
             it_passes_each_of_its_points_once(island)
@@ -4865,7 +4843,7 @@ fn how_far_round(around: &WalkedLoop) -> f64 {
 /// **Right-handed is not true of every surface, and the caller is what makes
 /// that safe.** A torus crosses its two coordinates *into* the material, so the
 /// sign of this sum would read backwards there. It never gets the chance: the
-/// only call site whose sign matters is guarded by `where_this_surface_pinches`,
+/// only call site whose sign matters is guarded by [`Surface::where_it_pinches`],
 /// and a torus pinches nowhere. `every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`
 /// in `rcad-geom` is the measurement, over all five surfaces.
 fn how_much_of_the_chart_this_loop_encloses(around: &WalkedLoop) -> f64 {
@@ -5806,7 +5784,9 @@ fn poles_of(wire: WireView<'_>) -> HashSet<VertexKey> {
 /// needs cutting in two, so that a corner the mesh will call a pole is never
 /// left the one corner of a closed edge (§195.2).
 pub(crate) fn the_surface_pinches_at(surface: &Surface, latitude: f64) -> bool {
-    where_this_surface_pinches(surface).is_some_and(|pinch| latitude.abs() == pinch)
+    surface
+        .where_it_pinches()
+        .is_some_and(|pinch| latitude.abs() == pinch)
 }
 
 /// The steps of `wire`, turned so the walk sets off from a corner that has a
@@ -6298,7 +6278,9 @@ fn put_in_the_poles_a_closed_crossing_passes(
         if other == ball {
             continue;
         }
-        let pinch = where_this_surface_pinches(ball).expect("a ball pinches at its poles");
+        let pinch = ball
+            .where_it_pinches()
+            .expect("a ball pinches at its poles");
         for up in [1.0, -1.0] {
             let pole = sphere.centre() + Vector::new(0.0, 0.0, up * sphere.radius());
             if let Some(far) = put_in_a_pole(points, ends, [ball, other], pole, up * pinch) {
@@ -6456,7 +6438,9 @@ fn the_pole_a_point_sits_within_a_rounding_of(stored: &Surface, at: Point) -> Op
     let Surface::Sphere(sphere) = stored else {
         return None;
     };
-    let pinch = where_this_surface_pinches(stored).expect("a ball pinches at its poles");
+    let pinch = stored
+        .where_it_pinches()
+        .expect("a ball pinches at its poles");
     [1.0, -1.0].into_iter().find_map(|up| {
         let pole = sphere.centre() + Vector::new(0.0, 0.0, up * sphere.radius());
         ((at - pole).length() <= one_rounding_among([at, pole, sphere.centre()]))
