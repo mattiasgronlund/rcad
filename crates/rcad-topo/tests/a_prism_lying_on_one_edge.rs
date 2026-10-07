@@ -25,9 +25,18 @@
 //! a block less a prism lying inside it along its edge, and a block united
 //! with a solid lying on it along one edge and reaching down into it somewhere
 //! else. Both validate if they are parted, which is why the parting asks.
+//!
+//! **Moved elsewhere along `x`, the edge need not lie on the top at all**
+//! (queue row Q1114). The edge is where the prism's two walls meet, and moving
+//! the prism rounds the offset of each wall's plane. At `x = 0` and `x = −1`
+//! the edge lies on the top exactly. At `x = −1.5` it lies `3.1e-17` inside
+//! the block, so the two overlap in a sliver, and every answer then needs a
+//! side shorter than the gap between two doubles: a limit. At `x = −2.5`,
+//! `−1.25` and `1.5` it stands a rounding above the top, the two share no
+//! point, and every answer is the two as they stand: a gap, still refused.
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
 use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
@@ -40,6 +49,15 @@ const RESTING: [[f64; 2]; 3] = [[0.0, 0.0], [3.0, 2.0], [-1.0, 2.0]];
 
 /// Where each prism is moved to, and how long it is.
 const LAID: [([f64; 3], f64); 2] = [([0.0, 0.0, 2.0], 6.0), ([-1.0, 0.0, 2.5], 4.75)];
+
+/// Where a prism six long is moved to for its walls' rounding to leave its
+/// edge `3.1e-17` inside the block's top.
+const A_ROUNDING_INTO_THE_TOP: [f64; 3] = [-1.5, 0.0, 2.0];
+
+/// Where a prism six long is moved to for its walls' rounding to leave its
+/// edge a rounding above the block's top.
+const A_ROUNDING_ABOVE_THE_TOP: [[f64; 3]; 3] =
+    [[-2.5, 0.0, 2.0], [-1.25, 0.0, 2.0], [1.5, 0.0, 2.0]];
 
 /// The regression: every rule both ways round, checked against volumes. The
 /// union is the block and the prism as they stood, two lumps; the
@@ -72,39 +90,93 @@ fn a_prism_lying_on_its_edge_on_a_blocks_top_answers_every_rule_both_ways_round(
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The same prism with its edge at `x = −1.5`, from `z = 2` to `z = 8`, is
-/// refused under every rule both ways round, `Undecidable` for want of *a
-/// point inside a piece of a face*; at `x = 0` and `x = −1` no fuse refuses.
-/// With the block first the piece is a sliver of the block's top along
-/// `x = −1.5` from `z = 0` to `z = 2`, the prism's edge run back to the block's
-/// end where no face of the prism reaches: corners `(−1.5, 0, 0)` and
-/// `(−1.5, 0, 2)` exact, and two boxes a rounding wide in `x` beside them. Not
-/// traced further. That refusal is the selection's, ahead of the assembly, and
-/// the intersection and both differences reach it too. The answers exist, so
-/// it is a gap; this pin fails the day it closes, and then the placement
-/// belongs in [`LAID`].
+/// **Where the edge lies is the walls' rounding.** Each end of the edge is the
+/// meet of the two walls and that end's plane, and asked exactly of those
+/// planes it lies on the block's top at every placement of [`LAID`], strictly
+/// below it at `x = −1.5`, inside the block, and strictly above it at
+/// `x = −2.5`, `−1.25` and `1.5`, clear of the block.
 #[test]
-fn the_prism_with_its_edge_at_x_minus_one_and_a_half_is_refused_for_want_of_a_point_inside_a_piece()
-{
-    let mut wrong = Vec::new();
-    for swapped in [false, true] {
-        for rule in EVERY_RULE {
-            let (_, answer) = fuse(swapped, rule, |model| {
-                [
-                    a_block(model),
-                    a_prism(model, RESTING, [-1.5, 0.0, 2.0], 6.0),
-                ]
-            });
-            match answer {
-                Err(Error::Undecidable { records })
-                    if !records.records().is_empty()
-                        && records.records().iter().all(|record| {
-                            record.predicate() == "a point inside a piece of a face"
-                        }) => {}
-                other => wrong.push(format!("{rule:?}, prism first {swapped}: {other:?}")),
-            }
-        }
+fn the_prisms_edge_is_on_the_blocks_top_only_where_every_fuse_answers() {
+    for (at, length) in LAID {
+        assert_eq!(
+            sides_of_the_prisms_edge_against_the_blocks_top(at, length),
+            [Decision::Zero; 2],
+            "{at:?}"
+        );
     }
+    assert_eq!(
+        sides_of_the_prisms_edge_against_the_blocks_top(A_ROUNDING_INTO_THE_TOP, 6.0),
+        [Decision::Neg; 2]
+    );
+    for at in A_ROUNDING_ABOVE_THE_TOP {
+        assert_eq!(
+            sides_of_the_prisms_edge_against_the_blocks_top(at, 6.0),
+            [Decision::Pos; 2],
+            "{at:?}"
+        );
+    }
+}
+
+/// **At `x = −1.5` every answer has a side shorter than the gap between two
+/// doubles**, which is what makes its refusal a limit. The edge is inside the
+/// block, so the two overlap in a sliver from `z = 2` to `z = 8`, and at each
+/// end every answer has a side along the block's top from where one wall meets
+/// it to where the other does: where the top stops and a wall starts in the
+/// union and in each difference, and across the sliver's own end in the
+/// intersection. One wall meets the top at `x = −1.5` exactly and the other
+/// strictly between that and the next double down, `−1.5000000000000002`, so
+/// the side is under the `2.2e-16` between doubles at `1.5`. With the block
+/// reaching 10 from the origin that is a spread above `4e16`, against the
+/// `1e11` a model supports (`docs/decisions.md` §3.5).
+#[test]
+fn every_answer_with_the_edge_a_rounding_into_the_top_needs_a_side_shorter_than_one_double() {
+    let at_one_and_a_half = where_each_wall_meets_the_blocks_top_against(-1.5);
+    assert!(
+        at_one_and_a_half.contains(&[Decision::Zero; 2])
+            && at_one_and_a_half.contains(&[Decision::Neg; 2]),
+        "{at_one_and_a_half:?}"
+    );
+    let the_next_double_down = -f64::from_bits(1.5_f64.to_bits() + 1);
+    assert_eq!(the_next_double_down, -1.500_000_000_000_000_2);
+    assert_eq!(
+        where_each_wall_meets_the_blocks_top_against(the_next_double_down),
+        [[Decision::Pos; 2]; 2]
+    );
+}
+
+/// **A limit, not a gap**: every rule both ways round is refused, `Undecidable`
+/// for want of *a point inside a piece of a face*, and is to be refused
+/// whatever later stages learn, as the turned cubes that overlap by a rounding
+/// are (`two_turned_cubes_a_rounding_apart.rs`), since every answer needs a
+/// side shorter than one double (the test above).
+///
+/// With the block first the piece is the sliver of the block's top from
+/// `z = 0` to `z = 2` between where the two walls' planes meet it, outside the
+/// prism. With the prism first it is the part of the prism's end at `z = 2`
+/// below the block's top, inside the block. Each has every corner on a plane
+/// of the other solid, so neither a corner nor a plane places it.
+#[test]
+fn the_prism_with_its_edge_a_rounding_into_the_blocks_top_is_refused() {
+    let wrong = what_is_not_refused_for_want_of_a_point_inside_a_piece(A_ROUNDING_INTO_THE_TOP);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// **A gap**: with the edge a rounding above the block's top the two share no
+/// point (the first test above), so the union is the two as they stand, the
+/// intersection nothing and each difference its first solid whole, and every
+/// rule both ways round is refused all the same, `Undecidable` for want of *a
+/// point inside a piece of a face*. Under the union at `x = −2.5`, either way
+/// round, the piece is the sliver of the block's top from `z = 0` to `z = 2`
+/// between where the two walls' planes meet it, outside the prism; two of its
+/// corners lie on the plane of the prism's end rather than in front of it,
+/// which `by_a_plane` in `fuse/select.rs` does not take. This pin fails the day
+/// it closes, and then these placements belong in [`LAID`].
+#[test]
+fn a_prism_standing_a_rounding_above_the_blocks_top_is_refused_though_the_two_share_no_point() {
+    let wrong: Vec<String> = A_ROUNDING_ABOVE_THE_TOP
+        .into_iter()
+        .flat_map(what_is_not_refused_for_want_of_a_point_inside_a_piece)
+        .collect();
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
@@ -240,6 +312,100 @@ fn refused_as_four_faces_along_one_edge(answer: rcad_topo::Result<Fused>) -> Opt
             fused.solids()
         )),
     }
+}
+
+/// Which side of the block's top each end of the prism's edge lies on, the
+/// prism moved by `at` and `length` long: the meet of its two walls and that
+/// end's plane, asked of the planes exactly. [`Decision::Pos`] is above.
+fn sides_of_the_prisms_edge_against_the_blocks_top(at: [f64; 3], length: f64) -> [Decision; 2] {
+    let planes = planes_round_the_edge(at, length);
+    planes.ends.map(|end| {
+        side_of_a_plane_where_three_planes_meet([planes.walls[0], planes.walls[1], end], planes.top)
+            .expect("two walls and an end meet in a point")
+    })
+}
+
+/// For each wall of the prism with its edge a rounding into the block's top,
+/// which side of the plane `x = across` the wall meets the top on at each end:
+/// the meet of the wall, the top and that end's plane, asked of the planes
+/// exactly. [`Decision::Pos`] is the side `x > across`.
+fn where_each_wall_meets_the_blocks_top_against(across: f64) -> [[Decision; 2]; 2] {
+    let planes = planes_round_the_edge(A_ROUNDING_INTO_THE_TOP, 6.0);
+    planes.walls.map(|wall| {
+        planes.ends.map(|end| {
+            side_of_a_plane_where_three_planes_meet(
+                [wall, planes.top, end],
+                [1.0, 0.0, 0.0, -across],
+            )
+            .expect("a wall, the top and an end meet in a point")
+        })
+    })
+}
+
+/// The planes round the prism's edge, as coefficients.
+struct RoundTheEdge {
+    /// The block's top, `y = 0`, facing up.
+    top: [f64; 4],
+    /// The prism's two walls, which lean, in no particular order.
+    walls: [[f64; 4]; 2],
+    /// The prism's two ends, square to `z`.
+    ends: [[f64; 4]; 2],
+}
+
+/// The block's top and the prism's walls and ends, the prism moved by `at` and
+/// `length` long, as the model stores them.
+fn planes_round_the_edge(at: [f64; 3], length: f64) -> RoundTheEdge {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let block = a_block(&mut model);
+    let prism = a_prism(&mut model, RESTING, at, length);
+    let planes_of = |solid: SolidKey| -> Vec<[f64; 4]> {
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .map(|face| face.plane().coefficients())
+            .collect()
+    };
+    let top = [0.0, 1.0, 0.0, 0.0];
+    assert!(
+        planes_of(block).contains(&top),
+        "the block's top is y = 0, facing up"
+    );
+    let prism = planes_of(prism);
+    let two_of = |which: fn(&[f64; 4]) -> bool| -> [[f64; 4]; 2] {
+        let found: Vec<[f64; 4]> = prism.iter().copied().filter(which).collect();
+        found
+            .try_into()
+            .unwrap_or_else(|found| panic!("a prism has two of these, not {found:?}"))
+    };
+    RoundTheEdge {
+        top,
+        walls: two_of(|plane| plane[0] != 0.0),
+        ends: two_of(|plane| plane[2] != 0.0),
+    }
+}
+
+/// What is wrong with every rule both ways round, the prism six long and moved
+/// by `at`, being refused `Undecidable` for want of *a point inside a piece of
+/// a face*; empty when nothing is.
+fn what_is_not_refused_for_want_of_a_point_inside_a_piece(at: [f64; 3]) -> Vec<String> {
+    let mut wrong = Vec::new();
+    for swapped in [false, true] {
+        for rule in EVERY_RULE {
+            let (_, answer) = fuse(swapped, rule, |model| {
+                [a_block(model), a_prism(model, RESTING, at, 6.0)]
+            });
+            match answer {
+                Err(Error::Undecidable { records })
+                    if !records.records().is_empty()
+                        && records.records().iter().all(|record| {
+                            record.predicate() == "a point inside a piece of a face"
+                        }) => {}
+                other => wrong.push(format!("{at:?} {rule:?}, prism first {swapped}: {other:?}")),
+            }
+        }
+    }
+    wrong
 }
 
 fn a_block(model: &mut Model) -> SolidKey {
