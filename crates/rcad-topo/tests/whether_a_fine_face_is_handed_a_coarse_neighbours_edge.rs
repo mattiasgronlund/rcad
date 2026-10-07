@@ -59,6 +59,8 @@
 //! says the measurement has teeth: the same machinery, pointed at a mesh cut
 //! ten times too coarse for the number it is checked against, sees it.
 
+use core::f64::consts::PI;
+
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Sphere, Surface, Vector};
 use rcad_predicates::{Cause, Policy, ProvenanceLog};
 use rcad_topo::{Error, Mesh, Model, Rule, SolidKey};
@@ -308,66 +310,134 @@ fn no_triangle_of_either_face_strays_further_than_the_deflection_asked_for() {
     );
 }
 
-/// The shape this file would rather have had, and why there is none to mesh.
+/// The shape this file would rather have had, down a ball's own axis, and it is
+/// answered under every rule both ways round, under either policy.
 ///
-/// A bar down a ball's own axis crosses its skin in two circles, which would be
-/// a pipe of radius a fifth against a ball of radius ten sharing an edge — a
-/// fifty-fold difference in curvature where the lens manages twenty. The fuse
-/// never gets that far, and the two placements stop in two places.
+/// A bar down a ball's own axis crosses its skin in two circles, which is a
+/// pipe of radius a fifth against a ball of radius ten sharing an edge — a
+/// fifty-fold difference in curvature where the lens manages twenty.
 ///
-/// **Down `z`, through the centre**, the union gets past the order along the
-/// two circles and is refused after the faces are cut: the result's mesh finds
-/// two corners of a face in one place (Q1140). It was refused
-/// `ACrossingThisCannotBeOrderedAlong` while the arrangement could not tell two
-/// circles from a quartic. What it should answer is the ball and the bar less
-/// what they share: `4000π/3 + 40π·0.04 − (4π/3)(1000 − (100 − 0.04)^(3/2))`.
+/// It was refused by the result's own mesh, which found two corners of a face
+/// in one place (Q1241). The fuse writes each circle as a closed run with its
+/// corner on it and nothing picking it, and `rcad_geom::walk` marched every
+/// such run from the seed on the circle ahead of the centre, so the circle
+/// behind was walked round the one ahead. Each is drawn in closed form now and
+/// told apart by its corner. Before that it was refused
+/// `ACrossingThisCannotBeOrderedAlong`, while the arrangement could not tell two
+/// circles from a quartic (Q1140).
 ///
-/// **Turned to lie along `x`** by a quarter turn about `y`, it is still
-/// refused by name before any order is asked. Why the turned bar's axis is not
-/// read as through the centre is not traced here.
+/// With `R = 10`, `r = 0.2` and the bar 40 long, so it reaches past the ball
+/// both ends: the ball less the bar is `(4π/3)(R² − r²)^(3/2)`, the two share
+/// `4000π/3` less that, the union is `4000π/3 + 40π·0.04` less what they share,
+/// and the bar less the ball is `40π·0.04` less what they share, in two pieces.
+/// Every answer is measured short of its closed form, since a mesh inscribed in
+/// a round wall is inside it, and within half a per cent: the two no wider than
+/// the bar at a five-hundredth, where a fiftieth leaves them 2.3% short, and
+/// the rest at a fiftieth.
+#[test]
+fn a_bar_down_a_balls_axis_is_answered_under_every_rule() {
+    let (ball_volume, bar_volume) = (4000.0 * PI / 3.0, 40.0 * PI * 0.04);
+    let left = 4.0 * PI / 3.0 * (100.0_f64 - 0.04).powf(1.5);
+    let shared = ball_volume - left;
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        for (rule, ball_first, pieces, closed_form, how_fine) in [
+            (
+                Rule::Union,
+                true,
+                1,
+                ball_volume + bar_volume - shared,
+                0.02,
+            ),
+            (
+                Rule::Union,
+                false,
+                1,
+                ball_volume + bar_volume - shared,
+                0.02,
+            ),
+            (Rule::Intersection, true, 1, shared, 0.002),
+            (Rule::Intersection, false, 1, shared, 0.002),
+            (Rule::Difference, true, 1, left, 0.02),
+            (Rule::Difference, false, 2, bar_volume - shared, 0.002),
+        ] {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let ball = model
+                .add_ball(10.0, &Isometry::identity())
+                .expect("a ball at the origin");
+            let bar = model
+                .add_round_bar(
+                    0.2,
+                    40.0,
+                    &Isometry::translation(Vector::new(0.0, 0.0, -20.0)).expect("a shift"),
+                )
+                .expect("a bar right through it");
+            let (argument, tool) = if ball_first { (ball, bar) } else { (bar, ball) };
+            let what = format!("{policy:?}, {rule:?}, the ball first {ball_first}");
+            let mut log = ProvenanceLog::new();
+            let answer = model
+                .fuse(&[argument], &[tool], rule, &policy, &mut log)
+                .unwrap_or_else(|why| panic!("{what}: refused with {why:?}"));
+            assert!(log.is_empty(), "{what}: left {:?}", log.records());
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a fuse writes a sound model or writes nothing");
+            assert_eq!(answer.solids().len(), pieces, "{what}");
+            let volume: f64 = answer
+                .solids()
+                .iter()
+                .map(|&solid| {
+                    model
+                        .solid(solid)
+                        .expect("this model made the key")
+                        .measure(
+                            Deflection::of(how_fine).expect("a positive length"),
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        )
+                        .expect("a solid this size measures")
+                        .volume()
+                })
+                .sum();
+            let short = (closed_form - volume) / closed_form;
+            assert!(
+                short > 0.0 && short < 0.005,
+                "{what}: measured {volume} at {how_fine} against {closed_form}"
+            );
+        }
+    }
+}
+
+/// The same bar **turned to lie along `x`** by a quarter turn about `y` never
+/// gets as far as a mesh: it is still refused by name before any order is
+/// asked. Why the turned bar's axis is not read as through the centre is not
+/// traced here (Q1245).
 #[test]
 fn a_ball_against_a_bar_never_gets_as_far_as_a_mesh() {
-    for turned in [false, true] {
-        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-        let ball = model
-            .add_ball(10.0, &Isometry::identity())
-            .expect("a ball at the origin");
-        let down_z = Isometry::translation(Vector::new(0.0, 0.0, -20.0)).expect("a shift");
-        let along_x = Isometry::translation(Vector::new(-20.0, 0.0, 0.0))
-            .expect("a shift")
-            .compose(
-                &Isometry::rotation(&Axis::y(), core::f64::consts::FRAC_PI_2)
-                    .expect("a quarter turn"),
-            );
-        let bar = model
-            .add_round_bar(0.2, 40.0, if turned { &along_x } else { &down_z })
-            .expect("a bar right through it");
-        let why = model
-            .fuse(
-                &[ball],
-                &[bar],
-                Rule::Union,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect_err("a ball and a bar have no fuse here");
-        let refused_where_it_should_be = if turned {
-            matches!(why, Error::ACrossingThisCannotBeOrderedAlong)
-        } else {
-            matches!(
-                why,
-                Error::CannotMeshAFace {
-                    why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
-                    ..
-                }
-            )
-        };
-        assert!(
-            refused_where_it_should_be,
-            "a bar {} a ball was refused with {why:?}",
-            if turned { "across" } else { "down" }
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let ball = model
+        .add_ball(10.0, &Isometry::identity())
+        .expect("a ball at the origin");
+    let along_x = Isometry::translation(Vector::new(-20.0, 0.0, 0.0))
+        .expect("a shift")
+        .compose(
+            &Isometry::rotation(&Axis::y(), core::f64::consts::FRAC_PI_2).expect("a quarter turn"),
         );
-    }
+    let bar = model
+        .add_round_bar(0.2, 40.0, &along_x)
+        .expect("a bar right through it");
+    let why = model
+        .fuse(
+            &[ball],
+            &[bar],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect_err("a ball and a bar have no fuse here");
+    assert!(
+        matches!(why, Error::ACrossingThisCannotBeOrderedAlong),
+        "a bar across a ball was refused with {why:?}"
+    );
 }
 
 /// One mesh, cut under a certified policy with nothing left unsettled.
