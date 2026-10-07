@@ -6020,16 +6020,16 @@ fn held_in_front_of_all_on_its_own_run(
             let [one, other] = cuts.each_ref().map(|cut| {
                 a_line_on(pipe, cut).expect("a cut read as a line where it is stored is one moved")
             });
-            match which_side_of_where_the_tangents_touch(pipe, [&one, &other], point.enclosure()) {
-                Decision::Undecidable { enclosure } => {
-                    return Err(gave_up_beside_where_the_tangents_touch(
-                        point,
-                        enclosure,
-                        [&one, &other],
-                    ));
-                }
-                found => found,
+            let found =
+                which_side_of_where_the_tangents_touch(pipe, [&one, &other], point.enclosure());
+            if let Decision::Undecidable { enclosure } = found {
+                return Err(gave_up_beside_where_the_tangents_touch(
+                    point,
+                    enclosure,
+                    [&one, &other],
+                ));
             }
+            found
         }
     };
     match found {
