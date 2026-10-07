@@ -4797,8 +4797,9 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// [`which_curve_it_is`]. The third is, for an arc of a
 /// closed crossing between a plane and a surface that curves right round — a
 /// ball's circle, or a cone's rim circle — that curved surface and that plane,
-/// or for an arc of the circle two balls cross in, the two balls, and which of
-/// the crossing's two arcs between the same two corners it is; see
+/// or for an arc of the circle two balls, or a cone and a second cone, a pipe
+/// or a ball on its axis, cross in, the two of them, and which of the
+/// crossing's two arcs between the same two corners it is; see
 /// [`which_arc_of_a_circle_this_is`]. The fourth is, for an arc of a
 /// hyperbola or a parabola a plane cuts on a cone, that cone and that plane;
 /// see [`which_open_crossing_of_a_cone_this_is`].
@@ -5622,8 +5623,9 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// Which of the two arcs between its corners a side is of a closed crossing
 /// between a plane and a surface that curves right round — a ball's circle, or
 /// a cone's rim circle and the ellipse a steeper plane leaves — together with
-/// that curved surface and that plane, or of the circle two balls cross in,
-/// together with the two balls; `None` for any other side.
+/// that curved surface and that plane, or of the circle two balls cross in, or
+/// a cone and a second cone, a pipe or a ball on its axis, together with the
+/// two; `None` for any other side.
 ///
 /// **Both arcs run between the same two corners and along the same two
 /// surfaces**, so nothing [`which_curve_it_is`] reads tells them apart. Most
@@ -5747,6 +5749,34 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// turned round for how a face spells it. Where the two are one ball there is
 /// no circle, and nothing is named.
 ///
+/// # So does a cone and a second cone, a pipe or a ball on its axis
+///
+/// **And a wall through the axis leaves both arcs between the same two
+/// corners.** The frustum of slope 1 cut to `x ≥ 0`, against a steeper frustum,
+/// a bar of radius 4 or a ball of radius 3 on its axis: the wall `x = 0` puts
+/// two corners on each circle the pair crosses in, at `(0, ±4, 4)` for the
+/// first two. The partner's skin holds the whole circle, so a rule keeping the
+/// partner's skin either side of the arc at `x < 0` keeps that arc as well as
+/// the one along the cone. Named by their corners alone the two were one edge
+/// with four faces along it, and the unions both ways round and the partner
+/// less the half were refused `ResultIsNotManifold { count: 4 }` (queue row
+/// Q1269, `tests/a_cone_hollowed_along_its_axis.rs`).
+///
+/// **The sign rule holds as it stands.** `intersect` names a cone against
+/// another curved surface only where the two share an axis, and refuses every
+/// other such pair, so a side carried by one of these pairs is on a circle
+/// square to that axis and centred on it. Both gradients lie in the plane
+/// through the axis and the point, so `∇S × ∇T` runs along the circle, and the
+/// same turn about the axis carries it from one point to the next, so it never
+/// vanishes on a circle where it does not vanish at one point. It vanishes
+/// everywhere on the one circle a ball inscribed in a cone touches it round,
+/// and that circle does not reach here: a frustum of slope 3/4 against the ball
+/// of radius 3 it holds is refused before any edge is named, and so is the
+/// half of it (`a_ball_a_frustum_touches_round_one_circle_is_refused_before_its_arcs_are_named`
+/// in that test file). A cone and a pipe written with the axis turned round
+/// have the same gradient, so the two are named either way round and nothing
+/// is turned round for how a face spells them.
+///
 /// Other pairs of curved surfaces that cross in closed curves — a ball and a
 /// pipe, two pipes — are not named here. Their curves can touch the line where
 /// the two gradients line up, two equal pipes square to each other do at two
@@ -5761,15 +5791,34 @@ fn which_arc_of_a_circle_this_is(
     from: usize,
     to: usize,
 ) -> Option<([[u64; 9]; 2], bool)> {
-    let (named, mine_is_the_first, spelled_the_other_way_round) =
-        if let [ball @ Surface::Sphere(_), other @ Surface::Sphere(_)] = meet.carried_by {
+    let (named, mine_is_the_first, spelled_the_other_way_round) = match meet.carried_by {
+        [ball @ Surface::Sphere(_), other @ Surface::Sphere(_)] => {
             let named = [name_of_surface_bits(&ball), name_of_surface_bits(&other)];
             match named[0].cmp(&named[1]) {
                 Ordering::Less => (named, true, false),
                 Ordering::Greater => ([named[1], named[0]], false, false),
                 Ordering::Equal => return None,
             }
-        } else {
+        }
+        [
+            one @ Surface::Cone(_),
+            other @ (Surface::Cone(_) | Surface::Cylinder(_) | Surface::Sphere(_)),
+        ]
+        | [
+            one @ (Surface::Cylinder(_) | Surface::Sphere(_)),
+            other @ Surface::Cone(_),
+        ] => {
+            let named = [
+                name_of_the_surface_either_way_round(&one),
+                name_of_the_surface_either_way_round(&other),
+            ];
+            match named[0].cmp(&named[1]) {
+                Ordering::Less => (named, true, false),
+                Ordering::Greater => ([named[1], named[0]], false, false),
+                Ordering::Equal => return None,
+            }
+        }
+        [_, _] => {
             let round_one = which_of_them_a_closed_crossing_runs_round(&meet.carried_by)?;
             let flat = &meet.carried_by[1 - round_one];
             (
@@ -5780,7 +5829,8 @@ fn which_arc_of_a_circle_this_is(
                 round_one == 0,
                 is_written_the_other_way_round(flat),
             )
-        };
+        }
+    };
     // A whole ball's seam is walked down and back up by the one face, with a
     // material side that names the half of the meridian it is and not a side
     // (`Arrangement::the_whole_surface`), so the rule below would read its two
