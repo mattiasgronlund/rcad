@@ -133,6 +133,27 @@ still refused — by their corners, not the arc's name — and a closed edge
 between such a pair, rather than an arc of one, is still untested; neither is
 this note's to close.
 
+**2026-10-07 note (Q1222, bringing the note above up to date): a closed edge
+between a round solid and such a pair is tested now, by Q1084
+(`044d82d2`).** A ball turned about `x` so neither pole is on `x = y`, and a
+bar of radius two square to the plane, each cut in one whole circle by
+`x = y`, with one block's face holding the whole circle spelled `c` and a
+second block clear of every round solid spelled `c′`. Every one of the twelve
+fuses of each was refused `ResultIsNotManifold { count: 1 }` until
+`name_of_the_closed_crossing_through` named the plane with
+`name_of_the_plane_at_any_scale` there too, and now each answers its closed
+form
+(`a_ball_cut_whole_by_a_plane_two_blocks_spell_an_ulp_apart_in_scale`,
+`a_bar_cut_whole_by_a_plane_two_blocks_spell_an_ulp_apart_in_scale`, in
+`crates/rcad-topo/tests/a_turned_plane_exactly_proportional_to_another.rs`).
+Two blocks on opposite sides of the plane are still refused, by their
+corners rather than the arc's name
+(`two_blocks_facing_apart_across_a_plane_spelled_an_ulp_apart_in_scale_are_still_refused`),
+and two overlapping flat blocks on such a plane, with no closed crossing in
+it, are still refused one way round with nobody having traced it
+(`two_blocks_overlapping_on_a_plane_spelled_an_ulp_apart_in_scale_are_refused_one_way_round`),
+filed by Q1084's lane as Q1221.
+
 ### 330.4 Whether a spelling can pair four faces crosswise
 
 §247.6 asked whether two spellings the fold leaves apart could pair the four

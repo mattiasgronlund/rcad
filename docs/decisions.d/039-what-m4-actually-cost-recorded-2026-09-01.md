@@ -455,6 +455,19 @@ moved them.
 > still refuse `ResultIsNotManifold { count: 4 }`, queue row Q1135's
 > (`a_pointed_cone_drilled_along_its_axis.rs`).
 
+> **2026-10-07 note (Q1191): the union and the bar less the cone move twice
+> more, and now answer.** `MeetPoint::WhereAClosedCurveStarts` named a closed
+> crossing's start corner by its two surfaces alone, so the cone's two
+> circles on the bar's wall got one corner and one edge, claimed four times;
+> Q1148 (`6ce74099`) names that corner by which of the two circles picked it
+> out as well, and the union and the bar less the cone moved from
+> `ResultIsNotManifold { count: 4 }` to
+> `TheFuseWroteABrokenAnswer { broken: AClosedEdgeIsWalkedAgainstItsSurface }`,
+> which `validate.rs` gave when it read the bar's face's side of the cone off
+> its far corner rather than where the face meets the edge. Q1190 (`9528b7d8`)
+> reads it there instead, and all six fuses now answer, held to `364π` for the
+> union and `92π/3` in two solids for the bar less the cone. §340.4.
+
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot
 assemble what it cut, before writing anything — `two_balls_that_really_cross_are_refused_by_name`
