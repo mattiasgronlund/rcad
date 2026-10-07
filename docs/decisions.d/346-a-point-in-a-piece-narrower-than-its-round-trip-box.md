@@ -603,6 +603,18 @@ read as before. `mise exec -- just t -p rcad-topo --no-fail-fast`: 1474 run,
   candidate itself, when it asks whether a piece lies on a flat face of the
   same plane, so the same reading could put a piece on a face its foot is off.
   A guess nobody has run, so it has no class.
+  *Q1107 (2026-10-07): run.* On the side of a bar `2^20` out on `x + y = 0`
+  with exact corners, the face held a point a spacing off whose foot was
+  `2^-20` short of its near edge, and did not hold one whose foot was `2^-20`
+  past it (**`wrong/C`**;
+  `a_point_a_rounding_off_a_far_face_is_on_it_where_its_foot_is` in
+  `select.rs`). The corners are now wound round `stretched_to_the_plane`'s box,
+  the fan cannot say for either point, and
+  `the_model_says_one_of_its_faces_holds` answers as each foot says. No fuse
+  reaches it: `the_piece_holds` holds the same box first
+  (`a_square_beside_a_far_face_does_not_hold_a_point_read_over_their_edge`),
+  and a throwaway probe over `just t -p rcad-topo` saw the box and the point
+  wind differently only in that test, 2 of 132457 calls.
 
 ### 346.7 A point in one face's sliver whose ray crosses the neighbour — 2026-10-06
 
