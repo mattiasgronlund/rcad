@@ -3664,23 +3664,12 @@ fn where_a_cone_and_a_ball_cross(
 /// The two circles a ball on a cone's axis cuts it in, told apart by the flat
 /// half-space square to the axis halfway between them.
 ///
-/// **Halfway, because neither stored point is always between them.** The apex
-/// is between the two exactly when it is inside the ball, and the ball's centre
-/// exactly when the ball reaches out past the cone level with it; a ball
-/// sitting in one nappe and pushing out through its side, nearer the apex than
-/// its own centre, has both circles on one side of both points. Halfway is
-/// `h = e/(1 + s²)` along the axis, which is `a + (c − a)/(1 + s²)`, and that
-/// point rounds — so the separation is **tested and not arranged**: the
-/// half-space has to read one circle above zero and the other below it with
-/// the rounding counted in, or this refuses.
-///
 /// What the stored direction reads at either circle is `‖w‖·h` with
 /// `h = (e ± √D)/(1 + s²)`, which is `(g ± √(W·D))/(1 + s²)` with
 /// `g = (c − a)·w` and `W = w·w`, so no `e` is ever divided out.
 fn two_circles_a_ball_cuts_round_a_cones_axis(cone: &Cone, ball: &Sphere) -> Result<SurfaceMeet> {
     let along = cone.axis().direction();
-    let squared_slope = cone.slope() * cone.slope();
-    let halfway = cone.apex() + (ball.centre() - cone.apex()) * (1.0 + squared_slope).recip();
+    let halfway = halfway_between_a_cones_apex_and_a_ball_on_its_axis(cone, ball);
 
     let up = dot_enclosing(
         gap_enclosing(cone.apex().coordinates(), ball.centre().coordinates()),
@@ -3700,6 +3689,32 @@ fn two_circles_a_ball_cuts_round_a_cones_axis(cone: &Cone, ball: &Sphere) -> Res
             quotient_or_everything(up - either_way, widening),
         ],
     )
+}
+
+/// Halfway along a cone's axis between its apex and a ball centred on it,
+/// `a + (c − a)/(1 + s²)` with `s` the cone's slope.
+///
+/// **Halfway, because neither stored point is always between the two circles
+/// a ball on a cone's axis cuts it in.** The apex is between the two exactly
+/// when it is inside the ball, and the ball's centre exactly when the ball
+/// reaches out past the cone level with it; a ball sitting in one nappe and
+/// pushing out through its side, nearer the apex than its own centre, has both
+/// circles on one side of both points. Halfway is `h = e/(1 + s²)` along the
+/// axis, which is this point, and it rounds — so [`two_circles_round_a_cones_axis`]
+/// tests the separation rather than arranging it: the half-space built through
+/// this point has to read one circle above zero and the other below it with
+/// the rounding counted in, or that refuses.
+///
+/// One function, so the half-space the ordering picker in
+/// [`along_a_crossing`](crate::along_a_crossing) builds can never pick a
+/// circle other than the one this crate's own `intersect` hands back as
+/// `through`.
+pub(crate) fn halfway_between_a_cones_apex_and_a_ball_on_its_axis(
+    cone: &Cone,
+    ball: &Sphere,
+) -> Point {
+    let squared_slope = cone.slope() * cone.slope();
+    cone.apex() + (ball.centre() - cone.apex()) * (1.0 + squared_slope).recip()
 }
 
 /// Two circles round a cone's axis, told apart by the flat half-space through
