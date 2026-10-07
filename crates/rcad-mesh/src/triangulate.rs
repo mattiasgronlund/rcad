@@ -1658,7 +1658,7 @@ fn corners_cut_off_by_one_side(
 ///
 /// A corner is taken to be one point with the next only when both stand at
 /// the very second coordinate the surface pinches at
-/// ([`where_the_surface_pinches`]), which is where a caller writes a pole
+/// ([`Surface::where_it_pinches`]), which is where a caller writes a pole
 /// side. One read as a pole but written a rounding off it is not seen as one,
 /// and is asked about as any corner is.
 fn corners_inside_one_edge(
@@ -1672,7 +1672,7 @@ fn corners_inside_one_edge(
         after[from] = to;
         before[to] = from;
     }
-    let pinch = where_the_surface_pinches(domain.surface());
+    let pinch = domain.surface().where_it_pinches();
     let one_point = |at: usize, next: usize| {
         pinch.is_some_and(|pinch| corners[at][1].abs() == pinch)
             && corners[next][1] == corners[at][1]
@@ -1696,23 +1696,6 @@ fn corners_inside_one_edge(
         }
     }
     inside
-}
-
-/// The second coordinate at which a surface pinches to one point, read without
-/// its sign, or `None` for one that pinches nowhere: a ball's poles at `±π/2`,
-/// and a cone's apex at `0` on either nappe.
-///
-/// # Panics
-///
-/// On a surface this crate has not been taught, for the reason
-/// [`how_far_a_point_lands_off_its_surface`] gives.
-fn where_the_surface_pinches(surface: &Surface) -> Option<f64> {
-    match surface {
-        Surface::Sphere(_) => Some(core::f64::consts::FRAC_PI_2),
-        Surface::Cone(_) => Some(0.0),
-        Surface::Plane(_) | Surface::Cylinder(_) | Surface::Torus(_) => None,
-        other => panic!("this crate cannot say where {other:?} pinches"),
-    }
 }
 
 /// The points the refinement has put down, bucketed by how far apart they have
