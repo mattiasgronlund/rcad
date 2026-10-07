@@ -115,6 +115,18 @@ pair (`cut_in_two`'s argument).
 > these shapes and the mesher's own machinery reaches it, so this is a gap
 > closed rather than a limit.
 
+> **2026-10-07 note (Q1099, `aeb4bb88`): corrects the note above.** "Where
+> none does, the old chord is kept and the triangulator refuses as before" no
+> longer holds: `cut_in_two` now leaves such a piece whole instead. A ball of
+> radius 4 at `(1, 1, 5)` resting on the block `[0, 4] × [0, 4] × [0, 1]` left
+> a face, its skin past `x = 0` between `y = 0` and `y = 4`, where no
+> corner-to-corner chord stays inside; kept, that face was refused
+> `BoundaryCrossesItself` under union both ways and ball less block. Left
+> whole, every one of 60 such shapes answers and measures its closed form
+> under all six fuses
+> (`a_ball_whose_skin_the_walls_cut_into_a_piece_no_straight_cut_narrows_fuses_by_every_rule`
+> in `fuses_that_touch.rs`).
+
 ### 402.4 What is still refused, and why it is a gap
 
 A strip whose holes neither lie one above the other nor clear each other's
