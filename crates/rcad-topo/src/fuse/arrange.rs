@@ -3201,6 +3201,14 @@ impl<'f> Arrangement<'f> {
     /// said nothing about straight lines. A cut that *closes* — the circle a
     /// bar's wall cuts in a block's face — lies wholly inside the face and
     /// touches no boundary at all, and dropping it would lose the hole.
+    ///
+    /// **Despite its name, this drops a lump of curved cuts that run on just
+    /// as it drops a lump of straight ones** — the check is `order.closes()`,
+    /// not "is straight". A roofed frustum's cone face against a plate with a
+    /// triangular hole cuts three hyperbola arcs with no boundary in them, and
+    /// all three are thrown away here
+    /// (`a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`,
+    /// Q1056's probe).
     fn drop_the_lumps_of_straight_cuts_alone(&mut self) {
         let mut same = Sameness::of(self.nodes.len());
         for arc in &self.arcs {
@@ -7704,7 +7712,7 @@ fn along_a_bend(
 /// against a pipe is one of the arms the ordering answers, and only where the
 /// ball is centred on the pipe's axis.
 ///
-/// # A cone against a pipe, a cone or a ball is a row that is started and not ordered
+/// # A cone against a pipe, a cone or a ball winds its circle about their shared axis
 ///
 /// [`intersect`](rcad_geom::intersect) names each of those pairs only where
 /// the two share an axis, and refuses the rest by name, so a run of one of them
@@ -7716,10 +7724,14 @@ fn along_a_bend(
 /// need none either, since one of them is where the circle starts: two
 /// frustums on one axis seamed a quarter turn apart answer every rule
 /// (`tests/a_cone_hollowed_along_its_axis.rs`).
-/// [`which_comes_first_round_a_crossing`] has no row for any pair with a cone
-/// in it, so where a third node on one such circle does need ordering it
-/// refuses by name, which is what returning `true` too often costs, as for a
-/// torus below.
+/// Since Q1141, [`which_comes_first_round_a_crossing`] does have a row for
+/// every pair with a cone in it, and orders a third node by winding the circle
+/// about the axis the two share. What still refuses by name is finding that
+/// third node at all: a wall through the circle that bends differently from
+/// both of the pair, and is not a plane square to, through, or beside their
+/// shared axis, is refused at [`meet_of_three_surfaces`] as
+/// [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`](rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+/// before the order is ever asked.
 ///
 /// # A ball against a pipe is a row that reads the placement
 ///

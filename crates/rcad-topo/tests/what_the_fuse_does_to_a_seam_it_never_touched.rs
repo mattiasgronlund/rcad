@@ -27,7 +27,7 @@
 //! **So why is a face that goes right round with no seam not the thing
 //! `Error::ACurvedFaceGoesRightRoundWithNoSeam` exists to refuse?** Because that
 //! refusal is only ever asked of a surface that *pinches*:
-//! `where_this_surface_pinches` (`mesh.rs:1181`) answers `Some` for a sphere and
+//! `Surface::where_it_pinches` (`rcad-geom`) answers `Some` for a sphere and
 //! a cone and **`None` for a cylinder**, and `mesh.rs:513-519` guards the
 //! refusal on it. The reason is written there: on a pipe a loop that does not go
 //! right round bounds a patch one way and an *unbounded* region the other, a
