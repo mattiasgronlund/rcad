@@ -5217,12 +5217,10 @@ struct WalkingAWire {
     longitude: f64,
     started: bool,
     will_not_lie_flat: bool,
-    /// Which way the longitude runs along a pole side the walk has crossed and
-    /// whose far end is not known yet, because it is wherever the next corner
-    /// with a longitude of its own sits. Only a pole between two **different**
-    /// meridians leaves one; a seam turning back is a whole turn and settled on
-    /// the spot.
-    crossing: Option<f64>,
+    /// A pole side the walk has crossed and whose far end is not written yet,
+    /// because it is wherever the next corner with a longitude of its own sits.
+    /// See [`APoleSideStillOpen`].
+    crossing: Option<APoleSideStillOpen>,
     /// The corner at a pole the walk has arrived at and not yet left: the entry
     /// in the point table and the latitude, waiting for the longitude the walk
     /// leaves by. A pole is a whole side of the patch, so it needs a corner at
@@ -5328,7 +5326,11 @@ impl WalkingAWire {
                 raw
             }
             Some(whole) => match self.crossing.take() {
-                Some(way) => {
+                Some(APoleSideStillOpen::AWholeTurn { way }) => {
+                    let past_it = self.longitude + way * whole;
+                    past_it + the_short_way_round(raw - past_it, whole)
+                }
+                Some(APoleSideStillOpen::BetweenTwoMeridians { way }) => {
                     self.longitude
                         + way * how_far_a_pole_side_runs(way * (raw - self.longitude), whole)
                 }
@@ -5385,13 +5387,17 @@ impl WalkingAWire {
     ///
     /// **How far that side runs is how far apart the two meridians are, and a
     /// whole turn only when they are one.** A ball's seam arrives at a pole and
-    /// turns straight back up itself, so its pole side is a whole turn, and that
-    /// is settled here. A **lune** — a sphere face between two different
-    /// half-meridians, which is the skin of a quarter of a ball — arrives down
-    /// one and leaves up the other, and its pole side is the angle between
-    /// them. Charging a whole turn there too made a quarter's skin a turn and a
-    /// quarter wide and its volume `5.209` where `π/3` is the truth (§166). The
-    /// far end is left open until the next corner with a longitude is walked.
+    /// turns straight back up itself, so its pole side is a whole turn. A
+    /// **lune** — a sphere face between two different half-meridians, which is
+    /// the skin of a quarter of a ball — arrives down one and leaves up the
+    /// other, and its pole side is the angle between them. Charging a whole
+    /// turn there too made a quarter's skin a turn and a quarter wide and its
+    /// volume `5.209` where `π/3` is the truth (§166).
+    ///
+    /// **Either way the far end is left open until the next corner with a
+    /// longitude is walked**, and that corner's longitude is the far end's:
+    /// see [`APoleSideStillOpen::AWholeTurn`] for what a seam's cost when it
+    /// was settled here instead.
     ///
     /// **Which way the side runs is read off where the walk came from.** A
     /// pinching surface's two coordinates are right-handed about its normal and
@@ -5405,20 +5411,20 @@ impl WalkingAWire {
     /// will not lie flat, and [`WalkingAWire::finish`] says so — as is a pole
     /// the walk arrived at without ever having been off it.
     fn cross_the_pole(&mut self, a_seam_turns_back_here: bool) {
-        let Some(whole) = self.wraps else {
+        if self.wraps.is_none() {
             self.will_not_lie_flat = true;
             return;
-        };
+        }
         self.still_at_a_pole = None;
         let Some(way) = self.which_way_the_pole_side_runs() else {
             self.will_not_lie_flat = true;
             return;
         };
-        if a_seam_turns_back_here {
-            self.longitude += way * whole;
+        self.crossing = Some(if a_seam_turns_back_here {
+            APoleSideStillOpen::AWholeTurn { way }
         } else {
-            self.crossing = Some(way);
-        }
+            APoleSideStillOpen::BetweenTwoMeridians { way }
+        });
     }
 
     /// Open the pole side at an ordinary corner of the wire that sits on a
@@ -5447,7 +5453,7 @@ impl WalkingAWire {
             self.will_not_lie_flat = true;
             return;
         };
-        self.crossing = Some(way);
+        self.crossing = Some(APoleSideStillOpen::BetweenTwoMeridians { way });
     }
 
     /// `1` when the pole just arrived at is below everything walked before it
@@ -5502,13 +5508,17 @@ impl WalkingAWire {
         // where it comes back no turns on, in rcad-topo's own turned ball and
         // block tests, and that side still closes on the first corner exactly,
         // as it always did.
-        if let (Some(whole), Some(way), Some(first)) = (
+        if let (Some(whole), Some(side), Some(first)) = (
             self.wraps,
             self.crossing.take(),
             self.corners.first().copied(),
         ) {
-            self.longitude +=
-                way * how_far_a_pole_side_runs(way * (first[0] - self.longitude), whole);
+            self.longitude += match side {
+                APoleSideStillOpen::AWholeTurn { way } => way * whole,
+                APoleSideStillOpen::BetweenTwoMeridians { way } => {
+                    way * how_far_a_pole_side_runs(way * (first[0] - self.longitude), whole)
+                }
+            };
             self.leave_the_pole_at(first[0] + whole_turns_between(self.longitude, first[0], whole));
         }
         // A walk that ends at a pole with no side open leaves it by the way it
@@ -5700,6 +5710,38 @@ impl WalkingAWire {
         );
         self.longitude += way * how_far_a_pole_side_runs(way * (first[0] - self.longitude), whole);
     }
+}
+
+/// A pole side the walk has crossed and not yet left, and which way the
+/// longitude runs along it: `1` with it, `-1` against it, as
+/// [`WalkingAWire::which_way_the_pole_side_runs`] reads it.
+///
+/// **Its far end is written at the longitude of the corner the walk leaves the
+/// pole by, and is that number.** [`WalkingAWire::arrive`] works the corner's
+/// longitude out once and [`WalkingAWire::leave_the_pole_at`] writes the far end
+/// with it, so the two cannot come out a rounding apart, however either was
+/// rounded.
+#[derive(Clone, Copy)]
+enum APoleSideStillOpen {
+    /// A seam that arrives at the pole and goes straight back up itself, so the
+    /// side is a whole turn and the corner after it is the corner before it, a
+    /// whole turn on.
+    ///
+    /// **Settling it where the pole is crossed wrote its two ends a rounding
+    /// apart.** The far end went in as the seam's longitude plus a whole turn,
+    /// rounded once, and the corner back up the seam as that plus the short way
+    /// round to the seam's own reading, rounded three times. Where the seam's
+    /// longitude plus a whole turn lands between 8 and 16 a rounding there is
+    /// `1.8e-15`, the two came out that far apart, and the patch got a pole side
+    /// one rounding wide with nowhere beside it for the triangulator to put a
+    /// point: a whole ball cut open at 99 degrees from `x` was refused "the mesh
+    /// still strays 1.67", as were 13 of 3600 seams a tenth of a degree apart,
+    /// from 99.0 to 114.1 degrees (Q1304,
+    /// `a_ball_whose_seam_is_a_little_past_a_quarter_turn.rs`).
+    AWholeTurn { way: f64 },
+    /// Two different meridians, so the side runs as far as they are apart, the
+    /// way it runs: [`how_far_a_pole_side_runs`].
+    BetweenTwoMeridians { way: f64 },
 }
 
 /// The two ends of an edge, in the order the edge is stored running rather than
