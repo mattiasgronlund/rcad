@@ -773,16 +773,28 @@ fn the_skins_of_a_half_chip_and_a_roofed_frustum_hold_their_own_points() {
     );
 }
 
-/// The skin of [`a_chip_of_a_cone`] is still refused by `face_holds_the_point`,
-/// at `(3, 9/4, 15/4)`, on the cone `r = z` exactly and inside the chip. Its
-/// cuts are `2x − z ≥ 1`, which the apex is behind and which cuts a
-/// hyperbola, and `2x + z ≤ 11`, which leans across it rather than lying
-/// square to the axis or side by side with it. Such a cut can leave two pieces
-/// along the branch's two arms, and this one leaves one only because it keeps
-/// the branch's vertex, which nothing in `holds.rs` reads yet (queue row
-/// Q1177).
+/// The skin of [`a_chip_of_a_cone`] is the part of the nappe `r = z, z ≥ 0` in
+/// front of both its cuts, `2x − z ≥ 1` and `2x + z ≤ 11`, and holds what that
+/// part does (queue row Q1230).
+///
+/// The first cut has the apex behind it and cuts the nappe in a hyperbola's
+/// branch, running off along `(1, 0, 2)`, the axis seen in its plane. The
+/// second leans across it, and its kept side falls along that direction,
+/// `−(2 + 2) < 0`, so it keeps one stretch of the branch and the part in front
+/// of both is one piece: the lens between the two hyperbolas. Every point
+/// below is on the cone exactly:
+///
+/// - `(3, ±9/4, 15/4)`: `2x − z = 9/4` and `2x + z = 39/4`, in front of both,
+///   so held. Seen down the axis these are on the chord `x = 3` both arcs share,
+///   where reading the skin's sides down the axis refused them before.
+/// - `(2, 0, 2)`: `2x − z = 2`, `2x + z = 6`, held.
+/// - `(1, 0, 1)`: `2x − z = 1`, the first branch's vertex, on the boundary.
+/// - `(4, 3, 5)`: `2x + z = 13`, past the second cut, not held.
+/// - `(0, 1, 1)`: `2x − z = −1`, behind the first cut, not held.
+/// - `(3, 4, −5)`: `2x − z = 11` and `2x + z = 1`, in front of both cuts, but on
+///   the nappe below the apex, not held.
 #[test]
-fn the_skin_of_a_chip_between_two_hyperbolas_is_not_yet_followed() {
+fn the_skin_of_a_chip_between_two_hyperbolas_holds_the_lens_between_them() {
     let mut model = a_model();
     let chip = a_chip_of_a_cone(&mut model);
     let solid = model.solid(chip).expect("this model made the key");
@@ -791,16 +803,25 @@ fn the_skin_of_a_chip_between_two_hyperbolas_is_not_yet_followed() {
         .find(|face| matches!(face.surface(), Surface::Cone(_)))
         .expect("the chip has a face on the cone")
         .key();
-    let refused = solid.face_holds_the_point(
-        skin,
-        PredicatePoint::from([3.0, 2.25, 3.75]),
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(refused, Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == skin),
-        "{refused:?}"
-    );
+    for (point, answer) in [
+        ([3.0, 2.25, 3.75], OnAFace::Held),
+        ([3.0, -2.25, 3.75], OnAFace::Held),
+        ([2.0, 0.0, 2.0], OnAFace::Held),
+        ([1.0, 0.0, 1.0], OnAFace::OnItsBoundary),
+        ([4.0, 3.0, 5.0], OnAFace::NotHeld),
+        ([0.0, 1.0, 1.0], OnAFace::NotHeld),
+        ([3.0, 4.0, -5.0], OnAFace::NotHeld),
+    ] {
+        let held = solid
+            .face_holds_the_point(
+                skin,
+                PredicatePoint::from(point),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("the chip's skin at {point:?}: {why:?}"));
+        assert_eq!(held, answer, "the chip's skin at {point:?}");
+    }
 }
 
 /// The part of the roofed frustum of

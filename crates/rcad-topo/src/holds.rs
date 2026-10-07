@@ -1747,7 +1747,12 @@ fn what_the_part_in_front_of_its_cuts_holds(
             }),
         }
     }
-    let one_of_two_runs = if is_a_family_this_follows(surface, &cuts) {
+    let nappe = if let Surface::Cone(cone) = surface {
+        the_nappe_its_sides_are_on(cone, sides)
+    } else {
+        None
+    };
+    let one_of_two_runs = if is_a_family_this_follows(surface, &cuts, nappe) {
         None
     } else {
         let run = match one_of_two_runs_between_two_flats(face, surface, sides, &cuts)? {
@@ -1813,6 +1818,28 @@ fn what_the_part_in_front_of_its_cuts_holds(
     } else {
         Ok(None)
     }
+}
+
+/// Which nappe of `cone` a face's sides are on, read off their corners where
+/// they are stored, as [`the_nappe_a_face_is_on`] reads it off the corners
+/// once moved: every corner off the apex's level says the same, or `None`.
+/// `None` too when no corner is off it, and when a corner's nappe could not be
+/// settled, which [`is_a_family_this_follows`] reads as a refusal.
+fn the_nappe_its_sides_are_on(cone: &rcad_geom::Cone, sides: &[Side]) -> Option<Decision> {
+    let mut found = None;
+    for corner in sides.iter().flat_map(|side| [side.start, side.end]) {
+        let nappe = the_nappe_of(cone, exactly(corner.at.coordinates()));
+        if nappe == Decision::Zero {
+            continue;
+        }
+        if !matches!(nappe, Decision::Pos | Decision::Neg)
+            || found.is_some_and(|known| known != nappe)
+        {
+            return None;
+        }
+        found = Some(nappe);
+    }
+    found
 }
 
 /// A cone face's cap, and the two planes through its apex it is in front of
@@ -3810,7 +3837,7 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// the axis along the ridge, and
 /// [`one_of_two_runs_of_a_cone_under_two_planes`] says which the face is.
 ///
-/// # Or one cut the apex is behind that does not close, beside cuts square to the axis or side by side with it
+/// # Or one cut the apex is behind that does not close, beside cuts that keep one stretch of its branch
 ///
 /// A plane leaning more steeply than the cone's side cuts the face's nappe in
 /// a hyperbola's branch, or in a parabola, and a frustum's skin cut to
@@ -3825,10 +3852,15 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// past `α(φ)`, which run along the branch: one piece.
 ///
 /// Another cut `h + t·b(φ) ≥ 0`, with the apex strictly in front, `h > 0`,
-/// leaves a ruling of `I` a point exactly where it holds the branch's point
-/// on it: `h + α(φ)·b(φ) ≥ 0`, which is `h·a(φ) − g·b(φ) ≥ 0` multiplied
-/// through by `a(φ) > 0`. **Two kinds of cut leave that one arc**, and only
-/// they are admitted:
+/// keeps along a ruling a piece from the apex out, so it leaves a ruling of
+/// `I` a point exactly where it holds the branch's point on it:
+/// `h + α(φ)·b(φ) ≥ 0`, which is `h·a(φ) − g·b(φ) ≥ 0` multiplied through by
+/// `a(φ) > 0`. So the part in front of both is the stretch of the branch the
+/// second cut keeps, with each ruling's piece hanging off it, and it is one
+/// piece exactly when that stretch is. The branch runs one way from end to
+/// end, so a stretch of it is one piece, and any number of such cuts keep the
+/// stretch they all keep: one piece again. **Three kinds of cut keep one
+/// stretch**, and only they are admitted:
 ///
 /// - **Square to the axis**, `b(φ)` is one number `β` for every ruling, and the
 ///   condition is `a(φ) ≥ g·β/h`: the rulings of `I` where `a` is at least some
@@ -3836,18 +3868,42 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 ///   `I`, or all of it, or none. The frustum's top is that.
 /// - **Side by side with it**, `b(φ) = μ·a(φ)` and the condition is
 ///   `a(φ)·(h − g·μ) ≥ 0`: all of `I` or none, as above.
+/// - **Not growing the way the branch runs off**
+///   ([`does_not_grow_the_way_the_branch_runs_off`]). On the branch's own plane
+///   the second cut is a line, which meets the branch in at most two points, a
+///   line meeting a conic in no more. Its side changes only where it crosses
+///   the branch, so the stretch it keeps is the whole branch, none of it, one
+///   arm cut off at one crossing, or the piece between two crossings, all one
+///   piece — or, with two crossings, the two arms beyond them and not the
+///   piece between, the one way to keep two. Keeping both arms means its kept
+///   side grows, or at least never falls, the whole way out along each arm.
+///   Far out a hyperbola's arm runs along its asymptote and a parabola's
+///   along its axis, and the branch is the mirror image of itself across the
+///   plane through the axis and the plane's normal, so the projected axis,
+///   the way the branch runs off, is the two asymptotes' directions added. So
+///   keeping both arms needs the kept side to grow along the projected axis,
+///   or to be level along it and along both asymptotes, which is a plane side
+///   by side with the first. A cut whose kept side falls along the projected
+///   axis, or is level along it, therefore keeps one stretch, wherever it
+///   sits. The chip of `tests/a_walk_neither_winding_nor_the_axis_places.rs`
+///   is that: its `2x + z ≤ 11` falls along `(1, 0, 2)`, the way its branch on
+///   `2x − z = 1` runs off.
 ///
-/// Each keeps the rulings where `a` is at least its own number, so any number
-/// of them keep the rulings where it is at least the largest: one arc, each
-/// ruling's piece hanging off the branch, one piece. **Any other cut is
-/// refused, and that is a gap**: its arc of rulings meets `I`, which is not the
-/// whole circle, and two arcs can meet in two, so the region can be two pieces
-/// along the branch's two arms with nothing at its vertex. A cut whose normal
-/// lies in the plane of the first's and the axis gives such a pair when it
-/// keeps the arms and not the vertex, and keeps one arc when it keeps the
-/// vertex; the second is the chip's `2x + z ≤ 11`, which this does not yet tell
-/// from the first. So is a cut through the apex beside a branch, whose
-/// `h·a(φ) − g·b(φ)` is `−g·b(φ)`, an arc of its own.
+/// **Any other cut is refused, and that is a gap**: one whose kept side grows
+/// the way the branch runs off may cross it twice and keep both arms, and the
+/// region is then two pieces with the stretch between them carrying nothing.
+/// Where such a cut sits decides it, and keeping the branch's vertex is not
+/// what does: a line can cross one arm twice and keep the vertex and the far
+/// end of that arm both, and
+/// `a_cut_behind_the_apex_that_does_not_close_leaves_two_pieces_beside_a_cut_that_leans_across_it`
+/// below builds one. Telling those apart wants where the two planes' line
+/// meets the branch, a part with no named consumer (§13). So is a cut through
+/// the apex beside a branch, whose `h·a(φ) − g·b(φ)` is `−g·b(φ)`, an arc of
+/// its own.
+///
+/// **Which nappe the face is on is what the third kind needs**, and it is
+/// `nappe`: the projected axis points into the branch on the nappe up the axis
+/// and out of the one on the nappe down it, and a hyperbola's plane cuts both.
 ///
 /// **Two cuts the apex is behind are refused, and that is a gap and not a
 /// limit.** There the region really can be two pieces. On the cone of slope one
@@ -3867,7 +3923,7 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// planes on the cone — a part with no named consumer (§13).
 ///
 /// [`Cone::is_cut_in_a_closed_curve_by`]: rcad_geom::Cone::is_cut_in_a_closed_curve_by
-fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
+fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut], nappe: Option<Decision>) -> bool {
     match surface {
         Surface::Plane(flat) if is_a_pair_of_pipes_running_the_same_way(flat, cuts) => {
             cuts.iter().any(|cut| cut.kept == Decision::Neg)
@@ -3928,9 +3984,16 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
                 ([], [flat]) => {
                     let up = cone.axis().direction().components();
                     cone.is_cut_in_a_closed_curve_by(flat) == Some(false)
-                        && planes().all(|other| {
-                            the_normals_lie_along_one_line(flat, other)
-                                || lie_along_one_line(other.normal().components(), up)
+                        && cuts.iter().all(|cut| {
+                            cut.surface.as_plane().is_some_and(|other| {
+                                the_normals_lie_along_one_line(flat, other)
+                                    || lie_along_one_line(other.normal().components(), up)
+                                    || nappe.is_some_and(|nappe| {
+                                        does_not_grow_the_way_the_branch_runs_off(
+                                            cone, flat, other, cut.kept, nappe,
+                                        )
+                                    })
+                            })
                         })
                 }
                 ([one, other], []) => do_two_planes_through_the_apex_meet_inside(cone, one, other),
@@ -3944,6 +4007,52 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut]) -> bool {
         }
         Surface::Torus(_) | _ => false,
     }
+}
+
+/// Whether a cut on `other`, keeping its `kept` side, does not grow the way the
+/// branch `flat` cuts `cone`'s nappe `nappe` in runs off: the third kind of cut
+/// [`is_a_family_this_follows`] admits beside such a branch.
+///
+/// The branch runs off along the axis projected into `flat`,
+/// `p = |n|²w − (n·w)n` with `n` the stored normal of `flat` and `w` the
+/// stored axis direction, turned round on the nappe down the axis
+/// ([`the_way_into_an_arc_that_does_not_close`] has why). The kept side of
+/// `other`, normal `m`, grows along `p` as `m·p` does, turned round where it
+/// keeps its negative side. So it does not grow exactly when the sign of
+/// `|n|²(m·w) − (n·w)(n·m)`, times `kept` and times `nappe`, is not positive:
+/// one polynomial in stored numbers, read in interval arithmetic, and a sign it
+/// cannot settle is `false`, which costs a refusal and never a wrong answer.
+fn does_not_grow_the_way_the_branch_runs_off(
+    cone: &rcad_geom::Cone,
+    flat: &Plane,
+    other: &Plane,
+    kept: Decision,
+    nappe: Decision,
+) -> bool {
+    let up = exactly(cone.axis().direction().components());
+    let [normal, facing] = [flat, other].map(|plane| exactly(plane.normal().components()));
+    let runs_off: [Interval; 3] = core::array::from_fn(|axis| {
+        dot(normal, normal) * up[axis] - dot(normal, up) * normal[axis]
+    });
+    let grows = dot(facing, runs_off).sign();
+    if grows == Decision::Zero {
+        return true;
+    }
+    let is_negative = |sign: Decision| {
+        if sign == Decision::Neg {
+            Some(true)
+        } else if sign == Decision::Pos {
+            Some(false)
+        } else {
+            None
+        }
+    };
+    let (Some(grows), Some(kept), Some(nappe)) =
+        (is_negative(grows), is_negative(kept), is_negative(nappe))
+    else {
+        return false;
+    };
+    grows ^ kept ^ nappe
 }
 
 /// Whether the line two planes through `cone`'s apex meet in lies **strictly
@@ -6534,7 +6643,7 @@ mod tests {
             );
         }
         assert!(
-            !is_a_family_this_follows(&Surface::Cone(cone), &cuts),
+            !is_a_family_this_follows(&Surface::Cone(cone), &cuts, Some(Decision::Pos)),
             "a cone face whose apex is behind a cut is refused"
         );
 
@@ -6607,7 +6716,7 @@ mod tests {
             .into_iter()
             .collect();
         assert!(
-            !is_a_family_this_follows(&ball, &cuts),
+            !is_a_family_this_follows(&ball, &cuts, None),
             "three planes that miss the centre are refused"
         );
         for left_out in 0..3 {
@@ -6616,7 +6725,7 @@ mod tests {
                 .map(|which| cuts[which].clone())
                 .collect();
             assert!(
-                is_a_family_this_follows(&ball, &two),
+                is_a_family_this_follows(&ball, &two, None),
                 "any two planes are followed"
             );
         }
@@ -6702,36 +6811,48 @@ mod tests {
 
         let three = [floor(), one_roof(), other_roof()];
         assert!(
-            !is_a_family_this_follows(&Surface::Cone(cone), &three),
+            !is_a_family_this_follows(&Surface::Cone(cone), &three, Some(Decision::Pos)),
             "one cut behind the apex and two others are refused"
         );
         assert_eq!(runs_of_rulings_that_carry_a_point(&three), 2);
 
         let two = [floor(), one_roof()];
         assert!(
-            is_a_family_this_follows(&Surface::Cone(cone), &two),
+            is_a_family_this_follows(&Surface::Cone(cone), &two, Some(Decision::Pos)),
             "one cut behind the apex that closes, and one other, are followed"
         );
         assert_eq!(runs_of_rulings_that_carry_a_point(&two), 1);
     }
 
-    /// Why one cut the apex is behind that does not close is followed only
-    /// beside cuts square to the axis or side by side with it.
+    /// Why one cut the apex is behind that does not close is followed beside a
+    /// cut that leans across it only when that cut does not grow the way the
+    /// branch runs off.
     ///
     /// On the cone of slope a half about `+z`, keep `2x − z/2 ≥ 1`. The apex is
     /// behind it and it leans more steeply than the cone's side, so it cuts a
     /// hyperbola's branch with its vertex at `(1, 0, 2)`, and only the rulings
-    /// with `cos φ > 1/2` reach it. Beside the top `z ≤ 8`, square to the axis,
+    /// with `cos φ > 1/2` reach it. The branch runs off along the axis projected
+    /// into its plane, `(1, 0, 4)`. Beside the top `z ≤ 8`, square to the axis,
     /// or beside `2x − z/2 ≤ 5`, side by side with it, one run of rulings
     /// carries a point, and the face is followed.
     ///
-    /// Beside `x ≤ 0.4z + 0.1`, which the apex is in front of too, it is **two**
-    /// runs: that plane leaves out the branch's vertex, `−1 + 0.8 + 0.1 < 0`,
-    /// and keeps both its arms, so the rulings with `cos φ > 7/8` carry nothing
-    /// and those with `1/2 < cos φ ≤ 7/8` either side of them do. The same plane
-    /// moved to `x ≤ 0.4z + 0.3` keeps the vertex and leaves one run; it faces
-    /// the same way, so it is where such a cut sits that tells the two apart,
-    /// which nothing here reads, and both are refused.
+    /// **Two cuts that lean across it and fall along `(1, 0, 4)` are followed,
+    /// wherever they sit.** `2x + z/2 ≤ 5` falls by `4` along it and keeps the
+    /// rulings with `cos φ ≥ 3/4`, round the vertex. `y − 0.3z ≥ −0.4` falls by
+    /// `1.2` and leaves the vertex out, `0 − 0.6 < −0.4`, and keeps one stretch
+    /// of the arm towards `+y`. One run each. On the nappe down the axis the
+    /// first rises the way that nappe's branch runs off, and is refused there.
+    ///
+    /// **Cuts that rise along it are refused, and where they sit is what
+    /// matters, but not as keeping the vertex.** `x ≤ 0.4z + 0.1` rises by
+    /// `0.6`; it leaves out the branch's vertex, `−1 + 0.8 + 0.1 < 0`, and
+    /// keeps both its arms, so the rulings with `cos φ > 7/8` carry nothing
+    /// and those with `1/2 < cos φ ≤ 7/8` either side of them do: **two** runs.
+    /// Moved to `x ≤ 0.4z + 0.3` it keeps the vertex and leaves one. And
+    /// `−3.7x − y + 1.44z ≥ −1` rises by `2.06`, keeps the vertex, `−0.82 ≥ −1`,
+    /// and still leaves two runs: its line on the branch's plane crosses the arm
+    /// towards `+y` twice, and the rulings from about `13°` to `48°` carry
+    /// nothing, between the vertex's run and the far end of that arm.
     #[test]
     fn a_cut_behind_the_apex_that_does_not_close_leaves_two_pieces_beside_a_cut_that_leans_across_it()
      {
@@ -6752,8 +6873,11 @@ mod tests {
         let branch = || cut([0.5, 0.0, 0.0], [2.0, 0.0, -0.5]);
         let top = || cut([0.0, 0.0, 8.0], [0.0, 0.0, -1.0]);
         let side_by_side = || cut([2.5, 0.0, 0.0], [-2.0, 0.0, 0.5]);
+        let falling = || cut([2.5, 0.0, 0.0], [-2.0, 0.0, -0.5]);
+        let falling_off_the_vertex = || cut([0.0, -0.4, 0.0], [0.0, 1.0, -0.3]);
         let leaving_the_vertex = || cut([0.1, 0.0, 0.0], [-1.0, 0.0, 0.4]);
         let keeping_the_vertex = || cut([0.3, 0.0, 0.0], [-1.0, 0.0, 0.4]);
+        let crossing_one_arm_twice = || cut([0.0, 1.0, 0.0], [-3.7, -1.0, 1.44]);
 
         let Surface::Plane(curve) = branch().surface else {
             unreachable!("built as a plane")
@@ -6765,13 +6889,31 @@ mod tests {
         for (what, other, followed, runs) in [
             ("the top", top(), true, 1),
             ("a cut side by side", side_by_side(), true, 1),
+            ("a falling cut round the vertex", falling(), true, 1),
             (
-                "a cut leaving the vertex out",
+                "a falling cut leaving the vertex out",
+                falling_off_the_vertex(),
+                true,
+                1,
+            ),
+            (
+                "a rising cut leaving the vertex out",
                 leaving_the_vertex(),
                 false,
                 2,
             ),
-            ("a cut keeping the vertex", keeping_the_vertex(), false, 1),
+            (
+                "a rising cut keeping the vertex",
+                keeping_the_vertex(),
+                false,
+                1,
+            ),
+            (
+                "a rising cut keeping the vertex and crossing one arm twice",
+                crossing_one_arm_twice(),
+                false,
+                2,
+            ),
         ] {
             assert_eq!(
                 side_of_surface(&other.surface, apex),
@@ -6780,12 +6922,20 @@ mod tests {
             );
             let cuts = [branch(), other];
             assert_eq!(
-                is_a_family_this_follows(&Surface::Cone(cone), &cuts),
+                is_a_family_this_follows(&Surface::Cone(cone), &cuts, Some(Decision::Pos)),
                 followed,
                 "{what}"
             );
             assert_eq!(runs_of_rulings_that_carry_a_point(&cuts), runs, "{what}");
         }
+        assert!(
+            !is_a_family_this_follows(
+                &Surface::Cone(cone),
+                &[branch(), falling()],
+                Some(Decision::Neg)
+            ),
+            "on the nappe down the axis a falling cut rises the way that nappe's branch runs off"
+        );
     }
 
     /// Why a cone face beside **two** cuts through its apex is followed only when
@@ -6835,14 +6985,14 @@ mod tests {
         let strip = [one_side(), other_side(), roof()];
         assert_eq!(runs_of_rulings_carrying_more_than_the_apex(&strip), 2);
         assert!(
-            !is_a_family_this_follows(&Surface::Cone(cone), &strip),
+            !is_a_family_this_follows(&Surface::Cone(cone), &strip, Some(Decision::Pos)),
             "two cuts through the apex meeting outside the cone are refused"
         );
 
         let half = [one_side(), roof()];
         assert_eq!(runs_of_rulings_carrying_more_than_the_apex(&half), 1);
         assert!(
-            is_a_family_this_follows(&Surface::Cone(cone), &half),
+            is_a_family_this_follows(&Surface::Cone(cone), &half, Some(Decision::Pos)),
             "one cut through the apex, and any the apex is in front of, are followed"
         );
 
@@ -6858,7 +7008,7 @@ mod tests {
                 "the quarter facing {x_kept}, {y_kept}"
             );
             assert!(
-                is_a_family_this_follows(&Surface::Cone(cone), &quarter),
+                is_a_family_this_follows(&Surface::Cone(cone), &quarter, Some(Decision::Pos)),
                 "two cuts through the apex meeting inside the cone keep one run, and are \
                  followed: the quarter facing {x_kept}, {y_kept}"
             );
@@ -6976,14 +7126,14 @@ mod tests {
 
         let leaned = [along_the_axis(), floor(), leaned_roof()];
         assert!(
-            !is_a_family_this_follows(&Surface::Cylinder(pipe), &leaned),
+            !is_a_family_this_follows(&Surface::Cylinder(pipe), &leaned, None),
             "a floor and a roof that are not side by side, beside a cut along the axis, are refused"
         );
         assert_eq!(runs_of_a_pipes_rulings_that_carry_a_point(&leaned), 2);
 
         let level = [along_the_axis(), floor(), level_roof()];
         assert!(
-            is_a_family_this_follows(&Surface::Cylinder(pipe), &level),
+            is_a_family_this_follows(&Surface::Cylinder(pipe), &level, None),
             "a floor and a roof side by side, beside a cut along the axis, are followed"
         );
         assert_eq!(runs_of_a_pipes_rulings_that_carry_a_point(&level), 1);
