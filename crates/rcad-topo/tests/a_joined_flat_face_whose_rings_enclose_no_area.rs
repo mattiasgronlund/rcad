@@ -222,16 +222,33 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 /// the `x` axis — outer arc, straight side, inner arc, straight side — so
 /// neither floor encloses any area between its corners.
 ///
-/// United, the two floors would join into the whole flat ring between the
-/// circles of radius 3 and 5, each a ring along the torus alone, which is the
-/// case `holds_the_other_rings` answers `None` for. **That is not reached.**
-/// Every rule, both ways round, is refused `a point inside a piece of a face`
-/// in `fuse/select.rs`, on the first solid's floor, named by its four corners
-/// `(±5, 0, 0)` and `(±3, 0, 0)`. All four are on the `x` axis, where the half
-/// ring's two straight sides lie.
+/// Pappus gives the whole ring `2π²·4·1² = 8π²` and each top half of a half
+/// bend a quarter of it, `2π²`, so the union is `4π²`, the intersection is
+/// nothing, and each difference is the first half, `2π²`. United, the two
+/// floors would join into the whole flat ring between the circles of radius 3
+/// and 5, each a ring along the torus alone, which is the case
+/// `holds_the_other_rings` answers `None` for, and Q597 predicted the panic in
+/// `rings_round` there. **Neither the answer nor the panic is reached.**
 ///
-/// Until Q617 every one was refused a step earlier, while that floor was cut
-/// into arcs (`which_way_an_edge_runs_round` in `fuse/arrange.rs`),
+/// **Every rule, both ways round, is refused
+/// `AFaceTrimmedByACurveThisCannotFollow` on the second solid's floor.**
+/// `select` finds `(0, ±3.75, 0)` inside the first solid's floor, a rung
+/// towards its outer arc from the middle of the arc's chord, and asks whether
+/// the second solid's floor, flush with it, holds that point. `holds.rs`
+/// cannot read that floor's inner arc, from `(±3, 0, 0)` round the axis: in
+/// `the_way_a_side_runs` no way into it is found (a temporary print, Q1268),
+/// because `the_way_into_an_arc` reads no arc of a circle a plane cuts a ring
+/// in (row Q1267). The volumes above are what the answer is checked against
+/// once it reads one.
+///
+/// Until Q1268 every one was refused a step earlier, `a point inside a piece
+/// of a face` on the first solid's floor, named by its four corners `(±5, 0,
+/// 0)` and `(±3, 0, 0)`. Every point offered was a blend of those corners, on
+/// the `x` axis: the torus offered no middle to step from on a plane square to
+/// its axis, and the floor's outer arc, the only thing that winds round a
+/// point of it, was not counted. Until Q617 every one was refused a step
+/// earlier still, while that floor was cut into arcs
+/// (`which_way_an_edge_runs_round` in `fuse/arrange.rs`),
 /// `AFaceTrimmedByACurveThisCannotFollow`. The arc it stopped on was the
 /// floor's inner side, half of the circle of radius 3 that `z = 0` cuts the
 /// torus in, picked by `y ≥ 0` (a temporary print, Q617). Q597 had put it on
@@ -240,7 +257,7 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 /// reads a picker whose plane holds both ends on any circle a plane cuts a
 /// ring in, and so reads every arc of both solids' floors, caps and walls.
 #[test]
-fn the_top_halves_of_two_half_bends_are_refused_with_no_point_found_inside_a_floor() {
+fn the_top_halves_of_two_half_bends_are_refused_where_the_second_floor_is_asked_a_point() {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for turned_first in [false, true] {
             let mut model =
@@ -263,29 +280,26 @@ fn the_top_halves_of_two_half_bends_are_refused_with_no_point_found_inside_a_flo
                 );
             }
             let what = format!("{rule:?}, turned first {turned_first}");
-            let refused = match model.fuse(
+            let refused = model.fuse(
                 &[one],
                 &[other],
                 rule,
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
-            ) {
-                Err(Error::Undecidable { records }) => records.records().to_vec(),
-                other => panic!("{what}: {other:?}"),
-            };
-            let [refused] = &refused[..] else {
-                panic!("{what}: one record, not {refused:#?}");
-            };
-            assert_eq!(
-                refused.predicate(),
-                "a point inside a piece of a face",
-                "{what}: {refused:#?}"
             );
-            let floor = [5.0, 3.0, -3.0, -5.0].map(|x| rcad_predicates::Point::from([x, 0.0, 0.0]));
+            let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
+                panic!("{what}: {refused:?}");
+            };
+            let floor = Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                    .expect("the z axis is a unit normal"),
+            );
+            let second = model.solid(other).expect("this model made the key");
             assert!(
-                refused.inputs().len() == floor.len()
-                    && floor.iter().all(|corner| refused.inputs().contains(corner)),
-                "{what}: the piece is not named by the floor's four corners: {refused:#?}"
+                second
+                    .faces()
+                    .any(|its| its.key() == face && its.surface() == floor),
+                "{what}: the refusal names {face:?}, not the second solid's floor"
             );
         }
     }
