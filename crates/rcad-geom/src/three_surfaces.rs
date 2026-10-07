@@ -2157,18 +2157,12 @@ fn what_a_plane_through_their_one_axis_leaves(
     let Some((heights, reach)) = the_heights_they_share_circles_at(one, other, &axis) else {
         return Err(refused());
     };
-    let mut steps =
+    let steps =
         match where_a_line_meets_a_quadric(WHERE_THREE_SURFACES_MEET, &heights, at, policy, log)? {
             WhereALineMeetsIt::Nowhere => return Ok(Some(MeetOfThree::Nowhere)),
             WhereALineMeetsIt::MoreThanAPoint => return Ok(Some(MeetOfThree::MoreThanAPoint)),
             WhereALineMeetsIt::At(steps) => steps,
         };
-    // Two roots come back as `(−B ∓ √Δ)/A`, which runs downwards where `A` is
-    // below zero, and which of `g₁ − g₂` and `g₂ − g₁` this is depends on the
-    // order the two arrived in.
-    if heights.squared.sign() == Decision::Neg {
-        steps.reverse();
-    }
 
     let at_the_apex = which_height_is_the_apex(&axis, &heights, steps.len());
     let mut places: SmallVec<[PredicatePoint; 2]> = SmallVec::new();
@@ -2615,12 +2609,16 @@ fn what_a_plane_beside_their_one_axis_leaves(
             }
             WhereALineMeetsIt::At(steps) => steps,
         };
+    // `steps` comes back ascending ([`WhereALineMeetsIt::At`]'s own promise),
+    // and a negative `A` is what turns `(−B − √Δ)/A` above `(−B + √Δ)/A`
+    // (`where_a_line_meets_a_quadric`'s note on `A`), so the two identities
+    // below are swapped to match whichever root `the_two_places_along_it`
+    // put first.
     let roots: SmallVec<[WhichRoot; 2]> = match (heights.squared.sign(), steps.len()) {
         (Decision::Zero, 1) => smallvec![WhichRoot::OfALine],
         (Decision::Pos | Decision::Neg, 1) => smallvec![WhichRoot::Twice],
-        (Decision::Pos | Decision::Neg, 2) => {
-            smallvec![WhichRoot::TakingTheRootAway, WhichRoot::AddingTheRoot]
-        }
+        (Decision::Pos, 2) => smallvec![WhichRoot::TakingTheRootAway, WhichRoot::AddingTheRoot],
+        (Decision::Neg, 2) => smallvec![WhichRoot::AddingTheRoot, WhichRoot::TakingTheRootAway],
         (squared, found) => unreachable!(
             "a quadratic has one root or two and a line has one, not {found} with A {squared:?}"
         ),
@@ -2654,11 +2652,9 @@ fn what_a_plane_beside_their_one_axis_leaves(
             cuts.push((height, how == Decision::Zero));
         }
     }
-    // Lower heights first, as on the road through the axis.
-    if heights.squared.sign() == Decision::Neg {
-        cuts.reverse();
-    }
-
+    // Lower heights first, as on the road through the axis — already true
+    // here, since `steps` came back ascending and the loop above kept that
+    // order.
     let mut places: SmallVec<[PredicatePoint; 2]> = SmallVec::new();
     for (height, it_only_touches) in cuts {
         places.extend(the_ends_of_the_chord_at(
@@ -3469,21 +3465,21 @@ fn where_a_line_meets_a_quadric(
     // The roots are read off the same three numbers either way, and
     // [`the_two_places_along_it`] never divides by `A` except through Forsythe's
     // pairing, so nothing below cares about the sign.
-    match ask(
+    let squared_sign = match ask(
         &the_sign_of(named, &quadratic.squared),
         Measures::Length,
         at,
         policy,
         log,
     )? {
-        Decision::Pos | Decision::Neg => (),
+        sign @ (Decision::Pos | Decision::Neg) => sign,
         Decision::Zero => {
             return where_a_line_meets_a_quadric_it_runs_alongside(
                 named, quadratic, at, policy, log,
             );
         }
         other => unreachable!("a sign question answers with a sign: {other:?}"),
-    }
+    };
 
     match ask(
         &the_discriminant_of(named, quadratic),
@@ -3497,7 +3493,7 @@ fn where_a_line_meets_a_quadric(
             where_it_touches(quadratic)
         )])),
         Decision::Pos => {
-            let [lower, upper] = the_two_places_along_it(quadratic);
+            let [lower, upper] = the_two_places_along_it(quadratic, squared_sign);
             Ok(WhereALineMeetsIt::At(smallvec![
                 MeetsAt::Here(lower),
                 MeetsAt::Here(upper),
@@ -3602,7 +3598,16 @@ fn where_a_line_meets_a_quadric_it_runs_alongside(
 /// multiply to `C/A`. Both forms are valid enclosures of the same number — they
 /// are the same identity — so the narrower of the two is taken for each root and
 /// there is no branch to get wrong when `q` runs through zero.
-fn the_two_places_along_it(quadratic: &Quadratic) -> [Interval; 2] {
+///
+/// **`squared_sign` is `A`'s sign, already certified by the caller.** `(−B −
+/// √Δ)/A` and `(−B + √Δ)/A` are ascending in that order only while `A` is
+/// positive; a cone's `A` is `‖D × w‖² − slope²(D·w)²`, negative for a line
+/// that points further into the cone than its own rulings do (the note on `A`
+/// in [`where_a_line_meets_a_quadric`]), and dividing by a negative `A` turns
+/// the pair around. The caller already knows which; asking again here would
+/// risk a plain enclosure check disagreeing with the certified answer it
+/// handed in.
+fn the_two_places_along_it(quadratic: &Quadratic, squared_sign: Decision) -> [Interval; 2] {
     // **Not read off `square_minus`**, which slid both sides up the range and
     // hands back a sign (§32.1).
     let root = root_enclosing(the_size_of_the_discriminant(quadratic));
@@ -3625,10 +3630,15 @@ fn the_two_places_along_it(quadratic: &Quadratic) -> [Interval; 2] {
     } else {
         (well_placed, its_partner)
     };
-    [
-        the_tighter(plainly(-root), lower),
-        the_tighter(plainly(root), upper),
-    ]
+    let smaller_when_a_positive = the_tighter(plainly(-root), lower);
+    let larger_when_a_positive = the_tighter(plainly(root), upper);
+    match squared_sign {
+        Decision::Pos => [smaller_when_a_positive, larger_when_a_positive],
+        Decision::Neg => [larger_when_a_positive, smaller_when_a_positive],
+        other => {
+            unreachable!("the caller certified squared_sign as Pos or Neg, not {other:?}")
+        }
+    }
 }
 
 /// The narrower of two enclosures of the same number.

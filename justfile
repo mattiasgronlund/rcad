@@ -2096,7 +2096,13 @@ check-fuzz-builds:
 # block on a bar's cap each matched `TwoCurvesTouchWithoutCrossing` and sent
 # every other `Error` to `panic!`; the fold of a straight cut along a straight
 # crossing answers both, and the tests that replaced them match no refusal.
-wildcard_arms := "95"
+#
+#     Q1272's lane  95 -> 96
+#
+# One more. `the_two_places_along_it` in `three_surfaces.rs` takes `A`'s sign,
+# which its caller has already certified as `Pos` or `Neg`, and names those
+# two; the arm for every other `Decision` is `unreachable!`.
+wildcard_arms := "96"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
