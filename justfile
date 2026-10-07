@@ -138,6 +138,7 @@ gate_steps := "check-plugins \
     check-triage-waits-for-the-night-selftest \
     check-fuzz-yield-selftest \
     check-spend-selftest \
+    check-row-time-selftest \
     check-fmt \
     lint \
     test \
@@ -291,6 +292,7 @@ gate_reusable_steps := "check \
     check-systemd-units-selftest \
     check-fuzz-yield-selftest \
     check-spend-selftest \
+    check-row-time-selftest \
     check-fmt \
     lint \
     test \
@@ -3446,8 +3448,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "59" ]; then \
-        echo "found $n check-* recipes, expected 59"; \
+    if [ "$n" != "60" ]; then \
+        echo "found $n check-* recipes, expected 60"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -14249,3 +14251,44 @@ spend since="" until="" report="all" lane="":
 [private]
 check-spend-selftest:
     @PYTHONDONTWRITEBYTECODE=1 python3 tooling/session-spend/check-spend.py
+
+# Where each queue row's time went, from its `take` to merged and pruned.
+#
+# For each row worked in `lanes` runs it prints the elapsed time, the agents'
+# running time, the waits between them, the slot time and the attempts; under
+# the rows, the total share, median and p90 of every part, step and bucket.
+# `--detail` lists each attempt's steps and what each step's time went to:
+# the model writing, each kind of command, each tool. `--json` prints the same
+# numbers. Rows are picked by Q id, or by `--since`/`--until` dates, the last
+# seven days by default. `docs/decisions.md` §411 is the spec, and §411.10 the
+# rules it chose where §411 said nothing.
+#
+# **Every sum is checked, and a broken one stops it before it prints.** A step's
+# buckets add up to its running time and a row's parts to its elapsed time, in
+# whole milliseconds, so there is no tolerance to pick. A real row that breaks
+# one is a finding about a rule, never a reason to loosen the check.
+#
+# Like `spend` it reads transcripts and never the repository, so it cannot be a
+# `check-` and is not in `gate_steps`; `check-row-time-selftest` holds what does
+# not move with the week. The claims file is the one `just queue` writes, in the
+# git common directory.
+[doc("Where each queue row's time went, take to prune: `just row-time`, `just row-time Q1311 --detail`, `just row-time --since 2026-10-01 --json`.")]
+row-time *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    claims="$(git rev-parse --path-format=absolute --git-common-dir)/rcad-queue-claims"
+    exec python3 tooling/row-time/row_time.py \
+        '{{claude_config}}/projects' \
+        '-home-mattias-git-mattiasgronlund-rcad' \
+        "$claims" {{args}}
+
+# What `row-time` decides that does not move with the week: the made-up run
+# records, transcripts and claims file it builds hold every case of
+# `docs/decisions.md` §411.9's list, and one whose buckets do not add up, which
+# has to make `row-time` fail rather than print. It needs no transcripts and no
+# Claude Code, so it runs on a runner like any other check.
+# `PYTHONDONTWRITEBYTECODE` for `check-spend-selftest`'s reason: the cases
+# import `row_time` as a module.
+[private]
+check-row-time-selftest:
+    @PYTHONDONTWRITEBYTECODE=1 python3 tooling/row-time/check-row-time.py
