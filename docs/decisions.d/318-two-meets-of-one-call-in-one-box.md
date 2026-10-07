@@ -169,3 +169,16 @@ crossing as `Measures::Volume`, as `the_one_the_start_is` already did. A
 tolerant policy reads a volume's enclosure divided by its working size twice,
 so it merges boxes up to `s²` times wider than its budget for a length: 625
 times at 25 mm. Not changed here, and no fuse was searched for that it misleads.
+
+**2026-10-07, Q706: filed as a length, and searched for a fuse it misleads.**
+`one_point_if_both_are_exact`, `the_one_the_start_is` and
+`the_one_ahead_of_the_start`, and the box arm along a bend, now hand back
+`Measures::Length`: each encloses the wider of two boxes' longest sides, or
+`det(apart, n, w)` with `n` and `w` of length one, not a volume. A search of
+168 tolerant fuses — the shape above lifted by `0` to `1048560` under working
+sizes `1`, `25`, `100` and `1000`, and §318's block and ball at `1e10` under
+working sizes `25` to `10000`, three rules, either solid first — found 21
+merges a length budget refuses, and every one of the 21 still refused on the
+next thing it met: no answer moved, and none was wrong. The sweep arm
+(`which_comes_first_round_a_crossing`) stays `Measures::Volume`; what it
+should be filed as is its own row (Q706's follow-up).
