@@ -554,6 +554,12 @@ fn where_it_is_in_a_fused_eighth([x, y, z]: [f64; 3]) -> Containment {
 /// row 4 files as a gap deferred to the milestone that builds an algebraic
 /// solver.
 ///
+/// **Since Q1259, a plane that holds the pipe's axis is answered**, not
+/// refused: that is `what_a_plane_through_their_one_axis_leaves`'s case. The
+/// route still needs a meet of three for every ray whose plane does not hold
+/// the pipe's axis, which is nearly all of them — this test's ray is moved off
+/// the axis for that reason, and still refuses.
+///
 /// The control is the pair the same route *can* do: put two planes in and the
 /// answer comes back, so what is refused is the degree and not the call.
 ///
@@ -567,10 +573,11 @@ fn a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses() 
     let pipe = Surface::Cylinder(
         Cylinder::new(Axis::x(), 1.0).expect("a pipe of radius one along the x axis"),
     );
-    // The ray along the ball's skin through the point (0, 3, 0), which is the
-    // ball crossed with the plane through it and the pipe's axis.
+    // The ray along the ball's skin through the point (sqrt(8.75), 0, 0.5),
+    // which is the ball crossed with the plane z = 0.5 — parallel to the
+    // pipe's axis but off it, so the plane is not the one Q1259 answers.
     let ray = Surface::Plane(
-        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.5), Vector::new(0.0, 0.0, 1.0))
             .expect("a unit normal"),
     );
 

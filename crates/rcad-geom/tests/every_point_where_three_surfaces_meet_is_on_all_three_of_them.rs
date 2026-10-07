@@ -44,6 +44,7 @@ use rcad_geom::{
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
 };
+use smallvec::smallvec;
 
 use crossings::{
     Corner, Elsewhere, Piece, a_corner_somewhere_else, a_lattice_corner, a_leaning_corner,
@@ -279,7 +280,9 @@ fn the_seeds_three_at(size: f64) -> [Surface; 3] {
 
 /// **§31.7's criterion 7.** Three surfaces of which fewer than two are flat are
 /// refused by name, and the refusal is a gap: the points are there and this is
-/// the demonstration.
+/// the demonstration. A plane that holds the axis the two curved surfaces are
+/// turned about is the exception Q1259 added: that case is answered even
+/// though only one of the three is flat.
 ///
 /// A pipe of radius three down `z`, a ball of radius five at the origin and a
 /// plane. The pipe and the ball meet where `x² + y² = 9` and `x² + y² + z² =
@@ -312,15 +315,34 @@ fn three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved() {
         );
     }
 
-    // One plane and two quadrics, and three quadrics. Both refuse by name. The
-    // wall runs along the axis the ball and the pipe share and cuts the pipe in
-    // two lines and the ball in a circle.
-    for triple in [[&wall, &ball, &pipe], [&second_ball, &ball, &pipe]] {
-        assert_eq!(
-            meet_of_three_surfaces(triple, &Policy::certified(), &mut ProvenanceLog::new()),
-            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
-        );
-    }
+    // Three quadrics, with no flat surface among them at all, refuse by name.
+    assert_eq!(
+        meet_of_three_surfaces(
+            [&second_ball, &ball, &pipe],
+            &Policy::certified(),
+            &mut ProvenanceLog::new()
+        ),
+        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+    );
+
+    // The wall runs along the axis the ball and the pipe share and cuts the
+    // pipe in two lines and the ball in a circle. Since Q1259 that is answered
+    // even though only one of the three surfaces is flat: the pipe meets the
+    // ball where x² + y² = 9 and x² + y² + z² = 25, so z = ±4, and the wall
+    // y = 0 cuts each of those two circles at x = ±3.
+    assert_eq!(
+        meet_of_three_surfaces(
+            [&wall, &ball, &pipe],
+            &Policy::certified(),
+            &mut ProvenanceLog::new()
+        ),
+        Ok(MeetOfThree::At(smallvec![
+            PredicatePoint::Exact([-3.0, 0.0, -4.0]),
+            PredicatePoint::Exact([3.0, 0.0, -4.0]),
+            PredicatePoint::Exact([-3.0, 0.0, 4.0]),
+            PredicatePoint::Exact([3.0, 0.0, 4.0]),
+        ]))
+    );
 
     // The cap is square to that axis and cuts both in one circle of radius
     // three, so it is not the demonstration: two circles about one centre are
