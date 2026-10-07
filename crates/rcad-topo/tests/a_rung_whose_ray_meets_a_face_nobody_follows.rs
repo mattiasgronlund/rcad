@@ -25,13 +25,24 @@
 //! Two planes leave the part of a sphere in front of both in one piece
 //! whatever they keep, and the skin is that part, so it is followed now.
 //!
-//! **Every fuse the cut ball is in now does what the two balls do without
-//! it.** Under intersection, and the half ball less the other two, the answer
-//! is right, held to its volume worked out by hand. The union, either way
-//! round, and the other two less the half ball are refused
-//! `ResultIsNotManifold { count: 4 }`, and so is the same fuse with the cut
-//! ball left out: that refusal is the small ball's and the half ball's, and
-//! not the cut ball's.
+//! **Every fuse the cut ball is in now answers, and so does the same fuse
+//! without it**, under every rule both ways round, held to its volume worked
+//! out by hand.
+//!
+//! **Until Q1192 the union, either way round, and the small ball less the
+//! half ball were refused `ResultIsNotManifold { count: 4 }`**, with the cut
+//! ball and without it. The two balls' skins cross in the circle `x = 2.6875`,
+//! and the flat face cuts the small ball's skin along `z = 0`, so the small
+//! ball's skin is in four pieces, all four with corners at
+//! `(2.6875, ±1.3332, 0)`. The circle's arc above `z = 0` and its arc below run
+//! between those two corners along the same two balls, and `assemble.rs`'s
+//! `which_arc_of_a_circle_this_is` told two arcs apart only where one of the
+//! two surfaces was a plane, so both were named one edge. The union keeps the
+//! three pieces of the small ball's skin outside the half ball and the half
+//! ball's skin below, and four faces then claimed that one edge: the half
+//! ball's skin and the small ball's piece below along the lower arc, the two
+//! pieces above along the upper one. The arcs of two balls' circle are now
+//! told apart by the same sign as a plane's.
 
 use std::f64::consts::PI;
 
@@ -39,51 +50,99 @@ use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
 
-/// Each rule, both ways round, with the cut ball and without it.
+/// Each rule, both ways round, with the cut ball and without it, held to the
+/// volume worked out by hand.
 ///
 /// The small ball and the big one share a lens: the two skins cross on the
 /// plane `x = (4 + 9 − 2.25)/4 = 2.6875`, the big ball's cap past it is
 /// `π · 0.3125² · (9 − 0.3125)/3` and the small ball's on the near side
 /// `π · 2.1875² · (4.5 − 2.1875)/3`, which add up to `1525π/384`. Both centres
 /// are on `z = 0`, so the half ball holds half of it, `1525π/768`. The half
-/// ball is `18π` and the small ball `4.5π`.
+/// ball is `18π` and the small ball `4.5π`, so the union is
+/// `18π + 4.5π − 1525π/768`, the half ball less the small one
+/// `18π − 1525π/768` and the small ball less the half ball `4.5π − 1525π/768`.
+///
+/// The cut ball touches neither, so where the rule keeps it — the union, and
+/// the small ball and the cut ball less the half ball — it comes back as a
+/// second solid, the one holding the cut ball's centre `(16, 0, 19.5)`, and
+/// holding what it held going in. It is measured on a coarser mesh than the
+/// rest, because it is seven times their size and a mesh as fine as theirs
+/// costs the test most of its time.
 #[test]
-fn a_ball_poking_out_of_a_half_ball_beside_a_cut_ball_answers_or_refuses_as_without_it() {
+fn a_ball_poking_out_of_a_half_ball_answers_every_rule_beside_a_cut_ball_and_without_it() {
     let shared = 1525.0 * PI / 768.0;
+    let (half_ball, small_ball) = (18.0 * PI, 4.5 * PI);
+    let cut_ball = {
+        let three = three();
+        measured(&three.model, three.cut_ball, 0.01, "the cut ball")
+    };
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for small_ball_first in [true, false] {
-            let what = format!("{rule:?}, the small ball first {small_ball_first}");
-            let (model, fused) = fuse_the_three(rule, small_ball_first, true);
-            match (rule, small_ball_first) {
-                (Rule::Intersection, _) => {
-                    let answer = fused.unwrap_or_else(|why| panic!("{what}: {why:?}"));
-                    let [solid] = answer[..] else {
-                        panic!("{what}: one solid, got {answer:?}");
-                    };
-                    assert_holds(&model, solid, shared, &what);
-                }
-                (Rule::Difference, false) => {
-                    let answer = fused.unwrap_or_else(|why| panic!("{what}: {why:?}"));
-                    let [solid] = answer[..] else {
-                        panic!("{what}: one solid, got {answer:?}");
-                    };
-                    assert_holds(&model, solid, 18.0 * PI - shared, &what);
-                }
-                (Rule::Union | Rule::Difference, _) => {
-                    assert!(
-                        matches!(fused, Err(Error::ResultIsNotManifold { count: 4 })),
-                        "{what}: {fused:?}"
-                    );
-                    let (_, alone) = fuse_the_three(rule, small_ball_first, false);
-                    assert!(
-                        matches!(alone, Err(Error::ResultIsNotManifold { count: 4 })),
-                        "{what}, without the cut ball: {alone:?}"
-                    );
-                }
+            let (volume, the_cut_ball_is_kept) = match (rule, small_ball_first) {
+                (Rule::Union, _) => (half_ball + small_ball - shared, true),
+                (Rule::Intersection, _) => (shared, false),
+                (Rule::Difference, true) => (small_ball - shared, true),
+                (Rule::Difference, false) => (half_ball - shared, false),
                 (other, _) => panic!("not a rule this probes: {other:?}"),
+            };
+            for with_the_cut_ball in [false, true] {
+                let what = format!(
+                    "{rule:?}, the small ball first {small_ball_first}, the cut ball in it \
+                     {with_the_cut_ball}"
+                );
+                let (model, fused) = fuse_the_three(rule, small_ball_first, with_the_cut_ball);
+                let answer = fused.unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                model
+                    .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| {
+                        panic!("{what} left a model that does not validate: {why}")
+                    });
+                let (cut_balls, others): (Vec<SolidKey>, Vec<SolidKey>) = answer
+                    .iter()
+                    .partition(|&&solid| holds_the_cut_balls_centre(&model, solid));
+                let [solid] = others[..] else {
+                    panic!("{what}: one solid besides the cut ball, got {answer:?}");
+                };
+                let (measured_now, error) = measured(&model, solid, 0.001, &what);
+                assert!(
+                    (measured_now - volume).abs() <= error,
+                    "{what} holds {volume} and this one says {measured_now} give or take {error}"
+                );
+                match (&cut_balls[..], with_the_cut_ball && the_cut_ball_is_kept) {
+                    (&[], false) => {}
+                    (&[cut_ball_now], true) => {
+                        let (now, now_error) = measured(&model, cut_ball_now, 0.01, &what);
+                        assert!(
+                            (now - cut_ball.0).abs() <= now_error + cut_ball.1,
+                            "{what}: the cut ball went in holding {} give or take {} and came \
+                             out holding {now} give or take {now_error}",
+                            cut_ball.0,
+                            cut_ball.1
+                        );
+                    }
+                    (_, kept) => panic!("{what}: the cut ball kept {kept}, got {answer:?}"),
+                }
             }
         }
     }
+}
+
+/// Whether `solid` holds the cut ball's centre, `(16, 0, 19.5)`, which none of
+/// the other two comes near.
+fn holds_the_cut_balls_centre(model: &Model, solid: SolidKey) -> bool {
+    let placed = model
+        .solid(solid)
+        .expect("this model made the key")
+        .classify_uncertain_point(
+            Point::from([16.0, 0.0, 19.5]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+    assert!(
+        matches!(placed, Containment::Inside | Containment::Outside),
+        "the cut ball's centre placed against a solid of the answer: {placed:?}"
+    );
+    placed == Containment::Inside
 }
 
 /// Points on the small ball's skin, in the cut ball and outside it, each of
@@ -181,26 +240,19 @@ fn three() -> Three {
     }
 }
 
-/// `solid` validates and measures `volume`, give or take what the mesh says.
-fn assert_holds(model: &Model, solid: SolidKey, volume: f64, what: &str) {
-    model
-        .validate(&Policy::certified(), &mut ProvenanceLog::new())
-        .unwrap_or_else(|why| panic!("{what} left a model that does not validate: {why}"));
+/// What `solid` measures, and give or take how much, as a mesh `deflection`
+/// fine says.
+fn measured(model: &Model, solid: SolidKey, deflection: f64, what: &str) -> (f64, f64) {
     let measured = model
         .solid(solid)
         .expect("this model made the key")
         .measure(
-            Deflection::of(0.001).expect("a fine mesh"),
+            Deflection::of(deflection).expect("a deflection above zero"),
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
         .unwrap_or_else(|why| panic!("{what} does not measure: {why}"));
-    assert!(
-        (measured.volume() - volume).abs() <= measured.volume_error(),
-        "{what} holds {volume} and this one says {} give or take {}",
-        measured.volume(),
-        measured.volume_error()
-    );
+    (measured.volume(), measured.volume_error())
 }
 
 fn one_solid(model: &mut Model, one: SolidKey, other: SolidKey, rule: Rule) -> SolidKey {
