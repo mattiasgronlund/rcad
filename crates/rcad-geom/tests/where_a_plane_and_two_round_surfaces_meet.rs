@@ -18,6 +18,9 @@
 //! - A plane that misses one of the two settles the triple on its own, and a
 //!   plane that touches one at a single point leaves one candidate and one sign
 //!   question. A ball and a bar both resting on a block's floor are it.
+//! - Two surfaces turned about one axis share circles square to it, and a
+//!   plane parallel to the axis cuts each in a chord, touches it or misses it.
+//!   A D-flat on a shaft across a chamfer cone is it.
 //!
 //! Every corner below is worked out by hand first and written in the test, and
 //! every one of them lands on a whole number — so a box round it has no width
@@ -837,6 +840,60 @@ fn on_the_axis_direction(along: usize, length: f64) -> [f64; 3] {
     let mut direction = [0.0; 3];
     direction[along] = length;
     direction
+}
+
+/// **A D-flat on a shaft, across the circles a chamfer cone and a ball on its
+/// axis cross the shaft in.** The flat runs beside the axis, parallel to it,
+/// and cuts each circle in a chord.
+///
+/// A shaft of radius five up `z`, flattened at `x = 3`, which leaves `y = ±4`
+/// on its skin. A cone of slope one with its apex at `z = 8` crosses the
+/// shaft where `|z − 8| = 5`, at `z = 3` and `13`; a ball of radius 13 about
+/// `(0, 0, 20)` crosses it where `(z − 20)² = 169 − 25`, at `z = 8` and `32`.
+/// So the corners are `(3, ±4, h)` at each, whole numbers, lower first and
+/// `+y` first at each, since `n × w` is `−y`.
+#[test]
+fn a_d_flat_on_a_shaft_meets_a_chamfer_cone_and_a_ball_on_its_axis_at_the_ends_of_chords() {
+    let shaft = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0);
+    let d_flat = flat([1.0, 0.0, 0.0], [3.0, 0.0, 0.0]);
+    let chamfer = cone([0.0, 0.0, 8.0], [0.0, 0.0, 1.0], 1.0);
+    let round = ball([0.0, 0.0, 20.0], 13.0);
+
+    for (other, heights) in [(&chamfer, [3.0, 13.0]), (&round, [8.0, 32.0])] {
+        let wanted: Vec<[f64; 3]> = heights
+            .iter()
+            .flat_map(|&height| [[3.0, 4.0, height], [3.0, -4.0, height]])
+            .collect();
+        assert_eq!(corners_of([&d_flat, &shaft, other]), wanted, "{other:?}");
+        assert_eq!(
+            meet([other, &d_flat, &shaft]),
+            meet([&shaft, other, &d_flat]),
+            "the answer depends on which three they are, not the order"
+        );
+    }
+}
+
+/// **A flat beside the axis that touches one of the circles a cone and a ball
+/// share, or misses both, though it cuts the cone and the ball.**
+///
+/// A cone of slope one with its apex at the origin and a ball of radius five
+/// about `(0, 0, 7)` cross where `2t² − 14t + 24 = 0`, at `z = 3` and `4`, in
+/// circles of radius three and four. The flat `x = 4` touches the upper circle
+/// at `(4, 0, 4)` and misses the lower; the flat `x = 4.5` is inside the ball's
+/// reach of five and misses both circles.
+#[test]
+fn a_flat_beside_a_cone_and_a_ball_on_its_axis_touches_one_of_their_circles_or_misses_both() {
+    let pointed = cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+    let round = ball([0.0, 0.0, 7.0], 5.0);
+
+    let touching = flat([1.0, 0.0, 0.0], [4.0, 0.0, 0.0]);
+    assert_eq!(
+        corners_of([&touching, &pointed, &round]),
+        vec![[4.0, 0.0, 4.0]]
+    );
+
+    let missing = flat([1.0, 0.0, 0.0], [4.5, 0.0, 0.0]);
+    assert_eq!(meet([&missing, &pointed, &round]), Ok(MeetOfThree::Nowhere));
 }
 
 /// **An axis that leans to the plane is not this road**, even with a ball

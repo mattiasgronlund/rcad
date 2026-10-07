@@ -554,31 +554,33 @@ fn where_it_is_in_a_fused_eighth([x, y, z]: [f64; 3]) -> Containment {
 /// row 4 files as a gap deferred to the milestone that builds an algebraic
 /// solver.
 ///
-/// **Since Q1259, a plane that holds the pipe's axis is answered**, not
-/// refused: that is `what_a_plane_through_their_one_axis_leaves`'s case. The
-/// route still needs a meet of three for every ray whose plane does not hold
-/// the pipe's axis, which is nearly all of them — this test's ray is moved off
-/// the axis for that reason, and still refuses.
+/// **A plane square to the pipe's axis, one that holds it, and one parallel
+/// to it are answered**, not refused, because the ball is centred on that
+/// axis: the first cuts the two in circles about one centre, and the other two
+/// cut the circles the ball and the pipe share, at `x = ±√8`, in two points
+/// each (Q1259, Q1271). The route still needs a meet of three for every ray
+/// whose plane leans to the pipe's axis, which is nearly all of them: it cuts
+/// the pipe in an ellipse and the ball in a circle, and that is the quartic.
+/// So this test's ray plane leans, and still refuses, and the plane `z = 0.5`
+/// it leaned from is the control that is answered.
 ///
-/// The control is the pair the same route *can* do: put two planes in and the
-/// answer comes back, so what is refused is the degree and not the call.
-///
-/// **The ray runs along the pipe's axis and not across it.** A plane square to
-/// the pipe's axis cuts the ball and the pipe in two circles about one centre,
-/// radius three against radius one, and that is answered — it shares nothing —
-/// so that plane is not a ray this route would be stuck on.
+/// The other control is the pair the same route *can* do: put two planes in
+/// and the answer comes back, so what is refused is the degree and not the
+/// call.
 #[test]
 fn a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses() {
     let ball = Surface::Sphere(Sphere::new(Point::origin(), RADIUS).expect("a ball"));
     let pipe = Surface::Cylinder(
         Cylinder::new(Axis::x(), 1.0).expect("a pipe of radius one along the x axis"),
     );
-    // The ray along the ball's skin through the point (sqrt(8.75), 0, 0.5),
-    // which is the ball crossed with the plane z = 0.5 — parallel to the
-    // pipe's axis but off it, so the plane is not the one Q1259 answers.
+    // The ray along the ball's skin through the point (0, sqrt(8.75), 0.5),
+    // which is the ball crossed with the plane x + 16z = 8. It leans to the
+    // pipe's axis, and crosses the circles the ball and the pipe share at
+    // x = ±√8 where z is (8 ∓ √8)/16, inside the pipe's radius of one, so the
+    // four points it is refused are there.
     let ray = Surface::Plane(
-        Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.5), Vector::new(0.0, 0.0, 1.0))
-            .expect("a unit normal"),
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.5), Vector::new(1.0, 0.0, 16.0))
+            .expect("a normal with length"),
     );
 
     let refusal = meet_of_three_surfaces(
@@ -586,7 +588,7 @@ fn a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses() 
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     )
-    .expect_err("a ball, a pipe and a plane is one plane short");
+    .expect_err("a ball, a pipe and a plane leaning to its axis is one plane short");
     assert!(
         matches!(
             refusal,
@@ -594,6 +596,41 @@ fn a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses() 
         ),
         "got {refusal:?}"
     );
+
+    // The plane z = 0.5 runs beside the pipe's axis, half a unit off it, and
+    // cuts each shared circle in a chord: (±√8, ±√0.75, 0.5).
+    let beside = Surface::Plane(
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.5), Vector::new(0.0, 0.0, 1.0))
+            .expect("a unit normal"),
+    );
+    let answer = meet_of_three_surfaces(
+        [&ball, &pipe, &beside],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a plane beside the axis a ball and a pipe share is answered");
+    let MeetOfThree::At(points) = &answer else {
+        panic!("expected four points, got {answer:?}");
+    };
+    let (along, out) = (8.0_f64.sqrt(), 0.75_f64.sqrt());
+    assert_eq!(points.len(), 4, "{answer:?}");
+    for wanted in [
+        [-along, -out, 0.5],
+        [-along, out, 0.5],
+        [along, -out, 0.5],
+        [along, out, 0.5],
+    ] {
+        assert!(
+            points.iter().any(|point| {
+                let boxed = point.enclosure();
+                (0..3).all(|axis| {
+                    let middle = (boxed[axis].lo() + boxed[axis].hi()) / 2.0;
+                    (middle - wanted[axis]).abs() < 1e-14 && boxed[axis].width() < 1e-14
+                })
+            }),
+            "no narrow box round {wanted:?} in {answer:?}"
+        );
+    }
 
     let across = Surface::Plane(
         Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
