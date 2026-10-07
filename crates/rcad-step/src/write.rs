@@ -39,7 +39,9 @@ use rcad_geom::{
 };
 use rcad_predicates::expansion::two_product;
 use rcad_predicates::{Decision, Point as PredicatePoint};
-use rcad_topo::{EdgeKey, FaceKey, FaceView, Model, ShellView, VertexKey, WireStepView};
+use rcad_topo::{
+    CoedgeView, EdgeKey, FaceKey, FaceView, Model, ShellView, VertexKey, WireStepView,
+};
 
 use crate::brep::{
     A_CIRCLE_MAY_MISS_ITS_FACE_BY, a_surface_holds_the_circle, how_far_off_the_circle_can_be,
@@ -160,7 +162,9 @@ pub enum CannotWrite {
     /// seam: it runs between the two poles, which are in a line with the
     /// centre, so no plane through them is picked out by the ends, and the
     /// located run [`EdgeView::run`](rcad_topo::EdgeView::run) hands out — it is
-    /// `pub` now — names the plane it was cut from. Which of the two arcs an
+    /// `pub` now — names the plane it was cut from; where no centre the reader
+    /// holds on the ball reads back as that plane, a whole ball is written cut
+    /// open where `add_ball` cuts it instead (Q1308). Which of the two arcs an
     /// open edge between a flat face and a pipe or a ball is, which the two
     /// ends do not say and the run's pickers do (Q766). The plane an open arc
     /// between two curved faces lies in, which the reader walks and which the
@@ -346,9 +350,10 @@ impl Writing {
     /// **A pole is left unwritten where the wire turns back along the edge it
     /// has just walked**, the way a real file writes a ball, and the reader puts
     /// it back at exactly that turn. A whole ball turned so its poles leave the
-    /// `z` line is written as the same ball on that line, with its seam where
-    /// `add_ball` cuts it ([`a_whole_ball_turned_off_its_chart`]), and so is
-    /// passed over by the first pass. See
+    /// `z` line, or whose seam no file can carry, is written as the same ball
+    /// on that line, with its seam where `add_ball` cuts it
+    /// ([`a_whole_ball_written_on_its_chart`]), and so is passed over by the
+    /// first pass. See
     /// [`CannotWrite::AWireThatStandsStillAtAPole`] for the poles that are
     /// refused instead.
     ///
@@ -366,7 +371,7 @@ impl Writing {
         let mut either_side: HashMap<EdgeKey, Vec<Side>> = HashMap::new();
         let mut whole_balls: HashMap<FaceKey, Sphere> = HashMap::new();
         for face in shell.faces() {
-            if let Some(ball) = a_whole_ball_turned_off_its_chart(model, face) {
+            if let Some(ball) = a_whole_ball_written_on_its_chart(model, face) {
                 whole_balls.insert(face.key(), ball);
                 continue;
             }
@@ -722,7 +727,6 @@ impl Writing {
             }
             (Surface::Sphere(ball), Surface::Sphere(other)) if !closed && ball == other => self
                 .a_seam_of_one_ball(ball, run, start, end)
-                .or_else(|| self.an_arc_its_own_plane_names(first, second, run, start, end))
                 .ok_or_else(refuse),
             (Surface::Torus(ring), Surface::Torus(other)) if !closed && ring == other => self
                 .an_arc_its_own_plane_names(first, second, run, start, end)
@@ -782,38 +786,9 @@ impl Writing {
         }
     }
 
-    /// The great circle a ball's seam runs half of from `start` to `end`, and
-    /// whether the seam runs round it the way it turns, or `None` where this is
-    /// not one.
-    ///
-    /// **Only between the two poles**, where the ball has no way round
-    /// ([`Surface::the_way_its_first_coordinate_runs_at`]), which is exactly on
-    /// the `z` line through the centre. A plane through both poles holds that
-    /// line and so the centre, so the seam is half of the circle of the ball's
-    /// own centre and radius in the plane the run was cut from. An edge with
-    /// the one ball on both sides and its ends anywhere else could be an arc of
-    /// a smaller circle, and is refused rather than written as a great one.
-    ///
-    /// **Which half is the way the edge runs along the circle.** A `CIRCLE`
-    /// runs the way a right hand turns about its axis `w`, and the reader names
-    /// the arc from `A` to `B` by the half-space facing `(B − A) × w`, which
-    /// every point of that arc is strictly in front of, or facing the other way
-    /// where `EDGE_CURVE.same_sense` is false (`Walk::the_arc_between`). It
-    /// names the run by the plane about `w`, so `w` is the plane's own normal
-    /// and the edge runs along the circle where `(B − A) × w` faces the side
-    /// the run's own half-space faces, and against it where it faces away.
-    /// Turned over to about the reversed normal instead, the circle picked the
-    /// same half and came back with the seam's plane reversed, which measured a
-    /// different volume (Q776). The sign is read in plain `f64`: the two
-    /// directions are along each other or opposite, never square, so a dot
-    /// that comes out zero is a run this does not recognise and is refused.
-    ///
-    /// **The circle is centred where the reader's plane comes back as the
-    /// run's** ([`a_centre_its_plane_reads_back_from`]). The reader names the
-    /// seam by the plane through the circle's centre about its axis, and the
-    /// ball's own centre, dotted with a normal a turn left, can land an ulp off
-    /// the offset the turn left (Q822). A centre an ulp or two off the ball's
-    /// is well inside what the reader allows a circle on a ball.
+    /// The curve a seam with the one ball on both sides runs along from
+    /// `start` to `end`, written, or `None` where this writer finds none the
+    /// file carries — see [`the_curve_of_a_seam_of_one_ball`].
     fn a_seam_of_one_ball(
         &mut self,
         ball: &Sphere,
@@ -821,32 +796,10 @@ impl Writing {
         start: Point,
         end: Point,
     ) -> Option<Curve> {
-        let skin = Surface::Sphere(*ball);
-        let at_a_pole = |corner: Point| skin.the_way_its_first_coordinate_runs_at(corner).is_none();
-        if start == end || !at_a_pole(start) || !at_a_pole(end) {
-            return None;
-        }
-        let EdgeRun::PartOfWhereItCrosses {
-            and: Surface::Plane(cut),
-            picked_by,
-        } = run
-        else {
-            return None;
-        };
-        let [Picker::InFrontOf(picking)] = picked_by.as_slice() else {
-            return None;
-        };
-        let leaning = (end - start).cross(cut.normal()).dot(picking.normal());
-        let the_edge_runs_its_way = if leaning > 0.0 {
-            true
-        } else if leaning < 0.0 {
-            false
-        } else {
-            return None;
-        };
-        let centre = a_centre_its_plane_reads_back_from(cut, ball.centre())?;
+        let (crossing, the_edge_runs_its_way) =
+            the_curve_of_a_seam_of_one_ball(ball, run, start, end)?;
         Some(Curve {
-            id: self.circle(centre, cut.normal(), ball.radius()),
+            id: self.round(&crossing, crossing.turning),
             the_edge_runs_its_way,
         })
     }
@@ -935,57 +888,8 @@ impl Writing {
         start: Point,
         end: Point,
     ) -> Option<Curve> {
-        let EdgeRun::PartOfWhereItCrosses { and, .. } = run else {
-            return None;
-        };
-        let Surface::Plane(cut) = and else {
-            return None;
-        };
-        if and == first || and == second {
-            return None;
-        }
-        let a_pipe = |face: &Surface| {
-            if let Surface::Cylinder(pipe) = face {
-                Some(*pipe)
-            } else {
-                None
-            }
-        };
-        let a_ball = |face: &Surface| {
-            if let Surface::Sphere(ball) = face {
-                Some(*ball)
-            } else {
-                None
-            }
-        };
-        let a_ring = |face: &Surface| {
-            if let Surface::Torus(ring) = face {
-                Some(*ring)
-            } else {
-                None
-            }
-        };
-        let (crossing, centre) = if let Some(pipe) = a_pipe(first).or_else(|| a_pipe(second)) {
-            let crossing = where_a_plane_crosses_a_pipe(cut, &pipe)?;
-            let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)?;
-            (crossing, centre)
-        } else if let Some(ball) = a_ball(first).or_else(|| a_ball(second)) {
-            let crossing = where_a_plane_crosses_a_ball(cut, &ball)?;
-            let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)?;
-            (crossing, centre)
-        } else {
-            let ring = a_ring(first).or_else(|| a_ring(second))?;
-            let crossing = where_a_plane_square_to_a_ring_crosses_it_nearest(cut, &ring, start)?;
-            let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)
-                .or_else(|| the_nearest_centre_a_ring_holds_its_circle_at(cut, &ring, &crossing))?;
-            (crossing, centre)
-        };
-        let crossing = Crossing {
-            centre,
-            turning: cut.normal(),
-            shape: crossing.shape,
-        };
-        let the_edge_runs_its_way = crossing.the_arc_runs_its_own_way(run, start, end)?;
+        let (crossing, the_edge_runs_its_way) =
+            the_arc_its_own_plane_names(first, second, run, start, end)?;
         Some(Curve {
             id: self.round(&crossing, crossing.turning),
             the_edge_runs_its_way,
@@ -1290,62 +1194,251 @@ impl Writing {
     }
 }
 
-/// The located ball `face` covers whole, where its placement turned its poles
-/// off the `z` line the located ball pinches on, or `None`.
+/// The located ball `face` covers whole, where it is written on the world's
+/// chart rather than cut open where it is, or `None`.
 ///
 /// A whole ball is one wire: a seam with two corners, a pole, the seam walked
 /// back, a pole. Where the face is stored both poles stand where the stored
-/// ball pinches, so the face is the whole ball and only the placement moved
-/// its poles. A turn about `z` leaves them on the line, and such a ball is
-/// written as it is, seam and all.
+/// ball pinches, so the face is the whole ball, and it covers the whole sphere
+/// wherever its seam runs. So the file need not say where the seam is, and two
+/// kinds are written as the same ball cut open where `add_ball` cuts it
+/// (`docs/decisions.md` §404):
 ///
-/// **This kernel's [`Sphere`] carries no poles of its own** and pinches on the
-/// world's `z` line wherever it is put, so a turned ball's poles cannot be
-/// written where its placement put them: the reader would put them back
-/// where its ball does not pinch, which `Model::validate` refuses. It is the
-/// same whole ball on the world's chart, so that is what is written
-/// (`docs/decisions.md` §404).
-fn a_whole_ball_turned_off_its_chart(model: &Model, face: FaceView<'_>) -> Option<Sphere> {
+/// - **One whose placement turned its poles off the `z` line** the located
+///   ball pinches on. This kernel's [`Sphere`] carries no poles of its own
+///   and pinches on the world's `z` line wherever it is put, so a turned
+///   ball's poles cannot be written where its placement put them: the reader
+///   would put them back where its ball does not pinch, which
+///   `Model::validate` refuses.
+/// - **One whose seam no file carries**, where
+///   [`the_curve_of_a_seam_of_one_ball`] finds no curve. A turn about `z`
+///   leaves the poles on the line, and such a ball is written as it is, seam
+///   and all, wherever the reader can be given the seam's plane to the bit.
+///   It is given it only through the centre of the circle the seam is half
+///   of, and the reader holds that circle on the ball only with its centre a
+///   few ulps from the ball's. Where the plane passes near the origin and the
+///   ball does not, one ulp of a coordinate moves the offset by many ulps of
+///   it, and no centre the reader holds may read back as the offset at all
+///   (`no_centre_the_reader_holds_on_the_ball_carries_the_seam_of_a_ball_turned_149_degrees`).
+///   Those balls were refused by name (Q1308).
+fn a_whole_ball_written_on_its_chart(model: &Model, face: FaceView<'_>) -> Option<Sphere> {
     let Surface::Sphere(ball) = face.surface() else {
         return None;
     };
     let stored = model
         .face(face.key())
         .expect("a face of the model being written");
-    let poles_pinch = |on: FaceView<'_>| -> Option<bool> {
-        let mut wires = on.wires();
-        let (Some(wire), None) = (wires.next(), wires.next()) else {
-            return None;
-        };
-        let walk: Vec<WireStepView<'_>> = wire.steps().collect();
-        let [first, second, third, fourth] = walk[..] else {
-            return None;
-        };
-        let (there, back, poles) = match (first, second, third, fourth) {
-            (
-                WireStepView::Along(there),
-                WireStepView::Pole(one),
-                WireStepView::Along(back),
-                WireStepView::Pole(other),
-            )
-            | (
-                WireStepView::Pole(one),
-                WireStepView::Along(there),
-                WireStepView::Pole(other),
-                WireStepView::Along(back),
-            ) => (there, back, [one.point(), other.point()]),
-            _ => return None,
-        };
-        if there.edge().key() != back.edge().key() || there.start().key() == there.end().key() {
-            return None;
-        }
-        Some(poles.iter().all(|pole| {
-            on.surface()
-                .the_way_its_first_coordinate_runs_at(*pole)
-                .is_none()
-        }))
+    let (_, a_whole_ball) = the_seam_of_a_ball_cut_open_once(stored)?;
+    let (seam, poles_on_the_line) = the_seam_of_a_ball_cut_open_once(face)?;
+    if !a_whole_ball {
+        return None;
+    }
+    if !poles_on_the_line {
+        return Some(ball);
+    }
+    let [start, end] = if seam.edge().orientation().is_reversed() {
+        [seam.end().point(), seam.start().point()]
+    } else {
+        [seam.start().point(), seam.end().point()]
     };
-    (poles_pinch(stored)? && !poles_pinch(face)?).then_some(ball)
+    the_curve_of_a_seam_of_one_ball(&ball, &seam.edge().run(), start, end)
+        .is_none()
+        .then_some(ball)
+}
+
+/// The seam of the ball `on` is cut open along, and whether both its poles
+/// stand where the ball pinches, or `None` where `on` is not one wire walking
+/// one edge of two corners there and back with a pole at each turn.
+fn the_seam_of_a_ball_cut_open_once(on: FaceView<'_>) -> Option<(CoedgeView<'_>, bool)> {
+    let mut wires = on.wires();
+    let (Some(wire), None) = (wires.next(), wires.next()) else {
+        return None;
+    };
+    let walk: Vec<WireStepView<'_>> = wire.steps().collect();
+    let [first, second, third, fourth] = walk[..] else {
+        return None;
+    };
+    let (there, back, poles) = match (first, second, third, fourth) {
+        (
+            WireStepView::Along(there),
+            WireStepView::Pole(one),
+            WireStepView::Along(back),
+            WireStepView::Pole(other),
+        )
+        | (
+            WireStepView::Pole(one),
+            WireStepView::Along(there),
+            WireStepView::Pole(other),
+            WireStepView::Along(back),
+        ) => (there, back, [one.point(), other.point()]),
+        _ => return None,
+    };
+    if there.edge().key() != back.edge().key() || there.start().key() == there.end().key() {
+        return None;
+    }
+    let poles_pinch = poles.iter().all(|pole| {
+        on.surface()
+            .the_way_its_first_coordinate_runs_at(*pole)
+            .is_none()
+    });
+    Some((there, poles_pinch))
+}
+
+/// The curve a seam with the one ball on both sides runs along from `start`
+/// to `end`, and whether the edge runs along it the curve's own way, or `None`
+/// where this writer finds none the file carries: half of a great circle from
+/// pole to pole ([`the_half_circle_from_pole_to_pole`]), or else an arc in the
+/// plane its run names ([`the_arc_its_own_plane_names`]).
+///
+/// [`Writing::a_seam_of_one_ball`] writes it, and
+/// [`a_whole_ball_written_on_its_chart`] asks it first, so that a whole ball
+/// is written on its chart wherever its own seam would be refused here.
+fn the_curve_of_a_seam_of_one_ball(
+    ball: &Sphere,
+    run: &EdgeRun,
+    start: Point,
+    end: Point,
+) -> Option<(Crossing, bool)> {
+    let skin = Surface::Sphere(*ball);
+    the_half_circle_from_pole_to_pole(ball, run, start, end)
+        .or_else(|| the_arc_its_own_plane_names(&skin, &skin, run, start, end))
+}
+
+/// The great circle a ball's seam runs half of from `start` to `end`, and
+/// whether the seam runs round it the way it turns, or `None` where this is
+/// not one.
+///
+/// **Only between the two poles**, where the ball has no way round
+/// ([`Surface::the_way_its_first_coordinate_runs_at`]), which is exactly on
+/// the `z` line through the centre. A plane through both poles holds that
+/// line and so the centre, so the seam is half of the circle of the ball's
+/// own centre and radius in the plane the run was cut from. An edge with
+/// the one ball on both sides and its ends anywhere else could be an arc of
+/// a smaller circle, and is refused rather than written as a great one.
+///
+/// **Which half is the way the edge runs along the circle.** A `CIRCLE`
+/// runs the way a right hand turns about its axis `w`, and the reader names
+/// the arc from `A` to `B` by the half-space facing `(B − A) × w`, which
+/// every point of that arc is strictly in front of, or facing the other way
+/// where `EDGE_CURVE.same_sense` is false (`Walk::the_arc_between`). It
+/// names the run by the plane about `w`, so `w` is the plane's own normal
+/// and the edge runs along the circle where `(B − A) × w` faces the side
+/// the run's own half-space faces, and against it where it faces away.
+/// Turned over to about the reversed normal instead, the circle picked the
+/// same half and came back with the seam's plane reversed, which measured a
+/// different volume (Q776). The sign is read in plain `f64`: the two
+/// directions are along each other or opposite, never square, so a dot
+/// that comes out zero is a run this does not recognise and is refused.
+///
+/// **The circle is centred where the reader's plane comes back as the
+/// run's** ([`a_centre_its_plane_reads_back_from`]). The reader names the
+/// seam by the plane through the circle's centre about its axis, and the
+/// ball's own centre, dotted with a normal a turn left, can land an ulp off
+/// the offset the turn left (Q822). A centre an ulp or two off the ball's
+/// is well inside what the reader allows a circle on a ball. Where no centre
+/// is found this is `None`, and a whole ball is then written on its chart
+/// ([`a_whole_ball_written_on_its_chart`]).
+fn the_half_circle_from_pole_to_pole(
+    ball: &Sphere,
+    run: &EdgeRun,
+    start: Point,
+    end: Point,
+) -> Option<(Crossing, bool)> {
+    let skin = Surface::Sphere(*ball);
+    let at_a_pole = |corner: Point| skin.the_way_its_first_coordinate_runs_at(corner).is_none();
+    if start == end || !at_a_pole(start) || !at_a_pole(end) {
+        return None;
+    }
+    let EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(cut),
+        picked_by,
+    } = run
+    else {
+        return None;
+    };
+    let [Picker::InFrontOf(picking)] = picked_by.as_slice() else {
+        return None;
+    };
+    let leaning = (end - start).cross(cut.normal()).dot(picking.normal());
+    let the_edge_runs_its_way = if leaning > 0.0 {
+        true
+    } else if leaning < 0.0 {
+        false
+    } else {
+        return None;
+    };
+    let centre = a_centre_its_plane_reads_back_from(cut, ball.centre())?;
+    let circle = Crossing {
+        centre,
+        turning: cut.normal(),
+        shape: Shape::Circle {
+            radius: ball.radius(),
+        },
+    };
+    Some((circle, the_edge_runs_its_way))
+}
+
+/// What [`Writing::an_arc_its_own_plane_names`] writes, and whether the edge
+/// runs along it the curve's own way, worked out without writing anything.
+fn the_arc_its_own_plane_names(
+    first: &Surface,
+    second: &Surface,
+    run: &EdgeRun,
+    start: Point,
+    end: Point,
+) -> Option<(Crossing, bool)> {
+    let EdgeRun::PartOfWhereItCrosses { and, .. } = run else {
+        return None;
+    };
+    let Surface::Plane(cut) = and else {
+        return None;
+    };
+    if and == first || and == second {
+        return None;
+    }
+    let a_pipe = |face: &Surface| {
+        if let Surface::Cylinder(pipe) = face {
+            Some(*pipe)
+        } else {
+            None
+        }
+    };
+    let a_ball = |face: &Surface| {
+        if let Surface::Sphere(ball) = face {
+            Some(*ball)
+        } else {
+            None
+        }
+    };
+    let a_ring = |face: &Surface| {
+        if let Surface::Torus(ring) = face {
+            Some(*ring)
+        } else {
+            None
+        }
+    };
+    let (crossing, centre) = if let Some(pipe) = a_pipe(first).or_else(|| a_pipe(second)) {
+        let crossing = where_a_plane_crosses_a_pipe(cut, &pipe)?;
+        let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)?;
+        (crossing, centre)
+    } else if let Some(ball) = a_ball(first).or_else(|| a_ball(second)) {
+        let crossing = where_a_plane_crosses_a_ball(cut, &ball)?;
+        let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)?;
+        (crossing, centre)
+    } else {
+        let ring = a_ring(first).or_else(|| a_ring(second))?;
+        let crossing = where_a_plane_square_to_a_ring_crosses_it_nearest(cut, &ring, start)?;
+        let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)
+            .or_else(|| the_nearest_centre_a_ring_holds_its_circle_at(cut, &ring, &crossing))?;
+        (crossing, centre)
+    };
+    let crossing = Crossing {
+        centre,
+        turning: cut.normal(),
+        shape: crossing.shape,
+    };
+    let the_edge_runs_its_way = crossing.the_arc_runs_its_own_way(run, start, end)?;
+    Some((crossing, the_edge_runs_its_way))
 }
 
 /// Whether the pole at `position` of `walk` stands where the wire turns back
@@ -2388,7 +2481,7 @@ mod plane_round_trip_tests {
     use core::f64::consts::TAU;
 
     use rcad_geom::{
-        Axis, Isometry, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Surface, Torus, Vector,
+        Axis, Isometry, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Sphere, Surface, Torus, Vector,
     };
 
     use super::{
@@ -2511,6 +2604,83 @@ mod plane_round_trip_tests {
         assert_eq!(
             the_nearest_centre_a_ring_holds_its_circle_at(&cut, &ring, &crossing),
             Some(Point::new(stepped(x, -23), y, stepped(z, -19)))
+        );
+    }
+
+    /// The seam of `add_ball(3)` turned `149°` about `z` and moved to
+    /// `(10, −6, 5)`: no centre the reader holds on the ball reads back as the
+    /// plane the seam is cut from, so no file carries that seam as it is, and
+    /// the ball is written cut open where `add_ball` cuts it (Q1308).
+    ///
+    /// **The plane passes near the origin and the ball does not.** Its offset
+    /// is `−7.4e-3`, the turned normal dotted with `(10, −6, 5)` in plain
+    /// `f64` (`Plane::transformed`), and the reader's dot of the ball's centre,
+    /// rounded once, is 256 ulps of it away. One `f64` step of `x` or `y` moves
+    /// that dot by `|n_x|·ulp(10)` or `|n_y|·ulp(6)`, about `9.2e-16` and
+    /// `7.6e-16`, which is about a thousand ulps of the offset each.
+    ///
+    /// **Every centre the reader could hold is searched**, as for the bend
+    /// above. The normal has no `z`, so moving `z` leaves the dot alone. A
+    /// centre the reader holds is within `16·ε` of `10` of the ball's centre
+    /// across the normal (`how_far_off_the_circle_can_be` in `brep.rs`), and
+    /// one whose plane reads back is within a few ulps of the offset of it
+    /// along the normal, so its `x` and `y` are within twice that allowance of
+    /// the ball's centre; those are all tried. 7 385 are held, and not one
+    /// reads back. So for this ball the refusal was a limit of a seam carried
+    /// by its circle's centre, not a gap a wider search would close
+    /// (`docs/decisions.md` §16.10).
+    #[test]
+    fn no_centre_the_reader_holds_on_the_ball_carries_the_seam_of_a_ball_turned_149_degrees() {
+        let turned = Isometry::translation(Vector::new(10.0, -6.0, 5.0))
+            .and_then(|moved| {
+                Isometry::rotation(&Axis::z(), 149_f64.to_radians())
+                    .map(|turn| moved.compose(&turn))
+            })
+            .expect("a finite move and turn");
+        let add_balls_cut =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis is a unit normal");
+        let Surface::Plane(cut) = Surface::Plane(add_balls_cut).transformed(&turned) else {
+            unreachable!("a plane moves as a plane");
+        };
+        let Surface::Sphere(ball) =
+            Surface::Sphere(Sphere::new(Point::origin(), 3.0).expect("a radius of three"))
+                .transformed(&turned)
+        else {
+            unreachable!("a ball moves as a ball");
+        };
+        let normal = cut.normal();
+        let [x, y, z] = ball.centre().coordinates();
+        assert_eq!((x, y, z), (10.0, -6.0, 5.0));
+        assert_eq!(normal.components()[2], 0.0);
+        assert_eq!(cut.offset(), -7.376_944_887_870_884e-3);
+        let read_back = plane_through(ball.centre(), normal)
+            .expect("a finite point")
+            .offset();
+        assert_eq!(read_back.to_bits().abs_diff(cut.offset().to_bits()), 256);
+
+        let reach = 2.0 * A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF * 10.0;
+        let steps = |of: f64| (reach / (of.next_up() - of)).ceil() as i32;
+        let skin = Surface::Sphere(ball);
+        let (mut held, mut read_back_as_the_offset) = (0, 0);
+        for along_x in -steps(x)..=steps(x) {
+            for along_y in -steps(y)..=steps(y) {
+                let at = Point::new(stepped(x, along_x), stepped(y, along_y), z);
+                if !a_surface_holds_the_circle(&skin, at, normal, ball.radius()) {
+                    continue;
+                }
+                held += 1;
+                if plane_through(at, normal)
+                    .is_ok_and(|back| back.offset().to_bits() == cut.offset().to_bits())
+                {
+                    read_back_as_the_offset += 1;
+                }
+            }
+        }
+        assert_eq!((held, read_back_as_the_offset), (7385, 0));
+        assert_eq!(
+            a_centre_its_plane_reads_back_from(&cut, ball.centre()),
+            None
         );
     }
 
