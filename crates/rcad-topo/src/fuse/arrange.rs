@@ -2546,6 +2546,16 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::as_the_planes_say`]) and a quadric
     /// ([`Arrangement::as_the_quadric_says`]) only where the boxes cannot say,
     /// because the boxes are cheaper and nearly always enough.
+    ///
+    /// **A refusal is filed under what its enclosure measures.** Along an axis
+    /// it is a step between two boxes, and across a bend the same step read
+    /// against `n × w`, the plane's normal and the cone's axis, both of length
+    /// one ([`along_a_bend`]): a length either way. Round a closed crossing it
+    /// depends on the arm that answered
+    /// ([`round_a_closed_crossing_and_what_it_measures`]), which is asked again
+    /// here because [`Arrangement::as_the_boxes_say`] hands back the answer
+    /// without it. Only the nodes' own boxes leave that order undecided, so
+    /// asking again gives the same answer, and the assert says so.
     fn order_along(
         &self,
         crossing: usize,
@@ -2554,10 +2564,6 @@ impl<'f> Arrangement<'f> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Decision> {
-        let measures = match self.crossings[crossing].order {
-            HowItRuns::AlongAnAxis { .. } => Measures::Length,
-            HowItRuns::AlongABend { .. } | HowItRuns::RoundAClosedCurve { .. } => Measures::Volume,
-        };
         let mut decided = self.as_the_boxes_say(crossing, first, second)?;
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_the_planes_say(crossing, first, second)
@@ -2569,6 +2575,27 @@ impl<'f> Arrangement<'f> {
         {
             decided = proved;
         }
+        let Decision::Undecidable { .. } = decided else {
+            return Ok(decided);
+        };
+        let measures = match self.crossings[crossing].order {
+            HowItRuns::AlongAnAxis { .. } | HowItRuns::AlongABend { .. } => Measures::Length,
+            HowItRuns::RoundAClosedCurve { from, node } => {
+                let [one, other] = [first, second].map(|node| self.nodes[node].point);
+                let partner = self.crossings[crossing].partner;
+                let (asked_again, measures) = round_a_closed_crossing_and_what_it_measures(
+                    [&self.surface, &partner],
+                    [from, node],
+                    one,
+                    other,
+                )?;
+                assert_eq!(
+                    asked_again, decided,
+                    "round a closed crossing only the nodes' own boxes leave an order undecided"
+                );
+                measures
+            }
+        };
         must_decide(
             decided,
             ALONG_A_CROSSING,
@@ -6212,35 +6239,63 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// point are two places.
 fn round_a_closed_crossing(
     pair: [&Surface; 2],
-    [from, node]: [PredicatePoint; 2],
+    start: [PredicatePoint; 2],
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> rcad_geom::Result<Decision> {
+    Ok(round_a_closed_crossing_and_what_it_measures(pair, start, one, other)?.0)
+}
+
+/// [`round_a_closed_crossing`], with what an undecided answer's enclosure
+/// measures.
+///
+/// **Every arm but the sweep answers as wide as a box**, which is a length:
+/// [`one_point_if_both_are_exact`], [`the_one_the_start_is`] and the
+/// [`the_one_ahead_of_the_start`] behind it each hand back the wider of the two
+/// boxes' longest sides. Filed as a volume, as all of them were until Q706, a
+/// box's width was divided by the working size twice, so a tolerant policy
+/// merged two nodes whose boxes were up to `s²` times wider than its budget
+/// for a length: 625 times at 25 mm (§318.5).
+///
+/// **The sweep stays a volume.** It is two steps from the start crossed, an
+/// area, read against the normal the crossing winds about. That normal is a
+/// plane's, of length one, for a plane's conic, which makes the sweep an area,
+/// and the line between the centres for two balls, which makes it a volume.
+/// Which of the two it is is `rcad-geom`'s to say.
+fn round_a_closed_crossing_and_what_it_measures(
+    pair: [&Surface; 2],
+    [from, node]: [PredicatePoint; 2],
+    one: PredicatePoint,
+    other: PredicatePoint,
+) -> rcad_geom::Result<(Decision, Measures)> {
     if one == other {
-        return Ok(one_point_if_both_are_exact(one, other));
+        return Ok((one_point_if_both_are_exact(one, other), Measures::Length));
     }
     if one == from || one == node {
-        return Ok(Decision::Pos);
+        return Ok((Decision::Pos, Measures::Length));
     }
     if other == from || other == node {
-        return Ok(Decision::Neg);
+        return Ok((Decision::Neg, Measures::Length));
     }
     let decided = which_comes_first_round_a_crossing(pair, from, one, other)?;
     // Compared rather than matched: only a proved zero is re-read, and every
     // other answer goes back as it came (§40).
     if decided != Decision::Zero {
-        return Ok(decided);
+        return Ok((decided, Measures::Volume));
     }
     if boxes_overlap(one, other) {
         let ahead = the_one_ahead_of_the_start(pair, from, one, other);
         // Compared rather than matched, as above: only an order is taken, and
         // every other answer leaves the pair to the policy (§40).
         if ahead == Decision::Pos || ahead == Decision::Neg {
-            return Ok(ahead);
+            return Ok((ahead, Measures::Length));
         }
-        return Ok(one_point_if_both_are_exact(one, other));
+        return Ok((one_point_if_both_are_exact(one, other), Measures::Length));
     }
-    Ok(the_one_the_start_is(pair, from, one, other))
+    Ok((
+        the_one_the_start_is(pair, from, one, other),
+        Measures::Length,
+    ))
 }
 
 /// Whether two nodes whose boxes share a point are that one point.
