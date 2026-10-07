@@ -1009,6 +1009,38 @@ fn three_curved_surfaces_meet_where_the_plane_two_of_them_differ_by_cuts_the_thi
     }
 }
 
+/// **Two cones of a slope whose square no `f64` holds still differ by a
+/// stored plane.** Cones of slope `s` up `z`, with their apexes at heights
+/// `h₁` and `h₂`, differ by `2s²(h₁ − h₂)·z = s²(h₁² − h₂²)`, each side
+/// several `f64` long where `s²` is, and the plane is `z = (h₁ + h₂)/2`
+/// whatever `s` is. A bar of radius 100 about the same axis is wider there
+/// than the cones' circle, so each three share nothing.
+///
+/// Slopes `0.01` to `0.99` by hundredths, against 38 pairs of whole heights
+/// with the lower one below 4 and the upper below 12: 3762 triples, all
+/// answered. With the two sides rounded to the nearest `f64` before
+/// [`Plane::from_coefficients`] divides them, rather than divided exactly
+/// first, 641 of them were refused, the stored plane an ulp off the true one
+/// (Q1284, the division swapped out by hand and the sweep counted).
+#[test]
+fn two_cones_of_a_slope_no_f64_squares_still_differ_by_a_stored_plane() {
+    let bar = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 100.0);
+    for hundredths in 1..100 {
+        let slope = f64::from(hundredths) / 100.0;
+        for low in 0..4 {
+            for high in (low + 1)..12 {
+                let lower = cone([0.0, 0.0, f64::from(low)], [0.0, 0.0, 1.0], slope);
+                let upper = cone([0.0, 0.0, f64::from(high)], [0.0, 0.0, 1.0], slope);
+                assert_eq!(
+                    meet([&lower, &upper, &bar]),
+                    Ok(MeetOfThree::Nowhere),
+                    "slope {slope}, apexes at {low} and {high}"
+                );
+            }
+        }
+    }
+}
+
 /// **Two quadrics that bend the same way and differ by a number share
 /// nothing**, and neither does any third surface with them. Two bars up `z`
 /// of radius three and five are `x² + y² = 9` and `x² + y² = 25`, and `0 = 16`
