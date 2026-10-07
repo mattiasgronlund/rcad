@@ -53,11 +53,35 @@ of them holds it, two ways:
   round the axis only grow or only shrink along it:
   `h = d / (s(n_x cos θ + n_y sin θ) + n_z)` on a cone in its own frame, and the
   same shape on a pipe. Every node of both lumps is held to one nappe first.
+- **On a ball, by opening it out flat from a node of `W`.** *2026-10-07,
+  Q1242 (`9082263a`):* `the_one_that_parts_the_walk_from_the_rest_of_its_lump`
+  in `fuse/arrange.rs` opens the skin out flat from one of `W`'s own nodes `P`
+  (a stereographic projection) — a turn seen flat is `orient3d` with `P` as
+  the fourth point, since turning space inside out about `P` keeps every
+  point on its side of every plane through `P`, and a circle's inside is the
+  cap on the far side of its plane from `P`. The region of a candidate's lump
+  that holds `P` is then the one round the outside, so its walk winds round
+  every node of the lump off itself and no other candidate's does. Plane and
+  ball partners only, whose curve on a ball lies in one plane.
 
 What neither settles is refused `CannotTellTheCellsOfAFaceApart`, except for a
 walk the face's boundary is known to wind round no times, which is left unjoined:
 no piece is made of its cell. A cell that still ends up holding two walks of one
 lump is refused the same way, on any surface but a torus.
+
+*2026-10-07, Q1242 (`9082263a`): a third lump can keep two facing walks apart.*
+Two walks that face each other back and forth — neither has the other's node
+inside it, so the facing rule alone would join them — are still not joined
+where each also faces back and forth with a different walk of one third lump:
+`a_third_lump_keeps_apart` in `fuse/arrange.rs` reads that as proof the two
+would end up one cell with two walks of that third lump's own, which
+[`Arrangement::no_cell_holds_two_walks_of_one_lump`] already refuses on any
+surface but a torus — so the join is skipped before the refusal is ever
+reached. A ball's skin through a square rod holed down its own axis is the
+shape: the hole's two circles each face the other's walk round the outside,
+yet the rod's four circles lie between them, one in the patch at the top and
+one in the patch at the bottom. Skipped on a torus, where a circle round the
+tube legitimately leaves two walks of one lump in one cell.
 
 The frustum of §282 reads: the bottom rim goes round the axis, the patch goes
 round nothing, the rest goes round once, so the rim belongs with the rest.
@@ -129,6 +153,11 @@ round for two shapes, and a printed probe at each of the five places
   square rod through it. The rod's four walls cut the ball in four circles that
   are one lump, with a patch inside all four at each end of the rod. The dimple
   sits in one patch and is on the same side of every circle as both.
+
+  *2026-10-07, Q1242 (`9082263a`): answered.* §340.2's ball method, opening
+  the walk out flat from one of its own nodes, holds the dimple to its patch,
+  and `a_dimpled_ball_through_a_square_rod_is_answered_under_every_rule`
+  pins it under every rule, both ways round, against its closed form.
 - **A curved side on a plane**: a plate with a round notch at one corner, cut in
   two by a holed slab's wall, with the hole's circle in the half away from the
   notch. Winding by corners is not asked, because the other half has the

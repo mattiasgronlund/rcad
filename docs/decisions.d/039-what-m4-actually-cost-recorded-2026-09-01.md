@@ -469,6 +469,20 @@ moved them.
 > reads it there instead, and all six fuses now answer, held to `364π` for the
 > union and `92π/3` in two solids for the bar less the cone. §340.4.
 
+> **2026-10-07 note (Q1114): a prism lying on its edge on a block's top is
+> refused for want of a point inside a piece of a face, wherever moving it
+> rounds its walls' offsets so that the edge leaves the top.** At `x = −1.5`
+> (`a_prism_lying_on_one_edge.rs`) the edge sits `3.1e-17` inside the block,
+> so the two overlap in a sliver, and every answer needs a side shorter than
+> the gap between two doubles — a spread above `4e16` against the `1e11` a
+> model supports (`docs/decisions.md` §3.5): **a limit**, pinned by
+> `the_prism_with_its_edge_a_rounding_into_the_blocks_top_is_refused`. At
+> `−2.5`, `−1.25` and `1.5` the edge stands a rounding above the top instead,
+> so the two share no point and every answer is the two as they stand, yet
+> every rule both ways round still refuses the same way: **a gap**, pinned by
+> `a_prism_standing_a_rounding_above_the_blocks_top_is_refused_though_the_two_
+> share_no_point`. Open queue row Q1279 is the one that moves that gap.
+
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot
 assemble what it cut, before writing anything — `two_balls_that_really_cross_are_refused_by_name`
