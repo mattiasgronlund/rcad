@@ -60,8 +60,8 @@
 //! rather than off a corner, because every corner sits on every cut.
 
 use rcad_geom::{
-    EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, SurfaceMeet, Vector,
-    WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS,
+    EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, SIDE_OF_A_HALF_SPACE, Surface,
+    SurfaceMeet, Vector, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS,
     how_a_plane_leans_against_a_cone, intersect, where_a_cones_apex_stands_against_a_plane,
     which_two_surfaces_a_run_is_between,
 };
@@ -696,6 +696,31 @@ fn walk_one_outline(
 /// it — a ball's skin, whose one wire is a seam with the same face on both
 /// sides.
 ///
+/// # A face along one of two curves, past the half-space picking it out
+///
+/// **A face can run along one of two curves its trimming crosses its surface
+/// in and across the other**, which is no edge of it. The union of a pointed
+/// cone and a bar along its axis has the bar's wall from below the apex up to
+/// the circle at `z = 1` on the cone's own nappe as one face, and that wall
+/// crosses the other nappe at `z = −1` on the way; the cone's face in the union
+/// runs along the circle at `z = 1` alone. Both were refused
+/// [`Error::AFaceMissesPartOfWhereItsSurfacesCross`], so every point a ray
+/// fired at either was [`Containment::CannotFollowAFacesTrimming`]
+/// (`tests/a_pointed_cone_drilled_along_its_axis.rs`, row Q1218).
+///
+/// Where the edge's curve is picked out of the two by a flat half-space facing
+/// along their axis ([`the_picker_this_face_is_read_past`]), the edge still
+/// cuts the surface in two, and the face is one of the two pieces: in front of
+/// the half-space the trimming crosses the surface in the edge's curve alone,
+/// so a point there is on the side of the trimming it reads, and every point
+/// past it is on the curve's side towards the half-space, which is the side a
+/// step from the curve towards it meets. So a point, a corner or the apex past
+/// the half-space says that side instead of its own sign
+/// ([`the_side_of_it_a_point_is_on`]), as `Model::validate` reads a corner
+/// there since row Q1190.
+///
+/// [`Containment::CannotFollowAFacesTrimming`]: crate::Containment::CannotFollowAFacesTrimming
+///
 /// # Errors
 ///
 /// The three refusals [`SolidView::face_holds_the_point`] lists,
@@ -727,26 +752,29 @@ fn what_a_curved_face_holds(
     }
     let trimmed_once = trimmings.len() == 1;
     for trimming in trimmings {
-        if !every_piece_of_that_crossing_is_an_edge(
+        let past = if every_piece_of_that_crossing_is_an_edge(
             surface,
             &trimming.surface,
             trimming.corners_on_it.len(),
             policy,
             log,
         )? {
-            return Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face: face.key() });
-        }
-        let mut inwards = the_side_this_face_lies_on(face, &trimming)?;
+            None
+        } else {
+            let past = the_picker_this_face_is_read_past(solid, face, &trimming, policy, log)?;
+            Some(past.ok_or(Error::AFaceMissesPartOfWhereItsSurfacesCross { face: face.key() })?)
+        };
+        let past = past.as_ref();
+        let mut inwards = the_side_this_face_lies_on_reading_past(face, &trimming, past)?;
         if inwards.is_none() && trimmed_once {
-            inwards = the_side_the_apex_is_on(surface, &trimming)?;
+            inwards = the_side_the_apex_is_on(surface, &trimming, past)?;
         }
         if inwards.is_none() {
             inwards = the_side_its_wire_keeps_along(solid, face, &trimming)?;
         }
         let inwards = inwards
             .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
-        let side = side_of_surface(&trimming.surface, point);
-        match side {
+        match the_side_of_it_a_point_is_on(&trimming.surface, past, point)? {
             Decision::Zero => on_its_boundary = true,
             settled if settled == inwards => (),
             Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
@@ -1297,10 +1325,20 @@ fn the_nappe_a_face_is_on(face: FaceView<'_>, cone: &rcad_geom::Cone) -> Result<
 /// trimming that is not a plane or a pipe, or an apex on the trimming itself —
 /// which the caller refuses by name as before.
 ///
+/// **A pipe on the axis crosses the other half too**, and the face runs along
+/// the one curve on its own half. That curve still cuts the half in two, so
+/// the face is still the piece reaching the apex; the apex is read the way
+/// `past` says, which is its own sign wherever it is not past the half-space
+/// picking the curve out.
+///
 /// # Errors
 ///
 /// [`Error::Undecidable`] when the apex's side could not be settled.
-fn the_side_the_apex_is_on(surface: &Surface, trimming: &Trimming) -> Result<Option<Decision>> {
+fn the_side_the_apex_is_on(
+    surface: &Surface,
+    trimming: &Trimming,
+    past: Option<&PastThePicker>,
+) -> Result<Option<Decision>> {
     let Surface::Cone(cone) = surface else {
         return Ok(None);
     };
@@ -1308,7 +1346,7 @@ fn the_side_the_apex_is_on(surface: &Surface, trimming: &Trimming) -> Result<Opt
         return Ok(None);
     }
     let apex = PredicatePoint::from(cone.apex().coordinates());
-    match side_of_surface(&trimming.surface, apex) {
+    match the_side_of_it_a_point_is_on(&trimming.surface, past, apex)? {
         Decision::Pos => Ok(Some(Decision::Pos)),
         Decision::Neg => Ok(Some(Decision::Neg)),
         Decision::Zero => Ok(None),
@@ -6600,6 +6638,160 @@ fn every_piece_of_that_crossing_is_an_edge(
     }
 }
 
+/// The flat half-space picking a closed edge's curve out of the two its
+/// surfaces cross in, moved where the face sits, and the side of the trimming
+/// a step from the curve towards that half-space's flat surface meets.
+struct PastThePicker {
+    /// Everything on or in front of it holds the edge's curve and not the
+    /// other one.
+    picker: HalfSpace,
+    /// [`Decision::Pos`] or [`Decision::Neg`], never anything else.
+    side: Decision,
+}
+
+/// What a point past the half-space picking out the curve of `face`'s one
+/// edge along `trimming` says, or `None` where the face's surface and the
+/// trimming are not a pair read that way.
+///
+/// The edge's two surfaces and its corner are found where they are stored,
+/// for §168's reason, and the half-space is moved where the face sits
+/// afterwards: a turned cone and pipe on one axis are no longer on exactly one
+/// axis, and [`intersect`] names no curve for them.
+///
+/// # Errors
+///
+/// Whatever finding the face across an edge refuses, and
+/// [`Error::Undecidable`] when [`intersect`] cannot settle the two surfaces or
+/// the side the step meets cannot be settled.
+fn the_picker_this_face_is_read_past(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    trimming: &Trimming,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<PastThePicker>> {
+    let [corner] = trimming.corners_on_it[..] else {
+        return Ok(None);
+    };
+    let mut partner = None;
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        let Some(across) = the_face_across(solid, face, edge)? else {
+            continue;
+        };
+        if edge.start().key() == corner
+            && the_surface_an_edge_cuts(face, across, edge) == trimming.surface
+        {
+            let [_, named] = which_two_surfaces_a_run_is_between(
+                edge.stored_run(),
+                [&face.stored_surface(), &across.stored_surface()],
+            );
+            partner = Some(named);
+            break;
+        }
+    }
+    let partner =
+        partner.expect("what_trims_this_face puts a corner on a trimming for an edge along it");
+    let at = where_it_is_stored(solid, corner);
+    let Some(past) = what_lies_past_the_picker(&face.stored_surface(), &partner, at, policy, log)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(PastThePicker {
+        picker: past.picker.transformed(&face.location()),
+        side: past.side,
+    }))
+}
+
+/// The half-space picking out the curve through `at` that `surface` and
+/// `partner` cross in, both where stored, and the side of `partner` a step from
+/// that curve towards the half-space's flat surface meets; `None` where every
+/// point says its own sign.
+///
+/// **Only where both curves go right round one axis and the half-space faces
+/// exactly along it**, which are the pairs `Model::validate` reads a corner of
+/// the same way (`validate.rs`'s `what_a_corner_past_the_picker_says`, row
+/// Q1190) and `arrange.rs`'s `whether_past_the_picker` reads a point of a
+/// fuse's arrangement by: a pipe and anything [`intersect`] cuts it in two such
+/// curves by, the axis being the pipe's; a cone and a pipe, a second cone or a
+/// ball on its axis, the axis being the cone's; and a ball and a cone whose
+/// axis runs through its centre, the axis again being the cone's. Each curve
+/// then cuts the surface in two, the half-space holds the edge's curve and not
+/// the other, and everything of the surface past the half-space's flat surface
+/// is on the curve's side towards it: on a cone through the apex, which joins
+/// the two nappes, and on a ball as the cap past the flat surface.
+///
+/// The half-space is the one [`intersect`] names the curve by
+/// ([`the_picker_naming_the_circle_through`]). A pair `intersect` refuses to
+/// name has none, and is refused by name as before.
+///
+/// The side is the partner's gradient against the step from `at` towards the
+/// flat surface, laid onto the surface: `|g|²·d − (g·d)·g` for the surface's
+/// gradient `g` and `d` the half-space's normal turned round, and `d` itself on
+/// a pipe, whose gradient is square to its axis. On a cone that runs along the
+/// ruling, and on a ball along the line of longitude. `None` where that is
+/// [`Decision::Zero`], which is the two surfaces touching rather than crossing
+/// there.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when [`intersect`] cannot settle the two surfaces,
+/// or the side the step meets cannot be settled.
+fn what_lies_past_the_picker(
+    surface: &Surface,
+    partner: &Surface,
+    at: Point,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<PastThePicker>> {
+    if !matches!(
+        partner,
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+    ) {
+        return Ok(None);
+    }
+    let axis = if let Surface::Cylinder(pipe) = surface {
+        pipe.axis()
+    } else if let (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) =
+        (surface, partner)
+    {
+        cone.axis()
+    } else {
+        return Ok(None);
+    };
+    let corner = PredicatePoint::from(at.coordinates());
+    let named = match the_picker_naming_the_circle_through(surface, partner, corner, policy, log) {
+        Ok(named) => named,
+        Err(Error::Geometry(_)) => return Ok(None),
+        Err(other) => return Err(other),
+    };
+    let Some(Picker::InFrontOf(picker)) = named else {
+        return Ok(None);
+    };
+    if !lie_along_one_line(picker.normal().components(), axis.direction().components()) {
+        return Ok(None);
+    }
+    let down = picker
+        .normal()
+        .components()
+        .map(|along| Interval::exactly(-along));
+    let step = if matches!(surface, Surface::Cylinder(_)) {
+        down
+    } else {
+        let across = gradient_at(surface, at).expect("a ball and a cone have a gradient");
+        let (squared, leaning) = (dot(across, across), dot(across, down));
+        core::array::from_fn(|index| squared * down[index] - leaning * across[index])
+    };
+    let out = gradient_at(partner, at).expect("a ball, a pipe and a cone have a gradient");
+    let side = dot(out, step).sign();
+    match side {
+        Decision::Pos | Decision::Neg => Ok(Some(PastThePicker { picker, side })),
+        Decision::Zero => Ok(None),
+        Decision::Undecidable { enclosure } => Err(gave_up_on_a_side(partner, corner, enclosure)),
+        other => panic!("a step came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
 /// Which side of `partner` this face lies on, read off its own corners.
 ///
 /// Every corner is either on `partner` — the corners of the very edge that runs
@@ -6629,7 +6821,21 @@ pub(crate) fn the_side_this_face_lies_on(
     face: FaceView<'_>,
     trimming: &Trimming,
 ) -> Result<Option<Decision>> {
-    let partner = &trimming.surface;
+    the_side_this_face_lies_on_reading_past(face, trimming, None)
+}
+
+/// [`the_side_this_face_lies_on`], with a corner past `past`'s half-space
+/// saying `past`'s side rather than its own sign.
+///
+/// # Errors
+///
+/// Those of [`the_side_this_face_lies_on`], and [`Error::Undecidable`] when a
+/// corner's side of the half-space could not be settled.
+fn the_side_this_face_lies_on_reading_past(
+    face: FaceView<'_>,
+    trimming: &Trimming,
+    past: Option<&PastThePicker>,
+) -> Result<Option<Decision>> {
     let mut found: Option<Decision> = None;
     for corner in face
         .wires()
@@ -6640,7 +6846,7 @@ pub(crate) fn the_side_this_face_lies_on(
             continue;
         }
         let at = PredicatePoint::from(corner.point().coordinates());
-        let side = side_of_surface(partner, at);
+        let side = the_side_of_it_a_point_is_on(&trimming.surface, past, at)?;
         match side {
             Decision::Zero => (),
             Decision::Pos | Decision::Neg => match found {
@@ -6649,12 +6855,42 @@ pub(crate) fn the_side_this_face_lies_on(
                 Some(_) => return Err(Invalid::AFaceStraddlesSomethingTrimmingIt.into()),
             },
             Decision::Undecidable { enclosure } => {
-                return Err(gave_up_on_a_side(partner, at, enclosure));
+                return Err(gave_up_on_a_side(&trimming.surface, at, enclosure));
             }
             other => panic!("a corner came back with a decision nothing here knows: {other:?}"),
         }
     }
     Ok(found)
+}
+
+/// Which side of `partner` a point of a face along it counts as on: its own
+/// sign, except past the half-space in `past`, where it is `past`'s side
+/// ([`what_a_curved_face_holds`] says why).
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when its side of the half-space could not be
+/// settled. Its side of `partner` comes back as it is, `Undecidable` too.
+fn the_side_of_it_a_point_is_on(
+    partner: &Surface,
+    past: Option<&PastThePicker>,
+    at: PredicatePoint,
+) -> Result<Decision> {
+    let Some(past) = past else {
+        return Ok(side_of_surface(partner, at));
+    };
+    match past.picker.side_of_point(at) {
+        Decision::Neg => Ok(past.side),
+        Decision::Pos | Decision::Zero => Ok(side_of_surface(partner, at)),
+        Decision::Undecidable { enclosure } => Err(gave_up(
+            SIDE_OF_A_HALF_SPACE,
+            at,
+            Level::Exact,
+            enclosure,
+            Measures::Length,
+        )),
+        other => panic!("a half-space came back with a decision nothing here knows: {other:?}"),
+    }
 }
 
 /// Whether `point`, already shown to be on the line through `from` and `to`, is
