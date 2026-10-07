@@ -80,8 +80,8 @@
 //! them placed before is placed by the same rule now.
 
 use rcad_geom::{
-    Cone, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus, Vector,
-    intersect,
+    Cone, Cylinder, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
+    Vector, intersect,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
@@ -90,7 +90,8 @@ use rcad_predicates::{
 
 use crate::classify::{side_of_a_flat_face, stretched_to_the_plane};
 use crate::holds::{
-    the_half_space_naming_the_meridian_circle_through, the_meridian_half_space_keeps,
+    lie_along_one_line, the_half_space_naming_the_meridian_circle_through,
+    the_meridian_half_space_keeps,
 };
 use crate::validate::side_of_surface;
 use crate::{Containment, Error, FaceKey, Model, Result, SolidView, VertexKey};
@@ -1350,6 +1351,21 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 /// `rcad-geom`, and the ellipse is admitted: the sign
 /// `(n·a)²(1 + s²) − s²|n|²|a|² > 0` is exact, and the region an ellipse's
 /// inside leaves on a plane is one convex piece just as a circle's is.
+///
+/// **A torus is counted on a plane square to its axis, along the outer of the
+/// two circles it cuts there** ([`runs_round_the_outer_circle`]). The torus's
+/// inside on such a plane is the band between two circles round the axis, so
+/// a point its sign holds is inside the outer circle, and a side along that
+/// circle whose material is inside the torus has the outer disk on its left:
+/// the ball's paragraph carries over. A side along the inner circle with its
+/// material inside the torus bites into the piece, and the bite is part of the
+/// inner disk, which the torus's sign already took out, so it counts nothing.
+/// The top halves of the two half bends of one ring have their floors on
+/// `z = 0` with all four corners on the `x` axis, so the corners wind round
+/// nothing, and until the outer arc was counted no point was held and every
+/// fuse of the two was refused [`INSIDE_A_PIECE`] (row Q1268). A side whose
+/// material is outside the torus still counts nothing; whether that holds is
+/// row Q1305's.
 fn in_the_bulge_of(
     flat: &Plane,
     side: &FaceMeet,
@@ -1364,7 +1380,8 @@ fn in_the_bulge_of(
             Some(false) => is_on_the_nappe_the_side_is_on(&cone, side, point),
             None => false,
         },
-        Surface::Plane(_) | Surface::Torus(_) | _ => false,
+        Surface::Torus(ring) => runs_round_the_outer_circle(flat, &ring, side)?,
+        Surface::Plane(_) | _ => false,
     };
     if !one_round_region || side.material_side != Decision::Neg {
         return Some(0);
@@ -1406,6 +1423,29 @@ fn is_on_the_nappe_the_side_is_on(cone: &Cone, side: &FaceMeet, point: Predicate
         how_far_up(point),
     ];
     signs.iter().all(decided) && signs[0] == signs[1] && signs[1] == signs[2]
+}
+
+/// Whether `side`, along `ring` on `flat`, runs round the outer of the two
+/// circles a plane square to the ring's axis cuts it in: `false` on a plane
+/// that is not square to the axis, and `None` where the side's end cannot be
+/// shown off the pipe of the ring's own radius, which has one circle inside it
+/// and the other outside.
+///
+/// Square is asked exactly, as `holds.rs` asks it ([`lie_along_one_line`]).
+fn runs_round_the_outer_circle(flat: &Plane, ring: &Torus, side: &FaceMeet) -> Option<bool> {
+    if !lie_along_one_line(
+        flat.normal().components(),
+        ring.axis().direction().components(),
+    ) {
+        return Some(false);
+    }
+    let pipe = Cylinder::new(ring.axis(), ring.ring_radius())
+        .expect("a ring's radius is finite and above nothing, which is all a pipe's needs");
+    match pipe.side_of(side.ends[0].point()) {
+        Decision::Pos => Some(true),
+        Decision::Neg => Some(false),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
+    }
 }
 
 /// The surface that cut a wire made of one closed curve, or `None` for a wire
@@ -2713,12 +2753,19 @@ fn how_big_the_surface_is(surface: &Surface, there: Point) -> f64 {
 /// axis or centre, so both are provably inside — which is what the winding
 /// count then checks, in exact arithmetic and with no trust placed here.
 ///
-/// **A torus has two answers, and both are offered.** A plane cuts a torus in
-/// up to four circles, and where it goes through the torus's axis it cuts two,
-/// one round each place the ring crosses the plane. Which of the two a given
-/// wire goes round is not known here, and does not need to be: nothing about a
-/// candidate is trusted, so the one that is not inside is ruled out by the same
-/// count that proves the other in.
+/// **A torus has two answers on a plane through its axis, and both are
+/// offered.** A plane cuts a torus in up to four circles, and where it goes
+/// through the torus's axis it cuts two, one round each place the ring crosses
+/// the plane. Which of the two a given wire goes round is not known here, and
+/// does not need to be: nothing about a candidate is trusted, so the one that
+/// is not inside is ruled out by the same count that proves the other in.
+///
+/// **On a plane square to its axis it has one**, the foot of the torus's
+/// centre: the two circles it cuts there are both round the axis. The point is
+/// in the hole and holds nothing, and what it is for is the arcs. Without it
+/// the half ring a half bend's floor is on had no middle to step from, so
+/// [`half_way_into_either_arc`] and [`rungs_towards_each_crossing`] offered
+/// nothing off the `x` axis its four corners lie on (row Q1268).
 ///
 /// Nothing where the division has nothing to divide by, which is a pipe running
 /// along the plane rather than through it — and then the wire it cut is not a
@@ -2738,6 +2785,11 @@ fn the_middles_of_a_round_wire(flat: &Plane, partner: &Surface) -> Vec<Predicate
                     + axis.direction()
                         * ((offset - normal.dot(axis.origin() - Point::origin())) / along),
             ]
+        }
+        Surface::Torus(ring)
+            if lie_along_one_line(normal.components(), ring.axis().direction().components()) =>
+        {
+            vec![ring.centre()]
         }
         Surface::Torus(ring) => where_the_ring_crosses_the_plane(normal, offset, ring),
         // **The same point, and it takes a proof rather than a picture.** Where
@@ -3229,6 +3281,18 @@ mod tests {
             .collect();
         middles.sort_by(|one, other| one[0].total_cmp(&other[0]));
         assert_eq!(middles, [[-4.0, 0.0, 0.0], [4.0, 0.0, 0.0]]);
+    }
+
+    /// Both circles `z = 0.5` cuts the bend in are round the axis, so their
+    /// middle is where the axis meets the plane.
+    #[test]
+    fn a_plane_square_to_a_bends_axis_offers_where_the_axis_meets_it() {
+        let (ring, _) = a_bend_and_its_end_cap_plane();
+        let across = Plane::from_coefficients([0.0, 0.0, 1.0, -0.5]).expect("a normal");
+        assert_eq!(
+            the_middles_of_a_round_wire(&across, &ring),
+            [PredicatePoint::from([0.0, 0.0, 0.5])]
+        );
     }
 
     /// The torus's inside on `y = 0` is two disks, and the sign of the torus
