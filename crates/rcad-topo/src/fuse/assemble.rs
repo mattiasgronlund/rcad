@@ -4797,7 +4797,8 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// [`which_curve_it_is`]. The third is, for an arc of a
 /// closed crossing between a plane and a surface that curves right round — a
 /// ball's circle, or a cone's rim circle — that curved surface and that plane,
-/// and which of the crossing's two arcs between the same two corners it is; see
+/// or for an arc of the circle two balls cross in, the two balls, and which of
+/// the crossing's two arcs between the same two corners it is; see
 /// [`which_arc_of_a_circle_this_is`]. The fourth is, for an arc of a
 /// hyperbola or a parabola a plane cuts on a cone, that cone and that plane;
 /// see [`which_open_crossing_of_a_cone_this_is`].
@@ -5621,7 +5622,8 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// Which of the two arcs between its corners a side is of a closed crossing
 /// between a plane and a surface that curves right round — a ball's circle, or
 /// a cone's rim circle and the ellipse a steeper plane leaves — together with
-/// that curved surface and that plane, or `None` for any other side.
+/// that curved surface and that plane, or of the circle two balls cross in,
+/// together with the two balls; `None` for any other side.
 ///
 /// **Both arcs run between the same two corners and along the same two
 /// surfaces**, so nothing [`which_curve_it_is`] reads tells them apart. Most
@@ -5720,6 +5722,36 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// pointed cone — the shape that has an apex on its own face — and gets a sound
 /// answer.
 ///
+/// # Two balls cross in a circle too
+///
+/// **And an answer can keep both its arcs between two corners.** A half ball
+/// of radius 3 cut to `z ≤ 0`, with a ball of radius 1.5 at `(2, 0, 0)` poking
+/// out of its rim: the small ball's skin is cut by the big ball's along the
+/// circle `x = 2.6875` and by the flat face along `z = 0`, every cut drawn in
+/// full, and the two circles cross at `(2.6875, ±1.3332, 0)`. The union keeps
+/// three of the four pieces that leaves, two of them either side of the arc
+/// above `z = 0`, and the third and the half ball's skin either side of the arc
+/// below. Named
+/// by their corners alone the two arcs were one edge with four faces along it,
+/// and the union both ways round and the small ball less the half ball were
+/// refused `ResultIsNotManifold { count: 4 }` (queue row Q1192,
+/// `tests/a_rung_whose_ray_meets_a_face_nobody_follows.rs`).
+///
+/// **The sign rule holds as it stands.** At a point of the circle the two
+/// gradients are the two radii there, and their cross product is zero only on
+/// the line through both centres. The circle two balls cross in is square to
+/// that line and centred on it, and has a radius that is not zero wherever it
+/// has two corners, so it never touches the line. The two balls are read in
+/// the order their names sort in, and **a ball has one spelling**
+/// (`name_of_the_surface_either_way_round` folds nothing for it), so nothing is
+/// turned round for how a face spells it. Where the two are one ball there is
+/// no circle, and nothing is named.
+///
+/// Other pairs of curved surfaces that cross in closed curves — a ball and a
+/// pipe, two pipes — are not named here. Their curves can touch the line where
+/// the two gradients line up, two equal pipes square to each other do at two
+/// points, and the sign rule says nothing there.
+///
 /// # Panics
 ///
 /// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`],
@@ -5729,7 +5761,26 @@ fn which_arc_of_a_circle_this_is(
     from: usize,
     to: usize,
 ) -> Option<([[u64; 9]; 2], bool)> {
-    let round_one = which_of_them_a_closed_crossing_runs_round(&meet.carried_by)?;
+    let (named, mine_is_the_first, spelled_the_other_way_round) =
+        if let [ball @ Surface::Sphere(_), other @ Surface::Sphere(_)] = meet.carried_by {
+            let named = [name_of_surface_bits(&ball), name_of_surface_bits(&other)];
+            match named[0].cmp(&named[1]) {
+                Ordering::Less => (named, true, false),
+                Ordering::Greater => ([named[1], named[0]], false, false),
+                Ordering::Equal => return None,
+            }
+        } else {
+            let round_one = which_of_them_a_closed_crossing_runs_round(&meet.carried_by)?;
+            let flat = &meet.carried_by[1 - round_one];
+            (
+                [
+                    name_of_the_surface_either_way_round(&meet.carried_by[round_one]),
+                    name_of_the_plane_at_any_scale(flat),
+                ],
+                round_one == 0,
+                is_written_the_other_way_round(flat),
+            )
+        };
     // A whole ball's seam is walked down and back up by the one face, with a
     // material side that names the half of the meridian it is and not a side
     // (`Arrangement::the_whole_surface`), so the rule below would read its two
@@ -5747,16 +5798,11 @@ fn which_arc_of_a_circle_this_is(
         Decision::Pos => false,
         other => panic!("a side of a face was walked with no material side: {other:?}"),
     };
-    let mine_is_the_round_one = round_one == 0;
-    let along_the_round_one_then_the_plane = along_mine_then_partner == mine_is_the_round_one;
-    let flat = &meet.carried_by[1 - round_one];
+    let along_the_first_then_the_second = along_mine_then_partner == mine_is_the_first;
     Some((
-        [
-            name_of_the_surface_either_way_round(&meet.carried_by[round_one]),
-            name_of_the_plane_at_any_scale(flat),
-        ],
-        (along_the_round_one_then_the_plane != walked_from_the_far_corner)
-            != is_written_the_other_way_round(flat),
+        named,
+        (along_the_first_then_the_second != walked_from_the_far_corner)
+            != spelled_the_other_way_round,
     ))
 }
 
