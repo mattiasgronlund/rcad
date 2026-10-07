@@ -225,8 +225,10 @@ fn how_often_a_certified_fuse_of_a_turned_curved_pair_refuses() {
 ///
 /// So this asserts the sweep and not a rate: a fuse either refuses by name or
 /// hands back a model that passes [`Model::validate`]. The count that answered
-/// is printed and floored, because a family that refused everything would sweep
-/// nothing and pass (§14.7).
+/// is printed and held to every fuse answered (Q1228), the measurement made
+/// since a fold in `validate.rs` got its own floor (§188.3): a family that
+/// refused even one would sweep less than it does now and the count would say
+/// so.
 #[test]
 fn every_answer_over_a_block_turned_against_a_bar_is_a_solid_that_validates() {
     let policy = Policy::certified();
@@ -265,9 +267,9 @@ fn every_answer_over_a_block_turned_against_a_bar_is_a_solid_that_validates() {
         "a block turned against a bar: {answered} of {fuses} fuses answered, refused {gave_up:?}"
     );
     assert!(fuses > 300, "only {fuses} fuses were drawn");
-    assert!(
-        answered * 4 >= fuses,
-        "only {answered} of {fuses} came back with an answer to sweep"
+    assert_eq!(
+        answered, fuses,
+        "this family is measured at every fuse answered, and this is that measurement"
     );
 }
 
