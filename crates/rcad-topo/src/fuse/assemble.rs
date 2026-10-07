@@ -65,7 +65,8 @@ use rcad_geom::{
     which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{
-    Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
+    Approximation, Cause, Decision, Level, Measures, Point as PredicatePoint, Policy,
+    ProvenanceLog, Record,
 };
 use smallvec::SmallVec;
 
@@ -106,7 +107,9 @@ use super::{
 /// a void has nothing round it, [`Error::Undecidable`] when one shell could not
 /// be placed inside or outside another, and
 /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's one
-/// corner is a pole of the surface it is drawn on.
+/// corner is a pole of the surface it is drawn on, and
+/// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
+/// coplanar pieces both wind as its outline.
 pub(crate) fn assemble(
     model: &Model,
     scratch: &Scratch,
@@ -135,8 +138,10 @@ pub(crate) fn assemble(
 /// # Errors
 ///
 /// [`Error::Undecidable`] when two of the input's planes cannot be told apart at
-/// all, and [`Error::ResultIsNotManifold`] when one of its edges is claimed by
-/// other than two faces, which means the input was already broken.
+/// all, [`Error::ResultIsNotManifold`] when one of its edges is claimed by
+/// other than two faces, which means the input was already broken, and
+/// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
+/// its coplanar faces both wind as its outline.
 pub(crate) fn joined_faces_of_an_input(
     model: &Model,
     solid: SolidView<'_>,
@@ -949,15 +954,18 @@ impl Assembly {
     /// # Errors
     ///
     /// [`Error::ResultIsNotManifold`] when an edge is claimed by other than two
-    /// faces, and [`Error::Undecidable`] when two planes cannot be told apart at
-    /// all.
+    /// faces, [`Error::Undecidable`] when two planes cannot be told apart at
+    /// all, and [`Error::TheFuseWroteABrokenAnswer`] when two rings of a joined
+    /// flat face both wind as its outline ([`Assembly::rings_round`]).
     ///
     /// # Panics
     ///
-    /// If a joined face comes out with two outlines, which is the answer
-    /// pinching to a point at a corner, or with a ring of fewer than three
-    /// sides. Both are broken internal invariants and a corrupt solid is worse
-    /// than a crash (§4.1).
+    /// Where [`Assembly::rings_round`] cannot tell which ring of a joined flat
+    /// face is its outline, as its own `# Panics` lists, or where a ring comes
+    /// out bounding nothing: fewer than three sides, unless it is one side that
+    /// closes on itself, two different sides not both straight, or a ring of a
+    /// whole closed surface ([`Assembly::sides_of`]). Both are broken internal
+    /// invariants and a corrupt solid is worse than a crash (§4.1).
     fn join_up_what_is_one_face(&mut self, log: &mut ProvenanceLog) -> Result<bool> {
         let along = self.darts_along_each_edge()?;
         let mut dissolved = self.edges_with_one_face_on_both_sides(&along, log)?;
@@ -966,7 +974,7 @@ impl Assembly {
             dissolved[edge] = false;
         }
         let same = joined_across(&along, &dissolved, self.faces.len());
-        let joined = self.rings_of_each_joined_face(&same, &along, &dissolved)?;
+        let joined = self.rings_of_each_joined_face(&same, &along, &dissolved, log)?;
         let renumbered = self.what_is_left(&joined, &along, &dissolved);
         // **A closed curve cut where nothing meets it** is joined back up even
         // where no face was: a pointed cone less a block whose walls are tangent
@@ -1063,6 +1071,7 @@ impl Assembly {
         same: &Sameness,
         along: &[[Dart; 2]],
         dissolved: &[bool],
+        log: &mut ProvenanceLog,
     ) -> Result<Vec<JoinedFace>> {
         let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for face in 0..self.faces.len() {
@@ -1086,7 +1095,7 @@ impl Assembly {
             let (surface, used, rings) = match self.faces[members[0]].surface.as_plane() {
                 Some(_) => {
                     let plane = plane_of_the_joined_face(&members, &self.faces);
-                    let rings = self.rings_round(&members, along, dissolved, plane)?;
+                    let rings = self.rings_round(&members, along, dissolved, plane, log)?;
                     (Surface::Plane(plane), Orientation::Forward, rings)
                 }
                 // The lowest spelling by bits, so the face does not depend on
@@ -1490,17 +1499,30 @@ impl Assembly {
             .collect()
     }
 
-    /// # Panics
+    /// The rings of one joined flat face, its outline first and then its holes.
     ///
-    /// If more than one ring winds with the plane's normal, or if none does.
-    /// Two outlines means the joined region touches itself at a corner, which
-    /// is a solid this kernel cannot hold. No outline means the region is
-    /// bounded by holes alone, which is a region with no outside — every face
-    /// that got here came out of [`Assembly::from_the_pieces`] or
-    /// [`Assembly::from_one_input_solid`] with an outline of its own, and
-    /// joining only ever takes an edge *away* from between two of them.
+    /// The outline is the one ring that winds with the plane's normal, and the
+    /// holes wind against it. No outline at all would be a region bounded by
+    /// holes alone, which has no outside — every face that got here came out of
+    /// [`Assembly::from_the_pieces`] or [`Assembly::from_one_input_solid`] with
+    /// an outline of its own, and joining only ever takes an edge *away* from
+    /// between two of them.
     ///
-    /// **A ring whose corners enclose nothing is placed by that same rule**,
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] where a ring's winding cannot be decided.
+    ///
+    /// [`Error::TheFuseWroteABrokenAnswer`], `broken`
+    /// [`Invalid::HoleWindsWithTheOuterWire`], where two rings wind with the
+    /// normal. Either the joined region touches itself at a corner, which is a
+    /// solid this kernel cannot hold, or a hole's corners lie within a rounding
+    /// of each other and wind the wrong way as stored: a cube turned so its
+    /// corner rests on another's face, with its three planes meeting a rounding
+    /// outside the face, leaves the face a hole of that size
+    /// (`a_turned_cube_with_its_corner_on_a_face.rs`, Q1287). Written, either
+    /// face is one [`Model::validate`] refuses for that `broken`.
+    ///
+    /// **A ring whose corners enclose nothing is placed by the rule above**,
     /// because its corners cannot place it. A half disk has two corners, so the
     /// hole a half ball pokes through a knife's face, joined across the axis
     /// from the knife's other half, winds round no area at all (§200.1's two
@@ -1518,17 +1540,39 @@ impl Assembly {
     /// (`a_joined_flat_face_whose_rings_enclose_no_area.rs`).
     /// A ring shown to hold the others is the outline and the rest are holes;
     /// with none shown to, and only one ring left that nothing could place,
-    /// that one is the outline by the rule above. Two or more left unplaced
-    /// still panics — a ring along a torus, or with a side along a hyperbola —
-    /// and no answer is known to reach it: a torus refuses every fuse before
-    /// here (`how_often_a_fuse_with_a_torus_refuses.rs`).
+    /// that one is the outline by the rule above.
+    ///
+    /// # Panics
+    ///
+    /// Where the rings still cannot say which one is the outline:
+    ///
+    /// - **A ring winding neither way.** Nothing reaches it:
+    ///   [`winding_round`] answers `Neg`, `Zero` or `Pos`, or refuses.
+    /// - **No ring winding with the plane, and none of those enclosing nothing
+    ///   holding the others**, every one of them answering `Some(false)`.
+    ///   Nothing keeps answers off it: two bars united and then united with the
+    ///   half bar whose corner is their lens's corner reach it, both ways round
+    ///   (`a_half_bar_whose_corner_is_the_lens_corner_mostly_answers` in
+    ///   `a_lens_whose_hole_is_half_a_disk.rs`, Q1290).
+    /// - **Two or more rings enclosing nothing that nothing could place** — a
+    ///   ring along a torus, or with a side along a hyperbola (Q1253). No shape
+    ///   is known to reach it: a torus refuses every fuse before here
+    ///   (`how_often_a_fuse_with_a_torus_refuses.rs`).
+    /// - **Two or more rings each holding the others**, which would mean the
+    ///   answer's rings cross. Nobody has traced whether any shape reaches it.
     fn rings_round(
         &self,
         members: &[usize],
         along: &[[Dart; 2]],
         dissolved: &[bool],
         plane: Plane,
+        log: &mut ProvenanceLog,
     ) -> Result<Vec<Vec<Dart>>> {
+        let corners_of = |ring: &[Dart]| -> Vec<[f64; 3]> {
+            ring.iter()
+                .map(|&dart| self.corners[self.starts_at(dart)].point.coordinates())
+                .collect()
+        };
         let mut walked: BTreeSet<Dart> = BTreeSet::new();
         let mut outline: Option<Vec<Dart>> = None;
         let mut holes = Vec::new();
@@ -1540,17 +1584,16 @@ impl Assembly {
                         continue;
                     }
                     let ring = self.ring_from(start, along, dissolved, &mut walked);
-                    let corners: Vec<[f64; 3]> = ring
-                        .iter()
-                        .map(|&dart| self.corners[self.starts_at(dart)].point.coordinates())
-                        .collect();
+                    let corners = corners_of(&ring);
                     match winding_round(&corners, plane.normal().components())? {
                         Decision::Pos => {
-                            assert!(
-                                outline.is_none(),
-                                "a face joined out of coplanar pieces has one outline, and this \
-                                 one has two, so the answer touches itself at a corner"
-                            );
+                            if let Some(first) = &outline {
+                                return Err(no_one_ring_is_the_outline(
+                                    &[corners_of(first), corners],
+                                    Invalid::HoleWindsWithTheOuterWire,
+                                    log,
+                                ));
+                            }
                             outline = Some(ring);
                         }
                         Decision::Neg => holes.push(ring),
@@ -3685,6 +3728,42 @@ fn plane_of_the_joined_face(members: &[usize], faces: &[Face]) -> Plane {
         })
         .expect("a joined face is made of at least one piece")
 }
+
+/// Refuse a joined flat face whose rings do not say which one is its outline,
+/// and record their corners.
+///
+/// Each ring's winding was decided exactly, on the corners as stored, so
+/// nothing here is undecided: the corners describe something no face can be.
+/// `broken` is what [`Model::validate`] would refuse the face for if it were
+/// written as it stands — a second ring winding with the plane goes in as a
+/// hole that winds with its outline, [`Invalid::HoleWindsWithTheOuterWire`].
+///
+/// Each ring's first corner is recorded again after its last, so a reader can
+/// tell where one ring stops and the next starts. The enclosure is infinite for
+/// the reason [`gave_up`] gives: there is no width here for a policy to accept.
+fn no_one_ring_is_the_outline(
+    rings: &[Vec<[f64; 3]>],
+    broken: Invalid,
+    log: &mut ProvenanceLog,
+) -> Error {
+    let corners: Vec<PredicatePoint> = rings
+        .iter()
+        .flat_map(|ring| ring.iter().chain(ring.first()))
+        .map(|&corner| PredicatePoint::from(corner))
+        .collect();
+    log.push(Record::new(
+        WHICH_RING_IS_THE_OUTLINE,
+        &corners,
+        Level::Interval,
+        f64::INFINITY,
+        Measures::Area,
+    ));
+    Error::TheFuseWroteABrokenAnswer { broken }
+}
+
+/// The name the choice of a joined flat face's outline goes by in provenance
+/// records.
+const WHICH_RING_IS_THE_OUTLINE: &str = "which ring of a joined flat face is its outline";
 
 /// The corner an input vertex is, made the first time it is asked for.
 fn corner_of(

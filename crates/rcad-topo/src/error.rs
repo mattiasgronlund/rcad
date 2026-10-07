@@ -193,8 +193,16 @@ pub enum Error {
     ///   `broken` [`Invalid::CoedgesRunTheSameWay`] (§243.5), while the mesher
     ///   read a torus facing into its tube and the bend's wall was used turned
     ///   round to suit it. Built the way a file writes a bend, it answers
-    ///   (§361), and no test in this crate now pins a sound pair that ends
-    ///   here.
+    ///   (§361).
+    /// - **Sound inputs a rounding apart.** A cube turned so that its corner
+    ///   rests on another cube's face, with its three planes meeting a rounding
+    ///   outside that face, leaves the fuse a triangle a rounding across. The
+    ///   union ends here with `broken` [`Invalid::HoleWindsWithTheOuterWire`],
+    ///   and the intersection under a tolerant policy with
+    ///   [`Invalid::OuterWireWindsAgainstTheNormal`]
+    ///   (`a_turned_cube_with_its_corner_on_a_face.rs`, Q1287). The answer the
+    ///   designer means exists, so under a tolerant policy that is a gap
+    ///   (Q1288).
     /// - **A broken input, carried through.** A round bar whose top corner was
     ///   moved a millimetre off its surfaces in the model's bytes, read back and
     ///   fused under `Policy::certified` against a partner that leaves that
@@ -237,10 +245,18 @@ pub enum Error {
     /// the argument. Everything else the sweep refuses is wrapped in here, with
     /// no list of exceptions to keep honest.
     ///
+    /// **One arrives before the sweep.** A face joined from coplanar pieces
+    /// whose rings include two that both wind as its outline is refused while
+    /// the pieces are joined, since nothing after that can say which ring is
+    /// the hole. `broken` is then [`Invalid::HoleWindsWithTheOuterWire`], what
+    /// the sweep would say of that face written down, and the log gets a
+    /// record holding both rings' corners.
+    ///
     /// [`Model::validate`]: crate::Model::validate
     #[error("this kernel built an answer that does not validate, and wrote nothing: {broken}")]
     TheFuseWroteABrokenAnswer {
-        /// What the sweep of the throwaway model refused the answer for.
+        /// What the sweep of the throwaway model refused the answer for, or
+        /// would have.
         broken: Invalid,
     },
 
