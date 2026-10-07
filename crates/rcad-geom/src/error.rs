@@ -31,6 +31,23 @@ pub enum Error {
         what: &'static str,
     },
 
+    /// Quarter turns were asked for about an axis that does not run exactly
+    /// along `x`, `y` or `z`.
+    ///
+    /// [`Isometry::quarter_turns`](crate::Isometry::quarter_turns) promises a
+    /// turn that rounds nothing, and only a turn about one of those three moves
+    /// each coordinate onto another. About any other axis a quarter turn is
+    /// [`Isometry::rotation`](crate::Isometry::rotation)'s to build, and that
+    /// rounds.
+    #[error(
+        "quarter turns are only said exactly about an axis along x, y or z, and this one points \
+         along {direction:?}"
+    )]
+    QuarterTurnsNeedAnAxisAlongXYOrZ {
+        /// The direction of the axis that was asked about.
+        direction: crate::Vector,
+    },
+
     /// Three points that were meant to give a plane all sit on one line.
     #[error("the three points are all on one line, so they do not give a plane")]
     PointsAreInALine,
