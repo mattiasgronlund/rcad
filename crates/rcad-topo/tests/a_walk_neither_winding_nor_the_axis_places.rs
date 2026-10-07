@@ -49,8 +49,8 @@
 //!   hole drawn above a roofed frustum is, below. So the route found to the
 //!   axis rule's `its_own == 0` is a face whose own sides are such arcs alone,
 //!   above every closed curve: the chip. Built by fusing a frustum with planes
-//!   it is refused before that (two shapes below); described face by face it
-//!   reaches it.
+//!   it was refused before that, and answers now (two shapes below, queue row
+//!   Q1176); described face by face it reaches it.
 //!
 //! The other shapes built on the way are pinned beside them, with what each
 //! gives instead.
@@ -552,7 +552,7 @@ fn the_top_of_a_plate_with_a_round_tab_and_a_round_hole_holds_neither_the_hole_n
 /// the prism along `y` whose face lies on `2x − z = 1` and then the one whose
 /// face lies on `2x + z = 11`, the rest of each prism clear of the frustum.
 ///
-/// The first cut answers one solid. The second was refused
+/// The first cut answers one solid, the half chip. The second was refused
 /// `AFaceTrimmedByACurveThisCannotFollow` in selection, both ways round (queue
 /// row Q1177): a ray from a point of the second prism's face met the half
 /// chip's skin, and `holds.rs` would not follow a cone face cut by one plane
@@ -560,14 +560,20 @@ fn the_top_of_a_plate_with_a_round_tab_and_a_round_hole_holds_neither_the_hole_n
 /// `z ≤ 8`. It does now, since a cut square to the axis keeps the rulings
 /// nearest the branch's vertex. The probe then printed selection keeping
 /// exactly the chip's three pieces, the lens on the cone and one piece on each
-/// plane, each with the two corners `(3, ±4, 5)`, and the fuse is refused
-/// `ResultIsNotManifold { count: 4 }` past selection, both ways round, as
-/// cutting with one prism holding both faces is
-/// (`a_frustum_under_two_steep_planes_is_refused_as_not_a_manifold`, queue row
-/// Q1176). Only the intersection is asked, since the chip is what it is for.
+/// plane, each with the two corners `(3, ±4, 5)`, and the fuse was refused
+/// `ResultIsNotManifold { count: 4 }` past selection, both ways round, for the
+/// reason cutting with one prism holding both faces was
+/// (`a_frustum_under_two_steep_planes_is_answered_under_every_rule`, queue row
+/// Q1176): the lens's two arcs were one edge.
+///
+/// **The answers.** The half chip is the frustum past `2x − z = 1`,
+/// [`the_half_chips_volume`]. The second prism is the triangle `30.5 · 27 / 2`
+/// along `|y| ≤ 10`, `8235`. The two share [`the_chips_volume`]. Each fuse is
+/// one solid.
 #[test]
-fn a_chip_cut_from_a_frustum_in_two_steps_is_refused_as_not_a_manifold() {
-    for chip_first in [true, false] {
+fn a_chip_cut_from_a_frustum_in_two_steps_is_answered_under_every_rule() {
+    let (half_chip, falling_prism, chip) = (the_half_chips_volume(), 8235.0, the_chips_volume());
+    for (rule, half_first) in every_rule_both_ways() {
         let mut model = a_model();
         let cone = cones::a_frustum_seamed_towards(
             &mut model,
@@ -590,38 +596,85 @@ fn a_chip_cut_from_a_frustum_in_two_steps_is_refused_as_not_a_manifold() {
             [[-20.0, -10.0], [10.5, -10.0], [-3.0, 17.0]],
             10.0,
         );
-        let refused = fuse(&mut model, half, falling, Rule::Intersection, chip_first);
-        assert!(
-            matches!(refused, Err(Error::ResultIsNotManifold { count: 4 })),
-            "the half chip first {chip_first}: {refused:?}"
-        );
+        let what = format!("{rule:?}, the half chip first {half_first}");
+        let answer = fuse(&mut model, half, falling, rule, half_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let volume = match (rule, half_first) {
+            (Rule::Union, _) => half_chip + falling_prism - chip,
+            (Rule::Intersection, _) => chip,
+            (Rule::Difference, true) => half_chip - chip,
+            (Rule::Difference, false) => falling_prism - chip,
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_each_holds(&model, &answer, &[volume], &what);
     }
 }
 
 /// A frustum of slope 1 from `z = 1/2` to `16`, and the pointed cone of slope 1
-/// to `16`, each cut by the prism along `y` (`|y| ≤ 20`) whose faces lie on
-/// `2x + z = 3` and `8x + 3z = −3`; and the frustum from `1/2` to `8` cut by
+/// to `16`, each against the prism along `y` (`|y| ≤ 20`) whose faces lie on
+/// `2x + z = 3` and `8x + 3z = −3`; and the frustum from `1/2` to `8` against
 /// the prism whose faces lie on `2x − z = 1` and `2x + z = 11`, the chip of
 /// `a_chip_of_a_cone_beside_a_tent_cannot_tell_the_tents_two_walks_apart`.
 ///
 /// Each plane leans more steeply than the cone's side and cuts a hyperbola.
 /// The first pair meet in a ridge at `(−6, y, 15)` and cut away the whole top
 /// of the cone, dipping to `z = 1` and `z = 0.6` below its two ends; the second
-/// meet in a chord at `(3, y, 5)` inside it. Every one of these intersections is
-/// refused `ResultIsNotManifold { count: 4 }`, both ways round. The same roof
-/// over a frustum from `z = 2`, which both hyperbolas dip below, answers
+/// meet in a chord at `(3, y, 5)` inside it. So the line each pair meets along
+/// crosses the cone twice, at `(−6, ±√189, 15)` and at `(3, ±4, 5)`, and every
+/// fuse keeps an arc of each plane's hyperbola between those two points. Named
+/// by their two corners alone the two arcs were one edge, with the cone's face
+/// along it twice and each plane's face once, and every fuse was refused
+/// `ResultIsNotManifold { count: 4 }`, both ways round (queue row Q1176). The
+/// same roof over a frustum from `z = 2`, which both hyperbolas dip below,
+/// never met it: there the floor's circle cuts each hyperbola in two, and no
+/// two arcs share both their corners
 /// (`a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`).
-/// Not traced.
+///
+/// **The answers.** The roof's prism is the triangle `2 · 16 / 2` along
+/// `|y| ≤ 20`, `640`, and the chip's `7 · 7 / 2` along `|y| ≤ 10`, `490`. The
+/// cone is `π(far³ − near³)/3`. What the two share is
+/// [`the_roofed_frustum_between`] the cone's floor and the ridge, and
+/// [`the_chips_volume`] for the chip, which lies between `z = 1` and `5`, inside
+/// the frustum and inside `|y| ≤ 10`. Each fuse is one solid.
 #[test]
-fn a_frustum_under_two_steep_planes_is_refused_as_not_a_manifold() {
+fn a_frustum_under_two_steep_planes_is_answered_under_every_rule() {
+    use std::f64::consts::PI;
     let roof = [[-6.0, 15.0], [0.0, -1.0], [2.0, -1.0]];
     let chip = [[3.0, 5.0], [-0.5, -2.0], [6.5, -2.0]];
-    for (what, cone_is_pointed, near, far, prism, half) in [
-        ("a frustum under the roof", false, 0.5, 16.0, roof, 20.0),
-        ("a pointed cone under the roof", true, 0.0, 16.0, roof, 20.0),
-        ("a frustum cut to the chip", false, 0.5, 8.0, chip, 10.0),
+    for (what, cone_is_pointed, near, far, prism, half, prism_holds, shared) in [
+        (
+            "a frustum under the roof",
+            false,
+            0.5,
+            16.0,
+            roof,
+            20.0,
+            640.0,
+            the_roofed_frustum_between(0.5, 15.0),
+        ),
+        (
+            "a pointed cone under the roof",
+            true,
+            0.0,
+            16.0,
+            roof,
+            20.0,
+            640.0,
+            the_roofed_frustum_between(0.0, 15.0),
+        ),
+        (
+            "a frustum cut to the chip",
+            false,
+            0.5,
+            8.0,
+            chip,
+            10.0,
+            490.0,
+            the_chips_volume(),
+        ),
     ] {
-        for cone_first in [true, false] {
+        let cone_holds = PI * (far * far * far - near * near * near) / 3.0;
+        for (rule, cone_first) in every_rule_both_ways() {
             let mut model = a_model();
             let cone = if cone_is_pointed {
                 cones::a_pointed_cone(&mut model, 1.0, far)
@@ -629,17 +682,23 @@ fn a_frustum_under_two_steep_planes_is_refused_as_not_a_manifold() {
                 cones::a_frustum(&mut model, 1.0, near, far)
             };
             let prism = a_prism_along_y(&mut model, prism, half);
-            let refused = fuse(&mut model, cone, prism, Rule::Intersection, cone_first);
-            assert!(
-                matches!(refused, Err(Error::ResultIsNotManifold { count: 4 })),
-                "{what}, the cone first {cone_first}: {refused:?}"
-            );
+            let what = format!("{what}, {rule:?}, the cone first {cone_first}");
+            let answer = fuse(&mut model, cone, prism, rule, cone_first)
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let volume = match (rule, cone_first) {
+                (Rule::Union, _) => cone_holds + prism_holds - shared,
+                (Rule::Intersection, _) => shared,
+                (Rule::Difference, true) => cone_holds - shared,
+                (Rule::Difference, false) => prism_holds - shared,
+                (other, _) => panic!("not a rule this probes: {other:?}"),
+            };
+            assert_each_holds(&model, &answer, &[volume], &what);
         }
     }
 }
 
 /// The frustum of slope 1 from `z = 2` to `16` under the roof of
-/// `a_frustum_under_two_steep_planes_is_refused_as_not_a_manifold`, which
+/// `a_frustum_under_two_steep_planes_is_answered_under_every_rule`, which
 /// answers, against a plate from `z = 9/4` to `20` over `[−30, 30]²` with a
 /// triangular hole `(3/10, 10)`, `(1/10, 53/5)`, `(0, 11)`.
 ///
@@ -712,7 +771,7 @@ fn a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_ever
 
 /// The skins `holds.rs` would not follow before queue row Q1177 hold their own
 /// points, asked through the public `face_holds_the_point`: the half chip of
-/// `a_chip_cut_from_a_frustum_in_two_steps_is_refused_as_not_a_manifold`, the
+/// `a_chip_cut_from_a_frustum_in_two_steps_is_answered_under_every_rule`, the
 /// frustum cut to `2x − z ≥ 1` under its top `z ≤ 8`, and the two pieces of
 /// skin of the roofed frustum of
 /// `a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`.
@@ -866,27 +925,47 @@ fn the_skin_of_a_chip_between_two_hyperbolas_holds_the_lens_between_them() {
     }
 }
 
-/// The part of the roofed frustum of
+/// The part of the cone `r ≤ z` under the roof of
 /// `a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`
-/// from `z = low` to `high`, by Simpson's rule over its slices.
+/// and `a_frustum_under_two_steep_planes_is_answered_under_every_rule` from
+/// `z = low` to `high`, by Simpson's rule over its slices.
 ///
 /// The slice at height `z` is the disc `r ≤ z` between `x = −(3 + 3z)/8` and
-/// `x = (3 − z)/2`. Both lines cut the disc for every `z` from `2` to `15`,
-/// where they meet at `x = −6`, so the slice area is smooth there. The part of
-/// a disc of radius `r` past `x = a`, for `|a| < r`, is
-/// `r² acos(a/r) − a √(r² − a²)`.
+/// `x = (3 − z)/2`. The first line cuts the disc from `z = 0.6` up and the
+/// second from `z = 1`, and the two meet at `x = −6` at `z = 15`, so the slice
+/// area is smooth between those heights and each stretch is summed on its own.
 fn the_roofed_frustum_between(low: f64, high: f64) -> f64 {
-    let past = |radius: f64, from: f64| {
-        assert!(from.abs() < radius, "both lines cut the disc");
-        radius * radius * (from / radius).acos() - from * (radius * radius - from * from).sqrt()
-    };
     let slice = |z: f64| {
         let (left, right) = (-(3.0 + 3.0 * z) / 8.0, (3.0 - z) / 2.0);
         if left >= right {
             return 0.0;
         }
-        past(z, left) - past(z, right)
+        the_part_of_a_disc_past(z, left) - the_part_of_a_disc_past(z, right)
     };
+    let mut heights = vec![low];
+    heights.extend([0.6, 1.0].into_iter().filter(|&at| low < at && at < high));
+    heights.push(high);
+    heights
+        .windows(2)
+        .map(|stretch| by_simpsons_rule(stretch[0], stretch[1], slice))
+        .sum()
+}
+
+/// The part of a disc of radius `radius` about the origin past `x = from`:
+/// `r² acos(a/r) − a √(r² − a²)` where the line cuts it.
+fn the_part_of_a_disc_past(radius: f64, from: f64) -> f64 {
+    if from >= radius {
+        0.0
+    } else if from <= -radius {
+        std::f64::consts::PI * radius * radius
+    } else {
+        radius * radius * (from / radius).acos() - from * (radius * radius - from * from).sqrt()
+    }
+}
+
+/// The integral of `slice` from `low` to `high` by Simpson's rule over 20 000
+/// steps.
+fn by_simpsons_rule(low: f64, high: f64, slice: impl Fn(f64) -> f64) -> f64 {
     let steps = 20_000;
     let step = (high - low) / f64::from(steps);
     let inner: f64 = (1..steps)
@@ -1229,26 +1308,19 @@ fn a_chip_of_a_cone(model: &mut Model) -> SolidKey {
 /// is `r² acos(a/r) − a √(r² − a²)`. The slice area is smooth on each side of
 /// `11/3`, so each side is summed on its own.
 fn the_chips_volume() -> f64 {
-    let past = |radius: f64, from: f64| {
-        if from >= radius {
-            0.0
-        } else {
-            radius * radius * (from / radius).acos() - from * (radius * radius - from * from).sqrt()
-        }
+    let slice = |z: f64| {
+        the_part_of_a_disc_past(z, (1.0 + z) / 2.0) - the_part_of_a_disc_past(z, (11.0 - z) / 2.0)
     };
-    let slice = |z: f64| past(z, (1.0 + z) / 2.0) - past(z, (11.0 - z) / 2.0);
-    let simpson = |low: f64, high: f64| {
-        let steps = 20_000;
-        let step = (high - low) / f64::from(steps);
-        let inner: f64 = (1..steps)
-            .map(|at| {
-                let weight = if at % 2 == 1 { 4.0 } else { 2.0 };
-                weight * slice(low + f64::from(at) * step)
-            })
-            .sum();
-        (slice(low) + inner + slice(high)) * step / 3.0
-    };
-    simpson(1.0, 11.0 / 3.0) + simpson(11.0 / 3.0, 5.0)
+    by_simpsons_rule(1.0, 11.0 / 3.0, slice) + by_simpsons_rule(11.0 / 3.0, 5.0, slice)
+}
+
+/// The half chip of
+/// `a_chip_cut_from_a_frustum_in_two_steps_is_answered_under_every_rule`: the
+/// frustum of slope 1 from `z = 1/2` to `8` past `2x − z = 1`, by Simpson's rule
+/// over its slices. The slice at height `z` is the disc `r ≤ z` past
+/// `x = (1 + z)/2`, which the line cuts from `z = 1` up.
+fn the_half_chips_volume() -> f64 {
+    by_simpsons_rule(1.0, 8.0, |z| the_part_of_a_disc_past(z, (1.0 + z) / 2.0))
 }
 
 /// The tent of
