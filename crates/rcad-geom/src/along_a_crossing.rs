@@ -93,9 +93,9 @@ use rcad_predicates::{
 use crate::enclosure::{cross_enclosing, dot_enclosing, exactly};
 use crate::exact::Exact;
 use crate::intersect::{
-    how_a_ball_on_a_cones_axis_meets_it, whether_a_ball_runs_through_a_cones_apex,
-    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
-    whether_two_cones_share_an_axis,
+    halfway_between_a_cones_apex_and_a_ball_on_its_axis, how_a_ball_on_a_cones_axis_meets_it,
+    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
+    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
 use crate::{
     Cone, Cylinder, Error, HalfSpace, Plane, Point, Result, Sphere, Surface, Torus, Vector,
@@ -553,9 +553,10 @@ fn the_way_two_cones_on_one_axis_wind(
 /// the pair taken cone first.
 ///
 /// The picker is the half-space square to the axis through
-/// `a + (c − a)/(1 + s²)`, built from the same numbers in the same order as
-/// [`intersect`](crate::intersect) builds the one it hands back on these two
-/// runs. That point is `h = e/(1 + s²)` up the axis, which is exactly where
+/// [`halfway_between_a_cones_apex_and_a_ball_on_its_axis`](crate::intersect::halfway_between_a_cones_apex_and_a_ball_on_its_axis),
+/// the one function [`intersect`](crate::intersect) builds its own half-space
+/// through on these two runs, so the picker can never drift from the circle
+/// `intersect` hands back. That point is exactly where
 /// [`the_way_a_circle_round_a_cones_axis_winds`]'s sign for a ball changes, so
 /// the circle ahead of it winds about the cone's axis direction negated and the
 /// one behind about the direction itself.
@@ -602,8 +603,7 @@ fn the_way_a_cone_and_a_ball_on_its_axis_wind(
         Decision::Undecidable { .. } => return Ok(WhichWayItWinds::CannotTell),
         other => unreachable!("where a ball stands against an apex is a sign: {other:?}"),
     }
-    let squared_slope = cone.slope() * cone.slope();
-    let halfway = cone.apex() + (ball.centre() - cone.apex()) * (1.0 + squared_slope).recip();
+    let halfway = halfway_between_a_cones_apex_and_a_ball_on_its_axis(cone, ball);
     the_way_a_circle_round_a_cones_axis_winds(cone, halfway, from)
 }
 
