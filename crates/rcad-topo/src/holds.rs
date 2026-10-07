@@ -6709,17 +6709,24 @@ fn the_picker_this_face_is_read_past(
 /// point says its own sign.
 ///
 /// **Only where both curves go right round one axis and the half-space faces
-/// exactly along it**, which are the pairs `Model::validate` reads a corner of
-/// the same way (`validate.rs`'s `what_a_corner_past_the_picker_says`, row
-/// Q1190) and `arrange.rs`'s `whether_past_the_picker` reads a point of a
-/// fuse's arrangement by: a pipe and anything [`intersect`] cuts it in two such
-/// curves by, the axis being the pipe's; a cone and a pipe, a second cone or a
-/// ball on its axis, the axis being the cone's; and a ball and a cone whose
-/// axis runs through its centre, the axis again being the cone's. Each curve
+/// exactly along it**, and of the pairs `Model::validate` reads a corner of the
+/// same way (`validate.rs`'s `what_a_corner_past_the_picker_says`, row Q1190),
+/// only those with no ball in them: a pipe and a pipe or a cone [`intersect`]
+/// cuts it in two such curves by, the axis being the pipe's, and a cone and a
+/// pipe or a second cone on its axis, the axis being the cone's. Each curve
 /// then cuts the surface in two, the half-space holds the edge's curve and not
 /// the other, and everything of the surface past the half-space's flat surface
 /// is on the curve's side towards it: on a cone through the apex, which joins
-/// the two nappes, and on a ball as the cap past the flat surface.
+/// the two nappes.
+///
+/// **A ball on either side is left refused, though the same reading holds of
+/// it.** Read that way too, taking a cone closed by a ball on its axis out of
+/// a cut cone panics in `fuse/assemble.rs` — "2 rings of a joined face enclose
+/// no area between their corners" — where it was refused
+/// `AFaceTrimmedByACurveThisCannotFollow`
+/// (`tests/a_joined_flat_face_whose_rings_enclose_no_area.rs`'s
+/// `a_cut_cone_less_a_cone_closed_by_a_ball_is_refused_on_the_balls_cap`).
+/// A refusal is kept over a crash until that is fixed (row Q1218's report).
 ///
 /// The half-space is the one [`intersect`] names the curve by
 /// ([`the_picker_naming_the_circle_through`]). A pair `intersect` refuses to
@@ -6729,9 +6736,8 @@ fn the_picker_this_face_is_read_past(
 /// flat surface, laid onto the surface: `|g|²·d − (g·d)·g` for the surface's
 /// gradient `g` and `d` the half-space's normal turned round, and `d` itself on
 /// a pipe, whose gradient is square to its axis. On a cone that runs along the
-/// ruling, and on a ball along the line of longitude. `None` where that is
-/// [`Decision::Zero`], which is the two surfaces touching rather than crossing
-/// there.
+/// ruling. `None` where that is [`Decision::Zero`], which is the two surfaces
+/// touching rather than crossing there.
 ///
 /// # Errors
 ///
@@ -6744,17 +6750,12 @@ fn what_lies_past_the_picker(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<PastThePicker>> {
-    if !matches!(
-        partner,
-        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
-    ) {
+    if !matches!(partner, Surface::Cylinder(_) | Surface::Cone(_)) {
         return Ok(None);
     }
     let axis = if let Surface::Cylinder(pipe) = surface {
         pipe.axis()
-    } else if let (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) =
-        (surface, partner)
-    {
+    } else if let Surface::Cone(cone) = surface {
         cone.axis()
     } else {
         return Ok(None);
