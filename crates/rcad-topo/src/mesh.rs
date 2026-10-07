@@ -3032,8 +3032,24 @@ impl BuildingAMesh {
     /// deflections (`a_cap_whose_rim_bends_back_past_its_own_meridian.rs`).
     /// So a chord that leaves the piece is replaced by the chord between two of
     /// its corners that stays inside and leaves the wider half narrowest
-    /// ([`the_most_even_chord_that_stays_inside`]). Where none does, the chord
-    /// is kept and the triangulator refuses the piece as it did.
+    /// ([`the_most_even_chord_that_stays_inside`]).
+    ///
+    /// **Where none does, the piece is left whole**, as one no cut makes any
+    /// narrower is above. A ball of radius 4 at `(1, 1, 5)` resting on the
+    /// block `[0, 4] × [0, 4] × [0, 1]` leaves a face, the ball's skin past
+    /// `x = 0` between `y = 0` and `y = 4`, that goes `2.03` round in the
+    /// chart: from the two corners where `x = 0` meets `y = 4`, at longitude
+    /// `−4.391`, to the two where it meets `y = 0`, at `−2.356`. The only chord
+    /// that parts the first two from the second runs between the points walked
+    /// on the `x = 0` arc above and below the first, both at `−4.014`, and the
+    /// lens `y = 4` cuts off the face reaches in between them to `−3.990`, so
+    /// that chord crosses it. Kept, as it was until Q1099, the piece was
+    /// refused `BoundaryCrossesItself` at the coarsest mesh and at the next,
+    /// just under 4, and so were union both ways and ball less block of 60 such shapes:
+    /// 180 of a sweep of 16 200 fuses of whole-number balls resting on
+    /// whole-number blocks. Left whole, every one of the 16 200 answers and
+    /// measures what its closed form says (`fuses_that_touch.rs`,
+    /// `a_ball_whose_skin_the_walls_cut_into_a_piece_no_straight_cut_narrows_fuses_by_every_rule`).
     fn cut_in_two(
         &mut self,
         face: FaceView<'_>,
@@ -3054,10 +3070,10 @@ impl BuildingAMesh {
         let (opened, at) = if a_chord_stays_inside(&opened, at) {
             (opened, at)
         } else {
-            match the_most_even_chord_that_stays_inside(piece, span) {
-                Some(at) => (piece.clone(), at),
-                None => (opened, at),
-            }
+            let Some(at) = the_most_even_chord_that_stays_inside(piece, span) else {
+                return Ok(None);
+            };
+            (piece.clone(), at)
         };
         let mut one = opened.between(at[0], at[1]);
         let mut other = opened.between(at[1], at[0]);
