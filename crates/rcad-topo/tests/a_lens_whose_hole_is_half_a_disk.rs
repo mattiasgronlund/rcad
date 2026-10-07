@@ -44,17 +44,20 @@
 //! rather than a touch in the arrangement — the pocket it would cut pinches to
 //! a point at the lens's own corner. Built by uniting or overlapping the two
 //! bars first, the fuse meets the half bar across the one line where the
-//! lens's two walls and the half bar's flat side all meet, three surfaces
-//! with at most one of them flat, and `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
-//! still refuses every one of those twelve fuses.
+//! lens's two walls and the half bar's pipe all run, three curved surfaces,
+//! and `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` refused every one of those
+//! twelve fuses until Q1284 read three pipes up `z` as the plane two of them
+//! differ by and two pipes. Now every one answers but two: the bars less the
+//! half bar pinches as against one bar, and **the union of the bars united
+//! and the half bar panics, both ways round**, in `rings_round`.
 //!
 //! A half bar of radius 4 at the origin, whose flat side is the whole chord,
 //! puts both of its corners on the lens's own. Against the two bars united or
-//! where they overlap it refuses `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` the
-//! same way. Against one bar alone it answers, bar the one fuse whose answer
-//! pinches; so do the two D's side by side without the half bar. Q625 found
-//! both refused `TwoCurvesTouchWithoutCrossing` before Q930 and did not pin
-//! them.
+//! where they overlap it was refused the same way, and since Q1284 answers,
+//! bar the one fuse whose answer pinches. Against one bar alone it answers,
+//! bar the same one; so do the two D's side by side without the half bar.
+//! Q625 found both refused `TwoCurvesTouchWithoutCrossing` before Q930 and
+//! did not pin them.
 //!
 //! **Which ring is the outline, run rather than read.** On base `90c2e6a9`,
 //! with a print in `rings_round` and `holds_the_other_rings` in
@@ -69,8 +72,11 @@
 //! over. So `rings_round` takes the outline as the one ring nothing could
 //! place. On one pipe, in the first union of the third route, the outline
 //! answers that it holds the other, as under gdb above. A second ring that
-//! nothing could place would reach the panic in `rings_round`; none of the
-//! shapes here builds one, and none of the fuses here panics.
+//! nothing could place would reach a panic in `rings_round`, and so would
+//! rings that each answer they hold none of the others. The second is what
+//! the union of the bars united and the half bar at the lens corner reaches
+//! (`a_half_bar_whose_corner_is_the_lens_corner_mostly_answers`), on base
+//! `1c002fe1` with Q1284's change, and it was not traced.
 //!
 //! `the_rings_of_the_cap` reads the outline first, as the face stores it, so
 //! the pins hold `rings_round` to that choice. Nothing else here would notice
@@ -82,16 +88,6 @@ use core::f64::consts::PI;
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
-
-const RULES: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
-
-/// A way to build the two solids a fuse is asked about, what it is called, and
-/// the refusal every fuse of them is expected to give.
-type Route = (
-    &'static str,
-    fn(&mut Model) -> [SolidKey; 2],
-    fn(&Error) -> bool,
-);
 
 /// A way to build the two solids a fuse is asked about, what it is called, and
 /// the volume and solid count every fuse of them is expected to give, for
@@ -316,16 +312,28 @@ fn the_two_ds_side_by_side_answer_by_every_rule() {
 /// `100π − 1.5L`, and the half bar less the bar `40π − 1.5L`.
 ///
 /// Against the two bars united or where they overlap, both its corners are
-/// the lens's own, the shape
-/// `a_half_bar_whose_corner_is_the_lens_corner_mostly_answers` builds at one
-/// corner, and every fuse refuses `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
-/// the same way.
+/// the lens's own, and the lens's two walls and the half bar's pipe all run
+/// down the vertical lines through `(0, ±4)`. Three pipes up `z` bend the same
+/// way, so since Q1284 their meet is the plane the lens's two walls differ by,
+/// `x = 0`, and two pipes, and they share those whole lines. Every fuse then
+/// answers but the one that pinches. The half bar's half disk is inside the
+/// bar at `(−3, 0)`, so against the two bars united, `U = 200π − 4L`, they
+/// share `24π` as against that one bar: union `216π − 4L`, intersection
+/// `24π`, the half bar less the bars `16π`, and the bars less the half bar
+/// `ResultIsNotManifold { count: 4 }`, pinched at `(0, ±4)` as against the
+/// one bar. Where the two bars overlap, the lens `4L`, they share `1.5L` as
+/// against the bar at `(3, 0)`: union `40π + 2.5L`, intersection `1.5L`, the
+/// lens less the half bar `2.5L`, and the half bar less the lens
+/// `40π − 1.5L`.
 #[test]
 fn a_half_bar_whose_flat_side_is_the_whole_chord_answers_against_either_bar_alone() {
-    assert_the_bar_at_minus_three_and_a_half_bar(
-        "the half bar of radius 4",
-        [4.0, 0.0],
-        [
+    assert_each_fuse(
+        "the bar at (−3, 0) and the half bar of radius 4",
+        |model| {
+            let bar = a_bar_at(model, -3.0);
+            [bar, a_half_bar_bulging_left(model, 4.0, 0.0)]
+        },
+        &[
             (Rule::Union, true, Some(116.0 * PI)),
             (Rule::Union, false, Some(116.0 * PI)),
             (Rule::Intersection, true, Some(24.0 * PI)),
@@ -348,27 +356,35 @@ fn a_half_bar_whose_flat_side_is_the_whole_chord_answers_against_either_bar_alon
             Expect::one(40.0 * PI - shared),
         ],
     );
-    let routes: [Route; 2] = [
-        (
-            "the two bars united, then the half bar of radius 4",
-            |model| {
-                let bars = two_bars_united(model);
-                [bars, a_half_bar_bulging_left(model, 4.0, 0.0)]
-            },
-            the_three_surfaces_need_two_flat,
-        ),
-        (
-            "where the two bars overlap, then the half bar of radius 4",
-            |model| {
-                let lens = where_two_bars_overlap(model);
-                [lens, a_half_bar_bulging_left(model, 4.0, 0.0)]
-            },
-            the_three_surfaces_need_two_flat,
-        ),
-    ];
-    for (route, build, refused_as_expected) in routes {
-        assert_every_fuse_refuses(route, build, refused_as_expected);
-    }
+    let the_bars = 200.0 * PI - 4.0 * the_lens();
+    assert_each_fuse(
+        "the two bars united, then the half bar of radius 4",
+        |model| {
+            let bars = two_bars_united(model);
+            [bars, a_half_bar_bulging_left(model, 4.0, 0.0)]
+        },
+        &[
+            (Rule::Union, true, Some(the_bars + 16.0 * PI)),
+            (Rule::Union, false, Some(the_bars + 16.0 * PI)),
+            (Rule::Intersection, true, Some(24.0 * PI)),
+            (Rule::Intersection, false, Some(24.0 * PI)),
+            (Rule::Difference, true, None),
+            (Rule::Difference, false, Some(16.0 * PI)),
+        ],
+    );
+    assert_every_fuse_answers(
+        "where the two bars overlap, then the half bar of radius 4",
+        |model| {
+            let lens = where_two_bars_overlap(model);
+            [lens, a_half_bar_bulging_left(model, 4.0, 0.0)]
+        },
+        [
+            Expect::one(40.0 * PI + 2.5 * the_lens()),
+            Expect::one(shared),
+            Expect::one(2.5 * the_lens()),
+            Expect::one(40.0 * PI - shared),
+        ],
+    );
 }
 
 /// The closed-form volume a fuse is expected to answer, how many solids it
@@ -468,17 +484,35 @@ fn assert_every_fuse_answers(
 /// footprint is tangent to the bar's own rim.
 ///
 /// Built by uniting or overlapping the two bars first, the fuse meets the half
-/// bar across the plane that carries the lens's two walls and the half bar's
-/// flat side all at once — three surfaces along the one line through
-/// `(0, −4)`, at most one of them flat — and
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` still refuses every one of those
-/// twelve fuses.
+/// bar along the one line through `(0, −4)` where the lens's two walls and the
+/// half bar's pipe all run. Three pipes up `z` bend the same way, so since
+/// Q1284 their meet is the plane the lens's two walls differ by, `x = 0`, and
+/// two pipes, and they share that whole line.
+///
+/// Where the two bars overlap, every fuse answers. The half bar's half disk
+/// crosses the bar at `(3, 0)`'s circle at `(0, −4)` and `(−1, −3)`, and the
+/// part of it inside that circle, `A = π/4 − 3 + 25·asin(√2/10)`, is the half
+/// disk less what lies between its arc and the bar's across the chord from
+/// `(0, −4)` to `(−1, −3)`: a segment of the half disk's circle, `π/4 − 1/2`,
+/// less one of the bar's, `25/2·(θ − 0.28)` for `θ = 2·asin(√2/10)`. So the
+/// lens `4L` and the half bar `2.5π` share `3A`.
+///
+/// United first, the two bars answer the intersection both ways round,
+/// `1.5π`, and the half bar less the bars, `π`, as against the one bar, and
+/// the bars less the half bar pinches the same way, `ResultIsNotManifold
+/// { count: 4 }`. **The union panics, both ways round**, in `rings_round` in
+/// `fuse/assemble.rs`: every ring of a joined face answers that it holds
+/// none of the others, which that function says no face can bring. It would
+/// be the bars and the half bar's part above the cap, `201π − 4L`.
 #[test]
 fn a_half_bar_whose_corner_is_the_lens_corner_mostly_answers() {
-    assert_the_bar_at_minus_three_and_a_half_bar(
-        "the half bar at the lens corner",
-        [1.0, -3.0],
-        [
+    assert_each_fuse(
+        "one bar and the half bar at the lens corner",
+        |model| {
+            let bar = a_bar_at(model, -3.0);
+            [bar, a_half_bar_bulging_left(model, 1.0, -3.0)]
+        },
+        &[
             (Rule::Union, true, Some(101.0 * PI)),
             (Rule::Union, false, Some(101.0 * PI)),
             (Rule::Intersection, true, Some(1.5 * PI)),
@@ -487,44 +521,79 @@ fn a_half_bar_whose_corner_is_the_lens_corner_mostly_answers() {
             (Rule::Difference, false, Some(PI)),
         ],
     );
-    let routes: [Route; 2] = [
-        (
-            "the two bars united, then the half bar",
-            |model| {
-                let bars = two_bars_united(model);
-                [bars, a_half_bar_bulging_left(model, 1.0, -3.0)]
-            },
-            the_three_surfaces_need_two_flat,
-        ),
-        (
-            "where the two bars overlap, then the half bar",
-            |model| {
-                let lens = where_two_bars_overlap(model);
-                [lens, a_half_bar_bulging_left(model, 1.0, -3.0)]
-            },
-            the_three_surfaces_need_two_flat,
-        ),
-    ];
-    for (route, build, refused_as_expected) in routes {
-        assert_every_fuse_refuses(route, build, refused_as_expected);
+
+    let shared = 3.0 * (PI / 4.0 - 3.0 + 25.0 * (2.0_f64.sqrt() / 10.0).asin());
+    assert_every_fuse_answers(
+        "where the two bars overlap, then the half bar",
+        |model| {
+            let lens = where_two_bars_overlap(model);
+            [lens, a_half_bar_bulging_left(model, 1.0, -3.0)]
+        },
+        [
+            Expect::one(4.0 * the_lens() + 2.5 * PI - shared),
+            Expect::one(shared),
+            Expect::one(4.0 * the_lens() - shared),
+            Expect::one(2.5 * PI - shared),
+        ],
+    );
+
+    let the_bars_and_the_half_bar = |model: &mut Model| {
+        let bars = two_bars_united(model);
+        [bars, a_half_bar_bulging_left(model, 1.0, -3.0)]
+    };
+    assert_each_fuse(
+        "the two bars united, then the half bar",
+        the_bars_and_the_half_bar,
+        &[
+            (Rule::Intersection, true, Some(1.5 * PI)),
+            (Rule::Intersection, false, Some(1.5 * PI)),
+            (Rule::Difference, true, None),
+            (Rule::Difference, false, Some(PI)),
+        ],
+    );
+    for first_first in [true, false] {
+        let union = std::panic::catch_unwind(|| {
+            let mut model = a_model();
+            let [first, second] = the_bars_and_the_half_bar(&mut model);
+            let [one, other] = if first_first {
+                [first, second]
+            } else {
+                [second, first]
+            };
+            fuse(&mut model, one, other, Rule::Union)
+        });
+        let Err(why) = union else {
+            panic!("the union, the bars first {first_first}, gives {union:?}; pin it");
+        };
+        assert_eq!(
+            why.downcast_ref::<&str>(),
+            Some(
+                &"every face joined here brought an outline of its own and joining only takes \
+                  edges away, so the joined face has one too, and none of its rings winds with \
+                  the plane or bounds a region holding the others"
+            ),
+            "the bars first {first_first}"
+        );
     }
 }
 
-/// The bar at `(−3, 0)` and a half bar of `radius` about `(0, y)`, whose
-/// corners sit on the bar's rim, fused by each rule and way round in
-/// `answers`: one solid holding the volume it gives, or where it gives
-/// `None`, a refusal `ResultIsNotManifold { count: 4 }`.
-fn assert_the_bar_at_minus_three_and_a_half_bar(
-    half_bar: &str,
-    [radius, y]: [f64; 2],
-    answers: [(Rule, bool, Option<f64>); 6],
+/// The pair `build` makes, fused by each rule and way round in `answers`:
+/// one solid holding the volume it gives, or where it gives `None`, a refusal
+/// `ResultIsNotManifold { count: 4 }`.
+fn assert_each_fuse(
+    route: &str,
+    build: impl Fn(&mut Model) -> [SolidKey; 2],
+    answers: &[(Rule, bool, Option<f64>)],
 ) {
-    for (rule, bar_first, answers) in answers {
-        let asked = format!("one bar and {half_bar}, {rule:?}, the bar first {bar_first}");
+    for &(rule, first_first, answers) in answers {
+        let asked = format!("{route}, {rule:?}, the first first {first_first}");
         let mut model = a_model();
-        let bar = a_bar_at(&mut model, -3.0);
-        let half = a_half_bar_bulging_left(&mut model, radius, y);
-        let [one, other] = if bar_first { [bar, half] } else { [half, bar] };
+        let [first, second] = build(&mut model);
+        let [one, other] = if first_first {
+            [first, second]
+        } else {
+            [second, first]
+        };
         match (fuse(&mut model, one, other, rule), answers) {
             (Ok(answer), Some(volume)) => {
                 assert_eq!(answer.len(), 1, "{asked} came back as {answer:?}");
@@ -572,37 +641,6 @@ fn the_first_union_of_the_third_route_answers_with_two_wall_pieces() {
         .filter(|face| matches!(face.surface(), rcad_geom::Surface::Cylinder(_)))
         .count();
     assert_eq!(on_the_pipe, 2, "faces on the bar's pipe");
-}
-
-fn the_three_surfaces_need_two_flat(why: &Error) -> bool {
-    matches!(
-        why,
-        Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
-    )
-}
-
-fn assert_every_fuse_refuses(
-    route: &str,
-    build: fn(&mut Model) -> [SolidKey; 2],
-    refused_as_expected: fn(&Error) -> bool,
-) {
-    for rule in RULES {
-        for first_first in [true, false] {
-            let asked = format!("{route}, {rule:?}, the first first {first_first}");
-            let mut model = a_model();
-            let [first, second] = build(&mut model);
-            let [one, other] = if first_first {
-                [first, second]
-            } else {
-                [second, first]
-            };
-            match fuse(&mut model, one, other, rule) {
-                Err(why) if refused_as_expected(&why) => (),
-                Err(why) => panic!("{asked} is refused another way: {why:?}"),
-                Ok(answer) => panic!("{asked} answers {answer:?}; pin what it answers"),
-            }
-        }
-    }
 }
 
 fn a_model() -> Model {
