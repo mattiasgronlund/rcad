@@ -1560,8 +1560,10 @@ fn is_one_circle_cut_in_two(
 /// the face's boundary, and borders the face's own side along that neighbour on
 /// the side the face does not keep. So the face sits inside the part in front
 /// of all of them; and that part is connected — a plane cut by half-planes and
-/// round discs, or a sphere cut by planes through its centre or by any two
-/// planes — with the face's boundary on its boundary, so the face is all of it.
+/// round discs, or a sphere cut by any two planes or by planes each with its
+/// centre on or behind it — with the face's boundary on its boundary, so the
+/// face is all of it. On a sphere the "in front of any" reading asks the same
+/// of the part behind all of them, which is the cuts turned round.
 ///
 /// **A cone leaves one convex region on a plane it cuts in a closed curve, and
 /// that is the whole of why one is admitted.** Square to the axis the curve is
@@ -1583,8 +1585,8 @@ fn is_one_circle_cut_in_two(
 /// it lies inside and crosses in a closed curve, a flat face that is a polygon
 /// with one bite out of its edge where it lies outside a pipe
 /// ([`is_a_polygon_less_one_bite_of_a_pipe`]), a sphere face whose sides are
-/// arcs cut by planes through its centre or by two planes, and a cone face or a
-/// pipe face cut by
+/// arcs cut by two planes or by planes each with the centre on one side of it
+/// ([`leaves_a_ball_in_one_piece`]), and a cone face or a pipe face cut by
 /// planes as [`is_a_family_this_follows`] sets out. Each arc must be picked by a
 /// half-space that tells it from its sibling ([`the_way_into_an_arc`]), which
 /// asks the picker to hold both its ends exactly, or to have the arc's whole
@@ -1893,6 +1895,12 @@ fn what_the_part_in_front_of_its_cuts_holds(
             }
         }
     }
+    let the_rest_of_a_ball_is_one_piece = || {
+        matches!(
+            surface,
+            Surface::Sphere(ball) if leaves_a_ball_in_one_piece(ball, &turned_round(&cuts))
+        )
+    };
     if in_front_of_all {
         let held = match &one_of_two_runs {
             Some(run) => held_in_front_of_all_on_its_own_run(run, &cuts, point)?,
@@ -1900,7 +1908,7 @@ fn what_the_part_in_front_of_its_cuts_holds(
         };
         Ok(Some(the_apex_is_a_corner(held)))
     } else if behind_all
-        && (matches!(surface, Surface::Sphere(_)) || is_two_discs_taken_together(surface, &cuts))
+        && (the_rest_of_a_ball_is_one_piece() || is_two_discs_taken_together(surface, &cuts))
     {
         held_in_front_of_any(&cuts, point).map(Some)
     } else {
@@ -1928,6 +1936,22 @@ fn the_nappe_its_sides_are_on(cone: &rcad_geom::Cone, sides: &[Side]) -> Option<
         found = Some(nappe);
     }
     found
+}
+
+/// `cuts` each keeping the side it does not, so the part in front of all of
+/// them is the part behind all of `cuts`.
+fn turned_round(cuts: &[Cut]) -> Vec<Cut> {
+    cuts.iter()
+        .map(|cut| Cut {
+            kept: if cut.kept == Decision::Pos {
+                Decision::Neg
+            } else {
+                assert_eq!(cut.kept, Decision::Neg, "a cut keeps one side or the other");
+                Decision::Pos
+            },
+            ..cut.clone()
+        })
+        .collect()
 }
 
 /// A cone face's cap, and the two planes through its apex it is in front of
@@ -3923,9 +3947,9 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// along the axis meeting off the pipe can too, and the caller asks
 /// [`one_of_two_runs_between_two_cuts_meeting_off_the_pipe`].
 ///
-/// On a sphere, it is planes through the centre, or any two planes. Each plane
-/// through the centre cuts the sphere into two halves, and any number of halves
-/// meet in one piece. **Two planes leave one piece whatever they keep** (row
+/// On a sphere, it is any two planes, or planes each with the centre on it or
+/// behind it ([`leaves_a_ball_in_one_piece`]). **Two planes leave one piece
+/// whatever they keep** (row
 /// Q1162). They cut the sphere in two circles, which meet in at most two
 /// points. Where they cross at two, the part in front of both has its edge on
 /// the arc of each circle in front of the other plane, and those two arcs run
@@ -3938,12 +3962,46 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// (`tests/a_rung_whose_ray_meets_a_face_nobody_follows.rs`). Turning which side
 /// each keeps round does not touch that argument, so the part behind both, which
 /// the sphere's "in front of any" reading needs as one piece, is one too.
-/// **A third plane that misses the centre is refused, and that is a limit of
-/// the argument and not a gap**: three caps lost can go right round a patch and
-/// leave the part in front of all three in two pieces with nothing between
-/// them (`three_planes_that_miss_a_balls_centre_leave_its_skin_in_two_pieces`
-/// below), and telling the face's piece from the other wants where the circles
-/// meet, which nothing here reads.
+///
+/// **Any number of planes leave one piece when the centre is on or behind
+/// each** (row Q1194): each keeps a cap no bigger than half the ball, and such
+/// caps meet in one patch. Put the centre at the origin and write the side a
+/// cut keeps as `n·x ≥ d`; the centre on the plane or behind it is `d ≥ 0`.
+/// Take two points `p` and `q` of the sphere strictly in front of every cut.
+/// They are not opposite each other, since `n·p > d ≥ 0` and `n·(−p) > d ≥ 0`
+/// cannot both hold. So the straight segment between them misses the centre,
+/// and pushing each of its points straight out from the centre onto the sphere
+/// draws the short great-circle arc from `p` to `q`. Each point `x` of the
+/// segment is strictly in front of every cut, since the side a plane keeps
+/// holds every segment between two of its points, and it is inside the ball,
+/// so it is pushed out to `λx` with `λ ≥ 1`. There the cut reads
+/// `λ(n·x − d) + (λ − 1)d`, the first term above zero and the second not below
+/// it: still in front. So the arc stays in front of every cut, any two points
+/// of that part are joined inside it, and the part is one piece. A ball kept to
+/// the corner `x, y, z ≥ 0.5` of a box has that for its skin
+/// (`tests/a_ball_kept_to_a_corner_of_a_box.rs`).
+///
+/// **The "in front of any" reading needs the part *behind* every cut in one
+/// piece instead**, and this says nothing of that when the centre is behind
+/// three: the ball kept to `x, y, z ≤ 1.3` below is the part behind cuts
+/// keeping `x, y, z ≥ 1.3`, and it is two pieces. So
+/// [`what_the_part_in_front_of_its_cuts_holds`] reads a sphere face that way
+/// only when the cuts turned round are one piece here too, which two planes,
+/// or planes through the centre, always are. A face with three or more cuts,
+/// the centre behind one of them at least, and every side behind every other
+/// cut is refused, as it was before: the part behind all of them can be two
+/// pieces, and no fuse here has been seen to leave such a face (§13).
+///
+/// **A third plane with the centre in front of it is refused, and that is a
+/// limit of the argument and not a gap**: there `d < 0`, pushing a point out
+/// can take it behind the plane, and the part in front of all three can be two
+/// pieces with nothing between them. Three caps lost can go right round a patch
+/// (`three_planes_that_miss_a_balls_centre_leave_its_skin_in_two_pieces`
+/// below), and one is enough when it cuts across the middle of what two others
+/// keep
+/// (`one_plane_with_a_balls_centre_in_front_beside_two_with_it_behind_leaves_two_pieces`).
+/// Telling the face's piece from the other wants where the circles meet, which
+/// nothing here reads.
 ///
 /// # On a cone it is planes the apex is in front of, any number of them, and one it is on or two that meet inside the cone
 ///
@@ -4187,17 +4245,7 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut], nappe: Option<Decis
             }
             Surface::Torus(_) | _ => false,
         }),
-        Surface::Sphere(ball) => {
-            let centre = PredicatePoint::from(ball.centre().coordinates());
-            let all_planes = cuts.iter().all(|cut| cut.surface.as_plane().is_some());
-            all_planes
-                && (cuts.len() <= 2
-                    || cuts.iter().all(|cut| {
-                        cut.surface
-                            .as_plane()
-                            .is_some_and(|flat| flat.side_of_point(centre) == Decision::Zero)
-                    }))
-        }
+        Surface::Sphere(ball) => leaves_a_ball_in_one_piece(ball, cuts),
         Surface::Cone(cone) => {
             let apex = PredicatePoint::from(cone.apex().coordinates());
             let mut behind = Vec::new();
@@ -4254,6 +4302,27 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut], nappe: Option<Decis
         }
         Surface::Torus(_) | _ => false,
     }
+}
+
+/// Whether the part of `ball`'s sphere in front of every one of `cuts` is one
+/// piece: every cut a plane, and two of them at most or each with the centre on
+/// it or behind it, as [`is_a_family_this_follows`] argues. A centre whose side
+/// of a plane could not be settled is a refusal, never a guess.
+fn leaves_a_ball_in_one_piece(ball: &rcad_geom::Sphere, cuts: &[Cut]) -> bool {
+    let centre = PredicatePoint::from(ball.centre().coordinates());
+    let all_planes = cuts.iter().all(|cut| cut.surface.as_plane().is_some());
+    all_planes
+        && (cuts.len() <= 2
+            || cuts.iter().all(|cut| {
+                cut.surface.as_plane().is_some_and(|flat| {
+                    matches!(
+                        (flat.side_of_point(centre), cut.kept),
+                        (Decision::Zero, _)
+                            | (Decision::Pos, Decision::Neg)
+                            | (Decision::Neg, Decision::Pos)
+                    )
+                })
+            }))
 }
 
 /// Whether a cut on `other`, keeping its `kept` side, does not grow the way the
@@ -7290,8 +7359,12 @@ mod tests {
     }
 
     /// What [`is_a_family_this_follows`] lets through on a ball's skin and what
-    /// it refuses: any two planes, and no third that misses the centre, because
-    /// three can leave the part of the sphere in front of them all in two pieces.
+    /// it refuses: any two planes, and no three with the centre in front of
+    /// them, because three can leave the part of the sphere in front of them all
+    /// in two pieces. Turned round, the same three are the "in front of any"
+    /// reading of cuts keeping `x, y, z ≥ 1.3`, which the centre is behind and
+    /// which [`leaves_a_ball_in_one_piece`] takes, so that reading asks it of the
+    /// cuts turned round and is refused here.
     ///
     /// A ball of radius 2 at the origin kept to `x, y, z ≤ 1.3`. Each two of the
     /// three caps it loses overlap, `2 · 1.3² < 4`, and no point is in all three,
@@ -7328,7 +7401,16 @@ mod tests {
             .collect();
         assert!(
             !is_a_family_this_follows(&ball, &cuts, None),
-            "three planes that miss the centre are refused"
+            "three planes with the centre in front of each are refused"
+        );
+        let Surface::Sphere(sphere) = ball else {
+            unreachable!("built as a ball just above");
+        };
+        let turned = turned_round(&cuts);
+        assert!(
+            leaves_a_ball_in_one_piece(&sphere, &turned)
+                && !leaves_a_ball_in_one_piece(&sphere, &turned_round(&turned)),
+            "x, y, z >= 1.3 are followed in front of all, and not in front of any"
         );
         for left_out in 0..3 {
             let two: Vec<Cut> = (0..3)
@@ -7371,6 +7453,131 @@ mod tests {
         assert!(
             in_front_of_all([-2.0, 0.0, 0.0]),
             "and so is the far side of the ball"
+        );
+    }
+
+    /// The cut on the plane through `at` square to `normal`, keeping the side
+    /// `kept` says, `Pos` being the side `normal` points to.
+    fn a_flat_cut(normal: Vector, at: Point, kept: Decision) -> Cut {
+        let plane = Plane::from_point_and_normal(at, normal).expect("a plane with a normal");
+        Cut {
+            surface: Surface::Plane(plane),
+            placed: Surface::Plane(plane),
+            kept,
+            corners_on_it: Vec::new(),
+        }
+    }
+
+    /// What [`is_a_family_this_follows`] follows on a ball's skin past two
+    /// planes: any number, each with the centre on it or behind it, which keep
+    /// caps no bigger than half the ball. A ball of radius 2 at the origin kept
+    /// to the corner `x, y, z ≥ 0.5`; with `z ≥ 0`, a plane exactly through the
+    /// centre, in place of `z ≥ 0.5`; and with a fourth plane, `x + y ≥ 1.5`,
+    /// that clips the patch's corner on `x = y`. Turn the fourth round, to keep
+    /// `x + y ≤ 1.5`, and the centre is in front of it, which is refused.
+    #[test]
+    fn caps_no_bigger_than_half_a_ball_are_followed_however_many() {
+        let ball = Surface::Sphere(
+            rcad_geom::Sphere::new(Point::origin(), 2.0).expect("a ball of radius two"),
+        );
+        let x = Vector::new(1.0, 0.0, 0.0);
+        let y = Vector::new(0.0, 1.0, 0.0);
+        let z = Vector::new(0.0, 0.0, 1.0);
+        let at = |normal: Vector, how_far: f64| Point::origin() + normal * how_far;
+        let corner = vec![
+            a_flat_cut(x, at(x, 0.5), Decision::Pos),
+            a_flat_cut(y, at(y, 0.5), Decision::Pos),
+            a_flat_cut(z, at(z, 0.5), Decision::Pos),
+        ];
+        assert!(
+            is_a_family_this_follows(&ball, &corner, None),
+            "x, y, z >= 0.5 are followed"
+        );
+        let through_the_centre = vec![
+            a_flat_cut(x, at(x, 0.5), Decision::Pos),
+            a_flat_cut(y, at(y, 0.5), Decision::Pos),
+            a_flat_cut(z, Point::origin(), Decision::Pos),
+        ];
+        assert!(
+            is_a_family_this_follows(&ball, &through_the_centre, None),
+            "x, y >= 0.5 and z >= 0 are followed"
+        );
+        let diagonal = Vector::new(1.0, 1.0, 0.0);
+        let clipped = Point::new(0.75, 0.75, 0.0);
+        let mut four = corner.clone();
+        four.push(a_flat_cut(diagonal, clipped, Decision::Pos));
+        assert!(
+            is_a_family_this_follows(&ball, &four, None),
+            "x, y, z >= 0.5 and x + y >= 1.5 are followed"
+        );
+        let mut turned = corner;
+        turned.push(a_flat_cut(diagonal, clipped, Decision::Neg));
+        assert!(
+            !is_a_family_this_follows(&ball, &turned, None),
+            "x, y, z >= 0.5 and x + y <= 1.5 are refused"
+        );
+    }
+
+    /// Why one plane with the centre in front of it is enough to refuse three:
+    /// it can cut right across what the other two keep.
+    ///
+    /// A ball of radius 2 at the origin kept to `x, y ≥ 0.5`, which the centre
+    /// is behind, is a lens from `(0.5, 0.5, −√3.5)` to `(0.5, 0.5, √3.5)`, and
+    /// both those tips have `x + y = 1`, in front of `x + y ≤ 2.2` too. A path
+    /// on the sphere from one tip to the other crosses `z = 0`, and on the
+    /// sphere's equator with `x, y ≥ 0.5`, `x + y = 2√2 · sin(t + 45°)` for
+    /// `(x, y) = 2(cos t, sin t)`, which is least at the arc's ends, `0.5 + √3.75`,
+    /// above `2.2`. So the part in front of all three has nothing on the equator
+    /// and a tip each side of it: two pieces, with the band between them taken
+    /// away.
+    #[test]
+    fn one_plane_with_a_balls_centre_in_front_beside_two_with_it_behind_leaves_two_pieces() {
+        let ball = Surface::Sphere(
+            rcad_geom::Sphere::new(Point::origin(), 2.0).expect("a ball of radius two"),
+        );
+        let x = Vector::new(1.0, 0.0, 0.0);
+        let y = Vector::new(0.0, 1.0, 0.0);
+        let lens = vec![
+            a_flat_cut(x, Point::new(0.5, 0.0, 0.0), Decision::Pos),
+            a_flat_cut(y, Point::new(0.0, 0.5, 0.0), Decision::Pos),
+        ];
+        let mut three = lens.clone();
+        three.push(a_flat_cut(
+            Vector::new(1.0, 1.0, 0.0),
+            Point::new(1.1, 1.1, 0.0),
+            Decision::Neg,
+        ));
+        assert!(
+            is_a_family_this_follows(&ball, &lens, None),
+            "x, y >= 0.5 are followed"
+        );
+        assert!(
+            !is_a_family_this_follows(&ball, &three, None),
+            "and with x + y <= 2.2 beside them they are refused"
+        );
+
+        let in_front_of_all = |at: [f64; 3]| at[0] >= 0.5 && at[1] >= 0.5 && at[0] + at[1] <= 2.2;
+        let tip = 3.5f64.sqrt();
+        assert!(
+            in_front_of_all([0.5, 0.5, tip]) && in_front_of_all([0.5, 0.5, -tip]),
+            "both tips of the lens are in front of all three"
+        );
+        assert!(
+            0.5 + 3.75f64.sqrt() > 2.2,
+            "the ends of the equator's arc are past x + y = 2.2"
+        );
+        let ends = [0.25f64.asin(), 0.25f64.acos()];
+        let how_many = 1000u32;
+        let mut on_the_equator = 0;
+        for step in 0..=how_many {
+            let t = ends[0] + (ends[1] - ends[0]) * f64::from(step) / f64::from(how_many);
+            if in_front_of_all([2.0 * t.cos(), 2.0 * t.sin(), 0.0]) {
+                on_the_equator += 1;
+            }
+        }
+        assert_eq!(
+            on_the_equator, 0,
+            "no point of the equator with x, y >= 0.5 is in front of all three"
         );
     }
 
