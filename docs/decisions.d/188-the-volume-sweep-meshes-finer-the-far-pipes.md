@@ -105,6 +105,22 @@ model's linear tolerance. On `builder.rs`'s tube with a hole as wide as its
 wall, that one took 16.6 s and failed; with the corner floor, the same test
 takes 0.010 s.
 
+**This floor is argued for chords that cross, not for folds** (2026-10-07). A
+chord at deflection `d` strays at most `d` from its curve, so two pieces of
+boundary the solid keeps apart by more than `2d` cannot be made to cross by the
+mesh, and that is linear in the gap. A fold (`TwoPatchesOfTheMeshDrewTheSameSide`)
+is a different sampling artefact: its side joins two points the two faces
+share, so it spans the gap between their shared curves, and it goes once a
+patch takes a point inside instead — which `rcad-mesh` does once the side's
+charge `L²/(3ρ)` is over the deflection, so the fold goes once `d < L²/(3ρ)`,
+quadratic in the gap. Since Q1198 (`c3a2a3f2`) a fold is asked down to its own
+floor in `validate.rs`'s `the_coarsest_mesh_whose_sides_do_not_cross`,
+`closest²/(6ρ)` and never above the corner floor; the function's doc comment
+argues it under "What stops a fold". The ring that needed it is
+`a_cone_less_a_whole_ball_pushing_out_through_its_side` (`2√2π/3`): both its
+faces drew the same side from circle to circle at the corner floor and only
+folded apart once the ball's band took a point inside.
+
 **The LED files, after the fix** (the kicad rate is 114/323 either side, and no
 pin moved):
 
