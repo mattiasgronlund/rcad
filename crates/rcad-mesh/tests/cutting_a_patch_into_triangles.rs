@@ -777,8 +777,11 @@ fn a_ring_whose_corner_is_a_rounding_off_a_hole_sides_line_starts_where_the_corn
     );
 }
 
+/// What a corner's `u` is moved by: nothing, or a rounding one way.
+type Nudge = fn(f64) -> f64;
+
 /// The corner on the line, and a rounding to either side of it along `u`.
-const ON_THE_LINE_AND_A_ROUNDING_TO_EITHER_SIDE: [(&str, fn(f64) -> f64); 3] = [
+const ON_THE_LINE_AND_A_ROUNDING_TO_EITHER_SIDE: [(&str, Nudge); 3] = [
     ("on the line", core::convert::identity),
     ("a rounding up", f64::next_up),
     ("a rounding down", f64::next_down),
@@ -792,7 +795,7 @@ const ON_THE_LINE_AND_A_ROUNDING_TO_EITHER_SIDE: [(&str, fn(f64) -> f64); 3] = [
 /// through one each.
 fn an_octagon_round_an_octagon_from(
     first: [f64; 2],
-    nudge: fn(f64) -> f64,
+    nudge: Nudge,
 ) -> (Vec<[f64; 2]>, Vec<[f64; 2]>) {
     let outline = [
         [2.0, 4.0],
