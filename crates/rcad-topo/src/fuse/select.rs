@@ -67,10 +67,12 @@
 //!
 //! A flat piece with straight sides is placed outside a solid with only flat
 //! faces when the plane of one of that solid's faces has the whole solid on or
-//! behind it and every corner of the piece strictly in front, each corner asked
-//! as the meet of three planes, exactly ([`by_a_plane`], Q991). Two turned
-//! cubes whose facing faces lie a rounding apart have no point inside either
-//! face that a ray can place, and this is what answers them.
+//! behind it, every corner of the piece on or in front of it and one strictly
+//! in front, each corner asked as the meet of three planes, exactly
+//! ([`by_a_plane`], Q991, Q1288). Two turned cubes whose facing faces lie a
+//! rounding apart have no point inside either face that a ray can place, and
+//! nor does the triangle a rounding across that a turned cube's corner, just
+//! inside a block's face, cuts out of it; this is what answers both.
 //!
 //! **The plane comes last where no point was found inside the piece, and first
 //! where one was found and none placed.** That is the order each rule came in:
@@ -823,18 +825,31 @@ fn is_off_every_surface_of(solid: SolidView<'_>, point: PredicatePoint) -> bool 
 }
 
 /// A flat piece with straight sides placed outside each solid by a plane of
-/// one of that solid's faces that has the whole solid on or behind it and
-/// every corner of the piece strictly in front. Outside every solid of the
-/// group is outside; anything else is `None`, and the caller tries the sides
-/// and the corners where it has not yet, or refuses.
+/// one of that solid's faces that has the whole solid on or behind it, every
+/// corner of the piece on or in front of it, and one corner strictly in front.
+/// Outside every solid of the group is outside; anything else is `None`, and
+/// the caller tries the sides and the corners where it has not yet, or
+/// refuses.
 ///
 /// **Why a plane can place a piece.** Every face of a solid `S` here is flat,
 /// so `S`'s skin is polygons with straight sides, which lie in the hull of
 /// their corners, and so does `S`. With every corner of `S` on or behind a
 /// plane `σ`, all of `S` is. A piece `P` with straight sides lies in the hull
-/// of its own corners too, so with each of them strictly in front of `σ` all
-/// of `P` is, and the two share no point. Unlike [`by_a_corner`], this does not
-/// lean on `P` having been cut by every surface of `S`.
+/// of its own corners too, so with each of them on or in front of `σ` all of
+/// `P` is. One corner strictly in front puts `P`'s plane off `σ`, so the two
+/// planes cross in a line, `P` lies on one side of that line, and `P`'s inside,
+/// which is open in its plane, lies strictly in front of `σ`: it shares no
+/// point with `S`, though a side of `P` may lie on `σ`. Unlike [`by_a_corner`],
+/// this does not lean on `P` having been cut by every surface of `S`.
+///
+/// **A corner on `σ` is allowed because a piece a rounding across has them.**
+/// A cube turned so that its corner touches a block's face from inside, with
+/// its three planes meeting `1e−16` inside the face, crosses that face in
+/// three lines cutting out a triangle a rounding across, in front of all
+/// three planes. No point is found inside it, two of its corners are on each
+/// of the three planes, and with every corner strictly in front asked for, all
+/// of Q1208's 201 random turns of that kind were refused (Q1288,
+/// `tests/a_turned_cube_with_its_corner_on_a_face.rs`).
 ///
 /// **Each corner is asked as the one point where three planes meet**
 /// ([`side_of_a_plane_where_three_planes_meet`]), never by its box, and the
@@ -903,8 +918,8 @@ fn the_planes_meeting_at_each_corner_of_a_piece(
 }
 
 /// Whether the plane of some face of `solid`, turned to face out of it, has
-/// every corner of the solid on or behind it and every one of `corners`
-/// strictly in front.
+/// every corner of the solid on or behind it, every one of `corners` on or in
+/// front of it, and one of `corners` strictly in front.
 fn is_in_front_of_a_plane_with_all_of_it_behind(
     solid: &BakedSolid,
     corners: &[[[f64; 4]; 3]],
@@ -917,7 +932,10 @@ fn is_in_front_of_a_plane_with_all_of_it_behind(
             .expect("every face of a solid whose corners all meet three planes is flat")
             .coefficients();
         let side = |three: &[[f64; 4]; 3]| side_of_a_plane_where_three_planes_meet(*three, outward);
-        corners.iter().all(|three| side(three) == Ok(Decision::Pos))
+        corners
+            .iter()
+            .all(|three| matches!(side(three), Ok(Decision::Pos | Decision::Zero)))
+            && corners.iter().any(|three| side(three) == Ok(Decision::Pos))
             && its_own
                 .iter()
                 .all(|three| matches!(side(three), Ok(Decision::Neg | Decision::Zero)))

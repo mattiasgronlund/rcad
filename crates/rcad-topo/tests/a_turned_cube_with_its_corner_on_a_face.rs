@@ -36,8 +36,36 @@
 //!
 //! **Under `Policy::tolerant(100.0)` it is a gap.** The answer meant is the
 //! block with its `x = 0` face whole, with the turned cube touching it from
-//! outside; it exists, and Q1288 owns finding it. When it does, these pins
-//! move to volumes.
+//! inside; it exists, and nothing here reaches it yet. The three crossings are
+//! proved apart, exactly, so no decision is left for a policy to resolve, and
+//! reaching it means taking three crossings a rounding apart as one.
+//!
+//! **Where the same turn's planes meet a rounding inside the face, every fuse
+//! answers under both policies** (Q1288). With the corner at `(0, 2, 4)` they
+//! meet at `x = +1.03e−16`. The three crossings still cut a triangle a
+//! rounding across out of the block's face, but now it is the part of the
+//! face in front of all three planes, outside the turned cube, and the
+//! answer exists: the block's face whole. No point could be proved inside the
+//! triangle, and it was refused `Undecidable` on "a point inside a piece of a
+//! face" until `select.rs`'s `by_a_plane` took a piece with every corner on or
+//! in front of a plane of the solid, and one strictly in front, as outside it:
+//! two corners of the triangle are on one of the turned cube's planes, and
+//! the third is in front of it. With the corner at `(0, 2, 5)`
+//! they meet exactly on the face, the crossings are one point and nothing is
+//! cut. [`with_its_planes_meeting_a_rounding_inside_every_fuse_answers_certified`]
+//! and [`with_its_planes_meeting_exactly_on_the_face_every_fuse_answers`] pin
+//! both against volumes.
+//!
+//! Q1208's 400 random turns split the same way. Run once over all 400 by
+//! Q1288, the planes meet inside the face in 201 and outside it in 199; the
+//! union of each of the 201 was refused `Undecidable` under both policies,
+//! and every rule both ways round now answers, the volumes agreeing as
+//! [`every_fuse_answers_and_the_volumes_agree`] asks. Of the 199, the union
+//! is still refused under `Policy::certified()` in all, and under
+//! `Policy::tolerant(100.0)` in 148: 74 `Undecidable` on the triangle, now
+//! inside the turned cube, and 74 written broken.
+//! [`random_turns_whose_planes_meet_inside_the_block_answer`] keeps the first
+//! 60.
 //!
 //! With the corner a thousandth inside the face, every fuse answers, and the
 //! union and the intersection hold both cubes between them:
@@ -46,11 +74,19 @@
 use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
 use rcad_topo::{DraftStep, Error, Invalid, Model, Rule, SolidBuilder, SolidKey};
 
 /// The corner of the turned cube, on the block's `x = 0` face.
 const ON_THE_FACE: [f64; 3] = [0.0, 3.0, 3.0];
+
+/// A corner on the face where the turned cube's three planes meet at
+/// `x = +1.03e−16`, a rounding inside it.
+const WHERE_ITS_PLANES_MEET_INSIDE: [f64; 3] = [0.0, 2.0, 4.0];
+
+/// A corner on the face where the turned cube's three planes meet exactly on
+/// it.
+const WHERE_ITS_PLANES_MEET_ON_THE_FACE: [f64; 3] = [0.0, 2.0, 5.0];
 
 #[test]
 fn the_block_united_with_the_turned_cube_is_refused_certified() {
@@ -201,6 +237,138 @@ fn with_the_corner_a_thousandth_inside_the_union_and_intersection_hold_both_cube
             );
         }
     }
+}
+
+/// The same turn with its corner at `(0, 2, 4)`, where its planes meet a
+/// rounding inside the block, under `Policy::certified()`. Before Q1288 every
+/// fuse but the turned cube less the block was refused `Undecidable` on the
+/// triangle the crossings cut out of the block's face.
+#[test]
+fn with_its_planes_meeting_a_rounding_inside_every_fuse_answers_certified() {
+    every_fuse_answers_and_the_volumes_agree(WHERE_ITS_PLANES_MEET_INSIDE, &certified());
+}
+
+/// [`with_its_planes_meeting_a_rounding_inside_every_fuse_answers_certified`]
+/// under `Policy::tolerant(100.0)`.
+#[test]
+fn with_its_planes_meeting_a_rounding_inside_every_fuse_answers_tolerant() {
+    every_fuse_answers_and_the_volumes_agree(WHERE_ITS_PLANES_MEET_INSIDE, &tolerant());
+}
+
+/// The same turn with its corner at `(0, 2, 5)`, where its planes meet
+/// exactly on the block's face, so the three crossings are one point.
+#[test]
+fn with_its_planes_meeting_exactly_on_the_face_every_fuse_answers() {
+    for policy in [certified(), tolerant()] {
+        every_fuse_answers_and_the_volumes_agree(WHERE_ITS_PLANES_MEET_ON_THE_FACE, &policy);
+    }
+}
+
+/// The first 60 of Q1208's random turns, sorted by where the turned cube's
+/// three planes at the corner meet, asked exactly: each whose planes meet
+/// inside the block answers the union and the intersection under both
+/// policies, and the two hold both cubes between them. Before Q1288 the
+/// union of each was refused `Undecidable`. 29 of the 60 meet inside, which
+/// is what the same planes give worked out in rationals.
+#[test]
+fn random_turns_whose_planes_meet_inside_the_block_answer() {
+    let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
+    let mut inside = 0;
+    for (index, (turn, at)) in q1208s_random_turns(60).into_iter().enumerate() {
+        if where_the_planes_at_the_corner_meet(&turn, at) != Decision::Pos {
+            continue;
+        }
+        inside += 1;
+        for policy in [certified(), tolerant()] {
+            let asked = format!("turn {}, {policy:?}", index + 1);
+            let union =
+                volume_of_a_fuse(&turn, at, Rule::Union, Order::BlockFirst, &policy, &asked);
+            let intersection = volume_of_a_fuse(
+                &turn,
+                at,
+                Rule::Intersection,
+                Order::BlockFirst,
+                &policy,
+                &asked,
+            );
+            assert!(
+                (union + intersection - 2000.0).abs() <= allowed,
+                "{asked}: the union {union} and the intersection {intersection} hold {} \
+                 between them, not 2000",
+                union + intersection
+            );
+        }
+    }
+    assert_eq!(inside, 29, "how many of the 60 meet inside the block");
+}
+
+/// Every rule both ways round answers one or more solids that validate, and
+/// their volumes agree with each other and with the turned cube moved a
+/// little further in.
+///
+/// The union is both cubes less what they share, so with the intersection it
+/// holds 2000; either difference is one cube less what they share, `1000`
+/// less the intersection. Those hold whatever the intersection is, so the
+/// intersection is held to the one with the turned cube moved `2⁻³⁰` further
+/// in, where nothing is a rounding from anything else. Moving a solid by `δ`
+/// changes what it shares with another by at most `δ` times its shadow, and a
+/// cube of side 10 casts at most `100·√3`. The rounding allowed is
+/// [`with_the_corner_a_thousandth_inside_the_union_and_intersection_hold_both_cubes`]'s.
+fn every_fuse_answers_and_the_volumes_agree(at: [f64; 3], policy: &Policy) {
+    let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
+    let further_in = 2.0_f64.powi(-30);
+    let reference = volume_of_the_answer(
+        [at[0] + further_in, at[1], at[2]],
+        Rule::Intersection,
+        Order::BlockFirst,
+        policy,
+        &format!("{further_in} further in, {policy:?}"),
+    );
+    for order in [Order::BlockFirst, Order::TurnedFirst] {
+        let asked = format!("{at:?}, {order:?}, {policy:?}");
+        let union = volume_of_the_answer(at, Rule::Union, order, policy, &asked);
+        let intersection = volume_of_the_answer(at, Rule::Intersection, order, policy, &asked);
+        let difference = volume_of_the_answer(at, Rule::Difference, order, policy, &asked);
+        assert!(
+            (union + intersection - 2000.0).abs() <= allowed,
+            "{asked}: the union {union} and the intersection {intersection} hold {} between \
+             them, not 2000",
+            union + intersection
+        );
+        assert!(
+            (difference + intersection - 1000.0).abs() <= allowed,
+            "{asked}: the difference {difference} and the intersection {intersection} hold {} \
+             between them, not 1000",
+            difference + intersection
+        );
+        assert!(
+            (intersection - reference).abs() <= further_in * 100.0 * 3.0_f64.sqrt() + allowed,
+            "{asked}: the intersection is {intersection}, and {reference} with the turned cube \
+             {further_in} further in"
+        );
+    }
+}
+
+/// Which side of the block's `x = 0` face the turned cube's three planes at
+/// its corner meet on, asked of the planes and exact: `Pos` is inside the
+/// block.
+fn where_the_planes_at_the_corner_meet(turn: &Isometry, at: [f64; 3]) -> Decision {
+    let mut model = a_model();
+    let [_, turned] = a_block_and_a_cube_turned(&mut model, turn, at);
+    let at_the_corner: Vec<[f64; 4]> = model
+        .solid(turned)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.plane().coefficients())
+        .filter(|plane| {
+            (plane[0] * at[0] + plane[1] * at[1] + plane[2] * at[2] + plane[3]).abs() < 1e-9
+        })
+        .collect();
+    let three: [[f64; 4]; 3] = at_the_corner
+        .try_into()
+        .expect("three faces of a cube meet at its corner");
+    side_of_a_plane_where_three_planes_meet(three, [1.0, 0.0, 0.0, 0.0])
+        .expect("three faces of a cube meet in a point")
 }
 
 /// Q1208's crash, the turned cube of `crash-45d4e616…` of the night of
@@ -419,8 +587,19 @@ fn volume_of_the_answer(
     policy: &Policy,
     asked: &str,
 ) -> f64 {
+    volume_of_a_fuse(&the_turn(), at, rule, order, policy, asked)
+}
+
+fn volume_of_a_fuse(
+    turn: &Isometry,
+    at: [f64; 3],
+    rule: Rule,
+    order: Order,
+    policy: &Policy,
+    asked: &str,
+) -> f64 {
     let mut model = a_model();
-    let pair = the_block_and_the_turned_cube(&mut model, at);
+    let pair = a_block_and_a_cube_turned(&mut model, turn, at);
     let answer = fuse(&mut model, pair, rule, order, policy)
         .unwrap_or_else(|why| panic!("{asked}, {rule:?}: {why}"));
     model
@@ -479,9 +658,13 @@ fn a_block(model: &mut Model) -> SolidKey {
 
 /// The block, and the cube turned 1.5 about `(1, 1, 0)` with its corner at `at`.
 fn the_block_and_the_turned_cube(model: &mut Model, at: [f64; 3]) -> [SolidKey; 2] {
+    a_block_and_a_cube_turned(model, &the_turn(), at)
+}
+
+/// A turn by 1.5 about the axis through the origin along `(1, 1, 0)`.
+fn the_turn() -> Isometry {
     let axis = Axis::new(Point::origin(), Vector::new(1.0, 1.0, 0.0)).expect("an axis");
-    let turn = Isometry::rotation(&axis, 1.5).expect("a turn");
-    a_block_and_a_cube_turned(model, &turn, at)
+    Isometry::rotation(&axis, 1.5).expect("a turn")
 }
 
 fn a_block_and_a_cube_turned(model: &mut Model, turn: &Isometry, at: [f64; 3]) -> [SolidKey; 2] {
