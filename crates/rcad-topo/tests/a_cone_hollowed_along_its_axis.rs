@@ -26,15 +26,17 @@
 //!   the ball's band and the cone's folding onto each other (Q1198). So does a
 //!   frustum less that ball, since a side along one of the two circles also asks
 //!   what picks its circle out (Q1197);
-//! - **a wall through a circle**, and every rule is refused before anything is
-//!   ordered round it, since the wall, the cone and the partner meet there and
-//!   two of them are curved.
+//! - **a wall through a circle**, where the wall, the cone and the partner meet
+//!   with two of them curved, and every rule was refused there until Q1259
+//!   placed those points. The circle then holds two nodes off its start, so
+//!   the order round it is asked, and three intersections and one difference
+//!   answer; every other rule is refused after the meet.
 //!
-//! So no fuse here asks the order round one of these circles. A seam puts one
-//! node on a face's circle beside its start, and each face has one seam, which
-//! is why two frustums seamed off where their circle starts answer as well;
-//! `rcad-geom`'s `along_a_crossing.rs` orders points round them all the same
-//! since Q1141, for whatever reaches it first.
+//! Without a wall no fuse here asks the order round one of these circles. A
+//! seam puts one node on a face's circle beside its start, and each face has
+//! one seam, which is why two frustums seamed off where their circle starts
+//! answer as well; `rcad-geom`'s `along_a_crossing.rs` orders points round
+//! them since Q1141, and a wall through the circle is what reaches it.
 //!
 //! Every cone here is built by `tests/cones`, face by face through
 //! `SolidBuilder` with a power-of-two slope, and every ball by `Model::add_ball`.
@@ -392,15 +394,20 @@ fn a_frustum_and_a_bar_of_radius_four_cross_in_one_circle_on_both_sides() {
     );
 }
 
-/// **A wall through the circle is refused before any order is asked.** The
-/// wide frustum seamed up `−x` and cut down to `x ≥ 0` by a block, against the
-/// steep frustum, the bar of radius 4 and a whole ball of radius 3 four up. The
-/// wall `x = 0` crosses each pair's circle on the half frustum's side, at
+/// **A wall through the circle is placed, and most rules then stop after it.**
+/// The wide frustum seamed up `−x` and cut down to `x ≥ 0` by a block, against
+/// the steep frustum, the bar of radius 4 and a whole ball of radius 3 four up.
+/// The wall `x = 0` crosses each pair's circle on the half frustum's side, at
 /// `(0, ±4, 4)` for the first two and `(0, ±z₂, z₂)`, `z₂ = 2 + √2/2`, for the
-/// ball, so the circle there has two nodes off its start. Each is where the
-/// wall, the cone and the partner meet, two of them curved, and every rule
-/// both ways is refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in
-/// `rcad-geom`'s `three_surfaces.rs`.
+/// ball, so the circle there has two nodes off its start, `(4, 0, 4)` and
+/// `(z₂, 0, z₂)`.
+///
+/// Each is where the wall, the cone and the partner meet, two of them curved,
+/// and every rule both ways was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
+/// there. `rcad-geom`'s `three_surfaces.rs` places them since Q1259: a plane
+/// holding the axis two surfaces are turned about cuts each circle they share
+/// in two points. The order round the circle from its start is then asked, as
+/// `along_a_crossing.rs` answers it since Q1141.
 ///
 /// Each partner turns about the axis, so it holds the same either side of the
 /// wall and the half frustum shares half of what the whole one does. With `W`
@@ -410,8 +417,16 @@ fn a_frustum_and_a_bar_of_radius_four_cross_in_one_circle_on_both_sides() {
 /// for the bar `608π/3`, `124π/3`, `128π/3` and `356π/3`; for the ball, with
 /// `S = (100 − √2)π/3`, `(620 + √2)π/6`, `(100 − √2)π/6`, `(404 + √2)π/6` and
 /// `(116 + √2)π/6`.
+///
+/// **What answers is the intersection with the steep frustum, both ways,
+/// `367π/12`, with the bar, both ways, `124π/3`, and the half less the bar,
+/// `128π/3`.** Every other rule is refused after the meet, and not traced: the
+/// unions and the rest of the differences `ResultIsNotManifold` with one edge or
+/// four, and the ball's intersections and the half less the ball
+/// `CannotMeshAFace` with `CornersCoincide`.
 #[test]
-fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_refused() {
+fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_placed_and_most_rules_stop_after()
+ {
     let half = |model: &mut Model| {
         let wide = seamed(model, 1.0, 2.0, 8.0, [-1.0, 0.0]);
         the_x_positive_half_of(model, wide)
@@ -428,17 +443,71 @@ fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_refu
         },
         |model| a_ball_four_up(model, 3.0),
     ];
-    for partner in partners {
+    use Gives::{CornersCoincide, Holds, NotManifold};
+    let wanted = [
+        [
+            NotManifold(1),
+            NotManifold(4),
+            Holds(367.0 * PI / 12.0),
+            Holds(367.0 * PI / 12.0),
+            NotManifold(1),
+            NotManifold(4),
+        ],
+        [
+            NotManifold(4),
+            NotManifold(4),
+            Holds(124.0 * PI / 3.0),
+            Holds(124.0 * PI / 3.0),
+            Holds(128.0 * PI / 3.0),
+            NotManifold(4),
+        ],
+        [
+            NotManifold(4),
+            NotManifold(4),
+            CornersCoincide,
+            CornersCoincide,
+            CornersCoincide,
+            NotManifold(4),
+        ],
+    ];
+    for (partner, wanted) in partners.into_iter().zip(wanted) {
         let gives = what_each_rule_gives(|model| [half(model), partner(model)]);
         assert!(
-            gives.iter().all(|answer| matches!(
-                answer,
-                Err(Error::Geometry(
-                    rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                ))
-            )),
+            gives
+                .iter()
+                .zip(&wanted)
+                .all(|(answer, wanted)| wanted.is(answer)),
             "{gives:?}"
         );
+    }
+}
+
+/// What one fuse is pinned to give: one solid of a closed-form volume, or a
+/// refusal by name.
+enum Gives {
+    Holds(f64),
+    NotManifold(usize),
+    CornersCoincide,
+}
+
+impl Gives {
+    fn is(&self, answer: &Result<Vec<(f64, f64)>, Error>) -> bool {
+        match (self, answer) {
+            (Gives::Holds(wanted), Ok(volumes)) => {
+                matches!(volumes[..], [(volume, error)] if (volume - wanted).abs() <= error)
+            }
+            (Gives::NotManifold(wanted), Err(Error::ResultIsNotManifold { count })) => {
+                count == wanted
+            }
+            (
+                Gives::CornersCoincide,
+                Err(Error::CannotMeshAFace {
+                    why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
+                    ..
+                }),
+            ) => true,
+            _ => false,
+        }
     }
 }
 

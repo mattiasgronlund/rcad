@@ -669,16 +669,21 @@ pub enum Error {
     /// quadrics is a degree-eight system.
     ///
     /// **"In general" is doing real work in that sentence**, and
-    /// `three_surfaces.rs`'s module doc names the three
+    /// `three_surfaces.rs`'s module doc names the four
     /// families it excludes: two quadrics that square `p` the same way differ by
     /// something flat; two surfaces turned about one axis are cut by a plane
     /// square to it in two circles about one centre, which are one circle or
-    /// share nothing; and a plane that misses or barely touches one of the two
-    /// settles the triple with a sign. Two pipes running the same way and a cap
-    /// plane — a union of two overlapping parallel bars — is the first, a bar
-    /// through a ball and a cap across both is the second, and a ball and a bar
-    /// both resting on a block's floor is the third. All three are answered,
-    /// and this is what is left over.
+    /// share nothing; the same two share circles square to the axis, which a
+    /// plane holding the axis cuts in two points each; and a plane that misses
+    /// or barely touches one of the two settles the triple with a sign. Two
+    /// pipes running the same way and a cap plane — a union of two overlapping
+    /// parallel bars — is the first, a bar through a ball and a cap across both
+    /// is the second, a wall through the circle a frustum crosses a bar in is
+    /// the third, and a ball and a bar both resting on a block's floor is the
+    /// fourth. All four are answered, and this is what is left over — among it
+    /// a wall beside the axis of those two rather than through it, which cuts
+    /// each circle in a chord
+    /// (`a_wall_beside_the_axis_of_a_cone_and_a_bar_is_still_refused`).
     ///
     /// A **gap** and not a limit (§16.10): the points are there, and a real
     /// algebraic solver reaches them. The family of fixes is the
