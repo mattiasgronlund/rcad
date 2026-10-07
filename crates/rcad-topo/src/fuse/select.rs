@@ -1782,7 +1782,21 @@ fn of_two_curved_kinds(one: &Surface, other: &Surface) -> bool {
 ///
 /// A flat face with straight sides is wound, the way it always was, and asked
 /// of the model where the winding cannot say
-/// ([`the_model_says_one_of_its_faces_holds`]). A **curved**
+/// ([`the_model_says_one_of_its_faces_holds`]).
+///
+/// **Its corners are wound round the point's box stretched to the plane**
+/// ([`stretched_to_the_plane`]), as [`the_piece_holds`] winds a piece's.
+/// [`InPlane`] reads a point off its plane where the line from its reference
+/// point through it meets the plane, and `2²⁰` out on a plane through the
+/// origin a point a spacing off is read about `1e-4` from its foot. Wound round
+/// the point alone, a face held such a point whose foot was off it, and did not
+/// hold one whose foot was on it
+/// (`a_point_a_rounding_off_a_far_face_is_on_it_where_its_foot_is`,
+/// `docs/decisions.md` §346.6). Over the box the fan cannot say for either, and
+/// the model answers both. A point on the plane stretches to itself and is
+/// wound as before.
+///
+/// A **curved**
 /// one is [`SolidView::face_holds_the_point`], which is the one authority on that
 /// question (§35) and which the fuse can call here because what it is asked
 /// about is a face of an *input* — a face the model holds, with corners it holds
@@ -1840,9 +1854,12 @@ fn a_face_of_the_input_holds(
         // piece's normal, and a face pressed against this one from the other
         // side runs the other way — which is what the agreement above already
         // said. Zero is the only answer that puts the point outside it.
-        if let Some(winding) =
-            InPlane::of(flat).and_then(|in_plane| in_plane.winding_around(&corners, point))
-        {
+        let winding = InPlane::of(flat)
+            .zip(stretched_to_the_plane(flat, point))
+            .and_then(|(in_plane, reaching_the_plane)| {
+                in_plane.winding_around(&corners, reaching_the_plane)
+            });
+        if let Some(winding) = winding {
             return Ok(winding != 0);
         }
         return Ok(the_model_says_one_of_its_faces_holds(
@@ -1859,7 +1876,15 @@ fn a_face_of_the_input_holds(
 
 /// Whether [`SolidView::face_holds_the_point`] says one of the model's faces
 /// that `face` was baked from holds `point`, for a flat face with straight
-/// sides whose corners [`InPlane::winding_around`] could not wind round it.
+/// sides whose corners [`InPlane::winding_around`] could not wind round the
+/// point's box stretched to the plane.
+///
+/// **A point a rounding off the plane beside the face's edge comes here**, as
+/// the fan over that box runs across the edge, and the model reads it beside
+/// its foot: [`SolidView::face_holds_the_point`] counts from a point off the
+/// face's first corner, as far off the plane as that corner's largest
+/// coordinate, where [`InPlane`] counts from one beside the origin
+/// (`a_point_a_rounding_off_a_far_face_is_on_it_where_its_foot_is`).
 ///
 /// **What the fan cannot see.** Every triangle of the fan has its apex at a
 /// corner of the face, and a point on a spoke from that apex is on the edge of
@@ -1958,7 +1983,8 @@ fn corners_of(piece: &Piece) -> Vec<Vec<PredicatePoint>> {
 /// through it meets the plane**, not at its foot, and the two can be far apart:
 /// `M` out on a plane through the origin, a point a rounding high is read about
 /// `M` times that height from its foot. A caller that needs the foot asks about
-/// a box that reaches the plane, as [`the_piece_holds`] does.
+/// a box that reaches the plane, as [`the_piece_holds`] and
+/// [`a_face_of_the_input_holds`] do.
 pub(crate) struct InPlane {
     from: PredicatePoint,
     /// Whether [`InPlane::from`] came out above the plane rather than below it.
@@ -3121,10 +3147,12 @@ mod tests {
     use smallvec::SmallVec;
 
     use super::{
-        InPlane, Piece, Rule, candidate_points, choose, corners_of, every_picker_keeps,
-        midway_between, the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through,
-        the_piece_holds, what_else_each_round_wire_asks,
+        InPlane, Piece, Rule, a_face_of_the_input_holds, candidate_points, choose, corners_of,
+        every_picker_keeps, midway_between, the_middles_of_a_round_wire,
+        the_pickers_of_the_meridian_circle_through, the_piece_holds,
+        what_else_each_round_wire_asks,
     };
+    use crate::fuse::bake::{BakedFace, BakedSolid, bake};
     use crate::fuse::{FaceMeet, MeetPoint, Scratch};
     use crate::{Model, ProfileBuilder};
 
@@ -3662,6 +3690,87 @@ mod tests {
         );
     }
 
+    /// A flat face `2²⁰` out on `x + y = 0`, a plane through the origin, and
+    /// two points a spacing off that plane in `x` and in `y` beside its near
+    /// edge `x = 2²⁰`, the one nearest the origin.
+    ///
+    /// The first point's foot is `2⁻²⁰` short of that edge, off the face, and
+    /// the point is on the side [`InPlane`]'s reference point is on, so it is
+    /// read about `1.7e-4` further out than its foot, over the edge. The second
+    /// point's foot is `2⁻²⁰` past the edge, on the face, and the point is on
+    /// the other side, so it is read about `3.4e-4` nearer the origin, back
+    /// over the edge. Wound round each point alone, the face held the first and
+    /// not the second (`docs/decisions.md` §346.6, Q1107). Wound round each
+    /// point's box stretched to the plane, the fan cannot say, and the model
+    /// answers as each foot says.
+    ///
+    /// **No fuse is known to reach this.** A point is asked of a face of an
+    /// input only once [`the_piece_holds`] has held its stretched box, and a
+    /// piece beside this face, sharing its edge with the same corners, does not
+    /// hold the first point
+    /// (`a_square_beside_a_far_face_does_not_hold_a_point_read_over_their_edge`).
+    #[test]
+    fn a_point_a_rounding_off_a_far_face_is_on_it_where_its_foot_is() {
+        let (model, solid, face) = a_far_face_on_a_plane_through_the_origin();
+        let on_it = |point: PredicatePoint| {
+            let piece = a_square_beside_the_far_face(face.surface);
+            a_face_of_the_input_holds(
+                &model,
+                &solid,
+                &face,
+                &piece,
+                point,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the corners are exact")
+        };
+        let out = f64::powi(2.0, 20);
+        let short = out - f64::powi(2.0, -20);
+        let past = out + f64::powi(2.0, -20);
+        let [below, above] = [f64::powi(2.0, -33), f64::powi(2.0, -32)];
+        let short_of_the_edge = PredicatePoint::from([short - below, -short - below, 0.5]);
+        let past_the_edge = PredicatePoint::from([past + above, -past + above, 0.5]);
+        assert!(
+            !on_it(PredicatePoint::from([short, -short, 0.5])),
+            "its foot"
+        );
+        assert!(
+            !on_it(short_of_the_edge),
+            "read over the edge, its foot short of it"
+        );
+        assert!(on_it(PredicatePoint::from([past, -past, 0.5])), "its foot");
+        assert!(
+            on_it(past_the_edge),
+            "read short of the edge, its foot past it"
+        );
+    }
+
+    /// The square beside the far face of the test above, sharing its near
+    /// edge, holds the first point's foot and not the point. [`the_piece_holds`]
+    /// winds the square's corners over the point's box stretched to the plane,
+    /// whose reading runs from beside the foot, in the square, to the point's,
+    /// on the face, and so crosses that edge. Every candidate is asked that
+    /// before any face of an input is, so a piece beside the face never hands
+    /// this point to [`a_face_of_the_input_holds`].
+    #[test]
+    fn a_square_beside_a_far_face_does_not_hold_a_point_read_over_their_edge() {
+        let (_, _, face) = a_far_face_on_a_plane_through_the_origin();
+        let square = a_square_beside_the_far_face(face.surface);
+        let short = f64::powi(2.0, 20) - f64::powi(2.0, -20);
+        let below = f64::powi(2.0, -33);
+        let foot = PredicatePoint::from([short, -short, 0.5]);
+        let point = PredicatePoint::from([short - below, -short - below, 0.5]);
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&square, foot),
+            Some(true)
+        );
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&square, point),
+            None
+        );
+    }
+
     /// A square on `z = 0` with the same ball's disk taken out of it. On the
     /// far side of the plane from the ball's centre the ball is narrower than
     /// the hole, so `(0.6, 0, 0.1)` is outside the ball while its foot
@@ -3852,6 +3961,93 @@ mod tests {
             .collect();
         assert_eq!(kept(Rule::Union), everything_else);
         assert!(log.is_empty(), "a certified fuse asked nothing: {log:?}");
+    }
+
+    /// The side of a three-cornered bar one unit tall standing on
+    /// `(2²⁰, −2²⁰)`, `(2²⁰ + 1, −2²⁰ − 1)` and `(2²⁰ + 1, −2²⁰)`: the face on
+    /// `x + y = 0` between the first two, with the model and the baked bar it
+    /// is a face of. Its four corners are exact and on its plane.
+    fn a_far_face_on_a_plane_through_the_origin() -> (Model, BakedSolid, BakedFace) {
+        let out = f64::powi(2.0, 20);
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let triangle = ProfileBuilder::new(vec![
+            [out, -out],
+            [out + 1.0, -out - 1.0],
+            [out + 1.0, -out],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a triangle");
+        let bar = model
+            .add_extrusion(&triangle, 1.0, &Isometry::identity())
+            .expect("a positive height");
+        let [solid] = <[BakedSolid; 1]>::try_from(
+            bake(
+                &model,
+                &[bar],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar bakes"),
+        )
+        .expect("one solid");
+        let face = solid
+            .faces
+            .iter()
+            .find(|face| {
+                face.surface.as_plane().is_some_and(|flat| {
+                    let [x, y, z] = flat.normal().components();
+                    x == y && z == 0.0
+                })
+            })
+            .expect("the bar has a side on x + y = 0")
+            .clone();
+        let flat = face.surface.as_plane().expect("a flat face");
+        assert_eq!(flat.offset(), 0.0, "through the origin");
+        for edge in face.wires.iter().flatten() {
+            assert_eq!(flat.side_of_point(edge.start.point), Decision::Zero);
+        }
+        (model, solid, face)
+    }
+
+    /// A square on the far face's plane, from `x = 2²⁰ − 1` to its near edge
+    /// `x = 2²⁰` and one unit tall, its corners exact and wound the way its
+    /// plane's [`InPlane`] counts as one.
+    fn a_square_beside_the_far_face(flat: Surface) -> Piece {
+        let out = f64::powi(2.0, 20);
+        let corners = [
+            [out - 1.0, 1.0 - out, 0.0],
+            [out, -out, 0.0],
+            [out, -out, 1.0],
+            [out - 1.0, 1.0 - out, 1.0],
+        ];
+        let walls = [
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, out],
+            [0.0, 0.0, 1.0, -1.0],
+            [1.0, 0.0, 0.0, 1.0 - out],
+        ]
+        .map(|wall| Surface::Plane(Plane::from_coefficients(wall).expect("a normal")));
+        let corner = |which: usize| MeetPoint::OfThreeSurfaces {
+            surfaces: [flat, walls[(which + 3) % 4], walls[which]],
+            which: 0,
+            point: PredicatePoint::from(corners[which]),
+        };
+        let square = (0..4)
+            .map(|which| FaceMeet {
+                carried_by: [flat, walls[which]],
+                ends: [corner(which), corner((which + 1) % 4)],
+                material_side: Decision::Neg,
+                along: SmallVec::new(),
+                approximation: None,
+            })
+            .collect();
+        Piece {
+            ancestors: Vec::new(),
+            surface: flat,
+            orientation: Orientation::Forward,
+            wires: vec![square],
+            is_the_whole_surface: false,
+        }
     }
 
     /// A ball of radius 1 whose centre is `below` under the origin, and the
