@@ -7813,20 +7813,15 @@ mod tests {
     /// a test can see: the ball below sits at `(1024, 2048, 4096)` and the
     /// mesher works it out about the origin.
     ///
-    /// **The tangency is real and not a rounding.** A pipe of twice the ball's
-    /// radius, its axis one radius off the centre and square to the meridian,
-    /// holds the ball from inside at `(1, 0, 0)` on the seam, and that is where
-    /// the marcher is seeded: one radius out from the axis towards the centre,
-    /// at the centre's own height. There the ball's normal is `out/‖out‖` and
-    /// the pipe's is `sideways/‖sideways‖`, both `(1, 0, 0)` to the bit, so
-    /// `‖u − v‖²` is exactly zero and the settling has nothing to divide by —
-    /// which is [`WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces`],
+    /// **The tangency is real and not a rounding.** A pipe of the ball's own
+    /// radius, its axis through the centre and square to the meridian, holds
+    /// the whole meridian circle: at every point of it the ball's normal is
+    /// `out/‖out‖` and the pipe's is `sideways/‖sideways‖`, and `sideways` is
+    /// `out` with nothing taken off it, because `out` is square to the axis
+    /// there and that dot product is exactly zero. The two normals are the same
+    /// bits, so `‖u − v‖²` is exactly zero and the settling has nothing to
+    /// divide by — which is [`WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces`],
     /// the site all 44 corpus files of §110.3 stop at.
-    ///
-    /// **Off the centre on purpose.** A pipe of the ball's own radius with its
-    /// axis through the centre touches the whole meridian circle, and that used
-    /// to be this test's pair; `rcad_geom::walk` draws the circle in closed form
-    /// now, so it is meshed rather than refused (Q1241).
     ///
     /// **The route is `Deserialize` and not a builder**, as for the two tests
     /// above: `SolidBuilder::build` walks the crossing in its own sweep and
@@ -7843,12 +7838,11 @@ mod tests {
             .add_ball(RADIUS, &a_long_way_off)
             .expect("a ball of radius one, placed");
 
-        let touching_at_the_seam = Cylinder::new(
-            Axis::new(Point::new(-RADIUS, 0.0, 0.0), Vector::new(0.0, 1.0, 0.0))
-                .expect("the y axis moved one radius back"),
-            2.0 * RADIUS,
+        let touching_all_along_the_meridian = Cylinder::new(
+            Axis::new(Point::origin(), Vector::new(0.0, 1.0, 0.0)).expect("the y axis"),
+            RADIUS,
         )
-        .expect("a pipe of radius two");
+        .expect("a pipe of radius one");
         let seam = model
             .data()
             .edges
@@ -7860,7 +7854,7 @@ mod tests {
             panic!("a ball's seam is part of a crossing")
         };
         model.data_mut().edges[seam].run = EdgeRun::PartOfWhereItCrosses {
-            and: Surface::Cylinder(touching_at_the_seam),
+            and: Surface::Cylinder(touching_all_along_the_meridian),
             picked_by,
         };
 
@@ -7914,7 +7908,7 @@ mod tests {
         };
         assert_eq!(
             pipe.axis().origin(),
-            Point::new(1024.0 - RADIUS, 2048.0, 4096.0),
+            Point::new(1024.0, 2048.0, 4096.0),
             "and the pipe rode out of the frame with it"
         );
     }

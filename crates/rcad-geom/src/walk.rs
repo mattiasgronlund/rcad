@@ -379,8 +379,7 @@ impl PointsAlongACrossing {
 /// named against, or touches it at one point, leaves a circle of no radius, and
 /// there is no angle to walk round one. Two balls round one centre with two
 /// radii get it too, for the same reason and one surface up, and so does a ball
-/// on a cone's axis that misses the cone, and a ball on a pipe's axis narrower
-/// than the pipe. A **limit** and not
+/// on a cone's axis that misses the cone. A **limit** and not
 /// a gap (§16.10) — the curve the run names does not exist at any precision.
 ///
 /// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
@@ -721,8 +720,7 @@ enum WhatARunLiesOn {
 /// reached this by. See [`Conic::has_an_angle_round_it`]. Two balls round one
 /// centre with two radii are the same thing one surface up, refused by
 /// [`where_two_balls_cut`] before a conic is built at all, and so is a ball on
-/// a cone's axis that misses the cone, and a ball on a pipe's axis narrower
-/// than the pipe.
+/// a cone's axis that misses the cone.
 ///
 /// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
 /// one centre with one radius.
@@ -788,14 +786,20 @@ fn what_a_run_between_these_two_lies_on(
             };
             where_two_balls_cut(&first, &second).map(WhatARunLiesOn::Conic)
         }
-        // A ball centred on a pipe's axis crosses it in circles square to the
-        // axis, and which of them this run is, is its ends' and its picker's to
-        // say, as for a cone and a pipe on one axis. Marched instead, a closed
-        // run with a corner on the second circle was walked round the first,
-        // because a run nothing picks starts at the first seed (Q1241).
+        // A ball centred on a pipe's axis and wider than it crosses it in two
+        // circles square to the axis, and which of them this run is, is its
+        // ends' and its picker's to say, as for a cone and a pipe on one axis.
+        // Marched instead, a closed run with a corner on the second circle was
+        // walked round the first, because a run nothing picks starts at the
+        // first seed (Q1241). A ball no wider than the pipe is marched as
+        // before: drawing the one circle a ball of the pipe's own width touches
+        // it round lets `SolidBuilder` build a rim it refuses today, which
+        // `rcad-step` pins.
         [Surface::Sphere(ball), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
-            if whether_a_ball_sits_on_a_pipes_axis(&ball, &pipe) == Decision::Zero {
+            if ball.radius() > pipe.radius()
+                && whether_a_ball_sits_on_a_pipes_axis(&ball, &pipe) == Decision::Zero
+            {
                 let ball_first = matches!(pair[0], Surface::Sphere(_));
                 where_a_ball_on_a_pipes_axis_cuts_it(&ball, &pipe, ball_first, run, policy, log)
                     .map(WhatARunLiesOn::Conic)
@@ -1454,14 +1458,10 @@ fn whether_a_ball_sits_on_a_pipes_axis(ball: &Sphere, pipe: &Cylinder) -> Decisi
     .0
 }
 
-/// The circle of the crossing of a pipe and a ball centred on its axis that the
-/// run names.
+/// The circle of the crossing of a pipe and a ball centred on its axis and
+/// wider than it that the run names.
 ///
 /// # Errors
-///
-/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the ball is narrower
-/// than the pipe and never reaches it, so the run names a circle that is not
-/// there — a **limit**, as for a ball on a cone's axis that misses the cone.
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] and
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] as
@@ -1475,19 +1475,16 @@ fn where_a_ball_on_a_pipes_axis_cuts_it(
     log: &mut ProvenanceLog,
 ) -> Result<Conic> {
     which_of_these_circles_this_run_is(
-        the_circles_a_ball_on_a_pipes_axis_cuts(ball, pipe, ball_first)?,
+        the_two_circles_a_ball_on_a_pipes_axis_cuts(ball, pipe, ball_first),
         run,
         policy,
         log,
     )
 }
 
-/// The two circles a ball centred on a pipe's axis crosses it in, `√(R² − r²)`
-/// either way along the axis from the centre, each of the pipe's radius — or
-/// the one circle round the centre where the ball is the pipe's own width and
-/// touches it all the way round.
-///
-/// `R > r` is asked by comparing the two stored radii, which is exact.
+/// The two circles a ball centred on a pipe's axis and wider than it crosses
+/// it in, `√(R² − r²)` either way along the axis from the centre, each of the
+/// pipe's radius. `R² − r²` is written `(R − r)(R + r)`, which does not cancel.
 ///
 /// # Which way round each goes
 ///
@@ -1496,31 +1493,23 @@ fn where_a_ball_on_a_pipes_axis_cuts_it(
 /// of `S` and `T` runs along `∇S × ∇T`, which for the ball first is
 /// anticlockwise about the axis on the circle ahead of the centre and about its
 /// opposite on the circle behind (`the_way_a_circle_round_a_pipes_axis_winds`
-/// derives it). The pipe first turns both round. The circle a ball of the
-/// pipe's width touches has no such direction, and runs about the axis.
-fn the_circles_a_ball_on_a_pipes_axis_cuts(
+/// derives it). The pipe first turns both round.
+fn the_two_circles_a_ball_on_a_pipes_axis_cuts(
     ball: &Sphere,
     pipe: &Cylinder,
     ball_first: bool,
-) -> Result<Vec<Conic>> {
+) -> Vec<Conic> {
     let radius = ball.radius();
     let skin = pipe.radius();
-    let reaches = match radius.total_cmp(&skin) {
-        Ordering::Less => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
-        Ordering::Equal => vec![0.0],
-        Ordering::Greater => {
-            let reach = ((radius - skin) * (radius + skin)).sqrt();
-            vec![reach, -reach]
-        }
-    };
+    let reach = ((radius - skin) * (radius + skin)).sqrt();
     let along = pipe.axis().direction();
     let up = along * along.length().recip();
     let (across, and) = pipe.basis();
-    Ok(reaches
+    [reach, -reach]
         .into_iter()
         .map(|reach| {
             let middle = ball.centre() + up * reach;
-            let about_the_axis = (reach >= 0.0) == ball_first;
+            let about_the_axis = (reach > 0.0) == ball_first;
             let and = if about_the_axis { and } else { -and };
             Conic {
                 centre: middle,
@@ -1529,7 +1518,7 @@ fn the_circles_a_ball_on_a_pipes_axis_cuts(
                 size: how_big_this_is(&[middle, ball.centre()], &[skin, radius, reach]),
             }
         })
-        .collect())
+        .collect()
 }
 
 /// Whether two pipes that do not point one way are the same width **and** have
