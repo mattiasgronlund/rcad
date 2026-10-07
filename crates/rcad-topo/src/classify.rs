@@ -41,8 +41,11 @@
 //! straddled. Under a tolerant policy the same query resolves instead, and the
 //! log picks up a record of what was accepted to get there.
 
+use std::collections::HashMap;
+
 use rcad_geom::{
-    EdgeRun, MeetsAt, Plane, Point, Surface, WhereALineMeetsIt, where_a_line_meets_a_surface,
+    EdgeRun, MeetsAt, Plane, PlaneAgreement, Point, Surface, WhereALineMeetsIt,
+    where_a_line_meets_a_surface,
 };
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_of_points,
@@ -232,7 +235,11 @@ impl SolidView<'_> {
         let Some((low, high)) = self.box_around_it() else {
             return Containment::Outside;
         };
-        if is_outside_the_box(point, low, high) {
+        if is_outside_the_box(point, low, high)
+            && self
+                .opened_out_to_where_its_planes_meet(low, high)
+                .is_some_and(|(low, high)| is_outside_the_box(point, low, high))
+        {
             return Containment::Outside;
         }
         if let Some(placed) = self.what_a_face_it_is_beside_says(point, policy, log) {
@@ -270,6 +277,88 @@ impl SolidView<'_> {
         Containment::Undecidable {
             enclosure: worst_enclosure,
         }
+    }
+
+    /// The box from `low` to `high`, opened out to hold every corner of a flat
+    /// face where that face's stored plane meets the stored planes across its
+    /// two straight sides there; `None` where three such planes cannot be
+    /// shown to meet in a point.
+    ///
+    /// **[`SolidView::box_around_it`] holds a flat face's stored corners, and
+    /// the face is its stored plane** (`docs/decisions.md` §17.1). A turn
+    /// leaves a corner a rounding off where its planes meet, so the solid the
+    /// stored planes bound can reach a rounding past that box at its outermost
+    /// corner. Forty cubes of side 2, turned about five axes by eight angles,
+    /// hold 3897 points past their boxes that every one of their six planes
+    /// puts inside, and the box alone answered every one of them `Outside`
+    /// (`tests/a_point_a_rounding_past_a_turned_solids_corner.rs`, Q1157).
+    ///
+    /// Each straight side of a flat face's outline runs along where its plane
+    /// meets the plane across that side, from one meeting of three planes to
+    /// the next, and a flat outline lies inside the box round its corners. So
+    /// this box holds every flat face along its straight sides between flat
+    /// faces, and the stored box holds the rest as it did. A corner where four
+    /// or more faces meet is placed once from each face's side, and each of
+    /// those places is taken in. A corner whose two sides run along one plane
+    /// is no corner of the outline, which runs straight on through it, and is
+    /// passed over.
+    ///
+    /// **A corner beside a curved face is not opened out**: the stored box is
+    /// all there is there, and where a plane and a curved surface meet a
+    /// rounding past it is not asked here.
+    ///
+    /// Asked only of a point already past the stored box, since a solid of a
+    /// thousand faces is a thousand meetings worked out.
+    fn opened_out_to_where_its_planes_meet(
+        self,
+        low: Point,
+        high: Point,
+    ) -> Option<(Point, Point)> {
+        let planes: HashMap<FaceKey, Plane> = self
+            .faces()
+            .filter_map(|face| Some((face.key(), *face.surface().as_plane()?)))
+            .collect();
+        let (mut low, mut high) = (low.coordinates(), high.coordinates());
+        for face in self.faces() {
+            let Some(flat) = planes.get(&face.key()) else {
+                continue;
+            };
+            for wire in face.wires() {
+                let across: Vec<Option<&Plane>> = wire
+                    .coedges()
+                    .map(|coedge| {
+                        let edge = coedge.edge();
+                        if *edge.stored_run() != EdgeRun::Straight {
+                            return None;
+                        }
+                        edge.neighbouring_faces()
+                            .find(|&other| other != face.key())
+                            .and_then(|other| planes.get(&other))
+                    })
+                    .collect();
+                let next_round = across.iter().cycle().skip(1);
+                for (into, out_of) in across.iter().zip(next_round) {
+                    let (Some(into), Some(out_of)) = (into, out_of) else {
+                        continue;
+                    };
+                    if matches!(
+                        into.agreement_with(out_of),
+                        PlaneAgreement::SameWay | PlaneAgreement::OppositeWay
+                    ) {
+                        continue;
+                    }
+                    let meet = Plane::meet_of_three(flat, into, out_of).ok()?;
+                    for (axis, side) in meet.enclosure().into_iter().enumerate() {
+                        if !(side.lo().is_finite() && side.hi().is_finite()) {
+                            return None;
+                        }
+                        low[axis] = low[axis].min(side.lo());
+                        high[axis] = high[axis].max(side.hi());
+                    }
+                }
+            }
+        }
+        Some((Point::from(low), Point::from(high)))
     }
 
     /// What a flat face whose corners and stored plane read the point
@@ -893,16 +982,21 @@ impl SolidView<'_> {
     }
 }
 
-/// Whether the whole of `point`'s box sits off one side of the solid's
-/// bounding box.
+/// Whether the whole of `point`'s box sits off one side of the box from `low`
+/// to `high`.
 ///
-/// This decides `Outside` without firing a ray, and it is allowed to because it
-/// is a proof rather than a shortcut. Every point of every face is inside
-/// [`SolidView::box_around_it`] — which is what that box is for and what
-/// [`SolidView::box_around_its_corners`] is not — and an enclosure is a range
-/// the point is guaranteed to be somewhere in, so a range lying entirely past
-/// one side of the box puts the point outside the solid with nothing left over.
-/// No tolerance is involved and no sign of a rounded quantity is read.
+/// `classify_uncertain_point` decides `Outside` from this without firing a
+/// ray, and it is allowed to because it is a proof rather than a shortcut
+/// **when the box holds every point of every face**, and an enclosure is a
+/// range the point is guaranteed to be somewhere in, so a range lying entirely
+/// past one side of the box puts the point outside the solid with nothing left
+/// over. No tolerance is involved and no sign of a rounded quantity is read.
+///
+/// [`SolidView::box_around_it`] alone is not that box: it holds a flat face's
+/// stored corners, and a turned solid's stored planes, which are its faces,
+/// meet a rounding past them (Q1157). So the answer is taken only where the
+/// point is past that box opened out to where the planes meet as well
+/// (`SolidView::opened_out_to_where_its_planes_meet`).
 ///
 /// A box that overlaps the solid's bounding box proves nothing either way, so
 /// it falls through and the rays decide it. So does a coordinate with no
