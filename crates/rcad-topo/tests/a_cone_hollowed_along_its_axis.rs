@@ -29,8 +29,9 @@
 //! - **a wall through a circle**, where the wall, the cone and the partner meet
 //!   with two of them curved, and every rule was refused there until Q1259
 //!   placed those points. The circle then holds two nodes off its start, so
-//!   the order round it is asked, and three intersections and one difference
-//!   answer; every other rule is refused after the meet.
+//!   the order round it is asked, and four intersections and two differences
+//!   answer since Q1269 named the circle's two arcs apart; every other rule is
+//!   refused after the meet.
 //!
 //! Without a wall no fuse here asks the order round one of these circles. A
 //! seam puts one node on a face's circle beside its start, and each face has
@@ -419,11 +420,34 @@ fn a_frustum_and_a_bar_of_radius_four_cross_in_one_circle_on_both_sides() {
 /// `(116 + √2)π/6`.
 ///
 /// **What answers is the intersection with the steep frustum, both ways,
-/// `367π/12`, with the bar, both ways, `124π/3`, and the half less the bar,
-/// `128π/3`.** Every other rule is refused after the meet, and not traced: the
-/// unions and the rest of the differences `ResultIsNotManifold` with one edge or
-/// four, and the ball's intersections and the half less the ball
-/// `CannotMeshAFace` with `CornersCoincide`.
+/// `367π/12`, the steep frustum less the half, `655π/12`, the intersection with
+/// the bar, both ways, `124π/3`, and the half less the bar, `128π/3`.**
+///
+/// The partner's skin holds the whole circle, and the arc of it at `x < 0`,
+/// between the same two corners as the arc along the cone, was one edge with
+/// it: every union and the partner less the half were refused
+/// `ResultIsNotManifold { count: 4 }`, with the partner's skin three times
+/// along it and the cone once. `fuse/assemble.rs`'s
+/// `which_arc_of_a_circle_this_is` names the two arcs apart since Q1269, and
+/// each of those rules now stops one step on, and is not fixed:
+///
+/// - against the steep frustum, the unions and the half less it are refused
+///   `ResultIsNotManifold { count: 1 }`, as the union one way round was
+///   already. The steep cone's apex is `(0, 0, 2)`, on the edge where the wall
+///   meets the half's floor. The wall's face is cut along the two rulings
+///   `x = 0` cuts the steep cone in, drawn in full down to the apex, so its
+///   edge along the floor is two edges either side of it; the floor touches the
+///   steep cone at the apex alone and keeps that edge whole, one edge with one
+///   face along it and two more with one each;
+/// - against the bar, the unions and the bar less the half are refused
+///   `ACurvedFaceGoesRightRoundWithNoSeam`, by the mesh the fuse checks its
+///   answer with;
+/// - against the ball, the unions and the ball less the half are refused
+///   `TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`, which `walk` gives
+///   for two balls of one centre and one radius.
+///
+/// The ball's intersections and the half less the ball are refused
+/// `CannotMeshAFace` with `CornersCoincide` (Q1270), as they were before.
 #[test]
 fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_placed_and_most_rules_stop_after()
  {
@@ -443,31 +467,31 @@ fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_plac
         },
         |model| a_ball_four_up(model, 3.0),
     ];
-    use Gives::{CornersCoincide, Holds, NotManifold};
+    use Gives::{CornersCoincide, Holds, NoSeam, NotManifold, OneBallTwice};
     let wanted = [
         [
             NotManifold(1),
-            NotManifold(4),
+            NotManifold(1),
             Holds(367.0 * PI / 12.0),
             Holds(367.0 * PI / 12.0),
             NotManifold(1),
-            NotManifold(4),
+            Holds(655.0 * PI / 12.0),
         ],
         [
-            NotManifold(4),
-            NotManifold(4),
+            NoSeam,
+            NoSeam,
             Holds(124.0 * PI / 3.0),
             Holds(124.0 * PI / 3.0),
             Holds(128.0 * PI / 3.0),
-            NotManifold(4),
+            NoSeam,
         ],
         [
-            NotManifold(4),
-            NotManifold(4),
+            OneBallTwice,
+            OneBallTwice,
             CornersCoincide,
             CornersCoincide,
             CornersCoincide,
-            NotManifold(4),
+            OneBallTwice,
         ],
     ];
     for (partner, wanted) in partners.into_iter().zip(wanted) {
@@ -482,12 +506,62 @@ fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_plac
     }
 }
 
+/// A frustum of slope 3/4 from `z = 1` to `z = 9`, seamed up `−x`, and the ball
+/// of radius 3 five up its axis, which it holds touching round one circle:
+/// `(1 + s²)R² − s²e² = 25·9/16 − 9·25/16` is zero, so the circle is at
+/// `h = e/(1 + s²) = 3.2`, `2.4` across. Along it `∇S × ∇T` is nothing, so
+/// nothing tells its two arcs between two corners apart, and
+/// `fuse/assemble.rs`'s `which_arc_of_a_circle_this_is` names a cone's arcs on
+/// the word that no fuse gets that far.
+///
+/// **Every rule both ways is refused before an edge is named.** The whole
+/// frustum, whose seam puts one corner on the circle beside its start, stops
+/// at selection, `Undecidable` placing a point at the start; its half `x ≥ 0`,
+/// whose wall puts two, stops at the ordering, which refuses to run along a
+/// touch.
+#[test]
+fn a_ball_a_frustum_touches_round_one_circle_is_refused_before_its_arcs_are_named() {
+    let ball = |model: &mut Model| {
+        model
+            .add_ball(
+                3.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, 5.0)).expect("a shift"),
+            )
+            .expect("a ball")
+    };
+    let whole = what_each_rule_gives(|model| {
+        let frustum = seamed(model, 0.75, 1.0, 9.0, [-1.0, 0.0]);
+        [frustum, ball(model)]
+    });
+    assert!(
+        whole
+            .iter()
+            .all(|answer| matches!(answer, Err(Error::Undecidable { .. }))),
+        "{whole:?}"
+    );
+    let half = what_each_rule_gives(|model| {
+        let frustum = seamed(model, 0.75, 1.0, 9.0, [-1.0, 0.0]);
+        [the_x_positive_half_of(model, frustum), ball(model)]
+    });
+    assert!(
+        half.iter().all(|answer| matches!(
+            answer,
+            Err(Error::Geometry(
+                rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent { .. }
+            ))
+        )),
+        "{half:?}"
+    );
+}
+
 /// What one fuse is pinned to give: one solid of a closed-form volume, or a
 /// refusal by name.
 enum Gives {
     Holds(f64),
     NotManifold(usize),
     CornersCoincide,
+    NoSeam,
+    OneBallTwice,
 }
 
 impl Gives {
@@ -505,6 +579,13 @@ impl Gives {
                     why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
                     ..
                 }),
+            )
+            | (Gives::NoSeam, Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }))
+            | (
+                Gives::OneBallTwice,
+                Err(Error::Geometry(
+                    rcad_geom::Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing,
+                )),
             ) => true,
             _ => false,
         }
