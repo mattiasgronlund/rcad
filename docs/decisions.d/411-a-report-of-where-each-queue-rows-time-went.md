@@ -421,3 +421,136 @@ earlier merges are 35 minutes together.
 What this leaves: the gate measurement above is a 2.2 row, filed with this
 section. Q1310's timestamps make the land lock exact rather than a bound,
 with no change here.
+
+### 411.11 Which gate steps the verifier's and the lander's gates spend their time in — Q1326
+
+*Measured 2026-10-08, over the same week as §411.10,* `mise exec -- just
+row-time --since 2026-09-30 --until 2026-10-07`*, which still prints `bucket:
+just verify-lane 18h54m` and `bucket: just land 15h38m`: the two totals this
+row divides further.*
+
+**The method.** `row_time.py` does not break the gate into its steps
+(§411.3), so a new scratch script, `gate_steps.py`, left in this lane's
+scratchpad, imports it for the loader and the row/step assembly
+(`load`, `assemble`, `read_transcript`, `text_of`) and adds nothing of its
+own to how a row or a step is built. For every assembled step whose role is
+`lane`, `verifier` or `lander`, it reads that step's transcript and scans
+every `Bash` tool result, in record order, for the three kinds of line
+`just gate quiet` itself prints (justfile ~728-861): a per-step line
+`· <step> (<secs> s)`, with ` FAILED, exit <n>` after it on a failure; a
+`· served:<steps> from <sha8>'s gate at <date>` line; and the `gate:
+PASS`/`gate: FAIL` line that opens each summary block. One `gate:
+PASS`/`gate: FAIL` line closes one gate run; every step line and served line
+since the previous close (or the start of the step) belongs to it. A
+backgrounded run's log can reach the tool results in several pieces — the
+`follow`/`print_new` relay, §385.2 — so the script concatenates every Bash
+result's text in record order before splitting it into lines, which is what
+stitches a split gate back together.
+
+**Check 1: do the lines reach the tool results?** Mostly, but not from the
+same place for every role, and not evenly.
+
+- `tooling/land/land.py`'s `run_split` (line 686-691) prints everything a
+  command said, unfiltered, so `just land`'s relayed log holds every step
+  line `just gate quiet` printed, passing or failing.
+- `tooling/verify-lane/verify_lane.py`'s `gate()` (line 302-320) does not:
+  `if not re.fullmatch(r"· \S+ \([0-9.]+ s\)", line): say(line)` keeps every
+  line that is *not* a plain passing-step line and drops the rest. A
+  **failing** step's line carries ` FAILED, exit <n>`, which does not
+  fullmatch that pattern, so it survives; a passing step's line is dropped
+  outright. The served line and the summary block survive either way, since
+  neither matches the pattern.
+- Measured coverage: of 299 lane agents, 234 (78%) show at least one gate
+  line; the other 65 never reached a gate at all (docs-only lanes, a lane
+  killed first, or a read-only one). Of 251 verifier agents, all 251 (100%)
+  show at least one gate-related line — the served/summary lines never go
+  missing — but the *step* lines mostly do: see Check 3. Of 173 landers that
+  ran their own gate (177 minus the 4 shared ones, Check 2), 154 (89%) show
+  gate lines.
+- 272 lane gates closed with a `gate: PASS`/`gate: FAIL` line and 4 did not
+  (an open run with step lines but no close, most likely a killed lane). Both
+  the verifier's 267 gates and the lander's 214 closed every time — the
+  backgrounded relay never lost a gate's close in this window. So the one
+  real case of "the lines are missing" in the week is those 4 lane gates, not
+  the background split the brief worried about; there is no log file to read
+  them back from, since those lanes' trees are gone.
+
+**Check 2: is one gate counted once?** Yes. 4 landers in the week have
+`landed_by` set (row_time.py's own §411.5 wiring): their own transcript
+holds no gate line at all, and the holder's step is the one the script
+counts. Each of those 4 shared gates carried exactly 2 lanes (the holder's
+own and one other) — `landed_for_counts: [2, 2, 2, 2]` in the script's
+output. Every other lander ran and is counted once.
+
+**Check 3: is the sum of step times the gate's wall time? No — and how far
+off tells its own story.** For the lane, whose gate calls are foreground and
+single, `step["own"]` (row_time's own call-to-result timing, reused
+unchanged) gives the real wall time of the three gate-running keys directly:
+`just pre-gate gate-lane` 15h13m, `just gate quiet` 51m31s (the lane's own
+share; §411.10's 5h35m for that bucket also holds the verifier's 11m32s and
+4h32m from the merger role, outside this row), `just pre-gate gate` 1h32m —
+18h26m in all. The **sum of every step's own time** over the same 272 gates
+is 49h37m, 2.7x that, because steps run several at once (`jobs=cores`). The
+**sum of just the cargo-chain steps'** time (`check check-fuzz-builds
+check-wildcards check-ignored lint test test-slow check-release-build
+check-t-selftest`, serial by design) is 19h05m — within 4% of the real
+18h26m, so the chain sum is a good stand-in for wall time where there is no
+foreground call to time directly. `check-t-selftest` is the step that ends
+the chain in 254 of 272 lane gates (239 of the whole gate), but its own
+total is 6m58s over those runs — a few seconds each — because it only has to
+run after `test`, not because it is slow; `test` (10h50m, the single biggest
+step) is what it is waiting on.
+
+Applying the chain-sum stand-in to the other two roles:
+
+- **Verifier:** 267 gates, 191 served (71%) — far more than the lane's 6 of
+  272 (2%), because the verifier's code is usually the lane's last commit,
+  already gated minutes before. Chain-sum 2h45m, sum of every step 3h11m.
+  Against the reproduced `just verify-lane` total of 18h54m, that leaves
+  about **16h09m for everything that is not the gate**: the checkout,
+  `files_outside`, `lines_that_run`, the revert, its rebuild, the test run
+  and the restore (`verifier.md` step 7). The gate itself is a small and
+  usually-served slice of what `just verify-lane` costs.
+- **Lander:** 214 gates (plus the 4 shared), 60 served (28%). Chain-sum
+  12h56m, sum of every step 30h56m. Against the reproduced `just land` total
+  of 15h38m (which already excludes the land lock wait, carried in its own
+  bucket), that leaves about **2h42m for everything that is not the gate**:
+  the merge, `queue apply`, `check-queue`, the commit, and the push loop. For
+  the lander, unlike the verifier, the gate is most of the total.
+
+Both splits are estimates from the chain-sum stand-in, not a second direct
+timing — marked as such, not asserted as exact. `test` is the single
+biggest step everywhere it runs at all (lane 10h50m of 256 runs, lander
+6h27m of 151, verifier 2h41m of 34 — the verifier's average per run is
+higher because it is rebuilding the reverted source, not the cached one);
+`test-slow`, which only the lander's gate (not `gate-lane`) runs, adds
+2h04m. `check-queue-api-selftest`, not in the chain, is independently the
+second-biggest cost for both lane (7h35m) and lander (4h32m).
+
+**What to speed up first, and why.** Of the two totals this row was asked to
+split, the gate is most of the lander's (chain-sum 12h56m of a 15h38m
+total) and least of the verifier's (2h45m of 18h54m) — the opposite of what
+§411.10's "the gate, run three times for each merged row" line suggested
+without the breakdown. `test` is the one step both large and on the serial
+chain in both roles, so it is what a change to the gate itself should
+shorten first — most directly for the lander, where the chain is most of
+the total. For the verifier, shortening the gate buys little, since it is
+usually served already; the 16h09m outside it (the checkout, revert,
+rebuild and retest) is where a change to `just verify-lane` would have to
+look, and this row did not break that further down — a 2.2 follow-up, named
+in the handoff.
+
+**What ran this:** `gate_steps.py`, imported `row_time.py` unchanged, is in
+this lane's scratchpad
+(`/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad-worktrees-dispatch-2026-10-03/348dbfb8-c5f8-4dff-b4d5-77d5949fcf61/scratchpad/gate_steps.py`),
+run as `mise exec -- python3 gate_steps.py`, printing one block a role with
+every step's total time, run count, served count and failed count, the two
+sums above, and which step ends the gate and the chain most often.
+
+What this leaves: a follow-up to find where `just verify-lane`'s 16h09m
+outside the gate goes (the checkout, the revert, its rebuild, the test run
+and the restore) is a 2.2 row, named but not filed here. A `just
+claim-section` run during this measurement claimed the next section number
+by mistake (an `--help` argument was read as the section's topic, not a
+flag) and nothing was written under it; the number is spent and unused,
+which costs nothing further.
