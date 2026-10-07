@@ -1484,13 +1484,15 @@ fn a_holed_bar_cut_to_a_bow_tie_cap_is_answered_under_every_rule() {
 /// between a chord and its arc. The line along it meets the chord's line only
 /// once, so it leaves that piece of the disk through the arc, and the fuse
 /// puts a corner there: the arc that chord stood for is not one arc of the
-/// ring after all. Nor can the arc be longer than half its circle with no
-/// corner on it: the bar cut to the step from `(−8, −6)` along `y = −6` to
+/// ring after all. The arc can be longer than half its circle with no corner
+/// on it: the bar cut to the step from `(−8, −6)` along `y = −6` to
 /// `(−1, −6)`, down to `(−1, −8)` and along `y = −8` to `(6, −8)`, the arc
-/// running the long way round, built face by face, is refused
-/// `AFaceTrimmedByACurveThisCannotFollow` against a bar of radius 2 standing
-/// through it, under every rule both ways round
-/// (`a_step_cap_whose_arc_runs_the_long_way_round_is_refused_by_the_next_fuse`,
+/// running the long way round, built face by face, answers against a bar of
+/// radius 2 standing through it, under every rule both ways round, since
+/// Q1094 gave `Surface::Cylinder` a real answer in
+/// `what_a_face_cut_by_part_of_a_crossing_holds` (`holds.rs`) in place of the
+/// blanket `AFaceTrimmedByACurveThisCannotFollow` it fell into before
+/// (`a_step_cap_whose_arc_runs_the_long_way_round_is_answered_by_the_next_fuse`,
 /// `docs/decisions.md` §224.1). The same step
 /// cut out of a bar by a prism comes back with a corner on the arc at
 /// `(−1, √99)`, where `x = −1` crosses it, and one at `(8, −6)`, where
@@ -1636,16 +1638,35 @@ fn a_staircase_cap_whose_corners_cancel_is_given_a_hole_under_every_rule() {
 /// The step of [`LONG_STEP`] holds what the circle above the chord `y = −8`
 /// holds, `75π + 50` on its cap, and its four corners, read back as written,
 /// sweep no area. Its arc runs three quarters of the way round with no corner
-/// on it, and no fuse that would join its cap gets that far: taking a bar of
-/// radius 2 at `(3, 2)` out of it is refused while its cap is cut, under every
-/// rule, both ways round (`docs/decisions.md` §224.1: an arc longer than half
-/// its circle has its centre in front of any picker that holds the whole arc).
+/// on it. `docs/decisions.md` §224.1 is quoted here on an earlier version of
+/// this test for the reason taking a bar out of this step was refused: an arc
+/// longer than half its circle has its centre in front of any picker that
+/// holds the whole arc. That is not what refused it. The refusal named a face
+/// of the step's own round wall, and the wall is a `Surface::Cylinder`, which
+/// `what_a_face_cut_by_part_of_a_crossing_holds` (holds.rs) answered for no
+/// family at all before Q1094 — grouped with `Sphere` and `Torus` under one
+/// blanket `AFaceTrimmedByACurveThisCannotFollow`, whatever the cut. Q1094's
+/// `in_front_of_a_plane_every_side_is_behind` gives `Cylinder` a real answer:
+/// a point in front of a plane that cuts the face, where every other side of
+/// the face lies on or behind that plane, is not held. The wall's two straight
+/// cuts are such planes, so taking a bar of radius 2 at `(3, 2)` out of it now
+/// answers under every rule, both ways round.
+///
+/// The disk of radius 2 about `(3, 2)` lies entirely inside the step's cap,
+/// clear of the arc and of both straight cuts, so the bar meets the step in
+/// the full cylinder between the step's caps, `z` in `[0, 4]`: `π·2²·4 = 16π`.
+/// The bar itself is `π·2²·6 = 24π`, so the union is the step plus
+/// `24π − 16π = 8π`, the intersection `16π`, the step less the bar
+/// `step − 16π`, and the bar less the step its two ends outside `[0, 4]`,
+/// `z` in `[−1, 0]` and `[4, 5]`, `π·2²·1 = 4π` each.
 #[test]
-fn a_step_cap_whose_arc_runs_the_long_way_round_is_refused_by_the_next_fuse() {
+fn a_step_cap_whose_arc_runs_the_long_way_round_is_answered_by_the_next_fuse() {
+    let step_volume = 4.0 * (75.0 * PI + 50.0);
+    let (pin, shared) = (PI * 2.0 * 2.0 * 6.0, PI * 2.0 * 2.0 * 4.0);
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let step = a_bar_cut_to(&mut model, 10.0, &LONG_STEP)
         .unwrap_or_else(|why| panic!("the step: {why:?}"));
-    assert_holds(&model, step, 4.0 * (75.0 * PI + 50.0), "the step");
+    assert_holds(&model, step, step_volume, "the step");
     let corners = the_outline_of_the_cap(&model, step, [6.0, -8.0, 4.0]);
     assert_eq!(
         corners,
@@ -1661,15 +1682,28 @@ fn a_step_cap_whose_arc_runs_the_long_way_round_is_refused_by_the_next_fuse() {
         let through = model
             .add_round_bar(2.0, 6.0, &at(3.0, 2.0, -1.0))
             .expect("a bar of radius two");
-        let refused = fused_in_order(&mut model, [step, through], rule, swapped);
-        let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
-            panic!("{rule:?}, swapped {swapped}: {refused:?}");
-        };
-        let the_step = model.solid(step).expect("this model made the key");
-        assert!(
-            the_step.faces().any(|mine| mine.key() == face),
-            "{rule:?}, swapped {swapped}: the refusal names a face of the step"
-        );
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, [step, through], rule, swapped);
+        match (rule, swapped) {
+            (Rule::Union, _) => assert_holds(
+                &model,
+                the_only(answer, &what),
+                step_volume + pin - shared,
+                &what,
+            ),
+            (Rule::Intersection, _) => {
+                assert_holds(&model, the_only(answer, &what), shared, &what);
+            }
+            (Rule::Difference, false) => {
+                assert_holds(&model, the_only(answer, &what), step_volume - shared, &what)
+            }
+            (Rule::Difference, true) => {
+                for end in the_two_smaller_first(&model, answer, &what) {
+                    assert_holds(&model, end, 4.0 * PI, &what);
+                }
+            }
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        }
     }
 }
 
