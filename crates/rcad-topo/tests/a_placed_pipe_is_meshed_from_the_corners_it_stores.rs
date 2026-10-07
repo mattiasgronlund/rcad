@@ -1,18 +1,15 @@
 //! Whether a placed pipe's flat end — a ring between two circles, not a bar's
-//! whole disc — is cut into other triangles than the unplaced pipe's, under
-//! the same twelve placements `a_placed_bar_is_meshed_from_the_corners_it_stores.rs`
+//! whole disc — is cut into the unplaced pipe's triangles, under the same
+//! twelve placements `a_placed_bar_is_meshed_from_the_corners_it_stores.rs`
 //! uses.
 //!
-//! §379.5's rule on corner order is asked only for a flat patch with one
-//! loop. A ring has two loops — an outline and a hole — so the triangulator
-//! leaves it to spade whatever is asked, the same as a ball's lid. Whether
-//! spade's near-ties on a ring go the same way wherever the pipe is put was
-//! not measured (Q784 lane report, remaining); this is that measurement.
-//!
-//! **It does not.** Nine of the twelve placements move 2 of a ring's
-//! triangles onto other points, on the bottom ring, the top ring, or (once)
-//! both. The counts are pinned below and recorded, dated, in §379.5; a row is
-//! filed for the defect. `docs/decisions.d/379-*.md`.
+//! Q797 measured it first, when §379.5's rule on corner order was asked only
+//! for a flat patch with one loop and a ring was left to spade's near-ties:
+//! nine of the twelve placements moved 2 of a ring's triangles onto other
+//! points, on the bottom ring, the top ring, or (once) both. Since Q1109 a
+//! ring whose two rims the walls across read at one height is cut by the
+//! order of its corners too, and every placement is cut into the unplaced
+//! pipe's triangles, corner for corner and in order. `docs/decisions.d/379-*.md`.
 //!
 //! The pipe is a bar of radius 3 and height 5 less a smaller coaxial bar that
 //! pokes through both ends, so each flat end is a ring. It is built through
@@ -29,89 +26,63 @@ const HEIGHT: f64 = 5.0;
 const INNER_RADIUS: f64 = 1.0;
 const INNER_HEIGHT: f64 = HEIGHT + 2.0;
 
-/// The count, pinned per placement, of each flat end's triangles that join
-/// points the unplaced pipe's mesh does not join them with: (bottom ring,
-/// top ring), in `some_turns_with_and_without_a_shift`'s order.
-///
-/// Measured 2026-10-06 on `9e6da7e1` and recorded in §379.5. Every entry but
-/// two is `(2, 0)`, `(0, 2)` or `(0, 0)`; one is `(2, 2)`. A change in either
-/// direction, on either ring, is a change worth re-reading §379.5 for.
-const PINNED_OFF: [(usize, usize); 12] = [
-    (2, 0),
-    (0, 2),
-    (2, 0),
-    (2, 0),
-    (2, 2),
-    (2, 0),
-    (0, 0),
-    (0, 0),
-    (2, 0),
-    (2, 0),
-    (0, 2),
-    (0, 0),
-];
-
-/// Pins how many of each flat end's triangles, under each of the twelve
-/// placements, join points the unplaced pipe's mesh does not. §379.5: a ring
-/// has two loops, so the corner-order rule that keeps a bar's whole discs at
-/// `0` leaves a ring to spade's near-ties, and this is not `0` everywhere.
+/// Each flat end of the pipe, under each of the twelve placements, is cut into
+/// the unplaced pipe's triangles: the same three corners in the same order, in
+/// the same order down the mesh. Prints how many of each ring's triangles join
+/// other points, which was 2 on one ring or both in nine placements before
+/// the rings were cut by corner order (§379.5, Q797).
 #[test]
-fn how_many_of_a_placed_pipes_flat_end_triangles_join_other_points() {
+fn a_placed_pipes_flat_ends_are_cut_into_the_unplaced_pipes_triangles() {
     let (unplaced, unplaced_bottom, unplaced_top) =
         a_pipe_meshed_with_its_ends(&Isometry::identity());
-    let unplaced_bottom_triangles = corner_sets_of(&unplaced, unplaced_bottom);
-    let unplaced_top_triangles = corner_sets_of(&unplaced, unplaced_top);
+    let unplaced_bottom_cut = the_triangles_of(&unplaced, unplaced_bottom);
+    let unplaced_top_cut = the_triangles_of(&unplaced, unplaced_top);
     assert!(
-        !unplaced_bottom_triangles.is_empty() && !unplaced_top_triangles.is_empty(),
+        !unplaced_bottom_cut.is_empty() && !unplaced_top_cut.is_empty(),
         "the unplaced pipe's flat ends have no triangles to compare"
     );
-    let placements = some_turns_with_and_without_a_shift();
-    assert_eq!(
-        placements.len(),
-        PINNED_OFF.len(),
-        "the pinned table has a different length than the placements it is meant to cover"
-    );
-    let mut measured = Vec::new();
-    let mut moved = Vec::new();
+    let unplaced_as_sets: HashSet<[u32; 3]> = unplaced_bottom_cut
+        .iter()
+        .chain(&unplaced_top_cut)
+        .map(|&corners| as_a_set(corners))
+        .collect();
+    let off = |cut: &[[u32; 3]]| {
+        cut.iter()
+            .filter(|&&corners| !unplaced_as_sets.contains(&as_a_set(corners)))
+            .count()
+    };
+    let mut differing = Vec::new();
 
-    for ((name, placement), &pinned) in placements.iter().zip(PINNED_OFF.iter()) {
+    for (name, placement) in &some_turns_with_and_without_a_shift() {
         let (placed, bottom, top) = a_pipe_meshed_with_its_ends(placement);
-        let bottom_off = count_joining_other_points(&placed, bottom, &unplaced_bottom_triangles);
-        let top_off = count_joining_other_points(&placed, top, &unplaced_top_triangles);
+        let bottom_cut = the_triangles_of(&placed, bottom);
+        let top_cut = the_triangles_of(&placed, top);
+        let (bottom_off, top_off) = (off(&bottom_cut), off(&top_cut));
         println!(
             "{name}: of {} triangles, {bottom_off} on the bottom ring and {top_off} on the top \
              ring join other points",
             placed.triangles().len()
         );
-        measured.push((bottom_off, top_off));
-        if (bottom_off, top_off) != pinned {
-            moved.push((name.clone(), pinned, (bottom_off, top_off)));
+        if bottom_cut != unplaced_bottom_cut || top_cut != unplaced_top_cut {
+            differing.push((name.clone(), bottom_off, top_off));
         }
     }
 
     assert!(
-        moved.is_empty(),
-        "a placed pipe's flat end counts moved from what §379.5 pinned; (placement, pinned \
-         (bottom, top), measured (bottom, top)): {moved:?}; full table: {measured:?}"
+        differing.is_empty(),
+        "a placed pipe's flat ends are not cut into the unplaced pipe's triangles; (placement, \
+         bottom ring and top ring triangles joining other points): {differing:?}"
     );
 }
 
-/// The triangles of `face`, each as its three corner indices sorted.
-fn corner_sets_of(mesh: &Mesh, face: FaceKey) -> HashSet<[u32; 3]> {
+/// The triangles of `face`, each as its three corners in the order the mesh
+/// holds them.
+fn the_triangles_of(mesh: &Mesh, face: FaceKey) -> Vec<[u32; 3]> {
     mesh.triangles()
         .iter()
         .filter(|triangle| triangle.face() == face)
-        .map(|triangle| as_a_set(triangle.corners()))
+        .map(|triangle| triangle.corners())
         .collect()
-}
-
-/// How many of `face`'s triangles, sorted, are not among `unplaced`.
-fn count_joining_other_points(mesh: &Mesh, face: FaceKey, unplaced: &HashSet<[u32; 3]>) -> usize {
-    mesh.triangles()
-        .iter()
-        .filter(|triangle| triangle.face() == face)
-        .filter(|triangle| !unplaced.contains(&as_a_set(triangle.corners())))
-        .count()
 }
 
 fn as_a_set(mut corners: [u32; 3]) -> [u32; 3] {

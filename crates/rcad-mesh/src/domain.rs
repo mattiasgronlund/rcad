@@ -74,20 +74,25 @@ impl TrimmedDomain {
     }
 
     /// Ask for the patch to be cut by the order of its corners, and not by the
-    /// Delaunay test, where that order alone makes a cut: a flat patch with no
-    /// holes whose outline turns the same way at every corner and goes round
-    /// once. Any other patch is cut as before.
+    /// Delaunay test, where that order alone makes a cut: a flat patch whose
+    /// outline turns the same way at every corner and goes round once, with no
+    /// hole, or with one hole that turns the other way at every corner, goes
+    /// round once, and is cut with every triangle turning the outline's way. Any
+    /// other patch is cut as before.
     ///
     /// **Ask only where no face across the boundary can draw a side between two
     /// of these corners.** The cut joins corners that are not next to each
-    /// other, and a face across the boundary that joins the same two draws the
-    /// same side: a pocket, refused as two patches drawing one side
+    /// other — on a disc two of the outline, on a ring one of the outline and
+    /// one of the hole — and a face across the boundary that joins the same two
+    /// draws the same side: a pocket, refused as two patches drawing one side
     /// (`docs/decisions.md` §187.4, §379.5). The triangulator sees one face and
     /// cannot tell; the caller sees both.
     ///
     /// What it buys: points of one circle are a near-tie for the Delaunay test
-    /// in any four, so the same disc moved by a rounding is cut into other
-    /// triangles. Corner order does not move with the numbers.
+    /// in any four, and so are a side of a ring's outline and a side of its
+    /// hole that face each other square, so the same disc or ring moved by a
+    /// rounding is cut into other triangles. Corner order does not move with
+    /// the numbers.
     #[must_use]
     pub fn cut_by_corner_order(mut self) -> Self {
         self.by_corner_order = true;
