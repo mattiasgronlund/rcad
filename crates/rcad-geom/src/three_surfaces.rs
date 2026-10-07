@@ -48,12 +48,21 @@
 //!   a shaft across the circle a chamfer cone crosses it in.
 //!   [`what_a_plane_beside_their_one_axis_leaves`].
 //!
+//! **Three curved surfaces, two of which bend the same way, are one plane and
+//! two curved surfaces** by the first family's own argument: every point the
+//! two share is on the plane they differ by, and every point on that plane and
+//! one of them is on the other. So the plane takes the place of one of the
+//! two, and the five roads answer the triple — two cones of one slope about one
+//! axis and a ball, or two bars running the same way and a third.
+//! [`where_three_curved_surfaces_meet`].
+//!
 //! What is left over is refused by name (§16.10, §31.2): one plane and two
 //! quadrics that bend differently, cross the plane in curves, and neither
 //! share an axis the plane is square or parallel to — a pipe and a ball off
 //! its axis, two pipes leaning against each other, or a plane leaning to the
-//! axis a ball and a pipe share — and any triple with a torus and fewer than
-//! two planes.
+//! axis a ball and a pipe share — three curved surfaces no two of which
+//! differ by a plane a stored [`Plane`] is exactly, and any triple with a
+//! torus and fewer than two planes.
 //! [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] says which of the two
 //! kinds of refusal it is in its own doc.
 //!
@@ -351,7 +360,8 @@ impl MeetOfThree {
 ///
 /// [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] when fewer than two of
 /// the three are planes and none of the five ways round that the module doc
-/// names runs.
+/// names runs — for three curved surfaces, after the plane two of them differ
+/// by has taken one's place, or where no two of them differ by one.
 ///
 /// [`Error::Undecidable`] when a sign the answer depends on could not be
 /// settled, or when a product the exact arithmetic needs falls out of `f64`'s
@@ -401,13 +411,18 @@ fn the_meet_where_they_stand(
     log: &mut ProvenanceLog,
 ) -> Result<MeetOfThree> {
     let [first, second, third] = in_a_fixed_order(surfaces);
-    let (Surface::Plane(one), Surface::Plane(other)) = (&first, &second) else {
-        return where_one_plane_and_two_curved_surfaces_meet(&first, &second, &third, policy, log);
+    let at = the_places_these_three_sit(&first, &second, &third);
+    let Surface::Plane(one) = &first else {
+        return where_three_curved_surfaces_meet([&first, &second, &third], &at, policy, log);
+    };
+    let Surface::Plane(other) = &second else {
+        return where_one_plane_and_two_curved_surfaces_meet(
+            one, &second, &third, &at, policy, log,
+        );
     };
     if let Surface::Plane(last) = &third {
         return where_three_planes_meet(one, other, last, policy, log);
     }
-    let at = the_places_these_three_sit(&first, &second, &third);
     let Some(line) = the_line_two_planes_cross_in(one, other, &at, policy, log)? else {
         return what_a_third_surface_leaves_of_one_plane(one, other, &third, &at, policy, log);
     };
@@ -1314,6 +1329,83 @@ fn what_one_plane_and_one_curved_surface_share(
     }
 }
 
+/// Three curved surfaces, by way of the plane two of them differ by.
+///
+/// Two quadrics that square `p` the same way differ by something flat, as
+/// [`where_a_plane_and_two_quadrics_of_one_bend_meet`] says: `Q₁ − Q₂` has no
+/// `p·p` left in it. **The three share exactly what that plane, one of the two
+/// and the third share.** A point on both quadrics is on the plane, because
+/// `Q₁ − Q₂` is nothing where `Q₁` and `Q₂` both are; and a point on the plane
+/// and on `Q₁` is on `Q₂`, because `Q₂ = Q₁ − (Q₁ − Q₂)`. So the plane takes
+/// the place of the second of the two, and the five roads answer the triple.
+/// A cone of slope one with its apex at `z = 0`, a second with its apex at
+/// `z = 3`, and a ball of radius `√148` about `(0, 0, 15)` are the plane
+/// `z = 1.5` and two curved surfaces, and the ball does not reach that plane.
+///
+/// **The roads take a stored [`Plane`], and a stored plane's normal has length
+/// one**, so the difference is scaled to one and then checked against the
+/// exact numbers it was scaled from ([`what_two_quadrics_differ_by`]). Where
+/// the check says they are one plane, nothing was lost. Where it does not —
+/// two balls whose centres lie along a diagonal, whose plane `x + y = 3` is
+/// stored with an offset of `3/√2` rounded — the refusal stands. That is a
+/// **gap** and not a limit (§16.10): the points are there, and roads that took
+/// the plane as the exact expansions it is, the way the first road already
+/// takes the flat surface it builds, would reach them.
+///
+/// **Bending the same way passes from pair to pair**, because it is nine
+/// numbers being equal, so either one pair of the three bends the same way or
+/// all three do. Where all three do, the plane any pair gives leaves two
+/// quadrics that bend the same way, and the first road answers it, so the
+/// first pair whose plane is stored exactly is as good as any.
+///
+/// Two quadrics whose difference has no `p` in it at all name no plane. Where
+/// it is a number other than nothing — two pipes on one axis with two radii —
+/// the equation `0 = d` holds nowhere, and neither does the meet. Where it is
+/// nothing, the two are one surface written twice and the base's refusal is
+/// kept, whatever the other pairs say, so that it does not hang on which
+/// pair is looked at first.
+fn where_three_curved_surfaces_meet(
+    [first, second, third]: [&Surface; 3],
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    let written = [first, second, third].map(how_a_surface_is_written);
+    let differences = [(0, 1), (0, 2), (1, 2)].map(|(one, other)| {
+        what_two_quadrics_differ_by(written[one].as_ref(), written[other].as_ref())
+    });
+    if differences
+        .iter()
+        .any(|difference| matches!(difference, WhatTwoQuadricsDifferBy::Nothing))
+    {
+        return Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat);
+    }
+    if differences
+        .iter()
+        .any(|difference| matches!(difference, WhatTwoQuadricsDifferBy::ANumber))
+    {
+        return Ok(MeetOfThree::Nowhere);
+    }
+    // The first of each pair stands for the pair, beside the one surface the
+    // pair leaves out, in the fixed order the three arrived in.
+    let kept = [[first, third], [first, second], [first, second]];
+    for (difference, [one, other]) in differences.iter().zip(kept) {
+        if let WhatTwoQuadricsDifferBy::APlane(flat) = difference {
+            return where_one_plane_and_two_curved_surfaces_meet(flat, one, other, at, policy, log);
+        }
+    }
+    if differences
+        .iter()
+        .any(|difference| matches!(difference, WhatTwoQuadricsDifferBy::SomethingWouldNotFit))
+    {
+        return Err(an_exact_step_could_not_be_taken(
+            WHERE_THREE_SURFACES_MEET,
+            at,
+        ));
+    }
+    Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+}
+
 /// One plane and two curved surfaces, by the five roads the module doc names.
 ///
 /// **Nothing here guesses.** Each road either reaches an answer it has earned or
@@ -1333,36 +1425,33 @@ fn what_one_plane_and_one_curved_surface_share(
 /// those before the last road existed; they keep that answer, and the last road
 /// takes only a plane that cuts both surfaces in curves.
 fn where_one_plane_and_two_curved_surfaces_meet(
-    first: &Surface,
-    second: &Surface,
-    third: &Surface,
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<MeetOfThree> {
-    let Surface::Plane(flat) = first else {
-        return Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat);
-    };
-    let at = the_places_these_three_sit(first, second, third);
     if let Some(answer) =
-        where_a_plane_and_two_quadrics_of_one_bend_meet(flat, second, third, &at, policy, log)?
+        where_a_plane_and_two_quadrics_of_one_bend_meet(flat, one, other, at, policy, log)?
     {
         return Ok(answer);
     }
-    if let Some(answer) = what_a_plane_square_to_their_one_axis_leaves(flat, second, third, &at)? {
+    if let Some(answer) = what_a_plane_square_to_their_one_axis_leaves(flat, one, other, at)? {
         return Ok(answer);
     }
     if let Some(answer) =
-        what_a_plane_through_their_one_axis_leaves(flat, second, third, &at, policy, log)?
+        what_a_plane_through_their_one_axis_leaves(flat, one, other, at, policy, log)?
     {
         return Ok(answer);
     }
     if let Some(answer) =
-        what_a_plane_that_grazes_one_of_them_leaves(flat, second, third, &at, policy, log)?
+        what_a_plane_that_grazes_one_of_them_leaves(flat, one, other, at, policy, log)?
     {
         return Ok(answer);
     }
     if let Some(answer) =
-        what_a_plane_beside_their_one_axis_leaves(flat, second, third, &at, policy, log)?
+        what_a_plane_beside_their_one_axis_leaves(flat, one, other, at, policy, log)?
     {
         return Ok(answer);
     }
@@ -1413,11 +1502,7 @@ fn where_a_plane_and_two_quadrics_of_one_bend_meet(
 
     // Past here the family is settled, so arithmetic that runs out is a
     // refusal about *this* triple and not a reason to try the next road.
-    let leaning = core::array::from_fn(|axis| {
-        let apart = mine.half_linear[axis].minus(&theirs.half_linear[axis]);
-        apart.plus(&apart)
-    });
-    let reach = theirs.constant.minus(&mine.constant);
+    let (leaning, reach) = the_flat_surface_two_quadrics_differ_by(&mine, &theirs);
     let Some(shared) = what_a_stored_plane_and_an_exact_one_share(flat, &leaning, &reach) else {
         return Err(an_exact_step_could_not_be_taken(
             WHERE_THREE_SURFACES_MEET,
@@ -1446,6 +1531,104 @@ fn where_a_plane_and_two_quadrics_of_one_bend_meet(
         || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at),
     )
     .map(Some)
+}
+
+/// What two curved surfaces differ by, as [`where_three_curved_surfaces_meet`]
+/// reads it.
+enum WhatTwoQuadricsDifferBy {
+    /// Something that is not flat: they square `p` two different ways, or one
+    /// of them is not written out as a quadric.
+    SomethingCurved,
+    /// A plane, and this stored plane is exactly it.
+    APlane(Plane),
+    /// A plane that no stored plane is exactly, because scaling its normal to
+    /// length one rounded it or its offset.
+    APlaneNoStoredOneIs,
+    /// A number other than nothing, so the two share no point at all.
+    ANumber,
+    /// Nothing: the two are one surface written twice.
+    Nothing,
+    /// A product falls out of `f64`'s range, so which of the others it is was
+    /// not worked out.
+    SomethingWouldNotFit,
+}
+
+/// What `mine` minus `theirs` is, for two surfaces written out by
+/// [`how_a_surface_is_written`]. `None` is a surface that is not a quadric, or
+/// whose numbers fell out of range, and the family hands it on.
+///
+/// **The stored plane is checked, not trusted.** The difference is divided
+/// through by its widest normal component, each quotient taken exactly where
+/// it is an `f64` ([`the_f64_quotient_of`]), and handed to
+/// [`Plane::from_coefficients`], which scales the normal to length one. It is
+/// kept only where [`what_a_stored_plane_and_an_exact_one_share`] says that
+/// plane and the exact one are the whole of each other, which is decided
+/// exactly, so a plane kept here is the difference and not one near it.
+///
+/// Dividing first is what keeps two cones of a slope whose square no `f64`
+/// holds. Two cones of slope `s` up `z` with their apexes at heights `h₁` and
+/// `h₂` differ by `2s²(h₁ − h₂)·z = s²(h₁² − h₂²)`, each side an expansion of
+/// several `f64`, and rounding the two sides before dividing can land an ulp
+/// off the plane `z = (h₁ + h₂)/2` that their exact quotient is.
+fn what_two_quadrics_differ_by(
+    mine: Option<&HowASurfaceIsWritten>,
+    theirs: Option<&HowASurfaceIsWritten>,
+) -> WhatTwoQuadricsDifferBy {
+    let (Some(mine), Some(theirs)) = (mine, theirs) else {
+        return WhatTwoQuadricsDifferBy::SomethingCurved;
+    };
+    if !they_bend_the_same_way(mine, theirs) {
+        return WhatTwoQuadricsDifferBy::SomethingCurved;
+    }
+    let (leaning, reach) = the_flat_surface_two_quadrics_differ_by(mine, theirs);
+    let signs = [&leaning[0], &leaning[1], &leaning[2], &reach].map(Exact::sign);
+    if !signs
+        .iter()
+        .all(|sign| matches!(sign, Decision::Pos | Decision::Neg | Decision::Zero))
+    {
+        return WhatTwoQuadricsDifferBy::SomethingWouldNotFit;
+    }
+    if signs[..3].iter().all(|sign| matches!(sign, Decision::Zero)) {
+        return if matches!(signs[3], Decision::Zero) {
+            WhatTwoQuadricsDifferBy::Nothing
+        } else {
+            WhatTwoQuadricsDifferBy::ANumber
+        };
+    }
+    let widest = &leaning[(0..3)
+        .max_by(|&one, &other| {
+            let size = |axis: usize| leaning[axis].nearest_f64().abs();
+            size(one).total_cmp(&size(other))
+        })
+        .expect("three axes")];
+    let over_the_widest = |value: &Exact| {
+        the_f64_quotient_of(value, widest)
+            .unwrap_or_else(|| value.nearest_f64() / widest.nearest_f64())
+    };
+    let [a, b, c] = leaning.each_ref().map(over_the_widest);
+    let Ok(flat) = Plane::from_coefficients([a, b, c, -over_the_widest(&reach)]) else {
+        return WhatTwoQuadricsDifferBy::APlaneNoStoredOneIs;
+    };
+    match what_a_stored_plane_and_an_exact_one_share(&flat, &leaning, &reach) {
+        Some(WhatTwoPlanesShare::TheWholeOfTheStoredOne) => WhatTwoQuadricsDifferBy::APlane(flat),
+        Some(WhatTwoPlanesShare::ALine(_) | WhatTwoPlanesShare::Nothing) => {
+            WhatTwoQuadricsDifferBy::APlaneNoStoredOneIs
+        }
+        None => WhatTwoQuadricsDifferBy::SomethingWouldNotFit,
+    }
+}
+
+/// `Q₁ − Q₂` for two quadrics that square `p` the same way, as the normal and
+/// offset of the flat surface `2(b₁ − b₂)·p = c₂ − c₁` it is nothing on.
+fn the_flat_surface_two_quadrics_differ_by(
+    mine: &HowASurfaceIsWritten,
+    theirs: &HowASurfaceIsWritten,
+) -> ([Exact; 3], Exact) {
+    let leaning = core::array::from_fn(|axis| {
+        let apart = mine.half_linear[axis].minus(&theirs.half_linear[axis]);
+        apart.plus(&apart)
+    });
+    (leaning, theirs.constant.minus(&mine.constant))
 }
 
 /// A quadric written out as `p·(M p) + 2b·p + c`, exactly.
