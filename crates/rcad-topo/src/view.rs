@@ -390,38 +390,40 @@ fn box_the_surface_bounds(solid: SolidView<'_>, face: FaceView<'_>) -> Option<(P
     let mut low = [f64::INFINITY; 3];
     let mut high = [f64::NEG_INFINITY; 3];
     let mut seen = false;
-    let mut open_out = |at: [f64; 3], by: [f64; 3]| {
+    let mut take_in = |(from, to): (Point, Point)| {
         seen = true;
+        let (from, to) = (from.coordinates(), to.coordinates());
         for axis in 0..3 {
-            low[axis] = low[axis].min(at[axis] - by[axis]);
-            high[axis] = high[axis].max(at[axis] + by[axis]);
+            low[axis] = low[axis].min(from[axis]);
+            high[axis] = high[axis].max(to[axis]);
         }
+    };
+    let every_way_round = |centre: Point, by: f64| {
+        let centre = centre.coordinates();
+        (
+            Point::from(centre.map(|at| at - by)),
+            Point::from(centre.map(|at| at + by)),
+        )
     };
     match face.surface() {
         Surface::Plane(_) => {
             for corner in face.wires().flat_map(WireView::points) {
-                open_out(corner.coordinates(), [0.0; 3]);
+                take_in((corner, corner));
             }
         }
-        Surface::Sphere(ball) => open_out(ball.centre().coordinates(), [ball.radius(); 3]),
+        Surface::Sphere(ball) => take_in(every_way_round(ball.centre(), ball.radius())),
         Surface::Cylinder(pipe) => {
-            let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
-            for up in how_far_along_its_axis_a_face_reaches(solid, face, RoundAnAxis::Pipe(pipe)) {
-                open_out(
-                    (origin + along * up).coordinates(),
-                    how_far_a_disc_reaches(along, pipe.radius()),
-                );
+            let round = RoundAnAxis::Pipe(pipe);
+            for up in how_far_along_its_axis_a_face_reaches(solid, face, round) {
+                take_in(box_round_a_disc(round, up));
             }
         }
         Surface::Cone(cone) => {
-            let (apex, along) = (cone.apex(), cone.axis().direction());
-            let reach = how_far_along_its_axis_a_face_reaches(solid, face, RoundAnAxis::Cone(cone));
+            let round = RoundAnAxis::Cone(cone);
+            let reach = how_far_along_its_axis_a_face_reaches(solid, face, round);
             let apex_too = the_face_may_reach_its_apex(solid, face, &reach).then_some(0.0);
             for up in apex_too.into_iter().chain(reach) {
-                open_out(
-                    (apex + along * up).coordinates(),
-                    how_far_a_disc_reaches(along, cone.radius_at(up)),
-                );
+                take_in(box_round_a_disc(round, up));
             }
         }
         // **The whole torus and not the corners' own reach**, unlike a pipe's
@@ -431,10 +433,10 @@ fn box_the_surface_bounds(solid: SolidView<'_>, face: FaceView<'_>) -> Option<(P
         // reaches places no corner of it shadows — so what is bounded here is
         // the surface, which is inside `ring + tube` of its centre whichever way
         // the face wraps.
-        Surface::Torus(ring) => open_out(
-            ring.centre().coordinates(),
-            [ring.ring_radius() + ring.tube_radius(); 3],
-        ),
+        Surface::Torus(ring) => take_in(every_way_round(
+            ring.centre(),
+            ring.ring_radius() + ring.tube_radius(),
+        )),
         other => panic!("this crate cannot say how far {other:?} reaches"),
     }
     seen.then(|| (Point::from(low), Point::from(high)))
