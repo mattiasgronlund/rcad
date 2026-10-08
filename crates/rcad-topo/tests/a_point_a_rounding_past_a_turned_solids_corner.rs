@@ -25,7 +25,7 @@
 //! Every solid here is convex, so it holds a point exactly when each of its
 //! surfaces puts the point on the solid's side.
 
-use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Surface, Vector};
+use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{Containment, FaceView, Model, Rule, SharedSpace, SolidKey, SolidView};
 
@@ -317,35 +317,38 @@ fn a_block_just_above_a_tipped_bars_box_is_not_called_apart_from_it() {
     );
 }
 
+/// The fuse of the block and the bar above, under every rule both ways round.
+///
+/// While the bar's box stopped short, all six gave `ResultIsNotManifold {
+/// count: 1 }`. Now the pair is seen, and all six refuse at the order along
+/// the line where the bar's wall meets the plane of the block's side `y =
+/// 0.5`: the block's bottom and the bar's top cut that line about three
+/// ten-billionths apart, and the order's enclosure is wider than that.
+///
+/// The answers exist — the union about `π + 1`, the intersection a sliver
+/// about `1e-10` thick — so this refusal is a gap, kept here until it is
+/// fixed (§346.7).
 #[test]
-fn every_fuse_of_a_block_just_above_a_tipped_bar() {
+fn every_fuse_of_a_block_just_above_a_tipped_bar_refuses_at_the_order_along_a_crossing() {
     let policy = Policy::certified();
     let (model, bar, block) = a_block_just_above_a_tipped_bar();
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for [one, other] in [[bar, block], [block, bar]] {
-            let mut copy = model.clone();
-            let said = copy.fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new());
-            let what = match said {
-                Ok(fused) => fused
-                    .solids()
-                    .iter()
-                    .map(|&solid| {
-                        let measured = copy
-                            .solid(solid)
-                            .expect("a solid the fuse made")
-                            .measure(
-                                Deflection::of(0.001).expect("a positive length"),
-                                &policy,
-                                &mut ProvenanceLog::new(),
-                            )
-                            .expect("the answer measures");
-                        format!("{} ~ {}", measured.volume(), measured.volume_error())
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                Err(why) => format!("{why:?}"),
+            let bar_first = one == bar;
+            let said =
+                model
+                    .clone()
+                    .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new());
+            let Err(rcad_topo::Error::Undecidable { records }) = said else {
+                panic!("{rule:?} bar first {bar_first}: {said:?}");
             };
-            println!("{rule:?} bar first {}: {what}", one == bar);
+            let first = &records.records()[0];
+            println!("{rule:?} bar first {bar_first}: {first:?}");
+            assert_eq!(
+                first.predicate(),
+                "order along a crossing",
+                "{rule:?} bar first {bar_first}"
+            );
         }
     }
 }
