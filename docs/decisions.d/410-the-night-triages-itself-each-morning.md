@@ -108,6 +108,13 @@ A verdict file is not a queue row. Triage files nothing, and nothing yet puts
 the morning's count where a dispatcher looks; that gap is a row of its own,
 beside one row per failing group.
 
+*Q1217 put the count in `just status` on 2026-10-08. For the night `latest`
+names, it prints how many groups still fail on `main`, how many no open row
+names, and how many a row names only by a panic place that other failing groups
+share too. That last kind needs a look to say which group the row is about,
+and `_status-triage` says why it is counted apart. On 2026-10-08 the counts
+were 17, 2 and 8. Filing the rows is still done by hand.*
+
 ### 410.6 Installing it
 
 ```

@@ -10382,6 +10382,10 @@ check-prune-worktrees-selftest:
 # the order a fill does; its stderr is left to show, so a queue it cannot read
 # says why here rather than looking empty.
 #
+# **The morning's fuzz triage follows the queue**, because a group still
+# failing on `main` that no open row names is queue work nobody has filed yet.
+# Triage itself files nothing (§410.5).
+#
 # **It never fails.** A row that cannot be answered says so in place of its
 # answer — the shape `fuzz-watermark` already has, and for the same reason: a
 # survey that exits non-zero because `gh` was not on PATH is a survey nobody
@@ -10403,6 +10407,10 @@ status dir=".":
     echo "=== ready in the queue (docs/queue.md, §230) ==="
     {{ just_executable() }} queue ready
     echo "(\`just queue\` for what is running and waiting too, \`just queue next\` for what the free slots take)"
+
+    echo
+    echo "=== the morning's fuzz triage (§410) ==="
+    {{ just_executable() }} _status-triage '{{ fuzz_log_root }}' '{{ queue_file }}'
 
     echo
     echo "=== the board ==="
@@ -12306,6 +12314,117 @@ check-queue-api-selftest:
     [ "$again" = "$((after + 1))" ] || fail "two small rows on a branch with no tree held $((again - after)) slots, and a bundle is one lane"
     exit 0
 
+# The fuzz half of `status`: for the night `latest` names, how many of the
+# groups `fuzz-triage` found still failing on `main` no open row names yet.
+#
+# **Triage files nothing** (§410.5). The 08:30 timer writes the night's
+# verdicts and stops, so a group still failing on `main` reached the queue only
+# when somebody thought to read the file.
+#
+# **An open row names a group by the file name of its sample, or by the place
+# of its panic**: the path and line, with the column left off, as rows write
+# it, and with the `crates/rcad-fuzz-explain/src/../../` the decoder's panics
+# carry taken out.
+#
+# **A place several failing groups share is counted apart.** `writer.rs:226` is
+# the assertion every reader refusal in the writer fuzzer reaches, whatever the
+# refusal: on 2026-10-08 four groups failed there, and Q1364, which is about one
+# of them, holds that place. Counted as named, the "in the solid #N" group no
+# row is about would have read as filed. Counted as unnamed, the same night read
+# 10 unnamed where 8 of those had a row on their place, and a count that is
+# mostly false alarms stops being read (§135.4). So the line gives both: the
+# groups no open row names at all, and the groups a row names only by a place
+# another failing group shares, which need a look to say which group the row
+# is about.
+#
+# A night with no verdicts file says so, because not triaged is a different
+# answer from nothing failing — the rule `tooling/fuzz-yield/nights.py` keeps.
+[private]
+_status-triage root queue:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    latest='{{ root }}/latest'
+    if [ ! -f "$latest" ]; then
+        echo "no night has finished: $latest does not exist"
+        exit 0
+    fi
+    night=$(awk 'END { print $NF }' "$latest")
+    verdicts="$night/fuzz-triage-verdicts.tsv"
+    if [ ! -f "$verdicts" ]; then
+        echo "$night has no fuzz-triage-verdicts.tsv, so it has not been triaged: \`just fuzz-triage\` replays it against main"
+        exit 0
+    fi
+
+    open=$(mktemp)
+    trap 'rm -f "$open"' EXIT
+    {{ just_executable() }} _queue-rows '{{ queue }}' \
+        | awk -F'\037' '$1 == "R" && $7 !~ /^(done|dropped):/ { print $11 }' >"$open" \
+        || { echo "could not read the open rows of {{ queue }}, so no group was matched to one"; exit 1; }
+
+    LC_ALL=C awk -F'\t' -v rows_file="$open" -v night="${night##*/}" -v verdicts="$verdicts" '
+        function place_of(group,    rest, at, place) {
+            if (substr(group, 1, 12) != "panicked at ") return ""
+            rest = substr(group, 13)
+            at = index(rest, ": ")
+            place = at ? substr(rest, 1, at - 1) : rest
+            sub(/:$/, "", place)
+            if (place !~ /^[^ ]+:[0-9]+:[0-9]+$/) return "!"
+            sub(/:[0-9]+$/, "", place)
+            while (sub(/[^\/.][^\/]*\/\.\.\//, "", place)) {}
+            return place
+        }
+        # A row naming writer.rs:2260 does not name writer.rs:226.
+        function names_place(row, place,    at, after) {
+            while ((at = index(row, place)) > 0) {
+                after = substr(row, at + length(place), 1)
+                if (after !~ /[0-9]/) return 1
+                row = substr(row, at + 1)
+            }
+            return 0
+        }
+        function refuse(why) {
+            print verdicts ": " why
+            refused = 1
+            exit 1
+        }
+        FILENAME == rows_file { rows[++nrows] = $0; next }
+        FNR == 1 {
+            if ($0 != "target\tfiles\tstill_fails\tsample\tgroup")
+                refuse("the header is not target, files, still_fails, sample, group, so no column can be read by name")
+            next
+        }
+        $3 == "no" { next }
+        $3 != "yes" { refuse("line " FNR " says still_fails is \"" $3 "\", which is neither yes nor no") }
+        {
+            failing++
+            sample[failing] = $4
+            sub(/.*\//, "", sample[failing])
+            if (sample[failing] == "") refuse("line " FNR " names no sample")
+            place[failing] = place_of($5)
+            if (place[failing] == "!") refuse("line " FNR " is a panic whose place this cannot read: " $5)
+            if (place[failing] != "") sharing[place[failing]]++
+        }
+        END {
+            if (refused) exit 1
+            if (!failing) {
+                printf "%s: no group still fails on main\n", night
+                exit 0
+            }
+            for (i = 1; i <= failing; i++) {
+                by_sample = by_place = 0
+                for (r = 1; r <= nrows; r++) {
+                    if (index(rows[r], sample[i])) by_sample = 1
+                    if (place[i] != "" && names_place(rows[r], place[i])) by_place = 1
+                }
+                if (by_sample || (by_place && sharing[place[i]] == 1)) continue
+                if (by_place) shared_only++
+                else unnamed++
+            }
+            printf "%s: %d group(s) still fail on main: %d named by no open row, and %d only by a place another failing group shares\n", night, failing, unnamed + 0, shared_only + 0
+            printf "(read from %s: a row names a group by the file name of its sample, or by the place of its panic)\n", verdicts
+        }
+    ' "$open" "$verdicts"
+
 # The branch half of `status`, kept apart so `check-status-selftest` can hold it
 # against a repository whose right answer is known.
 #
@@ -12550,8 +12669,8 @@ _where-the-work-is-check file name="":
     # this line was written for, but there is no reason `gate` should see less.
     echo "§0 is $lines of 50 non-blank lines, reviewed $reviewed, every section it cites exists."
 
-# Pins both halves of `status` against fixtures, because the live repository
-# cannot exercise either of them. Its §0 is right today by construction, and its
+# Pins the computed rows of `status` against fixtures, because the live repository
+# cannot exercise any of them. Its §0 is right today by construction, and its
 # branches are whatever happens to be lying around — a `_status-branches` that
 # had lost the ability to tell a cherry-picked branch from an unlanded one would
 # pass on most mornings and fail on the one that mattered.
@@ -12563,6 +12682,9 @@ _where-the-work-is-check file name="":
 #
 # The §0 fixtures are the three failures the check exists for, plus a good one,
 # because a check that rejects everything passes every negative case.
+#
+# The fuzz fixtures are one night for each rule `_status-triage` keeps, so a
+# rule that is lost fails the arm that names it.
 [private]
 check-status-selftest:
     #!/usr/bin/env bash
@@ -12686,6 +12808,86 @@ check-status-selftest:
     got=$(green_row)
     grep -qF "no green commit is on main in this checkout" <<<"$got" \
         || fail "a green belonging to another branch was counted as main's"
+
+    # The fuzz row. A verdict's sample sits under /night/ and a row's under
+    # ~/rcad-fuzz-logs/n/, so only the file name can match, as across two real
+    # nights.
+    logs="$dir/fuzz-logs"
+    mkdir -p "$logs"
+    printf '%s\n' '## Tier 1' '' '```' \
+        'Q1 1 parked:§1 opus - a coedge at crates/rcad-step/tests/fuzzing/writer.rs:384 §1' \
+        'Q2 1 todo opus - a refusal at crates/rcad-step/tests/fuzzing/writer.rs:226, sample ~/rcad-fuzz-logs/n/artifacts/t/crash-cccc §1' \
+        'Q3 1 todo opus - the fuse at crates/rcad-topo/src/fuse/arrange.rs:2306 §1' \
+        '```' '' '## Closed' '' '```' \
+        'Q4 1 done:abc1234 opus - the fuse at crates/rcad-topo/src/fuse/arrange.rs:999 §1' \
+        '```' >"$dir/queue.md"
+    point_latest_at() {
+        printf '2026-10-08 08:15  abc1234 (0 days old, 0 behind main)  5 targets  %s\n' "$logs/$1" >"$logs/latest"
+    }
+    night_with() {
+        local night=$1
+        shift
+        mkdir -p "$logs/$night"
+        printf 'target\tfiles\tstill_fails\tsample\tgroup\n' >"$logs/$night/fuzz-triage-verdicts.tsv"
+        printf '%s\n' "$@" >>"$logs/$night/fuzz-triage-verdicts.tsv"
+        point_latest_at "$night"
+    }
+    triage_row() { just _status-triage "$logs" "$dir/queue.md" 2>&1; }
+
+    got=$(triage_row)
+    grep -qxF "no night has finished: $logs/latest does not exist" <<<"$got" \
+        || fail "a log root no night has finished in did not say so"
+
+    mkdir -p "$logs/untriaged"
+    point_latest_at untriaged
+    got=$(triage_row)
+    grep -qF "$logs/untriaged has no fuzz-triage-verdicts.tsv, so it has not been triaged" <<<"$got" \
+        || fail "a night with no verdicts file was not called untriaged"
+
+    night_with decoder-path $'t\t3\tyes\t/night/artifacts/t/crash-aaaa\tpanicked at crates/rcad-fuzz-explain/src/../../rcad-step/tests/fuzzing/writer.rs:384:13: a coedge came back with a different edge run'
+    got=$(triage_row)
+    grep -qxF "decoder-path: 1 group(s) still fail on main: 0 named by no open row, and 0 only by a place another failing group shares" <<<"$got" \
+        || fail "a parked row naming the place, without the decoder's ../../ and the column, did not name the group"
+
+    night_with shared-place \
+        $'t\t5\tyes\t/night/artifacts/t/crash-bbbb\tpanicked at crates/rcad-fuzz-explain/src/../../rcad-step/tests/fuzzing/writer.rs:226:9: the reader refuses: one reason' \
+        $'t\t1\tyes\t/night/artifacts/t/crash-cccc\tpanicked at crates/rcad-fuzz-explain/src/../../rcad-step/tests/fuzzing/writer.rs:226:9: the reader refuses: another reason'
+    got=$(triage_row)
+    grep -qxF "shared-place: 2 group(s) still fail on main: 0 named by no open row, and 1 only by a place another failing group shares" <<<"$got" \
+        || fail "a row holding one group's sample and a place two groups share did not name that one and only place the other"
+
+    night_with closed-row $'t\t1\tyes\t/night/artifacts/t/crash-dddd\tpanicked at crates/rcad-topo/src/fuse/arrange.rs:999:1: unreachable'
+    got=$(triage_row)
+    grep -qxF "closed-row: 1 group(s) still fail on main: 1 named by no open row, and 0 only by a place another failing group shares" <<<"$got" \
+        || fail "a group only a done row names was counted as named"
+
+    night_with longer-line $'t\t1\tyes\t/night/artifacts/t/crash-eeee\tpanicked at crates/rcad-topo/src/fuse/arrange.rs:230:5: unreachable'
+    got=$(triage_row)
+    grep -qxF "longer-line: 1 group(s) still fail on main: 1 named by no open row, and 0 only by a place another failing group shares" <<<"$got" \
+        || fail "a row naming arrange.rs:2306 was taken to name arrange.rs:230"
+
+    night_with no-place \
+        $'t\t247\tyes\t/night/artifacts/t/crash-ffff\tt: bytes did not decode to a case' \
+        $'t\t9\tno\t/night/artifacts/t/crash-1111\tt: no longer fails — succeeded'
+    got=$(triage_row)
+    grep -qxF "no-place: 1 group(s) still fail on main: 1 named by no open row, and 0 only by a place another failing group shares" <<<"$got" \
+        || fail "a failing group with no panic place, beside one that no longer fails, was miscounted"
+
+    night_with all-fixed $'t\t9\tno\t/night/artifacts/t/crash-1111\tt: no longer fails — succeeded'
+    got=$(triage_row)
+    grep -qxF "all-fixed: no group still fails on main" <<<"$got" \
+        || fail "a night whose groups all pass on main did not say so"
+
+    night_with bad-place $'t\t1\tyes\t/night/artifacts/t/crash-2222\tpanicked at somewhere: it broke'
+    got=$(triage_row) && fail "a panic whose place has no line and column was read"
+    grep -qF "is a panic whose place this cannot read" <<<"$got" \
+        || fail "a panic place this cannot read did not say so"
+
+    night_with bad-header
+    printf 'target\tfiles\tsample\tgroup\n' >"$logs/bad-header/fuzz-triage-verdicts.tsv"
+    got=$(triage_row) && fail "a verdicts file with a column missing was read"
+    grep -qF "the header is not target, files, still_fails, sample, group" <<<"$got" \
+        || fail "a verdicts file with a column missing did not say its header moved"
 
     good='## 0. Where the work is
 
