@@ -41,11 +41,8 @@
 //! straddled. Under a tolerant policy the same query resolves instead, and the
 //! log picks up a record of what was accepted to get there.
 
-use std::collections::HashMap;
-
 use rcad_geom::{
-    Cone, EdgeRun, MeetsAt, Plane, PlaneAgreement, Point, Surface, WhereALineMeetsIt,
-    where_a_line_meets_a_surface,
+    Cone, EdgeRun, MeetsAt, Plane, Point, Surface, WhereALineMeetsIt, where_a_line_meets_a_surface,
 };
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_of_points,
@@ -237,7 +234,7 @@ impl SolidView<'_> {
         };
         if is_outside_the_box(point, low, high)
             && self
-                .opened_out_to_where_its_planes_meet(low, high)
+                .box_opened_out_to_where_its_planes_meet(low, high)
                 .map(|(low, high)| self.opened_out_by_what_a_tipped_disc_loses(low, high))
                 .is_some_and(|(low, high)| is_outside_the_box(point, low, high))
         {
@@ -278,91 +275,6 @@ impl SolidView<'_> {
         Containment::Undecidable {
             enclosure: worst_enclosure,
         }
-    }
-
-    /// The box from `low` to `high`, opened out to hold every corner of a flat
-    /// face where that face's stored plane meets the stored planes across its
-    /// two straight sides there; `None` where three such planes cannot be
-    /// shown to meet in a point.
-    ///
-    /// **[`SolidView::box_around_it`] holds a flat face's stored corners, and
-    /// the face is its stored plane** (`docs/decisions.md` §17.1). A turn
-    /// leaves a corner a rounding off where its planes meet, so the solid the
-    /// stored planes bound can reach a rounding past that box at its outermost
-    /// corner. Forty cubes of side 2, turned about five axes by eight angles,
-    /// hold 3897 points past their boxes that every one of their six planes
-    /// puts inside, and the box alone answered every one of them `Outside`
-    /// (`tests/a_point_a_rounding_past_a_turned_solids_corner.rs`, Q1157).
-    ///
-    /// Each straight side of a flat face's outline runs along where its plane
-    /// meets the plane across that side, from one meeting of three planes to
-    /// the next, and a flat outline lies inside the box round its corners. So
-    /// this box holds every flat face along its straight sides between flat
-    /// faces, and the stored box holds the rest as it did. A corner where four
-    /// or more faces meet is placed once from each face's side, and each of
-    /// those places is taken in. A corner whose two sides run along one plane
-    /// is no corner of the outline, which runs straight on through it, and is
-    /// passed over.
-    ///
-    /// **A corner beside a curved face is not opened out here**: the stored
-    /// box holds a face on a pipe or a cone by the discs across its axis, and
-    /// a corner on that face is inside those discs. What a tipped disc loses
-    /// of its reach is opened out next
-    /// ([`SolidView::opened_out_by_what_a_tipped_disc_loses`]). Where a plane
-    /// and a curved surface meet a rounding past the discs is not asked.
-    ///
-    /// Asked only of a point already past the stored box, since a solid of a
-    /// thousand faces is a thousand meetings worked out.
-    fn opened_out_to_where_its_planes_meet(
-        self,
-        low: Point,
-        high: Point,
-    ) -> Option<(Point, Point)> {
-        let planes: HashMap<FaceKey, Plane> = self
-            .faces()
-            .filter_map(|face| Some((face.key(), *face.surface().as_plane()?)))
-            .collect();
-        let (mut low, mut high) = (low.coordinates(), high.coordinates());
-        for face in self.faces() {
-            let Some(flat) = planes.get(&face.key()) else {
-                continue;
-            };
-            for wire in face.wires() {
-                let across: Vec<Option<&Plane>> = wire
-                    .coedges()
-                    .map(|coedge| {
-                        let edge = coedge.edge();
-                        if *edge.stored_run() != EdgeRun::Straight {
-                            return None;
-                        }
-                        edge.neighbouring_faces()
-                            .find(|&other| other != face.key())
-                            .and_then(|other| planes.get(&other))
-                    })
-                    .collect();
-                let next_round = across.iter().cycle().skip(1);
-                for (into, out_of) in across.iter().zip(next_round) {
-                    let (Some(into), Some(out_of)) = (into, out_of) else {
-                        continue;
-                    };
-                    if matches!(
-                        into.agreement_with(out_of),
-                        PlaneAgreement::SameWay | PlaneAgreement::OppositeWay
-                    ) {
-                        continue;
-                    }
-                    let meet = Plane::meet_of_three(flat, into, out_of).ok()?;
-                    for (axis, side) in meet.enclosure().into_iter().enumerate() {
-                        if !(side.lo().is_finite() && side.hi().is_finite()) {
-                            return None;
-                        }
-                        low[axis] = low[axis].min(side.lo());
-                        high[axis] = high[axis].max(side.hi());
-                    }
-                }
-            }
-        }
-        Some((Point::from(low), Point::from(high)))
     }
 
     /// The box from `low` to `high`, opened out along each axis by as much of a
@@ -1062,7 +974,7 @@ impl SolidView<'_> {
 /// axis tipped a hair off a coordinate axis reaches past it along that axis
 /// (Q1332). So the answer is taken only where the point is past that box
 /// opened out to where the planes meet and by what a tipped disc loses as well
-/// (`SolidView::opened_out_to_where_its_planes_meet`,
+/// (`SolidView::box_opened_out_to_where_its_planes_meet`,
 /// `SolidView::opened_out_by_what_a_tipped_disc_loses`).
 ///
 /// A box that overlaps the solid's bounding box proves nothing either way, so
