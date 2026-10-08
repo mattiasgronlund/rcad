@@ -52,17 +52,55 @@ triangles by `face.orientation()` alone, and the triangulator draws every
 triangle anticlockwise in the chart, so a torus face used forwards meshes
 facing into the tube.
 
-**(d) holds, on the corpus rather than on the standard's own words.**
-`brep.rs`'s `surface_of_the_face` reads `same_sense .T.` as `Forward` for every
-curved surface. The standard's sentence on the sense could not be read here:
-the ISO 10303-42 sample on `cdn.standards.iteh.ai` is a scanned image, and the
-STEP Tools schema pages carry no maths. What was read is the parametrisation
-`C + (R + r cos v)((cos u)x + (sin u)y) + r(sin v)z`, ring angle first, whose
-`σ_u × σ_v` at `v = 0` is `(R + r)r·ê`, out of the tube; and Open CASCADE's
-`Geom_ToroidalSurface` reference, verbatim: "The parametrization of the surface
-in the U direction is defined such as the normal Vector (N = D1U ^ D1V) is
-oriented towards the 'outside region' of the surface." 329.4 is the evidence
-that does not lean on either.
+**(d) holds, now on the standard's own words.** The iTeh sample is still an
+image, but the standard's own text, not just a schema reference without it, is
+mirrored in public HTML: `steptools.com` serves ISO 10303-42:2021(E)'s
+`geometry_schema` and `topology_schema` sections at
+`stds/smrl/data/resource_docs/geometric_and_topological_representation/sys/4_schema.htm`
+and `.../5_schema.htm`, titled `ISO 10303-42:2021(E)` in both the page's
+`<TITLE>` and its header table, and it carries the maths the STEP Tools AIM
+pages (the attribute-list pages this lane's predecessor read) leave out.
+
+§4.5.63 `toroidal_surface` (`geometry_schema`) gives the surface, in the
+`position` frame with `R` = `major_radius`, `r` = `minor_radius`: "the
+surface is represented by the equation `S` = 0, where `S(x, y, z) = x² + y² +
+z² − 2R√(x²+y²) − r² + R²`", "the positive direction of the normal to the
+surface at any point on the surface is given by `(Sx, Sy, Sz)`", "the unit
+normal is given by `N(u,v) = cos v((cos u)x + (sin u)y) + (sin v)z`", and then
+the sentence this leg needed: **"The sense of this normal is away from the
+nearest point on the circle of radius `R` with centre `C`."** That circle is
+the torus's own centre line, so away from it is out of the tube. The quoted
+`N(u, v)` at `v = 0` is `(cos u)x + (sin u)y`, radially outward from the axis
+at the outer equator — the same direction the parametrisation's `σ_u × σ_v`
+and Open CASCADE's `Geom_ToroidalSurface` text give, both quoted below, not a
+different one.
+
+§5.5.19 `face` and §5.5.20 `face_surface` (`topology_schema`) give
+`same_sense` against the face's own normal, which is the one the
+closed-edge rule and the mesher both answer to: "a topological normal **n**
+is associated with the face, such that the cross product **n** × **t**
+points toward the interior of the face, where **t** is the tangent to a
+bounding loop. That is, each loop runs counter-clockwise around the face when
+viewed from above, if we consider the normal **n** to point up" (`face`); "For
+a face of the subtype `face_surface`, the topological normal **n** is defined
+from the normal of the underlying surface, together with the BOOLEAN
+attribute `same_sense`" (`face`, on its `face_surface` subtype); and
+`same_sense` itself, in `face_surface`, is "flag
+indicates whether the sense of the surface normal agrees with (TRUE), or
+opposes (FALSE), the sense of the topological normal to the face." `same_sense
+.T.` is thus "use the surface's own normal, unreversed" — exactly `Forward`,
+which is how `brep.rs`'s `surface_of_the_face` reads it for every curved
+surface, torus included.
+
+So the standard agrees with both legs this rested on before it could be read:
+the parametrisation `C + (R + r cos v)((cos u)x + (sin u)y) + r(sin v)z`, ring
+angle first, whose `σ_u × σ_v` at `v = 0` is `(R + r)r·ê`, out of the tube;
+and Open CASCADE's `Geom_ToroidalSurface` reference, verbatim: "The
+parametrization of the surface in the U direction is defined such as the
+normal Vector (N = D1U ^ D1V) is oriented towards the 'outside region' of the
+surface." All three now corroborate each other
+rather than two corroborating a guess at the third, and 329.4 is independent
+of all three.
 
 ### 329.2 The experiment
 
