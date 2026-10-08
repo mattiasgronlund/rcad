@@ -192,8 +192,6 @@ use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
 
-#[path = "rings/mod.rs"]
-mod rings;
 mod touching;
 
 use touching::{Apart, Drawn, Insides, Shape, Slope, both_rows};
@@ -481,12 +479,19 @@ fn a_dome_lying_on_its_side_is_refused_as_an_edge_with_one_face() {
 #[test]
 fn a_bar_on_a_bends_cap_is_refused_before_its_rim_is_named() {
     let policy = Policy::certified();
-    for (ring, tube) in [(3.0, 1.0), (5.0, 2.0)] {
+    for (ring, tube) in [(3, 1), (5, 2)] {
+        // The control row of the bend's cap against a block: the quarter bend
+        // of `touching`, with a block clear of it that nothing here fuses.
+        let built = Drawn {
+            shape: Shape::ABendsCapAgainstABlock { ring, tube },
+            apart: Apart::ClearByOne,
+        }
+        .build();
+        let (mut model, bend) = (built.model, built.second);
+        let (ring, tube) = (f64::from(ring), f64::from(tube));
         let along_minus_y = Isometry::translation(Vector::new(ring, 0.0, 0.0))
             .expect("a whole-number shift")
             .compose(&Isometry::quarter_turns(&Axis::x(), 1).expect("x is an axis"));
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let bend = rings::a_quarter_bend(&mut model, ring, tube);
         let flat_ended = model
             .add_round_bar(tube, 2.0, &along_minus_y)
             .expect("a whole-number bar");
