@@ -90,11 +90,15 @@
 //! face's triangle, not any pair of planes round the apex, so it does not
 //! make `bake`'s own triple worse-conditioned
 //! (`a_pyramid_with_a_sliver_face_at_its_apex_is_united`). A gap of a
-//! hundred-millionth and below fails to build at all —
-//! `Plane::through_three_points` on two base corners that close cannot keep
-//! the third vertex on the resulting plane within tolerance — which is a
+//! hundred-millionth fails to build at all, at every turn and spelling tried
+//! but one — `Plane::through_three_points` fits the sliver face's plane
+//! through its first two corners, and the third then lands a few billionths
+//! off it, past `VertexOffItsFacePlane`'s tolerance — pinned by name at one
+//! such turn
+//! (`a_pyramid_with_too_fine_a_sliver_face_refuses_to_build`). This is a
 //! limit of fitting a plane through near-coincident points and not of the
-//! fold room, so it is left untried. An apex a million units from the origin
+//! fold room, so it is left there rather than chased further. An apex a
+//! million units from the origin
 //! folds nothing either and unites at every turn and spelling
 //! (`a_pyramid_whose_apex_is_far_from_the_origin_is_united`); a trillion
 //! units out refuses to build at all, past `DynamicRange::LARGEST_SUPPORTED_RATIO`
@@ -590,6 +594,49 @@ fn a_pyramid_with_a_sliver_face_at_its_apex_is_united() {
             }
         }
     }
+}
+
+/// The same sliver base, with the two close corners a hundred-millionth
+/// apart, refuses to build at all.
+///
+/// `Plane::through_three_points` fits the sliver face's plane through its
+/// first two corners (through the apex, with [`Through::TheApex`]) and then
+/// checks the third against it; at this gap the fit cannot keep that third
+/// corner within tolerance, so the face it builds is off its own plane. This
+/// is a limit of fitting a plane through two points this close together, not
+/// of the fold room §356 measures, so it is left as a limit rather than
+/// chased further (§16.10).
+#[test]
+fn a_pyramid_with_too_fine_a_sliver_face_refuses_to_build() {
+    let gap = 1e-8;
+    let base = [
+        [-1.0, -1.0],
+        [1.0, -gap / 2.0],
+        [1.0, gap / 2.0],
+        [-1.0, 1.0],
+    ];
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let turned = Isometry::rotation(
+        &Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction with length"),
+        0.3,
+    )
+    .expect("a finite turn");
+    let err = a_pyramid_with_base(
+        &mut model,
+        &base,
+        1.0,
+        [0.0, 0.0, 0.0],
+        Through::TheApex,
+        &turned,
+    )
+    .expect_err("a sliver gap of a hundred-millionth cannot fit a plane through it");
+    assert!(
+        matches!(
+            err,
+            rcad_topo::Error::Invalid(rcad_topo::Invalid::VertexOffItsFacePlane { .. })
+        ),
+        "expected VertexOffItsFacePlane, got {err}"
+    );
 }
 
 /// The pyramid folded by a sixteenth (as at the top of this file), shifted so
