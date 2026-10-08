@@ -250,6 +250,72 @@ fn how_often_a_point_past_a_tipped_bar_or_frustums_box_that_its_surfaces_put_ins
     assert_eq!((points, inside, undecided, outside), (23639, 23639, 0, 0));
 }
 
+/// A block of side 1 resting two ten-billionths above the box of the bar
+/// above, tipped `1e-9` about `x`, over the side of the top cap that the tip
+/// lifts (Q1363).
+///
+/// The bar's box stops at the cap's middle in `z`, where the cap truly
+/// reaches a billionth higher at `y = 1`, so the two boxes miss and the boxes
+/// alone answered `Apart` both ways round. Yet the block's corner at
+/// `(−0.5, 0.5)` is under the cap by half a billionth less two
+/// ten-billionths, and every stored surface of the bar puts it inside. A
+/// corner of one solid strictly inside the other is material of both in one
+/// place, so `Shared` is the whole answer.
+#[test]
+fn a_block_just_above_a_tipped_bars_box_is_not_called_apart_from_it() {
+    let policy = Policy::certified();
+    let (mut model, bar, block) = a_block_just_above_a_tipped_bar();
+    let bar = model.solid(bar).expect("this model made the key");
+    let block = model.solid(block).expect("this model made the key");
+
+    let (_, top_of_the_bar) = bar.box_around_it().expect("a bar has a box");
+    let (bottom_of_the_block, _) = block.box_around_it().expect("a cube has a box");
+    let corner = [-0.5, 0.5, 1.000_000_000_2];
+    assert_eq!(bottom_of_the_block.coordinates(), corner);
+    assert_eq!(
+        what_the_stored_surfaces_say(bar, corner),
+        Containment::Inside
+    );
+    let in_both = [0.0, 0.75, 1.000_000_000_4];
+    assert_eq!(
+        what_the_stored_surfaces_say(bar, in_both),
+        Containment::Inside
+    );
+    assert_eq!(
+        what_the_stored_surfaces_say(block, in_both),
+        Containment::Inside
+    );
+
+    for [one, other] in [[bar, block], [block, bar]] {
+        assert_eq!(
+            one.shares_space_with(other, &policy, &mut ProvenanceLog::new()),
+            SharedSpace::Shared
+        );
+    }
+    assert!(
+        top_of_the_bar.coordinates()[2] >= in_both[2],
+        "the bar's box stops short of what its surfaces hold: {top_of_the_bar:?}"
+    );
+}
+
+/// The bar of [`Tipped::Bar`] tipped `1e-9` about `x`, and a block of side 1
+/// from `(−0.5, 0.5)` to `(0.5, 1.5)` across, its bottom at
+/// `1.000_000_000_2`.
+fn a_block_just_above_a_tipped_bar() -> (Model, SolidKey, SolidKey) {
+    let (mut model, bar, _) = Tipped::Bar.built([1.0, 0.0, 0.0], 1e-9);
+    let block = model
+        .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side 1");
+    model
+        .place_solid(
+            block,
+            &Isometry::translation(Vector::new(-0.5, 0.5, 1.000_000_000_2))
+                .expect("a finite shift"),
+        )
+        .expect("this model made the key");
+    (model, bar, block)
+}
+
 /// Every `f64` point near a corner outermost along an axis that is past the
 /// box along that axis and that every stored plane puts inside.
 fn points_past_its_box_every_plane_puts_inside(view: SolidView<'_>) -> Vec<[f64; 3]> {
