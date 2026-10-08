@@ -4210,34 +4210,26 @@ fn where_a_ring_and_a_pipe_cross(
 
     let one_direction =
         squared_length_of_a_cross_product(WHERE_A_TORUS_AND_A_PIPE_CROSS, along, pipe_way);
-    // Two directions crossed is dimensionless, and filed as a length for the
-    // reason `where_a_plane_and_a_pipe_cross` gives.
-    match ask(&one_direction, Measures::Length, &at, policy, log)? {
-        Decision::Zero => (),
-        Decision::Pos => return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-        other => unreachable!("a sum of squares is never below zero: {other:?}"),
-    }
     let centre_on_the_axis = Question {
         named: WHERE_A_TORUS_AND_A_PIPE_CROSS,
         enclosing: || how_far_off_an_axis_enclosing(centre, origin, pipe_way),
         exactly: || how_far_off_an_axis_exactly(centre, origin, pipe_way),
     };
-    match ask(&centre_on_the_axis, Measures::Area, &at, policy, log)? {
-        Decision::Zero => (),
-        Decision::Pos => return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-        other => unreachable!("a sum of squares is never below zero: {other:?}"),
-    }
-
     let room = Question {
         named: WHERE_A_TORUS_AND_A_PIPE_CROSS,
         enclosing: || how_much_of_a_tube_a_pipe_on_its_axis_leaves_enclosing(ring, pipe),
         exactly: || how_much_of_a_tube_a_pipe_on_its_axis_leaves_exactly(ring, pipe),
     };
-    match ask(&room, Measures::Area, &at, policy, log)? {
-        Decision::Pos | Decision::Zero => Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-        Decision::Neg => Ok(SurfaceMeet::Nothing),
-        other => unreachable!("a sign question answers with a sign: {other:?}"),
+    // Two directions crossed is dimensionless, and filed as a length for the
+    // reason `where_a_plane_and_a_pipe_cross` gives. Everything but a proved
+    // miss is refused, so no answer here rests on a sign it was not given.
+    let misses = ask(&one_direction, Measures::Length, &at, policy, log)? == Decision::Zero
+        && ask(&centre_on_the_axis, Measures::Area, &at, policy, log)? == Decision::Zero
+        && ask(&room, Measures::Area, &at, policy, log)? == Decision::Neg;
+    if misses {
+        return Ok(SurfaceMeet::Nothing);
     }
+    Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface)
 }
 
 /// `D = r² − (a − R)²` as an enclosure.
@@ -4312,23 +4304,18 @@ fn where_a_ring_and_a_ball_cross(
         enclosing: || how_far_off_an_axis_enclosing(middle, centre, along),
         exactly: || how_far_off_an_axis_exactly(middle, centre, along),
     };
-    match ask(&on_the_axis, Measures::Area, &at, policy, log)? {
-        Decision::Zero => (),
-        Decision::Pos => return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-        other => unreachable!("a sum of squares is never below zero: {other:?}"),
-    }
-
     let crossing = Question {
         named: WHERE_A_TORUS_AND_A_BALL_CROSS,
         enclosing: || how_a_ball_on_a_rings_axis_crosses_its_tube_enclosing(ring, ball),
         exactly: || how_a_ball_on_a_rings_axis_crosses_its_tube_exactly(ring, ball),
     };
     let four_lengths = Measures::ManyLengths { how_many: 4 };
-    match ask(&crossing, four_lengths, &at, policy, log)? {
-        Decision::Pos | Decision::Zero => Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-        Decision::Neg => Ok(SurfaceMeet::Nothing),
-        other => unreachable!("a sign question answers with a sign: {other:?}"),
+    let misses = ask(&on_the_axis, Measures::Area, &at, policy, log)? == Decision::Zero
+        && ask(&crossing, four_lengths, &at, policy, log)? == Decision::Neg;
+    if misses {
+        return Ok(SurfaceMeet::Nothing);
     }
+    Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface)
 }
 
 /// `Δ = 4r²δ² − N²` as an enclosure.
@@ -4427,36 +4414,28 @@ fn where_a_ring_and_a_cone_cross(
         along,
         cone.axis().direction().components(),
     );
-    // Two directions crossed is dimensionless, and filed as a length for the
-    // reason `where_a_plane_and_a_pipe_cross` gives.
-    match ask(&one_direction, Measures::Length, &at, policy, log)? {
-        Decision::Zero => (),
-        Decision::Pos => return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-        other => unreachable!("a sum of squares is never below zero: {other:?}"),
-    }
     let apex_on_the_axis = Question {
         named: WHERE_A_TORUS_AND_A_CONE_CROSS,
         enclosing: || how_far_off_an_axis_enclosing(apex, centre, along),
         exactly: || how_far_off_an_axis_exactly(apex, centre, along),
     };
-    match ask(&apex_on_the_axis, Measures::Area, &at, policy, log)? {
-        Decision::Zero => (),
-        Decision::Pos => return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-        other => unreachable!("a sum of squares is never below zero: {other:?}"),
+    // Two directions crossed is dimensionless, and filed as a length for the
+    // reason `where_a_plane_and_a_pipe_cross` gives. Everything but a proved
+    // miss is refused, as in `where_a_ring_and_a_pipe_cross`.
+    let shares_the_axis = ask(&one_direction, Measures::Length, &at, policy, log)?
+        == Decision::Zero
+        && ask(&apex_on_the_axis, Measures::Area, &at, policy, log)? == Decision::Zero;
+    if !shares_the_axis {
+        return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface);
     }
-
     for nappe in [1.0, -1.0] {
         let reach = Question {
             named: WHERE_A_TORUS_AND_A_CONE_CROSS,
             enclosing: || how_a_nappe_reaches_a_tube_enclosing(ring, cone, nappe),
             exactly: || how_a_nappe_reaches_a_tube_exactly(ring, cone, nappe),
         };
-        match ask(&reach, Measures::Area, &at, policy, log)? {
-            Decision::Pos | Decision::Zero => {
-                return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface);
-            }
-            Decision::Neg => (),
-            other => unreachable!("a sign question answers with a sign: {other:?}"),
+        if ask(&reach, Measures::Area, &at, policy, log)? != Decision::Neg {
+            return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface);
         }
     }
     Ok(SurfaceMeet::Nothing)
@@ -4498,22 +4477,29 @@ fn how_a_nappe_reaches_a_tube_exactly(ring: &Torus, cone: &Cone, nappe: f64) -> 
         &Exact::gap_between(centre, apex),
         &Exact::of_each(ring.axis().direction().components()),
     )?;
-    let towards = match up.sign() {
-        Decision::Pos => nappe,
-        Decision::Neg => -nappe,
-        Decision::Zero => return Some(room),
-        Decision::Undecidable { .. } | _ => return None,
-    };
+    let (up, across) = (up.sign(), room.sign());
+    let a_sign = |sign: Decision| matches!(sign, Decision::Pos | Decision::Neg | Decision::Zero);
+    if !a_sign(up) || !a_sign(across) {
+        return None;
+    }
+    if up == Decision::Zero {
+        return Some(room);
+    }
     let leaning = Exact::product_of(2.0 * cone.slope(), ring.ring_radius())?;
     let leaning = leaning
         .times(&leaning)?
         .times(&squared_gap_exactly(centre, apex)?)?;
-    match (towards > 0.0, room.sign()) {
-        (true, Decision::Neg | Decision::Zero) => Some(room.minus(&leaning)),
-        (true, Decision::Pos) => Some(room.times(&room)?.minus(&leaning)),
-        (false, Decision::Pos | Decision::Zero) => Some(room.plus(&leaning)),
-        (false, Decision::Neg) => Some(leaning.minus(&room.times(&room)?)),
-        (_, Decision::Undecidable { .. } | _) => None,
+    let pulls_down = (up == Decision::Pos) == (nappe > 0.0);
+    if pulls_down {
+        if across == Decision::Pos {
+            Some(room.times(&room)?.minus(&leaning))
+        } else {
+            Some(room.minus(&leaning))
+        }
+    } else if across == Decision::Neg {
+        Some(leaning.minus(&room.times(&room)?))
+    } else {
+        Some(room.plus(&leaning))
     }
 }
 
