@@ -103,8 +103,10 @@ attempts). This is what actually walks the seed corpus in both plain
 different ones. This run makes no fresh claim about `-max_total_time` itself
 (no `-fork`, no `-max_total_time` flag were passed); that half of the leg
 still rests on §297's own log, where the `time: 3400s` stats line only
-appears after `-fork=3: 580 seed inputs, starting to fuzz` — i.e. after this
-merge phase, not counted against it.
+appears after `-fork=3: 580 seed inputs, starting to fuzz`, which this section
+first read as "after this merge phase, not counted against it". That reading
+was backwards: §297.3 shows the merge is on the `-max_total_time` clock from
+before it starts, so that `time: 3400s` is mostly the merge itself.
 
 **Leg (b), broken as stated, held in substance.** Exactly 61 of 388 files
 (16%; 61 of the 322 `timeout-*`-tagged files, 19%) actually tripped the
@@ -234,3 +236,133 @@ row is the count itself, not a proxy for it.
 Scripted at this lane's `target/q270/run-merge.sh`
 (`/usr/bin/time -v` into `target/q270/run-merge.log`, both gitignored, not
 part of this commit).
+
+### 297.3 The merge is on the clock: `-max_total_time` starts before it
+
+*Queue row Q271, checking whether `-max_total_time` counts fork mode's
+startup merge against itself, or only the fuzzing that follows "starting to
+fuzz" — the question §297.1's own closing sentence left open. Lane
+`lane-q271-does-max-total-time-count-the-startup-merge`, off `6533df6c`.*
+
+**The source settles it before any run does.** `FuzzerFork.cpp`
+(`libfuzzer-sys` 0.4.13, vendored at
+`~/.cargo/registry/src/*/libfuzzer-sys-0.4.13/libfuzzer/FuzzerFork.cpp`,
+matching `fuzz/Cargo.lock`'s own pin) sets the one clock `-max_total_time` is
+checked against at the top of `FuzzWithFork`, before the startup merge runs:
+
+```
+322:  Env.ProcessStartTime = std::chrono::system_clock::now();
+```
+
+The merge is the very next thing that happens — unless `-keep_seed` is
+passed, which this recipe never does, the whole seed set is merged via
+`CrashResistantMerge` before anything is fuzzed:
+
+```
+342:  if (Options.KeepSeed) {
+...
+346:    auto CFPath = DirPlusFile(Env.TempDir, "merge.txt");
+347:    std::set<uint32_t> NewFeatures, NewCov;
+348:    CrashResistantMerge(Env.Args, {}, SeedFiles, &Env.Files, Env.Features,
+349:                        &NewFeatures, Env.Cov, &NewCov, CFPath,
+350:                        /*Verbose=*/false, /*IsSetCoverMerge=*/false);
+```
+
+"starting to fuzz" prints only after that call returns:
+
+```
+361:  Printf("INFO: -fork=%d: %zd seed inputs, starting to fuzz in %s\n", NumJobs,
+362:         Env.Files.size(), Env.TempDir.c_str());
+```
+
+and the elapsed time the `-max_total_time` check reads is measured from
+`ProcessStartTime` — set at line 322, before the merge, never reset by
+anything between there and the check:
+
+```
+114:  size_t secondsSinceProcessStartUp() const {
+115:    return std::chrono::duration_cast<std::chrono::seconds>(
+116:               std::chrono::system_clock::now() - ProcessStartTime)
+117:        .count();
+118:  }
+...
+464:    if (Options.MaxTotalTimeSec > 0 &&
+465:        Env.secondsSinceProcessStartUp() >= (size_t)Options.MaxTotalTimeSec) {
+466:      Printf("INFO: fuzzed for %zd seconds, wrapping up soon\n",
+467:             Env.secondsSinceProcessStartUp());
+468:      StopJobs();
+```
+
+One clock, set once before the merge and never reset, feeds both the
+`time:` field §297's stats line prints and the `-max_total_time` check
+itself. §297.1's first reading, "after this merge phase, not counted against
+it", had it backwards: the merge is on the clock from before it starts.
+
+**One run says the same thing.** `mise exec -- just fuzz-target
+where_two_surfaces_cross 300 <abs-corpus-root> "" 3` against a fresh copy of
+Q180's corpus root (388 files, 322 `timeout-*`, byte-identical to the
+original: `sha1sum` of all 388 files in each matches, name for name) merged
+alongside the tracked `fuzz/corpus/where_two_surfaces_cross` (834 files,
+unchanged at this base), pinned to cores 0-3, launched detached, waited out
+in `timeout 540 tail --pid=<pid> -f /dev/null` segments.
+
+*(First attempt invalid, recorded so its numbers aren't mistaken for a
+second data point: `fuzz-target` does `cd fuzz` before resolving
+`corpus_root`, so a path given relative to the repo root —
+`target/q271/corpus-root`, as first tried — resolves to
+`fuzz/target/q271/corpus-root`, a directory that did not exist until this
+run's own `mkdir -p` created it empty. That run merged only the 834 tracked
+files (kept 502) and ran close to the full nominal 300 s — launch
+`2026-10-08T19:02:43.643427041Z` to exit `2026-10-08T19:09:32.736341049Z`,
+409.09 s wall, log's own `time: 315s`. A cheap merge barely dents the
+budget, consistent with one clock but not the test this row needs.
+Corrected by passing the corpus root as an absolute path.)*
+
+**The real run.** Launch `2026-10-08T19:18:44.103264046Z`; exit
+`2026-10-08T20:13:09.538377951Z`; 3265.44 s wall. Its tail, verbatim:
+
+```
+INFO: -fork=3: fuzzing in separate process(s)
+INFO: -fork=3: 592 seed inputs, starting to fuzz in /tmp/libFuzzerTemp.FuzzWithFork2139915.dir
+#25: cov: 3314 ft: 9592 corp: 592 exec/s: 0 oom/timeout/crash: 0/0/0 time: 3250s job: 1 dft_time: 0
+INFO: fuzzed for 3250 seconds, wrapping up soon
+INFO: exiting: 0 time: 3264s
+```
+
+This is exactly the signature the row named. Job 1's own budget is
+`min(300, 1) = 1` second (`CreateNewJob`, `FuzzerFork.cpp:130`), so by the
+time it is the first job to report back, almost no real fuzzing has run yet
+(`exec/s: 0`) — and `secondsSinceProcessStartUp()` already reads `3250s`,
+past the nominal 300 s budget, so the very first post-merge check
+(`FuzzerFork.cpp:464-465`) trips and calls `StopJobs()` immediately. The
+process quits about 14 seconds later (`time: 3264s` at exit), not 300
+seconds later. Had the clock reset at "starting to fuzz", this run would
+have fuzzed for another ~300 s before quitting, landing near
+3250 + 300 = 3550 s of process time (~59 min wall); it landed at 3264 s
+(~54.5 min wall) instead.
+
+3250 s for this merge (834 tracked + 388 root, kept 592) sits beside
+§297.1's 3290.76 s (root alone, 388 files, direct `-merge=1`) and §297.2's
+3270.10 s (the same two-source merge, also direct `-merge=1`, kept 586) — a
+third independent measurement of the same cost, now paid from inside fork
+mode itself rather than a standalone `-merge=1` run, and the first of the
+three built to also answer what the clock does with it.
+
+**Q271, settled: yes.** `-max_total_time` counts the startup merge.
+`ProcessStartTime` is captured before the merge runs and never reset; the
+same clock reads out in the `time:` field of every stats line and gates
+`StopJobs()`. A `fuzz-target` run whose merge alone outlasts its
+`-max_total_time` argument — as every run so far against Q180's corpus root
+has — fuzzes for close to zero real seconds and exits almost as soon as it
+starts.
+
+Checked, not assumed, that the slow files are still genuinely slow at this
+base and not something gone stale since §297.1: one `timeout-*` file from
+the corpus root, run directly (`taskset -c 0-3 /usr/bin/time -v
+./fuzz/target/x86_64-unknown-linux-gnu/release/where_two_surfaces_cross
+-timeout=10 -runs=1 <file>`), takes 11.65 s wall, 10.88 s user — the merge's
+cost is real compute, paid once per file regardless of which process pays
+it.
+
+Scripted at this lane's `target/q271-run.sh`, log at `target/q271/run.log`
+(both gitignored, not part of this commit).
