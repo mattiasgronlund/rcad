@@ -44,9 +44,8 @@ unrecorded target` line says how many a given binary has. Closing that would
 need either a real points-to analysis of the binary or a runtime interposer
 that walks the caller's stack on every ASan memcmp hook — both bigger than
 this row. docs/decisions.d/273 says so and names the count for each target
-this script has been run on; the five-target count behind the split added
-here (`docs/queue.md` Q1444) is reported in the row's own handoff rather than
-here, since writing a new decisions section is outside this file's write set.
+this script has been run on; docs/decisions.d/419 names the two buckets'
+counts for the five targets after the split added here (Q1444).
 
 usage: timing-hooked-calls.py <binary> [<binary> ...]
 exit 0 and a `clean` line per binary if none reaches a hook outside `is`;
