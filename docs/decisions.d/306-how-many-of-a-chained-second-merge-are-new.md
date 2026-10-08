@@ -26,6 +26,7 @@ rebuild was needed).*
   306.6   What this says about §295.2 and about Q237
   306.7   Which inputs the count names but the directory does not keep, and why the kept count moves
   306.8   The hasher is the traced cause, and it never changes what the reader built
+  306.9   Six real chained nights, 2026-10-03 through 2026-10-08: 8-108 KB a night, not 150-280 and not "a few hundred"
 
 ### 306.1 The inputs, and how each was checked
 
@@ -161,7 +162,9 @@ persistent corpus by construction already (that was §295.7's whole point,
 items 1-2), so it will observe something closer to this row's 52-54
 new-files/180 KB shape per night than §295.5's 131-files/422 KB one — the
 smaller number is not a regression to explain, it is what correctly chaining
-was expected to do.
+was expected to do. §306.9 reads six of Q237's own real nights once they
+existed, and finds per-night growth smaller again than this section's own
+150-280 KB estimate.
 
 ### 306.7 Which inputs the count names but the directory does not keep, and why the kept count moves
 
@@ -433,3 +436,83 @@ binary. 306.7's own leg (a)/(b)/(c) explanation of the file-count gap (a
 `MERGE-OUTER` pick that a later, differently-seeded process judges not to add
 a new feature) is unaffected either way; this row did not re-run a merge, only
 the single-file replay a merge's inner loop performs many times over.
+
+### 306.9 Six real chained nights, 2026-10-03 through 2026-10-08: 8-108 KB a night, not 150-280 and not "a few hundred"
+
+*Queue row Q262, off `5bcd7c40` (`main` at
+`5bcd7c40b89f46b978a23b0c606dd63efb837079`). Read-only: no fuzz binary was run
+and nothing was written to `rcad-nightly-fuzz`, `$HOME/rcad-fuzz-logs`,
+`$HOME/rcad-fuzz-corpus` or any held tree. §264.9 already read 2026-10-03
+through 2026-10-06 as the earliest nights with a completed reader-corpus
+merge under the current `fuzz-overnight`, chaining onto the persistent corpus
+at `$HOME/rcad-fuzz-corpus/no_step_file_makes_the_reader_panic`
+(`fuzz_corpus_root`, `justfile:5666`, unset here so its default — the same
+directory `reader_persistent` names at `justfile:6104`). 2026-10-07 and
+2026-10-08 are two further completed nights this row adds to that run.*
+
+Each night's `reader-corpus-merge.log` first line gives the persistent
+corpus's file count **before** that night's merge, and its own "persistent
+has N files after merging" line gives the count **after**. The next night's
+own first line always repeats the previous night's "after" count exactly —
+checked for all five transitions below against `wc -l` on each night's
+`corpus-names/no_step_file_makes_the_reader_panic` (the sorted filename
+listing `fuzz-overnight` writes before that night's own fuzzing starts), which
+matches the log's "before" count every time:
+
+| night | before (log) | after (log) | before (`corpus-names` count) |
+|---|---|---|---|
+| 2026-10-03 | 33,735 | 33,796 | 33,735 |
+| 2026-10-04 | 33,796 | 33,801 | 33,796 |
+| 2026-10-05 | 33,801 | 33,806 | 33,801 |
+| 2026-10-06 | 33,806 | 33,839 | 33,806 |
+| 2026-10-07 | 33,839 | 33,845 | 33,839 |
+| 2026-10-08 | 33,845 | 33,850 | 33,845 |
+
+So nothing else touches this directory between nights. None of the six logs
+records persistent-corpus *bytes*, only scratch bytes (§264.9's own table)
+and file counts. The corpus is content-addressed (every filename is the
+SHA-1 of its bytes) and, per the table above, append-only, so a file named in
+a given night's `corpus-names` listing is still sitting byte-identical in
+today's live persistent corpus — checked, not assumed: a script
+(`target/q262-bytes.sh`, this lane's scratchpad, not part of this row's write
+set) looked up every filename from each night's
+`corpus-names/no_step_file_makes_the_reader_panic` by `stat -c%s` against
+`$HOME/rcad-fuzz-corpus/no_step_file_makes_the_reader_panic`'s current
+contents and found zero missing names for all six nights (`missing=0` on
+every line of its output). Summing those sizes gives each night's **before**
+bytes; the current directory's own total (`find
+$HOME/rcad-fuzz-corpus/no_step_file_makes_the_reader_panic -type f -printf
+'%s\n' | awk '{s+=$1} END{print s}'`, matching `du -sb` on the same directory
+exactly: 33,850 files, 34,693,108 bytes) is 2026-10-08's **after** figure,
+since nothing has touched the directory since that night's 08:15 merge:
+
+| night | files before | bytes before | files after | bytes after | files added | bytes added |
+|---|---|---|---|---|---|---|
+| 2026-10-03 | 33,735 | 34,467,383 | 33,796 | 34,519,317 | 61 | 51,934 |
+| 2026-10-04 | 33,796 | 34,519,317 | 33,801 | 34,531,603 | 5 | 12,286 |
+| 2026-10-05 | 33,801 | 34,531,603 | 33,806 | 34,539,824 | 5 | 8,221 |
+| 2026-10-06 | 33,806 | 34,539,824 | 33,839 | 34,647,852 | 33 | 108,028 |
+| 2026-10-07 | 33,839 | 34,647,852 | 33,845 | 34,671,181 | 6 | 23,329 |
+| 2026-10-08 | 33,845 | 34,671,181 | 33,850 | 34,693,108 | 5 | 21,927 |
+| **total, 6 nights** | | | | | **115** | **225,725** |
+
+Six real nights, chained onto the persistent corpus by construction exactly
+as §295.7 designed and Q237 built — not a lab reproduction of one or two
+cycles — add between **8.2 KB and 108.0 KB a night** (21,927-108,028 bytes;
+decimal KB, the same unit §291.3's MB/h figures use), averaging 37.6 KB/night
+(225,725 bytes ÷ 6). **Neither estimate holds.** Every one of the six nights
+sits below §306.6's 150-280 KB/night band, including the single biggest
+night (2026-10-06, 108.0 KB, still 28% under the band's low end) — and all
+six sit far further below §295.2's "a few hundred KB," which §306.6 had
+already called an overstatement on a two-cycle sample. The six-night mean
+(37.6 KB) is about a fifth of §306.6's own low end and roughly a tenth to a
+twentieth of "a few hundred." §306.6 was right that its own two-cycle figure
+was "a thin sample for a steady-state rate," and right that real growth would
+likely be smaller than §295.2's unchained-derived estimate — but the real
+rate, now sampled over six real nights instead of two lab cycles, is smaller
+again than §306.6's own number, and far noisier night to night (a 13× spread
+between the smallest and largest night, 2026-10-05's 8,221 bytes against
+2026-10-06's 108,028) than either single-point estimate suggested. §295.2's
+"a few hundred KB per night" should be corrected to this section's figure;
+that correction is filed as a row (below) rather than made by editing §295
+here, per this row's own brief.
