@@ -225,6 +225,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
                 .collect()
         })
         .collect();
+    let wires = with_the_halves_of_each_whole_curve_joined(wires, policy, log)?;
     let mut corners = Corners::with_each_closed_curve_started_once(
         model,
         input_corners_on_exactly_three_planes(model, scratch),
@@ -520,6 +521,7 @@ impl Assembly {
                     .collect()
             })
             .collect();
+        let kept_wires = with_the_halves_of_each_whole_curve_joined(kept_wires, policy, log)?;
         let mut corners = Corners::with_each_closed_curve_started_once(
             model,
             input_corners_on_exactly_three_planes(model, scratch),
@@ -4043,6 +4045,146 @@ fn read_through<'a>(
     Cow::Owned(read)
 }
 
+/// The wires of the pieces with the two halves of a closed curve cut at a pole
+/// read as one closed side, wherever another side closes on the same curve
+/// whole.
+///
+/// **A ball's side of a rim can come in halves where the other side's is
+/// whole.** A ball's poles are straight up and down from its centre, so a
+/// ball centred on the end cap of a bar lying along `x` or `y`, of the bar's
+/// radius, has both poles on the cap's rim. `arrange` cuts the circle the
+/// cap's plane cuts the ball in at both poles
+/// (`across_a_circle_that_starts_at_a_pole`, §194.4), so a piece of the ball
+/// walks the rim as two halves, while the bar's cap and pipe walk it as one
+/// closed side at the bar's seam corner. [`the_name_each_closed_curve_goes_by`]
+/// gave the two pairs one name, but only for sides that close, so the rim was
+/// three edges with one face each and every fuse of that dome was refused
+/// `ResultIsNotManifold { count: 1 }` (Q1143).
+///
+/// So the two halves become one side from where the first starts round to
+/// where the second ends, which is the same place, and
+/// [`Corners::with_each_closed_curve_started_once`] gives it the curve's one
+/// corner with the whole sides' starts. **Only where some side closes on the
+/// curve under a name the halves' name joins.** Halves that every face along
+/// the curve brings are two edges with two faces each already, and joined
+/// there a circle whose only corner is a pole would have no direction to read
+/// (§194.4).
+///
+/// Two sides are halves of one curve when one arrives where the other leaves,
+/// at the place half way round, on the same two surfaces, with the material on
+/// the same side and along the same input edges, and the two together close.
+///
+/// # Errors
+///
+/// Whatever [`name_of_the_closed_crossing_through`] gives.
+fn with_the_halves_of_each_whole_curve_joined<'a>(
+    wires: Vec<Vec<Cow<'a, [FaceMeet]>>>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Vec<Vec<Cow<'a, [FaceMeet]>>>> {
+    let a_half = |side: &FaceMeet| {
+        side.ends
+            .iter()
+            .any(|end| matches!(end, MeetPoint::HalfWayRoundAClosedCurve { .. }))
+    };
+    if !wires
+        .iter()
+        .flatten()
+        .flat_map(|wire| wire.iter())
+        .any(a_half)
+    {
+        return Ok(wires);
+    }
+    let mut named: Vec<(&[Surface; 2], CurveName, bool)> = Vec::new();
+    for side in wires.iter().flatten().flat_map(|wire| wire.iter()) {
+        let closes = closes_on_itself(side);
+        if closes || a_half(side) {
+            let curve = name_of_the_closed_crossing_through(
+                &side.carried_by,
+                side.ends[0].point(),
+                policy,
+                log,
+            )?;
+            named.push((&side.carried_by, curve, closes));
+        }
+    }
+    let goes_by = the_name_each_closed_curve_goes_by(
+        named
+            .iter()
+            .map(|&(carried_by, curve, _)| (carried_by, curve)),
+        policy,
+    );
+    let one_name = |curve: CurveName| goes_by.get(&curve).copied().unwrap_or(curve);
+    let whole: BTreeSet<CurveName> = named
+        .iter()
+        .filter(|&&(_, _, closes)| closes)
+        .map(|&(_, curve, _)| one_name(curve))
+        .collect();
+    let to_join: BTreeSet<CurveName> = named
+        .iter()
+        .filter(|&&(_, curve, closes)| !closes && whole.contains(&one_name(curve)))
+        .map(|&(_, curve, _)| curve)
+        .collect();
+    if to_join.is_empty() {
+        return Ok(wires);
+    }
+    let mut joined = Vec::with_capacity(wires.len());
+    for piece in wires {
+        let mut of_this_piece = Vec::with_capacity(piece.len());
+        for mut wire in piece {
+            while let Some(at) = where_two_halves_of_one_of(&wire, &to_join, policy, log)? {
+                let mut read = wire.to_vec();
+                read.rotate_left(at);
+                let leaving = read.remove(1);
+                let arriving = &mut read[0];
+                arriving.ends[1] = leaving.ends[1].clone();
+                arriving.approximation = the_wider(arriving.approximation, leaving.approximation);
+                wire = Cow::Owned(read);
+            }
+            of_this_piece.push(wire);
+        }
+        joined.push(of_this_piece);
+    }
+    Ok(joined)
+}
+
+/// Where in `wire` a side arrives half way round one of the curves in
+/// `to_join` and the next side leaves from there to close it, as the place of
+/// the first of the two; `None` where no two sides do.
+///
+/// # Errors
+///
+/// Whatever [`name_of_the_closed_crossing_through`] gives.
+fn where_two_halves_of_one_of(
+    wire: &[FaceMeet],
+    to_join: &BTreeSet<CurveName>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<usize>> {
+    for (at, arriving) in wire.iter().enumerate() {
+        let leaving = &wire[(at + 1) % wire.len()];
+        let halves = matches!(arriving.ends[1], MeetPoint::HalfWayRoundAClosedCurve { .. })
+            && wire.len() > 1
+            && leaving.ends[0] == arriving.ends[1]
+            && leaving.ends[1] == arriving.ends[0]
+            && leaving.carried_by == arriving.carried_by
+            && leaving.material_side == arriving.material_side
+            && leaving.along == arriving.along
+            && matches!(arriving.ends[0], MeetPoint::WhereAClosedCurveStarts { .. });
+        if halves
+            && to_join.contains(&name_of_the_closed_crossing_through(
+                &arriving.carried_by,
+                arriving.ends[0].point(),
+                policy,
+                log,
+            )?)
+        {
+            return Ok(Some(at));
+        }
+    }
+    Ok(None)
+}
+
 /// The wider of two descriptions' slop, or whichever one there is.
 fn the_wider(one: Option<Approximation>, other: Option<Approximation>) -> Option<Approximation> {
     match (one, other) {
@@ -4887,6 +5029,16 @@ impl Edges {
     /// [`every_closed_edge_read_off_one_spelling`] has to know which one this
     /// was.
     ///
+    /// **A closed side is read at its edge's one corner**, and not where its
+    /// own pair starts the curve. A side whose start another corner took over
+    /// ([`Corners::with_each_closed_curve_started_once`]) starts somewhere the
+    /// other sides along the edge are not read. The two halves of a rim cut at
+    /// a ball's poles, read as one side
+    /// ([`with_the_halves_of_each_whole_curve_joined`]), start at a pole, and
+    /// a dome lying on a bar along `−y` read there had its ball walk the rim the
+    /// way the pipe did and was refused `FacesDoNotAgreeWhichWayTheyFace`; read
+    /// at the bar's seam corner it answers (Q1368).
+    ///
     /// # Panics
     ///
     /// If a straight side has no length. Every caller leaves such a side out
@@ -4968,8 +5120,9 @@ impl Edges {
             }
         };
         let (forward, read_against) = if from == to {
-            let forward = which_way_a_closed_edge_is_walked(meet, at, turned_round)?
-                .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?;
+            let forward =
+                which_way_a_closed_edge_is_walked(meet, corners.made[from].point, turned_round)?
+                    .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?;
             (forward, the_curved_one_of(&carried_by))
         } else {
             (self.made[edge].ends[0] == from, None)
