@@ -31,15 +31,30 @@
 //! turned rim's other corner `(13, 0, 4)` read above `z = −4` where the face
 //! leaves its circle going below it. The three bands' corners are on the side
 //! they keep, and no walk of any piece passed that is not the piece.
+//!
+//! **Before row Q1335, asking the ring's face of any piece whether it holds a
+//! point panicked**, and so did `classify_point` anywhere. The face is trimmed
+//! by the plane each circle's run names, so it is read as a ring face between
+//! two planes, and that reading took the face across each circle, the partner,
+//! for the plane. Read off the run instead, the pipes and the ball leave the
+//! band between the planes or the ring less it (`docs/decisions.md` §243.8),
+//! and the cone leaves one outer circle on `z = −4` and one inner on `z = 3`:
+//! one circle in front of the other's plane and the other behind it, which was
+//! refused as no face before (row Q1155). Its face is the part outside the
+//! middle of the tube on its side of `z = −4` and the part inside it on its
+//! side of `z = 3`.
 
+use core::cmp::Ordering;
 use core::f64::consts::PI;
 
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere,
     Surface, SurfaceMeet, Torus, Vector, intersect,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Invalid, Model, Result, SolidBuilder, SolidKey};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_topo::{
+    Containment, DraftStep, Error, Invalid, Model, OnAFace, Result, SolidBuilder, SolidKey,
+};
 
 const EVERY_WALK: [[Orientation; 2]; 4] = [
     [Orientation::Forward, Orientation::Forward],
@@ -229,6 +244,189 @@ fn every_other_description_of_each_piece_is_refused() {
     }
 }
 
+/// The ring's face of each piece cut by a pipe or the ball holds the part of
+/// the ring on the piece's side of the partner, has the two circles as its
+/// boundary and holds nothing else, wherever round the axis it is asked, as
+/// built and moved a hundred along `x`.
+///
+/// Each circle's run names its own plane, so the face is trimmed by two planes
+/// square to the axis, and here its two circles are both outside the middle of
+/// the tube or both inside it: the band between the planes, or the ring less
+/// that band (`docs/decisions.md` §243.8). Before row Q1335 every point
+/// panicked, because the face across each circle, the partner, was taken for
+/// the plane the circle is cut by.
+#[test]
+fn the_ring_face_of_each_piece_cut_by_a_pipe_or_the_ball_holds_its_side_of_the_partner() {
+    for piece in every_piece() {
+        if !piece.has_one_circle_each_side_of_the_middle_of_the_tube() {
+            the_ring_face_holds_its_side_of_the_partner(&piece);
+        }
+    }
+}
+
+/// The same of the two pieces the cone cuts, whose ring face has one circle
+/// outside the middle of the tube on `z = −4` and one inside it on `z = 3`.
+///
+/// Each circle is in front of the other's plane on one side and behind it on
+/// the other, which is neither a band between two planes nor the ring less one.
+/// The face is the outer part of the ring on its side of `z = −4` and the inner
+/// part on its side of `z = 3`, which meet at the top or the bottom of the tube.
+/// Before row Q1335 every point panicked, as above, and with the planes read
+/// right the face was refused `AFaceMissesPartOfWhereItsSurfacesCross` (row
+/// Q1155).
+#[test]
+fn the_ring_face_of_each_piece_cut_by_the_cone_holds_its_side_of_the_cone() {
+    for piece in every_piece() {
+        if piece.has_one_circle_each_side_of_the_middle_of_the_tube() {
+            the_ring_face_holds_its_side_of_the_partner(&piece);
+        }
+    }
+}
+
+/// `classify_point` finds each piece cut by a pipe or the ball inside the tube
+/// on its side of the partner, on its skin where the ring's face or the
+/// partner's holds the point, and outside everywhere else. Before row Q1335
+/// every point panicked, at the ring's face.
+#[test]
+fn classify_point_finds_each_piece_cut_by_a_pipe_or_the_ball_on_its_side_of_the_partner() {
+    for piece in every_piece() {
+        if !piece.has_one_circle_each_side_of_the_middle_of_the_tube() {
+            classify_point_finds_the_piece_on_its_side_of_the_partner(&piece);
+        }
+    }
+}
+
+/// The same of the two pieces the cone cuts.
+#[test]
+fn classify_point_finds_each_piece_cut_by_the_cone_on_its_side_of_the_cone() {
+    for piece in every_piece() {
+        if piece.has_one_circle_each_side_of_the_middle_of_the_tube() {
+            classify_point_finds_the_piece_on_its_side_of_the_partner(&piece);
+        }
+    }
+}
+
+/// Points on the ring, at `(r, z)`, each a whole number from the tube's middle
+/// circle: the outside, the inside, the top and the bottom of the tube, the
+/// four points of the planes `z = ±3` and `z = ±4`, which hold every piece's
+/// circles.
+const ON_THE_RING: [(f64, f64); 12] = [
+    (15.0, 0.0),
+    (5.0, 0.0),
+    (10.0, 5.0),
+    (10.0, -5.0),
+    (14.0, 3.0),
+    (14.0, -3.0),
+    (6.0, 3.0),
+    (6.0, -3.0),
+    (13.0, 4.0),
+    (13.0, -4.0),
+    (7.0, 4.0),
+    (7.0, -4.0),
+];
+
+/// Points inside the tube, at `(r, z)`: three of them on a partner, `r = 13`
+/// and `r = 7` on the pipes and `r = 9` at `z = 0` on the cone.
+const IN_THE_TUBE: [(f64, f64); 9] = [
+    (14.0, 0.0),
+    (12.0, 0.0),
+    (8.0, 0.0),
+    (6.0, 0.0),
+    (10.0, 4.0),
+    (10.0, -4.0),
+    (13.0, 0.0),
+    (9.0, 0.0),
+    (7.0, 0.0),
+];
+
+/// Asks `piece`'s ring face about every point of [`ON_THE_RING`] at three
+/// places round the axis, and again with the piece moved a hundred along `x`.
+fn the_ring_face_holds_its_side_of_the_partner(piece: &Piece) {
+    let (mut model, solid) = a_piece_named_by_planes(piece, piece.walk, Orientation::Forward)
+        .unwrap_or_else(|why| panic!("{}: {why:?}", piece.name));
+    for shift in [0.0, 100.0] {
+        model
+            .place_solid(
+                solid,
+                &Isometry::translation(Vector::new(shift, 0.0, 0.0)).expect("a finite shift"),
+            )
+            .unwrap_or_else(|why| panic!("{} moved: {why:?}", piece.name));
+        let view = model.solid(solid).expect("its own key");
+        let wall = view
+            .faces()
+            .find(|face| matches!(face.surface(), Surface::Torus(_)))
+            .expect("a face on the ring")
+            .key();
+        for (r, z) in ON_THE_RING {
+            let expected = match piece.side_of_the_partner((r, z)) {
+                Ordering::Equal => OnAFace::OnItsBoundary,
+                side if side == piece.side_it_keeps() => OnAFace::Held,
+                Ordering::Less | Ordering::Greater => OnAFace::NotHeld,
+            };
+            for at in round_the_axis((r, z), shift) {
+                let held = view.face_holds_the_point(
+                    wall,
+                    PredicatePoint::from(at.coordinates()),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                assert!(
+                    matches!(held, Ok(found) if found == expected),
+                    "{} moved {shift}: the ring's face at {:?} said {held:?}, not {expected:?}",
+                    piece.name,
+                    at.coordinates()
+                );
+            }
+        }
+    }
+}
+
+/// Classifies every point of [`IN_THE_TUBE`] and [`ON_THE_RING`] at three
+/// places round the axis, and again with the piece moved a hundred along `x`.
+fn classify_point_finds_the_piece_on_its_side_of_the_partner(piece: &Piece) {
+    let (mut model, solid) = a_piece_named_by_planes(piece, piece.walk, Orientation::Forward)
+        .unwrap_or_else(|why| panic!("{}: {why:?}", piece.name));
+    for shift in [0.0, 100.0] {
+        model
+            .place_solid(
+                solid,
+                &Isometry::translation(Vector::new(shift, 0.0, 0.0)).expect("a finite shift"),
+            )
+            .unwrap_or_else(|why| panic!("{} moved: {why:?}", piece.name));
+        let view = model.solid(solid).expect("its own key");
+        let in_the_tube = IN_THE_TUBE.map(|at| (at, Containment::Inside));
+        let on_the_ring = ON_THE_RING.map(|at| (at, Containment::OnBoundary));
+        for ((r, z), on_its_side) in in_the_tube.into_iter().chain(on_the_ring) {
+            let expected = match piece.side_of_the_partner((r, z)) {
+                Ordering::Equal => Containment::OnBoundary,
+                side if side == piece.side_it_keeps() => on_its_side,
+                Ordering::Less | Ordering::Greater => Containment::Outside,
+            };
+            for at in round_the_axis((r, z), shift) {
+                let found =
+                    view.classify_point(at, &Policy::certified(), &mut ProvenanceLog::new());
+                assert_eq!(
+                    found,
+                    expected,
+                    "{} moved {shift}: {:?}",
+                    piece.name,
+                    at.coordinates()
+                );
+            }
+        }
+    }
+}
+
+/// The point at `(r, z)` a quarter-turn and a half-turn apart round the axis,
+/// moved `shift` along `x`.
+fn round_the_axis((r, z): (f64, f64), shift: f64) -> [Point; 3] {
+    [
+        Point::new(shift + r, 0.0, z),
+        Point::new(shift, r, z),
+        Point::new(shift - r, 0.0, z),
+    ]
+}
+
 /// One piece of the ring cut by a partner.
 struct Piece {
     name: &'static str,
@@ -242,6 +440,37 @@ struct Piece {
     walk: [Orientation; 2],
     /// What Pappus gives.
     volume: f64,
+    /// How far past the partner the point at `(r, z)` is, up to a positive
+    /// factor: above zero on the side its gradient points to. Worked out from
+    /// the partner's own equation in whole numbers, so exactly, and asked only
+    /// below the cone's apex.
+    past_the_partner: fn((f64, f64)) -> f64,
+}
+
+impl Piece {
+    /// Whether the piece's two circles are one outside the middle circle of the
+    /// tube, `r = 10`, and one inside it, which only the cone's are.
+    fn has_one_circle_each_side_of_the_middle_of_the_tube(&self) -> bool {
+        let [(one, _), (other, _)] = self.circles;
+        (one > 10.0) != (other > 10.0)
+    }
+
+    /// Which side of the partner the point at `(r, z)` is on, `Greater` where
+    /// its gradient points.
+    fn side_of_the_partner(&self, at: (f64, f64)) -> Ordering {
+        (self.past_the_partner)(at)
+            .partial_cmp(&0.0)
+            .expect("a whole number")
+    }
+
+    /// The side of the partner the piece is on: the one its gradient points to
+    /// where the piece uses it turned round.
+    fn side_it_keeps(&self) -> Ordering {
+        match self.partner_used {
+            Orientation::Forward => Ordering::Less,
+            Orientation::Reversed => Ordering::Greater,
+        }
+    }
 }
 
 /// The eight pieces, each worked out by slicing the ring across its axis or,
@@ -276,6 +505,7 @@ fn every_piece() -> [Piece; 8] {
             partner_used: reversed,
             walk: [forward, reversed],
             volume: outside_the_pipe_of_13,
+            past_the_partner: past_the_pipe_of_13,
         },
         Piece {
             name: "the ring with its rim turned down to the pipe of 13",
@@ -284,6 +514,7 @@ fn every_piece() -> [Piece; 8] {
             partner_used: forward,
             walk: [reversed, forward],
             volume: whole - outside_the_pipe_of_13,
+            past_the_partner: past_the_pipe_of_13,
         },
         Piece {
             name: "the band inside the pipe of 7",
@@ -292,6 +523,7 @@ fn every_piece() -> [Piece; 8] {
             partner_used: forward,
             walk: [reversed, forward],
             volume: inside_the_pipe_of_7,
+            past_the_partner: past_the_pipe_of_7,
         },
         Piece {
             name: "the ring with its bore turned out to the pipe of 7",
@@ -300,6 +532,7 @@ fn every_piece() -> [Piece; 8] {
             partner_used: reversed,
             walk: [forward, reversed],
             volume: whole - inside_the_pipe_of_7,
+            past_the_partner: past_the_pipe_of_7,
         },
         Piece {
             name: "the ring beyond the cone",
@@ -308,6 +541,7 @@ fn every_piece() -> [Piece; 8] {
             partner_used: reversed,
             walk: [reversed, forward],
             volume: whole - within_the_cone,
+            past_the_partner: past_the_cone,
         },
         Piece {
             name: "the ring within the cone",
@@ -316,6 +550,7 @@ fn every_piece() -> [Piece; 8] {
             partner_used: forward,
             walk: [forward, reversed],
             volume: within_the_cone,
+            past_the_partner: past_the_cone,
         },
         Piece {
             name: "the band outside the ball",
@@ -324,6 +559,7 @@ fn every_piece() -> [Piece; 8] {
             partner_used: reversed,
             walk: [forward, reversed],
             volume: outside_the_ball,
+            past_the_partner: past_the_ball,
         },
         Piece {
             name: "the ring inside the ball",
@@ -332,6 +568,7 @@ fn every_piece() -> [Piece; 8] {
             partner_used: forward,
             walk: [reversed, forward],
             volume: whole - outside_the_ball,
+            past_the_partner: past_the_ball,
         },
     ]
 }
@@ -360,6 +597,26 @@ fn the_cone() -> Surface {
 /// rounded; each corner is off it by that rounding, which the sweep allows.
 fn the_ball() -> Surface {
     Surface::Sphere(Sphere::new(Point::origin(), 185f64.sqrt()).expect("a positive radius"))
+}
+
+fn past_the_pipe_of_13((r, _): (f64, f64)) -> f64 {
+    r * r - 169.0
+}
+
+fn past_the_pipe_of_7((r, _): (f64, f64)) -> f64 {
+    r * r - 49.0
+}
+
+/// Below the apex, the cone widens out the way its gradient points.
+fn past_the_cone((r, z): (f64, f64)) -> f64 {
+    r - (9.0 - z)
+}
+
+/// The ball as `√185` would be, not as it is rounded: no point asked is near
+/// enough to it for the rounding to matter but the corners, and those are on
+/// the planes that bound the ring's face there.
+fn past_the_ball((r, z): (f64, f64)) -> f64 {
+    r * r + z * z - 185.0
 }
 
 /// [`a_piece_built`] with each circle's run naming its own plane.
