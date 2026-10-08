@@ -44,7 +44,9 @@ files get added. The gate checks formatting but does not fix it: skip
 so the fix lands as a rustfmt-only commit on top of the real change, the
 way Q574's tip did.
 
-Gate with `mise exec -- just pre-gate gate-lane`. `pre-gate` runs the gate's
+Gate with `mise exec -- just pre-gate gate-lane`. Commit first: the gate
+refuses a tree with uncommitted or untracked files, since no sha names what it
+would read and your verifier would run it all again (§415). `pre-gate` runs the gate's
 cheapest steps at once — formatting, clippy and the wildcard count — and
 prints the first 60 lines of each one that fails. `just` starts the gate only
 when they all pass, so those failures come back in seconds instead of after a

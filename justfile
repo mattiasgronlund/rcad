@@ -531,6 +531,12 @@ gate-fresh image="rust:1-bookworm":
             # environment found a fault this repo had already documented is the
             # best evidence the recipe does what it claims.
             rustup show
+            # The gate below refuses a clone that anything has written to
+            # (§415). The commands above write under /etc, /usr, /tmp/home and
+            # the image rustup home, and this one is the one that can write
+            # into /rcad: `mise.toml` sets `lockfile = true`, so a mise newer
+            # than the one that wrote `mise.lock` may write it again, and then
+            # the refusal names the file rather than gating.
             mise install
             # The gate runs as root and everything it writes is root-owned, so
             # the tree goes back to the invoking user before this container
@@ -690,7 +696,15 @@ pre-gate:
 # `test` and the slowest selftest, which start at once, and a lane would then
 # find its second failure one gate later. The third word is how many steps run
 # at once; `1` runs them in turn. `docs/decisions.md` §372.8 to §372.12.
-[doc("Every step, as many at once as there are cores. `just gate quiet` prints one line a step and the summary; `just gate quiet fresh` serves nothing from an earlier green; a third word `1` runs the steps in turn.")]
+#
+# **A tree with anything uncommitted or untracked is refused before any step
+# starts.** No sha names what such a gate reads, so its green can be neither
+# served nor recorded, and whoever gates the commit after it runs every step
+# again. Ignored files do not count. It is a refusal and not a step because a
+# step would run beside the others to the end of the gate before it could say
+# "commit first". Like the refusal of a misspelt word it prints no summary
+# block: the block describes steps, and none ran. `docs/decisions.md` §415.
+[doc("Every step, as many at once as there are cores, on a tree with nothing uncommitted or untracked. `just gate quiet` prints one line a step and the summary; `just gate quiet fresh` serves nothing from an earlier green; a third word `1` runs the steps in turn.")]
 gate mode="loud" verdicts="reuse" jobs="cores":
     #!/usr/bin/env bash
     set -uo pipefail
@@ -709,6 +723,20 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     [ "$jobs" != cores ] || jobs={{ num_cpus() }}
     if ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
         echo "just gate takes how many steps to run at once, or nothing, third, not '{{ jobs }}'" >&2
+        exit 2
+    fi
+    # Before the log is emptied, so a refused run leaves the last real gate's
+    # log where it was. `--untracked-files` is named because a user's
+    # `status.showUntrackedFiles=no` would otherwise hide an untracked `.rs`
+    # that cargo compiles all the same.
+    dirty=$(git status --porcelain --untracked-files=normal) || {
+        echo "just gate could not ask git whether this tree has uncommitted or untracked files" >&2
+        exit 2
+    }
+    if [ -n "$dirty" ]; then
+        echo "just gate refuses a tree with uncommitted or untracked files, since no sha names what it would read:" >&2
+        git status --short --untracked-files=normal >&2
+        echo "commit first — a WIP commit is enough, and the branch is still on disk (docs/decisions.md §415)" >&2
         exit 2
     fi
     log='{{ gate_log }}'
@@ -959,13 +987,15 @@ gate mode="loud" verdicts="reuse" jobs="cores":
 #
 # **A tree with anything uncommitted or untracked has no name.** The name is
 # read from HEAD, and an untracked `.rs` file under `crates/*/tests/` gets
-# compiled anyway.
+# compiled anyway. `gate` refuses such a tree before it starts (§415), so it
+# meets this sentence when the tree changes while it runs, and its pass is then
+# not recorded; `check-gate-verdicts-selftest` drives that case.
 [private]
 _code-fingerprint:
     #!/usr/bin/env bash
     set -euo pipefail
     git rev-parse --verify --quiet HEAD >/dev/null || { echo "there is no commit here"; exit 0; }
-    if [ -n "$(git status --porcelain)" ]; then
+    if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
         echo "the tree has uncommitted or untracked files"
         exit 0
     fi
@@ -1078,6 +1108,9 @@ _gate-summary log status failed="" served="":
 #     out `test-slow`, and its pass is not a reading end to end either.
 #   - **the tree is clean**, because the sha is the whole record. A green
 #     recorded against a dirty tree names something nobody can get back.
+#     `gate` refuses a dirty tree before it starts (§415), so from there this
+#     catches a tree written to while the gate ran; from `gate-fresh`, a tree
+#     written to while the container ran.
 #   - **it never fails the gate.** Bookkeeping that can turn a green run red is
 #     worse than no bookkeeping; every giving-up path here says why and exits 0.
 #
@@ -1158,6 +1191,17 @@ check-gate-summary-selftest:
         echo "--- got ---"; echo "$got"
         exit 1
     }
+
+    # Every nested gate asks git about a scratch repository and not the real
+    # tree, because `gate` refuses a tree with anything uncommitted or untracked
+    # (§415). The real tree is dirty whenever this is run by hand mid-edit, and
+    # a failing proptest writes its seed into it while the real gate runs, which
+    # would add this step to a red gate's `also failed:` line for nothing.
+    repo="$dir/repo"
+    mkdir -p "$repo"
+    export GIT_DIR="$repo/.git" GIT_WORK_TREE="$repo"
+    git init -q -b main
+    git -c user.name=selftest -c user.email=selftest@invalid commit -q --allow-empty -m 'a clean tree'
 
     # A pass. `list` is a real recipe that costs nothing, so the driver runs
     # something real without the gate running itself.
@@ -1697,12 +1741,52 @@ check-gate-verdicts-selftest:
     grep -q '^· list (' <<<"$got" || fail "fresh served a step"
     grep -q '^· verdicts: fresh' <<<"$got" || fail "fresh did not say why it ran a step it had a green for"
 
-    # An untracked file is not in HEAD, and it gets compiled all the same.
+    # A tree with anything uncommitted or untracked is refused before any step
+    # starts (§415). An untracked file is not in HEAD and gets compiled all the
+    # same, and a changed or staged file is not what HEAD names either. An
+    # ignored file is no part of the code, and the gate runs.
+    refused() {
+        local rc=0
+        got=$("${@:2}" 2>&1) || rc=$?
+        [ "$rc" -eq 2 ] || fail "a gate of a tree with $1 exited $rc, where a refusal exits 2"
+        grep -q '^just gate refuses a tree with uncommitted or untracked files' <<<"$got" \
+            || fail "a gate of a tree with $1 did not say why it was refused"
+        grep -q '^commit first — a WIP commit is enough' <<<"$got" \
+            || fail "the refusal of a tree with $1 did not say what to do"
+        grep -q '^· ' <<<"$got" && fail "a gate of a tree with $1 started a step"
+        grep -q '=== gate summary ===' <<<"$got" && fail "a refused gate printed a summary of steps it never ran"
+        return 0
+    }
+    got=$(gate list list) || fail "a gate of a clean tree failed"
+    grep -q 'refuses' <<<"$got" && fail "a clean tree was refused"
+    grep -qx 'gate: PASS' <<<"$got" || fail "a gate of a clean tree did not pass"
     printf 'fn new() {}\n' >"$repo/crates/new.rs"
-    got=$(gate list list) || fail "a gate of an untracked file failed"
-    grep -q '^· list (' <<<"$got" || fail "a tree with an untracked .rs file was served HEAD's green"
-    grep -q 'uncommitted or untracked' <<<"$got" || fail "a dirty tree did not say why nothing was served"
+    refused "an untracked .rs file" gate list list
+    grep -qx '?? crates/new.rs' <<<"$got" || fail "the refusal did not name the untracked file"
+    refused "an untracked file that git config hides" \
+        env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=status.showUntrackedFiles GIT_CONFIG_VALUE_0=no \
+        "$j" --set gate_steps list --set gate_reusable_steps list --set gate_log "$dir/gate.log" gate quiet
+    grep -qx '?? crates/new.rs' <<<"$got" || fail "a refusal under status.showUntrackedFiles=no did not name the untracked file"
+    hidden=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=status.showUntrackedFiles GIT_CONFIG_VALUE_0=no fingerprint)
+    [[ "$hidden" =~ ^[0-9a-f]{64}$ ]] && fail "a tree with an untracked file that git config hides got a fingerprint"
+    g add crates/new.rs
+    refused "a staged new file" gate list list
+    grep -qx 'A  crates/new.rs' <<<"$got" || fail "the refusal did not name the staged file"
+    g rm -q --cached crates/new.rs
     rm "$repo/crates/new.rs"
+    printf '// changed\n' >>"$repo/crates/a.rs"
+    refused "a changed tracked file" gate list list
+    grep -qx ' M crates/a.rs' <<<"$got" || fail "the refusal did not name the changed file"
+    g checkout -q -- crates/a.rs
+    mkdir -p "$GIT_DIR/info"
+    printf '/target/\n' >>"$GIT_DIR/info/exclude"
+    mkdir -p "$repo/target"
+    printf 'fn built() {}\n' >"$repo/target/built.rs"
+    got=$(gate list list) || fail "a gate of a tree whose only extra file is ignored failed"
+    grep -q 'refuses' <<<"$got" && fail "a tree whose only extra file is ignored was refused"
+    grep -q "^· served: list from ${base:0:8}'s gate" <<<"$got" \
+        || fail "an ignored file kept a tree from being served the green of its code"
+    rm -r "$repo/target"
 
     # A day is the whole of what is served. Every repeat measured came within
     # it (§337.1).
@@ -1832,6 +1916,27 @@ check-gate-verdicts-selftest:
     grep -qxF 'tests: Summary [  21.004s] 30 tests run: 30 passed, 0 skipped' <<<"$got" \
         || fail "a summary whose record had gone dropped its own counts"
     grep -q 'not reached' <<<"$got" && fail "a summary whose record had gone said the tests were not reached"
+
+    # A clean tree can still change while its gate runs, and then no sha names
+    # what the gate read, so its pass is not recorded. This is the path that
+    # still reaches `_code-fingerprint`'s sentence for a dirty tree (§415). The
+    # file is written once the two-second step has started.
+    rm -f "$store/$f0"
+    rm -rf "$dir/gate.log.steps"
+    gate _gate-selftest-sleep _gate-selftest-sleep >"$dir/during" &
+    during=$!
+    for _ in $(seq 100); do
+        [ ! -e "$dir/gate.log.steps/0-_gate-selftest-sleep.log" ] || break
+        sleep 0.1
+    done
+    [ -e "$dir/gate.log.steps/0-_gate-selftest-sleep.log" ] || fail "the gate never started its step"
+    printf 'fn late() {}\n' >"$repo/crates/late.rs"
+    wait "$during" || { got=$(cat "$dir/during"); fail "a gate whose tree changed while it ran failed"; }
+    got=$(cat "$dir/during")
+    grep -qx '· verdicts: not recorded, because the tree changed while the gate ran' <<<"$got" \
+        || fail "a pass whose tree changed while it ran did not say why it recorded nothing"
+    [ -f "$store/$f0" ] && fail "a pass whose tree changed while it ran recorded a green"
+    rm "$repo/crates/late.rs"
     exit 0
 
 # Two gate steps that print the line a nextest run ends with, one for 3 tests
