@@ -808,6 +808,22 @@ short of 365.8, and 13 with it, 12 for the point. Its threshold, 18%, was not
 moved. `swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit` refuses 22
 of 276 either way.
 
+**One pin outside the row's files moved, and is not moved here.**
+`two_walls_a_hair_apart_are_caught_before_the_walk_gets_a_two_sided_piece`
+in `a_piece_of_a_face_bounded_by_two_straight_sides.rs` pins the tolerant
+union's last record as `a point inside a piece of a face`, on a sliver about
+`1e-99` wide that it calls a limit. A temporary print showed the rule place
+that sliver: the triangle on `z = 10` between the plain knife's line `y = 5`
+and the leaning knife's line, from `x = 0` to `5`, takes the placement of the
+square of the same face across `y = 5`, which the ray puts inside the leaning
+knife. That is right: the leaning knife's plane holds `(0, 5, 10)` and not
+`(5, 5, 10)`, and the sliver lies on the same side of it as the square. So the
+sliver was a gap and not a limit. The fuse now stops a piece later, `a point
+in a piece that every solid could place`, on a piece of a wall from
+`(−5, 5, 2)` to `(0, 5, 5)`, which this did not trace. Every other test of
+the workspace passed with its pins as they stood, and the slow tier passed 40
+of 40.
+
 **What this leaves.** Q1356's four pairs are not reached: the skew row moved by
 this pair's three fuses and no more. Their slivers lie in the plane of a face
 of the other solid with a side along an edge of that face, which is the one
