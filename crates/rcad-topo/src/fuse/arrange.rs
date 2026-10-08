@@ -1470,8 +1470,9 @@ impl<'f> Arrangement<'f> {
     ///
     /// Which crossings run through a corner is mostly a question about the
     /// model: the two edges either side of it, and, where more faces meet there,
-    /// every other surface the corner already knows about, and a round bar's
-    /// seam plane at a corner on its seam
+    /// every other surface the corner already knows about, and the seam plane
+    /// of a pipe or a cone at a corner on its seam, the plane through the axis
+    /// and the corner
     /// ([`BakedCorner::is_on_by_construction`](super::bake::BakedCorner::is_on_by_construction)).
     /// Only a cut has to be *asked*, and asking is
     /// [`Arrangement::passes_through`].
@@ -3833,6 +3834,12 @@ impl<'f> Arrangement<'f> {
     /// `N` is the face's gradient, except where there is none: at the apex of
     /// a face on the cone itself ([`Arrangement::what_a_turn_at_the_apex_is_about`]).
     ///
+    /// **There, two rulings of one plane that holds the axis turn by nothing**
+    /// ([`Arrangement::are_two_rulings_of_one_plane_holding_the_axis`]), and
+    /// that is read as `Zero` without working the turn out: worked out, it is
+    /// an interval straddling nothing, as two halves of one ruling are in
+    /// [`Arrangement::turns_anticlockwise`].
+    ///
     /// **Five lengths**: each way out is two, as a cross product of two
     /// gradients or of two normals, and `N` is one.
     fn turn_between_two_ways_out(
@@ -3846,7 +3853,17 @@ impl<'f> Arrangement<'f> {
         let at = self.nodes[node].point;
         let (one, other) = (self.way_out_of(node, first), self.way_out_of(node, second));
         let about = match self.the_cone_whose_apex_the_face_pinches_at(node) {
-            Some(cone) => self.what_a_turn_at_the_apex_is_about(&cone, one, other)?,
+            Some(cone) => {
+                let about = self.what_a_turn_at_the_apex_is_about(&cone, one, other)?;
+                if self.are_two_rulings_of_one_plane_holding_the_axis(
+                    &cone,
+                    first.crossing,
+                    second.crossing,
+                ) {
+                    return Ok(Decision::Zero);
+                }
+                about
+            }
             None => gradient_at(&self.surface, at).enclosure(),
         };
         must_decide(
@@ -3951,6 +3968,41 @@ impl<'f> Arrangement<'f> {
         Err(Error::TwoCurvesTouchWithoutCrossing {
             face: self.face.keys[0],
         })
+    }
+
+    /// Whether the two crossings are rulings one plane cuts through the cone's
+    /// apex, and that plane holds the cone's axis: `n·w` nothing, **proved of
+    /// the stored numbers and never rounded** ([`a_plane_holds_a_cones_axis`]).
+    ///
+    /// **Then `w · (t₁ × t₂)` is nothing in the reals.** Both ways out lie in
+    /// the plane, so `t₁ × t₂` runs along `n`, and `w · n` is nothing. About the
+    /// axis the two are half a turn apart: the plane crosses the cone in a
+    /// ruling and its mirror across the axis. Each `t` is an enclosure
+    /// ([`the_way_a_half_ruling_leaves_the_apex`]), so working the turn out
+    /// straddles nothing every time. The frustum turned 0.4 about `x` and cut
+    /// along its seam by a block turned the same way refused there under
+    /// `certified`, the turn's enclosure `2.05e-15` (§294.12).
+    ///
+    /// **The plane holding the axis is the condition, not the plane running
+    /// through the apex.** Every ruling of a plane runs through the apex, so
+    /// that says nothing. A plane through the apex that misses the axis crosses
+    /// the cone in two rulings that are not mirrors across it, so less than half
+    /// a turn apart about it one way round, and the turn between them is
+    /// something.
+    fn are_two_rulings_of_one_plane_holding_the_axis(
+        &self,
+        cone: &Cone,
+        one: usize,
+        other: usize,
+    ) -> bool {
+        let [mine, theirs] = [one, other].map(|crossing| &self.crossings[crossing]);
+        mine.through_an_apex.is_some()
+            && theirs.through_an_apex.is_some()
+            && mine.partner == theirs.partner
+            && mine
+                .partner
+                .as_plane()
+                .is_some_and(|flat| a_plane_holds_a_cones_axis(flat, cone))
     }
 
     /// [`Arrangement::turns_anticlockwise`], and where that says the two lie on
@@ -7510,6 +7562,18 @@ fn a_plane_rests_along_a_cone(one: &Surface, other: &Surface) -> bool {
         where_a_cones_apex_stands_against_a_plane(flat, cone) == Decision::Zero
             && how_a_plane_leans_against_a_cone(flat, cone) == Decision::Zero
     })
+}
+
+/// Whether a plane holds a cone's axis: `n·w` nothing, **proved and never
+/// rounded**, and `false` where it is something or cannot be told.
+///
+/// Asked as [`a_plane_lies_along_a_pipes_axis`] asks it, of a pipe round the
+/// cone's own axis, so that `n·w` is the one copy `rcad-geom` writes and not a
+/// second one here. The pipe's radius is in no part of it.
+fn a_plane_holds_a_cones_axis(flat: &Plane, cone: &Cone) -> bool {
+    let pipe = Cylinder::new(cone.axis(), 1.0)
+        .expect("a cone's axis is finite, and one is a radius above nothing");
+    a_plane_lies_along_a_pipes_axis(flat, &pipe) == Decision::Zero
 }
 
 /// The pair as a plane and a cone, whichever way round it arrived.
