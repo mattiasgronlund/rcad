@@ -4945,8 +4945,9 @@ impl Tally {
     /// For each fuse that came back not a solid, how many of its
     /// configuration's three fuses did, itself included, on average.
     ///
-    /// One when no configuration gave more than one, which is every family on
-    /// this tree; three when every one that gave any gave all three. A draw's
+    /// One when no configuration gave more than one, which is nearly every
+    /// draw of every family on this tree; three when every one that gave any
+    /// gave all three. A draw's
     /// configurations are drawn one after another from one seed, so its count
     /// is a sum of independent counts out of three, and its variance is at most
     /// this many times the binomial's. With `X` a configuration's count and `p`
