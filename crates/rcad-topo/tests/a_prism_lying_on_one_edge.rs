@@ -35,8 +35,11 @@
 //! (queue row Q1114). The edge is where the prism's two walls meet, and moving
 //! the prism rounds the offset of each wall's plane. At `x = 0` and `x = −1`
 //! the edge lies on the top exactly. At `x = −1.5` it lies `3.1e-17` inside
-//! the block, so the two overlap in a sliver, and every answer then needs a
-//! side shorter than the gap between two doubles: a limit. At `x = −2.5`,
+//! the block, so the two overlap in a sliver, and every exact answer then
+//! needs a side shorter than the gap between two doubles, whose two ends round
+//! to one corner. Since queue row Q1353 the union and both differences answer
+//! as if the edge lay on the top, and the intersection is refused
+//! (`docs/decisions.md` §417). At `x = −2.5`,
 //! `−1.25` and `1.5` it stands a rounding above the top, the two share no
 //! point, and every answer is the two as they stand. That was a gap, refused
 //! for want of a point inside a piece of a face, until queue row Q1279 let a
@@ -134,8 +137,8 @@ fn the_prisms_edge_is_on_the_blocks_top_or_above_it_wherever_every_fuse_answers(
     );
 }
 
-/// **At `x = −1.5` every answer has a side shorter than the gap between two
-/// doubles**, which is what makes its refusal a limit. The edge is inside the
+/// **At `x = −1.5` every exact answer has a side shorter than the gap between
+/// two doubles**, so its two ends round to one corner. The edge is inside the
 /// block, so the two overlap in a sliver from `z = 2` to `z = 8`, and at each
 /// end every answer has a side along the block's top from where one wall meets
 /// it to where the other does: where the top stops and a wall starts in the
@@ -161,23 +164,55 @@ fn every_answer_with_the_edge_a_rounding_into_the_top_needs_a_side_shorter_than_
     );
 }
 
-/// **A limit, not a gap**: every rule both ways round is refused, `Undecidable`
-/// for want of *a point inside a piece of a face*, and is to be refused
-/// whatever later stages learn, as the turned cubes that overlap by a rounding
-/// are (`two_turned_cubes_a_rounding_apart.rs`), since every answer needs a
-/// side shorter than one double (the test above).
+/// **The union and both differences answer as if the edge lay on the top, and
+/// the intersection is refused** `ResultIsNotManifold { count: 0 }`, under
+/// `Policy::certified()`.
 ///
-/// With the block first the piece is the sliver of the block's top from
-/// `z = 2` to `z = 8` between where the two walls' planes meet it, inside the
-/// prism, so no plane of the prism has a corner of it in front. Until queue
-/// row Q1279 the fuse stopped sooner, on the
-/// sliver from `z = 0` to `z = 2`, outside the prism, which the plane of the
-/// prism's end now places (`docs/decisions.md` §365.8). With the prism first
-/// the piece is the part of the prism's end at `z = 2` below the block's top,
-/// inside the block, its three corners a rounding from `(−1.5, 0, 2)`.
+/// Every rule both ways round was refused `Undecidable` for want of *a point
+/// inside a piece of a face* until queue row Q1353. With the block first the
+/// piece was the sliver of the block's top from `z = 2` to `z = 8` between
+/// where the two walls' planes meet it, inside the prism; with the prism first
+/// it was the part of the prism's end at `z = 2` below the block's top, inside
+/// the block. `by_a_plane` now places a piece inside a solid when every plane
+/// of the solid has every corner of the piece on or behind it and one strictly
+/// behind (`docs/decisions.md` §417), and both are such pieces.
+///
+/// The exact answers then need the side the test above measures, and its two
+/// ends round to the one corner `(−1.5, 0, 2)` (and `(−1.5, 0, 8)`).
+/// `fuse/assemble.rs` leaves out a side whose ends are one corner and a wire
+/// that then walks out and back along one edge (`docs/decisions.md` §365.7), so
+/// the sliver cut out of the block's top closes up, and what is written is the
+/// union of a prism resting on the top: the two as they stand, which validate
+/// and measure 240 and 24, as in [`LAID`]. Each difference is the first solid
+/// whole. The intersection is the sliver itself, and nothing of it is left to
+/// write.
 #[test]
-fn the_prism_with_its_edge_a_rounding_into_the_blocks_top_is_refused() {
-    let wrong = what_is_not_refused_for_want_of_a_point_inside_a_piece(A_ROUNDING_INTO_THE_TOP);
+fn the_prism_with_its_edge_a_rounding_into_the_blocks_top_answers_as_if_on_it() {
+    let mut wrong = Vec::new();
+    for swapped in [false, true] {
+        for rule in EVERY_RULE {
+            let what = format!("{rule:?}, prism first {swapped}");
+            let (model, answer) = fuse(swapped, rule, |model| {
+                [
+                    a_block(model),
+                    a_prism(model, RESTING, A_ROUNDING_INTO_THE_TOP, 6.0),
+                ]
+            });
+            let outcome = match (rule, swapped) {
+                (Rule::Union, _) => differs(&model, answer, &[24.0, BLOCK]),
+                (Rule::Difference, false) => differs(&model, answer, &[BLOCK]),
+                (Rule::Difference, true) => differs(&model, answer, &[24.0]),
+                (Rule::Intersection, _) => match answer {
+                    Err(Error::ResultIsNotManifold { count: 0 }) => None,
+                    other => Some(format!("not refused with no face along an edge: {other:?}")),
+                },
+                _ => unreachable!("EVERY_RULE holds only these three"),
+            };
+            if let Some(why) = outcome {
+                wrong.push(format!("{what}: {why}"));
+            }
+        }
+    }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
@@ -498,29 +533,6 @@ fn planes_round_the_edge(at: [f64; 3], length: f64) -> RoundTheEdge {
         walls: two_of(|plane| plane[0] != 0.0),
         ends: two_of(|plane| plane[2] != 0.0),
     }
-}
-
-/// What is wrong with every rule both ways round, the prism six long and moved
-/// by `at`, being refused `Undecidable` for want of *a point inside a piece of
-/// a face*; empty when nothing is.
-fn what_is_not_refused_for_want_of_a_point_inside_a_piece(at: [f64; 3]) -> Vec<String> {
-    let mut wrong = Vec::new();
-    for swapped in [false, true] {
-        for rule in EVERY_RULE {
-            let (_, answer) = fuse(swapped, rule, |model| {
-                [a_block(model), a_prism(model, RESTING, at, 6.0)]
-            });
-            match answer {
-                Err(Error::Undecidable { records })
-                    if !records.records().is_empty()
-                        && records.records().iter().all(|record| {
-                            record.predicate() == "a point inside a piece of a face"
-                        }) => {}
-                other => wrong.push(format!("{at:?} {rule:?}, prism first {swapped}: {other:?}")),
-            }
-        }
-    }
-    wrong
 }
 
 fn a_block(model: &mut Model) -> SolidKey {

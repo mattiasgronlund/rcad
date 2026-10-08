@@ -719,7 +719,8 @@ refused, a limit; with the block first the stop moved off the sliver from
 
 **What this leaves.** A turned cube whose three planes meet a rounding
 **outside** the block's face is still refused in 148 of Q1208's 199 under a
-tolerant policy (Q1288's lane's count); filed as a row of its own. Q1280
+tolerant policy (Q1288's lane's count); filed as a row of its own, Q1353,
+and §417 places its triangle inside the cube. Q1280
 traces the four skew pairs Q1146's probe of this rule left refused, each on a
 sliver in the plane of a face of the non-convex solid.
 
