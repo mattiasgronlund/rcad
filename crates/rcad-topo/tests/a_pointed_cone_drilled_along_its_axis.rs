@@ -55,6 +55,14 @@
 //! too, this time in the fuse's arrangement, and every order was refused
 //! `CannotTellTheCellsOfAFaceApart`. A **gap** (Q1354), closed the same way.
 //!
+//! **Then the fuse with the cube named both circles one curve.** It draws the
+//! wall's circle on the cone again, the other nappe's circle with it, and the
+//! two were one closed curve named by the pipe and the cone alone, so both got
+//! one edge with four faces along it and every order was refused
+//! `ResultIsNotManifold { count: 4 }`. A **gap** (Q1375): a circle round a
+//! cone's axis is now named by which side it is on of the flat half-space that
+//! picks it out.
+//!
 //! The closed forms, from the slices of the shared piece: inside the bar the cone
 //! holds a disc of radius `z` for `z` up to one and the whole unit disc above it,
 //! so the two share `π/3 + 9π = 28π/3`. The cone holds `1000π/3`, and the bar
@@ -167,21 +175,33 @@ fn every_point_round_the_union_is_placed_where_the_shapes_say_across_the_other_n
     }
 }
 
-/// The union fused again with a cube far from it is refused
-/// `ResultIsNotManifold { count: 4 }`, every way round. **A gap**: the answer
-/// is the two solids apart, `364π` and the cube's `8`.
+/// The union fused again with a cube far from it is the two solids apart, the
+/// union's `364π` and the cube's `8`, every way round, and the sweep accepts
+/// them.
 ///
-/// **Its wall is now cut right, and the two circles are then named one
-/// curve.** The cube cuts nothing of the bar's wall from `z = −15` up to the
-/// circle at `z = 1`, but the fuse draws the wall's own edge on the cone again,
-/// and the cone's other nappe with it, so the wall comes apart at `z = −1` into
-/// two bands. In `assemble.rs` a closed curve is named by its two surfaces
-/// alone wherever they are not a plane through a ring's axis
-/// (`name_of_the_closed_crossing_through`), so the new circle at `z = −1` and
-/// the wall's circle at `z = 1` are one curve, and
-/// `Corners::with_each_closed_curve_started_once` hands the start of the one at
-/// `z = −1` to the input corner at `z = 1`. Both circles are then one edge, along
-/// which the cone face and the two bands' three wires run.
+/// **By hand.** The cone of slope one up to `z = 10` has a base of radius ten,
+/// so it holds `π · 10² · 10 / 3 = 1000π/3`, and the bar of radius one and
+/// length forty holds `40π`. Inside the bar, the cone holds a disc of radius
+/// `z` for `z` up to one, `∫₀¹ πz² dz = π/3`, and the whole unit disc from there
+/// to ten, `9π`, so the two share `28π/3`. The union holds
+/// `1000π/3 + 40π − 28π/3 = 972π/3 + 40π = 324π + 40π = 364π`. The cube of
+/// side two moved to `(20, 20, 20)` holds `8` and spans `20` to `22` along each
+/// axis, so every point of it is more than `28` from the cone's axis, and the
+/// union reaches ten from it at most, at the cone's rim.
+///
+/// **The two circles were named one curve, and every order was refused
+/// `ResultIsNotManifold { count: 4 }`.** The cube cuts nothing of the bar's
+/// wall from `z = −15` up to the circle at `z = 1`, but the fuse draws the
+/// wall's own edge on the cone again, and the cone's other nappe with it, so
+/// the wall comes apart at `z = −1` into two bands. While `assemble.rs` named a
+/// closed curve by its two surfaces alone wherever they were not a plane
+/// through a ring's axis (`name_of_the_closed_crossing_through`), the new
+/// circle at `z = −1` and the wall's circle at `z = 1` were one curve, and
+/// `Corners::with_each_closed_curve_started_once` handed the start of the one
+/// at `z = −1` to the input corner at `z = 1`. Both circles were then one edge,
+/// along which the cone face and the two bands' three wires ran. A **gap**
+/// (Q1375): a cone and a pipe on its axis now name a circle by the side it is
+/// on of the flat half-space through the apex that `intersect` picks it by.
 ///
 /// **Before that, the bands could not be told apart** (Q1354). The arrangement
 /// read which side of the circle at `z = 1` the wall lies on off its one corner
@@ -190,31 +210,155 @@ fn every_point_round_the_union_is_placed_where_the_shapes_say_across_the_other_n
 /// walked inside out and the fuse was refused `CannotTellTheCellsOfAFaceApart`
 /// on it. That corner is now read as a node past that half-space is.
 #[test]
-fn the_union_and_a_far_cube_are_refused_for_naming_both_circles_one_curve() {
+fn the_union_and_a_far_cube_fuse_to_the_two_apart_in_every_order() {
+    let slack = the_two_solids_fall_short_by();
     for cone_first in [true, false] {
-        let (mut model, union) = the_union(cone_first);
-        let cube = model
-            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a whole-number cube");
-        model
-            .place_solid(
-                cube,
-                &Isometry::translation(Vector::new(20.0, 20.0, 20.0)).expect("a finite move"),
-            )
-            .expect("this model made the key");
-        for (arguments, tools) in [([union], [cube]), ([cube], [union])] {
-            let got = model.clone().fuse(
+        let (model, union) = the_union(cone_first);
+        with_a_far_cube_it_is_the_two_apart(
+            &model,
+            union,
+            CONE + BAR - SHARED,
+            slack,
+            &format!("the union with the bar (cone first: {cone_first})"),
+        );
+    }
+}
+
+/// A ball and a shallower cone on the cone's axis cross both its nappes too,
+/// and each one's union with the cone, fused again with the far cube, is the
+/// two solids apart, every way round.
+///
+/// **The ball** of radius five at `(0, 0, 1)` crosses the cone where
+/// `(z − 1)² + z² = 25`, which is `(z − 4)(z + 3) = 0`: at `z = 4`, and at
+/// `z = −3` on the other nappe. Up to `z = 4` the ball is the wider, so the two
+/// share `∫₀⁴ πz² dz = 64π/3` there, and above it the ball's cap up to `z = 6`,
+/// `π(2 · 25 − ∫₃⁵ u² du) = π(50 − 98/3) = 52π/3`: `116π/3` in all. The ball
+/// holds `500π/3`, so the union holds `(1000 + 500 − 116)π/3 = 1384π/3`.
+///
+/// **The shallower cone**, of slope one half from its apex at `z = −3` up to
+/// `z = 9`, crosses the cone where `|z| = (z + 3)/2`: at `z = 3`, and at
+/// `z = −1` on the other nappe. It holds `π · 6² · 12/3 = 144π`. Up to `z = 3`
+/// it is the wider, so the two share `∫₀³ πz² dz = 9π` there and
+/// `∫₃⁹ π(z + 3)²/4 dz = π(12³ − 6³)/12 = 126π` above it, `135π` in all, and the
+/// union holds `1000π/3 + 144π − 135π = 1027π/3`.
+///
+/// **Named by their two surfaces alone, both circles were one curve**, as the
+/// bar's two were, and every order of both was refused
+/// `ResultIsNotManifold { count: 4 }`. The fix that tells the bar's two apart
+/// tells these apart too: `intersect` picks each circle with a flat half-space
+/// square to the axis, the ball's halfway between the apex and its centre, the
+/// shallower cone's through the steeper cone's apex.
+#[test]
+fn a_ball_or_a_shallower_cone_across_both_nappes_and_a_far_cube_fuse_to_the_two_apart() {
+    type Pair = fn() -> (Model, SolidKey, SolidKey);
+    let pairs: [(&str, Pair, f64, f64); 2] = [
+        (
+            "a ball",
+            the_cone_and_a_ball,
+            500.0 * PI / 3.0,
+            1384.0 * PI / 3.0,
+        ),
+        (
+            "a shallower cone",
+            the_cone_and_a_shallower_cone,
+            144.0 * PI,
+            1027.0 * PI / 3.0,
+        ),
+    ];
+    for (partner, the_pair, partner_holds, union_holds) in pairs {
+        let slack = {
+            let (model, cone, other) = the_pair();
+            let short = [
+                CONE - volume_of(&model, cone),
+                partner_holds - volume_of(&model, other),
+            ];
+            assert!(
+                short.iter().all(|&short| short > 0.0),
+                "a mesh through points on a convex solid's skin falls inside it: the cone and \
+                 {partner} are {short:?} short"
+            );
+            short[0] + short[1]
+        };
+        for cone_first in [true, false] {
+            let (mut model, cone, other) = the_pair();
+            let (arguments, tools) = if cone_first {
+                ([cone], [other])
+            } else {
+                ([other], [cone])
+            };
+            let what = format!("the union with {partner} (cone first: {cone_first})");
+            let answer = model
+                .fuse(
+                    &arguments,
+                    &tools,
+                    Rule::Union,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let [union] = answer.solids()[..] else {
+                panic!("{what} is one solid, not {:?}", answer.solids());
+            };
+            with_a_far_cube_it_is_the_two_apart(&model, union, union_holds, slack, &what);
+        }
+    }
+}
+
+/// Fuses `union` with the cube of side two at `(20, 20, 20)` both ways round,
+/// and checks each answer passes [`Model::validate`] and is two solids, holding
+/// the cube's `8` and `holds`, each within `slack`.
+fn with_a_far_cube_it_is_the_two_apart(
+    model: &Model,
+    union: SolidKey,
+    holds: f64,
+    slack: f64,
+    what: &str,
+) {
+    let mut model = model.clone();
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a whole-number cube");
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(20.0, 20.0, 20.0)).expect("a finite move"),
+        )
+        .expect("this model made the key");
+    for (arguments, tools) in [([union], [cube]), ([cube], [union])] {
+        let order = format!(
+            "{what} and a far cube, union first: {}",
+            arguments[0] == union
+        );
+        let mut fused = model.clone();
+        let answer = fused
+            .fuse(
                 &arguments,
                 &tools,
                 Rule::Union,
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
-            );
+            )
+            .unwrap_or_else(|why| panic!("{order}: {why:?}"));
+        fused
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{order}: {why:?}"));
+        let mut got: Vec<f64> = answer
+            .solids()
+            .iter()
+            .map(|&solid| volume_of(&fused, solid))
+            .collect();
+        got.sort_by(f64::total_cmp);
+        let want = [8.0, holds];
+        assert_eq!(
+            got.len(),
+            want.len(),
+            "{order}: solids holding {got:?}, where the shapes say {want:?}"
+        );
+        for (got, want) in got.iter().zip(want) {
             assert!(
-                matches!(got, Err(Error::ResultIsNotManifold { count: 4 })),
-                "the union (cone first: {cone_first}) and a far cube, union first: {}, came back \
-                 {got:?}, where the pin says four faces run along the two circles' one edge",
-                arguments[0] == union
+                (got - want).abs() <= slack,
+                "{order} holds {got}, where the shapes say {want} and the bare solids fall \
+                 {slack} short"
             );
         }
     }
@@ -258,6 +402,31 @@ fn the_cone_and_the_bar() -> (Model, SolidKey, SolidKey) {
         )
         .expect("a bar of radius one");
     (model, cone, bar)
+}
+
+fn the_cone_and_a_ball() -> (Model, SolidKey, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let cone = a_pointed_cone(&mut model, SLOPE, HEIGHT);
+    let ball = model
+        .add_ball(
+            5.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, 1.0)).expect("a finite move"),
+        )
+        .expect("a ball of radius five");
+    (model, cone, ball)
+}
+
+fn the_cone_and_a_shallower_cone() -> (Model, SolidKey, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let cone = a_pointed_cone(&mut model, SLOPE, HEIGHT);
+    let shallower = a_pointed_cone(&mut model, 0.5, 12.0);
+    model
+        .place_solid(
+            shallower,
+            &Isometry::translation(Vector::new(0.0, 0.0, -3.0)).expect("a finite move"),
+        )
+        .expect("this model made the key");
+    (model, cone, shallower)
 }
 
 fn the_two_solids_fall_short_by() -> f64 {
