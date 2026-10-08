@@ -4,15 +4,16 @@
 //! the two are told apart only when that rounding is provably smaller than
 //! `R − r`.
 //!
-//! Every torus here lies on the plane `z = 0`, centred `x` out along `+x`, with
-//! its axis along `(1, 1, 0)`. The stored axis is `(h, h, 0)` and the picking
+//! Most tori here lie on the plane `z = 0`, centred `x` out along `+x`, with
+//! their axis along `(1, 1, 0)`. The stored axis is `(h, h, 0)` and the picking
 //! normal `w × n` is `(h, −h, 0)` with nothing rounded, so the one way the
 //! picker misses the centre is its offset: `fl(h·x)` where the true dot is
 //! `h·x`. With `x` near `2⁵³` that misses by up to half a unit, which is as
 //! wide as the room between a tube and its ring when both are under one.
 //!
 //! `docs/decisions.md` §314 says why a torus this far out is the only kind on
-//! which the rounding of `R − r` could have mattered, and why it never did.
+//! which the rounding of `R − r` could matter. §314.8 and §314.9 are the two
+//! tori on which the margin's rounding down costs a whole `f64` of room.
 
 use rcad_geom::{
     Axis, EdgeRun, Error, HalfSpace, Picker, Plane, Point, Surface, SurfaceMeet, Torus, Vector,
@@ -36,14 +37,14 @@ const OUT_ALONG_X: f64 = 9_007_199_254_741_000.0;
 /// exactly, it is `0.343` and the pair is named.
 #[test]
 fn a_picker_off_the_centre_by_more_than_half_the_room_still_names_both_circles() {
-    let ring = a_torus_out_along_x(1.0, 0.4);
-    let off = how_far_the_picker_misses_the_centre(&ring);
+    let ring = a_torus_out_along_x(Vector::new(1.0, 1.0, 0.0), 1.0, 0.4);
+    let flat = the_plane_through_its_axis(&ring);
+    let off = how_far_the_picker_misses(&ring, &flat);
     assert!(
         0.3 < off.hi && off.hi < 0.6,
         "the picker is more than half of 0.6 off the centre and less than all of it: {off:?}"
     );
 
-    let flat = the_plane_through_its_axis(&ring);
     let SurfaceMeet::Curves(runs) = crossed(&flat, &ring).expect("two circles, told apart") else {
         panic!("a plane through the axis cuts two circles");
     };
@@ -83,7 +84,10 @@ fn a_picker_off_the_centre_by_more_than_half_the_room_still_names_both_circles()
 /// `fl(R − r)` above that bound means `R − r` above it too.
 #[test]
 fn a_picker_off_the_centre_by_all_of_the_room_is_refused_although_the_room_rounds_up_past_it() {
-    let off = how_far_the_picker_misses_the_centre(&a_torus_out_along_x(1.0, 0.4));
+    let along = Vector::new(1.0, 1.0, 0.0);
+    let probe = a_torus_out_along_x(along, 1.0, 0.4);
+    let flat = the_plane_through_its_axis(&probe);
+    let off = how_far_the_picker_misses(&probe, &flat);
     let rounded_room = off.hi;
     assert!(
         off.lo < 0.0,
@@ -91,7 +95,7 @@ fn a_picker_off_the_centre_by_all_of_the_room_is_refused_although_the_room_round
     );
     let ring_radius = rounded_room + 2f64.powi(-10);
     let tube_radius = 2f64.powi(-10) + 109.0 * 2f64.powi(-62);
-    let ring = a_torus_out_along_x(ring_radius, tube_radius);
+    let ring = a_torus_out_along_x(along, ring_radius, tube_radius);
 
     let (room, room_rounding) = two_sum(ring_radius, -tube_radius);
     assert_eq!(
@@ -104,25 +108,122 @@ fn a_picker_off_the_centre_by_all_of_the_room_is_refused_although_the_room_round
         "the picker is further off the centre than the true R − r: {off:?} against {room_rounding:e}"
     );
 
-    let flat = the_plane_through_its_axis(&ring);
-    assert_eq!(
-        crossed(&flat, &ring),
-        Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+    assert_refused(&flat, &ring);
+}
+
+/// A torus whose room `R − r` is a quarter of a step under the `f64` one past
+/// the picker's distance is refused, although both circles clear the picker.
+/// It is refused with `R − r` enclosed, and named with `R − r` rounded.
+///
+/// On this torus nothing in `w × n` rounds, so the turn is exactly zero, and
+/// the margin charges the picker `up`, the `f64` at or above its true
+/// distance: a room of exactly the `f64` past `up` is named. The room here is
+/// a quarter step under that `f64` and rounds to it, but
+/// `Interval::exactly(R) − Interval::exactly(r)` has the `f64` below as its low
+/// end, which is `up` itself, and `up − up` is not above zero. The true room
+/// clears the true distance by three quarters of a step and nothing is turned,
+/// so the answer exists and this refusal is a gap (`docs/decisions.md` §314.8).
+#[test]
+fn rounding_the_ring_less_the_tube_down_takes_a_whole_f64_off_the_room() {
+    let along = Vector::new(1.0, 1.0, 0.0);
+    let probe = a_torus_out_along_x(along, 1.0, 0.4);
+    let flat = the_plane_through_its_axis(&probe);
+    let off = how_far_the_picker_misses(&probe, &flat);
+    assert!(
+        off.lo < 0.0,
+        "the distance is just under the f64 it rounds to: {off:?}"
     );
+    let up = off.hi;
+    let room = up.next_up();
+    assert_both_circles_named(&flat, &a_torus_with_room(along, room));
+
+    let ring_radius = room + 2f64.powi(-10);
+    let tube_radius = 2f64.powi(-10) + 2f64.powi(-56);
+    let (rounded_room, room_rounding) = two_sum(ring_radius, -tube_radius);
     assert_eq!(
-        crossed_the_other_way(&flat, &ring),
-        Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+        (rounded_room, room_rounding),
+        (room, -2f64.powi(-56)),
+        "R − r is a quarter of a step under the f64 past up, and rounds to it"
     );
+    assert_eq!(room - up, 2f64.powi(-54), "one step at 0.34 is 2⁻⁵⁴");
+    assert!(
+        (room - up) + room_rounding - off.lo > 2f64.powi(-55),
+        "the true room clears the true distance by three quarters of a step: {off:?}"
+    );
+
+    assert_refused(&flat, &a_torus_out_along_x(along, ring_radius, tube_radius));
+}
+
+/// A torus whose room is one `f64` past the picker's distance is refused,
+/// because the margin takes the turn of a rounded `w × n` off the room rounding
+/// down, and the turn's bound costs about `2·10⁻³⁵` but not zero. It is named
+/// with the turn taken out of the margin.
+///
+/// The axis leans along `(1, 5, 0)` and the plane's normal is `(0, 0, z)` with
+/// `z` three `f64` under one, kept as written, so `w × n` rounds. The margin
+/// charges the picker `up`, the `f64` at or above its true distance: a room
+/// two `f64` past `up` is named. A room one `f64` past `up` is refused, because
+/// that room less the turn, rounded down, is `up`, and `up − up` is not above
+/// zero. That room clears the true distance by more than a step and the turn
+/// costs under `2⁻¹⁰⁰` of it, so the answer exists and this refusal is a gap
+/// (`docs/decisions.md` §314.9).
+#[test]
+fn subtracting_a_turn_worth_ten_to_the_minus_35_takes_a_whole_f64_off_the_room() {
+    let along = Vector::new(1.0, 5.0, 0.0);
+    let lean = 1.0 - 3.0 * 2f64.powi(-53);
+    let probe = a_torus_out_along_x(along, 1.0, 0.4);
+    let flat = Plane::from_point_and_normal_as_written(probe.centre(), Vector::new(0.0, 0.0, lean))
+        .expect("a normal");
+    assert_eq!(
+        flat.normal().components(),
+        [0.0, 0.0, lean],
+        "the normal is kept as written"
+    );
+
+    let off = how_far_the_picker_misses(&probe, &flat);
+    assert!(
+        off.lo > 0.0,
+        "the distance is just over the f64 nearest it: {off:?}"
+    );
+    let up = off.hi.next_up();
+    assert_eq!(up, 0.155_354_594_472_641_85);
+    let room = up.next_up();
+    assert!(
+        (room - off.hi) - off.lo > 2f64.powi(-55),
+        "a room one f64 past up clears the true distance by more than a step: {off:?}"
+    );
+
+    let [w1, w2, _] = probe.axis().direction().components();
+    let [q1, q2, _] = probe.axis().direction().cross(flat.normal()).components();
+    assert_eq!(
+        (q1, q2),
+        (w2 * lean, -(w1 * lean)),
+        "w × n is two products, each rounded once"
+    );
+    let rounding = [w2.mul_add(lean, -q1), w1.mul_add(lean, q2)];
+    let turned =
+        rounding[0].mul_add(rounding[0], rounding[1] * rounding[1]) / q1.mul_add(q1, q2 * q2);
+    let ring_radius = room + 2f64.powi(-10);
+    assert!(
+        (1e-35..1e-34).contains(&(ring_radius * turned)),
+        "the turn's bound costs about 2·10⁻³⁵, and not zero: {turned:e}"
+    );
+
+    assert_refused(&flat, &a_torus_with_room(along, room));
+    assert_both_circles_named(&flat, &a_torus_with_room(along, room.next_up()));
 }
 
 /// A plane through the axis leaning off every coordinate plane, where `w × n`
-/// rounds and the picker is turned a little off the true surface between the
-/// two circles, still names both of them.
+/// rounds, still names both circles.
 ///
-/// The turn costs `R·sin²θ` of the room, which is about `10⁻³²` of the ring
-/// here. What this guards is the bound on it being worked out against the true
-/// `w × n` and not against something a whole picker away from it, which would
-/// refuse every plane that is not a coordinate plane.
+/// The axis is stored as `(h, h, 0)` and the normal as `(a, −a, a)`, so
+/// `w × n` comes out `(p, −p, −2p)` with `p = fl(h·a)`. That is parallel to the
+/// true product `h·a·(1, −1, −2)`, so the picker is not turned at all, but the
+/// bound on the turn reads only the rounding: `((h·a − p)/p)²`, about
+/// `7·10⁻³⁵`, which costs `R = 4` times that of the room. What this guards is
+/// the bound being worked
+/// out against the true `w × n` and not against something a whole picker away
+/// from it, which would refuse every plane that is not a coordinate plane.
 #[test]
 fn a_leaning_plane_through_the_axis_still_names_both_circles() {
     let axis = Axis::new(Point::origin(), Vector::new(1.0, 1.0, 0.0)).expect("an axis");
@@ -131,111 +232,60 @@ fn a_leaning_plane_through_the_axis_still_names_both_circles() {
         .expect("a normal");
 
     let [h, _, _] = axis.direction().components();
-    let [_, _, lean] = flat.normal().components();
-    assert_ne!(
-        h.mul_add(lean, -(h * lean)),
-        0.0,
-        "w × n rounds, so the picker is turned off the true surface"
+    let [a, _, _] = flat.normal().components();
+    assert_eq!(flat.normal().components(), [a, -a, a]);
+    let p = h * a;
+    assert_eq!(
+        axis.direction().cross(flat.normal()).components(),
+        [p, -p, -2.0 * p],
+        "w × n as stored is parallel to the true product"
+    );
+    let turned = (h.mul_add(a, -p) / p).powi(2);
+    assert!(
+        (1e-34..1e-33).contains(&(4.0 * turned)),
+        "w × n rounds, and the bound on a turn it does not have costs about 3·10⁻³⁴: {turned:e}"
     );
 
-    let SurfaceMeet::Curves(runs) = crossed(&flat, &ring).expect("two circles, told apart") else {
-        panic!("a plane through the axis cuts two circles");
-    };
-    assert_eq!(runs.len(), 2);
-    assert_eq!(crossed_the_other_way(&flat, &ring), crossed(&flat, &ring));
+    assert_both_circles_named(&flat, &ring);
 }
 
-#[test]
-fn probe_where_the_threshold_sits() {
-    for along in [1.0f64, 2.0, 3.0, 5.0, 7.0] {
-        let mut z = 1.0f64;
-        let mut hist = [0usize; 6];
-        for _ in 0..4 {
-            z = z.next_down();
-            for k in 0..30 {
-                let x = OUT_ALONG_X + 2.0 * f64::from(k);
-                let tube = 2f64.powi(-10);
-                let probe = a_torus_at(x, along, 1.0, 0.4);
-                let flat = Plane::from_point_and_normal_as_written(
-                    probe.centre(),
-                    Vector::new(0.0, 0.0, z),
-                )
-                .unwrap();
-                let off = how_far_the_picker_misses(&probe, &flat);
-                let up = if off.lo > 0.0 {
-                    off.hi.next_up()
-                } else {
-                    off.hi
-                };
-                if up < 2f64.powi(-8) {
-                    continue;
-                }
-                let mut seen = Vec::new();
-                let mut room = up.next_down();
-                for _ in 0..5 {
-                    let ring = a_torus_at(x, along, room + tube, tube);
-                    assert_eq!(ring.ring_radius() - ring.tube_radius(), room);
-                    let flat = Plane::from_point_and_normal_as_written(
-                        ring.centre(),
-                        Vector::new(0.0, 0.0, z),
-                    )
-                    .unwrap();
-                    seen.push(crossed(&flat, &ring).is_ok());
-                    room = room.next_up();
-                }
-                let w = probe.axis().direction().components();
-                let rounds =
-                    w[1].mul_add(z, -(w[1] * z)) != 0.0 || w[0].mul_add(z, -(w[0] * z)) != 0.0;
-                let first = seen.iter().position(|named| *named);
-                hist[first.unwrap_or(5)] += 1;
-                if first == Some(3) {
-                    eprintln!(
-                        "TIGHT along={along} z={z:e} x={x} off={off:?} up={up} rounds={rounds}"
-                    );
-                }
-            }
-        }
-        eprintln!("along={along} hist={hist:?}");
-    }
+/// A torus out along `x` with its axis along `along`, whose `R − r` is `room`
+/// with nothing rounded.
+fn a_torus_with_room(along: Vector, room: f64) -> Torus {
+    let ring = a_torus_out_along_x(along, room + 2f64.powi(-10), 2f64.powi(-10));
+    assert_eq!(ring.ring_radius() - ring.tube_radius(), room);
+    ring
 }
 
-fn a_torus_at(x: f64, along: f64, ring_radius: f64, tube_radius: f64) -> Torus {
-    let axis = Axis::new(Point::new(x, 0.0, 0.0), Vector::new(1.0, along, 0.0)).expect("an axis");
-    Torus::new(axis, ring_radius, tube_radius).expect("a tube narrower than its ring")
-}
-
-fn how_far_the_picker_misses(ring: &Torus, flat: &Plane) -> Wide {
-    let [q, q2, zero] = ring.axis().direction().cross(flat.normal()).components();
-    assert_eq!(zero, 0.0);
-    let [x, _, _] = ring.centre().coordinates();
-    let reading = q.mul_add(x, -(q * x)).abs();
-    let a = product(q, q);
-    let b = product(q2, q2);
-    let (hi, lo) = two_sum(a.hi, b.hi);
-    let length = root(Wide {
-        hi,
-        lo: lo + a.lo + b.lo,
-    });
-    let first = reading / length.hi;
-    let step = product(first, length.hi);
-    let left = ((reading - step.hi) - step.lo) - first * length.lo;
-    Wide {
-        hi: first,
-        lo: left / length.hi,
-    }
-}
-
-fn a_torus_out_along_x(ring_radius: f64, tube_radius: f64) -> Torus {
-    let axis = Axis::new(
-        Point::new(OUT_ALONG_X, 0.0, 0.0),
-        Vector::new(1.0, 1.0, 0.0),
-    )
-    .expect("an axis");
+fn a_torus_out_along_x(along: Vector, ring_radius: f64, tube_radius: f64) -> Torus {
+    let axis = Axis::new(Point::new(OUT_ALONG_X, 0.0, 0.0), along).expect("an axis");
     Torus::new(axis, ring_radius, tube_radius).expect("a tube narrower than its ring")
 }
 
 fn the_plane_through_its_axis(ring: &Torus) -> Plane {
     Plane::from_point_and_normal(ring.centre(), Vector::new(0.0, 0.0, 1.0)).expect("a normal")
+}
+
+fn assert_both_circles_named(flat: &Plane, ring: &Torus) {
+    let Ok(SurfaceMeet::Curves(runs)) = crossed(flat, ring) else {
+        panic!(
+            "a plane through the axis cuts two circles, told apart: {:?}",
+            crossed(flat, ring)
+        );
+    };
+    assert_eq!(runs.len(), 2);
+    assert_eq!(crossed_the_other_way(flat, ring), crossed(flat, ring));
+}
+
+fn assert_refused(flat: &Plane, ring: &Torus) {
+    assert_eq!(
+        crossed(flat, ring),
+        Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+    );
+    assert_eq!(
+        crossed_the_other_way(flat, ring),
+        Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+    );
 }
 
 fn crossed(flat: &Plane, ring: &Torus) -> Result<SurfaceMeet, Error> {
@@ -263,25 +313,24 @@ struct Wide {
     lo: f64,
 }
 
-/// How far the picker's flat surface sits off the torus's centre, as a length.
+/// How far the picker's flat surface sits off the torus's centre, as a length,
+/// for a plane whose `w × n` is `(q₁, q₂, 0)` and a centre `(x, 0, 0)`.
 ///
-/// The reading at the centre is `h·x − fl(h·x)`, which one fused multiply-add
-/// gives exactly, and the picking normal is `(h, −h, 0)`, so the length is that
-/// reading over `h·√2`.
-fn how_far_the_picker_misses_the_centre(ring: &Torus) -> Wide {
-    let [h, also_h, zero] = ring.axis().direction().components();
-    assert_eq!(
-        (also_h, zero),
-        (h, 0.0),
-        "the axis is stored along (1, 1, 0)"
-    );
-    let [x, _, _] = ring.centre().coordinates();
-    let reading = h.mul_add(x, -(h * x)).abs();
+/// The reading at the centre is `q₁·x − fl(q₁·x)`, which one fused
+/// multiply-add gives exactly, and the length is that reading over
+/// `√(q₁² + q₂²)`.
+fn how_far_the_picker_misses(ring: &Torus, flat: &Plane) -> Wide {
+    let [q1, q2, zero] = ring.axis().direction().cross(flat.normal()).components();
+    assert_eq!(zero, 0.0, "the plane's normal is square to the xy plane");
+    let [x, y, z] = ring.centre().coordinates();
+    assert_eq!((y, z), (0.0, 0.0), "the centre is out along x");
+    let reading = q1.mul_add(x, -(q1 * x)).abs();
 
-    let squared = product(h, h);
+    let [first_square, second_square] = [product(q1, q1), product(q2, q2)];
+    let (hi, lo) = two_sum(first_square.hi, second_square.hi);
     let length = root(Wide {
-        hi: 2.0 * squared.hi,
-        lo: 2.0 * squared.lo,
+        hi,
+        lo: lo + first_square.lo + second_square.lo,
     });
     let first = reading / length.hi;
     let step = product(first, length.hi);
