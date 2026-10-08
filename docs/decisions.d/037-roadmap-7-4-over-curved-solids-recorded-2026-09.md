@@ -43,6 +43,20 @@ And §7.4's other entries, asked again with a ball or a bar in them.
 | touching, not overlapping | a block sitting on a bar's cap | Union | refused, `TwoCurvesTouchWithoutCrossing` |
 | self-intersecting inputs | nothing in the public API builds a curved one | Union | discharged by the planar row |
 
+*2026-10-08, Q1341: the row no longer holds, as public API goes. `Import::read`
+of a written model builds a self-intersecting curved solid, and
+`Model::validate` passes it, since §17.4 keeps that check out of `validate`.
+The example is Q1216's unplaced bar of radius 8, cut by `z = 14` and by
+`z = 2y`: its bottom ellipse reaches `z = 16`, above the top cap, and its two
+edges cross where `sin t = 7/8`. The fuse still refuses it
+`ArgumentIntersectsItself` on 12 of 12 — every rule, both orders, beside a far
+bar and beside an overlapping ball — which is the designed refusal, so the
+row's verdict column stands. These numbers are Q1216's lane's own measurement,
+not re-measured here; its probe is `target/q1216-probe` in the dispatcher's
+tree (`src/main.rs`, `src/plate.rs`, `model.json`, `unplaced.json`). Re-filed
+from Q1317, which the Q1318 bundle (`1742a230`) closed without writing this
+note.*
+
 ### 37.2 How each entry is known to reach what it is about
 
 §14.7's vacuity rule, and lane 5c's finding that the turned family reads 0.00%

@@ -384,3 +384,20 @@ eight. On this base it does not.
   refusing both such walls.*
 - §377.3's paragraph "One refusal is renamed" says this shape is refused at
   step 1. It is answered now. §377 was outside this lane's write set.
+- `Model::validate` read a ring face's circle round the axis off the wrong
+  pair when the face across that circle was a pipe, a cone or a ball on the
+  same axis rather than a plane: `which_two_surfaces_a_run_is_between` puts
+  whichever curved face sorts first (a pipe, a cone and a ball each sort
+  before a ring) beside the plane, so a circle between a ring and a curved
+  partner never matched `[Torus, Plane]`, Q1153's band check was skipped, and
+  the side kept was read off the other circle's corner instead. It refused a
+  ring with its rim turned down to a pipe, and four other pieces of a ring
+  cut by a pipe, a cone or a ball on its axis. *2026-10-07, Q1173: answered.
+  `a_circle_round_the_axis` now also takes the face's own surface and returns
+  `Option<(Torus, Plane)>`, rather than reading the pair alone (`463e76b1`, a
+  one-ulp pin fix on top in `4cdda947`). Pinned in
+  `crates/rcad-topo/tests/a_ring_face_bounded_by_a_circle_on_a_coaxial_surface.rs`:
+  `intersect_names_no_crossing_of_a_ring_with_a_pipe_cone_or_ball_on_its_axis`,
+  `a_circle_named_only_by_the_ring_and_its_partner_is_refused_for_the_pair`,
+  `each_piece_walked_its_own_way_validates_and_holds_what_pappus_gives` and
+  `every_other_description_of_each_piece_is_refused`.*
