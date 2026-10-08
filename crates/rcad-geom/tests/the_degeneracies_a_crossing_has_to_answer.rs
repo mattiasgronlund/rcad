@@ -712,7 +712,8 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
             let slope = cone.slope();
             (x.hypot(y) - slope * (z - apex).abs()).abs() / slope.hypot(1.0)
         }
-        other => panic!("nothing here stands {other:?} round the z axis"),
+        Surface::Plane(flat) => panic!("nothing here stands {flat:?} round the z axis"),
+        other => panic!("a kind of surface this file does not know: {other:?}"),
     }
 }
 
