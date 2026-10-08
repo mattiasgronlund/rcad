@@ -5510,8 +5510,21 @@ impl WalkingAWire {
     ///
     /// Nothing to do before the walk has a longitude of its own: the far end
     /// is then where the walk set off, and [`WalkingAWire::finish`] closes it.
+    ///
+    /// **Nothing to do either while a pole side is still open.** A corner on a
+    /// pole met before any corner with a longitude stands on that same side, a
+    /// hair along it at most, so it changes neither which way the side runs nor
+    /// how far. Opened again here, a seam's whole turn became
+    /// [`APoleSideStillOpen::BetweenTwoMeridians`], and that reads how far apart
+    /// two readings of the seam's one meridian are: nothing, which it counts as
+    /// a whole turn, but a hair when the readings round a hair apart, which
+    /// they do once the walk has carried the longitude a whole turn. A ball of
+    /// radius `0.001` whose seam has a corner on its equator and one `3e-14`
+    /// from a pole crossed that pole a hair rather than a whole turn at 22 of
+    /// 720 whole degrees and poles, and was refused as a wire that will not lie
+    /// flat (Q1309, `a_pole_corner_met_while_a_pole_side_is_open.rs`).
     fn turn_at_a_corner_on_a_pole(&mut self) {
-        if !self.started || self.wraps.is_none() {
+        if !self.started || self.wraps.is_none() || self.crossing.is_some() {
             return;
         }
         let Some(way) = self.which_way_the_pole_side_runs() else {
