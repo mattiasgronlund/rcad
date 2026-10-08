@@ -128,7 +128,9 @@ impl Patch {
 /// About the loops: [`CannotTriangulate::BoundaryCrossesItself`] when two
 /// boundary edges cross, [`CannotTriangulate::CornersCoincide`] when one loop
 /// names the same point twice — two *different* loops naming it is a pinch and
-/// is allowed, see [`refuse_loops_that_touch`] — and
+/// is allowed, see [`refuse_loops_that_touch`] —
+/// [`CannotTriangulate::LoopsTouch`] when a corner sits on a side of its own
+/// loop or another between that side's two ends, and
 /// [`CannotTriangulate::CoordinateOutOfRange`] for a scaled coordinate the
 /// triangulation will not take — see that variant, the range is narrower than
 /// `f64`'s, and one too small is taken as zero where that changes nothing.
@@ -187,6 +189,9 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
             });
         }
         mesh.add_constraint(handles[from], handles[to]);
+    }
+    if flushed.is_none() {
+        refuse_a_side_with_a_corner_on_it(&mesh, &handles, domain)?;
     }
 
     let deflection = domain.deflection().length();
@@ -750,6 +755,8 @@ fn two_sides_of_an_outline_meet(one: [[f64; 2]; 2], other: [[f64; 2]; 2]) -> boo
 /// - Two sides of different loops with the *same two ends* are refused by
 ///   [`refuse_loops_that_share_a_whole_side`], which is the one way a stretch
 ///   can be doubled without any corner landing inside anything.
+/// - A corner of a loop on a side of **its own** loop is refused once the
+///   corners are in the triangulation, by [`refuse_a_side_with_a_corner_on_it`].
 ///
 /// The shared corner used to be refused with the rest, on the stated grounds
 /// that nothing needed it. Something does: a round pin drawn tangent to a flat
@@ -839,6 +846,90 @@ fn refuse_loops_that_share_a_whole_side(
                 at: domain.surface().point_at(at[0], at[1]),
             });
         }
+    }
+    Ok(())
+}
+
+/// Refuse a domain where a side did not go into the triangulation whole.
+///
+/// The triangulation splits a side at any corner lying on it between its two
+/// ends, and the face across that side draws it whole: a crack, for the reason
+/// [`refuse_loops_that_touch`] gives. That check asked about a corner of
+/// another loop; this asks about every corner, **its own loop's too**. A loop
+/// that runs down a line and back up the same line rests its own corners on
+/// its own side, and no triangle can draw those sides, since its three corners
+/// would be on one line. Q1307 saw one come back as a fan that covered the
+/// loop's area and left the side it ran back up in no triangle at all.
+///
+/// Asked of the triangulation and not of the corners as they were handed
+/// over, because the triangulation takes them scaled and the triangles follow
+/// its answer. Exact: spade's predicates are, and so is [`orient2d`] on the
+/// same numbers.
+///
+/// A patch with a corner [`spade::mitigate_underflow`] moved is left to
+/// [`the_flush_moved_nothing_the_patch_rests_on`], which asks every side the
+/// same and refuses the patch the way it was refused before the flush.
+///
+/// # Errors
+///
+/// [`CannotTriangulate::LoopsTouch`], and
+/// [`CannotTriangulate::CannotTellIfLoopsTouch`] when no corner can be shown to
+/// be on the side and [`orient2d`] could not settle one of them.
+///
+/// # Panics
+///
+/// When spade split a side and no corner is on it, which is spade breaking its
+/// own rule; and on a [`Decision`] this file has not been taught.
+fn refuse_a_side_with_a_corner_on_it(
+    mesh: &ConstrainedDelaunayTriangulation<Point2<f64>>,
+    handles: &[FixedVertexHandle],
+    domain: &TrimmedDomain,
+) -> Result<(), CannotTriangulate> {
+    let scaled = |position: usize| {
+        let at = mesh.vertex(handles[position]).position();
+        [at.x, at.y]
+    };
+    for (from, to) in every_side(domain) {
+        if mesh
+            .get_edge_from_neighbors(handles[from], handles[to])
+            .is_some()
+        {
+            continue;
+        }
+        let place_of = |corner: usize| {
+            let at = every_corner(domain)[corner];
+            domain.surface().point_at(at[0], at[1])
+        };
+        let mut unsettled = None;
+        for corner in 0..handles.len() {
+            if handles[corner] == handles[from] || handles[corner] == handles[to] {
+                continue;
+            }
+            match orient2d(scaled(from), scaled(to), scaled(corner)) {
+                Decision::Pos | Decision::Neg => {}
+                Decision::Zero => {
+                    if lies_between(scaled(corner), scaled(from), scaled(to)) {
+                        return Err(CannotTriangulate::LoopsTouch {
+                            corner,
+                            side: from,
+                            at: place_of(corner),
+                        });
+                    }
+                }
+                Decision::Undecidable { enclosure } => {
+                    unsettled.get_or_insert((corner, enclosure));
+                }
+                other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
+            }
+        }
+        let (corner, enclosure) = unsettled.unwrap_or_else(|| {
+            panic!("the triangulation split the side leaving corner {from} where no corner is")
+        });
+        return Err(CannotTriangulate::CannotTellIfLoopsTouch {
+            corner,
+            enclosure,
+            at: place_of(corner),
+        });
     }
     Ok(())
 }
@@ -1549,11 +1640,10 @@ fn refine_the_inside(
             // A triangle made of nothing but boundary sides has a boundary
             // chord for its longest, and every boundary side came in under the
             // deflection, so it is almost never over budget in the first place.
-            // Almost: a loop may rest one of its own corners on one of its own
-            // sides, and then the triangulation holds a constraint edge that is
-            // a *piece* of a side — and a piece of a side more than half a turn
-            // round a pipe has a longer chord than the whole of it. There is
-            // nothing to cut there, and the refusal below is the answer.
+            // Almost: on a torus or a cone a triangle is charged over its three
+            // corners at once, which is not the same number as any one side's.
+            // There is nothing to cut there, and the refusal below is the
+            // answer.
             let Some((_, from, to)) = to_split else {
                 continue;
             };
@@ -1879,11 +1969,12 @@ pub enum CannotTriangulate {
         position: usize,
     },
 
-    /// A corner of one loop lands on a side of another without being one of
-    /// that side's own ends.
+    /// A corner of a loop lands on a side of another loop, or of its own,
+    /// without being one of that side's own ends.
     ///
     /// See [`refuse_loops_that_touch`] for why this is refused while two loops
-    /// meeting at a corner they both name is not.
+    /// meeting at a corner they both name is not, and
+    /// [`refuse_a_side_with_a_corner_on_it`] for a loop touching itself.
     ///
     /// **`at` is the field a caller further up can do anything with**, and it
     /// is here because the two indices are not. They count corners of the
@@ -1892,7 +1983,7 @@ pub enum CannotTriangulate {
     /// bend — so "corner 7" is an address into something the caller of
     /// `SolidView::mesh` never built. A place in space is one it can find.
     /// `docs/decisions.md` §123.
-    #[error("the corner at {corner} sits on the side leaving corner {side}, in another loop")]
+    #[error("the corner at {corner} sits on the side leaving corner {side}")]
     LoopsTouch {
         /// The corner sitting on someone else's side.
         corner: usize,
