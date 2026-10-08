@@ -34,9 +34,11 @@
 //!   intersections and a difference with the ball since Q1270 put its pole
 //!   among the points walked along the wall's arc, and the steep frustum's
 //!   unions and the half less it since Q1337 put the steep cone's apex on the
-//!   half's floor as well as its wall, and the bar's unions and the bar less
-//!   the half since Q1338 named the cone in the run of the arc between two
-//!   pieces of the bar's wall; every other rule is refused after the meet.
+//!   half's floor as well as its wall, the bar's unions and the bar less the
+//!   half since Q1338 named the cone in the run of the arc between two pieces
+//!   of the bar's wall, and the ball's unions and the ball less the half since
+//!   Q1385 let a ring through one of the ball's poles go right round the
+//!   other. Every rule answers.
 //!
 //! Without a wall no fuse here asks the order round one of these circles. A
 //! seam puts one node on a face's circle beside its start, and each face has
@@ -49,7 +51,7 @@
 
 use std::f64::consts::PI;
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -453,9 +455,9 @@ fn a_half_frustum_against_a_steeper_frustum_whose_apex_is_on_its_floor_answers_e
     );
 }
 
-/// **A wall through the circle is placed, and half the rules then stop after
-/// it.** The half frustum of the test above against the bar of radius 4 and a
-/// whole ball of radius 3 four up. The wall `x = 0` crosses each pair's circle
+/// **A wall through the circle is placed, and every rule answers.** The half
+/// frustum of the test above against the bar of radius 4 and a whole ball of
+/// radius 3 four up, and against the ball again with the pair turned over. The wall `x = 0` crosses each pair's circle
 /// on the half frustum's side, at `(0, ±4, 4)` for the bar and `(0, ±z₂, z₂)`,
 /// `z₂ = 2 + √2/2`, for the ball, so the circle there has two nodes off its
 /// start, `(4, 0, 4)` and `(z₂, 0, z₂)`. They are placed as for the steep
@@ -468,10 +470,6 @@ fn a_half_frustum_against_a_steeper_frustum_whose_apex_is_on_its_floor_answers_e
 /// bar `608π/3`, `124π/3`, `128π/3` and `356π/3`; for the ball, with
 /// `S = (100 − √2)π/3`, `(620 + √2)π/6`, `(100 − √2)π/6`, `(404 + √2)π/6` and
 /// `(116 + √2)π/6`.
-///
-/// **Every rule answers against the bar, and against the ball the
-/// intersection, both ways, `(100 − √2)π/6`, and the half less the ball,
-/// `(404 + √2)π/6`.**
 ///
 /// The partner's skin holds the whole circle, and the arc of it at `x < 0`,
 /// between the same two corners as the arc along the cone, was one edge with
@@ -493,13 +491,20 @@ fn a_half_frustum_against_a_steeper_frustum_whose_apex_is_on_its_floor_answers_e
 ///   surface now names the other surface in `and`, here the cone
 ///   (`fuse/assemble.rs`'s `the_surface_that_cut_each_edge_its_faces_do_not_name`),
 ///   and they answer `608π/3`, `608π/3` and `356π/3`;
-/// - against the ball, the unions and the ball less the half are refused
+/// - against the ball, the unions and the ball less the half were refused
 ///   `AWireWillNotLieFlatOnItsFace`, by the mesh the fuse checks its answer
-///   with. They keep the ball less the piece of it inside the half, one face
-///   since the joiner joined a ball's pieces (§229.2), and its one ring of two
-///   arcs runs over the ball's north pole along the wall `x = 0`, with both
-///   poles' side kept. Why the mesher will not lay that ring flat is not
-///   traced. Left in pieces they were refused one step sooner,
+///   with (Q1385). They keep the ball less the piece of it inside the half,
+///   one face since the joiner joined a ball's pieces (§229.2), and its one
+///   ring of two arcs runs over the ball's north pole along the wall `x = 0`.
+///   The face holds the south pole, so the walk round that ring comes back a
+///   whole turn on, and a wire of more than one edge was let do that only if
+///   it never stood at a pole. A wire through one pole goes right round the
+///   other whenever its face holds that one, and `mesh.rs`'s
+///   `WalkingAWire::may_come_back_a_whole_turn_on` no longer asks, so they
+///   answer `(620 + √2)π/6`, `(620 + √2)π/6` and `(116 + √2)π/6`. Turned over,
+///   the ring runs over the ball's south pole and goes round the north one
+///   the other way, which is why the turned pair is here too. Left in pieces
+///   they were refused one step sooner,
 ///   `TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`, which `walk` gives for
 ///   two balls of one centre and one radius, the ball on either side of an
 ///   edge between two of its own pieces.
@@ -514,18 +519,30 @@ fn a_half_frustum_against_a_steeper_frustum_whose_apex_is_on_its_floor_answers_e
 /// pole twice. `mesh.rs`'s `put_in_the_poles_a_crossing_passes` puts the pole
 /// in along an open crossing too, where it is between the edge's ends.
 #[test]
-fn a_wall_through_the_circle_a_cone_crosses_a_bar_or_a_ball_in_is_placed_and_half_the_rules_stop_after()
- {
-    let partners: [fn(&mut Model) -> SolidKey; 2] = [
+fn a_half_frustum_whose_wall_crosses_the_circle_it_meets_a_bar_or_a_ball_in_answers_every_rule() {
+    let pairs: [fn(&mut Model) -> [SolidKey; 2]; 3] = [
         |model| {
-            model
+            let bar = model
                 .add_round_bar(4.0, 10.0, &Isometry::identity())
-                .expect("a bar of radius four")
+                .expect("a bar of radius four");
+            [a_half_frustum(model), bar]
         },
-        |model| a_ball_four_up(model, 3.0),
+        |model| [a_half_frustum(model), a_ball_four_up(model, 3.0)],
+        |model| {
+            let pair = [a_half_frustum(model), a_ball_four_up(model, 3.0)];
+            pair.map(|solid| turned_over(model, solid))
+        },
     ];
-    use Gives::{Holds, NotFlat};
+    use Gives::Holds;
     let root = 2.0_f64.sqrt();
+    let against_the_ball = [
+        Holds((620.0 + root) * PI / 6.0),
+        Holds((620.0 + root) * PI / 6.0),
+        Holds((100.0 - root) * PI / 6.0),
+        Holds((100.0 - root) * PI / 6.0),
+        Holds((404.0 + root) * PI / 6.0),
+        Holds((116.0 + root) * PI / 6.0),
+    ];
     let wanted = [
         [
             Holds(608.0 * PI / 3.0),
@@ -535,17 +552,11 @@ fn a_wall_through_the_circle_a_cone_crosses_a_bar_or_a_ball_in_is_placed_and_hal
             Holds(128.0 * PI / 3.0),
             Holds(356.0 * PI / 3.0),
         ],
-        [
-            NotFlat,
-            NotFlat,
-            Holds((100.0 - root) * PI / 6.0),
-            Holds((100.0 - root) * PI / 6.0),
-            Holds((404.0 + root) * PI / 6.0),
-            NotFlat,
-        ],
+        against_the_ball,
+        against_the_ball,
     ];
-    for (partner, wanted) in partners.into_iter().zip(wanted) {
-        let gives = what_each_rule_gives(|model| [a_half_frustum(model), partner(model)]);
+    for (pair, wanted) in pairs.into_iter().zip(wanted) {
+        let gives = what_each_rule_gives(pair);
         assert!(
             gives
                 .iter()
@@ -604,12 +615,12 @@ fn a_ball_a_frustum_touches_round_one_circle_is_refused_before_its_arcs_are_name
     );
 }
 
-/// What one fuse is pinned to give: one solid of a closed-form volume, two
-/// solids of two, the smaller first, or a refusal by name.
+/// What one fuse is pinned to give: one solid of a closed-form volume, or two
+/// solids of two, the smaller first.
+#[derive(Clone, Copy)]
 enum Gives {
     Holds(f64),
     HoldsTwo(f64, f64),
-    NotFlat,
 }
 
 impl Gives {
@@ -622,10 +633,21 @@ impl Gives {
             (Gives::HoldsTwo(smaller, larger), Ok(volumes)) => {
                 matches!(volumes[..], [one, other] if near(one, *smaller) && near(other, *larger))
             }
-            (Gives::NotFlat, Err(Error::AWireWillNotLieFlatOnItsFace { .. })) => true,
             _ => false,
         }
     }
+}
+
+/// `solid` turned half a turn about `x`, which takes `z` to `−z` and keeps the
+/// wall `x = 0` where it is.
+fn turned_over(model: &mut Model, solid: SolidKey) -> SolidKey {
+    model
+        .place_solid(
+            solid,
+            &Isometry::quarter_turns(&Axis::x(), 2).expect("x is an axis"),
+        )
+        .expect("this model made the key");
+    solid
 }
 
 /// The wide frustum seamed up `−x`, cut down to `x ≥ 0`.
