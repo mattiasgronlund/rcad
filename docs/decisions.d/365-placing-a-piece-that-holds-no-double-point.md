@@ -19,6 +19,7 @@ throwaway probe that is taken out (365.2); everything else in 365.2 was read.*
   365.6   Rungs nearer each crossing, after every other point
   365.7   A piece placed by a corner, and a strip whose corners round to two
   365.8   A plane places a piece with corners on it
+  365.9   A piece placed by the piece of its own face across a side
 
 ### 365.1 What each family has to change
 
@@ -243,6 +244,9 @@ one; Q621's lens may be that piece.
 > pin header's wall**, which holds no `f64` point and shares no side with a
 > piece of the other solid. Neither form above places it; a third does, a
 > corner the other solid's ray puts strictly inside or outside it (365.7).
+
+> **2026-10-08 note (Q1357): the first form, the flood, is built**, one step
+> deep: a triangle a rounding across on a comb's top asked for it (365.9).
 
 And **the rule runs only where no point
 inside the piece was found** (the `INSIDE_A_PIECE` exit of `place_the_piece`),
@@ -718,3 +722,93 @@ refused, a limit; with the block first the stop moved off the sliver from
 tolerant policy (Q1288's lane's count); filed as a row of its own. Q1280
 traces the four skew pairs Q1146's probe of this rule left refused, each on a
 sliver in the plane of a face of the non-convex solid.
+
+### 365.9 A piece placed by the piece of its own face across a side
+
+*Queue row Q1357. Lane `lane-q1357-a-triangle-on-the-plane-of-a-face-it-misses`,
+off `d50273dc`. Everything here was run, with a temporary switch that turned
+the rule off and is taken out, unless it says otherwise.*
+
+**The piece.** A comb of two teeth two high, three high at the origin, and an
+ell two by five with a bite one by four, leaning back one along `x` per step
+along `y`, one high at `(1, −3, 3)`: one pair of
+`how_often_a_certified_fuse_of_a_skew_pair_refuses`. The comb's walls `x = 2`
+and `y = 1` and the ell's wall `x + y = 3` all pass through `(2, 1, 3)`, the
+comb's corner at the foot of its right tooth, and the ell's wall is stored
+rounded. So the three cut a triangle out of the comb's top, with corners
+`(2, 1, 3)` exactly and two meets with the leaning wall in boxes
+`[1, 1 + 2⁻⁵²]` along `y` and `[2, 2 + 2⁻⁵¹]` along `x`, as the refusal
+record printed them. It holds no `f64` point. It lies in the plane of the
+ell's floor, `z = 3`, but the floor at `y = 1` runs from `x = 0` to `1`, so
+it is well outside the ell. Every rule stopped on it, `a point inside a piece
+of a face`. `by_a_corner` passes over each corner, since each is on the ell's
+plane `z = 3`, and `by_a_plane` finds no plane of the ell, which is not
+convex, with the ell behind it and the triangle in front.
+
+**The two roads.**
+
+1. Place the triangle by its side along `y = 1`, a cut by the comb's own wall,
+   taking the placement of the piece of the comb's top across that side.
+2. Test exactly, in the plane, whether a corner lying on a plane with the
+   whole ell behind it is in the ell's skin on that plane.
+
+**The choice: 1.**
+
+- **It asks nothing new.** It reads the arrangement's own sides and asks of
+  each end of one side, as the meet of its three planes, which side of a plane
+  it is on: `side_of_a_plane_where_three_planes_meet`, which `by_a_plane`
+  already asks. Road 2 needs a crossing count in the plane over corners that
+  are meets of three stored planes, with its own ties where a corner of the
+  ell's floor lies on the line the count runs along, and the skin of a solid
+  that is not convex, on such a plane, is its faces there and any edge or
+  corner touching it as well. None of that exists.
+- **It is the form 365.3 weighed and left** "until a piece the rule cannot
+  reach asks for one". This piece asks.
+- **It does not need a supporting plane.** Road 2 places only a corner on a
+  plane with all of the solid behind it. Road 1 does not care where the
+  piece is, only that its neighbour can be placed.
+
+**The rule** (`by_the_piece_across_a_side` in `fuse/select.rs`). A flat piece
+`P` of a face `F`, a solid `S` with only flat faces, and a straight side `s` of
+`P` that `P′`, another piece of `F`, has too, run the other way. If no plane
+of `S` other than `F`'s own (bit for bit, either way round) holds both ends of
+`s`, each asked exactly, then `P` is placed against the group where `P′` is.
+
+**Why it holds.** Each of `P` and `P′` was cut by every plane of `S`, so each
+is all inside `S`, all outside or all on its skin (§17.4). A plane of `S` that
+does not hold both ends of `s` meets the line of `s` in one point at most, so
+all but a few points `m` of `s` lie on no plane of `S` but `F`'s. If `m` is off
+`S`'s skin, a neighbourhood of it is all inside or all outside, and it meets
+the inside of both pieces, so the two are placed alike. If `m` is on the skin,
+it is on a face of `S` in `F`'s plane and on no other plane of `S`, so near
+`m` the skin is a disk of that plane with `S` on one side; both pieces reach
+into the disk, so both are on `S`'s skin, facing the same way. A plane of `S`
+other than `F`'s holding the whole side is the one place the two can differ,
+along an edge of `S`, and such a side is passed over. Per solid the two pieces
+are placed alike, so they are against the group too.
+
+**Its limits, as built.** The neighbour is placed by its own point search
+(`place_the_piece`) and by nothing else, so a chain of two slivers is not
+reached; nobody has built one, so that is a guess with no class (§360.5).
+Under `Policy::tolerant` the arrangement may fold nodes it only found near
+each other, so `s`'s ends are as exact as the drawing, which is true of every
+rule here. **It is tried last**, after the sides, the corners and the plane,
+for either search's failure, so a fuse that answered before answers as it did.
+
+**What it answers.** All six fuses of the pair, both orders, certified:
+the union holds 27, the comb's 21 and the ell's 6, the intersection nothing,
+and each difference the first solid, each answer validating and logging
+nothing. `a_sliver_on_the_plane_of_a_face_it_misses.rs` holds them; with the
+rule off both its tests refuse `a point inside a piece of a face`. Q1280's
+probe, which placed the triangle outside by hand, got the same three answers.
+
+**Pins that moved.** `how_often_a_certified_fuse_of_a_skew_pair_refuses`:
+16 of 447 refused with the rule off, 15 for the point and one the edge too
+short of 365.8, and 13 with it, 12 for the point. Its threshold, 18%, was not
+moved. `swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit` refuses 22
+of 276 either way.
+
+**What this leaves.** Q1356's four pairs are not reached: the skew row moved by
+this pair's three fuses and no more. Their slivers lie in the plane of a face
+of the other solid with a side along an edge of that face, which is the one
+side this rule passes over.

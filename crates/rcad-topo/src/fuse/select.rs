@@ -80,6 +80,16 @@
 //! a rung of [`rungs_towards_each_crossing`] was (§365.6), until Q1064 tried
 //! them after the plane where a point was found as well. So every piece one of
 //! them placed before is placed by the same rule now.
+//!
+//! # And last, by the piece of its own face across a side
+//!
+//! A flat piece none of those placed, against solids with only flat faces,
+//! takes the placement of the piece of its own face across one of its straight
+//! sides, where no plane of those solids but the face's own holds that side
+//! ([`by_the_piece_across_a_side`], §365.9). Near most of such a side the
+//! solids' skin is that plane or nothing, so the two pieces sit alike. It is
+//! tried after every other rule, so a piece any of them placed is placed as
+//! before.
 
 use rcad_geom::{
     Cone, Cylinder, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
@@ -138,17 +148,19 @@ pub(crate) struct Chosen {
 ///
 /// [`Error::Undecidable`] when a piece could not be placed against the solids
 /// it has to be placed against, and neither a side it shares, nor a corner, nor
-/// a plane ([`by_a_plane`]) placed it: under [`INSIDE_A_PIECE`] when no point
-/// inside it was found, and under [`PLACED_AGAINST_EVERY_SOLID`] when a point
-/// was found and could not be placed, or only a rung of
+/// a plane ([`by_a_plane`]), nor the piece of its own face across a side
+/// ([`by_the_piece_across_a_side`]) placed it: under [`INSIDE_A_PIECE`] when no
+/// point inside it was found, and under [`PLACED_AGAINST_EVERY_SOLID`] when a
+/// point was found and could not be placed, or only a rung of
 /// [`rungs_towards_each_crossing`], [`shorter_steps_across_a_curved_piece`] or
 /// [`between_the_middles_of_a_cone_pieces_sides`] was found.
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
 /// a point offered before the rungs was found inside the piece and the ray
 /// from a point tried met a face of a solid that nothing here can follow; no
-/// side, corner or plane is tried then. The same refusal, naming the same kind
-/// of face, when only a rung was found inside and a rung's ray met such a face,
-/// once no side, corner or plane has placed the piece.
+/// side, corner, plane or piece across is tried then. The same refusal, naming
+/// the same kind of face, when only a rung was found inside and a rung's ray
+/// met such a face, once no side, corner, plane or piece across has placed the
+/// piece.
 pub(crate) fn choose(
     model: &Model,
     scratch: &Scratch,
@@ -209,6 +221,12 @@ pub(crate) fn choose(
             } else {
                 by_its_sides_or_corners(log).or_else(by_its_plane)
             };
+            let by_the_piece_across = |in_plane: &InPlane| {
+                by_the_piece_across_a_side(
+                    model, scratch, &solids, against, index, in_plane, policy, log,
+                )
+            };
+            let placed = placed.or_else(|| in_plane.as_ref().and_then(by_the_piece_across));
             placed.ok_or_else(|| match unfollowed {
                 Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
                 None => gave_up(unplaced, &corners.concat(), Measures::Length, log),
@@ -409,14 +427,16 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// **Two searches happen here, and a caller that cannot tell them apart is told
 /// the wrong thing.** [`Search::NoPointInside`] says no point inside the piece
 /// was found, which is [`INSIDE_A_PIECE`] unless a side the piece shares places
-/// it ([`SidesItShares`]), a corner does ([`by_a_corner`]) or a plane does
-/// ([`by_a_plane`]); [`Search::NoPointInsidePlaced`] says one was found and
-/// could not be classified against every solid in the set, which is
-/// [`PLACED_AGAINST_EVERY_SOLID`] unless a plane, a side or a corner places the
-/// piece. The first says to look at the piece's trimming, the second says the
-/// piece is fine and a surface further down gave up — the lens in §216.4 is the
-/// second wearing the first's name. Neither is a refusal here, so that the
-/// caller can try the plane, the sides and the corners before it refuses.
+/// it ([`SidesItShares`]), a corner does ([`by_a_corner`]), a plane does
+/// ([`by_a_plane`]) or the piece across a side does
+/// ([`by_the_piece_across_a_side`]); [`Search::NoPointInsidePlaced`] says one
+/// was found and could not be classified against every solid in the set, which
+/// is [`PLACED_AGAINST_EVERY_SOLID`] unless a plane, a side, a corner or the
+/// piece across a side places the piece. The first says to look at the piece's
+/// trimming, the second says the piece is fine and a surface further down gave
+/// up — the lens in §216.4 is the second wearing the first's name. Neither is a
+/// refusal here, so that the caller can try the plane, the sides, the corners
+/// and the pieces across before it refuses.
 ///
 /// **The rungs of [`rungs_towards_each_crossing`] come last**, after
 /// [`points_in_a_sliver_of_a_ball`] too, so a piece any earlier point placed
@@ -621,8 +641,9 @@ impl<'a> SidesItShares<'a> {
     ///
     /// **Nothing here refuses.** A naming that gives up, a plane agreement
     /// that cannot be told, or two shared sides that disagree each leave the
-    /// piece where the point search left it, and unless a corner or a plane
-    /// places it the caller refuses under the name that search ran out under,
+    /// piece where the point search left it, and unless a corner, a plane or
+    /// the piece across a side places it the caller refuses under the name that
+    /// search ran out under,
     /// as it did before this was tried.
     fn place(
         &mut self,
@@ -828,8 +849,8 @@ fn is_off_every_surface_of(solid: SolidView<'_>, point: PredicatePoint) -> bool 
 /// one of that solid's faces that has the whole solid on or behind it, every
 /// corner of the piece on or in front of it, and one corner strictly in front.
 /// Outside every solid of the group is outside; anything else is `None`, and
-/// the caller tries the sides and the corners where it has not yet, or
-/// refuses.
+/// the caller tries the sides and the corners where it has not yet, then the
+/// piece across a side ([`by_the_piece_across_a_side`]), or refuses.
 ///
 /// **Why a plane can place a piece.** Every face of a solid `S` here is flat,
 /// so `S`'s skin is polygons with straight sides, which lie in the hull of
@@ -893,28 +914,35 @@ fn the_planes_meeting_at_each_corner_of_a_piece(
         .iter()
         .flatten()
         .map(|side| {
-            if side
-                .carried_by
-                .iter()
-                .any(|surface| surface.as_plane().is_none())
-            {
+            if !is_straight(side) {
                 return None;
             }
-            let three = match &side.ends[0] {
-                MeetPoint::Existing { vertex, .. } => {
-                    three_planes(&the_corner_at(own, *vertex).around)?
-                }
-                MeetPoint::OfThreeSurfaces { surfaces, .. } => three_planes(surfaces)?,
-                MeetPoint::WhereAClosedCurveStarts { .. }
-                | MeetPoint::HalfWayRoundAClosedCurve { .. }
-                | MeetPoint::APoleOfAClosedSurface { .. } => return None,
-            };
-            three
-                .iter()
-                .any(|plane| *plane == flat || *plane == flat.reversed())
-                .then(|| three.map(|plane| plane.coefficients()))
+            Some(the_planes_meeting_at(&side.ends[0], own, flat)?.map(|plane| plane.coefficients()))
         })
         .collect()
+}
+
+/// Whether `side` runs where two planes meet, and so along a straight line.
+fn is_straight(side: &FaceMeet) -> bool {
+    side.carried_by
+        .iter()
+        .all(|surface| surface.as_plane().is_some())
+}
+
+/// The three planes `end` is the one meeting point of, one of them `flat`
+/// either way round, or `None` where it is no such meet.
+fn the_planes_meeting_at(end: &MeetPoint, own: &BakedSolid, flat: Plane) -> Option<[Plane; 3]> {
+    let three = match end {
+        MeetPoint::Existing { vertex, .. } => three_planes(&the_corner_at(own, *vertex).around)?,
+        MeetPoint::OfThreeSurfaces { surfaces, .. } => three_planes(surfaces)?,
+        MeetPoint::WhereAClosedCurveStarts { .. }
+        | MeetPoint::HalfWayRoundAClosedCurve { .. }
+        | MeetPoint::APoleOfAClosedSurface { .. } => return None,
+    };
+    three
+        .iter()
+        .any(|plane| *plane == flat || *plane == flat.reversed())
+        .then_some(three)
 }
 
 /// Whether the plane of some face of `solid`, turned to face out of it, has
@@ -959,6 +987,146 @@ fn the_planes_meeting_at_each_corner_of_a_solid(solid: &BakedSolid) -> Option<Ve
         .flat_map(|face| face.wires.iter().flatten())
         .map(|edge| Some(three_planes(&edge.start.around)?.map(|plane| plane.coefficients())))
         .collect()
+}
+
+/// The last rule: a flat piece that no point, side it shares, corner or plane
+/// placed takes the placement of the piece of its own face across one of its
+/// straight sides, where no plane of a solid it is placed against holds that
+/// side, unless that plane is the face's own.
+///
+/// **Why a neighbour can place a piece.** `P` and `P′` are pieces of one flat
+/// face `F` that share a side `s`, and `S` is a solid with only flat faces.
+/// Each of the two was cut by every plane of `S`, so each lies all inside `S`,
+/// all outside it or all on its skin (§17.4). A plane of `S` that does not hold
+/// both ends of `s` meets the line of `s` in one point at most, so all but a
+/// few points `m` of `s` lie on no plane of `S` but `F`'s own.
+///
+/// - Off `S`'s skin, `m` has a neighbourhood all inside `S` or all outside it,
+///   and that neighbourhood meets the inside of `P` and of `P′`, so the two
+///   are placed alike.
+/// - On it, `m` is on a face of `S` in `F`'s plane and on no other plane of
+///   `S`, so near `m` `S`'s skin is a disk of that plane, with `S` on one side.
+///   `P` and `P′` both reach into that disk, so both lie on `S`'s skin, on the
+///   same face plane, facing the same way.
+///
+/// A plane of `S` that holds both ends of `s` and is not `F`'s is where `P`
+/// and `P′` can differ, along an edge of `S`, so such a side is passed over.
+/// Each end is asked as the meet of its three planes, exactly, as
+/// [`by_a_plane`] asks, so nothing goes into the log for it. `P′` is placed by
+/// [`place_the_piece`], its own point search, and what that asked the policy
+/// goes into the log only when it places `P`.
+///
+/// The piece this was built for is a triangle a rounding across on a comb's
+/// top, cut out by two of the comb's walls and a leaning wall of an ell
+/// standing on that top, all three through the comb's corner at the foot of a
+/// tooth (`docs/decisions.md` §365.9). It holds no `f64` point, every corner
+/// of it is on the plane of the ell's floor, though well off the floor, and
+/// the ell is not convex, so no plane of the ell has it in front. The piece
+/// across its side along the comb's own wall `y = 1` holds points, and the
+/// ray places them.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the neighbour is placed by place_the_piece, which asks for all of these"
+)]
+fn by_the_piece_across_a_side(
+    model: &Model,
+    scratch: &Scratch,
+    solids: &[&BakedSolid],
+    against: &[usize],
+    piece: usize,
+    in_plane: &InPlane,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Option<Placement> {
+    let mine = &scratch.pieces[piece];
+    let flat = *mine.surface.as_plane()?;
+    let own = solids[scratch.cut_from[piece]];
+    let theirs: Vec<Plane> = against
+        .iter()
+        .flat_map(|&index| &solids[index].faces)
+        .map(|face| face.surface.as_plane().copied())
+        .collect::<Option<_>>()?;
+    let others: Vec<[f64; 4]> = theirs
+        .iter()
+        .filter(|plane| **plane != flat && **plane != flat.reversed())
+        .map(Plane::coefficients)
+        .collect();
+    mine.wires.iter().flatten().find_map(|side| {
+        if !no_plane_holds_both_ends(side, own, flat, &others) {
+            return None;
+        }
+        let across = &scratch.pieces[the_piece_across(scratch, piece, side)?];
+        let mut trial = ProvenanceLog::new();
+        let candidates = candidate_points(across, &corners_of(across));
+        let search = place_the_piece(
+            model,
+            solids,
+            against,
+            &candidates,
+            across,
+            Some(in_plane),
+            policy,
+            &mut trial,
+        );
+        let Ok(Search::Placed(placement)) = search else {
+            return None;
+        };
+        trial.drain_into(log);
+        Some(placement)
+    })
+}
+
+/// Whether `side` is straight and every one of `planes` puts one end of it
+/// or the other strictly on one side, each end asked exactly as the meet of
+/// its three planes, one of them `flat`.
+fn no_plane_holds_both_ends(
+    side: &FaceMeet,
+    own: &BakedSolid,
+    flat: Plane,
+    planes: &[[f64; 4]],
+) -> bool {
+    if !is_straight(side) {
+        return false;
+    }
+    let Some(ends) = side
+        .ends
+        .iter()
+        .map(|end| Some(the_planes_meeting_at(end, own, flat)?.map(|plane| plane.coefficients())))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    planes.iter().all(|&plane| {
+        ends.iter().any(|&three| {
+            matches!(
+                side_of_a_plane_where_three_planes_meet(three, plane),
+                Ok(Decision::Pos | Decision::Neg)
+            )
+        })
+    })
+}
+
+/// The other piece cut from the same face as piece number `piece` that has
+/// `side` as a side, run the other way, if there is one.
+fn the_piece_across(scratch: &Scratch, piece: usize, side: &FaceMeet) -> Option<usize> {
+    let mine = &scratch.pieces[piece];
+    let from = scratch.cut_from[piece];
+    scratch
+        .pieces
+        .iter()
+        .zip(&scratch.cut_from)
+        .enumerate()
+        .find(|&(other, (theirs, &their_from))| {
+            other != piece
+                && their_from == from
+                && theirs.ancestors == mine.ancestors
+                && theirs.wires.iter().flatten().any(|their_side| {
+                    their_side.carried_by == side.carried_by
+                        && their_side.ends[0] == side.ends[1]
+                        && their_side.ends[1] == side.ends[0]
+                })
+        })
+        .map(|(other, _)| other)
 }
 
 /// The corner of `solid` that is `vertex`.
