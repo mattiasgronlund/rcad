@@ -30,8 +30,10 @@
 //!   with two of them curved, and every rule was refused there until Q1259
 //!   placed those points. The circle then holds two nodes off its start, so
 //!   the order round it is asked, and four intersections and two differences
-//!   answer since Q1269 named the circle's two arcs apart; every other rule is
-//!   refused after the meet.
+//!   answer since Q1269 named the circle's two arcs apart, and two more
+//!   intersections and a difference with the ball since Q1270 put its pole
+//!   among the points walked along the wall's arc; every other rule is refused
+//!   after the meet.
 //!
 //! Without a wall no fuse here asks the order round one of these circles. A
 //! seam puts one node on a face's circle beside its start, and each face has
@@ -421,7 +423,9 @@ fn a_frustum_and_a_bar_of_radius_four_cross_in_one_circle_on_both_sides() {
 ///
 /// **What answers is the intersection with the steep frustum, both ways,
 /// `367π/12`, the steep frustum less the half, `655π/12`, the intersection with
-/// the bar, both ways, `124π/3`, and the half less the bar, `128π/3`.**
+/// the bar, both ways, `124π/3`, the half less the bar, `128π/3`, the
+/// intersection with the ball, both ways, `(100 − √2)π/6`, and the half less
+/// the ball, `(404 + √2)π/6`.**
 ///
 /// The partner's skin holds the whole circle, and the arc of it at `x < 0`,
 /// between the same two corners as the arc along the cone, was one edge with
@@ -446,8 +450,15 @@ fn a_frustum_and_a_bar_of_radius_four_cross_in_one_circle_on_both_sides() {
 ///   `TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`, which `walk` gives
 ///   for two balls of one centre and one radius.
 ///
-/// The ball's intersections and the half less the ball are refused
-/// `CannotMeshAFace` with `CornersCoincide` (Q1270), as they were before.
+/// The ball's intersections and the half less the ball were refused
+/// `CannotMeshAFace` with `CornersCoincide` by the mesh the fuse checks its
+/// answer with (Q1270). The wall bounds the ball's skin inside the half with
+/// one arc over the ball's north pole, and the walk along that open arc
+/// stepped past the pole from `+y` to `−y`, half a turn of longitude the wrong
+/// way. The skin was read as a cap right round the pole, cut up to it along the
+/// meridian the arc runs down, and the patch between the two went through the
+/// pole twice. `mesh.rs`'s `put_in_the_poles_a_crossing_passes` puts the pole
+/// in along an open crossing too, where it is between the edge's ends.
 #[test]
 fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_placed_and_most_rules_stop_after()
  {
@@ -467,7 +478,8 @@ fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_plac
         },
         |model| a_ball_four_up(model, 3.0),
     ];
-    use Gives::{CornersCoincide, Holds, NoSeam, NotManifold, OneBallTwice};
+    use Gives::{Holds, NoSeam, NotManifold, OneBallTwice};
+    let root = 2.0_f64.sqrt();
     let wanted = [
         [
             NotManifold(1),
@@ -488,9 +500,9 @@ fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_plac
         [
             OneBallTwice,
             OneBallTwice,
-            CornersCoincide,
-            CornersCoincide,
-            CornersCoincide,
+            Holds((100.0 - root) * PI / 6.0),
+            Holds((100.0 - root) * PI / 6.0),
+            Holds((404.0 + root) * PI / 6.0),
             OneBallTwice,
         ],
     ];
@@ -559,7 +571,6 @@ fn a_ball_a_frustum_touches_round_one_circle_is_refused_before_its_arcs_are_name
 enum Gives {
     Holds(f64),
     NotManifold(usize),
-    CornersCoincide,
     NoSeam,
     OneBallTwice,
 }
@@ -573,14 +584,7 @@ impl Gives {
             (Gives::NotManifold(wanted), Err(Error::ResultIsNotManifold { count })) => {
                 count == wanted
             }
-            (
-                Gives::CornersCoincide,
-                Err(Error::CannotMeshAFace {
-                    why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
-                    ..
-                }),
-            )
-            | (Gives::NoSeam, Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }))
+            (Gives::NoSeam, Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }))
             | (
                 Gives::OneBallTwice,
                 Err(Error::Geometry(
