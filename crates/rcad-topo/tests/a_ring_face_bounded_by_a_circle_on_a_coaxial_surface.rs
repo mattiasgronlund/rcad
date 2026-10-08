@@ -103,6 +103,16 @@ fn intersect_names_each_circle_of_a_ring_with_a_pipe_cone_or_ball_on_its_axis_by
 
 /// Every piece, walked any way, with each circle's run naming only the faces
 /// either side, is refused for the pair those faces are.
+///
+/// **On purpose, and not for want of the arithmetic** since row Q1396: `walk`
+/// draws an arc of such a circle, and refuses only a whole one named this way.
+/// Answered, the pieces walked their own way held what Pappus gives, but the
+/// band outside the pipe of 13 with both circles walked forwards — a
+/// description that bounds no piece, refused
+/// `AClosedEdgeIsWalkedAgainstItsSurface` in
+/// [`every_other_description_of_each_piece_is_refused`] — built and validated,
+/// because `Model::validate` holds the ring's face to its band by the plane the
+/// run names (§243.8), and these runs name none.
 #[test]
 fn a_circle_named_only_by_the_ring_and_its_partner_is_refused_for_the_pair() {
     for piece in every_piece() {

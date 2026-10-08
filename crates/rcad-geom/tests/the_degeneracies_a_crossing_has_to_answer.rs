@@ -28,9 +28,9 @@
 //! *panic* on where the namer refused, so what they checked was that both
 //! halves said the same word. Since row Q1376 the namer no longer refuses the
 //! bend: it names the two circles the pipe's rim and the tube's share, and
-//! only the evaluator still refuses, for want of a row in `walk.rs` rather
-//! than for want of a name. The countersink pair is unchanged, both halves
-//! still refusing it under its own name.
+//! since row Q1396 the evaluator walks an arc of either, refusing only a whole
+//! circle named by the two faces alone. The countersink pair is unchanged,
+//! both halves still refusing it under its own name.
 //!
 //! # Why tangency is an answer and not a band
 //!
@@ -505,12 +505,12 @@ fn two_lines_off_the_lattice_are_named_just_as_the_same_pair_on_it_is() {
 /// "above zero" row instead: two circles a hair's width (`2.356e-9`) apart,
 /// where the reals give one.
 ///
-/// Since row Q1376, `intersect` names both. The evaluator has not followed:
-/// `walk.rs`'s `what_a_run_between_these_two_lies_on` has no row yet for a
-/// ring against another curved surface, so walking either circle, or finding
-/// where it starts, still refuses `ACrossingBetweenATorusAndAnotherCurvedSurface`
-/// — the gap `docs/decisions.d/378-two-quarter-bends-on-one-torus.md` files
-/// for later, not a limit.
+/// Since row Q1376, `intersect` names both, and since row Q1396 `walk` follows
+/// them: an arc of each, between two corners on it, is walked round that
+/// circle and not the other, `2.356e-9` away, which is three thousand times
+/// what a point it places may be off. A whole circle named by the two faces
+/// alone is still refused `ACrossingBetweenATorusAndAnotherCurvedSurface`, on
+/// purpose: `walk`'s `where_a_ring_and_a_surface_on_its_axis_cut` says why.
 ///
 /// The shapes are the ones the corpus panicked on before Q1376, to the digit.
 #[test]
@@ -550,6 +550,39 @@ fn a_pipe_that_should_rest_on_a_bends_tube_crosses_it_in_two_circles_because_0_5
         };
         assert_eq!(flat.normal(), Vector::new(0.0, 0.0, -1.0));
         assert_eq!(flat.offset(), offset);
+
+        let up = -offset;
+        let quarter = NamedRun::new(
+            EdgeRun::PartOfWhereItCrosses {
+                and: bend,
+                picked_by: smallvec![Picker::from(
+                    HalfSpace::new(Vector::new(1.0, 1.0, 0.0), 0.5)
+                        .expect("a normal with a length")
+                )],
+            },
+            [[0.5, 0.0, up], [0.0, 0.5, up]].map(rcad_predicates::Point::from),
+        )
+        .expect("a piece with two ends");
+        for along in [[&pipe, &bend], [&bend, &pipe]] {
+            let walked = walk(
+                &quarter,
+                along,
+                Deflection::of(0.01).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("the circle at {up}: {why:?}"));
+            let allowed = walked.deviation().magnitude();
+            assert!(allowed * 1000.0 < 2.356e-9, "{allowed}");
+            assert!(!walked.points().is_empty());
+            for point in walked.points() {
+                let [_, _, z] = point.coordinates();
+                assert!(
+                    (z - up).abs() <= allowed,
+                    "a point of the circle at {up} is at {z}"
+                );
+            }
+        }
     }
 
     let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
@@ -565,13 +598,121 @@ fn a_pipe_that_should_rest_on_a_bends_tube_crosses_it_in_two_circles_because_0_5
             )
             .map(|walked| walked.points().len()),
             Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-            "walk has no row yet for a ring against a curved surface, whichever face asks"
+            "a whole circle named by the two faces alone is refused, whichever face asks"
         );
         assert_eq!(
             where_a_closed_crossing_starts(&whole, along, &mut ProvenanceLog::new()),
             Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-            "and so does the one place a vertex could go on it"
+            "and so is the one place a vertex could go on it"
         );
+    }
+}
+
+/// An arc of a circle a ring shares with a pipe, a cone or a ball on its axis,
+/// between two corners on it and picked by the half-space through its chord,
+/// is walked on both surfaces whichever face is listed first: the quarter one
+/// side of the chord keeps, or the three quarters the other side keeps. Row
+/// Q1396 (§378.9); before it `walk` had no row for a ring against a curved
+/// surface and refused every such arc
+/// `ACrossingBetweenATorusAndAnotherCurvedSurface`.
+///
+/// The circles are `a_ring_face_bounded_by_a_circle_on_a_coaxial_surface.rs`'s,
+/// on the ring of ten and five, and the two the bar of four crosses the bend of
+/// four and one in, which `how_often_a_fuse_with_a_torus_refuses.rs` fuses.
+#[test]
+fn an_arc_of_a_circle_a_ring_shares_with_a_surface_on_its_axis_is_walked_on_both() {
+    let bend = a_bend([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 4.0, 1.0);
+    let ring = a_bend([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 10.0, 5.0);
+    let cone = a_cone([0.0, 0.0, -1.0], [0.0, 0.0, 9.0], 1.0);
+    let ball = a_ball([0.0, 0.0, 0.0], 185f64.sqrt());
+    for (torus, partner, (out, up)) in [
+        (
+            bend,
+            a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 4.0),
+            (4.0, 1.0),
+        ),
+        (
+            bend,
+            a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 4.0),
+            (4.0, -1.0),
+        ),
+        (
+            ring,
+            a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 13.0),
+            (13.0, -4.0),
+        ),
+        (
+            ring,
+            a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 7.0),
+            (7.0, 4.0),
+        ),
+        (ring, cone, (13.0, -4.0)),
+        (ring, cone, (6.0, 3.0)),
+        (ring, ball, (13.0, -4.0)),
+        (ring, ball, (13.0, 4.0)),
+    ] {
+        for (facing, quarter) in [(1.0, true), (-1.0, false)] {
+            let run = NamedRun::new(
+                EdgeRun::PartOfWhereItCrosses {
+                    and: partner,
+                    picked_by: smallvec![Picker::from(
+                        HalfSpace::new(Vector::new(facing, facing, 0.0), facing * out)
+                            .expect("a normal with a length")
+                    )],
+                },
+                [[out, 0.0, up], [0.0, out, up]].map(rcad_predicates::Point::from),
+            )
+            .expect("a piece with two ends");
+            for along in [[&torus, &partner], [&partner, &torus]] {
+                let walked = walk(
+                    &run,
+                    along,
+                    Deflection::of(0.01).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{partner:?} at {up}: {why:?}"));
+                let allowed = walked.deviation().magnitude();
+                assert!(!walked.points().is_empty(), "{partner:?} at {up}");
+                for point in walked.points() {
+                    let [x, y, z] = point.coordinates();
+                    let round = y.atan2(x);
+                    let inside_the_quarter = round > 0.0 && round < core::f64::consts::FRAC_PI_2;
+                    assert_eq!(
+                        inside_the_quarter, quarter,
+                        "{partner:?} at {up}: {point:?}"
+                    );
+                    for surface in [&torus, &partner] {
+                        assert!(
+                            how_far_off(surface, *point) <= allowed,
+                            "{partner:?} at {up}: {point:?} is {} off {surface:?}, allowed {allowed}",
+                            how_far_off(surface, *point)
+                        );
+                    }
+                    assert!((z - up).abs() <= allowed, "{partner:?} at {up}: {point:?}");
+                }
+            }
+        }
+    }
+}
+
+/// How far `point` is from `surface`, for the surfaces these tests stand on
+/// the `z` axis or round it.
+fn how_far_off(surface: &Surface, point: Point) -> f64 {
+    let [x, y, z] = point.coordinates();
+    match surface {
+        Surface::Cylinder(pipe) => (x.hypot(y) - pipe.radius()).abs(),
+        Surface::Sphere(ball) => ((point - ball.centre()).length() - ball.radius()).abs(),
+        Surface::Torus(ring) => {
+            let [_, _, height] = ring.centre().coordinates();
+            ((x.hypot(y) - ring.ring_radius()).hypot(z - height) - ring.tube_radius()).abs()
+        }
+        Surface::Cone(cone) => {
+            let [_, _, apex] = cone.apex().coordinates();
+            let slope = cone.slope();
+            (x.hypot(y) - slope * (z - apex).abs()).abs() / slope.hypot(1.0)
+        }
+        other => panic!("nothing here stands {other:?} round the z axis"),
     }
 }
 
@@ -645,15 +786,16 @@ fn a_bend(along: [f64; 3], centre: [f64; 3], ring: f64, tube: f64) -> Surface {
 /// walker and the starter all say so about the same twelve, and under the same
 /// name for each.
 ///
-/// **Ten of the twelve are refused on the kind of surface**, before a number is
-/// looked at: a cone against a ball or another cone, and a torus against
-/// anything curved.
+/// **One of the twelve is refused on the kind of surface**, before a number is
+/// looked at: the bend against a second bend.
 ///
-/// **The other two are a cone against a pipe, and those are refused on where the
-/// two stand.** A cone and a pipe that share an axis cross in two circles and
-/// `intersect` names them — `where_a_coaxial_cone_and_pipe_cross.rs` is that
-/// half — so the cone below is placed with its apex a whole unit off the pipe's
-/// axis, which is what makes it a refusal at all. Reading this row as "these
+/// **The other eleven are refused on where the two stand**: a cone against a
+/// pipe, a ball or a second cone, and a torus against a ball, a pipe or a
+/// cone. Each of those pairs crosses in circles and is named — by `intersect`
+/// and, since row Q1396 for a torus, walked — where the two share an axis, so
+/// every partner below stands off the other's axis, which is what makes it a
+/// refusal at all. A cone and a pipe that share an axis are
+/// `where_a_coaxial_cone_and_pipe_cross.rs`'s half. Reading this row as "these
 /// kinds are refused" would state something the dispatch contradicts, and the
 /// pair that used to sit here was coaxial and stopped being refused underneath
 /// the sweep.
@@ -747,8 +889,8 @@ fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_under_the_same_name(
     }
     assert_eq!(
         refused, 12,
-        "ten pairs refused on kind, plus the two cone-against-pipe pairs refused for standing off \
-         one another's axis, is twelve of the twenty-five"
+        "one pair refused on kind, plus eleven refused for standing off one another's axis, is \
+         twelve of the twenty-five"
     );
 }
 

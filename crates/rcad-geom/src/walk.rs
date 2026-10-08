@@ -48,7 +48,7 @@ use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
     Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
-    Surface, Torus, Vector,
+    Surface, SurfaceMeet, Torus, Vector,
 };
 
 /// How far a point [`walk`] hands back can sit off the curve it was worked out
@@ -390,9 +390,11 @@ impl PointsAlongACrossing {
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a run between a
 /// cone or a torus and another curved surface — the same two refusals
 /// [`intersect`](crate::intersect) gives those pairs, and a cone against a pipe,
-/// a ball or a second cone that shares its axis is drawn here exactly as it is
-/// named there. Nothing in this crate builds a refused run, and a file read in
-/// states one whenever it holds a pipe running into a bend.
+/// a ball or a second cone that shares its axis, or a torus against a pipe, a
+/// ball or a cone on its axis, is drawn here exactly as it is named there. The
+/// torus's refusal also covers a whole circle such a partner shares with it
+/// that the run names by the two faces alone, which
+/// `where_a_ring_and_a_surface_on_its_axis_cut` keeps refused on purpose.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run a caller
 /// states as going right round a crossing that runs on for ever — a plane and a
@@ -684,8 +686,9 @@ enum WhatARunLiesOn {
 /// so the namer and the evaluator never disagree about what a pair is called.
 /// **The evaluator refuses exactly what the namer refuses**, which is why the
 /// cone's arms against a pipe, a ball and a second cone ask whether the two
-/// share an axis rather than taking the caller's word for it. Both refusals are
-/// gaps: the crossing is there and none of the machinery for a degree-four or
+/// share an axis rather than taking the caller's word for it, and the torus's
+/// arms against them ask `intersect` itself. Both refusals are gaps: the
+/// crossing is there and none of the machinery for a degree-four or
 /// degree-eight curve with a cone or a torus in it exists. A ball through a
 /// cone's apex is refused under the cone's name in both halves too, for the
 /// reason `intersect`'s cone-and-ball arm gives.
@@ -887,14 +890,21 @@ fn what_a_run_between_these_two_lies_on(
             where_a_ball_on_a_cones_axis_cuts_it(&cone, &ball, run, policy, log)
                 .map(WhatARunLiesOn::Conic)
         }
+        // A ring and a ball, a pipe or a cone on its axis cross in circles
+        // square to that axis, and which of them this run is, is its ends' and
+        // its pickers' to say, as for a cone and a pipe on one axis.
         [
-            Surface::Torus(_),
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+            Surface::Torus(ring),
+            partner @ (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)),
         ]
         | [
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
-            Surface::Torus(_),
-        ] => Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
+            partner @ (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)),
+            Surface::Torus(ring),
+        ] => where_a_ring_and_a_surface_on_its_axis_cut(&ring, partner, run, policy, log)
+            .map(WhatARunLiesOn::Conic),
+        [Surface::Torus(_), Surface::Torus(_)] => {
+            Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface)
+        }
     }?;
 
     // A conic builder is handed the pair the caller's run *says* it lies on,
@@ -3630,15 +3640,116 @@ fn the_two_circles_a_cone_and_a_pipe_cut(cone: &Cone, pipe: &Cylinder) -> Vec<Co
         .collect()
 }
 
+/// The circle a ring and a ball, a pipe or a cone on its axis share that the
+/// run names, drawn as the partner and the circle's own plane draw it.
+///
+/// # The circles are the namer's, asked again
+///
+/// [`intersect`](crate::intersect) names each circle by the plane square to
+/// the axis it lies in, and `rcad-topo`'s arrangement splits the faces on those
+/// planes and picks each circle by the planes halfway to its neighbours
+/// (§378.9). So the candidates here are those planes, bit for bit, and each is
+/// drawn as `[partner, plane]` — the pair
+/// [`which_two_surfaces_a_run_is_between`] reads a run naming that plane between
+/// the two faces as. An arc the arrangement names by the ring and the partner
+/// and a whole circle a file names by its plane are then one curve, started at
+/// one point and walked one way.
+///
+/// # What the plane costs, and the size that pays for it
+///
+/// A plane's offset is the middle of an enclosure of the circle's height no
+/// wider than sixteen roundings of the larger of the offset and `R + r`, so the
+/// circle drawn is on the partner and the plane to their own rounding and off
+/// the ring by up to eight of those. The size the walk charges its bound
+/// against is widened to the ring's centre and `R + r` for that reason:
+/// [`POINT_ALONG_A_CROSSING_ROUNDOFF`] is 256 roundings of it.
+///
+/// # A whole circle named by the two faces alone is still refused
+///
+/// A run right round one of these circles that names no plane is refused under
+/// the pair's old name, and the reason is `rcad-topo`'s `Model::validate`, not
+/// the arithmetic. Validate holds a ring's face to walking its two circles
+/// round the axis opposite ways round the tube by the plane the run names
+/// (§243.8), so a circle named by the two faces alone is never asked: answered
+/// here, a ring's band bounded by a pipe of thirteen with both circles walked
+/// the same way — a description that bounds no piece, refused
+/// `AClosedEdgeIsWalkedAgainstItsSurface` when the runs name their planes —
+/// built and validated (`a_ring_face_bounded_by_a_circle_on_a_coaxial_surface.rs`).
+/// The circle is there, so this is a **gap**, kept closed until validate asks
+/// its band question of such a circle too. A file names its plane, and so does
+/// `intersect`; an arc between two corners is answered.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] where the partner
+/// is not proved on the ring's axis, and [`Error::Undecidable`] where a sign
+/// could not be settled — `intersect`'s two refusals for the pair, so the
+/// namer and the evaluator refuse the same pairs under the same names. The
+/// first also for a run right round a circle, as above.
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the partner misses the
+/// tube, so the run names a circle that is not there: a **limit**, as for a
+/// plane that misses a ball.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] as
+/// [`which_of_these_circles_this_run_is`] gives them — the second for a run
+/// with no end and nothing picking it on a pair that shares two circles or
+/// more, which names none of them.
+fn where_a_ring_and_a_surface_on_its_axis_cut(
+    ring: &Torus,
+    partner: Surface,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    if run.run().it_comes_back_to_where_it_started() {
+        return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface);
+    }
+    let named = match crate::intersect::intersect(&Surface::Torus(*ring), &partner, policy, log)? {
+        SurfaceMeet::Curves(circles) => circles,
+        SurfaceMeet::Nothing => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        other @ (SurfaceMeet::TouchAtOnePoint { .. } | SurfaceMeet::SameSurface) => {
+            unreachable!("a ring and a surface on its axis share circles or nothing: {other:?}")
+        }
+    };
+    let mut candidates = Vec::with_capacity(named.len());
+    for circle in named {
+        let EdgeRun::RightRoundWhereItCrosses {
+            and: own @ Surface::Plane(_),
+        } = circle.run()
+        else {
+            unreachable!("`intersect` names a circle round a ring's axis by its plane: {circle:?}");
+        };
+        // A plane square to a pipe's or a cone's axis, or any plane against a
+        // ball, crosses it in a conic, and one of no size is refused below in
+        // `what_a_run_between_these_two_lies_on` rather than handed back.
+        let WhatARunLiesOn::Conic(drawn) =
+            what_a_run_between_these_two_lies_on([partner, *own], run, policy, log)?
+        else {
+            unreachable!("a plane square to the axis of {partner:?} crosses it in a conic");
+        };
+        candidates.push(Conic {
+            size: how_big_this_is(
+                &[ring.centre()],
+                &[drawn.size, ring.ring_radius() + ring.tube_radius()],
+            ),
+            ..drawn
+        });
+    }
+    which_of_these_circles_this_run_is(candidates, run, policy, log)
+}
+
 /// Which of a handful of candidate conics the run names, told by its ends and,
 /// where those do not settle it, by the half-spaces on it.
 ///
-/// **Three shapes of crossing need this and they are not alike.** A plane cuts a
-/// torus in two circles, a cone and a pipe on one axis cut two more, and two
-/// pipes of one width on axes that meet cut two ellipses; in all three the pair
-/// of surfaces names *both* and only the run says which. A run with neither an
-/// end nor a picker on it takes the only candidate there is, which is how a
-/// plane resting on a torus's tube gets its one circle.
+/// **Four shapes of crossing need this and they are not alike.** A plane cuts a
+/// torus in two circles, a cone and a pipe on one axis cut two more, a ring and
+/// a ball, a pipe or a cone on its axis up to four, and two pipes of one width
+/// on axes that meet cut two ellipses; in all four the pair of surfaces names
+/// *both* and only the run says which. A run with neither an end nor a picker
+/// on it takes the only candidate there is, which is how a plane resting on a
+/// torus's tube gets its one circle.
 ///
 /// # The ends answer first, and a picker is only a tie-break
 ///
