@@ -48,16 +48,16 @@
 //! zero exactly only when the plane's normal is stored in numbers whose squares
 //! are exact, `(√2, 1, 1)` stored as `(0.7071…, 0.5, 0.5)`; there the apex was
 //! refused until such a line was read as meeting the curve once. With the
-//! normal `(2, 1, 1)` that part is not settled and the apex is still refused,
-//! which the last test pins.
+//! normal `(2, 1, 1)` interval arithmetic cannot settle that part, and the apex
+//! was refused until it was settled exactly where the interval could not
+//! (row Q1399).
 
 use std::collections::HashMap;
 
 use rcad_geom::{Axis, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
-    Containment, DraftStep, Error, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey,
-    SolidView,
+    Containment, DraftStep, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey, SolidView,
 };
 
 mod cones;
@@ -217,46 +217,62 @@ fn the_apex_of_a_cone_cut_by_a_wall_and_a_plane_along_a_ruling_is_on_its_boundar
 }
 
 /// **The same shape with a plane whose normal is not stored in short numbers
-/// still refuses its apex.** The plane `2x + y + z = 16` meets `x = −12` along
+/// holds its apex too.** The plane `2x + y + z = 16` meets `x = −12` along
 /// `(0, 1, −1)`, a ruling's direction, as the plane above does, but its normal
 /// is stored as `(0.8165…, 0.4082…, 0.4082…)`, each square in the part of
-/// degree two along that line rounds, and their difference is not settled.
-/// Every other point of the skin is answered seen down the axis. This pins the
-/// refusal a sign settled exactly would turn into `OnItsBoundary`.
+/// degree two along that line rounds, and interval arithmetic cannot settle
+/// their difference. The apex was refused `AFaceTrimmedByACurveThisCannotFollow`
+/// until that part was settled exactly when the interval could not (Q1399).
+///
+/// The stored normal is `q·(2, 1, 1)` exactly and the offset `16q`, so the
+/// stored plane is `2x + y + z = 16` and the points are worked out by hand
+/// against `x ≥ −12` and `2x + y + z ≤ 16`, each a whole unit or more off
+/// either plane or on one exactly: `(0, 8, 8)` is on the plane. The corners on
+/// the base circle solve `2x + y = −4` and `x² + y² = 400`:
+/// `x = (−16 ± √7936)/10`, about `7.308` and `−10.508`.
 #[test]
-fn a_cone_cut_by_a_wall_and_a_plane_along_a_ruling_stored_inexactly_still_refuses_its_apex() {
+fn the_skin_of_a_cone_cut_by_a_wall_and_a_plane_along_a_ruling_stored_inexactly_holds_its_apex() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let cone = a_cone_kept_to_x_at_least_minus_twelve(&mut model);
-    let leaning =
-        Plane::from_point_and_normal(Point::new(0.0, 0.0, 16.0), Vector::new(2.0, 1.0, 1.0))
-            .expect("a direction with length");
-    let wedge = a_tetrahedron(
-        &mut model,
-        [
-            Point::new(-100.0, -60.0, 276.0),
-            Point::new(100.0, -60.0, -124.0),
-            Point::new(0.0, 100.0, -84.0),
-            Point::new(-245.0, -122.0, -112.0),
-        ],
-        leaning,
-    );
-    let cut = the_one_solid_both_keep(&mut model, cone, wedge);
+    let cut = a_cone_cut_by_a_wall_and_a_plane_along_a_ruling_stored_inexactly(&mut model);
     let solid = model.solid(cut).expect("this model made the key");
-    assert_eq!(corners_of_the_skin(solid).len(), 4);
-    let refused = solid.face_holds_the_point(
-        the_skin(solid).key(),
-        PredicatePoint::from([0.0, 0.0, 0.0]),
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(
-            refused,
-            Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
-        ),
-        "{refused:?}"
-    );
-    assert_eq!(what_the_skin_holds(solid, [3.0, 4.0, 5.0]), OnAFace::Held);
+    let corners = corners_of_the_skin(solid);
+    assert_eq!(corners.len(), 4, "{corners:?}");
+    for corner in &corners {
+        let near = |want: [f64; 3]| (0..3).all(|axis| (corner[axis] - want[axis]).abs() < 1e-3);
+        assert!(
+            [
+                [-12.0, 16.0],
+                [-12.0, -16.0],
+                [7.308, -18.617],
+                [-10.508, 17.017]
+            ]
+            .iter()
+            .any(|&[x, y]| near([x, y, 20.0])),
+            "{corners:?}"
+        );
+    }
+    let asked = |at| what_the_skin_holds(solid, at);
+    assert_eq!(asked([0.0, 0.0, 0.0]), OnAFace::OnItsBoundary);
+    assert_eq!(asked([3.0, 4.0, 5.0]), OnAFace::Held);
+    assert_eq!(asked([0.0, 7.0, 7.0]), OnAFace::Held);
+    assert_eq!(asked([-12.0, 9.0, 15.0]), OnAFace::OnItsBoundary);
+    assert_eq!(asked([0.0, 8.0, 8.0]), OnAFace::OnItsBoundary);
+    assert_eq!(asked([0.0, -20.0, 20.0]), OnAFace::OnItsBoundary);
+    assert_eq!(asked([0.0, 11.0, 11.0]), OnAFace::NotHeld);
+    assert_eq!(asked([-13.0, 0.0, 13.0]), OnAFace::NotHeld);
+    assert_eq!(asked([0.0, 5.0, -5.0]), OnAFace::NotHeld);
+}
+
+/// **The apex of the cone cut by a wall and a plane stored inexactly along a
+/// ruling is on its boundary**, where `classify_point` answered
+/// `CannotFollowAFacesTrimming` naming the skin until Q1399.
+#[test]
+fn the_apex_of_a_cone_cut_by_a_wall_and_a_plane_along_a_ruling_stored_inexactly_is_on_its_boundary()
+{
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let cut = a_cone_cut_by_a_wall_and_a_plane_along_a_ruling_stored_inexactly(&mut model);
+    let solid = model.solid(cut).expect("this model made the key");
+    assert_the_apex_is_on_the_boundary(solid);
 }
 
 /// The apex is on the boundary, a point up the axis inside and one below the
@@ -348,7 +364,7 @@ fn a_cone_cut_by_a_wall_and_a_slope_meeting_under_its_apex(model: &mut Model) ->
 /// whose fourth corner is far on the origin's side, and whose other three faces
 /// are clear of the cone.
 fn a_cone_cut_by_a_wall_and_a_plane_along_a_ruling(model: &mut Model) -> SolidKey {
-    let cone = a_cone_kept_to_x_at_least_minus_twelve(model);
+    let cone = a_cone_kept_to_x_at_least(model, -12.0);
     let leaning = Plane::from_point_and_normal(
         Point::new(0.0, 0.0, 23.0),
         Vector::new(core::f64::consts::SQRT_2, 1.0, 1.0),
@@ -369,15 +385,40 @@ fn a_cone_cut_by_a_wall_and_a_plane_along_a_ruling(model: &mut Model) -> SolidKe
     the_one_solid_both_keep(model, cone, wedge)
 }
 
-/// The cone less all but the block `[−12, 40] × [−40, 40] × [−8, 30]`, whose
-/// wall `x = −12` alone reaches it.
-fn a_cone_kept_to_x_at_least_minus_twelve(model: &mut Model) -> SolidKey {
+/// The same cone less all but `x ≥ −12` and `2x + y + z ≤ 16`, the plane a face
+/// of a tetrahedron whose three corners on it are whole numbers, whose fourth
+/// is far on the origin's side, and whose other three faces are clear of the
+/// cone. The plane's stored normal is `q·(2, 1, 1)` for `q` its stored
+/// `0.4082…`, and its offset `16q`, both exactly.
+fn a_cone_cut_by_a_wall_and_a_plane_along_a_ruling_stored_inexactly(model: &mut Model) -> SolidKey {
+    let cone = a_cone_kept_to_x_at_least(model, -12.0);
+    let leaning =
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 16.0), Vector::new(2.0, 1.0, 1.0))
+            .expect("a direction with length");
+    let [double, q, also_q] = leaning.normal().components();
+    assert_eq!([double, also_q, leaning.offset()], [2.0 * q, q, 16.0 * q]);
+    let wedge = a_tetrahedron(
+        model,
+        [
+            Point::new(-100.0, -60.0, 276.0),
+            Point::new(100.0, -60.0, -124.0),
+            Point::new(0.0, 100.0, -84.0),
+            Point::new(-245.0, -122.0, -112.0),
+        ],
+        leaning,
+    );
+    the_one_solid_both_keep(model, cone, wedge)
+}
+
+/// The cone less all but the block `[wall, 40] × [−40, 40] × [−8, 30]`, whose
+/// wall `x = wall` alone reaches it, for a wall between `−20` and `0`.
+fn a_cone_kept_to_x_at_least(model: &mut Model, wall: f64) -> SolidKey {
     let cone = cones::a_pointed_cone(model, 1.0, 20.0);
     let profile = ProfileBuilder::new(vec![
-        [-12.0, -40.0],
+        [wall, -40.0],
         [40.0, -40.0],
         [40.0, 40.0],
-        [-12.0, 40.0],
+        [wall, 40.0],
     ])
     .build(&Policy::certified(), &mut ProvenanceLog::new())
     .expect("a simple outline");

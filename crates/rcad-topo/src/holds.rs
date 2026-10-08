@@ -4708,7 +4708,7 @@ fn does_not_grow_the_way_the_branch_runs_off(
 /// apex plus `m` is `|m × w|² − s²(m·w)²` for `w` the stored axis direction and
 /// `s` the slope — negative inside, as [`side_of_surface`] reads a cone — and
 /// asking it of `m` rather than of a point builds nothing that rounds.
-/// [`WhereTwoPlanesThroughTheApexMeet`] settles it through the cascade, exactly
+/// [`TheConeAlongWhereTwoPlanesMeet`] settles it through the cascade, exactly
 /// when the interval cannot. It is even in `m`, so it says nothing of which nappe
 /// and needs to say nothing: the line runs through both, one ray in each.
 ///
@@ -4722,7 +4722,7 @@ fn do_two_planes_through_the_apex_meet_inside(
     one: &Plane,
     other: &Plane,
 ) -> bool {
-    let (sign, _) = rcad_predicates::decide(&WhereTwoPlanesThroughTheApexMeet {
+    let (sign, _) = rcad_predicates::decide(&TheConeAlongWhereTwoPlanesMeet {
         one: one.normal().components(),
         other: other.normal().components(),
         along: cone.axis().direction().components(),
@@ -4735,23 +4735,26 @@ fn do_two_planes_through_the_apex_meet_inside(
     }
 }
 
-/// The cone's own sign along the line two planes through its apex meet in:
+/// The cone's part of degree two along the line two planes meet in:
 /// `|m × w|² − (s·(m·w))²` for `m = n₁ × n₂`, the slope taken inside the
-/// square as `how_a_plane_leans_against_a_cone` takes it.
+/// square as `how_a_plane_leans_against_a_cone` takes it. Where both planes
+/// hold the apex, that is the cone's own sign at the apex plus `m`
+/// ([`do_two_planes_through_the_apex_meet_inside`]); where they need not, it
+/// is `a` of [`an_arc_never_reaches_the_plane`], zero along a ruling.
 ///
 /// Degree eight in the stored numbers. The exact level carries every degree of
 /// it in expansions and gives up, as [`SquareToTheAxis`] does, where a product
 /// would round or a sum overflow.
-struct WhereTwoPlanesThroughTheApexMeet {
+struct TheConeAlongWhereTwoPlanesMeet {
     one: [f64; 3],
     other: [f64; 3],
     along: [f64; 3],
     slope: f64,
 }
 
-impl Predicate for WhereTwoPlanesThroughTheApexMeet {
+impl Predicate for TheConeAlongWhereTwoPlanesMeet {
     fn name(&self) -> &'static str {
-        WHERE_TWO_PLANES_THROUGH_A_CONES_APEX_MEET
+        THE_CONE_ALONG_WHERE_TWO_PLANES_MEET
     }
 
     fn on_floats(&self) -> Option<Filtered> {
@@ -4800,10 +4803,9 @@ impl Predicate for WhereTwoPlanesThroughTheApexMeet {
     }
 }
 
-/// The name the cone's sign along where two planes through its apex meet goes
-/// by in provenance records.
-const WHERE_TWO_PLANES_THROUGH_A_CONES_APEX_MEET: &str =
-    "where two planes through a cone's apex meet";
+/// The name the cone's part of degree two along where two planes meet goes by
+/// in provenance records.
+const THE_CONE_ALONG_WHERE_TWO_PLANES_MEET: &str = "a cone along where two planes meet";
 
 /// `expansion` times `factor`, exactly; `None` where one of the products would
 /// round ([`product_is_exact`]).
@@ -6321,8 +6323,10 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// the arc and `into_the_arc` is
 /// [`the_way_into_an_arc`]. `false` when the two planes are side by side, when
 /// a ball's or a pipe's curve does not close, and when a sign could not be
-/// settled — the part of degree two along the line among them, which interval
-/// arithmetic reads as zero only when its products are exact.
+/// settled. On a cone the part of degree two along the line is settled through
+/// the cascade, exactly where interval arithmetic cannot
+/// ([`TheConeAlongWhereTwoPlanesMeet`], row Q1399): along a ruling it is zero,
+/// and interval arithmetic reads it so only when its products are exact.
 ///
 /// **A cone's hyperbola or parabola is read too** (row Q1224). Nothing below
 /// leans on the curve closing but `a > 0` and the arc lying in front of its
@@ -6384,8 +6388,10 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// with normal `(√2, 1, 1)`, stored as `(0.7071…, 0.5, 0.5)`, has each plane's
 /// hyperbola against the other along a line running `(0, 1, −1)`, and `a` is
 /// `0.5² − 0.5²` exactly; its apex was refused for want of this (the same test
-/// file). The same shape with the plane's normal `(2, 1, 1)` is still refused:
-/// each square in its `a` rounds, so the difference of the two is not settled.
+/// file). The same shape with the plane's normal `(2, 1, 1)`, stored as
+/// `(0.8165…, 0.4082…, 0.4082…)`, has each square in its `a` round, so interval
+/// arithmetic cannot settle their difference, and its apex was refused until
+/// `a` was settled exactly (row Q1399).
 ///
 /// **Why that is enough.** The arc lies on `own`, so it can be on `cut` only on
 /// that line, and only where the line meets its curve. The arc is all of the
@@ -6464,7 +6470,19 @@ fn an_arc_never_reaches_the_plane(
     let ahead = dot(into_the_arc, less(start));
     let middle = a * ahead - grows * b;
     let apart = middle * middle - grows * grows * meets;
-    match a.sign() {
+    let along_the_line = match (a.sign(), round) {
+        (Decision::Undecidable { .. }, Surface::Cone(cone)) => {
+            let (sign, _) = rcad_predicates::decide(&TheConeAlongWhereTwoPlanesMeet {
+                one: own.normal().components(),
+                other: cut.normal().components(),
+                along: cone.axis().direction().components(),
+                slope: cone.slope(),
+            });
+            sign
+        }
+        (settled, _) => settled,
+    };
+    match along_the_line {
         Decision::Pos => {
             meets.sign() == Decision::Neg
                 || (middle.sign() == Decision::Neg && apart.sign() == Decision::Pos)
