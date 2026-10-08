@@ -6320,9 +6320,9 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// branch behind it or meets only the other branch. `start` is either end of
 /// the arc and `into_the_arc` is
 /// [`the_way_into_an_arc`]. `false` when the two planes are side by side, when
-/// a ball's or a pipe's curve does not close, when the line runs along a
-/// direction the round surface's part of degree two is zero at, and when a
-/// sign could not be settled.
+/// a ball's or a pipe's curve does not close, and when a sign could not be
+/// settled — the part of degree two along the line among them, which interval
+/// arithmetic reads as zero only when its products are exact.
 ///
 /// **A cone's hyperbola or parabola is read too** (row Q1224). Nothing below
 /// leans on the curve closing but `a > 0` and the arc lying in front of its
@@ -6371,6 +6371,21 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// each plane's hyperbola against the other plane along the line `x = −12`,
 /// `z = −36`, under the apex, which meets each plane's lower branch twice, and
 /// its apex was refused for want of this (the same test file).
+///
+/// **A line along a ruling meets the curve once** (row Q1390). There `a = 0`:
+/// the line runs along an asymptote of a hyperbola or the axis of a parabola,
+/// and `2b·t + c` is zero at `t = −c/(2b)` alone. That one meet is behind the
+/// chord when `g − γ·c/(2b) < 0`, which multiplied through by `2b²` is
+/// `b(2b·g − γ·c) < 0`. With `b = 0` that reads zero and so `false`, though
+/// the line, an asymptote itself, then misses the curve when `c` is not zero:
+/// a gap left, which no face built yet has had a cut meeting exactly along an
+/// asymptote to show. The skin of a pointed cone kept to
+/// `x ≥ −12` and to the side of the origin of the plane through `(0, 0, 23)`
+/// with normal `(√2, 1, 1)`, stored as `(0.7071…, 0.5, 0.5)`, has each plane's
+/// hyperbola against the other along a line running `(0, 1, −1)`, and `a` is
+/// `0.5² − 0.5²` exactly; its apex was refused for want of this (the same test
+/// file). The same shape with the plane's normal `(2, 1, 1)` is still refused:
+/// each square in its `a` rounds, so the difference of the two is not settled.
 ///
 /// **Why that is enough.** The arc lies on `own`, so it can be on `cut` only on
 /// that line, and only where the line meets its curve. The arc is all of the
@@ -6457,7 +6472,10 @@ fn an_arc_never_reaches_the_plane(
                     the_middle_of_the_meets_is_on_the_other_nappe(cone, start, off_from, along, a, b))
         }
         Decision::Neg => matches!(round, Surface::Cone(_)) && apart.sign() == Decision::Neg,
-        Decision::Zero | Decision::Undecidable { .. } | _ => false,
+        Decision::Zero => {
+            (b * (Interval::exactly(2.0) * b * ahead - grows * c)).sign() == Decision::Neg
+        }
+        Decision::Undecidable { .. } | _ => false,
     }
 }
 
