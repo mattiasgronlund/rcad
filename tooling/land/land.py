@@ -692,7 +692,14 @@ def run_split(*cmd):
 
 
 def say(line):
-    print(line, flush=True)
+    """Prints a line to the detached run's log, timestamped so a reader of the log alone can tell when it waited (§411.4).
+
+    The lines `follow` and `ended` print directly — `land: still running ...`,
+    `land: stopped at ...`, the JSON — go through plain `print`, not `say`, and
+    stay bare: `lanes.js` and `lander.md` match them as they stand.
+    """
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    print(f"{stamp} {line}", flush=True)
 
 
 def read(path):

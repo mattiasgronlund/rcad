@@ -13331,6 +13331,11 @@ check-land-selftest:
     [ "$rc" -eq 0 ] && [ "$(printf '%s\n' "$got" | tail -n 1)" = "$ran" ] || fail "a wait after the run ended did not print its JSON again"
     land_in lander 60 Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     [ "$rc" -eq 2 ] || fail "a second just land in a tree that has started a run exited $rc, not 2"
+    log="$at/lander/target/land/log"
+    grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z land: waiting for the land lock$' "$log" \
+        || fail "$log's 'waiting for the land lock' line carries no UTC timestamp (§411.4)"
+    grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z land: holding the land lock$' "$log" \
+        || fail "$log's 'holding the land lock' line carries no UTC timestamp (§411.4)"
 
     fixture sha-differs
     run Q1 lane-x "$(git -C "$at/origin.git" rev-parse main)" merge-x "$at/lane" "$at/verify"
