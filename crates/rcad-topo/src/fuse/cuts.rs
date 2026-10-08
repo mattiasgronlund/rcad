@@ -750,7 +750,7 @@ fn hull(
 /// of the pair — the face's own surface is the first and is not repeated.
 ///
 /// [`intersect`] is the one authority on how two surfaces meet (§24.3), so
-/// [`how_two_faces_meet`] asks it rather than working the three cases out again.
+/// [`how_two_faces_meet`] asks it rather than working the cases out again.
 /// That is also what
 /// makes the coincident case one rule for all three surface kinds: two faces on
 /// one *cylinder* answer [`SurfaceMeet::SameSurface`] exactly as two on one
@@ -770,7 +770,9 @@ fn cuts_between(
     match how_two_faces_meet(&face.surface, &against.surface, policy, log)? {
         HowTwoFacesMeet::OnOneSurface => Ok((boundary_of(against), boundary_of(face))),
         HowTwoFacesMeet::Nowhere => Ok((Vec::new(), Vec::new())),
-        HowTwoFacesMeet::AlongCurves => Ok((vec![against.surface], vec![face.surface])),
+        HowTwoFacesMeet::AtOnePoint | HowTwoFacesMeet::AlongCurves => {
+            Ok((vec![against.surface], vec![face.surface]))
+        }
     }
 }
 
@@ -847,13 +849,18 @@ fn share_a_corner(face: &BakedFace, against: &BakedFace) -> bool {
 enum HowTwoFacesMeet {
     /// The two are one surface, so the boundary of each is what cuts the other.
     OnOneSurface,
-    /// Nothing to cut along: they miss each other altogether, or they touch at
-    /// one point and cross nowhere.
-    ///
-    /// A pair that touches at one point cuts nothing (§31.3): neither face is
-    /// split and neither solid learns about the other. Two tangent balls united
-    /// come back as two shells that share no vertex.
+    /// They miss each other altogether.
     Nowhere,
+    /// They touch at one point and cross nowhere.
+    ///
+    /// A pair that touches at one point draws no curve on either face (§31.3).
+    /// Each is still handed the other's surface as a cut, and the arrangement
+    /// puts the point on a curve of the face that runs through it, because a
+    /// face next door can cut the other surface in curves through that point
+    /// and split the edge between them there (Q1337). Where no curve of the
+    /// face runs through the point nothing is split: two tangent balls united
+    /// come back as two shells that share no vertex.
+    AtOnePoint,
     /// They cross along one curve, or two.
     AlongCurves,
 }
@@ -884,7 +891,8 @@ fn how_two_faces_meet(
 ) -> Result<HowTwoFacesMeet> {
     match intersect(face, against, policy, log)? {
         SurfaceMeet::SameSurface => Ok(HowTwoFacesMeet::OnOneSurface),
-        SurfaceMeet::Nothing | SurfaceMeet::TouchAtOnePoint { .. } => Ok(HowTwoFacesMeet::Nowhere),
+        SurfaceMeet::Nothing => Ok(HowTwoFacesMeet::Nowhere),
+        SurfaceMeet::TouchAtOnePoint { .. } => Ok(HowTwoFacesMeet::AtOnePoint),
         SurfaceMeet::Curves(_) => Ok(HowTwoFacesMeet::AlongCurves),
         _ => Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
