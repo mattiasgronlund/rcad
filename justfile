@@ -6377,6 +6377,22 @@ fuzz-overnight window="28800":
             persistent_files_after=$(find "$reader_persistent" -type f | wc -l)
             echo "reader corpus merge: persistent has $persistent_files_after files after merging, took ${merge_elapsed}s" \
                 >>"$night/reader-corpus-merge.log"
+
+            # `MERGE-OUTER: N new files` is libFuzzer's own count of which
+            # *input* files its greedy pass picked, not of what landed on
+            # disk: two picks that agree once cut to this merge's
+            # `-max_len=5110`, or a pick that agrees with a file already in
+            # the output directory, are one file on disk and N counts them
+            # twice (docs/decisions.md §306.7). What the corpus actually
+            # gained is `persistent_files_after` minus `persistent_files_before`,
+            # so that is the number this log ends on; N is kept beside it,
+            # named for what it counts rather than left to be read as the
+            # same thing.
+            net_new=$(( persistent_files_after - persistent_files_before ))
+            merge_outer_n=$(grep -oE 'MERGE-OUTER: [0-9]+ new files' "$night/reader-corpus-merge.log" \
+                | tail -n 1 | grep -oE '[0-9]+' || true)
+            echo "reader corpus merge: net-new files tonight: $net_new (MERGE-OUTER picks: ${merge_outer_n:-0})" \
+                >>"$night/reader-corpus-merge.log"
         else
             merge_elapsed=$(( $(date +%s) - merge_started ))
             rm -rf "$merge_tmp"
@@ -6871,6 +6887,29 @@ check-fuzz-overnight-selftest:
         if [ "$arg" = "-merge=1" ]; then
             [ -z "${STUB_MERGE_FAIL:-}" ] || exit 1
             [ -z "${STUB_MERGE_HANG:-}" ] || sleep "$STUB_MERGE_HANG"
+
+            # `STUB_MERGE_ADD` and `STUB_MERGE_OUTER` are two separate knobs
+            # because a real merge's two numbers separate the same way
+            # (§306.7): what libFuzzer prints is a count of picks, and what
+            # lands on disk is whatever this stub writes into the merge's
+            # first directory argument — the one right after `-max_len=...`,
+            # which is `$merge_tmp` and becomes the persistent corpus on
+            # success. Set to different values, an arm can tell the night's
+            # own net-new count apart from libFuzzer's MERGE-OUTER count.
+            if [ -n "${STUB_MERGE_ADD:-}" ]; then
+                merge_dest=""
+                merge_prev=""
+                for merge_arg in "$@"; do
+                    case "$merge_prev" in
+                        -max_len=*) merge_dest="$merge_arg" ;;
+                    esac
+                    merge_prev="$merge_arg"
+                done
+                [ -z "$merge_dest" ] \
+                    || echo "a pick the stub kept" >"$merge_dest/$STUB_MERGE_ADD"
+            fi
+            [ -z "${STUB_MERGE_OUTER:-}" ] \
+                || echo "MERGE-OUTER: $STUB_MERGE_OUTER new files"
             exit 0
         fi
     done
@@ -7921,6 +7960,31 @@ check-fuzz-overnight-selftest:
         || fail "the copier's sleep outlived the night it belongs to: $(pgrep -af "^sleep $marker\$")"
     }
 
+    # Twenty-eight: the merge log's last line names the persistent corpus's
+    # own growth as the night's net-new count, with libFuzzer's own
+    # MERGE-OUTER pick count kept beside it rather than copied onto it
+    # (§306.7 — two picks that agree once cut to this merge's -max_len, or a
+    # pick that agrees with a file already on disk, are one file and not
+    # two, so MERGE-OUTER's N overcounts what the corpus gained). The stub
+    # merge here picks five and adds one, so a log that read N as the growth
+    # would fail this arm's grep.
+    twenty_eight() {
+    : >"$dir/log"
+    reader_persistent="$dir/corpus/no_step_file_makes_the_reader_panic"
+    rm -rf "$reader_persistent"
+    mkdir -p "$reader_persistent"
+    echo "kept from before" >"$reader_persistent/kept-from-before"
+    echo "kept from before too" >"$reader_persistent/kept-from-before-2"
+    STUB_MERGE_OUTER=5 STUB_MERGE_ADD="one-real-pick" run 8 \
+        || fail "a night whose merge picked more files than it added failed: $(cat "$dir/out")"
+    [ "$(find "$reader_persistent" -type f | wc -l)" -eq 3 ] \
+        || fail "the stub's one real pick did not land in the persistent corpus: $(find "$reader_persistent" -type f)"
+    night="$dir/logs/$(date +%Y-%m-%d)"
+    grep -qF "net-new files tonight: 1 (MERGE-OUTER picks: 5)" "$night/reader-corpus-merge.log" \
+        || fail "the merge log's net-new count did not read as the corpus's own growth, kept beside MERGE-OUTER's own pick count: $(cat "$night/reader-corpus-merge.log" 2>&1)"
+    rm -rf "$reader_persistent"
+    }
+
     # **Which arms run at once, and why each still asserts what it says.** Run
     # in turn they took 86 s, nearly all of it the stub's sleeps (Q709), so
     # most of them run beside each other.
@@ -7988,7 +8052,7 @@ check-fuzz-overnight-selftest:
     settle ten
     beside two_with_no_step_corpus five six_and_seven eight nine eleven \
         fourteen fifteen seventeen eighteen nineteen twenty twenty_one \
-        twenty_two twenty_four twenty_five twenty_seven
+        twenty_two twenty_four twenty_five twenty_seven twenty_eight
     settle
     rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*-"$tag"
     alone three
