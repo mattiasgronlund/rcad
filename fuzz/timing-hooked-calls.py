@@ -43,8 +43,9 @@ none of them can be ruled in or out by this scan; a `possibly reaches an
 unrecorded target` line says how many a given binary has. Closing that would
 need either a real points-to analysis of the binary or a runtime interposer
 that walks the caller's stack on every ASan memcmp hook — both bigger than
-this row. docs/decisions.d/273 and docs/decisions.d/419 (Q1444) say so and
-name the count for each target this script has been run on.
+this row. docs/decisions.d/273 says so and names the count for each target
+this script has been run on; §419 is claimed for Q1444's own count, not yet
+written.
 
 usage: timing-hooked-calls.py <binary> [<binary> ...]
 exit 0 and a `clean` line per binary if none reaches a hook outside `is`;
