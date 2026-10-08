@@ -731,9 +731,10 @@ impl BuildingAMesh {
     /// rather than a second opinion about position: a reversed list is the same
     /// points.
     ///
-    /// **A closed crossing that runs through a ball's pole has the pole among
-    /// its points**, whether or not the walk would have landed there — see
-    /// [`put_in_the_poles_a_closed_crossing_passes`].
+    /// **A crossing that runs through a ball's pole has the pole among its
+    /// points**, whether or not the walk would have landed there — see
+    /// [`put_in_the_poles_a_crossing_passes`]. An open one has it only where
+    /// the pole is between its two ends (Q1270).
     ///
     /// # The corners it starts from are the ones the arena stores
     ///
@@ -958,20 +959,28 @@ impl BuildingAMesh {
         // kind hands over is the run's own and not the two faces. A rim written
         // [`EdgeRun::RightRoundWhereItCrosses`] has the one surface either side
         // of it — that is why it carries `and` at all — so the faces say
-        // `[ball, ball]`, which [`put_in_the_poles_a_closed_crossing_passes`]
+        // `[ball, ball]`, which [`put_in_the_poles_a_crossing_passes`]
         // reads as a ball crossed with itself and walks straight past. The pair
         // below is the one `rcad_geom::walk` read off the same run to draw the
         // circle with (`which_two_surfaces_a_run_is_between`), so the poles are
-        // put in on the curve that was actually walked.
+        // put in on the curve that was actually walked. An open run gets the
+        // poles between its ends, read off the same pair.
         let moved = match run.run() {
             EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. } => {
-                put_in_the_poles_a_closed_crossing_passes(
+                put_in_the_poles_a_crossing_passes(
                     &mut points,
                     ends,
                     &which_two_surfaces_a_run_is_between(run.run(), [&along[0], &along[1]]),
+                    HowMuchOfTheCrossing::AllOfIt,
                 )
             }
-            EdgeRun::Straight | EdgeRun::PartOfWhereItCrosses { .. } | _ => 0.0,
+            EdgeRun::PartOfWhereItCrosses { .. } => put_in_the_poles_a_crossing_passes(
+                &mut points,
+                ends,
+                &along,
+                HowMuchOfTheCrossing::BetweenItsEnds,
+            ),
+            EdgeRun::Straight | _ => 0.0,
         };
         if self.points.len() + points.len() > MOST_POINTS_A_MESH_WILL_HOLD {
             return Err(Error::MoreMeshPointsThanASolidWillHold {
@@ -2334,7 +2343,7 @@ impl BuildingAMesh {
     /// edge, not inside it, so a cap whose rim runs through one pole reaches
     /// the other, and its walk keeps the other on its left. The walk put the
     /// pole on its rim as a corner at its latitude
-    /// ([`put_in_the_poles_a_closed_crossing_passes`]), so that pole is not
+    /// ([`put_in_the_poles_a_crossing_passes`]), so that pole is not
     /// strictly beyond every corner and is never taken
     /// (`a_ball_less_a_cap_whose_rim_runs_through_its_north_pole.rs`,
     /// `docs/decisions.md` §199.4).
@@ -3345,7 +3354,8 @@ impl BuildingAMesh {
     /// corner off them passes both in its middle; taking each the short way
     /// round is a coin toss at exactly half a turn (§192.1). A walk that would
     /// have stepped past the pole between two points has had the pole put
-    /// among them by [`put_in_the_poles_a_closed_crossing_passes`] (§193.3).
+    /// among them by [`put_in_the_poles_a_crossing_passes`] (§193.3), along
+    /// an open edge as well as a closed one since Q1270.
     fn walk_a_wire_round(
         &mut self,
         wire: WireView<'_>,
@@ -6386,8 +6396,8 @@ fn which_side_of_a_surface_a_run_names_this_face_lies_on(
     )
 }
 
-/// Make every pole of a ball that a closed crossing runs through one of the
-/// points walked along it, and say how far a walked point was moved to do it.
+/// Make every pole of a ball that a crossing runs through one of the points
+/// walked along it, and say how far a walked point was moved to do it.
 ///
 /// **The wire walk knows a pole only when a walked point lands on it**
 /// ([`BuildingAMesh::walk_a_wire_round`]). A plane through a ball's axis cuts
@@ -6397,18 +6407,31 @@ fn which_side_of_a_surface_a_run_names_this_face_lies_on(
 /// `a_rim_through_both_poles_measures.rs` did, and at every finer one it did
 /// not (§193.3).
 ///
-/// The crossing is the whole closed curve, so a pole is on it exactly when
-/// both surfaces hold the pole — two certified predicates and no distance
-/// compared with anything. A circle between a ball and a plane that misses
-/// the pole by one rounding or less is given it too, and the miss is charged —
-/// see [`how_far_a_circle_that_passes_within_a_rounding_of_a_pole_misses_it`].
+/// A closed crossing is the whole curve, so a pole is on it exactly when both
+/// surfaces hold the pole — two certified predicates and no distance compared
+/// with anything. A circle between a ball and a plane that misses the pole by
+/// one rounding or less is given it too, and the miss is charged — see
+/// [`how_far_a_circle_that_passes_within_a_rounding_of_a_pole_misses_it`].
 /// Any other pole whose coordinates round off the ball, or whose sides cannot
 /// be decided, is left out, and the walk then goes on as it did before this
 /// existed: [`WalkingAWire::finish`] checks it.
-fn put_in_the_poles_a_closed_crossing_passes(
+///
+/// **An open crossing is asked as well, since Q1270**, and there the pole has
+/// to lie between the two walked points it goes between, because the edge is
+/// only part of the curve ([`HowMuchOfTheCrossing::BetweenItsEnds`]). A half
+/// frustum `x ≥ 0` and a ball on its axis keep the ball's skin inside the
+/// frustum above the circle they cross in, and the wall `x = 0` bounds it with
+/// one arc over the ball's north pole, between two corners on the circle. The
+/// walk stepped past the pole from `+y` to `−y`, half a turn the wrong way: the
+/// skin was read as a cap right round the pole and cut up to it along the
+/// meridian that arc already runs down, which left a patch through the pole
+/// twice, refused `CornersCoincide`
+/// (`a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_placed_and_most_rules_stop_after`).
+fn put_in_the_poles_a_crossing_passes(
     points: &mut Vec<Point>,
     ends: [Point; 2],
     along: &[Surface; 2],
+    how_much: HowMuchOfTheCrossing,
 ) -> f64 {
     let mut moved: f64 = 0.0;
     for (index, ball) in along.iter().enumerate() {
@@ -6424,12 +6447,25 @@ fn put_in_the_poles_a_closed_crossing_passes(
             .expect("a ball pinches at its poles");
         for up in [1.0, -1.0] {
             let pole = sphere.centre() + Vector::new(0.0, 0.0, up * sphere.radius());
-            if let Some(far) = put_in_a_pole(points, ends, [ball, other], pole, up * pinch) {
+            if let Some(far) =
+                put_in_a_pole(points, ends, [ball, other], pole, up * pinch, how_much)
+            {
                 moved = moved.max(far);
             }
         }
     }
     moved
+}
+
+/// How much of the curve two surfaces cross in an edge's walked points stand
+/// for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HowMuchOfTheCrossing {
+    /// The whole closed curve, so a pole both surfaces hold is on it.
+    AllOfIt,
+    /// The stretch between the edge's two ends, so a pole both surfaces hold
+    /// may be on the rest of the curve instead.
+    BetweenItsEnds,
 }
 
 /// Put `pole` among `points`, between the two it lies between, when both
@@ -6453,12 +6489,19 @@ fn put_in_the_poles_a_closed_crossing_passes(
 /// alone, since the wire walk already turns there, and a twin beside it would
 /// be one rounding away, which the flat face across the edge reads as the same
 /// corner.
+///
+/// **Of an open crossing the pair has to have the pole between them**, since
+/// the far place the curve changes side is then the only one when the edge
+/// stops short of the pole: `(a − pole)·(b − pole)` is below zero exactly when
+/// the pole is inside the ball with `a` and `b` at either end of a diameter,
+/// which a point of a circle is when it is on the shorter arc between them.
 fn put_in_a_pole(
     points: &mut Vec<Point>,
     ends: [Point; 2],
     [ball, other]: [&Surface; 2],
     pole: Point,
     latitude: f64,
+    how_much: HowMuchOfTheCrossing,
 ) -> Option<f64> {
     let exactly = PredicatePoint::from(pole.coordinates());
     let holds_it = |surface: &Surface| match side_of_surface(surface, exactly) {
@@ -6505,6 +6548,11 @@ fn put_in_a_pole(
             points[beside] = pole;
             return Some(far.max(missed_by));
         }
+    }
+    if how_much == HowMuchOfTheCrossing::BetweenItsEnds
+        && (every[gap] - pole).dot(every[gap + 1] - pole) >= 0.0
+    {
+        return None;
     }
     points.insert(gap, pole);
     Some(missed_by)
@@ -9656,6 +9704,48 @@ mod tests {
                 "the mesher and the sweep have to spell one question one way (§23.8)"
             );
         }
+    }
+
+    /// An arc of the circle `x = 0` cuts a unit ball in, from `+y` on the
+    /// equator down through the south pole to `−y`, gets the south pole among
+    /// its points and not the north one.
+    ///
+    /// **The north pole is on the circle and not on the arc**, and the walked
+    /// points still change side of the plane square to the crossing there, at
+    /// the bottom, where the arc passes the south pole. Read as all of the
+    /// circle, as a closed crossing is, the north pole went in at the bottom
+    /// between the two walked points, so the walk would climb to it and back
+    /// in one step (Q1270).
+    #[test]
+    fn an_open_arc_gets_the_pole_it_passes_and_not_the_one_beyond_its_ends() {
+        let ball = Surface::Sphere(
+            Sphere::new(Point::origin(), 1.0).expect("a ball of radius one at the origin"),
+        );
+        let wall = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+                .expect("the plane x = 0"),
+        );
+        let half = core::f64::consts::FRAC_1_SQRT_2;
+        let walked = vec![Point::new(0.0, half, -half), Point::new(0.0, -half, -half)];
+        let ends = [Point::new(0.0, 1.0, 0.0), Point::new(0.0, -1.0, 0.0)];
+
+        let mut points = walked.clone();
+        let moved = put_in_the_poles_a_crossing_passes(
+            &mut points,
+            ends,
+            &[ball, wall],
+            HowMuchOfTheCrossing::BetweenItsEnds,
+        );
+
+        assert_eq!(
+            moved, 0.0,
+            "both poles are certified on the ball and the wall"
+        );
+        assert_eq!(
+            points,
+            vec![walked[0], Point::new(0.0, 0.0, -1.0), walked[1]],
+            "the south pole between the two walked points, and nothing else"
+        );
     }
 
     /// Of the two bands of a ring between two circles a quarter turn apart, the
