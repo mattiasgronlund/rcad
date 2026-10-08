@@ -302,6 +302,125 @@ fn random_turns_whose_planes_meet_inside_the_block_answer() {
     assert_eq!(inside, 29, "how many of the 60 meet inside the block");
 }
 
+#[test]
+fn probe_q1353_one() {
+    let Ok(index) = std::env::var("PROBE_TURN") else {
+        return;
+    };
+    let index: usize = index.parse().unwrap();
+    let (turn, at) = q1208s_random_turns(index)[index - 1];
+    let mut model = a_model();
+    let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
+    eprintln!(
+        "{:?}",
+        fuse(
+            &mut model,
+            pair,
+            Rule::Union,
+            Order::BlockFirst,
+            &tolerant()
+        )
+    );
+}
+
+#[test]
+fn probe_q1353_split() {
+    use std::collections::BTreeMap;
+    let mut split: BTreeMap<String, usize> = BTreeMap::new();
+    let mut signs: BTreeMap<String, usize> = BTreeMap::new();
+    let mut outside_in_60 = 0;
+    for (index, (turn, at)) in q1208s_random_turns(400).into_iter().enumerate() {
+        let sign = where_the_planes_at_the_corner_meet(&turn, at);
+        *signs.entry(format!("{sign:?}")).or_default() += 1;
+        if sign != Decision::Neg {
+            continue;
+        }
+        if index < 60 {
+            outside_in_60 += 1;
+        }
+        let mut model = a_model();
+        let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
+        let what = match fuse(
+            &mut model,
+            pair,
+            Rule::Union,
+            Order::BlockFirst,
+            &tolerant(),
+        ) {
+            Ok(solids) => match model.validate(&tolerant(), &mut ProvenanceLog::new()) {
+                Ok(()) => {
+                    let union: f64 = solids
+                        .iter()
+                        .map(|&solid| {
+                            model
+                                .solid(solid)
+                                .unwrap()
+                                .measure(
+                                    Deflection::of(0.1).unwrap(),
+                                    &Policy::certified(),
+                                    &mut ProvenanceLog::new(),
+                                )
+                                .unwrap()
+                                .volume()
+                        })
+                        .sum();
+                    let mut other = a_model();
+                    let pair = a_block_and_a_cube_turned(&mut other, &turn, at);
+                    let intersection = fuse(
+                        &mut other,
+                        pair,
+                        Rule::Intersection,
+                        Order::BlockFirst,
+                        &tolerant(),
+                    )
+                    .map(|solids| {
+                        solids
+                            .iter()
+                            .map(|&solid| {
+                                other
+                                    .solid(solid)
+                                    .unwrap()
+                                    .measure(
+                                        Deflection::of(0.1).unwrap(),
+                                        &Policy::certified(),
+                                        &mut ProvenanceLog::new(),
+                                    )
+                                    .unwrap()
+                                    .volume()
+                            })
+                            .sum::<f64>()
+                    });
+                    match intersection {
+                        Ok(intersection) => format!(
+                            "answers {} volumes disagree {}",
+                            solids.len(),
+                            (union + intersection - 2000.0).abs() > 1e-9
+                        ),
+                        Err(why) => format!("answers {}, intersection {why:?}", solids.len()),
+                    }
+                }
+                Err(why) => format!("answers, invalid {why:?}"),
+            },
+            Err(Error::Undecidable { records }) => format!(
+                "Undecidable {:?}",
+                records
+                    .records()
+                    .iter()
+                    .map(|record| record.predicate())
+                    .collect::<Vec<_>>()
+            ),
+            Err(why) => format!("{why:?}"),
+        };
+        eprintln!("turn {} {what}", index + 1);
+        *split.entry(what).or_default() += 1;
+    }
+    eprintln!("signs {signs:?}");
+    eprintln!("outside among the first 60: {outside_in_60}");
+    for (what, count) in &split {
+        eprintln!("SPLIT {count} {what}");
+    }
+}
+
 /// Every rule both ways round answers one or more solids that validate, and
 /// their volumes agree with each other and with the turned cube moved a
 /// little further in.
