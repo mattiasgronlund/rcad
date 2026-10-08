@@ -163,7 +163,7 @@ is what closed it. With the keep off, no test that pins a row of §39.4 fails.
 §39.4's own figures stay as they were written.
 
 **The two mutants.** Each is made on a scratch copy of `5f1bce87` (`git
-archive HEAD`, under `target/`), never on a tracked file:
+archive 5f1bce87`, under `target/`), never on a tracked file:
 
 - *keep off*: `if rounded > 0 { return None; }` straight after
   `times_holding_on` in `Nearly::times`. This is §322.6's mutant. A `Nearly`
@@ -177,6 +177,11 @@ every_point_where_three_surfaces_meet_is_on_all_three_of_them -E
 pin fails, so every variant gives its figure. At the base it is `mise exec --
 just t -p rcad-geom --test
 every_point_where_three_surfaces_meet_is_on_all_three_of_them --no-capture`.
+**Give each copy a `CARGO_TARGET_DIR` of its own.** The copies hold the same
+files at the same paths inside each, and with one target dir shared, a re-run
+of the *slide off* copy after the keep-off suite compiled nothing and printed
+the *keep off* row: 0 refused where its own build refuses 180. Every figure
+below was measured again with a target dir per copy.
 
 | `somewhere else`, 2051 triples | corners | certified `Zero` | refused | widest box |
 |---|---|---|---|---|
