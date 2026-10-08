@@ -422,7 +422,8 @@ pub enum Error {
     ACrossingBetweenAPlaneAndATorusThatIsAQuartic,
 
     /// A torus against a ball, a pipe, a cone, or another torus, except a
-    /// ball, a pipe or a cone on its axis that misses its tube.
+    /// ball, a pipe or a cone on its own axis, which `intersect` now names
+    /// whether it reaches the tube, rests on it, or misses it (row Q1376).
     ///
     /// A **gap** and the same one two leaning pipes have (§29), one degree
     /// worse: the crossing is a space curve of degree up to eight, naming which
@@ -432,12 +433,14 @@ pub enum Error {
     /// The family of fixes, shortest first. (a) The **coaxial** cases are
     /// circles square to the axis, found by one sign question per partner and
     /// per cone nappe: up to two for a pipe or a ball and up to four for a
-    /// cone. `intersect` finds them, answers a partner that misses the tube,
-    /// and still refuses one that reaches it: commit `9eead79c` named each
-    /// circle by its plane, and `rcad-topo`'s arrangement panics on that run
-    /// (row Q1334, §378). A second torus about the same axis is not done. (b)
-    /// The general case wants §29's whole second stage over again with a torus
-    /// in it.
+    /// cone. `intersect` finds them and names each circle by its plane
+    /// (row Q1334, then Q1376 for the rest of the axis), and
+    /// `three_surfaces` meets a plane holding the axis there the same way
+    /// (§378). What is still not done: `walk.rs` has no row for walking one
+    /// of these circles, so the evaluator still refuses the pair under this
+    /// name even once `intersect` has answered it, and a second torus about
+    /// the same axis is not named at all. (b) The general case wants §29's
+    /// whole second stage over again with a torus in it.
     #[error("a torus crossing another curved surface is a space curve of degree up to eight")]
     ACrossingBetweenATorusAndAnotherCurvedSurface,
 

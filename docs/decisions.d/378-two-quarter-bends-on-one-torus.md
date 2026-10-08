@@ -327,3 +327,66 @@ pairs 1 and 3 its fix moves onto the two panics above. The `holds.rs` panic,
 the `rings_round` panic and the refusal past Q618, and the coaxial rings, are
 each a row of their own. The naming 378.4 asked about is still not reached by
 any of the three.
+
+### 378.9 Q1376: a bend and a bar on its axis get through intersect, the corner and the arrangement; walking the crossing is what is left
+
+*Queue row Q1376, two lanes off `667c4a46`: `9b192c2d` and `90831e2d` on
+`lane-q1376-a-bend-and-a-bar-on-its-axis-answer`, merged here as `90831e2d`
+onto `lane-q1376-a-pipe-on-a-bends-axis-names-two-circles`.*
+
+**Naming.** `9eead79c`'s naming — a ring and a ball, a pipe or a cone on its
+own axis is the circles the two share, each named by the plane square to the
+axis it sits in, up to two for a pipe or a ball and up to four for a cone — is
+back, this time as one function,
+`the_heights_a_ring_crosses_a_round_surface_at`, read by both `intersect` and
+`three_surfaces`. It is `the_heights_a_ring_crosses_a_round_surface_at`'s doc
+comment, not a holdback this section used to cite, that is current now.
+
+**The corner.** `three_surfaces`'s `what_a_plane_through_a_rings_axis_leaves`
+takes a sixth road through `where_one_plane_and_two_curved_surfaces_meet`: a
+plane holding the ring's axis cuts each shared circle in two points, one
+either side of the axis, read off the other surface's reach along that axis.
+For the bend of ring four and tube one met by a bar of radius four on its
+axis, that is `(±4, 0, ±1)` exactly — the corner
+`what_a_plane_through_their_one_axis_leaves` already gives a bar and a cone
+on an axis, now given a ring on it too.
+
+**The arrangement.** `rcad-topo`'s `fuse::arrange` now works out the picker of
+every run of a pair once, in `crossing_for`, and keeps it on the `Crossing`: a
+plane-named circle is picked by the planes halfway to its neighbours, which
+`intersect` proves part them, and it is ordered as the round surface and the
+circle's plane, by the way their gradients cross where the circle starts.
+Every face of the bend and the bar now splits where the ring's axis holds the
+bar — `pickers_of` no longer panics on `RightRoundWhereItCrosses` for this
+pair, and ordering it no longer refuses `ACrossingThisCannotBeOrderedAlong`.
+
+**What still refuses, and why it is a gap and not this section's naming
+again.** All twelve fuses the two bends give — two bends (ring four tube one,
+ring six tube two), three rules, both ways round — still refuse
+`ACrossingBetweenATorusAndAnotherCurvedSurface`, traced with a backtrace probe
+on all twelve. Not from `intersect`, from `three_surfaces`, or from
+`fuse::arrange` any more: from `rcad-geom`'s `walk.rs`,
+`what_a_run_between_these_two_lies_on`, reached by `assemble`'s
+`nest_the_shells` measuring the fused solid's volume through
+`how_much_space_a_curved_solid_encloses` and `mesh`. The answer's arc of the
+circle the ring shares with the bar is named `PartOfWhereItCrosses` between
+the ring and the bar, with a chord half-space telling one part from the other,
+and `what_a_run_between_these_two_lies_on` has no row that matches a ring
+against a curved surface — every row it has is two of a plane, a pipe, a cone
+or a ball. The circle exists, `intersect` has named it and the arrangement has
+split on it; the arithmetic to walk it is the one piece not written. That is a
+**gap** (§16.10), not a limit. It is named here without a queue id: the row
+for it is filed when this branch lands, by `just queue apply`, not by this
+file.
+
+**The same gap reaches a file-stated pair, not just this section's bar.**
+`crates/rcad-geom/tests/the_degeneracies_a_crossing_has_to_answer.rs`'s pipe-
+into-a-bend test, built from the shapes one corpus KiCad file panicked the
+evaluator on, crosses the same way now that `intersect` answers it: the
+pipe's radius is the ring's radius plus its tube's radius to the digit, so in
+the reals the pipe rests on the tube's rim in one circle, but `0.5 − 0.4`
+stored as `f64` rounds one bit short of `0.1`, so the room `intersect` finds
+is a tiny positive number instead of zero and it names two circles,
+`2.356e-9` apart, rather than one. Walking either one still refuses under this
+section's name, for the same reason: no row in `walk.rs` for a ring against a
+curved surface, coaxial or not.
