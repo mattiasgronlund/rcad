@@ -3385,6 +3385,19 @@ impl<'f> Arrangement<'f> {
     /// inside the partner, and that is read off a corner of the face that is off
     /// it.
     ///
+    /// **A corner past the flat half-space that picks the crossing out is read
+    /// by [`Arrangement::whether_past_the_picker`] first**, because there the
+    /// partner's sign has turned back. The union of a pointed cone and a bar
+    /// down its axis keeps the bar's wall from `z = −15` up to the circle at
+    /// `z = 1` in one face, and that face crosses the cone's other nappe at
+    /// `z = −1`; its only corner off the cone is the seam corner at `z = −15`,
+    /// inside the other nappe, where next to `z = 1` the face is outside the
+    /// cone. Read off that corner's sign, the wall was walked inside out, and
+    /// the fuse of the union with a far cube was refused
+    /// `CannotTellTheCellsOfAFaceApart` (queue row Q1354). A corner it cannot
+    /// place is passed over, as [`Arrangement::which_side_of_everything`] passes
+    /// over a node.
+    ///
     /// **Where every corner sits on the partner, the edge itself says**, from
     /// the way the face's wire walks it in the model
     /// ([`BakedEdge::inside_across`](super::bake::BakedEdge)). Both halves of
@@ -3411,7 +3424,12 @@ impl<'f> Arrangement<'f> {
             if side.start.around.contains(&partner) {
                 continue;
             }
-            match side_of_surface(&partner, side.start.point) {
+            let found = match self.whether_past_the_picker(crossing, side.start.point) {
+                PastThePicker::No => side_of_surface(&partner, side.start.point),
+                PastThePicker::Yes(facing) => facing,
+                PastThePicker::CannotTell => continue,
+            };
+            match found {
                 Decision::Neg => return true,
                 Decision::Pos => return false,
                 Decision::Zero | Decision::Undecidable { .. } | _ => (),
@@ -9842,14 +9860,16 @@ mod tests {
 
 #[cfg(test)]
 mod curved {
-    use rcad_geom::{Isometry, Scale, Surface, Vector};
+    use rcad_geom::{
+        Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
+    };
     use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 
     use super::super::MeetPoint;
     use super::super::bake::{BakedFace, BakedSolid, bake};
     use super::super::cuts;
     use super::{Piece, split_a_face};
-    use crate::Model;
+    use crate::{DraftStep, Model, Rule, SolidBuilder};
 
     /// A block eight across sitting on the origin with a round bar of radius
     /// one straight through the middle of it, both already cut against each
@@ -10089,6 +10109,119 @@ mod curved {
             "the point at angle zero on the circle of radius one about (4, 4), where angle zero \
              is whichever way `Plane::basis` faces and not whichever way looks natural"
         );
+    }
+
+    /// The union of a pointed cone and a bar down its axis has one face on
+    /// the bar's pipe from its floor at `z = −15` up to the circle at `z = 1`,
+    /// and it crosses the cone's other nappe at `z = −1`. Fused again with a
+    /// far cube, the wall comes apart there into the two bands it holds.
+    ///
+    /// **Its one corner off the cone is the seam corner at `z = −15`**, past the
+    /// half-space `z ≥ 0` that picks the circle at `z = 1` out and inside the
+    /// other nappe, where the cone's sign is the one above that circle. Read off
+    /// that sign, the wall was walked inside out and refused
+    /// `CannotTellTheCellsOfAFaceApart` (queue row Q1354).
+    #[test]
+    fn a_bar_wall_across_a_cones_other_nappe_comes_apart_into_the_two_bands_it_holds() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let cone = a_pointed_cone_of_slope_one_up_to_ten(&mut model);
+        let bar = model
+            .add_round_bar(
+                1.0,
+                40.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, -15.0)).expect("a shift"),
+            )
+            .expect("a bar down the cone's axis");
+        let answer = model
+            .fuse(&[cone], &[bar], Rule::Union, &policy, &mut log)
+            .expect("the union answers");
+        let [union] = answer.solids()[..] else {
+            panic!("the union is one solid");
+        };
+        let cube = model.add_cube(2.0, &policy, &mut log).expect("a cube");
+        model
+            .place_solid(
+                cube,
+                &Isometry::translation(Vector::new(20.0, 20.0, 20.0)).expect("a shift"),
+            )
+            .expect("this model made the key");
+        let mut solids = bake(&model, &[union, cube], &policy, &mut log).expect("both bake");
+        cuts::gather(&mut solids, &policy, &mut log).expect("they cut each other");
+        let wall = solids[0]
+            .faces
+            .iter()
+            .find(|face| {
+                matches!(face.surface, Surface::Cylinder(_))
+                    && face
+                        .wires
+                        .iter()
+                        .flatten()
+                        .any(|side| side.start.point.enclosure()[2].lo() == -15.0)
+            })
+            .expect("the union has a wall down to the bar's floor");
+
+        let mut bands: Vec<Vec<f64>> = split(wall)
+            .iter()
+            .map(|piece| {
+                let mut heights: Vec<f64> = piece
+                    .wires
+                    .iter()
+                    .map(|wire| wire[0].ends[0].point().enclosure()[2].lo().round())
+                    .collect();
+                heights.sort_by(f64::total_cmp);
+                heights
+            })
+            .collect();
+        bands.sort_by(|one, other| one[0].total_cmp(&other[0]));
+        assert_eq!(
+            bands,
+            [vec![-15.0, -1.0], vec![-1.0, 1.0]],
+            "the circles bounding each piece of the wall"
+        );
+    }
+
+    /// The cone of slope one with its apex at the origin and its base at
+    /// `z = 10`, as `tests/cones/mod.rs` builds it.
+    fn a_pointed_cone_of_slope_one_up_to_ten(model: &mut Model) -> crate::SolidKey {
+        let mut builder = SolidBuilder::new();
+        let rim = builder
+            .add_vertex(Point::new(10.0, 0.0, 10.0))
+            .expect("a finite point");
+        let circle = builder
+            .add_edge(rim, rim, EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("the cap plane cuts the cone in one closed curve");
+        let top =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 10.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal");
+        let cap_coedge = builder
+            .add_coedge(circle, Orientation::Forward)
+            .expect("an edge of this build");
+        let cap_wire = builder
+            .add_wire(&[DraftStep::Along(cap_coedge)])
+            .expect("one closed edge is a wire");
+        let cap = builder
+            .add_face(Surface::Plane(top), &[cap_wire])
+            .expect("a cap is a plane trimmed by its circle");
+        let side_coedge = builder
+            .add_coedge(circle, Orientation::Reversed)
+            .expect("an edge of this build");
+        let side_wire = builder
+            .add_wire(&[DraftStep::Along(side_coedge)])
+            .expect("one closed edge is a wire");
+        let side = builder
+            .add_face(
+                Surface::Cone(Cone::new(Axis::z(), 1.0).expect("a positive slope")),
+                &[side_wire],
+            )
+            .expect("a face on the cone, bounded by its base circle and pinched at the apex");
+        builder
+            .add_shell(&[(cap, Orientation::Forward), (side, Orientation::Forward)])
+            .expect("two faces close");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a pointed cone described this way is a solid")
     }
 }
 
