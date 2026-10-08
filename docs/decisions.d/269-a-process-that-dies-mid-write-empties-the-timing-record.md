@@ -228,3 +228,52 @@ Left:
 - **`report` is written the same way,** but it is rebuilt whole from `totals`
   on every merge. So an empty one mends itself on the next tick, and it needed
   no fix; Q136 moved it to the same rename anyway.
+
+### 269.8 A week after the fix: no reset, but one target loses runs every night
+
+*Measured 2026-10-08 by Q174's read-only lane (run `wf_d9b974ee-e31`), with
+an adaptation of 269.5's script over `~/rcad-fuzz-logs/2026-09-27` to
+`2026-10-08`.*
+
+Seven nights ran on a build at or after `2f307678`: 09-27 and 10-03 to 10-08.
+Each night's build commit comes from `rcad-nightly-fuzz`'s reflog, and
+`git merge-base --is-ancestor 2f307678` holds for each. Five nights did not run.
+09-28 has no log directory. 09-29 and 09-30 built but wrote no `fuzz*.log`, for
+a reason the logs do not record. 10-01 and 10-02 failed to build in `cc`, the
+broken registry of §374.7. Nothing flagged those five at the time.
+
+That is 35 target-nights, as before. 23 read between −0.5% and +2%. Five read
+more than 2% below:
+
+| night | target | record | libFuzzer's last `#N` | gap | jobs | timeouts / crashes | lost |
+|---|---|---|---|---|---|---|---|
+| 09-27 | writer | 2 259 226 | 3 126 240 | −27.73% | 28 453 | 0 / 28 452 | 0 |
+| 09-27 | surfaces-cross | 1 097 708 | 1 150 432 | −4.58% | 1 314 | 1 229 / 0 | 0 |
+| 10-03 | writer | 860 732 | 941 403 | −8.57% | 8 133 | 7 / 8 127 | 0 |
+| 10-07 | surfaces-cross | 7 352 577 | 7 551 073 | −2.63% | 1 333 | 1 244 / 11 | 0 |
+| 10-08 | surfaces-cross | 6 533 796 | 6 715 612 | −2.71% | 1 499 | 1 418 / 6 | 0 |
+
+The other seven fall between those two bands. Surfaces-cross reads −1.21%,
+−1.63%, −1.45% and −1.91% on 10-03 to 10-06. The writer reads +7.19%, +7.60%
+and +8.94% on 10-06 to 10-08, nights with hundreds to over a thousand crash
+endings, which is the shape §256.4 describes.
+
+**The writer's two losses are §256.4's bound, not a reset.** They come to 30.5
+runs per crash ending on 09-27 and 9.9 on 10-03, both under the roughly 45 that
+§256.4 counted.
+
+**Surfaces-cross loses runs every night, and that is not what this section
+fixed.** It reads below zero on six of its seven nights. The runs lost per
+ending, (`#N` − record) / (timeouts + crashes), grow from 43 on 09-27 to 158 on
+10-07. It has 1 000 to 1 400 timeout endings a night and at most 11 crashes, so
+§256.4's bound does not cover it. §262.7's replay found that a target which times
+out almost every job reads +1% to +3%, not below. A reset is a one-off (269.5),
+and this is a loss that stays.
+
+**Verdict.** 269.7's prediction holds for what it was about: no loss of a
+reset's shape in 35 target-nights, where there were seven before. The torn
+`totals` was still not the only thing losing runs, because one target falls
+short every night. Q1381 finds why. A lead, not run: §278.6 says the `_Exit`
+paths, `-timeout` among them, still lose the runs since the last merge. This
+target's runs per job rose about 6.6 times over the week (835 on 09-27, 5 516 on
+10-07, record over jobs), and that would raise what each timeout ending loses.
