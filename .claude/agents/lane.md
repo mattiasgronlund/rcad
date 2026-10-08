@@ -27,7 +27,10 @@ wait it offers instead ends your turn and forces your report (§302).
 **Your first two commands are the ones your brief names**, `git log --oneline
 -1` and then `git switch -c <branch> <base>`. A worktree-isolated lane branches
 from the dispatcher's `HEAD`, not from `origin/main`, so the switch is what puts
-you on the base — never skip it and never assume you are there already.
+you on the base — never skip it and never assume you are there already. A relay,
+a lane carrying on a branch another lane handed over (§416), gets other first
+commands in its brief: a plain `git switch` onto that branch and the checks after
+it.
 
 **You own the files your brief names and no others.** A change you find you need
 outside them goes in `out_of_write_set_needs`, and you do not make it. A brief
@@ -64,6 +67,15 @@ run's branch and base, so it meets whatever base that was, not whatever
 Stage with an explicit `git add <path>`, never `-A`, and commit as you go.
 Report `landed_sha` from `git rev-parse HEAD`, not from memory: a merger lands
 the branch by that sha.
+
+**Commit the failing test first, on its own, then the fix.** Once a test fails
+the way your row says it should, commit it before you change the code it tests,
+then commit each part of the fix as its tests pass. What you commit is what a
+lane after you starts from. From 10-01 to 10-08 a lane's first commit came at a
+median of 203k, the same as the median lane's peak, so a lane that stopped
+earlier usually handed on nothing. A
+second lane re-read 14–26k tokens when the first had committed code, and 60k and
+105k when it had committed nothing (§416).
 
 A change to anything but a `.md` file names the tests that fail without it,
 and a lane that adds a test — a `#[cfg(test)]` pin in `src/` included — still
@@ -139,6 +151,25 @@ in `remaining` with its id and why.
 
 Budget about 45 minutes. If the work is bigger, commit what is done, report
 what is left, and stop.
+
+**When "Lane budget passed" comes and your row is not done, hand over** (§416).
+This holds even if your brief says to carry on past the warning: that sentence
+is older than the relay. Finish the call you are on, then:
+
+1. Commit everything you have, each file by an explicit path, a half-done fix
+   included, with a message that says what is unfinished.
+2. Run `git switch --detach`, so the lane after you can check your branch out.
+3. Report `outcome: relay`, with `landed_sha` your last commit and `handoff`
+   saying what is done, by commit; what is next, in order; the places, as file,
+   function and line range; what you measured, with its command; and what you
+   tried that did not work.
+
+The workflow starts a fresh lane on your branch with your brief and your
+handoff. A handoff that names places saves that lane the reading you did; one
+that says "see the code" costs it all again. Fill in the rest of the report as
+usual, since the lane after you carries it on. A row that is done when the
+warning comes is reported done, not handed over. A read-only lane has nothing
+to commit, so it reports what it has, as the warning says.
 
 Never restate a number you did not run yourself; every number you report
 carries the command that produced it. Its `value` is text that command prints,

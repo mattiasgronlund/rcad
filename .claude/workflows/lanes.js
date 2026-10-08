@@ -22,6 +22,12 @@
 // on. Since §385 the verifier's fixed steps, and its re-runs of the lane's
 // numbers, are `just verify-lane`'s, and the verifier keeps the reading.
 //
+// Since §416 a writing lane past its context budget does not carry on past it.
+// It commits what it has, lets go of its branch and reports `relay` with a
+// handoff, and a fresh lane carries the branch on from that commit, at most
+// MAX_RELAYS times a row. The verifier and the merger see one branch and the
+// last lane's report, which carries the whole row's account.
+//
 // Invoke it as the `lanes` workflow, which is `meta.name` below and not this
 // file's name: Claude Code loads `.claude/workflows/*.js`, parses `meta`, and
 // registers what `meta.name` says. Pass args:
@@ -77,6 +83,7 @@ export const meta = {
 const MERGE_ATTEMPTS = 3
 const DOCS_CATCH_UPS = 5
 const RESULT_LINES = 20
+const MAX_RELAYS = 3
 
 const writes = (lane) => Array.isArray(lane.writeSet) && lane.writeSet.length > 0
 const rowsOf = (lane) => {
@@ -109,17 +116,11 @@ log(`${LANES.length} lane(s) off ${BASE.slice(0, 8)}: ${LANES.map((l) => `${l.la
 // reached, and only function declarations are hoisted, so the one piece of
 // state the stages share is declared here.
 let lastMerge = Promise.resolve()
+const relayed = new Map()
 
 const results = await pipeline(
   LANES,
-  (lane) => agent(writes(lane) ? WRITING(lane) : READING(lane), {
-    label: lane.label,
-    phase: 'Work',
-    isolation: 'worktree',
-    agentType: 'lane',
-    schema: reportSchema(lane),
-    model: lane.model,
-  }),
+  (lane) => worked(lane),
   (report, lane) => verified(report, lane),
   (prior, lane) => {
     if (prior.stop) return handedBack(lane, prior)
@@ -140,11 +141,66 @@ const rows = results.map((r, i) => r || {
 log(`done: ${rows.filter((r) => r.merged).length} of ${LANES.length} lane(s) merged`)
 return { base: BASE, lanes: rows }
 
+// §416: the median lane peaked at 203k with its first commit at the very end,
+// so a lane stopped at the budget warning handed on nothing, and briefs told
+// lanes to carry on past it instead. Now the lane commits and hands its branch
+// to a fresh one. A second lane re-read 14-26k when the first had committed
+// and 60-105k when it had not, which is why the handoff is a commit and not
+// only prose. A row that asks for more than MAX_RELAYS is handed back.
+async function worked(lane) {
+  let report = await laneAgent(lane, writes(lane) ? WRITING(lane) : READING(lane), lane.label, 0)
+  const trees = []
+  let before = null
+  let n = 0
+  while (report && writes(lane) && report.outcome === 'relay' && n < MAX_RELAYS) {
+    const why = relayRefused(report)
+    if (why) {
+      relayed.set(lane.label, { trees, before, refused: why })
+      return report
+    }
+    n++
+    log(`${lane.label}: relay ${n} of ${MAX_RELAYS}, from ${report.landed_sha}`)
+    trees.push(report.worktree_path)
+    before = report
+    report = await laneAgent(lane, RELAY(lane, before, n), `relay ${n}:${lane.label}`, n)
+    if (report && report.outcome !== 'blocked' && !sameSha(report.continued_from, before.landed_sha)) {
+      relayed.set(lane.label, { trees, before, refused: `relay ${n} started at ${report.continued_from}, not at ${before.landed_sha} where the lane before it stopped` })
+      return report
+    }
+  }
+  const more = !!report && writes(lane) && report.outcome === 'relay'
+  relayed.set(lane.label, { trees, before, refused: more ? `the lane asked for relay ${n + 1}, past the ${MAX_RELAYS} a row gets` : null })
+  return report
+}
+
+function laneAgent(lane, prompt, label, relay) {
+  return agent(prompt, {
+    label,
+    phase: 'Work',
+    isolation: 'worktree',
+    agentType: 'lane',
+    schema: reportSchema(lane, relay),
+    model: lane.model,
+  })
+}
+
+function relayRefused(report) {
+  if (typeof report.handoff !== 'string' || !report.handoff.trim()) return 'the lane asked for a relay and wrote no handoff'
+  if (typeof report.worktree_path !== 'string' || !report.worktree_path) return 'the lane asked for a relay and named no worktree to take its branch from'
+  return null
+}
+
+function sameSha(a, b) {
+  return typeof a === 'string' && typeof b === 'string' && a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a))
+}
+
 // A lane that started somewhere else measured another tree; verifying its
 // claims against this base would only tell us they disagree, which we know.
 function verified(report, lane) {
-  const out = { report, check: null, kind: null }
+  const relay = relayed.get(lane.label) || { trees: [], before: null, refused: null }
+  const out = { report, check: null, kind: null, relayTrees: relay.trees, relayedFrom: relay.before }
   if (!report) return stopped(lane, out, 'the lane returned nothing')
+  if (relay.refused) return stopped(lane, out, relay.refused)
   if (typeof report.base_sha !== 'string' || report.base_sha.slice(0, 8) !== BASE.slice(0, 8)) {
     return stopped(lane, out, `the lane checked out ${report.base_sha}, not ${BASE.slice(0, 8)}`)
   }
@@ -454,6 +510,8 @@ function handedBack(lane, prior) {
     row.lines.push(`lane said ${prior.report.outcome}: ${prior.report.summary}`)
     if (prior.report.remaining) row.lines.push(`remaining: ${prior.report.remaining}`)
   }
+  const handoff = [prior.report, prior.relayedFrom].find((r) => r && typeof r.handoff === 'string' && r.handoff.trim())
+  if (handoff) row.lines.push(`handoff, on ${branchOf(lane)} at ${handoff.landed_sha}: ${handoff.handoff}`)
   if (prior.check) {
     row.lines.push(`verifier said ${prior.check.verdict}${prior.check.notes ? `: ${prior.check.notes}` : ''}`)
     for (const c of prior.check.unbacked_claims || []) row.lines.push(`unbacked: ${c}`)
@@ -465,7 +523,7 @@ function handedBack(lane, prior) {
 }
 
 function treesOf(prior) {
-  return [prior.report && prior.report.worktree_path, prior.check && prior.check.worktree_path].filter(Boolean)
+  return (prior.relayTrees || []).concat([prior.report && prior.report.worktree_path, prior.check && prior.check.worktree_path]).filter(Boolean)
 }
 
 function START(lane) {
@@ -491,7 +549,35 @@ ${lane.brief}
 ${START(lane)}`
 }
 
-function reportSchema(lane) {
+// The lane before has let go of the branch with `git switch --detach`, as
+// lane.md tells it to; the `-C` fallback covers one that did not.
+function RELAY(lane, before, n) {
+  const branch = branchOf(lane)
+  return `Queue ${rowsOf(lane)}. You own these files and no others: ${lane.writeSet.join(', ')}.
+Your branch: ${branch}, which you carry on: you are relay ${n} of at most ${MAX_RELAYS} (§416).
+
+A lane before you did part of this row, passed its context budget, committed its work to ${branch} at ${before.landed_sha} and handed it to you. Its handoff, which is where you start:
+
+${before.handoff}
+
+The row's brief, as that lane had it:
+
+${lane.brief}
+
+Base of the branch: main at ${BASE}. Your first commands, in this order:
+  git log --oneline -1
+  git switch ${branch}
+  git rev-parse HEAD
+  git merge-base --is-ancestor ${BASE} HEAD
+  git worktree unlock ${before.worktree_path}
+Report what git rev-parse HEAD printed as continued_from, and ${BASE} as base_sha once the ancestor check exits 0. If the switch refuses because ${branch} is checked out in ${before.worktree_path}, run git -C ${before.worktree_path} switch --detach and then the switch again. If it still refuses, if HEAD is not ${before.landed_sha}, or if the ancestor check fails, stop and report it as blocked. Never reach for \`checkout -B\` or \`switch -C\`.
+
+Your report is the row's report, not only your part of it. Carry into it, beside your own, everything of the lane before you that still holds: each number (run it again if a commit since could move it), each test in tests_that_fail_without_the_change, each step in rows, each file in files_changed, its decisions_section, out_of_write_set_needs and remaining.
+
+The lane before you reported (JSON): ${JSON.stringify(before)}`
+}
+
+function reportSchema(lane, relay) {
   const core = {
     start_sha: { type: 'string', description: 'what git log -1 said BEFORE your switch' },
     base_sha: { type: 'string', description: 'what you switched to' },
@@ -504,7 +590,8 @@ function reportSchema(lane) {
   }
   const required = ['start_sha', 'base_sha', 'branch', 'worktree_path', 'outcome', 'summary', 'numbers', 'remaining']
   if (writes(lane)) {
-    core.outcome = { type: 'string', enum: ['fixed', 'limit_demonstrated', 'partial', 'blocked'] }
+    core.outcome = { type: 'string', enum: ['fixed', 'limit_demonstrated', 'partial', 'blocked', 'relay'] }
+    core.handoff = { type: 'string', description: 'only with outcome relay, lane.md and §416: what is done, by commit; what is next, in order; the places, as file, function and lines; what you measured, with its command; and what you tried that did not work' }
     core.landed_sha = { type: 'string', description: 'your last commit' }
     core.decisions_section = { type: 'string', description: 'the section number you claimed with just claim-section, if any' }
     core.files_changed = { type: 'array', items: { type: 'string' } }
@@ -518,6 +605,10 @@ function reportSchema(lane) {
     if (lane.sameBehaviour === true) {
       core.tests_that_reach_the_change = { type: 'array', items: { type: 'string' }, description: 'the tests that run the lines you changed and pass before and after; your row keeps the behaviour, so no test fails without it and tests_that_fail_without_the_change stays empty (§399)' }
       required.push('tests_that_reach_the_change')
+    }
+    if (relay > 0) {
+      core.continued_from = { type: 'string', description: 'what git rev-parse HEAD printed straight after your git switch onto the branch' }
+      required.push('continued_from')
     }
   } else {
     core.outcome = { type: 'string', enum: ['answered', 'partial', 'blocked'] }
@@ -646,7 +737,7 @@ Exit 0 from the second means the lander's run pushed before it stopped or died: 
   return `Merge queue ${rowsOf(lane)}, lane ${lane.label}, onto main, or say why not.
 Lane branch: ${branchOf(lane)}, which it reports ending at ${r.landed_sha}.
 The lane's write set: ${lane.writeSet.join(', ')}
-Trees to unlock: the lane's, ${r.worktree_path}; ${verifier}
+Trees to unlock: the lane's, ${r.worktree_path}; ${relayedFrom(prior)}${verifier}
 Only if your push went through, after unlocking your own tree: mise exec -- just mark-finished ${treesOf(prior).join(' ')} <your own tree>
 Your first commands, in this order:
   git log --oneline -1
@@ -660,6 +751,11 @@ The lane's rows are its add steps for your queue apply, as merger.md step 3 says
 The lane's report (JSON): ${JSON.stringify(r)}
 
 The verifier's verdict (JSON): ${JSON.stringify(prior.check)}`
+}
+
+function relayedFrom(prior) {
+  const trees = prior.relayTrees || []
+  return trees.length ? `the lanes it was relayed from, ${trees.join(', ')}; ` : ''
 }
 
 // Every argument the lander types is literal text, since the Bash guard of a

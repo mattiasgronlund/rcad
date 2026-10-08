@@ -169,10 +169,12 @@ standing rules and a brief carries only what is this row's:
   not exist yet — this repo keeps its finished `lane-*` branches, so check `git
   branch --list 'lane-*'` first; a reused label stops the lane at its second
   command (§237);
-- nothing about the context hook, unless you expect the lane to run long. A
-  lane that sees "Lane budget passed" is past 150k of its own context and is
-  told to commit and report; say "carry on past it" only in a brief whose work
-  needs that much;
+- nothing about the context hook for a writing lane. One that sees "Lane
+  budget passed" is past 150k of its own context; it commits, hands its branch
+  over, and `lanes.js` starts a fresh lane on it, up to three times a row
+  (§416). "Carry on past it" would undo that. A read-only lane has nothing to
+  hand over and stops at the warning, so say "carry on past it" in a read-only
+  brief that builds a probe or reads a listing;
 - for a row that writes a section, `mise exec -- just claim-section '<what>'`
   before writing;
 - the verbatim API signatures and exact-arithmetic facts that lane needs,

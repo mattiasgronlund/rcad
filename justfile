@@ -2745,6 +2745,21 @@ check-skills-selftest:
 # phrase inside its own tail -- and that the Opus merger's brief, for a row
 # that never reached the lander, names the gate as a reason beside the other
 # two.
+#
+# **A twenty-second arm holds the relay (§416).** From 10-01 to 10-08, 283 of
+# 354 Opus lanes passed the 150k budget, and a lane's first commit came at a
+# median of 203k, so a lane stopped at the warning handed on nothing and briefs
+# told lanes to carry on instead. Now a writing lane past the warning commits,
+# lets go of its branch and reports `relay`, and `lanes.js` starts a fresh lane
+# on that branch. The arm checks that a row's relays are bounded by
+# `MAX_RELAYS`; that a row asking for one past the bound, or whose relay was
+# refused, is handed back rather than verified; that a relay switches onto the
+# lane's own branch and is checked to start where the lane before it stopped;
+# that the trees a row was relayed from are counted among its trees, so they
+# are unlocked and marked finished; and that `relay` is an outcome a writing
+# lane may report. In `lane.md` it checks the rule to hand over, the `git
+# switch --detach` that frees the branch, and the rule to commit the failing
+# test first, which is what a relay starts from.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -2831,6 +2846,17 @@ check-lanes-workflow:
     same_caught="  return !!m && m.outcome_on_branch === 'fail'"
     same_steps='## Same behaviour'
     same_pointer='(a row that keeps what they compute goes again marked sameBehaviour, §399)'
+    relay_constant='^const MAX_RELAYS = [1-9][0-9]*$'
+    relay_loop="  while (report && writes(lane) && report.outcome === 'relay' && n < MAX_RELAYS) {"
+    relay_more="  const more = !!report && writes(lane) && report.outcome === 'relay'"
+    relay_refused='  if (relay.refused) return stopped(lane, out, relay.refused)'
+    relay_continuity="    if (report && report.outcome !== 'blocked' && !sameSha(report.continued_from, before.landed_sha)) {"
+    relay_switch='  git switch ${branch}'
+    relay_trees='  return (prior.relayTrees || []).concat([prior.report && prior.report.worktree_path, prior.check && prior.check.worktree_path]).filter(Boolean)'
+    relay_outcome="    core.outcome = { type: 'string', enum: ['fixed', 'limit_demonstrated', 'partial', 'blocked', 'relay'] }"
+    relay_rule='**When "Lane budget passed" comes and your row is not done, hand over** (§416).'
+    relay_detach='2. Run `git switch --detach`, so the lane after you can check your branch out.'
+    test_first='**Commit the failing test first, on its own, then the fix.** Once a test fails'
     settings=.claude/settings.json
     script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
@@ -3157,6 +3183,30 @@ check-lanes-workflow:
             echo "$1's brief to the Opus merger does not name a red verifier gate as a reason the lander never ran ('$gate_reason'); the merger would read a cause that is not true (§383.4 item 3, §414)"
             return 21
         fi
+        if ! grep -qE -- "$relay_constant" "$1" || ! grep -qxF -- "$relay_loop" "$1"; then
+            echo "$1 does not bound a row's relays by MAX_RELAYS in the loop that starts them ('$relay_loop'); a lane asking for relay after relay would never stop (§416)"
+            return 22
+        fi
+        if ! grep -qxF -- "$relay_more" "$1" || ! grep -qxF -- "$relay_refused" "$1"; then
+            echo "$1 does not hand back a row whose lane asks for a relay past the bound, or whose relay was refused; that lane's half-done commit would go to the verifier as if it were finished (§416)"
+            return 22
+        fi
+        if ! grep -qxF -- "$relay_switch" "$1" || ! grep -qxF -- "$relay_continuity" "$1"; then
+            echo "$1 does not switch a relay onto the lane's own branch and check that it starts where the lane before it stopped; a relay could carry on from another commit (§416)"
+            return 22
+        fi
+        if ! grep -qxF -- "$relay_trees" "$1"; then
+            echo "$1 does not count the trees a row was relayed from among its trees, so nothing unlocks them or marks them finished (§416)"
+            return 22
+        fi
+        if ! grep -qxF -- "$relay_outcome" "$1"; then
+            echo "$1 does not let a writing lane report the outcome relay (§416)"
+            return 22
+        fi
+        if ! grep -qF -- "$relay_rule" "$2/lane.md" || ! grep -qF -- "$relay_detach" "$2/lane.md" || ! grep -qF -- "$test_first" "$2/lane.md"; then
+            echo "$2/lane.md does not tell a lane to commit its failing test first and to hand over at the budget warning, letting go of its branch; a lane stopped there would hand on nothing (§416)"
+            return 22
+        fi
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
     swap() {
@@ -3336,7 +3386,29 @@ check-lanes-workflow:
     grep -vxF -- "$gate_pass_check" "$file" > "$dir/gate-check-missing/lanes.js"
     fresh gate-reason-missing
     swap "$file" "$gate_reason" 'or the lane wrote no rows just land takes.' > "$dir/gate-reason-missing/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21)
+    fresh relay-unbounded
+    swap "$file" ' && n < MAX_RELAYS) {' ') {' > "$dir/relay-unbounded/lanes.js"
+    fresh relay-no-bound
+    grep -vE -- "$relay_constant" "$file" > "$dir/relay-no-bound/lanes.js"
+    fresh relay-past-the-bound-verified
+    swap "$file" "$relay_more" '  const more = false' > "$dir/relay-past-the-bound-verified/lanes.js"
+    fresh relay-refusal-ignored
+    grep -vxF -- "$relay_refused" "$file" > "$dir/relay-refusal-ignored/lanes.js"
+    fresh relay-from-anywhere
+    grep -vxF -- "$relay_continuity" "$file" > "$dir/relay-from-anywhere/lanes.js"
+    fresh relay-not-switched
+    grep -vxF -- "$relay_switch" "$file" > "$dir/relay-not-switched/lanes.js"
+    fresh relay-trees-forgotten
+    swap "$file" '(prior.relayTrees || []).concat(' '(' > "$dir/relay-trees-forgotten/lanes.js"
+    fresh relay-not-an-outcome
+    swap "$file" ", 'relay'] }" '] }' > "$dir/relay-not-an-outcome/lanes.js"
+    fresh relay-unsaid
+    grep -vF -- "$relay_rule" "$agents/lane.md" > "$dir/relay-unsaid/agents/lane.md"
+    fresh relay-holds-the-branch
+    grep -vF -- "$relay_detach" "$agents/lane.md" > "$dir/relay-holds-the-branch/agents/lane.md"
+    fresh test-not-first
+    grep -vF -- "$test_first" "$agents/lane.md" > "$dir/test-not-first/agents/lane.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
@@ -3353,7 +3425,7 @@ check-lanes-workflow:
             exit 1
         fi
     done
-    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, hands the verifier just verify-lane, and prunes only what merged; ${#cuts[@]} cuts, each caught"
+    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, hands the verifier just verify-lane, relays a lane past its budget to a fresh one, and prunes only what merged; ${#cuts[@]} cuts, each caught"
 
 # Print the changed lines between two commits that could change what runs:
 # everything but `.md` files, comment lines, and test code -- files under
