@@ -44,7 +44,7 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    EdgeRun, MeetsAt, Plane, PlaneAgreement, Point, Surface, WhereALineMeetsIt,
+    Cone, EdgeRun, MeetsAt, Plane, PlaneAgreement, Point, Surface, WhereALineMeetsIt,
     where_a_line_meets_a_surface,
 };
 use rcad_predicates::{
@@ -238,6 +238,7 @@ impl SolidView<'_> {
         if is_outside_the_box(point, low, high)
             && self
                 .opened_out_to_where_its_planes_meet(low, high)
+                .map(|(low, high)| self.opened_out_by_what_a_tipped_disc_loses(low, high))
                 .is_some_and(|(low, high)| is_outside_the_box(point, low, high))
         {
             return Containment::Outside;
@@ -303,9 +304,12 @@ impl SolidView<'_> {
     /// is no corner of the outline, which runs straight on through it, and is
     /// passed over.
     ///
-    /// **A corner beside a curved face is not opened out**: the stored box is
-    /// all there is there, and where a plane and a curved surface meet a
-    /// rounding past it is not asked here.
+    /// **A corner beside a curved face is not opened out here**: the stored
+    /// box holds a face on a pipe or a cone by the discs across its axis, and
+    /// a corner on that face is inside those discs. What a tipped disc loses
+    /// of its reach is opened out next
+    /// ([`SolidView::opened_out_by_what_a_tipped_disc_loses`]). Where a plane
+    /// and a curved surface meet a rounding past the discs is not asked.
     ///
     /// Asked only of a point already past the stored box, since a solid of a
     /// thousand faces is a thousand meetings worked out.
@@ -359,6 +363,66 @@ impl SolidView<'_> {
             }
         }
         Some((Point::from(low), Point::from(high)))
+    }
+
+    /// The box from `low` to `high`, opened out along each axis by as much of a
+    /// pipe's or a cone's reach as [`SolidView::box_around_it`] may have lost
+    /// to working it out as `r · √(1 − a²)`.
+    ///
+    /// **That box holds a face on a pipe or a cone by the discs across its
+    /// axis**, and a disc of radius `r` square to the axis `a` reaches
+    /// `r · √(1 − a²/|a|²)` along a coordinate axis, `a` being the axis's part
+    /// along it. The box works it out as `r · √(1 − a²)`, and where `a` is
+    /// near one the subtraction keeps nothing but rounding. A bar tipped
+    /// `1e-9` off `z` stores an axis whose `z` part is exactly one, so its
+    /// discs reach nothing in `z` by that sum where they truly reach a
+    /// billionth of the radius, and the stored surfaces put points a
+    /// billionth past the box inside
+    /// (`tests/a_point_a_rounding_past_a_turned_solids_corner.rs`, Q1332).
+    ///
+    /// The reach is worked out again here as `r · √(b² + c²)/|a|`, from the
+    /// axis's other two parts, which loses nothing to cancellation, and the
+    /// box is opened out by whatever that gives past the sum the box used.
+    /// That is nothing for a bar along a coordinate axis, whose sum is exact,
+    /// so such a bar's box is not widened at all. What it does not cover is a
+    /// rounding or two in the rest of the box's arithmetic, the disc's centre
+    /// and the sum that adds the reach to it, which round to nearest and not
+    /// outward.
+    ///
+    /// A cone's radius grows along it, and the widest any of its faces' discs
+    /// can be is bounded by how far the box's corners are from its apex
+    /// ([`the_widest_a_cone_reaches`]).
+    fn opened_out_by_what_a_tipped_disc_loses(self, low: Point, high: Point) -> (Point, Point) {
+        let mut lost = [0.0f64; 3];
+        for face in self.faces() {
+            let surface = face.surface();
+            let (along, radius) = if let Surface::Cylinder(pipe) = surface {
+                (pipe.axis().direction(), pipe.radius())
+            } else if let Surface::Cone(cone) = surface {
+                (
+                    cone.axis().direction(),
+                    the_widest_a_cone_reaches(cone, low, high),
+                )
+            } else {
+                continue;
+            };
+            let parts = along.components();
+            let length = parts.iter().map(|part| part * part).sum::<f64>();
+            for axis in 0..3 {
+                let others = (0..3)
+                    .filter(|&other| other != axis)
+                    .map(|other| parts[other] * parts[other])
+                    .sum::<f64>();
+                let reach = (others / length).sqrt();
+                let as_the_box_has_it = (1.0 - parts[axis] * parts[axis]).max(0.0).sqrt();
+                lost[axis] = lost[axis].max(radius * (reach - as_the_box_has_it).max(0.0));
+            }
+        }
+        let (low, high) = (low.coordinates(), high.coordinates());
+        (
+            Point::from(core::array::from_fn(|axis| low[axis] - lost[axis])),
+            Point::from(core::array::from_fn(|axis| high[axis] + lost[axis])),
+        )
     }
 
     /// What a flat face whose corners and stored plane read the point
@@ -994,9 +1058,12 @@ impl SolidView<'_> {
 ///
 /// [`SolidView::box_around_it`] alone is not that box: it holds a flat face's
 /// stored corners, and a turned solid's stored planes, which are its faces,
-/// meet a rounding past them (Q1157). So the answer is taken only where the
-/// point is past that box opened out to where the planes meet as well
-/// (`SolidView::opened_out_to_where_its_planes_meet`).
+/// meet a rounding past them (Q1157), and a disc across a pipe's or a cone's
+/// axis tipped a hair off a coordinate axis reaches past it along that axis
+/// (Q1332). So the answer is taken only where the point is past that box
+/// opened out to where the planes meet and by what a tipped disc loses as well
+/// (`SolidView::opened_out_to_where_its_planes_meet`,
+/// `SolidView::opened_out_by_what_a_tipped_disc_loses`).
 ///
 /// A box that overlaps the solid's bounding box proves nothing either way, so
 /// it falls through and the rays decide it. So does a coordinate with no
@@ -1008,6 +1075,25 @@ fn is_outside_the_box(point: PredicatePoint, low: Point, high: Point) -> bool {
     let low = low.coordinates();
     let high = high.coordinates();
     (0..3).any(|axis| point[axis].hi() < low[axis] || point[axis].lo() > high[axis])
+}
+
+/// The widest a disc of `cone` reaches anywhere in the box from `low` to
+/// `high`: no further from the axis than `slope` times how far along it, and
+/// no further than from the apex, so neither more than the box's farthest
+/// corner is from the apex.
+fn the_widest_a_cone_reaches(cone: Cone, low: Point, high: Point) -> f64 {
+    let apex = cone.apex().coordinates();
+    let (low, high) = (low.coordinates(), high.coordinates());
+    let farthest = (0..3)
+        .map(|axis| {
+            let off = (low[axis] - apex[axis])
+                .abs()
+                .max((high[axis] - apex[axis]).abs());
+            off * off
+        })
+        .sum::<f64>()
+        .sqrt();
+    cone.slope().min(1.0) * farthest
 }
 
 /// Whether some triangle of `face`'s fan and its stored plane `flat` do not

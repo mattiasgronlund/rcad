@@ -11,13 +11,22 @@
 //! `SolidView::shares_space_with` read the same box the same way, and called a
 //! block resting a spacing above that box `Apart` from the cube (Q1331).
 //!
-//! Every answer here is checked against the stored planes' exact signs. A cube
-//! is convex, so it holds a point exactly when each of its six planes puts the
-//! point on the cube's side.
+//! A face on a pipe or a cone is held in that box by the discs across its
+//! axis, and a disc's reach along a coordinate axis was worked out as
+//! `r · √(1 − a²)`, which keeps nothing but rounding where the axis is a hair
+//! off that coordinate axis. A bar or a frustum tipped `1e-9` reaches a
+//! billionth of its radius past the box, and points there came back `Outside`
+//! where every stored surface put them inside (Q1332).
+//!
+//! Every answer here is checked against the stored surfaces' exact signs.
+//! Every solid here is convex, so it holds a point exactly when each of its
+//! surfaces puts the point on the solid's side.
 
-use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Vector};
-use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Surface, Vector};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{Containment, FaceView, Model, SharedSpace, SolidKey, SolidView};
+
+mod cones;
 
 /// A point one spacing above the top of a cube's box, turned `2.5` about
 /// `(1, 1, 1)`, under the corner whose three planes meet above that box. The
@@ -33,7 +42,10 @@ fn a_point_above_a_turned_cubes_box_that_every_plane_puts_inside_is_inside() {
     ];
     let (_, high) = view.box_around_it().expect("a cube has a box");
     assert_eq!(high.coordinates()[2].next_up(), point[2]);
-    assert_eq!(what_the_stored_planes_say(view, point), Containment::Inside);
+    assert_eq!(
+        what_the_stored_surfaces_say(view, point),
+        Containment::Inside
+    );
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
         assert_eq!(
             view.classify_point(
@@ -85,11 +97,11 @@ fn a_block_one_spacing_above_a_turned_cubes_box_is_not_called_apart_from_it() {
         1.401_524_820_729_245,
     ];
     assert_eq!(
-        what_the_stored_planes_say(cube, in_both),
+        what_the_stored_surfaces_say(cube, in_both),
         Containment::Inside
     );
     assert_eq!(
-        what_the_stored_planes_say(block, in_both),
+        what_the_stored_surfaces_say(block, in_both),
         Containment::Inside
     );
 
@@ -152,6 +164,92 @@ fn how_often_a_point_past_a_turned_cubes_box_that_every_plane_puts_inside_is_ans
     assert_eq!((points, inside, undecided, outside), (3897, 1, 3811, 85));
 }
 
+/// A point a billionth above the box of a bar and of a frustum, each tipped
+/// `1e-9` about `x`, under the top rim's highest point (Q1332).
+///
+/// The tip leaves the axis's `z` part exactly one, so the box, which works a
+/// disc's reach along `z` out as `r · √(1 − 1)`, has the top cap reach no
+/// higher than its middle. It truly reaches a billionth of its radius higher
+/// on one side, and the box alone put these points outside.
+#[test]
+fn a_point_above_a_bar_or_a_frustum_tipped_a_billionth_that_its_surfaces_put_inside_is_inside() {
+    for (shape, point) in [
+        (Tipped::Bar, [0.0, 0.499_999_999, 1.000_000_000_4]),
+        (Tipped::Frustum, [0.0, 0.999_999_996, 4.000_000_000_9]),
+    ] {
+        let (model, solid, _) = shape.built([1.0, 0.0, 0.0], 1e-9);
+        let view = model.solid(solid).expect("this model made the key");
+        let (_, high) = view.box_around_it().expect("a solid has a box");
+        assert!(point[2] > high.coordinates()[2], "{shape:?}: {high:?}");
+        assert_eq!(
+            what_the_stored_surfaces_say(view, point),
+            Containment::Inside,
+            "{shape:?}"
+        );
+        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            assert_eq!(
+                view.classify_point(
+                    Point::new(point[0], point[1], point[2]),
+                    &policy,
+                    &mut ProvenanceLog::new()
+                ),
+                Containment::Inside,
+                "{shape:?} {policy:?}"
+            );
+        }
+    }
+}
+
+/// Forty bars and frustums, each tipped about one of four axes square to its
+/// own by one of five small angles. Near each rim, every point sampled past
+/// the solid's box that every stored surface puts inside is classified.
+///
+/// A tip under about `1e-7` leaves the box short of the discs at the rims,
+/// and the box alone answered every one of these points `Outside`. From
+/// `1e-6` the margin the box already leaves along the axis covers what the
+/// sum loses, and none of the points sampled is past the box.
+#[test]
+fn how_often_a_point_past_a_tipped_bar_or_frustums_box_that_its_surfaces_put_inside_is_answered_outside()
+ {
+    let axes = [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [1.0, 1.0, 0.0],
+        [2.0, -1.0, 0.0],
+    ];
+    let angles = [1e-9, 1e-8, 3e-8, 1e-7, 1e-6];
+    let (mut points, mut inside, mut undecided, mut outside) = (0, 0, 0, 0);
+    for shape in [Tipped::Bar, Tipped::Frustum] {
+        for axis in axes {
+            for angle in angles {
+                let (model, solid, tip) = shape.built(axis, angle);
+                let view = model.solid(solid).expect("this model made the key");
+                for point in points_past_its_box_its_surfaces_put_inside(view, shape, &tip) {
+                    points += 1;
+                    let answer = view.classify_point(
+                        Point::new(point[0], point[1], point[2]),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    );
+                    if answer == Containment::Inside {
+                        inside += 1;
+                    } else if matches!(answer, Containment::Undecidable { .. }) {
+                        undecided += 1;
+                    } else {
+                        assert_eq!(answer, Containment::Outside, "{shape:?} {point:?}");
+                        outside += 1;
+                    }
+                }
+            }
+        }
+    }
+    println!(
+        "{points} points past the box that every surface puts inside: \
+         {inside} Inside, {undecided} Undecidable, {outside} Outside"
+    );
+    assert_eq!((points, inside, undecided, outside), (23639, 23639, 0, 0));
+}
+
 /// Every `f64` point near a corner outermost along an axis that is past the
 /// box along that axis and that every stored plane puts inside.
 fn points_past_its_box_every_plane_puts_inside(view: SolidView<'_>) -> Vec<[f64; 3]> {
@@ -190,7 +288,8 @@ fn points_past_its_box_every_plane_puts_inside(view: SolidView<'_>) -> Vec<[f64;
                 for &x in &near[0] {
                     for &y in &near[1] {
                         for &z in &near[2] {
-                            if what_the_stored_planes_say(view, [x, y, z]) == Containment::Inside {
+                            if what_the_stored_surfaces_say(view, [x, y, z]) == Containment::Inside
+                            {
                                 found.push([x, y, z]);
                             }
                         }
@@ -236,12 +335,13 @@ enum Side {
     On,
 }
 
-/// The cube is convex, so it holds a point exactly when every stored plane
-/// puts the point on the cube's side.
-fn what_the_stored_planes_say(view: SolidView<'_>, point: [f64; 3]) -> Containment {
+/// Every solid here is convex — a cube, a block, a bar and a frustum — so it
+/// holds a point exactly when every stored surface puts the point on the
+/// solid's side.
+fn what_the_stored_surfaces_say(view: SolidView<'_>, point: [f64; 3]) -> Containment {
     let sides: Vec<Side> = view
         .faces()
-        .map(|face| side_of_its_plane(face, point))
+        .map(|face| side_of_its_surface(face, point))
         .collect();
     if sides.contains(&Side::Outer) {
         Containment::Outside
@@ -252,13 +352,21 @@ fn what_the_stored_planes_say(view: SolidView<'_>, point: [f64; 3]) -> Containme
     }
 }
 
-fn side_of_its_plane(face: FaceView<'_>, point: [f64; 3]) -> Side {
+fn side_of_its_surface(face: FaceView<'_>, point: [f64; 3]) -> Side {
     let outer = if face.orientation().is_reversed() {
         Decision::Neg
     } else {
         Decision::Pos
     };
-    let side = face.plane().side_of_point(PredicatePoint::from(point));
+    let at = PredicatePoint::from(point);
+    let surface = face.surface();
+    let side = if let Surface::Cylinder(pipe) = surface {
+        pipe.side_of(at)
+    } else if let Surface::Cone(cone) = surface {
+        cone.side_of(at)
+    } else {
+        face.plane().side_of_point(at)
+    };
     assert!(
         matches!(side, Decision::Pos | Decision::Neg | Decision::Zero),
         "an exact point is always placed: {side:?}"
@@ -270,6 +378,84 @@ fn side_of_its_plane(face: FaceView<'_>, point: [f64; 3]) -> Side {
     } else {
         Side::Inner
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Tipped {
+    /// A round bar of radius 1 from `z = 0` to `z = 1`.
+    Bar,
+    /// The frustum of a cone of slope a half about `z`, from `z = 2`, where
+    /// its radius is 1, to `z = 4`, where it is 2.
+    Frustum,
+}
+
+impl Tipped {
+    /// The solid, tipped `angle` about `axis` through the origin, and the tip.
+    fn built(self, axis: [f64; 3], angle: f64) -> (Model, SolidKey, Isometry) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let tip = Isometry::rotation(
+            &Axis::new(Point::origin(), Vector::new(axis[0], axis[1], axis[2])).expect("an axis"),
+            angle,
+        )
+        .expect("a finite turn");
+        let solid = match self {
+            Self::Bar => model
+                .add_round_bar(1.0, 1.0, &tip)
+                .expect("a bar of radius 1"),
+            Self::Frustum => {
+                let frustum = cones::a_frustum(&mut model, 0.5, 2.0, 4.0);
+                model
+                    .place_solid(frustum, &tip)
+                    .expect("this model made the key");
+                frustum
+            }
+        };
+        (model, solid, tip)
+    }
+
+    /// Each cap's rim as its radius, its height up the untipped axis, and
+    /// which way along the axis the solid lies from it.
+    fn rims(self) -> [(f64, f64, f64); 2] {
+        match self {
+            Self::Bar => [(1.0, 0.0, 1.0), (1.0, 1.0, -1.0)],
+            Self::Frustum => [(1.0, 2.0, 1.0), (2.0, 4.0, -1.0)],
+        }
+    }
+}
+
+/// Points just inside each rim of the untipped solid, `inward` of the radius
+/// in from the rim and `inward` along the axis in from the cap, half a degree
+/// apart round it, tipped with the solid — those past its box that every
+/// stored surface puts inside.
+fn points_past_its_box_its_surfaces_put_inside(
+    view: SolidView<'_>,
+    shape: Tipped,
+    tip: &Isometry,
+) -> Vec<[f64; 3]> {
+    let (low, high) = view.box_around_it().expect("a solid has a box");
+    let (low, high) = (low.coordinates(), high.coordinates());
+    let mut found = Vec::new();
+    for (radius, height, towards_the_middle) in shape.rims() {
+        for step in 0..720 {
+            let round = f64::from(step) * core::f64::consts::TAU / 720.0;
+            for inward in [1e-13, 1e-11, 1e-9] {
+                let near_the_rim = Point::new(
+                    radius * (1.0 - inward) * round.cos(),
+                    radius * (1.0 - inward) * round.sin(),
+                    height + towards_the_middle * inward,
+                );
+                let point = tip.apply_to_point(near_the_rim).coordinates();
+                let is_past_the_box =
+                    (0..3).any(|axis| point[axis] < low[axis] || point[axis] > high[axis]);
+                if is_past_the_box
+                    && what_the_stored_surfaces_say(view, point) == Containment::Inside
+                {
+                    found.push(point);
+                }
+            }
+        }
+    }
+    found
 }
 
 /// A cube of side 2 about the origin, turned `angle` about `axis` through it.
