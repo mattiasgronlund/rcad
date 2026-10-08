@@ -23,7 +23,7 @@ mod pairs;
 
 use rcad_geom::Deflection;
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, Rule, SolidKey};
+use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use comparison::{answer_of, same_answer};
 use pairs::{Configuration, Elsewhere, Placed, Shape, Skew, Turn};
@@ -34,6 +34,32 @@ const BLOCK: usize = 1;
 #[test]
 fn a_turned_frame_and_the_block_flush_beneath_it_unite_to_one_solid_of_fourteen() {
     both_ways_round_give(Rule::Union, 1, 14.0);
+}
+
+/// **Taking the block back out of the union is refused today**, though the
+/// answer is the frame. The union keeps one edge from the block's front to the
+/// frame's front, where a strip `2.8e-17` wide was left out, and the two fronts
+/// are planes with the same normal bits and offsets `0.0` and
+/// `-2.7755575615628914e-17`: parallel, and apart. No third plane meets both,
+/// and the second fuse stops at "where three surfaces meet" with no bound at
+/// all. A gap and not a limit (§16.10), since the frame is in the model; the
+/// lane that answers it turns this test round.
+#[test]
+fn the_block_taken_back_out_of_the_union_is_refused_where_the_two_fronts_are_parallel() {
+    let (mut model, keys) = the_frame_and_the_block().build();
+    let union = fuse_and_validate(&mut model, &[keys[FRAME]], &[keys[BLOCK]], Rule::Union);
+    let refused = model.fuse(
+        &union,
+        &[keys[BLOCK]],
+        Rule::Difference,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(refused, Err(Error::Undecidable { .. })),
+        "the union less the block was expected to be refused as undecidable, and gave {:?}",
+        refused.map(|fused| fused.solids().len())
+    );
 }
 
 #[test]
@@ -118,21 +144,30 @@ fn the_frame_and_the_block() -> Configuration {
 /// check that what came back validates.
 fn fused(arguments: usize, tools: usize, rule: Rule) -> (Model, Vec<SolidKey>) {
     let (mut model, keys) = the_frame_and_the_block().build();
-    let mut log = ProvenanceLog::new();
+    let solids = fuse_and_validate(&mut model, &[keys[arguments]], &[keys[tools]], rule);
+    (model, solids)
+}
+
+fn fuse_and_validate(
+    model: &mut Model,
+    arguments: &[SolidKey],
+    tools: &[SolidKey],
+    rule: Rule,
+) -> Vec<SolidKey> {
     let solids = match model.fuse(
-        &[keys[arguments]],
-        &[keys[tools]],
+        arguments,
+        tools,
         rule,
         &Policy::certified(),
-        &mut log,
+        &mut ProvenanceLog::new(),
     ) {
         Ok(fused) => fused.solids().to_vec(),
-        Err(why) => panic!("the {rule:?} of solid {arguments} against {tools} refused: {why:?}"),
+        Err(why) => panic!("the {rule:?} of {arguments:?} against {tools:?} refused: {why:?}"),
     };
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a fuse's answer validates");
-    (model, solids)
+    solids
 }
 
 fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
