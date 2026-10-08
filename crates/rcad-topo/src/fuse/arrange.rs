@@ -73,7 +73,7 @@ use rcad_geom::{
     Axis, Cone, Cylinder, EdgeRun, MeetOfThree, NamedRun, Orientation,
     POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane, PlaneAgreement, Point, Sphere, Surface,
     SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
-    intersect, meet_of_three_surfaces, where_a_closed_crossing_starts,
+    intersect, meet_of_three_surfaces, root_enclosing, where_a_closed_crossing_starts,
     where_a_cones_apex_stands_against_a_plane, which_comes_first_round_a_crossing,
 };
 use rcad_predicates::expansion::{difference_of_two_products, expansion_sign, expansion_sum};
@@ -7482,7 +7482,9 @@ fn a_ruling_through_an_apex(
 /// four corners, so no two can be read in one.
 ///
 /// **Every enclosure here is interval `+ − ×` on the stored numbers, and the
-/// one root is rounded outwards** ([`root_rounded_outwards`]).
+/// one root is [`root_enclosing`], the same copy `rcad-geom` rounds its own
+/// cone-apex root with** (Q1234; this used to carry its own, always a step
+/// looser).
 ///
 /// # Panics
 ///
@@ -7500,7 +7502,11 @@ fn the_way_a_half_ruling_leaves_the_apex(
     let across = cross_of_intervals(normal, along);
     let slope = Interval::exactly(cone.slope());
     let leaning = up * up - slope * slope * dot_of(across, across);
-    let spread = root_rounded_outwards(-(leaning * squared_axis))?;
+    let under_the_root = -(leaning * squared_axis);
+    if under_the_root.hi() < 0.0 {
+        return None;
+    }
+    let spread = root_enclosing(under_the_root);
     let squared_normal = dot_of(normal, normal);
     let down: [Interval; 3] = core::array::from_fn(|axis| {
         squared_axis * (squared_normal * along[axis] - up * normal[axis])
@@ -7524,25 +7530,6 @@ fn the_way_a_half_ruling_leaves_the_apex(
          which rcad-geom proved holds one half ruling"
     );
     Some(way)
-}
-
-/// `√value` as an enclosure, or `None` when the whole of `value` is below
-/// nothing.
-///
-/// **Rounded outwards by one step at each end.** `f64::sqrt` is correctly
-/// rounded, so the root of the low end lies within half a step of what it
-/// gives back and one step down is at or below it, and one step up from the
-/// root of the high end is at or above that. The root grows with what it is
-/// taken of, so every value between the two ends has its root between those.
-/// A low end below nothing is taken as nothing, which only widens the
-/// enclosure. `the_root_rounded_outwards_encloses_the_root` is the test.
-fn root_rounded_outwards(value: Interval) -> Option<Interval> {
-    if value.hi() < 0.0 {
-        return None;
-    }
-    let lo = value.lo().max(0.0).sqrt().next_down().max(0.0);
-    let hi = value.hi().sqrt().next_up();
-    Some(Interval::new(lo, hi).expect("a root grows with what it is taken of"))
 }
 
 /// Whether one of the two is a plane resting along the other, a cone, touching
@@ -8530,70 +8517,13 @@ mod tests {
 
     use super::{
         Arc, Arrangement, Boundary, CrossingsDrawn, HowItRuns, Node, Piece, as_exact_as_it_is,
-        canonical_cut_surfaces, prove_the_hinted_order, root_rounded_outwards, split_a_face,
-        the_other_way, the_way_a_half_ruling_leaves_the_apex, three_planes_faced_the_one_way,
+        canonical_cut_surfaces, prove_the_hinted_order, split_a_face, the_other_way,
+        the_way_a_half_ruling_leaves_the_apex, three_planes_faced_the_one_way,
         where_the_crossing_starts,
     };
     use crate::fuse::bake::{BakedFace, BakedSolid, bake, what_writing_the_corner_down_cost};
     use crate::fuse::{FaceMeet, MeetPoint};
     use crate::{Model, ProfileBuilder, SolidKey};
-
-    /// The enclosure [`root_rounded_outwards`] publishes holds the true root:
-    /// the square of its low end is at or below the low end it was taken of,
-    /// and the square of its high end at or above the high end, both decided
-    /// exactly from `two_product`'s two halves of the square.
-    #[test]
-    fn the_root_rounded_outwards_encloses_the_root() {
-        use rcad_predicates::expansion::{product_is_exact, two_product};
-        let squared_against = |root: f64, value: f64| {
-            assert!(product_is_exact(root, root), "{root} squares exactly");
-            let (high, low) = two_product(root, root);
-            high.total_cmp(&value).then(low.total_cmp(&0.0))
-        };
-        let nothing = root_rounded_outwards(Interval::exactly(0.0)).expect("not below nothing");
-        assert!(nothing.lo() == 0.0 && nothing.hi() > 0.0, "{nothing:?}");
-        let values = [
-            0.25,
-            0.1,
-            2.0,
-            3.0,
-            7.0 / 64.0,
-            0.75,
-            1e-200,
-            1e200,
-            1.0,
-            4.0,
-        ];
-        for &low in &values {
-            for &high in values.iter().filter(|&&high| high >= low) {
-                let root = root_rounded_outwards(Interval::new(low, high).expect("low ≤ high"))
-                    .expect("not below nothing");
-                assert_ne!(
-                    squared_against(root.lo(), low),
-                    Ordering::Greater,
-                    "√{low} is at or above {}",
-                    root.lo()
-                );
-                assert_ne!(
-                    squared_against(root.hi(), high),
-                    Ordering::Less,
-                    "√{high} is at or below {}",
-                    root.hi()
-                );
-            }
-        }
-        let dips = Interval::new(-1e-30, 0.5).expect("low ≤ high");
-        let root = root_rounded_outwards(dips).expect("not wholly below nothing");
-        assert_eq!(
-            root.lo(),
-            0.0,
-            "a low end below nothing is taken as nothing"
-        );
-        assert!(
-            root_rounded_outwards(Interval::new(-2.0, -1.0).expect("low ≤ high")).is_none(),
-            "wholly below nothing has no root"
-        );
-    }
 
     /// Unturned, the plane `y = 0` cuts the cone of slope one half about `+z`
     /// in rulings along `(±½, 0, 1)` exactly, so the way each corner's half
