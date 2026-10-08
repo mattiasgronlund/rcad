@@ -155,8 +155,65 @@ runs before `check_shells_and_solids`, whose curved-volume sum is what refuses.
 ### 329.4 The corpus, which the kernel did not make
 
 367 corpus files, 87 with a face on a `TOROIDAL_SURFACE` — 420 such faces
-`.T.` and 301 `.F.` (a throwaway regex count over every `ADVANCED_FACE`,
-`target/tori.py` in the lane's tree and not committed). Importing those 87 on `0a7142ff`: **none imports**. Three are refused
+`.T.` and 301 `.F.`. The lane that first printed these four numbers counted
+with an uncommitted `target/tori.py`, and its verifier never re-ran it
+(Q349); recounted against the same corpus, all four stand unchanged.
+
+A file counts if its name ends `.step` or `.stp`, case-insensitive (367 of
+them, under `$RCAD_STEP_CORPUS` — `just recipe fetch-corpus` shows the variable). A face
+counts if it is an `ADVANCED_FACE` whose surface reference resolves, within
+the same file, to a `TOROIDAL_SURFACE` entity; the schema's other route to a
+face, `FACE_SURFACE`, names none in this corpus (`grep -rl FACE_SURFACE(`
+over all 367 finds none), so reading it in moves nothing. A face's `.T.`/`.F.`
+is that face's own `same_sense` field, read verbatim off the STEP text, which
+can wrap one entity across several lines before its closing `;` — the script
+below joins entities on `;`, not on the newline, for exactly that reason.
+
+```python
+# Q349's recount: python3 tori.py "$RCAD_STEP_CORPUS"
+import re, sys
+from pathlib import Path
+
+ENTITY = re.compile(r"#(\d+)\s*=\s*([A-Z0-9_]+)\s*\((.*)\)\s*$", re.S)
+FACE = re.compile(
+    r"^(?:ADVANCED_FACE|FACE_SURFACE)\s*\(\s*'[^']*'\s*,\s*\((.*?)\)\s*,"
+    r"\s*#(\d+)\s*,\s*\.([TF])\.\s*\)$"
+)
+
+def entities(text):
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    start, end = text.find("DATA;"), text.rfind("ENDSEC;")
+    body = text[start:end] if start != -1 and end != -1 else text
+    for chunk in body.split(";"):
+        m = ENTITY.match(chunk.strip())
+        if m:
+            yield m.group(1), m.group(2), m.group(3)
+
+def count_file(path):
+    torus_ids, faces = set(), []
+    for eid, etype, args in entities(path.read_text(errors="replace")):
+        if etype == "TOROIDAL_SURFACE":
+            torus_ids.add(eid)
+        elif m := FACE.match(f"{etype}({args})"):
+            faces.append((m.group(2), m.group(3)))
+    t = sum(1 for s, sense in faces if s in torus_ids and sense == "T")
+    f = sum(1 for s, sense in faces if s in torus_ids and sense == "F")
+    return t, f
+
+root = Path(sys.argv[1])
+files = sorted(p for p in root.rglob("*") if p.suffix.lower() in (".step", ".stp"))
+with_torus = t_total = f_total = 0
+for p in files:
+    t, f = count_file(p)
+    with_torus += t + f > 0
+    t_total += t
+    f_total += f
+print(len(files), with_torus, t_total, f_total)
+```
+
+Run as `python3 - "$RCAD_STEP_CORPUS" <<'PY' ... PY` with the body above, or
+saved as `tori.py`: prints `367 87 420 301`, in that order — the same four
+numbers this section already had. Importing those 87 on `0a7142ff`: **none imports**. Three are refused
 `FacesDoNotAgreeWhichWayTheyFace` — `Relay_1-Form-A_Schrack-RYII_RM5mm`,
 `Relay_1-Form-B_Schrack-RYII_RM5mm` and `Relay_SPDT_Finder_34.51_Vertical`,
 with 2, 2 and 4 torus faces, all `.T.` — and the other 84 by names that come
