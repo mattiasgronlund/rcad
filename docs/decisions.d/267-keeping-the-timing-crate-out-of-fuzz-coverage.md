@@ -220,6 +220,26 @@ The same tip as cargo-fuzz builds it today (timing rlib: 45 sancov references):
 The leak re-runs are gone (`#835` in all four), and so is about a fifth of
 the extra coverage. The rest is item 1, and it still diverges.
 
+**Correction, 2026-10-08.** The first table's two runs per arm are two single
+draws, and §305.3 and §305.4 show that with address-space randomisation on —
+as every run here had it — a single binary, run under one command, draws
+`INITED ... ft: 8771` or `ft: 8772` depending only on where the stack starts.
+A pair of single draws cannot, by itself, judge whether `RCAD_FUZZ_TIMINGS`
+moves libFuzzer. The lines in the first table are reproduced exactly by
+§305.3's `run-present-off-*` and `run-present-on-*` logs, on a binary built
+the same way (`INITED cov: 3100 ft: 8772 corp: 503/26Kb`, then `cov: 3101 ft:
+8836 corp: 519/27Kb`, 16 new, for both the unset and the set pair), and §305.5
+reran those same two arms at four fixed stack positions and found all eight
+`INITED` and `DONE` lines identical, with `ft: 8772` at every position tried
+— never `8771` (§305.4: `present-off-aslroff-padNNN` against
+`present-on-aslroff-padNNN`, and the base binary's seed-only sweep, which also
+never drew 8771). So the first table's conclusion still holds, but on
+§305.5's fixed-stack comparison, not on the two draws recorded above. §305.7
+names the methods that judge the variable properly: the arms at fixed stack
+positions (`setarch -R`, with the two environments padded to equal size), or
+several runs per arm with randomisation on, compared by the spread of
+outcomes.
+
 ### 267.6 What is left
 
 - **The build change (row candidate).** Check in the stand-in and set `RUSTC`
