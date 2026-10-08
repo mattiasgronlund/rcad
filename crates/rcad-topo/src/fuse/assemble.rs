@@ -585,7 +585,7 @@ impl Assembly {
             &assembly.edges,
             &assembly.corners,
             &mut assembly.faces,
-        );
+        )?;
         Ok(assembly)
     }
 
@@ -3520,14 +3520,30 @@ impl Face {
 struct Side {
     edge: usize,
     forward: bool,
-    /// For a side of a **closed** edge made in [`Edges::of`], the curved
-    /// surface whose winding `forward` was read against: the curved one of the
-    /// piece's own crossing pair, which need not be a surface of either face the
-    /// answer keeps along the edge. A disc cut from one bar is read against
-    /// that bar's pipe, and the edge is stored by the other bar's wall.
-    /// [`every_closed_edge_read_off_one_spelling`] reads it. `None` for every
-    /// other side.
-    read_against: Option<Surface>,
+    /// For a side of a **closed** edge made in [`Edges::of`], what `forward`
+    /// was read against. [`every_closed_edge_read_off_one_spelling`] reads it.
+    /// `None` for every other side.
+    read_against: Option<ReadAgainst>,
+}
+
+/// What [`Edges::of`] read a closed side's way round against, kept so that
+/// [`every_closed_edge_read_off_one_spelling`] can read the side again against
+/// what the side across was read against.
+#[derive(Clone, Copy)]
+struct ReadAgainst {
+    /// The curved one of the piece's own crossing pair, which need not be a
+    /// surface of either face the answer keeps along the edge. A disc cut from
+    /// one bar is read against that bar's pipe, and the edge is stored by the
+    /// other bar's wall.
+    surface: Surface,
+    /// The gradients of the piece's crossing pair at the edge's corner, as
+    /// [`which_way_a_closed_crossing_turns`] takes them: the crossing the side
+    /// walks.
+    crossing: [Vector; 2],
+    /// The gradient and the axis that crossing was read against: `surface`'s
+    /// own, or at a ball's pole the ball's and its lid's way out
+    /// ([`the_lid_a_circle_from_a_pole_bounds`]).
+    frame: [Vector; 2],
 }
 
 /// Where one face walks along one edge: the face, the ring, and how far round
@@ -3673,7 +3689,8 @@ pub(super) fn one_surface(one: &Surface, other: &Surface) -> bool {
 }
 
 /// Turn round each side of a closed edge that was read off another spelling of
-/// the surface the answer stores the edge by.
+/// the surface the answer stores the edge by, or off another surface that runs
+/// the other way round the edge.
 ///
 /// [`Edges::of`] reads which way a side walks a closed edge off the curved
 /// surface of that side's own crossing pair ([`Side::read_against`]), and a
@@ -3701,27 +3718,43 @@ pub(super) fn one_surface(one: &Surface, other: &Surface) -> bool {
 /// property of the two faces and not of which was handed over first, so the
 /// answer does not depend on argument order.
 ///
-/// **Only a side read against another spelling of that surface is turned.** A
-/// dot of two windings compares two spellings of one surface and nothing else,
-/// so a side read against a different surface altogether is left as it was
-/// read, as it was before §359. Shapes reach that since a rim can come under
-/// two names ([`the_name_each_closed_curve_goes_by`]): uniting the dome on a
-/// shaft of its radius reads the pipe's side against the pipe and the ball's
-/// against the ball, and a frustum on a bar of its narrow radius the cone's
-/// against the cone. Every one of those answers passes the sweep, which reads
-/// the edge's way back off one surface for both sides (`fuses_that_touch.rs`,
-/// `how_often_a_fuse_with_a_cone_refuses.rs`).
+/// **A side read against another spelling of that surface is turned by the
+/// two windings.** Whether a spelling winds the other way is exact: turning an
+/// axis round negates every product [`the_way_it_is_parametrised_about`] is
+/// made of, so the two windings are exact negatives of each other and their
+/// dot product is never a rounding away from zero.
 ///
-/// **Whether a spelling winds the other way is exact**: turning an axis round
-/// negates every product [`the_way_it_is_parametrised_about`] is made of, so
-/// the two windings are exact negatives of each other and their dot product is
-/// never a rounding away from zero.
+/// **A side read against a different surface altogether is read again against
+/// what the side across was read against, where that is the reference
+/// itself** ([`runs_the_other_way_read_against`]). Shapes reach that since a
+/// rim can come under two names ([`the_name_each_closed_curve_goes_by`]):
+/// uniting the dome on a shaft of its radius reads the pipe's side against the
+/// pipe and the ball's against the ball, and a frustum on a bar of its narrow
+/// radius the cone's against the cone. Upright, the pipe's longitude and the
+/// ball's run the same way round the rim, and the two readings agree. **Laid on
+/// its side they do not** (Q1377): the rim is then a meridian of the ball, whose
+/// longitude is square to it, so the ball's side is read against its latitude,
+/// or at a pole against its lid, and along `+y` and `±x` that runs the other way
+/// from the pipe's longitude. Left as read, both faces walked the rim the same
+/// way, and 42 of the 72 fuses of `fuses_that_touch.rs`'s dome lying on its side
+/// were refused `CoedgesRunTheSameWay` or `FacesDoNotAgreeWhichWayTheyFace`. A
+/// side read against neither the reference nor a spelling of it, beside another
+/// such side, is left as it was read.
+///
+/// # Errors
+///
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] where a side read again cannot
+/// be told.
 ///
 /// # Panics
 ///
 /// If a side of a closed edge does not say what it was read against. Every
 /// side here was made by [`Edges::of`], which says it for each closed side.
-fn every_closed_edge_read_off_one_spelling(edges: &[Edge], corners: &[Corner], faces: &mut [Face]) {
+fn every_closed_edge_read_off_one_spelling(
+    edges: &[Edge],
+    corners: &[Corner],
+    faces: &mut [Face],
+) -> Result<()> {
     let mut claimants: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); edges.len()];
     for (face, walked) in faces.iter().enumerate() {
         for (wire, ring) in walked.wires.iter().enumerate() {
@@ -3744,20 +3777,68 @@ fn every_closed_edge_read_off_one_spelling(edges: &[Edge], corners: &[Corner], f
         };
         let at = corners[edge.ends[0]].point;
         let wound = the_way_it_is_parametrised_about(&reference, at);
-        for (face, wire, position) in [one, other] {
-            let side = &mut faces[face].wires[wire][position];
-            let read = side
+        let reads = [one, other].map(|(face, wire, position)| {
+            faces[face].wires[wire][position]
                 .read_against
-                .expect("Edges::of says what each closed side was read against");
-            if name_of_surface_bits(&read) == name_of_surface_bits(&reference)
-                || !one_surface(&read, &reference)
-            {
-                continue;
-            }
-            if the_way_it_is_parametrised_about(&read, at).dot(wound) < 0.0 {
+                .expect("Edges::of says what each closed side was read against")
+        });
+        let the_reference_itself = |read: &ReadAgainst| {
+            name_of_surface_bits(&read.surface) == name_of_surface_bits(&reference)
+        };
+        for (index, (face, wire, position)) in [one, other].into_iter().enumerate() {
+            let (read, across) = (&reads[index], &reads[1 - index]);
+            let turn = if the_reference_itself(read) {
+                false
+            } else if one_surface(&read.surface, &reference) {
+                the_way_it_is_parametrised_about(&read.surface, at).dot(wound) < 0.0
+            } else if the_reference_itself(across) {
+                runs_the_other_way_read_against(read, across)?
+            } else {
+                false
+            };
+            if turn {
+                let side = &mut faces[face].wires[wire][position];
                 side.forward = !side.forward;
             }
         }
+    }
+    Ok(())
+}
+
+/// Whether the crossing `read` walks runs the other way round against its own
+/// frame from the way it runs against `across`'s.
+///
+/// Read with [`which_way_a_closed_crossing_turns`], the rule both sides were
+/// read with, so this is the side read again against the other frame and not a
+/// second rule.
+///
+/// `false` where `across`'s frame says nothing about this crossing: square to
+/// both its legs, the crossing would run along the gradient of a surface the
+/// edge lies on. Nothing is turned there, and the sweep reads the edge back.
+///
+/// # Errors
+///
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] where either reading cannot be
+/// told.
+///
+/// # Panics
+///
+/// If [`which_way_a_closed_crossing_turns`] grows a fifth answer, as
+/// [`which_way_a_closed_edge_is_walked`] says.
+fn runs_the_other_way_read_against(read: &ReadAgainst, across: &ReadAgainst) -> Result<bool> {
+    let way = |[gradient, axis]: [Vector; 2]| {
+        which_way_a_closed_crossing_turns(read.crossing, gradient, axis)
+    };
+    match (way(read.frame), way(across.frame)) {
+        (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => Ok(true),
+        (Decision::Pos, Decision::Pos)
+        | (Decision::Neg, Decision::Neg)
+        | (Decision::Zero, _)
+        | (_, Decision::Zero) => Ok(false),
+        (Decision::Undecidable { enclosure }, _) | (_, Decision::Undecidable { enclosure }) => {
+            Err(Error::CannotTellWhichWayAClosedEdgeRuns { enclosure })
+        }
+        other => panic!("a fifth answer out of the closed-edge rule: {other:?}"),
     }
 }
 
@@ -5056,10 +5137,11 @@ impl Edges {
     /// `seam` is [`the_seam_a_side_runs_along`], which `meet` cannot carry.
     ///
     /// **A closed side is read against the curved surface of `meet`'s own
-    /// pair**, which the side carries as [`Side::read_against`], because the
-    /// answer may keep another spelling of that surface along the edge and
-    /// [`every_closed_edge_read_off_one_spelling`] has to know which one this
-    /// was.
+    /// pair**, which the side carries as [`Side::read_against`] with the
+    /// crossing and the frame it was read with, because the answer may keep
+    /// another spelling of that surface along the edge, or another surface
+    /// altogether, and [`every_closed_edge_read_off_one_spelling`] has to know
+    /// which one this was and be able to read the side again.
     ///
     /// **A closed side is read at its edge's one corner**, and not where its
     /// own pair starts the curve. A side whose start another corner took over
@@ -5152,10 +5234,8 @@ impl Edges {
             }
         };
         let (forward, read_against) = if from == to {
-            let forward =
-                which_way_a_closed_edge_is_walked(meet, corners.made[from].point, turned_round)?
-                    .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?;
-            (forward, the_curved_one_of(&carried_by))
+            which_way_a_closed_edge_is_walked(meet, corners.made[from].point, turned_round)?
+                .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?
         } else {
             (self.made[edge].ends[0] == from, None)
         };
@@ -5185,15 +5265,16 @@ impl Edges {
 /// round, `sides_of` turns every side of it round with it and the face's use
 /// says so — which is what the sweep reads.
 ///
-/// **The answer is against the curved one of `meet`'s pair**, and
-/// [`every_closed_edge_read_off_one_spelling`] turns it round afterwards where
-/// the answer keeps another spelling of that surface along the edge. The path
-/// for a circle from a ball's pole reads against the lid's normal and not
-/// against a winding, and needs nothing from that pass: the surface it is read
-/// against is a ball, a ball has no second spelling
-/// (`name_of_the_surface_either_way_round` folds nothing for it), so the only
-/// ball that is one surface with it is itself bit for bit, and the pass leaves
-/// such a side alone.
+/// **The answer is against the curved one of `meet`'s pair**, handed back with
+/// what it was read against, and [`every_closed_edge_read_off_one_spelling`]
+/// turns it round afterwards where the answer stores the edge by another
+/// spelling of that surface, or by another surface that runs the other way
+/// round it. The path for a circle from a ball's pole reads against the lid's
+/// normal and not against a winding, and is never turned by that pass itself:
+/// the surface it is read against is a ball, a ball has no second spelling
+/// (`name_of_the_surface_either_way_round` folds nothing for it), and where the
+/// ball is what the edge is stored by, the pass leaves the ball's own side
+/// alone and reads the side across again against the lid.
 ///
 /// # Errors
 ///
@@ -5213,44 +5294,56 @@ fn which_way_a_closed_edge_is_walked(
     meet: &FaceMeet,
     at: Point,
     turned_round: bool,
-) -> Result<Option<bool>> {
+) -> Result<Option<(bool, Option<ReadAgainst>)>> {
     let [mine, partner] = meet.carried_by;
-    if the_curved_one_of(&meet.carried_by).is_none() {
+    let Some(curved) = the_curved_one_of(&meet.carried_by) else {
         // Two planes cross in a straight line, which does not close, so nothing
         // reaches here — and a wire with no curved surface either side of it has
         // no longitude to run along.
-        return Ok(Some(true));
-    }
-    let outward = [gradient_of(&mine, at), gradient_of(&partner, at)];
+        return Ok(Some((true, None)));
+    };
+    let crossing = [gradient_of(&mine, at), gradient_of(&partner, at)];
+    let read_against = |frame| {
+        Some(ReadAgainst {
+            surface: curved,
+            crossing,
+            frame,
+        })
+    };
     match a_closed_crossing_is_walked_the_way_it_is_stored(
         [&mine, &partner],
-        outward,
+        crossing,
         at,
         meet.material_side,
     )? {
-        Some(forward) => Ok(Some(forward)),
+        Some(forward) => Ok(Some((
+            forward,
+            read_against([
+                gradient_of(&curved, at),
+                the_way_it_is_parametrised_about(&curved, at),
+            ]),
+        ))),
         None => {
             let Some(lid) = the_lid_a_circle_from_a_pole_bounds(meet, turned_round) else {
                 return Ok(None);
             };
-            let runs_along_stored = match which_way_a_closed_crossing_turns(
-                outward,
-                gradient_of(&lid.ball, at),
-                lid.outward,
-            ) {
-                Decision::Pos => true,
-                Decision::Neg => false,
-                Decision::Zero => return Ok(None),
-                Decision::Undecidable { enclosure } => {
-                    return Err(Error::CannotTellWhichWayAClosedEdgeRuns { enclosure });
-                }
-                other => panic!("a fifth answer out of the closed-edge rule: {other:?}"),
-            };
-            Ok(Some(match meet.material_side {
+            let frame = [gradient_of(&lid.ball, at), lid.outward];
+            let runs_along_stored =
+                match which_way_a_closed_crossing_turns(crossing, frame[0], frame[1]) {
+                    Decision::Pos => true,
+                    Decision::Neg => false,
+                    Decision::Zero => return Ok(None),
+                    Decision::Undecidable { enclosure } => {
+                        return Err(Error::CannotTellWhichWayAClosedEdgeRuns { enclosure });
+                    }
+                    other => panic!("a fifth answer out of the closed-edge rule: {other:?}"),
+                };
+            let forward = match meet.material_side {
                 Decision::Neg => runs_along_stored,
                 Decision::Pos => !runs_along_stored,
                 other => panic!("a face with no side to its material: {other:?}"),
-            }))
+            };
+            Ok(Some((forward, read_against(frame))))
         }
     }
 }

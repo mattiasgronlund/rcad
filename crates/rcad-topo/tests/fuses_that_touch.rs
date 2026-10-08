@@ -148,13 +148,13 @@
 //! and every fuse of the touching row answers.
 //! [`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`]
 //! checks nine domes by every rule against their closed forms. **Laid on its
-//! side it answers 30 fuses of 72**: the ball's poles are then on the rim, and
+//! side it answers all 72 fuses**: the ball's poles are then on the rim, and
 //! the ball's side of the rim, cut in two at them, is read as one closed side
-//! again since Q1368. The other 42 are refused because the two sides of the rim
-//! are read against the pipe and the ball, which disagree about which way it
-//! runs;
-//! [`a_dome_lying_on_its_side_answers_where_both_sides_of_its_rim_are_read_one_way`]
-//! pins both.
+//! again since Q1368. 42 of them were then refused because the two sides of the
+//! rim were read against the pipe and the ball, which disagree about which way
+//! it runs, until Q1377 read both against the ball;
+//! [`a_dome_lying_on_its_side_by_every_rule_against_the_closed_forms`] checks
+//! them against the closed forms.
 //!
 //! **A bend's touch is not reached.** Every fuse of a bend lying on a block is
 //! refused as a quartic, touching or one unit clear, so that cell is pinned at
@@ -193,7 +193,7 @@ use proptest::test_runner::{
 };
 use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
 
 mod touching;
 
@@ -408,10 +408,21 @@ fn a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms() {
 }
 
 /// The dome on a shaft of its radius lying on its side, every rule both ways
-/// round: **30 of the 72 fuses answer the closed forms**
+/// round, along `±x` and `±y`, for `R` from one to three: **all 72 fuses answer
+/// the closed forms and validate.**
+///
+/// A bar of radius `R` and length `h = R + 1` holds `πR²h`, and a ball of radius
+/// `R` centred on the middle of its end cap is cut by the cap's plane into two
+/// half balls of `⅔πR³` each. The half towards the bar is inside it, since a
+/// point of it is at most `R` from the cap's middle, so at most `R` from the
+/// bar's axis and at most `R < h` along it; the other half is outside it. The
+/// two touch along the cap's rim and cross nowhere else. So `A ∪ B = πR²h +
+/// ⅔πR³`, `A ∩ B = ⅔πR³`, `bar \ ball = πR²h − ⅔πR³` and `ball \ bar = ⅔πR³`:
+/// for `R = 1`, `2π + ⅔π = 8.378`, `2.094`, `4.189` and `2.094`. Each answer is
+/// one solid and is checked against these to within what its mesh declares,
+/// the same closed forms
 /// [`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`]
-/// holds the upright dome to, and validate, and the other 42 are pinned at the
-/// refusal they give.
+/// holds the upright dome to.
 ///
 /// A ball's poles are always straight up and down from its centre, so a ball
 /// centred on the end cap of a bar lying along `x` or `y` has both poles on the
@@ -427,22 +438,24 @@ fn a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms() {
 /// another side closes on the same curve whole, the rim gets the seam corner,
 /// and each side of it is read at that corner.
 ///
-/// **What is still refused is which way the rim runs** (Q1368). Each side is
-/// read against the curved surface of its own pair: the bar's against the pipe,
-/// the ball's against the ball. The rim is a meridian of the ball, which the
-/// ball's longitude is square to, so the ball's side is read against its
-/// latitude where the corner is off the poles and against the cap's plane where
-/// it is a pole. Those agree with the pipe's longitude only for the bar running
-/// along `−y`, where all six rules both ways answer. Along `+y` they disagree,
-/// both faces walk the rim the same way, and the sweep refuses every fuse
-/// `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`. Along `x`, where
-/// the seam corner is a pole, the intersection answers both ways and the union
-/// and the differences are refused `FacesDoNotAgreeWhichWayTheyFace`.
+/// **What stopped 42 of them next was which way the rim runs** (Q1368, Q1377).
+/// Each side is read against the curved surface of its own pair: the bar's cap
+/// and pipe against the pipe, the ball's against the ball. The rim is a
+/// meridian of the ball, which the ball's longitude is square to, so the ball's
+/// side is read against its latitude where the corner is off the poles and
+/// against its lid, the cap's plane, where it is a pole. Those agree with the
+/// pipe's longitude only for the bar running along `−y`. Along `+y` they
+/// disagreed, both faces walked the rim the same way, and the sweep refused
+/// every fuse `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`; along
+/// `x`, where the seam corner is a pole, the union and the differences were
+/// refused `FacesDoNotAgreeWhichWayTheyFace`. `fuse/assemble.rs`'s
+/// `every_closed_edge_read_off_one_spelling` now reads the side read against
+/// the pipe again against the ball, the surface `Model::validate` reads the rim
+/// against for every rule here.
 #[test]
-fn a_dome_lying_on_its_side_answers_where_both_sides_of_its_rim_are_read_one_way() {
+fn a_dome_lying_on_its_side_by_every_rule_against_the_closed_forms() {
     let policy = Policy::certified();
     let third = std::f64::consts::PI / 3.0;
-    let mut answered = 0;
     for radius in 1..=3 {
         for (axis, quarters, along) in [
             (Axis::x(), 1, "-y"),
@@ -479,30 +492,9 @@ fn a_dome_lying_on_its_side_answers_where_both_sides_of_its_rim_are_read_one_way
                     one == shaft
                 );
                 let mut fused = model.clone();
-                let outcome =
-                    fused.fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new());
-                let refused_as_pinned = match (along, rule) {
-                    ("-y", _) | ("+x" | "-x", Rule::Intersection) => None,
-                    ("+y", _) => Some(matches!(
-                        outcome,
-                        Err(Error::TheFuseWroteABrokenAnswer {
-                            broken: Invalid::CoedgesRunTheSameWay
-                        })
-                    )),
-                    (_, _) => Some(matches!(
-                        outcome,
-                        Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
-                    )),
-                };
-                if let Some(pinned) = refused_as_pinned {
-                    assert!(
-                        pinned,
-                        "{which} came back {:?}; move the pin, and check it against {holds}",
-                        outcome.map(|answer| answer.solids().len())
-                    );
-                    continue;
-                }
-                let answer = outcome.unwrap_or_else(|why| panic!("{which} refused {why}"));
+                let answer = fused
+                    .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{which} refused {why}"));
                 fused
                     .validate(&policy, &mut ProvenanceLog::new())
                     .unwrap_or_else(|why| panic!("{which} does not validate: {why}"));
@@ -513,11 +505,9 @@ fn a_dome_lying_on_its_side_answers_where_both_sides_of_its_rim_are_read_one_way
                     "{which} measures {volume} against {holds}, out by more than the {error} its \
                      mesh declares"
                 );
-                answered += 1;
             }
         }
     }
-    assert_eq!(answered, 30, "30 of the 72 fuses answer");
 }
 
 /// A bar of a bend's tube radius butted onto the bend's `+x` cap, so the cap's
