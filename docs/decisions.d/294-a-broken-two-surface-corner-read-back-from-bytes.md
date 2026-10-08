@@ -701,3 +701,53 @@ plane` there because the block's face is an ulp off the moved seam plane
   turns round to answers held to `26π/3`. A row of its own, tier 1.
 - `place_the_corners`' doc comment in `arrange.rs` still names only "a round
   bar's seam plane". That row has the file, and fixes it there.
+
+**2026-10-08, Q1361: two rulings of one plane holding the axis turn by
+nothing at the apex, and the turned frustum answers under `certified`.** Lane
+`lane-q1361-a-frustums-apex-on-a-plane-holding-its-axis`, base `09cb891b`.
+
+*The rule.* `turn_between_two_ways_out` (`fuse/arrange.rs`), at the apex of a
+face on a cone, returns `Zero` when both ways out are rulings through the apex
+(`through_an_apex`), both crossings of one partner, that partner a plane, and
+that plane holds the cone's axis: `n·w` proved nothing of the stored numbers
+(`are_two_rulings_of_one_plane_holding_the_axis`). The sign is
+`how_a_plane_leans_against_a_pipe` asked of a pipe round the cone's own axis
+(`a_plane_holds_a_cones_axis`), so the exact `n·w` is `rcad-geom`'s one copy
+and not a second one; it takes no policy, and a sign it cannot prove is not
+`Zero`, so the turn is then worked out as before. The check runs after
+`what_a_turn_at_the_apex_is_about`, so two ways out into different nappes are
+still `TwoCurvesTouchWithoutCrossing`.
+
+*Why the plane holding the axis and not any plane through the apex.* Both ways
+out lie in the plane, so `t₁ × t₂` runs along `n`, and the turn
+`−w·(t₁ × t₂)` is `n·w` times something that is nothing only when the two are
+along one line. So the turn is nothing exactly when `n·w` is. "Through the apex"
+says nothing, since every ruling of a plane runs through the apex. A plane
+through the apex that misses the axis crosses the cone in two rulings that are
+not mirrors across it, and the turn between them is something. That is
+measured, not argued: the frustum turned 0.4 about `x` against the half past
+its seam left unturned, whose face `y = 0` runs through the apex, is steeper
+than the cone, and misses the turned axis. Under the rule above both rules
+answer under `certified`, `Model::validate` accepts the model, and each holds
+the closed form on a fine mesh: the face cuts each circle square to the axis
+along a chord `h·tan 0.4` from its middle, so the piece past it is
+`(acos(2·tan 0.4)/4 − tan 0.4·√(1/4 − tan² 0.4))·(6³ − 2³)/3` and the rest is
+`52π/3` less that. With the axis check taken out, which is the scratch probe's
+any-plane condition, the difference refuses `TwoCurvesTouchWithoutCrossing`
+(`a_plane_through_a_frustums_apex_that_misses_its_axis_turns_its_two_rulings_by_something`).
+
+*What it gives.* The frustum turned 0.4 about `x` less or intersected with
+the half past its seam turned the same way answers under both policies:
+`26π/3` on a fine mesh, `Model::validate` accepts it, and its corners are the
+unturned answer's turned, each within `1e-12`. The corner moved a quarter turn
+round gives that answer to a rounding, and the corners moved off the wall and
+off the cap give `CannotTellTheCellsOfAFaceApart`, as unturned.
+`a_turned_frustum_cut_along_its_seam_gets_past_its_seam_corner_and_is_refused_at_its_apex`
+is turned round to these answers and renamed
+`a_turned_frustum_cut_along_its_seam_gives_what_the_unturned_frustum_gives_turned`.
+Without the rule it refuses at the apex as before, the record's enclosure
+`2.0539125955565396e-15`. `place_the_corners`' doc names the seam plane of a pipe or a
+cone now.
+
+**What this leaves.** Nothing new. The frustum turned and then shifted is still
+not tried, as above.
