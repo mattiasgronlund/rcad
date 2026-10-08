@@ -928,3 +928,77 @@ is not traced and this rule was not run against it.
 - The fix: pick a hyperbola's branch for a run with ends by the ends' side and
   the sign of `and·w`, in `which_branch_of_a_hyperbola_this_run_is`, and turn
   the two pins above into answers. A row, tier 1.
+
+### 294.15 Q1405: a hyperbola's branch is named by the side its ends are on — 2026-10-08
+
+*Queue row Q1405, from §294.14's "What this leaves". Lane
+`lane-q1405-a-hyperbolas-branch-picked-by-its-ends`, base `ee5b984a`.*
+
+**The fix.** For a run with ends, `which_branch_of_a_hyperbola_this_run_is`
+asks only which side of the apex the ends are on, and
+`which_way_the_branch_these_ends_are_on_opens` turns that into the branch:
+`s = −1` when they are on the side the axis points to, `s = +1` when they are
+on the other. No vertex is asked. `which_side_of_the_apex` hands back the
+`Decision`, resolved under the policy, and the new function matches it all four
+ways: `Pos` and `Neg` name a branch, `Zero` and `Undecidable` refuse
+`CannotNameWhichPieceOfACrossingThisIs` as before, and two ends on two sides
+refuse as before. The run with no ends is not touched: its pickers still ask
+each vertex, as §294.14's "On the way past" describes.
+
+**Why the side names the branch.** The argument is §294.14's, now written on
+the function. Branch `s` is `centre + and·towards·s·cosh σ + across·sinh σ`,
+`towards` is positive and `across` is square to the axis, so far out the branch
+runs along `s·and` and is on the side `s·(and·w)` names. `and` is `â × n̂`,
+`â` along `w × n`, and `(w × n) × n · w = (w·n)² − |w|²|n|² = −|w × n|²`, so
+`and·w = −|w × n̂|`, never positive, and zero only for a plane square to the
+axis, which cuts a circle. The identity holds of the exact `and`, and the
+branch built with `s` on the rounded `and` is the rounding of the exact branch
+with that `s`, so nothing rounded is read to pick it.
+
+**Measured, with a scratch probe not kept.** The probe kept the fix and, at
+each pick with ends, also asked both vertices as the old code did, with a log
+of its own so no record changed, and wrote one line per pick:
+`agree` where the vertices named exactly one branch and it was the fix's,
+`disagree` where they named the other, `untold` otherwise, with `and·ŵ`. Run
+as `just t -p rcad-geom -p rcad-topo --no-fail-fast`, 2795 tests, only the two
+pins below failed, because they now answered. Of 21,553 picks, 21,536 agreed,
+none disagreed, and 17 were untold, all of them from those two pins.
+`and·ŵ` was between `−1` and `−0.866` at every pick.
+
+**What it gives.**
+
+- The turned and shifted frustum cut along its seam under `tolerant(100)`
+  (§294.13): the sound frustum and the corner moved a quarter turn round answer
+  both rules with half the frustum, `26π/3` on a fine mesh, and
+  `validate_solid` accepts each; the sound frustum's whole model validates, its
+  corners are the turned frustum's answer shifted, to `1e-12`, and the corner
+  moved a quarter turn round gives the sound answer's corners to the same. The
+  corners moved off the wall and off the cap still give
+  `CannotTellTheCellsOfAFaceApart`
+  (`under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_answers_as_the_bar_does`).
+  Under `certified` it still refuses `side of plane` first (§294.13, Q913).
+- `rcad_geom::walk` on the seam's cut between the two seam corners walks,
+  under both policies and with either run `intersect` names, with nothing
+  recorded, every point between the bottom and top circles and on the face and
+  the cone to twice the walk's deviation
+  (`walking_the_cut_along_a_turned_and_shifted_frustums_seam_names_the_branch_its_corners_are_on`).
+
+**Q1195's shape, run after the fix as a scratch probe not kept.** The bar of
+`a_closed_edge_between_two_planes_its_curve_leaves.rs` with its lid split by a
+half disc on `leaning_off_the_lid_through((0, 0, 4), −1e-14)`, the arc naming
+`a_cone_the_lid_crosses_in_a_parabola`, half disc listed first: it builds, and
+`Model::validate` under `certified` accepts it. That is the check Q1195 asks to
+add. Measuring the solid then refuses
+`CannotPlaceAPointThatCloseToACrossing { asked: 0.001875, closest: 0.355 }`:
+the hyperbola a `1e-14` lean off a parabola is so long that its published
+bound is `0.355`. With the lid listed first it measures `113.003 ± 0.376`,
+against `36π = 113.097`. The probe was not run on the base, so which ask
+refused there was not seen; the bound fits a vertex's side, since the near
+vertex is about `0.5/√2 = 0.354` from the plane through the apex and its box
+was `0.355` either way.
+
+**What this leaves.**
+
+- Q1195's shape with the half disc first builds and validates but does not
+  measure, on the bound above. Whether that bound can be had smaller for a
+  hyperbola so near a parabola is a row of its own, tier 5, after Q1195.
