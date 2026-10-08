@@ -11,6 +11,7 @@ opening `lock` to releasing it as one merge, counted per process per second.*
   293.3   The measurement
   293.4   What share of a draw's time a merge costs
   293.5   How much of that is strace's own cost
+  293.6   The fixed replay that still could not isolate it
 
 ### 293.1 The answer
 
@@ -280,3 +281,81 @@ time is `strace` stopping and restarting the process at each of the roughly
 half-dozen syscalls a merge makes — and no unstraced measurement of the same
 quantity exists, because nothing short of tracing the syscalls can see where
 one merge begins and ends.
+
+The family of fix that would isolate `strace`'s cost properly — a fixed,
+non-mutating replay over byte-identical corpus copies, so both arms run the
+identical sequence of inputs — was built and run; see 293.6. It does not
+isolate the cost either, and 293.6 says why in numbers.
+
+### 293.6 The fixed replay that still could not isolate it
+
+Q222 built the fix 293.5 named and did not build: `-runs=0` over two
+byte-identical copies of `fuzz/corpus/where_two_surfaces_cross` (834 files
+each, `diff -r` confirmed identical before and after every run), one copy
+per arm so neither run's traced syscalls could touch the other's files.
+`-runs=0` replays each corpus file exactly once and exits — no mutation, no
+`-fork`, one process per run — so both arms execute the same 835 draws (834
+corpus files plus libFuzzer's own empty first run) in the same order, every
+time. `ASAN_OPTIONS=detect_leaks=0` was set on *both* arms this time, not
+only the straced one as in 293.2's command: leaving LeakSanitizer's exit-time
+scan running on only one arm would have been a second confound on top of
+`strace` itself.
+
+Three straced and three unstraced runs, interleaved S,U,S,U,S,U, each with a
+fresh `RCAD_FUZZ_TIMINGS` directory and `uptime` read immediately before it
+started. Built once (`cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" mise
+exec -- cargo +nightly fuzz build where_two_surfaces_cross`), then each run
+was
+
+```
+ASAN_OPTIONS=detect_leaks=0 RUSTFLAGS="-C target-cpu=x86-64-v3" \
+RCAD_FUZZ_TIMINGS=<fresh dir> taskset -c 18-21 mise exec -- \
+[strace -f -ttt -o <log> -e trace=openat,flock,rename] \
+cargo +nightly fuzz run where_two_surfaces_cross <corpus copy> -- -runs=0
+```
+
+with the bracketed `strace` invocation present for S1–S3 and absent for
+U1–U3. Wall time is the gap between a `date -u +%s.%6N` printed immediately
+before and immediately after each command:
+
+| run | arm | `uptime` load (1 min) just before | wall time |
+|---|---|---|---|
+| S1 | straced   | 14.09 | 26.856 s |
+| U1 | unstraced | 24.79 | 32.185 s |
+| S2 | straced   | 18.26 | 19.836 s |
+| U2 | unstraced | 12.94 | 17.186 s |
+| S3 | straced   |  8.96 | 19.034 s |
+| U3 | unstraced |  7.97 | 21.869 s |
+
+Three other lanes were building and testing on this machine throughout (the
+load column), and the run-to-run order above is the order they were run in,
+not sorted — the slowest run of either arm (U1, 32.185 s) sits right next to
+the highest load reading of the six (24.79), and the three fastest runs
+(U2, S3, U3) sit next to the three lowest load readings (12.94, 8.96, 7.97).
+Mean wall time was 21.909 s straced and 23.747 s unstraced — unstraced
+*slower* on average, which `strace` adding real cost cannot produce — and the
+gap between those two means (1.838 s) is smaller than either arm's own
+run-to-run spread: 7.822 s within the three straced runs, 14.999 s within the
+three unstraced ones. By the same test 293.5 applied to its own attempt: two
+runs of the same arm differ by more than the two arms differ, so **this
+replay does not isolate `strace`'s cost either** — it controls for the
+heavy-tail mutation confound 293.5 found, but the machine's own load during
+this window is a second confound at least as large, and nothing here
+controls for that one. The honest reading is that `strace`'s wall-clock cost
+on this target, whatever it is, is smaller than the run-to-run noise a busy
+box already produces, not that it is zero.
+
+The three straced runs' own `strace.log`s still let 293.2's script measure
+merge durations directly, since replaying without `-fork` means one process
+per run: 4, 3 and 4 merges (11 total, one process per run, where 293.3 had
+51 merges across 22 forked processes). Pooled: mean 7.894 ms, median 6.908 ms,
+max 15.688 ms — lower than 293.3's 13.0/8.5/62.1 ms on every figure, but off
+a sample of 11 against 293.3's 51, and run under three other lanes' load
+rather than the quieter box 293.3 presumably had, so this is not read as
+"merges got cheaper" — merge duration cannot be read at all without
+`strace`, which is exactly why no unstraced figure exists to compare it to.
+What the two arms' own `RCAD_FUZZ_TIMINGS` `report` files do support, the
+same way 293.5's did: per-draw p50 was 0.377/0.410 ms (S1/U1), 0.254/0.229 ms
+(S2/U2) and 0.262/0.254 ms (S3/U3) — the straced and unstraced figures
+interleave rather than one side consistently leading, consistent with
+293.5's reasoning that a draw making no syscall is not `strace`'s to slow.
