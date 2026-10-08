@@ -341,6 +341,24 @@ is queued, with two candidates: the floor learns of the apex as a point on
 its boundary, or `assemble` drops a vertex that is no corner on a straight
 edge, as §245.3 does for a closed edge.
 
+**The first candidate landed in Q1337** (§31.3): `cuts.rs`'s
+`how_two_faces_meet` hands a touch at one point to both faces as a cut, and
+`arrange.rs`'s `place_the_touches` puts a node at the point once it is proved
+to lie on exactly one crossing drawn on the face, so the floor now learns of
+the apex. **Q474**
+(`lane-q1337-q474-a-floor-through-a-cones-apex-answers`) then answered the
+floor-through-the-apex fuses under every rule, merging the two floor `z = 0`
+pins above,
+`a_floor_through_the_apex_still_gives_the_half_frustum_under_intersection_and_difference`
+and
+`a_floor_through_the_apex_is_not_a_manifold_under_the_fuses_that_keep_the_floor`,
+into one: `a_floor_through_the_apex_cuts_the_frustum_in_half_under_every_rule`
+in `tests/a_frustum_cut_in_half_down_its_axis.rs`. The table's union and
+block-less-frustum rows for floor `z = 0` are stale along with those two test
+names — all six fuses now give one solid each, the model validates, and every
+volume is the closed form `56π/3`, or `2400 ± 56π/3`, within what the mesh
+says it may miss by.
+
 `a_half_frustums_corners_on_two_rulings_stay_two_corners` did not move.
 
 Where the numbers come from: a scratch test in
