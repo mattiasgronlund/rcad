@@ -38,7 +38,9 @@
 //! block with its `x = 0` face whole, with the turned cube touching it from
 //! inside; it exists, and nothing here reaches it yet. The three crossings are
 //! proved apart, exactly, so no decision is left for a policy to resolve, and
-//! reaching it means taking three crossings a rounding apart as one.
+//! reaching it means taking three crossings a rounding apart as one: the
+//! second half of `docs/decisions.md` §417, not built. The six tolerant pins
+//! below stay refused until it is.
 //!
 //! **Where the same turn's planes meet a rounding inside the face, every fuse
 //! answers under both policies** (Q1288). With the corner at `(0, 2, 4)` they
@@ -60,12 +62,30 @@
 //! Q1288, the planes meet inside the face in 201 and outside it in 199; the
 //! union of each of the 201 was refused `Undecidable` under both policies,
 //! and every rule both ways round now answers, the volumes agreeing as
-//! [`every_fuse_answers_and_the_volumes_agree`] asks. Of the 199, the union
-//! is still refused under `Policy::certified()` in all, and under
-//! `Policy::tolerant(100.0)` in 148: 74 `Undecidable` on the triangle, now
-//! inside the turned cube, and 74 written broken.
+//! [`every_fuse_answers_and_the_volumes_agree`] asks.
 //! [`random_turns_whose_planes_meet_inside_the_block_answer`] keeps the first
 //! 60.
+//!
+//! **Where the planes meet outside the face, the triangle is inside the turned
+//! cube** (Q1353, `docs/decisions.md` §417): it is the cube's tip cut off by
+//! the face, each of its corners on two of the cube's planes and strictly
+//! behind the third. `by_a_plane` now places a piece with every corner on or
+//! behind every plane of a solid with only flat faces, all on or behind them,
+//! and one corner strictly behind each, inside it. Of the 199, the union under
+//! `Policy::tolerant(100.0)` with the block first answered 51 and was refused
+//! in 148 before: 74 `Undecidable` on the triangle, 58 a hole winding with its
+//! outline and 16 an outline winding against its face. It now answers 62, and
+//! the union and intersection of each hold 2000 between them; none is refused
+//! `Undecidable`, and the 137 left are refused by name once the answer is
+//! written with its corners rounded: 65 a hole winding with its outline, 16 an
+//! outline winding against its face, 34 a shell enclosing nothing and 22 an
+//! edge with four faces or none. The rule is exact, so it runs under
+//! `Policy::certified()` too, where the union of 10 of the 199 now answers
+//! either way round: each validates and holds, within `1e−6`, what the turned
+//! cube moved `2⁻³⁰` further in gives. How the tip is written in those 10 was
+//! not traced. 98 are refused for the range, and the rest by the names above.
+//! [`random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant`]
+//! keeps the first 60, 31 of which meet outside.
 //!
 //! With the corner a thousandth inside the face, every fuse answers, and the
 //! union and the intersection hold both cubes between them:
@@ -302,6 +322,88 @@ fn random_turns_whose_planes_meet_inside_the_block_answer() {
     assert_eq!(inside, 29, "how many of the 60 meet inside the block");
 }
 
+/// The same first 60 of Q1208's random turns, now each whose turned cube's
+/// three planes at the corner meet outside the block, under
+/// `Policy::tolerant(100.0)`: none of the 31 is refused for want of a point
+/// inside a piece of a face any more (Q1353). The triangle the crossings cut
+/// out of the block's face is inside the turned cube, and `select.rs`'s
+/// `by_a_plane` now places it there: every corner of it is on or behind every
+/// plane of the turned cube, and strictly behind one. 15 answer the union and
+/// the intersection, and the two hold both cubes between them; turns 47 and 48
+/// were refused `Undecidable` on the triangle before. The other 16 are refused
+/// by name, as `REFUSED` says, once the answer is written with its corners
+/// rounded; what is left to reach them is the second half of
+/// `docs/decisions.md` §417.
+#[test]
+fn random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant() {
+    const REFUSED: [(usize, Refused); 16] = [
+        (1, Refused::AHoleWindingWithItsOutline),
+        (5, Refused::AHoleWindingWithItsOutline),
+        (8, Refused::NoSpaceInside),
+        (9, Refused::AnEdgeWithFourFaces),
+        (13, Refused::AHoleWindingWithItsOutline),
+        (14, Refused::AnOutlineWindingAgainstItsFace),
+        (18, Refused::AnOutlineWindingAgainstItsFace),
+        (21, Refused::NoSpaceInside),
+        (25, Refused::AHoleWindingWithItsOutline),
+        (29, Refused::AHoleWindingWithItsOutline),
+        (34, Refused::AHoleWindingWithItsOutline),
+        (39, Refused::AnOutlineWindingAgainstItsFace),
+        (49, Refused::NoSpaceInside),
+        (51, Refused::AHoleWindingWithItsOutline),
+        (55, Refused::AnEdgeWithFourFaces),
+        (57, Refused::AHoleWindingWithItsOutline),
+    ];
+    let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
+    let mut outside = 0;
+    for (index, (turn, at)) in q1208s_random_turns(60).into_iter().enumerate() {
+        if where_the_planes_at_the_corner_meet(&turn, at) != Decision::Neg {
+            continue;
+        }
+        outside += 1;
+        let number = index + 1;
+        let asked = format!("turn {number}");
+        if let Some(&(_, refused)) = REFUSED.iter().find(|&&(which, _)| which == number) {
+            let mut model = a_model();
+            let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
+            refused.assert_is(
+                fuse(
+                    &mut model,
+                    pair,
+                    Rule::Union,
+                    Order::BlockFirst,
+                    &tolerant(),
+                ),
+                &asked,
+            );
+            continue;
+        }
+        let union = volume_of_a_fuse(
+            &turn,
+            at,
+            Rule::Union,
+            Order::BlockFirst,
+            &tolerant(),
+            &asked,
+        );
+        let intersection = volume_of_a_fuse(
+            &turn,
+            at,
+            Rule::Intersection,
+            Order::BlockFirst,
+            &tolerant(),
+            &asked,
+        );
+        assert!(
+            (union + intersection - 2000.0).abs() <= allowed,
+            "{asked}: the union {union} and the intersection {intersection} hold {} between \
+             them, not 2000",
+            union + intersection
+        );
+    }
+    assert_eq!(outside, 31, "how many of the 60 meet outside the block");
+}
+
 /// Every rule both ways round answers one or more solids that validate, and
 /// their volumes agree with each other and with the turned cube moved a
 /// little further in.
@@ -531,9 +633,13 @@ enum Refused {
     AnOutlineWindingAgainstItsFace,
     /// The answer's shortest edge is a rounding long beside corners at 10.
     TooWideARange,
-    /// The turned cube less the block is the tip outside the face, which
-    /// encloses less than nothing once its corners are rounded.
+    /// A shell of the answer is the tip outside the face, which encloses
+    /// nothing, or less than nothing, once its corners are rounded: all of the
+    /// turned cube less the block, and a shell of some unions.
     NoSpaceInside,
+    /// An edge of the answer has four faces along it, where the tip's sides
+    /// meet the block's face.
+    AnEdgeWithFourFaces,
 }
 
 impl Refused {
@@ -562,6 +668,9 @@ impl Refused {
                 why,
                 Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume <= 0.0
             ),
+            Self::AnEdgeWithFourFaces => {
+                matches!(why, Error::ResultIsNotManifold { count: 4 })
+            }
         };
         assert!(matched, "{asked} is refused {why:?}, not {self:?}");
     }

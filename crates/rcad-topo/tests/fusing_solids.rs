@@ -12,7 +12,9 @@ use rcad_predicates::{
     Approximation, Cause, Decision, Point as PredicatePoint, Policy, ProvenanceLog,
     meet_of_three_planes, side_of_a_plane_where_three_planes_meet,
 };
-use rcad_topo::{Containment, Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey, VertexKey};
+use rcad_topo::{
+    Containment, Error, FaceKey, Invalid, Model, ProfileBuilder, Rule, SolidKey, VertexKey,
+};
 
 fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
@@ -567,12 +569,15 @@ fn a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_
 /// reach (§16.10). There is no answer to reach. §17's exit table says which
 /// other kinds of refusal were tried for this half and why each had an answer.
 ///
-/// **Where the fuse stops is earlier, in selection.** The slab's face on the
-/// second cube's bottom is a strip `2^-52` wide, and no candidate point could
-/// be shown to lie inside it. The record names that strip's four corners. If
-/// selection learns to place it, the range check will refuse the answer as
-/// `Invalid::DynamicRangeTooWide` instead, and this test will fail. That is on
-/// purpose: criterion 7 would then need another demonstration (§353.5).
+/// **Where the fuse stops is now the range check, not selection.** The
+/// slab's face on the second cube's bottom used to be a strip `2^-52` wide
+/// that no candidate point could be shown to lie inside, so the fuse stopped
+/// refused `Undecidable` at *a point inside a piece of a face*. Q1353's
+/// `by_a_plane` places a piece inside a solid when every plane of the solid
+/// has every corner of the piece on or behind it and one strictly behind
+/// (`docs/decisions.md` §417), which that strip has, so selection now writes
+/// the slab's sliver and the range check refuses it by name instead, for the
+/// edge `2.2e-16` long at a coordinate past `2.18` that it would need.
 #[test]
 fn what_two_turned_cubes_a_rounding_deep_in_each_other_share_is_too_thin_to_hold_and_is_refused() {
     let (mut model, one, other) = two_turned_cubes_a_rounding_deep_in_each_other();
@@ -633,34 +638,12 @@ fn what_two_turned_cubes_a_rounding_deep_in_each_other_share_is_too_thin_to_hold
         &mut ProvenanceLog::new(),
     );
 
-    let Err(Error::Undecidable { records }) = refused else {
-        panic!("a slab no model can hold is refused as undecided: {refused:?}");
-    };
-    let [record] = records.records() else {
-        panic!("the fuse stops at the first piece it cannot place: {records:?}");
-    };
-    assert_eq!(record.predicate(), "a point inside a piece of a face");
-    let named: Vec<[usize; 3]> = corners
-        .iter()
-        .filter(|(_, corner)| {
-            record
-                .inputs()
-                .iter()
-                .any(|input| boxes_overlap(*input, *corner))
-        })
-        .map(|(three, _)| *three)
-        .collect();
-    let on_all_of_them: Vec<usize> = named[0]
-        .into_iter()
-        .filter(|plane| named.iter().all(|three| three.contains(plane)))
-        .collect();
-    let the_second_cubes_bottom = planes.len() / 2;
-    assert_eq!(
-        (named.len(), on_all_of_them),
-        (4, vec![the_second_cubes_bottom]),
-        "the four corners of the slab's face on the second cube's bottom, where a cube's \
-         faces come bottom first: {:?}",
-        record.inputs()
+    assert!(
+        matches!(
+            refused,
+            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) if ratio > 1e16
+        ),
+        "a slab no model can hold is refused for the edge it would need: {refused:?}"
     );
 }
 
@@ -732,11 +715,6 @@ fn the_farthest_apart_two_points_of(one: PredicatePoint, other: PredicatePoint) 
     let across =
         |axis: usize| one[axis].hi().max(other[axis].hi()) - one[axis].lo().min(other[axis].lo());
     across(0).hypot(across(1)).hypot(across(2))
-}
-
-fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
-    let (one, other) = (one.enclosure(), other.enclosure());
-    (0..3).all(|axis| one[axis].lo() <= other[axis].hi() && other[axis].lo() <= one[axis].hi())
 }
 
 /// Two towers `1e308` tall, a certified fuse settles them, and nothing it

@@ -890,6 +890,24 @@ fn is_off_every_surface_of(solid: SolidView<'_>, point: PredicatePoint) -> bool 
 /// placed is the meet of the three surfaces it names. Any other corner, a
 /// corner of `P` not on `P`'s own plane, or a curved surface on `P` or on `S`
 /// leaves this rule out.
+///
+/// **And inside a solid whose every face plane has all of it on or behind,
+/// with every corner of the piece on or behind every one of them and, for
+/// each, one corner strictly behind** (Q1353, `docs/decisions.md` §417). Such
+/// a solid `S` is convex. Take `p` inside `P`, open in `P`'s plane, and a face
+/// plane `σ` of `S`. All of `P` is on or behind `σ`, as above; were `p` on
+/// `σ`, the distance to `σ` would be at most zero on a disk round `p` in `P`'s
+/// plane and zero at its middle, so zero on all of that plane, and every
+/// corner of `P` on `σ`, which one strictly behind rules out. So `p` is
+/// strictly behind every face plane of `S`. A point `k` inside `S` is too,
+/// since a ball round it is in `S`. Every point between `k` and `p` is then
+/// strictly behind every face plane, so on no face of `S`, and the segment
+/// never leaves `S`: `p` is inside `S`. Inside one solid of the group is
+/// inside, as [`by_a_corner`] reads it. The piece this was built for is the
+/// same triangle with the turned cube's planes meeting a rounding *outside*
+/// the block's face, where the triangle is the cube's tip cut off by the face,
+/// inside the cube: each of its corners is on two of the cube's planes there
+/// and strictly behind the third.
 fn by_a_plane(
     solids: &[&BakedSolid],
     against: &[usize],
@@ -897,10 +915,15 @@ fn by_a_plane(
     piece: &Piece,
 ) -> Option<Placement> {
     let corners = the_planes_meeting_at_each_corner_of_a_piece(piece, solids[mine])?;
-    against
-        .iter()
-        .all(|&index| is_in_front_of_a_plane_with_all_of_it_behind(solids[index], &corners))
-        .then_some(Placement::Outside)
+    let mut outside_every_one = true;
+    for &index in against {
+        match placed_by_the_planes_of(solids[index], &corners) {
+            Some(true) => return Some(Placement::Inside),
+            Some(false) => (),
+            None => outside_every_one = false,
+        }
+    }
+    outside_every_one.then_some(Placement::Outside)
 }
 
 /// The three planes each corner of a flat piece with straight sides is the
@@ -947,29 +970,42 @@ fn the_planes_meeting_at(end: &MeetPoint, own: &BakedSolid, flat: Plane) -> Opti
         .then_some(three)
 }
 
-/// Whether the plane of some face of `solid`, turned to face out of it, has
-/// every corner of the solid on or behind it, every one of `corners` on or in
-/// front of it, and one of `corners` strictly in front.
-fn is_in_front_of_a_plane_with_all_of_it_behind(
-    solid: &BakedSolid,
-    corners: &[[[f64; 4]; 3]],
-) -> bool {
-    let Some(its_own) = the_planes_meeting_at_each_corner_of_a_solid(solid) else {
-        return false;
-    };
-    solid.faces.iter().any(|face| {
+/// Whether the planes of `solid`'s faces, each turned to face out of it, put
+/// a piece with `corners` outside it (`Some(false)`) or inside it
+/// (`Some(true)`), by [`by_a_plane`]'s two rules, or `None` when neither
+/// holds.
+///
+/// Outside: one plane has every corner of the solid on or behind it, every one
+/// of `corners` on or in front of it, and one of `corners` strictly in front.
+/// Inside: every plane has every corner of the solid on or behind it, every
+/// one of `corners` on or behind it, and one of `corners` strictly behind.
+fn placed_by_the_planes_of(solid: &BakedSolid, corners: &[[[f64; 4]; 3]]) -> Option<bool> {
+    let its_own = the_planes_meeting_at_each_corner_of_a_solid(solid)?;
+    let mut inside_every_one = true;
+    for face in &solid.faces {
         let outward = outward_plane_of_face(face)
             .expect("every face of a solid whose corners all meet three planes is flat")
             .coefficients();
-        let side = |three: &[[f64; 4]; 3]| side_of_a_plane_where_three_planes_meet(*three, outward);
-        corners
+        let side =
+            |three: &[[f64; 4]; 3]| side_of_a_plane_where_three_planes_meet(*three, outward).ok();
+        let solid_behind = its_own
             .iter()
-            .all(|three| matches!(side(three), Ok(Decision::Pos | Decision::Zero)))
-            && corners.iter().any(|three| side(three) == Ok(Decision::Pos))
-            && its_own
-                .iter()
-                .all(|three| matches!(side(three), Ok(Decision::Neg | Decision::Zero)))
-    })
+            .all(|three| matches!(side(three), Some(Decision::Neg | Decision::Zero)));
+        let piece: Vec<Option<Decision>> = corners.iter().map(side).collect();
+        let piece_in_front = piece
+            .iter()
+            .all(|side| matches!(side, Some(Decision::Pos | Decision::Zero)))
+            && piece.contains(&Some(Decision::Pos));
+        if solid_behind && piece_in_front {
+            return Some(false);
+        }
+        let piece_behind = piece
+            .iter()
+            .all(|side| matches!(side, Some(Decision::Neg | Decision::Zero)))
+            && piece.contains(&Some(Decision::Neg));
+        inside_every_one &= solid_behind && piece_behind;
+    }
+    inside_every_one.then_some(true)
 }
 
 /// The three planes each corner of every face of `solid` is the one meeting
