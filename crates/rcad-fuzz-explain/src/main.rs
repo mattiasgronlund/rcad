@@ -24,12 +24,12 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use rcad_fuzz_explain::{TARGETS, as_tsv, explain, triage};
+use rcad_fuzz_explain::{TARGETS, as_members_tsv, as_tsv, explain, triage};
 
 fn main() -> ExitCode {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if arguments.first().map(String::as_str) == Some("--triage") {
-        return triage_from_stdin();
+        return triage_from_stdin(&arguments[1..]);
     }
     let [target, artifact] = arguments.as_slice() else {
         eprintln!(
@@ -59,7 +59,26 @@ fn main() -> ExitCode {
 
 /// `--triage`'s whole job: read the manifest `fuzz-triage` built, replay it,
 /// print the report.
-fn triage_from_stdin() -> ExitCode {
+///
+/// `rest` is everything after `--triage` on the command line: nothing, or
+/// `--members <path>` to also write every still-failing group's crash files
+/// to `path` (§418.4). Stdout is the same [`as_tsv`] report either way, byte
+/// for byte, because `fuzz-triage` runs this from the replayed `main`'s own
+/// tree and that tree can be older than this binary's — an option that
+/// changed what the plain call prints would change what an old call's output
+/// means.
+fn triage_from_stdin(rest: &[String]) -> ExitCode {
+    let members_path = match rest {
+        [] => None,
+        [flag, path] if flag == "--members" => Some(PathBuf::from(path)),
+        other => {
+            eprintln!(
+                "--triage: unknown arguments after --triage: {}",
+                other.join(" ")
+            );
+            return ExitCode::FAILURE;
+        }
+    };
     let mut manifest = String::new();
     if let Err(why) = std::io::stdin().read_to_string(&mut manifest) {
         eprintln!("--triage: could not read the manifest from stdin: {why}");
@@ -84,6 +103,15 @@ fn triage_from_stdin() -> ExitCode {
     });
     let (groups, skipped) = triage(inputs);
     print!("{}", as_tsv(&groups));
+    if let Some(path) = &members_path
+        && let Err(why) = std::fs::write(path, as_members_tsv(&groups))
+    {
+        eprintln!(
+            "--triage: could not write the members file {}: {why}",
+            path.display()
+        );
+        return ExitCode::FAILURE;
+    }
     eprintln!("--triage: {total} of {total} replayed, {skipped} skipped as no target");
     ExitCode::SUCCESS
 }
