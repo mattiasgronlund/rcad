@@ -1638,9 +1638,10 @@ fn is_one_circle_cut_in_two(
 /// the face's boundary, and borders the face's own side along that neighbour on
 /// the side the face does not keep. So the face sits inside the part in front
 /// of all of them; and that part is connected — a plane cut by half-planes and
-/// round discs, or a sphere cut by any two planes or by planes each with its
-/// centre on or behind it — with the face's boundary on its boundary, so the
-/// face is all of it. On a sphere the "in front of any" reading asks the same
+/// round discs, a sphere cut by any two planes or by planes each with its
+/// centre on or behind it, or a ring cut by planes through its axis and at most
+/// one square to it — with the face's boundary on its boundary, so the face is
+/// all of it. On a sphere the "in front of any" reading asks the same
 /// of the part behind all of them, which is the cuts turned round.
 ///
 /// **A cone leaves one convex region on a plane it cuts in a closed curve, and
@@ -1664,8 +1665,12 @@ fn is_one_circle_cut_in_two(
 /// with one bite out of its edge where it lies outside a pipe
 /// ([`is_a_polygon_less_one_bite_of_a_pipe`]), a sphere face whose sides are
 /// arcs cut by two planes or by planes each with the centre on one side of it
-/// ([`leaves_a_ball_in_one_piece`]), and a cone face or a pipe face cut by
-/// planes as [`is_a_family_this_follows`] sets out. Each arc must be picked by a
+/// ([`leaves_a_ball_in_one_piece`]), a cone face or a pipe face cut by
+/// planes as [`is_a_family_this_follows`] sets out, and a ring face cut by
+/// planes through its axis and at most one square to it
+/// ([`leaves_a_ring_in_one_piece`]) — the top half of a quarter bend's wall,
+/// whose sides are two quarter circles of its floor and two half circles of
+/// its caps (row Q1367). Each arc must be picked by a
 /// half-space that tells it from its sibling ([`the_way_into_an_arc`]), which
 /// asks the picker to hold both its ends exactly, or to have the arc's whole
 /// curve in front of it with that curve's centre behind, or to have the middle
@@ -4084,6 +4089,9 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// along the axis meeting off the pipe can too, and the caller asks
 /// [`one_of_two_runs_between_two_cuts_meeting_off_the_pipe`].
 ///
+/// On a ring it is planes through the axis, no two side by side, and at most
+/// one plane square to it, as [`leaves_a_ring_in_one_piece`] sets out.
+///
 /// On a sphere, it is any two planes, or planes with one point inside the ball
 /// on or behind each of them ([`leaves_a_ball_in_one_piece`]). **Two planes leave one piece
 /// whatever they keep** (row
@@ -4470,8 +4478,68 @@ fn is_a_family_this_follows(surface: &Surface, cuts: &[Cut], nappe: Option<Decis
         Surface::Cylinder(pipe) => {
             leaves_a_pipe_in_one_piece(pipe, cuts) || is_a_wedge_of_a_pipe(pipe, cuts)
         }
-        Surface::Torus(_) | _ => false,
+        Surface::Torus(ring) => leaves_a_ring_in_one_piece(ring, cuts),
+        _ => false,
     }
+}
+
+/// Whether the part of `ring` in front of every one of `cuts` is one piece:
+/// every cut a plane, at most one of them square to the ring's axis, the rest
+/// holding the axis, and no two of those side by side
+/// ([`the_normals_lie_along_one_line`]). A sign that could not be settled is a
+/// refusal, never a guess.
+///
+/// **Every point of the ring is at one angle round the axis and one angle round
+/// the tube**, and each kind of plane reads only one of the two. A plane
+/// holding the axis has, at a point a distance `ρ` out from the axis in the
+/// direction `u`, the value `ρ·(n·u)`, and `ρ` is never less than the ring's
+/// radius less the tube's, which a ring keeps positive. So its side is read off
+/// the angle round the axis alone: a closed half-turn of angles. Seen down the
+/// axis each is a half-plane through one point, and half-planes through one
+/// point meet in one convex wedge, whose angles are one run or none — unless
+/// the wedge is a whole line, which only two halves of one line kept the
+/// opposite ways leave, and two planes side by side are refused below. A plane
+/// square to the axis has, at each angle
+/// round the axis, the same circle of the tube to cut, cut the same way, so it
+/// keeps one run of angles round the tube — the same run at every angle round
+/// the axis. The part in front of every cut is those two runs taken together,
+/// one piece.
+///
+/// **Two planes square to the axis can leave two bands**, an outer and an inner
+/// one between them, and one plane through the axis stored twice and kept the
+/// opposite ways leaves the two circles it cuts the ring in, which are apart. So
+/// neither is admitted. [`what_a_ring_face_between_two_planes_holds`] reads the
+/// bands, and its face never comes here.
+///
+/// So the top half of a quarter bend's wall, cut by its floor `z = 0` and by
+/// its two caps through the axis, is the part of the ring in front of all
+/// three, and the top half of a half bend's wall the part in front of its floor
+/// and the one plane both its caps lie on
+/// (`a_quarter_and_a_half_bends_wall_hold_their_own_points` in
+/// `tests/a_joined_flat_face_whose_rings_enclose_no_area.rs`).
+fn leaves_a_ring_in_one_piece(ring: &rcad_geom::Torus, cuts: &[Cut]) -> bool {
+    let up = ring.axis().direction().components();
+    let mut square_to_the_axis = 0;
+    let mut through_the_axis: Vec<&Plane> = Vec::new();
+    for cut in cuts {
+        let Some(flat) = cut.surface.as_plane() else {
+            return false;
+        };
+        match how_the_axis_lies_on(flat, ring) {
+            Decision::Zero => through_the_axis.push(flat),
+            Decision::Pos | Decision::Neg if lie_along_one_line(flat.normal().components(), up) => {
+                square_to_the_axis += 1;
+            }
+            Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => return false,
+            other => panic!("the axis came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+    square_to_the_axis <= 1
+        && through_the_axis.iter().enumerate().all(|(index, one)| {
+            through_the_axis[index + 1..]
+                .iter()
+                .all(|other| !the_normals_lie_along_one_line(one, other))
+        })
 }
 
 /// Whether the part of `ball`'s sphere in front of every one of `cuts` is one
@@ -5851,6 +5919,10 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 ///   it only behind the chord ([`an_arc_never_reaches_the_plane`]). The skin of
 ///   a ball cut down to four planes through its centre has each of its four arcs
 ///   against the plane across from it (row Q976).
+/// - An arc of a ring on a plane through the ring's axis, against another plane
+///   through that axis, both ends on the same side of it
+///   ([`are_two_planes_through_a_rings_axis`]). The top half of a quarter
+///   bend's wall has each of its half meridians against the other cap.
 ///
 /// Everything else is [`Lies::Across`]: an arc with neither end on the plane
 /// that the line does meet in front of its chord really does bulge across it.
@@ -5996,7 +6068,7 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
                                         side.start.at,
                                         *into_the_arc,
                                         &flat,
-                                    )
+                                    ) || are_two_planes_through_a_rings_axis(round, [own, &flat])
                                 },
                             )) =>
                 {
@@ -6301,6 +6373,26 @@ fn an_arc_never_reaches_the_plane(
     let middle = a * dot(into_the_arc, less(start)) - grows * b;
     middle.sign() == Decision::Neg
         && (middle * middle - grows * grows * meets).sign() == Decision::Pos
+}
+
+/// Whether `round` is a ring and both `planes` hold its whole axis
+/// ([`how_the_axis_lies_on`]), so an arc of the ring on the first lies wholly
+/// on the side of the second its ends are on.
+///
+/// **The first plane cuts the ring in two circles round the tube**, each at
+/// one angle round the axis and apart from the other, and the arc is on one of
+/// them. The second plane has, at a point a distance `ρ` out from the axis in
+/// the direction `u`, the value `ρ·(n·u)`, and every point of such a circle is
+/// at the same `u` and at a `ρ` between the ring's radius less the tube's and
+/// the two added, both positive. So every point of the circle, the arc's ends
+/// with them, reads the one sign of `n·u`.
+fn are_two_planes_through_a_rings_axis(round: &Surface, planes: [&Plane; 2]) -> bool {
+    let Surface::Torus(ring) = round else {
+        return false;
+    };
+    planes
+        .iter()
+        .all(|flat| how_the_axis_lies_on(flat, ring) == Decision::Zero)
 }
 
 /// Which way the curve two surfaces cross in runs where it passes `at`, as
