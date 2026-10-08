@@ -441,24 +441,27 @@ const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 168;
 /// shipping as coverage** (§14.7). Both laws over it run from the fixed seed
 /// ([`over_a_fixed_corpus`]), so unlike every other floor in this file the
 /// share compared here is not a range — the seed passed to the RNG makes no
-/// difference to it, checked directly by running both properties under
-/// `PROPTEST_RNG_SEED` 1 and 2 and getting bit-identical reports either way —
-/// so **one run measures it for good.** Commutativity reaches **60 of 134**,
-/// 44.78%, and inclusion and exclusion **18 of 67**, 26.87%, both risen since
-/// the tenth this floor started at was sized against 22% and 17% — the
-/// generator has moved and the two are not the pair they were.
+/// difference to it — so **one run measures it for good**:
+/// `mise exec -- just t swapping_the_two_sides_of_a_bar_leaning_through_a_block_changes_not_one_bit --no-capture`
+/// and `mise exec -- just t what_a_block_and_a_leaning_bar_take_up_adds_up_inside_a_stated_share_of_what_they_declare --no-capture`.
 ///
-/// **A tenth no longer catches a halving of either law.** Half of 44.78% is
-/// 22.39% and half of 26.87% is 13.43%, both well clear of the old floor. What
-/// serves both at once is anywhere in **22.39% to 26.87%** — above each law's
-/// own halved worst, below each law's own measured worst — a window of 4.5
-/// points, which is safe to sit inside precisely because there is no run to
-/// run noise for the shipped seed to add to it. A quarter is 1.87 points under
-/// the tighter measurement (inclusion and exclusion's 26.87%) and 2.61 points
-/// over the tighter half (commutativity's 22.39%), and it moves only when the
-/// corpus does, which is a regression or a deliberate change and not a flake
-/// either way.
-const A_LEANING_BAR_STILL_COMPARES_THIS_MUCH: f64 = 0.25;
+/// **Q114 (92da92b6) fixed the fuse this family exercises most** — the wrong
+/// `ResultIsNotManifold` §191 found — so both laws now reach the same share:
+/// commutativity **118 of 140** and inclusion and exclusion **59 of 70**,
+/// both 84.29%, up from the 44.78% and 26.87% the old quarter floor was sized
+/// against, when most of this family's fuses answered that wrong refusal
+/// rather than reaching a comparison.
+///
+/// **A quarter no longer catches a halving of either law.** Half of 84.29% is
+/// 42.14%, well clear of a quarter (25%). What serves both at once, since they
+/// now measure the identical share, is anywhere in **42.14% to 84.29%** —
+/// above the halved worst, below the measured worst. **A half** sits 7.86
+/// points above the halved worst and 34.29 points below the measured worst —
+/// margins of the same order [`A_THINNER_LAW_STILL_COMPARES_THIS_MUCH`]'s own
+/// five properties keep against their own halved worst and worst — and stays
+/// clear of [`SOME_COMPARISONS_MUST_HAPPEN`] (six tenths), so this family
+/// keeps its own floor rather than folding into that one (§279).
+const A_LEANING_BAR_STILL_COMPARES_THIS_MUCH: f64 = 0.5;
 
 /// How much of a curved fixture turned together a certified fuse may refuse
 /// (§191).
@@ -475,11 +478,14 @@ const TURNED_ROUND_REFUSALS_MUST_STAY_BELOW: f64 = 0.03;
 /// How much of a bar leaning through a block a certified fuse may refuse
 /// (§191).
 ///
-/// Measured at **298 of 429, 69.5%**, over the shipped corpus. Seventy-five per
-/// cent is twenty-three fuses above it. It is a ceiling on a family that already
-/// refuses most of itself, so its job is only to say out loud when that gets
-/// worse; [`A_LEANING_BAR_STILL_COMPARES_THIS_MUCH`] is the guard that the laws
-/// over it still compare anything.
+/// Measured at **63 of 450, 14.0%**, over the shipped corpus
+/// (`mise exec -- just t how_often_a_certified_fuse_of_a_bar_leaning_through_a_block_refuses --no-capture`),
+/// down from 298 of 429, 69.5%, before Q114 (92da92b6) fixed the wrong
+/// `ResultIsNotManifold` §191 found. Seventy-five per cent is 61 points above
+/// the measured rate. It is a ceiling on a family that still refuses more
+/// than most, so its job is only to say out loud when that gets worse;
+/// [`A_LEANING_BAR_STILL_COMPARES_THIS_MUCH`] is the guard that the laws over
+/// it still compare anything.
 const LEANING_BAR_REFUSALS_MUST_STAY_BELOW: f64 = 0.75;
 
 /// How often the lattice control comes back as something a `Model` cannot
@@ -3744,22 +3750,28 @@ fn a_ball_and_block_union_turned_about_any_of_26_axes_is_still_a_sound_model() {
 }
 
 /// A bar leaning through a block, clear of every side wall by more than a unit,
-/// united with the block is a solid — and **today the fuse says it is not**.
+/// united with the block is one solid, of the volume Cavalieri's principle
+/// gives: the cube's own volume, plus however much of the bar's cylinder —
+/// cross-section `π·radius²` all along its own length — sits outside the
+/// slab the floor and the roof cut from it. That slab's axial span is
+/// `side · secθ`, `θ` the lean off upright, because the bar travels `secθ`
+/// along its own axis for every unit it climbs.
 ///
-/// §191 found it. **Left failing on purpose**: this is a wrong statement about
-/// geometry, not a refusal. Every crossing here is transversal — the floor and
-/// the roof cut the bar in ellipses whose nearest point to a side wall is more
-/// than a unit off it, and the caps stand more than a unit clear of the block —
-/// so no edge of the true union has more than two faces along it. The fuse
-/// answers `ResultIsNotManifold`, *"an edge would have 8 faces along it"*,
-/// which claims the union cannot be held as a solid. It can.
+/// §191 found this fuse wrong: it answered `ResultIsNotManifold`, *"an edge
+/// would have 8 faces along it"*, for a union whose every crossing is
+/// transversal — the floor and the roof cut the bar in ellipses whose nearest
+/// point to a side wall is more than a unit off it, and the caps stand more
+/// than a unit clear of the block — so no edge of the true union can have more
+/// than two faces along it. **Fixed by Q114 (92da92b6)**: the wall below the
+/// block crosses the planes `x = 0` and `y = 0` in two ellipses meeting at
+/// `(0, 0, -6.23)` and `(0, 0, -2.77)`, and an arc named without its plane put
+/// arcs of both ellipses onto one edge.
 ///
 /// Found by walking every whole-number place the [`a_leaning_bar`] family's
 /// room allows for radius one and two, leans `(1, 0)` and `(1, 1)`, one to
-/// four up and blocks six to sixteen across: two of those fuses came back this
-/// way, and this is the first of them.
+/// four up and blocks six to sixteen across: two of those fuses came back
+/// wrong this way, and this is the first of them.
 #[test]
-#[ignore = "open: §191, a leaning bar's union with a block is called not a solid (8 faces on an edge)"]
 fn a_bar_leaning_through_a_block_unites_with_it_into_a_solid() {
     let fixture = LeaningBar {
         side: 15,
@@ -3774,28 +3786,48 @@ fn a_bar_leaning_through_a_block_unites_with_it_into_a_solid() {
         "the fixture is one the family draws, a unit clear of every side wall"
     );
     let (mut model, keys) = fixture.build();
-    match model.fuse(
-        &keys[..1],
-        &keys[1..],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    ) {
-        Err(why @ Error::ResultIsNotManifold { .. }) => {
-            panic!("a union that is a solid was called not one: {why}")
-        }
-        Err(why) => println!("refused, which is allowed: {why}"),
-        Ok(fused) => {
-            assert_eq!(
-                fused.solids().len(),
-                1,
-                "a bar through a block is one solid"
-            );
-            model
-                .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                .expect("the union is a sound model");
-        }
-    }
+    let fused = model
+        .fuse(
+            &keys[..1],
+            &keys[1..],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("every crossing here is transversal, so the union is a solid");
+    assert_eq!(
+        fused.solids().len(),
+        1,
+        "a bar through a block is one solid"
+    );
+    let solid = fused.solids()[0];
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the union is a sound model");
+
+    let side = f64::from(fixture.side);
+    let [across, along] = fixture.lean.map(f64::from);
+    let secant_of_the_lean =
+        across.hypot(along).hypot(f64::from(fixture.up)) / f64::from(fixture.up);
+    let closed_form = side.powi(3)
+        + std::f64::consts::PI
+            * f64::from(fixture.radius).powi(2)
+            * (fixture.length() - side * secant_of_the_lean);
+    let measured = model
+        .solid(solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a solid this size measures");
+    assert!(
+        (measured.volume() - closed_form).abs() <= measured.volume_error(),
+        "a bar leaning through a block: {} ± {} against {closed_form}",
+        measured.volume(),
+        measured.volume_error()
+    );
 }
 
 /// Ask all three rules of whatever `build` builds, the first solid against the
