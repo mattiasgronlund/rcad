@@ -469,7 +469,6 @@ impl Piece {
         match self.partner_used {
             Orientation::Forward => Ordering::Less,
             Orientation::Reversed => Ordering::Greater,
-            other => panic!("an orientation nothing here knows: {other:?}"),
         }
     }
 }
