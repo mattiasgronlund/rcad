@@ -5693,9 +5693,11 @@ type CurveName = ([[u64; 9]; 2], Option<[u64; 4]>);
 ///
 /// Only those pairs are told apart here. Other pairs that cross in more than
 /// one closed curve — a plane square to a ring's axis, cutting an inner and an
-/// outer circle, two rings, a ball and a pipe, and two pipes — are still named
-/// by their surfaces alone, and no fuse of the first two has been run
-/// (§378.4).
+/// outer circle, two rings, a ball and a pipe, and a thin pipe through a fat
+/// one — are still named by their surfaces alone. No fuse of the first two
+/// reaches this name, because `intersect` refuses a part of each (§378.8).
+/// Whether a fuse of the last two can hand one loop's start to an input corner
+/// on the other, as the cone's did, has not been asked.
 ///
 /// **A plane is named at any scale** ([`name_of_the_plane_at_any_scale`]), as
 /// the arcs of these crossings are, because two turned faces can spell one
