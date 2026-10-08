@@ -976,10 +976,12 @@ impl Assembly {
     ///
     /// Where [`Assembly::rings_round`] cannot tell which ring of a joined flat
     /// face is its outline, as its own `# Panics` lists, or where a ring comes
-    /// out bounding nothing: fewer than three sides, unless it is one side that
-    /// closes on itself, two different sides not both straight, or a ring of a
-    /// whole closed surface ([`Assembly::sides_of`]). Both are broken internal
-    /// invariants and a corrupt solid is worse than a crash (§4.1).
+    /// out bounding nothing once each ring of two straight sides is left out:
+    /// fewer than three sides, unless it is one side that closes on itself, two
+    /// different sides not both straight, or a ring of a whole closed surface
+    /// ([`Assembly::with_each_ring_of_two_straight_sides_left_out`]). Both are
+    /// broken internal invariants and a corrupt solid is worse than a crash
+    /// (§4.1).
     fn join_up_what_is_one_face(&mut self, log: &mut ProvenanceLog) -> Result<bool> {
         let along = self.darts_along_each_edge()?;
         let mut dissolved = self.edges_with_one_face_on_both_sides(&along, log)?;
@@ -2002,9 +2004,10 @@ impl Assembly {
     ///
     /// # Panics
     ///
-    /// If a ring comes out with fewer than three sides, or if a run of edges
-    /// that became one edge does not have exactly two ends left. Both mean the
-    /// joining above is wrong.
+    /// If a ring comes out bounding nothing, as
+    /// [`Assembly::with_each_ring_of_two_straight_sides_left_out`] lists, or if
+    /// a run of edges that became one edge does not have exactly two ends left.
+    /// Both mean the joining above is wrong.
     fn rebuild_from(&mut self, joined: &[JoinedFace], renumbered: Renumbered) -> Result<()> {
         let edges = self.edges_after_joining(&renumbered);
 
@@ -2028,6 +2031,7 @@ impl Assembly {
                 })
             })
             .collect::<Result<_>>()?;
+        let (edges, faces) = Self::with_each_ring_of_two_straight_sides_left_out(edges, faces);
 
         self.corners = core::mem::take(&mut self.corners)
             .into_iter()
@@ -2037,6 +2041,166 @@ impl Assembly {
         self.edges = edges;
         self.faces = faces;
         Ok(())
+    }
+
+    /// The joined faces with every ring of a flat face that is two straight
+    /// sides left out, and the two edges of each such ring made one.
+    ///
+    /// **Two straight sides between the same two corners are one segment** as
+    /// the answer's corners are written, so a ring of them goes out along it
+    /// and back and encloses nothing. That is §365.7's rule for a piece's wire
+    /// ([`encloses_something`]), met here by a ring the joining makes out of
+    /// pieces that each enclose something. A turned frame with a block flush
+    /// beneath it makes one: over the turned planes the block's front sits
+    /// `2.8e-17` outside the frame's front, the union keeps the strip of the
+    /// block's top between the two, and the frame's wall at `x = 4` cuts that
+    /// strip into two triangles. Their corners on that wall are one ulp apart
+    /// and stay two corners, while the strip's ends round onto one corner each
+    /// ([`Corners::of`]). Joined, the two triangles are one ring of two sides
+    /// from one end to the other, one along each front, once the two corners
+    /// on the wall are walked straight through
+    /// (`a_turned_frame_and_a_block_flush_beneath_it.rs`, queue row Q1426).
+    ///
+    /// **Making the two edges one keeps every edge's faces paired.** Every edge
+    /// has two faces along it, walking it opposite ways, and such a ring walks
+    /// each of its two edges once, one each way along the segment. So `k` edges
+    /// made one by `k - 1` rings keep two uses between them, one each way: the
+    /// block's front and the frame's front come out on either side of one edge
+    /// between the strip's two ends. More rings than that would leave the edge
+    /// with no face along it, which [`Assembly::group_into_shells`] refuses as
+    /// not a manifold. The edge still runs straight, since
+    /// [`Edge::how_it_runs`] reads two flat surfaces and two different ends as
+    /// straight whichever planes they are, and its two ends keep every other
+    /// edge they had.
+    ///
+    /// **Which edge stays is chosen off what it runs along**, the lowest pair of
+    /// [`name_of_surface_bits`] it is carried by, and never off its index here,
+    /// which depends on the order the solids were handed over.
+    ///
+    /// # Panics
+    ///
+    /// If a flat face loses its outline and keeps a hole, or if a ring comes
+    /// out bounding nothing: fewer than three sides, unless it is one side that
+    /// closes on itself, two different sides not both straight, or a ring of a
+    /// whole closed surface. Both are broken internal invariants and a corrupt
+    /// solid is worse than a crash (§4.1).
+    fn with_each_ring_of_two_straight_sides_left_out(
+        edges: Vec<Edge>,
+        mut faces: Vec<Face>,
+    ) -> (Vec<Edge>, Vec<Face>) {
+        let one_segment = Self::leave_out_each_ring_of_two_straight_sides(&edges, &mut faces);
+        let (edges, faces) = if one_segment.joined_anything() {
+            Self::each_segment_as_one_edge(edges, faces, &one_segment)
+        } else {
+            (edges, faces)
+        };
+        for face in &faces {
+            for ring in &face.wires {
+                assert!(
+                    ring.len() >= 3
+                        || a_ring_of_one_or_two_sides_bounds_something(ring, &edges)
+                        || face.is_a_whole_closed_surface,
+                    "a face has at least three sides, one that closes, or two not both \
+                     straight; this one has {}",
+                    ring.len()
+                );
+            }
+        }
+        (edges, faces)
+    }
+
+    /// Take each ring of two straight sides out of its flat face, and answer
+    /// which edges those rings say are one segment.
+    fn leave_out_each_ring_of_two_straight_sides(edges: &[Edge], faces: &mut [Face]) -> Sameness {
+        let mut one_segment = Sameness::of(edges.len());
+        for face in faces
+            .iter_mut()
+            .filter(|face| face.surface.as_plane().is_some())
+        {
+            let left_out: Vec<bool> = face
+                .wires
+                .iter()
+                .map(|ring| match &ring[..] {
+                    [one, other] => {
+                        one.edge != other.edge
+                            && edges[one.edge].lies_on_two_planes()
+                            && edges[other.edge].lies_on_two_planes()
+                    }
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                !left_out[0] || left_out.iter().all(|&out| out),
+                "a flat face whose outline encloses nothing has a hole that does"
+            );
+            face.wires = core::mem::take(&mut face.wires)
+                .into_iter()
+                .zip(left_out)
+                .filter_map(|(ring, out)| {
+                    if out {
+                        one_segment.join(ring[0].edge, ring[1].edge);
+                        None
+                    } else {
+                        Some(ring)
+                    }
+                })
+                .collect();
+        }
+        one_segment
+    }
+
+    /// The edges with each class `one_segment` holds made one edge, and every
+    /// side and face pointed at what is left. A face left with no ring goes.
+    fn each_segment_as_one_edge(
+        mut edges: Vec<Edge>,
+        mut faces: Vec<Face>,
+        one_segment: &Sameness,
+    ) -> (Vec<Edge>, Vec<Face>) {
+        let mut classes: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for edge in 0..edges.len() {
+            classes
+                .entry(one_segment.leader(edge))
+                .or_default()
+                .push(edge);
+        }
+        let mut kept_for: Vec<usize> = (0..edges.len()).collect();
+        for class in classes.values_mut().filter(|class| class.len() > 1) {
+            class.sort_by_key(|&edge| {
+                let mut names = edges[edge]
+                    .carried_by
+                    .map(|surface| name_of_surface_bits(&surface));
+                names.sort_unstable();
+                names
+            });
+            for &edge in class.iter() {
+                kept_for[edge] = class[0];
+            }
+            edges[class[0]].from = each_one_once(
+                class
+                    .iter()
+                    .flat_map(|&edge| edges[edge].from.iter().copied()),
+            );
+        }
+        let now = numbered((0..edges.len()).map(|edge| kept_for[edge] == edge));
+        for side in faces
+            .iter_mut()
+            .flat_map(|face| face.wires.iter_mut())
+            .flatten()
+        {
+            let kept = kept_for[side.edge];
+            if kept != side.edge {
+                let starts_at = edges[side.edge].ends[usize::from(!side.forward)];
+                side.forward = edges[kept].ends[0] == starts_at;
+            }
+            side.edge = now[kept].expect("the edge each class keeps is numbered");
+        }
+        faces.retain(|face| !face.wires.is_empty());
+        let edges = edges
+            .into_iter()
+            .zip(&now)
+            .filter_map(|(edge, now)| now.map(|_| edge))
+            .collect();
+        (edges, faces)
     }
 
     /// Which corners and edges the joining leaves, and what they are called now.
@@ -2442,33 +2606,6 @@ impl Assembly {
                 read_against: None,
             });
         }
-        // Three sides, **or one that closes on itself**, which is the rule
-        // `Model::validate` reads: a cap circle and the rim of a round hole are
-        // one whole curve and have one corner between them. A seam is the third
-        // shape a wire comes in — one edge walked both ways, with a pole between
-        // the two walks — and it has four steps once the poles are counted. And
-        // **two different sides that are not both straight** bound a face too, as
-        // `Model::wire_of_two_steps_bounds_a_face` has it: a chord and the arc
-        // across it, which is the half disk a flat cut leaves inside a ball.
-        let straight = |side: &Side| {
-            edges[side.edge]
-                .carried_by
-                .iter()
-                .all(|surface| surface.as_plane().is_some())
-        };
-        let bounds_something = match &sides[..] {
-            [only] => edges[only.edge].ends[0] == edges[only.edge].ends[1],
-            [one, other] => one.edge != other.edge && !(straight(one) && straight(other)),
-            _ => false,
-        };
-        assert!(
-            sides.len() >= 3
-                || bounds_something
-                || self.faces[ring[0].face].is_a_whole_closed_surface,
-            "a face has at least three sides, one that closes, or two not both straight; \
-             this one has {}",
-            sides.len()
-        );
         Ok(sides)
     }
 
@@ -3254,11 +3391,7 @@ impl Edge {
     /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for an arc of a
     /// curved crossing that nothing told from its sibling.
     fn how_it_runs(&self, corners: &[Corner], cut_by: Option<Surface>) -> Result<EdgeRun> {
-        let flat = self
-            .carried_by
-            .iter()
-            .all(|surface| surface.as_plane().is_some());
-        match (flat, self.ends[0] == self.ends[1]) {
+        match (self.lies_on_two_planes(), self.ends[0] == self.ends[1]) {
             (true, false) => Ok(EdgeRun::Straight),
             (_, true) => Ok(match cut_by {
                 Some(and) => EdgeRun::RightRoundWhereItCrosses { and },
@@ -3299,6 +3432,14 @@ impl Edge {
                 }
             },
         }
+    }
+
+    /// Whether both surfaces it runs between are flat, which makes it a straight
+    /// line wherever its two ends are different corners.
+    fn lies_on_two_planes(&self) -> bool {
+        self.carried_by
+            .iter()
+            .all(|surface| surface.as_plane().is_some())
     }
 
     /// The half-space holding the one nappe this edge runs on, when it runs
@@ -6648,6 +6789,27 @@ fn encloses_something(sides: &[Side]) -> bool {
         *how_often.entry(side.edge).or_default() += if side.forward { 1 } else { -1 };
     }
     how_often.values().any(|&walked| walked != 0)
+}
+
+/// Whether a ring of one or two sides of the answer bounds a face.
+///
+/// **One side that closes on itself** does, which is the rule
+/// `Model::validate` reads: a cap circle and the rim of a round hole are one
+/// whole curve and have one corner between them. A seam is the third shape a
+/// wire comes in — one edge walked both ways, with a pole between the two
+/// walks — and it has four steps once the poles are counted. And **two
+/// different sides that are not both straight** bound a face too, as
+/// `Model::wire_of_two_steps_bounds_a_face` has it: a chord and the arc across
+/// it, which is the half disk a flat cut leaves inside a ball.
+fn a_ring_of_one_or_two_sides_bounds_something(ring: &[Side], edges: &[Edge]) -> bool {
+    match ring {
+        [only] => edges[only.edge].ends[0] == edges[only.edge].ends[1],
+        [one, other] => {
+            one.edge != other.edge
+                && !(edges[one.edge].lies_on_two_planes() && edges[other.edge].lies_on_two_planes())
+        }
+        _ => false,
+    }
 }
 
 /// The seam of a piece's input face that `side` runs the whole of, where it
