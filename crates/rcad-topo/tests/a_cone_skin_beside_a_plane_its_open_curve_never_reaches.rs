@@ -51,13 +51,22 @@
 //! normal `(2, 1, 1)` interval arithmetic cannot settle that part, and the apex
 //! was refused until it was settled exactly where the interval could not
 //! (row Q1399).
+//!
+//! # A wall and a plane through its hyperbola's asymptote (row Q1400)
+//!
+//! The same cone kept to `x ≥ −16` and to the side away from the apex of a
+//! plane through the line `x = −16`, `y + z = 0`, an asymptote of the wall's
+//! hyperbola. Each plane's hyperbola misses the line the two share, and is
+//! read so, but the skin is refused before its sides are read, so its apex,
+//! which it does not hold, is still refused; the last test pins that.
 
 use std::collections::HashMap;
 
 use rcad_geom::{Axis, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
-    Containment, DraftStep, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey, SolidView,
+    Containment, DraftStep, Error, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+    SolidView,
 };
 
 mod cones;
@@ -275,6 +284,76 @@ fn the_apex_of_a_cone_cut_by_a_wall_and_a_plane_along_a_ruling_stored_inexactly_
     assert_the_apex_is_on_the_boundary(solid);
 }
 
+/// **The skin of a cone cut by a wall and a plane through an asymptote of the
+/// wall's hyperbola answers every point but the apex, which it does not
+/// hold.** The wall `x = −16` cuts the cone in `z² − y² = 256`, whose
+/// asymptote `x = −16`, `y + z = 0` is where the wall meets the cone's tangent
+/// plane along the ruling `(0, −1, 1)`. The plane through it with normal
+/// `(√2, −1, −1)` is stored as `r·x − y/2 − z/2 = −16r` (`r` the stored
+/// `0.7071…`), and the skin keeps the side `y + z ≥ 2r(x + 16)`, away from the
+/// apex. Each plane's hyperbola meets the line the two share nowhere: along it
+/// the part of degree two and the cross term are both zero exactly (Q1400).
+///
+/// Since Q1400 `holds.rs` reads such an arc as never reaching the other plane,
+/// but the skin is refused before its sides are read: the wall keeps a side
+/// that grows the way the slanted plane's branch runs off, the apex is behind
+/// the slanted plane, and the steps follow no such family. So the winding seen
+/// down the axis answers, and it refuses the apex, where every ruling is seen.
+/// This pins that refusal, which the steps would turn into `NotHeld`.
+///
+/// The points are worked out by hand against `x ≥ −16` and
+/// `y + z ≥ 2r(x + 16)`, each a whole unit or more off either plane or on one
+/// exactly: `(0, 16r, 16r)` is on the slanted plane, since `2r·16 = 32r`. The
+/// corners where the slanted plane meets the base circle solve
+/// `y = √2(x + 16) − 20` and `x² + y² = 400`, so
+/// `3x² + (64 − 40√2)x + 512 − 640√2 = 0`: about `(10.275, 17.159)` and
+/// `(−12.752, −15.407)`.
+#[test]
+fn a_cone_cut_by_a_wall_and_a_plane_through_its_asymptote_still_refuses_its_apex() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let cut = a_cone_cut_by_a_wall_and_a_plane_through_its_asymptote(&mut model);
+    let solid = model.solid(cut).expect("this model made the key");
+    let corners = corners_of_the_skin(solid);
+    assert_eq!(corners.len(), 4, "{corners:?}");
+    for corner in &corners {
+        let near = |want: [f64; 3]| (0..3).all(|axis| (corner[axis] - want[axis]).abs() < 1e-3);
+        assert!(
+            [
+                [-16.0, 12.0],
+                [-16.0, -12.0],
+                [10.275, 17.159],
+                [-12.752, -15.407]
+            ]
+            .iter()
+            .any(|&[x, y]| near([x, y, 20.0])),
+            "{corners:?}"
+        );
+    }
+    let refused = solid.face_holds_the_point(
+        the_skin(solid).key(),
+        PredicatePoint::from([0.0, 0.0, 0.0]),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+        ),
+        "{refused:?}"
+    );
+    let r = core::f64::consts::FRAC_1_SQRT_2;
+    let asked = |at| what_the_skin_holds(solid, at);
+    assert_eq!(asked([0.0, 15.0, 15.0]), OnAFace::Held);
+    assert_eq!(asked([-12.0, 9.0, 15.0]), OnAFace::Held);
+    assert_eq!(asked([0.0, 16.0 * r, 16.0 * r]), OnAFace::OnItsBoundary);
+    assert_eq!(asked([-16.0, 0.0, 16.0]), OnAFace::OnItsBoundary);
+    assert_eq!(asked([0.0, 20.0, 20.0]), OnAFace::OnItsBoundary);
+    assert_eq!(asked([3.0, 4.0, 5.0]), OnAFace::NotHeld);
+    assert_eq!(asked([-20.0, 0.0, 20.0]), OnAFace::NotHeld);
+    assert_eq!(asked([0.0, 5.0, -5.0]), OnAFace::NotHeld);
+}
+
 /// The apex is on the boundary, a point up the axis inside and one below the
 /// apex outside: every solid here keeps the axis from the apex to `z = 9`.
 fn assert_the_apex_is_on_the_boundary(solid: SolidView<'_>) {
@@ -404,6 +483,40 @@ fn a_cone_cut_by_a_wall_and_a_plane_along_a_ruling_stored_inexactly(model: &mut 
             Point::new(100.0, -60.0, -124.0),
             Point::new(0.0, 100.0, -84.0),
             Point::new(-245.0, -122.0, -112.0),
+        ],
+        leaning,
+    );
+    the_one_solid_both_keep(model, cone, wedge)
+}
+
+/// The same cone less all but `x ≥ −16` and the side away from the origin of
+/// the plane through `(−16, 0, 0)` with normal `(√2, −1, −1)`, which holds the
+/// line `x = −16`, `y + z = 0`. That plane is stored as
+/// `r·x − y/2 − z/2 = −16r` (`r` the stored `0.7071…`), and it is a face of a
+/// tetrahedron whose three corners on it satisfy that exactly
+/// (`y + z = 2r(x + 16)`, with `512r` exact and each `z` in its binade), whose
+/// fourth corner is far on the side the skin keeps, and whose other three faces
+/// are 36 units or more clear of the cone's part that side of both planes.
+fn a_cone_cut_by_a_wall_and_a_plane_through_its_asymptote(model: &mut Model) -> SolidKey {
+    let cone = a_cone_kept_to_x_at_least(model, -16.0);
+    let leaning = Plane::from_point_and_normal(
+        Point::new(-16.0, 0.0, 0.0),
+        Vector::new(core::f64::consts::SQRT_2, -1.0, -1.0),
+    )
+    .expect("a direction with length");
+    let [r, minus_half, also_minus_half] = leaning.normal().components();
+    assert_eq!(r, core::f64::consts::FRAC_1_SQRT_2);
+    assert_eq!(
+        [minus_half, also_minus_half, leaning.offset()],
+        [-0.5, -0.5, -16.0 * r]
+    );
+    let wedge = a_tetrahedron(
+        model,
+        [
+            Point::new(240.0, -140.0, 140.0 + 512.0 * r),
+            Point::new(240.0, 100.0, 512.0 * r - 100.0),
+            Point::new(-272.0, -20.0, 20.0 - 512.0 * r),
+            Point::new(-256.0, 256.0, 256.0),
         ],
         leaning,
     );

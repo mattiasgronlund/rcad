@@ -6380,10 +6380,19 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// the line runs along an asymptote of a hyperbola or the axis of a parabola,
 /// and `2b·t + c` is zero at `t = −c/(2b)` alone. That one meet is behind the
 /// chord when `g − γ·c/(2b) < 0`, which multiplied through by `2b²` is
-/// `b(2b·g − γ·c) < 0`. With `b = 0` that reads zero and so `false`, though
-/// the line, an asymptote itself, then misses the curve when `c` is not zero:
-/// a gap left, which no face built yet has had a cut meeting exactly along an
-/// asymptote to show. The skin of a pointed cone kept to
+/// `b(2b·g − γ·c) < 0`. With `b = 0` as well the line is an asymptote itself,
+/// where the cut meets the tangent plane along that ruling, and `c` alone is
+/// left: not zero, the line misses the curve (row Q1400). No face reaches that
+/// reading yet. On a cone's skin, a plane through an asymptote of the skin's
+/// arc keeps that arc, which is wholly on one side of it, and cuts the skin
+/// only by keeping the side away from the apex; then the arc's own plane keeps
+/// a side that grows the way the other plane's branch runs off, which
+/// [`is_a_family_this_follows`] refuses before any side is read. On a flat face
+/// the arc's hyperbola does not close, which it refuses too. The skin of
+/// `x ≥ −16` and the side away from the apex of a plane through
+/// `x = −16`, `y + z = 0` is that (the same test file), and
+/// `a_walls_hyperbola_never_reaches_a_plane_through_its_asymptote` below asks
+/// this and that of its planes. The skin of a pointed cone kept to
 /// `x ≥ −12` and to the side of the origin of the plane through `(0, 0, 23)`
 /// with normal `(√2, 1, 1)`, stored as `(0.7071…, 0.5, 0.5)`, has each plane's
 /// hyperbola against the other along a line running `(0, 1, −1)`, and `a` is
@@ -6492,6 +6501,7 @@ fn an_arc_never_reaches_the_plane(
         Decision::Neg => matches!(round, Surface::Cone(_)) && apart.sign() == Decision::Neg,
         Decision::Zero => {
             (b * (Interval::exactly(2.0) * b * ahead - grows * c)).sign() == Decision::Neg
+                || (b.sign() == Decision::Zero && matches!(c.sign(), Decision::Pos | Decision::Neg))
         }
         Decision::Undecidable { .. } | _ => false,
     }
@@ -8819,6 +8829,59 @@ mod tests {
                  followed: the quarter facing {x_kept}, {y_kept}"
             );
         }
+    }
+
+    /// **A wall's hyperbola never reaches a plane through its asymptote**, and
+    /// the skin both are cuts of is refused before the arc is asked (row
+    /// Q1400). The wall `x = −16` cuts the cone of slope one about `+z` in
+    /// `z² − y² = 256`, from `(−16, 12, 20)` down through `(−16, 0, 16)` to
+    /// `(−16, −12, 20)` below the base `z = 20`, and the plane through `(−16, 0, 0)`
+    /// with normal `(√2, −1, −1)` meets the wall in the asymptote
+    /// `y + z = 0`. Along it the part of degree two and the cross term are both
+    /// zero exactly and the rest is `64`, so the line misses the curve.
+    ///
+    /// The skin keeps `x ≥ −16`, `z ≤ 20` and the side of the slanted plane
+    /// away from the apex, the one its arc is on
+    /// (`tests/a_cone_skin_beside_a_plane_its_open_curve_never_reaches.rs`).
+    /// The wall's kept side grows the way the slanted plane's branch runs off,
+    /// so [`is_a_family_this_follows`] refuses those three cuts.
+    #[test]
+    fn a_walls_hyperbola_never_reaches_a_plane_through_its_asymptote() {
+        let cone = rcad_geom::Cone::new(Axis::z(), 1.0).expect("a positive slope");
+        let plane = |through: [f64; 3], facing: [f64; 3]| {
+            Plane::from_point_and_normal(
+                Point::new(through[0], through[1], through[2]),
+                Vector::new(facing[0], facing[1], facing[2]),
+            )
+            .expect("a normal with a length")
+        };
+        let wall = plane([-16.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
+        let slanted = plane([-16.0, 0.0, 0.0], [core::f64::consts::SQRT_2, -1.0, -1.0]);
+        let base = plane([0.0, 0.0, 20.0], [0.0, 0.0, 1.0]);
+        assert!(an_arc_never_reaches_the_plane(
+            &wall,
+            &Surface::Cone(cone),
+            Point::new(-16.0, 12.0, 20.0),
+            exactly([0.0, 0.0, -1.0]),
+            &slanted,
+        ));
+
+        let kept_negative = |flat: Plane| Cut {
+            surface: Surface::Plane(flat),
+            placed: Surface::Plane(flat),
+            kept: Decision::Neg,
+            corners_on_it: Vec::new(),
+        };
+        let apex = PredicatePoint::from(cone.apex().coordinates());
+        assert_eq!(
+            side_of_surface(&Surface::Plane(slanted), apex),
+            Decision::Pos
+        );
+        assert!(!is_a_family_this_follows(
+            &Surface::Cone(cone),
+            &[wall, slanted, base].map(kept_negative),
+            Some(Decision::Pos),
+        ));
     }
 
     /// How many runs of the rulings of the slope-one-half cone about `+z` carry a
