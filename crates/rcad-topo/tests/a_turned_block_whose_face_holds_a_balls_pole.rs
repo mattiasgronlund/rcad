@@ -80,12 +80,15 @@ fn a_block_clear_of_a_ball_whose_face_plane_holds_its_pole_fuses_and_measures() 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Today {
     Answers,
-    /// `CannotMeshAFace { CornersCoincide }`. The rim's one corner sits
-    /// `2.7e-14` from `N`, inside one rounding, so it is walked as the pole,
-    /// but at its own latitude `π/2 − 2.7e-14` and not the pinch. The cap round
-    /// the south pole is then cut into quarters, and the cutter knows a pole
-    /// side only at the pinch's latitude, so the third quarter's pole side has
-    /// no width.
+    /// `CannotMeshAFace { LoopsTouch }`. The rim's one corner sits within
+    /// one rounding of `N` — measured at `2.7e-14` to `5.5e-14`, depending
+    /// on the case — so it is walked as the pole, but at its own latitude
+    /// and not the pinch. The ball face's loop then runs up the meridian
+    /// through that corner, out to the rim and round it, and back down the
+    /// same meridian to close on the pole corner again. The side closing the
+    /// loop runs along that same meridian, so the rim corner the loop passed
+    /// on its way out sits on that closing side, and `triangulate` refuses
+    /// the loop as `CannotTriangulate::LoopsTouch`.
     CornerReadAsThePoleOffThePinch,
 }
 
@@ -223,7 +226,7 @@ fn a_block_whose_face_plane_misses_a_balls_pole_by_a_rounding_cuts_off_a_cap_or_
                         matches!(
                             said,
                             Err(Error::CannotMeshAFace {
-                                why: CannotTriangulate::CornersCoincide { .. },
+                                why: CannotTriangulate::LoopsTouch { .. },
                                 ..
                             })
                         ),
