@@ -103,14 +103,14 @@ fn triage_from_stdin(rest: &[String]) -> ExitCode {
     });
     let (groups, skipped) = triage(inputs);
     print!("{}", as_tsv(&groups));
-    if let Some(path) = &members_path {
-        if let Err(why) = std::fs::write(path, as_members_tsv(&groups)) {
-            eprintln!(
-                "--triage: could not write the members file {}: {why}",
-                path.display()
-            );
-            return ExitCode::FAILURE;
-        }
+    if let Some(path) = &members_path
+        && let Err(why) = std::fs::write(path, as_members_tsv(&groups))
+    {
+        eprintln!(
+            "--triage: could not write the members file {}: {why}",
+            path.display()
+        );
+        return ExitCode::FAILURE;
     }
     eprintln!("--triage: {total} of {total} replayed, {skipped} skipped as no target");
     ExitCode::SUCCESS
