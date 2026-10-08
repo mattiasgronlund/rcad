@@ -4,7 +4,7 @@
 //! names the **points** a third surface cuts out of that curve, which is what a
 //! corner of an arrangement is (`docs/decisions.md` §31.2 rows 4 and 5).
 //!
-//! # Two planes and a quadric is the road, and five ways round it
+//! # Two planes and a quadric is the road, and six ways round it
 //!
 //! Two planes cross in a line, and a line cut by a quadric is a quadratic in one
 //! unknown whose discriminant is a polynomial in the stored numbers. That is the
@@ -15,7 +15,8 @@
 //! quadric in a conic and two conics in one plane meet where a quartic is zero —
 //! and reaching *that* takes an algebraic solver rather than a discriminant. But
 //! **five families of it are not a quartic at all**, and all five are
-//! ordinary mechanical CAD rather than curiosities:
+//! ordinary mechanical CAD rather than curiosities. A sixth takes a ring in
+//! place of one quadric:
 //!
 //! - **Two quadrics that bend the same way.** Write a quadric out as
 //!   `p·(M p) + 2b·p + c`. Two of them with the same `M` differ by something
@@ -47,12 +48,18 @@
 //!   axis and off it, as a sign at a root of that quadratic says — a D-flat on
 //!   a shaft across the circle a chamfer cone crosses it in.
 //!   [`what_a_plane_beside_their_one_axis_leaves`].
+//! - **A ring and a ball, a pipe or a cone on its axis, and a plane that holds
+//!   it.** The two share circles square to the axis, at the heights
+//!   [`intersect`](crate::intersect) names them by, and the plane cuts each
+//!   in two points — a bend's end cap across the circles a bar of the bend's
+//!   own radius crosses its tube in.
+//!   [`what_a_plane_through_a_rings_axis_leaves`].
 //!
 //! **Three curved surfaces, two of which bend the same way, are one plane and
 //! two curved surfaces** by the first family's own argument: every point the
 //! two share is on the plane they differ by, and every point on that plane and
 //! one of them is on the other. So the plane takes the place of one of the
-//! two, and the five roads answer the triple — two cones of one slope about one
+//! two, and the six roads answer the triple — two cones of one slope about one
 //! axis and a ball, or two bars running the same way and a third.
 //! [`where_three_curved_surfaces_meet`].
 //!
@@ -62,7 +69,7 @@
 //! its axis, two pipes leaning against each other, or a plane leaning to the
 //! axis a ball and a pipe share — three curved surfaces no two of which
 //! differ by a plane a stored [`Plane`] is exactly, and any triple with a
-//! torus and fewer than two planes.
+//! torus and fewer than two planes but the sixth family.
 //! [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] says which of the two
 //! kinds of refusal it is in its own doc.
 //!
@@ -102,7 +109,10 @@ use crate::enclosure::{
     cross_enclosing, dot_enclosing, exactly, quotient_or_everything, root_enclosing,
 };
 use crate::exact::{Exact, Nearly, binary_exponent, multiplied_by_a_power_of_two, slid_exactly};
-use crate::intersect::{Question, ask, intersect, squared_length_of_a_cross_product};
+use crate::intersect::{
+    Question, ask, intersect, squared_length_of_a_cross_product,
+    the_heights_a_ring_crosses_a_round_surface_at,
+};
 use crate::plane::which_side_of_a_flat_surface;
 use crate::real_roots::where_a_polynomial_is_zero;
 use crate::{
@@ -366,7 +376,7 @@ impl MeetOfThree {
 /// # Errors
 ///
 /// [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] when fewer than two of
-/// the three are planes and none of the five ways round that the module doc
+/// the three are planes and none of the six ways round that the module doc
 /// names runs — for three curved surfaces, after the plane two of them differ
 /// by has taken one's place, or where no two of them differ by one.
 ///
@@ -1344,7 +1354,7 @@ fn what_one_plane_and_one_curved_surface_share(
 /// and the third share.** A point on both quadrics is on the plane, because
 /// `Q₁ − Q₂` is nothing where `Q₁` and `Q₂` both are; and a point on the plane
 /// and on `Q₁` is on `Q₂`, because `Q₂ = Q₁ − (Q₁ − Q₂)`. So the plane takes
-/// the place of the second of the two, and the five roads answer the triple.
+/// the place of the second of the two, and the six roads answer the triple.
 /// A cone of slope one with its apex at `z = 0`, a second with its apex at
 /// `z = 3`, and a ball of radius `√148` about `(0, 0, 15)` are the plane
 /// `z = 1.5` and two curved surfaces, and the ball does not reach that plane.
@@ -1413,7 +1423,7 @@ fn where_three_curved_surfaces_meet(
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
 }
 
-/// One plane and two curved surfaces, by the five roads the module doc names.
+/// One plane and two curved surfaces, by the six roads the module doc names.
 ///
 /// **Nothing here guesses.** Each road either reaches an answer it has earned or
 /// hands the question on, and what nothing reaches is the refusal that was here
@@ -1449,6 +1459,11 @@ fn where_one_plane_and_two_curved_surfaces_meet(
     }
     if let Some(answer) =
         what_a_plane_through_their_one_axis_leaves(flat, one, other, at, policy, log)?
+    {
+        return Ok(answer);
+    }
+    if let Some(answer) =
+        what_a_plane_through_a_rings_axis_leaves(flat, one, other, at, policy, log)?
     {
         return Ok(answer);
     }
@@ -2197,9 +2212,10 @@ fn what_a_plane_through_their_one_axis_leaves(
 /// The one axis two curved surfaces are turned about, read off one of them.
 struct AnAxis {
     /// The surface it is read off: the cone, or the pipe where neither is a
-    /// cone.
+    /// cone, or the ring where one is
+    /// ([`what_a_plane_through_a_rings_axis_leaves`]).
     read_off: Surface,
-    /// That cone's apex or that pipe's axis origin.
+    /// That cone's apex, that pipe's axis origin, or that ring's centre.
     through: [f64; 3],
     /// That surface's stored direction, turned round where its first component
     /// that is not zero is below zero, which is exact.
@@ -2307,7 +2323,8 @@ fn the_heights_they_share_circles_at(
 /// # Panics
 ///
 /// On a plane or a torus, which [`it_is_turned_about`] has already turned
-/// away.
+/// away, and which [`what_a_plane_through_a_rings_axis_leaves`] hands on
+/// before it asks.
 fn how_far_out_it_reaches(surface: &Surface, axis: &AnAxis) -> Option<Quadratic> {
     let squared_axis = Exact::dot_of(axis.along, axis.along)?;
     let height_of = |place: [f64; 3]| {
@@ -2422,6 +2439,95 @@ fn the_point_a_box_names(boxed: [Interval; 3]) -> PredicatePoint {
     } else {
         PredicatePoint::Constructed(boxed)
     }
+}
+
+/// What a plane that holds a ring's axis leaves of the ring and a ball, a pipe
+/// or a cone on that axis, or `None` where the three are not that.
+///
+/// The ring and the other surface share whole circles square to the axis and
+/// nothing else, at the heights [`the_heights_a_ring_crosses_a_round_surface_at`]
+/// finds, which are the heights [`intersect`] names each circle by. A plane
+/// holding the axis cuts each circle in two points, at its radius either side
+/// of the axis, as it does in [`what_a_plane_through_their_one_axis_leaves`]:
+/// a bend's end cap meets a bar of the bend's own radius on its axis where the
+/// circles at the top and the bottom of the tube cross it, `(±4, 0, ±1)` for
+/// ring four and tube one. No quartic: the heights are each a square root, and
+/// the tube never reaches the axis, so every circle is wider than nothing and
+/// cut twice.
+///
+/// **The radius at a height is read off the other surface**, as
+/// [`how_far_out_it_reaches`] writes it about the axis through the ring's
+/// centre along its stored direction. That direction is turned the way
+/// [`the_axis_both_are_turned_about`] turns one, and the order is the one
+/// [`what_a_plane_through_their_one_axis_leaves`] gives: lower heights first
+/// along it, and at each height the `−(n × w)` side first. Every point is a
+/// box worked out in intervals from its height's box.
+///
+/// **One axis, and the plane holding it, are decided exactly**: the plane by
+/// [`it_holds_the_axis`], and the other surface by the questions
+/// [`intersect`] asks before it names a circle. A ball, a pipe or a cone that
+/// is not on the ring's axis is not this road and is handed on, as is a second
+/// ring.
+fn what_a_plane_through_a_rings_axis_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<MeetOfThree>> {
+    let ((Surface::Torus(ring), round) | (round, Surface::Torus(ring))) = (one, other) else {
+        return Ok(None);
+    };
+    let along = ring.axis().direction().components();
+    let backwards = along
+        .iter()
+        .find(|component| **component != 0.0)
+        .is_some_and(|component| *component < 0.0);
+    let axis = AnAxis {
+        read_off: Surface::Torus(*ring),
+        through: ring.centre().coordinates(),
+        along: if backwards {
+            along.map(|component| -component)
+        } else {
+            along
+        },
+    };
+    if !it_holds_the_axis(flat, &axis) {
+        return Ok(None);
+    }
+    let mut heights = match the_heights_a_ring_crosses_a_round_surface_at(ring, round, policy, log)
+    {
+        Ok(heights) => heights,
+        Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface) => return Ok(None),
+        Err(refused) => return Err(refused),
+    };
+    if heights.is_empty() {
+        return Ok(Some(MeetOfThree::Nowhere));
+    }
+
+    // Past here the family is settled, so arithmetic that runs out is a
+    // refusal about *this* triple, which a slide along the range can retry.
+    let refused = || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at);
+    let Some(reach) = how_far_out_it_reaches(round, &axis) else {
+        return Err(refused());
+    };
+    if backwards {
+        heights = heights.iter().map(|height| -*height).collect();
+    }
+    heights.sort_by(|one, other| one.lo().total_cmp(&other.lo()));
+    let apart = heights.windows(2).all(|pair| pair[0].hi() < pair[1].lo());
+    if !apart {
+        return Err(refused());
+    }
+    let places: SmallVec<[PredicatePoint; 2]> = heights
+        .iter()
+        .flat_map(|&height| the_two_points_at(flat, &axis, &reach, height))
+        .collect();
+    if places.iter().any(|place| !place.uncertainty().is_finite()) {
+        return Err(refused());
+    }
+    Ok(Some(MeetOfThree::At(places)))
 }
 
 /// What a plane that misses one of the two curved surfaces, or touches it at a
