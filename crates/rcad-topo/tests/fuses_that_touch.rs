@@ -148,10 +148,13 @@
 //! and every fuse of the touching row answers.
 //! [`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`]
 //! checks nine domes by every rule against their closed forms. **Laid on its
-//! side it does not answer**: the ball's poles are then on the rim, the ball's
-//! side of the rim is cut in two at them, and every fuse is refused as an edge
-//! with one face along it;
-//! [`a_dome_lying_on_its_side_is_refused_as_an_edge_with_one_face`] pins that.
+//! side it answers 30 fuses of 72**: the ball's poles are then on the rim, and
+//! the ball's side of the rim, cut in two at them, is read as one closed side
+//! again since Q1368. The other 42 are refused because the two sides of the rim
+//! are read against the pipe and the ball, which disagree about which way it
+//! runs;
+//! [`a_dome_lying_on_its_side_answers_where_both_sides_of_its_rim_are_read_one_way`]
+//! pins both.
 //!
 //! **A bend's touch is not reached.** Every fuse of a bend lying on a block is
 //! refused as a quartic, touching or one unit clear, so that cell is pinned at
@@ -190,7 +193,7 @@ use proptest::test_runner::{
 };
 use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 mod touching;
 
@@ -404,11 +407,11 @@ fn a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms() {
     }
 }
 
-/// The dome on a shaft of its radius lying on its side, pinned at **every rule
-/// both ways round refused `ResultIsNotManifold { count: 1 }`**. It fails the
-/// day that changes, which is the day it should be checked against the closed
-/// forms [`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`]
-/// holds the upright dome to.
+/// The dome on a shaft of its radius lying on its side, every rule both ways
+/// round: **30 of the 72 fuses answer the closed forms**
+/// [`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`]
+/// holds the upright dome to, and validate, and the other 42 are pinned at the
+/// refusal they give.
 ///
 /// A ball's poles are always straight up and down from its centre, so a ball
 /// centred on the end cap of a bar lying along `x` or `y` has both poles on the
@@ -417,19 +420,35 @@ fn a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms() {
 /// (`across_a_circle_that_starts_at_a_pole`, §194.4): from the pole it starts at
 /// to the other, `HalfWayRoundAClosedCurve`, and back. The bar's side of the rim
 /// is one closed side at the bar's seam corner. `fuse/assemble.rs`'s
-/// `the_name_each_closed_curve_goes_by` joins the names of closed sides only, so
-/// the two halves and the closed side are three edges, each with one face. With
-/// the bar along `x` its seam corner is itself one of the poles, and that is
-/// refused the same way. Queue row Q1143 found it.
+/// `the_name_each_closed_curve_goes_by` joined the names of closed sides only, so
+/// the two halves and the closed side were three edges, each with one face, and
+/// all 72 fuses here were refused `ResultIsNotManifold { count: 1 }` (Q1143).
+/// `fuse/assemble.rs` now reads the two halves as one closed side wherever
+/// another side closes on the same curve whole, the rim gets the seam corner,
+/// and each side of it is read at that corner.
+///
+/// **What is still refused is which way the rim runs** (Q1368). Each side is
+/// read against the curved surface of its own pair: the bar's against the pipe,
+/// the ball's against the ball. The rim is a meridian of the ball, which the
+/// ball's longitude is square to, so the ball's side is read against its
+/// latitude where the corner is off the poles and against the cap's plane where
+/// it is a pole. Those agree with the pipe's longitude only for the bar running
+/// along `−y`, where all six rules both ways answer. Along `+y` they disagree,
+/// both faces walk the rim the same way, and the sweep refuses every fuse
+/// `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`. Along `x`, where
+/// the seam corner is a pole, the intersection answers both ways and the union
+/// and the differences are refused `FacesDoNotAgreeWhichWayTheyFace`.
 #[test]
-fn a_dome_lying_on_its_side_is_refused_as_an_edge_with_one_face() {
+fn a_dome_lying_on_its_side_answers_where_both_sides_of_its_rim_are_read_one_way() {
     let policy = Policy::certified();
+    let third = std::f64::consts::PI / 3.0;
+    let mut answered = 0;
     for radius in 1..=3 {
-        for (axis, quarters) in [
-            (Axis::x(), 1),
-            (Axis::x(), 3),
-            (Axis::y(), 1),
-            (Axis::y(), 3),
+        for (axis, quarters, along) in [
+            (Axis::x(), 1, "-y"),
+            (Axis::x(), 3, "+y"),
+            (Axis::y(), 1, "+x"),
+            (Axis::y(), 3, "-x"),
         ] {
             let (r, h) = (f64::from(radius), f64::from(radius + 1));
             let mut model =
@@ -445,22 +464,60 @@ fn a_dome_lying_on_its_side_is_refused_as_an_edge_with_one_face() {
                     &Isometry::translation(end).expect("a whole-number shift"),
                 )
                 .expect("a whole-number ball");
-            for (one, other) in [(shaft, dome), (dome, shaft)] {
-                for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-                    let refused = model
-                        .clone()
-                        .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
-                        .map(|answer| answer.solids().len());
+            let bar = 3.0 * third * r * r * h;
+            let half_ball = 2.0 * third * r * r * r;
+            for (one, other, rule, holds) in [
+                (shaft, dome, Rule::Union, bar + half_ball),
+                (dome, shaft, Rule::Union, bar + half_ball),
+                (shaft, dome, Rule::Intersection, half_ball),
+                (dome, shaft, Rule::Intersection, half_ball),
+                (shaft, dome, Rule::Difference, bar - half_ball),
+                (dome, shaft, Rule::Difference, half_ball),
+            ] {
+                let which = format!(
+                    "{rule:?} of R = {r} along {along} (shaft first: {})",
+                    one == shaft
+                );
+                let mut fused = model.clone();
+                let outcome =
+                    fused.fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new());
+                let refused_as_pinned = match (along, rule) {
+                    ("-y", _) | ("+x" | "-x", Rule::Intersection) => None,
+                    ("+y", _) => Some(matches!(
+                        outcome,
+                        Err(Error::TheFuseWroteABrokenAnswer {
+                            broken: Invalid::CoedgesRunTheSameWay
+                        })
+                    )),
+                    (_, _) => Some(matches!(
+                        outcome,
+                        Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
+                    )),
+                };
+                if let Some(pinned) = refused_as_pinned {
                     assert!(
-                        matches!(refused, Err(Error::ResultIsNotManifold { count: 1 })),
-                        "{rule:?} of R = {r} lying along {axis:?} turned {quarters} (shaft first: \
-                         {}) came back {refused:?}; pin it against the closed forms",
-                        one == shaft
+                        pinned,
+                        "{which} came back {:?}; move the pin, and check it against {holds}",
+                        outcome.map(|answer| answer.solids().len())
                     );
+                    continue;
                 }
+                let answer = outcome.unwrap_or_else(|why| panic!("{which} refused {why}"));
+                fused
+                    .validate(&policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{which} does not validate: {why}"));
+                assert_eq!(answer.solids().len(), 1, "{which} is one solid");
+                let (volume, error) = volume_and_error(&fused, answer.solids());
+                assert!(
+                    (volume - holds).abs() <= error,
+                    "{which} measures {volume} against {holds}, out by more than the {error} its \
+                     mesh declares"
+                );
+                answered += 1;
             }
         }
     }
+    assert_eq!(answered, 30, "30 of the 72 fuses answer");
 }
 
 /// A bar of a bend's tube radius butted onto the bend's `+x` cap, so the cap's
