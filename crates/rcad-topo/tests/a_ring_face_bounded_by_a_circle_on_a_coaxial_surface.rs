@@ -31,6 +31,18 @@
 //! turned rim's other corner `(13, 0, 4)` read above `z = −4` where the face
 //! leaves its circle going below it. The three bands' corners are on the side
 //! they keep, and no walk of any piece passed that is not the piece.
+//!
+//! **Before row Q1335, asking the ring's face of any piece whether it holds a
+//! point panicked**, and so did `classify_point` anywhere. The face is trimmed
+//! by the plane each circle's run names, so it is read as a ring face between
+//! two planes, and that reading took the face across each circle, the partner,
+//! for the plane. Read off the run instead, the pipes and the ball leave the
+//! band between the planes or the ring less it (`docs/decisions.md` §243.8),
+//! and the cone leaves one outer circle on `z = −4` and one inner on `z = 3`:
+//! one circle in front of the other's plane and the other behind it, which was
+//! refused as no face before (row Q1155). Its face is the part outside the
+//! middle of the tube on its side of `z = −4` and the part inside it on its
+//! side of `z = 3`.
 
 use core::cmp::Ordering;
 use core::f64::consts::PI;
@@ -258,8 +270,10 @@ fn the_ring_face_of_each_piece_cut_by_a_pipe_or_the_ball_holds_its_side_of_the_p
 /// Each circle is in front of the other's plane on one side and behind it on
 /// the other, which is neither a band between two planes nor the ring less one.
 /// The face is the outer part of the ring on its side of `z = −4` and the inner
-/// part on its side of `z = 3`, and the cone is what they meet at. Before row
-/// Q1335 every point panicked, as above.
+/// part on its side of `z = 3`, which meet at the top or the bottom of the tube.
+/// Before row Q1335 every point panicked, as above, and with the planes read
+/// right the face was refused `AFaceMissesPartOfWhereItsSurfacesCross` (row
+/// Q1155).
 #[test]
 fn the_ring_face_of_each_piece_cut_by_the_cone_holds_its_side_of_the_cone() {
     for piece in every_piece() {

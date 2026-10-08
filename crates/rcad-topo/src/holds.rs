@@ -848,6 +848,11 @@ fn what_a_curved_face_holds(
 /// comes here as one plane with two edges. The general rule refused that too:
 /// every corner of the wall is on the plane, so no corner says which side of it
 /// the wall is on (`docs/decisions.md` §377).
+///
+/// **A plane here may be a circle's own rather than a cap's**, named by the
+/// edge's run with a pipe, a cone or a ball across it: a ring cut by one of
+/// those on its axis is trimmed by the plane of each circle, which is where
+/// [`what_trims_this_face`] reads it, and not by the face across (row Q1335).
 fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) -> bool {
     matches!(surface, Surface::Torus(_))
         && trimmings
@@ -920,29 +925,45 @@ fn is_a_ring_face_between_two_planes(surface: &Surface, trimmings: &[Trimming]) 
 ///
 /// **Two different planes square to the axis leave two bands between them**,
 /// an outer and an inner — a washer's rounded rim between `z = ±h` is the
-/// outer one — so the planes' sides do not settle the face. Step 3 still
-/// holds each circle in front of the other plane or each behind it, and then
-/// the side of the pipe of the ring's own radius that [`intersect`] names both
-/// circles by says which band ([`the_side_of_the_pipe_naming_both_circles`]).
-/// Both in front, the face is that band (row Q950); both behind, it is the
-/// ring less that band — a groove turned into a ring's rim leaves the ring
-/// less its outer band — which is the part in front of either plane, and
-/// between them the part off the band (row Q1144). `point` is asked against
-/// both planes and that side of the pipe, all moved into place.
+/// outer one — so the planes' sides do not settle the face. The side of the
+/// pipe of the ring's own radius that [`intersect`] names each circle by says
+/// whether it is outer or inner ([`the_side_of_the_pipe_naming_each_circle`]).
+/// With both circles on one side, step 3 still holds each in front of the
+/// other plane or each behind it. Both in front, the face is that band (row
+/// Q950); both behind, it is the ring less that band — a groove turned into a
+/// ring's rim leaves the ring less its outer band — which is the part in front
+/// of either plane, and between them the part off the band (row Q1144). With
+/// one outer circle and one inner, step 3 turns round: one must be in front of
+/// the other plane and the other behind it, and the face runs round the tube
+/// from one circle to the other over its top or under its bottom — the ring
+/// cut by a cone on its axis. It is the part on each circle's side of the pipe
+/// in front of that circle's own plane (row Q1335). `point` is asked against
+/// both planes and the sides of the pipe, all moved into place.
+///
+/// **A plane here may be the circle's own, named by its run, with a pipe, a
+/// cone or a ball across the edge** rather than a cap (row Q1335). Such a run
+/// is how `rcad-step` reads a circle between two curved faces, and how
+/// [`intersect`] names a ring's crossing with a pipe, a cone or a ball on its
+/// axis. The plane read is the second surface
+/// [`which_two_surfaces_a_run_is_between`] names, which is the run's own where
+/// the face across is curved, and the plane moved into place is
+/// [`the_surface_an_edge_cuts`]'s, so a face across that is not flat is never
+/// taken for the plane.
 ///
 /// # Errors
 ///
 /// [`Error::AFaceMissesPartOfWhereItsSurfacesCross`] when a plane neither
 /// holds the ring's axis nor is square to it, when one plane is square to it
-/// and the other is not, one circle is in front of the other plane and the
-/// other is not, a circle is on the other plane, the wire keeps one plane's two
-/// sides, both edges are along one of that plane's circles, or two different
-/// planes square to the axis have one outer circle and one inner, which is what
-/// the general rule gave every face of this shape. Whatever [`intersect`] gives
-/// for two planes, or one plane and the
-/// ring. [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the closed-edge rule
-/// cannot, and [`Error::Undecidable`] when a side, whether a plane holds the
-/// axis, or which side of the pipe a point is on, could not be settled.
+/// and the other is not, a circle is on the other plane, the wire keeps one
+/// plane's two sides, both edges are along one of that plane's circles, a
+/// corner is on no one circle, or one circle is in front of the other plane
+/// and the other is not, except for one outer circle and one inner of two
+/// different planes square to the axis — which are refused when both are in
+/// front or both behind. Whatever [`intersect`] gives for two planes, or one
+/// plane and the ring. [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the
+/// closed-edge rule cannot, and [`Error::Undecidable`] when a side, whether a
+/// plane holds the axis, or which side of the pipe a point is on, could not be
+/// settled.
 fn what_a_ring_face_between_two_planes_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
@@ -1038,25 +1059,34 @@ fn what_a_ring_face_between_two_planes_holds(
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         };
     }
-    let in_front_of_both = match in_front {
-        [true, true] => true,
-        [false, false] => false,
-        [true, false] | [false, true] => return Err(refuse()),
-    };
     if square_to_the_axis == 0 {
-        return if in_front_of_both {
-            held_in_front_of_all(&cuts, point)
-        } else {
-            held_in_front_of_any(&cuts, point)
+        return match in_front {
+            [true, true] => held_in_front_of_all(&cuts, point),
+            [false, false] => held_in_front_of_any(&cuts, point),
+            [true, false] | [false, true] => Err(refuse()),
         };
     }
-    let band = the_side_of_the_pipe_naming_both_circles(solid, &ring, [one, other], policy, log)?
-        .ok_or_else(refuse)?
-        .transformed(&face.location());
-    if in_front_of_both {
-        held_in_front_of_all_on_one_band(&cuts, &band, point)
-    } else {
-        held_in_front_of_either_or_off_the_band(&cuts, &band, point)
+    let [Some(one_side), Some(other_side)] =
+        the_side_of_the_pipe_naming_each_circle(solid, &ring, [one, other], policy, log)?
+    else {
+        return Err(refuse());
+    };
+    let one_band = one_side == other_side;
+    let [one_side, other_side] =
+        [one_side, other_side].map(|side| side.transformed(&face.location()));
+    match (in_front, one_band) {
+        ([true, true], true) => held_in_front_of_all_on_one_band(&cuts, &one_side, point),
+        ([false, false], true) => held_in_front_of_either_or_off_the_band(&cuts, &one_side, point),
+        ([true, false] | [false, true], false) => {
+            held_in_front_of_its_own_plane_on_each_side_of_the_pipe(
+                [one, other],
+                [&one_side, &other_side],
+                point,
+            )
+        }
+        ([true, true] | [false, false], false) | ([true, false] | [false, true], true) => {
+            Err(refuse())
+        }
     }
 }
 
@@ -1143,8 +1173,8 @@ fn are_on_two_circles(
 }
 
 /// The side of the pipe of the ring's own radius that names the circle each of
-/// two different planes square to the axis cuts a face along, when it names
-/// both; `None` when it does not.
+/// two different planes square to the axis cuts a face along; `None` for a
+/// corner no one circle certainly keeps.
 ///
 /// **Between two such planes the ring holds two bands**, and the pipe is what
 /// tells them apart. Each plane cuts the ring in two circles round the axis, at
@@ -1165,6 +1195,16 @@ fn are_on_two_circles(
 /// the other plane, so the inner circle there is met from beyond the plane and
 /// not from in front of it.
 ///
+/// **One outer circle and one inner, one in front of the other's plane and one
+/// behind it, is a face too**: the ring cut by a cone on its axis, whose line
+/// across the tube runs from an outer circle on one plane to an inner circle on
+/// another (row Q1335). Round the tube from the outer circle over the top to
+/// the inner one, the face is above both planes where it leaves them; under the
+/// bottom, below both. So it keeps one side of both, read the same way along
+/// the axis, and of two different planes that puts one circle in front of the
+/// other's plane and the other behind it. Two outer circles keeping one side of
+/// both bound no face: leaving one going up meets the other from below.
+///
 /// Each corner's circle is named on its own plane as stored. Both pickers are
 /// built from the ring alone, so the same side of the pipe is equal by value
 /// whichever plane named it.
@@ -1172,13 +1212,13 @@ fn are_on_two_circles(
 /// # Errors
 ///
 /// Whatever [`intersect`] gives for each plane and the ring.
-fn the_side_of_the_pipe_naming_both_circles(
+fn the_side_of_the_pipe_naming_each_circle(
     solid: SolidView<'_>,
     ring: &Surface,
     cuts: [&Cut; 2],
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Option<Picker>> {
+) -> Result<[Option<Picker>; 2]> {
     let mut circle_through = |cut: &Cut| {
         let corner = where_it_is_stored(solid, cut.corners_on_it[0]).coordinates();
         the_picker_naming_the_circle_through(
@@ -1189,9 +1229,7 @@ fn the_side_of_the_pipe_naming_both_circles(
             log,
         )
     };
-    let one = circle_through(cuts[0])?;
-    let other = circle_through(cuts[1])?;
-    Ok(one.filter(|one| other.as_ref() == Some(one)))
+    Ok([circle_through(cuts[0])?, circle_through(cuts[1])?])
 }
 
 /// Whether the whole of `torus`'s axis lies on `flat`: [`Decision::Zero`] when
@@ -6640,17 +6678,59 @@ fn held_in_front_of_all_on_its_own_run(
     }
 }
 
-/// The face is the part of its ring in front of both planes square to its axis
-/// and on `band`'s side of the pipe of the ring's own radius
-/// ([`the_side_of_the_pipe_naming_both_circles`]), already moved into place.
+/// The face is the part of its ring on the outer circle's side of the pipe of
+/// the ring's own radius and in front of that circle's plane, and the part on
+/// the inner circle's side and in front of the other plane: the ring cut by a
+/// cone on its axis ([`the_side_of_the_pipe_naming_each_circle`]). Each side
+/// of the pipe and each plane is as moved into place.
 ///
-/// A point on the pipe is kept, as a picker keeps what is on it. No point of
-/// the ring in front of both planes is on it, so that reading is never asked of
-/// one on the face.
+/// A point on a plane is on the boundary only on its own circle's side of the
+/// pipe; on the other side it is on the plane's other circle, which is inside
+/// the face or off it as the other part says. A point on the pipe is the top
+/// or the bottom of the tube, strictly on one side of both planes, so taking it
+/// as on both sides of the pipe gives it the same answer from either part.
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`], naming the pipe, when it cannot say.
+/// [`Error::Undecidable`], naming a plane or the pipe, when neither part holds
+/// the point and one could not say.
+fn held_in_front_of_its_own_plane_on_each_side_of_the_pipe(
+    cuts: [&Cut; 2],
+    sides: [&Picker; 2],
+    point: PredicatePoint,
+) -> Result<OnAFace> {
+    let mut on_its_boundary = false;
+    let mut undecided = None;
+    for (cut, side) in cuts.into_iter().zip(sides) {
+        match held_in_front_of_all_on_one_band(core::slice::from_ref(cut), side, point) {
+            Ok(OnAFace::Held) => return Ok(OnAFace::Held),
+            Ok(OnAFace::OnItsBoundary) => on_its_boundary = true,
+            Ok(OnAFace::NotHeld) => (),
+            Err(refusal) => undecided = Some(refusal),
+        }
+    }
+    if let Some(refusal) = undecided {
+        return Err(refusal);
+    }
+    Ok(if on_its_boundary {
+        OnAFace::OnItsBoundary
+    } else {
+        OnAFace::NotHeld
+    })
+}
+
+/// The face is the part of its ring in front of every plane of `cuts` square to
+/// its axis and on `band`'s side of the pipe of the ring's own radius
+/// ([`the_side_of_the_pipe_naming_each_circle`]), already moved into place.
+///
+/// A point on the pipe is kept, as a picker keeps what is on it. No point of
+/// the ring in front of both of two planes is on it, so that reading is never
+/// asked of one on a band; for one plane, see
+/// [`held_in_front_of_its_own_plane_on_each_side_of_the_pipe`].
+///
+/// # Errors
+///
+/// [`Error::Undecidable`], naming a plane or the pipe, when it cannot say.
 fn held_in_front_of_all_on_one_band(
     cuts: &[Cut],
     band: &Picker,
@@ -6676,7 +6756,7 @@ fn held_in_front_of_all_on_one_band(
 
 /// The face is its ring less the band between two planes square to its axis on
 /// `band`'s side of the pipe of the ring's own radius
-/// ([`the_side_of_the_pipe_naming_both_circles`]), already moved into place:
+/// ([`the_side_of_the_pipe_naming_each_circle`]), already moved into place:
 /// the part in front of either plane, and between them the part off the band.
 ///
 /// The band's own two circles are the face's boundary, and the other band's
@@ -10694,10 +10774,132 @@ mod tests {
     }
 
     /// A ring face along the outer circle of `z = −3` and the inner circle of
-    /// `z = 3` is refused, however it is walked and used: no face keeps the
-    /// near side of both planes along those two circles.
+    /// `z = 3`, walked so it keeps the near side of both planes or the far side
+    /// of both, is refused however it is used: no piece of the ring keeps those
+    /// sides. So is a wall along the outer circles of both planes walked so it
+    /// keeps one side of both, read the same way along the axis: leaving one
+    /// circle going up meets the other from below, so no piece keeps those
+    /// sides either, and here one circle is in front of the other's plane and
+    /// the other behind it, as on a face from an outer circle to an inner one
+    /// ([`a_ring_face_from_an_outer_circle_of_one_plane_to_an_inner_of_another_runs_over_the_top_or_under`]).
+    ///
+    /// Before row Q1335 this held for every walk of the first wall, and the two
+    /// that keep one side of both planes read the same way are a face (row
+    /// Q1155).
     #[test]
-    fn a_ring_face_along_an_outer_circle_of_one_plane_and_an_inner_of_another_is_refused() {
+    fn a_ring_face_along_two_circles_keeping_sides_no_piece_keeps_is_refused() {
+        for (near, far, walks) in [
+            (
+                14.0,
+                6.0,
+                [
+                    [Orientation::Reversed, Orientation::Reversed],
+                    [Orientation::Forward, Orientation::Forward],
+                ],
+            ),
+            (
+                14.0,
+                14.0,
+                [
+                    [Orientation::Reversed, Orientation::Reversed],
+                    [Orientation::Forward, Orientation::Forward],
+                ],
+            ),
+        ] {
+            for walk in walks {
+                for wall_used in [Orientation::Forward, Orientation::Reversed] {
+                    let (model, solid, wall) = a_wall_between_caps_facing_out_of_z_3(
+                        [near, far],
+                        walk,
+                        wall_used,
+                        Isometry::identity(),
+                    );
+                    let ring = model.solid(solid).expect("this model made the key");
+                    for point in [at(15.0, 0.0, 0.0), at(5.0, 0.0, 0.0), at(10.0, 0.0, 5.0)] {
+                        let answer = ring.face_holds_the_point(
+                            wall,
+                            point,
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        );
+                        assert!(
+                            matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == wall),
+                            "{near} to {far}, walked {walk:?}, used {wall_used:?}, {point:?}: {answer:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// A ring face along the outer circle of `z = −3` and the inner circle of
+    /// `z = 3`, walked so it keeps one side of both planes read the same way
+    /// along the axis, holds the tube from one circle to the other over its
+    /// top, or under its bottom, as built and moved a hundred along `x` (rows
+    /// Q1155, Q1335).
+    ///
+    /// Over the top it is the outer part of the ring above `z = −3` and the
+    /// inner part above `z = 3`, which meet at the top of the tube: the wall of
+    /// [`a_bands_wall_walking_both_circles_the_same_way_round_the_tube_is_refused`]
+    /// that validates, walked `[Reversed, Forward]` and used as stored. Walked
+    /// the other way round both circles, or used turned round, it is the rest
+    /// of the ring less the two circles, under the bottom. Each circle is in
+    /// front of the other's plane on one and behind it on the other, and every
+    /// point was refused `AFaceMissesPartOfWhereItsSurfacesCross`.
+    #[test]
+    fn a_ring_face_from_an_outer_circle_of_one_plane_to_an_inner_of_another_runs_over_the_top_or_under()
+     {
+        let moved = Isometry::translation(Vector::new(100.0, 0.0, 0.0)).expect("a finite shift");
+        let (held, boundary, not_held) = (OnAFace::Held, OnAFace::OnItsBoundary, OnAFace::NotHeld);
+        let over_and_under = [
+            ((15.0, 0.0), [held, not_held]),
+            ((5.0, 0.0), [not_held, held]),
+            ((10.0, 5.0), [held, not_held]),
+            ((10.0, -5.0), [not_held, held]),
+            ((14.0, 3.0), [held, not_held]),
+            ((6.0, -3.0), [not_held, held]),
+            ((14.0, -3.0), [boundary, boundary]),
+            ((6.0, 3.0), [boundary, boundary]),
+        ];
+        for walk in [
+            [Orientation::Reversed, Orientation::Forward],
+            [Orientation::Forward, Orientation::Reversed],
+        ] {
+            for wall_used in [Orientation::Forward, Orientation::Reversed] {
+                let over_the_top =
+                    (walk[0] == Orientation::Reversed) == (wall_used == Orientation::Forward);
+                for (placed, by) in [(Isometry::identity(), 0.0), (moved, 100.0)] {
+                    let (model, solid, wall) =
+                        a_wall_between_caps_facing_out_of_z_3([14.0, 6.0], walk, wall_used, placed);
+                    let ring = model.solid(solid).expect("this model made the key");
+                    for ((x, z), [over, under]) in over_and_under {
+                        let point = at(x + by, 0.0, z);
+                        let answer = ring.face_holds_the_point(
+                            wall,
+                            point,
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        );
+                        let expected = if over_the_top { over } else { under };
+                        assert!(
+                            matches!(answer, Ok(found) if found == expected),
+                            "walked {walk:?}, used {wall_used:?}, {point:?}: {answer:?}, not {expected:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// [`a_piece_of_pipe_placed`] on the ring of ten with tube five, along the
+    /// circle of `z = −3` through `(near, 0, −3)` and the one of `z = 3` through
+    /// `(far, 0, 3)`, each capped by its plane facing away from the other.
+    fn a_wall_between_caps_facing_out_of_z_3(
+        [near, far]: [f64; 2],
+        walk: [Orientation; 2],
+        wall_used: Orientation,
+        placed: Isometry,
+    ) -> (Model, SolidKey, FaceKey) {
         let facing = |up: f64| {
             Plane::from_point_and_normal(
                 rcad_geom::Point::new(0.0, 0.0, up),
@@ -10705,41 +10907,23 @@ mod tests {
             )
             .expect("the z axis is a unit normal")
         };
-        for walk in EVERY_WALK {
-            for wall_used in [Orientation::Forward, Orientation::Reversed] {
-                let (model, solid, wall) = a_piece_of_pipe_placed(
-                    rcad_geom::Torus::new(Axis::z(), 10.0, 5.0)
-                        .expect("a tube narrower than its ring"),
-                    End {
-                        corner: rcad_geom::Point::new(14.0, 0.0, -3.0),
-                        cap: facing(-3.0),
-                        used: Orientation::Forward,
-                    },
-                    End {
-                        corner: rcad_geom::Point::new(6.0, 0.0, 3.0),
-                        cap: facing(3.0),
-                        used: Orientation::Forward,
-                    },
-                    None,
-                    walk,
-                    wall_used,
-                    Isometry::identity(),
-                );
-                let ring = model.solid(solid).expect("this model made the key");
-                for point in [at(15.0, 0.0, 0.0), at(5.0, 0.0, 0.0), at(10.0, 0.0, 5.0)] {
-                    let answer = ring.face_holds_the_point(
-                        wall,
-                        point,
-                        &Policy::certified(),
-                        &mut ProvenanceLog::new(),
-                    );
-                    assert!(
-                        matches!(answer, Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face }) if face == wall),
-                        "walked {walk:?}, used {wall_used:?}, {point:?}: {answer:?}"
-                    );
-                }
-            }
-        }
+        a_piece_of_pipe_placed(
+            rcad_geom::Torus::new(Axis::z(), 10.0, 5.0).expect("a tube narrower than its ring"),
+            End {
+                corner: rcad_geom::Point::new(near, 0.0, -3.0),
+                cap: facing(-3.0),
+                used: Orientation::Forward,
+            },
+            End {
+                corner: rcad_geom::Point::new(far, 0.0, 3.0),
+                cap: facing(3.0),
+                used: Orientation::Forward,
+            },
+            None,
+            walk,
+            wall_used,
+            placed,
+        )
     }
 
     /// The top half of a ring cut by `z = 0`, with the cap along its outer
