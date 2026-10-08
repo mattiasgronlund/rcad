@@ -12414,7 +12414,7 @@ _status-triage root queue:
     rows=$(mktemp)
     surviving=$(mktemp)
     trap 'rm -f "$rows" "$surviving"' EXIT
-    {{ just_executable() }} _queue-rows '{{ queue }}' \
+    {{ just_executable() }} --justfile '{{ justfile() }}' _queue-rows '{{ queue }}' \
         | awk -F'\037' '$1 == "R" { print $5 "\037" $7 "\037" $11 }' >"$rows" \
         || { echo "could not read the rows of {{ queue }}, so no group was matched to one"; exit 1; }
 
@@ -12939,18 +12939,50 @@ check-status-selftest:
     grep -qF "no green commit is on main in this checkout" <<<"$got" \
         || fail "a green belonging to another branch was counted as main's"
 
-    # The fuzz row. A verdict's sample sits under /night/ and a row's under
-    # ~/rcad-fuzz-logs/n/, so only the file name can match, as across two real
-    # nights.
+    # The fuzz row. A verdict's sample sits under /night/ and a member's own
+    # crash file is what a row names (§418.4). A done row's sha, and the main a
+    # night replayed on, are resolved as git commits wherever `_status-triage`
+    # runs, so a scratch git repo stands in for this session's own history
+    # rather than risking a sha that may or may not resolve in the real one.
+    scratch="$dir/triage-repo"
+    git init -q -b main "$scratch"
+    git -C "$scratch" config user.email t@t
+    git -C "$scratch" config user.name t
+    echo one > "$scratch/f"; git -C "$scratch" add f
+    git -C "$scratch" commit -q -m "a fix that reached the replayed main"
+    fixed_sha=$(git -C "$scratch" rev-parse HEAD)
+    echo two > "$scratch/f"; git -C "$scratch" add f
+    git -C "$scratch" commit -q -m "the main the night replayed on"
+    replayed_sha=$(git -C "$scratch" rev-parse HEAD)
+    git -C "$scratch" checkout -q -b aside "$fixed_sha"
+    echo three > "$scratch/g"; git -C "$scratch" add g
+    git -C "$scratch" commit -q -m "a fix that never reached the replayed main"
+    not_ancestor_sha=$(git -C "$scratch" rev-parse HEAD)
+    git -C "$scratch" checkout -q main
+    bogus_sha=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+
     logs="$dir/fuzz-logs"
     mkdir -p "$logs"
+    full_hash=$(printf 'cafefeed%032d' 1)
+    prefix_hash=$(printf 'beadfeed%032d' 2)
+    twin_a=$(printf 'abcdef01%032d' 3)
+    twin_b=$(printf 'abcdef01%032d' 4)
+    dropped_hash=$(printf 'd00dfeed%032d' 5)
+    notanc_hash=$(printf 'f00dfeed%032d' 6)
+
     printf '%s\n' '## Tier 1' '' '```' \
         'Q1 1 parked:§1 opus - a coedge at crates/rcad-step/tests/fuzzing/writer.rs:384 §1' \
-        'Q2 1 todo opus - a refusal at crates/rcad-step/tests/fuzzing/writer.rs:226, sample ~/rcad-fuzz-logs/n/artifacts/t/crash-cccc §1' \
+        'Q2 1 todo opus - a refusal at crates/rcad-step/tests/fuzzing/writer.rs:226 §1' \
         'Q3 1 todo opus - the fuse at crates/rcad-topo/src/fuse/arrange.rs:2306 §1' \
+        "Q5 1 todo opus - names the crash file in full, crash-$full_hash §1" \
+        "Q6 1 todo opus - names only an 8-digit prefix, crash-${prefix_hash:0:8} §1" \
+        "Q7 1 todo opus - names a prefix two groups' crash files share, crash-${twin_a:0:8} §1" \
+        "Q8 1 dropped:§1 opus - decided not worth fixing, crash-$dropped_hash §1" \
         '```' '' '## Closed' '' '```' \
-        'Q4 1 done:abc1234 opus - the fuse at crates/rcad-topo/src/fuse/arrange.rs:999 §1' \
+        "Q4 1 done:$fixed_sha opus - the fuse at crates/rcad-topo/src/fuse/arrange.rs:999 §1" \
+        "Q9 1 done:$not_ancestor_sha opus - a fix that never reached the replayed main, crash-$notanc_hash §1" \
         '```' >"$dir/queue.md"
+
     point_latest_at() {
         printf '2026-10-08 08:15  abc1234 (0 days old, 0 behind main)  5 targets  %s\n' "$logs/$1" >"$logs/latest"
     }
@@ -12960,9 +12992,24 @@ check-status-selftest:
         mkdir -p "$logs/$night"
         printf 'target\tfiles\tstill_fails\tsample\tgroup\n' >"$logs/$night/fuzz-triage-verdicts.tsv"
         printf '%s\n' "$@" >>"$logs/$night/fuzz-triage-verdicts.tsv"
+        if [ "${old_format:-0}" != 1 ]; then
+            {
+                printf 'target\tgroup\tfile\n'
+                local line target files still_fails sample group
+                for line in "$@"; do
+                    IFS=$'\t' read -r target files still_fails sample group <<<"$line"
+                    [ "$still_fails" = yes ] || continue
+                    printf '%s\t%s\t%s\n' "$target" "$group" "$sample"
+                done
+            } >"$logs/$night/fuzz-triage-members.tsv"
+            printf '%s\n' "$replayed_sha" >"$logs/$night/fuzz-triage-replayed-main.txt"
+        fi
         point_latest_at "$night"
     }
-    triage_row() { just _status-triage "$logs" "$dir/queue.md" 2>&1; }
+    triage_row() {
+        just --justfile '{{justfile()}}' --working-directory "$scratch" \
+            _status-triage "$logs" "${1:-$dir/queue.md}" 2>&1
+    }
 
     got=$(triage_row)
     grep -qxF "no night has finished: $logs/latest does not exist" <<<"$got" \
@@ -12976,31 +13023,31 @@ check-status-selftest:
 
     night_with decoder-path $'t\t3\tyes\t/night/artifacts/t/crash-aaaa\tpanicked at crates/rcad-fuzz-explain/src/../../rcad-step/tests/fuzzing/writer.rs:384:13: a coedge came back with a different edge run'
     got=$(triage_row)
-    grep -qxF "decoder-path: 1 group(s) still fail on main: 0 named by no open row, and 0 only by a place another failing group shares" <<<"$got" \
+    grep -qxF "decoder-path: 1 group(s) still fail on main: 0 named by no row, and 0 only by a place another failing group shares" <<<"$got" \
         || fail "a parked row naming the place, without the decoder's ../../ and the column, did not name the group"
 
     night_with shared-place \
         $'t\t5\tyes\t/night/artifacts/t/crash-bbbb\tpanicked at crates/rcad-fuzz-explain/src/../../rcad-step/tests/fuzzing/writer.rs:226:9: the reader refuses: one reason' \
         $'t\t1\tyes\t/night/artifacts/t/crash-cccc\tpanicked at crates/rcad-fuzz-explain/src/../../rcad-step/tests/fuzzing/writer.rs:226:9: the reader refuses: another reason'
     got=$(triage_row)
-    grep -qxF "shared-place: 2 group(s) still fail on main: 0 named by no open row, and 1 only by a place another failing group shares" <<<"$got" \
-        || fail "a row holding one group's sample and a place two groups share did not name that one and only place the other"
+    grep -qxF "shared-place: 2 group(s) still fail on main: 0 named by no row, and 2 only by a place another failing group shares" <<<"$got" \
+        || fail "two groups sharing one place and named by neither file nor a unique place were not both counted shared-only"
 
     night_with closed-row $'t\t1\tyes\t/night/artifacts/t/crash-dddd\tpanicked at crates/rcad-topo/src/fuse/arrange.rs:999:1: unreachable'
     got=$(triage_row)
-    grep -qxF "closed-row: 1 group(s) still fail on main: 1 named by no open row, and 0 only by a place another failing group shares" <<<"$got" \
-        || fail "a group only a done row names was counted as named"
+    grep -qxF "closed-row: 1 group(s) still fail on main: 1 named by no row, and 0 only by a place another failing group shares" <<<"$got" \
+        || fail "a done row whose fix already reached the replayed main was still counted as naming its group"
 
     night_with longer-line $'t\t1\tyes\t/night/artifacts/t/crash-eeee\tpanicked at crates/rcad-topo/src/fuse/arrange.rs:230:5: unreachable'
     got=$(triage_row)
-    grep -qxF "longer-line: 1 group(s) still fail on main: 1 named by no open row, and 0 only by a place another failing group shares" <<<"$got" \
+    grep -qxF "longer-line: 1 group(s) still fail on main: 1 named by no row, and 0 only by a place another failing group shares" <<<"$got" \
         || fail "a row naming arrange.rs:2306 was taken to name arrange.rs:230"
 
     night_with no-place \
         $'t\t247\tyes\t/night/artifacts/t/crash-ffff\tt: bytes did not decode to a case' \
         $'t\t9\tno\t/night/artifacts/t/crash-1111\tt: no longer fails — succeeded'
     got=$(triage_row)
-    grep -qxF "no-place: 1 group(s) still fail on main: 1 named by no open row, and 0 only by a place another failing group shares" <<<"$got" \
+    grep -qxF "no-place: 1 group(s) still fail on main: 1 named by no row, and 0 only by a place another failing group shares" <<<"$got" \
         || fail "a failing group with no panic place, beside one that no longer fails, was miscounted"
 
     night_with all-fixed $'t\t9\tno\t/night/artifacts/t/crash-1111\tt: no longer fails — succeeded'
@@ -13018,6 +13065,54 @@ check-status-selftest:
     got=$(triage_row) && fail "a verdicts file with a column missing was read"
     grep -qF "the header is not target, files, still_fails, sample, group" <<<"$got" \
         || fail "a verdicts file with a column missing did not say its header moved"
+
+    night_with named-full $'t\t1\tyes\t/night/artifacts/t/crash-'"$full_hash"$'\tpanicked at crates/rcad-geom/src/foo.rs:10:5: full hash check'
+    got=$(triage_row)
+    grep -qxF "named-full: 1 group(s) still fail on main: 0 named by no row, and 0 only by a place another failing group shares" <<<"$got" \
+        || fail "a row naming a crash file's full 40-digit hash did not name the group"
+
+    night_with named-prefix $'t\t1\tyes\t/night/artifacts/t/crash-'"$prefix_hash"$'\tpanicked at crates/rcad-geom/src/bar.rs:20:5: prefix hash check'
+    got=$(triage_row)
+    grep -qxF "named-prefix: 1 group(s) still fail on main: 0 named by no row, and 0 only by a place another failing group shares" <<<"$got" \
+        || fail "a row naming only an 8-digit prefix of a crash file's hash did not name the group"
+
+    night_with ambiguous-prefix \
+        $'t\t1\tyes\t/night/artifacts/t/crash-'"$twin_a"$'\tpanicked at crates/rcad-geom/src/baz1.rs:30:5: twin one' \
+        $'t\t1\tyes\t/night/artifacts/t/crash-'"$twin_b"$'\tpanicked at crates/rcad-geom/src/baz2.rs:40:5: twin two'
+    got=$(triage_row) && fail "a prefix matching crash files in two different still-failing groups was read"
+    grep -qF "Q7: names crash-${twin_a:0:8}, which is a prefix of crash files in more than one still-failing group" <<<"$got" \
+        || fail "an ambiguous crash-file prefix did not name the row and say so"
+
+    night_with dropped-names-file $'t\t1\tyes\t/night/artifacts/t/crash-'"$dropped_hash"$'\tpanicked at crates/rcad-geom/src/qux.rs:50:5: dropped check'
+    got=$(triage_row)
+    grep -qxF "dropped-names-file: 1 group(s) still fail on main: 0 named by no row, and 0 only by a place another failing group shares" <<<"$got" \
+        || fail "a dropped row naming a crash file did not name the group, so the fault would be refiled every morning"
+
+    night_with done-not-ancestor $'t\t1\tyes\t/night/artifacts/t/crash-'"$notanc_hash"$'\tpanicked at crates/rcad-geom/src/quux.rs:60:5: not ancestor check'
+    got=$(triage_row)
+    grep -qxF "done-not-ancestor: 1 group(s) still fail on main: 0 named by no row, and 0 only by a place another failing group shares" <<<"$got" \
+        || fail "a done row whose fix never reached the replayed main was not counted as naming its group"
+
+    old_format=1 night_with old-format $'t\t1\tyes\t/night/artifacts/t/crash-aaaaaaaaaa\tpanicked at crates/rcad-geom/src/old.rs:70:5: old format check'
+    got=$(triage_row)
+    grep -qF "$logs/old-format has fuzz-triage-verdicts.tsv but not fuzz-triage-members.tsv and fuzz-triage-replayed-main.txt, so it predates §418.4" <<<"$got" \
+        || fail "a night with a verdicts file but not the two §418.4 files did not say it predates them"
+    grep -qF "just fuzz-triage old-format" <<<"$got" \
+        || fail "a night that predates §418.4 did not name the replay that would rewrite it"
+
+    night_with members-mismatch $'t\t1\tyes\t/night/artifacts/t/crash-bbbbbbbbbb\tpanicked at crates/rcad-geom/src/mismatch.rs:80:5: mismatch check'
+    printf 'target\tgroup\tfile\n' >"$logs/members-mismatch/fuzz-triage-members.tsv"
+    got=$(triage_row) && fail "a members file missing a still-failing group that the verdicts file lists was read"
+    grep -qF "fuzz-triage-members.tsv: is missing a still-failing group" <<<"$got" \
+        || fail "a members file missing a still-failing group did not name the file"
+
+    printf '%s\n' '## Tier 1' '' '```' \
+        "Q10 1 done:$bogus_sha opus - a done row whose sha this repo never heard of §1" \
+        '```' >"$dir/queue-bad-sha.md"
+    night_with done-unresolvable $'t\t1\tyes\t/night/artifacts/t/crash-cccccccccc\tpanicked at crates/rcad-geom/src/badsha.rs:90:5: bad sha check'
+    got=$(triage_row "$dir/queue-bad-sha.md") && fail "a done row whose sha does not resolve to a commit was read"
+    grep -qF "Q10: done:$bogus_sha does not resolve to a commit here" <<<"$got" \
+        || fail "a done row whose sha does not resolve did not name the row"
 
     good='## 0. Where the work is
 
