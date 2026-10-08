@@ -79,9 +79,39 @@
 //! past the apex's box. Folded by `2⁻²⁴`, 34 of 108 refuse, with apex meets
 //! left from just past the room (§395.8).
 //!
-//! Not reached here: a corner with five or more planes round it, a side face
-//! whose own angle at the apex is a sliver, and an apex far enough from the
-//! origin that the room grows with it.
+//! **Three more corners, reached below (Q275).** A corner with five or six
+//! planes round it folds no meet at all: a regular pentagon or hexagon base
+//! gives `bake` more well-conditioned triples to choose among, not fewer, so
+//! every one of 72 certified unions measures `stick_out_rooms=0`
+//! (`a_pyramid_with_five_or_six_planes_round_its_apex_is_united`,
+//! `RCAD_Q275_PROBE`). A side face with a sliver of an angle at its apex —
+//! two base corners a thousandth, a hundred-thousandth or a millionth apart —
+//! folds nothing either, over 108 unions at three gaps: a sliver narrows one
+//! face's triangle, not any pair of planes round the apex, so it does not
+//! make `bake`'s own triple worse-conditioned
+//! (`a_pyramid_with_a_sliver_face_at_its_apex_is_united`). A gap of a
+//! hundred-millionth fails to build at all, at every turn and spelling tried
+//! but one — `Plane::through_three_points` fits the sliver face's plane
+//! through its first two corners, and the third then lands a few billionths
+//! off it, past `VertexOffItsFacePlane`'s tolerance — pinned by name at one
+//! such turn
+//! (`a_pyramid_with_too_fine_a_sliver_face_refuses_to_build`). This is a
+//! limit of fitting a plane through near-coincident points and not of the
+//! fold room, so it is left there rather than chased further. An apex a
+//! million units from the origin
+//! folds nothing either and unites at every turn and spelling
+//! (`a_pyramid_whose_apex_is_far_from_the_origin_is_united`); a trillion
+//! units out refuses to build at all, past `DynamicRange::LARGEST_SUPPORTED_RATIO`
+//! (`1e11`, §3.5), a limit of `Model::new`'s own declared scale envelope and
+//! not of the fold
+//! (`a_pyramid_whose_apex_is_far_enough_to_leave_the_scale_envelope_refuses_to_build`).
+//!
+//! Measured with `RCAD_Q275_PROBE=1 mise exec -- cargo nextest run -p
+//! rcad-topo -E 'binary(a_corner_with_four_planes_round_it)' --no-capture`,
+//! a probe temporarily added to `Arrangement::the_corner_that_is_this_place`
+//! (`crates/rcad-topo/src/fuse/arrange.rs`) and taken back out before this
+//! file's own commit — none of these three corners stuck a meet out past its
+//! own box at all, so no second table is needed beside §310's.
 
 use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
@@ -512,4 +542,360 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
                 .volume()
         })
         .sum()
+}
+
+/// A pyramid with a five-sided and a six-sided base — five and six planes
+/// round its apex, where Q240 and §310 built only four — is united with a
+/// cube clear of it, at every turn and spelling: 36 unions for each.
+///
+/// A fifth and sixth plane give `bake` more triples to pick a well-conditioned
+/// one from, not fewer, so no meet here stuck out past the apex's box by more
+/// than the four-plane pyramid's own worst fold did (`RCAD_Q275_PROBE`, the
+/// second table above). All 72 answer, validate and match their closed-form
+/// volume.
+#[test]
+fn a_pyramid_with_five_or_six_planes_round_its_apex_is_united() {
+    for sides in [5, 6] {
+        let base = a_regular_polygon(sides, 1.0);
+        for through in SPELLINGS {
+            for turn in TURNS {
+                for axis in AXES {
+                    is_united_with_base(&base, 1.0, [0.0, 0.0, 0.0], through, turn, axis);
+                }
+            }
+        }
+    }
+}
+
+/// A pyramid whose base brings two neighbouring corners to within `gap` of
+/// each other, so the face between them has a sliver of an angle at the
+/// apex, is united with a cube clear of it, at every turn and spelling, for
+/// `gap` a thousandth, a millionth and a billionth: 108 unions.
+///
+/// The sliver face's own triple is three planes meeting close to a line (the
+/// apex and the two nearly-coincident base corners), the same shape §356's
+/// argument folds into the apex's box, and all 108 answer, validate and match
+/// their closed-form volume. The furthest meet measured sticks out
+/// `RCAD_Q275_PROBE`'s number below, well short of a refusal.
+#[test]
+fn a_pyramid_with_a_sliver_face_at_its_apex_is_united() {
+    for gap in [1e-3, 1e-5, 1e-6] {
+        let base = [
+            [-1.0, -1.0],
+            [1.0, -gap / 2.0],
+            [1.0, gap / 2.0],
+            [-1.0, 1.0],
+        ];
+        for through in SPELLINGS {
+            for turn in TURNS {
+                for axis in AXES {
+                    is_united_with_base(&base, 1.0, [0.0, 0.0, 0.0], through, turn, axis);
+                }
+            }
+        }
+    }
+}
+
+/// The same sliver base, with the two close corners a hundred-millionth
+/// apart, refuses to build at all.
+///
+/// `Plane::through_three_points` fits the sliver face's plane through its
+/// first two corners (through the apex, with [`Through::TheApex`]) and then
+/// checks the third against it; at this gap the fit cannot keep that third
+/// corner within tolerance, so the face it builds is off its own plane. This
+/// is a limit of fitting a plane through two points this close together, not
+/// of the fold room §356 measures, so it is left as a limit rather than
+/// chased further (§16.10).
+#[test]
+fn a_pyramid_with_too_fine_a_sliver_face_refuses_to_build() {
+    let gap = 1e-8;
+    let base = [
+        [-1.0, -1.0],
+        [1.0, -gap / 2.0],
+        [1.0, gap / 2.0],
+        [-1.0, 1.0],
+    ];
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let turned = Isometry::rotation(
+        &Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction with length"),
+        0.3,
+    )
+    .expect("a finite turn");
+    let err = a_pyramid_with_base(
+        &mut model,
+        &base,
+        1.0,
+        [0.0, 0.0, 0.0],
+        Through::TheApex,
+        &turned,
+    )
+    .expect_err("a sliver gap of a hundred-millionth cannot fit a plane through it");
+    assert!(
+        matches!(
+            err,
+            rcad_topo::Error::Invalid(rcad_topo::Invalid::VertexOffItsFacePlane { .. })
+        ),
+        "expected VertexOffItsFacePlane, got {err}"
+    );
+}
+
+/// The pyramid folded by a sixteenth (as at the top of this file), shifted so
+/// its apex sits a million units from the origin, is united with a cube
+/// clear of it, at every turn and spelling: 36 unions.
+///
+/// [`what_writing_the_corner_down_cost`](rcad_topo) grows with a corner's own
+/// coordinates, so the room `bake` grants the apex grows along with it; moving
+/// the apex out does not shrink how far a meet can stick out and still fold.
+#[test]
+fn a_pyramid_whose_apex_is_far_from_the_origin_is_united() {
+    let base = [
+        [-1.0, -1.0],
+        [0.0, -1.0 - 1.0 / 16.0],
+        [1.0, -1.0],
+        [0.0, 1.0],
+    ];
+    for through in SPELLINGS {
+        for turn in TURNS {
+            for axis in AXES {
+                is_united_with_base(&base, 1.0, [1e6, 1e6, 1e6], through, turn, axis);
+            }
+        }
+    }
+}
+
+/// The same pyramid, shifted so its apex sits a trillion units from the
+/// origin, refuses to build at all.
+///
+/// A trillion is past [`DynamicRange::LARGEST_SUPPORTED_RATIO`](rcad_geom),
+/// `1e11`, the ratio of a model's own size to its smallest feature that `f64`
+/// can still carry (§3.5). This pyramid's own size is about the apex's
+/// distance from the origin and its smallest feature is the millimetre scale
+/// the model was declared with, so the ratio crosses `1e11` once the apex
+/// passes about a hundred billion units out — a limit this row's family of
+/// fixes (a wider room for the fold) cannot move, since it is `Model::new`'s
+/// own declared envelope and not the fold's (§16.10).
+#[test]
+fn a_pyramid_whose_apex_is_far_enough_to_leave_the_scale_envelope_refuses_to_build() {
+    let base = [
+        [-1.0, -1.0],
+        [0.0, -1.0 - 1.0 / 16.0],
+        [1.0, -1.0],
+        [0.0, 1.0],
+    ];
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let turned = Isometry::rotation(
+        &Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction with length"),
+        0.1,
+    )
+    .expect("a finite turn");
+    let err = a_pyramid_with_base(
+        &mut model,
+        &base,
+        1.0,
+        [1e12, 1e12, 1e12],
+        Through::TheApex,
+        &turned,
+    )
+    .expect_err("a pyramid a trillion units from the origin is past the scale envelope");
+    assert!(
+        matches!(
+            err,
+            rcad_topo::Error::Invalid(rcad_topo::Invalid::DynamicRangeTooWide { .. })
+        ),
+        "expected DynamicRangeTooWide, got {err}"
+    );
+}
+
+/// `sides` points evenly spaced on a circle of `radius`, wound
+/// counter-clockwise: a regular polygon base for
+/// [`a_pyramid_with_five_or_six_planes_round_its_apex_is_united`].
+fn a_regular_polygon(sides: usize, radius: f64) -> Vec<[f64; 2]> {
+    (0..sides)
+        .map(|corner| {
+            let angle = 2.0 * std::f64::consts::PI * corner as f64 / sides as f64;
+            [radius * angle.cos(), radius * angle.sin()]
+        })
+        .collect()
+}
+
+/// A pyramid on an arbitrary polygon `base`, shifted by `shift` and united
+/// with a cube clear of it, as [`is_united`] asks of the fixed four-cornered
+/// base above.
+fn is_united_with_base(
+    base: &[[f64; 2]],
+    height: f64,
+    shift: [f64; 3],
+    through: Through,
+    turn: f64,
+    axis: [f64; 3],
+) {
+    let (mut model, pyramid, cube) =
+        a_pyramid_with_base_and_a_cube_clear_of_it(base, height, shift, through, turn, axis);
+    let mut log = ProvenanceLog::new();
+    let fused = model
+        .fuse(
+            &[pyramid],
+            &[cube],
+            Rule::Union,
+            &Policy::certified(),
+            &mut log,
+        )
+        .unwrap_or_else(|why| {
+            panic!(
+                "a pyramid on base {base:?}, {height} high, shifted by {shift:?}, with its \
+                 planes through {through:?}, turned {turn} about {axis:?}, was refused: {why}"
+            )
+        });
+    assert_eq!(
+        fused.solids().len(),
+        2,
+        "two solids that do not touch unite as the two of them"
+    );
+    assert!(log.is_empty(), "a certified union recorded {log:?}");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a certified union leaves a valid model");
+
+    let pyramid_volume = a_polygon_area(base) * height / 3.0;
+    let united = volume_of(&model, fused.solids());
+    assert!(
+        (united - (pyramid_volume + 1.0)).abs() <= 1e-9,
+        "a pyramid of {pyramid_volume} and a unit cube united to {united}"
+    );
+}
+
+/// A pyramid on an arbitrary polygon `base`, its apex `height` above the
+/// origin and the whole shape shifted by `shift` after it is turned, with a
+/// cube clear of it, as [`a_pyramid_and_a_cube_clear_of_it`] builds the fixed
+/// four-cornered one.
+fn a_pyramid_with_base_and_a_cube_clear_of_it(
+    base: &[[f64; 2]],
+    height: f64,
+    shift: [f64; 3],
+    through: Through,
+    turn: f64,
+    [x, y, z]: [f64; 3],
+) -> (Model, SolidKey, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let turned = Isometry::rotation(
+        &Axis::new(Point::origin(), Vector::new(x, y, z)).expect("a direction with length"),
+        turn,
+    )
+    .expect("a finite turn");
+    let pyramid = a_pyramid_with_base(&mut model, base, height, shift, through, &turned)
+        .expect("a turned pyramid is a sound solid");
+    let cube = model
+        .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a unit cube");
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(
+                shift[0] + 100.0,
+                shift[1] + 100.0,
+                shift[2] + 100.0,
+            ))
+            .expect("a finite shift"),
+        )
+        .expect("this model made the key");
+    (model, pyramid, cube)
+}
+
+/// A pyramid with an arbitrary polygon `base`, apex `height` above the
+/// origin, described face by face in turned coordinates and shifted by
+/// `shift` once turned. The base's points are wound counter-clockwise seen
+/// from above, in the plane `z = 0`; `base.len()` side planes meet at the
+/// apex.
+///
+/// `Err` when the shape itself is sound but the model it was written into
+/// refuses it — [`a_pyramid_whose_apex_is_far_enough_to_leave_the_scale_envelope_refuses_to_build`]
+/// reads this to pin a refusal by name rather than letting it panic.
+fn a_pyramid_with_base(
+    model: &mut Model,
+    base: &[[f64; 2]],
+    height: f64,
+    shift: [f64; 3],
+    through: Through,
+    turned: &Isometry,
+) -> rcad_topo::Result<SolidKey> {
+    let sides = base.len();
+    let mut raw = vec![[0.0, 0.0, height]];
+    raw.extend(base.iter().map(|&[x, y]| [x, y, 0.0]));
+    let points: Vec<Point> = raw
+        .into_iter()
+        .map(|[x, y, z]| {
+            let turned_point = turned.apply_to_point(Point::new(x, y, z));
+            let [tx, ty, tz] = turned_point.coordinates();
+            Point::new(tx + shift[0], ty + shift[1], tz + shift[2])
+        })
+        .collect();
+    // Counter-clockwise seen from outside, the apex first on every side face,
+    // the base face last and wound the other way round.
+    let mut faces: Vec<Vec<usize>> = (0..sides)
+        .map(|side| vec![0, side + 1, (side + 1) % sides + 1])
+        .collect();
+    faces.push((1..=sides).rev().collect());
+
+    let mut builder = SolidBuilder::new();
+    let vertices: Vec<_> = points
+        .iter()
+        .map(|&point| builder.add_vertex(point).expect("a finite corner"))
+        .collect();
+    let mut edges: Vec<([usize; 2], DraftEdge)> = Vec::new();
+    let drafted: Vec<_> = faces
+        .iter()
+        .map(|face| {
+            let steps: Vec<DraftStep> = (0..face.len())
+                .map(|position| {
+                    let (from, to) = (face[position], face[(position + 1) % face.len()]);
+                    let (edge, orientation) =
+                        match edges.iter().find(|(ends, _)| *ends == [to, from]) {
+                            Some(&(_, edge)) => (edge, Orientation::Reversed),
+                            None => {
+                                let edge = builder
+                                    .add_edge(vertices[from], vertices[to], EdgeRun::Straight)
+                                    .expect("a side between two corners");
+                                edges.push(([from, to], edge));
+                                (edge, Orientation::Forward)
+                            }
+                        };
+                    DraftStep::Along(
+                        builder
+                            .add_coedge(edge, orientation)
+                            .expect("one use of a side"),
+                    )
+                })
+                .collect();
+            let wire = builder.add_wire(&steps).expect("a closed boundary");
+            let [first, second, third] = match (through, face.len()) {
+                (Through::ABaseCorner, 3) => [face[1], face[2], face[0]],
+                _ => [face[0], face[1], face[2]],
+            };
+            let plane = Plane::through_three_points(points[first], points[second], points[third])
+                .expect("three corners of a face not in a line");
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a face of a pyramid")
+        })
+        .collect();
+    let shell: Vec<_> = drafted
+        .iter()
+        .map(|&face| (face, Orientation::Forward))
+        .collect();
+    builder.add_shell(&shell).expect("a pyramid's faces close");
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// The area of an arbitrary simple polygon `base`, by the shoelace formula,
+/// for [`is_united_with_base`]'s closed-form volume check.
+fn a_polygon_area(base: &[[f64; 2]]) -> f64 {
+    let sides = base.len();
+    0.5 * (0..sides)
+        .map(|corner| {
+            let [x1, y1] = base[corner];
+            let [x2, y2] = base[(corner + 1) % sides];
+            x1 * y2 - x2 * y1
+        })
+        .sum::<f64>()
+        .abs()
 }
