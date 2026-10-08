@@ -96,6 +96,7 @@ pub use crate::cone::{Cone, SIDE_OF_CONE};
 pub use crate::cylinder::{Cylinder, SIDE_OF_CYLINDER};
 pub use crate::de_boor::EVALUATION_ROUNDOFF;
 pub use crate::deflection::Deflection;
+pub use crate::enclosure::root_enclosing;
 pub use crate::error::{Error, Result, WhereFollowingACrossingGaveUp};
 pub use crate::half_space::{HalfSpace, Picker, SIDE_OF_A_HALF_SPACE};
 pub use crate::intersect::{

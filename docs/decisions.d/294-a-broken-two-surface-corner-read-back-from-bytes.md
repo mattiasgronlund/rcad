@@ -553,7 +553,10 @@ whether the second picker is the first one reversed. For a half, `along` is
 root rounded outwards by `root_rounded_outwards` (one step down from
 `f64::sqrt` of the low end, clamped at nothing, and one step up from that of the
 high end, which encloses because `sqrt` is correctly rounded; pinned by
-`the_root_rounded_outwards_encloses_the_root`), and of the four candidate ways
+`the_root_rounded_outwards_encloses_the_root`; Q1234 deleted both and calls
+`rcad-geom`'s `root_enclosing`, which steps out only where `sqrt` needs it,
+pinned in `a_corner_one_step_off_its_half_ruling_is_read_when_the_root_is_exact`),
+and of the four candidate ways
 out the one both pickers read strictly in front of them. So the sign comes from
 the corner, not from which picker is first. Two more changes were needed and
 were measured, not guessed:
