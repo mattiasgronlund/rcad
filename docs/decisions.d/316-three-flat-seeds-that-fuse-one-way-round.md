@@ -30,6 +30,55 @@ the three halves it counts. Two things differ from what
   and `count: 1` for an intersection, under either policy. Both orders refuse,
   so no counter sees it. This lane did not read that half's shape.
 
+**2026-10-08: both open questions above are answered, by a committed test
+instead of a replayed probe (Q311, Q312).**
+`crates/rcad-topo/tests/the_three_flat_seeds_and_the_corners_they_move.rs`
+decodes all six halves of the three seeds directly with `postcard`, and pins
+the header, the rule, the policy and every stored corner of solid 2 that
+differs from solid 1's, exactly, for each
+(`mise exec -- just t -p rcad-topo --test
+the_three_flat_seeds_and_the_corners_they_move`, `6 tests run: 6 passed`).
+
+**Q312: the table above is right for the five halves it already named, and
+two more facts belong beside it.** `2e9c4138`'s first half, never decoded
+before this test, also moves a corner — but on **solid 1**, not solid 2:
+`(3.2379e-319, 2.1123e-319, 0)` and `(1.61895e-319, s, 0)`, the latter not
+exactly `(0, s, 0)` as the "second cube differs only" framing above would
+have it. Its solid 2 then reads as having three corners "off" relative to
+solid 1, though one of those three is solid 2's own exact `(0, s, 0)`, counted
+only because solid 1's nearby corner moved away from it. `65452b22`'s first
+half does not decode at all — `postcard::from_bytes` refuses its bytes — which
+matches the `halves_that_decode: 1` that
+`every_model_the_fuse_fuzzer_kept_is_fused_again.rs` already asserts for this
+seed. Separately, `1422656e`'s second half and `2e9c4138`'s second half move a
+corner to the exact same value, `(s, 4.021529366771898e-87, 0)`, bit for bit;
+decoding both independently confirms this is a genuine coincidence between two
+corpus files, not a copy-paste error in the row above.
+
+**Q311: the "Both ways round" paragraph in
+`every_model_the_fuse_fuzzer_kept_is_fused_again.rs`'s module doc was wrong
+when it was written, not moved there later.** That paragraph was first written
+by `959985aa` (2026-09-25), whose own message says it was measured on
+"`0c1346f9` plus this change" — confirmed by `git log -1 --format='%H %P'
+959985aa`, which prints `959985aa... 0c1346f9...`. `git show
+959985aa:crates/rcad-topo/tests/every_model_the_fuse_fuzzer_kept_is_fused_again.rs`
+shows the paragraph, as first written, calling all three counted halves
+"second half[, each] a certified intersection... header `0x94`" —
+self-contradictory on its face, since header `0x94` decodes to union and
+tolerant, not intersection and certified. Replaying `959985aa`'s own
+both-ways-round harness
+(`fuzzing::fuse::how_one_model_is_fused_keeping_the_provenance`, called
+directly per half with the same header/split/`rotate_left(4)` convention
+`two_models_split_and_fused` uses) in a detached worktree checked out at that
+commit (`git worktree add --detach <path> 959985aa`, removed afterward with
+`git worktree remove --force`, nothing left under `target/`) gives
+`a_solid_one_way_round_only: 1` for `2e9c4138`'s **second** half, `65452b22`'s
+**second** half, and `1422656e`'s **first** half — not "second" for
+`1422656e` as the paragraph says. So the prediction two paragraphs above
+("Nobody replayed `0c1346f9` to prove it") is now proved, and directly at the
+commit that wrote the paragraph: no later commit moved it, so `287786b5`
+(Q170) need not be examined.
+
 ### 316.2 Which answer is right
 
 Two cubes on the same six planes are one cube. The planes decide where the
