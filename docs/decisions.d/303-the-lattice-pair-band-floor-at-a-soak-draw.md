@@ -88,7 +88,9 @@ weighs an eighth of a 441-fuse draw and a four-hundredth of a soak.
 
 `band_for_a_draw_of(fuses, rate)` moves each end of the rate band out by
 `A_DRAW_STRAYS_THIS_MANY_SPREADS` (three) of `sqrt(end × (1 − end) / fuses)`,
-and never lets the floor under one fuse.
+and never lets the floor under one fuse. *Later, §303.6:* that spread is now
+widened by how the answers that are not solids come together in a
+configuration, which on this tree leaves every band as it was.
 `Tally::rate_of_answers_that_were_not_solids_must_be_within` judges the lattice
 and turned rows with it. The rate ends follow the file's convention, applied
 to the soaked rate rather than to one draw:
@@ -172,16 +174,146 @@ turned too.
 
 ### 303.5 What is left
 
-- **The other four bands are unmeasured at a soak.** `A_FLUSH_PAIR_IS_NOT_A_SOLID`,
-  `A_PAIR_ELSEWHERE_IS_NOT_A_SOLID` and `A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID`
-  were derived the same way, from one shipped draw. The skew row has its own
-  count floor (§136.5). All passed §290's 16 chunks at factor 66, so their
-  failure rate there is under about one in sixteen, and that is all that is
-  known. Measuring each at 48 seeds and moving it onto `band_for_a_draw_of` is
-  a row of its own. The flush band is narrow on purpose, and its doc says why,
-  so it moves only with a measurement that says why.
+- **The other three bands were measured at a soak by Q258**, `6cafcef4`, and
+  moved onto `band_for_a_draw_of` with their ends unchanged. Each was eight
+  fresh seeds at factor 66, 25 407 fuses a seed, and 24 seeds at factor 1,
+  447 fuses a seed, as each constant's doc comment records.
+  `A_FLUSH_PAIR_IS_NOT_A_SOLID` pooled 24 570 of 203 256, 12.09%, each soaked
+  seed between 11.83% and 12.52%, and the factor-1 seeds spread from 9.84% to
+  14.09%; seeds 9 and 21, 44 of 447 each, were under the fixed 10% floor.
+  `A_PAIR_ELSEWHERE_IS_NOT_A_SOLID` pooled 4 540 of 203 256, 2.23%, each seed
+  between 2.01% and 2.38%, the factor-1 seeds 1.79% to 3.80%; seeds 3 and 11,
+  8 of 447 each, were under the fixed 1.9% floor.
+  `A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID` pooled 4 515 of 203 256, 2.22%, each
+  seed between 2.10% and 2.31%, the factor-1 seeds 1.57% to 4.03%, every one
+  inside its band. The flush band kept its narrow 10%–28% on purpose. The skew
+  row keeps its own count floor (§136.5).
 - **The turned-over-lattice gap in §303.4** is a row for whoever next works on
   §17.7: for a sample of turned fuses that come back not a solid, fuse the
   same configuration upright, and say for each whether it is an exact answer
   about the rounded input or a gap.
 - §290.4's finding B, the turned bar refusing at seed 112, is untouched here.
+
+### 303.6 Why a draw's spread is not the binomial's
+
+*Queue row Q260, lane `lane-q260-q1417-why-a-band-spreads-wider-than-binomial`,
+off `5bcd7c40`. The runs are in that lane's tree under `target/q260/`:
+`one.sh <test> <factor> <seed>` runs a row with the regression seeds replayed,
+`norep.sh` the same from outside the repo so nothing is replayed (§303.2),
+`old.sh` the same on `4066f85b`'s tree, and `python3 target/q260/summary.py
+[runs dir]` tabulates them. Both trees carry the count this section adds, so
+the counts are the shipped code's.*
+
+**A draw is a sum over configurations, not over fuses.** `every_rule` fuses
+each configuration three ways, union, overlap and difference, and the
+configurations come one after another from the seed's stream. So a draw's
+count is a sum of independent counts out of three, and the binomial, which
+takes each fuse as a draw of its own, is the right spread only if a
+configuration's three fuses come back not a solid independently. They do not,
+and the two families went opposite ways for that one reason. `Tally` now
+counts configurations by how many of their three fuses were not a solid, and
+`report` prints it.
+
+**On this tree, almost no configuration gives more than one.** At factor 1 with
+nothing replayed (128 configurations a draw, seeds 1 to 200), and at factor 66
+with the seeds replayed (seeds 1 to 8):
+
+| family | draw | configurations with none / one / two / three | rate | spread per seed | binomial | configurations predict |
+|---|---|---|---|---|---|---|
+| lattice | factor 1, 200 | 23932/1668/0/0 | 2.172% | 0.7441 pts | 0.7438 pts | 0.7271 pts |
+| lattice | factor 66, 8 | 63139/4615/0/0 | 2.270% | 0.0580 pts | 0.0935 pts | 0.0913 pts |
+| flush | factor 1, 200 | 16371/9229/0/0 | 12.017% | 1.5519 pts | 1.6593 pts | 1.4146 pts |
+| flush | factor 66, 8 | 43529/24224/0/0 | 11.918% | 0.1966 pts | 0.2033 pts | 0.1736 pts |
+| elsewhere | factor 1, 200 | 23856/1744/0/0 | 2.271% | 0.7193 pts | 0.7602 pts | 0.7423 pts |
+| elsewhere | factor 66, 8 | 63214/4539/0/0 | 2.233% | 0.0905 pts | 0.0927 pts | 0.0906 pts |
+| leaning alike | factor 1, 200 | 23897/1703/0/0 | 2.217% | 0.7705 pts | 0.7514 pts | 0.7342 pts |
+| leaning alike | factor 66, 8 | 63218/4536/0/0 | 2.232% | 0.0743 pts | 0.0927 pts | 0.0905 pts |
+| turned | factor 1, 200 | 24937/661/1/1 | 0.867% | 0.4678 pts | 0.4732 pts | 0.4719 pts |
+| turned | factor 66, 4 | 33047/829/0/0 | 0.816% | 0.0404 pts | 0.0564 pts | 0.0560 pts |
+
+A configuration that gives at most one has a count of variance `3p(1 − 3p)`
+where the binomial has `3p(1 − p)`, so its spread is `sqrt((1 − 3p) / (1 −
+p))` of the binomial's: 0.977 for the lattice family and 0.85 for the flush.
+That is the whole of what the per-configuration counts say about the narrow
+lattice spread. §303.2's 0.079 against 0.093, over 113 seeds, is 0.85 of the
+binomial, and the eight seeds here are 0.62 of it, both below the 0.977 the
+configurations give. Within one seed the configurations are independent: on
+`4066f85b`, lattice seed 1 at factor 66 split into 66 blocks of 128
+configurations gives block sums whose variance is 0.969 of independent
+configurations', and turned seeds 1 and 2 give 1.223 and 0.862, against the
+0.18 a ratio from 66 blocks strays by chance, one way in one seed and the
+other way in the next (`python3 target/q260/blocks.py target/q260/seq/*.txt`,
+from `target/q260/seq.sh`, which prints each configuration's count). At
+factor 1, 200 seeds a family, the five spreads are 0.97 to 1.10 of what the
+configurations predict. So the narrow factor-66 spreads are draws of few seeds
+below a spread that is itself a little under the binomial's, not a cause still
+to be found; the run that would settle it is the row below.
+
+**On `4066f85b`, the turned family's configurations failed together.** Over
+seeds 1 to 8 at factor 66, 2 286 configurations gave one answer that was not a
+solid, 537 two and 539 all three (`python3 target/q260/summary.py
+target/q260/oldruns`). A configuration's count then varies more than the
+binomial allows, and the configurations predict 0.1315 points against the
+binomial's 0.0970 at 25 401 fuses, 1.36 times as wide. §303.2's 0.121 over 48
+seeds is 0.92 of that. At factor 1 with nothing replayed, 200 seeds of that
+tree spread 0.9588 points against a binomial 0.7824, 1.23 times as wide, and
+0.91 of the 1.0514 its configurations predict. Which change since took the
+failing together away was not traced. §351.6's is the one that fits, a corner
+of one solid on an edge of the other named twice, leaving edges with one face
+each, which every rule over that pair would meet, but that is not checked. On
+this tree the turned spread is 0.99 of the binomial's.
+
+**The band now.** `band_for_a_draw_of(fuses, together, rate)` multiplies the
+binomial's variance by `together`, which `Tally::how_many_not_solids_come_together`
+counts from the draw itself: for each answer that is not a solid, how many of
+its configuration's three were, itself included, on average. With `X` a
+configuration's count, `E[X²]` is `together` times `E[X] = 3p`, so `Var X =
+together · 3p − 9p²`, at most `together` times the binomial's `3p(1 − p)`
+because `together` is at most three. It is one on four families of this
+tree, so their bands are the ones they were. Turned is 674 over 666, 1.012,
+pooled over its 200 draws at factor 1, and one only in a draw without the two
+configurations that gave more than one. On `4066f85b`'s turned draws it would
+have been 9 285 over 4 977, 1.87, and the band's spread 1.37 times as wide.
+`answers_that_are_not_solids_coming_three_to_a_configuration_widen_the_band`
+pins that arithmetic on those counts.
+
+The measured spread was taken from the draw rather than written into each
+band as a constant because a constant goes stale with the kernel, as this one
+would have at §351.6. It is never under one: the narrowing above comes from
+the three rules excluding each other at the measured rate, and a band end is
+a rate no draw has had, so the binomial is the spread it keeps there.
+
+**Every family still passes the shipped draw and the soaks.** Each row's shipped
+draw passes, and so does every soaked seed above at factor 66. With each rate
+above and the replayed seeds' own answers that are not solids (3, 7, 3, 2 and
+3 of 63, replayed less fresh at factor 1, seeds 1 and 2), the chance an honest
+draw fires is at most 4.8e-07, elsewhere at factor 10, at every factor from 1
+to 660 (`python3 target/q260/falsefire.py lattice=0.02270 flush=0.11918
+elsewhere=0.02233 turned=0.00867 "leaning alike=0.02232"`). What a halved
+rate costs differs by row: lattice 97 times in 100 at factor 66, flush and
+elsewhere 100, turned 8, and leaning alike **never**, at any factor to 660.
+
+What this leaves:
+
+- **The leaning-alike band cannot catch its rate halving.** Its floor, 1.1%,
+  is half its soaked rate of 2.232%, because Q258 kept the ends derived from
+  one draw of 1.6%. Two thirds to three times 2.232% is 1.5% to 6.7%. Turned
+  at factor 66 catches a halving 8 times in 100 for the same kind of reason,
+  its floor of 0.52% against a rate of 0.867%. Re-deriving both is Q1425.
+- **The turned row panics at factor 66, seed 2.** `RCAD_SOAK_FACTOR=66
+  RCAD_SOAK_SEED=2` stops in `fuse/assemble.rs` with "a face has at least
+  three sides, one that closes, or two not both straight; this one has 2",
+  shrunk to a 5 × 3 frame one high at the origin and a 2 × 1 block one high
+  at `[3, 0, -1]`, turned by 27 steps about `[-2, -3, -2]`. Proptest wrote
+  `cc 495585801e746d7c89c5aceca5ce3a319ee33917cafbeaa1c4186d04c1c51140` into
+  the regression file, and this lane took it back out: the file is not in its
+  write set. Q1426.
+- **Nothing replayed, the turned floor of one fuse fails 5 of 200 honest draws
+  of 384 fuses**, seeds 67, 94, 108, 162 and 196, which give none. The
+  binomial over configurations puts that at 3.4%. With the regression seeds
+  replayed, 2 of the 63 replayed fuses are not solids, so it cannot happen;
+  only a run from outside the repo reaches it, and §303.3's floor is kept.
+- **The narrow factor-66 spreads**, eight seeds a family and §303.2's 113,
+  sit under what the configurations predict by more than one would expect
+  together. A run of 48 seeds a family at factor 66, with the per-block counts
+  of each, would say whether they are chance. Q1427.
