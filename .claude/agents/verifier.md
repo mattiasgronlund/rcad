@@ -230,6 +230,16 @@ claims, or its tests cannot be made to fail. For a lane marked
 the mutation passes, or when its argument leaves out a case or finds one where
 the old and the new differ.
 
+A gate red only on pins the lane named in `out_of_write_set_needs` — a count,
+an expected value or a test outside the write set that its change moved — is a
+`fix_first`, never a `merge` with `fixes` empty. Copy each of those edits into
+`fixes`: the file, the change, and the gate step it turns green. They are fixes
+for this merge, not rows for later. From 10-01 to 10-08, 30 of 33 lanes handed
+over red were red only this way, and five verifiers still said `merge`, which
+left the merger to work out the edits from a red land gate (§414.1). A pin the
+lane names in the slow tier is a fix the same way, though step 3 could not
+show it red: `gate-lane` leaves out `test-slow`, and the land gate does not.
+
 `notes` is at most five lines, for the merger: what it must act on and what no
 other field says. Never an account of the steps you ran: the other fields
 already hold those, and writing them out again was about a third of a

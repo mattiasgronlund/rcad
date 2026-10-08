@@ -97,3 +97,30 @@ on this row's report.
 See also §383.4 item 3 and §383.5 (which agent lands what), §384 (`just
 land`), and §397.5 (the shared land gate landers run inside one detached
 run).
+
+### 414.4 The verdict says `fix_first` (Q1416)
+
+Item 3 became Q1416. `verifier.md`'s "The verdict" now says that a gate red
+only on pins the lane named in `out_of_write_set_needs` is a `fix_first`,
+with each edit copied into `fixes`, and never a `merge` with `fixes` empty.
+`landable()` already sends a `fix_first` to the Opus merger, so §414.2's
+routing does not change. What changes is that the merger is handed the edits,
+where before it was handed a `merge` and found the edits only when its gate
+went red.
+
+`merger.md` had to move with it. Its step 2 made a `fix_first` fix only when
+the fix was inside the lane's write set, and told the merger not to merge on
+any other. With only the verifier changed, these lanes would have gone from
+merged after a red gate to not merged at all. A pin now counts as inside when
+the lane named it and the verifier copied it. Nothing in the record argued for
+the old limit: §383.3 counts fixes and does not bound them. The merger had
+also made exactly these edits already, on two of the five rows above: Q503's
+merge `f8b4cc67` re-pins `a_lens_whose_hole_is_half_a_disk.rs`, and Q563's
+`be0ddf78` re-pins two KiCad corpus counts in `rcad-step`'s tests, each
+outside its lane's write set (`git show --cc` on each). `merger.md` is outside
+Q1416's write set, and widening the change to it was this session's call.
+
+`lanes.js` is in the row's write set and did not change. The `fixes` schema
+text ("each fix fix_first asks for: the file, the change, and why") and the
+`VERIFY` and `MERGE` briefs say nothing the rule contradicts, so all of the
+change is in `.md` files and `lines that run` counts 0 (§375).
