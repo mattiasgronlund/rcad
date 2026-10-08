@@ -1767,6 +1767,8 @@ check-gate-verdicts-selftest:
         env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=status.showUntrackedFiles GIT_CONFIG_VALUE_0=no \
         "$j" --set gate_steps list --set gate_reusable_steps list --set gate_log "$dir/gate.log" gate quiet
     grep -qx '?? crates/new.rs' <<<"$got" || fail "a refusal under status.showUntrackedFiles=no did not name the untracked file"
+    hidden=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=status.showUntrackedFiles GIT_CONFIG_VALUE_0=no fingerprint)
+    [[ "$hidden" =~ ^[0-9a-f]{64}$ ]] && fail "a tree with an untracked file that git config hides got a fingerprint"
     g add crates/new.rs
     refused "a staged new file" gate list list
     grep -qx 'A  crates/new.rs' <<<"$got" || fail "the refusal did not name the staged file"
