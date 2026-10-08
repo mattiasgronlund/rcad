@@ -161,7 +161,8 @@ the merge. It does not fix what the night keeps.
   edges at the first job line and 96% to 97.5% by the end. It runs at 9% to 10%
   of B's rate, which is 12 to 27 times C's, with a merge of 11 to 23 s and no
   timeouts in either round. It gained more edges and features than any other
-  arm in both rounds.
+  arm in both rounds. §264.9 reads the same four things off a real night's
+  logs instead of this lane's fifteen-minute, small-corpus arms.
 
 **The pin belongs in `fuzz-target`, in the branch that appends `step_corpus`,
 and not in `fuzz-reader`'s arguments.** `fuzz-reader` always passes
@@ -203,3 +204,101 @@ minutes and not for a night. Q144's long pair is the run that measures it.
 
 `RCAD_STEP_CORPUS` still held 520 files afterwards, and none was newer than the
 start of round 1. §255.6's placement holds.
+
+### 264.9 What a real night's logs show, against the lab's figures
+
+*Queue row Q247, replacing Q246 (which cited §264.4 for the merge time; the
+right figure is §264.7's). Read-only: no fuzz binary was run for this row. Q156
+merged `1b344a33` at 2026-09-27 18:52:44 +0200 (`git log -1 --format='%ad'
+1b344a33`); `$HOME/rcad-fuzz-logs` is where `fuzz-overnight` writes
+(`fuzz_log_root` in the justfile, unset here, so its default). Every file
+named below is under that directory.*
+
+**The first night after the merge is gone.** `fuzz-overnight` names a night's
+directory by the date its own `date +%Y-%m-%d` reads at the top of the run,
+and every surviving night in this directory started at 00:10 and ran to about
+08:1x — so the night that began the evening of 2026-09-27 (after the 18:52
+merge) is the one dated 2026-09-28, and `ls $HOME/rcad-fuzz-logs/2026-09-28`
+answers "No such file or directory". `2026-09-27` itself is the night
+*before* the merge: it ran 00:10–08:15 that same morning, hours before Q156
+landed, and its own directory carries none of this section's machinery
+(no `corpus-names/`, no `reader-corpus-merge.log`, no
+`timing-hooked-calls.log`) — all four are written unconditionally by the
+current recipe once the build succeeds, so their absence says that night ran
+an older revision of `fuzz-overnight`, from before the scratch-and-merge
+mechanism (§264.7, §295.6) existed, not that the mechanism misfired.
+
+**The earliest night that remains, 2026-09-29, has nothing to read.** Its
+directory holds only `build.log` (a clean `cargo +nightly fuzz build`,
+"Finished `release` profile ... in 1m 32s") and an empty `watermark.log` — no
+`fuzz-reader.log`, no `corpus-names/`, no `timing-hooked-calls.log`, nothing
+under `artifacts/` or `timings/`. The run never reached the point where any
+target starts fuzzing, so none of the four things this row asks about —
+the reader's command line, a merge time, a timeout verdict, a byte count —
+can be read off it. `2026-09-30` is the same shape. `2026-10-01` and
+`2026-10-02` fail earlier still: `build.log` ends "error: could not compile
+`cc` (lib) due to 11 previous errors" — the fuzz targets never built at all.
+
+**The earliest remaining night with a completed run is 2026-10-03.** Its
+`fuzz-reader.log` carries this line, unedited:
+
+```
+Running `target/x86_64-unknown-linux-gnu/release/no_step_file_makes_the_reader_panic -artifact_prefix=/home/mattias/git/mattiasgronlund/rcad-nightly-fuzz/fuzz/artifacts/no_step_file_makes_the_reader_panic/ -max_total_time=28712 -max_len=65536 -fork=4 -timeout=10 -ignore_crashes=1 -ignore_timeouts=1 -ignore_ooms=1 -dict=step.dict /home/mattias/rcad-fuzz-corpus/no_step_file_makes_the_reader_panic-scratch /home/mattias/rcad-fuzz-corpus/no_step_file_makes_the_reader_panic corpus/no_step_file_makes_the_reader_panic /home/mattias/git/mattiasgronlund/rcad-step-corpus`
+```
+
+It carries `-max_len=65536`, and its last argument,
+`/home/mattias/git/mattiasgronlund/rcad-step-corpus`, is exactly what
+`RCAD_STEP_CORPUS`'s default expands to in that worktree
+(`parent_directory(parent_directory(git rev-parse --path-format=absolute
+--git-common-dir)) / "rcad-step-corpus"`, read off the hub's shared
+`.git`) — so the line ends in `RCAD_STEP_CORPUS`, not in a path that merely
+looks like it. `2026-10-04` through `2026-10-06` carry the same command line
+with only `-max_total_time` changed night to night.
+
+**The merge before the first job line runs longer than §264.7's lab figure.**
+Reading the `time:` field off each night's own first `job: 1` line —
+the same column §264.2 reports as "first job line" — gives 31 s
+(2026-10-03), 36 s (2026-10-04), 42 s (2026-10-05) and 32 s (2026-10-06): all
+above §264.7's 11–23 s. By 2026-10-03 the persistent reader corpus already
+held 33 735 files (`wc -l
+rcad-fuzz-logs/2026-10-03/corpus-names/no_step_file_makes_the_reader_panic`,
+and the same count in that night's own `reader-corpus-merge.log`, "33735
+files before merging") against the few hundred to two thousand files each
+lab arm started from in §264.2 — a corpus thirty-plus times the size would
+plausibly take fork mode longer to load before job 1, but that cause is not
+measured here, only the four nights' consistency with each other.
+
+**No job ended on `-timeout` in any of the four nights.** Every `job:` line
+in each night's `fuzz-reader.log` reads `oom/timeout/crash: 0/0/0`; each night
+ends `INFO: exiting: 0`; and `find
+rcad-fuzz-logs/<night>/artifacts/no_step_file_makes_the_reader_panic
+-name 'timeout-*'` is empty for 2026-10-03 through 2026-10-06 alike.
+
+**The writable corpus directory gained well under §291.3's ≈18.5 MB/h.** The
+reader's first, writable directory is
+`$RCAD_FUZZ_CORPUS/no_step_file_makes_the_reader_panic-scratch`
+(`fuzz-target`'s `$scratch`), and `fuzz-overnight` empties it with `rm -rf`
+only after a *successful* end-of-night merge (`reader-corpus-merge.log`:
+"persistent has N files after merging"). Three consecutive nights' own logs
+confirm their scratch directory started empty, because each night's
+"persistent has N files before merging" matches the previous night's own
+"after merging" count (33796 → 33801 → 33806 → 33839 across
+2026-10-03/04/05/06):
+
+| night | scratch bytes at merge | run seconds | MB/h |
+|---|---|---|---|
+| 2026-10-04 | 58 088 615 | 28 764 | 7.27 |
+| 2026-10-05 | 54 118 692 | 28 727 | 6.79 |
+| 2026-10-06 | 56 392 898 | 28 800 | 7.05 |
+
+(bytes from each night's `reader-corpus-merge.log`, "scratch is N bytes";
+seconds from that night's `fuzz-reader.log`, "INFO: exiting: 0 time: Ns";
+MB/h = bytes ÷ (seconds/3600) ÷ 1 000 000.) All three sit at 37–39% of
+§291.3's rate. 2026-10-03's own scratch held 54 409 439 bytes over 28 713 s
+(≈6.82 MB/h), in the same range, but whether *its* scratch started empty
+cannot be read off these logs — the only earlier complete night,
+2026-09-27, predates the scratch mechanism (above), so there is no earlier
+"after merging" count to compare it against. A non-empty start would only
+lower 2026-10-03's true rate, so this does not weaken the finding that a real
+night gains bytes well below §291.3's figure, measured on D2/65536 for
+fifteen minutes rather than a night.
