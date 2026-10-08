@@ -1895,9 +1895,14 @@ fn settle_against_each(
             Containment::CannotFollowAFacesTrimming { face } => {
                 return Ok(Settled::MetAFaceNobodyFollows(face));
             }
-            // This crate's `Error` has nothing yet that says a ray could not
-            // be fired, so it stays with the undecided ones, as it does in
-            // `assemble.rs`'s `one_shell_is_inside_another`.
+            // `Error::CannotFireARayAtAFacesSurface` exists since Q883, and
+            // `assemble.rs`'s `one_shell_is_inside_another` returns it. Here it
+            // still stays with the undecided points, because no fuse is known
+            // to reach this arm: the point beside it answers every point whose
+            // box no face of the solid meets (§323), and every shape Q1125
+            // tried either answered or was refused before a point was put to a
+            // ray (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`). A
+            // fuse that reaches it is what changing this waits for (§35.6).
             Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(Settled::Abandoned),
             // Coincidence was asked above and found no face the piece lies on.
             Containment::OnBoundary | Containment::Undecidable { .. } => {
