@@ -436,14 +436,15 @@ fn a_leaning_plane_cuts_a_ring_in_a_quartic_including_the_villarceau_pair() {
 /// Two tori holding the same numbers are the same surface, and a torus against
 /// a second torus runs to degree eight and is refused by name.
 ///
-/// A ball, a pipe or a cone on the ring's axis is named instead, since row
-/// Q1334 (§378): the ball of radius four about the centre crosses the tube at
-/// `(31/8, ±√63/8)`, the pipe of radius four at `(4, ±1)`, and the cone of
-/// slope one with its apex at the centre misses it, its two rays passing
-/// `2√2` from the tube's middle where the tube is one wide. Each circle comes
-/// back as the plane square to the axis it lies in.
+/// A ball or a pipe on the ring's axis that reaches its tube is refused too:
+/// the ball of radius four about the centre crosses the tube at
+/// `(31/8, ±√63/8)` and the pipe of radius four at `(4, ±1)`, and `intersect`
+/// finds those circles and does not hand them back (row Q1334, §378). The cone
+/// of slope one with its apex at the centre misses the tube, its two rays
+/// passing `2√2` from the tube's middle where the tube is one wide, and that
+/// is answered.
 #[test]
-fn a_ring_against_a_ball_pipe_or_cone_on_its_axis_is_circles_and_against_another_ring_is_refused() {
+fn a_ring_against_anything_curved_that_reaches_it_is_refused_and_against_itself_is_one_surface() {
     let ring = a_ring();
     let settle = |one: &Surface, other: &Surface| {
         intersect(one, other, &Policy::certified(), &mut ProvenanceLog::new())
@@ -453,29 +454,19 @@ fn a_ring_against_a_ball_pipe_or_cone_on_its_axis_is_circles_and_against_another
         Ok(SurfaceMeet::SameSurface)
     );
 
-    let a_ball = Surface::Sphere(Sphere::new(Point::origin(), 4.0).expect("a radius"));
-    let a_pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius"));
     let a_cone = Surface::Cone(Cone::new(Axis::z(), 1.0).expect("a slope"));
-    let the_balls = 63f64.sqrt() / 8.0;
-    for (other, heights) in [
-        (a_ball, vec![-the_balls, the_balls]),
-        (a_pipe, vec![-1.0, 1.0]),
-        (a_cone, vec![]),
-    ] {
-        for met in [
-            settle(&Surface::Torus(ring), &other),
-            settle(&other, &Surface::Torus(ring)),
-        ] {
-            assert_eq!(
-                circles_by_their_planes(&met),
-                Some(heights.len()),
-                "against {other:?}: {met:?}"
-            );
-            assert_circles_sit_at(&met, &heights, 5.0);
-        }
-    }
+    assert_eq!(
+        settle(&Surface::Torus(ring), &a_cone),
+        Ok(SurfaceMeet::Nothing)
+    );
+    assert_eq!(
+        settle(&a_cone, &Surface::Torus(ring)),
+        Ok(SurfaceMeet::Nothing)
+    );
 
     for other in [
+        Surface::Sphere(Sphere::new(Point::origin(), 4.0).expect("a radius")),
+        Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius")),
         Surface::Torus(Torus::new(Axis::z(), 4.0, 2.0).expect("a thicker tube")),
         Surface::Torus(Torus::new(Axis::x(), 4.0, 1.0).expect("a ring the other way")),
     ] {
@@ -491,22 +482,24 @@ fn a_ring_against_a_ball_pipe_or_cone_on_its_axis_is_circles_and_against_another
     }
 }
 
-/// The rest of what a ball, a pipe or a cone on a ring's axis can do, each
-/// worked out by hand in the half-plane through the axis, where the tube of
-/// `a_ring` is the circle of radius one round `(4, 0)`:
+/// What a ball, a pipe or a cone on a ring's axis can do, each worked out by
+/// hand in the half-plane through the axis, where the tube of `a_ring` is the
+/// circle of radius one round `(4, 0)`. Only a miss is answered (row Q1334,
+/// §378):
 ///
-/// - **resting on the tube all the way round** is one circle, as a ball
-///   inscribed in a pipe is: the pipe of radius five on the outer rim and the
-///   ball of radius five about the centre both touch it at `(5, 0)`;
-/// - **missing it** is nothing: the pipe of radius two and the ball of radius
-///   two;
-/// - **a cone crosses in up to four circles, not two**: slope four from the
-///   centre crosses at `h = ±15/17` and `±1`;
-/// - **a cone resting on the tube** is one circle per nappe: the ring of five
-///   and four against slope three quarters from the centre, at `h = ±2.4`;
-/// - **off the axis**, by any amount, is refused as before.
+/// - **missing the tube** is nothing: the pipe of radius two, the ball of
+///   radius two about the centre and of radius two ten up the axis, and the
+///   cone of slope a tenth with its apex ten up, whose two rays pass `3/√1.01`
+///   and `5/√1.01` from the tube's middle;
+/// - **resting on the tube all the way round** is refused: the pipe of radius
+///   five on the outer rim and the ball of radius five about the centre both
+///   touch it at `(5, 0)`, and the ring of five and four rests on both nappes
+///   of slope three quarters from its centre, at `h = ±2.4`;
+/// - **a cone crossing in four circles** is refused: slope four from the centre
+///   crosses at `h = ±15/17` and `±1`;
+/// - **off the axis**, by any amount, is refused.
 #[test]
-fn a_ball_pipe_or_cone_on_a_rings_axis_rests_misses_or_crosses_in_up_to_four_circles() {
+fn a_ball_pipe_or_cone_on_a_rings_axis_is_answered_only_where_it_misses_the_tube() {
     let settle = |ring: Torus, other: Surface| {
         intersect(
             &Surface::Torus(ring),
@@ -520,74 +513,42 @@ fn a_ball_pipe_or_cone_on_a_rings_axis_rests_misses_or_crosses_in_up_to_four_cir
     let a_ball = |radius: f64| Surface::Sphere(Sphere::new(Point::origin(), radius).expect("r"));
     let a_pipe = |radius: f64| Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("r"));
     let a_cone = |slope: f64| Surface::Cone(Cone::new(Axis::z(), slope).expect("a slope"));
-    let (fifteen, sixteen) = (15.0 / 17.0, 2.4);
-    for (ring, other, heights) in [
-        (ring, a_pipe(5.0), vec![0.0]),
-        (ring, a_ball(5.0), vec![0.0]),
-        (ring, a_pipe(2.0), vec![]),
-        (ring, a_ball(2.0), vec![]),
-        (ring, a_cone(4.0), vec![-1.0, -fifteen, fifteen, 1.0]),
-        (fat, a_cone(0.75), vec![-sixteen, sixteen]),
+    let ten_up = Point::new(0.0, 0.0, 10.0);
+    for other in [
+        a_pipe(2.0),
+        a_ball(2.0),
+        Surface::Sphere(Sphere::new(ten_up, 2.0).expect("a radius")),
+        Surface::Cone(
+            Cone::new(
+                Axis::new(ten_up, Vector::new(0.0, 0.0, 1.0)).expect("up"),
+                0.1,
+            )
+            .expect("a slope"),
+        ),
     ] {
-        let met = settle(ring, other);
-        assert_eq!(
-            circles_by_their_planes(&met),
-            Some(heights.len()),
-            "{other:?}: {met:?}"
-        );
-        assert_circles_sit_at(&met, &heights, 9.0);
+        assert_eq!(settle(ring, other), Ok(SurfaceMeet::Nothing), "{other:?}");
     }
 
     let off = Axis::new(Point::new(1e-9, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis");
-    for other in [
-        Surface::Sphere(Sphere::new(Point::new(0.0, 1e-9, 0.0), 4.0).expect("a radius")),
-        Surface::Cylinder(Cylinder::new(off, 4.0).expect("a radius")),
-        Surface::Cone(Cone::new(off, 4.0).expect("a slope")),
+    for (ring, other) in [
+        (ring, a_pipe(5.0)),
+        (ring, a_ball(5.0)),
+        (fat, a_cone(0.75)),
+        (ring, a_cone(4.0)),
+        (
+            ring,
+            Surface::Sphere(Sphere::new(Point::new(0.0, 1e-9, 0.0), 2.0).expect("a radius")),
+        ),
+        (
+            ring,
+            Surface::Cylinder(Cylinder::new(off, 2.0).expect("a radius")),
+        ),
+        (ring, Surface::Cone(Cone::new(off, 1.0).expect("a slope"))),
     ] {
         assert_eq!(
             settle(ring, other),
             Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
             "{other:?}"
-        );
-    }
-}
-
-/// How many circles `met` names, if every one is named by a plane facing `+z`,
-/// and `Some(0)` for nothing.
-fn circles_by_their_planes(met: &Result<SurfaceMeet, Error>) -> Option<usize> {
-    match met {
-        Ok(SurfaceMeet::Nothing) => Some(0),
-        Ok(SurfaceMeet::Curves(runs)) => runs
-            .iter()
-            .all(|run| {
-                matches!(
-                    run.run(),
-                    EdgeRun::RightRoundWhereItCrosses { and: Surface::Plane(flat) }
-                        if flat.normal() == Vector::new(0.0, 0.0, 1.0)
-                )
-            })
-            .then_some(runs.len()),
-        _ => None,
-    }
-}
-
-/// Each circle's plane is at the height listed, lowest first, to within
-/// sixteen roundings of `largest`: the allowance `intersect` refuses past.
-fn assert_circles_sit_at(met: &Result<SurfaceMeet, Error>, heights: &[f64], largest: f64) {
-    let Ok(SurfaceMeet::Curves(runs)) = met else {
-        return;
-    };
-    for (run, up) in runs.iter().zip(heights) {
-        let EdgeRun::RightRoundWhereItCrosses {
-            and: Surface::Plane(flat),
-        } = run.run()
-        else {
-            panic!("{run:?}");
-        };
-        assert!(
-            (flat.offset() - up).abs() <= 16.0 * f64::EPSILON * largest,
-            "{} where the circle is at {up}",
-            flat.offset()
         );
     }
 }

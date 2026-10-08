@@ -15,9 +15,9 @@
 //!
 //! **Each circle's run names its own plane**, `z = −4`, `z = 4` or `z = 3`,
 //! stored facing `+z`, which is how `rcad-step` reads a circle between two
-//! different curved faces, and since row Q1334 how `intersect` names the
-//! crossing of a ring with a pipe, a cone or a ball on its axis. A circle whose
-//! run names only the faces either side is refused for the pair.
+//! different curved faces. `intersect` names no crossing of a ring with a pipe,
+//! a cone or a ball, so no fuse makes these pieces, and a circle whose run names
+//! only the faces either side is refused for the pair.
 //!
 //! **Before row Q1173, `Model::validate` refused five of the eight pieces
 //! however they were walked**: the turned rim, the turned bore, both pieces of
@@ -36,7 +36,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere,
-    Surface, SurfaceMeet, Torus, Vector, intersect,
+    Surface, Torus, Vector, intersect,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Error, Invalid, Model, Result, SolidBuilder, SolidKey};
@@ -48,56 +48,24 @@ const EVERY_WALK: [[Orientation; 2]; 4] = [
     [Orientation::Reversed, Orientation::Reversed],
 ];
 
-/// `intersect` names a ring's crossing with each of the three partners as the
-/// two circles, lower first, each by its own plane facing `+z`, either way
-/// round. Row Q1334 (§378); before it every pair was refused
-/// `ACrossingBetweenATorusAndAnotherCurvedSurface`.
-///
-/// For the pipes and the cone those are the runs [`a_piece_named_by_planes`]
-/// builds every piece with, bit for bit. The ball's radius is a rounding of
-/// `√185`, so its circles sit at `±3.99999999999999939`, worked out in exact
-/// rationals, and their planes are roundings of that: held here to the
-/// allowance `intersect` refuses past, sixteen roundings of the largest number.
+/// `intersect` refuses a ring with each of the three partners, so a fuse
+/// cannot cut a ring by any of them, and `SolidBuilder` is the way in.
 #[test]
-fn intersect_names_each_circle_of_a_ring_with_a_pipe_cone_or_ball_on_its_axis_by_its_plane() {
-    let the_balls_circles = 3.999_999_999_999_999_4;
-    for (partner, heights, allowed) in [
-        (a_pipe(13.0), [-4.0, 4.0], 0.0),
-        (a_pipe(7.0), [-4.0, 4.0], 0.0),
-        (the_cone(), [-4.0, 3.0], 0.0),
-        (
-            the_ball(),
-            [-the_balls_circles, the_balls_circles],
-            16.0 * f64::EPSILON * 15.0,
-        ),
-    ] {
-        for [one, other] in [[the_ring(), partner], [partner, the_ring()]] {
-            let met = intersect(
-                &one,
-                &other,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|why| panic!("{partner:?}: {why:?}"));
-            let SurfaceMeet::Curves(runs) = &met else {
-                panic!("{partner:?}: {met:?}");
-            };
-            assert_eq!(runs.len(), 2, "{partner:?}: {met:?}");
-            for (run, up) in runs.iter().zip(heights) {
-                let EdgeRun::RightRoundWhereItCrosses {
-                    and: Surface::Plane(flat),
-                } = run.run()
-                else {
-                    panic!("{partner:?}: {run:?}");
-                };
-                assert_eq!(flat.normal(), Vector::new(0.0, 0.0, 1.0), "{partner:?}");
-                assert!(
-                    (flat.offset() - up).abs() <= allowed,
-                    "{partner:?}: {} where the circle is at {up}",
-                    flat.offset()
-                );
-            }
-        }
+fn intersect_names_no_crossing_of_a_ring_with_a_pipe_cone_or_ball_on_its_axis() {
+    for partner in [a_pipe(13.0), a_pipe(7.0), the_cone(), the_ball()] {
+        let met = intersect(
+            &the_ring(),
+            &partner,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(
+                met,
+                Err(rcad_geom::Error::ACrossingBetweenATorusAndAnotherCurvedSurface)
+            ),
+            "{partner:?}: {met:?}"
+        );
     }
 }
 
@@ -358,19 +326,15 @@ fn a_piece_named_by_planes(
     walk: [Orientation; 2],
     wall_used: Orientation,
 ) -> Result<(Model, SolidKey)> {
-    let runs = piece.circles.map(|(_, up)| a_circles_run(up));
+    let runs = piece
+        .circles
+        .map(|(_, up)| EdgeRun::RightRoundWhereItCrosses {
+            and: Surface::Plane(
+                Plane::from_point_and_normal(Point::new(0.0, 0.0, up), Vector::new(0.0, 0.0, 1.0))
+                    .expect("the z axis is a unit normal"),
+            ),
+        });
     a_piece_built(piece, runs, walk, wall_used)
-}
-
-/// The run of the circle round the axis at height `up`: its own plane, facing
-/// `+z`.
-fn a_circles_run(up: f64) -> EdgeRun {
-    EdgeRun::RightRoundWhereItCrosses {
-        and: Surface::Plane(
-            Plane::from_point_and_normal(Point::new(0.0, 0.0, up), Vector::new(0.0, 0.0, 1.0))
-                .expect("the z axis is a unit normal"),
-        ),
-    }
 }
 
 /// The ring's face bounded by `piece`'s two circles, each walked as `walk`

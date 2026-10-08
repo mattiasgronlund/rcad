@@ -133,8 +133,11 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 ///
 /// **A torus against a plane is classified whole and named in four of its six
 /// shapes** — see [`where_a_plane_and_a_torus_cross`] for the table. A torus
-/// against a ball, a pipe, a cone or another torus is not named at all: the
-/// crossing runs to degree eight and none of the machinery for that exists. Two
+/// against a ball, a pipe or a cone **on its axis** is answered where that
+/// partner misses the tube, and refused where it reaches it, though those
+/// circles are found — [`where_a_ring_and_a_pipe_cross`] says why. Off the axis,
+/// and against another torus, it is not named at all: the crossing runs to
+/// degree eight and none of the machinery for that exists. Two
 /// tori with one centre, one pair of radii and their axes along one line are the
 /// same surface and come back as one, **whichever way each axis points** — see
 /// [`one_ring_either_way_round`].
@@ -177,7 +180,7 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// [`Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic`] for every plane
 /// against a torus but the two families that cut circles, and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a torus against
-/// anything curved.
+/// anything curved but a ball, a pipe or a cone on its axis that misses it.
 ///
 /// **A partly undecidable answer refuses whole.** A caller handed one of two
 /// curves has no way to know a second existed, and a fuse classifying against
@@ -4171,18 +4174,26 @@ fn two_circles_round_the_axis(ring: &Torus) -> Result<SurfaceMeet> {
 /// | zero | one circle where the pipe rests on the tube's rim all the way round |
 /// | below zero | nothing |
 ///
-/// The resting circle is one curve, the way a ball inscribed in a pipe is
-/// (§24.10), and it lies in the plane through the ring's centre, which is
-/// written down with nothing rounded.
-///
 /// Sharing an axis is the two questions [`where_a_cone_and_a_pipe_cross`] asks,
 /// with the ring's centre standing in for the apex.
+///
+/// # Only the miss is answered
+///
+/// **The circles are found and not handed back.** Commit `9eead79c` named each
+/// one by the plane square to the axis it lies in,
+/// [`EdgeRun::RightRoundWhereItCrosses`] with that plane, the run `rcad-step`
+/// reads such a circle as, and a fuse that reaches such a run panics:
+/// `rcad-topo`'s arrangement asks `pickers_of` what picks it out, and that
+/// asserts the run is straight or right round where its faces cross. A quarter
+/// bend of ring four and tube one less a bar of radius four on its axis was
+/// the fuse (row Q1334, §378). So a crossing or a resting circle stays refused
+/// until the arrangement reads that run, and a pipe that misses the tube is
+/// answered.
 ///
 /// # Errors
 ///
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] where the two do
-/// not share an axis. [`Error::CannotNameWhichPieceOfACrossingThisIs`] where
-/// [`circles_round_a_rings_axis`] cannot write a plane down for each circle.
+/// not share an axis, and where they do and the pipe reaches the tube.
 /// [`Error::Undecidable`] where a sign could not be settled, which takes a
 /// product leaving `f64`'s range.
 fn where_a_ring_and_a_pipe_cross(
@@ -4223,16 +4234,7 @@ fn where_a_ring_and_a_pipe_cross(
         exactly: || how_much_of_a_tube_a_pipe_on_its_axis_leaves_exactly(ring, pipe),
     };
     match ask(&room, Measures::Area, &at, policy, log)? {
-        Decision::Pos => {
-            let room = how_much_of_a_tube_a_pipe_on_its_axis_leaves_exactly(ring, pipe)
-                .map_or_else(
-                    || how_much_of_a_tube_a_pipe_on_its_axis_leaves_enclosing(ring, pipe),
-                    |room| room.enclosure(),
-                );
-            let up = root_enclosing(room * squared_length_enclosing(exactly(along)));
-            circles_round_a_rings_axis(ring, &[-up, up])
-        }
-        Decision::Zero => circles_round_a_rings_axis(ring, &[Interval::exactly(0.0)]),
+        Decision::Pos | Decision::Zero => Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
         Decision::Neg => Ok(SurfaceMeet::Nothing),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
@@ -4279,20 +4281,19 @@ fn how_much_of_a_tube_a_pipe_on_its_axis_leaves_exactly(
 ///
 /// which is `−(δ² − (B + r)²)(δ² − (B − r)²)`. `e² = ‖b − c‖²` once the
 /// centre is proved on the axis, so `Δ` is a polynomial in the stored numbers.
-/// The circles sit at `h = (−eN ± R√Δ)/(2δ²)`; read along the stored direction
-/// `w` that is `(−gN ± R√(Δ·w·w))/(2δ²)` with `g = (b − c)·w`, so no root of
-/// `w·w` is divided out. A touching circle is one curve, the way a ball
-/// inscribed in a pipe is (§24.10).
+/// The circles sit at `h = (−eN ± R√Δ)/(2δ²)`.
 ///
 /// The tube never reaches the axis, because a [`Torus`]'s tube is narrower
 /// than its ring, so every point the two circles share has `ρ > 0` and is a
 /// whole circle round the axis.
 ///
+/// Only a ball that misses the tube is answered, for the reason
+/// [`where_a_ring_and_a_pipe_cross`] gives.
+///
 /// # Errors
 ///
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] where the centre is
-/// not on the axis. [`Error::CannotNameWhichPieceOfACrossingThisIs`] where
-/// [`circles_round_a_rings_axis`] cannot write a plane down for each circle.
+/// not on the axis, and where it is and the ball reaches the tube.
 /// [`Error::Undecidable`] where a sign could not be settled, which takes a
 /// product leaving `f64`'s range.
 fn where_a_ring_and_a_ball_cross(
@@ -4323,31 +4324,9 @@ fn where_a_ring_and_a_ball_cross(
         exactly: || how_a_ball_on_a_rings_axis_crosses_its_tube_exactly(ring, ball),
     };
     let four_lengths = Measures::ManyLengths { how_many: 4 };
-    let shape = ask(&crossing, four_lengths, &at, policy, log)?;
-    if shape == Decision::Neg {
-        return Ok(SurfaceMeet::Nothing);
-    }
-
-    let (apart, past) = a_ball_on_a_rings_axis_exactly(ring, ball).map_or_else(
-        || a_ball_on_a_rings_axis_enclosing(ring, ball),
-        |(apart, past)| (apart.enclosure(), past.enclosure()),
-    );
-    let crossing = how_a_ball_on_a_rings_axis_crosses_its_tube_exactly(ring, ball).map_or_else(
-        || how_a_ball_on_a_rings_axis_crosses_its_tube_enclosing(ring, ball),
-        |crossing| crossing.enclosure(),
-    );
-    let up = dot_enclosing(gap_enclosing(centre, middle), exactly(along));
-    let halfway = quotient_or_everything(-(up * past), Interval::exactly(2.0) * apart);
-    match shape {
-        Decision::Zero => circles_round_a_rings_axis(ring, &[halfway]),
-        Decision::Pos => {
-            let either_way = quotient_or_everything(
-                Interval::exactly(ring.ring_radius())
-                    * root_enclosing(crossing * squared_length_enclosing(exactly(along))),
-                Interval::exactly(2.0) * apart,
-            );
-            circles_round_a_rings_axis(ring, &[halfway - either_way, halfway + either_way])
-        }
+    match ask(&crossing, four_lengths, &at, policy, log)? {
+        Decision::Pos | Decision::Zero => Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
+        Decision::Neg => Ok(SurfaceMeet::Nothing),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
 }
@@ -4422,15 +4401,14 @@ fn a_ball_on_a_rings_axis_exactly(ring: &Torus, ball: &Sphere) -> Option<(Exact,
 /// root. On a nappe, read along the stored direction `w`, the circles sit at
 /// `(s²g ± sR√(w·w) ± √(Q·w·w))/(1 + s²)`, the first `±` the nappe's.
 ///
-/// A ray touching the tube is one curve, the way a ball inscribed in a pipe is
-/// (§24.10). Sharing an axis is the two questions [`where_a_cone_and_a_pipe_cross`]
-/// asks.
+/// Sharing an axis is the two questions [`where_a_cone_and_a_pipe_cross`]
+/// asks. Only a cone whose two nappes both miss the tube is answered, for the
+/// reason [`where_a_ring_and_a_pipe_cross`] gives.
 ///
 /// # Errors
 ///
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] where the two do
-/// not share an axis. [`Error::CannotNameWhichPieceOfACrossingThisIs`] where
-/// [`circles_round_a_rings_axis`] cannot write a plane down for each circle.
+/// not share an axis, and where they do and a nappe reaches the tube.
 /// [`Error::Undecidable`] where a sign could not be settled, which takes a
 /// product leaving `f64`'s range.
 fn where_a_ring_and_a_cone_cross(
@@ -4467,44 +4445,21 @@ fn where_a_ring_and_a_cone_cross(
         other => unreachable!("a sum of squares is never below zero: {other:?}"),
     }
 
-    let squared_direction = squared_length_enclosing(exactly(along));
-    let up = dot_enclosing(gap_enclosing(centre, apex), exactly(along));
-    let slope = Interval::exactly(cone.slope());
-    let widening = Interval::exactly(1.0) + slope * slope;
-    let mut sitting_at: SmallVec<[Interval; 4]> = SmallVec::new();
     for nappe in [1.0, -1.0] {
         let reach = Question {
             named: WHERE_A_TORUS_AND_A_CONE_CROSS,
             enclosing: || how_a_nappe_reaches_a_tube_enclosing(ring, cone, nappe),
             exactly: || how_a_nappe_reaches_a_tube_exactly(ring, cone, nappe),
         };
-        let shape = ask(&reach, Measures::Area, &at, policy, log)?;
-        if shape == Decision::Neg {
-            continue;
-        }
-        let middle = quotient_or_everything(
-            slope * slope * up
-                + Interval::exactly(nappe)
-                    * slope
-                    * Interval::exactly(ring.ring_radius())
-                    * root_enclosing(squared_direction),
-            widening,
-        );
-        match shape {
-            Decision::Zero => sitting_at.push(middle),
-            Decision::Pos => {
-                let reach = how_a_nappe_reaches_a_tube_enclosing(ring, cone, nappe);
-                let either_way =
-                    quotient_or_everything(root_enclosing(reach * squared_direction), widening);
-                sitting_at.extend([middle - either_way, middle + either_way]);
+        match ask(&reach, Measures::Area, &at, policy, log)? {
+            Decision::Pos | Decision::Zero => {
+                return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface);
             }
+            Decision::Neg => (),
             other => unreachable!("a sign question answers with a sign: {other:?}"),
         }
     }
-    if sitting_at.is_empty() {
-        return Ok(SurfaceMeet::Nothing);
-    }
-    circles_round_a_rings_axis(ring, &sitting_at)
+    Ok(SurfaceMeet::Nothing)
 }
 
 /// `Q = X − 2·nappe·sRe` as an enclosure, with `e = g/√(w·w)`.
@@ -4588,88 +4543,6 @@ fn the_room_a_cone_on_a_rings_axis_leaves_exactly(ring: &Torus, cone: &Cone) -> 
             .minus(&Exact::product_of(ring.ring_radius(), ring.ring_radius())?),
     )
 }
-
-/// Circles round a ring's axis, each named by the plane square to the axis
-/// that it lies in — [`EdgeRun::RightRoundWhereItCrosses`] with that plane, the
-/// run `rcad-step` reads a circle between two different curved faces as.
-///
-/// `sitting_at` is where each circle sits read along the ring's stored axis
-/// direction `w` from its centre, `w·(x − c)` for any point `x` of it.
-///
-/// # Why a plane
-///
-/// The partner here is a pipe, a ball or a cone on the ring's axis, and a plane
-/// square to that axis crosses each of them in one circle, so the partner and
-/// the plane name the circle with nothing picking it. That is the pair
-/// `which_two_surfaces_a_run_is_between` reads off such a run between two
-/// curved faces, the curved face that sorts first and the plane, and a ring
-/// sorts after the other three. `Model::validate` reads the ring's face against
-/// the plane since row Q1173 (§243.8).
-///
-/// # What the plane costs
-///
-/// **Its offset is a rounding**, where the one that names a plane-and-ball
-/// circle is not: a circle's height takes a square root. The offset stored is
-/// the `f64` at the middle of the enclosure `w·c + sitting_at`, so the circle
-/// the partner and the plane draw is on both exactly and off the ring by that
-/// rounding. The enclosure is refused wider than sixteen roundings of the
-/// largest number in it, the allowance `Model::validate` gives a corner.
-///
-/// **Its normal is the ring's stored axis direction, kept as written**, so it
-/// crosses that axis to exactly nothing, which is what `Model::validate` and
-/// the walk ask before they read a plane as square to a ring's axis.
-///
-/// # Errors
-///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where the axis direction
-/// would not be kept as written, where an enclosure is wider than that, or
-/// where two circles are not provably at two heights.
-fn circles_round_a_rings_axis(ring: &Torus, sitting_at: &[Interval]) -> Result<SurfaceMeet> {
-    let axis = ring.axis().direction();
-    let level = Plane::from_point_and_normal_as_written(ring.centre(), axis)?;
-    if level.normal() != axis {
-        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-    }
-    let through_the_centre = dot_enclosing(
-        exactly(axis.components()),
-        exactly(ring.centre().coordinates()),
-    );
-    let mut offsets: SmallVec<[Interval; 4]> = sitting_at
-        .iter()
-        .map(|reach| through_the_centre + *reach)
-        .collect();
-    offsets.sort_by(|one, other| one.lo().total_cmp(&other.lo()));
-
-    let largest = ring.ring_radius() + ring.tube_radius();
-    let narrow = offsets.iter().all(|offset| {
-        offset.lo().is_finite()
-            && offset.hi().is_finite()
-            && offset.width()
-                <= A_CIRCLES_PLANE_MAY_BE_ROUNDED_BY
-                    * f64::EPSILON
-                    * offset.lo().abs().max(offset.hi().abs()).max(largest)
-    });
-    let apart = offsets.windows(2).all(|pair| pair[0].hi() < pair[1].lo());
-    if !narrow || !apart {
-        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-    }
-
-    let runs = offsets
-        .iter()
-        .map(|offset| {
-            let plane = level.moved_to(offset.lo() / 2.0 + offset.hi() / 2.0)?;
-            NamedRun::the_whole_of(EdgeRun::RightRoundWhereItCrosses {
-                and: Surface::Plane(plane),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(SurfaceMeet::Curves(runs))
-}
-
-/// How many roundings of the largest number involved a circle's plane may be
-/// known to within: sixteen, the allowance `Model::validate` gives a corner of
-/// a curved face.
-const A_CIRCLES_PLANE_MAY_BE_ROUNDED_BY: f64 = 16.0;
 
 /// Whether two cones are one point set: one apex, one slope, and their axes
 /// along one line, **whichever way each axis points**.

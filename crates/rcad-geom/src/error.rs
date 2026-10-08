@@ -421,19 +421,23 @@ pub enum Error {
     #[error("a plane cuts this torus in a quartic that is not a pair of circles")]
     ACrossingBetweenAPlaneAndATorusThatIsAQuartic,
 
-    /// A torus against a ball, a pipe, a cone, or another torus.
+    /// A torus against a ball, a pipe, a cone, or another torus, except a
+    /// ball, a pipe or a cone on its axis that misses its tube.
     ///
     /// A **gap** and the same one two leaning pipes have (§29), one degree
     /// worse: the crossing is a space curve of degree up to eight, naming which
     /// of its shapes it takes has no discriminant anybody has written down, and
     /// the marcher has no seed to start from.
     ///
-    /// The family of fixes, shortest first. (a) The **coaxial** cases are two
-    /// circles each and are one sign question apiece — a pipe sharing the
-    /// torus's axis crosses it in two circles square to that axis, and so does a
-    /// ball centred on it and a second torus about it. That covers a rod through
-    /// the middle of a ring, which is what a real file holds. (b) The general
-    /// case wants §29's whole second stage over again with a torus in it.
+    /// The family of fixes, shortest first. (a) The **coaxial** cases are
+    /// circles square to the axis, found by one sign question per partner and
+    /// per cone nappe: up to two for a pipe or a ball and up to four for a
+    /// cone. `intersect` finds them, answers a partner that misses the tube,
+    /// and still refuses one that reaches it: commit `9eead79c` named each
+    /// circle by its plane, and `rcad-topo`'s arrangement panics on that run
+    /// (row Q1334, §378). A second torus about the same axis is not done. (b)
+    /// The general case wants §29's whole second stage over again with a torus
+    /// in it.
     #[error("a torus crossing another curved surface is a space curve of degree up to eight")]
     ACrossingBetweenATorusAndAnotherCurvedSurface,
 
