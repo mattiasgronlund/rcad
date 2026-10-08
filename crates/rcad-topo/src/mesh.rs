@@ -941,45 +941,12 @@ impl BuildingAMesh {
             // ways of writing the lid's use was refused
             // `FacesDoNotAgreeWhichWayTheyFace`, and which one depended on the
             // plane (`a_closed_edge_neither_direction_rule_answers.rs`).
-            let stored_way =
-                match read_off_the_faces {
-                    Some(way) => Some(way),
-                    None => match the_face_across(solid, face, edge)? {
-                        None => None,
-                        Some(across) => [(face, across), (across, face)].into_iter().find_map(
-                            |(flat, round)| {
-                                let a_disk = flat.stored_surface().as_plane().is_some()
-                                    && flat.wire_count() == 1
-                                    && flat.outer_wire().closes_on_one_edge()
-                                    && matches!(round.stored_surface(), Surface::Sphere(_));
-                                if !a_disk {
-                                    return None;
-                                }
-                                let in_the_frame = |surface: Surface| {
-                                    SurfaceAlongAnEdge {
-                                        stored: surface,
-                                        placed_at: flat.location(),
-                                    }
-                                    .in_the_frame(&back)
-                                };
-                                let outward =
-                                    gradient_of(&in_the_frame(flat.stored_surface()), corner)
-                                        * flat.orientation().sign();
-                                let walked = outward.cross(gradient_of(
-                                    &in_the_frame(round.stored_surface()),
-                                    corner,
-                                ));
-                                let used = flat.outer_wire().coedges().next()?;
-                                (walked != Vector::zero()).then_some(
-                                    match used.orientation_on_its_edge() {
-                                        Orientation::Forward => walked,
-                                        Orientation::Reversed => -walked,
-                                    },
-                                )
-                            },
-                        ),
-                    },
-                };
+            let stored_way = match read_off_the_faces {
+                Some(way) => Some(way),
+                None => the_way_a_flat_disk_across_a_ball_walks_its_rim(
+                    solid, face, edge, &back, corner,
+                )?,
+            };
             if let Some(first) = points.first()
                 && let Some(stored_way) = stored_way
                 && (*first - corner).dot(stored_way) < 0.0
@@ -6327,6 +6294,60 @@ fn the_way_this_face_walks_a_closed_edge(
         Orientation::Forward => walked,
         Orientation::Reversed => -walked,
     }))
+}
+
+/// Which way a closed edge runs, read off a flat face across it that is a
+/// disk over a ball — one wire, the whole edge, with the ball on its other
+/// side — as `outward × ∇(the ball)`.
+///
+/// **A disk like this has no corner off the ball to read a side from**
+/// (`docs/decisions.md` §220.6): a flat cut across a ball, or a cap through
+/// the ball's pole with its rim lidded, closes with one wire and nothing
+/// else. Asked of `face` first and then of the face across it, since only one
+/// of the two can be the disk.
+///
+/// `None` where neither face is such a disk, or the disk's gradient crosses
+/// the ball's to nothing at `corner`.
+///
+/// # Errors
+///
+/// Whatever `the_face_across` refuses with.
+fn the_way_a_flat_disk_across_a_ball_walks_its_rim(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    edge: EdgeView<'_>,
+    back: &Isometry,
+    corner: Point,
+) -> Result<Option<Vector>> {
+    let Some(across) = the_face_across(solid, face, edge)? else {
+        return Ok(None);
+    };
+    Ok([(face, across), (across, face)]
+        .into_iter()
+        .find_map(|(flat, round)| {
+            let a_disk = flat.stored_surface().as_plane().is_some()
+                && flat.wire_count() == 1
+                && flat.outer_wire().closes_on_one_edge()
+                && matches!(round.stored_surface(), Surface::Sphere(_));
+            if !a_disk {
+                return None;
+            }
+            let in_the_frame = |surface: Surface| {
+                SurfaceAlongAnEdge {
+                    stored: surface,
+                    placed_at: flat.location(),
+                }
+                .in_the_frame(back)
+            };
+            let outward = gradient_of(&in_the_frame(flat.stored_surface()), corner)
+                * flat.orientation().sign();
+            let walked = outward.cross(gradient_of(&in_the_frame(round.stored_surface()), corner));
+            let used = flat.outer_wire().coedges().next()?;
+            (walked != Vector::zero()).then_some(match used.orientation_on_its_edge() {
+                Orientation::Forward => walked,
+                Orientation::Reversed => -walked,
+            })
+        }))
 }
 
 /// Which side of `named`, a surface a run of this face's names, the face lies
