@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use rcad_geom::{
     EdgeRun, Isometry, Orientation, Plane, PlaneAgreement, Point, Segment, Surface, Vector,
 };
-use rcad_predicates::{Approximation, Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Approximation, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 use smallvec::SmallVec;
 
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
@@ -216,12 +216,11 @@ impl<'m> SolidView<'m> {
     ///
     /// **A corner beside a curved face is not opened out here**: the stored
     /// box holds a face on a pipe or a cone by the discs across its axis, and
-    /// a corner on that face is inside those discs. A caller that needs what a
-    /// tipped disc loses of its reach opens that out itself
-    /// (`classify.rs`'s `opened_out_by_what_a_tipped_disc_loses`, read by
-    /// `classify_uncertain_point`'s `Outside` shortcut); `overlap.rs`'s
-    /// `shares_space_with` does not ask for it. Where a plane and a curved
-    /// surface meet a rounding past the discs is not asked here either way.
+    /// a corner on that face is inside those discs. The stored box holds a
+    /// tipped disc's whole reach itself, rounded outward
+    /// ([`box_round_a_disc`], Q1363), so no caller has to open that out.
+    /// Where a plane and a curved surface meet a rounding past the discs is
+    /// not asked here either way.
     ///
     /// Asked only where the stored box has already answered, since a solid of a
     /// thousand faces is a thousand meetings worked out.
@@ -476,16 +475,6 @@ fn the_face_may_reach_its_apex(solid: SolidView<'_>, face: FaceView<'_>, reach: 
     )
 }
 
-/// How far along each coordinate axis a disc of `radius` square to the unit
-/// direction `square_to` reaches from its centre: `radius · √(1 − a²)` for the
-/// direction's component `a` along that coordinate axis. A disc square to `z`
-/// reaches its radius in `x` and `y` and nothing in `z`.
-fn how_far_a_disc_reaches(square_to: Vector, radius: f64) -> [f64; 3] {
-    square_to
-        .components()
-        .map(|a| radius * (1.0 - a * a).max(0.0).sqrt())
-}
-
 /// A pipe or a cone: the two surfaces a face on which is measured along an
 /// axis.
 ///
@@ -658,22 +647,135 @@ fn box_round_a_side_on_an_axis(
     };
     let turns = where_up_can_turn_along_a_crossing(round, &flat)?;
     let ends = [edge.start().point(), edge.end().point()].map(|end| round.up_of(end));
-    let (origin, along) = (round.origin(), round.along());
     let mut round_it: Option<(Point, Point)> = None;
     for up in ends.into_iter().chain(turns) {
-        let radius = match round {
-            RoundAnAxis::Pipe(pipe) => pipe.radius(),
-            RoundAnAxis::Cone(cone) => cone.radius_at(up),
-        };
-        let at = (origin + along * up).coordinates();
-        let by = how_far_a_disc_reaches(along, radius);
-        let disc = (
-            Point::from([0, 1, 2].map(|axis| at[axis] - by[axis])),
-            Point::from([0, 1, 2].map(|axis| at[axis] + by[axis])),
-        );
+        let disc = box_round_a_disc(round, up);
         round_it = Some(round_it.map_or(disc, |so_far| both_boxes(so_far, disc)));
     }
     round_it
+}
+
+/// The box round the disc across `round`'s axis at `up` along it, rounded
+/// outward so that it holds every point of the disc.
+///
+/// **A disc of radius `r` square to the stored axis `a` reaches
+/// `r · √(b² + c²)/|a|` along a coordinate axis**, `b` and `c` being the
+/// axis's two parts across that coordinate axis. It was worked out as
+/// `r · √(1 − a²)` from the part along it until Q1363, and where that part is
+/// near one the subtraction keeps nothing but rounding. A bar tipped `1e-9` off
+/// `z` stores an axis whose `z` part is exactly one, so its discs reached
+/// nothing in `z` by that sum where they truly reach a billionth of the radius,
+/// and the stored surfaces put points a billionth past the box inside
+/// (`tests/a_point_a_rounding_past_a_turned_solids_corner.rs`, Q1332, Q1363).
+/// A stored axis is of length one only to within a turn, so `|a|` is carried
+/// rather than taken as one.
+///
+/// The disc's centre is `origin + a · up/|a|²` on either surface. A cone's
+/// radius there is `slope · |up|/|a|`, so its reach is
+/// `slope · |up| · √(b² + c²)/|a|²`.
+///
+/// **Every step rounds outward**: the squares and the sums and products in
+/// interval arithmetic, the quotients and the root to nearest and then a step
+/// outward unless the rounding is shown to be exact ([`quotient_of`],
+/// [`root_rounded_up`]). So a bar along a coordinate axis whose numbers are
+/// whole gets the box it always had, bit for bit, and a tipped one a rounding
+/// wider where it needs one. What is still rounded to nearest is `up` itself
+/// ([`RoundAnAxis::up_of`]), which the caller works out.
+///
+/// An `up` that is not a finite number is a disc nobody can place, and the box
+/// round it is every point.
+fn box_round_a_disc(round: RoundAnAxis, up: f64) -> (Point, Point) {
+    if !up.is_finite() {
+        return (
+            Point::from([f64::NEG_INFINITY; 3]),
+            Point::from([f64::INFINITY; 3]),
+        );
+    }
+    let parts = round.along().components();
+    let squares = parts.map(|part| Interval::exactly(part) * Interval::exactly(part));
+    let length = squares[0] + squares[1] + squares[2];
+    assert!(
+        length.lo() > 0.0,
+        "an axis of length one to within a turn has a length: {parts:?}"
+    );
+    let [over_least, over_most] = [length.lo(), length.hi()].map(|bottom| quotient_of(up, bottom));
+    let along_it = Interval::new(
+        over_least.lo().min(over_most.lo()),
+        over_least.hi().max(over_most.hi()),
+    )
+    .expect("two quotients of one finite number are a range");
+    let (radius, over) = match round {
+        RoundAnAxis::Pipe(pipe) => (Interval::exactly(pipe.radius()), length),
+        RoundAnAxis::Cone(cone) => (
+            Interval::exactly(cone.slope()) * Interval::exactly(up.abs()),
+            length * length,
+        ),
+    };
+    let origin = round.origin().coordinates();
+    let ends = [0, 1, 2].map(|axis| {
+        let across = squares[(axis + 1) % 3] + squares[(axis + 2) % 3];
+        let spread = root_rounded_up(quotient_of(across.hi(), over.lo()).hi());
+        let reach = Interval::exactly((radius * Interval::exactly(spread)).hi());
+        let centre = Interval::exactly(origin[axis]) + Interval::exactly(parts[axis]) * along_it;
+        ((centre - reach).lo(), (centre + reach).hi())
+    });
+    (
+        Point::from(ends.map(|(low, _)| low)),
+        Point::from(ends.map(|(_, high)| high)),
+    )
+}
+
+/// `top / bottom` for a `bottom` above zero, as a range that holds it: the
+/// quotient rounded to nearest, and the next `f64` on whichever side the
+/// rounding went, or neither where it was exact.
+///
+/// Which side is read off `top − quotient · bottom`, which one fused
+/// multiply-add works out exactly: the remainder of a division rounded to
+/// nearest is itself an `f64` while nothing is near the subnormals. Where
+/// something is, both sides are taken.
+fn quotient_of(top: f64, bottom: f64) -> Interval {
+    debug_assert!(bottom > 0.0, "a quotient over {bottom}");
+    if top == 0.0 {
+        return Interval::exactly(0.0);
+    }
+    let quotient = top / bottom;
+    if !quotient.is_finite() {
+        return Interval::ENTIRE;
+    }
+    let near_the_subnormals = [top, bottom, quotient]
+        .iter()
+        .any(|value| value.abs() < 1e-270);
+    let (low, high) = if near_the_subnormals {
+        (quotient.next_down(), quotient.next_up())
+    } else {
+        let left_over = (-quotient).mul_add(bottom, top);
+        if left_over > 0.0 {
+            (quotient, quotient.next_up())
+        } else if left_over < 0.0 {
+            (quotient.next_down(), quotient)
+        } else {
+            (quotient, quotient)
+        }
+    };
+    Interval::new(low, high).expect("a finite quotient and its neighbours are a range")
+}
+
+/// The square root of `square`, which is at least zero, rounded up: the root
+/// rounded to nearest, or the next `f64` above it where that came out short.
+///
+/// Whether it came out short is the sign of `root² − square`, which one fused
+/// multiply-add gets right while nothing is near the subnormals.
+fn root_rounded_up(square: f64) -> f64 {
+    debug_assert!(square >= 0.0, "a root of {square}");
+    if square == 0.0 {
+        return 0.0;
+    }
+    let root = square.sqrt();
+    if square < 1e-270 || root.mul_add(root, -square) < 0.0 {
+        root.next_up()
+    } else {
+        root
+    }
 }
 
 /// The smallest box holding both of two boxes.
