@@ -229,15 +229,24 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 /// floors would join into the whole flat ring between the circles of radius 3
 /// and 5, each a ring along the torus alone, which is the case
 /// `holds_the_other_rings` answers `None` for, and Q597 predicted the panic in
-/// `rings_round` there. **Neither the answer nor the panic is reached.**
+/// `rings_round` there. **The intersection and the difference, both ways round,
+/// give the volumes above and leave a model that validates.**
 ///
-/// **Every rule, both ways round, is refused `Undecidable` on `a point inside
-/// a piece of a face`, its record naming the two corners of the first
-/// solid's start cap**, as the quarter bends below are and for the same
-/// reason: `select::place_the_piece` in `fuse/select.rs` finds no point inside
-/// that half disk, whose sides are its chord along `z = 0` and half of a
-/// circle `y = 0` cuts the ring in (Q1367). The volumes above are what the
-/// answer is checked against once it does.
+/// **The union, both ways round, is refused `ResultIsNotManifold { count: 4 }`
+/// before `rings_round`,** at `darts_along_each_edge` in `fuse/assemble.rs`. It
+/// keeps both floors and both walls, so both halves of the circle `z = 0` cuts
+/// the ring in, of radius 5 and of radius 3, run between the same two corners,
+/// `(±5, 0, 0)` and `(±3, 0, 0)`, and `which_arc_of_a_circle_this_is` tells the
+/// two arcs of a closed crossing apart for a plane against a ball, a cone or a
+/// pipe and not a ring: one edge, carried by `z = 0` and the ring and made from
+/// one input edge of each solid, is claimed four times (a temporary print,
+/// Q1373). A gap: the answer is the top half of the whole ring, `4π²`.
+///
+/// Until Q1373 every one was refused `Undecidable` on `a point inside a piece
+/// of a face`, its record naming the two corners of the first solid's start
+/// cap, as the quarter bends below were and for the same reason: `select`
+/// found no point inside that half disk, whose sides are its chord along
+/// `z = 0` and half of a circle `y = 0` cuts the ring in.
 ///
 /// Until Q1367 every one was refused `AFaceTrimmedByACurveThisCannotFollow` on
 /// the second solid's wall, by `holds.rs`, which read no face on a ring with
@@ -268,9 +277,12 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 /// reads a picker whose plane holds both ends on any circle a plane cuts a
 /// ring in, and so reads every arc of both solids' floors, caps and walls.
 #[test]
-fn the_top_halves_of_two_half_bends_are_refused_where_a_point_is_sought_inside_the_first_start_cap()
-{
-    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+fn the_top_halves_of_two_half_bends_fuse_to_what_pappus_gives_but_for_their_union() {
+    for (rule, volume) in [
+        (Rule::Union, None),
+        (Rule::Intersection, Some(0.0)),
+        (Rule::Difference, Some(2.0 * PI * PI)),
+    ] {
         for turned_first in [false, true] {
             let mut model =
                 Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -292,39 +304,44 @@ fn the_top_halves_of_two_half_bends_are_refused_where_a_point_is_sought_inside_t
                 );
             }
             let what = format!("{rule:?}, turned first {turned_first}");
-            let refused = model.fuse(
-                &[one],
-                &[other],
-                rule,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            );
-            let start = if turned_first {
-                [-1.0, 0.0]
-            } else {
-                [1.0, 0.0]
-            };
-            assert_no_point_is_found_inside_the_start_cap(&refused, start, &what);
+            match volume {
+                Some(volume) => assert_fuses_to(&mut model, one, other, rule, volume, &what),
+                None => {
+                    let refused = model.fuse(
+                        &[one],
+                        &[other],
+                        rule,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    );
+                    assert!(
+                        matches!(refused, Err(Error::ResultIsNotManifold { count: 4 })),
+                        "{what}: {refused:?}"
+                    );
+                }
+            }
         }
     }
 }
 
 /// **Half-meridians the arrangement reads, a floor and a wall `holds.rs`
-/// reads, and a cap `select` finds no point in.** The top halves, `z ≥ 0`, of
+/// reads, and a cap `select` finds a point in.** The top halves, `z ≥ 0`, of
 /// two quarter bends of one ring, ring 4 and tube 1: one from `+x` round to
 /// `+y`, the other from `+y` round to `−x`, meeting flush on `x = 0`. Pappus
 /// gives each `π/2 · 4 · π/2 = π²`, so the union is the top half of a half
 /// bend, `2π²`, the intersection is nothing, and each difference is the first
-/// quarter, `π²`. Unlike the half bends' floors above, each floor's four
+/// quarter, `π²`. Every rule, both ways round, gives that, and leaves a model
+/// that validates. Unlike the half bends' floors above, each floor's four
 /// corners are not on one line.
 ///
-/// **Every rule, both ways round, is refused `Undecidable` on `a point inside
-/// a piece of a face`, its record naming the two corners of the first solid's
-/// start cap**, `(3, 0, 0)` and `(5, 0, 0)`, or `(0, 3, 0)` and `(0, 5, 0)`
-/// turned: `select::place_the_piece` in `fuse/select.rs` finds no point inside
-/// that half disk, whose sides are its chord along `z = 0` and half of a
-/// circle the cap's plane cuts the ring in (Q1367). The volumes above are what
-/// the answer is checked against once it does.
+/// Until Q1373 every one was refused `Undecidable` on `a point inside a piece
+/// of a face`, its record naming the two corners of the first solid's start
+/// cap, `(3, 0, 0)` and `(5, 0, 0)`, or `(0, 3, 0)` and `(0, 5, 0)` turned.
+/// That half disk's sides are its chord along `z = 0` and half of a circle the
+/// cap's plane cuts the ring in, so its two corners wind round nothing, and
+/// `select`'s `in_the_bulge_of` counted no arc of a circle a plane through the
+/// ring's axis cuts. `(4, 0, 0.5)` was offered, half way from the chord's
+/// middle to the arc, and not held (a temporary print, Q1373).
 ///
 /// Until Q1367 every one was refused `AFaceTrimmedByACurveThisCannotFollow` on
 /// the second solid's wall, by the arm of
@@ -348,9 +365,12 @@ fn the_top_halves_of_two_half_bends_are_refused_where_a_point_is_sought_inside_t
 /// The arrangement and `holds.rs` now read such an arc by one spelling, and
 /// `a_quarter_and_a_half_bends_floor_hold_their_own_points` checks its sign.
 #[test]
-fn the_top_halves_of_two_quarter_bends_are_refused_where_a_point_is_sought_inside_the_first_start_cap()
- {
-    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+fn the_top_halves_of_two_quarter_bends_fuse_by_every_rule_to_what_pappus_gives() {
+    for (rule, volume) in [
+        (Rule::Union, 2.0 * PI * PI),
+        (Rule::Intersection, 0.0),
+        (Rule::Difference, PI * PI),
+    ] {
         for turned_first in [false, true] {
             let mut model =
                 Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -365,15 +385,7 @@ fn the_top_halves_of_two_quarter_bends_are_refused_where_a_point_is_sought_insid
                 assert_measures(&model, quarter, PI * PI, "the top half of a quarter bend");
             }
             let what = format!("{rule:?}, turned first {turned_first}");
-            let refused = model.fuse(
-                &[one],
-                &[other],
-                rule,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            );
-            let start = if turned_first { [0.0, 1.0] } else { [1.0, 0.0] };
-            assert_no_point_is_found_inside_the_start_cap(&refused, start, &what);
+            assert_fuses_to(&mut model, one, other, rule, volume, &what);
         }
     }
 }
@@ -538,34 +550,36 @@ fn a_quarter_and_a_half_bends_wall_hold_their_own_points() {
     }
 }
 
-/// That `refused` is refused `Undecidable` on finding a point inside the
-/// first solid's start cap, which runs out from the ring's axis along `start`:
-/// every record names `a point inside a piece of a face`, and the first names
-/// the cap's two corners, where the tube's inner and outer edges cross it.
-fn assert_no_point_is_found_inside_the_start_cap<T: std::fmt::Debug>(
-    refused: &rcad_topo::Result<T>,
-    start: [f64; 2],
+/// That `one` fused with `other` under `rule` answers, leaves a model that
+/// validates, and holds `volume`: one solid, or none where `volume` is nothing.
+fn assert_fuses_to(
+    model: &mut Model,
+    one: SolidKey,
+    other: SolidKey,
+    rule: Rule,
+    volume: f64,
     what: &str,
 ) {
-    let Err(Error::Undecidable { records }) = refused else {
-        panic!("{what}: {refused:?}");
+    let answer = model
+        .fuse(
+            &[one],
+            &[other],
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{what} refused: {why:?}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{what} left a model that does not validate: {why}"));
+    if volume == 0.0 {
+        assert_eq!(answer.solids(), [], "{what} is nothing");
+        return;
+    }
+    let [solid] = answer.solids() else {
+        panic!("{what} is one solid, not {:?}", answer.solids());
     };
-    assert!(
-        !records.records().is_empty()
-            && records
-                .records()
-                .iter()
-                .all(|record| record.predicate() == "a point inside a piece of a face"),
-        "{what}: {records:?}"
-    );
-    let corners = [3.0, 5.0].map(|out| {
-        rcad_predicates::Point::from([
-            written_out(start[0] * out),
-            written_out(start[1] * out),
-            0.0,
-        ])
-    });
-    assert_eq!(records.records()[0].inputs(), corners, "{what}");
+    assert_measures(model, *solid, volume, what);
 }
 
 fn assert_measures(model: &Model, solid: SolidKey, volume: f64, what: &str) {

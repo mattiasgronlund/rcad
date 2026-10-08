@@ -102,7 +102,7 @@ use rcad_predicates::{
 
 use crate::classify::{side_of_a_flat_face, stretched_to_the_plane};
 use crate::holds::{
-    lie_along_one_line, the_half_space_naming_the_meridian_circle_through,
+    how_the_axis_lies_on, lie_along_one_line, the_half_space_naming_the_meridian_circle_through,
     the_meridian_half_space_keeps,
 };
 use crate::validate::side_of_surface;
@@ -492,27 +492,29 @@ fn place_the_piece(
         return Ok(Search::Placed(Placement::Outside));
     }
     let also_picked_by = what_else_each_round_wire_asks(piece, policy, log)?;
+    let meridians = the_meridian_circle_each_side_runs_round(piece, policy, log)?;
     let mut unfollowed = None;
-    let mut try_one =
-        |candidate: PredicatePoint, log: &mut ProvenanceLog| -> Result<Option<Option<Placement>>> {
-            if the_piece_holds(piece, in_plane, &also_picked_by, candidate) != Some(true) {
-                return Ok(None);
+    let mut try_one = |candidate: PredicatePoint,
+                       log: &mut ProvenanceLog|
+     -> Result<Option<Option<Placement>>> {
+        if the_piece_holds(piece, in_plane, &also_picked_by, &meridians, candidate) != Some(true) {
+            return Ok(None);
+        }
+        let mut trial = ProvenanceLog::new();
+        let settled =
+            settle_against_each(model, solids, against, candidate, piece, policy, &mut trial)?;
+        Ok(Some(match settled {
+            Settled::At(placement) => {
+                trial.drain_into(log);
+                Some(placement)
             }
-            let mut trial = ProvenanceLog::new();
-            let settled =
-                settle_against_each(model, solids, against, candidate, piece, policy, &mut trial)?;
-            Ok(Some(match settled {
-                Settled::At(placement) => {
-                    trial.drain_into(log);
-                    Some(placement)
-                }
-                Settled::MetAFaceNobodyFollows(face) => {
-                    unfollowed.get_or_insert(face);
-                    None
-                }
-                Settled::Abandoned => None,
-            }))
-        };
+            Settled::MetAFaceNobodyFollows(face) => {
+                unfollowed.get_or_insert(face);
+                None
+            }
+            Settled::Abandoned => None,
+        }))
+    };
     let mut one_was_inside = false;
     for &candidate in candidates {
         let Some(settled) = try_one(candidate, log)? else {
@@ -1177,7 +1179,10 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// A round wire's partner's inside is the region it bounds only where the
 /// partner leaves one region on the plane. A torus leaves two, so
 /// `also_picked_by` — one entry per wire, from [`what_else_each_round_wire_asks`]
-/// — says what else must hold the point, or `None` where nothing can say.
+/// — says what else must hold the point, or `None` where nothing can say. An
+/// arc of one of those two circles is read the same way: `meridians`, one
+/// entry per side of every wire, from [`the_meridian_circle_each_side_runs_round`],
+/// says which disk its bulge is in ([`in_the_bulge_of`]).
 ///
 /// **A flat piece's curved partners are asked about the point and a point of
 /// the plane beside it at once**, through [`side_of_a_partner_by_its_plane`]. A
@@ -1202,6 +1207,7 @@ fn the_piece_holds(
     piece: &Piece,
     in_plane: Option<&InPlane>,
     also_picked_by: &[Option<Vec<Picker>>],
+    meridians: &[Vec<Option<Picker>>],
     point: PredicatePoint,
 ) -> Option<bool> {
     // A piece that is the **whole** of a closed surface is trimmed by nothing.
@@ -1279,8 +1285,14 @@ fn the_piece_holds(
                     wire.iter().map(|side| side.ends[0].point()).collect();
                 winding +=
                     in_plane.winding_around(core::slice::from_ref(&corners), reaching_the_plane)?;
-                for side in wire {
-                    winding += in_the_bulge_of(flat, side, in_plane, reaching_the_plane)?;
+                for (index, side) in wire.iter().enumerate() {
+                    winding += in_the_bulge_of(
+                        flat,
+                        side,
+                        meridians[position][index].as_ref(),
+                        in_plane,
+                        reaching_the_plane,
+                    )?;
                 }
             }
         }
@@ -1552,9 +1564,24 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 /// fuse of the two was refused [`INSIDE_A_PIECE`] (row Q1268). A side whose
 /// material is outside the torus still counts nothing; whether that holds is
 /// row Q1305's.
+///
+/// **A torus is counted on a plane through its axis too, along either of the
+/// two meridian circles it cuts there, on the point's own side of the
+/// half-space `meridian` that names the side's circle.** The torus's inside on
+/// such a plane is the two circles' disks, one each side of that half-space's
+/// plane, which [`intersect`] proved clears both: so a point the torus's sign
+/// holds and the half-space keeps is in the side's own disk, and the ball's
+/// paragraph carries over. Without the half-space the bulge would count the
+/// other disk's points on the same side of the chord, which the torus's sign
+/// holds just as surely. A bend's start cap is a half disk with nothing but
+/// its chord along the floor and half a meridian circle round it, so its
+/// corners wind round nothing, and until its arc was counted no point was held
+/// and every fuse of two bends' top halves meeting flush was refused
+/// [`INSIDE_A_PIECE`] (row Q1373).
 fn in_the_bulge_of(
     flat: &Plane,
     side: &FaceMeet,
+    meridian: Option<&Picker>,
     in_plane: &InPlane,
     point: PredicatePoint,
 ) -> Option<i32> {
@@ -1566,7 +1593,10 @@ fn in_the_bulge_of(
             Some(false) => is_on_the_nappe_the_side_is_on(&cone, side, point),
             None => false,
         },
-        Surface::Torus(ring) => runs_round_the_outer_circle(flat, &ring, side)?,
+        Surface::Torus(ring) => match meridian {
+            Some(this_circle) => every_picker_keeps(core::slice::from_ref(this_circle), point)?,
+            None => runs_round_the_outer_circle(flat, &ring, side)?,
+        },
         Surface::Plane(_) | _ => false,
     };
     if !one_round_region || side.material_side != Decision::Neg {
@@ -1728,11 +1758,59 @@ fn the_pickers_of_the_meridian_circle_through(
     )
 }
 
+/// For every side of every wire of a flat piece, the half-space naming the
+/// meridian circle of a ring the side runs along, which [`in_the_bulge_of`]
+/// reads its bulge's disk by; `None` for a side along anything else, for one
+/// on a plane that does not hold the ring's axis exactly
+/// ([`how_the_axis_lies_on`]), and for one whose corner no one circle
+/// certainly keeps. Nothing for a curved piece.
+///
+/// Worked out once per piece, as [`what_else_each_round_wire_asks`] is, since
+/// the answer is about the side and not about the point.
+///
+/// # Errors
+///
+/// Whatever [`intersect`] gives for the piece's plane against a ring whose
+/// axis it holds.
+fn the_meridian_circle_each_side_runs_round(
+    piece: &Piece,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Vec<Vec<Option<Picker>>>> {
+    let Some(flat) = piece.surface.as_plane() else {
+        return Ok(Vec::new());
+    };
+    let mut each = Vec::with_capacity(piece.wires.len());
+    for wire in &piece.wires {
+        let mut sides = Vec::with_capacity(wire.len());
+        for side in wire {
+            sides.push(
+                if let Surface::Torus(ring) = &side.carried_by[1]
+                    && how_the_axis_lies_on(flat, ring) == Decision::Zero
+                {
+                    the_half_space_naming_the_meridian_circle_through(
+                        &piece.surface,
+                        &side.carried_by[1],
+                        side.ends[0].point(),
+                        policy,
+                        log,
+                    )?
+                } else {
+                    None
+                },
+            );
+        }
+        each.push(sides);
+    }
+    Ok(each)
+}
+
 /// Whether every one of `pickers` keeps `point`: `Some(false)` when one
 /// certainly rules it out, `None` when one cannot say.
 ///
 /// Each list is empty or holds the one half-space naming a ring's meridian
-/// circle ([`what_else_each_round_wire_asks`]), so each picker is asked what
+/// circle ([`what_else_each_round_wire_asks`],
+/// [`the_meridian_circle_each_side_runs_round`]), so each picker is asked what
 /// `holds.rs` asks it, [`the_meridian_half_space_keeps`], and a point on its
 /// plane is kept.
 fn every_picker_keeps(pickers: &[Picker], point: PredicatePoint) -> Option<bool> {
@@ -3386,8 +3464,8 @@ mod tests {
 
     use super::{
         InPlane, Piece, Rule, a_face_of_the_input_holds, candidate_points, choose, corners_of,
-        every_picker_keeps, midway_between, the_middles_of_a_round_wire,
-        the_pickers_of_the_meridian_circle_through, the_piece_holds,
+        every_picker_keeps, midway_between, the_meridian_circle_each_side_runs_round,
+        the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
     use crate::fuse::bake::{BakedFace, BakedSolid, bake};
@@ -3600,6 +3678,57 @@ mod tests {
         );
     }
 
+    /// A bend's start cap on `y = 0`: its chord along the floor `z = 0` from
+    /// `(3, 0, 0)` to `(5, 0, 0)`, and half of the meridian circle round
+    /// `(4, 0, 0)` over the top, as the top half of a quarter bend has it. Its
+    /// two corners wind round nothing, so what holds a point is the arc's
+    /// bulge. The torus's sign holds the other disk, round `(−4, 0, 0)`, as
+    /// surely, and its upper half is on the bulge's side of the chord's line
+    /// too: only the half-space naming the arc's circle keeps it out (Q1373).
+    #[test]
+    fn a_bends_start_cap_holds_its_own_half_disk_and_not_the_other_disks_half() {
+        let (ring, _) = a_bend_and_its_end_cap_plane();
+        let cap = Plane::from_coefficients([0.0, -1.0, 0.0, 0.0]).expect("a normal");
+        let floor = Plane::from_coefficients([0.0, 0.0, -1.0, 0.0]).expect("a normal");
+        let corner = |x: f64, which: u8| MeetPoint::OfThreeSurfaces {
+            surfaces: [Surface::Plane(cap), ring, Surface::Plane(floor)],
+            which,
+            point: PredicatePoint::from([x, 0.0, 0.0]),
+        };
+        let half_disk = Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(cap),
+            orientation: Orientation::Forward,
+            wires: vec![vec![
+                FaceMeet {
+                    carried_by: [Surface::Plane(cap), Surface::Plane(floor)],
+                    ends: [corner(3.0, 0), corner(5.0, 1)],
+                    material_side: Decision::Neg,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+                FaceMeet {
+                    carried_by: [Surface::Plane(cap), ring],
+                    ends: [corner(5.0, 1), corner(3.0, 0)],
+                    material_side: Decision::Neg,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+            ]],
+            is_the_whole_surface: false,
+        };
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&half_disk, PredicatePoint::from(at))
+        };
+        assert_eq!(holds([4.0, 0.0, 0.5]), Some(true), "inside the half disk");
+        assert_eq!(holds([4.0, 0.0, -0.5]), Some(false), "under its chord");
+        assert_eq!(
+            holds([-4.0, 0.0, 0.5]),
+            Some(false),
+            "in the other disk, on the bulge's side of the chord's line"
+        );
+    }
+
     /// A piece of the wall `y = −10` inside the lower nappe of `x² + y² = (z/2)²`:
     /// one arc of the hyperbola and the chord `z = −52` across it, corners
     /// `(±24, −10, −52)`. The upper nappe's region on the same wall is inside the
@@ -3770,7 +3899,7 @@ mod tests {
         let lower_cap = piece(ball, vec![side(ball, cone, low)]);
         let band = piece(cone, vec![side(cone, ball, low), side(cone, ball, high)]);
         let holds = |piece: &Piece, at: [f64; 3]| {
-            the_piece_holds(piece, None, &[], PredicatePoint::from(at))
+            the_piece_holds(piece, None, &[], &[], PredicatePoint::from(at))
         };
         assert_eq!(holds(&lower_cap, [0.75, 0.0, 1.1]), Some(true), "the cap");
         assert_eq!(
@@ -4319,7 +4448,13 @@ mod tests {
         let also_picked_by =
             what_else_each_round_wire_asks(piece, &Policy::certified(), &mut ProvenanceLog::new())
                 .expect("a plane crosses a torus in circles");
-        the_piece_holds(piece, Some(&in_plane), &also_picked_by, point)
+        let meridians = the_meridian_circle_each_side_runs_round(
+            piece,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a plane crosses a torus in circles");
+        the_piece_holds(piece, Some(&in_plane), &also_picked_by, &meridians, point)
     }
 
     /// A piece of `flat` bounded by whole circles it cuts `ring` in, one wire
