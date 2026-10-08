@@ -8307,9 +8307,12 @@ fuzz-triage night="" against="main":
 
     tellable=$(grep -c . <"$manifest" || true)
     echo
+    # `cargo` by name and not through `mise exec`: the 08:30 timer has no `mise`
+    # on its PATH, and the `mise exec -- just` that started this recipe has
+    # already set what mise.toml's `[env]` adds. `check-fuzz-triage-selftest`.
     decode=(cargo run -q --profile test -p rcad-fuzz-explain -- --triage)
-    echo "\$ mise exec -- ${decode[*]}   (replaying $tellable input(s) in one process)"
-    (cd "$work" && mise exec -- "${decode[@]}") <"$manifest" >"$report"
+    echo "\$ ${decode[*]}   (replaying $tellable input(s) in one process)"
+    (cd "$work" && "${decode[@]}") <"$manifest" >"$report"
     triage_status=$?
     if [ "$triage_status" -ne 0 ]; then
         echo "fuzz-triage: the decoder itself failed (exit $triage_status), so nothing was replayed"
@@ -8421,6 +8424,14 @@ fuzz-promote target file name="":
 # recipe's parse and not about which tree it borrows: pointing it at `main` from
 # a lane would have every gate build a second worktree of the workspace to
 # decode a fixture of twenty junk bytes.
+#
+# **Every arm runs with a `mise` on its PATH that fails as a missing one does.**
+# `rcad-fuzz-triage.service` has no `mise` on its PATH: it starts `mise` by
+# absolute path, and `mise exec` does not add its own directory to the PATH it
+# passes on. The recipe called `mise exec` a second time, inside itself, and both
+# of the timer's first two mornings, 2026-10-07 and 10-08, ended on `mise:
+# command not found` with nothing replayed. Every arm passed on a session's
+# PATH, so none of them could have caught it.
 [private]
 check-fuzz-triage-selftest:
     #!/usr/bin/env bash
@@ -8447,7 +8458,12 @@ check-fuzz-triage-selftest:
         echo "--- got ---"; echo "$got"
         exit 1
     }
-    triage() { RCAD_FUZZ_LOGS="$logs" just fuzz-triage "$1" HEAD 2>&1; }
+    no_mise="$dir/no-mise"
+    mkdir -p "$no_mise"
+    printf '#!/bin/sh\necho "mise: command not found (the 08:30 timer has no mise on its PATH)" >&2\nexit 127\n' \
+        >"$no_mise/mise"
+    chmod +x "$no_mise/mise"
+    triage() { PATH="$no_mise:$PATH" RCAD_FUZZ_LOGS="$logs" just fuzz-triage "$1" HEAD 2>&1; }
 
     verdicts="$night/fuzz-triage-verdicts.tsv"
     header=$(printf 'target\tfiles\tstill_fails\tsample\tgroup')
