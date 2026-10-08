@@ -17,6 +17,13 @@ shape of the answer stays plausible. The unit of billing is the API response:
 
 ## What the numbers mean
 
+Output tokens are a lower bound, not a count. A response's usage grows from
+one record to the next as it streams, so `load()` keeps the largest it saw —
+but about half of all responses never write a record carrying a final
+`stop_reason` at all, and for those the largest we saw is still short of the
+true total. There is no record left to read it from; it is not in these
+transcripts.
+
 Almost everything is cache read: each response re-sends the conversation, so a
 tool result of N tokens is paid once as a cache write and again on every later
 response in that session. That is why `classes` reports "carry" — result tokens
@@ -145,6 +152,15 @@ def load(root, repo, since, until, only=None):
                 if key not in grouped:
                     grouped[key] = {"record": record, "content": []}
                     order.append(key)
+                else:
+                    # usage.output_tokens grows from one record of a response to
+                    # the next as it streams, so the record with the largest
+                    # count is the closest we have to the true total — never
+                    # the first, which is `load`'s whole subject (§396.1).
+                    kept = (grouped[key]["record"].get("message") or {}).get("usage") or {}
+                    seen = message.get("usage") or {}
+                    if seen.get("output_tokens", 0) > kept.get("output_tokens", 0):
+                        grouped[key]["record"] = record
                 grouped[key]["content"].extend(message.get("content") or [])
             elif '"tool_result"' in line:
                 record = _parse(line)
@@ -442,7 +458,8 @@ def report_summary(responses, total):
         for name, amount in r["parts"].items():
             parts[name] += amount
     for name, amount in parts.most_common():
-        print(f"  {name:12} ${amount:9,.2f} {100 * amount / total:6.1f}%")
+        note = "   (a lower bound — not every response logs a final count)" if name == "output" else ""
+        print(f"  {name:12} ${amount:9,.2f} {100 * amount / total:6.1f}%{note}")
     print()
 
     print("=== batching ===")
