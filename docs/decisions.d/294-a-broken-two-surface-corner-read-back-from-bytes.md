@@ -355,7 +355,7 @@ does not reach it. Whether that is a limit is Q913's to pin.
 on a cone, and `the_seam_plane_a_corner_is_on` looks only at pipes, so it would
 still ask. *Tried by Q1044 (§294.10): it never gets that far. The fuse refuses
 earlier, where the block's face crosses the cone, so nothing is asked about the
-corner.*
+corner. Since Q1164 it looks at cones too (§294.12).*
 
 ### 294.10 Q1044: the turned frustum is refused where the cut runs through its apex — 2026-10-06
 
@@ -419,7 +419,9 @@ with one change: a cone's seam is a ruling, the line through the apex and the
 corner, and not a line parallel to the axis. The plane through the axis and the
 corner is built the same way, from the axis origin, which on a cone is the apex.
 It crosses the cone in two rulings that meet only at the apex, and a cap square
-to the axis in two points a diameter apart, as on a pipe.
+to the axis in two points a diameter apart, as on a pipe. *It did refuse there,
+once Q1171 named the rulings (§294.11), and Q1164 extended the seam plane to
+cones on this argument (§294.12).*
 
 **What this leaves.**
 
@@ -601,3 +603,98 @@ filed for it.
 **What this leaves.** Q1164, already filed and waiting on Q1171: extend
 `the_seam_plane_a_corner_is_on` to cones, now that the turned frustum is shown
 to refuse there.
+
+### 294.12 Q1164: a frustum's seam corner is on its moved seam plane too, and the turn at its apex refuses next — 2026-10-08
+
+*Queue row Q1164, from §294.10's "What this leaves". Lane
+`lane-q1164-a-turned-frustum-less-its-half-past-the-seam`, base `4c27dddc`.*
+
+**The case.** `cones::a_frustum(model, 0.5, 2, 6)` turned 0.4 about `x`,
+less or intersected with `THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM` turned the
+same way. Measured again on the base: under `certified` both rules refused
+`side of plane` at the box round the bottom seam corner `(1, 0, 2)` turned, as
+§294.11 pinned, and under `tolerant(100)` both answered `26π/3`.
+
+**The rule, and the argument §294.10 sketched.** `the_seam_plane_a_corner_is_on`
+(`fuse/bake.rs`) takes a cone's axis where it took a pipe's, and does nothing
+else differently: the plane through the axis origin and the stored corner, its
+normal the axis direction crossed with the corner, kept only when the stored
+corner is exactly on it as stored, and moved with `Plane::transformed`. On a
+cone the axis origin is the apex. For the frustum's two seam corners, `(1, 0, 2)`
+and `(3, 0, 6)`, the normal is `(0, 1, 0)` exactly and the plane is `y = 0`, so
+both carry it. The block's face is that plane turned round, bit for bit, so
+`place_the_corners` takes the face through them without asking. That the bits
+agree is shown by the refusal moving off the seam corner, since
+`is_on_by_construction` compares the two planes' bits and nothing else changed.
+
+It is sound for §294.9's two reasons, and the second is where a cone differs.
+Moved, the corner is no more exactly on its cap and its cone than on the seam
+plane; each is a moved copy of an incidence the model held. And the corner is a
+cached sample of the circle the cap and the cone share, so taking it as where
+the plane crosses that circle moves no point of the solid, **provided the plane
+crosses the circle in no second point a rounding away**. On a pipe the plane
+holds the axis and crosses the circle again a diameter away. On a cone the seam
+is a ruling, the line through the apex and the corner, and the plane holds it
+because it holds the apex and the corner. It crosses the cone in that ruling
+and its mirror across the axis, and the two meet only at the apex; a cap square
+to the axis crosses them in two points a diameter apart, as on a pipe. A corner
+at the apex itself has no plane through it and the axis, and gets none. Which
+of the cone's crossings with the face the corner lies on is still read off the
+crossings' own pickers (`nothing_rules_the_point_out`), as it is on a pipe: the
+seam plane says the face runs through the corner, and not which curve of the
+pair does. The four half rulings of §294.11 are each picked by two flat
+surfaces through the apex; which of them the corner's box is strictly on the
+side of was not printed.
+
+**What it gives: one step further, to the apex.** Under `certified`, the sound
+frustum and the corner moved a quarter turn round now refuse `Undecidable` on
+`which way round a node two ways out of it turn`, with one record, whose node
+is the apex `(0, 0, 0)` exactly and whose two ways out are the enclosures of
+`(∓0.5, −0.38941834230865047, 0.9210609940028851)`, `2.2e-15` across. The
+corners moved off the wall and off the cap give `CannotTellTheCellsOfAFaceApart`,
+as they do unturned and under `tolerant(100)`. Under `tolerant(100)` nothing
+moved: the sound frustum is `26π/3` and its corners the unturned answer's
+turned, within `1e-12`
+(`a_turned_frustum_cut_along_its_seam_gets_past_its_seam_corner_and_is_refused_at_its_apex`,
+which replaces `a_turned_frustum_cut_along_its_seam_is_named_through_its_apex_and_refused_at_its_seam_corner`).
+
+**Why the turn at the apex is nothing.** The face asked is the frustum's wall,
+on the cone, at its apex, so `turn_between_two_ways_out` (`fuse/arrange.rs`)
+reads the turn about the axis, `−w` for two ways out into the nappe along `w`
+(`what_a_turn_at_the_apex_is_about`). The two ways out are the two half
+rulings into that nappe, and both are crossings of the block's face, so both lie
+in it: `t₁ × t₂` is along the face's normal `n`. `n` is `x̂ × w` bit for bit
+(§294.11), so `w · n` is nothing exactly, and so is `−w · (t₁ × t₂)`. About the
+axis the two are half a turn apart. Each `t` is an enclosure, so the interval
+straddles nothing, and `certified` refuses where `tolerant(100)` takes the
+`2.2e-15` as nothing.
+
+**It is a gap.** The answer exists: `tolerant(100)` gives it, and a scratch
+probe, not kept, showed `certified` gives it too once that turn is read as
+`Zero`. The probe returned `Zero` in `turn_between_two_ways_out` at the apex of
+a face on a cone whenever the two ways out were crossings of one plane. With
+it and this change, both rules answered under `certified`, held `26π/3` on a
+fine mesh, validated, and had the unturned answer's corners turned within
+`1e-12`; the corners moved off the wall and off the cap gave
+`CannotTellTheCellsOfAFaceApart`, and the one moved a quarter turn round gave
+the sound answer to a rounding. Without this change the probe's `Zero` would not
+be reached: on the base the fuse stops at `side of plane`, so that is asked
+before the turn, and the probe does not touch it. The probe's condition is looser
+than a fix can be: a plane through the apex that does not hold the axis meets
+the nappe in two rulings that are not half a turn apart about it, and `Zero`
+there would be wrong. The fix is to read the turn as `Zero` only when the plane
+runs through the apex and holds the axis exactly, `n · w = 0` asked of the
+stored numbers. `arrange.rs` is outside this row's files, so it is a row of its
+own.
+
+**Not tried.** The frustum turned and then shifted. The bar refuses `side of
+plane` there because the block's face is an ulp off the moved seam plane
+(§294.9), and nothing here says whether the frustum's face is too.
+
+**What this leaves.**
+
+- The apex turn above: `turn_between_two_ways_out` reads two ways out of a
+  cone's apex that lie in one plane holding the axis as `Zero`, and the pin
+  turns round to answers held to `26π/3`. A row of its own, tier 1.
+- `place_the_corners`' doc comment in `arrange.rs` still names only "a round
+  bar's seam plane". That row has the file, and fixes it there.
