@@ -226,6 +226,14 @@ tangent-spheres and tangent-cylinder–plane entries are that, plus the same
 question asked of a tangency along a whole curve, which `intersect` answers as
 one curve and the fuse cuts along like any other.
 
+**Since Q1337, that is only true where no curve of the face already runs
+through the touch point.** `fuse/arrange.rs`'s `Arrangement::place_the_touches`
+hands the touch to the face as a cut when the point lies on one of its
+crossings, and puts the point on that curve as a node — a frustum's floor
+touching a steeper cone at its apex, with the wall beside it already cutting
+that cone in two rulings through the same point, is the case this closes
+(§347.8).
+
 **`SameSurface` is §17.4's coplanar case with one word changed.** Two coplanar
 faces contribute one cut line per edge of the other, each named by the pair
 `{S, U}` for the face `U` across that edge. Two faces on one *cylinder* do

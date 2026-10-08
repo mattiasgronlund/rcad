@@ -6426,7 +6426,7 @@ fn which_side_of_a_surface_a_run_names_this_face_lies_on(
 /// skin was read as a cap right round the pole and cut up to it along the
 /// meridian that arc already runs down, which left a patch through the pole
 /// twice, refused `CornersCoincide`
-/// (`a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_placed_and_most_rules_stop_after`).
+/// (`a_wall_through_the_circle_a_cone_crosses_a_bar_or_a_ball_in_is_placed_and_half_the_rules_stop_after`).
 fn put_in_the_poles_a_crossing_passes(
     points: &mut Vec<Point>,
     ends: [Point; 2],

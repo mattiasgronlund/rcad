@@ -214,14 +214,17 @@ impl<'m> SolidView<'m> {
     /// is no corner of the outline, which runs straight on through it, and is
     /// passed over.
     ///
-    /// **A corner beside a curved face is not opened out**: the stored box is
-    /// all there is there, and where a plane and a curved surface meet a
-    /// rounding past it is not asked here.
+    /// **A corner beside a curved face is not opened out here**: the stored
+    /// box holds a face on a pipe or a cone by the discs across its axis, and
+    /// a corner on that face is inside those discs. A caller that needs what a
+    /// tipped disc loses of its reach opens that out itself
+    /// (`classify.rs`'s `opened_out_by_what_a_tipped_disc_loses`, read by
+    /// `classify_uncertain_point`'s `Outside` shortcut); `overlap.rs`'s
+    /// `shares_space_with` does not ask for it. Where a plane and a curved
+    /// surface meet a rounding past the discs is not asked here either way.
     ///
     /// Asked only where the stored box has already answered, since a solid of a
-    /// thousand faces is a thousand meetings worked out. `classify.rs` keeps a
-    /// copy of this, `opened_out_to_where_its_planes_meet`, that its `Outside`
-    /// shortcut reads (Q1157); the two are one reading and must stay so.
+    /// thousand faces is a thousand meetings worked out.
     pub(crate) fn box_opened_out_to_where_its_planes_meet(
         self,
         low: Point,

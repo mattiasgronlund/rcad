@@ -1,6 +1,7 @@
 //! `SolidView::box_around_it` has to hold the whole solid, because a point
-//! outside it is answered `Outside` with no ray fired and two boxes that miss
-//! say two solids never touch.
+//! past it, opened out to where its planes meet, is answered `Outside` with
+//! no ray fired, and two such opened-out boxes that miss say two solids never
+//! touch.
 //!
 //! For a face on a pipe or a cone the box used to be settled by the face's
 //! corners: how far along the axis the face reaches was read off the corners'
