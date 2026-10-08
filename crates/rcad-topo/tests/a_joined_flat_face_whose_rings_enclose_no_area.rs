@@ -57,7 +57,9 @@
 //! run along pipes reaches `rings_round` with corners that cancel exactly, the
 //! one ring there and the outline by that; a second such ring, as a hole, is
 //! refused before it, because nothing can say which side of that cap's wall on
-//! the bar a point is (Q1120).
+//! the bar a point is (Q1120). With one of those sides straight and leaning,
+//! the fuse puts a corner on the arc where the line along it leaves the cap,
+//! and the ring winds (Q1254).
 
 use std::f64::consts::PI;
 
@@ -2739,21 +2741,150 @@ fn a_cap_along_four_pipes_whose_corners_cancel_is_answered_with_a_bar_on_top_or_
     }
 }
 
+/// **One arc, two pipes and a leaning line** (Q1254). The cap along four pipes
+/// above with its middle side, round the pipe of radius 6 about `(−2, 0)`, made
+/// straight: from `(−2, 6)` to `(4, 0)` along `x + y = 4`, on the plane whose
+/// normal is `(−1, −1, 0)/√2`. That is the side to straighten because it is the
+/// only one of the three whose corners share neither an `x` nor a `y`: the
+/// other two, straight, would lie on `y = 6` and `y = 0`, square to an axis.
+/// The corners are the four as before, so they still sweep exactly 0.
+///
+/// The cap holds the arc's segment less the two pipes' segments, each read off
+/// its angle; a straight side cuts no segment. The arc turns `π − atan(3/4)`,
+/// whose sine is `3/5`, and each pipe `acos(7/25) = 2·atan(3/4)`, whose sine is
+/// `24/25`. So the cap's face is
+///
+/// ```text
+/// 50(π − atan(3/4) − 3/5) − 2·(25/2)(2·atan(3/4) − 24/25) = 50π − 100·atan(3/4) − 6
+/// ```
+///
+/// and the cap, 4 high, `200π − 400·atan(3/4) − 24`, about 346.92: the cap
+/// along four pipes with the radius-6 pipe's segment, `4·18(π/2 − 1)`, given
+/// back.
+///
+/// **The line along the straight side leaves the cap through its arc**, past
+/// `(−2, 6)`, at `(2 − √46, 2 + √46)`: `(−3, 7)` is on it, inside the circle
+/// and outside the pipe about `(−5, 2)`. That is the sentence the cap along four
+/// pipes gives for having no straight side next to `(−2, 6)`. The fuse puts a
+/// corner on the arc there, as on the staircase's, so every answer that keeps
+/// the cap reads its top back as the four corners as written with that one
+/// after `(10, 0)`, and those five sweep more than nothing.
+///
+/// A bar of radius 2 at `(3, 7)`, as for the four pipes, stays clear of every
+/// side: its circle reaches `√58 + 2 < 10` from the bar's axis, is `√89` and
+/// `√137` from the two pipes' axes against `7`, and `3√2 > 2` from the line, on
+/// the cap's side, so it is clear of the fuse's cut along the line as well. On
+/// top, from `z = 4` to `6`, it is `8π`: the union is the cap and the bar, the
+/// cap less the bar is the cap, the bar less the cap is the bar, and the two
+/// share no solid. Flush, from `z = 0` to `4`, it is `16π` inside the cap: the
+/// union is the cap, the intersection the bar, the cap less the bar the cap
+/// less `16π`, and the bar less the cap nothing. Every rule, both ways round,
+/// answers that under `Policy::certified()`.
+///
+/// **Each of those twelve fuses reaches `into_the_arc_away_from_the_centre`**
+/// (`holds.rs`, Q1093), and is refused `AFaceTrimmedByACurveThisCannotFollow`
+/// on the cap's top with that function made to answer `None` (run for Q1254).
+/// Q605's lane, on a base before Q1093, saw such a cap refused that way and did
+/// not pin it. What reaches it is the two pipe sides, not the arc of the bar: a
+/// print there names the pipe about `(−5, 2)` with its picker `y ≥ 6` and the
+/// pipe about `(7, −4)` with `y ≥ 0`, each with the end it shares with the
+/// straight side, `(−2, 6)` or `(4, 0)`, solved into a box under `10⁻¹⁴` wide
+/// that the picker's plane runs through, on the top and on the floor. The cap
+/// along four pipes, whose corners are where two pipes meet, still answers with
+/// that function made to answer `None`.
+#[test]
+fn a_cap_along_three_pipes_and_a_leaning_line_is_answered_with_a_bar_on_top_or_flush() {
+    let cap_volume = 200.0 * PI - 400.0 * 0.75_f64.atan() - 24.0;
+    let as_written = PIPE_CAP.map(|[x, y]| [x, y, 4.0]);
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &LEANING_CAP_SIDES)
+        .unwrap_or_else(|why| panic!("the cap: {why:?}"));
+    assert_holds(&model, cap, cap_volume, "the cap");
+    let corners = the_outline_of_the_cap(&model, cap, as_written[0]);
+    assert_eq!(corners, as_written, "read back as written");
+    assert_eq!(swept_by(&corners), 0.0, "the cap's corners cancel");
+
+    let [leaves_x, leaves_y] = [2.0 - 46.0_f64.sqrt(), 2.0 + 46.0_f64.sqrt()];
+    for flush in [true, false] {
+        for (rule, swapped) in every_rule_both_ways() {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &LEANING_CAP_SIDES)
+                .unwrap_or_else(|why| panic!("the cap: {why:?}"));
+            let bar = if flush {
+                model.add_round_bar(2.0, 4.0, &at(3.0, 7.0, 0.0))
+            } else {
+                model.add_round_bar(2.0, 2.0, &at(3.0, 7.0, 4.0))
+            }
+            .expect("a bar of radius two");
+            let what = format!("{rule:?}, swapped {swapped}, flush {flush}");
+            let answer = fused_in_order(&mut model, [cap, bar], rule, swapped);
+            let bar_volume = if flush { 16.0 * PI } else { 8.0 * PI };
+            let volume = match (flush, rule, swapped) {
+                (true, Rule::Union, _) | (false, Rule::Difference, false) => cap_volume,
+                (true, Rule::Difference, false) => cap_volume - bar_volume,
+                (false, Rule::Union, _) => cap_volume + bar_volume,
+                (true, Rule::Intersection, _) | (false, Rule::Difference, true) => {
+                    assert_holds(&model, the_only(answer, &what), bar_volume, &what);
+                    continue;
+                }
+                (true, Rule::Difference, true) | (false, Rule::Intersection, _) => {
+                    let solids = answer.unwrap_or_else(|why| panic!("{what} refused: {why}"));
+                    assert_eq!(solids, Vec::new(), "{what}: nothing is left");
+                    continue;
+                }
+                (_, other, _) => panic!("not a rule this probes: {other:?}"),
+            };
+            let with_the_cap = the_only(answer, &what);
+            assert_holds(&model, with_the_cap, volume, &what);
+            let written = the_outline_of_the_cap(&model, with_the_cap, as_written[0]);
+            let [first, [x, y, z], second, third, fourth] = written[..] else {
+                panic!("{what}: five corners, not {written:?}");
+            };
+            assert_eq!([first, second, third, fourth], as_written, "{what}");
+            assert!(
+                (x - leaves_x).abs() < 1e-12 && (y - leaves_y).abs() < 1e-12 && z == 4.0,
+                "{what}: no corner where the line leaves the arc in {written:?}"
+            );
+            assert!(swept_by(&written) > 1.0, "{what}: {written:?}");
+        }
+    }
+}
+
 /// The corners of the cap along four pipes, in the order its ring runs.
 const PIPE_CAP: [[f64; 2]; 4] = [[10.0, 0.0], [-8.0, 6.0], [-2.0, 6.0], [4.0, 0.0]];
 
-/// The pipe each side after the arc runs clockwise round, `(centre, radius)`.
-const PIPE_CAP_SIDES: [([f64; 2], f64); 3] =
-    [([-5.0, 2.0], 5.0), ([-2.0, 0.0], 6.0), ([7.0, -4.0], 5.0)];
+/// How each side of the cap along four pipes runs after the arc.
+const PIPE_CAP_SIDES: [Side; 3] = [
+    Side::RoundAPipe([-5.0, 2.0], 5.0),
+    Side::RoundAPipe([-2.0, 0.0], 6.0),
+    Side::RoundAPipe([7.0, -4.0], 5.0),
+];
 
-/// [`a_bar_cut_to`], with every side after the arc along a pipe: side `i + 1`
-/// runs clockwise round `pipes[i]`, `(centre, radius)`, the shorter way from its
-/// corner to the next, and the cap is outside that pipe.
+/// How each side of the cap along three pipes and a leaning line runs after
+/// the arc: [`PIPE_CAP_SIDES`] with the middle one straight.
+const LEANING_CAP_SIDES: [Side; 3] = [
+    Side::RoundAPipe([-5.0, 2.0], 5.0),
+    Side::Straight,
+    Side::RoundAPipe([7.0, -4.0], 5.0),
+];
+
+/// How a side of a cap after its arc runs from its corner to the next.
+#[derive(Clone, Copy)]
+enum Side {
+    /// Clockwise round the pipe of this centre and radius, the shorter way,
+    /// with the cap outside the pipe.
+    RoundAPipe([f64; 2], f64),
+    /// Straight, on the plane through both corners.
+    Straight,
+}
+
+/// [`a_bar_cut_to`], with side `i + 1` running as `sides[i]` says.
 fn a_bar_cut_to_pipes(
     model: &mut Model,
     radius: f64,
     corners: &[[f64; 2]],
-    pipes: &[([f64; 2], f64)],
+    sides: &[Side],
 ) -> rcad_topo::Result<SolidKey> {
     use Orientation::{Forward, Reversed};
     let mut builder = SolidBuilder::new();
@@ -2777,21 +2908,25 @@ fn a_bar_cut_to_pipes(
         )
     };
     let next = |index: usize| (index + 1) % corners.len();
+    let after_the_arc = |index: usize| index.checked_sub(1).map(|side| sides[side]);
     let mut up = Vec::with_capacity(corners.len());
     let mut along_the_top = Vec::with_capacity(corners.len());
     let mut along_the_bottom = Vec::with_capacity(corners.len());
     for index in 0..corners.len() {
         up.push(builder.add_edge(low[index], high[index], EdgeRun::Straight)?);
-        // A shorter arc clockwise round its pipe bulges to the left of its
-        // chord, which is the right going the other way.
-        let picker = if index == 0 {
-            right_of(corners[0], corners[1])
-        } else {
-            right_of(corners[next(index)], corners[index])
+        let picker = match after_the_arc(index) {
+            None => Some(right_of(corners[0], corners[1])),
+            // A shorter arc clockwise round its pipe bulges to the left of its
+            // chord, which is the right going the other way.
+            Some(Side::RoundAPipe(..)) => Some(right_of(corners[next(index)], corners[index])),
+            Some(Side::Straight) => None,
         };
-        let [run_high, run_low] = [top, bottom].map(|plane| EdgeRun::PartOfWhereItCrosses {
-            and: Surface::Plane(plane),
-            picked_by: smallvec![picker],
+        let [run_high, run_low] = [top, bottom].map(|plane| match picker {
+            Some(picker) => EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(plane),
+                picked_by: smallvec![picker],
+            },
+            None => EdgeRun::Straight,
         });
         along_the_top.push(builder.add_edge(high[index], high[next(index)], run_high)?);
         along_the_bottom.push(builder.add_edge(low[index], low[next(index)], run_low)?);
@@ -2820,19 +2955,30 @@ fn a_bar_cut_to_pipes(
                 (up[index], Reversed),
             ],
         )?;
-        let (surface, used) = if index == 0 {
-            (
+        let (surface, used) = match after_the_arc(index) {
+            None => (
                 Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a positive radius")),
                 Forward,
-            )
-        } else {
-            let ([x, y], pipe) = pipes[index - 1];
-            let axis = Axis::new(Point::new(x, y, 0.0), Vector::new(0.0, 0.0, 1.0))
-                .expect("a finite axis");
-            (
-                Surface::Cylinder(Cylinder::new(axis, pipe).expect("a positive radius")),
-                Reversed,
-            )
+            ),
+            Some(Side::RoundAPipe([x, y], pipe)) => {
+                let axis = Axis::new(Point::new(x, y, 0.0), Vector::new(0.0, 0.0, 1.0))
+                    .expect("a finite axis");
+                (
+                    Surface::Cylinder(Cylinder::new(axis, pipe).expect("a positive radius")),
+                    Reversed,
+                )
+            }
+            Some(Side::Straight) => {
+                let ([x, y], [to_x, to_y]) = (corners[index], corners[next(index)]);
+                let outward = Vector::new(to_y - y, x - to_x, 0.0);
+                (
+                    Surface::Plane(
+                        Plane::from_point_and_normal(Point::new(x, y, 0.0), outward)
+                            .expect("a side with a length"),
+                    ),
+                    Forward,
+                )
+            }
         };
         faces.push((builder.add_face(surface, &[wire])?, used));
     }
