@@ -149,3 +149,136 @@ as it was.
 - The uniformly tiny triple §322.4 keeps refused is a gap for the scaling
   family. It was refused before this section and is refused after it. (§349
   answers it; this bullet stays as history.)
+
+### 322.8 §39.4's refusals after `Nearly` — 2026-10-08
+
+*Queue row Q329. Lane `lane-q329-the-refusal-catalogue-after-nearly`, off
+`5f1bce87`, carried by two lanes in turn (§416).* §39.4 lists every refusal M4
+can produce. It was written before `Nearly`, and nobody had asked which of its
+rows a kept product moves. **One row moved, and `Nearly` did not move it.**
+`Undecidable` out of `meet_of_three_surfaces`, the `2^k` family's 10.83%, now
+refuses none of its 2051 triples. With the keep turned off it still refuses
+none, and the row comes back the same to the last digit. §349's slide (Q327)
+is what closed it. With the keep off, no test that pins a row of §39.4 fails.
+§39.4's own figures stay as they were written.
+
+**The two mutants.** Each is made on a scratch copy of `5f1bce87` (`git
+archive 5f1bce87`, under `target/`), never on a tracked file:
+
+- *keep off*: `if rounded > 0 { return None; }` straight after
+  `times_holding_on` in `Nearly::times`. This is §322.6's mutant. A `Nearly`
+  then never carries a box, and refuses wherever `Exact` refused.
+- *slide off*: `the_meet_slid_into_range(surfaces).filter(|_| false)` in
+  `meet_of_three_surfaces`. This is §349.6's mutant.
+
+In the copy, the row is `cargo nextest run -p rcad-geom --test
+every_point_where_three_surfaces_meet_is_on_all_three_of_them -E
+'test(/somewhere_else/)' --no-capture`. The row prints before its `refused == 0`
+pin fails, so every variant gives its figure. At the base it is `mise exec --
+just t -p rcad-geom --test
+every_point_where_three_surfaces_meet_is_on_all_three_of_them --no-capture`.
+**Give each copy a `CARGO_TARGET_DIR` of its own.** The copies hold the same
+files at the same paths inside each, and with one target dir shared, a re-run
+of the *slide off* copy after the keep-off suite compiled nothing and printed
+the *keep off* row: 0 refused where its own build refuses 180. Every figure
+below was measured again with a target dir per copy.
+
+| `somewhere else`, 2051 triples | corners | certified `Zero` | refused | widest box |
+|---|---|---|---|---|
+| as it stands | 806 | 254 | **0** (0.00%) | 3.0246243428348286e-16 |
+| keep off | 806 | 254 | **0** (0.00%) | 3.0246243428348286e-16 |
+| slide off | 670 | 240 | **180** (8.78%) | 3.0246243428348286e-16 |
+| both off | 646 | 240 | **197** (9.61%) | 3.0246243428348286e-16 |
+| §34.7 and §41.3, 2050 triples | 646 | 240 | 222 (10.83%) | 3.0246243428348286e-16 |
+
+- **The keep answers 17 triples on its own**: 197 refused with both off, 180
+  with only the slide off. The slide answers all 197 on its own. So nothing
+  the keep answers on this row is left for it once the slide is in.
+- *Slide off* is §349.6's row exactly: 180 refused, 670 corners.
+- *Both off* has §34.7's corners and certified `Zero`s to the digit, and 25
+  fewer refusals than §41.3's 222. **Those 25 are not traced.** The test file
+  and its seeds have changed since §41.3 (`git log --` the file): one change
+  kept another seed (`45386cd4`), and the row now draws 2051 triples where it
+  drew 2050.
+- **Where the keep shows in this file, it shows as a box, not a refusal.** The
+  `turned` row's widest box is `2.410769996328908e-15` with the keep off, which
+  is §41.3's figure to the digit, and `1.997652952092723e-15` with it. That row
+  refuses none either way. With the keep off and the slide on, all eight tests
+  in the file pass.
+
+**Every test of `rcad-geom` and `rcad-topo`, with the keep off.** In the same
+copy, `cargo nextest run -p rcad-geom -p rcad-topo --no-fail-fast`: 2822 tests
+run, 2816 passed, 6 failed. All six are about `Nearly` itself:
+
+- `a_reading_no_slide_can_square_is_still_decided` and
+  `the_box_holds_the_true_product_wherever_it_falls_off_the_bottom`, the tests
+  of `Nearly` in `exact.rs`;
+- `a_plane_a_speck_inside_a_pipes_wall_cuts_it_in_two_lines`,
+  `a_line_across_the_moved_pipe_meets_it_either_side_of_its_axis` and
+  `a_bar_moved_by_a_speck_less_a_cube_through_its_wall_holds_what_the_unmoved_one_does`,
+  three of §322.6's four;
+- `how_many_corners_two_bars_running_the_same_way_have_is_what_the_closed_form_says`,
+  the pin §322.5 moved to 0.
+
+None of them pins a row of §39.4. §322.6's fourth test was rewritten by Q325
+(`a54ecbde`) as
+`a_bar_moved_by_a_speck_united_with_a_cube_far_away_holds_what_the_unmoved_one_does`,
+and it passes with the keep off. Why is not traced. The plane-pipe room it
+reached keeps its pin in `rcad-geom`, the first test above.
+
+**The rows a kept product can reach, re-run at the base.** Outside tests,
+`Nearly` is used only in `exact.rs`, `intersect.rs` and `three_surfaces.rs`.
+It differs from `Exact` only where a product falls below `2⁻⁹⁶⁹`, the floor of
+`product_is_exact`. Each test below asserts its refusal, so a pass means the row
+stands as §39.4 wrote it. All seven pass, and none of them fails with the keep
+off either:
+
+| §39.4 row | then | now | why the keep does not move it |
+|---|---|---|---|
+| `Undecidable` out of `meet_of_three_surfaces` | gap, 10.83% | **answered**, 0 of 2051 | it does not: the slide moved it, as above |
+| *order along a crossing*, a turned notched bar | gap | refused, certified and tolerant | its corner boxes come from `meet_of_three_surfaces`, but the refusal is §34.5's winding sum over them |
+| `Undecidable` out of `intersect`, a direction with a subnormal part | gap | refused, and decided slid by `2^300` | the lean `n·w` is `Exact::dot_of` and is asked first; the room the keep serves is asked only after a `Zero` lean |
+| `TheseTwoSurfacesDoNotCrossInAConic`, a dot that cancels in `f64` | gap | refused | `along_a_crossing.rs` has no `Nearly`, and `intersect`'s side is the same exact lean |
+| `Undecidable` from `meet_of_three_planes`, past the top of the range | limit | refused | the keep still refuses a product that overflows |
+| `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` | gap | refused | settled by the kinds of the three surfaces, before any product |
+| `CannotWorkOutHowBigACrossingIs`, a bar too thin for its squares | gap | refused | the `f64` angle in `walk.rs`, with no `Nearly` |
+| `ACrossingThisCannotBeOrderedAlong`, a ball one rounding off a bar's axis | gap | refused | refused by the kind of crossing, a quartic, before any order |
+
+The seven tests, in one call: `mise exec -- just t -E
+'test(a_turned_notched_bar_is_refused_for_want_of_an_order_along_a_crossing) |
+test(a_ball_one_rounding_off_a_bars_axis_is_refused_before_any_order) |
+test(a_direction_with_a_subnormal_component_cannot_be_told_from_square_to_a_plane)
+|
+test(three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere)
+| test(a_bar_too_thin_for_its_own_squares_is_refused_rather_than_asserted_against)
+|
+test(a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently)
+| test(three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved)'`.
+
+**Two rows a kept product may reach, with nothing to re-run.** `Undecidable`
+out of `face_holds_the_point` asks `intersect`, so the plane-pipe room is on its
+way. *Which piece of a face a hole is in* follows rays along the crossings in
+`fuse/arrange.rs`, and whether a kept product sits on that way is not traced.
+§39.4 says no generator reaches either.
+
+**The rows it does not reach**, one line each:
+
+- `PlanesDoNotMeetInAPoint`: Cramer's rule is `rcad-predicates`' interval
+  arithmetic, and the line through two planes still refuses any loss where it
+  crosses the third (`where_a_line_crosses_one_plane`).
+- `TheseTwoSurfacesDoNotCrossInAConic` for two planes, a plane down a pipe's
+  axis, a ball against a pipe or two pipes, and
+  `TheCrossingOfTheseTwoSurfacesIsNotClosed`: the kind of curve the pair makes.
+- `DeflectionBelowWhatAMeshCanReach`: the mesher's floor, set by where the fuse
+  puts the surface.
+- The rows about faces in `rcad-topo` — what trims a face, which side of it a
+  face lies on, poles, seams, arcs, cells, joins, cutting small enough, holes,
+  which way an edge runs — and the rows struck through as closed: none of their
+  tests fails with the keep off.
+- Seven test names in §39.4 are not a `fn` at this base. Three *a point inside
+  a piece* rows now answer: the bar cut off its axis and the two tools
+  (`08883735`), and the bar and its copy (`647d8eed`). So does the ball cut
+  down its polar axis (`c4c68524`), and the seam-twice test was renamed in
+  `22f42553`. Those four commits are older than this section. The ball between
+  two blocks was re-pinned by Q365 and Q508, and the Q1114 note's prism is now
+  `the_prism_with_its_edge_a_rounding_into_the_blocks_top_answers_as_if_on_it`.

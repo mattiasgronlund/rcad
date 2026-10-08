@@ -484,6 +484,17 @@ moved them.
 > in front, and all 18 fuses answer, held against volumes in
 > `a_prism_lying_on_one_edge.rs`'s `LAID` (§365.8).
 
+> **2026-10-08 note (Q329): what `Nearly` moved here.** Q100's `Nearly`
+> (§322) came in after these tables, and keeps a product that falls below
+> `f64`'s range. Of the rows above, only `Undecidable` out of
+> `meet_of_three_surfaces` moved: its `2^k` family now refuses none of 2051
+> triples, against 10.83%. **`Nearly` did not move it; §349's slide (Q327)
+> did.** With `Nearly`'s keep turned off, that row comes back the same to the
+> last digit, and with only the slide off it refuses 180. With the keep off, no
+> test that pins a row here fails. The rows a kept product can reach were
+> re-run and stand as written. §322.8 has the figures, the command behind
+> each, and a line for each row the keep does not reach.
+
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot
 assemble what it cut, before writing anything — `two_balls_that_really_cross_are_refused_by_name`
