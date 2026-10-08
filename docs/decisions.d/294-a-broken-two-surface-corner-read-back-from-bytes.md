@@ -831,3 +831,100 @@ since `side of plane` comes first.
   tier 1.
 - Whether the rule that cuts the seam corner away has an answer `certified`
   could reach, for the bar and the frustum both. A row after Q913.
+
+### 294.14 Q1397: the tolerant refusal is a walk asking a hyperbola's vertex a rounding from the apex — 2026-10-08
+
+*Queue row Q1397, from §294.13's "What this leaves". Lane
+`lane-q1397-where-the-tolerant-frustum-cut-is-refused`, base `caed9389`. No line
+that runs changed: a test, two doc comments and this subsection. The trace
+used prints and a backtrace in `rcad-geom`, taken out before the commit.*
+
+**Where it is raised.** Not while the faces are cut up: the fuse puts its
+answer together, and then `nest_the_shells` measures each shell by meshing it,
+and the mesher refuses walking one edge. Line numbers at `caed9389`:
+
+`Model::fuse` (`fuse/mod.rs:236`) → `fused_under` (`:251`) → `assemble`
+(`fuse/assemble.rs:125`) → `nest_the_shells` (`:2570`) →
+`how_much_space_it_encloses` (`:3622`) →
+`how_much_space_a_curved_solid_encloses` (`validate.rs:2464`) →
+`the_coarsest_mesh_whose_sides_do_not_cross` (`:2627`) → `mesh`
+(`mesh.rs:409`) → `walk_the_edges_this_face_can_place` (`:705`) → the
+mesher's `walk` (`:859`) → `rcad_geom::walk` (`walk.rs:439`) →
+`what_a_run_between_these_two_lies_on` (`:759`) → `where_a_plane_cuts_a_cone`
+(`:2886`) → `which_branch_of_a_hyperbola_this_run_is` (`:3015`) →
+`which_side_of_the_apex`, which returns the error at `:3066`.
+
+All four refusals the pin holds (two corners, two rules) come by that path.
+
+**What it is handed.** The edge the block's face cuts along the cone, from a
+corner on the bottom circle to one on the top circle. The first walked is,
+under `Difference`, the one down the seam, `(1, 0, 2)` to `(3, 0, 6)` before
+the placement, and under `Intersection` the one down the far ruling,
+`(−1, 0, 2)` to `(−3, 0, 6)`. The surfaces are the block's face and the
+frustum's cone, apex at `(7, −5, 2.5)` and slope `0.5`, each in the frame the
+mesher shifts that face into. The face is steeper than the cone and misses its
+apex by `4.996e-16`, the number §294.13 summed exactly. So they cross in a
+hyperbola, and `where_a_plane_cuts_a_cone` works out a half-axis of
+`9.992e-16` towards the vertices and `4.996e-16` across. Its centre is within
+`5e-16` of the apex, so each branch's vertex stands about `1e-15` from it, one
+each side.
+
+**Why it is refused.** `which_branch_of_a_hyperbola_this_run_is` asks both
+ends which side of the plane through the apex square to the axis they are on,
+and both are decided, on the side the axis points to. Then it asks each
+branch's vertex the same thing, to find the branch the ends are on. A vertex
+is placed to `POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF` times the size, `9.9e-14`
+here, so its box holds the apex: the side is `Undecidable`, enclosure
+`2.6e-13`. `certified` leaves it so and `tolerant(100)` reads it as `Zero`, and
+`which_side_of_the_apex` refuses both, since neither names a branch. The new
+pin asks `rcad_geom::walk` the same thing with the two seam corners as ends,
+under both policies and with each of the two runs `intersect` names, and pins
+the one record, `which side of a cone's apex`, whose box holds the apex
+(`walking_the_cut_along_a_turned_and_shifted_frustums_seam_asks_a_point_a_rounding_from_the_apex`).
+The bar never gets here: a face along a pipe's axis cuts it in two straight
+lines. The frustum turned alone does not either: its face holds the apex
+exactly, and a face through the apex cuts straight lines too.
+
+**A gap, not a limit.** The answer is there and the arithmetic can reach it
+without the vertex. Each branch is built as `centre + and·towards·s·cosh t +
+across·r·sinh t`, `s = ±1`, where `across` is square to the axis. So far out,
+branch `s` runs along `s·and`, and it lies in the half of the cone on that
+side of the apex. `and` is `â × n̂` with `â` along `w × n`, so `and·w =
+−|w × n̂|`. That is never positive. It is far from zero on every hyperbola:
+a plane crosses a cone in one only when it is steeper than the cone, and then
+`|and·ŵ| > 1/√(1 + slope²)`, `0.89` for this cone. So the branch the ends are
+on is `s = −1` when they are on the axis's side and `s = +1` when they are
+not, and no point a rounding from the apex is asked. Measured with a scratch
+probe that picked the branch that way, not kept:
+
+- the sound frustum and the corner moved a quarter turn round answered both
+  rules with one solid each, which `validate_solid` accepts and which measures
+  `26π/3` on a fine mesh (`holds`); the sound frustum's whole model validates.
+  The corners moved off the wall and off the cap still give
+  `CannotTellTheCellsOfAFaceApart`.
+- with the probe asserting the two ways agree wherever the vertex could be
+  told, `rcad-geom` and `rcad-topo` ran 2789 tests, and only the pin above
+  failed, because it now answered. 21,510 branch picks were decided by their
+  vertices and every one agreed with the sign. 76 could not be told by their
+  vertices. `and·ŵ` was negative in all of them, between `−0.894` and `−1`.
+
+The family of fixes here is "ask something other than the vertex". The vertex
+of this hyperbola is a rounding from the apex, so asking it more exactly
+cannot settle it. A point far out on the branch could be asked instead, but the
+sign of `and·w` names the branch with no point at all.
+
+**On the way past.** The fuse's `start_every_closed_crossing_that_has_no_node`
+(`arrange.rs:2181`) asks `where_a_closed_crossing_starts` of the branch past
+the apex, which reaches neither face. That goes through the same function
+with no ends, so the branch is picked by `intersect`'s half-space at the
+vertex instead. Under `tolerant(100)` the half-space holds both vertices and
+it is refused at `walk.rs:3022`. The fuse drops it with `let Ok(..) else {
+continue }`. That is right here, since the branch touches neither face. Q1195,
+a walk refused in the same function on a hyperbola a rounding off a parabola,
+is not traced and this rule was not run against it.
+
+**What this leaves.**
+
+- The fix: pick a hyperbola's branch for a run with ends by the ends' side and
+  the sign of `and·w`, in `which_branch_of_a_hyperbola_this_run_is`, and turn
+  the two pins above into answers. A row, tier 1.
