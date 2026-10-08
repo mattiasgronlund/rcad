@@ -52,8 +52,9 @@
 //!   about. Until Q1062 the first union was refused under that name instead, on
 //!   the lower bar's top cap flush on the block's floor, and so was every one
 //!   call ([`a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it`]).
-//! - **The lower bar and a box through its wall, then the upper bar**
-//!   ([`uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_one_box`]).
+//! - **The lower bar and a box through its wall, then the upper bar, answers
+//!   since Q1302**
+//!   ([`uniting_the_lower_bar_with_the_box_first_and_the_upper_bar_after_is_the_same_union`]).
 //!   The first union answers and validates. Until Q1093 the second was refused
 //!   `AFaceTrimmedByACurveThisCannotFollow` on that union's wall before any
 //!   face was asked whether it holds a point: the arrangement cutting the wall
@@ -68,19 +69,21 @@
 //!   end to be on or in front, cannot tell (Q1063). `holds.rs` now reads the
 //!   arc by the middle of the other arc, which is behind the picker
 //!   (`into_the_arc_away_from_the_centre`). Since Q1094 the notch answers by
-//!   every spelling of the wall, and a window is refused `ResultIsNotManifold`
-//!   at one edge by every spelling. A window cut opposite the seam is refused
-//!   the same, so the seam is not what stops it
-//!   ([`a_window_cut_opposite_the_seam_is_refused_the_same`]).
+//!   every spelling of the wall, and a window was refused `ResultIsNotManifold`
+//!   at one edge by every spelling, opposite the seam too
+//!   ([`a_window_cut_opposite_the_seam_unites_the_same_by_every_call`]).
 //!
-//!   That edge is a piece of the circle the bars meet on. The first union
+//!   That edge was a piece of the circle the bars meet on. The first union
 //!   keeps a corner on that circle wherever two pieces of its wall met, which
 //!   `assemble.rs` does on purpose (`what_is_left`), and two of them,
 //!   `(1.5, ±1.3229, 2)`, are where the box's inner face `x = 1.5` crossed it.
 //!   That face is inside the bar and gone from the first union, so nothing in
 //!   the second fuse cuts the upper bar's bottom circle there. The first
-//!   union's wall then walks the circle in arcs that end at those corners, and
-//!   the upper bar's wall in arcs that pass them, and no edge has two faces.
+//!   union's wall then walked the circle in arcs that end at those corners,
+//!   and the upper bar's wall in arcs that pass them, and no edge had two
+//!   faces. Each such corner has one wire through it and nothing else, so it
+//!   is no corner of any answer, and since Q1302 `assemble.rs` reads that
+//!   wire past it (`corners_one_wire_walks_past`).
 
 use core::f64::consts::PI;
 
@@ -106,6 +109,11 @@ const ANSWERED_IN_ONE_CALL: [TheBox; 7] = [
     TheBox::TopSlicedOffAbove,
     TheBox::SlicedAtTheMeeting,
 ];
+
+/// `(the box is the argument of the first fuse, the upper bar is the argument
+/// of the second)`, every way.
+const EVERY_ORDER_OF_THE_TWO_FUSES: [(bool, bool); 4] =
+    [(false, false), (false, true), (true, false), (true, true)];
 
 const EVERY_WALL: [Wall; 4] = [
     Wall::SpelledOnce,
@@ -162,11 +170,28 @@ fn a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it() {
     }
 }
 
-/// **The lower bar united with the box first, and the upper bar after, is
-/// refused for one of the seven boxes**, by every spelling of the wall, where
-/// the other two ways of asking answer: the box on the lower wall, at the
-/// second fuse, as [`the_second_union_is_refused`] sets out. The refusal is a
-/// gap: the same three solids unite in one call, and with the bars first.
+/// **The lower bar united with the box first, and the upper bar after, gives
+/// the union by hand for all seven boxes**, by every spelling of the wall: the
+/// solid or solids one call gives, and the bars first.
+///
+/// **The box on the lower wall answers since Q1302**, with each of the two
+/// fuses asked both ways round
+/// ([`the_box_first_then_the_upper_bar_in_every_order`]): `16π + 4 −
+/// (0.5·√3.75 + 4·asin(0.25))`, the bar four tall and the box's `x ∈ [1.5, 4]`,
+/// `|y| ≤ 0.5`, one tall, less the strip of the disc of radius 2 it
+/// overlaps ([`TheBox::union_by_hand`]). The second fuse was refused
+/// `ResultIsNotManifold { count: 1 }`. The first union keeps a corner on the
+/// circle the bars meet on wherever two pieces of its wall met, which
+/// `assemble.rs` does on purpose (`what_is_left`), and two of them,
+/// `(1.5, ±1.3229, 2)`, are where the box's inner face `x = 1.5` crossed it.
+/// That face is inside the bar and gone from the first union, so nothing in
+/// the second fuse cuts the upper bar's bottom circle there. The union drops
+/// both caps on `z = 2`, and the first union's wall then walked the circle in
+/// arcs ending at those corners where the upper bar's wall walked past them.
+/// Each such corner has one wire through it and nothing else, so it cannot be
+/// a corner of any answer, and `assemble.rs` now reads the wire past it
+/// (`corners_one_wire_walks_past`), as it already did where a closed edge
+/// only started.
 ///
 /// Until Q1093 the box across the meeting was refused too, and both were
 /// refused `AFaceTrimmedByACurveThisCannotFollow` naming the first union's
@@ -204,7 +229,7 @@ fn a_bars_top_cap_flush_on_the_blocks_floor_unites_with_it() {
 /// holds neither. `classify.rs` grazed every ray on that until Q1080, and now
 /// grazes only where the face may hold the box.
 #[test]
-fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_one_box() {
+fn uniting_the_lower_bar_with_the_box_first_and_the_upper_bar_after_is_the_same_union() {
     for wall in EVERY_WALL {
         for the_box in [
             TheBox::BlockOverNegativeX,
@@ -214,26 +239,34 @@ fn uniting_the_lower_bar_with_the_box_first_refuses_the_upper_bar_for_one_box() 
             TheBox::TopSlicedOffAbove,
             TheBox::SlicedAtTheMeeting,
         ] {
+            let call = Call::LowerWithTheBoxThenUpper {
+                the_box_is_the_argument: false,
+                the_upper_bar_is_the_argument: false,
+            };
             let asked = format!("{the_box:?}, {wall:?}");
-            let (model, said) = unite(the_box, wall, Call::LowerWithTheBoxThenUpper);
+            let (model, said) = unite(the_box, wall, call);
             let united = said.unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
             is_the_union_by_hand(&model, &united, the_box, &asked);
         }
 
-        the_second_union_is_refused(TheBox::OnTheLowerWallOnly, wall);
+        the_box_first_then_the_upper_bar_in_every_order(TheBox::OnTheLowerWallOnly, wall);
     }
 }
 
-/// **A window cut through the lower bar's wall opposite its seam is refused
-/// the same** as the box on the lower wall, which cuts one through the seam:
-/// so the seam running through the window is not what the second fuse cannot
-/// follow. The same three united in one call, or with the bars first, are the
-/// mirror image of the box on the lower wall's union, and hold as much.
+/// **A window cut through the lower bar's wall opposite its seam unites the
+/// same by every call**, the mirror image of the box on the lower wall's
+/// union, and holding as much: in one call, with the bars first, and with the
+/// box first and each fuse asked both ways round. It was refused
+/// `ResultIsNotManifold { count: 1 }` at the second fuse until Q1302, the same
+/// as the box on the lower wall, so the seam running through that window was
+/// never what the second fuse could not follow
+/// ([`uniting_the_lower_bar_with_the_box_first_and_the_upper_bar_after_is_the_same_union`]
+/// says what it was).
 #[test]
-fn a_window_cut_opposite_the_seam_is_refused_the_same() {
+fn a_window_cut_opposite_the_seam_unites_the_same_by_every_call() {
     let the_box = TheBox::OnTheLowerWallOppositeTheSeam;
     for wall in EVERY_WALL {
-        the_second_union_is_refused(the_box, wall);
+        the_box_first_then_the_upper_bar_in_every_order(the_box, wall);
         for call in [
             Call::LowerAgainstUpperAndBox,
             Call::UpperAndBoxAgainstLower,
@@ -290,58 +323,18 @@ fn a_notched_wall_holds_no_point_of_its_pipe_above_its_top() {
     }
 }
 
-/// `(lower ∪ box) ∪ upper`, for a box that cuts a window in the lower bar's
-/// wall: the first union answers, validates and is one solid, and the second
-/// is refused `ResultIsNotManifold` at one edge, by every spelling of the wall.
-fn the_second_union_is_refused(the_box: TheBox, wall: Wall) {
-    let asked = format!("{the_box:?}, {wall:?}");
-    let asked = asked.as_str();
-    let policy = Policy::certified();
-    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-    let [lower, upper] = the_two_bars(&mut model, wall);
-    let third = a_box(&mut model, the_box.bounds());
-    let first = model
-        .fuse(
-            &[lower],
-            &[third],
-            Rule::Union,
-            &policy,
-            &mut ProvenanceLog::new(),
-        )
-        .unwrap_or_else(|refused| panic!("{asked}, the lower bar and the box: {refused:?}"))
-        .solids()
-        .to_vec();
-    model
-        .validate(&policy, &mut ProvenanceLog::new())
-        .unwrap_or_else(|broken| panic!("{asked}, the first union: {broken:?}"));
-    assert_eq!(
-        first.len(),
-        1,
-        "{asked}: the lower bar and the box are one solid"
-    );
-
-    let refused = model
-        .fuse(
-            &first,
-            &[upper],
-            Rule::Union,
-            &policy,
-            &mut ProvenanceLog::new(),
-        )
-        .expect_err(asked);
-    match the_box {
-        TheBox::OnTheLowerWallOnly | TheBox::OnTheLowerWallOppositeTheSeam => assert!(
-            matches!(refused, Error::ResultIsNotManifold { count: 1 }),
-            "{asked}: {refused:?}"
-        ),
-        TheBox::AcrossTheMeeting
-        | TheBox::BlockOverNegativeX
-        | TheBox::OnTheUpperWallOnly
-        | TheBox::FarAway
-        | TheBox::TopSlicedOffAbove
-        | TheBox::SlicedAtTheMeeting => {
-            panic!("{asked}: this box cuts no window in the lower wall")
-        }
+/// `(lower ∪ box) ∪ upper` with each fuse asked both ways round, the four
+/// calls of [`EVERY_ORDER_OF_THE_TWO_FUSES`], each the union by hand.
+fn the_box_first_then_the_upper_bar_in_every_order(the_box: TheBox, wall: Wall) {
+    for (the_box_is_the_argument, the_upper_bar_is_the_argument) in EVERY_ORDER_OF_THE_TWO_FUSES {
+        let call = Call::LowerWithTheBoxThenUpper {
+            the_box_is_the_argument,
+            the_upper_bar_is_the_argument,
+        };
+        let asked = format!("{the_box:?}, {wall:?}, {call:?}");
+        let (model, said) = unite(the_box, wall, call);
+        let united = said.unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+        is_the_union_by_hand(&model, &united, the_box, &asked);
     }
 }
 
@@ -431,8 +424,12 @@ enum Call {
     UpperAndBoxAgainstLower,
     /// `fuse([lower], [upper])`, then that with the box.
     LowerWithUpperThenTheBox,
-    /// `fuse([lower], [box])`, then that with the upper bar.
-    LowerWithTheBoxThenUpper,
+    /// `fuse([lower], [box])`, then `fuse([that], [upper])`, each the other way
+    /// round where it says the second is the argument.
+    LowerWithTheBoxThenUpper {
+        the_box_is_the_argument: bool,
+        the_upper_bar_is_the_argument: bool,
+    },
     /// `fuse([lower], [box])` and no more, the upper bar left out.
     LowerWithTheBoxAlone,
 }
@@ -458,8 +455,23 @@ fn unite(the_box: TheBox, wall: Wall, call: Call) -> (Model, Result<Vec<SolidKey
         Call::UpperAndBoxAgainstLower => union(&mut model, &[upper, third], &[lower]),
         Call::LowerWithUpperThenTheBox => union(&mut model, &[lower], &[upper])
             .and_then(|bars| union(&mut model, &bars, &[third])),
-        Call::LowerWithTheBoxThenUpper => union(&mut model, &[lower], &[third])
-            .and_then(|first| union(&mut model, &first, &[upper])),
+        Call::LowerWithTheBoxThenUpper {
+            the_box_is_the_argument,
+            the_upper_bar_is_the_argument,
+        } => {
+            let first = if the_box_is_the_argument {
+                union(&mut model, &[third], &[lower])
+            } else {
+                union(&mut model, &[lower], &[third])
+            };
+            first.and_then(|first| {
+                if the_upper_bar_is_the_argument {
+                    union(&mut model, &[upper], &first)
+                } else {
+                    union(&mut model, &first, &[upper])
+                }
+            })
+        }
         Call::LowerWithTheBoxAlone => union(&mut model, &[lower], &[third]),
     };
     (model, said)
