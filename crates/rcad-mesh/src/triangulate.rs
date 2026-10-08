@@ -861,6 +861,13 @@ fn refuse_loops_that_share_a_whole_side(
 /// would be on one line. Q1307 saw one come back as a fan that covered the
 /// loop's area and left the side it ran back up in no triangle at all.
 ///
+/// **A domain with every corner on one line is let through**, and comes back
+/// with no triangles. It encloses nothing, so no triangles is all of it, and no
+/// triangle draws a piece of a side. `rcad-topo`'s
+/// `a_block_edge_grazing_a_ball.rs` cuts slivers `2⁻⁷⁸` wide, a flat face of
+/// one comes here as three corners on one line, and the solid is refused
+/// later, on its curved face, as it was before this check.
+///
 /// Asked of the triangulation and not of the corners as they were handed
 /// over, because the triangulation takes them scaled and the triangles follow
 /// its answer. Exact: spade's predicates are, and so is [`orient2d`] on the
@@ -885,6 +892,9 @@ fn refuse_a_side_with_a_corner_on_it(
     handles: &[FixedVertexHandle],
     domain: &TrimmedDomain,
 ) -> Result<(), CannotTriangulate> {
+    if mesh.num_inner_faces() == 0 {
+        return Ok(());
+    }
     let scaled = |position: usize| {
         let at = mesh.vertex(handles[position]).position();
         [at.x, at.y]

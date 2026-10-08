@@ -534,6 +534,24 @@ fn a_loop_that_runs_back_up_its_own_side_is_refused() {
     }
 }
 
+/// A loop with every corner on one line rests one on a side too, but encloses
+/// nothing, and comes back with no triangles, which is all of it.
+///
+/// Refusing it as well changed what `rcad-topo` says about a fuse whose answer
+/// is slivers `2⁻⁷⁸` wide (`a_block_edge_grazing_a_ball.rs`): a flat face of
+/// one is three corners on one line, and the solid is refused on its curved
+/// face instead.
+#[test]
+fn a_loop_with_every_corner_on_one_line_comes_back_with_no_triangles() {
+    let patch = triangulate(&domain_of(
+        flat(),
+        vec![[0.0, 0.0], [4.0, 0.0], [1.0, 0.0]],
+        Vec::new(),
+    ))
+    .expect("a loop that encloses nothing");
+    assert_eq!(patch.triangles(), &[] as &[[u32; 3]]);
+}
+
 /// A hole meeting the outline at a corner they both name is meshed, hole and
 /// all.
 ///
