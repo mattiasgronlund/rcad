@@ -128,6 +128,7 @@ gate_steps := "check-plugins \
     check-corpus-selftest \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
+    check-timing-hooked-calls-selftest \
     check-fuzz-watermark-selftest \
     check-gate-fresh-selftest \
     check-gate-fresh-cleanup-selftest \
@@ -285,6 +286,7 @@ gate_reusable_steps := "check \
     check-corpus-selftest \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
+    check-timing-hooked-calls-selftest \
     check-fuzz-watermark-selftest \
     check-gate-fresh-selftest \
     check-gate-fresh-cleanup-selftest \
@@ -3693,8 +3695,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "60" ]; then \
-        echo "found $n check-* recipes, expected 60"; \
+    if [ "$n" != "61" ]; then \
+        echo "found $n check-* recipes, expected 61"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -8076,6 +8078,91 @@ check-fuzz-overnight-selftest:
     bound=60
     [ "$SECONDS" -le "$bound" ] \
         || { echo "check-fuzz-overnight-selftest took $SECONDS s, over its bound of $bound s: arms that should run beside each other are running in turn, or one of them is waiting on something new"; exit 1; }
+
+# `fuzz/timing-hooked-calls.py`'s split, pinned against a hand-assembled
+# object rather than a compiled one — the exact instructions are under test
+# this way, and no optimiser gets a vote on whether a jump table exists.
+# docs/decisions.d/419 (Q1444).
+#
+# Four sequences, one function each so no register state leaks from one into
+# the next:
+#
+#   a real relative jump table — `lea table(%rip),%rax; movslq
+#   (%rax,%r12,4),%rcx; add %rax,%rcx; jmp *%rcx` — which must count as
+#   staying inside its own function;
+#
+#   a bare `jmp *%rax` with no load or add in front of it, which must count
+#   as able to leave;
+#
+#   the same load and add, but a jump through a *different* register — a
+#   near miss that must still count as able to leave, since the register the
+#   jump actually uses was never shown to hold the table's own base plus
+#   offset;
+#
+#   and a `call *%rax`, which always counts as able to leave — cautious-side,
+#   even though nothing about the instruction itself rules out the same
+#   sequence.
+#
+# None of the four is a call to a hooked function, so the first two counts
+# this script prints stay 0 and the exit code stays 0; this recipe is purely
+# about the two counts the jump-table split adds.
+[doc("The jump-table split in timing-hooked-calls.py, pinned against a hand-assembled fixture.")]
+check-timing-hooked-calls-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    cat >"$dir/fixture.s" <<'ASM'
+    .text
+    .globl rcad_fuzz_timing_table_jump
+    .type rcad_fuzz_timing_table_jump, @function
+    rcad_fuzz_timing_table_jump:
+    lea jumptable(%rip), %rax
+    movslq (%rax,%r12,4), %rcx
+    add %rax, %rcx
+    jmp *%rcx
+
+    .globl rcad_fuzz_timing_bare_jmp
+    .type rcad_fuzz_timing_bare_jmp, @function
+    rcad_fuzz_timing_bare_jmp:
+    jmp *%rax
+
+    .globl rcad_fuzz_timing_near_miss
+    .type rcad_fuzz_timing_near_miss, @function
+    rcad_fuzz_timing_near_miss:
+    lea jumptable(%rip), %rax
+    movslq (%rax,%r12,4), %rcx
+    add %rax, %rcx
+    jmp *%rdx
+
+    .globl rcad_fuzz_timing_call_star
+    .type rcad_fuzz_timing_call_star, @function
+    rcad_fuzz_timing_call_star:
+    call *%rax
+
+    .section .rodata
+    .align 4
+    jumptable:
+    .long 0
+    .long 0
+    ASM
+    as "$dir/fixture.s" -o "$dir/fixture.o"
+
+    got=$(fuzz/timing-hooked-calls.py "$dir/fixture.o") \
+        || { echo "$got"; echo "timing-hooked-calls.py exited non-zero against a fixture with no hooked call at all"; exit 1; }
+
+    leave_line="  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function, unscanned: 3"
+    printf '%s\n' "$got" | grep -qxF "$leave_line" || {
+        echo "$got"
+        echo "expected the line above (3: the bare jmp, the near miss, and the call)"
+        exit 1
+    }
+    stays_line="  tail jumps in rcad_fuzz_timing through a relative jump table, staying inside their own function: 1"
+    printf '%s\n' "$got" | grep -qxF "$stays_line" || {
+        echo "$got"
+        echo "expected the line above (1: only the real jump table)"
+        exit 1
+    }
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and

@@ -26,13 +26,26 @@ belongs to `SlowRun::is` or to something else.
 
 **What this cannot see**: a call through a computed pointer — one where the
 register a `call *%reg` uses was not last set by a direct, in-function load
-of a hooked GOT slot. `merge_out` alone makes 12 such calls (counted below,
-`--computed`), and none of them can be ruled in or out by this scan; a
-`possibly reaches an unrecorded target` line says how many a given binary
-had. Closing that would need either a real points-to analysis of the
-binary or a runtime interposer that walks the caller's stack on every ASan
-memcmp hook — both bigger than this row. docs/decisions.d/273 says so and
-names the count for each target this script has been run on.
+of a hooked GOT slot. Most `jmp *%reg` of this kind is not that: it is the
+tail of a relative jump table, the lowering of a match under `-fPIE` — `lea
+table(%rip),%base; movslq (%base,%idx,4),%off; add %base,%off; jmp *%off` —
+whose table holds offsets from its own base, so the jump can only land
+inside the function it is in, never at an imported symbol. This scan
+recognises that whole sequence, the load and the add of the same base
+register and the jump through the result, and reports it apart, as a jump
+that stays inside its own function. Everything else indirect that this scan
+could not trace to a hooked-slot load — a bare `jmp *%reg` the sequence does
+not match, every `call *%reg`, or a call through a memory operand (a vtable
+slot, a stored function pointer) — stays in the "can leave" bucket, since it
+might reach a target this scan did not name. `merge_out` alone made 12 such
+calls before docs/decisions.d/273's fix (counted below, `--computed`), and
+none of them can be ruled in or out by this scan; a `possibly reaches an
+unrecorded target` line says how many a given binary has. Closing that would
+need either a real points-to analysis of the binary or a runtime interposer
+that walks the caller's stack on every ASan memcmp hook — both bigger than
+this row. docs/decisions.d/273 says so and names the count for each target
+this script has been run on; docs/decisions.d/419 names the two buckets'
+counts for the five targets after the split added here (Q1444).
 
 usage: timing-hooked-calls.py <binary> [<binary> ...]
 exit 0 and a `clean` line per binary if none reaches a hook outside `is`;
@@ -85,12 +98,15 @@ def main():
 
     failed = False
     for binary in binaries:
-        hits, unmatched, computed = scan(binary)
+        hits, unmatched, computed, table_jumps = scan(binary)
         timing_hits = [h for h in hits if "rcad_fuzz_timing" in h["function"]]
         timing_unmatched = [
             load for fn, load in unmatched if fn and "rcad_fuzz_timing" in fn
         ]
         timing_computed = [c for c in computed if "rcad_fuzz_timing" in c[0]]
+        timing_table_jumps = [
+            c for c in table_jumps if "rcad_fuzz_timing" in c[0]
+        ]
 
         offenders = [h for h in timing_hits if not belongs_to_is(binary, h)]
         print(f"{binary}:")
@@ -103,8 +119,14 @@ def main():
             f"{len(timing_unmatched)}"
         )
         print(
-            f"  calls in rcad_fuzz_timing through a computed pointer, unscanned: "
+            f"  calls or tail jumps in rcad_fuzz_timing through a computed "
+            f"pointer that can leave the function, unscanned: "
             f"{len(timing_computed)}"
+        )
+        print(
+            f"  tail jumps in rcad_fuzz_timing through a relative jump "
+            f"table, staying inside their own function: "
+            f"{len(timing_table_jumps)}"
         )
 
         if offenders or timing_unmatched:
@@ -127,8 +149,10 @@ def main():
 
 
 def scan(binary):
-    """Every call/tail-jump to a hooked function, and every unmatched load
-    and computed-pointer call, anywhere in `binary`."""
+    """Every call/tail-jump to a hooked function, every unmatched load, every
+    computed-pointer call or tail jump that can leave its function, and every
+    tail jump recognised as a relative jump table that cannot, anywhere in
+    `binary`."""
     names_at = {}
     for line in run(["nm", binary]).splitlines():
         parts = line.split()
@@ -151,6 +175,7 @@ def scan(binary):
     hits = []
     unmatched_loads = []
     computed_calls = []
+    table_jumps = []
     function = None
     regs = {}
     open_loads = {}
@@ -173,7 +198,7 @@ def scan(binary):
         operands = split_operands(rest)
 
         if mnemonic in ("call", "jmp"):
-            target, kind = None, None
+            target, kind, table_jump = None, None, False
             direct = re.match(r"^([0-9a-f]+) <", rest)
             if direct and int(direct.group(1), 16) in hooked_addresses:
                 target, kind = int(direct.group(1), 16), "direct"
@@ -188,17 +213,31 @@ def scan(binary):
                     target = hooked_slots[state[1]]
                     kind = f"%{reg} loaded at {state[2]:x} from GOT slot {state[1]:x}"
                     open_loads.pop(reg, None)
+                # A relative jump table's tail: `lea table(%rip),%base;
+                # movslq (%base,%idx,4),%off; add %base,%off; jmp *%off`.
+                # The table holds offsets from `%base`, itself a fixed
+                # address this function's own code computed, so the sum can
+                # only land inside this function — never at an imported
+                # symbol. Recognising the whole sequence, not just the
+                # mnemonic, is the point: §273.9 found that a `jmp *%reg`
+                # cannot be told apart from a genuine cross-function one by
+                # mnemonic alone. Only `jmp` earns this; `call *%reg` never
+                # does, cautious-side, even when the same registers line up.
+                elif mnemonic == "jmp" and state and state[0] == "table_target":
+                    table_jump = True
             # Anything else indirect — a register this scan could not trace
-            # back to a hooked-slot load, or a call through a memory
-            # operand (a vtable slot, a jump table, a stored function
+            # back to a hooked-slot load or a relative jump table, or a call
+            # through a memory operand (a vtable slot, a stored function
             # pointer) — is a target this scan cannot name at all, not one
             # it named and found harmless. `merge_out` alone had 12 of
             # these before §273's fix (docs/decisions.d/273 §273.3, using a
             # different scan that also counts this way); see the module
             # docstring.
-            if target is None and rest.startswith("*") and not (
+            if target is None and not table_jump and rest.startswith("*") and not (
                     "(%rip)" in rest and comment):
                 computed_calls.append((function, address, rest))
+            elif table_jump:
+                table_jumps.append((function, address, rest))
             if target is not None:
                 hits.append({
                     "function": function, "address": address,
@@ -227,12 +266,29 @@ def scan(binary):
             open_loads[reg] = (address, slot, reg)
         elif mnemonic == "mov" and operands[0].startswith("$"):
             regs[reg] = ("const", int(operands[0][1:], 16), address)
+        # The three steps of a relative jump table's tail, tracked per
+        # register so the `jmp *%reg` above can tell a real one from a
+        # register that merely ends up holding some other computed value:
+        # a rip-relative `lea` (the table's own fixed base address), a
+        # `movslq` of a 4-byte table entry off that base (the offset), and
+        # an `add` of the same base back into the offset (the target).
+        elif mnemonic == "lea" and len(operands) == 2 and "(%rip)" in operands[0]:
+            regs[reg] = ("table_base", address)
+        elif (mnemonic == "movslq" and len(operands) == 2
+                and regs.get(base_register(operands[0]), (None,))[0] == "table_base"):
+            regs[reg] = ("table_offset", base_register(operands[0]), address)
+        elif (mnemonic == "add" and len(operands) == 2
+                and operands[0].startswith("%")
+                and regs.get(reg, (None,))[0] == "table_offset"
+                and regs[reg][1] == REG64.get(operands[0][1:])
+                and regs.get(regs[reg][1], (None,))[0] == "table_base"):
+            regs[reg] = ("table_target", address)
         else:
             regs[reg] = ("other", mnemonic, address)
     for load in open_loads.values():
         unmatched_loads.append((function, load))
 
-    return hits, unmatched_loads, computed_calls
+    return hits, unmatched_loads, computed_calls, table_jumps
 
 
 def belongs_to_is(binary, hit):
@@ -288,6 +344,15 @@ def split_operands(text):
     if current.strip():
         operands.append(current.strip())
     return operands
+
+
+def base_register(operand):
+    """The base register of an AT&T memory operand, e.g. `rax` out of
+    `(%rax,%r12,4)` or `8(%rax)` — the first register AT&T syntax always
+    places right after the `(`. `None` for an operand with no parentheses at
+    all, such as a plain register or an immediate."""
+    match = re.search(r"\(%(\w+)", operand)
+    return REG64.get(match.group(1)) if match else None
 
 
 def demangle(name):
