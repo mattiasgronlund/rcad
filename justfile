@@ -8405,6 +8405,15 @@ check-gate-fresh-cleanup-selftest:
 # row with `still_fails` = `yes`. Keyed on the whole message instead, the one
 # writer assertion that prints two planes made 1 676 rows out of one fault.
 #
+# **Two more files land beside it, for `_status-triage` to read (§418.4).**
+# `$night/fuzz-triage-members.tsv` names every crash file of each bucket still
+# failing — `target`, `group`, `file`, one line per file — because a queue row
+# can name a group by any one of its files, not only the `sample` column
+# above, and the sample changes as a group grows.
+# `$night/fuzz-triage-replayed-main.txt` holds the one full sha of the `main`
+# this replayed against, which before this only went to the `replayed:` line
+# below, read by nobody.
+#
 # **The decoder is built in the `test` profile, not `dev` and not `release`.**
 # `cargo fuzz` builds its targets optimised with `debug_assertions` on, and
 # `[profile.test]` is the one profile here that is both. `dev` gives the same
@@ -8491,8 +8500,9 @@ fuzz-triage night="" against="main":
     borrowed=""
     manifest=$(mktemp)
     report=$(mktemp)
+    members=$(mktemp)
     cleanup() {
-        rm -f "$manifest" "$report"
+        rm -f "$manifest" "$report" "$members"
         if [ -n "$borrowed" ]; then
             git worktree remove --force "$borrowed/tree" >/dev/null 2>&1 || true
             rm -rf "$borrowed"
@@ -8549,7 +8559,7 @@ fuzz-triage night="" against="main":
     # `cargo` by name and not through `mise exec`: the 08:30 timer has no `mise`
     # on its PATH, and the `mise exec -- just` that started this recipe has
     # already set what mise.toml's `[env]` adds. `check-fuzz-triage-selftest`.
-    decode=(cargo run -q --profile test -p rcad-fuzz-explain -- --triage)
+    decode=(cargo run -q --profile test -p rcad-fuzz-explain -- --triage --members "$members")
     echo "\$ ${decode[*]}   (replaying $tellable input(s) in one process)"
     (cd "$work" && "${decode[@]}") <"$manifest" >"$report"
     triage_status=$?
@@ -8559,6 +8569,8 @@ fuzz-triage night="" against="main":
     fi
 
     cp "$report" "$night/fuzz-triage-verdicts.tsv"
+    cp "$members" "$night/fuzz-triage-members.tsv"
+    echo "$at" >"$night/fuzz-triage-replayed-main.txt"
     echo
     echo "verdicts: $night/fuzz-triage-verdicts.tsv"
     groups=$(($(wc -l <"$report") - 1))
@@ -8751,6 +8763,25 @@ check-fuzz-triage-selftest:
     ! grep -qF "$hang" "$verdicts" \
         || fail "a timeout was replayed and grouped, and one that hangs stalls every file after it"
 
+    members="$night/fuzz-triage-members.tsv"
+    members_header=$(printf 'target\tgroup\tfile')
+    [ -f "$members" ] || fail "no members file landed beside the verdicts"
+    [ "$(head -1 "$members")" = "$members_header" ] \
+        || fail "the members file's header does not name its three columns"
+    grep -qF "$crash" "$members" \
+        || fail "the first file of a still-failing group was not listed in the members file"
+    grep -qF "$crash2" "$members" \
+        || fail "the second file of the same still-failing group was not listed in the members file"
+    grep -qF "$third" "$members" \
+        || fail "the other target's still-failing group's file was not listed in the members file"
+    ! grep -qF "$hang" "$members" \
+        || fail "a timeout, never replayed, was listed in the members file"
+
+    replayed_main="$night/fuzz-triage-replayed-main.txt"
+    [ -f "$replayed_main" ] || fail "no replayed-main file landed beside the verdicts"
+    [ "$(cat "$replayed_main")" = "$(git rev-parse HEAD)" ] \
+        || fail "the replayed-main file did not hold the full sha of the commit this replayed against"
+
     # Two: the nights before §91's copy-out landed keep their inputs in a
     # rescued directory beside the night, and 2026-09-14 is one of them.
     rm -rf "$night/artifacts"
@@ -8804,6 +8835,8 @@ check-fuzz-triage-selftest:
         || fail "an untellable input was counted as decoded"
     [ "$(head -1 "$flat_night/fuzz-triage-verdicts.tsv")" = "$header" ] \
         || fail "a night with only untellable input still needs a header-only verdict file, for Q146 to read without special-casing it"
+    [ "$(head -1 "$flat_night/fuzz-triage-members.tsv")" = "$members_header" ] \
+        || fail "a night with only untellable input still needs a header-only members file"
 
     # Six: promoting a good artifact keeps the trailing sha1 and lands it under
     # a name — `crash-<name>-<sha1>` is the shape already in the corpus.

@@ -179,6 +179,10 @@ pub struct GroupedVerdict {
     pub still_fails: bool,
     /// One file from the bucket, to read or replay by hand.
     pub sample: PathBuf,
+    /// Every file that landed in this bucket, `sample` included. A queue row
+    /// can name the group by any one of these (§418.4), not only the first
+    /// file read — the first changes as the group grows.
+    pub members: Vec<PathBuf>,
     /// The panic's own message and place, where the bucket is a panic; a
     /// fixed name for everything else, so a night's harmless residue does not
     /// fragment into one bucket per file.
@@ -208,16 +212,23 @@ pub fn triage(inputs: impl IntoIterator<Item = (String, PathBuf)>) -> (Vec<Group
             continue;
         }
         let (group, still_fails) = bucket_for(&target, &path);
-        buckets
-            .entry((target.clone(), group.clone()))
-            .and_modify(|verdict| verdict.files += 1)
-            .or_insert_with(|| GroupedVerdict {
-                target,
-                files: 1,
-                still_fails,
-                sample: path,
-                group,
-            });
+        match buckets.entry((target.clone(), group.clone())) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                let verdict = entry.get_mut();
+                verdict.files += 1;
+                verdict.members.push(path);
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(GroupedVerdict {
+                    target,
+                    files: 1,
+                    still_fails,
+                    sample: path.clone(),
+                    members: vec![path],
+                    group,
+                });
+            }
+        }
     }
     let mut groups: Vec<_> = buckets.into_values().collect();
     groups.sort_by(|a, b| {
@@ -354,6 +365,34 @@ pub fn as_tsv(groups: &[GroupedVerdict]) -> String {
             verdict.sample.display(),
             verdict.group
         );
+    }
+    out
+}
+
+/// Every crash file of each still-failing bucket, for `fuzz-triage` to write
+/// beside `fuzz-triage-verdicts.tsv`: `target\tgroup\tfile`, one line per
+/// file, header first. A queue row names a group by any one of these files
+/// (§418.4), not only [`GroupedVerdict::sample`], so this is what
+/// `_status-triage` reads to tell whether a row's `crash-<hex>` names one.
+///
+/// A bucket that no longer fails keeps no file here — there is nothing left
+/// to point a row at, and a fixed bucket's files would only make the
+/// still-failing set this writes harder to tell apart from it.
+pub fn as_members_tsv(groups: &[GroupedVerdict]) -> String {
+    let mut out = String::from("target\tgroup\tfile\n");
+    for verdict in groups {
+        if !verdict.still_fails {
+            continue;
+        }
+        for member in &verdict.members {
+            let _ = writeln!(
+                out,
+                "{}\t{}\t{}",
+                verdict.target,
+                verdict.group,
+                member.display()
+            );
+        }
     }
     out
 }
@@ -1004,6 +1043,47 @@ mod tests {
         );
         let body = lines.next().expect("one data row");
         assert_eq!(body.matches('\t').count(), 4, "{body}");
+    }
+
+    /// Every file of a still-failing group reaches the members file, not only
+    /// the sample, and a fixed group's files do not — the whole point of
+    /// keeping `members` is that a row can name the group by any one of them.
+    #[test]
+    fn as_members_tsv_lists_every_file_of_a_failing_group_and_none_of_a_fixed_one() {
+        let a = TempFile::holding(b"not a real crash input");
+        let b = TempFile::holding(b"not a real crash input");
+        let fixed_numbers = [
+            0.0, 0.0, 1.0, -5.0, // a plane well clear of the ball below
+            0.0, 0.0, 0.0, 1.0, // a unit ball at the origin
+        ];
+        let fixed_bytes = surfaces::bytes_for([0, 1], &fixed_numbers);
+        let c = TempFile::holding(&fixed_bytes);
+        let (groups, _) = triage([
+            (WHERE_TWO_SURFACES_CROSS.to_owned(), a.path.clone()),
+            (WHERE_TWO_SURFACES_CROSS.to_owned(), b.path.clone()),
+            (WHERE_TWO_SURFACES_CROSS.to_owned(), c.path.clone()),
+        ]);
+        let text = as_members_tsv(&groups);
+        let mut lines = text.lines();
+        assert_eq!(lines.next(), Some("target\tgroup\tfile"));
+        let body: Vec<_> = lines.collect();
+        assert_eq!(body.len(), 2, "{body:?}");
+        assert!(
+            body.iter()
+                .any(|line| line.ends_with(&a.path.display().to_string())),
+            "{body:?}"
+        );
+        assert!(
+            body.iter()
+                .any(|line| line.ends_with(&b.path.display().to_string())),
+            "{body:?}"
+        );
+        assert!(
+            !body
+                .iter()
+                .any(|line| line.ends_with(&c.path.display().to_string())),
+            "a file from a fixed bucket was written to the members file: {body:?}"
+        );
     }
 
     const THE_WRITERS_PLACE: &str =
