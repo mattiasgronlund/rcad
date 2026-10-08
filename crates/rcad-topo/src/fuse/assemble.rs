@@ -2785,7 +2785,7 @@ impl Assembly {
     /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for an arc of a
     /// curved crossing.
     fn how_each_edge_runs(&self) -> Result<Vec<EdgeRun>> {
-        let cut_by = self.the_surface_that_cut_each_closed_rim();
+        let cut_by = self.the_surface_that_cut_each_edge_its_faces_do_not_name();
         self.edges
             .iter()
             .zip(cut_by)
@@ -2793,8 +2793,8 @@ impl Assembly {
             .collect()
     }
 
-    /// Which surface cut each edge, for a closed rim whose two faces **in the
-    /// answer** sit on the one surface and so name nothing between them.
+    /// Which surface cut each edge whose two faces **in the answer** sit on the
+    /// one surface and so name nothing between them, closed or not.
     ///
     /// [`Edge::carried_by`] is the pair of faces that *met*, so the cutting
     /// plane is in scope down in [`Edge::how_it_runs`]. What is not in scope
@@ -2805,6 +2805,18 @@ impl Assembly {
     /// both sides, which says nothing at all, and
     /// [`EdgeRun::RightRoundWhereItCrosses`] is that rim naming the surface that
     /// cut it instead (`docs/decisions.md` §216).
+    ///
+    /// **An arc between two pieces of one surface names the other surface as
+    /// well.** The half frustum `x ≥ 0` united with a bar of radius 4 whose
+    /// axis is the cone's keeps the bar's wall above and below the arc at
+    /// `x < 0` of the circle where the cone crosses the pipe, in two pieces,
+    /// with that arc between them. [`Edge::the_surface_that_names_it_twice`]
+    /// put the pipe in its run's `and`, since a pipe sorts ahead of a cone, and
+    /// a pipe either side and a pipe in `and` name nothing: the walk put no
+    /// point between the arc's ends, the mesher read the half turn between them
+    /// the wrong way round, and the piece above was refused
+    /// [`Error::ACurvedFaceGoesRightRoundWithNoSeam`]
+    /// (`a_cone_hollowed_along_its_axis.rs`, Q1338).
     ///
     /// **One surface is asked of the spelling folded away**
     /// ([`name_of_the_surface_either_way_round`]), never of the bits: two bars
@@ -2820,13 +2832,15 @@ impl Assembly {
     /// alone may name nothing to follow.
     ///
     /// `None` everywhere else, which is where [`EdgeRun::RightRoundWhereItsFacesCross`]
-    /// stays. Three shapes come back `None` for a reason worth naming: an edge
-    /// that is not closed, which is not this kind of run at all; an edge other
-    /// than two faces claim, which [`Assembly::group_into_shells`] refuses as
-    /// [`Error::ResultIsNotManifold`] a step later under its own name rather
-    /// than here; and a crossing whose pair does not name one surface of the
-    /// answer and one other, which leaves nothing to put in `and`.
-    fn the_surface_that_cut_each_closed_rim(&self) -> Vec<Option<Surface>> {
+    /// stays for a rim, and [`Edge::the_surface_that_names_it_twice`] is asked
+    /// for an arc. Three shapes come back `None` for a reason worth naming: an
+    /// edge that is not closed between two different surfaces, which name it
+    /// themselves; an edge other than two faces claim, which
+    /// [`Assembly::group_into_shells`] refuses as [`Error::ResultIsNotManifold`]
+    /// a step later under its own name rather than here; and a crossing whose
+    /// pair does not name one surface of the answer and one other, which leaves
+    /// nothing to put in `and`.
+    fn the_surface_that_cut_each_edge_its_faces_do_not_name(&self) -> Vec<Option<Surface>> {
         let mut claimants: Vec<Vec<usize>> = vec![Vec::new(); self.edges.len()];
         for (face, walked) in self.faces.iter().enumerate() {
             for side in walked.wires.iter().flatten() {
@@ -2837,12 +2851,12 @@ impl Assembly {
             .iter()
             .zip(&claimants)
             .map(|(edge, by)| {
-                if edge.ends[0] != edge.ends[1] {
-                    return None;
-                }
                 let [one, other] = <[usize; 2]>::try_from(by.as_slice()).ok()?;
                 let either_side = self.faces[one].surface;
                 if !one_surface(&self.faces[other].surface, &either_side) {
+                    if edge.ends[0] != edge.ends[1] {
+                        return None;
+                    }
                     return the_plane_of_a_rim_between_two_curved_faces(
                         [either_side, self.faces[other].surface],
                         &edge.carried_by,
@@ -3230,8 +3244,10 @@ impl Edge {
     /// [`Edge::arc`](which_arc_this_is).
     ///
     /// `cut_by` is the one thing this cannot work out for itself:
-    /// [`Assembly::the_surface_that_cut_each_closed_rim`] says why, and a rim
-    /// that comes with one names it rather than its two faces.
+    /// [`Assembly::the_surface_that_cut_each_edge_its_faces_do_not_name`] says
+    /// why. A rim that comes with one names it rather than its two faces, and an
+    /// arc puts it in `and` in place of
+    /// [`Edge::the_surface_that_names_it_twice`].
     ///
     /// # Errors
     ///
@@ -3251,10 +3267,11 @@ impl Edge {
             (false, false) => match self.arc {
                 WhichArc::TheOnlyOne => Ok(EdgeRun::Straight),
                 WhichArc::LeavingACorner { corner, towards } => {
+                    let and = cut_by.unwrap_or_else(|| self.the_surface_that_names_it_twice());
                     let ends = self.ends.map(|end| corners[end].point);
                     if let Some(branch) = self.the_branch_of_a_hyperbola_this_is_on(ends)? {
                         return Ok(EdgeRun::PartOfWhereItCrosses {
-                            and: self.the_surface_that_names_it_twice(),
+                            and,
                             picked_by: SmallVec::from_buf([branch]),
                         });
                     }
@@ -3276,7 +3293,7 @@ impl Edge {
                     )
                     .ok_or(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed)?;
                     Ok(EdgeRun::PartOfWhereItCrosses {
-                        and: self.the_surface_that_names_it_twice(),
+                        and,
                         picked_by: SmallVec::from_buf([picker]),
                     })
                 }
@@ -3458,12 +3475,16 @@ impl Edge {
     /// [`EdgeRun::PartOfWhereItCrosses`]'s `and`.
     ///
     /// That field is there for a run whose two faces are the *same* surface — a
-    /// ball's seam — and names the second one. An arc's two faces already name
-    /// both, so either is a true answer, and what picks between them is a check:
-    /// `Model::validate` asks that both ends are not *provably* off `and`, and a
-    /// flat `and` is the cheapest of the three to be sure about. So the flat one
-    /// goes in wherever there is one, and `name_of_surface_bits` gives that for
-    /// free by sorting a plane ahead of a ball or a pipe.
+    /// ball's seam — and names the second one. An arc between two different
+    /// faces names both already, so either is a true answer, and what picks
+    /// between them is a check: `Model::validate` asks that both ends are not
+    /// *provably* off `and`, and a flat `and` is the cheapest of the three to be
+    /// sure about. So the flat one goes in wherever there is one, and
+    /// `name_of_surface_bits` gives that for free by sorting a plane ahead of a
+    /// ball or a pipe. An arc between two pieces of one surface is not asked
+    /// here: either may be the one its faces sit on, and
+    /// [`Assembly::the_surface_that_cut_each_edge_its_faces_do_not_name`]
+    /// hands it the other.
     ///
     /// **The sentence that used to stand here said the check was an exact
     /// `Zero`, and that a corner this fuse solved for is exactly on a plane it
