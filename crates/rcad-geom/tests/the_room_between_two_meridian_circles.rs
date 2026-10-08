@@ -145,6 +145,86 @@ fn a_leaning_plane_through_the_axis_still_names_both_circles() {
     assert_eq!(crossed_the_other_way(&flat, &ring), crossed(&flat, &ring));
 }
 
+#[test]
+fn probe_where_the_threshold_sits() {
+    for along in [1.0f64, 2.0, 3.0, 5.0, 7.0] {
+        let mut z = 1.0f64;
+        let mut hist = [0usize; 6];
+        for _ in 0..4 {
+            z = z.next_down();
+            for k in 0..30 {
+                let x = OUT_ALONG_X + 2.0 * f64::from(k);
+                let tube = 2f64.powi(-10);
+                let probe = a_torus_at(x, along, 1.0, 0.4);
+                let flat = Plane::from_point_and_normal_as_written(
+                    probe.centre(),
+                    Vector::new(0.0, 0.0, z),
+                )
+                .unwrap();
+                let off = how_far_the_picker_misses(&probe, &flat);
+                let up = if off.lo > 0.0 {
+                    off.hi.next_up()
+                } else {
+                    off.hi
+                };
+                if up < 2f64.powi(-8) {
+                    continue;
+                }
+                let mut seen = Vec::new();
+                let mut room = up.next_down();
+                for _ in 0..5 {
+                    let ring = a_torus_at(x, along, room + tube, tube);
+                    assert_eq!(ring.ring_radius() - ring.tube_radius(), room);
+                    let flat = Plane::from_point_and_normal_as_written(
+                        ring.centre(),
+                        Vector::new(0.0, 0.0, z),
+                    )
+                    .unwrap();
+                    seen.push(crossed(&flat, &ring).is_ok());
+                    room = room.next_up();
+                }
+                let w = probe.axis().direction().components();
+                let rounds =
+                    w[1].mul_add(z, -(w[1] * z)) != 0.0 || w[0].mul_add(z, -(w[0] * z)) != 0.0;
+                let first = seen.iter().position(|named| *named);
+                hist[first.unwrap_or(5)] += 1;
+                if first == Some(3) {
+                    eprintln!(
+                        "TIGHT along={along} z={z:e} x={x} off={off:?} up={up} rounds={rounds}"
+                    );
+                }
+            }
+        }
+        eprintln!("along={along} hist={hist:?}");
+    }
+}
+
+fn a_torus_at(x: f64, along: f64, ring_radius: f64, tube_radius: f64) -> Torus {
+    let axis = Axis::new(Point::new(x, 0.0, 0.0), Vector::new(1.0, along, 0.0)).expect("an axis");
+    Torus::new(axis, ring_radius, tube_radius).expect("a tube narrower than its ring")
+}
+
+fn how_far_the_picker_misses(ring: &Torus, flat: &Plane) -> Wide {
+    let [q, q2, zero] = ring.axis().direction().cross(flat.normal()).components();
+    assert_eq!(zero, 0.0);
+    let [x, _, _] = ring.centre().coordinates();
+    let reading = q.mul_add(x, -(q * x)).abs();
+    let a = product(q, q);
+    let b = product(q2, q2);
+    let (hi, lo) = two_sum(a.hi, b.hi);
+    let length = root(Wide {
+        hi,
+        lo: lo + a.lo + b.lo,
+    });
+    let first = reading / length.hi;
+    let step = product(first, length.hi);
+    let left = ((reading - step.hi) - step.lo) - first * length.lo;
+    Wide {
+        hi: first,
+        lo: left / length.hi,
+    }
+}
+
 fn a_torus_out_along_x(ring_radius: f64, tube_radius: f64) -> Torus {
     let axis = Axis::new(
         Point::new(OUT_ALONG_X, 0.0, 0.0),
