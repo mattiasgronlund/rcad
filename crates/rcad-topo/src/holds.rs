@@ -4708,7 +4708,7 @@ fn does_not_grow_the_way_the_branch_runs_off(
 /// apex plus `m` is `|m × w|² − s²(m·w)²` for `w` the stored axis direction and
 /// `s` the slope — negative inside, as [`side_of_surface`] reads a cone — and
 /// asking it of `m` rather than of a point builds nothing that rounds.
-/// [`WhereTwoPlanesThroughTheApexMeet`] settles it through the cascade, exactly
+/// [`TheConeAlongWhereTwoPlanesMeet`] settles it through the cascade, exactly
 /// when the interval cannot. It is even in `m`, so it says nothing of which nappe
 /// and needs to say nothing: the line runs through both, one ray in each.
 ///
@@ -4722,7 +4722,7 @@ fn do_two_planes_through_the_apex_meet_inside(
     one: &Plane,
     other: &Plane,
 ) -> bool {
-    let (sign, _) = rcad_predicates::decide(&WhereTwoPlanesThroughTheApexMeet {
+    let (sign, _) = rcad_predicates::decide(&TheConeAlongWhereTwoPlanesMeet {
         one: one.normal().components(),
         other: other.normal().components(),
         along: cone.axis().direction().components(),
@@ -4735,23 +4735,26 @@ fn do_two_planes_through_the_apex_meet_inside(
     }
 }
 
-/// The cone's own sign along the line two planes through its apex meet in:
+/// The cone's part of degree two along the line two planes meet in:
 /// `|m × w|² − (s·(m·w))²` for `m = n₁ × n₂`, the slope taken inside the
-/// square as `how_a_plane_leans_against_a_cone` takes it.
+/// square as `how_a_plane_leans_against_a_cone` takes it. Where both planes
+/// hold the apex, that is the cone's own sign at the apex plus `m`
+/// ([`do_two_planes_through_the_apex_meet_inside`]); where they need not, it
+/// is `a` of [`an_arc_never_reaches_the_plane`], zero along a ruling.
 ///
 /// Degree eight in the stored numbers. The exact level carries every degree of
 /// it in expansions and gives up, as [`SquareToTheAxis`] does, where a product
 /// would round or a sum overflow.
-struct WhereTwoPlanesThroughTheApexMeet {
+struct TheConeAlongWhereTwoPlanesMeet {
     one: [f64; 3],
     other: [f64; 3],
     along: [f64; 3],
     slope: f64,
 }
 
-impl Predicate for WhereTwoPlanesThroughTheApexMeet {
+impl Predicate for TheConeAlongWhereTwoPlanesMeet {
     fn name(&self) -> &'static str {
-        WHERE_TWO_PLANES_THROUGH_A_CONES_APEX_MEET
+        THE_CONE_ALONG_WHERE_TWO_PLANES_MEET
     }
 
     fn on_floats(&self) -> Option<Filtered> {
@@ -4800,10 +4803,9 @@ impl Predicate for WhereTwoPlanesThroughTheApexMeet {
     }
 }
 
-/// The name the cone's sign along where two planes through its apex meet goes
-/// by in provenance records.
-const WHERE_TWO_PLANES_THROUGH_A_CONES_APEX_MEET: &str =
-    "where two planes through a cone's apex meet";
+/// The name the cone's part of degree two along where two planes meet goes by
+/// in provenance records.
+const THE_CONE_ALONG_WHERE_TWO_PLANES_MEET: &str = "a cone along where two planes meet";
 
 /// `expansion` times `factor`, exactly; `None` where one of the products would
 /// round ([`product_is_exact`]).
@@ -6321,8 +6323,10 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// the arc and `into_the_arc` is
 /// [`the_way_into_an_arc`]. `false` when the two planes are side by side, when
 /// a ball's or a pipe's curve does not close, and when a sign could not be
-/// settled — the part of degree two along the line among them, which interval
-/// arithmetic reads as zero only when its products are exact.
+/// settled. On a cone the part of degree two along the line is settled through
+/// the cascade, exactly where interval arithmetic cannot
+/// ([`TheConeAlongWhereTwoPlanesMeet`], row Q1399): along a ruling it is zero,
+/// and interval arithmetic reads it so only when its products are exact.
 ///
 /// **A cone's hyperbola or parabola is read too** (row Q1224). Nothing below
 /// leans on the curve closing but `a > 0` and the arc lying in front of its
@@ -6376,16 +6380,27 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// the line runs along an asymptote of a hyperbola or the axis of a parabola,
 /// and `2b·t + c` is zero at `t = −c/(2b)` alone. That one meet is behind the
 /// chord when `g − γ·c/(2b) < 0`, which multiplied through by `2b²` is
-/// `b(2b·g − γ·c) < 0`. With `b = 0` that reads zero and so `false`, though
-/// the line, an asymptote itself, then misses the curve when `c` is not zero:
-/// a gap left, which no face built yet has had a cut meeting exactly along an
-/// asymptote to show. The skin of a pointed cone kept to
+/// `b(2b·g − γ·c) < 0`. With `b = 0` as well the line is an asymptote itself,
+/// where the cut meets the tangent plane along that ruling, and `c` alone is
+/// left: not zero, the line misses the curve (row Q1400). No face reaches that
+/// reading yet. On a cone's skin, a plane through an asymptote of the skin's
+/// arc keeps that arc, which is wholly on one side of it, and cuts the skin
+/// only by keeping the side away from the apex; then the arc's own plane keeps
+/// a side that grows the way the other plane's branch runs off, which
+/// [`is_a_family_this_follows`] refuses before any side is read. On a flat face
+/// the arc's hyperbola does not close, which it refuses too. The skin of
+/// `x ≥ −16` and the side away from the apex of a plane through
+/// `x = −16`, `y + z = 0` is that (the same test file), and
+/// `a_walls_hyperbola_never_reaches_a_plane_through_its_asymptote` below asks
+/// this and that of its planes. The skin of a pointed cone kept to
 /// `x ≥ −12` and to the side of the origin of the plane through `(0, 0, 23)`
 /// with normal `(√2, 1, 1)`, stored as `(0.7071…, 0.5, 0.5)`, has each plane's
 /// hyperbola against the other along a line running `(0, 1, −1)`, and `a` is
 /// `0.5² − 0.5²` exactly; its apex was refused for want of this (the same test
-/// file). The same shape with the plane's normal `(2, 1, 1)` is still refused:
-/// each square in its `a` rounds, so the difference of the two is not settled.
+/// file). The same shape with the plane's normal `(2, 1, 1)`, stored as
+/// `(0.8165…, 0.4082…, 0.4082…)`, has each square in its `a` round, so interval
+/// arithmetic cannot settle their difference, and its apex was refused until
+/// `a` was settled exactly (row Q1399).
 ///
 /// **Why that is enough.** The arc lies on `own`, so it can be on `cut` only on
 /// that line, and only where the line meets its curve. The arc is all of the
@@ -6464,7 +6479,19 @@ fn an_arc_never_reaches_the_plane(
     let ahead = dot(into_the_arc, less(start));
     let middle = a * ahead - grows * b;
     let apart = middle * middle - grows * grows * meets;
-    match a.sign() {
+    let along_the_line = match (a.sign(), round) {
+        (Decision::Undecidable { .. }, Surface::Cone(cone)) => {
+            let (sign, _) = rcad_predicates::decide(&TheConeAlongWhereTwoPlanesMeet {
+                one: own.normal().components(),
+                other: cut.normal().components(),
+                along: cone.axis().direction().components(),
+                slope: cone.slope(),
+            });
+            sign
+        }
+        (settled, _) => settled,
+    };
+    match along_the_line {
         Decision::Pos => {
             meets.sign() == Decision::Neg
                 || (middle.sign() == Decision::Neg && apart.sign() == Decision::Pos)
@@ -6474,6 +6501,7 @@ fn an_arc_never_reaches_the_plane(
         Decision::Neg => matches!(round, Surface::Cone(_)) && apart.sign() == Decision::Neg,
         Decision::Zero => {
             (b * (Interval::exactly(2.0) * b * ahead - grows * c)).sign() == Decision::Neg
+                || (b.sign() == Decision::Zero && matches!(c.sign(), Decision::Pos | Decision::Neg))
         }
         Decision::Undecidable { .. } | _ => false,
     }
@@ -8801,6 +8829,59 @@ mod tests {
                  followed: the quarter facing {x_kept}, {y_kept}"
             );
         }
+    }
+
+    /// **A wall's hyperbola never reaches a plane through its asymptote**, and
+    /// the skin both are cuts of is refused before the arc is asked (row
+    /// Q1400). The wall `x = −16` cuts the cone of slope one about `+z` in
+    /// `z² − y² = 256`, from `(−16, 12, 20)` down through `(−16, 0, 16)` to
+    /// `(−16, −12, 20)` below the base `z = 20`, and the plane through `(−16, 0, 0)`
+    /// with normal `(√2, −1, −1)` meets the wall in the asymptote
+    /// `y + z = 0`. Along it the part of degree two and the cross term are both
+    /// zero exactly and the rest is `64`, so the line misses the curve.
+    ///
+    /// The skin keeps `x ≥ −16`, `z ≤ 20` and the side of the slanted plane
+    /// away from the apex, the one its arc is on
+    /// (`tests/a_cone_skin_beside_a_plane_its_open_curve_never_reaches.rs`).
+    /// The wall's kept side grows the way the slanted plane's branch runs off,
+    /// so [`is_a_family_this_follows`] refuses those three cuts.
+    #[test]
+    fn a_walls_hyperbola_never_reaches_a_plane_through_its_asymptote() {
+        let cone = rcad_geom::Cone::new(Axis::z(), 1.0).expect("a positive slope");
+        let plane = |through: [f64; 3], facing: [f64; 3]| {
+            Plane::from_point_and_normal(
+                Point::new(through[0], through[1], through[2]),
+                Vector::new(facing[0], facing[1], facing[2]),
+            )
+            .expect("a normal with a length")
+        };
+        let wall = plane([-16.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
+        let slanted = plane([-16.0, 0.0, 0.0], [core::f64::consts::SQRT_2, -1.0, -1.0]);
+        let base = plane([0.0, 0.0, 20.0], [0.0, 0.0, 1.0]);
+        assert!(an_arc_never_reaches_the_plane(
+            &wall,
+            &Surface::Cone(cone),
+            Point::new(-16.0, 12.0, 20.0),
+            exactly([0.0, 0.0, -1.0]),
+            &slanted,
+        ));
+
+        let kept_negative = |flat: Plane| Cut {
+            surface: Surface::Plane(flat),
+            placed: Surface::Plane(flat),
+            kept: Decision::Neg,
+            corners_on_it: Vec::new(),
+        };
+        let apex = PredicatePoint::from(cone.apex().coordinates());
+        assert_eq!(
+            side_of_surface(&Surface::Plane(slanted), apex),
+            Decision::Pos
+        );
+        assert!(!is_a_family_this_follows(
+            &Surface::Cone(cone),
+            &[wall, slanted, base].map(kept_negative),
+            Some(Decision::Pos),
+        ));
     }
 
     /// How many runs of the rulings of the slope-one-half cone about `+z` carry a
