@@ -67,8 +67,7 @@ use rcad_geom::{
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftEdge, DraftStep, Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder,
-    SolidKey,
+    DraftEdge, DraftStep, Error, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey,
 };
 use smallvec::smallvec;
 
@@ -232,11 +231,18 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 /// `holds_the_other_rings` answers `None` for, and Q597 predicted the panic in
 /// `rings_round` there. **Neither the answer nor the panic is reached.**
 ///
-/// **Every rule, both ways round, is refused
-/// `AFaceTrimmedByACurveThisCannotFollow` on the second solid's wall**, as the
-/// quarter bends below are and for the same reason: nothing in `holds.rs` says
-/// whether a point on a ring is inside a face with an arc among its sides. The
-/// volumes above are what the answer is checked against once it does.
+/// **Every rule, both ways round, is refused `Undecidable` on `a point inside
+/// a piece of a face`, its record naming the two corners of the first
+/// solid's start cap**, as the quarter bends below are and for the same
+/// reason: `select::place_the_piece` in `fuse/select.rs` finds no point inside
+/// that half disk, whose sides are its chord along `z = 0` and half of a
+/// circle `y = 0` cuts the ring in (Q1367). The volumes above are what the
+/// answer is checked against once it does.
+///
+/// Until Q1367 every one was refused `AFaceTrimmedByACurveThisCannotFollow` on
+/// the second solid's wall, by `holds.rs`, which read no face on a ring with
+/// an arc among its sides; `a_quarter_and_a_half_bends_wall_hold_their_own_points`
+/// checks the reading it has now.
 ///
 /// Until Q1267 every one was refused on the second solid's floor, by
 /// `holds.rs`. `select` finds `(0, ±3.75, 0)` inside the first solid's floor,
@@ -262,7 +268,8 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 /// reads a picker whose plane holds both ends on any circle a plane cuts a
 /// ring in, and so reads every arc of both solids' floors, caps and walls.
 #[test]
-fn the_top_halves_of_two_half_bends_are_refused_where_the_second_wall_is_asked_a_point() {
+fn the_top_halves_of_two_half_bends_are_refused_where_a_point_is_sought_inside_the_first_start_cap()
+{
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for turned_first in [false, true] {
             let mut model =
@@ -292,30 +299,41 @@ fn the_top_halves_of_two_half_bends_are_refused_where_the_second_wall_is_asked_a
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             );
-            let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
-                panic!("{what}: {refused:?}");
+            let start = if turned_first {
+                [-1.0, 0.0]
+            } else {
+                [1.0, 0.0]
             };
-            assert_names_the_second_wall(&model, other, face, &what);
+            assert_no_point_is_found_inside_the_start_cap(&refused, start, &what);
         }
     }
 }
 
-/// **Half-meridians the arrangement reads, a floor `holds.rs` reads, and a
-/// wall it cannot.** The top halves, `z ≥ 0`, of two quarter bends of one
-/// ring, ring 4 and tube 1: one from `+x` round to `+y`, the other from `+y`
-/// round to `−x`, meeting flush on `x = 0`. Pappus gives each
-/// `π/2 · 4 · π/2 = π²`, so the union is the top half of a half bend, `2π²`,
-/// the intersection is nothing, and each difference is the first quarter, `π²`.
-/// Unlike the half bends' floors above, each floor's four corners are not on
-/// one line.
+/// **Half-meridians the arrangement reads, a floor and a wall `holds.rs`
+/// reads, and a cap `select` finds no point in.** The top halves, `z ≥ 0`, of
+/// two quarter bends of one ring, ring 4 and tube 1: one from `+x` round to
+/// `+y`, the other from `+y` round to `−x`, meeting flush on `x = 0`. Pappus
+/// gives each `π/2 · 4 · π/2 = π²`, so the union is the top half of a half
+/// bend, `2π²`, the intersection is nothing, and each difference is the first
+/// quarter, `π²`. Unlike the half bends' floors above, each floor's four
+/// corners are not on one line.
 ///
-/// **Every rule, both ways round, is refused `AFaceTrimmedByACurveThisCannotFollow`
-/// on the second solid's wall**, by the arm of
-/// `what_a_face_cut_by_part_of_a_crossing_holds` in `holds.rs` that refuses
+/// **Every rule, both ways round, is refused `Undecidable` on `a point inside
+/// a piece of a face`, its record naming the two corners of the first solid's
+/// start cap**, `(3, 0, 0)` and `(5, 0, 0)`, or `(0, 3, 0)` and `(0, 5, 0)`
+/// turned: `select::place_the_piece` in `fuse/select.rs` finds no point inside
+/// that half disk, whose sides are its chord along `z = 0` and half of a
+/// circle the cap's plane cuts the ring in (Q1367). The volumes above are what
+/// the answer is checked against once it does.
+///
+/// Until Q1367 every one was refused `AFaceTrimmedByACurveThisCannotFollow` on
+/// the second solid's wall, by the arm of
+/// `what_a_face_cut_by_part_of_a_crossing_holds` in `holds.rs` that refused
 /// every face on a ring with an arc among its sides (a temporary print, Q1267):
-/// rays fired from the first solid meet the second wall, and nothing in
-/// `holds.rs` says whether a point on a ring is inside such a face. The volumes
-/// above are what the answer is checked against once it does.
+/// rays fired from the first solid meet the second wall, at points like
+/// `(1.318, 4.403, 0.803)`. `holds.rs` now reads that wall as the part of the
+/// ring in front of its floor and both caps, and
+/// `a_quarter_and_a_half_bends_wall_hold_their_own_points` checks it.
 ///
 /// Until Q1267 every one was refused a step earlier, on the second solid's
 /// floor, because `the_way_into_an_arc` read no arc of a ring's circle: it asked
@@ -330,7 +348,8 @@ fn the_top_halves_of_two_half_bends_are_refused_where_the_second_wall_is_asked_a
 /// The arrangement and `holds.rs` now read such an arc by one spelling, and
 /// `a_quarter_and_a_half_bends_floor_hold_their_own_points` checks its sign.
 #[test]
-fn the_top_halves_of_two_quarter_bends_are_refused_where_the_second_wall_is_asked_a_point() {
+fn the_top_halves_of_two_quarter_bends_are_refused_where_a_point_is_sought_inside_the_first_start_cap()
+ {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for turned_first in [false, true] {
             let mut model =
@@ -353,10 +372,8 @@ fn the_top_halves_of_two_quarter_bends_are_refused_where_the_second_wall_is_aske
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             );
-            let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
-                panic!("{what}: {refused:?}");
-            };
-            assert_names_the_second_wall(&model, other, face, &what);
+            let start = if turned_first { [0.0, 1.0] } else { [1.0, 0.0] };
+            assert_no_point_is_found_inside_the_start_cap(&refused, start, &what);
         }
     }
 }
@@ -439,16 +456,116 @@ fn a_quarter_and_a_half_bends_floor_hold_their_own_points() {
     }
 }
 
-/// That `face`, which a fuse was refused on, is the wall of `second`, the face
-/// on the ring.
-fn assert_names_the_second_wall(model: &Model, second: SolidKey, face: FaceKey, what: &str) {
-    let second = model.solid(second).expect("this model made the key");
-    assert!(
-        second
+/// **A quarter bend's wall and a half bend's hold their own points**, which
+/// checks the reading `holds.rs` gives a face on a ring with arcs for sides:
+/// the part of the ring in front of its floor and of each cap. Each wall is
+/// the top half of the tube, `z > 0`, between its two caps through the axis.
+///
+/// Each point is on the ring, a degree or more from every cap and off the
+/// floor by a fifth of the tube or more, and the ones that tell a wrong
+/// reading apart:
+///
+/// - `(2.828, 2.828, −1)` is under the floor: held only if the floor's side
+///   is read the wrong way round.
+/// - `(−0.695, 3.939, 1)` and `(3.939, −0.695, 1)` are ten degrees past one
+///   cap of the quarter: held only if that cap's side is read wrong.
+/// - `(−2.828, 2.828, 1)` and `(2.828, −2.828, 1)` are in front of one cap of
+///   the quarter and behind the other: held if the wall were read as the part
+///   in front of either cap, as three quarters of a bend would be.
+/// - `(1.318, 4.403, 0.803)` is where a ray from the quarter met the turned
+///   quarter's wall when every fuse of the two was refused there (Q1267): held
+///   by the quarter, and not by the turned one.
+#[test]
+fn a_quarter_and_a_half_bends_wall_hold_their_own_points() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let quarter = the_top_half_of_a_quarter_bend(&mut model, false)
+        .unwrap_or_else(|why| panic!("the top half of a quarter bend: {why:?}"));
+    let turned = the_top_half_of_a_quarter_bend(&mut model, true)
+        .unwrap_or_else(|why| panic!("the turned top half of a quarter bend: {why:?}"));
+    let half = the_top_half_of_a_half_bend(&mut model, false)
+        .unwrap_or_else(|why| panic!("the top half of a half bend: {why:?}"));
+    for (solid, asked) in [
+        (
+            quarter,
+            vec![
+                ([2.828, 2.828, 1.0], OnAFace::Held),
+                ([4.792, 0.845, 0.5], OnAFace::Held),
+                ([1.318, 4.403, 0.803], OnAFace::Held),
+                ([2.828, 2.828, -1.0], OnAFace::NotHeld),
+                ([-0.695, 3.939, 1.0], OnAFace::NotHeld),
+                ([3.939, -0.695, 1.0], OnAFace::NotHeld),
+                ([-2.828, 2.828, 1.0], OnAFace::NotHeld),
+                ([2.828, -2.828, 1.0], OnAFace::NotHeld),
+            ],
+        ),
+        (
+            turned,
+            vec![
+                ([1.318, 4.403, 0.803], OnAFace::NotHeld),
+                ([-1.318, 4.403, 0.803], OnAFace::Held),
+                ([-2.828, 2.828, 1.0], OnAFace::Held),
+                ([-2.828, 2.828, -1.0], OnAFace::NotHeld),
+            ],
+        ),
+        (
+            half,
+            vec![
+                ([0.0, 4.0, 1.0], OnAFace::Held),
+                ([-4.792, 0.845, 0.5], OnAFace::Held),
+                ([4.792, 0.845, 0.5], OnAFace::Held),
+                ([0.0, 4.0, -1.0], OnAFace::NotHeld),
+                ([0.0, -4.0, 1.0], OnAFace::NotHeld),
+                ([4.792, -0.845, 0.5], OnAFace::NotHeld),
+            ],
+        ),
+    ] {
+        let solid = model.solid(solid).expect("this model made the key");
+        let wall = solid
             .faces()
-            .any(|its| its.key() == face && matches!(its.surface(), Surface::Torus(_))),
-        "{what}: the refusal names {face:?}, not the second solid's wall"
+            .find(|face| matches!(face.surface(), Surface::Torus(_)))
+            .expect("a bend's top half has a wall on the ring");
+        for (at, expected) in asked {
+            let held = solid
+                .face_holds_the_point(
+                    wall.key(),
+                    rcad_predicates::Point::from(at),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{at:?} is answered: {why:?}"));
+            assert_eq!(held, expected, "{at:?}");
+        }
+    }
+}
+
+/// That `refused` is refused `Undecidable` on finding a point inside the
+/// first solid's start cap, which runs out from the ring's axis along `start`:
+/// every record names `a point inside a piece of a face`, and the first names
+/// the cap's two corners, where the tube's inner and outer edges cross it.
+fn assert_no_point_is_found_inside_the_start_cap<T: std::fmt::Debug>(
+    refused: &rcad_topo::Result<T>,
+    start: [f64; 2],
+    what: &str,
+) {
+    let Err(Error::Undecidable { records }) = refused else {
+        panic!("{what}: {refused:?}");
+    };
+    assert!(
+        !records.records().is_empty()
+            && records
+                .records()
+                .iter()
+                .all(|record| record.predicate() == "a point inside a piece of a face"),
+        "{what}: {records:?}"
     );
+    let corners = [3.0, 5.0].map(|out| {
+        rcad_predicates::Point::from([
+            written_out(start[0] * out),
+            written_out(start[1] * out),
+            0.0,
+        ])
+    });
+    assert_eq!(records.records()[0].inputs(), corners, "{what}");
 }
 
 fn assert_measures(model: &Model, solid: SolidKey, volume: f64, what: &str) {
