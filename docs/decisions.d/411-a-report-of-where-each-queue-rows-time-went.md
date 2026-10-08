@@ -561,3 +561,147 @@ claim-section` run during this measurement claimed the next section number
 by mistake (an `--help` argument was read as the section's topic, not a
 flag) and nothing was written under it; the number is spent and unused,
 which costs nothing further.
+
+### 411.12 How much of the verifier's 18h54m the transcripts can still split — Q1349
+
+*Measured 2026-10-08, over the same week and the same row set as §411.10 and
+§411.11,* `mise exec -- just row-time --since 2026-09-30 --until 2026-10-07`
+*for the row set, and a new scratch script, `verify_split.py`, built for this
+row and left in this lane's scratchpad
+(`/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad-worktrees-clean-up-dead-sessions/7e0b4050-c5e7-4c79-b9c6-f16d95a5d801/scratchpad/verify_split.py`,
+run as `mise exec -- python3 verify_split.py`), which imports `row_time.py`
+unchanged for `ms_of_date`, `load`, `assemble`, `read_transcript` and
+`timeline`, the same functions Q1326's `gate_steps.py` used for §411.11.*
+
+**Why §411.11 could only find a floor.** `gate()` in `verify_lane.py` relays
+every line the inner `just gate-lane`/`just gate quiet` call printed except a
+passing step's own `· <step> (<secs> s)` line (§411.11 Check 1), so the 2h45m
+of step lines §411.11 found is almost entirely the steps that failed (31 of
+its 34 `test` lines), not a sample of the gate's real running time.
+
+**The method.** For every assembled step whose role is `verifier`,
+`verify_split.py` re-reads its transcript (`read_transcript` +
+`row_time.timeline`) and keeps, in time order, every `Bash` call whose key is
+`just verify-lane` — `row_time.py`'s `KEYED_BY_RECIPE` already folds the
+first call (`just verify-lane <input>`) and every later `just verify-lane
+wait` into that one key, so a run that needed several calls to finish shows
+up as several same-keyed calls in a row. `print_new` in `verify_lane.py`
+prints only the log's new bytes each time it is called (the same relay
+§411.11 read for `land`), so concatenating these calls' result texts in call
+order reconstructs the run's whole log, and the call boundaries between them
+are the only timestamps the log carries at all — `say()` in `verify_lane.py`
+prints no time of its own, confirmed by reading the function.
+
+**Check 1: how many verifier runs give any boundary at all?** Most do not.
+
+    verifier steps in the week: 251
+    single-call verify-lane runs (whole run in one Bash call, no boundary): 193
+    multi-call verify-lane runs (>=1 `wait` call, boundaries available): 34
+    steps with no `just verify-lane` Bash call found at all: 24
+      reasons: {'(no marks)': 24}
+
+193 of 251 (77%) verifier runs finished inside the harness's single-call
+window (the default `VERIFY_LANE_WAIT` is 540 s), so the whole run — unlock
+through `=== verify-lane: done ===` — arrives in one relay burst with no
+internal timestamp whatsoever: for these, **the split is not recoverable from
+the transcript at all**, only the call's own total time, already in
+`row_time`'s `bucket: just verify-lane`. The 24 with no `just verify-lane`
+call and no other mark are read as the population §411.11 named "26 gates the
+verifier ran as a plain `just gate quiet` before `verify-lane` existed" —
+plausible by the count, not traced further here.
+
+**Check 2: the `tests: Summary [...]` line is a real, not estimated, test
+time, and it survives `gate()`'s filter regardless of pass or fail.**
+`_gate-summary` in the justfile greps the whole gate log for nextest's own
+`^ *Summary ` line (`Summary [ 165.424s] 951 tests run: ...`, confirmed
+against real examples already quoted in §247) and prints it as `tests:
+Summary [...]`; that line never matches `gate()`'s `· \S+ \([0-9.]+ s\)`
+filter, so it reaches the transcript whether the gate passed or failed. `test`
+is itself a listed, servable step in `gate_reusable_steps` (confirmed by
+reading `justfile` past where §411.11's quote of the list was cut — `test`
+and `test-slow` are both there, after `check-row-time-selftest`), so most
+gates serve it rather than run it, and when they do the line is a cached
+`(served from <sha>)` copy of an **earlier** gate's time, not this one's —
+`verify_split.py` keeps the fresh (unsuffixed) and served (suffixed) lines
+apart:
+
+    gate chunks closed (gate: PASS/FAIL seen) across verifier steps: 231
+      with a `tests: Summary [...]` line (test ran, real wall time known): 64
+      with no Summary line (test served or never reached): 167
+      of those, `served:` named test: 167
+      gates with N Summary lines: {2: 64}
+    sum of nextest Summary wall-clock seconds over all verifier gates: 16265.8s = 4.52h
+      n=64, median=104.5s, min=19.7s, max=6484.6s
+
+231 closed gates is short of §411.11's 267 (a chunk here is "the step lines
+and served line since the previous `full log:` line through the next one",
+not since the previous `gate: PASS`/`FAIL`; the two counts were not
+reconciled further). 167 of 231 (72%) name `test` on their `served:` line,
+close to §411.11's 71% for the same role, a cross-check that the two
+measurements are reading the same population two different ways. For the
+other 64 (28%), `test` ran fresh and nextest's own summary says how long:
+**4.52h of real, measured test time across the week's verifier gates**, a
+genuine lower bound on the gate's share of the 18h54m, not a chain-sum
+estimate. Every one of the 64 shows exactly two `Summary` lines (never one);
+this script cannot tell which nextest invocation (`test`, `test-slow`, or
+something else entirely) produced which, so that split stays unknown. Of the
+64, the ones whose `· test (...)` step line also survived (because it
+failed) are the 31 §411.11 already found; the other roughly 33 passed
+silently and are invisible to the step-line method, only visible through this
+line.
+
+**Check 3: the call-boundary bound, for the 34 runs that have one.** For each
+multi-call run, `verify_split.py` finds which call first shows `"checked out
+"` (end of unlock/branch_on_base/files_outside/lines_that_run/checkout),
+`"=== gate summary ==="` (the gate just finished — it is written in one
+atomic burst right after the blocking `run(JUST, "gate-lane")` returns, so its
+appearance marks the true end of the gate, not an estimate) and `"===
+verify-lane: done ==="` (the end of tests_pass/revert/numbers). A bound only
+exists between two landmarks that fall in *different* calls; same-call pairs
+give nothing beyond the call's own total time (most `pre_gate<=` values below
+are just the ~540 s call window and carry no information):
+
+    runs where the gate itself is bounded (different call than checkout): 5 of 34,
+      values: [315.5s, 378.0s, 475.5s, 1002.0s, 6324.4s]
+    runs where gate-summary-to-done is bounded: 24 of 34,
+      range: about 22s to about 1342s
+
+So for 5 of 251 verifier runs this week, the gate's own span (checkout to
+summary) is known to within a loose window (5.3 to 105 minutes); for 24 of
+251, the span after the gate (tests_pass, the revert, its rebuild, the test
+run and the restore, numbers) is known the same way. For the other 222, no
+useful bound exists at all. These bounds are genuinely loose: the true event
+sits somewhere inside the window between two call-result timestamps, not at
+either end.
+
+**What stays unknown.** For the 193 single-call runs (77% of verifier steps),
+nothing splits the 18h54m bucket at all beyond its own total — the gate
+against "the rest" is simply not recoverable from this week's transcripts.
+Even the 34 multi-call runs mostly give no bound (29 of 34 have no gate
+bound, 10 of 34 have no post-gate bound either), because `wait` calls land
+wherever the model happened to send them, not at the phase boundaries. The
+4.52h of real test time (Check 2) is the one solid, non-estimated number this
+row can add to §411.10's and §411.11's totals; it says the gate's share of
+18h54m is **at least** 4.52h plus whatever the non-test gate steps cost
+(unmeasured here), leaving most of the week's 18h54m still undivided between
+"its gate" and "the rest".
+
+**What `gate()` would have to print for next week to split exactly, without
+changing `verify_lane.py` now.** `say()` in `verify_lane.py` prints no time of
+its own (confirmed in Check 1's method), exactly the gap Q1310 is already
+closing in `land.py`'s `say()`. Stamping `say()` the same way here would be
+sufficient on its own, with no change needed to the inner `gate`/`gate-lane`
+recipe's own output: `verify()`'s named steps already each end in their own
+`say()` call (`unlocked the lane's tree`, the `git log` line, `files outside
+the write set`, each `lines-that-run` line ending `lines that run: N`,
+`checked out <tip>`, then whatever `gate()` relays, then `tests_pass`'s and
+`revert`'s own lines, then `=== verify-lane: done ===`), so a timestamp on
+every one of those lines would mark every phase boundary exactly, including
+the gate's own span as the gap between the stamped `checked out` line and the
+first stamped line after the gate's one relayed burst — with no need to read
+inside the inner gate recipe's own timing at all, since that burst already
+arrives as one atomic write bounded by the blocking subprocess call around
+it. This is a remaining item, filed as a row below, not done here.
+
+**What ran this:** `verify_split.py`, the path given above; its output is
+saved beside it as `verify_split_output.txt` in the same scratchpad.
