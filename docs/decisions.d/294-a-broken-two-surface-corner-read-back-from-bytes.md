@@ -750,4 +750,84 @@ Without the rule it refuses at the apex as before, the record's enclosure
 cone now.
 
 **What this leaves.** Nothing new. The frustum turned and then shifted is still
-not tried, as above.
+not tried, as above. *Tried by Q1362 (§294.13): it is the bar's case again.*
+
+### 294.13 Q1362: the turned and shifted frustum cut along its seam is the bar's case again — 2026-10-08
+
+*Queue row Q1362, from §294.12's "Not tried". Lane
+`lane-q1362-a-turned-frustum-shifted-along-its-seam`, base `e40e675a`. No line
+that runs changed: two tests and a doc comment.*
+
+**The case.** `cones::a_frustum(model, 0.5, 2, 6)` turned 0.4 about `x` and
+then shifted by `(7, −5, 2.5)`, less or intersected with
+`THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM` placed the same way: §294.9's turned
+and shifted bar, on a cone.
+
+**What it gives under `certified`: the bar's refusal.** The sound frustum and
+every moved corner, under both rules, refuse `Undecidable` with one record,
+`side of plane`, asked of one box: `x` from `7.999999999999773` to
+`8.000000000000227`, `y` from `−5.778836684617528` to `−5.778836684617073`, `z`
+from `4.342121988005543` to `4.342121988005998`, enclosure
+`5.977440764581843e-13`. That is the box round where the bottom seam corner
+`(1, 0, 2)` lands, and the block's face along the seam straddles it
+(`a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is`).
+The bar refuses the same predicate round its own bottom seam corner, a box
+`2.8e-13` either way.
+
+**Why, checked exactly on the stored numbers.** The frustum's seam plane is
+`y = 0`, the bar's, since both stand on `Axis::z()` with their seam corners on
+`+x`; moved by the placement and turned round, its normal is
+`(0, −0.9210609940028851, −0.38941834230865047)` and its offset
+`0x400d0dd7b8f4fb65`. The block's face has that normal bit for bit and the
+offset `0x400d0dd7b8f4fb66`, the next `f64` up: one ulp further out along its
+own normal, where the bar's block face is one ulp the other way,
+`0x400d0dd7b8f4fb64` (§294.9). The block's placement is the shift and the turn
+composed with the block's own shift to `(−5, 0, 1)`, where the bar's is to
+`(−5, 0, −1)`, and the two round apart. So the face is not the seam plane, the
+corner is not taken as on it (`is_on_by_construction` is bit for bit, §294.12),
+and the box is asked. Both facts are pinned in the test, with two more asked
+exactly of the face and the placed cone: the face runs along the axis
+(`how_a_plane_leans_against_a_pipe` on a pipe round it is `Zero`) and misses it,
+the apex `(7, −5, 2.5)` behind it (`where_a_cones_apex_stands_against_a_plane`
+is `Neg`). A scratch probe, not kept, summed `n·apex − d` exactly with
+`rcad_predicates::expansion`: `−4.996003610813204e-16` against the face, and
+`−5.551115123125783e-17`, the seam plane's own rounding, against the seam
+plane. So the frustum's axis lies inside the block by that much, where the
+bar's block falls `3.9e-16` short of the bar's axis (Q913). The face crosses
+the cone in a hyperbola a rounding from the two rulings, and `intersect`, asked
+of the two as placed, names its two branches under both policies (pinned in the
+same test).
+
+**So it is the bar's case again, and Q913 is where it is settled.** Q913 pins
+whether the bar's refusal is a limit, by an answer holding the seam corner and
+the face's crossing with the bottom circle a rounding apart. Here the face is
+on the other side of the seam. If the seam corners stand as the axis does —
+not summed here, since the turn is applied as a quaternion and a corner's
+exact image under it is not one dot product — then of the two rules the
+intersection keeps the corner with the crossing a rounding from it and the
+difference cuts the corner away, the other way round from the bar. No second
+limit row is filed. What is not run is whether the rule that cuts the corner
+away holds any pair a rounding apart at all: its answer's corners near the seam
+would be the face's crossings alone. That is a guess nobody has run, a row of
+its own after Q913.
+
+**Under `tolerant(100)` it is refused further on, where the bar answers.** The
+turned and shifted bar cut by the half past its seam answers both rules, half
+the bar on a fine mesh, and validates. The frustum gets past its seam corner
+and the sound frustum and the corner moved a quarter turn round refuse
+`Error::Geometry(CannotNameWhichPieceOfACrossingThisIs)`; the corners moved off
+the wall and off the cap give `CannotTellTheCellsOfAFaceApart`, as at every
+placement tried
+(`under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_is_refused_where_the_bar_answers`).
+It is not `intersect` on the face and the cone, which names the hyperbola;
+where the fuse raises it was not traced. Under `certified` it is not reached,
+since `side of plane` comes first.
+
+**What this leaves.**
+
+- The `tolerant(100)` refusal above: trace where the fuse raises
+  `CannotNameWhichPieceOfACrossingThisIs` for the turned and shifted frustum,
+  and whether the answer the bar gets is there to be had. A row of its own,
+  tier 1.
+- Whether the rule that cuts the seam corner away has an answer `certified`
+  could reach, for the bar and the frustum both. A row after Q913.
