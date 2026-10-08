@@ -31,7 +31,7 @@ use rcad_predicates::expansion::{product_is_exact, two_product};
 ///
 /// If the whole enclosure is below zero, which means a caller asked for the root
 /// of something that is not a square.
-pub(crate) fn root_enclosing(value: Interval) -> Interval {
+pub fn root_enclosing(value: Interval) -> Interval {
     assert!(
         value.hi() >= 0.0,
         "this is not a square, so nothing here takes its root: {value:?}"

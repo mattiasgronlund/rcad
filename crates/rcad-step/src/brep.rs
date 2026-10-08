@@ -2458,7 +2458,7 @@ fn gradient_of(surface: &Surface, at: Point) -> Option<Vector> {
 /// on one surface however the file happened to write the pair down.
 /// [`Surface::how_it_sorts_against`] is that order, and `rcad-topo` sorts its own
 /// copy of the same bits into the same rows.
-fn the_curved_one_of(carried_by: &[Surface]) -> Option<Surface> {
+pub(crate) fn the_curved_one_of(carried_by: &[Surface]) -> Option<Surface> {
     carried_by
         .iter()
         .filter(|surface| surface.as_plane().is_none())

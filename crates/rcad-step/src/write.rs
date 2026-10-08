@@ -45,7 +45,7 @@ use rcad_topo::{
 
 use crate::brep::{
     A_CIRCLE_MAY_MISS_ITS_FACE_BY, a_surface_holds_the_circle, how_far_off_the_circle_can_be,
-    the_poles_of_a_ball_on_its_chart,
+    the_curved_one_of, the_poles_of_a_ball_on_its_chart,
 };
 use crate::geometry::plane_through;
 
@@ -2133,10 +2133,7 @@ impl Crossing {
         either_side: [&Surface; 2],
         corner: Point,
     ) -> Option<bool> {
-        let curved = either_side
-            .into_iter()
-            .filter(|face| face.as_plane().is_none())
-            .min_by(|one, other| one.how_it_sorts_against(other))?;
+        let curved = the_curved_one_of(&either_side.map(|face| *face))?;
         let winding = curved.the_way_its_first_coordinate_runs_at(corner)?;
         let leaning = self.turning.cross(corner - self.centre).dot(winding);
         if leaning > 0.0 {
