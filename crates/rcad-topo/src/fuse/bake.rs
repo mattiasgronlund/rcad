@@ -247,10 +247,10 @@ pub(crate) struct BakedCorner {
     /// further: three planes that share a line in the file meet wherever
     /// rounding puts them on it, 326 units off in a KiCad relay (§395.7).
     pub(crate) room_its_planes_were_asked_with: Option<f64>,
-    /// For a corner read out of the model on a pipe's wall, the plane through
-    /// the pipe's axis and the corner, moved into place — the plane a round
-    /// bar's seam lies in — when the stored corner is exactly on it as stored.
-    /// `None` for every other corner.
+    /// For a corner read out of the model on a pipe's wall or a cone's, the
+    /// plane through the axis and the corner, moved into place — the plane a
+    /// round bar's or a frustum's seam lies in — when the stored corner is
+    /// exactly on it as stored. `None` for every other corner.
     ///
     /// **Kept apart from `around`, and never asked.** Every surface in
     /// `around` meets here or was asked about the corner, and the arrangement
@@ -305,6 +305,16 @@ impl BakedCorner {
     /// point of the solid. The plane holds the axis, so it crosses the circle
     /// again only on the far side of the axis, a diameter away, and the corner
     /// is one of its two crossings and never both.
+    ///
+    /// **On a cone it is the same plane and the same argument** (§294.12). A
+    /// frustum's seam is a ruling, the line through the apex and the corner,
+    /// and the plane through the axis and the corner holds it, since the axis
+    /// starts at the apex. It crosses the cone in that ruling and its mirror
+    /// across the axis, which meet only at the apex, and a cap square to the
+    /// axis in two points a diameter apart, as on a pipe; which of the
+    /// crossings the corner is on, the crossings' own pickers say. The turned
+    /// frustum cut along its seam refused `side of plane` at its bottom seam
+    /// corner until this held for cones too.
     ///
     /// **Bit for bit, or not at all.** A plane an ulp from the seam plane is
     /// a different plane, crossing the circle an ulp from the corner, and that
@@ -958,16 +968,16 @@ fn place_a_corner(
     })
 }
 
-/// The plane through the axis of a pipe round a corner read out of the model,
-/// and through the stored corner, moved into place with the corner
+/// The plane through the axis of a pipe or a cone round a corner read out of
+/// the model, and through the stored corner, moved into place with the corner
 /// ([`BakedCorner::seam_plane`]).
 ///
 /// **Only when the stored corner is exactly on it**, asked of the stored
 /// numbers. The plane is built from the corner, so it is through the corner
 /// as written, but its normal is scaled to length one and that rounds unless
-/// the pipe stands along an axis. A plane that misses the stored corner by a
-/// rounding crosses the circle a rounding away from it, which is a second
-/// point and not this one.
+/// the axis runs along an axis of the frame. A plane that misses the stored
+/// corner by a rounding crosses the circle a rounding away from it, which is a
+/// second point and not this one.
 fn the_seam_plane_a_corner_is_on(
     model: &Model,
     slot: VertexSlot,
@@ -975,12 +985,17 @@ fn the_seam_plane_a_corner_is_on(
 ) -> Option<Plane> {
     let stored = model.data().vertices[slot].point;
     around.iter().find_map(|face| {
-        let Surface::Cylinder(pipe) = face.stored else {
-            return None;
+        let axis = match face.stored {
+            Surface::Cylinder(pipe) => pipe.axis(),
+            Surface::Cone(cone) => cone.axis(),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) => return None,
+            // A surface kind added to `rcad-geom` after this has not been
+            // shown to have a seam the plane through its axis holds.
+            _ => return None,
         };
-        let axis = pipe.axis();
-        // A corner on the axis has no plane through the two, and only a
-        // corner moved off its wall in the file can be there.
+        // A corner on the axis has no plane through the two. On a pipe only
+        // a corner moved off its wall in the file can be there; on a cone,
+        // the apex is on the axis too, and a corner there is no seam corner.
         let seam_plane = Plane::from_point_and_normal(
             axis.origin(),
             axis.direction().cross(stored - axis.origin()),
