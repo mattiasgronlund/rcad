@@ -5915,8 +5915,9 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 ///   floor of a block with a bar bored through one edge has its arc against the
 ///   three sides of the block the bar is clear of.
 /// - Any other arc against a plane, both ends on the same side of it, when the
-///   line the plane meets the arc's own plane in misses the arc's curve or meets
-///   it only behind the chord ([`an_arc_never_reaches_the_plane`]). The skin of
+///   line the plane meets the arc's own plane in misses the arc's curve, meets
+///   it only behind the chord, or meets the branch of a hyperbola the arc is on
+///   behind it ([`an_arc_never_reaches_the_plane`]). The skin of
 ///   a ball cut down to four planes through its centre has each of its four arcs
 ///   against the plane across from it (row Q976).
 /// - An arc of a ring on a plane through the ring's axis, against another plane
@@ -6273,12 +6274,13 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 }
 
 /// Whether an arc of the curve the plane `own` cuts `round` in never reaches
-/// the plane `cut`: the line the two planes meet in misses the curve, or meets
-/// it only behind the arc's chord. `start` is either end of the arc and
-/// `into_the_arc` is [`the_way_into_an_arc`]. `false` when the two planes are
-/// side by side, when a ball's or a pipe's curve does not close, when the line
-/// runs along a direction the round surface's part of degree two is not
-/// positive at, and when a sign could not be settled.
+/// the plane `cut`: the line the two planes meet in misses the curve, meets it
+/// only behind the arc's chord, or, on a hyperbola's plane, meets the arc's own
+/// branch behind it. `start` is either end of the arc and `into_the_arc` is
+/// [`the_way_into_an_arc`]. `false` when the two planes are side by side, when
+/// a ball's or a pipe's curve does not close, when the line runs along a
+/// direction the round surface's part of degree two is zero at, and when a
+/// sign could not be settled.
 ///
 /// **A cone's hyperbola or parabola is read too** (row Q1224). Nothing below
 /// leans on the curve closing but `a > 0` and the arc lying in front of its
@@ -6294,6 +6296,23 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// plane, so the middle piece runs below `z = 18` with both ends behind it, and
 /// the skin was refused for want of this.
 ///
+/// **A line steeper than the cone's side meets each branch of a hyperbola
+/// once** (row Q1235). There `a < 0`: far out either way the line is inside the
+/// cone, on one nappe one way and on the other nappe the other way, and it
+/// misses the apex because `own` does, so it leaves the one nappe and enters
+/// the other. The other branch lies wholly in front of the chord: the chord's
+/// line meets the curve only at the arc's two ends, so the other branch is on
+/// one side of it, and that branch runs off the opposite ways to the arc's own
+/// branch, whose arms past the arc run off behind the chord. So the arc never
+/// reaches the plane exactly when the meet on its own branch is behind the
+/// chord, which is exactly one of the two meets behind:
+/// `(g + γ·t₊)(g + γ·t₋) < 0`, which multiplied through by `a²` is
+/// `Δ² < γ²(b² − ac)`, with `g`, `γ` and `Δ` as below. The skin of a pointed
+/// cone cut by two walls of a block along its axis, `x = −12` and `y = 15`, has
+/// each wall's hyperbola against the other wall, whose line runs up the axis,
+/// and its apex was refused for want of this
+/// (`tests/a_cone_skin_beside_a_plane_its_open_curve_never_reaches.rs`).
+///
 /// **Why that is enough.** The arc lies on `own`, so it can be on `cut` only on
 /// that line, and only where the line meets its curve. The arc is all of the
 /// curve strictly on the `into_the_arc` side of its chord, with its two ends,
@@ -6307,15 +6326,16 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// `x₀ = (e(h × u) + d(u × n))/|u|²` is on both planes, and the line is
 /// `(|u|²x₀ + t·u)/|u|²`. [`how_far_outside`] at that point, scaled by `|u|²`,
 /// is `a·t² + 2b·t + c`: `a` is the round surface's part of degree two at `u`,
-/// positive wherever the curve closes and asked to be where it does not; `c` is
-/// its value at `|u|²x₀`; and `b`, the
+/// positive wherever the curve closes, and of either sign where it does not;
+/// `c` is its value at `|u|²x₀`; and `b`, the
 /// cross term, is a quarter of its value a step of `u` past that point less its
 /// value a step before, since the two squares cancel. The meets are
 /// `t = (−b ± √(b² − ac))/a`, and `b² − ac` negative is the line missing the
 /// curve. Behind the chord is `g + γ·t < 0`, with `g` how far the arc's side of
 /// the chord reads at `|u|²x₀` against `start`, and `γ` how fast it grows along
-/// `u`. Both meets read that when `Δ = a·g − γ·b` is negative and `Δ²` is more
-/// than `γ²(b² − ac)`, which is `Δ < −|γ|·√(b² − ac)` multiplied through by `a`
+/// `u`. For `a > 0` both meets read that when `Δ = a·g − γ·b` is negative and
+/// `Δ²` is more than `γ²(b² − ac)`, which is `Δ < −|γ|·√(b² − ac)` multiplied
+/// through by `a`
 /// — the same two signs [`into_the_arc_on_the_centres_side`] reads of the far
 /// arc's middle, for a pair of points instead of one. Nothing is divided and no
 /// root is taken: every sign is of a polynomial in stored numbers, in interval
@@ -6361,18 +6381,22 @@ fn an_arc_never_reaches_the_plane(
     ) else {
         return false;
     };
-    if scale.sign() != Decision::Pos || a.sign() != Decision::Pos {
+    if scale.sign() != Decision::Pos {
         return false;
     }
     let b = (past - before) * Interval::exactly(0.25);
     let meets = b * b - a * c;
-    if meets.sign() == Decision::Neg {
-        return true;
-    }
     let grows = dot(into_the_arc, along);
     let middle = a * dot(into_the_arc, less(start)) - grows * b;
-    middle.sign() == Decision::Neg
-        && (middle * middle - grows * grows * meets).sign() == Decision::Pos
+    let apart = middle * middle - grows * grows * meets;
+    match a.sign() {
+        Decision::Pos => {
+            meets.sign() == Decision::Neg
+                || (middle.sign() == Decision::Neg && apart.sign() == Decision::Pos)
+        }
+        Decision::Neg => matches!(round, Surface::Cone(_)) && apart.sign() == Decision::Neg,
+        Decision::Zero | Decision::Undecidable { .. } | _ => false,
+    }
 }
 
 /// Whether `round` is a ring and both `planes` hold its whole axis
