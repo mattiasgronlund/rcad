@@ -51,8 +51,9 @@
 //! a bored block's joined top, where the outline winds and places it; the probe
 //! with no ring that winds is refused before `rings_round` (Q802). A hole
 //! along the cut cone's hyperbola closed by a ball, which no plane can close
-//! without putting corners on the outline, is refused before `rings_round`
-//! where the wall, the cone and the ball meet (Q1233). A cap whose sides all
+//! without putting corners on the outline, reaches `rings_round` in the union
+//! with an outline and a hole along two hyperbolas, and is answered under every
+//! rule since `holds_the_other_rings` reads such an arc (Q1233, Q1289). A cap whose sides all
 //! run along pipes reaches `rings_round` with corners that cancel exactly, the
 //! one ring there and the outline by that; a second such ring, as a hole, is
 //! refused before it, because nothing can say which side of that cap's wall on
@@ -2242,8 +2243,8 @@ fn fused_groups_in_order(
         .map(|answer| answer.solids().to_vec())
 }
 
-/// **A hole along a cone's hyperbola, closed by a ball, is refused before its
-/// rings are placed** (Q1233). The nested cups reach `rings_round` with an
+/// **A hole along a cone's hyperbola, closed by a ball, has its rings placed**
+/// (Q1233, Q1289). The nested cups reach `rings_round` with an
 /// outline that winds, because the second cone's base plane `z = 16` puts two
 /// corners on the cut cone's hyperbola
 /// ([`the_nested_cups_and_a_block_flush_with_their_wall_are_answered_under_every_rule`]).
@@ -2256,27 +2257,43 @@ fn fused_groups_in_order(
 /// past the top, cut by a ball of radius `√148` about `(0, 0, 15)`. The ball
 /// crosses the cut cone's skin only in circles of radius under 12, so on
 /// `x = −12` it is the circle of radius 2 about `z = 15`, clear of the outline,
-/// and the hole would be that circle's arc above the second cone's hyperbola,
-/// two corners, with an outline of two corners: the face `holds_the_other_rings`
-/// answers `None` for twice. The cone cut by the ball holds the cone up to where
+/// and the hole is that circle's arc above the second cone's hyperbola, two
+/// corners, with an outline of two corners: the face `holds_the_other_rings`
+/// answered `None` for twice. The cone cut by the ball holds the cone up to where
 /// the ball crosses it, `w = 6 + √38` above the apex, and the ball's cap above
 /// that.
 ///
-/// **Taking it out of the cut cone is refused under every rule, both ways
-/// round, `AFaceTrimmedByACurveThisCannotFollow` naming the ball's cap**, the
-/// one face of the closed cone on the ball, and since Q1284 not where it was.
+/// **Every rule is answered both ways round, and the union reaches
+/// `rings_round` with this hole on the cut cone's wall**, the closed cone
+/// poking out through the wall and through the cut cone's top `z = 18`, which
+/// the ball crosses in a circle of radius `√139`. So the union holds the cut
+/// cone, the cap above its top and the sliver past its wall; the intersection
+/// the closed cone less those two; the cut cone less the closed cone the
+/// difference of the two, with those two put back; and the closed cone less
+/// the cut cone the cap and the sliver, two solids apart, since the ball
+/// reaches `x = −12` only between `z = 13` and `17`.
+///
 /// The hole's corners are where the plane `x = −12`, the second cone and the
 /// ball meet, which `rcad-geom` answers since Q1271. The meet of the ball and
 /// the two cones, three curved surfaces and no plane, was refused next, and is
 /// answered since Q1284: the two cones are of one slope about one axis, so
 /// they differ by the plane `z = 1.5`, which the ball, `13.5` below its centre
 /// against a radius of `√148`, does not reach, and the three share nothing.
+/// After that every rule was refused `AFaceTrimmedByACurveThisCannotFollow` on
+/// the ball's cap, until `holds.rs` read a point of a ball past the picker
+/// (Q1218, Q1289). Then the union panicked in `rings_round`, its wall's outline
+/// and hole each two corners with a side along a hyperbola, which
+/// `holds_the_other_rings` could not place until it read an arc of a curve
+/// that does not close (Q1289).
 #[test]
-fn a_cut_cone_less_a_cone_closed_by_a_ball_is_refused_on_the_balls_cap() {
+fn a_cut_cone_and_a_cone_closed_by_a_ball_are_answered_under_every_rule() {
     let (crossing, radius) = (6.0 + 38.0_f64.sqrt(), 148.0_f64.sqrt());
     let cap_height = radius + 12.0 - crossing;
     let closed_by_the_ball = PI * crossing.powi(3) / 3.0
         + PI * cap_height * cap_height * (3.0 * radius - cap_height) / 3.0;
+    let above_the_top = PI * (radius - 3.0).powi(2) * (2.0 * radius + 3.0) / 3.0;
+    let past_the_wall = what_the_closed_cone_holds_past_the_wall();
+    let cut = what_the_block_holds_of_the_cone();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let [_, closed] = a_cut_cone_and_a_cone_closed_by_a_ball(&mut model);
     assert_holds(
@@ -2289,19 +2306,67 @@ fn a_cut_cone_less_a_cone_closed_by_a_ball_is_refused_on_the_balls_cap() {
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let pair = a_cut_cone_and_a_cone_closed_by_a_ball(&mut model);
-        let refused = fused_in_order(&mut model, pair, rule, swapped);
-        let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
-            panic!("{rule:?}, swapped {swapped}: {refused:?}");
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, pair, rule, swapped);
+        let volume = match (rule, swapped) {
+            (Rule::Union, _) => cut + above_the_top + past_the_wall,
+            (Rule::Intersection, _) => closed_by_the_ball - above_the_top - past_the_wall,
+            (Rule::Difference, false) => cut - closed_by_the_ball + above_the_top + past_the_wall,
+            (Rule::Difference, true) => {
+                let [sliver, cap] = the_two_smaller_first(&model, answer, &what);
+                assert_holds(
+                    &model,
+                    sliver,
+                    past_the_wall,
+                    &format!("{what}, the sliver"),
+                );
+                assert_holds(&model, cap, above_the_top, &format!("{what}, the cap"));
+                continue;
+            }
+            (other, _) => panic!("not a rule this probes: {other:?}"),
         };
-        let on = model
-            .face(face)
-            .expect("the refusal names a face of this model")
-            .surface();
-        assert!(
-            matches!(on, Surface::Sphere(ball) if ball.centre() == Point::new(0.0, 0.0, 15.0)),
-            "{rule:?}, swapped {swapped}: a face on {on:?}"
-        );
+        assert_holds(&model, the_only(answer, &what), volume, &what);
     }
+}
+
+/// The part of the closed cone past the wall `x = −12`: the second cone's part
+/// from `z = 15`, where its radius `u = z − 3` reaches 12, to where the ball
+/// closes it, `u = w = 6 + √38`, and then the ball's part above that.
+///
+/// The cone's part is [`what_the_second_cone_holds_past_the_wall`]'s integral
+/// from 12 to `w`. The ball's part is the piece of a ball of radius `R = √148`
+/// past two planes square to each other, `|x| > a = 12` and `z − 15 > b = w −
+/// 12`: slicing it across `x`, the slice is the circle of radius `√(R² − x²)`
+/// cut by a chord `b` from its centre, which is
+/// `(R² − x²) acos(b/√(R² − x²)) − b√(k² − x²)` for `k² = R² − b² = w²`.
+/// Integrated by parts, the first term leaves `(b/3)∫(x² − 2R² + 2R⁴/(R² −
+/// x²))/√(k² − x²) dx`, all three standard, so from `a` to `k` it is `P(k) −
+/// P(a)` for
+///
+/// ```text
+/// P(x) = (R²x − x³/3) acos(b/√(R² − x²)) − (b(3R² − b²)/3) asin(x/k)
+///        − (2b/3) x√(k² − x²) + (2R³/3) atan(bx/(R√(k² − x²)))
+/// ```
+///
+/// with `P(k) = πR³/3 − πb(3R² − b²)/6`. At `b = 0` it is half a cap of height
+/// `R − a`, as it should be, and a midpoint sum of the slices across `z` in
+/// 200 000 steps agrees with the whole to 2e-11 (Q1289).
+fn what_the_closed_cone_holds_past_the_wall() -> f64 {
+    let past_the_wall_of_a_cone = |u: f64| {
+        let rise = (u * u - 144.0).sqrt();
+        u.powi(3) / 3.0 * (12.0 / u).acos() - 8.0 * u * rise + 576.0 * (u + rise).ln()
+    };
+    let (squared, wide) = (148.0_f64, 6.0 + 38.0_f64.sqrt());
+    let (radius, up) = (squared.sqrt(), wide - 12.0);
+    let across = |x: f64| {
+        let left = (wide * wide - x * x).sqrt();
+        (squared * x - x.powi(3) / 3.0) * (up / (squared - x * x).sqrt()).acos()
+            - up * (3.0 * squared - up * up) / 3.0 * (x / wide).asin()
+            - 2.0 * up / 3.0 * x * left
+            + 2.0 * radius.powi(3) / 3.0 * (up * x / (radius * left)).atan()
+    };
+    let at_the_far_end = PI * radius.powi(3) / 3.0 - PI * up * (3.0 * squared - up * up) / 6.0;
+    past_the_wall_of_a_cone(wide) - past_the_wall_of_a_cone(12.0) + at_the_far_end - across(12.0)
 }
 
 /// The cut cone, and the second cone with its apex at `z = 3` cut by the ball

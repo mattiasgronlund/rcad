@@ -60,7 +60,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    DynamicRange, EdgeRun, HalfSpace, Isometry, MeetOfThree, Orientation, Picker, Plane,
+    Cone, DynamicRange, EdgeRun, HalfSpace, Isometry, MeetOfThree, Orientation, Picker, Plane,
     PlaneAgreement, Point, Surface, SurfaceMeet, Vector, meet_of_three_surfaces,
     which_way_a_closed_crossing_turns,
 };
@@ -72,7 +72,8 @@ use smallvec::SmallVec;
 
 use crate::holds::{
     WhereTheCurveIsCentred, a_picker_that_tells_the_two_arcs_apart,
-    the_half_space_naming_the_meridian_circle_through, where_a_closed_crossing_is_centred,
+    the_half_space_naming_the_meridian_circle_through, the_nappe_an_arc_that_does_not_close_is_on,
+    the_nappe_of, where_a_closed_crossing_is_centred,
 };
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse, WireStep};
@@ -1555,13 +1556,16 @@ impl Assembly {
     ///   (`a_half_bar_whose_corner_is_the_lens_corner_mostly_answers` in
     ///   `a_lens_whose_hole_is_half_a_disk.rs`, Q1290).
     /// - **Two or more rings enclosing nothing that nothing could place** — a
-    ///   ring along a torus, or with a side along a hyperbola (Q1253). No shape
-    ///   is known to reach it. It is not that a torus refuses every fuse before
-    ///   the joining: a bend fused with a copy of itself reaches
-    ///   [`Assembly::join_up_what_is_one_face`] under all three rules (Q597).
-    ///   What keeps two rings along one torus off one joined flat face so far
-    ///   is the gap in `which_way_an_edge_runs_round` (`fuse/arrange.rs`) that
-    ///   stops the one probe that would put them there.
+    ///   ring along a torus. No shape is known to reach it. It is not that a
+    ///   torus refuses every fuse before the joining: a bend fused with a copy
+    ///   of itself reaches [`Assembly::join_up_what_is_one_face`] under all
+    ///   three rules (Q597). What keeps two rings along one torus off one
+    ///   joined flat face so far is the gap in `which_way_an_edge_runs_round`
+    ///   (`fuse/arrange.rs`) that stops the one probe that would put them there.
+    ///   A ring with a side along a hyperbola was the other such ring (Q1253),
+    ///   and a shape reached it: united with a cone closed by a ball, a cut
+    ///   cone's wall has an outline and a hole of two corners each, each with a
+    ///   side along a hyperbola. Such a side is placed now (Q1289).
     /// - **Two or more rings each holding the others**, which would mean the
     ///   answer's rings cross. Nobody has traced whether any shape reaches it.
     fn rings_round(
@@ -1681,11 +1685,18 @@ impl Assembly {
     /// the two, and nothing for any other. The piece of the plane between an
     /// arc and its chord is the part inside the arc's surface on the side of
     /// the chord the arc bulges to, because every arc counted is of a crossing
-    /// that closes round the inside of its surface — a circle or an ellipse. A
-    /// straight side is its own chord and adds nothing. So a corner is held
-    /// when the turns add up to one, either way round, and not when they add
-    /// up to none. The outline of a bar united across a tube's wall runs along
-    /// two pipes and so does its hole
+    /// that closes round the inside of its surface — a circle or an ellipse —
+    /// or of a cone's parabola or one branch of its hyperbola, which bounds the
+    /// inside of the cone's nappe it is on, a convex region the chord's line
+    /// meets in the chord alone (`holds.rs`'s
+    /// `the_way_into_an_arc_that_does_not_close` has why). On a hyperbola's
+    /// plane the inside of the other nappe is a second region, and a point
+    /// there is in no piece of the arc. A straight side is its own chord and
+    /// adds nothing. So a corner is held when the turns add up to one, either
+    /// way round, and not when they add up to none. The outline of a bar
+    /// united across a tube's wall runs along two pipes and so does its hole,
+    /// and a cut cone's wall united with a cone closed by a ball has an outline
+    /// and a hole each with a side along a hyperbola
     /// (`a_joined_flat_face_whose_rings_enclose_no_area.rs`).
     ///
     /// A corner on an arc's surface is outside that arc's piece: it is not on
@@ -1703,8 +1714,9 @@ impl Assembly {
     /// not the region either circle bounds — and where no corner is placed. Of
     /// a ring along more than one surface, `None` too where its corners are not
     /// on one line, where a closed side is one of several, for an arc along a
-    /// torus or along a cone's parabola or hyperbola, and for an arc whose
-    /// bulge reads along its chord.
+    /// torus, for an arc along a cone's parabola or hyperbola whose plane holds
+    /// the apex or whose ends are not both on one nappe, for an arc whose bulge
+    /// reads along its chord, and where a corner's nappe cannot be settled.
     ///
     /// # Panics
     ///
@@ -2998,6 +3010,10 @@ struct Bulging {
     ends: [[f64; 3]; 2],
     surface: Surface,
     left: bool,
+    /// Where the plane cuts `surface`, a cone, in a parabola or a hyperbola,
+    /// the cone and the nappe the arc is on; `None` for an arc of a curve
+    /// that closes.
+    nappe: Option<(Cone, Decision)>,
 }
 
 /// How each arc of `ring` bulges against its chord, for
@@ -3021,17 +3037,24 @@ fn how_each_arc_bulges(
                 return Some(None);
             };
             let surface = the_curved_one(dart)?;
-            match surface {
-                Surface::Cylinder(_) | Surface::Sphere(_) => (),
-                Surface::Cone(_) => {
-                    where_a_closed_crossing_is_centred(&surface, plane)?;
+            let nappe = match surface {
+                Surface::Cylinder(_) | Surface::Sphere(_) => None,
+                Surface::Cone(_)
+                    if where_a_closed_crossing_is_centred(&surface, plane).is_some() =>
+                {
+                    None
+                }
+                Surface::Cone(cone) => {
+                    let ends = [from, to].map(|at| assembly.corners[at].point);
+                    let on = the_nappe_an_arc_that_does_not_close_is_on(&cone, plane, ends)?;
+                    Some((cone, on))
                 }
                 Surface::Plane(_) | Surface::Torus(_) => return None,
                 // A kind added to `rcad-geom` after this has not been shown
                 // to bound the region inside it, so an arc along it is not
                 // counted.
                 _ => return None,
-            }
+            };
             let ends = [from, to].map(|at| assembly.corners[at].point.coordinates());
             let into_the_arc = (assembly.corners[corner].point + towards).coordinates();
             let left = match winding_round(&[ends[0], ends[1], into_the_arc], normal).ok()? {
@@ -3044,6 +3067,7 @@ fn how_each_arc_bulges(
                 ends,
                 surface,
                 left,
+                nappe,
             }))
         })
         .collect::<Option<_>>()
@@ -3063,6 +3087,17 @@ fn turns_round(arcs: &[Option<Bulging>], normal: [f64; 3], at: [f64; 3]) -> Opti
                     "which side of a surface a corner is on came back as a decision \
                      nothing here knows: {other:?}"
                 ),
+            }
+            if let Some((cone, nappe)) = &arc.nappe {
+                let found = the_nappe_of(cone, PredicatePoint::from(at).enclosure());
+                match found {
+                    Decision::Pos | Decision::Neg | Decision::Zero if found != *nappe => {
+                        return Some(0);
+                    }
+                    Decision::Pos | Decision::Neg | Decision::Zero => (),
+                    Decision::Undecidable { .. } => return None,
+                    other => panic!("which nappe a corner is on came back as {other:?}"),
+                }
             }
             let left = match winding_round(&[arc.ends[0], arc.ends[1], at], normal).ok()? {
                 Decision::Pos => true,
@@ -6210,11 +6245,12 @@ mod tests {
     use super::super::Scratch;
     use super::super::select::choose;
     use super::{
-        Assembly, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, JoinedFace, Lump,
-        MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector, VertexKey, WhichArc,
+        Assembly, Bulging, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, JoinedFace,
+        Lump, MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector, VertexKey, WhichArc,
         WireStep, Written, assemble, name_of_the_closed_crossing_through,
         names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
-        the_half_space_both_ends_are_on, vertices_that_only_start_a_closed_edge,
+        the_half_space_both_ends_are_on, the_nappe_an_arc_that_does_not_close_is_on, turns_round,
+        vertices_that_only_start_a_closed_edge, winding_round,
     };
 
     /// A corner that settles on a lower rounding leaves the coordinate it came
@@ -7802,6 +7838,44 @@ mod tests {
             along: along.iter().copied().collect(),
             approximation: None,
         }
+    }
+
+    /// **A point inside the other nappe is in no piece of a hyperbola's arc**
+    /// (Q1289). The wall `x = −12` cuts the cone of slope 1 about `z` in the
+    /// hyperbola `z² − y² = 144`, and the arc of its upper branch under its
+    /// chord on `z = 18` bulges down, towards the lower branch. `(−12, 0, 15)`
+    /// is between the arc and its chord. `(−12, 0, −15)` is inside the cone too,
+    /// and on the side of the chord the arc bulges to, but on the lower nappe.
+    #[test]
+    fn a_point_inside_the_other_nappe_is_not_between_a_hyperbolas_arc_and_its_chord() {
+        let cone = Cone::new(Axis::z(), 1.0).expect("a positive slope");
+        let wall =
+            Plane::from_point_and_normal(Point::new(-12.0, 0.0, 0.0), Vector::new(-1.0, 0.0, 0.0))
+                .expect("a normal with length");
+        let reach = 180.0_f64.sqrt();
+        let ends = [
+            Point::new(-12.0, reach, 18.0),
+            Point::new(-12.0, -reach, 18.0),
+        ];
+        let nappe = the_nappe_an_arc_that_does_not_close_is_on(&cone, &wall, ends)
+            .expect("both ends are up the axis from the apex");
+        assert_eq!(nappe, Decision::Pos);
+        let normal = wall.normal().components();
+        let ends = ends.map(|end| end.coordinates());
+        let left = winding_round(&[ends[0], ends[1], [-12.0, 0.0, 12.0]], normal)
+            .expect("three corners off one line")
+            == Decision::Pos;
+        let arcs = [Some(Bulging {
+            ends,
+            surface: Surface::Cone(cone),
+            left,
+            nappe: Some((cone, nappe)),
+        })];
+        assert!(
+            matches!(turns_round(&arcs, normal, [-12.0, 0.0, 15.0]), Some(1 | -1)),
+            "between the arc and its chord"
+        );
+        assert_eq!(turns_round(&arcs, normal, [-12.0, 0.0, -15.0]), Some(0));
     }
 
     /// The plane `z = 0`, facing out of a bar that stands on it.
