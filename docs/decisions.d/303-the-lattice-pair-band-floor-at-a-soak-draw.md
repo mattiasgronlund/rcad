@@ -172,14 +172,20 @@ turned too.
 
 ### 303.5 What is left
 
-- **The other four bands are unmeasured at a soak.** `A_FLUSH_PAIR_IS_NOT_A_SOLID`,
-  `A_PAIR_ELSEWHERE_IS_NOT_A_SOLID` and `A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID`
-  were derived the same way, from one shipped draw. The skew row has its own
-  count floor (§136.5). All passed §290's 16 chunks at factor 66, so their
-  failure rate there is under about one in sixteen, and that is all that is
-  known. Measuring each at 48 seeds and moving it onto `band_for_a_draw_of` is
-  a row of its own. The flush band is narrow on purpose, and its doc says why,
-  so it moves only with a measurement that says why.
+- **The other three bands were measured at a soak by Q258**, `6cafcef4`, and
+  moved onto `band_for_a_draw_of` with their ends unchanged. Each was eight
+  fresh seeds at factor 66, 25 407 fuses a seed, and 24 seeds at factor 1,
+  447 fuses a seed, as each constant's doc comment records.
+  `A_FLUSH_PAIR_IS_NOT_A_SOLID` pooled 24 570 of 203 256, 12.09%, each soaked
+  seed between 11.83% and 12.52%, and the factor-1 seeds spread from 9.84% to
+  14.09%; seeds 9 and 21, 44 of 447 each, were under the fixed 10% floor.
+  `A_PAIR_ELSEWHERE_IS_NOT_A_SOLID` pooled 4 540 of 203 256, 2.23%, each seed
+  between 2.01% and 2.38%, the factor-1 seeds 1.79% to 3.80%; seeds 3 and 11,
+  8 of 447 each, were under the fixed 1.9% floor.
+  `A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID` pooled 4 515 of 203 256, 2.22%, each
+  seed between 2.10% and 2.31%, the factor-1 seeds 1.57% to 4.03%, every one
+  inside its band. The flush band kept its narrow 10%–28% on purpose. The skew
+  row keeps its own count floor (§136.5).
 - **The turned-over-lattice gap in §303.4** is a row for whoever next works on
   §17.7: for a sample of turned fuses that come back not a solid, fuse the
   same configuration upright, and say for each whether it is an exact answer
