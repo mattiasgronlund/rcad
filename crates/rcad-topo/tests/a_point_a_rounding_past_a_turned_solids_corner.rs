@@ -14,17 +14,20 @@
 //! A face on a pipe or a cone is held in that box by the discs across its
 //! axis, and a disc's reach along a coordinate axis was worked out as
 //! `r · √(1 − a²)`, which keeps nothing but rounding where the axis is a hair
-//! off that coordinate axis. A bar or a frustum tipped `1e-9` reaches a
+//! off that coordinate axis. A bar or a frustum tipped `1e-9` reached a
 //! billionth of its radius past the box, and points there came back `Outside`
-//! where every stored surface put them inside (Q1332).
+//! where every stored surface put them inside (Q1332), and a block resting
+//! just above the box was called `Apart` from the bar (Q1363). The box itself
+//! now works the reach out as `r · √(b² + c²)/|a|` from the axis's other two
+//! parts, rounded outward (Q1363).
 //!
 //! Every answer here is checked against the stored surfaces' exact signs.
 //! Every solid here is convex, so it holds a point exactly when each of its
 //! surfaces puts the point on the solid's side.
 
-use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Surface, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
-use rcad_topo::{Containment, FaceView, Model, SharedSpace, SolidKey, SolidView};
+use rcad_topo::{Containment, FaceView, Model, Rule, SharedSpace, SolidKey, SolidView};
 
 mod cones;
 
@@ -164,13 +167,14 @@ fn how_often_a_point_past_a_turned_cubes_box_that_every_plane_puts_inside_is_ans
     assert_eq!((points, inside, undecided, outside), (3897, 1, 3811, 85));
 }
 
-/// A point a billionth above the box of a bar and of a frustum, each tipped
-/// `1e-9` about `x`, under the top rim's highest point (Q1332).
+/// A point a billionth above the top cap's middle of a bar and of a frustum,
+/// each tipped `1e-9` about `x`, under the top rim's highest point (Q1332).
 ///
-/// The tip leaves the axis's `z` part exactly one, so the box, which works a
-/// disc's reach along `z` out as `r · √(1 − 1)`, has the top cap reach no
+/// The tip leaves the axis's `z` part exactly one, so a box that works a
+/// disc's reach along `z` out as `r · √(1 − 1)` has the top cap reach no
 /// higher than its middle. It truly reaches a billionth of its radius higher
-/// on one side, and the box alone put these points outside.
+/// on one side, and that box alone put these points outside. The box holds
+/// them now (Q1363).
 #[test]
 fn a_point_above_a_bar_or_a_frustum_tipped_a_billionth_that_its_surfaces_put_inside_is_inside() {
     for (shape, point) in [
@@ -180,7 +184,7 @@ fn a_point_above_a_bar_or_a_frustum_tipped_a_billionth_that_its_surfaces_put_ins
         let (model, solid, _) = shape.built([1.0, 0.0, 0.0], 1e-9);
         let view = model.solid(solid).expect("this model made the key");
         let (_, high) = view.box_around_it().expect("a solid has a box");
-        assert!(point[2] > high.coordinates()[2], "{shape:?}: {high:?}");
+        assert!(point[2] <= high.coordinates()[2], "{shape:?}: {high:?}");
         assert_eq!(
             what_the_stored_surfaces_say(view, point),
             Containment::Inside,
@@ -201,13 +205,18 @@ fn a_point_above_a_bar_or_a_frustum_tipped_a_billionth_that_its_surfaces_put_ins
 }
 
 /// Forty bars and frustums, each tipped about one of four axes square to its
-/// own by one of five small angles. Near each rim, every point sampled past
-/// the solid's box that every stored surface puts inside is classified.
+/// own by one of five small angles. Near each rim, every point sampled that
+/// every stored surface puts inside is counted, and those past the solid's box
+/// are classified.
 ///
-/// A tip under about `1e-7` leaves the box short of the discs at the rims,
-/// and the box alone answered every one of these points `Outside`. From
-/// `1e-6` the margin the box already leaves along the axis covers what the
-/// sum loses, and none of the points sampled is past the box.
+/// While the box worked a disc's reach out as `r · √(1 − a²)`, a tip under
+/// about `1e-7` left it short of the discs at the rims, and 23639 of these
+/// points were past it. The box alone answered every one of them `Outside`,
+/// and Q1332 opened the box out for `classify_uncertain_point` alone, after
+/// which all 23639 came back `Inside`. Now the box itself holds all 172800
+/// (Q1363), so none is past it and that step is gone. Classified with it gone,
+/// all 172800 came back `Inside` too; that run takes six seconds, so it is not
+/// kept here.
 #[test]
 fn how_often_a_point_past_a_tipped_bar_or_frustums_box_that_its_surfaces_put_inside_is_answered_outside()
  {
@@ -218,14 +227,21 @@ fn how_often_a_point_past_a_tipped_bar_or_frustums_box_that_its_surfaces_put_ins
         [2.0, -1.0, 0.0],
     ];
     let angles = [1e-9, 1e-8, 3e-8, 1e-7, 1e-6];
-    let (mut points, mut inside, mut undecided, mut outside) = (0, 0, 0, 0);
+    let (mut points, mut past_the_box) = (0, 0);
+    let (mut inside, mut undecided, mut outside) = (0, 0, 0);
     for shape in [Tipped::Bar, Tipped::Frustum] {
         for axis in axes {
             for angle in angles {
                 let (model, solid, tip) = shape.built(axis, angle);
                 let view = model.solid(solid).expect("this model made the key");
-                for point in points_past_its_box_its_surfaces_put_inside(view, shape, &tip) {
+                let (low, high) = view.box_around_it().expect("a solid has a box");
+                let (low, high) = (low.coordinates(), high.coordinates());
+                for point in points_near_its_rims_its_surfaces_put_inside(view, shape, &tip) {
                     points += 1;
+                    if (0..3).all(|axis| low[axis] <= point[axis] && point[axis] <= high[axis]) {
+                        continue;
+                    }
+                    past_the_box += 1;
                     let answer = view.classify_point(
                         Point::new(point[0], point[1], point[2]),
                         &Policy::certified(),
@@ -244,18 +260,21 @@ fn how_often_a_point_past_a_tipped_bar_or_frustums_box_that_its_surfaces_put_ins
         }
     }
     println!(
-        "{points} points past the box that every surface puts inside: \
+        "{points} points near a rim that every surface puts inside, {past_the_box} past the box: \
          {inside} Inside, {undecided} Undecidable, {outside} Outside"
     );
-    assert_eq!((points, inside, undecided, outside), (23639, 23639, 0, 0));
+    assert_eq!(
+        (points, past_the_box, inside, undecided, outside),
+        (172_800, 0, 0, 0, 0)
+    );
 }
 
 /// A block of side 1 resting two ten-billionths above the box of the bar
 /// above, tipped `1e-9` about `x`, over the side of the top cap that the tip
 /// lifts (Q1363).
 ///
-/// The bar's box stops at the cap's middle in `z`, where the cap truly
-/// reaches a billionth higher at `y = 1`, so the two boxes miss and the boxes
+/// The bar's box stopped at the cap's middle in `z`, where the cap truly
+/// reaches a billionth higher at `y = 1`, so the two boxes missed and the boxes
 /// alone answered `Apart` both ways round. Yet the block's corner at
 /// `(−0.5, 0.5)` is under the cap by half a billionth less two
 /// ten-billionths, and every stored surface of the bar puts it inside. A
@@ -264,7 +283,7 @@ fn how_often_a_point_past_a_tipped_bar_or_frustums_box_that_its_surfaces_put_ins
 #[test]
 fn a_block_just_above_a_tipped_bars_box_is_not_called_apart_from_it() {
     let policy = Policy::certified();
-    let (mut model, bar, block) = a_block_just_above_a_tipped_bar();
+    let (model, bar, block) = a_block_just_above_a_tipped_bar();
     let bar = model.solid(bar).expect("this model made the key");
     let block = model.solid(block).expect("this model made the key");
 
@@ -296,6 +315,39 @@ fn a_block_just_above_a_tipped_bars_box_is_not_called_apart_from_it() {
         top_of_the_bar.coordinates()[2] >= in_both[2],
         "the bar's box stops short of what its surfaces hold: {top_of_the_bar:?}"
     );
+}
+
+#[test]
+fn every_fuse_of_a_block_just_above_a_tipped_bar() {
+    let policy = Policy::certified();
+    let (model, bar, block) = a_block_just_above_a_tipped_bar();
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for [one, other] in [[bar, block], [block, bar]] {
+            let mut copy = model.clone();
+            let said = copy.fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new());
+            let what = match said {
+                Ok(fused) => fused
+                    .solids()
+                    .iter()
+                    .map(|&solid| {
+                        let measured = copy
+                            .solid(solid)
+                            .expect("a solid the fuse made")
+                            .measure(
+                                Deflection::of(0.001).expect("a positive length"),
+                                &policy,
+                                &mut ProvenanceLog::new(),
+                            )
+                            .expect("the answer measures");
+                        format!("{} ~ {}", measured.volume(), measured.volume_error())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                Err(why) => format!("{why:?}"),
+            };
+            println!("{rule:?} bar first {}: {what}", one == bar);
+        }
+    }
 }
 
 /// The bar of [`Tipped::Bar`] tipped `1e-9` about `x`, and a block of side 1
@@ -491,15 +543,13 @@ impl Tipped {
 
 /// Points just inside each rim of the untipped solid, `inward` of the radius
 /// in from the rim and `inward` along the axis in from the cap, half a degree
-/// apart round it, tipped with the solid — those past its box that every
-/// stored surface puts inside.
-fn points_past_its_box_its_surfaces_put_inside(
+/// apart round it, tipped with the solid — those that every stored surface
+/// puts inside.
+fn points_near_its_rims_its_surfaces_put_inside(
     view: SolidView<'_>,
     shape: Tipped,
     tip: &Isometry,
 ) -> Vec<[f64; 3]> {
-    let (low, high) = view.box_around_it().expect("a solid has a box");
-    let (low, high) = (low.coordinates(), high.coordinates());
     let mut found = Vec::new();
     for (radius, height, towards_the_middle) in shape.rims() {
         for step in 0..720 {
@@ -511,11 +561,7 @@ fn points_past_its_box_its_surfaces_put_inside(
                     height + towards_the_middle * inward,
                 );
                 let point = tip.apply_to_point(near_the_rim).coordinates();
-                let is_past_the_box =
-                    (0..3).any(|axis| point[axis] < low[axis] || point[axis] > high[axis]);
-                if is_past_the_box
-                    && what_the_stored_surfaces_say(view, point) == Containment::Inside
-                {
+                if what_the_stored_surfaces_say(view, point) == Containment::Inside {
                     found.push(point);
                 }
             }
