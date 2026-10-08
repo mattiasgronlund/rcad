@@ -72,9 +72,16 @@
 //! pick a corner out on their own and a fuse has to count along the line
 //! (§31.3). That count is only well defined if the line has a direction the
 //! three surfaces fix between them — so the three are put in a **fixed order**
-//! before anything is worked out, and the points come back running along
-//! `n₁ × n₂` for the two planes *in that order*. `fuse(A, B)` and `fuse(B, A)`
-//! therefore number the same corner the same way.
+//! before anything is worked out, and the points come back running along one
+//! direction of the line the two planes cross in, the same direction every
+//! time for that pair in that order. **It is not always `n₁ × n₂`**:
+//! [`the_line_two_planes_cross_in`]'s own doc says which direction it
+//! actually is, and
+//! `crates/rcad-geom/tests/a_line_steeper_than_a_cones_rulings.rs`'s second
+//! test has a pair of planes where it comes out `−(n₁ × n₂)` instead. What
+//! `fuse(A, B)` and `fuse(B, A)` need is only that the direction is fixed by
+//! the pair and the order, not which of the two signs it carries, so both
+//! still number the same corner the same way.
 //!
 //! # A sign and a size are two different numbers here
 //!
@@ -3021,6 +3028,14 @@ fn cross_of(u: &[Term; 3], v: [f64; 3]) -> Option<[Term; 3]> {
 /// three. Which one is picked is worked out in `f64` and only ranks the
 /// candidates; that a minor is **not zero** is decided exactly, and an axis
 /// whose minor cannot be built at all is passed over rather than trusted.
+///
+/// **The points this hands back run along `n₁ × n₂ / minor`, not along
+/// `n₁ × n₂` itself.** `minor` is that same largest two-by-two component of
+/// `n₁ × n₂`, so dividing by it always turns that one component positive —
+/// and turns the other two round with it when `minor` was negative to start
+/// with. A caller after `n₁ × n₂`'s own sign, rather than after one fixed
+/// direction for the pair, reads it off the planes' own normals and never off
+/// the points here.
 ///
 /// # Errors
 ///
