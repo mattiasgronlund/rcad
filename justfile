@@ -1420,7 +1420,9 @@ _gate-selftest-sleep:
 # The filter is driven through `--set` against fixture lists rather than against
 # the real ones, for the same reason `check-gate-summary-selftest` is: this
 # recipe is itself a step of the docs arm, so a nested real run would not
-# terminate.
+# terminate. Both nested calls run against a scratch repository, the way
+# `check-gate-summary-selftest`'s does, so that `gate`'s §415 refusal of an
+# uncommitted or untracked real tree never fires on the selftest itself.
 #
 # Both directions are exercised. A filter that dropped nothing and a filter that
 # dropped everything are both "the list came out wrong", and only one of them is
@@ -1494,6 +1496,18 @@ check-gate-docs-selftest:
     grep -qx check-corpus-selftest <<<"$docs_arm" \
         || fail "check-corpus-selftest left the docs arm, and it needs no corpus to run"
 
+    # Every nested `gate-docs` and `gate-lane` call below asks git about a
+    # scratch repository and not the real tree, because `gate` refuses a tree
+    # with anything uncommitted or untracked (§415). The real tree is dirty
+    # whenever this is run by hand mid-edit, and a failing proptest writes its
+    # seed into it while the real gate runs, which would add this step to a
+    # red gate's `also failed:` line for nothing.
+    repo="$dir/repo"
+    mkdir -p "$repo"
+    export GIT_DIR="$repo/.git" GIT_WORK_TREE="$repo"
+    git init -q -b main
+    git -c user.name=selftest -c user.email=selftest@invalid commit -q --allow-empty -m 'a clean tree'
+
     # The filter itself. `list` is a real recipe that costs nothing; the word
     # beside it is not a recipe at all, which is the cheapest failing step there
     # is and needs no fixture of its own.
@@ -1543,6 +1557,13 @@ check-gate-docs-selftest:
     got=$($j --set gate_steps 'list test-slow' --set gate_log "$dir/lane.log" gate-lane quite 2>&1) \
         && fail "a lane gate given 'quite' ran"
     grep -q "not 'quite'" <<<"$got" || fail "a lane gate given 'quite' was refused without gate's own word"
+
+    # `GIT_DIR` wins over `-C`, and the section below runs `git -C "$repo"`
+    # against a second, unrelated repository of its own, and so does
+    # `check-gate-lane-callers` itself, through its own `git -C dir grep`. Left
+    # exported, every one of those calls would read the scratch repository
+    # above instead, and this section would test nothing.
+    unset GIT_DIR GIT_WORK_TREE
 
     # `check-gate-lane-callers`, in a repository built here.
     held=check-gate-lane-callers
