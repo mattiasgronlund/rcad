@@ -30,10 +30,12 @@
 //!   with two of them curved, and every rule was refused there until Q1259
 //!   placed those points. The circle then holds two nodes off its start, so
 //!   the order round it is asked, and four intersections and two differences
-//!   answer since Q1269 named the circle's two arcs apart, and two more
+//!   answer since Q1269 named the circle's two arcs apart, two more
 //!   intersections and a difference with the ball since Q1270 put its pole
-//!   among the points walked along the wall's arc; every other rule is refused
-//!   after the meet.
+//!   among the points walked along the wall's arc, and the steep frustum's
+//!   unions and the half less it since Q1337 put the steep cone's apex on the
+//!   half's floor as well as its wall; every other rule is refused after the
+//!   meet.
 //!
 //! Without a wall no fuse here asks the order round one of these circles. A
 //! seam puts one node on a face's circle beside its start, and each face has
@@ -397,13 +399,12 @@ fn a_frustum_and_a_bar_of_radius_four_cross_in_one_circle_on_both_sides() {
     );
 }
 
-/// **A wall through the circle is placed, and most rules then stop after it.**
-/// The wide frustum seamed up `−x` and cut down to `x ≥ 0` by a block, against
-/// the steep frustum, the bar of radius 4 and a whole ball of radius 3 four up.
-/// The wall `x = 0` crosses each pair's circle on the half frustum's side, at
-/// `(0, ±4, 4)` for the first two and `(0, ±z₂, z₂)`, `z₂ = 2 + √2/2`, for the
-/// ball, so the circle there has two nodes off its start, `(4, 0, 4)` and
-/// `(z₂, 0, z₂)`.
+/// **A wall through the circle is placed, and every rule then answers against
+/// the steep frustum.** The wide frustum seamed up `−x` and cut down to `x ≥ 0`
+/// by a block, `84π`, against the steep frustum of the tests above, from
+/// `z = 2.5` to `z = 6` about the apex `(0, 0, 2)`, `511π/6`. The wall `x = 0`
+/// crosses their circle at `z = 4` on the half frustum's side, at `(0, ±4, 4)`,
+/// so the circle there has two nodes off its start, `(4, 0, 4)`.
 ///
 /// Each is where the wall, the cone and the partner meet, two of them curved,
 /// and every rule both ways was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
@@ -412,37 +413,74 @@ fn a_frustum_and_a_bar_of_radius_four_cross_in_one_circle_on_both_sides() {
 /// in two points. The order round the circle from its start is then asked, as
 /// `along_a_crossing.rs` answers it since Q1141.
 ///
+/// The steep frustum turns about the axis, so it holds the same either side of
+/// the wall and the half shares half of the `367π/6` the whole frustum does.
+/// The union is `84π + 511π/6 − 367π/12 = 1663π/12` and the intersection
+/// `367π/12`. The half less the steep frustum is two solids, as the whole one
+/// less it is: the half of the ring below `z = 4`,
+/// `½(π∫₂⁴ z² dz − π∫₂.₅⁴ 4(z − 2)² dz) = ½(56π/3 − 63π/6) = 49π/12`, and the
+/// half of the top above `z = 6`, `½ · π(8³ − 6³)/3 = 148π/3`. The steep
+/// frustum less the half is `511π/6 − 367π/12 = 655π/12`.
+///
+/// **The unions and the half less the steep frustum were refused
+/// `ResultIsNotManifold { count: 1 }`** (Q1337). The steep cone's apex is on
+/// the edge where the wall meets the half's floor `z = 2`. The wall is cut
+/// along the two rulings `x = 0` cuts the steep cone in, drawn in full down to
+/// the apex, so it walked that edge as two sides either side of the apex. The
+/// floor touches the steep cone at the apex and nowhere else, which drew
+/// nothing on it, so it walked the edge as one side. The floor is now handed
+/// the cone as a surface that touches it, and `fuse/arrange.rs`'s
+/// `place_the_touches` puts the apex on the one curve of the floor through it,
+/// the edge along the wall.
+#[test]
+fn a_half_frustum_against_a_steeper_frustum_whose_apex_is_on_its_floor_answers_every_rule() {
+    let gives = what_each_rule_gives(|model| [a_half_frustum(model), a_steep_frustum(model)]);
+    let wanted = [
+        Gives::Holds(1663.0 * PI / 12.0),
+        Gives::Holds(1663.0 * PI / 12.0),
+        Gives::Holds(367.0 * PI / 12.0),
+        Gives::Holds(367.0 * PI / 12.0),
+        Gives::HoldsTwo(49.0 * PI / 12.0, 148.0 * PI / 3.0),
+        Gives::Holds(655.0 * PI / 12.0),
+    ];
+    assert!(
+        gives
+            .iter()
+            .zip(&wanted)
+            .all(|(answer, wanted)| wanted.is(answer)),
+        "{gives:?}"
+    );
+}
+
+/// **A wall through the circle is placed, and half the rules then stop after
+/// it.** The half frustum of the test above against the bar of radius 4 and a
+/// whole ball of radius 3 four up. The wall `x = 0` crosses each pair's circle
+/// on the half frustum's side, at `(0, ±4, 4)` for the bar and `(0, ±z₂, z₂)`,
+/// `z₂ = 2 + √2/2`, for the ball, so the circle there has two nodes off its
+/// start, `(4, 0, 4)` and `(z₂, 0, z₂)`. They are placed as for the steep
+/// frustum above.
+///
 /// Each partner turns about the axis, so it holds the same either side of the
 /// wall and the half frustum shares half of what the whole one does. With `W`
 /// the whole frustum's volume, `P` the partner's and `S` what the two share,
 /// the answers are `W/2 + P − S/2`, `S/2`, `(W − S)/2` and `P − S/2`: for the
-/// steep frustum `1663π/12`, `367π/12`, `49π/12` with `148π/3`, and `655π/12`;
-/// for the bar `608π/3`, `124π/3`, `128π/3` and `356π/3`; for the ball, with
+/// bar `608π/3`, `124π/3`, `128π/3` and `356π/3`; for the ball, with
 /// `S = (100 − √2)π/3`, `(620 + √2)π/6`, `(100 − √2)π/6`, `(404 + √2)π/6` and
 /// `(116 + √2)π/6`.
 ///
-/// **What answers is the intersection with the steep frustum, both ways,
-/// `367π/12`, the steep frustum less the half, `655π/12`, the intersection with
-/// the bar, both ways, `124π/3`, the half less the bar, `128π/3`, the
-/// intersection with the ball, both ways, `(100 − √2)π/6`, and the half less
-/// the ball, `(404 + √2)π/6`.**
+/// **What answers is the intersection with the bar, both ways, `124π/3`, the
+/// half less the bar, `128π/3`, the intersection with the ball, both ways,
+/// `(100 − √2)π/6`, and the half less the ball, `(404 + √2)π/6`.**
 ///
 /// The partner's skin holds the whole circle, and the arc of it at `x < 0`,
 /// between the same two corners as the arc along the cone, was one edge with
 /// it: every union and the partner less the half were refused
 /// `ResultIsNotManifold { count: 4 }`, with the partner's skin three times
-/// along it and the cone once. `fuse/assemble.rs`'s
-/// `which_arc_of_a_circle_this_is` names the two arcs apart since Q1269, and
-/// each of those rules now stops one step on, and is not fixed:
+/// along it and the cone once, and so were the steep frustum's above.
+/// `fuse/assemble.rs`'s `which_arc_of_a_circle_this_is` names the two arcs
+/// apart since Q1269, and each of those rules now stops one step on, and is
+/// not fixed:
 ///
-/// - against the steep frustum, the unions and the half less it are refused
-///   `ResultIsNotManifold { count: 1 }`, as the union one way round was
-///   already. The steep cone's apex is `(0, 0, 2)`, on the edge where the wall
-///   meets the half's floor. The wall's face is cut along the two rulings
-///   `x = 0` cuts the steep cone in, drawn in full down to the apex, so its
-///   edge along the floor is two edges either side of it; the floor touches the
-///   steep cone at the apex alone and keeps that edge whole, one edge with one
-///   face along it and two more with one each;
 /// - against the bar, the unions and the bar less the half are refused
 ///   `ACurvedFaceGoesRightRoundWithNoSeam`, by the mesh the fuse checks its
 ///   answer with;
@@ -467,17 +505,9 @@ fn a_frustum_and_a_bar_of_radius_four_cross_in_one_circle_on_both_sides() {
 /// pole twice. `mesh.rs`'s `put_in_the_poles_a_crossing_passes` puts the pole
 /// in along an open crossing too, where it is between the edge's ends.
 #[test]
-fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_placed_and_most_rules_stop_after()
+fn a_wall_through_the_circle_a_cone_crosses_a_bar_or_a_ball_in_is_placed_and_half_the_rules_stop_after()
  {
-    let half = |model: &mut Model| {
-        let wide = seamed(model, 1.0, 2.0, 8.0, [-1.0, 0.0]);
-        the_x_positive_half_of(model, wide)
-    };
-    let partners: [fn(&mut Model) -> SolidKey; 3] = [
-        |model| {
-            let steeper = a_frustum(model, 2.0, 0.5, 4.0);
-            up(model, steeper, 2.0)
-        },
+    let partners: [fn(&mut Model) -> SolidKey; 2] = [
         |model| {
             model
                 .add_round_bar(4.0, 10.0, &Isometry::identity())
@@ -485,17 +515,9 @@ fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_plac
         },
         |model| a_ball_four_up(model, 3.0),
     ];
-    use Gives::{Holds, NoSeam, NotFlat, NotManifold};
+    use Gives::{Holds, NoSeam, NotFlat};
     let root = 2.0_f64.sqrt();
     let wanted = [
-        [
-            NotManifold(1),
-            NotManifold(1),
-            Holds(367.0 * PI / 12.0),
-            Holds(367.0 * PI / 12.0),
-            NotManifold(1),
-            Holds(655.0 * PI / 12.0),
-        ],
         [
             NoSeam,
             NoSeam,
@@ -514,7 +536,7 @@ fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_plac
         ],
     ];
     for (partner, wanted) in partners.into_iter().zip(wanted) {
-        let gives = what_each_rule_gives(|model| [half(model), partner(model)]);
+        let gives = what_each_rule_gives(|model| [a_half_frustum(model), partner(model)]);
         assert!(
             gives
                 .iter()
@@ -573,29 +595,42 @@ fn a_ball_a_frustum_touches_round_one_circle_is_refused_before_its_arcs_are_name
     );
 }
 
-/// What one fuse is pinned to give: one solid of a closed-form volume, or a
-/// refusal by name.
+/// What one fuse is pinned to give: one solid of a closed-form volume, two
+/// solids of two, the smaller first, or a refusal by name.
 enum Gives {
     Holds(f64),
-    NotManifold(usize),
+    HoldsTwo(f64, f64),
     NoSeam,
     NotFlat,
 }
 
 impl Gives {
     fn is(&self, answer: &Result<Vec<(f64, f64)>, Error>) -> bool {
+        let near = |(volume, error): (f64, f64), wanted: f64| (volume - wanted).abs() <= error;
         match (self, answer) {
             (Gives::Holds(wanted), Ok(volumes)) => {
-                matches!(volumes[..], [(volume, error)] if (volume - wanted).abs() <= error)
+                matches!(volumes[..], [one] if near(one, *wanted))
             }
-            (Gives::NotManifold(wanted), Err(Error::ResultIsNotManifold { count })) => {
-                count == wanted
+            (Gives::HoldsTwo(smaller, larger), Ok(volumes)) => {
+                matches!(volumes[..], [one, other] if near(one, *smaller) && near(other, *larger))
             }
             (Gives::NoSeam, Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }))
             | (Gives::NotFlat, Err(Error::AWireWillNotLieFlatOnItsFace { .. })) => true,
             _ => false,
         }
     }
+}
+
+/// The wide frustum seamed up `−x`, cut down to `x ≥ 0`.
+fn a_half_frustum(model: &mut Model) -> SolidKey {
+    let wide = seamed(model, 1.0, 2.0, 8.0, [-1.0, 0.0]);
+    the_x_positive_half_of(model, wide)
+}
+
+/// The frustum of slope 2 from `z = 2.5` to `z = 6` about the apex `(0, 0, 2)`.
+fn a_steep_frustum(model: &mut Model) -> SolidKey {
+    let steeper = a_frustum(model, 2.0, 0.5, 4.0);
+    up(model, steeper, 2.0)
 }
 
 fn seamed(model: &mut Model, slope: f64, near: f64, far: f64, seam: [f64; 2]) -> SolidKey {

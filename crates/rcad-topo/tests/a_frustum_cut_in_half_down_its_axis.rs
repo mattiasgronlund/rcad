@@ -40,45 +40,41 @@
 //!   `CannotTellTheCellsOfAFaceApart` on that face, as the pointed cone did;
 //!   that was never pinned, and Q457 did not measure it again (§347.8).
 //! - **Floor at `z = 0`, through the apex.** The apex is then a point on the
-//!   block's own bottom edge. The three fuses that keep none of the block's
-//!   floor answer, right:
-//!   [`a_floor_through_the_apex_still_gives_the_half_frustum_under_intersection_and_difference`].
-//!   The three that keep it, both unions and the block less the frustum, are
-//!   refused `ResultIsNotManifold { count: 1 }`:
-//!   [`a_floor_through_the_apex_is_not_a_manifold_under_the_fuses_that_keep_the_floor`].
+//!   block's own bottom edge. All six fuses answer, since Q1337:
+//!   [`a_floor_through_the_apex_cuts_the_frustum_in_half_under_every_rule`].
 //!
-//! # Why the floor through the apex is not a manifold
+//! # Why the floor through the apex now answers
 //!
 //! Before §347 all six fuses on this floor refused `Undecidable` naming *which
 //! way a crossing runs*. Each ruling's direction was read as `∇S × ∇Q` at its
 //! first node, which was the apex, and the cone has no gradient there. §347
-//! reads a ruling's direction off its own line, and the fuses now get as far
-//! as putting the answer's faces together.
+//! reads a ruling's direction off its own line, and the fuses then got as far
+//! as putting the answer's faces together, where the block's face `x = 0` and
+//! its floor `z = 0` disagreed about the edge they share: `x = 0` cuts the
+//! cone in two rulings that meet the bottom edge at the apex, so that face had
+//! a node there and walked the bottom edge as two sides, while `intersect`
+//! said the plane `z = 0` only touches the cone at the apex, and `cuts.rs`
+//! used to read a touch at one point as two faces that meet nowhere — so the
+//! floor had no node at the apex and walked the bottom edge as one side, and
+//! the mismatch came back `ResultIsNotManifold { count: 1 }` for the three
+//! fuses that keep the floor.
 //!
-//! There the block's face `x = 0` and its floor `z = 0` disagree about the
-//! edge they share. On `x = 0` the two rulings meet the bottom edge at the
-//! apex, so that face has a node there and walks the bottom edge as two sides.
-//! The floor is never cut by the cone: `intersect` says the plane `z = 0`
-//! touches the cone at the apex and nowhere else, and `cuts.rs` reads a touch
-//! at one point as two faces that meet nowhere. So the floor has no node at the
-//! apex and walks the bottom edge as one side. A probe printed both faces'
-//! corners and showed this (§347.8). It did not print which edge `assemble.rs`
-//! finds claimed by one face. So the disagreement is the likely cause of the
-//! refusal, but that has not been shown. Every fuse that keeps the floor next
-//! to the pieces of `x = 0` on either side of the apex is refused, and every
-//! fuse that keeps neither answers.
-//!
-//! **This is a gap and not a limit**: every answer exists and is written in the
-//! refusals' messages.
+//! Q1337 closes that gap: `cuts.rs`'s `how_two_faces_meet` now gives
+//! `AtOnePoint` for a touch, so each face is handed the other's surface as a
+//! cut, and `arrange.rs`'s `place_the_touches` puts a node at the touch point
+//! once it is proved to lie on exactly one crossing drawn on the face — here,
+//! the floor's crossing with `x = 0` passes through the apex, so the floor
+//! gets the node it was missing and walks the bottom edge as two sides too.
+//! `join_arcs_that_meet_at_nothing` no longer joins across that node. **This
+//! was a gap and not a limit**: every answer existed and was written in the
+//! refusals' messages, and all six now answer it.
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, HalfSpace, Isometry, NamedRun, Orientation, Picker, Plane,
     Point, Scale, Surface, SurfaceMeet, Vector, intersect,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{
-    DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey, WireStepView,
-};
+use rcad_topo::{DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey, WireStepView};
 
 mod cones;
 
@@ -124,45 +120,12 @@ fn a_block_face_with_the_apex_inside_it_cuts_the_frustum_in_half_under_every_rul
 }
 
 /// The block's floor at `z = 0`, through the apex, so the apex is a point on
-/// the block's bottom edge. The intersection, either order, and the frustum
-/// less the block keep nothing of the block's floor, and each answers the half
-/// frustum, `56π/3`.
+/// the block's bottom edge. All six fuses answer as they do clear of the
+/// apex, since Q1337. The block is `10 · 20 · 12 = 2400`.
 #[test]
-fn a_floor_through_the_apex_still_gives_the_half_frustum_under_intersection_and_difference() {
-    for (rule, frustum_first) in [
-        (Rule::Intersection, true),
-        (Rule::Intersection, false),
-        (Rule::Difference, true),
-    ] {
+fn a_floor_through_the_apex_cuts_the_frustum_in_half_under_every_rule() {
+    for (rule, frustum_first) in six_fuses() {
         is_one_solid_of_the_right_volume(0.0, rule, frustum_first);
-    }
-}
-
-/// The same floor under the three fuses that keep it: the union, either order,
-/// and the block less the frustum. Each is refused
-/// `ResultIsNotManifold { count: 1 }`, an edge of the answer claimed by one
-/// face. The module doc says what a probe showed of why.
-///
-/// Every answer exists: the block is `10 · 20 · 12 = 2400` and holds the
-/// frustum's `x ≤ 0` half whole. The message of each assertion is the answer
-/// the refusal stands in for.
-#[test]
-fn a_floor_through_the_apex_is_not_a_manifold_under_the_fuses_that_keep_the_floor() {
-    for (rule, frustum_first) in [
-        (Rule::Union, true),
-        (Rule::Union, false),
-        (Rule::Difference, false),
-    ] {
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let frustum = cones::a_frustum(&mut model, SLOPE, LOW, HIGH);
-        let cutter = a_block(&mut model, [-10.0, -10.0, 0.0], [0.0, 10.0, 12.0]);
-        let said = fuse(&mut model, frustum, cutter, rule, frustum_first);
-        assert!(
-            matches!(said, Err(Error::ResultIsNotManifold { count: 1 })),
-            "{rule:?} (frustum first: {frustum_first}) should be one solid of volume {}; today \
-             the floor has no corner at the apex where the face x = 0 has one. Got {said:?}",
-            the_right_volume(0.0, rule, frustum_first)
-        );
     }
 }
 

@@ -670,6 +670,10 @@ struct Arrangement<'f> {
     /// were handed in. `None` when the surface misses the face's own and cuts
     /// nothing.
     cut_crossings: Vec<Option<usize>>,
+    /// Each cut surface that touches the face's own at one point and crosses
+    /// it nowhere, with that point. It draws no curve, and
+    /// [`Arrangement::place_the_touches`] says what it still does.
+    touches: Vec<(Surface, PredicatePoint)>,
     /// Which crossing each boundary edge lies on, by wire and position.
     crossing_of_edge: Vec<Vec<usize>>,
     /// Which node each edge of each wire starts at, by wire and position.
@@ -1022,6 +1026,7 @@ impl<'f> Arrangement<'f> {
             arcs: Vec::new(),
             drawn_in_full: Vec::new(),
             cut_crossings: Vec::new(),
+            touches: Vec::new(),
             crossing_of_edge: Vec::new(),
             node_of_corner: Vec::new(),
             node_of_the_end: Vec::new(),
@@ -1037,6 +1042,7 @@ impl<'f> Arrangement<'f> {
         arrangement.place_the_corners(policy, log)?;
         arrangement.leave_out_the_cuts_clear_of_the_face();
         arrangement.place_the_meets(policy, log)?;
+        arrangement.place_the_touches();
         arrangement.start_every_closed_crossing_that_has_no_node(log)?;
         arrangement.work_out_how_each_crossing_runs(log)?;
         arrangement.merge_points_that_are_one_point(policy, log)?;
@@ -1200,7 +1206,8 @@ impl<'f> Arrangement<'f> {
     /// The crossing `surface ∩ partner`, adding it if it is not there yet.
     ///
     /// `None` when the pair names no curve at all — two parallel planes, a ball
-    /// clear of the face's own surface.
+    /// clear of the face's own surface. A cut surface that touches the face's
+    /// own at one point is kept in [`Arrangement::touches`] as well.
     ///
     /// A pair can name **two** curves: a plane down the inside of a pipe cuts
     /// two straight lines, and a ball crossing a pipe off-axis leaves two loops.
@@ -1242,7 +1249,13 @@ impl<'f> Arrangement<'f> {
     ) -> Result<Option<usize>> {
         let runs = match intersect(&self.surface, &partner, policy, log)? {
             SurfaceMeet::Curves(runs) => runs,
-            SurfaceMeet::Nothing | SurfaceMeet::TouchAtOnePoint { .. } => return Ok(None),
+            SurfaceMeet::Nothing => return Ok(None),
+            SurfaceMeet::TouchAtOnePoint { at } => {
+                if cuts {
+                    self.touches.push((partner, at));
+                }
+                return Ok(None);
+            }
             SurfaceMeet::SameSurface => {
                 return Err(Error::AFaceMeetsItsNeighbourOnItsOwnSurface {
                     face: self.face.keys[0],
@@ -2138,6 +2151,70 @@ impl<'f> Arrangement<'f> {
             .find(|edge| edge.start.vertex == vertex)
             .expect("every corner node is where an edge of this face starts")
             .start
+    }
+
+    /// A node where a cut surface touches the face's own at one point, when
+    /// that point is on exactly one crossing drawn here.
+    ///
+    /// **The touch draws no curve, but a face next door can draw curves through
+    /// the point**, and it splits its own side of the edge between the two
+    /// faces there. A frustum's floor `z = 2` touches a steeper cone at its apex
+    /// `(0, 0, 2)` and nowhere else, while the wall `x = 0` beside it cuts that
+    /// cone in two rulings, which meet the edge along the floor at the apex.
+    /// The wall walks that edge as two sides, so the floor has to as well, or
+    /// the edge comes back with one face along it (Q1337, §347.8). That is the
+    /// argument `cuts.rs` makes for cutting every face by every surface, carried
+    /// down to a point: both sides of an edge are split where either is.
+    ///
+    /// **The node is named by the three surfaces**, the face's, the crossing's
+    /// partner and the one touching, and is the first place they meet. The face
+    /// next door finds the point as the meet of the same three, and the touch
+    /// is the only point the face's surface shares with the one touching, so
+    /// every meet of the three is that point.
+    ///
+    /// **A point on two crossings or more is a node already**: where those two
+    /// meet, as [`Arrangement::place_the_meets`] or a corner of the face put
+    /// it. Adding another would ask the order of two nodes at one point, which
+    /// two boxes cannot always settle. A cone's apex on a face of that cone is
+    /// one such, on the two rulings a plane through it cuts.
+    ///
+    /// **A point not proved on the crossing gets no node**, as every touch got
+    /// none before this step. Where it was on after all, the face next door
+    /// splits the edge and this face does not, and the fuse is refused
+    /// `ResultIsNotManifold` when the pieces are put together rather than
+    /// answering wrongly.
+    fn place_the_touches(&mut self) {
+        for (touching, at) in self.touches.clone() {
+            let through: SmallVec<[usize; 2]> = (0..self.crossings.len())
+                .filter(|&crossing| {
+                    self.crossings[crossing].reaches_the_face
+                        && self.passes_through_a_touch(crossing, at)
+                })
+                .collect();
+            let [crossing] = through[..] else {
+                continue;
+            };
+            let mut named = [self.surface, self.crossings[crossing].partner, touching];
+            named.sort_by_key(name_of_surface_bits);
+            self.nodes.push(Node {
+                point: as_exact_as_it_is(at),
+                vertex: None,
+                made_of: Some((named, 0)),
+                also: Vec::new(),
+                half_way_round: false,
+                crossings: vec![crossing],
+            });
+        }
+    }
+
+    /// Whether `crossing` provably runs through the point `at`: on its partner,
+    /// and picked by whichever curve of the pair it is.
+    fn passes_through_a_touch(&self, crossing: usize, at: PredicatePoint) -> bool {
+        match side_of_surface(&self.crossings[crossing].partner, at) {
+            Decision::Zero => nothing_rules_the_point_out(self.crossings[crossing].picked_by(), at),
+            Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => false,
+            other => panic!("a decision nothing here knows: {other:?}"),
+        }
     }
 
     /// A closed crossing with no node on it still needs one.
@@ -3544,8 +3621,12 @@ impl<'f> Arrangement<'f> {
     /// of these two arcs alone, and the two are one stretch of an open
     /// crossing: on the same crossing, along the same boundary, and running
     /// the same way against their gradients.
+    ///
+    /// **A node put where a surface touches the face is not joined across**,
+    /// for the reason an input corner is not: the face next door splits the
+    /// edge there ([`Arrangement::place_the_touches`]).
     fn the_two_arcs_to_join_at(&self, node: usize, touching: &[usize]) -> Option<(usize, usize)> {
-        if self.nodes[node].vertex.is_some() {
+        if self.nodes[node].vertex.is_some() || self.a_touch_is_at(node) {
             return None;
         }
         let &[one, other] = touching else {
@@ -3563,6 +3644,18 @@ impl<'f> Arrangement<'f> {
             && first.against_its_gradients == second.against_its_gradients
             && !self.crossings[first.crossing].order.closes())
         .then_some((lower, higher))
+    }
+
+    /// Whether `node` stands for a place where a surface touching the face
+    /// meets a crossing. Such a surface draws no crossing here, so only
+    /// [`Arrangement::place_the_touches`] names a node by it.
+    fn a_touch_is_at(&self, node: usize) -> bool {
+        let Node { made_of, also, .. } = &self.nodes[node];
+        made_of.iter().chain(also).any(|(surfaces, _)| {
+            self.touches
+                .iter()
+                .any(|(touching, _)| surfaces.contains(touching))
+        })
     }
 
     /// Walk every arc from both sides, keeping the region on the left, and see
@@ -9975,6 +10068,7 @@ mod tests {
             arcs: Vec::new(),
             drawn_in_full: Vec::new(),
             cut_crossings: Vec::new(),
+            touches: Vec::new(),
             crossing_of_edge: Vec::new(),
             node_of_corner: Vec::new(),
             node_of_the_end: Vec::new(),

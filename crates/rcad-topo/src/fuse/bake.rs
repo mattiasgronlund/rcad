@@ -150,8 +150,9 @@ pub(crate) struct BakedFace {
     ///
     /// [`FaceData`]: crate::model::FaceData
     pub(crate) wires: Vec<Vec<BakedEdge>>,
-    /// The second surface of each crossing cutting this face, filled in by the
-    /// gathering step. The first is always the face's own.
+    /// The second surface of each crossing cutting this face, and each surface
+    /// touching it at one point, filled in by the gathering step. The first is
+    /// always the face's own.
     pub(crate) cuts: Vec<Surface>,
     /// A box round the face.
     pub(crate) bounds: Bounds,
