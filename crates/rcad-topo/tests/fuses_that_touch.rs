@@ -147,7 +147,11 @@
 //! names. Since Q1118 `fuse/assemble.rs` gives the rim one name and one corner,
 //! and every fuse of the touching row answers.
 //! [`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`]
-//! checks nine domes by every rule against their closed forms.
+//! checks nine domes by every rule against their closed forms. **Laid on its
+//! side it does not answer**: the ball's poles are then on the rim, the ball's
+//! side of the rim is cut in two at them, and every fuse is refused as an edge
+//! with one face along it;
+//! [`a_dome_lying_on_its_side_is_refused_as_an_edge_with_one_face`] pins that.
 //!
 //! **A bend's touch is not reached.** Every fuse of a bend lying on a block is
 //! refused as a quartic, touching or one unit clear, so that cell is pinned at
@@ -156,7 +160,9 @@
 //! clear of the bend, answers all 90. The 45 that keep the bend were refused
 //! writing it back, `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`,
 //! the stop §243.5 and §323.5 record, until the bend's wall was used forwards
-//! (§361). A torus against any other curved surface is refused by name.
+//! (§361). A torus against any other curved surface is refused by name, so a
+//! bar butted onto a bend's cap never reaches the rim the two share;
+//! [`a_bar_on_a_bends_cap_is_refused_before_its_rim_is_named`] pins that.
 //!
 //! # What is not built, and why
 //!
@@ -182,7 +188,7 @@ use proptest::prelude::*;
 use proptest::test_runner::{
     Config, FileFailurePersistence, RngAlgorithm, TestCaseError, TestRng, TestRunner,
 };
-use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -393,6 +399,142 @@ fn a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms() {
                     "{rule:?} of R = {r}, h = {h} (shaft first: {shaft_first}) measures {volume} \
                      against {holds}, out by more than the {error} its mesh declares"
                 );
+            }
+        }
+    }
+}
+
+/// The dome on a shaft of its radius lying on its side, pinned at **every rule
+/// both ways round refused `ResultIsNotManifold { count: 1 }`**. It fails the
+/// day that changes, which is the day it should be checked against the closed
+/// forms [`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`]
+/// holds the upright dome to.
+///
+/// A ball's poles are always straight up and down from its centre, so a ball
+/// centred on the end cap of a bar lying along `x` or `y` has both poles on the
+/// cap's rim, and the cap's plane runs down its polar axis. `fuse/arrange.rs`
+/// cuts the ball's side of the rim in two at the poles
+/// (`across_a_circle_that_starts_at_a_pole`, §194.4): from the pole it starts at
+/// to the other, `HalfWayRoundAClosedCurve`, and back. The bar's side of the rim
+/// is one closed side at the bar's seam corner. `fuse/assemble.rs`'s
+/// `the_name_each_closed_curve_goes_by` joins the names of closed sides only, so
+/// the two halves and the closed side are three edges, each with one face. With
+/// the bar along `x` its seam corner is itself one of the poles, and that is
+/// refused the same way. Queue row Q1143 found it.
+#[test]
+fn a_dome_lying_on_its_side_is_refused_as_an_edge_with_one_face() {
+    let policy = Policy::certified();
+    for radius in 1..=3 {
+        for (axis, quarters) in [
+            (Axis::x(), 1),
+            (Axis::x(), 3),
+            (Axis::y(), 1),
+            (Axis::y(), 3),
+        ] {
+            let (r, h) = (f64::from(radius), f64::from(radius + 1));
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let lying = Isometry::quarter_turns(&axis, quarters).expect("an axis along x or y");
+            let shaft = model
+                .add_round_bar(r, h, &lying)
+                .expect("a whole-number bar");
+            let end = lying.apply_to_point(Point::new(0.0, 0.0, h)) - Point::origin();
+            let dome = model
+                .add_ball(
+                    r,
+                    &Isometry::translation(end).expect("a whole-number shift"),
+                )
+                .expect("a whole-number ball");
+            for (one, other) in [(shaft, dome), (dome, shaft)] {
+                for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                    let refused = model
+                        .clone()
+                        .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                        .map(|answer| answer.solids().len());
+                    assert!(
+                        matches!(refused, Err(Error::ResultIsNotManifold { count: 1 })),
+                        "{rule:?} of R = {r} lying along {axis:?} turned {quarters} (shaft first: \
+                         {}) came back {refused:?}; pin it against the closed forms",
+                        one == shaft
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A bar of a bend's tube radius butted onto the bend's `+x` cap, so the cap's
+/// plane, the bend's ring and the bar's pipe all hold the cap's rim — pinned at
+/// **every rule both ways round refused before the rim is reached**.
+///
+/// A fuse with a ring in it crosses every surface of the other solid with the
+/// ring, wherever the two faces are. So a bar with a flat far end is refused
+/// `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` for that end's plane, which
+/// lies square to the cap and off the ring's axis however far from the bend it
+/// is. A bar whose far end is cut by a plane through the ring's axis gets past
+/// that, and is refused `ACrossingBetweenATorusAndAnotherCurvedSurface` for its
+/// pipe against the ring, which touch along the rim. Neither reaches
+/// `fuse/assemble.rs`, so whether the rim would come out under one name is not
+/// measured here. Queue row Q1143 built both; this fails the day either moves.
+#[test]
+fn a_bar_on_a_bends_cap_is_refused_before_its_rim_is_named() {
+    let policy = Policy::certified();
+    for (ring, tube) in [(3, 1), (5, 2)] {
+        // The control row of the bend's cap against a block: the quarter bend
+        // of `touching`, with a block clear of it that nothing here fuses.
+        let built = Drawn {
+            shape: Shape::ABendsCapAgainstABlock { ring, tube },
+            apart: Apart::ClearByOne,
+        }
+        .build();
+        let (mut model, bend) = (built.model, built.second);
+        let (ring, tube) = (f64::from(ring), f64::from(tube));
+        let along_minus_y = Isometry::translation(Vector::new(ring, 0.0, 0.0))
+            .expect("a whole-number shift")
+            .compose(&Isometry::quarter_turns(&Axis::x(), 1).expect("x is an axis"));
+        let flat_ended = model
+            .add_round_bar(tube, 2.0, &along_minus_y)
+            .expect("a whole-number bar");
+        let cut_through_the_axis = model
+            .add_bar_cut_off_by(
+                tube,
+                [
+                    Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                        .expect("a unit normal"),
+                    Plane::from_point_and_normal(
+                        Point::new(0.0, 0.0, ring),
+                        Vector::new(-1.0, 0.0, 1.0),
+                    )
+                    .expect("a normal with a length"),
+                ],
+                &along_minus_y,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar whose far end lies on the plane x + y = 0");
+        for (bar, wanted) in [
+            (
+                flat_ended,
+                rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic,
+            ),
+            (
+                cut_through_the_axis,
+                rcad_geom::Error::ACrossingBetweenATorusAndAnotherCurvedSurface,
+            ),
+        ] {
+            for (one, other) in [(bar, bend), (bend, bar)] {
+                for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                    let refused = model
+                        .clone()
+                        .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                        .map(|answer| answer.solids().len());
+                    assert!(
+                        matches!(&refused, Err(Error::Geometry(why)) if *why == wanted),
+                        "{rule:?} of ring {ring}, tube {tube} (bar first: {}) came back \
+                         {refused:?}, not {wanted:?}",
+                        one == bar
+                    );
+                }
             }
         }
     }
