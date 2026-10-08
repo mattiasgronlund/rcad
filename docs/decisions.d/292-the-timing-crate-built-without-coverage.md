@@ -147,6 +147,30 @@ way, was not run down — the row's "done" test is 267.5's *first* table (the
 stand-in build), and that one now shows a residual difference where it
 previously showed none; this is reported rather than closed.
 
+**Correction, 2026-10-08.** §305.1 finds that neither leg of this gap holds
+and that nothing moved since `9e72d414`: "the split at `INITED` between 8771
+and 8772 is not the variable and not `timed`: the **same binary**, run twice
+with the same command and the same environment, lands on either" (305.1).
+With address-space randomisation on, as every run in the table above had it,
+each process draws one of the two values; §305.4 shows the split is a fixed
+function of where the stack starts when randomisation is switched off,
+flipping with every 16 bytes the stack is moved. §305.3 reran the unset and
+set arms of a binary built the same way as this row's — one with the timing
+crate not linked in at all (`nm | grep -c rcad_fuzz_timing` reads 0, §305.2),
+so no reading of `timed`'s `OnceLock` check can be the cause — and got, across
+five runs, `ft: 8771` then `3101/8858/521, 18 new` three times and `ft: 8772`
+then `3101/8836/519, 16 new` twice; neither this row's unset line (`8771`,
+then `3101/8835/519`, 16 new) nor its set line (`8772/504`, then
+`3102/8863/523`, 19 new) came up there, nor in 20 more runs at fixed stack
+positions (§305.3, §305.4). The exact numbers above are therefore not
+reproduced, but §305.1's conclusion is: "So §292.5's 'does not fully hold' is
+two draws from this lottery, not a residual cost of the timing crate"
+(305.1). Where this row's own `corp: 504` draw came from is open (§305.7).
+§305.7 names the methods that judge the variable properly instead of reading
+a pair of single draws: the arms at fixed stack positions (`setarch -R`, with
+the two environments padded to equal size), or several runs per arm with
+randomisation on, compared by the spread of outcomes.
+
 ### 292.6 What is left
 
 - **The residual difference in 292.5, unmeasured.** Whether it is `timed`'s
