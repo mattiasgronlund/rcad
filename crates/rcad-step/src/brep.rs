@@ -12,7 +12,7 @@ use std::f64::consts::SQRT_2;
 
 use rcad_geom::{
     Axis, Cylinder, EdgeRun, HalfSpace, NEAREST_F64_POINT_ROUNDOFF, Orientation, Picker, Plane,
-    Point, Sphere, Surface, Vector,
+    Point, Sphere, Surface, Torus, Vector, which_two_surfaces_a_run_is_between,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{
@@ -151,6 +151,10 @@ struct Walk {
     /// The surfaces either side of each closed edge, filled in before any face
     /// of the shell is described — see [`Walk::find_the_closed_edges`].
     closed_edges: BTreeMap<EntityId, Vec<Surface>>,
+    /// The run every closed edge was described with, which
+    /// [`Walk::which_way_round_a_closed_edge_is_stored`] reads the two surfaces
+    /// the edge is between off where the longitude says nothing.
+    closed_runs: BTreeMap<EntityId, EdgeRun>,
     /// The surfaces of the faces along every edge of the shell, filled in by
     /// the same pass — [`Walk::the_surface_that_names_the_curve`] reads it to tell a circle
     /// imprinted on a flat face from one a curved face places.
@@ -174,6 +178,7 @@ impl Walk {
             face_names: Vec::new(),
             face_surfaces: Vec::new(),
             closed_edges: BTreeMap::new(),
+            closed_runs: BTreeMap::new(),
             surfaces_along_each_edge: BTreeMap::new(),
         }
     }
@@ -279,8 +284,15 @@ impl Walk {
         let bounds = self.the_bounds_that_bound_something(reading, face, keyword, &surface)?;
         let outer_first = self.outer_bound_first(reading, face, &bounds, &surface)?;
         let mut wires = Vec::with_capacity(outer_first.len());
-        for bound in outer_first {
-            wires.push(self.describe_the_bound(reading, face, bound, &surface)?);
+        if let [only] = outer_first[..]
+            && let Some((ball, loop_id)) =
+                self.a_whole_ball_off_its_chart(reading, face, only, &surface)?
+        {
+            wires.push(self.describe_a_whole_ball(&ball, loop_id)?);
+        } else {
+            for bound in outer_first {
+                wires.push(self.describe_the_bound(reading, face, bound, &surface)?);
+            }
         }
         let drafted = self
             .builder
@@ -303,7 +315,8 @@ impl Walk {
         keyword: Keyword,
     ) -> Result<(Surface, Orientation), Refusal> {
         let sits_on = reading.reference_at(face, keyword, 2)?;
-        let written = reading.surface_at(face, sits_on)?;
+        let written =
+            reading.surface_at(face, sits_on, || corners_as_written(reading, face, keyword))?;
         let same_sense = reading.flag_at(face, keyword, 3)?;
         Ok(match (written.as_plane(), same_sense) {
             (_, true) => (written, Orientation::Forward),
@@ -661,6 +674,168 @@ impl Walk {
         Ok(wire)
     }
 
+    /// The ball a face covers whole, where the file cut it open along a slit
+    /// whose two corners are not both where this kernel's ball pinches, with
+    /// the loop that says so; `None` for every other bound.
+    ///
+    /// **A loop that walks one edge there and straight back bounds the whole
+    /// ball**, wherever the edge runs on it: it encloses nothing, so the face
+    /// is the ball less the slit. A ball turned off `z` comes as one (Q1010),
+    /// and this kernel's [`Sphere`] pinches only on the `z` line through its
+    /// centre, so the poles [`with_a_pole_where_it_turns_back`] would put at
+    /// the file's corners would stand where the ball does not pinch. The ball
+    /// is read on its own chart instead — see [`Walk::describe_a_whole_ball`].
+    /// A loop whose two corners both stand on that line is the kernel's own
+    /// seam, and is walked as the file wrote it.
+    ///
+    /// **The slit and its corners are dropped, so they are only checked, and
+    /// to the digits the file was written in** (`docs/decisions.md` §404). The
+    /// slit is a `CIRCLE` that lies on the ball and each corner is on the ball,
+    /// both to [`A_SLIT_WRITTEN_IN_TWELVE_DIGITS_MAY_MISS_ITS_BALL_BY`]. A file
+    /// whose slit misses its ball by more is walked as it was before, which
+    /// refuses it. The corners are read ahead, so a file walked that way does
+    /// not count an integer in them twice; the circle's numbers it does.
+    ///
+    /// **Where the ball is too small for its centre to hold two poles apart**
+    /// — `z + r` or `z − r` rounds to `z` — there is no chart to read it on,
+    /// and it is walked as before too. The writer refuses to write such a ball
+    /// for the same reason.
+    fn a_whole_ball_off_its_chart(
+        &self,
+        reading: &Reading<'_>,
+        face: EntityId,
+        bound: EntityId,
+        surface: &Surface,
+    ) -> Result<Option<(Sphere, EntityId)>, Refusal> {
+        let Surface::Sphere(ball) = surface else {
+            return Ok(None);
+        };
+        let (loop_id, _) = self.loop_of_bound(reading, face, bound)?;
+        let uses = reading.references_at(loop_id, EDGE_LOOP, 1)?;
+        let [there, back] = uses[..] else {
+            return Ok(None);
+        };
+        let edge_curve = reading.reference_at(there, ORIENTED_EDGE, 3)?;
+        if reading.reference_at(back, ORIENTED_EDGE, 3)? != edge_curve
+            || reading.flag_at(there, ORIENTED_EDGE, 4)?
+                == reading.flag_at(back, ORIENTED_EDGE, 4)?
+            || an_edge_with_one_corner(reading, edge_curve)
+        {
+            return Ok(None);
+        }
+        let curve = reading.reference_at(edge_curve, EDGE_CURVE, 3)?;
+        let Some(held) = reading.file().instance(curve) else {
+            return Ok(None);
+        };
+        if held.parts()[0].keyword() != CIRCLE.name() {
+            return Ok(None);
+        }
+        let corner = |position| -> Result<Point, Refusal> {
+            let vertex_point = reading.reference_at(edge_curve, EDGE_CURVE, position)?;
+            let at = reading.reference_at(vertex_point, VERTEX_POINT, 1)?;
+            reading.point_read_ahead_at(vertex_point, at)
+        };
+        let corners = [corner(1)?, corner(2)?];
+        if corners.iter().all(|corner| {
+            surface
+                .the_way_its_first_coordinate_runs_at(*corner)
+                .is_none()
+        }) || the_poles_of_a_ball_on_its_chart(ball).is_none()
+        {
+            return Ok(None);
+        }
+        let on_the_ball = |(off, largest): (f64, f64)| {
+            off <= (A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF
+                + A_SLIT_WRITTEN_IN_TWELVE_DIGITS_MAY_MISS_ITS_BALL_BY)
+                * largest
+        };
+        if !corners.iter().all(|corner| {
+            on_the_ball((
+                ((*corner - ball.centre()).length() - ball.radius()).abs(),
+                largest_of(&[*corner, ball.centre()], &[ball.radius()]),
+            ))
+        }) {
+            return Ok(None);
+        }
+        let position = reading.reference_at(curve, CIRCLE, 1)?;
+        let place = reading.placement_at(curve, position)?;
+        let radius = reading.real_at(curve, CIRCLE, 2)?;
+        let Ok(its_plane) = plane_through(place.origin, place.axis) else {
+            return Ok(None);
+        };
+        if !how_far_off_the_circle_can_be(surface, place.origin, its_plane.normal(), radius)
+            .is_some_and(on_the_ball)
+        {
+            return Ok(None);
+        }
+        Ok(Some((*ball, loop_id)))
+    }
+
+    /// The whole ball as `add_ball` builds it, on the chart this kernel's ball
+    /// carries: poles at `centre ± (0, 0, r)` and the seam in the plane through
+    /// the centre square to `y`, on the side facing `+x`. The file's own slit
+    /// and its two corners are not read into the solid. It is the ball the
+    /// writer puts in a file for a whole ball turned off `z`
+    /// (`Writing::a_whole_ball_on_its_chart`), so a turned slit reads as the
+    /// file this kernel would have written for it.
+    fn describe_a_whole_ball(
+        &mut self,
+        ball: &Sphere,
+        loop_id: EntityId,
+    ) -> Result<rcad_topo::DraftWire, Refusal> {
+        let centre = ball.centre();
+        let not_a_working_shape = |why| Refusal::TheGeometryIsNotAWorkingShape { id: loop_id, why };
+        let meridian = Plane::from_point_and_normal(centre, Vector::new(0.0, 1.0, 0.0))
+            .map_err(not_a_working_shape)?;
+        let facing_x = HalfSpace::through_a_point_facing(centre, Vector::new(1.0, 0.0, 0.0))
+            .map_err(not_a_working_shape)?;
+        let mut poles = Vec::with_capacity(2);
+        for at in the_poles_of_a_ball_on_its_chart(ball)
+            .expect("a_whole_ball_off_its_chart reads only a ball that holds two poles apart")
+        {
+            let pole = self
+                .builder
+                .add_vertex(at)
+                .map_err(|why| self.refused(loop_id, why))?;
+            self.vertex_names.push(loop_id);
+            self.corner_points.insert(pole, at);
+            poles.push(pole);
+        }
+        let (north, south) = (poles[0], poles[1]);
+        let seam = self
+            .builder
+            .add_edge(
+                north,
+                south,
+                EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Plane(meridian),
+                    picked_by: smallvec![Picker::from(facing_x)],
+                },
+            )
+            .map_err(|why| self.refused(loop_id, why))?;
+        self.edge_names.push(loop_id);
+        self.ends.insert(seam, [north, south]);
+        let mut steps = Vec::with_capacity(4);
+        for (way, pole) in [
+            (Orientation::Forward, south),
+            (Orientation::Reversed, north),
+        ] {
+            let coedge = self
+                .builder
+                .add_coedge(seam, way)
+                .map_err(|why| self.refused(loop_id, why))?;
+            self.coedge_names.push(loop_id);
+            steps.push(DraftStep::Along(coedge));
+            steps.push(DraftStep::Pole(pole));
+        }
+        let wire = self
+            .builder
+            .add_wire(&steps)
+            .map_err(|why| self.refused(loop_id, why))?;
+        self.wire_names.push(loop_id);
+        Ok(wire)
+    }
+
     /// One `ORIENTED_EDGE`, as one use of one edge running one way round.
     ///
     /// **[`Orientation`] means two different things and the file answers only
@@ -893,24 +1068,27 @@ impl Walk {
     /// later, so a hint that came out wrong is a refusal by name and never a
     /// solid with a seam running backwards.
     ///
-    /// **A travel that dots to exactly zero against the winding is no answer,
-    /// and it says so.** `which_way_a_closed_crossing_turns` reads the surface's
-    /// latitude there, and this has no gradient to build one from — so the hint
-    /// goes back to the file's own flag rather than picking a side. Picking one
-    /// is worse than useless: the two uses of a closed edge travel exact
-    /// opposite ways, so a tie-break that answers the same for both is
-    /// *provably* wrong for one of them, and `SolidBuilder` refuses the whole
-    /// solid by `ADraftEdgeIsWalkedTheSameWayTwice`. That is where 26
-    /// of the corpus's files went, every one of them stopped by this and
-    /// nothing else: a bend of pipe capped by a plane, whose cap circle runs
-    /// round the *ring* while [`Surface::the_way_its_first_coordinate_runs_at`]
-    /// on a bend runs round the **tube**, square to it at every corner.
+    /// **A travel that dots to exactly zero against the winding is a circle
+    /// round a torus's ring**, square at every corner to the winding, which runs
+    /// round the tube. There the way the edge is stored is read the way
+    /// `rcad-topo` reads it, by
+    /// [`the_way_a_closed_edge_runs_where_its_longitude_says_nothing`]: the
+    /// torus's latitude where its two surfaces cross, which is what
+    /// `Model::validate` checks, and the mesher's own rule where a plane
+    /// touches the torus, which `Model::validate` passes over. The disc of
+    /// §229.4 with a round rim in two bands has one of each: its equator, and
+    /// the two circles where its flat faces rest on the rim (§390.5).
     ///
-    /// `ORIENTED_EDGE.orientation` answers a different question (§115), so
-    /// falling back to it is luck — but it is luck that at least tells the two
-    /// uses apart, and `Model::validate` asks the certified question moments
-    /// later and refuses by `AClosedEdgeIsWalkedAgainstItsSurface` when the luck
-    /// runs out.
+    /// **Where neither has an answer the hint goes back to the file's own flag**
+    /// rather than picking a side. Picking one is worse than useless: the two
+    /// uses of a closed edge travel exact opposite ways, so a tie-break that
+    /// answers the same for both is *provably* wrong for one of them, and
+    /// `SolidBuilder` refuses the whole solid by
+    /// `ADraftEdgeIsWalkedTheSameWayTwice`. `ORIENTED_EDGE.orientation` answers
+    /// a different question (§115), so falling back to it is luck — but it is
+    /// luck that at least tells the two uses apart, and `Model::validate` asks
+    /// the certified question moments later and refuses by
+    /// `AClosedEdgeIsWalkedAgainstItsSurface` when the luck runs out.
     fn which_way_round_a_closed_edge_is_stored(
         &self,
         reading: &Reading<'_>,
@@ -935,7 +1113,18 @@ impl Walk {
         else {
             return Ok(None);
         };
-        let leaning = travel.dot(winding);
+        let mut leaning = travel.dot(winding);
+        if leaning == 0.0
+            && let (Some(run), [one, other]) =
+                (self.closed_runs.get(&edge_curve), carried_by.as_slice())
+            && let Some(stored) = the_way_a_closed_edge_runs_where_its_longitude_says_nothing(
+                run,
+                [one, other],
+                corner,
+            )
+        {
+            leaning = travel.dot(stored);
+        }
         Ok(if leaning > 0.0 {
             Some(true)
         } else if leaning < 0.0 {
@@ -1010,6 +1199,9 @@ impl Walk {
             [starts_at, ends_at],
             along_the_curve,
         )?;
+        if starts_at == ends_at {
+            self.closed_runs.insert(edge_curve, run.clone());
+        }
         let edge = self
             .builder
             .add_edge(start, end, run)
@@ -1209,6 +1401,13 @@ impl Walk {
     /// seam cut from a plane whose normal the turn left an ulp off length one,
     /// and scaling it to length one again moved its last bit (Q822,
     /// `docs/decisions.md` §366).
+    ///
+    /// **The pipe a circle on flat faces is named by keeps the axis the file
+    /// wrote** ([`Axis::as_written`]), as a `CYLINDRICAL_SURFACE` does, and the
+    /// writer asks the same constructor whether the pipe reads back
+    /// (`Writing::an_arc_of_a_circle_on_a_flat_face`). A disc drawn on a turned
+    /// bar's top has that axis an ulp off length one, and [`Axis::new`] moved
+    /// the last bit of 76 of 372 such axes (Q1001, §355.6).
     fn the_surface_that_names_the_curve(
         &self,
         reading: &Reading<'_>,
@@ -1234,7 +1433,7 @@ impl Walk {
             && self.every_face_holds_the_curve(reading, edge_curve, curve, keyword, place)?
         {
             let radius = reading.real_at(curve, CIRCLE, 2)?;
-            let round = Axis::new(place.origin, place.axis)
+            let round = Axis::as_written(place.origin, place.axis)
                 .and_then(|axis| Cylinder::new(axis, radius))
                 .map_err(not_a_working_shape)?;
             return Ok(Surface::Cylinder(round));
@@ -1393,6 +1592,10 @@ impl Walk {
     ///
     /// When `EDGE_CURVE.same_sense` is false the edge runs the other way round
     /// the curve, which is the other arc, and the half-space is reversed.
+    ///
+    /// Where the half-space stands, along `(B − A) × w`, is
+    /// [`a_half_space_naming_the_arc`]'s: an arc longer than half its curve
+    /// needs one a fuse can read that a shorter arc does not.
     fn the_arc_between(
         &self,
         edge_curve: EntityId,
@@ -1406,7 +1609,7 @@ impl Walk {
         }
         let across = (corners[1] - corners[0]).cross(place.axis);
         let facing = if along_the_curve { across } else { -across };
-        let picking = a_half_space_holding_both(corners, facing)
+        let picking = a_half_space_naming_the_arc(corners, facing, place.origin)
             .ok_or(Refusal::AnArcThisReaderCouldNotName { edge: edge_curve })?;
         Ok(EdgeRun::PartOfWhereItCrosses {
             and,
@@ -1811,7 +2014,9 @@ impl ProbeWalk {
         let keyword =
             self.record(reading.keyword_of(self.walk.brep, face, &[ADVANCED_FACE, FACE_SURFACE]))?;
         let sits_on = self.record(reading.reference_at(face, keyword, 2))?;
-        let written = self.record(reading.surface_at(face, sits_on))?;
+        let written = self.record(
+            reading.surface_at(face, sits_on, || corners_as_written(reading, face, keyword)),
+        )?;
         let same_sense = self.record(reading.flag_at(face, keyword, 3))?;
         let (surface, used) = match (written.as_plane(), same_sense) {
             (_, true) => (written, Orientation::Forward),
@@ -1829,9 +2034,21 @@ impl ProbeWalk {
         )?;
         let bound_count = outer_first.len();
         let mut wires = Vec::with_capacity(bound_count);
-        for bound in outer_first {
-            if let Some(wire) = self.probe_the_bound(reading, face, bound, &surface) {
-                wires.push(wire);
+        let whole = match outer_first[..] {
+            [only] => self.record(
+                self.walk
+                    .a_whole_ball_off_its_chart(reading, face, only, &surface),
+            )?,
+            _ => None,
+        };
+        if let Some((ball, loop_id)) = whole {
+            let described = self.walk.describe_a_whole_ball(&ball, loop_id);
+            wires.push(self.record(described)?);
+        } else {
+            for bound in outer_first {
+                if let Some(wire) = self.probe_the_bound(reading, face, bound, &surface) {
+                    wires.push(wire);
+                }
             }
         }
         if wires.len() < bound_count {
@@ -1920,6 +2137,60 @@ impl ProbeWalk {
     }
 }
 
+/// Every corner of a face as the file wrote it — each end of each edge of its
+/// `EDGE_LOOP`s, and the one corner of a `VERTEX_LOOP` — which a cone's slope
+/// is put back from where the file cut its half-angle (`cone_from`, in
+/// `geometry.rs`).
+///
+/// Read before the face is described, so it reads the file and not the walk,
+/// and it counts no integer it meets ([`Reading::point_read_ahead_at`]). `None`
+/// where a bound, a loop or a corner does not read, or a loop is neither kind:
+/// describing the face refuses it by name a moment later, and a slope from the
+/// corners that did read would be a slope from part of the face.
+///
+/// **The corner of a `VERTEX_LOOP` counts**, though the walk drops it where
+/// it stands on the apex ([`Walk::the_bounds_that_bound_something`]). On a
+/// cone placed with its radius on the cap, as `a_pointed_cone_with_its_apex_written_as_a_loop`
+/// is, the apex is the one corner off the placement's plane, and it says the
+/// slope; a cone placed at its apex finds it on that plane, where it says
+/// nothing and is passed over.
+fn corners_as_written(
+    reading: &Reading<'_>,
+    face: EntityId,
+    keyword: Keyword,
+) -> Option<Vec<Point>> {
+    let mut vertices = Vec::new();
+    for bound in reading.references_at(face, keyword, 1).ok()? {
+        let bound_keyword = reading
+            .keyword_of(face, bound, &[FACE_OUTER_BOUND, FACE_BOUND])
+            .ok()?;
+        let loop_id = reading.reference_at(bound, bound_keyword, 1).ok()?;
+        if let Some(record) = reading.file().instance(loop_id)?.part(VERTEX_LOOP.name()) {
+            vertices.push(record.attribute(1)?.as_reference()?);
+            continue;
+        }
+        for use_of_an_edge in reading.references_at(loop_id, EDGE_LOOP, 1).ok()? {
+            let edge_curve = reading
+                .reference_at(use_of_an_edge, ORIENTED_EDGE, 3)
+                .ok()?;
+            for position in 1..=2 {
+                vertices.push(
+                    reading
+                        .reference_at(edge_curve, EDGE_CURVE, position)
+                        .ok()?,
+                );
+            }
+        }
+    }
+    vertices
+        .into_iter()
+        .map(|vertex| {
+            let at = reading.reference_at(vertex, VERTEX_POINT, 1).ok()?;
+            reading.point_read_ahead_at(vertex, at).ok()
+        })
+        .collect()
+}
+
 /// One coedge as a loop walks it, with the corners it goes from and to, and
 /// where the second one is.
 #[derive(Clone, Copy, Debug)]
@@ -1954,6 +2225,13 @@ struct Walked {
 /// `LED_D5.0mm.step` writes its pole `1.6e-15` off that line, so it gets no
 /// pole either, and imports as it did.
 ///
+/// **A loop that is nothing but one edge walked there and back is not walked
+/// here** unless both its corners stand on that line: it is a whole ball, cut
+/// open along a slit, and [`Walk::a_whole_ball_off_its_chart`] reads it on the
+/// ball's own chart instead (`docs/decisions.md` §404). So what is left to
+/// turn back at a corner the ball does not pinch at is a part of a ball, as
+/// the domes above are.
+///
 /// An edge with one corner is never turned at: it has no far end to come back
 /// from.
 fn with_a_pole_where_it_turns_back(walked: &[Walked], surface: &Surface) -> Vec<DraftStep> {
@@ -1972,6 +2250,35 @@ fn with_a_pole_where_it_turns_back(walked: &[Walked], surface: &Surface) -> Vec<
     }
     steps
 }
+
+/// The two poles of `ball` where this kernel's ball pinches, north first:
+/// `centre ± (0, 0, r)`, which is where `add_ball` puts them. `None` where
+/// `z + r` or `z − r` rounds to `z`, so that a pole would stand on the centre
+/// and not on the ball.
+pub(crate) fn the_poles_of_a_ball_on_its_chart(ball: &Sphere) -> Option<[Point; 2]> {
+    let [x, y, z] = ball.centre().coordinates();
+    let [north, south] = [z + ball.radius(), z - ball.radius()];
+    (north != z && south != z).then(|| [Point::new(x, y, north), Point::new(x, y, south)])
+}
+
+/// How far, in parts of the largest number involved, a slit cutting a whole
+/// ball open, and each of its two corners, may sit off the ball beyond
+/// [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`] roundings and still be read as on it —
+/// see [`Walk::a_whole_ball_off_its_chart`].
+///
+/// **It is what writing the numbers in twelve significant digits costs**, the
+/// allowance [`Walk::every_face_holds_the_curve`] already gives an
+/// `ELLIPSE`'s sizes, and for the same reason: the numbers never reach the
+/// model, so the check only tells a slit on the ball from a file that is
+/// wrong, and a ball turned off `z` puts its corners at irrational
+/// coordinates a file writes rounded. Each number is off by at most half a
+/// unit in its twelfth digit, `5e-12` of the largest. A corner's distance off
+/// the ball is moved by at most `√3` of that for the corner, `√3` for the
+/// centre and one for the radius; a circle's by `√3` for each of the two
+/// centres and one for each of the two radii, `2√3 + 2 < 5.5` in all, and
+/// six of them is this. A slit a thousandth of its radius off is refused
+/// (`docs/decisions.md` §404).
+const A_SLIT_WRITTEN_IN_TWELVE_DIGITS_MAY_MISS_ITS_BALL_BY: f64 = 6.0 * 5e-12;
 
 /// Whether the apex is inside the box of [`A_CIRCLE_MAY_MISS_ITS_FACE_BY`]
 /// roundings round `corner`, a rounding being [`NEAREST_F64_POINT_ROUNDOFF`]
@@ -2033,6 +2340,115 @@ fn an_edge_with_one_corner(reading: &Reading<'_>, edge_curve: EntityId) -> bool 
     )
 }
 
+/// Which way a closed edge round a torus's ring is stored running, read the
+/// way `rcad-topo` reads it, or `None` where that reads nothing here.
+///
+/// **This mirrors `mesh.rs`'s `the_way_a_closed_edge_is_stored_running`**,
+/// which `rcad-step` cannot call, and through it `Model::validate`'s rule
+/// (`a_closed_crossing_is_walked_the_way_it_is_stored`). The two surfaces are
+/// the ones [`which_two_surfaces_a_run_is_between`] reads off the run, so for
+/// the equator between two bands of one torus they are the torus and the
+/// equator's own plane, not the two bands. The edge runs along `∇S × ∇T`,
+/// turned round where that runs against the torus's longitude `L`; where the
+/// dot is exactly zero, as it is all the way round a circle round the ring,
+/// against the second reference, the gradient crossed into the first:
+/// `∇C × L`. At a torus's outer equator that runs down the ring angle.
+///
+/// **Where the two surfaces touch rather than cross, `∇S × ∇T` is nothing**
+/// and `Model::validate` passes the edge over. The mesher still puts its points
+/// in an order, and a face that walks them the other way is refused
+/// `AWireWillNotLieFlatOnItsFace`. That order is
+/// [`the_way_a_circle_where_a_plane_touches_a_torus_runs`].
+///
+/// Only a torus is read: the curved one of any other pair has a longitude that
+/// is not square to its closed circles, so the caller never gets here, or
+/// gets here at a corner this has not been measured on, and keeps the file's
+/// flag there.
+fn the_way_a_closed_edge_runs_where_its_longitude_says_nothing(
+    run: &EdgeRun,
+    faces: [&Surface; 2],
+    at: Point,
+) -> Option<Vector> {
+    let pair = which_two_surfaces_a_run_is_between(run, faces);
+    let curved = the_curved_one_of(&pair)?;
+    let Surface::Torus(ring) = curved else {
+        return None;
+    };
+    let longitude = curved.the_way_its_first_coordinate_runs_at(at)?;
+    let gradient = gradient_of(&curved, at)?;
+    let forward = gradient_of(&pair[0], at)?.cross(gradient_of(&pair[1], at)?);
+    let with_the_longitude = forward.dot(longitude);
+    let against_the_frame = if with_the_longitude == 0.0 {
+        forward.dot(gradient.cross(longitude))
+    } else {
+        with_the_longitude
+    };
+    if against_the_frame > 0.0 {
+        Some(forward)
+    } else if against_the_frame < 0.0 {
+        Some(-forward)
+    } else {
+        the_way_a_circle_where_a_plane_touches_a_torus_runs(&pair, &ring, at)
+    }
+}
+
+/// Which way the mesher puts the points of a circle where a plane rests on a
+/// torus, round the top or the bottom of its tube, or `None` for any other
+/// pair.
+///
+/// **This mirrors `mesh.rs`'s `the_way_a_closed_edge_where_its_faces_touch_runs`
+/// together with what the mesher does with its answer**, neither of which
+/// `rcad-step` can call. That function hands back the torus's longitude `L`,
+/// and the mesher turns the points `rcad_geom::walk` drew round where the
+/// first of them lies against `L` from the corner. `L` runs round the tube,
+/// square to this circle, so it is the circle's bend that decides and not its
+/// first step: the first point lies towards the circle's centre whichever way
+/// it is drawn. The walk draws a circle round a torus's axis the way a right
+/// hand turns about that axis (`circles_round_the_axis`, from
+/// `Torus::basis`). So the drawn order is kept where `L` points towards the
+/// centre, which is round the top of the tube, and turned round where it
+/// points away, round the bottom.
+fn the_way_a_circle_where_a_plane_touches_a_torus_runs(
+    pair: &[Surface; 2],
+    ring: &Torus,
+    at: Point,
+) -> Option<Vector> {
+    let flat = pair.iter().find_map(Surface::as_plane)?;
+    let along = ring.axis().direction();
+    if flat.normal().cross(along) != Vector::zero() {
+        return None;
+    }
+    let out = at - ring.centre();
+    let centre = ring.centre() + along * (out.dot(along) / along.dot(along));
+    let drawn = along.cross(at - centre);
+    let longitude = Surface::Torus(*ring).the_way_its_first_coordinate_runs_at(at)?;
+    Some(if (centre - at).dot(longitude) < 0.0 {
+        -drawn
+    } else {
+        drawn
+    })
+}
+
+/// Which way a plane or a torus faces at `at`, or `None` for any other surface.
+///
+/// **Spelled exactly as `rcad-topo`'s `validate.rs` spells `gradient_of`**,
+/// the bulge term included, so that a sign read off it here is the sign
+/// `Model::validate` reads: `(w·w)(x·x + R² − r² − 2R²)x + 2R²(x·w)w` for
+/// `x = at − centre`, the quartic's gradient divided by four.
+fn gradient_of(surface: &Surface, at: Point) -> Option<Vector> {
+    if let Some(flat) = surface.as_plane() {
+        return Some(flat.normal());
+    }
+    let Surface::Torus(ring) = surface else {
+        return None;
+    };
+    let (centre, along) = (ring.centre(), ring.axis().direction());
+    let out = at - centre;
+    let (big, small) = (ring.ring_radius(), ring.tube_radius());
+    let bulge = out.dot(out) + big * big - small * small - 2.0 * big * big;
+    Some(out * (along.dot(along) * bulge) + along * (2.0 * big * big * along.dot(out)))
+}
+
 /// Which of the surfaces either side of a closed edge names which way it runs.
 ///
 /// **The same pick `rcad-topo`'s `the_curved_one_of` makes, and it has to be the
@@ -2042,7 +2458,7 @@ fn an_edge_with_one_corner(reading: &Reading<'_>, edge_curve: EntityId) -> bool 
 /// on one surface however the file happened to write the pair down.
 /// [`Surface::how_it_sorts_against`] is that order, and `rcad-topo` sorts its own
 /// copy of the same bits into the same rows.
-fn the_curved_one_of(carried_by: &[Surface]) -> Option<Surface> {
+pub(crate) fn the_curved_one_of(carried_by: &[Surface]) -> Option<Surface> {
     carried_by
         .iter()
         .filter(|surface| surface.as_plane().is_none())
@@ -2149,7 +2565,7 @@ fn the_faces_along_it_name_no_crossing(faces: &[Surface]) -> bool {
 /// added. Without that room, `Relay_DPST_Fujitsu_FTR-F1A`,
 /// `Relay_DPDT_Fujitsu_FTR-F1C` and `nist_ftc_08_asme1_ap242-e2` logged 18, 18
 /// and 56 sides of a pipe the certified policy gave up on and the tolerant one
-/// answered (`no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses`).
+/// answered (`whether_a_tolerant_policy_buys_anything_a_certified_one_does_not.rs`).
 /// All three files are refused either way, and which arcs those were was not
 /// traced.
 fn which_of_a_rings_two_circles(
@@ -2258,7 +2674,12 @@ fn which_of_a_rings_two_circles(
 ///
 /// Anything else holds nothing, which is the safe direction: the run is then
 /// named by its faces as before.
-fn a_surface_holds_the_circle(surface: &Surface, centre: Point, axis: Vector, radius: f64) -> bool {
+pub(crate) fn a_surface_holds_the_circle(
+    surface: &Surface,
+    centre: Point,
+    axis: Vector,
+    radius: f64,
+) -> bool {
     how_far_off_the_circle_can_be(surface, centre, axis, radius).is_some_and(|(off, largest)| {
         off <= A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF * largest
     })
@@ -2305,13 +2726,13 @@ fn a_surface_holds_the_circle(surface: &Surface, centre: Point, axis: Vector, ra
 /// `the_relays_two_circles_round_their_tubes_are_inside_the_allowance` holds
 /// both. Nobody has measured the furthest over the whole corpus since the
 /// cone and the torus got their bounds.
-const A_CIRCLE_MAY_MISS_ITS_FACE_BY: f64 = 16.0;
+pub(crate) const A_CIRCLE_MAY_MISS_ITS_FACE_BY: f64 = 16.0;
 
 /// The furthest any point of the circle can be from `surface`, and the
 /// largest number the bound was worked out from — see
 /// [`a_surface_holds_the_circle`] for the bounds. `None` for a surface with no
 /// bound here.
-fn how_far_off_the_circle_can_be(
+pub(crate) fn how_far_off_the_circle_can_be(
     surface: &Surface,
     centre: Point,
     axis: Vector,
@@ -2478,6 +2899,44 @@ fn how_far_off_the_ellipse_can_be(surface: &Surface, ellipse: &Ellipse) -> Optio
     ))
 }
 
+/// The half-space that picks the arc between `corners` lying the way `facing`
+/// points, in a shape a fuse reads, with `centre` the centre of the arc's curve.
+///
+/// A fuse tells the two arcs between one pair of ends apart in exactly two ways
+/// (`a_picker_that_tells_the_two_arcs_apart` in `rcad-topo`): by a plane that
+/// holds **both ends exactly**, or by one with both ends on or in front and the
+/// **curve's centre on or behind**. [`a_half_space_holding_both`] stands its
+/// plane a few roundings below both ends, so it is the second kind exactly
+/// where the centre stays on or behind it.
+///
+/// **An arc longer than half its curve never has that.** Its centre is on the
+/// arc's own side of the chord, so in front of the plane through the chord and
+/// further in front of one lowered below it. Such an arc takes a plane through
+/// both ends instead, where the numbers hold both ends on one plane exactly
+/// ([`a_half_space_through_both`]); the side of it the arc is on is then the
+/// side `facing` points to, which is what the lowered plane said too, and
+/// nothing about how near the plane came to an end is read. Where no such plane
+/// can be found it keeps the lowered one, which names the arc for this model
+/// and the next `Model::validate` but which a fuse still does not read
+/// (`a_long_arc_with_no_plane_through_both_its_ends_keeps_the_lowered_one`).
+///
+/// **An arc whose centre is on or behind the lowered plane keeps it** even
+/// where a plane through both ends exists, so every arc that read back before
+/// reads back with the very picker it had.
+fn a_half_space_naming_the_arc(
+    corners: [Point; 2],
+    facing: Vector,
+    centre: Point,
+) -> Option<HalfSpace> {
+    let lowered = a_half_space_holding_both(corners, facing)?;
+    match lowered.side_of_point(PredicatePoint::from(centre.coordinates())) {
+        Decision::Neg | Decision::Zero => Some(lowered),
+        Decision::Pos | Decision::Undecidable { .. } | _ => {
+            Some(a_half_space_through_both(corners, facing).unwrap_or(lowered))
+        }
+    }
+}
+
 fn a_half_space_holding_both(corners: [Point; 2], facing: Vector) -> Option<HalfSpace> {
     let below = |corner: Point| {
         let terms = facing.components().into_iter().zip(corner.coordinates());
@@ -2493,6 +2952,32 @@ fn a_half_space_holding_both(corners: [Point; 2], facing: Vector) -> Option<Half
             picking.side_of_point(PredicatePoint::from(corner.coordinates())) != Decision::Neg
         })
         .then_some(picking)
+}
+
+/// A half-space facing `facing`, or `facing` scaled to length one, whose plane
+/// both `corners` are exactly on — `None` when neither is.
+///
+/// The test is the exact predicate, so the plane holds both ends or is not
+/// handed back; nothing is near enough. Whether one exists is a question about
+/// the numbers: `facing · corner` has to round to the same offset at both
+/// corners with nothing lost. The length-one normal is what lets a slice
+/// square to an axis at any offset qualify: there `facing` is `(0, −2x, 0)` or
+/// the like, `2x·y` need not be a number `f64` holds, and `(0, −1, 0)` makes
+/// the offset `y` itself (`a_long_arc_is_named_by_a_plane_through_both_its_ends`).
+fn a_half_space_through_both(corners: [Point; 2], facing: Vector) -> Option<HalfSpace> {
+    [Some(facing), facing.normalized().ok()]
+        .into_iter()
+        .flatten()
+        .find_map(|normal| {
+            let through = HalfSpace::through_a_point_facing(corners[0], normal).ok()?;
+            corners
+                .iter()
+                .all(|corner| {
+                    through.side_of_point(PredicatePoint::from(corner.coordinates()))
+                        == Decision::Zero
+                })
+                .then_some(through)
+        })
 }
 
 /// Which side of a surface a point is on, through the same certified predicates
@@ -2565,8 +3050,8 @@ mod tests {
 
     use super::{
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, Ellipse, a_half_space_holding_both,
-        a_surface_holds_the_circle, a_surface_holds_the_ellipse, how_far_off,
-        how_far_off_the_circle_can_be, how_far_off_the_ellipse_can_be,
+        a_half_space_naming_the_arc, a_surface_holds_the_circle, a_surface_holds_the_ellipse,
+        how_far_off, how_far_off_the_circle_can_be, how_far_off_the_ellipse_can_be,
     };
 
     /// The LED body's circle, written as the file writes it: on its dome
@@ -3386,6 +3871,88 @@ mod tests {
             coin_tosses_lost > 0,
             "with no slack at all an end has to land behind the surface somewhere, or \
              the eight epsilons are paying for nothing"
+        );
+    }
+
+    /// A circle of radius `5s` about `z` sliced by `y = −3s`, with the
+    /// corners at `(±4s, −3s, 0)`: the long arc is named by a plane both ends
+    /// are exactly on, and the short arc keeps the lowered plane it always had.
+    ///
+    /// `s = 1` is the plane `facing` itself, offset `−24`. `s = 1 + 2⁻³⁰` is the
+    /// one where `facing · corner = −24s²` needs 62 bits, so only the
+    /// length-one normal `(0, 1, 0)` holds both ends — the control checks that
+    /// `facing` itself does not.
+    #[test]
+    fn a_long_arc_is_named_by_a_plane_through_both_its_ends() {
+        let side = |half: &rcad_geom::HalfSpace, at: Point| {
+            half.side_of_point(PredicatePoint::from(at.coordinates()))
+        };
+        for (s, facing_itself_holds_both) in [(1.0, true), (1.0 + 2f64.powi(-30), false)] {
+            let corners = [
+                Point::new(4.0 * s, -3.0 * s, 0.0),
+                Point::new(-4.0 * s, -3.0 * s, 0.0),
+            ];
+            let into_the_long_arc = (corners[1] - corners[0]).cross(Vector::new(0.0, 0.0, 1.0));
+            let centre = Point::origin();
+
+            let long = a_half_space_naming_the_arc(corners, into_the_long_arc, centre)
+                .expect("a plane through both ends of the long arc");
+            assert_eq!(
+                corners.map(|corner| side(&long, corner)),
+                [Decision::Zero; 2],
+                "s = {s}: the long arc's plane holds both its ends"
+            );
+            assert_eq!(side(&long, centre), Decision::Pos, "s = {s}: centre");
+            let lowered =
+                a_half_space_holding_both(corners, into_the_long_arc).expect("a lowered plane");
+            assert_eq!(
+                side(&lowered, centre),
+                Decision::Pos,
+                "s = {s}: the lowered plane has the long arc's centre in front, which is \
+                 what a fuse does not read"
+            );
+            let through_facing_itself =
+                rcad_geom::HalfSpace::through_a_point_facing(corners[0], into_the_long_arc)
+                    .expect("a normal with length");
+            assert_eq!(
+                corners
+                    .iter()
+                    .all(|corner| side(&through_facing_itself, *corner) == Decision::Zero),
+                facing_itself_holds_both,
+                "s = {s}: whether `facing` itself holds both ends"
+            );
+
+            let into_the_short_arc = -into_the_long_arc;
+            let short = a_half_space_naming_the_arc(corners, into_the_short_arc, centre)
+                .expect("a plane for the short arc");
+            assert_eq!(
+                Some(short),
+                a_half_space_holding_both(corners, into_the_short_arc),
+                "s = {s}: the short arc keeps the lowered plane"
+            );
+            assert_eq!(
+                corners.map(|corner| side(&short, corner)),
+                [Decision::Pos; 2],
+                "s = {s}: the short arc's ends are in front of its lowered plane"
+            );
+            assert_eq!(side(&short, centre), Decision::Neg, "s = {s}: centre");
+        }
+    }
+
+    /// A long arc whose ends no plane facing `facing`, or `facing` scaled to
+    /// length one, holds exactly keeps the lowered plane, with its centre in
+    /// front — the picker a fuse refuses. This is the gap left after Q771, kept
+    /// here so that a fix for it starts from a shape that is known to reach it.
+    #[test]
+    fn a_long_arc_with_no_plane_through_both_its_ends_keeps_the_lowered_one() {
+        let corners = [Point::new(0.1, 0.7, 0.0), Point::new(-0.3, 0.2, 0.0)];
+        let facing = (corners[1] - corners[0]).cross(Vector::new(0.0, 0.0, 1.0));
+        let centre = Point::new(-1.0, 1.2, 0.0);
+        let named = a_half_space_naming_the_arc(corners, facing, centre).expect("a picker");
+        assert_eq!(Some(named), a_half_space_holding_both(corners, facing));
+        assert_eq!(
+            named.side_of_point(PredicatePoint::from(centre.coordinates())),
+            Decision::Pos
         );
     }
 }

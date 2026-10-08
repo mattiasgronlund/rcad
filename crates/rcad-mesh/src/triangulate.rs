@@ -128,7 +128,9 @@ impl Patch {
 /// About the loops: [`CannotTriangulate::BoundaryCrossesItself`] when two
 /// boundary edges cross, [`CannotTriangulate::CornersCoincide`] when one loop
 /// names the same point twice — two *different* loops naming it is a pinch and
-/// is allowed, see [`refuse_loops_that_touch`] — and
+/// is allowed, see [`refuse_loops_that_touch`] —
+/// [`CannotTriangulate::LoopsTouch`] when a corner sits on a side of its own
+/// loop or another between that side's two ends, and
 /// [`CannotTriangulate::CoordinateOutOfRange`] for a scaled coordinate the
 /// triangulation will not take — see that variant, the range is narrower than
 /// `f64`'s, and one too small is taken as zero where that changes nothing.
@@ -187,6 +189,9 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
             });
         }
         mesh.add_constraint(handles[from], handles[to]);
+    }
+    if flushed.is_none() {
+        refuse_a_side_with_a_corner_on_it(&mesh, &handles, domain)?;
     }
 
     let deflection = domain.deflection().length();
@@ -247,7 +252,7 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
         }
     }
 
-    if let Some(triangles) = cut_by_corner_order(domain) {
+    if let Some(triangles) = cut_by_corner_order(domain, &corners) {
         return Ok(Patch {
             corners,
             triangles,
@@ -273,17 +278,62 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
 
 /// The triangles of a patch cut by the order of its corners, when the caller
 /// asked for that ([`TrimmedDomain::cut_by_corner_order`]) and the patch is one
-/// it can be done to: flat, with no holes, and an outline that turns the same
-/// way at every corner and goes round once. `None` leaves the patch to the
-/// Delaunay triangulation.
+/// it can be done to: flat, with an outline that turns the same way at every
+/// corner and goes round once, and either no hole
+/// ([`every_other_corner_cut_off`]) or one hole that turns the other way at
+/// every corner and goes round once ([`in_step_round_a_ring`]). `None` leaves
+/// the patch to the Delaunay triangulation.
+///
+/// `corners` is [`every_corner`]'s list, the outline's first and then the
+/// hole's.
+///
+/// Turned anticlockwise when the outline runs clockwise, since that is how
+/// every triangle [`triangulate`] hands back is turned.
+fn cut_by_corner_order(domain: &TrimmedDomain, corners: &[[f64; 2]]) -> Option<Vec<[u32; 3]>> {
+    if !domain.is_cut_by_corner_order() || !matches!(domain.surface(), Surface::Plane(_)) {
+        return None;
+    }
+    let outline = domain.outer().corners();
+    let anticlockwise = turns_one_way_once_round(outline)?;
+    let mut triangles = match domain.holes() {
+        [] => every_other_corner_cut_off(outline.len()),
+        [hole] => {
+            let hole = hole.corners();
+            if turns_one_way_once_round(hole)? == anticlockwise {
+                return None;
+            }
+            let across = the_corner_of_the_hole_across_from(outline[0], hole, anticlockwise)?;
+            let triangles = in_step_round_a_ring(outline.len(), hole.len(), across);
+            let every_one_turns_with_the_outline = triangles.iter().all(|triangle| {
+                let [a, b, c] = triangle.map(|corner| corners[corner as usize]);
+                which_way_it_turns(a, b, c) == Some(anticlockwise)
+            });
+            if !every_one_turns_with_the_outline {
+                return None;
+            }
+            triangles
+        }
+        _ => return None,
+    };
+    if !anticlockwise {
+        for triangle in &mut triangles {
+            triangle.swap(1, 2);
+        }
+    }
+    Some(triangles)
+}
+
+/// A convex outline of `count` corners cut into triangles that turn the way it
+/// does.
 ///
 /// **Every other corner is cut off, round after round.** The first round joins
 /// each corner to the one after next, the next round does the same among the
 /// corners left, and so on, so the triangles stay about as wide as they are
 /// long where a fan from one corner would draw slivers. Done to every flat disc
 /// with nobody asking, this made 68 of 1440 meshes of a ball cut through its
-/// pole fold, and the fan 96, against the Delaunay cut's 38: a lid's corners
-/// are joined by the ball's own triangles too (`docs/decisions.md` §379.5).
+/// pole fold, and the fan 96, against the Delaunay cut's 38 then: a lid's
+/// corners are joined by the ball's own triangles too (`docs/decisions.md`
+/// §379.5). The Delaunay cut's are 2 since Q1027 ([`corners_inside_one_edge`]).
 /// That is what the caller's asking is for.
 ///
 /// **Why it needs an outline that turns one way, once round:** then the patch
@@ -294,22 +344,9 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
 /// then falling once, since an outline that turns one way and goes round twice
 /// climbs and falls twice. A turn of zero, or one that cannot be settled, is
 /// not one way, and leaves the patch to the Delaunay triangulation.
-///
-/// Turned anticlockwise when the outline runs clockwise, since that is how
-/// every triangle [`triangulate`] hands back is turned.
-fn cut_by_corner_order(domain: &TrimmedDomain) -> Option<Vec<[u32; 3]>> {
-    if !domain.is_cut_by_corner_order()
-        || !matches!(domain.surface(), Surface::Plane(_))
-        || !domain.holes().is_empty()
-    {
-        return None;
-    }
-    let corners = domain.outer().corners();
-    let anticlockwise = turns_one_way_once_round(corners)?;
-    let mut left: Vec<u32> = (0..corners.len())
-        .map(|position| u32::try_from(position).expect("a loop of fewer than four billion corners"))
-        .collect();
-    let mut triangles = Vec::with_capacity(corners.len() - 2);
+fn every_other_corner_cut_off(count: usize) -> Vec<[u32; 3]> {
+    let mut left: Vec<u32> = (0..count).map(a_corner_number).collect();
+    let mut triangles = Vec::with_capacity(count - 2);
     while left.len() >= 3 {
         let mut kept = Vec::with_capacity(left.len() / 2 + 1);
         let mut at = 0;
@@ -326,35 +363,165 @@ fn cut_by_corner_order(domain: &TrimmedDomain) -> Option<Vec<[u32; 3]>> {
         }
         left = kept;
     }
-    if !anticlockwise {
-        for triangle in &mut triangles {
-            triangle.swap(1, 2);
+    triangles
+}
+
+/// The band of triangles between an outline of `outline` corners and a hole
+/// of `hole` corners inside it, numbered as [`every_corner`] numbers them, cut
+/// by stepping round both loops together from the outline's corner 0 and the
+/// hole's corner `across`: each triangle stands on one side of one loop and
+/// reaches across to the corner the other loop has got to. They turn the way
+/// the outline does when the hole runs round the other way.
+///
+/// **Which loop steps next is read from the corner numbers alone.** The
+/// outline is walked the way it runs and the hole the other way, so that both
+/// go round the same way; each loop's steps are taken as equal shares of a
+/// turn, and the step whose middle comes first round goes next, the outline's
+/// on a tie. That is a comparison of whole numbers, so exact. On two circles
+/// cut into even steps, which is how a pipe's two rims come to its flat end,
+/// each side of the outline reaches about the hole's corner across from its
+/// middle, and each side of the hole the outline's. No coordinate chooses a
+/// step, so a ring moved or turned is cut into the same triangles corner for
+/// corner once it starts from the same corner, where the Delaunay test is tied
+/// wherever a side of the outline and a side of the hole face each other
+/// square: those four corners are on one circle (`docs/decisions.md` §379.5).
+/// The start, `across`, is chosen from coordinates, and
+/// [`the_corner_of_the_hole_across_from`] says where a rounding can move it.
+///
+/// **Why they are a triangulation of the ring when every one of them turns the
+/// way the outline does**, which [`cut_by_corner_order`] settles with
+/// [`orient2d`] before it takes them. A triangle's sides are one side of a loop
+/// and two rungs across: the rung it starts from, and the one it hands to the
+/// next triangle, and the last hands back the first. So the triangles' sides
+/// taken together run every rung once each way, and what is left is the
+/// outline once round its way and the hole once round the other. That pair
+/// winds once round every point of the ring and not at all round a point of
+/// the hole or outside, and a triangle that turns the outline's way winds once
+/// round each point inside it and not at all round any other. So every point
+/// of the ring is under exactly one triangle, and no point outside the ring
+/// under any; every side of either loop is a side of exactly one triangle. No
+/// corner lies along another triangle's side either: the triangles at a corner
+/// run round it in order from one of its loop's sides to the other, and so
+/// already cover the ring beside it once.
+///
+/// Any other ring turns some triangle the wrong way or none, and is left to the
+/// Delaunay triangulation: a hole far off to one side, say, or two loops that
+/// touch, where the rung between the two corners in one place has no length.
+///
+/// **No side joins two corners of one loop**, only a corner of the outline to
+/// a corner of the hole, so a face across either rim draws none of them unless
+/// it reaches the other rim too (§187.4).
+fn in_step_round_a_ring(outline: usize, hole: usize, across: usize) -> Vec<[u32; 3]> {
+    let on_the_outline = |step: usize| a_corner_number(step % outline);
+    let on_the_hole = |step: usize| a_corner_number(outline + (across + hole - step % hole) % hole);
+    let (mut round_the_outline, mut round_the_hole) = (0, 0);
+    let mut triangles = Vec::with_capacity(outline + hole);
+    while round_the_outline < outline || round_the_hole < hole {
+        let the_outline_steps = round_the_hole == hole
+            || (round_the_outline < outline
+                && comes_no_later_round(round_the_outline, outline, round_the_hole, hole));
+        if the_outline_steps {
+            triangles.push([
+                on_the_outline(round_the_outline),
+                on_the_outline(round_the_outline + 1),
+                on_the_hole(round_the_hole),
+            ]);
+            round_the_outline += 1;
+        } else {
+            triangles.push([
+                on_the_outline(round_the_outline),
+                on_the_hole(round_the_hole + 1),
+                on_the_hole(round_the_hole),
+            ]);
+            round_the_hole += 1;
         }
     }
-    Some(triangles)
+    triangles
+}
+
+/// Whether the middle of step `one` of `ones` equal steps round comes no later
+/// than the middle of step `other` of `others`: `(one + ½) / ones ≤ (other +
+/// ½) / others`, multiplied out into whole numbers wide enough not to
+/// overflow.
+fn comes_no_later_round(one: usize, ones: usize, other: usize, others: usize) -> bool {
+    let wide = |count: usize| u128::from(a_corner_number(count));
+    (2 * wide(one) + 1) * wide(others) <= (2 * wide(other) + 1) * wide(ones)
+}
+
+/// The corner of `hole` that [`in_step_round_a_ring`] starts from beside the
+/// outline's corner `first`, which turns the way `anticlockwise` says: the
+/// middle of the run of the hole's sides that `first` sees from outside, or
+/// the first corner of the middle side when the run is odd. `None` when
+/// `first` sees no side from outside, or [`orient2d`] cannot settle which side
+/// of one it is on.
+///
+/// **A side whose line `first` lies on is not seen**, since it is not seen
+/// from outside. It used to give `None` and send the ring to the Delaunay
+/// triangulation, so an octagon round an octagon with its corner exactly on
+/// that line was cut by spade, and the same ring placed, a rounding off the
+/// line, by corner order: 14 of its 16 triangles apart under each of the
+/// twelve placements of `docs/decisions.md` §333.2 (Q1274). Any start is safe
+/// to try, because [`cut_by_corner_order`] takes the cut only when every
+/// triangle turns the outline's way.
+///
+/// **Read from signs alone, so a ring moved by a rounding starts from the same
+/// corner unless `first` lies within a rounding of the line through a side at
+/// one end of the run.** Even then it holds at the end where that side joining
+/// or leaving the run leaves the middle where it was. At the other end the
+/// start moves one corner, and the ring is cut into other triangles, a whole
+/// cut of the ring each time: 15 of 36 placed copies of that octagon ring,
+/// cornered on the other end's line or a rounding to either side of it
+/// (`a_ring_whose_corner_is_a_rounding_off_a_hole_sides_line_starts_where_the_corner_sees`
+/// in `cutting_a_patch_into_triangles.rs`).
+///
+/// **No start read from the corners handed in holds for every ring.** Turned
+/// a whole turn against the outline, the hole's start has to walk once round
+/// it, or some triangle turns over — a start fixed at the hole's corner 0 does
+/// on a pipe's ring (§379.5, Q1109) — so the start changes somewhere as the
+/// hole turns, and a ring there and the same ring placed are a rounding apart.
+/// Of rules that read only which sides `first` sees, none holds at both ends
+/// of the run either: one that kept its start whichever end's side joined or
+/// left would keep it as the run walks round, and so never move. What would
+/// hold is a start read where the solid is stored, which only the caller has.
+fn the_corner_of_the_hole_across_from(
+    first: [f64; 2],
+    hole: &[[f64; 2]],
+    anticlockwise: bool,
+) -> Option<usize> {
+    let count = hole.len();
+    let mut seen = Vec::with_capacity(count);
+    for at in 0..count {
+        let sees_it_from_outside = match orient2d(hole[at], hole[(at + 1) % count], first) {
+            Decision::Pos => anticlockwise,
+            Decision::Neg => !anticlockwise,
+            Decision::Zero => false,
+            Decision::Undecidable { .. } => return None,
+            other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
+        };
+        seen.push(sees_it_from_outside);
+    }
+    let start = (0..count).find(|&at| seen[at] && !seen[(at + count - 1) % count])?;
+    let run = seen.iter().filter(|&&sees| sees).count();
+    Some((start + run / 2) % count)
+}
+
+/// The number a triangle names the corner at `position` by.
+fn a_corner_number(position: usize) -> u32 {
+    u32::try_from(position).expect("a loop of fewer than four billion corners")
 }
 
 /// Whether an outline turns anticlockwise at every corner (`Some(true)`) or
 /// clockwise at every corner (`Some(false)`) and goes round once; `None` for
 /// any other outline.
-///
-/// # Panics
-///
-/// On a [`Decision`] this file has not been taught.
 fn turns_one_way_once_round(corners: &[[f64; 2]]) -> Option<bool> {
     let count = corners.len();
     let mut way = None;
     for at in 0..count {
-        let anticlockwise = match orient2d(
+        let anticlockwise = which_way_it_turns(
             corners[at],
             corners[(at + 1) % count],
             corners[(at + 2) % count],
-        ) {
-            Decision::Pos => true,
-            Decision::Neg => false,
-            Decision::Zero | Decision::Undecidable { .. } => return None,
-            other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
-        };
+        )?;
         if *way.get_or_insert(anticlockwise) != anticlockwise {
             return None;
         }
@@ -371,6 +538,22 @@ fn turns_one_way_once_round(corners: &[[f64; 2]]) -> Option<bool> {
         return None;
     }
     way
+}
+
+/// Whether `a`, `b`, `c` turn anticlockwise (`Some(true)`) or clockwise
+/// (`Some(false)`), by [`orient2d`]; `None` for no turn, or one it cannot
+/// settle.
+///
+/// # Panics
+///
+/// On a [`Decision`] this file has not been taught.
+fn which_way_it_turns(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<bool> {
+    match orient2d(a, b, c) {
+        Decision::Pos => Some(true),
+        Decision::Neg => Some(false),
+        Decision::Zero | Decision::Undecidable { .. } => None,
+        other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
+    }
 }
 
 /// The first corner with a scaled coordinate that is not zero and is under
@@ -572,6 +755,8 @@ fn two_sides_of_an_outline_meet(one: [[f64; 2]; 2], other: [[f64; 2]; 2]) -> boo
 /// - Two sides of different loops with the *same two ends* are refused by
 ///   [`refuse_loops_that_share_a_whole_side`], which is the one way a stretch
 ///   can be doubled without any corner landing inside anything.
+/// - A corner of a loop on a side of **its own** loop is refused once the
+///   corners are in the triangulation, by [`refuse_a_side_with_a_corner_on_it`].
 ///
 /// The shared corner used to be refused with the rest, on the stated grounds
 /// that nothing needed it. Something does: a round pin drawn tangent to a flat
@@ -661,6 +846,100 @@ fn refuse_loops_that_share_a_whole_side(
                 at: domain.surface().point_at(at[0], at[1]),
             });
         }
+    }
+    Ok(())
+}
+
+/// Refuse a domain where a side did not go into the triangulation whole.
+///
+/// The triangulation splits a side at any corner lying on it between its two
+/// ends, and the face across that side draws it whole: a crack, for the reason
+/// [`refuse_loops_that_touch`] gives. That check asked about a corner of
+/// another loop; this asks about every corner, **its own loop's too**. A loop
+/// that runs down a line and back up the same line rests its own corners on
+/// its own side, and no triangle can draw those sides, since its three corners
+/// would be on one line. Q1307 saw one come back as a fan that covered the
+/// loop's area and left the side it ran back up in no triangle at all.
+///
+/// **A domain with every corner on one line is let through**, and comes back
+/// with no triangles. It encloses nothing, so no triangles is all of it, and no
+/// triangle draws a piece of a side. `rcad-topo`'s
+/// `a_block_edge_grazing_a_ball.rs` cuts slivers `2⁻⁷⁸` wide, a flat face of
+/// one comes here as three corners on one line, and the solid is refused
+/// later, on its curved face, as it was before this check.
+///
+/// Asked of the triangulation and not of the corners as they were handed
+/// over, because the triangulation takes them scaled and the triangles follow
+/// its answer. Exact: spade's predicates are, and so is [`orient2d`] on the
+/// same numbers.
+///
+/// A patch with a corner [`spade::mitigate_underflow`] moved is left to
+/// [`the_flush_moved_nothing_the_patch_rests_on`], which asks every side the
+/// same and refuses the patch the way it was refused before the flush.
+///
+/// # Errors
+///
+/// [`CannotTriangulate::LoopsTouch`], and
+/// [`CannotTriangulate::CannotTellIfLoopsTouch`] when no corner can be shown to
+/// be on the side and [`orient2d`] could not settle one of them.
+///
+/// # Panics
+///
+/// When spade split a side and no corner is on it, which is spade breaking its
+/// own rule; and on a [`Decision`] this file has not been taught.
+fn refuse_a_side_with_a_corner_on_it(
+    mesh: &ConstrainedDelaunayTriangulation<Point2<f64>>,
+    handles: &[FixedVertexHandle],
+    domain: &TrimmedDomain,
+) -> Result<(), CannotTriangulate> {
+    if mesh.num_inner_faces() == 0 {
+        return Ok(());
+    }
+    let scaled = |position: usize| {
+        let at = mesh.vertex(handles[position]).position();
+        [at.x, at.y]
+    };
+    for (from, to) in every_side(domain) {
+        if mesh
+            .get_edge_from_neighbors(handles[from], handles[to])
+            .is_some()
+        {
+            continue;
+        }
+        let place_of = |corner: usize| {
+            let at = every_corner(domain)[corner];
+            domain.surface().point_at(at[0], at[1])
+        };
+        let mut unsettled = None;
+        for corner in 0..handles.len() {
+            if handles[corner] == handles[from] || handles[corner] == handles[to] {
+                continue;
+            }
+            match orient2d(scaled(from), scaled(to), scaled(corner)) {
+                Decision::Pos | Decision::Neg => {}
+                Decision::Zero => {
+                    if lies_between(scaled(corner), scaled(from), scaled(to)) {
+                        return Err(CannotTriangulate::LoopsTouch {
+                            corner,
+                            side: from,
+                            at: place_of(corner),
+                        });
+                    }
+                }
+                Decision::Undecidable { enclosure } => {
+                    unsettled.get_or_insert((corner, enclosure));
+                }
+                other => panic!("orient2d came back with a decision nothing here knows: {other:?}"),
+            }
+        }
+        let (corner, enclosure) = unsettled.unwrap_or_else(|| {
+            panic!("the triangulation split the side leaving corner {from} where no corner is")
+        });
+        return Err(CannotTriangulate::CannotTellIfLoopsTouch {
+            corner,
+            enclosure,
+            at: place_of(corner),
+        });
     }
     Ok(())
 }
@@ -1280,8 +1559,9 @@ struct HowFineToGo<'a> {
     deflection: f64,
     slop: f64,
     step: f64,
-    /// Each corner of the domain that lies inside one edge, with the corners
-    /// before and after it along its own loop. Empty on a plane: see
+    /// Each corner of the domain that lies inside one edge, with a corner
+    /// before and a corner after it along its own loop, once for each pair
+    /// [`corners_inside_one_edge`] gives. Empty on a plane: see
     /// [`corners_cut_off_by_one_side`].
     corners_inside_one_edge: &'a [(usize, [FixedVertexHandle; 2])],
 }
@@ -1370,11 +1650,10 @@ fn refine_the_inside(
             // A triangle made of nothing but boundary sides has a boundary
             // chord for its longest, and every boundary side came in under the
             // deflection, so it is almost never over budget in the first place.
-            // Almost: a loop may rest one of its own corners on one of its own
-            // sides, and then the triangulation holds a constraint edge that is
-            // a *piece* of a side — and a piece of a side more than half a turn
-            // round a pipe has a longer chord than the whole of it. There is
-            // nothing to cut there, and the refusal below is the answer.
+            // Almost: on a torus or a cone a triangle is charged over its three
+            // corners at once, which is not the same number as any one side's.
+            // There is nothing to cut there, and the refusal below is the
+            // answer.
             let Some((_, from, to)) = to_split else {
                 continue;
             };
@@ -1438,7 +1717,9 @@ fn refine_the_inside(
 }
 
 /// The corners of a curved patch that one side of the triangulation cuts
-/// straight across, from the corner before to the corner after along the loop.
+/// straight across, from the corner before to the corner after along the loop,
+/// or from a corner that is the same point in space as either
+/// ([`corners_inside_one_edge`]).
 ///
 /// **Such a side can be a side of the next face too, and then the mesh is
 /// wrong.** Where two faces meet at a sharp edge — a cap leaning steeply across
@@ -1490,26 +1771,65 @@ fn corners_cut_off_by_one_side(
 }
 
 /// Each corner that lies inside one edge, with the triangulation's handles for
-/// the corners either side of it along its own loop.
+/// a corner before it and a corner after it along its own loop: the one either
+/// side, and every corner that is the same point in space as one of those.
+///
+/// **Where a surface pinches, one point is several corners in a row**, and the
+/// side that cuts a corner off is a side between two points, whichever of the
+/// corners standing at each it is drawn from. A ball's pole is a whole side of
+/// the patch, from the longitude the boundary arrives at to the one it leaves
+/// by (`docs/decisions.md` §25.6). Asked only of the corner beside the cut-off
+/// one, the side from the far end of that pole side was free to be drawn
+/// instead. Q889's shape is where it showed: a unit ball less a cube whose
+/// face plane tilts 30 degrees and misses `N` by half a rounding leaves a cap
+/// with `N` on its rim, and a half of it runs from where a cut reaches `N`,
+/// along the pole side to where the rim arrives at `N`, and on down the rim.
+/// The side from the rim's `N` to the rim point two on was cut here, the
+/// triangulation drew the side from the cut's `N` to that point, the disc
+/// across, fanned from `N`, drew it too, and measured at `0.3` the answer was
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` (Q1027,
+/// `a_turned_block_whose_face_holds_a_balls_pole.rs` in `rcad-topo`).
+///
+/// A corner is taken to be one point with the next only when both stand at
+/// the very second coordinate the surface pinches at
+/// ([`Surface::where_it_pinches`]), which is where a caller writes a pole
+/// side. One read as a pole but written a rounding off it is not seen as one,
+/// and is asked about as any corner is.
 fn corners_inside_one_edge(
     domain: &TrimmedDomain,
     handles: &[FixedVertexHandle],
 ) -> Vec<(usize, [FixedVertexHandle; 2])> {
+    let corners = every_corner(domain);
     let mut before = vec![0; handles.len()];
     let mut after = vec![0; handles.len()];
     for (from, to) in every_side(domain) {
         after[from] = to;
         before[to] = from;
     }
-    (0..handles.len())
-        .filter(|&position| !domain.is_between_two_edges(position))
-        .map(|position| {
-            (
-                position,
-                [handles[before[position]], handles[after[position]]],
-            )
-        })
-        .collect()
+    let pinch = domain.surface().where_it_pinches();
+    let one_point = |at: usize, next: usize| {
+        pinch.is_some_and(|pinch| corners[at][1].abs() == pinch)
+            && corners[next][1] == corners[at][1]
+    };
+    let the_corners_at_one_point_from = |first: usize, onwards: &[usize], cut_off: usize| {
+        let mut run = vec![first];
+        let mut at = first;
+        while onwards[at] != cut_off && !run.contains(&onwards[at]) && one_point(at, onwards[at]) {
+            at = onwards[at];
+            run.push(at);
+        }
+        run
+    };
+    let mut inside = Vec::new();
+    for position in (0..handles.len()).filter(|&position| !domain.is_between_two_edges(position)) {
+        let afters = the_corners_at_one_point_from(after[position], &after, position);
+        for one_before in the_corners_at_one_point_from(before[position], &before, position) {
+            for &one_after in &afters {
+                inside.push((position, [handles[one_before], handles[one_after]]));
+            }
+        }
+    }
+    inside
 }
 
 /// The points the refinement has put down, bucketed by how far apart they have
@@ -1659,11 +1979,12 @@ pub enum CannotTriangulate {
         position: usize,
     },
 
-    /// A corner of one loop lands on a side of another without being one of
-    /// that side's own ends.
+    /// A corner of a loop lands on a side of another loop, or of its own,
+    /// without being one of that side's own ends.
     ///
     /// See [`refuse_loops_that_touch`] for why this is refused while two loops
-    /// meeting at a corner they both name is not.
+    /// meeting at a corner they both name is not, and
+    /// [`refuse_a_side_with_a_corner_on_it`] for a loop touching itself.
     ///
     /// **`at` is the field a caller further up can do anything with**, and it
     /// is here because the two indices are not. They count corners of the
@@ -1672,7 +1993,7 @@ pub enum CannotTriangulate {
     /// bend — so "corner 7" is an address into something the caller of
     /// `SolidView::mesh` never built. A place in space is one it can find.
     /// `docs/decisions.md` §123.
-    #[error("the corner at {corner} sits on the side leaving corner {side}, in another loop")]
+    #[error("the corner at {corner} sits on the side leaving corner {side}")]
     LoopsTouch {
         /// The corner sitting on someone else's side.
         corner: usize,
@@ -1894,6 +2215,55 @@ mod tests {
         assert_eq!(turns_one_way_once_round(&seven(2)), None);
         assert_eq!(turns_one_way_once_round(&dented), None);
         assert_eq!(turns_one_way_once_round(&straight), None);
+    }
+
+    /// Half a cap of a unit ball with the north pole `N` on its rim, as
+    /// `rcad-topo` hands it over for Q889's shape at tilt direction 30 and
+    /// `−0.5` roundings: from where a cut reaches `N`, along the pole side to
+    /// where the rim arrives at `N`, down the rim through four points, and back
+    /// up the cut through one. The rim is one closed edge that a flat disc
+    /// holds too, so no side may cut a rim point off between its neighbours,
+    /// and the two corners at `N` are one neighbour. Before Q1027 the side from
+    /// the rim's `N` to the second rim point was cut, and the one from the
+    /// cut's `N` to it was drawn.
+    #[test]
+    fn no_side_cuts_off_the_rim_point_beside_a_pole_from_either_end_of_the_pole_side() {
+        let pole = core::f64::consts::FRAC_PI_2;
+        let corners = vec![
+            [0.517_088_499_497_801_1, pole],
+            [-0.858_556_149_995_533_4, pole],
+            [-0.858_556_149_995_533_4, 1.355_101_762_754_067_1],
+            [-0.449_901_067_827_468_6, 0.942_862_505_055_460_4],
+            [0.008_044_512_237_852_575, 0.639_814_837_818_900_4],
+            [0.515_025_951_126_744_1, 0.523_630_599_236_529_3],
+            [0.516_057_225_312_272_6, 1.047_213_463_015_713],
+        ];
+        // `N` twice, the rim's points 1 to 4, and the point along the cut.
+        let point_of: [u32; 7] = [0, 0, 1, 2, 3, 4, 8];
+        let ball = Sphere::new(Point::origin(), 1.0).expect("a unit ball");
+        let domain = TrimmedDomain::new(
+            Surface::from(ball),
+            crate::domain::Loop::through(corners).expect("seven corners"),
+            Vec::new(),
+            rcad_geom::Deflection::of(0.3).expect("a positive length"),
+        )
+        .with_corners_between_two_edges(vec![true, true, false, false, false, true, true]);
+        let patch = triangulate(&domain).expect("the half cap is cut");
+
+        let point = |corner: u32| point_of.get(corner as usize).copied();
+        let cutting_off_a_rim_point = [[0, 2], [1, 3], [2, 4]].map(|ends| ends.map(Some));
+        for triangle in patch.triangles() {
+            for (from, to) in [(0, 1), (1, 2), (2, 0)] {
+                let side = [point(triangle[from]), point(triangle[to])];
+                assert!(
+                    !cutting_off_a_rim_point
+                        .iter()
+                        .any(|&[one, other]| side == [one, other] || side == [other, one]),
+                    "triangle {triangle:?} cuts a rim point off with the side between points \
+                     {side:?}"
+                );
+            }
+        }
     }
 
     /// [`how_far_a_flat_piece_strays`]'s torus arm is a published bound, so here

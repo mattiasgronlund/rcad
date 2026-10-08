@@ -38,17 +38,20 @@
 //!   `x`, and turned then shifted, each block placed the same way. The corner
 //!   is moved in the stored frame, and `validate` refuses it just as it
 //!   refuses the bar at no placement. Every fuse gives what the bar at no
-//!   placement gives, with two differences. Turned and shifted, the fuse's
+//!   placement gives, with three differences. Turned and shifted, the fuse's
 //!   refusal of the corner moved off the cap carries a distance of
 //!   `0.9999999999999982` where `validate`'s carries `1.0`: the same refusal,
-//!   the distance only to rounding. And turned, the sound bar cut along its
-//!   seam is `Undecidable` on `side of plane`, so every corner moved there is
-//!   too. The point it asks about is a box round where the bottom seam corner
-//!   `(3, 0, 0)` lands, which is on the block's face: `8.5e-14` either way
-//!   turned, `2.8e-13` turned and shifted. That is the sound bar's refusal,
-//!   not an answer about the moved corner. Only
-//!   shifted, the sound bar answers, because a corner moved by a shift that
-//!   rounds nothing is handed on exact (Q509). Before Q509 it refused
+//!   the distance only to rounding. Turned and shifted, the sound bar cut
+//!   along its seam is `Undecidable` on `side of plane`, so every corner
+//!   moved there is too. The point it asks about is a box `2.8e-13` either
+//!   way round where the bottom seam corner `(3, 0, 0)` lands, on the block's
+//!   face give or take an ulp. That is the sound bar's refusal, not an answer
+//!   about the moved corner. Turned alone, the same cut answers, because the
+//!   block's face is the bar's seam plane turned to the bit and the corner is
+//!   taken as on it by construction (§294.9); the corner moved a quarter turn
+//!   round then gives the sound answer to a rounding rather than to the bit.
+//!   Shifted alone, the sound bar answers, because a corner moved by a shift
+//!   that rounds nothing is handed on exact (Q509). Before Q509 it refused
 //!   `side of plane` there as well.
 //! - **A tolerant policy**, `Policy::tolerant(100.0)`, on the bar at no
 //!   placement: every fuse as under `certified`, except the corner moved off
@@ -58,25 +61,77 @@
 //! - **A ball's south pole** `(0, 0, -3)`, moved to five places. `validate`
 //!   refuses four with `VertexOffItsFaceSurface`, and the one moved onto the
 //!   equator at `(3, 0, 0)` with `APoleStandsWhereTheSurfaceDoesNotPinch`.
-//!   **No fuse blames itself.** In six pairs, a block far away among them, the
-//!   answer is the sound ball's corner for corner to the last bit, so the
-//!   moved pole never reaches it. The seventh pair, a small block round the
-//!   pole, refuses with `ACurvedFaceGoesRightRoundWithNoSeam` for the sound
-//!   ball too. The same under both policies.
+//!   **No fuse blames itself.** In all seven pairs, a block far away and a
+//!   small block round the pole among them, the answer is the sound ball's
+//!   corner for corner to the last bit, so the moved pole never reaches it.
+//!   The same under both policies. Until Q508 the small block round the pole
+//!   refused with `ACurvedFaceGoesRightRoundWithNoSeam` for the sound ball
+//!   too, because the mesher could not tell which pole the cap the ball keeps
+//!   reaches.
 //! - **A frustum's top corner** `(3, 0, 6)`, from `cones::a_frustum(model,
 //!   0.5, 2, 6)`, moved off the wall, off the cap and a quarter turn round:
-//!   the bar's outcomes, and one refusal more. Moved off the cap to
-//!   `(3.5, 0, 7)`, the corner sits inside a block over the top, `z` from 5
-//!   to 8, and both rules tried with that block are `Undecidable` on
-//!   `a point inside a piece of a face`. The sound frustum is `Undecidable` on
-//!   that predicate against a block over the rim by its seam, and so is every
-//!   moved corner there. The same under both policies.
+//!   the bar's outcomes. Moved off the cap to `(3.5, 0, 7)`, the corner sits
+//!   inside a block over the top, `z` from 5 to 8; the frustum less that block
+//!   is the sound frustum's answer, and the two together blame themselves with
+//!   `validate`'s own refusal. Against a block over the rim by the seam, the
+//!   sound frustum and every moved corner give the sound frustum's answer. The
+//!   same under both policies. All of these were `Undecidable` on `a point
+//!   inside a piece of a face` until a piece no point was found in was placed
+//!   by a side it shares (§365.3, Q712); the sound frustum's two answers that
+//!   moved measure what the frustum and the block say.
+//!
+//!   **The seam was never what refused the block over the rim by the seam.**
+//!   That block's wall at `x = 2` cuts the cone below its floor, down to
+//!   `(2, 0, 4)`, and leaves a piece of the cone between that cut and the
+//!   circle at `z = 5` that no step of one radius from its two corners
+//!   reached. The seam turned to `−x` or `+y`, or the block put over the far
+//!   rim at `x = −2`, leaves the same piece. The block over the rim away from
+//!   the seam stops at `x = −1`, where its wall's cut reaches down to the
+//!   bottom rim at `(−1, 0, 2)`, and a point the fuse offered was inside every
+//!   piece that cut left, so it answered. Since Q929 the fuse takes the same
+//!   steps shorter as well, and one of them is inside the piece
+//!   (`a_frustums_wall_cut_below_a_blocks_floor.rs`).
+//!
+//!   **Turned 0.4 about `x`, the frustum cut along its seam answers under both
+//!   policies, as the bar does** (§294.12, Q1361). The block's face along the
+//!   seam runs through the cone's apex, so the two cross in two rulings
+//!   through it, along directions no `f64`s write. Until Q1171
+//!   `rcad_geom::intersect` refused them, `CannotNameWhichPieceOfACrossingThisIs`,
+//!   under both policies (Q1044, §294.10); it names the four halves the apex
+//!   cuts them into now (§294.11). Until Q1164 the fuse then stopped at `side
+//!   of plane` at the bottom seam corner's box, the bar's refusal before
+//!   §294.9; a cone's seam corner carries its seam plane now, as a pipe's does.
+//!   Until Q1361 `certified` then stopped at the turn between the two halves
+//!   that leave the apex into the frustum's nappe, which is nothing and was
+//!   asked as two enclosures; two rulings of one plane holding the axis are
+//!   read as turning by nothing now. The sound frustum gives half the frustum,
+//!   `26π/3`, and the corners moved off the wall and off the cap give their
+//!   unturned outcomes.
+//!
+//!   **Turned and then shifted, it is the bar's case again** (§294.13). Under
+//!   `certified` every corner refuses `side of plane` at the box round where
+//!   the bottom seam corner lands, because the block's face is one ulp off the
+//!   moved seam plane, as the bar's is, though the other way. Under
+//!   `tolerant(100)` it answers, as the bar does: half the frustum, `26π/3`,
+//!   from the sound frustum and the corner moved a quarter turn round, and the
+//!   unturned outcomes from the corners moved off the wall and off the cap.
+//!   Until Q1405 the sound frustum refused `CannotNameWhichPieceOfACrossingThisIs`
+//!   there: meshing its answer, the walk along the cut asked a hyperbola's
+//!   vertex a rounding from the cone's apex which side of the apex it is on, to
+//!   pick a branch the ends already pick (§294.14). The ends pick it now
+//!   (§294.15).
 //!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
+use std::f64::consts::PI;
+
+use rcad_geom::{
+    Axis, Cone, Cylinder, Deflection, Isometry, NamedRun, Plane, Point, Scale, Surface,
+    SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
+    intersect, walk, where_a_cones_apex_stands_against_a_plane,
+};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 mod cones;
@@ -198,6 +253,15 @@ const THE_HALF_PAST_THE_SEAM: Block = Block {
     tall: 12.0,
 };
 
+/// The whole `y < 0` half of the bar, so one face of the block runs along the
+/// seam the other way round from [`THE_HALF_PAST_THE_SEAM`]'s.
+const THE_HALF_SHORT_OF_THE_SEAM: Block = Block {
+    low: [-5.0, -5.0],
+    high: [5.0, 0.0],
+    floor: -1.0,
+    tall: 12.0,
+};
+
 /// Over the ball's top, `z` from 2 to 5.
 const OVER_THE_BALLS_TOP: Block = Block {
     low: [-5.0, -5.0],
@@ -288,9 +352,9 @@ enum Shape {
     Bar(Isometry),
     /// A ball of radius three about the origin. Its corner is the south pole.
     Ball,
-    /// `cones::a_frustum(model, 0.5, 2, 6)`. Its corner is the top one, on the
-    /// seam.
-    Frustum,
+    /// `cones::a_frustum(model, 0.5, 2, 6)`, at a placement. Its corner is the
+    /// top one, on the seam.
+    Frustum(Isometry),
 }
 
 /// What one fuse of a solid read back with a moved corner comes to.
@@ -306,7 +370,6 @@ enum Outcome {
     Undecidable(&'static str),
     CannotTellTheCellsOfAFaceApart,
     TwoCurvesTouchWithoutCrossing,
-    ACurvedFaceGoesRightRoundWithNoSeam,
 }
 
 #[test]
@@ -449,6 +512,8 @@ fn a_fuse_that_cuts_the_moved_corner_away_gives_the_answer_the_sound_bar_gives()
 /// round, it is inside the half the block takes, and the answer is the sound
 /// bar's. **None of the three refusals names the file**, and neither is wrong
 /// about what it could not do. Shifted, bar and block alike, it is the same.
+/// Turned it is the same but for the last bit or two of a corner
+/// (`a_turned_bar_cut_along_its_seam_gives_what_the_unturned_bar_gives_turned`).
 #[test]
 fn a_cut_along_the_seam_refuses_a_corner_moved_in_the_cut_and_answers_one_moved_out_of_it() {
     let policy = Policy::certified();
@@ -502,34 +567,107 @@ fn under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_to
     }
 }
 
+/// Turned 0.4 about `x`, the bar cut along its seam gives what the unturned bar
+/// gives, turned.
+///
+/// The sound bar less the half past its seam, and with it, is half the bar,
+/// `45π`, and its corners are the unturned answer's corners turned. Its bottom
+/// seam corner `(3, 0, 0)` lands on the block's face, handed on as a box
+/// `8.5e-14` either way, and the face is the bar's seam plane moved the same way
+/// to the bit. Asked which side of it the box is, the fuse refused `side of
+/// plane`; the corner is on that plane by construction, and is taken so
+/// (§294.9).
+///
+/// The top corner moved in the file then gives the unturned bar's outcomes:
+/// off the wall and off the cap the same refusals, and a quarter turn round
+/// the sound answer — but the sound answer to a rounding, not to the bit. Cut
+/// away, the moved corner leaves the top seam corner of the answer to be
+/// placed where the block's face crosses the top circle, two ulps from where
+/// the sound bar's own corner is written.
+#[test]
+fn a_turned_bar_cut_along_its_seam_gives_what_the_unturned_bar_gives_turned() {
+    let policy = Policy::certified();
+    let half_the_bar = PI * RADIUS * RADIUS * HEIGHT / 2.0;
+    let turned = Shape::Bar(the_turn());
+    for rule in [Rule::Difference, Rule::Intersection] {
+        let answer_of = |shape: Shape, moved_to, partner| {
+            fuse(shape, moved_to, partner, rule, &policy).unwrap_or_else(|why| {
+                panic!(
+                    "{shape:?} with its corner at {moved_to:?}, {partner:?} {rule:?}, refused: \
+                     {why:?}"
+                )
+            })
+        };
+        for partner in [THE_HALF_PAST_THE_SEAM, THE_HALF_SHORT_OF_THE_SEAM] {
+            let sound = answer_of(turned, WHERE_THE_BAR_PUTS_IT, partner);
+            let unturned = answer_of(
+                Shape::Bar(Isometry::identity()),
+                WHERE_THE_BAR_PUTS_IT,
+                partner,
+            );
+            holds(&sound, half_the_bar, rule, &policy);
+            holds(&unturned, half_the_bar, rule, &policy);
+            the_same_corners_to_a_rounding(&sound, &unturned, &the_turn(), rule);
+        }
+
+        let sound = answer_of(turned, WHERE_THE_BAR_PUTS_IT, THE_HALF_PAST_THE_SEAM);
+        let cut_away = answer_of(
+            turned,
+            A_QUARTER_TURN_ROUND_AND_OFF_THE_WALL,
+            THE_HALF_PAST_THE_SEAM,
+        );
+        holds(&cut_away, half_the_bar, rule, &policy);
+        the_same_corners_to_a_rounding(&cut_away, &sound, &Isometry::identity(), rule);
+
+        check(
+            turned,
+            OFF_THE_WALL,
+            THE_HALF_PAST_THE_SEAM,
+            rule,
+            &policy,
+            Outcome::CannotTellTheCellsOfAFaceApart,
+        );
+        check(
+            turned,
+            OFF_THE_CAP,
+            THE_HALF_PAST_THE_SEAM,
+            rule,
+            &policy,
+            Outcome::Undecidable("order along a crossing"),
+        );
+    }
+}
+
 /// **This is the sound bar's refusal, not an answer about a moved corner.**
-/// Turned, the bar's bottom seam corner `(3, 0, 0)` lands on the block's face
-/// and is handed on as a box `8.5e-14` either way round where it lands
-/// (`2.8e-13` when shifted as well), so which
-/// side of that face it is on comes out `Undecidable`. The sound bar refuses
-/// that way, and every moved corner with it, turned alone or turned and then
-/// shifted. Shifted alone it answers, which is Q509's exact corner.
+/// Turned and then shifted, the bar's bottom seam corner `(3, 0, 0)` lands on
+/// the block's face give or take a rounding and is handed on as a box
+/// `2.8e-13` either way round where it lands, so which side of that face it is
+/// on comes out `Undecidable`. The face is not the bar's seam plane moved: the
+/// shift rounds the two offsets apart by an ulp, so the face crosses the
+/// bottom circle an ulp from the corner, and nothing says the two are one
+/// point (§294.9). The sound bar refuses that way, and every moved corner with
+/// it. Turned alone it answers
+/// (`a_turned_bar_cut_along_its_seam_gives_what_the_unturned_bar_gives_turned`),
+/// and shifted alone, which is Q509's exact corner.
 #[test]
 fn a_turned_sound_bar_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is() {
     let policy = Policy::certified();
-    for placement in [the_turn(), the_turn_then_the_shift()] {
-        let bar = Shape::Bar(placement);
-        for rule in [Rule::Difference, Rule::Intersection] {
-            for moved_to in [
-                WHERE_THE_BAR_PUTS_IT,
-                OFF_THE_WALL,
-                OFF_THE_CAP,
-                A_QUARTER_TURN_ROUND_AND_OFF_THE_WALL,
-            ] {
-                check(
-                    bar,
-                    moved_to,
-                    THE_HALF_PAST_THE_SEAM,
-                    rule,
-                    &policy,
-                    Outcome::Undecidable("side of plane"),
-                );
-            }
+    let bar = Shape::Bar(the_turn_then_the_shift());
+    for rule in [Rule::Difference, Rule::Intersection] {
+        for moved_to in [
+            WHERE_THE_BAR_PUTS_IT,
+            OFF_THE_WALL,
+            OFF_THE_CAP,
+            A_QUARTER_TURN_ROUND_AND_OFF_THE_WALL,
+        ] {
+            check(
+                bar,
+                moved_to,
+                THE_HALF_PAST_THE_SEAM,
+                rule,
+                &policy,
+                Outcome::Undecidable("side of plane"),
+            );
         }
     }
 }
@@ -557,7 +695,7 @@ fn a_ball_whose_south_pole_is_moved_in_its_file_reads_back_and_does_not_validate
 
 /// **A moved pole never reaches the answer.** Even with a block far away,
 /// where the whole ball is kept, the answer's corners are the sound ball's to
-/// the last bit. The one pair refused is refused for the sound ball too.
+/// the last bit. So are they with a small block cut out round the pole itself.
 #[test]
 fn a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer() {
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
@@ -581,7 +719,7 @@ fn a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer() {
             (
                 ROUND_THE_SOUTH_POLE,
                 Rule::Difference,
-                Outcome::ACurvedFaceGoesRightRoundWithNoSeam,
+                Outcome::TheSoundAnswer,
             ),
             (
                 THE_BALLS_X_ABOVE_NOUGHT_HALF,
@@ -605,7 +743,7 @@ fn a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer() {
 #[test]
 fn a_frustum_whose_top_corner_is_moved_in_its_file_reads_back_and_does_not_validate() {
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        let frustum = Shape::Frustum;
+        let frustum = Shape::Frustum(Isometry::identity());
         does_not_validate(
             frustum,
             THE_FRUSTUMS_CORNER_OFF_THE_WALL,
@@ -631,12 +769,11 @@ fn a_frustum_whose_top_corner_is_moved_in_its_file_reads_back_and_does_not_valid
 /// Each row is a partner, a rule, what the sound frustum gives, and what the
 /// corner moved off the wall, off the cap and a quarter turn round gives.
 #[test]
-fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_more() {
+fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives() {
     use Outcome::{
         CannotTellTheCellsOfAFaceApart as CannotTell, ItBlamesItself as Blamed,
         TheSoundAnswer as Sound,
     };
-    let inside_a_piece = Outcome::Undecidable("a point inside a piece of a face");
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
         for (partner, rule, sound, [off_the_wall, off_the_cap, a_quarter_turn_round]) in [
             (FAR_AWAY, Rule::Union, Sound, [Blamed, Blamed, Blamed]),
@@ -650,19 +787,19 @@ fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_
                 OVER_THE_FRUSTUMS_TOP,
                 Rule::Difference,
                 Sound,
-                [Sound, inside_a_piece, Sound],
+                [Sound, Sound, Sound],
             ),
             (
                 OVER_THE_FRUSTUMS_TOP,
                 Rule::Intersection,
                 Sound,
-                [Blamed, inside_a_piece, Blamed],
+                [Blamed, Blamed, Blamed],
             ),
             (
                 OVER_THE_FRUSTUMS_RIM_BY_THE_SEAM,
                 Rule::Difference,
-                inside_a_piece,
-                [inside_a_piece, inside_a_piece, inside_a_piece],
+                Sound,
+                [Sound, Sound, Sound],
             ),
             (
                 OVER_THE_FRUSTUMS_RIM_AWAY_FROM_THE_SEAM,
@@ -684,7 +821,14 @@ fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_
             ),
         ] {
             let frustum = |moved_to, outcome| {
-                check(Shape::Frustum, moved_to, partner, rule, &policy, outcome);
+                check(
+                    Shape::Frustum(Isometry::identity()),
+                    moved_to,
+                    partner,
+                    rule,
+                    &policy,
+                    outcome,
+                );
             };
             frustum(WHERE_THE_FRUSTUM_PUTS_IT, sound);
             frustum(THE_FRUSTUMS_CORNER_OFF_THE_WALL, off_the_wall);
@@ -695,6 +839,633 @@ fn a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_
             );
         }
     }
+}
+
+/// The sound frustum less a block over its top, and less a block over its rim
+/// by the seam, each hold what the frustum and the block say. The first is
+/// what the corner moved off the cap gives, and the second what every corner
+/// gives, so this is what `TheSoundAnswer` holds those to.
+///
+/// The frustum is `π/12 · (6³ − 2³) = 52π/3`, and below `z = 5` it is
+/// `π/12 · (5³ − 2³) = 39π/4`. The block over the rim takes `∫₅⁶ seg(z/2) dz`, `seg(r)` being the
+/// part of a circle of radius `r` past `x = 2`, `r² acos(2/r) − 2√(r² − 4)`;
+/// with `F(r) = r³/3 · acos(2/r) − 4r/3 · √(r² − 4) + 8/3 · ln(r + √(r² − 4))`
+/// that is `2 (F(3) − F(2.5))`.
+#[test]
+fn the_sound_frustum_less_a_block_over_its_top_or_its_rim_holds_what_the_two_say() {
+    let f = |r: f64| {
+        let leg = (r * r - 4.0).sqrt();
+        r.powi(3) / 3.0 * (2.0 / r).acos() - 4.0 * r / 3.0 * leg + 8.0 / 3.0 * (r + leg).ln()
+    };
+    let frustum = 52.0 * PI / 3.0;
+    for (partner, volume) in [
+        (OVER_THE_FRUSTUMS_TOP, 39.0 * PI / 4.0),
+        (
+            OVER_THE_FRUSTUMS_RIM_BY_THE_SEAM,
+            frustum - 2.0 * (f(3.0) - f(2.5)),
+        ),
+    ] {
+        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            let (mut model, solid) = read_back(
+                Shape::Frustum(Isometry::identity()),
+                WHERE_THE_FRUSTUM_PUTS_IT,
+            );
+            let block = a_block(&mut model, partner, &Isometry::identity());
+            let what = format!("{partner:?} under {policy:?}");
+            let answer = model
+                .fuse(
+                    &[solid],
+                    &[block],
+                    Rule::Difference,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} refused: {why:?}"));
+            let [solid] = answer.solids() else {
+                panic!("{what}: {:?}", answer.solids());
+            };
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what} does not validate: {why:?}"));
+            let measured = model
+                .solid(*solid)
+                .expect("the fuse made this key")
+                .measure(
+                    Deflection::of(0.001).expect("a fine mesh"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} does not measure: {why:?}"));
+            assert!(
+                (measured.volume() - volume).abs() <= measured.volume_error(),
+                "{what} holds {volume} and measures {} give or take {}",
+                measured.volume(),
+                measured.volume_error()
+            );
+        }
+    }
+}
+
+/// **Turned 0.4 about `x`, the frustum cut along its seam gives what the
+/// unturned frustum gives, turned, under both policies.** Until Q1171 every
+/// fuse here refused `CannotNameWhichPieceOfACrossingThisIs` where the block's
+/// face crosses the cone; `intersect` names the four half rulings now
+/// (`the_face_along_a_turned_frustums_seam_crosses_its_cone_in_four_half_rulings`).
+/// Until Q1164 the fuse then refused `side of plane` at the box round the
+/// bottom seam corner `(1, 0, 2)` turned, the round bar's refusal before
+/// §294.9. A seam corner on a cone carries its seam plane now, as one on a
+/// pipe does, and the block's face is that plane turned, so the corner is
+/// taken as on it unasked (§294.12).
+///
+/// **Until Q1361 `certified` then refused at the apex `(0, 0, 0)`**, on
+/// `which way round a node two ways out of it turn`. On the frustum's wall,
+/// the two half rulings that leave the apex into the frustum's nappe both lie
+/// in the block's face, which holds the axis, so about the axis they are half
+/// a turn apart and the turn between them is nothing. Each is an enclosure, so
+/// worked out the turn straddles nothing. It is read as nothing now, because
+/// the face holds the axis exactly as stored
+/// (`a_plane_through_a_frustums_apex_that_misses_its_axis_turns_its_two_rulings_by_something`
+/// is the plane that does not).
+///
+/// The sound frustum answers both rules with half the frustum, `26π/3`,
+/// measured on a fine mesh, validates, and has the unturned answer's corners
+/// turned to a rounding. The corner moved a quarter turn round is cut away and
+/// gives the sound answer to a rounding, not to the bit, since the top seam
+/// corner is then placed where the block's face crosses the top circle: the
+/// turned bar's one difference. The corners moved off the wall and off the
+/// cap give `CannotTellTheCellsOfAFaceApart`, as they do unturned
+/// (`a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives`).
+#[test]
+fn a_turned_frustum_cut_along_its_seam_gives_what_the_unturned_frustum_gives_turned() {
+    let half_the_frustum = 26.0 * PI / 3.0;
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        for rule in [Rule::Difference, Rule::Intersection] {
+            let answer_of = |placement, moved_to| {
+                fuse(
+                    Shape::Frustum(placement),
+                    moved_to,
+                    THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+                    rule,
+                    &policy,
+                )
+                .unwrap_or_else(|why| {
+                    panic!(
+                        "the frustum at {placement:?} with its corner at {moved_to:?}, {rule:?} \
+                         under {policy:?}, refused: {why:?}"
+                    )
+                })
+            };
+            let unturned = answer_of(Isometry::identity(), WHERE_THE_FRUSTUM_PUTS_IT);
+            holds(&unturned, half_the_frustum, rule, &policy);
+
+            let turned = answer_of(the_turn(), WHERE_THE_FRUSTUM_PUTS_IT);
+            holds(&turned, half_the_frustum, rule, &policy);
+            turned
+                .model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| {
+                    panic!("{rule:?} under {policy:?} does not validate: {why:?}")
+                });
+            the_same_corners_to_a_rounding(&turned, &unturned, &the_turn(), rule);
+
+            let cut_away = answer_of(the_turn(), THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND);
+            holds(&cut_away, half_the_frustum, rule, &policy);
+            the_same_corners_to_a_rounding(&cut_away, &turned, &Isometry::identity(), rule);
+
+            for moved_to in [
+                THE_FRUSTUMS_CORNER_OFF_THE_WALL,
+                THE_FRUSTUMS_CORNER_OFF_THE_CAP,
+            ] {
+                check(
+                    Shape::Frustum(the_turn()),
+                    moved_to,
+                    THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+                    rule,
+                    &policy,
+                    Outcome::CannotTellTheCellsOfAFaceApart,
+                );
+            }
+        }
+    }
+}
+
+/// **Turned and then shifted, the frustum cut along its seam is the round
+/// bar's case again** (§294.13). Under `certified` the sound frustum and every
+/// moved corner refuse `side of plane`, with one record, on a box `4.6e-13`
+/// across round where the bottom seam corner `(1, 0, 2)` lands, which the
+/// block's face along the seam straddles. The turned and shifted bar refuses
+/// the same way round its own bottom seam corner
+/// (`a_turned_sound_bar_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is`).
+///
+/// The cause is the bar's too. The face has the normal of the frustum's seam
+/// plane, moved and turned round, bit for bit, and an offset one ulp further
+/// out along it, because the block's placement is the shift and the turn
+/// composed with the block's own shift to `(-5, 0, 1)`, and that rounds. So
+/// the face is not the seam plane, the corner is not taken as on it unasked
+/// (§294.12), and the box is asked and straddles it. The face runs along the
+/// frustum's axis and misses it: the apex is behind it, so the block reaches a
+/// rounding past the axis, and the face crosses the cone in a hyperbola, whose
+/// two branches `intersect` names. The bar's face is one ulp the other way
+/// (§294.9). Whether an answer holding the corner and the face's crossing with
+/// the bottom circle a rounding apart can be had at all is Q913's to pin.
+#[test]
+fn a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is()
+ {
+    let placement = the_turn_then_the_shift();
+    let (mut model, frustum) = read_back(Shape::Frustum(placement), WHERE_THE_FRUSTUM_PUTS_IT);
+    let block = a_block(
+        &mut model,
+        THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+        &placement,
+    );
+    let the_seam_plane = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+        .expect("y = 0 holds the frustum's axis and both its seam corners")
+        .transformed(&placement)
+        .reversed();
+    let face = the_face_with_the_normal_of(&model, block, &the_seam_plane);
+    assert_eq!(
+        face.offset(),
+        the_seam_plane.offset().next_up(),
+        "the block's face is one ulp further out than the seam plane"
+    );
+    let cone = the_frustums_cone(&model, frustum);
+    let a_pipe_round_the_axis = Cylinder::new(cone.axis(), 1.0).expect("a pipe");
+    assert_eq!(
+        how_a_plane_leans_against_a_pipe(&face, &a_pipe_round_the_axis),
+        Decision::Zero,
+        "the face runs along the axis"
+    );
+    assert_eq!(
+        where_a_cones_apex_stands_against_a_plane(&face, &cone),
+        Decision::Neg,
+        "and misses it, with the apex behind the face"
+    );
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        let met = intersect(
+            &Surface::Plane(face),
+            &Surface::Cone(cone),
+            &policy,
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(branches)) = met else {
+            panic!("{policy:?}: the hyperbola is named: {met:?}");
+        };
+        assert_eq!(branches.len(), 2, "{policy:?}: its two branches");
+    }
+
+    let where_the_corner_lands = placement
+        .apply_to_point(Point::new(1.0, 0.0, 2.0))
+        .coordinates();
+    for rule in [Rule::Difference, Rule::Intersection] {
+        for moved_to in [
+            WHERE_THE_FRUSTUM_PUTS_IT,
+            THE_FRUSTUMS_CORNER_OFF_THE_WALL,
+            THE_FRUSTUMS_CORNER_OFF_THE_CAP,
+            THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND,
+        ] {
+            let case = format!("{rule:?} with the top corner at {moved_to:?}");
+            let refused = fuse(
+                Shape::Frustum(placement),
+                moved_to,
+                THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+                rule,
+                &Policy::certified(),
+            );
+            let Err(Error::Undecidable { records }) = refused else {
+                panic!("{case}: {:?}", refused.map(|answer| answer.solids.len()));
+            };
+            let [record] = records.records() else {
+                panic!("{case}: one record, {records:?}");
+            };
+            assert_eq!(record.predicate(), "side of plane", "{case}");
+            let [corner] = record.inputs() else {
+                panic!("{case}: one point asked about, {record:?}");
+            };
+            assert!(corner.uncertainty() < 5e-13, "{case}: {corner:?}");
+            assert!(
+                corner
+                    .enclosure()
+                    .iter()
+                    .zip(where_the_corner_lands)
+                    .all(|(side, at)| side.lo() <= at && at <= side.hi()),
+                "{case}: {corner:?} holds {where_the_corner_lands:?}"
+            );
+            assert!(
+                matches!(face.side_of_point(*corner), Decision::Undecidable { .. }),
+                "{case}: the block's face straddles {corner:?}"
+            );
+        }
+    }
+}
+
+/// **Under `tolerant(100)` the turned and shifted frustum cut along its seam
+/// answers, as the turned and shifted bar does** (§294.15, Q1405). The policy
+/// takes the box round the bottom seam corner as on the block's face, which
+/// `certified` cannot tell
+/// (`a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is`).
+/// The sound frustum answers both rules with half the frustum, `26π/3` on a
+/// fine mesh, its whole model validates, and its corners are the turned
+/// frustum's shifted, to a rounding. The corner moved a quarter turn round is
+/// cut away and gives the sound answer to a rounding. The corners moved off the
+/// wall and off the cap give `CannotTellTheCellsOfAFaceApart`, as at every
+/// placement tried. The bar, placed the same way and cut by the half past its
+/// seam, is half the bar under both rules.
+///
+/// **Until Q1405 the sound frustum and the corner moved a quarter turn round
+/// refused `CannotNameWhichPieceOfACrossingThisIs`** (§294.13, §294.14), when
+/// `nest_the_shells` meshed the answer to measure it. The mesher walks the edge
+/// the face cuts along the cone, between corners on the bottom and top circles,
+/// as one branch of the hyperbola the face cuts, and `rcad_geom::walk` picked
+/// the branch by asking each branch's vertex which side of the apex it is on.
+/// The face misses the apex by `5e-16`, so each vertex is within `1e-15` of the
+/// apex and placed only to `9.9e-14`, and neither policy could tell. The branch
+/// is named by the side of the apex the corners are on now
+/// (`walking_the_cut_along_a_turned_and_shifted_frustums_seam_names_the_branch_its_corners_are_on`).
+#[test]
+fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_answers_as_the_bar_does()
+{
+    let policy = Policy::tolerant(100.0);
+    let placement = the_turn_then_the_shift();
+    let half_the_frustum = 26.0 * PI / 3.0;
+    for rule in [Rule::Difference, Rule::Intersection] {
+        let bar = fuse(
+            Shape::Bar(placement),
+            WHERE_THE_BAR_PUTS_IT,
+            THE_HALF_PAST_THE_SEAM,
+            rule,
+            &policy,
+        )
+        .unwrap_or_else(|why| panic!("the bar, {rule:?}, refused: {why:?}"));
+        holds(&bar, PI * RADIUS * RADIUS * HEIGHT / 2.0, rule, &policy);
+
+        let answer_of = |placement, moved_to| {
+            fuse(
+                Shape::Frustum(placement),
+                moved_to,
+                THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+                rule,
+                &policy,
+            )
+            .unwrap_or_else(|why| {
+                panic!(
+                    "the frustum at {placement:?} with its corner at {moved_to:?}, {rule:?}, \
+                     refused: {why:?}"
+                )
+            })
+        };
+        let sound = answer_of(placement, WHERE_THE_FRUSTUM_PUTS_IT);
+        holds(&sound, half_the_frustum, rule, &policy);
+        sound
+            .model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?} does not validate: {why:?}"));
+        let turned = answer_of(the_turn(), WHERE_THE_FRUSTUM_PUTS_IT);
+        the_same_corners_to_a_rounding(&sound, &turned, &the_shift(), rule);
+
+        let cut_away = answer_of(placement, THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND);
+        holds(&cut_away, half_the_frustum, rule, &policy);
+        the_same_corners_to_a_rounding(&cut_away, &sound, &Isometry::identity(), rule);
+
+        for moved_to in [
+            THE_FRUSTUMS_CORNER_OFF_THE_WALL,
+            THE_FRUSTUMS_CORNER_OFF_THE_CAP,
+        ] {
+            check(
+                Shape::Frustum(placement),
+                moved_to,
+                THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+                rule,
+                &policy,
+                Outcome::CannotTellTheCellsOfAFaceApart,
+            );
+        }
+    }
+}
+
+/// **Walking the cut along the seam names the branch its corners are on by
+/// which side of the apex they are, and asks no point a rounding from the
+/// apex** (§294.15, Q1405). The block's face misses the cone's apex by
+/// `5e-16`, so the two cross in a hyperbola whose two vertices stand about
+/// `1e-15` either side of the apex. `rcad_geom::walk`, handed that crossing
+/// between the two seam corners, finds both corners on the axis's side of the
+/// apex, which names the branch opening against the face's `and` direction,
+/// since that direction always runs against the axis. Under either policy and
+/// whichever of the two runs `intersect` names it is handed, it walks that
+/// branch with nothing to record: every point it puts down is on the cone's
+/// wall between the bottom circle and the top one, on the face, and on the
+/// cone, to the walk's own deviation.
+///
+/// **Until Q1405 it refused `CannotNameWhichPieceOfACrossingThisIs`**
+/// (§294.14). It asked each branch's vertex which side of the apex it is on,
+/// and a vertex is placed only to `9.9e-14`, so its box held the apex:
+/// `certified` could not tell, and `tolerant(100)` read it as on the plane
+/// through the apex, which names no branch either. The fuse met this when it
+/// meshed its answer to nest the shells.
+#[test]
+fn walking_the_cut_along_a_turned_and_shifted_frustums_seam_names_the_branch_its_corners_are_on() {
+    let placement = the_turn_then_the_shift();
+    let (mut model, frustum) = read_back(Shape::Frustum(placement), WHERE_THE_FRUSTUM_PUTS_IT);
+    let block = a_block(
+        &mut model,
+        THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+        &placement,
+    );
+    let the_seam_plane = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+        .expect("y = 0 holds the frustum's axis and both its seam corners")
+        .transformed(&placement)
+        .reversed();
+    let face = the_face_with_the_normal_of(&model, block, &the_seam_plane);
+    let cone = the_frustums_cone(&model, frustum);
+    assert_eq!(
+        how_a_plane_leans_against_a_cone(&face, &cone),
+        Decision::Neg,
+        "the face is steeper than the cone, so a face that misses the apex crosses it in a \
+         hyperbola"
+    );
+    let apex = placement.apply_to_point(Point::origin());
+    assert_eq!(cone.apex().coordinates(), apex.coordinates());
+    let up = cone.axis().direction() * cone.axis().direction().length().recip();
+    let the_seam_corners = [Point::new(1.0, 0.0, 2.0), Point::new(3.0, 0.0, 6.0)]
+        .map(|corner| PredicatePoint::from(placement.apply_to_point(corner).coordinates()));
+    let (plane, slope) = (face, cone.slope());
+    let [face, cone] = [Surface::Plane(face), Surface::Cone(cone)];
+
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        let met = intersect(&face, &cone, &policy, &mut ProvenanceLog::new());
+        let Ok(SurfaceMeet::Curves(branches)) = met else {
+            panic!("{policy:?}: the hyperbola is named: {met:?}");
+        };
+        for branch in branches {
+            let run = NamedRun::new(branch.run().clone(), the_seam_corners)
+                .expect("a branch of a hyperbola does not go right round");
+            let mut log = ProvenanceLog::new();
+            let walked = walk(
+                &run,
+                [&face, &cone],
+                Deflection::of(0.01).expect("a length"),
+                &policy,
+                &mut log,
+            )
+            .unwrap_or_else(|why| panic!("{policy:?}: the walk refused: {why:?}"));
+            assert!(
+                log.records().is_empty(),
+                "{policy:?}: nothing to record, {log:?}"
+            );
+            assert!(!walked.points().is_empty(), "{policy:?}: {walked:?}");
+            let room = 2.0 * walked.deviation().magnitude();
+            for point in walked.points() {
+                let height = (*point - apex).dot(up);
+                assert!(
+                    2.0 < height && height < 6.0,
+                    "{policy:?}: {point:?} is {height} up the axis, off the frustum's wall"
+                );
+                assert!(
+                    plane.signed_distance_to(*point).abs() <= room,
+                    "{policy:?}: {point:?} is off the face"
+                );
+                let out_from_the_axis = ((*point - apex) - up * height).length();
+                assert!(
+                    (out_from_the_axis - slope * height).abs() <= room,
+                    "{policy:?}: {point:?} is off the cone"
+                );
+            }
+        }
+    }
+}
+
+/// **A plane through the apex that misses the axis turns its two rulings by
+/// something, and the fuse works that turn out.** The frustum turned 0.4 about
+/// `x`, and the half past its seam left unturned: the block's face `y = 0`
+/// runs through the apex at the origin and is steeper than the cone, so the two
+/// cross in two rulings through it, as along the seam. But the axis is turned
+/// 0.4 out of the face, so `n·w` is something, and the two halves into the
+/// frustum's nappe are not mirrors across the axis. About it they are less than
+/// half a turn apart, and the turn at the apex is not nothing. Read as nothing,
+/// as a turn between two rulings of any one plane through the apex would be,
+/// the difference refuses `TwoCurvesTouchWithoutCrossing` on the frustum's
+/// wall: measured with the axis check taken out of `arrange.rs`.
+///
+/// In the frustum's own frame the face is `y = z·tan 0.4`, which cuts each
+/// circle `z = h` square to the axis, of radius `h/2`, along a chord
+/// `h·tan 0.4` from its middle. So the piece past the face is `K·h²` across at
+/// every height, `K = acos(2·tan 0.4)/4 − tan 0.4·√(1/4 − tan² 0.4)`, and
+/// `K·(6³ − 2³)/3` from the bottom cap to the top. That piece is what the
+/// block takes, and what is left of `52π/3`.
+#[test]
+fn a_plane_through_a_frustums_apex_that_misses_its_axis_turns_its_two_rulings_by_something() {
+    let policy = Policy::certified();
+    let lean = 0.4f64.tan();
+    let across = (2.0 * lean).acos() / 4.0 - lean * (0.25 - lean * lean).sqrt();
+    let past_the_face = across * (6.0f64.powi(3) - 2.0f64.powi(3)) / 3.0;
+    for (rule, volume) in [
+        (Rule::Difference, 52.0 * PI / 3.0 - past_the_face),
+        (Rule::Intersection, past_the_face),
+    ] {
+        let (mut model, frustum) = read_back(Shape::Frustum(the_turn()), WHERE_THE_FRUSTUM_PUTS_IT);
+        let block = a_block(
+            &mut model,
+            THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+            &Isometry::identity(),
+        );
+        let (cone, face) = the_cone_and_the_face_through_its_apex(&model, frustum, block);
+        assert_eq!(
+            how_a_plane_leans_against_a_cone(&face, &cone),
+            Decision::Neg,
+            "the face is steeper than the cone, so they cross in two rulings"
+        );
+        let a_pipe_round_the_axis = Cylinder::new(cone.axis(), 1.0).expect("a pipe");
+        assert_ne!(
+            how_a_plane_leans_against_a_pipe(&face, &a_pipe_round_the_axis),
+            Decision::Zero,
+            "the face misses the axis"
+        );
+
+        let answer = model
+            .fuse(
+                &[frustum],
+                &[block],
+                rule,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{rule:?} refused: {why:?}"));
+        let [solid] = answer.solids() else {
+            panic!("{rule:?}: {:?}", answer.solids());
+        };
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?} does not validate: {why:?}"));
+        let measured = model
+            .solid(*solid)
+            .expect("the fuse made this key")
+            .measure(
+                Deflection::of(0.001).expect("a fine mesh"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{rule:?} does not measure: {why:?}"));
+        assert!(
+            (measured.volume() - volume).abs() <= measured.volume_error(),
+            "{rule:?} holds {volume} and measures {} give or take {}",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
+}
+
+/// **The turned frustum's cone and the block's face along the seam cross in
+/// four half rulings, which `rcad_geom::intersect` names.** That face runs
+/// through the cone's apex at the origin and is steeper than the cone, so the
+/// two cross in two rulings through the apex. Unturned, `intersect` names the
+/// two whole, along directions `f64` writes down exactly on both surfaces.
+/// Turned, no such direction exists (§294.11), and it names the four halves the
+/// apex cuts the two into, each by a corner of two flat surfaces through the
+/// apex. It refused the turned pair until Q1171 (§294.10).
+#[test]
+fn the_face_along_a_turned_frustums_seam_crosses_its_cone_in_four_half_rulings() {
+    let policy = Policy::certified();
+    for placement in [Isometry::identity(), the_turn()] {
+        let (mut model, frustum) = read_back(Shape::Frustum(placement), WHERE_THE_FRUSTUM_PUTS_IT);
+        let block = a_block(
+            &mut model,
+            THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+            &placement,
+        );
+        let (cone, face) = the_cone_and_the_face_through_its_apex(&model, frustum, block);
+        assert_eq!(
+            how_a_plane_leans_against_a_cone(&face, &cone),
+            Decision::Neg,
+            "{placement:?}: the face is steeper than the cone, so they cross in two rulings"
+        );
+        let met = intersect(
+            &Surface::Plane(face),
+            &Surface::Cone(cone),
+            &policy,
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(runs)) = met else {
+            panic!("{placement:?}: the crossing is named: {met:?}");
+        };
+        let how_many = if placement == Isometry::identity() {
+            2
+        } else {
+            4
+        };
+        assert_eq!(
+            runs.len(),
+            how_many,
+            "{placement:?}: two whole rulings unturned, four halves turned"
+        );
+    }
+}
+
+/// The frustum's cone, its apex at the origin, and the one face of the block
+/// that runs through that apex, exactly.
+fn the_cone_and_the_face_through_its_apex(
+    model: &Model,
+    frustum: SolidKey,
+    block: SolidKey,
+) -> (Cone, Plane) {
+    let cone = the_frustums_cone(model, frustum);
+    let through_the_apex: Vec<Plane> = the_planes_of(model, block)
+        .into_iter()
+        .filter(|flat| flat.offset() == 0.0)
+        .collect();
+    let [face] = through_the_apex.as_slice() else {
+        panic!("one face through the origin: {through_the_apex:?}");
+    };
+    assert_eq!(cone.apex(), Point::origin());
+    assert_eq!(
+        where_a_cones_apex_stands_against_a_plane(face, &cone),
+        Decision::Zero,
+        "the face runs through the apex"
+    );
+    (cone, *face)
+}
+
+/// The one face of `block` whose plane has `like`'s normal, bit for bit.
+fn the_face_with_the_normal_of(model: &Model, block: SolidKey, like: &Plane) -> Plane {
+    let bits = |flat: &Plane| {
+        let normal = flat.normal();
+        [normal.x(), normal.y(), normal.z()].map(f64::to_bits)
+    };
+    let alike: Vec<Plane> = the_planes_of(model, block)
+        .into_iter()
+        .filter(|flat| bits(flat) == bits(like))
+        .collect();
+    let [face] = alike.as_slice() else {
+        panic!("one face with the normal of {like:?}: {alike:?}");
+    };
+    *face
+}
+
+/// The frustum's one cone, as placed.
+fn the_frustums_cone(model: &Model, frustum: SolidKey) -> Cone {
+    let cones: Vec<Cone> = model
+        .solid(frustum)
+        .expect("this model made the key")
+        .faces()
+        .filter_map(|face| {
+            let Surface::Cone(cone) = face.surface() else {
+                return None;
+            };
+            Some(cone)
+        })
+        .collect();
+    let [cone] = cones.as_slice() else {
+        panic!("one cone: {cones:?}");
+    };
+    *cone
+}
+
+/// The planes of `solid`'s flat faces, as placed.
+fn the_planes_of(model: &Model, solid: SolidKey) -> Vec<Plane> {
+    model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .filter_map(|face| face.surface().as_plane().copied())
+        .collect()
 }
 
 /// No placement at all, the shift, the turn, and the turn then the shift.
@@ -778,8 +1549,7 @@ fn check(
         }
         Outcome::Undecidable(_)
         | Outcome::CannotTellTheCellsOfAFaceApart
-        | Outcome::TwoCurvesTouchWithoutCrossing
-        | Outcome::ACurvedFaceGoesRightRoundWithNoSeam => {
+        | Outcome::TwoCurvesTouchWithoutCrossing => {
             refuses_as(shape, moved_to, partner, rule, policy, outcome);
         }
     }
@@ -812,9 +1582,6 @@ fn refuses_as(
         }
         Outcome::TwoCurvesTouchWithoutCrossing => {
             matches!(refused, Error::TwoCurvesTouchWithoutCrossing { .. })
-        }
-        Outcome::ACurvedFaceGoesRightRoundWithNoSeam => {
-            matches!(refused, Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
         }
         Outcome::ItBlamesItself | Outcome::TheSoundAnswer => {
             unreachable!("{refusal:?} is not a refusal")
@@ -894,6 +1661,59 @@ fn the_same_answer_as_the_sound_solid(
             .model
             .validate_solid(solid, policy, &mut ProvenanceLog::new())
             .unwrap_or_else(|error| panic!("{case}: the answer on its own is sound: {error:?}"));
+    }
+}
+
+/// The answer is one solid, `validate_solid` accepts it, and it measures
+/// `volume` to within what a fine mesh can say.
+fn holds(answer: &Answer, volume: f64, rule: Rule, policy: &Policy) {
+    let [solid] = answer.solids[..] else {
+        panic!("{rule:?}: {} solids", answer.solids.len());
+    };
+    answer
+        .model
+        .validate_solid(solid, policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{rule:?} does not validate: {why:?}"));
+    let measured = answer
+        .model
+        .solid(solid)
+        .expect("the fuse made this key")
+        .measure(
+            Deflection::of(0.001).expect("a fine mesh"),
+            policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{rule:?} does not measure: {why:?}"));
+    assert!(
+        (measured.volume() - volume).abs() <= measured.volume_error(),
+        "{rule:?} holds {volume} and measures {} give or take {}",
+        measured.volume(),
+        measured.volume_error()
+    );
+}
+
+/// Further than a corner of the turned bar can land from where the turn puts
+/// it: the widest box the turn moves one into is `2.8e-13` either way, round
+/// the top seam corner.
+const A_ROUNDING_OF_THE_TURN: f64 = 1e-12;
+
+/// Each corner of `theirs`, moved by `movement`, is within
+/// [`A_ROUNDING_OF_THE_TURN`] of exactly one corner of `mine`, and the two have
+/// as many corners.
+fn the_same_corners_to_a_rounding(mine: &Answer, theirs: &Answer, movement: &Isometry, rule: Rule) {
+    let point = |bits: &[u64; 3]| {
+        let [x, y, z] = bits.map(f64::from_bits);
+        Point::new(x, y, z)
+    };
+    assert_eq!(mine.corners.len(), theirs.corners.len(), "{rule:?}");
+    for corner in &theirs.corners {
+        let there = movement.apply_to_point(point(corner));
+        let near = mine
+            .corners
+            .iter()
+            .filter(|other| (point(other) - there).length() <= A_ROUNDING_OF_THE_TURN)
+            .count();
+        assert_eq!(near, 1, "{rule:?}: the corner {there:?}");
     }
 }
 
@@ -998,8 +1818,11 @@ impl Shape {
                     .add_ball(3.0, &Isometry::identity())
                     .expect("a ball of radius three");
             }
-            Shape::Frustum => {
-                cones::a_frustum(model, 0.5, 2.0, 6.0);
+            Shape::Frustum(placement) => {
+                let frustum = cones::a_frustum(model, 0.5, 2.0, 6.0);
+                model
+                    .place_solid(frustum, &placement)
+                    .expect("this model made the key");
             }
         }
     }
@@ -1009,15 +1832,15 @@ impl Shape {
         match self {
             Shape::Bar(_) => WHERE_THE_BAR_PUTS_IT,
             Shape::Ball => THE_SOUTH_POLE,
-            Shape::Frustum => WHERE_THE_FRUSTUM_PUTS_IT,
+            Shape::Frustum(_) => WHERE_THE_FRUSTUM_PUTS_IT,
         }
     }
 
     /// Where the solid is placed, and so where its partner is placed too.
     fn placement(self) -> Isometry {
         match self {
-            Shape::Bar(placement) => placement,
-            Shape::Ball | Shape::Frustum => Isometry::identity(),
+            Shape::Bar(placement) | Shape::Frustum(placement) => placement,
+            Shape::Ball => Isometry::identity(),
         }
     }
 }

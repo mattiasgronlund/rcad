@@ -22,7 +22,10 @@
 //! is the mistake this module is most likely to cause.
 //!
 //! - [`SharedSpace::Apart`] is a proof. The boxes round the two solids miss, so
-//!   no point is in both.
+//!   no point is in both. A box round a solid with a turned flat face is the
+//!   one round its stored corners opened out to where its stored planes meet,
+//!   since those planes are the faces (`docs/decisions.md` §17.1) and they meet
+//!   a rounding past the corners.
 //! - [`SharedSpace::Shared`] is a proof. Either a corner of one solid is
 //!   strictly inside the other — a corner is on its own solid's skin, and every
 //!   neighbourhood of a skin point holds material, so material meets material —
@@ -49,7 +52,9 @@
 //!
 //! # Cost
 //!
-//! Over a model: one box test per pair of solids. Inside a pair whose boxes
+//! Over a model: one box test per pair of solids, and where the boxes round
+//! the stored corners miss, the meeting of three planes at each corner of each
+//! flat face of both, to open them out. Inside a pair whose boxes
 //! meet: one point classification per corner of each solid against the other,
 //! and one plane comparison per pair of faces. The plane comparison is the
 //! quadratic one.
@@ -159,7 +164,18 @@ impl<'m> SolidView<'m> {
         let (Some(mine), Some(theirs)) = (self.box_around_it(), other.box_around_it()) else {
             return SharedSpace::Apart;
         };
-        if boxes_miss(mine, theirs) {
+        // `box_around_it` is not a box the whole solid fits inside: a turned
+        // solid's stored planes, which are its faces, meet a rounding past the
+        // stored corners it holds, and a turned cube and a block one spacing
+        // above its box share a point every plane of both puts inside (Q1331).
+        // Opened out to where the planes meet, it is. It is asked first all the
+        // same, because a box opened out holds the one it was opened from, so
+        // where those meet no plane need be met.
+        if boxes_miss(mine, theirs)
+            && let Some(mine) = self.box_opened_out_to_where_its_planes_meet(mine.0, mine.1)
+            && let Some(theirs) = other.box_opened_out_to_where_its_planes_meet(theirs.0, theirs.1)
+            && boxes_miss(mine, theirs)
+        {
             return SharedSpace::Apart;
         }
 
@@ -186,10 +202,11 @@ impl<'m> SolidView<'m> {
 
 /// Whether the two boxes have no point in common.
 ///
-/// A proof and not a hint, and plain `f64` is honest for the same reason
-/// `Bounds::overlap` gives: every point of every face is inside the box
-/// [`SolidView::box_around_it`] draws, so two boxes that miss hold no common
-/// point at all.
+/// Plain `f64` is honest for the same reason `Bounds::overlap` gives: the
+/// corners are compared, not computed, so two boxes that miss here hold no
+/// common point at all. That proves the two solids apart only for boxes every
+/// point of each solid is inside, which is what
+/// [`SolidView::shares_space_with`] hands it last.
 fn boxes_miss(mine: (Point, Point), theirs: (Point, Point)) -> bool {
     let (my_low, my_high) = (mine.0.coordinates(), mine.1.coordinates());
     let (their_low, their_high) = (theirs.0.coordinates(), theirs.1.coordinates());

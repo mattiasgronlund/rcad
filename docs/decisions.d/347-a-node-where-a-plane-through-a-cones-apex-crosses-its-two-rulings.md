@@ -118,6 +118,23 @@ because §283.3 was right that it was likely the same missing node. It took
 the node and the rulings' direction together, so the refusal was not only the
 node.
 
+**2026-10-04 (Q862, `70e6c705`):** every fuse in both tables answers now,
+one solid, validated, inside the mesh's own error of the right answer. The
+four refusals were not the mesher's. `Assembly::what_is_left` read the apex
+as a point walked straight through where only the two rulings left it, and
+folded them into one straight edge between their far ends, beside the cap's
+chord between the same two corners. It now keeps every corner that is the
+apex of a cone an edge there is carried by (347.4's note). The pins are
+renamed `a_block_face_through_the_apex_cuts_the_cone_in_half_and_every_fuse_answers`
+and `the_same_block_with_the_apex_just_below_its_face_answers_every_fuse`,
+and each pins the face count as well. With the floor at `z = 1` the cone's
+skin outside the block comes back as three faces of one cone where one would
+do: ten faces for the unions where eight would do, and six for the cone less
+the block where four would. `Assembly::edges_a_curved_face_keeps` leaves the
+three apart, because joined they are one ring of four sides that goes right
+round the apex and is not a band between two rings. A temporary print there
+showed that group in both unions and the cone less the block.
+
 ### 347.4 What is left
 
 - **The mesher.** Every refusal left in 347.3 is the check a fuse makes by
@@ -129,6 +146,56 @@ node.
   errors say and no more. §285 has a mesher refusal of the same name on a
   pointed cone's cap cut round its apex. `mesh.rs` is outside this row's write
   set.
+
+  **2026-10-04 (Q862, `70e6c705`):** the mesher was right to refuse. Q468
+  traced every refusal here to the shell it was handed, the two rulings
+  folded into one straight edge through the apex by `Assembly::what_is_left`
+  in `fuse/assemble.rs`, and a probe that kept the apex answered all twelve.
+  The rule is built: a corner that is the apex of a cone an edge there is
+  carried by is never walked straight through. It is an exact match of the
+  corner's point against `Cone::apex` by `exactly_at`, the same bits
+  `Corners::of` already joins two corners by, since the arrangement puts the
+  node where the two rulings cross at the apex as the cone stores it. A
+  corner one `f64` off the apex is not kept on that ground
+  (`only_a_corner_exactly_at_a_cones_apex_is_read_as_the_apex`). A direction
+  test at the corner was the other way, and was not taken: it would read two
+  rounded directions, and on a nearly flat cone the two rulings a plane
+  through its axis cuts are nearly opposite. Keeping the apex is never wrong,
+  because a face on a cone lies on one nappe and two rulings of one nappe are
+  never opposite. What it leaves is the bullet below on pieces of one cone
+  round its apex.
+- **Pieces of one cone round its apex stay apart** (2026-10-04, Q862). With
+  the floor at `z = 1`, the cone's skin outside the block is cut along the
+  rulings below the floor and round the cone at `z = 1` into three pieces of
+  the one cone. Joined they are one face whose one ring, of four sides, goes
+  right round the apex, with the apex inside it as on the input's own skin.
+  `Assembly::edges_a_curved_face_keeps` leaves such a group apart, since a
+  seam is only looked for across a band between two rings. The doc comment
+  on `Assembly::the_corners_each_closed_run_keeps` records a ring of arcs
+  right round a pointed cone with no seam refused by the writer
+  (`AWireWillNotLieFlatOnItsFace`), measured on a pointed cone less a block
+  whose walls touch its rim, so joining these is more than dropping the
+  rule. The answer is the right solid and validates, with two faces too
+  many and edges with one cone on both sides.
+
+  **2026-10-05 (Q989):** joined. `Assembly::needs_no_seam` now takes one
+  ring right round a cone, and nothing else, as a cap round its apex: the
+  other piece that ring cuts the nappe into is unbounded, so the face holds
+  the apex, and the mesher cuts it up to the apex
+  (`cut_a_cap_up_to_its_pole`) with no seam kept. The unions answer 8 faces
+  and the cone less the block 4, validated and inside the mesh's own error
+  of the volumes in 347.3; `mise exec -- just t -p rcad-topo --test
+  a_block_face_through_a_cones_apex` pins them. Over the workspace, a
+  temporary print in the new arm showed it reached in three more tests, all
+  passing: `fuses_that_touch.rs`'s
+  `a_pointed_cone_standing_on_its_apex_on_a_block` (rings of 4 and 8 sides),
+  and `how_often_a_fuse_with_a_cone_refuses.rs`'s
+  `how_often_a_certified_fuse_with_a_cone_in_it_refuses` and
+  `uniting_a_cone_with_a_cube_gives_the_same_answer_whichever_way_round_it_is_asked`
+  (rings of 3, 6 and 9 sides, seven pieces each, the corner-up cube round a
+  pointed cone's apex). Whether their printed counts moved was not compared.
+  The rim case on `Assembly::the_corners_each_closed_run_keeps` was not
+  measured again.
 - **A pin outside Q207's write set moved.** In
   `a_frustum_cut_in_half_down_its_axis.rs`,
   `a_block_whose_floor_runs_through_the_apex_is_refused_there` pinned all six
@@ -142,9 +209,9 @@ node.
   has the partner's inside on both sides, and `runs_against_its_gradients`
   refuses it `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`. No test builds
   one.
-- **A plane resting along a cone**, one ruling touched all along, is left as
-  it was: `∇S × ∇Q` is nothing along the whole line, it carries no picker to
-  read a line off, and `how_a_crossing_runs` still refuses it.
+- **A plane resting along a cone**, one ruling touched all along, no longer
+  refuses by `how_a_crossing_runs`: §39.4's 2026-10-04 note (Q473) reads the
+  ruling instead.
 
 ### 347.5 Which pairs still get no node where their two curves meet
 

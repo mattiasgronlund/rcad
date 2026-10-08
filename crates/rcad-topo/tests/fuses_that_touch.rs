@@ -28,26 +28,34 @@
 //! # The table
 //!
 //! `mise exec -- just t -p rcad-topo --test fuses_that_touch --no-capture`, from
-//! the fixed seed: 24 drawn shapes per cell, split between the two rows, six
-//! fuses each. "answered" is out of every fuse that row made.
+//! the fixed seed: 26 drawn shapes per cell, split between the two rows, six
+//! fuses each. "answered" is out of every fuse that row made. Refreshed by
+//! queue row Q1062, whose change moved two cells, the bar's cap and the
+//! frustum's cap flush on a block. With that change switched off by hand the
+//! bar's cap answered 36 of 66 touching and the frustum's 0 of 90, every other
+//! fuse of both refused `Undecidable` at *a point in a piece that every solid
+//! could place*, and every other cell printed what it prints here; what moved
+//! the other cells since the table before was not traced. Queue row Q1118
+//! moved one cell since, the dome's touching row, from none answered to all
+//! 66; only that cell's line was printed again.
 //!
 //! | cell | touching | clear by one | what the touch alone refuses |
 //! |---|---|---|---|
-//! | two blocks, one flush on the other | 66 of 66 | 84 of 84 | — |
+//! | two blocks, one flush on the other | 66 of 66 | 90 of 90 | — |
 //! | a bar beside a block's wall | 78 of 78 | 78 of 78 | — |
 //! | a bar in an inside corner (a fillet) | 84 of 84 | 72 of 72 | — |
-//! | a bar's cap flush on a block | 0 of 66 | 84 of 84 | *a point inside a piece of a face* 66 |
-//! | a ball resting on a block | 54 of 72 | 78 of 78 | `NotFinite` 9, `ResultIsNotManifold` 9 |
-//! | a ball against a block's wall | 57 of 78 | 72 of 72 | `ResultIsNotManifold` 21 |
+//! | a bar's cap flush on a block | 66 of 66 | 90 of 90 | — |
+//! | a ball resting on a block | 78 of 78 | 78 of 78 | — |
+//! | a ball against a block's wall | 78 of 78 | 78 of 78 | — |
 //! | two bars touching along a line | 60 of 60 | 96 of 96 | — |
 //! | a bar inside a bar, touching | panics on its control | — | see below |
-//! | two balls touching at a point | 54 of 54 | 96 of 96 | — |
-//! | a ball inside a ball, touching once | 54 of 54 | 96 of 96 | — |
-//! | the dome on a shaft of its radius | 0 of 66 | 12 of 84 | `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` 66 |
-//! | a ball against a bar's wall | 54 of 54 | 96 of 96 | — |
-//! | a ball inside a bar, touching | 54 of 54 | 96 of 96 | — |
-//! | a cone's apex on a block | 33 of 90 | 66 of 66 | `CannotNameWhichPieceOfACrossingThisIs` 21, *a point inside a piece of a face* 36 |
-//! | a frustum's cap flush on a block | 0 of 84 | 66 of 66 | *a point inside a piece of a face* 84 |
+//! | two balls touching at a point | 60 of 60 | 96 of 96 | — |
+//! | a ball inside a ball, touching once | 60 of 60 | 96 of 96 | — |
+//! | the dome on a shaft of its radius | 66 of 66 | 90 of 90 | — |
+//! | a ball against a bar's wall | 60 of 60 | 96 of 96 | — |
+//! | a ball inside a bar, touching | 60 of 60 | 96 of 96 | — |
+//! | a cone's apex on a block | 90 of 90 | 66 of 66 | — |
+//! | a frustum's cap flush on a block | 90 of 90 | 66 of 66 | — |
 //! | a bend lying on a block | 0 of 66 | 0 of 90 | nothing: both rows refuse as a quartic |
 //! | a bend's cap flush against a block | 0 of 66 | 90 of 90 | `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` 66 |
 //!
@@ -88,16 +96,37 @@
 //!   corner that a whole-number move had put there without rounding anything;
 //!   `a_bar_moved_by_whole_numbers_keeps_its_seam_corner_exact.rs` is that gap,
 //!   closed.
-//! - *a point inside a piece of a face*, a flat cap flush on a flat face with a
-//!   circle round it: known, §39.4's coincident-face row and §38.9.
-//! - `ResultIsNotManifold` and `NotFinite` on a ball resting on a block:
-//!   **new**, unclassified before this file, and demonstrated a gap by
-//!   [`a_ball_resting_on_a_block_it_overhangs_is_refused_though_the_answer_is_both_solids`].
-//!   A `NotFinite` out of whole-number input is also a coordinate the kernel
-//!   worked out as infinity, which is worth a look on its own.
-//! - `CannotNameWhichPieceOfACrossingThisIs` on a cone's apex: a plane through a
-//!   cone's apex square to its axis crosses it in the apex alone. Unclassified
-//!   here beyond the argument above, that the answer is the two inputs.
+//! - A flat cap flush on a flat face with a circle round it: **closed**, every
+//!   fuse of the bar's cap and the frustum's cap on a block answers since queue
+//!   row Q1062. The one point found inside a cap is the middle of its circle,
+//!   and where that is the middle of the block's face too it lies on both the
+//!   face's diagonals, so `fuse/select.rs`'s fan of triangles over the face's
+//!   corners had it on a spoke from every corner and could not say the face
+//!   held it. The cap was never read as lying on the face, and the ray called
+//!   the point on the block's skin. `select.rs` asks
+//!   `SolidView::face_holds_the_point` where the fan cannot say.
+//! - `ResultIsNotManifold` and `NotFinite` on a ball resting on a block, and
+//!   `CannotNameWhichPieceOfACrossingThisIs` and *a point inside a piece of a
+//!   face* on a cone's apex: every fuse of both cells answers in the table
+//!   above. The hand-written rows of
+//!   [`a_ball_resting_on_a_block_it_overhangs_unites_into_both_solids_as_they_stand`]
+//!   all answer since Q508.
+//! - `Invalid(FacesDoNotAgreeWhichWayTheyFace)` on a ball resting on a block
+//!   whose wall planes cut its skin into a rim of arcs: **closed** by Q451,
+//!   where the mesher learnt to open such a rim the way it opens one closed
+//!   curve. Queue row Q892 counted 2 of this cell's touching differences and 4
+//!   of its unions refused that way on `a7ad3f4b`;
+//!   [`a_ball_whose_skin_the_blocks_walls_cut_into_a_rim_of_arcs_fuses_by_every_rule`]
+//!   pins three shapes of it by every rule.
+//! - `CannotMeshAFace` with `BoundaryCrossesItself` on a ball of radius four
+//!   resting a unit in from two walls of a block four wide: **closed** by
+//!   Q1099, where the mesher learnt to leave whole a piece of the ball's skin
+//!   that no straight cut between its corners narrows, rather than cut it along
+//!   a chord that leaves it. A sweep of 16 200 fuses of whole-number balls
+//!   resting on whole-number blocks counted 180 refused that way on
+//!   `3741c5a7`, union both ways and ball less block, and none since;
+//!   [`a_ball_whose_skin_the_walls_cut_into_a_piece_no_straight_cut_narrows_fuses_by_every_rule`]
+//!   pins five shapes of it by every rule.
 //!
 //! **The dome is known: §124.** A ball on a bar of its own radius, centred on
 //! the bar's axis, shares exactly one circle with it **only** because it is
@@ -106,8 +135,26 @@
 //! widens the bar by one, where the ball sits wholly inside the pipe and crosses
 //! nothing but the cap. **Of every cell here it is the only one with that
 //! property**: every other touch has a crossing twin one unit the other way.
-//! Its control still refuses 72 of 84, on *a point inside a piece of a face*;
-//! what in it refuses is not worked out here.
+//! Its control answers all 90. The touching row used to stop where the cap
+//! plane, the ball and the bar meet, refused
+//! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`; the cap is square to the axis
+//! the two share and cuts both in one circle, which `three_surfaces.rs`
+//! answers as `MoreThanAPoint` since Q981. The fuse then went on and refused
+//! every rule `TwoCurvesTouchWithoutCrossing`: the cap's rim and the circle the
+//! ball cuts the cap in are one curve drawn twice. Since Q987 the arrangement
+//! draws it once, and every fuse refused one step on as an edge with one face
+//! along it, because the rim came out of the bar and out of the ball under two
+//! names. Since Q1118 `fuse/assemble.rs` gives the rim one name and one corner,
+//! and every fuse of the touching row answers.
+//! [`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`]
+//! checks nine domes by every rule against their closed forms. **Laid on its
+//! side it answers all 72 fuses**: the ball's poles are then on the rim, and
+//! the ball's side of the rim, cut in two at them, is read as one closed side
+//! again since Q1368. 42 of them were then refused because the two sides of the
+//! rim were read against the pipe and the ball, which disagree about which way
+//! it runs, until Q1377 read both against the ball;
+//! [`a_dome_lying_on_its_side_by_every_rule_against_the_closed_forms`] checks
+//! them against the closed forms.
 //!
 //! **A bend's touch is not reached.** Every fuse of a bend lying on a block is
 //! refused as a quartic, touching or one unit clear, so that cell is pinned at
@@ -116,7 +163,9 @@
 //! clear of the bend, answers all 90. The 45 that keep the bend were refused
 //! writing it back, `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`,
 //! the stop §243.5 and §323.5 record, until the bend's wall was used forwards
-//! (§361). A torus against any other curved surface is refused by name.
+//! (§361). A torus against any other curved surface is refused by name, so a
+//! bar butted onto a bend's cap never reaches the rim the two share;
+//! [`a_bar_on_a_bends_cap_is_refused_before_its_rim_is_named`] pins that.
 //!
 //! # What is not built, and why
 //!
@@ -127,13 +176,12 @@
 //!   bar beside a wall is the same touch turned, and is built instead.
 //! - **A plane lying along a cone's ruling** needs a slanted face, which no
 //!   whole-number block has; `degenerate_curved_fuses.rs` builds it by hand as
-//!   `a_wall_lying_on_a_cones_side_leaves_that_crossing_with_no_direction`.
+//!   `a_wedge_lying_on_a_cones_side_shares_and_leaves_what_is_worked_out_by_hand`.
 //! - **A cone against a ball or a bar**: not built yet, and nothing here says
 //!   whether they would reach their touch. A cone's side against another cone
 //!   *is* built now, as one hand-written pair rather than a cell —
-//!   [`two_cones_sharing_one_rim_circle_are_refused_before_the_join_could_see_them`]
-//!   — and every rule of it is refused by name before the fuse assembles
-//!   anything. A torus against anything curved is refused by name before it could
+//!   [`two_cones_sharing_one_rim_circle_fuse_by_every_rule`] — and every rule
+//!   of it answers. A torus against anything curved is refused by name before it could
 //!   (`how_often_a_fuse_with_a_torus_refuses.rs`'s last three rows).
 
 use std::cell::{Cell, RefCell};
@@ -143,9 +191,9 @@ use proptest::prelude::*;
 use proptest::test_runner::{
     Config, FileFailurePersistence, RngAlgorithm, TestCaseError, TestRng, TestRunner,
 };
-use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Model, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Model, ProfileBuilder, Rule, SolidKey};
 
 mod touching;
 
@@ -270,6 +318,273 @@ fn a_ball_on_a_bar_of_the_same_radius() {
         touching::a_dome_on_a_shaft(),
         Expect::TheControlAnswers,
     );
+}
+
+/// The dome on a shaft of its radius, every rule both ways round, against the
+/// closed forms.
+///
+/// A ball of radius `R` centred on the top of a bar of radius `R` and height
+/// `h` shares one circle with the bar, the rim of its top cap, and is tangent
+/// to the pipe all the way round it. So the answers are a hemisphere and a
+/// bar: `A ∪ B = πR²h + ⅔πR³`, `A ∩ B = ⅔πR³` (the lower half of the ball,
+/// inside the bar since `h > R`), `bar \ ball = πR²h − ⅔πR³`, and
+/// `ball \ bar = ⅔πR³`. An answer is checked against those, to within what
+/// its mesh declares.
+///
+/// **What used to stop every fuse, traced by Q987.** The cap's plane cuts the
+/// ball in the cap's own rim, and so does the pipe it is tangent to. Drawn as
+/// two crossings of the cap, each node of the rim had two ways out leaving it
+/// the same way and bending alike, and `fuse/arrange.rs` refused all 66 fuses
+/// of the touching row `TwoCurvesTouchWithoutCrossing`. The same circle twice
+/// is one curve: the arrangement folds it into one crossing now, on the cap, on
+/// the pipe and on the ball, and every face is cut into the pieces it has.
+///
+/// **What stopped it next was joining those pieces, traced by Q1118.** The
+/// rim came out of the bar's two faces named by the cap's plane and the pipe,
+/// at the bar's seam corner `(R, 0, h)`, and out of the ball named by the
+/// cap's plane and the ball, at `(0, R, h)` where that pair starts a circle.
+/// `fuse/assemble.rs` named a closed edge by the two surfaces either side, so
+/// that was two edges with one face each, and all 54 fuses here were refused
+/// `ResultIsNotManifold { count: 1 }`. It gives the two names one now, and
+/// the rim one corner, the seam's. Past that the union and the bar less the
+/// ball keep the pipe and the ball either side of the rim, which touch and do
+/// not cross, and were refused `ACrossingAlongThisEdgeCouldNotBeFollowed`
+/// until the rim was written as the cap's plane against a face.
+#[test]
+fn a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms() {
+    let policy = Policy::certified();
+    let third = std::f64::consts::PI / 3.0;
+    for radius in 1..=3 {
+        for height in radius + 1..=radius + 3 {
+            let (r, h) = (f64::from(radius), f64::from(height));
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let shaft = model
+                .add_round_bar(r, h, &Isometry::identity())
+                .expect("a whole-number bar");
+            let dome = model
+                .add_ball(
+                    r,
+                    &Isometry::translation(Vector::new(0.0, 0.0, h)).expect("a whole-number shift"),
+                )
+                .expect("a whole-number ball");
+            let bar = 3.0 * third * r * r * h;
+            let half_ball = 2.0 * third * r * r * r;
+            for (one, other, rule, holds) in [
+                (shaft, dome, Rule::Union, bar + half_ball),
+                (dome, shaft, Rule::Union, bar + half_ball),
+                (shaft, dome, Rule::Intersection, half_ball),
+                (dome, shaft, Rule::Intersection, half_ball),
+                (shaft, dome, Rule::Difference, bar - half_ball),
+                (dome, shaft, Rule::Difference, half_ball),
+            ] {
+                let mut fused = model.clone();
+                let shaft_first = one == shaft;
+                let answer = fused
+                    .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| {
+                        panic!(
+                            "{rule:?} of R = {r}, h = {h} (shaft first: {shaft_first}) refused \
+                             {why}; every fuse of these nine domes answers since Q1118"
+                        )
+                    });
+                fused
+                    .validate(&policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{rule:?} does not validate: {why}"));
+                assert_eq!(
+                    answer.solids().len(),
+                    1,
+                    "{rule:?} of R = {r}, h = {h} (shaft first: {shaft_first}) is one solid"
+                );
+                let (volume, error) = volume_and_error(&fused, answer.solids());
+                assert!(
+                    (volume - holds).abs() <= error,
+                    "{rule:?} of R = {r}, h = {h} (shaft first: {shaft_first}) measures {volume} \
+                     against {holds}, out by more than the {error} its mesh declares"
+                );
+            }
+        }
+    }
+}
+
+/// The dome on a shaft of its radius lying on its side, every rule both ways
+/// round, along `±x` and `±y`, for `R` from one to three: **all 72 fuses answer
+/// the closed forms and validate.**
+///
+/// A bar of radius `R` and length `h = R + 1` holds `πR²h`, and a ball of radius
+/// `R` centred on the middle of its end cap is cut by the cap's plane into two
+/// half balls of `⅔πR³` each. The half towards the bar is inside it, since a
+/// point of it is at most `R` from the cap's middle, so at most `R` from the
+/// bar's axis and at most `R < h` along it; the other half is outside it. The
+/// two touch along the cap's rim and cross nowhere else. So `A ∪ B = πR²h +
+/// ⅔πR³`, `A ∩ B = ⅔πR³`, `bar \ ball = πR²h − ⅔πR³` and `ball \ bar = ⅔πR³`:
+/// for `R = 1`, `2π + ⅔π = 8.378`, `2.094`, `4.189` and `2.094`. Each answer is
+/// one solid and is checked against these to within what its mesh declares,
+/// the same closed forms
+/// [`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`]
+/// holds the upright dome to.
+///
+/// A ball's poles are always straight up and down from its centre, so a ball
+/// centred on the end cap of a bar lying along `x` or `y` has both poles on the
+/// cap's rim, and the cap's plane runs down its polar axis. `fuse/arrange.rs`
+/// cuts the ball's side of the rim in two at the poles
+/// (`across_a_circle_that_starts_at_a_pole`, §194.4): from the pole it starts at
+/// to the other, `HalfWayRoundAClosedCurve`, and back. The bar's side of the rim
+/// is one closed side at the bar's seam corner. `fuse/assemble.rs`'s
+/// `the_name_each_closed_curve_goes_by` joined the names of closed sides only, so
+/// the two halves and the closed side were three edges, each with one face, and
+/// all 72 fuses here were refused `ResultIsNotManifold { count: 1 }` (Q1143).
+/// `fuse/assemble.rs` now reads the two halves as one closed side wherever
+/// another side closes on the same curve whole, the rim gets the seam corner,
+/// and each side of it is read at that corner.
+///
+/// **What stopped 42 of them next was which way the rim runs** (Q1368, Q1377).
+/// Each side is read against the curved surface of its own pair: the bar's cap
+/// and pipe against the pipe, the ball's against the ball. The rim is a
+/// meridian of the ball, which the ball's longitude is square to, so the ball's
+/// side is read against its latitude where the corner is off the poles and
+/// against its lid, the cap's plane, where it is a pole. Those agree with the
+/// pipe's longitude only for the bar running along `−y`. Along `+y` they
+/// disagreed, both faces walked the rim the same way, and the sweep refused
+/// every fuse `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`; along
+/// `x`, where the seam corner is a pole, the union and the differences were
+/// refused `FacesDoNotAgreeWhichWayTheyFace`. `fuse/assemble.rs`'s
+/// `every_closed_edge_read_off_one_spelling` now reads the side read against
+/// the pipe again against the ball, the surface `Model::validate` reads the rim
+/// against for every rule here.
+#[test]
+fn a_dome_lying_on_its_side_by_every_rule_against_the_closed_forms() {
+    let policy = Policy::certified();
+    let third = std::f64::consts::PI / 3.0;
+    for radius in 1..=3 {
+        for (axis, quarters, along) in [
+            (Axis::x(), 1, "-y"),
+            (Axis::x(), 3, "+y"),
+            (Axis::y(), 1, "+x"),
+            (Axis::y(), 3, "-x"),
+        ] {
+            let (r, h) = (f64::from(radius), f64::from(radius + 1));
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let lying = Isometry::quarter_turns(&axis, quarters).expect("an axis along x or y");
+            let shaft = model
+                .add_round_bar(r, h, &lying)
+                .expect("a whole-number bar");
+            let end = lying.apply_to_point(Point::new(0.0, 0.0, h)) - Point::origin();
+            let dome = model
+                .add_ball(
+                    r,
+                    &Isometry::translation(end).expect("a whole-number shift"),
+                )
+                .expect("a whole-number ball");
+            let bar = 3.0 * third * r * r * h;
+            let half_ball = 2.0 * third * r * r * r;
+            for (one, other, rule, holds) in [
+                (shaft, dome, Rule::Union, bar + half_ball),
+                (dome, shaft, Rule::Union, bar + half_ball),
+                (shaft, dome, Rule::Intersection, half_ball),
+                (dome, shaft, Rule::Intersection, half_ball),
+                (shaft, dome, Rule::Difference, bar - half_ball),
+                (dome, shaft, Rule::Difference, half_ball),
+            ] {
+                let which = format!(
+                    "{rule:?} of R = {r} along {along} (shaft first: {})",
+                    one == shaft
+                );
+                let mut fused = model.clone();
+                let answer = fused
+                    .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{which} refused {why}"));
+                fused
+                    .validate(&policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{which} does not validate: {why}"));
+                assert_eq!(answer.solids().len(), 1, "{which} is one solid");
+                let (volume, error) = volume_and_error(&fused, answer.solids());
+                assert!(
+                    (volume - holds).abs() <= error,
+                    "{which} measures {volume} against {holds}, out by more than the {error} its \
+                     mesh declares"
+                );
+            }
+        }
+    }
+}
+
+/// A bar of a bend's tube radius butted onto the bend's `+x` cap, so the cap's
+/// plane, the bend's ring and the bar's pipe all hold the cap's rim — pinned at
+/// **every rule both ways round refused before the rim is reached**.
+///
+/// A fuse with a ring in it crosses every surface of the other solid with the
+/// ring, wherever the two faces are. So a bar with a flat far end is refused
+/// `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` for that end's plane, which
+/// lies square to the cap and off the ring's axis however far from the bend it
+/// is. A bar whose far end is cut by a plane through the ring's axis gets past
+/// that, and is refused `ACrossingBetweenATorusAndAnotherCurvedSurface` for its
+/// pipe against the ring, which touch along the rim. Neither reaches
+/// `fuse/assemble.rs`, so whether the rim would come out under one name is not
+/// measured here. Queue row Q1143 built both; this fails the day either moves.
+#[test]
+fn a_bar_on_a_bends_cap_is_refused_before_its_rim_is_named() {
+    let policy = Policy::certified();
+    for (ring, tube) in [(3, 1), (5, 2)] {
+        // The control row of the bend's cap against a block: the quarter bend
+        // of `touching`, with a block clear of it that nothing here fuses.
+        let built = Drawn {
+            shape: Shape::ABendsCapAgainstABlock { ring, tube },
+            apart: Apart::ClearByOne,
+        }
+        .build();
+        let (mut model, bend) = (built.model, built.second);
+        let (ring, tube) = (f64::from(ring), f64::from(tube));
+        let along_minus_y = Isometry::translation(Vector::new(ring, 0.0, 0.0))
+            .expect("a whole-number shift")
+            .compose(&Isometry::quarter_turns(&Axis::x(), 1).expect("x is an axis"));
+        let flat_ended = model
+            .add_round_bar(tube, 2.0, &along_minus_y)
+            .expect("a whole-number bar");
+        let cut_through_the_axis = model
+            .add_bar_cut_off_by(
+                tube,
+                [
+                    Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                        .expect("a unit normal"),
+                    Plane::from_point_and_normal(
+                        Point::new(0.0, 0.0, ring),
+                        Vector::new(-1.0, 0.0, 1.0),
+                    )
+                    .expect("a normal with a length"),
+                ],
+                &along_minus_y,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar whose far end lies on the plane x + y = 0");
+        for (bar, wanted) in [
+            (
+                flat_ended,
+                rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic,
+            ),
+            (
+                cut_through_the_axis,
+                rcad_geom::Error::ACrossingBetweenATorusAndAnotherCurvedSurface,
+            ),
+        ] {
+            for (one, other) in [(bar, bend), (bend, bar)] {
+                for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                    let refused = model
+                        .clone()
+                        .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                        .map(|answer| answer.solids().len());
+                    assert!(
+                        matches!(&refused, Err(Error::Geometry(why)) if *why == wanted),
+                        "{rule:?} of ring {ring}, tube {tube} (bar first: {}) came back \
+                         {refused:?}, not {wanted:?}",
+                        one == bar
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -408,7 +723,7 @@ fn a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule() 
 
 /// Two pointed cones base to base on one circle, their rim vertices half a turn
 /// apart — the shape that would hand §204.1's join a run of pieces carrying two
-/// input edges — refused before the fuse assembles anything.
+/// input edges. **Every rule answers, both ways round.**
 ///
 /// §204.1 joins a closed curve that was cut into pieces back into one edge only
 /// **when every piece came from one input edge**. A run whose pieces are an
@@ -423,17 +738,26 @@ fn a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule() 
 /// the two cut points stays a corner and the run keeps it. A pointed cone's
 /// side is the one face here with a closed wire and no seam, so both solids
 /// have to be pointed cones on one circle, which is two cone faces meeting one
-/// curve: refused by name. The same family with a sphere in place of the second
-/// cone is [`a_ball_on_a_bar_of_the_same_radius`], whose touching row answers
-/// none of its fuses either.
+/// curve. The same family with a sphere in place of the second cone is
+/// [`a_ball_on_a_bar_of_the_same_radius`].
 ///
-/// So *this* family is a **limit and not a gap** (§16.10) and the pin is here:
-/// the day either refusal goes, the closed-run join has a second case to
-/// answer. What is **not** settled is a closing run of pieces of two *different*
-/// input edges, or of a fresh crossing curve carrying no input edge at all;
-/// neither has been built and neither has been ruled out.
+/// **That curve used to be refused by name and is named now** (Q1122): two
+/// cones of one slope on one axis, apexes four apart, cross in the one circle
+/// halfway between them, which is this rim. The fuse then gets past it, and
+/// what it gives is measured here rather than predicted: the two lumps touch
+/// along a curve and nowhere else, so their intersection holds nothing, each
+/// difference is the first cone, `8π/3`, unchanged, and the union is one solid
+/// of both, `16π/3`. A second pair whose rim vertices are **one** point is
+/// asked the same, so the half turn is not what it turns on.
+///
+/// **The union used to stop** in `fuse/assemble.rs` with
+/// `ResultIsNotManifold { count: 1 }` — no panic, so the join §204.1 feared
+/// did not turn this into a crash. Both caps lie flush on one plane and go, so
+/// the rim comes out of each cone named by its cap's plane and that cone: two
+/// names, two edges with one face each. Queue row Q1118 gave a rim that one
+/// plane cuts two cones in, a ball or a pipe in one name and one corner.
 #[test]
-fn two_cones_sharing_one_rim_circle_are_refused_before_the_join_could_see_them() {
+fn two_cones_sharing_one_rim_circle_fuse_by_every_rule() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let lower = a_pointed_cone_with_its_vertex_at(
         &mut model,
@@ -441,25 +765,59 @@ fn two_cones_sharing_one_rim_circle_are_refused_before_the_join_could_see_them()
         2.0,
         Point::new(2.0, 0.0, 2.0),
     );
-    let upper = a_pointed_cone_with_its_vertex_at(
+    let half_a_turn_round = a_pointed_cone_with_its_vertex_at(
         &mut model,
         Point::new(0.0, 0.0, 4.0),
         -2.0,
         Point::new(-2.0, 0.0, 2.0),
     );
+    let at_one_point = a_pointed_cone_with_its_vertex_at(
+        &mut model,
+        Point::new(0.0, 0.0, 4.0),
+        -2.0,
+        Point::new(2.0, 0.0, 2.0),
+    );
+    let one_cone = 8.0 * std::f64::consts::PI / 3.0;
     let policy = Policy::certified();
-    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+    for upper in [half_a_turn_round, at_one_point] {
         for (one, other) in [(lower, upper), (upper, lower)] {
-            let why = model
-                .clone()
-                .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
-                .expect_err("a cone against a cone is refused");
+            let fused = |rule: Rule| {
+                let mut fused = model.clone();
+                let answer = fused
+                    .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                    .map(|answer| answer.solids().to_vec());
+                (fused, answer)
+            };
+
+            let (joined, union) = fused(Rule::Union);
+            let solids = union.unwrap_or_else(|why| panic!("the union: {why}"));
+            assert_eq!(solids.len(), 1, "{solids:?}");
+            joined
+                .validate(&policy, &mut ProvenanceLog::new())
+                .expect("a fuse hands back a sound model");
+            let (volume, error) = volume_and_error(&joined, &solids);
             assert!(
-                matches!(
-                    why,
-                    Error::Geometry(rcad_geom::Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
-                ),
-                "{rule:?}: refused {why} instead"
+                (volume - 2.0 * one_cone).abs() <= error,
+                "the two cones hold {} and their union holds {volume} give or take {error}",
+                2.0 * one_cone
+            );
+
+            let (_, intersection) = fused(Rule::Intersection);
+            assert!(
+                intersection.as_ref().is_ok_and(Vec::is_empty),
+                "two cones touching along a rim share no volume: {intersection:?}"
+            );
+
+            let (left, difference) = fused(Rule::Difference);
+            let solids = difference.unwrap_or_else(|why| panic!("the difference: {why}"));
+            assert_eq!(solids.len(), 1, "{solids:?}");
+            left.validate(&policy, &mut ProvenanceLog::new())
+                .expect("a fuse hands back a sound model");
+            let (volume, error) = volume_and_error(&left, &solids);
+            assert!(
+                (volume - one_cone).abs() <= error,
+                "the first cone holds {one_cone} and its difference holds {volume} give or take \
+                 {error}"
             );
         }
     }
@@ -611,18 +969,20 @@ fn a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_p
     }
 }
 
-/// A ball of radius two resting on a block it hangs over the edge of is
-/// refused, though its answer is the two solids as they stand — a **gap**
-/// (§16.10), and this is the demonstration.
+/// A ball of radius two resting on a block it hangs over the edge of unites
+/// into the two solids as they stand, measured against the cube's volume and
+/// the ball's.
 ///
 /// A cube of side two and a ball of radius two whose south pole rests on the
 /// middle of the cube's top, at `(1, 1, 2)`. Every number is whole and the touch
-/// is exact. The union is refused `ACurvedFaceGoesRightRoundWithNoSeam`. It has
-/// been refused all along and the name has moved twice: `ResultIsNotManifold`
-/// first, in assembly, where the two arcs of one ball-and-plane circle between
-/// the same two corners were given one edge name, until §198 told them apart;
-/// then `AWireWillNotLieFlatOnItsFace`, out of the mesher, until §208.4 let a
-/// ring of arcs be walked.
+/// is exact. The union was refused all along until Q508, a **gap** (§16.10)
+/// whose name moved three times: `ResultIsNotManifold` first, in assembly,
+/// where the two arcs of one ball-and-plane circle between the same two corners
+/// were given one edge name, until §198 told them apart; then
+/// `AWireWillNotLieFlatOnItsFace`, out of the mesher, until §208.4 let a ring of
+/// arcs be walked; then `ACurvedFaceGoesRightRoundWithNoSeam`, until Q508
+/// changed how the mesher reads which pole a cap of the ball reaches
+/// (`which_pole_this_cap_reaches` in `mesh.rs`, the one function Q508 changed).
 ///
 /// **The ball moved over to `(1, 2)` on a cube of side four was refused too, and
 /// answers since §217.** It was `Geometry(NotFinite)` — a coordinate worked out
@@ -631,26 +991,20 @@ fn a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_p
 /// understood. What moved it is the only thing §217 changed here: the fuse now
 /// writes the surface that cut a closed rim. That block's wall plane cuts the
 /// ball in a circle whose two faces are the one sphere, and a rim whose two
-/// faces name one surface is exactly what the new run exists for.
+/// faces name one surface is exactly what the new run exists for. **Why that
+/// makes this particular coordinate finite was not chased.**
 ///
-/// **Why that makes this particular coordinate finite was not chased**, so the
-/// row is kept and asserts the two solids rather than being deleted: a row that
-/// refused once and answers now is the cheapest guard there is against it
-/// refusing again, and the mechanism is a question for whoever wants it.
-///
-/// Three rows say the answer exists and this kernel can hold it:
-///
-/// - the same ball **one unit higher** unites into two solids;
-/// - a ball of **radius one** resting on the same point unites into two solids;
-/// - the same ball resting on a cube of **side four**, where it no longer hangs
-///   over an edge, unites into two solids.
-///
-/// So what refuses is not the touch alone and not the overhang alone: a side
-/// wall's plane crossing the ball while the top touches it. A fuse crosses
-/// planes and not faces, so a wall nowhere near the ball still cuts it.
+/// Rows that refused once and answer now are the cheapest guard there is
+/// against their refusing again, so they are kept beside the rows that always
+/// answered: the same ball **one unit higher**, a ball of **radius one** resting
+/// on the same point, and the ball resting on a cube of **side four** where it
+/// no longer hangs over an edge. In each a side wall's plane crosses the ball
+/// or not while the top touches it; a fuse crosses planes and not faces, so a
+/// wall nowhere near the ball still cuts it.
 #[test]
-fn a_ball_resting_on_a_block_it_overhangs_is_refused_though_the_answer_is_both_solids() {
-    let refused = |side: f64, centre: [f64; 3], radius: f64| {
+fn a_ball_resting_on_a_block_it_overhangs_unites_into_both_solids_as_they_stand() {
+    let unites_into_both = |side: f64, centre: [f64; 3], radius: f64| {
+        let case = format!("a ball of {radius} at {centre:?} on a cube of {side}");
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let cube = model
             .add_cube(side, &Policy::certified(), &mut ProvenanceLog::new())
@@ -662,38 +1016,166 @@ fn a_ball_resting_on_a_block_it_overhangs_is_refused_though_the_answer_is_both_s
                 &Isometry::translation(Vector::new(x, y, z)).expect("a whole-number shift"),
             )
             .expect("a whole-number ball");
-        match model.fuse(
-            &[cube],
-            &[ball],
-            Rule::Union,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        ) {
-            Ok(united) => {
-                assert_eq!(united.solids().len(), 2, "two solids that touch at a point");
-                None
-            }
-            Err(why) => {
-                println!("a ball of {radius} at {centre:?} on a cube of {side}: {why:?}");
-                Some(named(&why))
-            }
-        }
+        let united = model
+            .fuse(
+                &[cube],
+                &[ball],
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{case}: refused {}", named(&why)));
+        let solids = united.solids().to_vec();
+        assert_eq!(solids.len(), 2, "{case}: two solids that touch at a point");
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{case}: the union does not validate: {why}"));
+        let (volume, error) = volume_and_error(&model, &solids);
+        let both = side.powi(3) + 4.0 / 3.0 * std::f64::consts::PI * radius.powi(3);
+        assert!(
+            (volume - both).abs() <= error,
+            "{case}: the union measures {volume} against {both}, out by more than the {error} \
+             its measurements declare"
+        );
     };
 
-    assert_eq!(
-        refused(2.0, [1.0, 1.0, 4.0], 2.0).as_deref(),
-        Some("ACurvedFaceGoesRightRoundWithNoSeam")
-    );
-    assert_eq!(
-        refused(4.0, [1.0, 2.0, 6.0], 2.0),
-        None,
-        "refused Geometry(NotFinite) until §217 named the plane that cut the rim"
-    );
-    assert_eq!(refused(2.0, [1.0, 1.0, 5.0], 2.0), None, "one unit higher");
-    assert_eq!(refused(4.0, [1.0, 2.0, 7.0], 2.0), None, "one unit higher");
-    assert_eq!(refused(2.0, [1.0, 1.0, 3.0], 1.0), None, "radius one");
-    assert_eq!(refused(4.0, [1.0, 2.0, 5.0], 1.0), None, "radius one");
-    assert_eq!(refused(4.0, [2.0, 2.0, 6.0], 2.0), None, "over the middle");
+    unites_into_both(2.0, [1.0, 1.0, 4.0], 2.0);
+    unites_into_both(4.0, [1.0, 2.0, 6.0], 2.0);
+    unites_into_both(2.0, [1.0, 1.0, 5.0], 2.0);
+    unites_into_both(4.0, [1.0, 2.0, 7.0], 2.0);
+    unites_into_both(2.0, [1.0, 1.0, 3.0], 1.0);
+    unites_into_both(4.0, [1.0, 2.0, 5.0], 1.0);
+    unites_into_both(4.0, [2.0, 2.0, 6.0], 2.0);
+}
+
+/// A ball of radius two resting on the block `[0, 3] × [0, 2] × [0, 1]` at
+/// `(1, 1, 3)`, and two more of the same family, answer every rule both ways
+/// round: the union is the two solids as they stand, `6 + 32π/3`, the
+/// intersection is nothing, and each difference is its first solid.
+///
+/// The fuse cuts the ball along the planes of the block's walls and not only
+/// where the walls are, so `x = 0`, `y = 0` and `y = 2`, each a unit from its
+/// centre, cut circles of radius `√3` in it that cross one another, and `x = 3`
+/// touches it at `(3, 1, 3)` the way the top touches its south pole. The
+/// piece of the ball's skin that holds both poles is the ball less those three
+/// caps, bounded by **one rim of ten arcs** — not one closed curve, and holding
+/// the material outside it in the mesher's chart (it encloses `−7.63` there).
+/// Until Q451 the mesher opened a ball's skin along a seam only when its rim was
+/// one closed curve; this one fell through to the paths below that one, which
+/// Q451's own commit message says filled such a rim inside out, and the check
+/// of the fuse's own answer refused union both ways and the ball less the block
+/// `Invalid(FacesDoNotAgreeWhichWayTheyFace)`. Measured on `a7ad3f4b`,
+/// where every shape below refused those three fuses; a bisect of the first
+/// shape to `d0eb84cc` names `75a593bd` the first that answers. Its change is
+/// the `it_passes_each_of_its_points_once` arm of the first test in
+/// `cut_off_what_goes_too_far_round` in `mesh.rs`, and with that arm switched
+/// off this test refuses the first union the same way again (queue row Q892).
+///
+/// The three shapes: the row's own; a ball of radius three at `(2, 1)` on the
+/// block `[0, 4] × [0, 4] × [0, 2]`, cut by the planes `x = 0`, `x = 4` and
+/// `y = 0` and touched by `y = 4`; and a ball of radius two at `(3, 3)` on that
+/// block, cut by `x = 4` and `y = 4` only. The ten arcs and the `−7.63` were
+/// printed for the first; the other two were only seen to refuse the same three
+/// fuses on `a7ad3f4b` and to answer here.
+#[test]
+fn a_ball_whose_skin_the_blocks_walls_cut_into_a_rim_of_arcs_fuses_by_every_rule() {
+    for (size, at, radius) in [
+        ([3, 2, 1], [1, 1], 2),
+        ([4, 4, 2], [2, 1], 3),
+        ([4, 4, 2], [3, 3], 2),
+    ] {
+        a_ball_resting_on_a_block_fuses_by_every_rule(size, at, radius);
+    }
+}
+
+/// A ball of radius four at `(1, 1, 5)` resting on the block
+/// `[0, 4] × [0, 4] × [0, 1]`, and four more of the same family, answer every
+/// rule both ways round: the union is the two solids as they stand,
+/// `16 + 256π/3` for the first, the intersection is nothing, and each
+/// difference is its first solid.
+///
+/// The planes `x = 0` and `y = 0`, a unit from the centre, and `x = 4` and
+/// `y = 4`, three units from it, cut the ball's skin into pieces, and one of
+/// them, past `x = 0` between `y = 0` and `y = 4`, goes `2.03` round in the
+/// mesher's chart, so the mesher cuts it narrower. The lens `y = 4` cuts off it
+/// reaches in past the only chord that would, and until Q1099 that chord was
+/// kept and the piece refused `CannotMeshAFace` with `BoundaryCrossesItself`,
+/// union both ways and the ball less the block. Now the piece is left whole
+/// (`cut_in_two` in `mesh.rs`, whose doc has the numbers). A sweep of every
+/// whole-number ball of radius one to four resting strictly inside the top of
+/// a whole-number block, sides two to six and heights one to three, refused
+/// 180 of its 16 200 fuses that way on `3741c5a7`, all of them a ball of
+/// radius four a unit in from a wall of a side four long, and answers all of
+/// them with the change.
+///
+/// The five shapes: the row's own; the same ball on the far corner of that
+/// block; on a block `6 × 4 × 2`, where no plane reaches the ball's seam;
+/// on `4 × 6 × 3` a unit in from its far corner; and on `5 × 4 × 1`. The
+/// sweep printed each of them refusing those three fuses on `3741c5a7`.
+#[test]
+fn a_ball_whose_skin_the_walls_cut_into_a_piece_no_straight_cut_narrows_fuses_by_every_rule() {
+    for (size, at) in [
+        ([4, 4, 1], [1, 1]),
+        ([4, 4, 1], [3, 3]),
+        ([6, 4, 2], [1, 1]),
+        ([4, 6, 3], [3, 5]),
+        ([5, 4, 1], [4, 3]),
+    ] {
+        a_ball_resting_on_a_block_fuses_by_every_rule(size, at, 4);
+    }
+}
+
+/// A ball of `radius` resting at `at` on the top of the block from the origin
+/// to `size`, fused with it by every rule both ways round, each answer checked
+/// against the closed form: the union is the two as they stand, the
+/// intersection is nothing, and each difference is its first solid.
+fn a_ball_resting_on_a_block_fuses_by_every_rule(size: [i32; 3], at: [i32; 2], radius: i32) {
+    let case = format!("a ball of {radius} at {at:?} on a block of {size:?}");
+    let [x, y, z] = size.map(f64::from);
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let rectangle = ProfileBuilder::new(vec![[0.0, 0.0], [x, 0.0], [x, y], [0.0, y]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+    let block = model
+        .add_extrusion(&rectangle, z, &Isometry::identity())
+        .expect("building a box needs no decision");
+    let r = f64::from(radius);
+    let [across, along] = at.map(f64::from);
+    let ball = model
+        .add_ball(
+            r,
+            &Isometry::translation(Vector::new(across, along, z + r))
+                .expect("a whole-number shift"),
+        )
+        .expect("a whole-number ball");
+    let block_holds = x * y * z;
+    let ball_holds = 4.0 / 3.0 * std::f64::consts::PI * r.powi(3);
+    for (one, other, rule, solids, holds) in [
+        (block, ball, Rule::Union, 2, block_holds + ball_holds),
+        (ball, block, Rule::Union, 2, block_holds + ball_holds),
+        (block, ball, Rule::Intersection, 0, 0.0),
+        (ball, block, Rule::Intersection, 0, 0.0),
+        (block, ball, Rule::Difference, 1, block_holds),
+        (ball, block, Rule::Difference, 1, ball_holds),
+    ] {
+        let held = match fused(&model, one, other, rule) {
+            Ok(Outcome::Answered(held)) => held,
+            Ok(Outcome::Refused(why)) => panic!("{case}: {rule:?} refused {why}"),
+            Err(why) => panic!("{case}: {rule:?} {why}"),
+        };
+        let block_first = one == block;
+        assert_eq!(
+            held.solids, solids,
+            "{case}: {rule:?} (block first: {block_first}), how many solids"
+        );
+        assert!(
+            (held.volume - holds).abs() <= held.error,
+            "{case}: {rule:?} (block first: {block_first}) measures {} against {holds}, \
+             out by more than the {} its measurements declare",
+            held.volume,
+            held.error
+        );
+    }
 }
 
 /// What a cell's rows must have done for the run to have measured anything.

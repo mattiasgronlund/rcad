@@ -31,6 +31,23 @@ pub enum Error {
         what: &'static str,
     },
 
+    /// Quarter turns were asked for about an axis that does not run exactly
+    /// along `x`, `y` or `z`.
+    ///
+    /// [`Isometry::quarter_turns`](crate::Isometry::quarter_turns) promises a
+    /// turn that rounds nothing, and only a turn about one of those three moves
+    /// each coordinate onto another. About any other axis a quarter turn is
+    /// [`Isometry::rotation`](crate::Isometry::rotation)'s to build, and that
+    /// rounds.
+    #[error(
+        "quarter turns are only said exactly about an axis along x, y or z, and this one points \
+         along {direction:?}"
+    )]
+    QuarterTurnsNeedAnAxisAlongXYOrZ {
+        /// The direction of the axis that was asked about.
+        direction: crate::Vector,
+    },
+
     /// Three points that were meant to give a plane all sit on one line.
     #[error("the three points are all on one line, so they do not give a plane")]
     PointsAreInALine,
@@ -321,13 +338,13 @@ pub enum Error {
     )]
     CannotNameWhichPieceOfACrossingThisIs,
 
-    /// A cone against a ball or another cone, and a cone against a pipe that
-    /// does not share its axis.
+    /// A cone against a pipe, a ball or a second cone that does not share its
+    /// axis, and a ball on the axis whose skin runs through the apex.
     ///
-    /// A **gap** and the same one two leaning pipes have (§29): the crossing is
-    /// a degree-four space curve, naming which of its shapes it takes is an
-    /// eighth-degree discriminant, and drawing it needs the marcher. None of
-    /// that is built for a cone.
+    /// Off the axis a **gap** and the same one two leaning pipes have (§29): the
+    /// crossing is a degree-four space curve, naming which of its shapes it
+    /// takes is an eighth-degree discriminant, and drawing it needs the
+    /// marcher. None of that is built for a cone.
     ///
     /// The family of fixes, shortest first. (a) **A cone and a pipe on one axis
     /// is done**, and it was neither planar nor one sign question. There is no
@@ -338,23 +355,40 @@ pub enum Error {
     /// whether the pair shares an axis, and that is **two** sign questions —
     /// `‖w_c × w_p‖² = 0` for the directions and `‖(a − o_p) × w_p‖² = 0` for
     /// the apex — both of them sums of squares this crate already asks
-    /// elsewhere. `where_a_cone_and_a_pipe_cross` is the whole of it. (b) A ball
-    /// centred on a cone's axis is the same shape of answer and is **not**
-    /// built: §13 wants a named consumer and it has none. (c) A second cone
-    /// sharing the axis is held out for a stronger reason than that.
-    /// `rcad-topo`'s `assemble.rs` answers *this crossing holds no straight
-    /// line* for the whole cone-and-cone row on the strength of this refusal,
-    /// and two cones that share an apex meet along rulings, which are lines
-    /// (§50.2 item 4). That arm is the first thing to change the day this one
-    /// lifts. (d) The general case wants the marcher taught a cone and an
-    /// eighth-degree discriminant derived, which is §29's whole second stage
-    /// over again.
+    /// elsewhere. `where_a_cone_and_a_pipe_cross` is the whole of it. (b) **A
+    /// ball centred on a cone's axis is done**: one quadratic in how far up the
+    /// axis a circle sits, whose discriminant `(1 + s²)R² − s²‖c − a‖²` says
+    /// two circles, one the ball touches all the way round, or none —
+    /// `where_a_cone_and_a_ball_cross`. (c) **A second cone on the axis is
+    /// done**: `s₁·|h| = s₂·|h − d|` is two circles, one halfway between the
+    /// apexes for one slope, or the apex alone for one apex —
+    /// `where_two_cones_cross`. `rcad-topo`'s `assemble.rs` answers *this
+    /// crossing holds no straight line* for the whole cone-and-cone row, and
+    /// that was held out on the strength of this refusal, because two cones
+    /// that share an apex meet along rulings (§50.2 item 4). It stays right for
+    /// a reason of its own now: two cones on one axis meet in circles or at a
+    /// point and never along a ruling, and two that share an apex with their
+    /// axes leaning apart are still refused here. (d) The general case wants
+    /// the marcher taught a cone and an eighth-degree discriminant derived,
+    /// which is §29's whole second stage over again.
     ///
-    /// **Naming the coaxial pair moved no file in the STEP corpus**, and §50.11
+    /// **A ball through the apex is the one coaxial pair left here**, and it is
+    /// not a degree-four curve: the crossing is one circle and the apex apart
+    /// from it, and `SurfaceMeet` has no answer that says a curve and a point
+    /// at once. A gap of the vocabulary rather than of the arithmetic. `walk`
+    /// also refuses under this name a closed run stated on two cones on one
+    /// axis with one apex, which touch only there — a pair `intersect` answers,
+    /// and a name that is wrong for it: `walk.rs`'s `where_two_coaxial_cones_cut`
+    /// says why it stands.
+    ///
+    /// **Naming the coaxial cone and pipe moved no file in the STEP corpus**, and §50.11
     /// measured that before it was written: this variant is raised zero times
     /// across all 367 files, and every file holding a coaxial cone-and-pipe
     /// neighbour refuses for something else. Its consumer is a fuse of a frustum
-    /// with a bar, not an import.
+    /// with a bar, not an import. The ball and the second cone were not measured
+    /// against the corpus; `rcad-topo`'s `a_cone_hollowed_along_its_axis.rs` fuses
+    /// them, and answers every rule where their circles fall off the faces and
+    /// refuses every rule, in the arrangement, where a circle falls on one.
     #[error("a cone crossing another curved surface is a degree-four space curve")]
     ACrossingBetweenAConeAndAnotherCurvedSurface,
 
@@ -387,19 +421,26 @@ pub enum Error {
     #[error("a plane cuts this torus in a quartic that is not a pair of circles")]
     ACrossingBetweenAPlaneAndATorusThatIsAQuartic,
 
-    /// A torus against a ball, a pipe, a cone, or another torus.
+    /// A torus against a ball, a pipe, a cone, or another torus, except a
+    /// ball, a pipe or a cone on its own axis, which `intersect` now names
+    /// whether it reaches the tube, rests on it, or misses it (row Q1376).
     ///
     /// A **gap** and the same one two leaning pipes have (§29), one degree
     /// worse: the crossing is a space curve of degree up to eight, naming which
     /// of its shapes it takes has no discriminant anybody has written down, and
     /// the marcher has no seed to start from.
     ///
-    /// The family of fixes, shortest first. (a) The **coaxial** cases are two
-    /// circles each and are one sign question apiece — a pipe sharing the
-    /// torus's axis crosses it in two circles square to that axis, and so does a
-    /// ball centred on it and a second torus about it. That covers a rod through
-    /// the middle of a ring, which is what a real file holds. (b) The general
-    /// case wants §29's whole second stage over again with a torus in it.
+    /// The family of fixes, shortest first. (a) The **coaxial** cases are
+    /// circles square to the axis, found by one sign question per partner and
+    /// per cone nappe: up to two for a pipe or a ball and up to four for a
+    /// cone. `intersect` finds them and names each circle by its plane
+    /// (row Q1334, then Q1376 for the rest of the axis), and
+    /// `three_surfaces` meets a plane holding the axis there the same way
+    /// (§378). What is still not done: `walk.rs` has no row for walking one
+    /// of these circles, so the evaluator still refuses the pair under this
+    /// name even once `intersect` has answered it, and a second torus about
+    /// the same axis is not named at all. (b) The general case wants §29's
+    /// whole second stage over again with a torus in it.
     #[error("a torus crossing another curved surface is a space curve of degree up to eight")]
     ACrossingBetweenATorusAndAnotherCurvedSurface,
 
@@ -652,22 +693,41 @@ pub enum Error {
     /// quadrics is a degree-eight system.
     ///
     /// **"In general" is doing real work in that sentence**, and
-    /// `three_surfaces.rs`'s module doc names the two
+    /// `three_surfaces.rs`'s module doc names the five
     /// families it excludes: two quadrics that square `p` the same way differ by
-    /// something flat, and a plane that misses or barely touches one of the two
-    /// settles the triple with a sign. Two pipes running the same way and a cap
-    /// plane — a union of two overlapping parallel bars — is the first, and a
-    /// ball and a bar both resting on a block's floor is the second. Both are
-    /// answered, and this is what is left over.
+    /// something flat; two surfaces turned about one axis are cut by a plane
+    /// square to it in two circles about one centre, which are one circle or
+    /// share nothing; the same two share circles square to the axis, which a
+    /// plane holding the axis cuts in two points each; a plane that misses or
+    /// barely touches one of the two settles the triple with a sign; and a
+    /// plane beside that axis, parallel to it, cuts each shared circle in a
+    /// chord, touches it or misses it, as an exact sign at its height says. Two
+    /// pipes running the same way and a cap plane — a union of two overlapping
+    /// parallel bars — is the first, a bar through a ball and a cap across both
+    /// is the second, a wall through the circle a frustum crosses a bar in is
+    /// the third, a ball and a bar both resting on a block's floor is the
+    /// fourth, and a D-flat on a shaft across the circle a chamfer cone crosses
+    /// it in is the fifth. All five are answered, and so are three curved
+    /// surfaces two of which square `p` the same way, since the plane those two
+    /// differ by takes one of their places (Q1284): two cones of one slope
+    /// about one axis and a ball. This is what is left over — among it a plane
+    /// leaning to the axis a ball and a pipe share, which cuts the pipe in an
+    /// ellipse (`a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses`
+    /// in `rcad-topo`), and three curved surfaces two of which differ by a
+    /// plane that no stored [`Plane`](crate::Plane) is exactly, such as two
+    /// balls whose centres lie along a diagonal.
     ///
     /// A **gap** and not a limit (§16.10): the points are there, and a real
     /// algebraic solver reaches them. The family of fixes is the
     /// Dupont–Lazard–Lazard–Petitjean machinery or a certified numerical solver
     /// with a separation bound of its own, and both are a milestone rather than
     /// a lane (`docs/decisions.md` §31.2). The consumer that calls it due is
-    /// named there too: two capped bars crossing near one of their caps.
-    /// `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved`
-    /// and `two_bars_leaning_across_each_other_and_a_plane_are_still_refused`
+    /// named there too: two capped bars crossing near one of their caps. For
+    /// the plane no stored plane is, the fix is smaller: roads that take the
+    /// plane as the exact numbers it is, as the first family's road already
+    /// does. `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved`,
+    /// `two_bars_leaning_across_each_other_and_a_plane_are_still_refused` and
+    /// `two_balls_whose_plane_no_stored_plane_is_and_a_bar_are_still_refused`
     /// are the demonstrations that the points exist.
     #[error(
         "where three surfaces meet is only worked out when two of them are flat, and fewer than \

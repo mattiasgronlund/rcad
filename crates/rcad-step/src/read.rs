@@ -7,7 +7,7 @@ use crate::names::{
     DATA, END_ISO_10303_21, ENDSEC, FILE_DESCRIPTION, FILE_NAME, FILE_SCHEMA, HEADER, ISO_10303_21,
     Keyword,
 };
-use crate::token::{Token, Tokens, error_at};
+use crate::token::{LastDigit, Token, Tokens, error_at};
 
 const OPENING: &[u8] = ISO_10303_21.name().as_bytes();
 const CLOSING: &[u8] = END_ISO_10303_21.name().as_bytes();
@@ -241,22 +241,35 @@ fn one_record(tokens: &mut Tokens<'_>, section: Section) -> Result<Record, Error
         ));
     };
     tokens.take_exactly(Token::Open, "( after an entity type name")?;
-    let attributes = items(tokens, 1, section)?;
+    let mut last_digits = Vec::new();
+    let attributes = items(tokens, 1, section, Some(&mut last_digits))?;
     Ok(Record {
         keyword: keyword.into(),
         attributes,
+        last_digits: last_digits.into_boxed_slice(),
     })
 }
 
-/// The values between a `(` already taken and the `)` this takes.
-fn items(tokens: &mut Tokens<'_>, depth: usize, section: Section) -> Result<Vec<Value>, Error> {
+/// The values between a `(` already taken and the `)` this takes, and into
+/// `last_digits`, where it is given, the place each real among them was written
+/// to.
+fn items(
+    tokens: &mut Tokens<'_>,
+    depth: usize,
+    section: Section,
+    mut last_digits: Option<&mut Vec<(usize, LastDigit)>>,
+) -> Result<Vec<Value>, Error> {
     if tokens.peek()?.1 == Token::Close {
         tokens.take()?;
         return Ok(Vec::new());
     }
     let mut items = Vec::new();
     loop {
-        items.push(one_value(tokens, depth, section)?);
+        let (value, last) = one_value(tokens, depth, section)?;
+        if let (Some(places), Some(last)) = (last_digits.as_deref_mut(), last) {
+            places.push((items.len(), last));
+        }
+        items.push(value);
         let (at, next) = tokens.take()?;
         if next == Token::Close {
             return Ok(items);
@@ -273,7 +286,12 @@ fn items(tokens: &mut Tokens<'_>, depth: usize, section: Section) -> Result<Vec<
     }
 }
 
-fn one_value(tokens: &mut Tokens<'_>, depth: usize, section: Section) -> Result<Value, Error> {
+/// One value, and the place of its last digit where it is a real or wraps one.
+fn one_value(
+    tokens: &mut Tokens<'_>,
+    depth: usize,
+    section: Section,
+) -> Result<(Value, Option<LastDigit>), Error> {
     if depth > DEEPEST_NESTING {
         let at = tokens.peek()?.0;
         return Err(tokens.fault(
@@ -285,25 +303,29 @@ fn one_value(tokens: &mut Tokens<'_>, depth: usize, section: Section) -> Result<
     }
     let (at, token) = tokens.take()?;
     match token {
-        Token::Integer(number) => Ok(Value::Integer(number)),
-        Token::Real(number) => Ok(Value::Real(number)),
-        Token::Text(text) => Ok(Value::Text(text)),
-        Token::Enumeration(name) => Ok(Value::Enumeration(name.into())),
-        Token::Nothing => Ok(Value::Nothing),
-        Token::Derived => Ok(Value::Derived),
+        Token::Integer(number) => Ok((Value::Integer(number), None)),
+        Token::Real(number, last) => Ok((Value::Real(number), last)),
+        Token::Text(text) => Ok((Value::Text(text), None)),
+        Token::Enumeration(name) => Ok((Value::Enumeration(name.into()), None)),
+        Token::Nothing => Ok((Value::Nothing, None)),
+        Token::Derived => Ok((Value::Derived, None)),
         Token::Reference(id) => match section {
-            Section::Data => Ok(Value::Reference(id)),
+            Section::Data => Ok((Value::Reference(id), None)),
             Section::Header => Err(tokens.fault(at, Problem::ReferenceInTheHeader { id })),
         },
-        Token::Open => Ok(Value::List(items(tokens, depth + 1, section)?)),
+        Token::Open => Ok((Value::List(items(tokens, depth + 1, section, None)?), None)),
         Token::Keyword(keyword) => {
             tokens.take_exactly(Token::Open, "( after a type name wrapping a value")?;
-            let inside = one_value(tokens, depth + 1, section)?;
+            let (inside, last) = one_value(tokens, depth + 1, section)?;
             tokens.take_exactly(Token::Close, ") after a type name wrapping a value")?;
-            Ok(Value::Typed {
-                keyword: keyword.into(),
-                value: Box::new(inside),
-            })
+            let last = last.filter(|_| matches!(inside, Value::Real(_)));
+            Ok((
+                Value::Typed {
+                    keyword: keyword.into(),
+                    value: Box::new(inside),
+                },
+                last,
+            ))
         }
         found @ (Token::Close | Token::Comma | Token::Semicolon | Token::Equals | Token::End) => {
             Err(tokens.fault(

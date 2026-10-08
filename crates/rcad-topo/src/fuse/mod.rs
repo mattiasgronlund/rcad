@@ -74,7 +74,7 @@
 //! the selection table, the image maps history is derived from, and
 //! `Model::fuse` itself.
 
-use rcad_geom::{DynamicRange, Point, Surface};
+use rcad_geom::{DynamicRange, Picker, Point, Surface};
 use rcad_predicates::{
     Approximation, Decision, Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
     Record, resolve_under_policy,
@@ -217,7 +217,7 @@ impl Model {
     /// `a_turned_and_shifted_bar_blames_itself_for_a_corner_off_the_cap_with_the_distance_rounded`,
     /// `under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_touches_without_crossing`,
     /// `a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer`, and
-    /// `a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives_and_one_refusal_more`
+    /// `a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives`
     /// (§294.8). Only a corner with three or more surfaces round it is still
     /// untried (§294.7).
     pub fn fuse(
@@ -407,6 +407,9 @@ pub(crate) struct Scratch {
     /// later copy, every piece then lay on the earlier one and was dropped as
     /// the one that came second, and `a ∪ a` came back empty.
     pub(crate) cut_from: Vec<usize>,
+    /// Every point some face's arrangement found to be more than one name,
+    /// from the faces of both groups, kept piece or not.
+    pub(crate) names_of_one_point: Vec<NamesOfOnePoint>,
 }
 
 impl Scratch {
@@ -439,9 +442,12 @@ impl Scratch {
 
         let mut pieces = Vec::new();
         let mut cut_from = Vec::new();
+        let mut names_of_one_point = Vec::new();
         for (operand, solid) in arguments.iter().chain(&tools).enumerate() {
             for face in &solid.faces {
-                pieces.extend(split_a_face(face, policy, log)?);
+                let split = split_a_face(face, policy, log)?;
+                pieces.extend(split.pieces);
+                names_of_one_point.extend(split.names_of_one_point);
             }
             cut_from.resize(pieces.len(), operand);
         }
@@ -450,6 +456,7 @@ impl Scratch {
             tools,
             pieces,
             cut_from,
+            names_of_one_point,
         })
     }
 }
@@ -519,10 +526,21 @@ pub(crate) enum MeetPoint {
     /// corner on it still needs one. Where it goes depends on the two surfaces
     /// and on nothing else, which is what keeps `fuse(A, B)` and `fuse(B, A)`
     /// agreeing (§31.3, §34.4).
+    ///
+    /// **Two surfaces can cross in two closed curves**, and then the two
+    /// surfaces do not say which one this starts: a bar down a pointed cone's
+    /// axis crosses the cone's surface in a circle either side of the apex.
+    /// Named by the two alone, both circles got one corner and so one edge,
+    /// with four faces along it. `picked_by` is what says which.
     WhereAClosedCurveStarts {
         /// The two surfaces whose crossing this starts, in the order the face
         /// asking carries them.
         carried_by: [Surface; 2],
+        /// What picks this curve out of the others the two cross in, as
+        /// `intersect` named it, and empty where they cross in one closed curve.
+        /// The same from both faces along the curve, in both argument orders:
+        /// `intersect` builds it from the two surfaces whichever comes first.
+        picked_by: SmallVec<[Picker; 1]>,
         /// Where it is.
         point: PredicatePoint,
     },
@@ -531,13 +549,16 @@ pub(crate) enum MeetPoint {
     ///
     /// A closed edge starting at a pole has no direction anyone can read, so
     /// the circle is cut in two there and each half runs between two corners
-    /// (§194). Named apart from where the curve starts by the two surfaces
-    /// alone, which is what keeps both faces along it and both argument orders
-    /// agreeing.
+    /// (§194). Named apart from where the curve starts by the two surfaces and
+    /// what picks the curve out of the others they cross in, which is what
+    /// keeps both faces along it and both argument orders agreeing.
     HalfWayRoundAClosedCurve {
         /// The two surfaces whose crossing this is, in the order the face
         /// asking carries them.
         carried_by: [Surface; 2],
+        /// What picks this curve out of the others the two cross in, as
+        /// [`MeetPoint::WhereAClosedCurveStarts`] carries it.
+        picked_by: SmallVec<[Picker; 1]>,
         /// Where it is.
         point: PredicatePoint,
     },
@@ -568,6 +589,31 @@ impl MeetPoint {
             | MeetPoint::APoleOfAClosedSurface { point, .. } => *point,
         }
     }
+}
+
+/// One point that a face's arrangement found to be more than one name.
+///
+/// The arrangement folds a meet of three surfaces into a corner of the face,
+/// or into another meet, when the two are one point within rounding, and
+/// hands the survivor on as the end of every side there. A face that has
+/// neither that corner nor the fold keeps the meet as a node of its own and
+/// names it by its three surfaces, so the same point came into the answer as
+/// two corners under two names, a few ulps apart, and an edge was left with
+/// one face along it (§284.7). This carries the fold to `assemble`, which
+/// makes every name here one corner before any piece is walked.
+///
+/// **Not a [`MeetPoint`] field.** The names travel beside the pieces, from
+/// every node of every face whether or not a kept piece ends there, because
+/// the face that folded may keep no piece at the point while the face that
+/// did not fold keeps one.
+#[derive(Clone, Debug)]
+pub(crate) struct NamesOfOnePoint {
+    /// The end the arrangement hands on for the point.
+    pub(crate) kept: MeetPoint,
+    /// The meets folded into it: their three surfaces, in
+    /// `meet_of_three_surfaces`'s own fixed order, and which of their meeting
+    /// points each one was, as [`MeetPoint::OfThreeSurfaces`] carries them.
+    pub(crate) folded: Vec<([Surface; 3], u8)>,
 }
 
 /// Give up on a decision nothing can bound, recording that it was asked.

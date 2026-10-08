@@ -18,13 +18,15 @@
 //!
 //! # Every face is cut by every plane, its own solid's included
 //!
-//! Two solids are skipped whole only when no chain of overlapping boxes joins
-//! them: solids that nothing links leave every face of each other alone. Two
-//! that miss each other but are both reached by a third are still cut against
-//! each other, because the third's faces are cut by both and the edges it
-//! shares with each must be split at the same points (§222.3 item 1). Inside a
-//! pair that might touch, **no face pair is skipped**, and a box test there
-//! would be wrong rather than merely keen.
+//! Two solids are skipped whole only when no chain of solids that may meet
+//! joins them, and two may meet unless it is proved that no face of the one
+//! shares a point with a face of the other (§400): solids that nothing links
+//! leave every face of each other alone, whether they stand apart or one is
+//! wholly inside the other. Two that are apart but are both reached by a third
+//! are still cut against each other, because the third's faces are cut by both
+//! and the edges it shares with each must be split at the same points (§222.3
+//! item 1). Inside a pair that might touch, **no face pair is skipped**, and a
+//! box test there would be wrong rather than merely keen.
 //!
 //! A cut is by a *plane*, and a plane reaches past the face that carries it. A
 //! face whose box is nowhere near the other solid can still be crossed by one
@@ -54,9 +56,43 @@
 //! plane of both solids is the closure of the argument above: every face on
 //! either side of any edge of the answer is then diced by the one set, so the
 //! two sides agree about where the corners are wherever they come from.
-//! [`assemble`](super::assemble)'s joining folds the extra pieces back into one
-//! face and drops the corners that stopped being corners, so nothing of the
-//! split reaches the answer.
+//! [`assemble`](super::assemble)'s joining folds the extra pieces of a plane, a
+//! cone, a pipe or a ball back into one face (§229.2), and on a plane drops
+//! the corners that stopped being corners.
+//!
+//! **Some of the split still reaches the answer.** A corner where pieces of
+//! one curved surface met stays a corner; a band round a cone or a pipe keeps
+//! one seam, and a group on one whose rings cannot be counted, or that has no
+//! seam to keep, stays in its pieces; pieces that make up a whole ball stay
+//! apart; and a ring's pieces are never joined at all.
+//!
+//! # A crossing that splits nothing and is no edge is left off
+//!
+//! The argument above is about edges: a crossing has to be on a face because
+//! it splits the face's edges where it splits its neighbours'. A crossing that
+//! **shares no point with any other surface the face is bounded or cut by**
+//! splits no edge, of this face or any other, so that argument asks nothing of
+//! it. Every edge of the face's pieces lies along one of those other surfaces.
+//! What such a crossing still does is cut the face's inside into the part on
+//! either side of it, and that is wanted only where it is an edge of the
+//! answer: where the face that carries it reaches it.
+//!
+//! **So it is left off when that face provably misses the whole surface it
+//! cuts** (Q1090). A tube from `z = −10` to `20` and a block from `0` to `22`
+//! about it: the pipes cross the block's top in circles of radius 4 and 12
+//! that meet nothing else on it, and the tube's walls never come within two of
+//! `z = 22`. Cut along them, the ring between was a piece that selection could
+//! not find a point inside, and the fuse was refused. Left off, the circles
+//! are no loss. No boundary of either solid passes within reach of them,
+//! because any surface that did would share a point with them, so the top on
+//! one side of each circle is inside or outside each solid exactly where the
+//! other side is.
+//!
+//! The face missing the surface is read off the band round its axis, the test
+//! [`two_faces_provably_apart`] uses, and that the crossing meets nothing else
+//! is asked the way the arrangement places its nodes; both are proofs and
+//! neither is a box. A surface carried by two faces stays on wherever one of
+//! them does not say so.
 //!
 //! # Two gaps, left open on purpose
 //!
@@ -73,7 +109,7 @@
 //! §7.4's catalogue of degenerate inputs, which is where the cases that would
 //! close them get written.
 
-use rcad_geom::{Surface, SurfaceMeet, intersect};
+use rcad_geom::{MeetOfThree, Surface, SurfaceMeet, intersect, meet_of_three_surfaces};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::{Error, Result};
@@ -86,7 +122,8 @@ use super::bake::{BakedFace, BakedSolid};
 ///
 /// Every face is cut against every other face, in its own solid and in every
 /// other, whichever group each came from. The header says why the solid's own
-/// planes are in there.
+/// planes are in there, and why a crossing that splits nothing and lies where
+/// its face never reaches is then left off.
 ///
 /// # Errors
 ///
@@ -105,7 +142,10 @@ pub(crate) fn gather(
     }
 
     let within_reach = solids_within_reach_of_each_other(solids);
-    let mut found: Vec<(usize, usize, Surface)> = Vec::new();
+    let mut found: Vec<Vec<Vec<ACutFound>>> = solids
+        .iter()
+        .map(|solid| vec![Vec::new(); solid.faces.len()])
+        .collect();
     for one in 0..solids.len() {
         for other in one..solids.len() {
             if within_reach.leader(one) != within_reach.leader(other) {
@@ -117,24 +157,97 @@ pub(crate) fn gather(
                     let face = &solids[one].faces[mine];
                     let against = &solids[other].faces[theirs];
                     let (onto_face, onto_against) = cuts_between(face, against, policy, log)?;
-                    found.extend(onto_face.into_iter().map(|cut| (one, mine, cut)));
-                    found.extend(onto_against.into_iter().map(|cut| (other, theirs, cut)));
+                    found[one][mine].extend(found_on(face, against, onto_face));
+                    found[other][theirs].extend(found_on(against, face, onto_against));
                 }
             }
         }
     }
 
-    for (solid, face, cut) in found {
-        solids[solid].faces[face].cuts.push(cut);
+    for (solid, faces) in found.into_iter().enumerate() {
+        for (face, cuts) in faces.into_iter().enumerate() {
+            let kept = the_cuts_left_on(&solids[solid].faces[face], &cuts);
+            solids[solid].faces[face].cuts.extend(kept);
+        }
     }
     Ok(())
 }
 
-/// Which solids are joined to each other by a chain of solids whose boxes
-/// overlap.
+/// A cut found for a face, before it is hung on it.
+#[derive(Clone, Copy, Debug)]
+struct ACutFound {
+    cut: Surface,
+    /// Whether the face that carries `cut` provably shares no point with the
+    /// whole surface of the face it cuts, so that no point of their crossing is
+    /// on that face.
+    its_face_misses_this_surface: bool,
+}
+
+fn found_on(face: &BakedFace, against: &BakedFace, cuts: Vec<Surface>) -> Vec<ACutFound> {
+    let its_face_misses_this_surface =
+        !cuts.is_empty() && a_face_misses_a_surface_by_its_band(against, &face.surface);
+    cuts.into_iter()
+        .map(|cut| ACutFound {
+            cut,
+            its_face_misses_this_surface,
+        })
+        .collect()
+}
+
+/// The cuts to hang on `face`: every one found, but a crossing that splits
+/// nothing on the face and lies where the face carrying it never reaches
+/// (the header's last section).
+///
+/// Such a crossing is one whose carrying face provably misses `face`'s whole
+/// surface, and which provably shares no point with any other surface `face`
+/// is bounded or cut by. One surface carried by two faces is left off only
+/// where both say so, since each finding is weighed on its own.
+fn the_cuts_left_on(face: &BakedFace, found: &[ACutFound]) -> Vec<Surface> {
+    let others: Vec<Surface> = face
+        .wires
+        .iter()
+        .flatten()
+        .map(|edge| edge.across)
+        .chain(found.iter().map(|one| one.cut))
+        .collect();
+    found
+        .iter()
+        .filter(|one| {
+            !(one.its_face_misses_this_surface
+                && the_crossing_meets_none_of(&face.surface, &one.cut, &others))
+        })
+        .map(|one| one.cut)
+        .collect()
+}
+
+/// Whether the crossing of `surface` and `cut` provably shares no point with
+/// any of `others` but `cut` itself.
+///
+/// Asked the way [`place_the_meets`](super::arrange) asks for a node: where
+/// the three surfaces meet, and where that cannot be worked out, whether the
+/// two partners meet at all. Under a certified policy, with its records
+/// dropped, for the reason [`two_faces_provably_apart`] gives: a crossing left
+/// off on a guess is an edge of the answer lost.
+fn the_crossing_meets_none_of(surface: &Surface, cut: &Surface, others: &[Surface]) -> bool {
+    let policy = Policy::certified();
+    others.iter().filter(|other| *other != cut).all(|other| {
+        let mut dropped = ProvenanceLog::new();
+        match meet_of_three_surfaces([surface, cut, other], &policy, &mut dropped) {
+            Ok(MeetOfThree::Nowhere) => true,
+            Ok(MeetOfThree::At(_) | MeetOfThree::MoreThanAPoint) => false,
+            Ok(_) => false,
+            Err(_) => matches!(
+                intersect(cut, other, &policy, &mut dropped),
+                Ok(SurfaceMeet::Nothing)
+            ),
+        }
+    })
+}
+
+/// Which solids are joined to each other by a chain of solids that may meet.
 ///
 /// **Two solids whose boxes miss are still cut against each other when a third
-/// solid's box reaches both** (§222.3 item 1). A block with one box poking up
+/// solid reaches both** (§222.3 item 1). A block with one box poking up
 /// through its floor and another sitting inside it: the inside box's walls cut
 /// the block's floor, and that floor meets the poking box's walls along the
 /// footprint. Skip the poking box against the inside one and the floor side of
@@ -143,16 +256,494 @@ pub(crate) fn gather(
 /// argument one solid further out: both sides of every edge of the answer have
 /// to be diced by the one set of planes, and that set is everything in the
 /// chain.
+///
+/// **Two solids are joined unless it is proved that they do not meet** (§400).
+/// Whole-solid boxes that touch were the test until then, and a block's plane
+/// then cut a ball standing clear of the block in two, a ball nothing folds
+/// back together. Two solids no face of which shares a point have no edge of
+/// the answer between them, so the header's argument asks nothing of their
+/// planes. Proved, not guessed: a pair this cannot settle is joined, so a
+/// refusal or an answer moves only where the solids are really apart.
 fn solids_within_reach_of_each_other(solids: &[BakedSolid]) -> Sameness {
     let mut within_reach = Sameness::of(solids.len());
     for one in 0..solids.len() {
         for other in one + 1..solids.len() {
-            if solids[one].bounds.overlap(solids[other].bounds) {
+            if solids[one].bounds.overlap(solids[other].bounds)
+                && !no_face_of_one_meets_the_other(&solids[one], &solids[other])
+            {
                 within_reach.join(one, other);
             }
         }
     }
     within_reach
+}
+
+/// Whether it is proved that no face of `one` shares a point with any face of
+/// `other`, edges and corners included.
+///
+/// That is enough for two solids to be left uncut against each other, whether
+/// they stand apart or one lies wholly inside the other: either way no edge of
+/// the answer has a face of the one on one side and a face of the other on the
+/// other, and selection places each uncut face against the other solid as a
+/// whole.
+fn no_face_of_one_meets_the_other(one: &BakedSolid, other: &BakedSolid) -> bool {
+    one.faces.iter().all(|face| {
+        other
+            .faces
+            .iter()
+            .all(|against| two_faces_provably_apart(face, against))
+    })
+}
+
+/// Whether `face` and `against` provably share no point.
+///
+/// Every point the two share is on both surfaces and inside both faces' boxes,
+/// so any one of these proves there is none: the two boxes miss; one surface
+/// misses the part of space both boxes hold; one surface misses the band round
+/// an axis that the other face lies in ([`band_a_face_is_inside`]); the
+/// surfaces do not meet at all; or they touch at one point outside that part of
+/// space.
+///
+/// **The band is what settles one round solid inside another about one axis.**
+/// A frustum of radius 1 to 3 inside a bar of radius 4: the box round the
+/// frustum's top cap reaches `√18` from the axis at its corners, so the bar's
+/// wall runs through that box although it never comes within 1 of the cap. Round
+/// the axis the cap reaches 3 out and the wall is 4 out, and nothing in between
+/// is a guess.
+///
+/// **Where one of the two has no box here, `bake`'s own boxes are asked
+/// whether they miss.** Those are read off stored corners in plain `f64`
+/// (§35.4), grown by what writing a corner down costs (Q694, §340.10), but
+/// still plain `f64`, so a miss between them is still not a proof. It is the
+/// test the two whole solids' boxes, those same boxes taken together, have
+/// always passed as one, and it is asked only of a face on a pipe, a cone or
+/// a torus, or a flat face with a side on one, which nothing here bounds
+/// (§400.3). Without it a block holding a cube clear of a frustum through its
+/// floor cut the frustum along the cube's planes in one grouping of a fuse
+/// and not in the other.
+///
+/// **Asked under a certified policy whatever the fuse runs under, and its
+/// records dropped.** A tolerant policy settling a close call one way would
+/// skip a cut on a guess. A pair this cannot settle is not refused here: it is
+/// joined, and the cutting that follows asks the same surfaces again under the
+/// fuse's own policy and log, as it did before there was a proof.
+fn two_faces_provably_apart(face: &BakedFace, against: &BakedFace) -> bool {
+    let (mine, theirs) = (box_a_face_is_inside(face), box_a_face_is_inside(against));
+    if (mine.is_none() || theirs.is_none()) && !face.bounds.overlap(against.bounds) {
+        return true;
+    }
+    let both = match (mine, theirs) {
+        (Some(mine), Some(theirs)) => match where_two_boxes_overlap(mine, theirs) {
+            Some(both) => Some(both),
+            None => return true,
+        },
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (None, None) => None,
+    };
+    if both.is_some_and(|both| {
+        a_surface_misses_a_box(&face.surface, both)
+            || a_surface_misses_a_box(&against.surface, both)
+    }) {
+        return true;
+    }
+    if a_face_misses_a_surface_by_its_band(face, &against.surface)
+        || a_face_misses_a_surface_by_its_band(against, &face.surface)
+    {
+        return true;
+    }
+    let Ok(meet) = intersect(
+        &face.surface,
+        &against.surface,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) else {
+        return false;
+    };
+    if let SurfaceMeet::TouchAtOnePoint { at } = meet {
+        return both.is_some_and(|both| where_two_boxes_overlap(both, at.enclosure()).is_none());
+    }
+    matches!(meet, SurfaceMeet::Nothing)
+}
+
+/// Whether `face` provably shares no point with `surface`, read off the band
+/// round an axis the face lies in.
+fn a_face_misses_a_surface_by_its_band(face: &BakedFace, surface: &Surface) -> bool {
+    band_a_face_is_inside(face).is_some_and(|band| a_surface_misses_a_band(surface, band))
+}
+
+/// A box the face is certainly inside, rounded outward, or `None` where this
+/// cannot bound the face.
+///
+/// - A face on a **ball** is inside the box round the whole ball.
+/// - A **flat** face is inside the hull of its boundary. A straight side lies
+///   between its two corners, and a corner is inside the box it carries; a
+///   side on a ball is inside that ball's box.
+/// - A face on anything else, and a flat face with a side on anything else, is
+///   not bounded here. `bake`'s own boxes are not used: they are read off
+///   stored corners in plain `f64` (§35.4), and a surface missing the part of
+///   one such box another holds could be a rounding of where the two touch.
+fn box_a_face_is_inside(face: &BakedFace) -> Option<[rcad_predicates::Interval; 3]> {
+    if let Surface::Sphere(ball) = &face.surface {
+        return box_round_a_ball(ball);
+    }
+    face.surface.as_plane()?;
+    let mut round_it: Option<[rcad_predicates::Interval; 3]> = None;
+    for edge in face.wires.iter().flatten() {
+        let side = if let Surface::Sphere(ball) = &edge.across {
+            box_round_a_ball(ball)?
+        } else {
+            edge.across.as_plane()?;
+            both_boxes(edge.start.point.enclosure(), edge.end.point.enclosure())
+        };
+        round_it = Some(round_it.map_or(side, |so_far| both_boxes(so_far, side)));
+    }
+    round_it
+}
+
+fn box_round_a_ball(ball: &rcad_geom::Sphere) -> Option<[rcad_predicates::Interval; 3]> {
+    let [x, y, z] = ball
+        .centre()
+        .coordinates()
+        .map(|centre| rcad_predicates::Interval::around(centre, ball.radius()));
+    Some([x.ok()?, y.ok()?, z.ok()?])
+}
+
+/// The smallest box holding both. An axis whose ends are not numbers holds
+/// everything, which is never too small.
+fn both_boxes(
+    one: [rcad_predicates::Interval; 3],
+    other: [rcad_predicates::Interval; 3],
+) -> [rcad_predicates::Interval; 3] {
+    core::array::from_fn(|axis| {
+        rcad_predicates::Interval::new(
+            one[axis].lo().min(other[axis].lo()),
+            one[axis].hi().max(other[axis].hi()),
+        )
+        .unwrap_or(rcad_predicates::Interval::ENTIRE)
+    })
+}
+
+/// The part of space both boxes hold, or `None` when they provably hold none.
+/// Boxes that touch share what they touch along, and an axis whose ends are not
+/// numbers is taken to hold everything.
+fn where_two_boxes_overlap(
+    one: [rcad_predicates::Interval; 3],
+    other: [rcad_predicates::Interval; 3],
+) -> Option<[rcad_predicates::Interval; 3]> {
+    let mut both = [rcad_predicates::Interval::ENTIRE; 3];
+    for axis in 0..3 {
+        let (low, high) = (
+            one[axis].lo().max(other[axis].lo()),
+            one[axis].hi().min(other[axis].hi()),
+        );
+        if low > high {
+            return None;
+        }
+        both[axis] =
+            rcad_predicates::Interval::new(low, high).unwrap_or(rcad_predicates::Interval::ENTIRE);
+    }
+    Some(both)
+}
+
+/// Whether `surface` provably passes through no point of `room`.
+///
+/// A plane misses a box when its equation keeps one sign over the whole box. A
+/// ball's skin misses one that lies wholly outside the ball or wholly inside
+/// it. Both are worked in interval arithmetic on the numbers the surface
+/// stores, which are the surface (§17.1), so a sign proved here is a sign of
+/// the surface itself. Any other surface proves nothing.
+fn a_surface_misses_a_box(surface: &Surface, room: [rcad_predicates::Interval; 3]) -> bool {
+    if let Surface::Plane(flat) = surface {
+        let [a, b, c, d] = flat.coefficients();
+        let over_the_box = rcad_predicates::Interval::exactly(a) * room[0]
+            + rcad_predicates::Interval::exactly(b) * room[1]
+            + rcad_predicates::Interval::exactly(c) * room[2]
+            + rcad_predicates::Interval::exactly(d);
+        return matches!(
+            over_the_box.sign(),
+            rcad_predicates::Decision::Pos | rcad_predicates::Decision::Neg
+        );
+    }
+    let Surface::Sphere(ball) = surface else {
+        return false;
+    };
+    let centre = ball.centre().coordinates();
+    let mut nearest = rcad_predicates::Interval::exactly(0.0);
+    let mut furthest = rcad_predicates::Interval::exactly(0.0);
+    for axis in 0..3 {
+        let gap = room[axis] - rcad_predicates::Interval::exactly(centre[axis]);
+        let near = if gap.lo() > 0.0 {
+            gap.lo()
+        } else if gap.hi() < 0.0 {
+            -gap.hi()
+        } else {
+            0.0
+        };
+        let far = gap.lo().abs().max(gap.hi().abs());
+        nearest = nearest
+            + rcad_predicates::Interval::exactly(near) * rcad_predicates::Interval::exactly(near);
+        furthest = furthest
+            + rcad_predicates::Interval::exactly(far) * rcad_predicates::Interval::exactly(far);
+    }
+    let skin = rcad_predicates::Interval::exactly(ball.radius())
+        * rcad_predicates::Interval::exactly(ball.radius());
+    matches!((nearest - skin).sign(), rcad_predicates::Decision::Pos)
+        || matches!((furthest - skin).sign(), rcad_predicates::Decision::Neg)
+}
+
+/// Where a face lies round one axis: how far up it and how far out from it.
+///
+/// Both are measured the way the stored surfaces measure them, with the axis's
+/// direction `w` as stored and not scaled to length one: `up` holds
+/// `(p − origin)·w` and `out` holds `|(p − origin) × w|²` for every point `p`
+/// of the face. A pipe of radius `r` about the line is then every point with
+/// `out = r²·|w|²`, and a cone every point with `out = slope²·(up − its apex's
+/// up)²`, whatever the length of `w` — the expressions the two side-of
+/// predicates in `rcad-geom` take the sign of.
+#[derive(Clone, Copy, Debug)]
+struct ABandRoundAnAxis {
+    origin: [f64; 3],
+    along: [f64; 3],
+    up: rcad_predicates::Interval,
+    out: rcad_predicates::Interval,
+}
+
+/// The band round an axis the face certainly lies in, worked in interval
+/// arithmetic, or `None` where this cannot bound the face that way.
+///
+/// - A face on a **pipe** or a **cone** whose every side is where a plane
+///   square to the axis crosses it. Each such side keeps one `up`, the `up` of
+///   any corner on it. Through every point of either surface but a cone's apex
+///   runs a straight ruling along which `up` changes at a steady rate, so the
+///   least and the most `up` on the face are on its sides, or at the apex: a
+///   cone's band always reaches down to its apex, which only ever widens it. A
+///   seam is not a side here, since the face lies on both sides of it, and
+///   `bake` leaves seams out of the wires.
+/// - A **flat** face square to an axis, whose every side is straight or where
+///   the plane crosses a pipe or a cone about that axis. Such a side is a circle
+///   about the axis, where `out` is the same all round, so the corners on it
+///   say what it is; a straight side is no farther out anywhere than at its
+///   ends. A flat face is inside the hull of its sides and `out` only grows away
+///   from the axis, so the face is no farther out than its farthest corner.
+/// - Anything else is not banded. A side running anywhere else could reach
+///   past every corner on it.
+fn band_a_face_is_inside(face: &BakedFace) -> Option<ABandRoundAnAxis> {
+    let sides = || face.wires.iter().flatten();
+    let corners =
+        sides().flat_map(|side| [side.start.point.enclosure(), side.end.point.enclosure()]);
+    let (origin, along) = match &face.surface {
+        Surface::Cylinder(pipe) => axis_numbers(pipe.axis()),
+        Surface::Cone(cone) => axis_numbers(cone.axis()),
+        Surface::Plane(_) => sides().find_map(|side| match &side.across {
+            Surface::Cylinder(pipe) => Some(axis_numbers(pipe.axis())),
+            Surface::Cone(cone) => Some(axis_numbers(cone.axis())),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) => None,
+            _ => None,
+        })?,
+        Surface::Sphere(_) | Surface::Torus(_) => return None,
+        _ => return None,
+    };
+    let mut band = ABandRoundAnAxis {
+        origin,
+        along,
+        up: rcad_predicates::Interval::exactly(0.0),
+        out: rcad_predicates::Interval::exactly(0.0),
+    };
+    let up = corners
+        .clone()
+        .map(|corner| band.up_of(corner))
+        .reduce(hull)?;
+    match &face.surface {
+        Surface::Cylinder(pipe) => {
+            if !sides().all(|side| band.is_square_to(&side.across)) {
+                return None;
+            }
+            band.up = up;
+            band.out = squared(rcad_predicates::Interval::exactly(pipe.radius())) * band.length();
+        }
+        Surface::Cone(cone) => {
+            if !sides().all(|side| band.is_square_to(&side.across)) {
+                return None;
+            }
+            band.up = hull(up, rcad_predicates::Interval::exactly(0.0));
+            band.out = squared(rcad_predicates::Interval::exactly(cone.slope())) * squared(band.up);
+        }
+        Surface::Plane(_) => {
+            if !band.is_square_to(&face.surface)
+                || !sides().all(|side| match &side.across {
+                    Surface::Plane(_) => true,
+                    Surface::Cylinder(pipe) => band.is_on_the_axis(pipe.axis()),
+                    Surface::Cone(cone) => band.is_on_the_axis(cone.axis()),
+                    Surface::Sphere(_) | Surface::Torus(_) => false,
+                    _ => false,
+                })
+            {
+                return None;
+            }
+            band.up = up;
+            band.out = corners
+                .map(|corner| band.out_of(corner))
+                .fold(rcad_predicates::Interval::exactly(0.0), hull);
+        }
+        Surface::Sphere(_) | Surface::Torus(_) => return None,
+        _ => return None,
+    }
+    Some(band)
+}
+
+/// Whether `surface` provably passes through no point of `band`.
+///
+/// Only a surface about the band's own axis is asked: a pipe or a cone on that
+/// line, a ball centred on it, or a plane square to it. Each is then one
+/// expression in `up` and `out`, worked over the band in interval arithmetic
+/// on the numbers the surface stores (§17.1), and a sign proved for it is a
+/// sign of the surface itself. A ball is `out + (up − its centre's up)² =
+/// radius²·|w|²`, which is Lagrange's identity, and a plane square to the line
+/// is `(n·w)·(up + w·origin) + d·|w|² = 0`, its own equation scaled by `|w|²`.
+fn a_surface_misses_a_band(surface: &Surface, band: ABandRoundAnAxis) -> bool {
+    let exactly = rcad_predicates::Interval::exactly;
+    let over_the_band = match surface {
+        Surface::Plane(flat) => {
+            if !band.is_square_to(surface) {
+                return false;
+            }
+            let [a, b, c, d] = flat.coefficients();
+            let along = band.along.map(exactly);
+            dot([a, b, c].map(exactly), along) * (band.up + dot(along, band.origin.map(exactly)))
+                + exactly(d) * band.length()
+        }
+        Surface::Cylinder(pipe) => {
+            if !band.is_on_the_axis(pipe.axis()) {
+                return false;
+            }
+            band.out - squared(exactly(pipe.radius())) * band.length()
+        }
+        Surface::Cone(cone) => {
+            if !band.is_on_the_axis(cone.axis()) {
+                return false;
+            }
+            let apex = band.up_of(cone.apex().coordinates().map(exactly));
+            band.out - squared(exactly(cone.slope())) * squared(band.up - apex)
+        }
+        Surface::Sphere(ball) => {
+            let centre = ball.centre().coordinates().map(exactly);
+            if !band.runs_along(difference(centre, band.origin)) {
+                return false;
+            }
+            band.out + squared(band.up - band.up_of(centre))
+                - squared(exactly(ball.radius())) * band.length()
+        }
+        Surface::Torus(_) => return false,
+        _ => return false,
+    };
+    matches!(
+        over_the_band.sign(),
+        rcad_predicates::Decision::Pos | rcad_predicates::Decision::Neg
+    )
+}
+
+impl ABandRoundAnAxis {
+    fn up_of(self, point: [rcad_predicates::Interval; 3]) -> rcad_predicates::Interval {
+        dot(
+            difference(point, self.origin),
+            self.along.map(rcad_predicates::Interval::exactly),
+        )
+    }
+
+    fn out_of(self, point: [rcad_predicates::Interval; 3]) -> rcad_predicates::Interval {
+        let [x, y, z] = cross(
+            difference(point, self.origin),
+            self.along.map(rcad_predicates::Interval::exactly),
+        );
+        squared(x) + squared(y) + squared(z)
+    }
+
+    /// `|w|²`.
+    fn length(self) -> rcad_predicates::Interval {
+        let along = self.along.map(rcad_predicates::Interval::exactly);
+        dot(along, along)
+    }
+
+    /// Whether `surface` is a plane whose normal is provably parallel to the
+    /// axis, exactly and not to within a rounding.
+    fn is_square_to(self, surface: &Surface) -> bool {
+        surface.as_plane().is_some_and(|flat| {
+            let [a, b, c, _] = flat.coefficients();
+            self.runs_along([a, b, c].map(rcad_predicates::Interval::exactly))
+        })
+    }
+
+    /// Whether `axis` is provably the band's own line: parallel to it, and
+    /// through a point of it.
+    fn is_on_the_axis(self, axis: rcad_geom::Axis) -> bool {
+        let (origin, along) = axis_numbers(axis);
+        self.runs_along(along.map(rcad_predicates::Interval::exactly))
+            && self.runs_along(difference(
+                origin.map(rcad_predicates::Interval::exactly),
+                self.origin,
+            ))
+    }
+
+    /// Whether `direction × w` is exactly nought, which interval arithmetic
+    /// says only when it is.
+    fn runs_along(self, direction: [rcad_predicates::Interval; 3]) -> bool {
+        cross(
+            direction,
+            self.along.map(rcad_predicates::Interval::exactly),
+        )
+        .iter()
+        .all(|component| matches!(component.sign(), rcad_predicates::Decision::Zero))
+    }
+}
+
+fn axis_numbers(axis: rcad_geom::Axis) -> ([f64; 3], [f64; 3]) {
+    (axis.origin().coordinates(), axis.direction().components())
+}
+
+fn difference(
+    point: [rcad_predicates::Interval; 3],
+    origin: [f64; 3],
+) -> [rcad_predicates::Interval; 3] {
+    core::array::from_fn(|axis| point[axis] - rcad_predicates::Interval::exactly(origin[axis]))
+}
+
+fn dot(
+    one: [rcad_predicates::Interval; 3],
+    other: [rcad_predicates::Interval; 3],
+) -> rcad_predicates::Interval {
+    one[0] * other[0] + one[1] * other[1] + one[2] * other[2]
+}
+
+fn cross(
+    one: [rcad_predicates::Interval; 3],
+    other: [rcad_predicates::Interval; 3],
+) -> [rcad_predicates::Interval; 3] {
+    [
+        one[1] * other[2] - one[2] * other[1],
+        one[2] * other[0] - one[0] * other[2],
+        one[0] * other[1] - one[1] * other[0],
+    ]
+}
+
+/// The square of a range, which is never below nought even where the range
+/// holds nought and the product of the range with itself would say it was.
+fn squared(value: rcad_predicates::Interval) -> rcad_predicates::Interval {
+    let product = value * value;
+    if value.contains_zero() {
+        rcad_predicates::Interval::new(0.0, product.hi())
+            .unwrap_or(rcad_predicates::Interval::ENTIRE)
+    } else {
+        product
+    }
+}
+
+/// The smallest range holding both.
+fn hull(
+    one: rcad_predicates::Interval,
+    other: rcad_predicates::Interval,
+) -> rcad_predicates::Interval {
+    rcad_predicates::Interval::new(one.lo().min(other.lo()), one.hi().max(other.hi()))
+        .unwrap_or(rcad_predicates::Interval::ENTIRE)
 }
 
 /// The crossings each of two faces cuts in the other, each as the second surface
@@ -304,7 +895,7 @@ mod tests {
     use rcad_geom::{Isometry, Plane, Scale, Surface, Vector};
     use rcad_predicates::{Policy, ProvenanceLog};
 
-    use super::gather;
+    use super::{gather, no_face_of_one_meets_the_other};
     use crate::fuse::bake::{BakedFace, BakedSolid, bake};
     use crate::{Error, Model, SolidKey};
 
@@ -436,6 +1027,47 @@ mod tests {
     fn a_cube_does_not_run_through_itself() {
         let mut solids = two_cubes(Vector::new(1.0, 1.0, 1.0));
         gathered(&mut solids);
+    }
+
+    /// A ball of radius 5 at the origin and a bar of radius 3 standing from
+    /// `−half` to `half` up its middle.
+    fn a_ball_round_a_bar(half: f64) -> Vec<BakedSolid> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let ball = model
+            .add_ball(5.0, &Isometry::identity())
+            .expect("a ball of radius five");
+        let bar = model
+            .add_round_bar(
+                3.0,
+                2.0 * half,
+                &Isometry::translation(Vector::new(0.0, 0.0, -half)).expect("a finite shift"),
+            )
+            .expect("a bar of radius three");
+        let policy = Policy::certified();
+        bake(&model, &[ball, bar], &policy, &mut ProvenanceLog::new()).expect("both bake")
+    }
+
+    /// Nothing but the band round the bar's axis proves this: every face of
+    /// the bar is on a pipe or bounded by one, so none has a box here, and the
+    /// ball's skin meets every surface of the bar.
+    #[test]
+    fn a_bar_with_its_rims_inside_a_ball_is_proved_apart_from_it() {
+        let solids = a_ball_round_a_bar(2.0);
+        assert!(no_face_of_one_meets_the_other(&solids[0], &solids[1]));
+    }
+
+    /// Rims at `3² + 4² = 5²` are on the ball, exactly, so the two touch along
+    /// both rims and must be cut against each other.
+    #[test]
+    fn a_bar_with_its_rims_on_the_ball_is_not_proved_apart_from_it() {
+        let solids = a_ball_round_a_bar(4.0);
+        assert!(!no_face_of_one_meets_the_other(&solids[0], &solids[1]));
+    }
+
+    #[test]
+    fn a_bar_poking_out_of_a_ball_is_not_proved_apart_from_it() {
+        let solids = a_ball_round_a_bar(4.5);
+        assert!(!no_face_of_one_meets_the_other(&solids[0], &solids[1]));
     }
 
     /// Two cubes wired into one solid, overlapping. Nothing a profile can build

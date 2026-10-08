@@ -167,9 +167,10 @@ impl Torus {
     ///
     /// # Panics
     ///
-    /// If the stored axis direction has no length. Neither public constructor
-    /// can hand back one — [`Axis::new`] checks it, and `Deserialize` goes
-    /// through [`Torus::new`] and so through `Axis` — and [`Torus::transformed`]
+    /// If the stored axis direction has no length. No public constructor can
+    /// hand back one — [`Axis::new`] checks it, and [`Axis::as_written`], which
+    /// `Deserialize` goes through by way of [`Torus::new`], hands it any
+    /// direction whose length is not within a hair of one — and [`Torus::transformed`]
     /// cannot shrink one, for the reason
     /// [`Cylinder::basis`](crate::Cylinder::basis) spells out at length.
     #[must_use]

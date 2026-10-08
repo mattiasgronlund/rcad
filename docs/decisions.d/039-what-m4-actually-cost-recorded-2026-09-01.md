@@ -301,16 +301,16 @@ moved them.
 
 | Refusal | Cause | | Demonstration |
 |---|---|---|---|
-| `ACrossingThisCannotBeOrderedAlong` | a ball with a pipe through it — the quartic | **gap** | `a_ball_with_a_pipe_through_it_is_refused_by_name`. **Not a budget question**: `Policy::tolerant` refuses it too (§37.7). §36.20 and §34.10 |
+| `ACrossingThisCannotBeOrderedAlong` | a ball one rounding off a pipe's axis, with a bar through it — the quartic. Centred on the axis it crosses the bar in two circles instead, which the arrangement now orders (Q1140, `6e0940d4`), and the fuse answers under every rule and a tolerant policy too (Q1241, `a_ball_with_a_bar_through_its_centre_is_answered_under_every_rule`) | **gap** | `a_ball_one_rounding_off_a_bars_axis_is_refused_before_any_order`. **Not a budget question**: `Policy::tolerant` refuses it too (§37.7), verified again here. §36.20 and §34.10 |
 | `Undecidable`, *order along a crossing* | a **turned notched bar** — §34.5's determinant, in the arrangement | **gap** | `a_turned_notched_bar_is_refused_for_want_of_an_order_along_a_crossing`, tolerant too, and the same shape unturned is decided and records nothing |
-| `Undecidable`, *order along a crossing* | **a block turned by −π/4 to lean through a bar's rim start** — a second cause, met ordering the meet and the rim start round the cap circle | **gap** | `a_block_turned_to_lean_through_a_bars_rim_start_cannot_order_two_points_round_its_cap` (Q209, §284.6) |
-| `ResultIsNotManifold { count: 1 }` | under a **tolerant** policy, that same turned block is ordered, and its faces disagree on a corner | **gap** | `under_a_tolerant_policy_the_turned_block_is_ordered_and_its_faces_disagree_on_a_corner` (§284.7) |
+| ~~`Undecidable`, *order along a crossing*~~ | ~~a block turned by −π/4 to lean through a bar's rim start — a second cause, met ordering the meet and the rim start round the cap circle~~ | **closed** | a meet of two planes and a pipe now narrows by one checked step and the order reads that narrower box exactly where the unnarrowed one could not decide it; all six fuses answer as `a_block_turned_to_lean_through_a_bars_rim_start_answers_all_six_fuses_with_one_solid_each` (Q209, `164b8f73`, §401) |
+| ~~`ResultIsNotManifold { count: 1 }`~~ | ~~under a **tolerant** policy, that same turned block is ordered, and its faces disagree on a corner~~ | **closed** | with the order proved, the tolerant policy is never asked at this meet and the fold that disagreed never happens; all six tolerant fuses answer too, as `under_a_tolerant_policy_the_turned_block_answers_all_six_fuses_with_one_solid_each_too` (Q209, `164b8f73`, §401, §284.8) |
 | `Undecidable`, *a point inside a piece of a face* | a **bar cut by a single plane not through its axis** | **gap** | `a_bar_cut_by_one_plane_off_its_axis_is_refused_for_want_of_a_point_inside_a_piece`. §36.28, and §38.9 says the coincident-face gap below is entangled with it: a knife whose face is exactly the bar's own cap plane refuses here too |
 | `Undecidable`, *a point inside a piece of a face* | two coincident curved faces | **gap** | `a_bar_and_a_copy_of_it_in_the_same_place_are_refused_for_want_of_a_point_inside_a_piece`. The answer is the bar. Tolerant too. **This is what criterion 15's second name runs into** |
 | `Undecidable`, *a point inside a piece of a face* | two tools meeting on one plane that cuts a round wall | **gap** | `two_tools_meeting_on_a_plane_that_cuts_a_round_wall_are_refused_by_name`; one tool making the same cut is answered |
 | `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` | **an arc whose chord rounds onto its own tangent** | **gap** | `an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name`. The half-space exists; `f64` cannot reach it at that separation. §36.24, §36.26 |
-| `TwoCurvesTouchWithoutCrossing` | a plane tangent to a bar's wall, or a block sitting exactly on a bar's cap | **limit** | `a_wall_that_touches_a_bar_without_crossing_it_is_refused_by_name`, `a_block_sitting_on_a_bars_cap_is_refused_by_name`. The two arcs meet and there is nothing between them |
-| `TwoCurvesTouchWithoutCrossing` | **a corner exactly on a curved face** — a `3 × 4` block corner on a bar or a ball of radius five | **gap** | `a_block_corner_exactly_on_a_bars_wall_is_refused_by_name`, `..._on_a_balls_skin_...`. The answer is the bar; the determinant is exactly zero and tolerant refuses it too. §38.2 |
+| ~~`TwoCurvesTouchWithoutCrossing`~~ | ~~a plane tangent to a bar's wall, or a block sitting exactly on a bar's cap~~ | **closed** | the wall answers since Q649 (`a_wall_lying_on_a_bars_skin_runs_up_the_bars_axis_and_is_answered`) and the block on the cap since Q930, both ways round and turned by quarters (`a_block_sitting_on_a_bars_cap_meets_it_at_one_point_under_every_rule`); the Q649 and Q930 notes below |
+| ~~`TwoCurvesTouchWithoutCrossing`~~ | ~~**a corner exactly on a curved face** — a `3 × 4` block corner on a bar or a ball of radius five~~ | **closed** | the ball's answers (`a_block_corner_exactly_on_a_balls_skin_is_answered`), and since Q930 the bar's, under every rule and a tolerant policy too: two straight crossings on one line are folded into one (`a_block_corner_exactly_on_a_bars_wall_is_answered`, §38.2, the Q930 note below) |
 | `AClosedEdgeOfTheAnswerWouldStartAtAPole` | **a ball cut by a plane through its polar axis** | **gap** | `a_ball_cut_by_a_plane_down_its_polar_axis_is_refused_by_name`, with the equator and a leaning plane answered as controls. §38.3 |
 | `ACurvedFaceGoesRightRoundWithNoSeam` | a cut meets a ball's seam twice | **gap** | `a_ball_cut_by_a_plane_that_crosses_its_seam_twice_is_refused_by_name`. The answer is two caps of a ball |
 | `ACurvedFaceGoesRightRoundWithNoSeam` | **a cut leaving a piece of a ball that holds no pole, or both** | **gap, and a §19 violation** | four public calls: `add_ball(4)` intersected with `add_cube(20)` whose face sits at `y = 1`. The answer is a spherical cap of volume 84.823 — the same solid `a_ball_cut_by_a_plane_meshes_into_a_closed_surface` certifies when the plane is `z = 1`. **Turning the whole arrangement flips it**: answered from 1.00 to 1.30 radians about `x` and refused from 1.40, either side of `acos(1/4)`, which is where the kept cap stops holding a pole. §38.6 filed the family a limit; a closed curve on a sphere leaves three kinds of piece and only the one-pole cap is handled |
@@ -323,6 +323,7 @@ moved them.
 | `CurvedFaceWithAHoleGoesTooFarRound` | a curved face with a hole that is not a ring, going more than a quarter turn round | **gap, from a file only** | the fuse's ring is cut across into four patches and a hole that does not go right round has nothing to cut across to — but such a face has a triangulation and the cutting rule cannot find it. §31.10 item 5 filed the old doc as a claim M4 would falsify, and it did: *"the fuse refuses a curved solid outright"* stopped being true. What still keeps a fuse away from it is the row above — the only fused face with a hole in it is a ball with a pipe through it, and that refuses first |
 | `Undecidable`, *which piece of a face a hole is in* | no ray through a lump of endless curves gave an answer | **gap**, unchanged from §17 | |
 | `Undecidable`, *which way a crossing runs* | the direction worked out at a box straddles every axis | **gap**, and unreached since §36.8 | |
+| `Undecidable`, *which way an edge runs round a closed crossing* | an edge's tangent at its start could not be signed against the arc's own direction | **gap, undemonstrated** | `which_way_an_edge_runs_round` in `fuse/arrange.rs`. Missing from this table since Q617; added by Q1243 |
 
 > **2026-10-02 note (Q649): a plane or a bar lying along a bar.** The
 > `TwoCurvesTouchWithoutCrossing` row for "a plane tangent to a bar's wall, or a
@@ -342,10 +343,11 @@ moved them.
 > stand, so it is a gap too, and queue row Q371 traces and fixes it
 > (`a_bar_lying_along_a_plane_or_a_bar.rs`; traced and fixed by Q760, in the
 > note below). The block on a bar's cap refuses
-> `TwoCurvesTouchWithoutCrossing` again, under every rule, and why is not traced
-> (`a_block_sitting_on_a_bars_cap_is_refused_as_two_curves_that_touch`). A plane
+> `TwoCurvesTouchWithoutCrossing` again, under every rule (traced and answered
+> by Q930, in the note below). A plane
 > lying along a cone's ruling still refuses on *which way a crossing runs*,
-> unchanged: a ruling has no stored direction, and it is queue row Q473's.
+> unchanged: a ruling has no stored direction, and it is queue row Q473's
+> (closed by Q473, in the note below).
 
 > **2026-10-03 note (Q760): the union of a bar lying along a plane or a bar is
 > answered.** Traced on the bar beside a cube's wall, with a print of the
@@ -369,6 +371,118 @@ moved them.
 > its corner, and two quarter bends end to end still refuse
 > `ResultIsNotManifold { count: 4 }`, and §80.9's decision that two solids
 > touching along an edge of both are not built is untouched.
+
+> **2026-10-06 note (Q803): a prism lying on one of its own edges parts four
+> darts too.** `part_each_line_two_faces_rest_against_each_other_along` now
+> also parts a line into two edges where only one of its two pairs is pieces of
+> one input face and the other pair is two faces of the other solid — a prism
+> resting on a block's top face along one of the prism's own edges — but only
+> where those two faces lie on the outer side of the face they rest on and no
+> other edge joins the two pairs into one shell
+> (`a_prism_lying_on_one_edge.rs`). A block less a prism lying inside it along
+> its edge
+> (`a_block_less_a_prism_lying_inside_it_along_its_edge_is_refused_and_the_rest_answer`)
+> and a solid lying on a block along one edge and reaching into it elsewhere
+> (`a_solid_lying_on_a_block_along_an_edge_and_reaching_into_it_is_refused_united`)
+> stay refused `ResultIsNotManifold { count: 4 }`.
+
+> **2026-10-04 note (Q473): a plane lying along a cone's ruling runs along the
+> ruling.** The gap above, closed: `AlongATouch` carries the ruling,
+> `(n·n)w − (n·w)n` for the plane's normal and the cone's axis, read only once
+> `rcad-geom`'s two proved doors say the apex is on the plane and the lean is
+> nothing, so a tolerant `intersect`'s touch is refused rather than read. A
+> face on the cone lies on the side of the plane its nappe is on, read off its
+> corners. Each other face of the solid meets the resting plane in an edge
+> that touches its conic of the cone on the ruling, at a meet no box narrows;
+> `turns_anticlockwise` reads that turn as the touch it is proved to be.
+> `degenerate_curved_fuses.rs`'s wedge, its back corner moved to `(−5, 1, 8)`,
+> answers the intersection both ways round and the frustum less the wedge, held
+> to volumes worked out level by level. Left: the union both ways round and the
+> wedge less the frustum refuse in the mesher, `CornersCoincide`; the union's
+> answer exists (its floor less the frustum's disc touches its own edge at one
+> point), so that is a gap, and whether the wedge less the frustum is a
+> manifold at all is not demonstrated. The wedge's first back corner,
+> `(−5, 0, 8)`, refuses *order along a crossing* under every certified rule: one
+> face's ellipse starts inside the box of the node where the wedge's edge
+> touches it. The order exists, so that is a gap too.
+
+> **2026-10-05 note (Q930): one line drawn as two crossings is one crossing.**
+> Traced with a print where `sorted_anticlockwise` refuses. The bar first, it
+> refused on the bar's wall at `(2, 0, 0)`: the plane `x = 2` rests on the wall
+> along `(2, 0, z)`, and the plane `y = 0` cuts the wall along the same ruling,
+> the one of its two picked by `x ≥ 0`, so two ways out leave up the ruling,
+> one along each, and bend alike. The block first, it refused on the block's
+> wall `y = 0` at `(2, 0, 8)`, where the wall's edge with `x = 2` and the
+> bar's line `x = 2` are the one line. The pin's guess, the wall `x = 2`, was
+> not where it refused. `crossing_like` folds two partners only when they are
+> one surface or, all three flat, cut one line; a plane and a pipe, or two
+> planes on a pipe, it never folds. `fuse/arrange.rs`'s
+> `fold_the_straight_cuts_along_one_line` now folds a straight cut into a
+> straight crossing drawn before it when the two share a node whose ways out
+> are proved parallel and not nothing, never settled by the policy. It runs
+> **after** `merge_points_that_are_one_point`, not before: a quarter turn round
+> the bar from its seam, the ruling ends on the cap circle at two meets, one per
+> crossing, which are one node only once merged, and run before the merge the
+> fold missed them and those placements still refused. The block on the cap
+> answers every rule both ways round, with its corner on the rim at the seam, a
+> quarter, a half and three quarters round, and mirrored across `y = 0`, and
+> slid a tenth clear or a tenth along the touch: the union is the two solids,
+> `32π + 8`, the intersection empty, and each less the other itself
+> (`a_block_sitting_on_a_bars_cap_meets_it_at_one_point_under_every_rule`).
+> **This is §38.2's family of fixes, for straight lines**, and it closes
+> §38.2's own shape: the `3 × 4` block corner on a bar of radius five answers
+> all three rules under a certified and a tolerant policy, the bar, the block
+> and the bar with the block's room left empty in it
+> (`a_block_corner_exactly_on_a_bars_wall_is_answered`). Turned by 0.4 or 1.0
+> radians about the bar's axis instead of a quarter, the block on the cap is
+> refused `Undecidable` on *side of plane* or *side of cylinder*, at a corner
+> the turn rounds a hair off the touch. The fold asks nothing under the
+> policy, so that refusal is not its.
+
+> **2026-10-06 note (Q1136): a pointed cone drilled along its axis reaches
+> `CannotTellTheCellsOfAFaceApart`.** A cone of slope one (base at `z = 10`)
+> drilled by a bar of radius one from `z = -15` to `25` reached
+> `the_walk_of_each_other_lump_each_walk_faces` on the bar's wall, under
+> every rule both ways round (Q1091, `db0edb6e`). `which_side_of_everything`
+> read a walk's side of a closed curve as the partner's sign at one of its
+> nodes, and past the second of the two circles where the bar's wall meets
+> the cone's two nappes (`z = 1` and `z = -1`) that sign turns back, so a
+> walk on one circle matched both walks of the other and the bands
+> `-15..-1` and `1..10` read the same sign and would have been glued.
+> `whether_past_the_picker` in `fuse/arrange.rs` now reads a node past the
+> flat half-space that picks a curve out, on a pipe whose axis that
+> half-space faces along. The intersection both ways round and the cone less
+> the bar now answer; the union both ways round and the bar less the cone
+> still refuse `ResultIsNotManifold { count: 4 }`, queue row Q1135's
+> (`a_pointed_cone_drilled_along_its_axis.rs`).
+
+> **2026-10-07 note (Q1191): the union and the bar less the cone move twice
+> more, and now answer.** `MeetPoint::WhereAClosedCurveStarts` named a closed
+> crossing's start corner by its two surfaces alone, so the cone's two
+> circles on the bar's wall got one corner and one edge, claimed four times;
+> Q1148 (`6ce74099`) names that corner by which of the two circles picked it
+> out as well, and the union and the bar less the cone moved from
+> `ResultIsNotManifold { count: 4 }` to
+> `TheFuseWroteABrokenAnswer { broken: AClosedEdgeIsWalkedAgainstItsSurface }`,
+> which `validate.rs` gave when it read the bar's face's side of the cone off
+> its far corner rather than where the face meets the edge. Q1190 (`9528b7d8`)
+> reads it there instead, and all six fuses now answer, held to `364π` for the
+> union and `92π/3` in two solids for the bar less the cone. §340.4.
+
+> **2026-10-07 note (Q1114): a prism lying on its edge on a block's top is
+> refused for want of a point inside a piece of a face, wherever moving it
+> rounds its walls' offsets so that the edge leaves the top.** At `x = −1.5`
+> (`a_prism_lying_on_one_edge.rs`) the edge sits `3.1e-17` inside the block,
+> so the two overlap in a sliver, and every answer needs a side shorter than
+> the gap between two doubles — a spread above `4e16` against the `1e11` a
+> model supports (`docs/decisions.md` §3.5): **a limit**, pinned by
+> `the_prism_with_its_edge_a_rounding_into_the_blocks_top_is_refused`. At
+> `−2.5`, `−1.25` and `1.5` the edge stands a rounding above the top instead,
+> so the two share no point and every answer is the two as they stand. Every
+> rule both ways round refused the same way there, **a gap**, until Q1279:
+> `by_a_plane` now places a piece with corners on the plane and one strictly
+> in front, and all 18 fuses answer, held against volumes in
+> `a_prism_lying_on_one_edge.rs`'s `LAID` (§365.8).
 
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot

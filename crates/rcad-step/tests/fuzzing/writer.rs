@@ -45,7 +45,10 @@
 //! are the numbers the writer writes and the reader reads, and §249.2 found
 //! every one of them come back the same bits for a turned round bar. A cone's
 //! slope is the one exception: the file carries its half-angle, no angle reads
-//! back as most slopes, and the slope is compared as a measurement (§366).
+//! back as most slopes, and the slope is compared as a measurement (§366). A
+//! whole ball turned off `z` is the other: it is written cut open on the `z`
+//! line, the only line this kernel's ball pinches on, and compared by its
+//! surface, its poles and its seam (§404).
 //! Volume, surface area and centroid are then also checked bit for bit, but
 //! only for a solid whose every number came back the same bits and that sits
 //! wholly on planes or carries no placement at all. A
@@ -96,7 +99,7 @@ use rcad_geom::{
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
-use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey, SolidView, WireView};
+use rcad_topo::{CoedgeView, DraftStep, Model, SolidBuilder, SolidKey, SolidView, WireView};
 
 use the_door::every_number_the_door_promised_is_real;
 
@@ -302,6 +305,16 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
 /// reader reads it off the circle's placement, and the writer places the
 /// circle at a centre that plane reads back from (Q822).
 ///
+/// **A whole ball the writer put back on the world's chart is the one face
+/// not compared corner by corner.** Two kinds end up there
+/// (`docs/decisions.md` §404): a turn that moved the ball's poles off the `z`
+/// line it pinches on, and a turn about `z` itself whose own seam no centre
+/// the reader holds can carry, in the bands
+/// [`a_whole_ball_whose_seam_was_rewritten`] finds by comparing seams rather
+/// than by the poles. Either way [`assert_cut_again_on_the_z_line`] compares
+/// the face by its surface, its poles and its seam; its solid is not then
+/// measured bit for bit, which a turned solid is not anyway.
+///
 /// # Panics
 ///
 /// If a face, a coedge, a corner or a run differs between `here` and `back`.
@@ -341,6 +354,13 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) -> bool {
                 "a sound solid's face came back from its own file with a different surface"
             );
         }
+        if let Some(ball) = a_whole_ball_turned_off_z(here_face)
+            .or_else(|| a_whole_ball_whose_seam_was_rewritten(here_face, back_face))
+        {
+            assert_cut_again_on_the_z_line(ball, back_face);
+            every_number_the_same_bits = false;
+            continue;
+        }
         let here_coedges: Vec<_> = here_face.wires().flat_map(WireView::coedges).collect();
         let back_coedges: Vec<_> = back_face.wires().flat_map(WireView::coedges).collect();
         assert_eq!(
@@ -362,13 +382,158 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) -> bool {
             let (here_run, back_run) = (here_coedge.edge().run(), back_coedge.edge().run());
             let chord = here_coedge.end().point() - here_coedge.start().point();
             assert!(
-                the_same_run(&here_run, &back_run, chord),
+                the_same_run(&here_run, &back_run, chord, here_surface),
                 "a sound solid's coedge came back from its own file with a different edge run: \
                  {here_run:?} went in, {back_run:?} came back"
             );
         }
     }
     every_number_the_same_bits
+}
+
+/// The ball `face` covers whole, where a turn moved a pole of it off the `z`
+/// line its located ball pinches on, or `None`.
+fn a_whole_ball_turned_off_z(face: &rcad_topo::FaceView<'_>) -> Option<rcad_geom::Sphere> {
+    let Surface::Sphere(ball) = face.surface() else {
+        return None;
+    };
+    let mut wires = face.wires();
+    let (Some(wire), None) = (wires.next(), wires.next()) else {
+        return None;
+    };
+    let poles = the_poles_of_a_whole_ball(wire)?;
+    poles
+        .iter()
+        .any(|pole| {
+            face.surface()
+                .the_way_its_first_coordinate_runs_at(*pole)
+                .is_some()
+        })
+        .then_some(ball)
+}
+
+/// The ball `here_face` covers whole, where its poles stand where the ball
+/// pinches (so [`a_whole_ball_turned_off_z`] does not catch it) but its own
+/// seam came back from the file as a different run than the one it went in
+/// with, or `None`.
+///
+/// A turn about `z` leaves a ball's poles on the line it pinches on — only a
+/// turn about some other axis moves them off it. For most such turns the
+/// writer carries the seam as it is, and the seam that comes back is still
+/// compared corner by corner. For a turn in the bands
+/// `docs/decisions.md` §404 names, no centre the reader holds can carry that
+/// seam's own plane, and the writer puts the whole ball back on the world's
+/// chart instead, with its seam wherever `add_ball` cuts that
+/// (`rcad_step::write`'s `a_whole_ball_written_on_its_chart`). Comparing the
+/// two seams by [`the_same_run`] is how this tells the two apart without
+/// asking the writer which one it did (Q1319).
+fn a_whole_ball_whose_seam_was_rewritten(
+    here_face: &rcad_topo::FaceView<'_>,
+    back_face: &rcad_topo::FaceView<'_>,
+) -> Option<rcad_geom::Sphere> {
+    let Surface::Sphere(ball) = here_face.surface() else {
+        return None;
+    };
+    let here_seam = the_seam_of_a_whole_ball(here_face)?;
+    let back_seam = the_seam_of_a_whole_ball(back_face)?;
+    let chord = here_seam.end().point() - here_seam.start().point();
+    let same = the_same_run(
+        &here_seam.edge().run(),
+        &back_seam.edge().run(),
+        chord,
+        here_face.surface(),
+    );
+    (!same).then_some(ball)
+}
+
+/// The two poles of a wire that walks one edge there and back with a pole at
+/// each turn, in walk order, or `None` for any other wire.
+fn the_poles_of_a_whole_ball(wire: WireView) -> Option<[Point; 2]> {
+    the_seam_and_poles_of_a_whole_ball(wire).map(|(_, poles)| poles)
+}
+
+/// The seam of the one wire of `face`, the way [`the_seam_and_poles_of_a_whole_ball`]
+/// finds it, or `None` where `face` is not one wire walking one edge there and
+/// back with a pole at each turn.
+fn the_seam_of_a_whole_ball<'m>(face: &rcad_topo::FaceView<'m>) -> Option<CoedgeView<'m>> {
+    let mut wires = face.wires();
+    let (Some(wire), None) = (wires.next(), wires.next()) else {
+        return None;
+    };
+    the_seam_and_poles_of_a_whole_ball(wire).map(|(seam, _)| seam)
+}
+
+/// The seam of a wire that walks one edge there and back with a pole at each
+/// turn, as the coedge walking it the first time, and the two poles in walk
+/// order, or `None` for any other wire.
+fn the_seam_and_poles_of_a_whole_ball(wire: WireView<'_>) -> Option<(CoedgeView<'_>, [Point; 2])> {
+    use rcad_topo::WireStepView::{Along, Pole};
+    let walk: Vec<_> = wire.steps().collect();
+    let [first, second, third, fourth] = walk[..] else {
+        return None;
+    };
+    let ((Along(there), Pole(one), Along(back), Pole(other))
+    | (Pole(one), Along(there), Pole(other), Along(back))) = (first, second, third, fourth)
+    else {
+        return None;
+    };
+    (there.edge().key() == back.edge().key()).then(|| (there, [one.point(), other.point()]))
+}
+
+/// That `back` is the whole of `ball` cut open again on the `z` line, the way
+/// the writer writes a whole ball turned off it (`docs/decisions.md` §404):
+/// its poles at `centre ± (0, 0, r)` to the bit, and its seam the run
+/// `add_ball` cuts between them, in the plane through the centre square to `y`
+/// on the side facing `+x`. Its surface was compared before this.
+///
+/// **This is the one face compared by its poles and not corner by corner.**
+/// This kernel's ball pinches only on the `z` line, so the poles the turn
+/// moved off it have no way into a file and back; the ball they bound does.
+///
+/// # Panics
+///
+/// If `back` is not that face.
+fn assert_cut_again_on_the_z_line(ball: rcad_geom::Sphere, back: &rcad_topo::FaceView<'_>) {
+    let mut wires = back.wires();
+    let (Some(wire), None) = (wires.next(), wires.next()) else {
+        panic!("a sound solid's whole ball came back from its own file with other than one wire");
+    };
+    let poles = the_poles_of_a_whole_ball(wire).unwrap_or_else(|| {
+        panic!("a sound solid's whole ball came back from its own file cut some other way")
+    });
+    let centre = ball.centre();
+    let [x, y, z] = centre.coordinates();
+    let [north, south] = [z + ball.radius(), z - ball.radius()].map(|at| Point::new(x, y, at));
+    let came_back = format!("{poles:?}");
+    assert!(
+        came_back == format!("{:?}", [north, south])
+            || came_back == format!("{:?}", [south, north]),
+        "a sound solid's whole ball came back from its own file with its poles at {came_back}, \
+         not at {north:?} and {south:?}"
+    );
+    let seam = wire
+        .coedges()
+        .next()
+        .expect("a wire with two steps along its edge");
+    let cut = Plane::from_point_and_normal(centre, Vector::new(0.0, 1.0, 0.0))
+        .expect("the y axis is a unit normal");
+    let facing_x = HalfSpace::through_a_point_facing(centre, Vector::new(1.0, 0.0, 0.0))
+        .expect("the x axis has length");
+    let add_balls_seam = EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(cut),
+        picked_by: [Picker::from(facing_x)].into_iter().collect(),
+    };
+    let back_run = seam.edge().run();
+    assert!(
+        the_same_run(
+            &add_balls_seam,
+            &back_run,
+            seam.end().point() - seam.start().point(),
+            Surface::Sphere(ball)
+        ),
+        "a sound solid's whole ball came back from its own file with a different edge run: \
+         {add_balls_seam:?} was written, {back_run:?} came back"
+    );
 }
 
 /// Whether a cone's slope came back as near as a written half-angle can carry
@@ -414,10 +579,23 @@ fn a_slope_comes_back_as_near_as_a_half_angle_carries_it(here: f64, back: f64) -
 /// exact arithmetic unless the diameter is a power of two (Q822,
 /// `docs/decisions.md` §366). The sign is read in plain `f64`, as the writer
 /// reads its own (`Writing::a_seam_of_one_ball`): a picker standing on the
-/// chord faces along that line or against it, never square to it. Beside any
-/// other surface the arc's plane is not to hand, so the pickers must be along
-/// each other — the cross product exactly zero — and not opposite.
-fn the_same_run(here: &EdgeRun, back: &EdgeRun, chord: Vector) -> bool {
+/// chord faces along that line or against it, never square to it.
+///
+/// **Where the face walking the edge is flat, the arc lies in the face's plane
+/// instead**, and is told the same way. A circle drawn on a flat cap is named
+/// by the pipe of its radius (`Writing::an_arc_of_a_circle_on_a_flat_face`),
+/// and turned about `z` by `0.1` and moved, the kernel's picker was
+/// `(0.09983341664682815, −0.9950041652780258, 0)` and the reader's
+/// `(0.19966683329365686, −1.9900083305560514, 0)`, the same side of the
+/// chord and not along each other to the bit
+/// (`how_often_a_turned_disc_drawn_on_a_bar_comes_back_from_its_own_file`).
+/// An edge is walked from both its faces, so one with a curved face on its
+/// other side is still held to the test below from that side; only an edge
+/// between two flat faces is told by its side of the chord alone.
+/// Beside any other surface the arc's plane is not to hand, so the pickers
+/// must be along each other — the cross product exactly zero — and not
+/// opposite.
+fn the_same_run(here: &EdgeRun, back: &EdgeRun, chord: Vector, walked_by: Surface) -> bool {
     let same_bits = || format!("{here:?}") == format!("{back:?}");
     let (
         EdgeRun::PartOfWhereItCrosses {
@@ -432,8 +610,15 @@ fn the_same_run(here: &EdgeRun, back: &EdgeRun, chord: Vector) -> bool {
     else {
         return same_bits();
     };
+    let the_arcs_plane = if let Surface::Plane(cut) = here_and {
+        Some(*cut)
+    } else if let Surface::Plane(face) = walked_by {
+        Some(face)
+    } else {
+        None
+    };
     let facing_the_same_way = |here: &HalfSpace, back: &HalfSpace| {
-        if let Surface::Plane(cut) = here_and {
+        if let Some(cut) = the_arcs_plane {
             let into_an_arc = cut.normal().cross(chord);
             let [here_side, back_side] =
                 [here, back].map(|picker| picker.normal().dot(into_an_arc));
@@ -646,8 +831,13 @@ fn a_seam_picked_from_the_other_side_is_a_different_run() {
         picked_by: [Picker::from(picking.reversed())].into_iter().collect(),
     };
     let chord = seam.end().point() - seam.start().point();
-    assert!(the_same_run(&here, &here, chord));
-    assert!(!the_same_run(&here, &the_other_half, chord));
+    let ball = the_one_solid(&model)
+        .faces()
+        .next()
+        .expect("a ball has one face")
+        .surface();
+    assert!(the_same_run(&here, &here, chord, ball));
+    assert!(!the_same_run(&here, &the_other_half, chord, ball));
 }
 
 /// The ball draw 89 of `how_often_a_model_the_mutator_draws_is_refused` (in
@@ -797,18 +987,36 @@ fn every_bend_this_target_draws_comes_back_from_its_own_file() {
 
 /// A bend of ring seven and tube one, turned about `x`, `y` and `z` by every
 /// tenth of a radian up to a whole turn, in place and moved by whole units:
-/// how many the writer writes and the reader reads back.
+/// how many the writer writes, the reader reads back, and come back the same
+/// solid.
 ///
-/// **This counts what is left after Q407, and fails when a fix moves it.**
-/// Turned about `z` all 124 are written and read back. Turned about `x` or `y`
-/// by 2.5, 2.8, 3.2, 3.3, 3.7, 4.1 or 4.6 radians, in place or moved, the
-/// reader refuses the file with `CannotNameWhichPieceOfACrossingThisIs` —
-/// 28 bends, the same angles about either axis — and turned about `y` by 5.0
-/// and moved, the writer refuses the seam, the quarter of the inner equator.
-/// Neither was traced (`docs/decisions.md` §241.6).
+/// **This counts what is left, and fails when a fix moves it.** The writer
+/// writes all 372: turned about `y` by 5.0 and moved, it refused the seam
+/// until Q843 looked further for its centre
+/// (`a_bend_turned_five_about_y_and_moved_comes_back_from_its_own_file`).
+///
+/// **All 372 come back the same, every located number bit for bit, and the
+/// ring's axis with the bits the file wrote.** The writer writes the axis as
+/// the model places it, a turn of `z` an ulp or so off length one, and the
+/// reader keeps it (`Axis::as_written`, in `geometry.rs`'s `TOROIDAL_SURFACE`
+/// arm), as it keeps the normal of the seam's plane (§313.3).
+///
+/// Until Q1000 the reader built that axis with `Axis::new`, which scales it
+/// again and moved the last bit of 76 of these axes, the count pinned below.
+/// 48 of those bends were read back with the ring an ulp moved, and 28 were
+/// refused with `CannotNameWhichPieceOfACrossingThisIs`: turned about `x` by
+/// 2.5 the seam's plane and the ring's axis were
+/// `(0, -0.5984721441039565, -0.8011436155469336)` and
+/// `(…, -0.8011436155469337)`, whose cross product is `(5.55e-17, 0, 0)` and
+/// not exactly nothing, so `rcad_geom`'s walk took the seam's plane for one
+/// holding the axis (`where_a_plane_cuts_a_torus`) and neither meridian circle
+/// held the seam's two ends (`which_of_these_circles_this_run_is`).
+/// `docs/decisions.md` §355.6.
 #[test]
 fn how_often_a_turned_bend_comes_back_from_its_own_file() {
-    let (mut bends, mut writer_refused, mut reader_refused) = (0, 0, Vec::new());
+    let (mut bends, mut writer_refused, mut the_same, mut ring_moved) = (0, 0, 0, 0);
+    let mut new_would_have_moved_the_ring = 0;
+    let mut reader_refused = Vec::new();
     for axis in [Axis::x(), Axis::y(), Axis::z()] {
         for tenths in 1..63 {
             for moved in [Vector::zero(), Vector::new(3.0, 5.0, 10.0)] {
@@ -829,25 +1037,353 @@ fn how_often_a_turned_bend_comes_back_from_its_own_file() {
                     writer_refused += 1;
                     continue;
                 };
+                let written = the_ring_axis(the_one_solid(&model));
+                let scaled_again = Axis::new(written.origin(), written.direction())
+                    .expect("a ring's placed axis is finite and has a length");
+                if format!("{scaled_again:?}") != format!("{written:?}") {
+                    new_would_have_moved_the_ring += 1;
+                }
                 let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
-                if let Err(why) =
-                    Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
-                {
-                    reader_refused.push(format!("{why:?}"));
+                match Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) {
+                    Ok(back) => {
+                        let read = the_ring_axis(the_one_solid(back.model()));
+                        if format!("{read:?}") != format!("{written:?}") {
+                            ring_moved += 1;
+                            continue;
+                        }
+                        assert!(
+                            assert_located_numbers_the_same(
+                                the_one_solid(&model),
+                                the_one_solid(back.model())
+                            ),
+                            "{turned:?}"
+                        );
+                        the_same += 1;
+                    }
+                    Err(why) => reader_refused.push(format!("{turned:?}: {why:?}")),
                 }
             }
         }
     }
     println!(
-        "{bends} turned bends: {writer_refused} refused by the writer, {} by the reader",
+        "{bends} turned bends: {writer_refused} refused by the writer, {the_same} the same, \
+         {ring_moved} with the ring's axis moved, {} refused by the reader; Axis::new would \
+         have moved {new_would_have_moved_the_ring} of the written ring axes",
         reader_refused.len()
     );
-    assert_eq!((bends, writer_refused, reader_refused.len()), (372, 1, 28));
-    assert!(
-        reader_refused
-            .iter()
-            .all(|why| why.contains("CannotNameWhichPieceOfACrossingThisIs")),
+    assert_eq!(
+        (
+            bends,
+            writer_refused,
+            the_same,
+            ring_moved,
+            reader_refused.len()
+        ),
+        (372, 0, 372, 0, 0),
         "{reader_refused:?}"
+    );
+    assert_eq!(new_would_have_moved_the_ring, 76);
+}
+
+/// A round bar, a frustum and a pointed cone, turned as
+/// [`how_often_a_turned_bend_comes_back_from_its_own_file`] turns its bend:
+/// all 1 116 are written, and every one comes back with its pipe's or cone's
+/// axis as the file wrote it, and the same solid.
+///
+/// The reader's `CYLINDRICAL_SURFACE` arm and `cone_from` keep the axis
+/// (`Axis::as_written`), and `cone_from` moves it to the apex rather than
+/// build it again (`Axis::moved_to`). The count pinned last is how many of the
+/// written axes `Axis::new` would have moved, which is how many came back
+/// moved while the reader built them with it (`docs/decisions.md` §355.6).
+#[test]
+fn how_often_a_turned_bar_or_cone_comes_back_from_its_own_file() {
+    let shapes: [fn(&mut Model) -> rcad_topo::Result<SolidKey>; 3] = [
+        a_round_bar,
+        |model| a_frustum(model, 0.5, 2.0, 6.0),
+        |model| a_pointed_cone(model, 0.5, 6.0),
+    ];
+    let (mut drawn, mut writer_refused, mut the_same, mut axis_moved) = (0, 0, 0, 0);
+    let mut new_would_have_moved_the_axis = 0;
+    let mut reader_refused = Vec::new();
+    for shape in shapes {
+        for axis in [Axis::x(), Axis::y(), Axis::z()] {
+            for tenths in 1..63 {
+                for moved in [Vector::zero(), Vector::new(3.0, 5.0, 10.0)] {
+                    let turned = Isometry::translation(moved)
+                        .expect("a finite offset")
+                        .compose(
+                            &Isometry::rotation(&axis, f64::from(tenths) * 0.1)
+                                .expect("a finite angle about a unit axis"),
+                        );
+                    let model = one_solid_placed_by(shape, &turned);
+                    drawn += 1;
+                    let Ok(text) = rcad_step::write(&model, "a turned bar or cone") else {
+                        writer_refused += 1;
+                        continue;
+                    };
+                    let written = the_curved_axis(the_one_solid(&model));
+                    let scaled_again = Axis::new(written.origin(), written.direction())
+                        .expect("a placed axis is finite and has a length");
+                    if format!("{scaled_again:?}") != format!("{written:?}") {
+                        new_would_have_moved_the_axis += 1;
+                    }
+                    let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+                    match Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) {
+                        Ok(back) => {
+                            let read = the_curved_axis(the_one_solid(back.model()));
+                            if format!("{read:?}") != format!("{written:?}") {
+                                axis_moved += 1;
+                                continue;
+                            }
+                            assert!(
+                                assert_located_numbers_the_same(
+                                    the_one_solid(&model),
+                                    the_one_solid(back.model())
+                                ),
+                                "{turned:?}"
+                            );
+                            the_same += 1;
+                        }
+                        Err(why) => reader_refused.push(format!("{turned:?}: {why:?}")),
+                    }
+                }
+            }
+        }
+    }
+    println!(
+        "{drawn} turned bars and cones: {writer_refused} refused by the writer, {the_same} the \
+         same, {axis_moved} with the axis moved, {} refused by the reader; Axis::new would have \
+         moved {new_would_have_moved_the_axis} of the written axes",
+        reader_refused.len()
+    );
+    assert_eq!(
+        (
+            drawn,
+            writer_refused,
+            the_same,
+            axis_moved,
+            reader_refused.len()
+        ),
+        (1116, 0, 1116, 0, 0),
+        "{reader_refused:?}"
+    );
+    assert_eq!(new_would_have_moved_the_axis, 228);
+}
+
+/// The axis of the one pipe or cone `solid` is bounded by, where it is placed.
+fn the_curved_axis(solid: SolidView) -> Axis {
+    let mut axes = solid.faces().filter_map(|face| {
+        let surface = face.surface();
+        if let Surface::Cylinder(pipe) = surface {
+            return Some(pipe.axis());
+        }
+        let Surface::Cone(cone) = surface else {
+            return None;
+        };
+        Some(cone.axis())
+    });
+    let axis = axes.next().expect("a bar or a cone has one curved face");
+    assert!(axes.next().is_none(), "a bar or a cone has one curved face");
+    axis
+}
+
+/// A round bar with a disc drawn on its top, turned as
+/// [`how_often_a_turned_bend_comes_back_from_its_own_file`] turns its bend:
+/// all 372 are written, every one comes back with the pipe that names the
+/// drawn circle on the axis the file wrote, and the same solid.
+///
+/// The writer writes that circle where the reader's `Axis::as_written` gives
+/// the pipe back (`Writing::an_arc_of_a_circle_on_a_flat_face`), and the
+/// reader builds the pipe with it (`Walk::the_surface_that_names_the_curve`).
+/// Until Q1001 both asked `Axis::new`, which moves the last bit of 76 of the
+/// written axes, the count pinned last, and the writer refused exactly those
+/// 76 with `ACurveTheFacesEitherSideOfItDoNotName` between two planes. With
+/// the writer moved alone the reader read the 76 back with the axis moved, and
+/// with the reader moved alone the writer still refused them
+/// (`docs/decisions.md` §355.6).
+#[test]
+fn how_often_a_turned_disc_drawn_on_a_bar_comes_back_from_its_own_file() {
+    let (mut drawn, mut the_same, mut axis_moved) = (0, 0, 0);
+    let mut new_would_have_moved_the_axis = 0;
+    let (mut writer_refused, mut reader_refused) = (Vec::new(), Vec::new());
+    for axis in [Axis::x(), Axis::y(), Axis::z()] {
+        for tenths in 1..63 {
+            for moved in [Vector::zero(), Vector::new(3.0, 5.0, 10.0)] {
+                let turned = Isometry::translation(moved)
+                    .expect("a finite offset")
+                    .compose(
+                        &Isometry::rotation(&axis, f64::from(tenths) * 0.1)
+                            .expect("a finite angle about a unit axis"),
+                    );
+                let model = one_solid_placed_by(a_bar_with_a_disc_drawn_on_its_top, &turned);
+                drawn += 1;
+                let written = the_drawn_circles_axis(the_one_solid(&model));
+                let scaled_again = Axis::new(written.origin(), written.direction())
+                    .expect("a placed axis is finite and has a length");
+                if format!("{scaled_again:?}") != format!("{written:?}") {
+                    new_would_have_moved_the_axis += 1;
+                }
+                let text = match rcad_step::write(&model, "a turned disc drawn on a bar") {
+                    Ok(text) => text,
+                    Err(why) => {
+                        writer_refused.push(format!("{turned:?}: {why:?}"));
+                        continue;
+                    }
+                };
+                let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+                match Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) {
+                    Ok(back) => {
+                        let read = the_drawn_circles_axis(the_one_solid(back.model()));
+                        if format!("{read:?}") != format!("{written:?}") {
+                            axis_moved += 1;
+                            continue;
+                        }
+                        assert!(
+                            assert_located_numbers_the_same(
+                                the_one_solid(&model),
+                                the_one_solid(back.model())
+                            ),
+                            "{turned:?}"
+                        );
+                        the_same += 1;
+                    }
+                    Err(why) => reader_refused.push(format!("{turned:?}: {why:?}")),
+                }
+            }
+        }
+    }
+    println!(
+        "{drawn} turned discs drawn on a bar: {} refused by the writer, {the_same} the same, \
+         {axis_moved} with the drawn circle's axis moved, {} refused by the reader; Axis::new \
+         would have moved {new_would_have_moved_the_axis} of the written axes",
+        writer_refused.len(),
+        reader_refused.len()
+    );
+    assert_eq!(
+        (
+            drawn,
+            writer_refused.len(),
+            the_same,
+            axis_moved,
+            reader_refused.len()
+        ),
+        (372, 0, 372, 0, 0),
+        "writer: {writer_refused:?}\nreader: {reader_refused:?}"
+    );
+    assert_eq!(new_would_have_moved_the_axis, 76);
+}
+
+/// The axis of the pipe that names the circle drawn on the flat top of
+/// [`a_bar_with_a_disc_drawn_on_its_top`], where it is placed: both halves of
+/// the circle name the one pipe.
+fn the_drawn_circles_axis(solid: SolidView) -> Axis {
+    let axes: Vec<Axis> = solid
+        .faces()
+        .flat_map(|face| face.wires().flat_map(WireView::coedges).collect::<Vec<_>>())
+        .filter_map(|coedge| {
+            let EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Cylinder(pipe),
+                ..
+            } = coedge.edge().run()
+            else {
+                return None;
+            };
+            Some(pipe.axis())
+        })
+        .collect();
+    let [first, ..] = axes[..] else {
+        panic!("the disc drawn on the bar has no arc");
+    };
+    assert!(
+        axes.len() == 4
+            && axes
+                .iter()
+                .all(|axis| format!("{axis:?}") == format!("{first:?}")),
+        "two halves of one circle, each walked by the disc and by the cap round it: {axes:?}"
+    );
+    first
+}
+
+/// The bend of [`how_often_a_turned_bend_comes_back_from_its_own_file`] turned
+/// about `x` by `2.5`, read back from its own file, keeps its ring's axis
+/// through its model's saved bytes.
+///
+/// A model read back from a file stores the ring's axis as the file wrote it,
+/// an ulp off length one, where a model built here stores `z` and a placement.
+/// Saved and loaded, that axis comes back through `Axis`'s `Deserialize`,
+/// which is `Axis::as_written`. Through `Axis::new` it came back
+/// `(0, -0.5984721441039565, -0.8011436155469337)`, an ulp from what was saved
+/// (`docs/decisions.md` §355.6).
+#[test]
+fn a_turned_bend_read_back_from_its_own_file_keeps_its_ring_axis_through_its_bytes() {
+    let turned = Isometry::rotation(&Axis::x(), 2.5).expect("a finite angle about a unit axis");
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = a_quarter_bend(&mut model, 7.0, 1.0).expect("a bend fits this model");
+    model
+        .place_solid(solid, &turned)
+        .expect("the key came from this model");
+    let written = the_ring_axis(the_one_solid(&model));
+
+    let text = rcad_step::write(&model, "a turned bend").expect("the bend is written");
+    let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+    let back = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the bend is read back");
+    let read = the_ring_axis(the_one_solid(back.model()));
+    assert_eq!(format!("{read:?}"), format!("{written:?}"));
+
+    let bytes = postcard::to_allocvec(back.model()).expect("a model always encodes");
+    let loaded: Model = postcard::from_bytes(&bytes).expect("a model's own bytes decode");
+    let reloaded = the_ring_axis(the_one_solid(&loaded));
+    assert_eq!(
+        format!("{reloaded:?}"),
+        format!("{written:?}"),
+        "the ring's axis moved between saving the read-back model and loading it"
+    );
+}
+
+/// The axis of the one ring `solid` is bounded by, where it is placed.
+fn the_ring_axis(solid: SolidView) -> Axis {
+    let mut rings = solid.faces().filter_map(|face| {
+        let Surface::Torus(ring) = face.surface() else {
+            return None;
+        };
+        Some(ring.axis())
+    });
+    let ring = rings.next().expect("a bend has one ring");
+    assert!(rings.next().is_none(), "a bend has one ring");
+    ring
+}
+
+/// The one bend of [`how_often_a_turned_bend_comes_back_from_its_own_file`]
+/// the writer refused, ring seven and tube one turned about `y` by `5.0` and
+/// moved by `(3, 5, 10)`, is written and comes back the same, every located
+/// number bit for bit.
+///
+/// **Its seam's plane reads back from one centre the reader holds, and it is
+/// twenty steps out.** The plane's offset is the turned normal dotted with the
+/// move in plain `f64`, `32` ulps from the ring's centre dotted and rounded
+/// once, and of every `f64` centre the reader could hold on the ring, the one
+/// it reads back from is `23` steps of `x` and `19` of `z` from the ring's
+/// centre, at `15.88` of the sixteen units the reader allows
+/// (`a_turned_bends_seam_has_one_centre_its_plane_reads_back_from` in
+/// `write.rs`). The writer stepped four and refused the seam by name (Q843).
+#[test]
+fn a_bend_turned_five_about_y_and_moved_comes_back_from_its_own_file() {
+    let turned = Isometry::translation(Vector::new(3.0, 5.0, 10.0))
+        .expect("a finite offset")
+        .compose(&Isometry::rotation(&Axis::y(), 5.0).expect("a finite angle about a unit axis"));
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = a_quarter_bend(&mut model, 7.0, 1.0).expect("a bend fits this model");
+    model
+        .place_solid(solid, &turned)
+        .expect("the key came from this model");
+    let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}, {:?}",
+        rcad_step::write(&model, "a turned bend").err()
     );
 }
 
@@ -1293,6 +1829,101 @@ fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> rcad_topo::Result<
             (side, Orientation::Forward),
         ])
         .expect("three faces close");
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// A round bar of radius two about `+z`, four tall, with a disc of radius one
+/// drawn on its top cap: the cap is a ring round the disc and the disc a face
+/// of its own on the same plane, so the circle between them is two half
+/// circles that name the pipe of radius one standing on the cap.
+fn a_bar_with_a_disc_drawn_on_its_top(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    let up = Vector::new(0.0, 0.0, 1.0);
+    let centre = Point::new(0.0, 0.0, 4.0);
+    let drawn = Cylinder::new(Axis::new(centre, up).expect("a unit direction"), 1.0)
+        .expect("a positive radius");
+    let half_of_the_rim = |facing: Vector| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Cylinder(drawn),
+        picked_by: [Picker::from(
+            HalfSpace::through_a_point_facing(centre, facing).expect("a facing with a length"),
+        )]
+        .into_iter()
+        .collect(),
+    };
+    let mut builder = SolidBuilder::new();
+    let [foot, rim, near, far] = [
+        Point::new(2.0, 0.0, 0.0),
+        Point::new(2.0, 0.0, 4.0),
+        Point::new(1.0, 0.0, 4.0),
+        Point::new(-1.0, 0.0, 4.0),
+    ]
+    .map(|at| builder.add_vertex(at).expect("a finite point"));
+    let bottom_circle = builder
+        .add_edge(foot, foot, EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("the bottom cap cuts the pipe in one closed curve");
+    let seam = builder
+        .add_edge(foot, rim, EdgeRun::Straight)
+        .expect("a ruling of a pipe is straight");
+    let top_circle = builder
+        .add_edge(rim, rim, EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("the top cap cuts the pipe in one closed curve");
+    let one_half = builder
+        .add_edge(near, far, half_of_the_rim(Vector::new(0.0, 1.0, 0.0)))
+        .expect("half of the drawn circle");
+    let other_half = builder
+        .add_edge(far, near, half_of_the_rim(Vector::new(0.0, -1.0, 0.0)))
+        .expect("the other half of the drawn circle");
+
+    let bottom = a_cap(
+        &mut builder,
+        Point::origin(),
+        Vector::new(0.0, 0.0, -1.0),
+        bottom_circle,
+        Orientation::Reversed,
+    );
+    let side = a_wall(
+        &mut builder,
+        Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a positive radius")),
+        (bottom_circle, Orientation::Forward),
+        seam,
+        top_circle,
+    );
+    let top = Surface::Plane(Plane::from_point_and_normal(centre, up).expect("a unit normal"));
+    let mut a_wire = |walked: &[(rcad_topo::DraftEdge, Orientation)]| {
+        let steps: Vec<DraftStep> = walked
+            .iter()
+            .map(|&(edge, turn)| {
+                DraftStep::Along(
+                    builder
+                        .add_coedge(edge, turn)
+                        .expect("an edge of this build"),
+                )
+            })
+            .collect();
+        builder.add_wire(&steps).expect("a wire that closes")
+    };
+    let round_the_cap = a_wire(&[(top_circle, Orientation::Forward)]);
+    let round_the_hole = a_wire(&[
+        (other_half, Orientation::Reversed),
+        (one_half, Orientation::Reversed),
+    ]);
+    let round_the_disc = a_wire(&[
+        (one_half, Orientation::Forward),
+        (other_half, Orientation::Forward),
+    ]);
+    let cap = builder
+        .add_face(top, &[round_the_cap, round_the_hole])
+        .expect("the cap round the disc");
+    let disc = builder
+        .add_face(top, &[round_the_disc])
+        .expect("the disc drawn on the cap");
+    builder
+        .add_shell(&[
+            (bottom, Orientation::Forward),
+            (side, Orientation::Forward),
+            (cap, Orientation::Forward),
+            (disc, Orientation::Forward),
+        ])
+        .expect("four faces close");
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 

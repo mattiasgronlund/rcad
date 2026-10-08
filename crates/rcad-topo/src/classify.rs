@@ -41,15 +41,19 @@
 //! straddled. Under a tolerant policy the same query resolves instead, and the
 //! log picks up a record of what was accepted to get there.
 
+use std::collections::HashMap;
+
 use rcad_geom::{
-    EdgeRun, MeetsAt, Point, Surface, WhereALineMeetsIt, where_a_line_meets_a_surface,
+    Cone, EdgeRun, MeetsAt, Plane, PlaneAgreement, Point, Surface, WhereALineMeetsIt,
+    where_a_line_meets_a_surface,
 };
 use rcad_predicates::{
-    Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_tolerantly,
+    Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_of_points,
+    orient3d_tolerantly,
 };
 
 use crate::validate::side_of_surface;
-use crate::{Error, FaceKey, FaceView, OnAFace, SolidView};
+use crate::{Error, FaceKey, FaceView, OnAFace, SolidView, WireView};
 
 /// Where a point sits relative to a solid.
 ///
@@ -72,7 +76,10 @@ pub enum Containment {
         ///
         /// Zero when no predicate was in doubt and the geometry was: every ray
         /// tried met an edge or a corner dead on, which is exact and still
-        /// tells us nothing.
+        /// tells us nothing; or a ray met a flat face whose stored corners and
+        /// stored plane put the point on different sides, or the point is
+        /// beside such a face, and another face was too near for the plane
+        /// alone to place it.
         enclosure: f64,
     },
     /// One face of the solid is trimmed in a way
@@ -173,6 +180,17 @@ impl SolidView<'_> {
     /// over, once each way, so only the whole outline can say (see
     /// [`SolidView::face_holds_the_point`]).
     ///
+    /// **A triangle is the face only where it agrees with the face's stored
+    /// plane**, which is the face (`docs/decisions.md` §17.1), and a turned
+    /// solid stores its corners a rounding off that plane. So where a ray's
+    /// count turns on which side of a triangle the point is, the stored plane
+    /// is asked too; where the two part, no count is trusted and the plane next
+    /// to the point places it, or nothing does and the answer is
+    /// [`Containment::Undecidable`] (`SolidView::what_its_plane_says_beside_it`).
+    /// A point beside a face whose corners and plane part about it is placed
+    /// the same way before any ray is fired, whether a ray's line would meet
+    /// that face or not (`SolidView::what_a_face_it_is_beside_says`).
+    ///
     /// The ray's far target is picked from [`SolidView::box_around_it`] and is
     /// exact. `point` is the only thing the *caller* may hand over as a box, and
     /// it is handed to every predicate as it is — nothing here rounds it down to
@@ -182,6 +200,9 @@ impl SolidView<'_> {
     /// from the point it started at, the count is not to be trusted, so the
     /// whole ray is thrown away and the next of three fixed targets is tried. If
     /// all three graze something, the answer is [`Containment::Undecidable`].
+    /// **A root the face holds none of is no graze**, wherever along the ray it
+    /// is, and nor is a point a surface's own sign cannot place, where that
+    /// face holds none of it: neither puts anything on the face.
     ///
     /// # Why the answer never wobbles
     ///
@@ -214,8 +235,16 @@ impl SolidView<'_> {
         let Some((low, high)) = self.box_around_it() else {
             return Containment::Outside;
         };
-        if is_outside_the_box(point, low, high) {
+        if is_outside_the_box(point, low, high)
+            && self
+                .opened_out_to_where_its_planes_meet(low, high)
+                .map(|(low, high)| self.opened_out_by_what_a_tipped_disc_loses(low, high))
+                .is_some_and(|(low, high)| is_outside_the_box(point, low, high))
+        {
             return Containment::Outside;
+        }
+        if let Some(placed) = self.what_a_face_it_is_beside_says(point, policy, log) {
+            return placed;
         }
 
         let mut worst_enclosure = 0.0f64;
@@ -232,6 +261,11 @@ impl SolidView<'_> {
             if pass.on_boundary {
                 return Containment::OnBoundary;
             }
+            if let Some(face) = pass.parted_at {
+                return self
+                    .what_its_plane_says_beside_it(face, point, policy, log)
+                    .unwrap_or(Containment::Undecidable { enclosure: 0.0 });
+            }
             if !pass.grazed_something {
                 return if pass.winding == 0 {
                     Containment::Outside
@@ -244,6 +278,228 @@ impl SolidView<'_> {
         Containment::Undecidable {
             enclosure: worst_enclosure,
         }
+    }
+
+    /// The box from `low` to `high`, opened out to hold every corner of a flat
+    /// face where that face's stored plane meets the stored planes across its
+    /// two straight sides there; `None` where three such planes cannot be
+    /// shown to meet in a point.
+    ///
+    /// **[`SolidView::box_around_it`] holds a flat face's stored corners, and
+    /// the face is its stored plane** (`docs/decisions.md` §17.1). A turn
+    /// leaves a corner a rounding off where its planes meet, so the solid the
+    /// stored planes bound can reach a rounding past that box at its outermost
+    /// corner. Forty cubes of side 2, turned about five axes by eight angles,
+    /// hold 3897 points past their boxes that every one of their six planes
+    /// puts inside, and the box alone answered every one of them `Outside`
+    /// (`tests/a_point_a_rounding_past_a_turned_solids_corner.rs`, Q1157).
+    ///
+    /// Each straight side of a flat face's outline runs along where its plane
+    /// meets the plane across that side, from one meeting of three planes to
+    /// the next, and a flat outline lies inside the box round its corners. So
+    /// this box holds every flat face along its straight sides between flat
+    /// faces, and the stored box holds the rest as it did. A corner where four
+    /// or more faces meet is placed once from each face's side, and each of
+    /// those places is taken in. A corner whose two sides run along one plane
+    /// is no corner of the outline, which runs straight on through it, and is
+    /// passed over.
+    ///
+    /// **A corner beside a curved face is not opened out here**: the stored
+    /// box holds a face on a pipe or a cone by the discs across its axis, and
+    /// a corner on that face is inside those discs. What a tipped disc loses
+    /// of its reach is opened out next
+    /// ([`SolidView::opened_out_by_what_a_tipped_disc_loses`]). Where a plane
+    /// and a curved surface meet a rounding past the discs is not asked.
+    ///
+    /// Asked only of a point already past the stored box, since a solid of a
+    /// thousand faces is a thousand meetings worked out.
+    fn opened_out_to_where_its_planes_meet(
+        self,
+        low: Point,
+        high: Point,
+    ) -> Option<(Point, Point)> {
+        let planes: HashMap<FaceKey, Plane> = self
+            .faces()
+            .filter_map(|face| Some((face.key(), *face.surface().as_plane()?)))
+            .collect();
+        let (mut low, mut high) = (low.coordinates(), high.coordinates());
+        for face in self.faces() {
+            let Some(flat) = planes.get(&face.key()) else {
+                continue;
+            };
+            for wire in face.wires() {
+                let across: Vec<Option<&Plane>> = wire
+                    .coedges()
+                    .map(|coedge| {
+                        let edge = coedge.edge();
+                        if *edge.stored_run() != EdgeRun::Straight {
+                            return None;
+                        }
+                        edge.neighbouring_faces()
+                            .find(|&other| other != face.key())
+                            .and_then(|other| planes.get(&other))
+                    })
+                    .collect();
+                let next_round = across.iter().cycle().skip(1);
+                for (into, out_of) in across.iter().zip(next_round) {
+                    let (Some(into), Some(out_of)) = (into, out_of) else {
+                        continue;
+                    };
+                    if matches!(
+                        into.agreement_with(out_of),
+                        PlaneAgreement::SameWay | PlaneAgreement::OppositeWay
+                    ) {
+                        continue;
+                    }
+                    let meet = Plane::meet_of_three(flat, into, out_of).ok()?;
+                    for (axis, side) in meet.enclosure().into_iter().enumerate() {
+                        if !(side.lo().is_finite() && side.hi().is_finite()) {
+                            return None;
+                        }
+                        low[axis] = low[axis].min(side.lo());
+                        high[axis] = high[axis].max(side.hi());
+                    }
+                }
+            }
+        }
+        Some((Point::from(low), Point::from(high)))
+    }
+
+    /// The box from `low` to `high`, opened out along each axis by as much of a
+    /// pipe's or a cone's reach as [`SolidView::box_around_it`] may have lost
+    /// to working it out as `r · √(1 − a²)`.
+    ///
+    /// **That box holds a face on a pipe or a cone by the discs across its
+    /// axis**, and a disc of radius `r` square to the axis `a` reaches
+    /// `r · √(1 − a²/|a|²)` along a coordinate axis, `a` being the axis's part
+    /// along it. The box works it out as `r · √(1 − a²)`, and where `a` is
+    /// near one the subtraction keeps nothing but rounding. A bar tipped
+    /// `1e-9` off `z` stores an axis whose `z` part is exactly one, so its
+    /// discs reach nothing in `z` by that sum where they truly reach a
+    /// billionth of the radius, and the stored surfaces put points a
+    /// billionth past the box inside
+    /// (`tests/a_point_a_rounding_past_a_turned_solids_corner.rs`, Q1332).
+    ///
+    /// The reach is worked out again here as `r · √(b² + c²)/|a|`, from the
+    /// axis's other two parts, which loses nothing to cancellation, and the
+    /// box is opened out by whatever that gives past the sum the box used.
+    /// That is nothing for a bar along a coordinate axis, whose sum is exact,
+    /// so such a bar's box is not widened at all. What it does not cover is a
+    /// rounding or two in the rest of the box's arithmetic, the disc's centre
+    /// and the sum that adds the reach to it, which round to nearest and not
+    /// outward.
+    ///
+    /// A cone's radius grows along it, and the widest any of its faces' discs
+    /// can be is bounded by how far the box's corners are from its apex
+    /// ([`the_widest_a_cone_reaches`]).
+    fn opened_out_by_what_a_tipped_disc_loses(self, low: Point, high: Point) -> (Point, Point) {
+        let mut lost = [0.0f64; 3];
+        for face in self.faces() {
+            let surface = face.surface();
+            let (along, radius) = if let Surface::Cylinder(pipe) = surface {
+                (pipe.axis().direction(), pipe.radius())
+            } else if let Surface::Cone(cone) = surface {
+                (
+                    cone.axis().direction(),
+                    the_widest_a_cone_reaches(cone, low, high),
+                )
+            } else {
+                continue;
+            };
+            let parts = along.components();
+            let length = parts.iter().map(|part| part * part).sum::<f64>();
+            for axis in 0..3 {
+                let others = (0..3)
+                    .filter(|&other| other != axis)
+                    .map(|other| parts[other] * parts[other])
+                    .sum::<f64>();
+                let reach = (others / length).sqrt();
+                let as_the_box_has_it = (1.0 - parts[axis] * parts[axis]).max(0.0).sqrt();
+                lost[axis] = lost[axis].max(radius * (reach - as_the_box_has_it).max(0.0));
+            }
+        }
+        let (low, high) = (low.coordinates(), high.coordinates());
+        (
+            Point::from(core::array::from_fn(|axis| low[axis] - lost[axis])),
+            Point::from(core::array::from_fn(|axis| high[axis] + lost[axis])),
+        )
+    }
+
+    /// What a flat face whose corners and stored plane read the point
+    /// differently says of it, where the point is beside that face; `None` when
+    /// it is beside no such face, and the ray is to count it.
+    ///
+    /// **The ray asks a face's stored plane only where its line passes through
+    /// one of that face's triangles**, and it finds those by the triangles'
+    /// sides, which are the corners'. The line from a point in one face's
+    /// sliver within a sliver's depth of an edge can pass through the
+    /// neighbouring face's triangle instead, or through neither, and then the
+    /// plane was never asked and the corners' answer came back where the stored
+    /// planes say the other (`docs/decisions.md` §346.6, Q997). So every flat
+    /// face whose corners and plane part about the point is found first
+    /// ([`its_corners_and_plane_part_at`]), whatever the line meets.
+    ///
+    /// **Such a face matters only beside the point.** Its plane runs on past
+    /// its edges, and so does the sliver between that plane and its triangles'
+    /// planes. A point in that sliver far from the face, as the cap a turned
+    /// block's face cuts off a ball `0.3` past the block is, is left to the
+    /// ray, which reads it the same both ways. A face is beside the point
+    /// unless it holds none of the point's box stretched to its plane. Where
+    /// two faces part about the point both are taken as beside it: that is the
+    /// strip between their corners' edge and their planes' meeting, which
+    /// neither face's corners hold and only their planes place.
+    ///
+    /// Each face beside the point is asked what its plane says
+    /// ([`SolidView::what_its_plane_says_beside_it`]), and the first that can
+    /// show it answers. If none can, the answer is [`Containment::Undecidable`].
+    fn what_a_face_it_is_beside_says(
+        self,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Option<Containment> {
+        let parted: Vec<FaceView<'_>> = self
+            .faces()
+            .filter(|&face| {
+                let surface = face.surface();
+                surface.as_plane().is_some_and(|flat| {
+                    every_side_of_it_is_straight(face)
+                        && its_corners_and_plane_part_at(face, flat, point)
+                })
+            })
+            .collect();
+        let beside: Vec<FaceView<'_>> = if parted.len() > 1 {
+            parted
+        } else {
+            parted
+                .into_iter()
+                .filter(|&face| self.is_beside(face, point, policy, log))
+                .collect()
+        };
+        if beside.is_empty() {
+            return None;
+        }
+        Some(
+            beside
+                .into_iter()
+                .find_map(|face| self.what_its_plane_says_beside_it(face.key(), point, policy, log))
+                .unwrap_or(Containment::Undecidable { enclosure: 0.0 }),
+        )
+    }
+
+    /// Whether `face` may hold a point of `point`'s box stretched to its plane:
+    /// anything short of a proof that it holds none.
+    fn is_beside(
+        self,
+        face: FaceView<'_>,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        let Some(reach) = stretched_to_the_plane(&face.plane(), point) else {
+            return true;
+        };
+        !self.face_holds_none_of(face, reach, policy, log)
     }
 
     /// What every point of `point`'s box is, read off one exact point beside
@@ -270,6 +526,19 @@ impl SolidView<'_> {
     /// classified with an ordinary ray: what it gets, every point of the box
     /// gets. A target whose grown box a face meets, or whose ray grazes
     /// something, hands over to the next.
+    ///
+    /// **Except where its ray parts at a flat face** ([`Hit::ReadingsPart`]).
+    /// [`SolidView::no_face_meets`] reads such a face by its triangles, so the
+    /// grown box can be clear of them while the face's stored plane, which is
+    /// the face, passes through it over the face: a point a rounding off a
+    /// turned block's side, and a point beside it a few spacings away in the
+    /// sliver between the side's triangles and its plane. The ray from the
+    /// point beside leaves out the crossing it parts at, so its count is one
+    /// off, and it put points on the wrong side of a turned block's side
+    /// (`tests/a_point_beside_a_turned_flat_face.rs`, Q1068). So the face's
+    /// plane places `point` itself, as it does where a ray from `point` parts
+    /// ([`SolidView::what_its_plane_says_beside_it`]), and where it cannot the
+    /// next target is tried.
     fn what_a_point_beside_it_says(
         self,
         point: PredicatePoint,
@@ -294,6 +563,15 @@ impl SolidView<'_> {
                 "{beside:?} is in a box round {point:?} that no face of the solid meets, and a \
                  ray from it says it is on the solid's skin"
             );
+            if let Some(face) = pass.parted_at {
+                let Some(placed) =
+                    self.what_its_plane_says_beside_it(face, point, policy, &mut trial)
+                else {
+                    continue;
+                };
+                trial.drain_into(log);
+                return Some(placed);
+            }
             if !pass.grazed_something {
                 trial.drain_into(log);
                 return Some(if pass.winding == 0 {
@@ -306,14 +584,119 @@ impl SolidView<'_> {
         None
     }
 
+    /// What every point of `point`'s box is, read off the stored plane of
+    /// `face` alone, or `None` when another face comes too near for that to be
+    /// shown.
+    ///
+    /// **Asked where the ray met `face` and its corners and its stored plane
+    /// read the point differently** ([`Hit::ReadingsPart`]). The fuse cuts along
+    /// the stored plane, which is the face (`docs/decisions.md` §17.1), and the
+    /// ray fans the face's stored corners, which a turn leaves a rounding off
+    /// that plane (§75.6). A point in the sliver between the two was put on one
+    /// side of the face by the ray and on the other by the plane, or the ray
+    /// could not settle its sign at all where the plane could: a ball whose cap
+    /// a turned block's face takes off is a rounding deep, and every point of it
+    /// is in that sliver (§346.6). Asked too of a face the point is beside
+    /// whose corners and plane part about it, wherever the ray's line goes
+    /// ([`SolidView::what_a_face_it_is_beside_says`]), and of a face where the
+    /// ray from an exact point beside the point's box parted
+    /// ([`SolidView::what_a_point_beside_it_says`]).
+    ///
+    /// **The plane speaks for the point when no other face is near.** The box is
+    /// stretched along an axis until it holds a point of the plane as well
+    /// ([`stretched_to_the_plane`]). If `face` holds every point of the
+    /// stretched box and no other face holds any, the skin inside that box is
+    /// `face` and nothing else, so the segment from the point to the plane
+    /// reaches the skin only at the plane, where the face's material is on its
+    /// inner side. The point is inside exactly when it is on that side.
+    ///
+    /// **No other flat face may part from its own plane about the stretched
+    /// box**, even one whose plane the box is clear of. `face`'s corners say
+    /// how far it reaches, and by its edge a neighbour's plane and corners can
+    /// put the box on opposite sides: the box is then held by `face`'s corners
+    /// and past the edge the stored planes meet along, and `face`'s plane
+    /// placed it where the neighbour's plane says the other (Q997). Every
+    /// sign here is decided about a whole box, so nothing is a tolerance; where
+    /// a sign cannot be decided, or another face is near, the answer is `None`
+    /// and the caller does not fall back on the ray it already distrusts.
+    fn what_its_plane_says_beside_it(
+        self,
+        face: FaceKey,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Option<Containment> {
+        let face = self
+            .faces()
+            .find(|used| used.key() == face)
+            .expect("a ray parted at a face of this solid");
+        let flat = face
+            .surface()
+            .as_plane()
+            .copied()
+            .expect("only a flat face's corners and plane can read a point differently");
+        let reach = stretched_to_the_plane(&flat, point)?;
+        let mut trial = ProvenanceLog::new();
+        if !matches!(
+            self.what_this_face_holds(face, reach, policy, &mut trial),
+            Ok(OnAFace::Held)
+        ) {
+            return None;
+        }
+        for other in self.faces().filter(|other| other.key() != face.key()) {
+            let surface = other.surface();
+            if surface.as_plane().is_some_and(|other_flat| {
+                every_side_of_it_is_straight(other)
+                    && its_corners_and_plane_part_at(other, other_flat, reach)
+            }) {
+                return None;
+            }
+            let side = surface.as_plane().map_or_else(
+                || side_of_surface(&surface, reach),
+                |other_flat| side_of_a_flat_face(other_flat, reach),
+            );
+            if matches!(side, Decision::Pos | Decision::Neg) {
+                continue;
+            }
+            if !matches!(
+                self.what_this_face_holds(other, reach, policy, &mut trial),
+                Ok(OnAFace::NotHeld)
+            ) {
+                return None;
+            }
+        }
+        let inner = if face.orientation().is_reversed() {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        };
+        let placed = match side_of_a_flat_face(&flat, point) {
+            Decision::Zero => Containment::OnBoundary,
+            side if side == inner => Containment::Inside,
+            Decision::Pos | Decision::Neg => Containment::Outside,
+            Decision::Undecidable { .. } | _ => return None,
+        };
+        trial.drain_into(log);
+        Some(placed)
+    }
+
     /// Whether no face of this solid holds any point of `point`'s box.
     ///
     /// A face is kept clear of the box by the same description the ray counts
     /// it by. A flat face with straight sides is its fanned triangles, and the
     /// fan covers the face, so the box has to miss every one of them
-    /// ([`misses_the_triangle`]). Every other face is the part of its surface
-    /// it holds, so the box has to be off the surface, or the face has to hold
-    /// none of the box.
+    /// ([`misses_the_triangle`]), or the ones it meets have to add up to
+    /// nothing there ([`SolidView::its_fan_adds_up_to_nothing_over`]). Every
+    /// other face is the part of its surface it holds, so the box has to be off
+    /// the surface, or the face has to hold none of the box.
+    ///
+    /// **Clear of a turned face's triangles is not clear of its stored
+    /// plane**, which the triangles are a rounding off. A box a rounding off
+    /// such a face, over it, can miss every triangle and still hold points on
+    /// both sides of the plane. A ray from a point of the box between the two
+    /// parts at the face wherever its line passes through it, and
+    /// [`SolidView::what_a_point_beside_it_says`] then asks the plane rather
+    /// than the ray (Q1068).
     fn no_face_meets(
         self,
         point: PredicatePoint,
@@ -326,7 +709,7 @@ impl SolidView<'_> {
                 face.for_each_triangle(|corners| {
                     clear &= misses_the_triangle(corners, point, policy, log);
                 });
-                return clear;
+                return clear || self.its_fan_adds_up_to_nothing_over(face, point, policy, log);
             }
             match side_of_surface(&face.surface(), point) {
                 Decision::Pos | Decision::Neg => true,
@@ -336,6 +719,56 @@ impl SolidView<'_> {
                 ),
             }
         })
+    }
+
+    /// Whether the triangles of `face`'s fan that meet `point`'s box add up to
+    /// nothing anywhere in it, for a flat face whose every corner is on its
+    /// stored plane.
+    ///
+    /// **The fan of a face that is not convex reaches outside it.** Every wire
+    /// is fanned from one corner ([`FaceView::for_each_triangle`]), so an
+    /// L-shaped face fanned from the end of one arm puts triangles over the
+    /// notch between the arms, and they come in pairs wound opposite ways. The
+    /// ray counts each with its sign, so a ray through the notch is counted in
+    /// and out again; a box in the notch meets those triangles and still meets
+    /// nothing the ray counts, and no direction keeps it apart from a triangle
+    /// it really is in.
+    ///
+    /// **Where every corner is on the stored plane, what the fan adds up to at a
+    /// place on the plane is the winding of the wires round it**, the same for
+    /// whichever corner it is fanned from, and that winding is what
+    /// [`SolidView::what_this_face_holds`] counts. So where it says
+    /// [`OnAFace::NotHeld`] of the box — a sign decided about every point of
+    /// it, §323.3's contract — the fan adds up to nothing at every place where
+    /// the box meets the plane, and a segment inside the box crosses the face
+    /// as often one way as the other. Every corner is asked by the plane's own
+    /// predicate, which is exact for a stored corner.
+    ///
+    /// **A face whose corners are off its stored plane is not answered.** A
+    /// turn leaves them a rounding off it (§75.6), and then the two triangles
+    /// of a pair are not in one plane: between them is a sliver a rounding
+    /// thick that one of them counts and the other does not, and a box that
+    /// straddles the plane takes it in.
+    fn its_fan_adds_up_to_nothing_over(
+        self,
+        face: FaceView<'_>,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        let flat = face
+            .surface()
+            .as_plane()
+            .copied()
+            .expect("only a flat face is fanned");
+        let every_corner_on_the_plane = face.wires().flat_map(WireView::points).all(|corner| {
+            flat.side_of_point(PredicatePoint::from(corner.coordinates())) == Decision::Zero
+        });
+        every_corner_on_the_plane
+            && matches!(
+                self.what_this_face_holds(face, point, policy, log),
+                Ok(OnAFace::NotHeld)
+            )
     }
 
     /// One ray's tally, or which face's trimming stopped it being counted.
@@ -378,6 +811,15 @@ impl SolidView<'_> {
     /// A round *hole* is worse than invisible: its one corner fans into a
     /// triangle with no area, so the outer polygon's own fan covers the hole and
     /// the ray is counted through material that is not there.
+    ///
+    /// **The corners are checked against the stored plane wherever the ray's
+    /// count depends on them.** Whether a triangle the ray's line passes
+    /// through is met ahead of the point is asked of the triangle, and asked
+    /// again of the face's stored plane: the ray from the point to its target
+    /// crosses that plane when the two are on opposite sides of it. Where both
+    /// answers are decided and differ, or only the plane's is decided, the
+    /// count is not trusted and the face is named instead
+    /// ([`SolidView::what_its_plane_says_beside_it`]).
     fn count_a_polygon(
         self,
         face: FaceView<'_>,
@@ -387,13 +829,29 @@ impl SolidView<'_> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<(), Containment> {
+        let flat = face
+            .surface()
+            .as_plane()
+            .copied()
+            .expect("a polygon is counted only on a flat face");
+        let stored_side = |side: Decision| match side {
+            Decision::Pos => Some(true),
+            Decision::Neg => Some(false),
+            Decision::Zero | Decision::Undecidable { .. } | _ => None,
+        };
+        let crosses_the_plane_ahead = stored_side(side_of_a_flat_face(&flat, point))
+            .zip(stored_side(
+                flat.side_of_point(PredicatePoint::from(target.coordinates())),
+            ))
+            .map(|(from, to)| from != to);
         let mut on_the_plane = false;
         face.for_each_triangle(|corners| {
-            match look_at_triangle(corners, point, target, policy, log) {
+            match look_at_triangle(corners, point, target, crosses_the_plane_ahead, policy, log) {
                 Hit::Missed => {}
                 Hit::WentThrough { leaving } => tally.winding += leaving,
                 Hit::StartsOnThePlane => on_the_plane = true,
                 Hit::Grazed { enclosure } => tally.grazed(enclosure),
+                Hit::ReadingsPart => tally.parted(face.key()),
             }
         });
         if on_the_plane {
@@ -439,7 +897,11 @@ impl SolidView<'_> {
                 self.ask_whether_the_face_holds_it(face, tally, point, policy, log)?;
             }
             Decision::Pos | Decision::Neg => (),
-            Decision::Undecidable { enclosure } => tally.grazed(enclosure),
+            Decision::Undecidable { enclosure } => {
+                if !self.face_holds_none_of(face, point, policy, log) {
+                    tally.grazed(enclosure);
+                }
+            }
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
 
@@ -496,6 +958,13 @@ impl SolidView<'_> {
             let at = match meeting {
                 Meeting::Ahead { at } => at,
                 Meeting::Behind => continue,
+                Meeting::Straddles { at } => {
+                    if !self.face_holds_none_of(face, PredicatePoint::Constructed(at), policy, log)
+                    {
+                        tally.grazed(0.0);
+                    }
+                    continue;
+                }
                 Meeting::CouldNotTell => {
                     tally.grazed(0.0);
                     continue;
@@ -543,18 +1012,58 @@ impl SolidView<'_> {
         let held = self.what_this_face_holds(face, point, policy, log);
         tally.take_in(held, face.key())
     }
+
+    /// Whether `face` holds no point of `point`'s box, so that the box can
+    /// neither put a point on the skin through `face` nor be where the ray
+    /// crosses it, whichever side of the face's surface each of its points is
+    /// on.
+    ///
+    /// **It rests on §323.3's contract**: [`OnAFace::NotHeld`] is a sign decided
+    /// about every point of the box, which is what the ray already drops a root
+    /// ahead of the point on. Asked where the surface's own sign cannot place a
+    /// point, and where a root cannot be told from the point it started at. A
+    /// point of an upper bar's wall, against a lower bar on the same pipe, is
+    /// both: the pipe's sign straddles the point, and one root of every ray is a
+    /// rounding either side of it. Neither is on the lower bar's wall, and each
+    /// threw every ray away until Q1080. What the face was asked goes into `log`
+    /// only when it holds none of the box.
+    fn face_holds_none_of(
+        self,
+        face: FaceView<'_>,
+        point: PredicatePoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        let mut trial = ProvenanceLog::new();
+        let held_by_none = matches!(
+            self.what_this_face_holds(face, point, policy, &mut trial),
+            Ok(OnAFace::NotHeld)
+        );
+        if held_by_none {
+            trial.drain_into(log);
+        }
+        held_by_none
+    }
 }
 
-/// Whether the whole of `point`'s box sits off one side of the solid's
-/// bounding box.
+/// Whether the whole of `point`'s box sits off one side of the box from `low`
+/// to `high`.
 ///
-/// This decides `Outside` without firing a ray, and it is allowed to because it
-/// is a proof rather than a shortcut. Every point of every face is inside
-/// [`SolidView::box_around_it`] — which is what that box is for and what
-/// [`SolidView::box_around_its_corners`] is not — and an enclosure is a range
-/// the point is guaranteed to be somewhere in, so a range lying entirely past
-/// one side of the box puts the point outside the solid with nothing left over.
-/// No tolerance is involved and no sign of a rounded quantity is read.
+/// `classify_uncertain_point` decides `Outside` from this without firing a
+/// ray, and it is allowed to because it is a proof rather than a shortcut
+/// **when the box holds every point of every face**, and an enclosure is a
+/// range the point is guaranteed to be somewhere in, so a range lying entirely
+/// past one side of the box puts the point outside the solid with nothing left
+/// over. No tolerance is involved and no sign of a rounded quantity is read.
+///
+/// [`SolidView::box_around_it`] alone is not that box: it holds a flat face's
+/// stored corners, and a turned solid's stored planes, which are its faces,
+/// meet a rounding past them (Q1157), and a disc across a pipe's or a cone's
+/// axis tipped a hair off a coordinate axis reaches past it along that axis
+/// (Q1332). So the answer is taken only where the point is past that box
+/// opened out to where the planes meet and by what a tipped disc loses as well
+/// (`SolidView::opened_out_to_where_its_planes_meet`,
+/// `SolidView::opened_out_by_what_a_tipped_disc_loses`).
 ///
 /// A box that overlaps the solid's bounding box proves nothing either way, so
 /// it falls through and the rays decide it. So does a coordinate with no
@@ -566,6 +1075,112 @@ fn is_outside_the_box(point: PredicatePoint, low: Point, high: Point) -> bool {
     let low = low.coordinates();
     let high = high.coordinates();
     (0..3).any(|axis| point[axis].hi() < low[axis] || point[axis].lo() > high[axis])
+}
+
+/// The widest a disc of `cone` reaches anywhere in the box from `low` to
+/// `high`: no further from the axis than `slope` times how far along it, and
+/// no further than from the apex, so neither more than the box's farthest
+/// corner is from the apex.
+fn the_widest_a_cone_reaches(cone: Cone, low: Point, high: Point) -> f64 {
+    let apex = cone.apex().coordinates();
+    let (low, high) = (low.coordinates(), high.coordinates());
+    let farthest = (0..3)
+        .map(|axis| {
+            let off = (low[axis] - apex[axis])
+                .abs()
+                .max((high[axis] - apex[axis]).abs());
+            off * off
+        })
+        .sum::<f64>()
+        .sqrt();
+    cone.slope().min(1.0) * farthest
+}
+
+/// Whether some triangle of `face`'s fan and its stored plane `flat` do not
+/// both put every point of `point`'s box on the same side.
+///
+/// **A side is read against a point well in front of the plane**, which every
+/// triangle's own plane puts in front too: a turn leaves the corners a
+/// rounding off the plane, so each triangle is tilted from it by about a
+/// rounding, and a triangle of a hole or of a fan that doubles back is wound
+/// the other way round, which reading against that point undoes. A triangle
+/// with no area has no side and is passed over, and so is one no point in
+/// front of the plane can be found for ([`a_point_in_front_of`]); the ray
+/// still asks the plane wherever its line passes through either.
+///
+/// A point exactly on a triangle's plane is no parting, since every stored
+/// corner is one and the outline is what places it (`look_at_triangle`). A box
+/// that both the triangle and the plane straddle is left to the ray, which
+/// grazes it there as it always has. Every other case short of both settling
+/// the same side is a parting: the box holds a point the two readings place
+/// differently, or may.
+fn its_corners_and_plane_part_at(face: FaceView<'_>, flat: &Plane, point: PredicatePoint) -> bool {
+    let by_the_plane = in_front_of_it(side_of_a_flat_face(flat, point), Decision::Pos);
+    let mut parted = false;
+    face.for_each_triangle(|corners| {
+        let [a, b, c] = corners.map(|corner| PredicatePoint::from(corner.coordinates()));
+        if parted {
+            return;
+        }
+        let Some(ahead) = a_point_in_front_of(flat, corners) else {
+            return;
+        };
+        let front = orient3d_of_points(a, b, c, ahead);
+        if front == Decision::Zero {
+            return;
+        }
+        let by_the_triangle = in_front_of_it(orient3d_of_points(a, b, c, point), front);
+        parted = match (by_the_triangle, by_the_plane) {
+            (Reading::On, _) | (Reading::Unsettled, Reading::Unsettled) => false,
+            (Reading::Side(one), Reading::Side(other)) => one != other,
+            (Reading::Unsettled, Reading::Side(_) | Reading::On)
+            | (Reading::Side(_), Reading::On | Reading::Unsettled) => true,
+        };
+    });
+    parted
+}
+
+/// What one plane says of a point, against the sign it gives a point in
+/// front of it.
+#[derive(Clone, Copy)]
+enum Reading {
+    /// Off the plane: in front of it, or behind.
+    Side(bool),
+    /// Exactly on it.
+    On,
+    /// A box the plane straddles.
+    Unsettled,
+}
+
+fn in_front_of_it(side: Decision, front: Decision) -> Reading {
+    match side {
+        Decision::Pos | Decision::Neg => Reading::Side(side == front),
+        Decision::Zero => Reading::On,
+        Decision::Undecidable { .. } => Reading::Unsettled,
+        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
+/// A point a step along `flat`'s normal from the first of `corners`, where the
+/// plane puts it in front, or `None`.
+///
+/// The step is a thousandth of the largest coordinate of the three corners or
+/// of the plane's offset, far more than the rounding a corner sits off its
+/// plane and far less than the top of the range, which a step as long as the
+/// coordinates overflows past at `1e308`. A triangle whose corners are all the
+/// origin gets no step, and has no area to read a side by either.
+fn a_point_in_front_of(flat: &Plane, corners: [Point; 3]) -> Option<PredicatePoint> {
+    let normal = flat.normal().components();
+    let reach = corners
+        .iter()
+        .flat_map(|corner| corner.coordinates())
+        .fold(flat.offset().abs(), |far, part| far.max(part.abs()))
+        / 1024.0;
+    let at = corners[0].coordinates();
+    let ahead = PredicatePoint::from(core::array::from_fn::<f64, 3, _>(|axis| {
+        at[axis] + normal[axis] * reach
+    }));
+    (flat.side_of_point(ahead) == Decision::Pos).then_some(ahead)
 }
 
 /// Three far-off points to aim at, in turn.
@@ -647,6 +1262,128 @@ fn the_box_round_both(point: PredicatePoint, beside: PredicatePoint) -> Predicat
     }))
 }
 
+/// `point`'s box stretched along one axis until it holds a point of `flat`
+/// too, or `None` when no stretch could be proved to reach the plane. A point
+/// the plane holds comes back as the box it is, and a box of no width as the
+/// `f64` triple in it, as a stretched box does.
+///
+/// The axis is the one the plane's normal has most of, and the box keeps its
+/// other two sides. Each of its two ends across that axis is moved out until
+/// the plane's own sign puts that end's face on its own side of the plane, or
+/// on it. Every line along the axis through the box then crosses the plane
+/// between the two faces, so the box holds a point of the plane as well as
+/// every point it held. The first try past the point is where the plane
+/// crosses the axis through the middle of the box, worked out in `f64`;
+/// nothing about it is trusted, and a try the sign does not prove is passed
+/// over. `fuse::select` stretches a flat piece's candidate with this too,
+/// before asking the piece's curved partners about it (§346.6, Q671).
+pub(crate) fn stretched_to_the_plane(
+    flat: &Plane,
+    point: PredicatePoint,
+) -> Option<PredicatePoint> {
+    if side_of_a_flat_face(flat, point) == Decision::Zero {
+        return Some(as_exact_as_it_is(point.enclosure()));
+    }
+    let normal = flat.normal().components();
+    let along = (0..3)
+        .max_by(|&one, &other| normal[one].abs().total_cmp(&normal[other].abs()))
+        .expect("three axes");
+    let mut boxed = point.enclosure();
+    let middle = boxed.map(|span| span.lo() + (span.hi() - span.lo()) / 2.0);
+    let crossing = (0..3)
+        .filter(|&axis| axis != along)
+        .fold(flat.offset(), |rest, axis| {
+            rest - normal[axis] * middle[axis]
+        })
+        / normal[along];
+    let low = an_end_on_its_side(flat, boxed, along, boxed[along].lo(), crossing, -1.0)?;
+    let high = an_end_on_its_side(flat, boxed, along, boxed[along].hi(), crossing, 1.0)?;
+    boxed[along] = Interval::new(low, high).expect("each end only ever moves away from the other");
+    Some(as_exact_as_it_is(boxed))
+}
+
+/// Where along `along` the face of `boxed` on the `way` end is on that end's
+/// side of `flat`, or on it: `own_end` when its face already is, and otherwise
+/// the first of a run of tries from `crossing`, or from `own_end` when the
+/// crossing is not past it, each step twice the one before. `way` is `-1.0` for
+/// the low end and `1.0` for the high one. `None` when no try is proved.
+fn an_end_on_its_side(
+    flat: &Plane,
+    boxed: [Interval; 3],
+    along: usize,
+    own_end: f64,
+    crossing: f64,
+    way: f64,
+) -> Option<f64> {
+    let ends_side = if (flat.normal().components()[along] > 0.0) == (way > 0.0) {
+        Decision::Pos
+    } else {
+        Decision::Neg
+    };
+    let is_on_its_side = |end: f64| {
+        let mut face = boxed;
+        face[along] = Interval::exactly(end);
+        let side = side_of_a_flat_face(flat, PredicatePoint::Constructed(face));
+        side == ends_side || side == Decision::Zero
+    };
+    if is_on_its_side(own_end) {
+        return Some(own_end);
+    }
+    let size = boxed.iter().fold(flat.offset().abs(), |largest, side| {
+        largest.max(side.lo().abs()).max(side.hi().abs())
+    });
+    let mut step = size.max(f64::MIN_POSITIVE) * f64::EPSILON;
+    let mut end = if (crossing - own_end) * way > 0.0 {
+        crossing
+    } else {
+        own_end + way * step
+    };
+    for _ in 0..64 {
+        if !end.is_finite() {
+            return None;
+        }
+        if is_on_its_side(end) {
+            return Some(end);
+        }
+        end += way * step;
+        step *= 2.0;
+    }
+    None
+}
+
+/// Which side of `flat` a point is on, asked with each coordinate the plane
+/// cannot see narrowed to one end of its box.
+///
+/// **A plane whose normal has no part along an axis cannot tell apart two
+/// points that differ only along it**, so narrowing that coordinate changes
+/// nothing about the answer and everything about whether it can be given: a
+/// box that is one double in the other two coordinates becomes an exact point,
+/// and the plane's own predicate settles it exactly. A segment up through the
+/// cap a turned block's face takes off a ball is such a box, a fraction of a
+/// spacing from the plane, and asked as a box its sign is never settled
+/// (`docs/decisions.md` §346.6, item 4). `fuse::select` builds those segments
+/// and asks a flat piece's plane about its candidates through this.
+pub(crate) fn side_of_a_flat_face(flat: &Plane, point: PredicatePoint) -> Decision {
+    let PredicatePoint::Constructed(mut boxed) = point else {
+        return flat.side_of_point(point);
+    };
+    for (axis, part) in flat.normal().components().into_iter().enumerate() {
+        if part == 0.0 {
+            boxed[axis] = Interval::exactly(boxed[axis].lo());
+        }
+    }
+    flat.side_of_point(as_exact_as_it_is(boxed))
+}
+
+/// A box of no width is the `f64` triple in it, which every predicate can then
+/// settle exactly; any other box is handed on as the box it is.
+fn as_exact_as_it_is(boxed: [Interval; 3]) -> PredicatePoint {
+    if boxed.iter().all(|side| side.lo() == side.hi()) {
+        return PredicatePoint::from(boxed.map(|side| side.lo()));
+    }
+    PredicatePoint::Constructed(boxed)
+}
+
 /// Whether no point of `point`'s box is on the triangle `corners`.
 ///
 /// **Off the triangle's plane is not the only way to miss it.** A box beside a
@@ -660,12 +1397,19 @@ fn the_box_round_both(point: PredicatePoint, beside: PredicatePoint) -> Predicat
 /// the contract §323.3 rests on. It goes first because it is exact and cheap,
 /// and a box it settles leaves nothing in `log`.
 ///
-/// Two boxes off the face are still refused. One sits inside a triangle's own
-/// bounding box and off the triangle, which only a face not lined up with the
-/// axes has room for; the axes across the triangle's sides would settle it,
-/// and they are not tried. The other is covered by a triangle of the fan and
-/// not by the face, because the fan of a face that is not convex reaches
-/// outside it and no axis settles that. No test builds either yet.
+/// **A box inside a triangle's own bounding box can still be off it**, where
+/// the triangle's sides are not lined up with the axes: beside the top of a
+/// block turned about the upright, in a corner of the square round it. So the
+/// two are held up next against the nine directions square to a side of the
+/// triangle and to a coordinate axis ([`apart_across_a_side`]). With the three
+/// axes and the plane's own normal those are the thirteen directions along one
+/// of which a box and a triangle that do not touch are always apart. The nine
+/// here are rounded and their projections widened, so a box still refused
+/// touches the triangle or is within a rounding of touching it.
+///
+/// A box a triangle touches can still miss the face, where the face is not
+/// convex and its fan reaches outside it; that is the whole outline's
+/// question, and [`SolidView::its_fan_adds_up_to_nothing_over`] asks it.
 fn misses_the_triangle(
     [a, b, c]: [Point; 3],
     point: PredicatePoint,
@@ -679,10 +1423,56 @@ fn misses_the_triangle(
             || corners.iter().all(|corner| corner[axis] > reach[axis].hi())
     };
     (0..3).any(apart_along)
+        || apart_across_a_side(corners, reach)
         || matches!(
             decide(a, b, c, point, policy, log),
             Decision::Pos | Decision::Neg
         )
+}
+
+/// Whether, along a direction square to a side of the triangle `corners` and
+/// to one coordinate axis, every corner is below every point of the box
+/// `reach`, or every corner above.
+///
+/// **The direction does not have to be the exact one, and is not.** Any vector
+/// `v` at all keeps the two apart when every corner's `v · x` is below the
+/// least `v · x` of the box: the triangle is the corners' convex hull, so each
+/// of its points is below that too, and a point in both would have to be
+/// below itself. So the side is a rounded `f64` difference and each direction
+/// is that side crossed with an axis, which is a swap and a sign; only the
+/// two projections have to hold for every point, and they are worked out in
+/// [`Interval`] arithmetic, which rounds every step outward. A direction whose
+/// projections overlap decides nothing and the next is asked; one with a part
+/// that is not finite is not a direction and is passed over.
+fn apart_across_a_side(corners: [[f64; 3]; 3], reach: [Interval; 3]) -> bool {
+    (0..3).any(|side| {
+        let [from, to] = [corners[side], corners[(side + 1) % 3]];
+        let [x, y, z]: [f64; 3] = core::array::from_fn(|axis| to[axis] - from[axis]);
+        [[0.0, z, -y], [-z, 0.0, x], [y, -x, 0.0]]
+            .into_iter()
+            .any(|across| apart_along_the_direction(across, corners, reach))
+    })
+}
+
+/// Whether the corners of a triangle all project below the box `reach` along
+/// `across`, or all above it, by projections that hold for every point.
+fn apart_along_the_direction(
+    across: [f64; 3],
+    corners: [[f64; 3]; 3],
+    reach: [Interval; 3],
+) -> bool {
+    if !across.iter().all(|part| part.is_finite()) {
+        return false;
+    }
+    let across = exactly(across);
+    let of_the_box = dot_enclosing(across, reach);
+    let of_the_corners = corners.map(|corner| dot_enclosing(across, exactly(corner)));
+    of_the_corners
+        .iter()
+        .all(|shadow| shadow.hi() < of_the_box.lo())
+        || of_the_corners
+            .iter()
+            .all(|shadow| shadow.lo() > of_the_box.hi())
 }
 
 /// What one triangle had to say about the ray.
@@ -700,6 +1490,11 @@ enum Hit {
     /// The ray met an edge or a corner of the triangle, or a predicate could
     /// not decide. Nothing this ray says can be trusted.
     Grazed { enclosure: f64 },
+    /// The triangle and the face's stored plane disagree about whether the ray
+    /// meets the face ahead of the point, or only the plane can say. The point
+    /// is in the sliver between the corners and the plane, and no ray counted
+    /// by the corners can be trusted about it.
+    ReadingsPart,
 }
 
 /// Running totals for one ray.
@@ -709,6 +1504,9 @@ struct Crossings {
     on_boundary: bool,
     grazed_something: bool,
     worst_enclosure: f64,
+    /// The first flat face whose corners and stored plane read the point
+    /// differently ([`Hit::ReadingsPart`]).
+    parted_at: Option<FaceKey>,
 }
 
 impl Crossings {
@@ -716,6 +1514,11 @@ impl Crossings {
     fn grazed(&mut self, enclosure: f64) {
         self.grazed_something = true;
         self.worst_enclosure = self.worst_enclosure.max(enclosure);
+    }
+
+    /// The ray met `face` where its corners and its stored plane part.
+    fn parted(&mut self, face: FaceKey) {
+        self.parted_at.get_or_insert(face);
     }
 
     /// Take in what a face said about a point on its own surface.
@@ -742,10 +1545,19 @@ impl Crossings {
 /// have to agree in sign. A fourth test — which side of the triangle's plane
 /// the point is on — then says whether the meeting is ahead of the point or
 /// behind it.
+///
+/// `crosses_the_plane_ahead` is the same question put to the face's stored
+/// plane, or `None` when the plane cannot say. Where the plane says and the
+/// triangle's certified sign says otherwise, or cannot say, the answer is
+/// [`Hit::ReadingsPart`], before any policy is asked to settle the triangle's
+/// sign. A point exactly on the triangle's plane is still asked of the
+/// outline: every stored corner is one, and the outline is what says it is
+/// on the skin.
 fn look_at_triangle(
     [a, b, c]: [Point; 3],
     point: PredicatePoint,
     target: Point,
+    crosses_the_plane_ahead: Option<bool>,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Hit {
@@ -772,7 +1584,30 @@ fn look_at_triangle(
     }
     let leaving = if positives > 0 { 1 } else { -1 };
 
-    let side_of_the_plane = decide(a, b, c, point, policy, log);
+    let by_the_corners = orient3d_of_points(
+        PredicatePoint::from(a.coordinates()),
+        PredicatePoint::from(b.coordinates()),
+        PredicatePoint::from(c.coordinates()),
+        point,
+    );
+    if let Some(ahead_by_the_plane) = crosses_the_plane_ahead {
+        let parted = match by_the_corners {
+            Decision::Pos | Decision::Neg => {
+                ((by_the_corners == Decision::Pos) == (leaving == 1)) != ahead_by_the_plane
+            }
+            Decision::Undecidable { .. } => true,
+            Decision::Zero => false,
+            other => panic!("orient3d came back with a decision nothing here knows: {other:?}"),
+        };
+        if parted {
+            return Hit::ReadingsPart;
+        }
+    }
+    let side_of_the_plane = if matches!(by_the_corners, Decision::Undecidable { .. }) {
+        decide(a, b, c, point, policy, log)
+    } else {
+        by_the_corners
+    };
     match side_of_the_plane {
         Decision::Zero => Hit::StartsOnThePlane,
         Decision::Pos | Decision::Neg => {
@@ -810,8 +1645,14 @@ enum Meeting {
     },
     /// At the point itself or behind it, so the ray crosses nothing here.
     Behind,
-    /// The root's box straddles the point, or a coefficient of the quadratic
-    /// did. Nothing this ray says can be trusted.
+    /// The root's box straddles the point: somewhere in this box, and nobody
+    /// can say whether ahead of the point or behind it.
+    Straddles {
+        /// Where it landed.
+        at: [Interval; 3],
+    },
+    /// A touch no `f64` names, or a step of a kind nothing here knows. Nothing
+    /// this ray says can be trusted.
     CouldNotTell,
 }
 
@@ -827,17 +1668,16 @@ fn gap_enclosing(from: [Interval; 3], there: Point) -> [Interval; 3] {
 /// on this face's own surface: the ray crosses nothing there, and whether the
 /// point is on the face is asked separately. A root whose box merely covers zero
 /// is a different thing — nobody can say whether the crossing is ahead — and it
-/// is a graze.
+/// is a graze unless the face holds none of the box it lands in.
 fn where_it_lands(t: Interval, from: [Interval; 3], along: [Interval; 3]) -> Meeting {
     if t.hi() < 0.0 || (t.lo() == 0.0 && t.hi() == 0.0) {
         return Meeting::Behind;
     }
+    let at = core::array::from_fn(|axis| from[axis] + t * along[axis]);
     if t.lo() <= 0.0 {
-        return Meeting::CouldNotTell;
+        return Meeting::Straddles { at };
     }
-    Meeting::Ahead {
-        at: core::array::from_fn(|axis| from[axis] + t * along[axis]),
-    }
+    Meeting::Ahead { at }
 }
 
 /// Which way the surface faces outwards at `at`, as a box.
@@ -952,7 +1792,10 @@ pub(crate) fn decide(
 }
 
 /// A box on the plane of a block's side and off the side itself, against a
-/// solid that also has a torus face (`docs/decisions.md` §323.3).
+/// solid that also has a torus face (`docs/decisions.md` §323.3) — beside the
+/// sides of a block square to the axes, beside the top of a turned block where
+/// only the directions across a triangle's sides keep the two apart, and in the
+/// notch of an L, which triangles of its top's fan cover and the top does not.
 ///
 /// These were written here because no public call built such a solid: the
 /// solid is written the way a fuse writes an answer of two pieces that do not
@@ -966,10 +1809,13 @@ mod a_box_beside_a_blocks_side {
         Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
         Surface, Torus, Vector,
     };
-    use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
     use smallvec::smallvec;
 
-    use crate::{Containment, DraftStep, Model, ProfileBuilder, SolidBuilder, SolidKey};
+    use crate::{
+        Containment, DraftStep, FaceView, Model, ProfileBuilder, SolidBuilder, SolidKey, SolidView,
+        WireView,
+    };
 
     /// Boxes on the planes of the block's sides, none on a side, and what
     /// every point of each is against the bend and the block together.
@@ -999,6 +1845,184 @@ mod a_box_beside_a_blocks_side {
         }
         let on_the_top = a_box_round([4.0, -1.0, 0.0]);
         assert!(!block.no_face_meets(on_the_top, &policy, &mut ProvenanceLog::new()));
+    }
+
+    /// A box on the plane of the L's top, in the notch between its arms.
+    const IN_THE_NOTCH: [f64; 3] = [-7.75, -7.0, 1.0];
+
+    /// The block's top turned with it, its corners a rounding off its stored
+    /// plane, so that only the directions across a triangle's sides settle a
+    /// box beside it and the outline is not asked.
+    #[test]
+    fn a_box_off_a_turned_blocks_top_inside_a_triangles_bounds_meets_no_face() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = a_turned_block(&mut model);
+        let block = model.solid(block).expect("this model made the key");
+        assert!(
+            !every_corner_is_on_its_plane(the_turned_top(block)),
+            "the turn left every corner of the top on its plane"
+        );
+        let at = off_the_turned_top();
+        let mut bounds_round_it = 0;
+        for face in block.faces() {
+            face.for_each_triangle(|corners| {
+                let corners = corners.map(|corner| corner.coordinates());
+                let inside = (0..3).all(|axis| {
+                    let (low, high) = corners
+                        .iter()
+                        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), corner| {
+                            (low.min(corner[axis]), high.max(corner[axis]))
+                        });
+                    (low..=high).contains(&at[axis])
+                });
+                bounds_round_it += usize::from(inside);
+            });
+        }
+        assert!(
+            bounds_round_it > 0,
+            "no triangle's bounding box holds the box, so the coordinate axes alone settle it"
+        );
+        let mut log = ProvenanceLog::new();
+        assert!(block.no_face_meets(a_box_round(at), &policy, &mut log));
+        assert!(log.is_empty(), "it was settled exactly: {log:?}");
+    }
+
+    #[test]
+    fn a_box_in_the_notch_of_an_l_meets_no_face() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let l = an_l_beside_the_bend(&mut model);
+        let l = model.solid(l).expect("this model made the key");
+        let mut covered = [0; 2];
+        for face in l.faces() {
+            face.for_each_triangle(|corners| {
+                if let Some(counter_clockwise) = which_way_it_covers(corners, IN_THE_NOTCH) {
+                    covered[usize::from(counter_clockwise)] += 1;
+                }
+            });
+        }
+        assert!(
+            covered[0] > 0 && covered[1] > 0,
+            "the top's fan should cover the notch both ways round: {covered:?}"
+        );
+        assert!(l.no_face_meets(
+            a_box_round(IN_THE_NOTCH),
+            &policy,
+            &mut ProvenanceLog::new()
+        ));
+        let on_an_arm = a_box_round([-9.0, -7.0, 1.0]);
+        assert!(!l.no_face_meets(on_an_arm, &policy, &mut ProvenanceLog::new()));
+    }
+
+    /// The L turned the way the block is leaves its top's corners a rounding
+    /// off its stored plane, and then the two triangles over the notch are not
+    /// in one plane. Every point of the box in the notch is still outside the
+    /// L, a quarter from the nearest wall, so the answer exists and this is a
+    /// gap: `its_fan_adds_up_to_nothing_over` does not answer for a fan that
+    /// is not flat.
+    #[test]
+    fn a_box_in_the_notch_of_a_turned_l_is_still_refused() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let l = an_l(&mut model, &the_turn());
+        let l = model.solid(l).expect("this model made the key");
+        assert!(
+            !every_corner_is_on_its_plane(the_turned_top(l)),
+            "the turn left every corner of the top on its plane"
+        );
+        let in_the_notch = the_turn().apply_to_point(Point::new(2.25, 3.0, 2.0));
+        let boxed = a_box_round(in_the_notch.coordinates());
+        assert!(!l.no_face_meets(boxed, &policy, &mut ProvenanceLog::new()));
+    }
+
+    #[test]
+    fn a_box_off_a_turned_blocks_top_is_answered_beside_a_bend() {
+        assert_outside_beside_a_bend(a_turned_block, off_the_turned_top());
+    }
+
+    #[test]
+    fn a_box_in_the_notch_of_an_l_is_answered_beside_a_bend() {
+        assert_outside_beside_a_bend(an_l_beside_the_bend, IN_THE_NOTCH);
+    }
+
+    /// That `at` is outside the bend and outside what `build` makes, each on
+    /// its own, and that a box round it is answered outside the two together.
+    fn assert_outside_beside_a_bend(build: impl FnOnce(&mut Model) -> SolidKey, at: [f64; 3]) {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bend = a_quarter_bend(&mut model);
+        let other = build(&mut model);
+        let both = both_in_one_solid(&mut model, bend, other);
+        let [both, bend, other] =
+            [both, bend, other].map(|key| model.solid(key).expect("this model made the key"));
+        for alone in [bend, other] {
+            let placed = alone.classify_point(Point::from(at), &policy, &mut ProvenanceLog::new());
+            assert_eq!(
+                placed,
+                Containment::Outside,
+                "{at:?} against one on its own"
+            );
+        }
+        let placed =
+            both.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new());
+        assert_eq!(placed, Containment::Outside, "{at:?}");
+    }
+
+    /// Where [`the_turn`] puts `(1, 2.25, 2)`: on the plane of the block's top
+    /// and a quarter off the top, beside the middle of one of its sides.
+    fn off_the_turned_top() -> [f64; 3] {
+        the_turn()
+            .apply_to_point(Point::new(1.0, 2.25, 2.0))
+            .coordinates()
+    }
+
+    /// The face of `solid` whose plane faces most nearly the way [`the_turn`]
+    /// turns straight up.
+    fn the_turned_top(solid: SolidView<'_>) -> FaceView<'_> {
+        let up = the_turn()
+            .apply_to_vector(Vector::new(0.0, 0.0, 1.0))
+            .components();
+        let facing_up = |face: &FaceView<'_>| {
+            let normal = face
+                .surface()
+                .as_plane()
+                .expect("every face here is flat")
+                .normal()
+                .components();
+            (0..3).map(|axis| normal[axis] * up[axis]).sum::<f64>()
+        };
+        solid
+            .faces()
+            .max_by(|one, other| facing_up(one).total_cmp(&facing_up(other)))
+            .expect("a solid with faces")
+    }
+
+    fn every_corner_is_on_its_plane(face: FaceView<'_>) -> bool {
+        let flat = *face.surface().as_plane().expect("a flat face");
+        face.wires().flat_map(WireView::points).all(|corner| {
+            flat.side_of_point(PredicatePoint::from(corner.coordinates())) == Decision::Zero
+        })
+    }
+
+    /// Whether the triangle `corners`, lying in the plane `z = at[2]`, covers
+    /// `at` strictly inside it: `Some(true)` wound counter-clockwise seen from
+    /// above, `Some(false)` clockwise. Small whole numbers and quarters, so
+    /// every product here is exact.
+    fn which_way_it_covers(corners: [Point; 3], at: [f64; 3]) -> Option<bool> {
+        let corners = corners.map(|corner| corner.coordinates());
+        if corners.iter().any(|corner| corner[2] != at[2]) {
+            return None;
+        }
+        let turn = |from: [f64; 3], to: [f64; 3], there: [f64; 3]| {
+            (to[0] - from[0]) * (there[1] - from[1]) - (to[1] - from[1]) * (there[0] - from[0])
+        };
+        let [a, b, c] = corners;
+        let whole = turn(a, b, c);
+        let inside = [turn(a, b, at), turn(b, c, at), turn(c, a, at)]
+            .iter()
+            .all(|part| part * whole > 0.0);
+        inside.then_some(whole > 0.0)
     }
 
     #[test]
@@ -1049,6 +2073,53 @@ mod a_box_beside_a_blocks_side {
                 &Isometry::translation(Vector::new(2.0, -3.0, -2.0)).expect("a finite shift"),
             )
             .expect("a block")
+    }
+
+    /// The cube `[0, 2]³` placed by [`the_turn`], so that no face of it is
+    /// lined up with the axes.
+    fn a_turned_block(model: &mut Model) -> SolidKey {
+        let square = ProfileBuilder::new(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a square");
+        model
+            .add_extrusion(&square, 2.0, &the_turn())
+            .expect("a turned block")
+    }
+
+    /// `0.7` about `(1, 2, 3)` through the origin, then out to `(−8, −8, 0)`:
+    /// what `[0, 2]³` turns into is then within four of that and well clear of
+    /// the bend.
+    fn the_turn() -> Isometry {
+        let slant = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
+        Isometry::translation(Vector::new(-8.0, -8.0, 0.0))
+            .expect("a finite shift")
+            .compose(&Isometry::rotation(&slant, 0.7).expect("a turn"))
+    }
+
+    /// The L moved down one and out to `(−10, −10)`, well clear of the bend,
+    /// so that its top is on `z = 1` and its notch is `[−8, −6] × [−8, −6]`.
+    fn an_l_beside_the_bend(model: &mut Model) -> SolidKey {
+        let shift = Isometry::translation(Vector::new(-10.0, -10.0, -1.0)).expect("a finite shift");
+        an_l(model, &shift)
+    }
+
+    /// An L of arms two wide, `[0, 4] × [0, 2]` and `[0, 2] × [0, 4]`, two
+    /// tall, placed by `placement`. Its outline starts at the end of the first
+    /// arm, so the fan of its top reaches over the notch between the arms.
+    fn an_l(model: &mut Model, placement: &Isometry) -> SolidKey {
+        let outline = ProfileBuilder::new(vec![
+            [4.0, 0.0],
+            [4.0, 2.0],
+            [2.0, 2.0],
+            [2.0, 4.0],
+            [0.0, 4.0],
+            [0.0, 0.0],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("an L");
+        model
+            .add_extrusion(&outline, 2.0, placement)
+            .expect("an L-shaped block")
     }
 
     fn both_in_one_solid(model: &mut Model, one: SolidKey, other: SolidKey) -> SolidKey {

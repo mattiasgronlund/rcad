@@ -14,6 +14,12 @@
 //! reader where the file puts them (§326.3). `validate` and `validate_solid`
 //! now read it at whichever of the two is smaller (§363), so they refuse that
 //! solid as the reader does.
+//!
+//! A fourth cause lived in the harness itself rather than in the writer or the
+//! reader: `assert_located_numbers_the_same` compared a whole ball turned
+//! about `z` corner by corner even where the writer had rewritten its seam
+//! onto the world's chart, and panicked on the seam's `EdgeRun` where the two
+//! disagreed by design (Q1319, `docs/decisions.md` §404.3).
 
 #![forbid(unsafe_code)]
 
@@ -141,6 +147,54 @@ fn the_same_bar_moved_toward_the_origin_is_refused_by_validate_as_by_the_reader(
         panic!("the reader refuses the bar's corner off its cap, not {why:?}");
     };
     assert_eq!(distance, 2.0_f64.powi(-28));
+}
+
+/// `add_ball(3)` turned about `z` and moved to `(10, −6, 5)`, at three turns:
+/// 149° and 320°, each inside one of the two bands (142.6–155.2° and
+/// 315.6–334.6°) where no centre the reader holds carries the seam's own
+/// plane, and 90°, outside both.
+///
+/// Since Q1308 the writer accepts every one of the three: inside a band it
+/// rewrites the ball's seam onto the world's chart instead of carrying the
+/// one `add_ball` cut (`docs/decisions.md` §404), and outside it carries the
+/// seam as it is. Before Q1319 the harness only told the two apart by whether
+/// a turn moved the ball's *poles* off the `z` line, which a turn about `z`
+/// never does, so it compared every one of these three corner by corner —
+/// right for 90°, and a false alarm for 149° and 320°, where it panicked on
+/// the seam's `EdgeRun`: "a sound solid's coedge came back from its own file
+/// with a different edge run". `assert_cut_again_on_the_z_line` is the
+/// narrower acceptance Q1319 widened the harness to, and a turn whose seam
+/// does come back — 90° here — still goes through the corner-by-corner
+/// comparison this asserts came back the same.
+///
+/// # Panics
+///
+/// Before Q1319, on the 149° and 320° cases, with the panic message above.
+#[test]
+fn a_ball_turned_about_z_in_the_two_bands_is_accepted_and_outside_them_is_compared_corner_by_corner()
+ {
+    for degrees in [149.0_f64, 320.0, 90.0] {
+        let placement = Isometry::translation(Vector::new(10.0, -6.0, 5.0))
+            .expect("a finite move")
+            .compose(&Isometry::rotation(&Axis::z(), degrees.to_radians()).expect("a finite turn"));
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a scale"));
+        model
+            .add_ball(3.0, &placement)
+            .expect("a ball of radius three");
+        let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+        let reached = one_model_decoded_and_written(&bytes);
+        assert_eq!(
+            (
+                reached.written,
+                reached.refused,
+                reached.read_back,
+                reached.came_back_the_same,
+                reached.solids_the_same
+            ),
+            (1, 0, 1, 1, 1),
+            "turned {degrees}°: {reached:?}"
+        );
+    }
 }
 
 /// A round bar of radius 4, 4 tall, with its top corner `2⁻²⁸` above the cap,

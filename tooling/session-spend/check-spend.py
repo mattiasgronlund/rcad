@@ -24,8 +24,11 @@ Run through `just check-spend-selftest`.
 """
 
 import datetime
+import json
 import os
+import shutil
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -37,6 +40,7 @@ from spend import (
     finding_runs,
     found_hits,
     is_lookup,
+    load,
     ritual_of,
     targets_of,
     warning_said,
@@ -285,6 +289,49 @@ def check_delegation():
     return failed
 
 
+def check_load():
+    """One response, written as three records whose output_tokens grow.
+
+    A transcript line is written each time a response's usage is re-sent, and
+    `output_tokens` grows from one line to the next as the response streams —
+    so the record `load()` keeps for a group must be the one with the largest
+    count, never the first it saw. §396.1 counted this by hand; this is the
+    case that fails without that fix.
+    """
+    tmp = tempfile.mkdtemp()
+    try:
+        repo_dir = os.path.join(tmp, "rcad")
+        os.makedirs(repo_dir)
+        lines = []
+        for out in (10, 60, 120):
+            lines.append(json.dumps({
+                "type": "assistant",
+                "requestId": "req1",
+                "timestamp": "2026-10-07T12:00:00.000Z",
+                "cwd": "/repo",
+                "message": {
+                    "id": "msg1",
+                    "model": "claude-sonnet-5",
+                    "usage": {"output_tokens": out, "input_tokens": 1},
+                    "content": [{"type": "text", "text": "partial"}],
+                },
+            }))
+        with open(os.path.join(repo_dir, "session.jsonl"), "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+        since = datetime.datetime(2026, 10, 7, tzinfo=datetime.timezone.utc)
+        until = datetime.datetime(2026, 10, 8, tzinfo=datetime.timezone.utc)
+        responses, _, _ = load(tmp, "rcad", since, until)
+        got = [r["output"] for r in responses]
+        if got != [120]:
+            print("load() wanted the largest output_tokens of one streamed "
+                  "response ([120]), got %r" % got)
+            return 1
+        return 0
+    finally:
+        shutil.rmtree(tmp)
+
+
 def main():
     failed = 0
     for why, tools, want in CASES:
@@ -319,6 +366,7 @@ def main():
 
     failed += check_delegation()
     failed += check_pairs()
+    failed += check_load()
 
     # Every ritual has at least one case. A bucket nobody exercises is a bucket
     # that can quietly stop matching anything, and the report would still print
@@ -330,7 +378,7 @@ def main():
             failed += 1
 
     every = (len(CASES) + len(LOOKUPS) + len(RUNS) + 3 + len(SAYINGS) + len(BUCKETS)
-             + PAIR_CASES)
+             + PAIR_CASES + 1)
     if failed:
         print("%d of %d classifier cases came out wrong" % (failed, every))
         return 1

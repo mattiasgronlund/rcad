@@ -85,6 +85,17 @@ The walk arm's premise, that nothing the kernel builds names a plane between
 two curved faces, rests on a grep of `PartOfWhereItCrosses`'s constructors. No
 test proves it.
 
+> **2026-10-06 note (Q1142): the premise no longer holds.** Since Q1118
+> (`4605e8a5`), `fuse/assemble.rs`'s `the_plane_of_a_rim_between_two_curved_faces`
+> writes a closed rim between two different curved faces — the dome's own
+> pipe and ball, a frustum's cone and a bar's pipe, two cones base to base —
+> as `RightRoundWhereItCrosses { and: <the plane> }`, earned by
+> `meet_of_three_surfaces` answering `MoreThanAPoint` for the plane and the
+> two curved surfaces, once `the_name_each_closed_curve_goes_by` has joined
+> their two names into one. The kernel does build this now, through that one
+> constructor; the grep above was of `PartOfWhereItCrosses` alone and never
+> covered it.
+
 **Where the nine LEDs stop now.** Both `D3.0 O1.27` files stop on `#223`, the
 flat face with the pin holes: `BoundaryCrossesItself` at 8. Nobody has looked at
 it. The seven siblings get past the body and stop on the dome (`FaceSlot 17`,

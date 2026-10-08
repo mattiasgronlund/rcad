@@ -161,6 +161,16 @@ bound on what removing it is worth. Here it was worth no file at all.
   circle where a plane meets a cone, is about the writer, and this lane
   changed only the reader.
 
+> **2026-10-05 note (Q1023): one of the four files was not a modelling
+> tolerance.** `nist_stc_06_asme1_ap242-e3.stp`'s two apex `VERTEX_LOOP`
+> corners (`z = 70.4822675346`) were the half-angle's own cut to ten digits,
+> not a modelling tolerance away from the apex. Since Q955 (§366.7), the
+> corners' slope, `1.6642794823614244`, is read back from the corners
+> themselves and puts the apex exactly on them, so the loop now stands and
+> the file is no longer among Q751's four. It is refused first for a
+> different reason, a hole that winds the same way as its outer wire, which
+> is Q1022's to trace.
+
 ### 376.6 What is left
 
 - `VERTEX_LOOP` is matched by its spelling, as `A_LOOP_OF_ONE_CORNER` in

@@ -42,11 +42,15 @@
 //! exactly zero. The corners sit on the cone for `cones/mod.rs`'s reason: a
 //! power-of-two slope makes `slope · height` exact, and `0.5 · 4 = 2`.
 //!
-//! # Which of the two ways into an arc each lid asks
+//! # Which of the four ways into an arc each lid asks
 //!
-//! [`the_way_into_an_arc`] reads a picker one of two ways, and the two lids ask
-//! one each — on purpose, because the second way is the one §211's arithmetic is
-//! for.
+//! [`the_way_into_an_arc`] reads a picker one of four ways — a third,
+//! `into_the_arc_on_the_centres_side`, was added for a frustum's floor disc
+//! (Q971) and is `arrange.rs`'s own since Q1033, rather than a second copy of
+//! the first two; a fourth, `into_the_arc_away_from_the_centre`, was added in
+//! `holds.rs` for a window arc whose ends' boxes straddle its picker (Q1093) —
+//! and the two lids here ask one of the first two each, on purpose, because the
+//! second is the one §211's arithmetic is for.
 //!
 //! The **upper lid**'s arc is the bigger half of its ellipse, so the ellipse's
 //! centre lies on the arc's own side of the chord and no half-space can hold the

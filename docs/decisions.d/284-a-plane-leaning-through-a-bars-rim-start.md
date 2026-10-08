@@ -181,7 +181,11 @@ measured one. It is a **gap**, since the table in 284.4 holds.
   found narrowing moves. `crates/rcad-topo/src/fuse/arrange.rs` or
   `crates/rcad-geom/src/three_surfaces.rs`. Its check is
   `a_block_turned_to_lean_through_a_bars_rim_start_cannot_order_two_points_round_its_cap`,
-  whose messages carry the volumes.
+  whose messages carry the volumes. **Done by §401 (Q209, `164b8f73`)**, which
+  renamed the check to
+  `a_block_turned_to_lean_through_a_bars_rim_start_answers_all_six_fuses_with_one_solid_each`
+  when a meet of two planes and a pipe came to narrow by one checked step and
+  the order read that narrower box.
 - **Name an arc by its plane as well** where two planes cut one curved
   surface between the same corners (284.5). `crates/rcad-topo/src/fuse/assemble.rs`.
   Its check is
@@ -193,7 +197,9 @@ measured one. It is a **gap**, since the table in 284.4 holds.
 - **§39.4's table** has one row for "order along a crossing", the turned
   notched bar. This is a second cause of that refusal, and the table should
   gain a row when either item above lands. `docs/decisions.d/039-*.md` is
-  outside this lane's write set.
+  outside this lane's write set. **Corrected by §401.7**: the second cause's
+  row is struck rather than kept, since §401 closes it rather than merely
+  demonstrating it.
 - §252.8's sentence "a plane leaning through a bar's rim start" describes the
   turned block. It stays as written, and this section corrects it.
 
@@ -285,3 +291,102 @@ was built or measured.
 stays the check, and it trips once the names agree: under the second probe
 its first fuse, the union with the bar first, answered where the pin wants
 `ResultIsNotManifold { count: 1 }`.
+
+### 284.8 A node carries every name it folds — 2026-10-04
+
+*Queue row Q656, from 284.7. Lane `lane-q656-a-node-carries-every-name-it-folds`,
+off `f4775743`, which holds Q209 (`164b8f73`) and Q711's corner naming
+(§351.6).*
+
+**The turned block no longer reaches the fold.** On `f4775743` the six
+tolerant fuses of the turned block all answer, each one solid within
+`volume_error` of 284.4's volume by hand, with nothing in the log. 284.7's
+check had already become
+`under_a_tolerant_policy_the_turned_block_answers_all_six_fuses_with_one_solid_each_too`
+in Q209's commit. Nothing joined the two names. Since Q209 the order round the
+cap circle is proved, so the policy is never asked, the meet is never folded
+into the rim start, and it is a node of its own on the cap, on the wall and on
+the turned face alike. A temporary print in `Corners`, since removed, of every
+corner within `1e-6` of `(5, 0, 0)` showed one in each of the turned block's
+twelve fuses, under both policies: `Meet(which 1)` at
+`(5, 2.512e-15, 0)`. The rim start is no corner of the answer at all, since
+it only starts the cap's closed edge. Q711 played no part: the rim start has a
+plane and a cylinder round it, not three planes.
+
+**Other shapes still reach it.** A second probe, also removed, recorded every
+meet name an arrangement dropped, by a fold in `fold_the_nodes` or because
+`a_corner_is_this_place` found a corner already was the place, and asked
+`Corners`, once every kept piece was walked, whether the dropped name and the
+name of the node that stood for it had become two different corners. Over
+`mise exec -- just t -p rcad-topo --no-fail-fast` on `f4775743` that happened
+in 36 fuses:
+
+| test | fuses | refused `ResultIsNotManifold { count: 1 }` |
+|---|---|---|
+| `a_fused_draw_hands_its_provenance_back_through_the_door` | 20 | 18 |
+| `every_seed_in_the_checked_in_corpus_is_fused_without_panicking` | 10 | 9 |
+| `a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike` | 6 | 6 |
+
+The two corners were a few ulps apart in every one. The drops were of three
+kinds: a meet of three planes folded into another meet of three planes, a meet
+taken in by an input corner that §351.6 names by its own three planes, and a
+meet of a cube's face, the top cap plane and the wall of a bar taken in by
+the bar's top rim start, which is 284.7's shape under `Policy::certified`.
+
+**What was built**, the family 284.7 chose:
+
+- `Node::also` keeps every other meet a node stands for, as
+  `(surfaces, which)` the way `made_of` names its own. `fold_the_nodes` puts
+  the loser's name and everything it stood for on the survivor, for a meet
+  into a corner and a meet into a meet alike, and
+  `the_corner_that_is_this_place`, which `a_corner_is_this_place` now asks,
+  hands back the corner node so `place_the_meets` and
+  `place_where_two_rulings_cross` can record the place there.
+- `split_a_face` hands back, beside the pieces, every node that stands for
+  more than one name, as `NamesOfOnePoint`: the end the node is handed on as,
+  and the meets it took in. `Scratch` gathers them from every face of both
+  groups.
+- `Corners::join_the_names_of_each_point` makes them a union of names before
+  any piece is walked. Every name of one point goes by the least of them, so
+  neither which face folded nor the order the solids came in can matter. A
+  point with an input corner among its names goes where that corner alone
+  would go, the lowest one if there are several, as the fold lets the corner
+  win.
+
+**Not a `MeetPoint` field**, though the row asked for one field on
+`MeetPoint::Existing` and `OfThreeSurfaces`. `select.rs`'s own tests build
+both variants and was outside this row's files. And a field on an end reaches
+`assemble` only where a kept piece ends at that node, where the face that
+folded may keep no piece there while the face that did not keeps one. Beside
+the pieces, from every node, has neither limit.
+
+**Q431's ask** was that an input corner solved from three planes also answer
+to their `Meet` name. §351.6 did that in `assemble`, from
+`BakedCorner::around`, and this row did not move it. Nothing is left of it.
+
+**What moved.** The six fuses of the bar against the fifteenth corner-up cube
+of `a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike`
+answer: the bar goes from 48 answered and 6 not a solid to 54 answered, and
+its other 42 still refuse an undecided order, as the frustum's 48 do. That
+pair is pinned by
+`a_cube_on_its_corner_leaning_through_a_bars_top_rim_start_answers_all_six_fuses`,
+a bar of radius 4 from `z = 3` to `z = 8` and a cube of side 8 stood on its
+corner at `(0, 0, 4)`, under `Policy::certified`: each fuse one solid that
+validates, with nothing logged, and union and intersection, and each
+difference with the intersection, adding up to the solids within the measured
+errors. With the join switched off all six refuse
+`ResultIsNotManifold { count: 1 }`. Every test of `rcad-topo` passes with the
+change, `fuses_that_must_agree.rs` included, so no pin moved under either
+policy.
+
+### 284.9 What this leaves
+
+- Which of the 30 draws of `a_fused_draw_hands_its_provenance_back_through_the_door`
+  and `every_seed_in_the_checked_in_corpus_is_fused_without_panicking` answer
+  now, and with what volume. Neither test pins its draws' outcomes, and the
+  probe was not run again after the change.
+- In 44 fuses on `f4775743` a dropped name was a corner of the answer while
+  the node that took it in ended no kept side; nearly all of them answered.
+  Since this change, where that node was an input corner, the corner goes
+  where the input corner goes and not where the meet arrived. Whether any of
+  them moved by a bit was not compared, beyond every test passing.

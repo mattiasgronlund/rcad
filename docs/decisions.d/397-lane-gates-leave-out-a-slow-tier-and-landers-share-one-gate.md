@@ -254,6 +254,36 @@ and the times measured.
   list. `_slow-tests-filter` now takes the list as an argument. The stub-cargo
   arm of `check-gate-docs-selftest` caught it and now holds it.
 
+**2026-10-04, since Q850 (7022e4a7).** The five tests are cut as the split row
+says. On a busy machine `test-slow` did not come down to 21 s.
+
+- **The cut.** rcad-step's corpus sweep is three tests, one per tolerant
+  budget, and each compares 367 pairs. Each cone family is two tests, one per
+  lean, or four, one per side and turn. Each family's counts add up to its old
+  pin. `slow_tests` names 40 tests where it named 30.
+- **Each piece alone.** rcad-step's three took 13.2, 13.2 and 19.1 s of CPU
+  (`/usr/bin/time` on the test binary). Run one case at a time, the cone
+  families took 54.8 s (frustum cube), 51.2 s (pointed cube), 22.4 s (pointed
+  cone, steeper face) and 15.3 s (frustum, steeper plane) in all. The cone
+  file's 19 tests run together at a load of about 13 took 20.2 s, and that was
+  its longest piece.
+- **In the gate.** A whole gate on 7022e4a7, starting at a load of about 14 on
+  24 cores: `test` 48.2 s, then `test-slow` 55.6 s (nextest's wall 54.5 s).
+  The 40 tests added up to 939 test-seconds, against the 503 the arithmetic
+  above used, and 22 of them took over 20 s. Pieces that take 13 to 20 s alone
+  took 40 to 44 s. `just test-slow` on its own at a load of 25 to 31 took
+  43.9 s.
+- **What that says.** `test` runs the same tests it ran on b80f5e88 and took
+  48.2 s against 27.8 s, so the whole machine was slower, not the slow tier
+  alone. With no piece over about 20 s alone, the longest test no longer sets
+  `test-slow`'s wall; the free cores do. "About 21 s (503 s over 24 cores)"
+  holds only when the slow tier has the 24 cores to itself, and here it had
+  about ten. Nobody has measured it on a quiet machine. How often the machine
+  is not quiet is §397.7's first bar, which Q853 measures.
+- **Three comments outside the write set** named an old test and now name a
+  new one: `rcad-step/src/brep.rs`, `rcad-topo/src/holds.rs` and
+  `meshing_a_plane_cut_along_a_cones_other_nappe.rs`.
+
 ### 397.5 Landers share one gate (amends §266.4)
 
 What `origin/main` shows, from 09-29 12:00 to 10-03 21:00 UTC (104.9 h at
@@ -332,6 +362,70 @@ and a verified lane would hold its files the whole time.
 still holds, since the fast-forward check makes a lost race harmless. What a
 lost race costs, a second fresh gate, was not measured then. Landers now take
 a lock.
+
+**2026-10-04, since Q851 (d5625791, 0b47f03c).** Built as items 1 to 9 say,
+with two departures, one gap closed, and one cost named.
+
+- **What was built.** `just land` starts `land.py --detached-run` in a session
+  of its own and follows its log for at most `LAND_WAIT` seconds, 540 by
+  default, and `just land wait` follows it again. The spool, the lock and the
+  result files sit under `rcad-land/` in the git common directory. An entry's
+  run is alive when its pid is there, is not a zombie, and started when the
+  entry says, so a pid used again by another process is not taken for the run.
+- **The holder lands its own lane first**, then the others oldest first. Item
+  4 had its own lane among them in age order. This way a stop of its own comes
+  before any other lane's `queue apply`, and leaves none to throw away.
+- **The result files are written last**, after `ff-main` and `mark-finished`.
+  Item 5 wrote them first. This way each holds every field the lander reports.
+  A holder killed between its push and its results leaves those lanes on
+  `main` with no result, so each of their runs stops at `already-on-main`,
+  which item 9 keeps and the Opus merger settles.
+- **`rows_closed` and `rows_added` fill only on a merge.** Before, a stop after
+  the queue apply reported rows it had not closed on `main`. Nothing reads them
+  on a stop: `lanes.js` hands the Opus merger the stop line alone.
+- **Item 7 assumed that a lane reaches the Opus merger only once its run is
+  dead, and a detached run outlives its lander.** A lander that dies, runs out
+  of turns, or gives up at the first `still running` leaves its run waiting or
+  landing, and `lanes.js` starts the merger all the same. The merger's ancestor
+  check could then come before the run's push, and the lane would land twice:
+  two merge commits and two `queue apply`s. So `just land wait-for <lane
+  branch>` waits, at most 540 s a call and exit 3 while it still waits, for as
+  long as a live run's entry names the lane or anyone holds the lock. The
+  merger's brief runs it before `git fetch origin` and the ancestor check.
+  - Both legs are needed. A holder can be landing an entry whose run died after
+    the holder listed it. A run can be alive and waiting while the lock is
+    free; the selftest makes one with `SIGSTOP`.
+  - Waiting on any holder is wider than it needs to be. Which lanes a holder
+    took cannot be read without its lock, so `wait-for` does not try.
+  - `merger.md` is outside the row's write set, so the brief carries the step.
+    The `still running` line names `wait-for` too, for a merger briefed by a
+    `lanes.js` older than this.
+- **A reset leaves its marks in the claims file.** `queue apply` records each
+  `done` as a `release` and each `add` as an `add` in the claims file every
+  tree shares (`tooling/queue/queue.py`), and `git reset` takes neither back.
+  So a lane reset out of a batch, at a stop of its own or when a red batch
+  falls back, leaves its row released and its new ids used up, and its retry
+  takes new ids. A lone lander's stop after its `queue apply` cost the same
+  before; a batch resets more often.
+- **The selftest** keeps its 9 stops and its clean arm and gains four arms:
+  two landers share one gate, a red batch falls back to one lane, a dead entry
+  is left alone, and a killed holder drops the lock. The dead-entry arm also
+  holds `wait-for` to both legs, and the briefs are held to the `wait` and
+  `wait-for` lines. At a load of 43 to 53 on 24 cores it took 26.5 s without
+  `wait-for`, against 22.8 s before Q851. At a load of 3 to 6, three runs
+  each, taken in turn: 12.6 to 15.1 s without `wait-for` and 14.6 to 14.9 s
+  with it. Thirteen mutations of `land.py` and the briefs each failed it; the
+  two commits name them.
+- **The changeover.** A dispatcher whose `claude` process started before this
+  landed keeps the `lander.md` and `lanes.js` it loaded, and `/clear` does not
+  reload them. Its landers run the new `land.py` with the old prompt, which
+  runs `just land` once. So such a lander reports `merged: false` on any
+  landing that takes over 540 s, where today one catch-up over code already
+  costs 2 × 269 s at the median. Its Opus merger gets the old brief, without
+  `wait-for`. The one thing that names `wait-for` to it is the `still running`
+  line, which the old `lander.md` has the lander copy into
+  `not_merged_because`. Restart such a dispatcher's `claude` process once this
+  is on `main`.
 
 ### 397.6 No cap on gates at once, yet (amends §372.13)
 

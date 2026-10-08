@@ -16,13 +16,15 @@
 //! `Undecidable` under a certified policy. The step and the point are now
 //! checked to land on an `f64` and handed back exactly where they do.
 //!
-//! Past that, union and difference stop at meshing a face, and those two
-//! refusals are pinned as they answer below. A tangent point whose `−B/A` is
+//! Past that, union and difference stopped at meshing a face, because the
+//! edge meets the ball at one vertex where both walls' circles start and end,
+//! and the ball's face between them is a figure eight. The mesher cuts such a
+//! wire into the loops that touch there now (`docs/decisions.md` §364), and
+//! every rule is held to its closed form below. A tangent point whose `−B/A` is
 //! not an `f64`, which a slanted edge touched exactly would make, is not in
 //! this file: nobody has run one.
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
-use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -121,52 +123,85 @@ fn from_minus_y_the_intersection_is_empty() {
     }
 }
 
-/// Pinned as it answers: union and difference from `+x` stop at meshing a
-/// face, `CornersCoincide { position: 2 }` — queue row Q659.
+/// From `+x` the union is the prism and the ball less the cap they share, and
+/// the ball less the prism is the ball less that cap, each one solid.
+///
+/// Both were refused `CannotMeshAFace { CornersCoincide { position: 2 } }`
+/// until the mesher cut a wire that sets off from one corner twice into the
+/// loops that touch there (`docs/decisions.md` §364): the edge meets the ball
+/// at one vertex, both walls' circles start and end at it, and the ball's face
+/// between them was a figure eight.
 #[test]
-fn from_plus_x_union_and_difference_cannot_mesh_a_face() {
+fn from_plus_x_union_and_difference_measure_the_prism_and_the_ball_less_the_cap() {
     for (radius, across) in FROM_PLUS_X {
+        let depth = 0.4 * radius;
+        let cap = core::f64::consts::PI * depth * depth * (3.0 * radius - depth) / 3.0;
+        let ball = 4.0 / 3.0 * core::f64::consts::PI * radius.powi(3);
         for height in HEIGHTS {
-            for rule in [Rule::Union, Rule::Difference] {
-                assert_corners_coincide_at(2, radius, across, height, rule);
-            }
+            assert_measures(1, radius, across, height, Rule::Union, PRISM + ball - cap);
+            assert_measures(1, radius, across, height, Rule::Difference, ball - cap);
         }
     }
 }
 
-/// Pinned as it answers: union and difference from `−y` stop at meshing a
-/// face, `CornersCoincide { position: 4 }`. Nobody has traced it.
+/// From `−y` the ball shares only the touching point with the prism: the
+/// union is the two of them, two solids, and the ball less the prism is the
+/// ball whole.
+///
+/// Both were refused `CannotMeshAFace { CornersCoincide { position: 4 } }` for
+/// the same figure eight as from `+x`, here with both walls' circles outside
+/// the walls (`docs/decisions.md` §364).
 #[test]
-fn from_minus_y_union_and_difference_cannot_mesh_a_face() {
+fn from_minus_y_union_and_difference_measure_the_prism_and_the_whole_ball() {
     let (radius, across) = FROM_MINUS_Y;
+    let ball = 4.0 / 3.0 * core::f64::consts::PI * radius.powi(3);
     for height in HEIGHTS {
-        for rule in [Rule::Union, Rule::Difference] {
-            assert_corners_coincide_at(4, radius, across, height, rule);
-        }
+        assert_measures(2, radius, across, height, Rule::Union, PRISM + ball);
+        assert_measures(1, radius, across, height, Rule::Difference, ball);
     }
 }
 
-fn assert_corners_coincide_at(
-    position: usize,
+/// The prism's volume: a triangle of area 10.5, 32 tall.
+const PRISM: f64 = 336.0;
+
+/// Assert the fuse makes `solids` solids that measure `should` between them,
+/// within the errors they publish.
+fn assert_measures(
+    solids: usize,
     radius: f64,
     across: [f64; 2],
     height: f64,
     rule: Rule,
+    should: f64,
 ) {
-    let (_, fused) = fuse_a_ball_touching_the_edge(radius, across, height, rule);
-    match fused {
-        Err(Error::CannotMeshAFace {
-            why: CannotTriangulate::CornersCoincide { position: found },
-            ..
-        }) => assert_eq!(
-            found, position,
-            "radius {radius} from {across:?} at height {height}, {rule:?}"
-        ),
-        other => panic!(
-            "radius {radius} from {across:?} at height {height}, {rule:?}: \
-             expected CornersCoincide {{ position: {position} }}, got {other:?}"
-        ),
+    let (model, fused) = fuse_a_ball_touching_the_edge(radius, across, height, rule);
+    let fused = fused.unwrap_or_else(|refused| {
+        panic!("radius {radius} from {across:?} at height {height}, {rule:?}: {refused:?}")
+    });
+    assert_eq!(
+        fused.solids().len(),
+        solids,
+        "radius {radius} from {across:?} at height {height}, {rule:?}"
+    );
+    let (mut volume, mut error) = (0.0, 0.0);
+    for &solid in fused.solids() {
+        let measured = model
+            .solid(solid)
+            .expect("the fuse made it")
+            .measure(
+                Deflection::of(0.001).expect("a positive length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a solid this size measures");
+        volume += measured.volume();
+        error += measured.volume_error();
     }
+    assert!(
+        (volume - should).abs() <= error,
+        "radius {radius} from {across:?} at height {height}, {rule:?}: \
+         {volume} ± {error} is not {should}"
+    );
 }
 
 /// The model the fuse ran in, and what the fuse said.

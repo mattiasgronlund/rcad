@@ -80,6 +80,22 @@ The helper has one other caller, `two_loops_either_side_of_a_pipe`. Its reading
 gets tighter in the same way. It is still an upper bound on the distance, which
 is all that caller's argument uses.
 
+**2026-10-05, Q304: the pipe did not lean on the factor of two.** Its margin
+reads `α` and `β` off the picker's normal as stored, so a turned normal is
+charged in `β`, which the torus's `R − r` never was. Measured in
+`crates/rcad-geom/tests/two_loops_either_side_of_a_pipe.rs`: a fat pipe along
+`(1, 1, 0)` through `(0, 0, 2⁵³ + 8)`, a thin one through the same point,
+widened one `f64` at a time to the widest named, and the room its nearer loop
+leaves worked out to about a hundred bits. Tightest is a fallback picker,
+where `β` is a third and not a rounding: along `(1, 0, 2)` the offset misses
+by `0.485`, an interval read `1.414`, and the widest pipe named leaves
+`3.8e-15`
+(`the_widest_thin_pipe_named_through_a_leaning_picker_leaves_its_near_loop_clear`).
+A picker turned `5.5e-17`, along `(1, −2, 2)`, leaves `6.6e-8`
+(`the_widest_thin_pipe_named_through_a_turned_picker_leaves_its_near_loop_clear`).
+All 324 directions with whole components up to 4 leave at least `1.7e-15`
+(`every_widest_thin_pipe_named_leaves_its_near_loop_clear_of_the_picker`).
+
 ### 314.4 The turn the factor of two was hiding
 
 The picker's normal is `w × n` in `f64`, and those products round, so the
@@ -130,3 +146,12 @@ lengths.
 - `select.rs` and `holds.rs` each keep their own copy of the meridian-circle
   lookup (§250.5), which names a circle from a corner and does not go through
   this function. Whether their margins have the same shape was not checked.
+  **Answered, Q305 (2026-10-05): there is no second margin.** The two copies
+  were one by Q117 (250.8), `the_picker_naming_the_circle_through` in
+  `holds.rs`, and that lookup asked `intersect` for its pickers from its first
+  commit (`6c9ab819`, in `select.rs`). For a plane through the axis,
+  `intersect` reaches `two_meridian_circles`, so the lookup gets this
+  section's pickers. Its only arithmetic of its own is
+  `Picker::side_of_point(corner)`, which for `InFrontOf` is
+  `HalfSpace::side_of_point`, exact about the four numbers the half-space
+  holds. The sentence above was wrong when it was written.

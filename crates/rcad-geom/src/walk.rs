@@ -34,16 +34,21 @@ use rcad_predicates::{
     Approximation, Cause, Decision, Filtered, Interval, Level, Measures, Point as PredicatePoint,
     Policy, Predicate, ProvenanceLog, Record, decide, resolve_under_policy,
 };
+use smallvec::SmallVec;
 
+use crate::enclosure::{cross_enclosing, exactly, gap_enclosing, squared_length_enclosing};
 use crate::exact::Exact;
 use crate::intersect::{
-    Question, WHERE_TWO_PIPES_CROSS, ask, whether_a_cone_and_a_pipe_share_an_axis,
+    Question, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_TWO_PIPES_CROSS, ask,
+    how_a_ball_on_a_cones_axis_meets_it, one_cone_either_way_round,
+    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
+    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
     Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
-    Surface, Torus, Vector,
+    Surface, SurfaceMeet, Torus, Vector,
 };
 
 /// How far a point [`walk`] hands back can sit off the curve it was worked out
@@ -87,6 +92,12 @@ use crate::{
 ///
 /// **An error in the angle does not come into it.** Getting `angle` wrong slides
 /// the point *along* the curve, and this is how far it can sit *off* it.
+///
+/// **An arc of a plane's ellipse that [`walk`] places round a cone is charged
+/// this too**, against the arc's own size and not the ellipse's. Its chain is a
+/// different one, derived at `AnArcRoundACone`, and comes to under a tenth of
+/// this; one constant for both is what lets `rcad-topo`'s floor under a mesh,
+/// a multiple of it, hold whichever way a run was walked.
 ///
 /// `every_point_along_a_crossing_is_on_both_surfaces.rs` measures the worst a
 /// search can find and prints the figure.
@@ -223,6 +234,73 @@ pub struct PointsAlongACrossing {
 }
 
 impl PointsAlongACrossing {
+    /// How many times further up a cone's axis the ellipse a plane cuts it in
+    /// has to reach than a run's two ends do before [`walk`] places that run's
+    /// points round the cone and not round the ellipse.
+    ///
+    /// **Either way is a bound, and this only says which bound is published.**
+    /// Round the ellipse, a point rounds against the ellipse's own centre and
+    /// reach; round the cone, against the apex and the run's own ends. A plane a
+    /// rounding off parallel to a ruling cuts an ellipse `4.5e16` long whose
+    /// arcs by the frustum are `4` across, and round the ellipse their middle
+    /// points came out `1` to `2` off the cone
+    /// (`an_arc_of_a_plane_cut_nearly_along_a_cones_ruling.rs`). An ellipse a
+    /// plane cuts at an ordinary lean reaches a few times further than its arcs
+    /// and keeps the points it always had: a million is far from both.
+    ///
+    /// Public because `rcad-topo`'s mesher has to charge such a run by its
+    /// ends where this walks it by them, and it does so past **twice** this,
+    /// so that the two never disagree about a run on the line between them.
+    /// Which of the two arcs the run is, the mesher asks
+    /// [`PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of`].
+    pub const WALKED_ROUND_THE_CONE_PAST: f64 = 1_048_576.0;
+
+    /// Whether [`walk`] places `run`'s points round a cone from its two ends,
+    /// so that no point of it is further from the apex than one of them.
+    ///
+    /// **That is the arc that misses the ellipse's far end, and only that
+    /// one.** Past [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`], the
+    /// walk asks the run's half-spaces which of the two arcs between its ends
+    /// they pick; the other arc is walked round the ellipse and charged at the
+    /// ellipse's size, since it runs out to the far end. A mesher that charged
+    /// that arc by its ends would hand the walk a deflection under what it can
+    /// place a point to: a face on a cone of slope a half, cut by a lid `2⁻²⁴`
+    /// off a ruling and a wall square to it, whose one curved edge runs from
+    /// two ends `1.25` up round the far side to `1.7e7` up, was refused
+    /// `CannotPlaceAPointThatCloseToACrossing` for a deflection `rcad-topo`
+    /// picked itself (`a_cone_arc_past_the_far_end_of_a_long_ellipse.rs`).
+    ///
+    /// **Asked under a certified policy, and `false` whenever that does not
+    /// settle it**: a run the walk could not name, a half-space it could not
+    /// decide, a crossing that is not a plane's long ellipse round a cone. So a
+    /// mesher that charges by the ends only on `true` can charge more than the
+    /// walk needs, and never less.
+    ///
+    /// `along` is the surfaces of the two faces either side, as [`walk`] takes
+    /// them, and `run` and `along` are in one frame.
+    #[must_use]
+    pub fn are_placed_round_the_cone_from_the_ends_of(
+        run: &NamedRun,
+        along: [&Surface; 2],
+    ) -> bool {
+        let pair = which_two_surfaces_a_run_is_between(run.run(), along);
+        let Some(arc) = AnArcRoundACone::of(pair, run) else {
+            return false;
+        };
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let Ok(WhatARunLiesOn::Conic(conic)) =
+            what_a_run_between_these_two_lies_on(pair, run, &policy, &mut log)
+        else {
+            return false;
+        };
+        let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * conic.the_size_it_was_worked_out_from();
+        matches!(
+            arc.which_arc(&conic, deviation, &policy, &mut log),
+            Ok(WhichArc::Near(..))
+        )
+    }
+
     /// The points, in the direction the run is stored running, **with neither
     /// end included**.
     ///
@@ -300,7 +378,8 @@ impl PointsAlongACrossing {
 /// surfaces cross in a conic and they do not: a plane that misses the ball it is
 /// named against, or touches it at one point, leaves a circle of no radius, and
 /// there is no angle to walk round one. Two balls round one centre with two
-/// radii get it too, for the same reason and one surface up. A **limit** and not
+/// radii get it too, for the same reason and one surface up, and so does a ball
+/// on a cone's axis that misses the cone. A **limit** and not
 /// a gap (§16.10) — the curve the run names does not exist at any precision.
 ///
 /// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
@@ -310,16 +389,29 @@ impl PointsAlongACrossing {
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a run between a
 /// cone or a torus and another curved surface — the same two refusals
-/// [`intersect`](crate::intersect) gives those pairs, and a cone against a pipe
-/// that shares its axis is drawn here exactly as it is named there. Nothing in
-/// this crate builds a refused run, and a file read in states one whenever it
-/// holds a pipe running into a bend.
+/// [`intersect`](crate::intersect) gives those pairs, and a cone against a pipe,
+/// a ball or a second cone that shares its axis, or a torus against a pipe, a
+/// ball or a cone on its axis, is drawn here exactly as it is named there. The
+/// torus's refusal also covers a whole circle such a partner shares with it
+/// that the run names by the two faces alone, which
+/// `where_a_ring_and_a_surface_on_its_axis_cut` keeps refused on purpose.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run a caller
 /// states as going right round a crossing that runs on for ever — a plane and a
 /// cone crossing in a parabola or a hyperbola. The two shapes through the apex
 /// are straight lines, and a straight run gets the same empty answer here that a
 /// run between two planes does.
+///
+/// # An arc of a very long ellipse round a cone is walked round the cone
+///
+/// A plane a rounding off parallel to a cone's ruling cuts it in an ellipse
+/// whose centre can be `2.2e16` out while an arc of it by a frustum is `4`
+/// across, and a point placed from that centre rounds by more than the arc is
+/// wide. Where the ellipse reaches more than
+/// [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`] times further up the
+/// cone's axis than the run's two ends do, the arc that misses the ellipse's far
+/// end is placed along the cone's rulings instead, and charged and counted by
+/// its own size and bend. `AnArcRoundACone` says how.
 ///
 /// # A run with no ends keeps the two points at the ends of what was walked
 ///
@@ -367,24 +459,42 @@ pub fn walk(
     if !deviation.is_finite() {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     }
-    let tag = Approximation::new(deviation, Cause::PointAlongACrossing);
+    if let Some(arc) = AnArcRoundACone::of(pair, run) {
+        return arc.walk(&conic, deviation, deflection, policy, log);
+    }
     let Some(room) = room_left_over(deflection, deviation, policy, log)? else {
-        return Ok(PointsAlongACrossing {
-            points: Vec::new(),
-            deviation: tag,
-        });
+        return Ok(nothing_walked(deviation));
     };
 
-    let (from, to) = conic.the_stretch_this_run_covers(run, deviation, policy, log)?;
-    let steps = how_many_steps(&conic, to - from, room)?;
+    let stretch = conic.the_stretch_this_run_covers(run, deviation, policy, log)?;
+    points_round_a_conic(&conic, stretch, deviation, room)
+}
+
+/// Points along `stretch` of a conic, `room` apart from the curve at most.
+fn points_round_a_conic(
+    conic: &Conic,
+    (from, to): (f64, f64),
+    deviation: f64,
+    room: f64,
+) -> Result<PointsAlongACrossing> {
+    let steps = how_many_steps(conic, to - from, room)?;
     let points = (1..steps)
         .map(|step| conic.at(from + (to - from) * (step as f64) / (steps as f64)))
         .collect();
 
     Ok(PointsAlongACrossing {
         points,
-        deviation: tag,
+        deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
     })
+}
+
+/// What a walk a tolerant caller waved through hands back: no points between
+/// the ends, and how far off they would have been.
+fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
+    PointsAlongACrossing {
+        points: Vec::new(),
+        deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
+    }
 }
 
 /// The one place on a closed crossing that a vertex can go.
@@ -575,15 +685,25 @@ enum WhatARunLiesOn {
 /// same order — a cone against a torus is the torus's refusal in both halves,
 /// so the namer and the evaluator never disagree about what a pair is called.
 /// **The evaluator refuses exactly what the namer refuses**, which is why the
-/// cone-and-pipe arm asks whether the two share an axis rather than taking the
-/// caller's word for it. Both refusals are gaps: the crossing is there and none
-/// of the machinery for a degree-four or degree-eight curve with a cone or a
-/// torus in it exists.
+/// cone's arms against a pipe, a ball and a second cone ask whether the two
+/// share an axis rather than taking the caller's word for it, and the torus's
+/// arms against them ask `intersect` itself. Both refusals are gaps: the
+/// crossing is there and none of the machinery for a degree-four or
+/// degree-eight curve with a cone or a torus in it exists. A ball through a
+/// cone's apex is refused under the cone's name in both halves too, for the
+/// reason `intersect`'s cone-and-ball arm gives.
+///
+/// **One pair is refused here under that name and answered there**: two cones
+/// on one axis with one apex and two slopes, which `intersect` answers as
+/// touching at the apex. A closed run stated on them names nothing, and the
+/// refusal keeps an older name — `where_two_coaxial_cones_cut` says why.
 ///
 /// **One cone twice is not one of those pairs**, and that is the one place the
 /// evaluator says more than the namer's table does: the namer answers it as one
 /// surface, and a run right round where that surface meets itself is a circle
-/// the run's own end names (§214). Every other run on that pair still refuses.
+/// the run's own end names (§214). "One cone" is the namer's own exact test, so
+/// a cone written about `+z` against the same cone about `−z` is one cone here
+/// too (§357.2). Every other run on that pair still refuses.
 ///
 /// [`Error::ACrossingPieceHasNoEndsAndNothingPickingIt`] for such a closed run
 /// with no ends, which leaves nothing to put the circle through.
@@ -602,7 +722,8 @@ enum WhatARunLiesOn {
 /// altogether, or touches it at one point, is the shape a stranger's model
 /// reached this by. See [`Conic::has_an_angle_round_it`]. Two balls round one
 /// centre with two radii are the same thing one surface up, refused by
-/// [`where_two_balls_cut`] before a conic is built at all.
+/// [`where_two_balls_cut`] before a conic is built at all, and so is a ball on
+/// a cone's axis that misses the cone.
 ///
 /// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
 /// one centre with one radius.
@@ -668,9 +789,26 @@ fn what_a_run_between_these_two_lies_on(
             };
             where_two_balls_cut(&first, &second).map(WhatARunLiesOn::Conic)
         }
+        // A ball centred on a pipe's axis and wider than it crosses it in two
+        // circles square to the axis, and which of them this run is, is its
+        // ends' and its picker's to say, as for a cone and a pipe on one axis.
+        // Marched instead, a closed run with a corner on the second circle was
+        // walked round the first, because a run nothing picks starts at the
+        // first seed (Q1241). A ball no wider than the pipe is marched as
+        // before: drawing the one circle a ball of the pipe's own width touches
+        // it round lets `SolidBuilder` build a rim it refuses today, which
+        // `rcad-step` pins.
         [Surface::Sphere(ball), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
-            a_quartic_picked_up_at(where_a_ball_reaches_across_a_pipe(&ball, &pipe))
+            if ball.radius() > pipe.radius()
+                && whether_a_ball_sits_on_a_pipes_axis(&ball, &pipe) == Decision::Zero
+            {
+                let ball_first = matches!(pair[0], Surface::Sphere(_));
+                where_a_ball_on_a_pipes_axis_cuts_it(&ball, &pipe, ball_first, run, policy, log)
+                    .map(WhatARunLiesOn::Conic)
+            } else {
+                a_quartic_picked_up_at(where_a_ball_reaches_across_a_pipe(&ball, &pipe))
+            }
         }
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
             // Two pipes down one direction cross in straight lines, and a run
@@ -723,23 +861,50 @@ fn what_a_run_between_these_two_lies_on(
         // them (§214). A **guarded** arm on purpose: the refusal below still
         // covers a cone against a different cone, and a sixth kind of `Surface`
         // is still a compile error here, which a wildcard would have cost.
+        //
+        // **One cone whichever way each face writes its axis**, asked exactly as
+        // `intersect` asks it (§357.2), and the circle built from the spelling
+        // that sorts first. The two spellings build one circle round opposite
+        // ways, so taking the one listed first would walk one rim two ways for
+        // the two faces either side of it; the one that sorts first is also the
+        // one `rcad-topo`'s `the_curved_one_of` reads a closed edge's direction
+        // off.
         [Surface::Cone(one), Surface::Cone(other)]
-            if one == other && run.run() == &EdgeRun::RightRoundWhereItsFacesCross =>
+            if one_cone_either_way_round(&one, &other)
+                && run.run() == &EdgeRun::RightRoundWhereItsFacesCross =>
         {
-            the_circle_a_closed_run_round_one_cone_lies_on(&one, run).map(WhatARunLiesOn::Conic)
+            let first = match Surface::Cone(one).how_it_sorts_against(&Surface::Cone(other)) {
+                Ordering::Greater => other,
+                Ordering::Less | Ordering::Equal => one,
+            };
+            the_circle_a_closed_run_round_one_cone_lies_on(&first, run).map(WhatARunLiesOn::Conic)
         }
-        [Surface::Cone(_), Surface::Sphere(_) | Surface::Cone(_)]
-        | [Surface::Sphere(_), Surface::Cone(_)] => {
-            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+        // Two cones on one axis cross in one circle or two, and a ball on a
+        // cone's axis in none, one or two; which one this run is, is its ends'
+        // and its picker's to say, as for the coaxial pipe.
+        [Surface::Cone(one), Surface::Cone(other)] => {
+            where_two_coaxial_cones_cut(&one, &other, run, policy, log).map(WhatARunLiesOn::Conic)
         }
+        [Surface::Cone(cone), Surface::Sphere(ball)]
+        | [Surface::Sphere(ball), Surface::Cone(cone)] => {
+            where_a_ball_on_a_cones_axis_cuts_it(&cone, &ball, run, policy, log)
+                .map(WhatARunLiesOn::Conic)
+        }
+        // A ring and a ball, a pipe or a cone on its axis cross in circles
+        // square to that axis, and which of them this run is, is its ends' and
+        // its pickers' to say, as for a cone and a pipe on one axis.
         [
-            Surface::Torus(_),
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_),
+            Surface::Torus(ring),
+            partner @ (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)),
         ]
         | [
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
-            Surface::Torus(_),
-        ] => Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
+            partner @ (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)),
+            Surface::Torus(ring),
+        ] => where_a_ring_and_a_surface_on_its_axis_cut(&ring, partner, run, policy, log)
+            .map(WhatARunLiesOn::Conic),
+        [Surface::Torus(_), Surface::Torus(_)] => {
+            Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface)
+        }
     }?;
 
     // A conic builder is handed the pair the caller's run *says* it lies on,
@@ -891,10 +1056,17 @@ fn the_corner_a_closed_run_starts_at(run: &NamedRun) -> Option<Point> {
 /// The place on the loop this run names that the marcher starts from, settled
 /// onto both surfaces.
 ///
-/// A run that nothing picks is the whole of a single loop, and the two seeds are
-/// two places on it — either will do. A run that *is* picked is one of two loops,
-/// and then exactly one of the seeds may pass: both or neither and the
+/// A run that nothing picks is taken to be the whole of a single loop, and the
+/// two seeds two places on it — either will do. A run that *is* picked is one of
+/// two loops, and then exactly one of the seeds may pass: both or neither and the
 /// half-spaces have not told them apart after all.
+///
+/// **That first reading is wrong for a closed run with its corner on the second
+/// of two loops**, which nothing picks because its corner names it. A ball
+/// `0.1` off a pipe's axis has two such loops, and the run with its corner at
+/// `z = −3.9` is walked round the loop at `z = +3.9`. A ball centred on the axis
+/// no longer comes here: its circles are drawn in closed form and told apart by
+/// the corner (Q1241).
 ///
 /// # Errors
 ///
@@ -1085,6 +1257,9 @@ fn walk_an_endless_bend(
 /// [`FEWEST_STEPS_THAT_SHOW_A_BEND`], whose `1 − 1/n²` is an equality for this
 /// shape rather than a limit.
 ///
+/// **An arc walked round a cone is counted here too**, with a bound on `‖p″‖`
+/// in place of its value; `AnArcRoundACone` derives the bound.
+///
 /// # Errors
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when the count is not a number,
@@ -1260,6 +1435,100 @@ fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point;
     let reach = (radius * radius - nearest * nearest).max(0.0).sqrt();
     let middle = pipe.axis().origin() + along * up + towards * skin;
     [middle + along * reach, middle - along * reach]
+}
+
+/// Whether a ball's centre is on a pipe's axis, **proved and not rounded**: the
+/// sign of `‖(c − o) × w‖²`, which is the question
+/// [`intersect`](crate::intersect) splits the pair on before it names two
+/// circles or two quartic loops, and the one `rcad-topo`'s arrangement asks
+/// before it orders round a circle.
+///
+/// **No [`Policy`]**, for the reason [`whether_a_cone_and_a_pipe_share_an_axis`]
+/// gives: a `Zero` nobody earned would draw two circles where the two cross in
+/// a quartic. Anything but `Zero` is marched, as every ball and pipe was before.
+fn whether_a_ball_sits_on_a_pipes_axis(ball: &Sphere, pipe: &Cylinder) -> Decision {
+    let centre = ball.centre().coordinates();
+    let origin = pipe.axis().origin().coordinates();
+    let along = pipe.axis().direction().components();
+    decide(&Question {
+        named: WHERE_A_BALL_AND_A_PIPE_CROSS,
+        enclosing: || {
+            squared_length_enclosing(cross_enclosing(
+                gap_enclosing(origin, centre),
+                exactly(along),
+            ))
+        },
+        exactly: || {
+            Exact::squared_length_of(&Exact::cross_of(
+                &Exact::gap_between(origin, centre),
+                along,
+            )?)
+        },
+    })
+    .0
+}
+
+/// The circle of the crossing of a pipe and a ball centred on its axis and
+/// wider than it that the run names.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] as
+/// [`which_of_these_circles_this_run_is`] gives them.
+fn where_a_ball_on_a_pipes_axis_cuts_it(
+    ball: &Sphere,
+    pipe: &Cylinder,
+    ball_first: bool,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    which_of_these_circles_this_run_is(
+        the_two_circles_a_ball_on_a_pipes_axis_cuts(ball, pipe, ball_first),
+        run,
+        policy,
+        log,
+    )
+}
+
+/// The two circles a ball centred on a pipe's axis and wider than it crosses
+/// it in, `√(R² − r²)` either way along the axis from the centre, each of the
+/// pipe's radius. `R² − r²` is written `(R − r)(R + r)`, which does not cancel.
+///
+/// # Which way round each goes
+///
+/// Each starts on the pipe's own first direction across, where the marcher's
+/// seed for it was, and runs the way `along_a_crossing` orders it: the crossing
+/// of `S` and `T` runs along `∇S × ∇T`, which for the ball first is
+/// anticlockwise about the axis on the circle ahead of the centre and about its
+/// opposite on the circle behind (`the_way_a_circle_round_a_pipes_axis_winds`
+/// derives it). The pipe first turns both round.
+fn the_two_circles_a_ball_on_a_pipes_axis_cuts(
+    ball: &Sphere,
+    pipe: &Cylinder,
+    ball_first: bool,
+) -> Vec<Conic> {
+    let radius = ball.radius();
+    let skin = pipe.radius();
+    let reach = ((radius - skin) * (radius + skin)).sqrt();
+    let along = pipe.axis().direction();
+    let up = along * along.length().recip();
+    let (across, and) = pipe.basis();
+    [reach, -reach]
+        .into_iter()
+        .map(|reach| {
+            let middle = ball.centre() + up * reach;
+            let about_the_axis = (reach > 0.0) == ball_first;
+            let and = if about_the_axis { and } else { -and };
+            Conic {
+                centre: middle,
+                across: across * skin,
+                and: and * skin,
+                size: how_big_this_is(&[middle, ball.centre()], &[skin, radius, reach]),
+            }
+        })
+        .collect()
 }
 
 /// Whether two pipes that do not point one way are the same width **and** have
@@ -1581,13 +1850,16 @@ fn nothing_between_the_ends() -> PointsAlongACrossing {
 /// **This trusts the plane, and the trust is earned upstream, not here.** A
 /// plane crosses a torus in up to two circles and a slanted pipe in an ellipse,
 /// so a plane that is not the curve's own would hand back a curve nobody drew.
-/// Nothing the kernel builds names a plane beside two curved faces — its own
-/// runs name one of the two faces, or, on a seam, have both faces the one
-/// surface and are caught above. So the name is a reader's, and `rcad-step`
-/// writes a plane there only for a circle it has checked lies on every face
-/// along it, and one of the two faces everywhere else — every ellipse, and
-/// every arc along a cone or a torus. Moving that check moves this arm's
-/// premise.
+/// Since Q1118, the kernel's own fuse can be where the name comes from:
+/// `rcad-topo`'s `the_plane_of_a_rim_between_two_curved_faces` puts the cap's
+/// plane in `and` for a closed rim between two different curved faces — the
+/// dome's pipe and ball, a frustum's cone and a bar's pipe, two cones base to
+/// base — once `meet_of_three_surfaces` says the plane and the two curved
+/// surfaces share more than a point, and that check is the trust earned there.
+/// Everywhere else the name is a reader's, and `rcad-step` writes a plane
+/// there only for a circle it has checked lies on every face along it, and one
+/// of the two faces everywhere else — every ellipse, and every arc along a
+/// cone or a torus. Moving either check moves this arm's premise.
 ///
 /// **Two curved faces that name a third curved surface are a face and that
 /// surface.** This is the paragraph above one surface up, and it is the one
@@ -1998,6 +2270,340 @@ impl Conic {
     }
 }
 
+/// A piece of the ellipse a plane cuts a cone in, walked round the cone and not
+/// round the ellipse.
+///
+/// # Why round the cone
+///
+/// [`Conic::at`] puts a point at `centre + across·cos θ + and·sin θ` and rounds
+/// against the largest of those. A plane a rounding off parallel to a ruling
+/// cuts an ellipse whose centre is `2.2e16` out, so the points of an arc of it
+/// by the frustum, `4` across, are the difference of two numbers near `2.2e16`,
+/// and the one middle point of each such arc came out `1` to `2` off the cone
+/// (§406.5).
+///
+/// The ruling at angle `a` round the cone is `apex + r·g(a)`, with
+/// `g = slope·dir(a) + nappe·w` and `dir(a)` the direction [`Cone::point_at`]
+/// steps across the axis by. The plane's signed distance along it is
+/// `s₀ + r·(n·g)`, a straight line in `r`, so the ruling meets the plane at
+/// `r = −s₀ / (n·g)`. Nothing in that is larger than the apex, the plane's
+/// offset and the arc's own reach. The point is on the cone because it is on a
+/// ruling, and on the plane because of the division.
+///
+/// # How far off, derived
+///
+/// With `u = f64::EPSILON / 2` and `L` the largest of the apex's coordinates,
+/// the ends' coordinates and how far each end is from the apex, which is what
+/// [`how_big_this_is`] is handed:
+///
+/// - `s₀`, [`Plane::signed_distance_to`] the apex, rounds by under
+///   `8u·max(|apex|, |offset|)`, and the offset is under `√3·L` because the
+///   ends are on the plane: under `14u·L`.
+/// - `n·g` sums three terms each under `|g| ≤ slope + 1`, so it is out by under
+///   `7u·|g|`, and times `r` that moves the point off the plane by under
+///   `7u·r·|g| ≤ 7u·L`. The division adds `u·|s₀| ≤ u·L`.
+/// - `dir(a)` is two unit vectors, each normalised, times a `cos` and a `sin`:
+///   within `16u` of length one and of square to the axis, which moves the
+///   point off the cone by under `16u·r·slope ≤ 16u·L`.
+/// - [`Cone::point_at`] adds three terms under `L` per coordinate: `9u·L`.
+///
+/// That is about `47u·L`, under `24 · f64::EPSILON · L`. It is charged
+/// [`POINT_ALONG_A_CROSSING_ROUNDOFF`], the ellipse's own constant and ten
+/// times that, so that `rcad-topo`'s floor under a mesh, a multiple of that
+/// constant, holds whichever way a run was walked.
+///
+/// # Only the arc that misses the ellipse's far end
+///
+/// **No point of such an arc is further from the apex than one of its ends.**
+/// The distance along a ruling is `|s₀| / |n·g(a)|`, and `|n·g(a)|` is least
+/// at the angle of the ellipse's far end and grows steadily from there both
+/// ways round to the near end; so on an arc that misses the far end it is
+/// least at one of the arc's ends. That is what lets the ends stand for the
+/// arc's size. The arc that passes the far end is walked round the ellipse as
+/// before, since its points are out where the ellipse's own numbers are, and
+/// `rcad-topo`'s mesher asks which of the two a run is through
+/// [`PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of`] before
+/// it charges a face by the ends.
+#[derive(Clone, Debug)]
+struct AnArcRoundACone {
+    flat: Plane,
+    cone: Cone,
+    picked_by: SmallVec<[Picker; 1]>,
+    /// `1` when the ellipse is up the cone's axis from the apex, `-1` when it
+    /// is down it.
+    nappe: f64,
+    /// `s₀`, the plane's signed distance to the apex.
+    apex_off_the_plane: f64,
+    ends: [Point; 2],
+    /// The angle round the cone each end is at.
+    angles: [f64; 2],
+    /// The angle round the cone the ellipse's far end is at.
+    far_end: f64,
+    /// The smaller of `|n·g|` at the two ends, which is the least it gets on
+    /// the arc that misses the far end.
+    least_lean: f64,
+    size: f64,
+}
+
+/// Which of the two arcs between a run's two ends its half-spaces pick.
+enum WhichArc {
+    /// The arc that misses the ellipse's far end, as angles round the cone.
+    Near(f64, f64),
+    /// The arc past the far end, as angles round the ellipse.
+    Far(f64, f64),
+}
+
+impl AnArcRoundACone {
+    /// The arc `run` names on the ellipse `pair` crosses in, when `pair` is a
+    /// plane and a cone, the run is a piece between two named ends, and the
+    /// ellipse reaches more than
+    /// [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`] times further up
+    /// the cone's axis than either end does.
+    ///
+    /// **How far up the axis the ellipse reaches is worked out as `rcad-topo`'s
+    /// mesher works it out**, `|s₀|` over `|n·ŵ| − slope·√(1 − (n·ŵ)²)`, so the
+    /// two measure one thing. Where the bottom of that comes to nothing or less,
+    /// which in an ellipse is a rounding, the ellipse is taken to reach for
+    /// ever.
+    ///
+    /// `None` too when the ruling at an end does not meet the plane on the
+    /// ends' own side of the apex, which every ruling of an ellipse does: the
+    /// run is not what it says, and the walk round the ellipse gets to say so.
+    fn of(pair: [Surface; 2], run: &NamedRun) -> Option<Self> {
+        let ([Surface::Plane(flat), Surface::Cone(cone)]
+        | [Surface::Cone(cone), Surface::Plane(flat)]) = pair
+        else {
+            return None;
+        };
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+            return None;
+        };
+        if run.is_the_whole_curve() || run.ends().contains(&nowhere_in_particular()) {
+            return None;
+        }
+        let ends = run
+            .ends()
+            .map(|end| Point::from(end.enclosure().map(middle_of)));
+        let apex = cone.apex();
+        let straight_on = cone.axis().direction() * cone.axis().direction().length().recip();
+        let ends_along = ends.map(|end| straight_on.dot(end - apex).abs());
+        let down = flat.normal().dot(straight_on).abs();
+        let sideways = (1.0 - down * down).max(0.0).sqrt();
+        let room = down - cone.slope() * sideways;
+        let apex_off_the_plane = flat.signed_distance_to(apex);
+        let far_along = if room > 0.0 {
+            apex_off_the_plane.abs() / room
+        } else {
+            f64::INFINITY
+        };
+        let dwarfs_its_ends = far_along
+            > PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST * ends_along[0].max(ends_along[1]);
+        if !dwarfs_its_ends {
+            return None;
+        }
+
+        let nappe = if straight_on.dot(ends[0] - apex) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        let (across, and) = cone.basis();
+        let normal = flat.normal();
+        let up = nappe * normal.dot(cone.axis().direction());
+        let (towards_across, towards_and) = (normal.dot(across), normal.dot(and));
+        let far_end = if up > 0.0 {
+            (-towards_and).atan2(-towards_across)
+        } else {
+            towards_and.atan2(towards_across)
+        };
+        let mut arc = Self {
+            flat,
+            cone,
+            picked_by: picked_by.clone(),
+            nappe,
+            apex_off_the_plane,
+            ends,
+            angles: ends.map(|end| cone.coordinates_of(end).0),
+            far_end,
+            least_lean: 0.0,
+            size: how_big_this_is(
+                &[apex, ends[0], ends[1]],
+                &[(ends[0] - apex).length(), (ends[1] - apex).length()],
+            ),
+        };
+        let leans = arc.angles.map(|round| normal.dot(arc.ruling(round)));
+        let out_along_each = leans.map(|lean| -apex_off_the_plane / lean);
+        if !out_along_each
+            .iter()
+            .all(|along| along.is_finite() && *along > 0.0)
+        {
+            return None;
+        }
+        arc.least_lean = leans[0].abs().min(leans[1].abs());
+        Some(arc)
+    }
+
+    /// The run's points, round the cone when its half-spaces pick the arc that
+    /// misses the ellipse's far end and round the ellipse when they pick the
+    /// other.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when they pick both or
+    /// neither, and whatever [`room_left_over`] and the step counts refuse.
+    fn walk(
+        &self,
+        conic: &Conic,
+        deviation_round_the_ellipse: f64,
+        deflection: Deflection,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<PointsAlongACrossing> {
+        match self.which_arc(conic, deviation_round_the_ellipse, policy, log)? {
+            WhichArc::Near(from, to) => self.walk_round_the_cone(from, to, deflection, policy, log),
+            WhichArc::Far(from, to) => {
+                let Some(room) =
+                    room_left_over(deflection, deviation_round_the_ellipse, policy, log)?
+                else {
+                    return Ok(nothing_walked(deviation_round_the_ellipse));
+                };
+                points_round_a_conic(conic, (from, to), deviation_round_the_ellipse, room)
+            }
+        }
+    }
+
+    /// Which arc the run's half-spaces pick, asked at the middle of each.
+    ///
+    /// **The arc past the far end is asked at its middle round the ellipse**,
+    /// placed by [`Conic::at`] and boxed by the ellipse's own deviation. Round
+    /// the cone, its middle is where the ruling runs nearly along the plane,
+    /// and there `n·g` is a rounding and `−s₀ / (n·g)` can be anything.
+    fn which_arc(
+        &self,
+        conic: &Conic,
+        deviation_round_the_ellipse: f64,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<WhichArc> {
+        let [from, to] = self.angles;
+        let onwards = from + wrapped(to - from);
+        let near = if wrapped(self.far_end - from) < wrapped(to - from) {
+            onwards - core::f64::consts::TAU
+        } else {
+            onwards
+        };
+        let near_held = every_half_space_holds(
+            &self.picked_by,
+            self.at((from + near) / 2.0),
+            self.deviation(),
+            policy,
+            log,
+        )?;
+
+        let [start, finish] = self.ends.map(|end| conic.angle_of(end));
+        let round_the_ellipse = start + wrapped(finish - start);
+        let how_far_out = |end: f64| (conic.at((start + end) / 2.0) - self.cone.apex()).length();
+        let past_the_far_end = if how_far_out(round_the_ellipse)
+            >= how_far_out(round_the_ellipse - core::f64::consts::TAU)
+        {
+            round_the_ellipse
+        } else {
+            round_the_ellipse - core::f64::consts::TAU
+        };
+        let far_held = every_half_space_holds(
+            &self.picked_by,
+            conic.at((start + past_the_far_end) / 2.0),
+            deviation_round_the_ellipse,
+            policy,
+            log,
+        )?;
+
+        match (near_held, far_held) {
+            (true, false) => Ok(WhichArc::Near(from, near)),
+            (false, true) => Ok(WhichArc::Far(start, past_the_far_end)),
+            (true, true) | (false, false) => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+        }
+    }
+
+    /// Points round the cone from angle `from` to `to`.
+    ///
+    /// **Counted by how the arc bends and by how far it turns**, the two
+    /// questions [`how_many_steps`] asks of an ellipse, asked of angle round the
+    /// cone. A step of more than a quarter turn round the cone is one the
+    /// mesher cannot tell from a step the other way.
+    fn walk_round_the_cone(
+        &self,
+        from: f64,
+        to: f64,
+        deflection: Deflection,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<PointsAlongACrossing> {
+        let deviation = self.deviation();
+        let Some(room) = room_left_over(deflection, deviation, policy, log)? else {
+            return Ok(nothing_walked(deviation));
+        };
+        let by_bending = how_many_pieces_an_endless_bend_takes(
+            self.how_far_a_step_of_one_stands_off_its_chord(),
+            to - from,
+            room,
+        )?;
+        let by_turning = ((to - from).abs() / (core::f64::consts::TAU / 4.0)).ceil() as usize;
+        let steps = by_bending.max(by_turning);
+        let points = (1..steps)
+            .map(|step| self.at(from + (to - from) * (step as f64) / (steps as f64)))
+            .collect();
+
+        Ok(PointsAlongACrossing {
+            points,
+            deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
+        })
+    }
+
+    /// Where the ruling at angle `round` meets the plane.
+    fn at(&self, round: f64) -> Point {
+        let along = -self.apex_off_the_plane / self.flat.normal().dot(self.ruling(round));
+        self.cone.point_at(round, self.nappe * along)
+    }
+
+    /// `g(round)`: the step one unit along the ruling at `round` takes, on the
+    /// ellipse's own nappe.
+    fn ruling(&self, round: f64) -> Vector {
+        let (across, and) = self.cone.basis();
+        (across * round.cos() + and * round.sin()) * self.cone.slope()
+            + self.cone.axis().direction() * self.nappe
+    }
+
+    fn deviation(&self) -> f64 {
+        POINT_ALONG_A_CROSSING_ROUNDOFF * self.size
+    }
+
+    /// How far the arc stands off the chord of a step round the cone, per
+    /// square radian.
+    ///
+    /// A curve `p(a)` stands off the chord of a step `Δ` by at most
+    /// `‖p″‖·Δ²/8`, as [`how_many_pieces_an_endless_bend_takes`] says. Here
+    /// `p − apex = −s₀·g/D` with `D = n·g`, so
+    ///
+    /// ```text
+    /// (g/D)″ = g″/D − 2g′D′/D² − g·D″/D² + 2g·D′²/D³
+    /// ```
+    ///
+    /// and with `|g′| = |g″| = slope`, `|g| ≤ slope + ‖w‖`, `|D′|` and `|D″|`
+    /// at most `slope·‖n‖`, and `|D|` at least [`AnArcRoundACone::least_lean`]
+    /// on this arc, every term has a bound.
+    fn how_far_a_step_of_one_stands_off_its_chord(&self) -> f64 {
+        let slope = self.cone.slope();
+        let turns = slope * self.flat.normal().length();
+        let ruling = slope + self.cone.axis().direction().length();
+        let least = self.least_lean;
+        let bends = slope / least
+            + (2.0 * slope + ruling) * turns / (least * least)
+            + 2.0 * ruling * turns * turns / (least * least * least);
+        self.apex_off_the_plane.abs() * bends / 8.0
+    }
+}
+
 /// Which side of a half-space the box `at` is on, spending the policy's budget
 /// on the answer when nothing could tell and recording it either way.
 ///
@@ -2352,6 +2958,8 @@ fn the_parabola_a_plane_along_a_ruling_cuts(
 /// The fuse wrote exactly such pickers until e2cd175d, and [`walk`] is public
 /// and takes any run, so what a writer chose cannot be what this depends on.
 /// Once the branch is named, the ends are what say how much of it to walk.
+/// [`which_way_the_branch_these_ends_are_on_opens`] says how the side the ends
+/// are on names the branch without asking any point of it.
 ///
 /// A run with no ends is the pair [`intersect`](crate::intersect) mints, and
 /// there the pickers are the whole of what tells the branches apart: the
@@ -2362,10 +2970,9 @@ fn the_parabola_a_plane_along_a_ruling_cuts(
 ///
 /// # Errors
 ///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when an end or a vertex
-/// cannot be put on one side of the apex, when the two ends are on different
-/// sides of it, and, for a run with no ends, when the pickers hold both
-/// branches or neither.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when an end cannot be put
+/// on one side of the apex, when the two ends are on different sides of it,
+/// and, for a run with no ends, when the pickers hold both branches or neither.
 fn which_branch_of_a_hyperbola_this_run_is(
     spread: [f64; 3],
     places: [Point; 2],
@@ -2378,47 +2985,36 @@ fn which_branch_of_a_hyperbola_this_run_is(
     let [apex, centre] = places;
     let [across, and, axis] = directions;
     let size = how_big_this_is(&[centre, apex], &[towards, sideways_reach, standing_off]);
-    let deviation = POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF * size;
-    let branches = [1.0, -1.0].map(|side| HyperbolaBranch {
+    let the_branch_opening = |opening: f64| HyperbolaBranch {
         centre,
-        out: and * (towards * side),
+        out: and * (towards * opening),
         across: across * sideways_reach,
         size,
-    });
+    };
 
     let ends: Vec<PredicatePoint> = run
         .ends()
         .into_iter()
         .filter(|end| *end != nowhere_in_particular())
         .collect();
+    if !ends.is_empty() {
+        let opening = which_way_the_branch_these_ends_are_on_opens(axis, apex, &ends, policy, log)?;
+        return Ok(WhatARunLiesOn::OneBranchOfAHyperbola(the_branch_opening(
+            opening,
+        )));
+    }
+
+    let deviation = POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF * size;
+    let picked_by: &[Picker] = match run.run() {
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
+        EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
+    };
     let mut held = Vec::new();
-    if ends.is_empty() {
-        let picked_by: &[Picker] = match run.run() {
-            EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-            EdgeRun::Straight
-            | EdgeRun::RightRoundWhereItsFacesCross
-            | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
-        };
-        for branch in branches {
-            if every_half_space_holds(picked_by, branch.at(0.0), deviation, policy, log)? {
-                held.push(branch);
-            }
-        }
-    } else {
-        let mut sides = Vec::new();
-        for end in ends {
-            sides.push(which_side_of_the_apex(axis, apex, end, policy, log)?);
-        }
-        if sides.iter().any(|side| *side != sides[0]) {
-            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-        }
-        for branch in branches {
-            let Some(vertex) = somewhere_within(branch.at(0.0), deviation) else {
-                return Err(Error::CannotWorkOutHowBigACrossingIs);
-            };
-            if which_side_of_the_apex(axis, apex, vertex, policy, log)? == sides[0] {
-                held.push(branch);
-            }
+    for branch in [1.0, -1.0].map(the_branch_opening) {
+        if every_half_space_holds(picked_by, branch.at(0.0), deviation, policy, log)? {
+            held.push(branch);
         }
     }
     match held.as_slice() {
@@ -2427,34 +3023,82 @@ fn which_branch_of_a_hyperbola_this_run_is(
     }
 }
 
-/// Which side of the plane through `apex` square to `axis` the point `at` is
-/// on: the sign of `(at − apex)·axis`, and only ever [`Ordering::Greater`] or
-/// [`Ordering::Less`].
+/// The `s` of the branch `centre + and·towards·s·cosh σ + across·sinh σ` that
+/// `ends` are on: `−1` when they are on the side of the apex the axis points
+/// to, and `+1` when they are on the other.
 ///
-/// A point exactly on that plane is on neither branch of a hyperbola, since
-/// the plane the hyperbola lies in misses the apex, so it is refused along with
-/// a sign that could not be told.
+/// **Branch `s` lies on the side `−s` names, on every hyperbola.** `across` is
+/// square to the axis `w` and `towards` is positive, so far out along branch
+/// `s` the point runs along `s·and`, and it is on the side of the apex that the
+/// sign of `s·(and·w)` names. Since the whole branch is on one side, that is
+/// the branch's side. And `and·w` is never positive. `and` is `â × n̂`, with
+/// `â` along `w × n`, and `(w × n) × n · w = (w·n)² − |w|²|n|² = −|w × n|²`,
+/// so `and·w` is `−|w × n̂|`. That is zero only where the plane is square to
+/// the axis, and such a plane cuts a cone in a circle and never in a
+/// hyperbola.
+///
+/// **So no point of the branch is asked.** Asking a branch's vertex which side
+/// of the apex it is on, which this did until Q1405, refuses wherever the
+/// plane misses the apex by a rounding, because both vertices are then a
+/// rounding from the apex and each is placed only to
+/// [`POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF`] times the size (§294.14). The
+/// identity holds of the exact `and`, and the branch built on the rounded one
+/// with this `s` is the rounding of the exact branch with this `s`, so nothing
+/// rounded is read to pick it.
 ///
 /// # Errors
 ///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the sign is zero or
-/// undecided, recorded first in `log` when it is undecided — a tolerant
-/// policy that reads it as zero is refused all the same, because zero names no
-/// branch either.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when an end cannot be put
+/// on one side of the apex, and when two ends are on different sides of it.
+/// A point on the plane through the apex square to the axis is on neither
+/// branch, since the plane the hyperbola lies in misses the apex, so a side a
+/// tolerant policy reads as `Zero` is refused just as one it could not tell.
+fn which_way_the_branch_these_ends_are_on_opens(
+    axis: Vector,
+    apex: Point,
+    ends: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<f64> {
+    let mut opening = None;
+    for end in ends {
+        let this_ones = match which_side_of_the_apex(axis, apex, *end, policy, log) {
+            Decision::Pos => -1.0,
+            Decision::Neg => 1.0,
+            Decision::Zero | Decision::Undecidable { .. } => {
+                return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+            }
+            other => {
+                panic!("a side of the apex came back with a decision nothing knows: {other:?}")
+            }
+        };
+        if opening.is_some_and(|so_far| so_far != this_ones) {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        }
+        opening = Some(this_ones);
+    }
+    Ok(opening.expect("a run with ends has at least one end"))
+}
+
+/// Which side of the plane through `apex` square to `axis` the point `at` is
+/// on: the sign of `(at − apex)·axis`, `Pos` on the side the axis points to.
+///
+/// A sign the cascade cannot tell is recorded in `log` and resolved under
+/// `policy`, so a tolerant policy can hand it back as `Zero`.
 fn which_side_of_the_apex(
     axis: Vector,
     apex: Point,
     at: PredicatePoint,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Ordering> {
+) -> Decision {
     let question = SideOfTheApex {
         axis: axis.components(),
         apex: apex.coordinates(),
         at,
     };
     let (decided, level) = decide(&question);
-    let decision = if let Decision::Undecidable { enclosure } = decided {
+    if let Decision::Undecidable { enclosure } = decided {
         resolve_under_policy(
             Record::new(SIDE_OF_THE_APEX, &[at], level, enclosure, Measures::Length),
             policy,
@@ -2462,14 +3106,6 @@ fn which_side_of_the_apex(
         )
     } else {
         decided
-    };
-    match decision {
-        Decision::Pos => Ok(Ordering::Greater),
-        Decision::Neg => Ok(Ordering::Less),
-        Decision::Zero | Decision::Undecidable { .. } => {
-            Err(Error::CannotNameWhichPieceOfACrossingThisIs)
-        }
-        other => panic!("a side of the apex came back with a decision nothing knows: {other:?}"),
     }
 }
 
@@ -2655,11 +3291,20 @@ fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
 /// The circle where a plane cuts a torus, picked out of the two the crossing can
 /// come in.
 ///
-/// **Two families reach here and no others.** A plane square to the axis cuts
-/// circles round the axis; a plane holding the axis cuts the two meridian
-/// circles. Every other plane is refused by name in
-/// [`intersect`](crate::intersect) before a run exists, so this never has to
-/// stand in for a quartic.
+/// **Two families reach here from [`intersect`](crate::intersect) and no
+/// others.** A plane square to the axis cuts circles round the axis; a plane
+/// holding the axis cuts the two meridian circles. Every other plane is
+/// refused by name there before a run exists, so this never has to stand in
+/// for a quartic.
+///
+/// **A run read from a file has not been through
+/// [`intersect`](crate::intersect), and can be a rounding off square.**
+/// `rcad-step` reads a seam's plane with the normal the file wrote and a
+/// ring's axis scaled to length one again, so a bend turned about `x` by 2.5
+/// came in with `n × w = (5.55e-17, 0, 0)` for two spellings of one written
+/// direction. This sends such a plane to the meridian circles, neither of
+/// which holds the seam's ends, and it is refused below rather than drawn
+/// (Q842, `docs/decisions.md` §241.6).
 ///
 /// # Which of the two circles this run is, is asked two ways
 ///
@@ -2693,8 +3338,8 @@ fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
 /// builds two unit vectors one `f64` apart whose cross product comes out zero
 /// with a true value near `1e-17`. So a test on the computed cross product would
 /// be worth nothing if the two families it separates ran up against each other.
-/// They do not. A run only reaches here in one of the two families
-/// [`intersect`](crate::intersect) certified **exactly**, and the family this
+/// They do not. A run [`intersect`](crate::intersect) named reaches here only
+/// in one of the two families it certified **exactly**, and the family this
 /// arm sends away is the one holding the axis, where `n·w = 0` for two vectors
 /// of length one — so `‖n × w‖` is one there, and no rounding of anything walks
 /// a whole unit. The pipe arm's `n·w == 0.0` has a three-term sum in it and
@@ -2704,8 +3349,8 @@ fn where_two_balls_cut(one: &Sphere, other: &Sphere) -> Result<Conic> {
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when the circle's own numbers do
 /// not come out finite, and
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the pickers hold both
-/// candidates or neither.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the run's ends and
+/// pickers hold both candidates or neither.
 fn where_a_plane_cuts_a_torus(
     flat: &Plane,
     ring: &Torus,
@@ -2829,6 +3474,175 @@ fn where_a_coaxial_cone_and_pipe_cut(
     )
 }
 
+/// The circle two cones on one axis cross in that the run names: the one
+/// halfway between their apexes where they have one slope, and one of the two
+/// `intersect` names where they have two.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two are not
+/// **proved** to share an axis, asked here for the reason
+/// [`where_a_coaxial_cone_and_pipe_cut`] gives.
+///
+/// **The same name where they share an apex, and there it is the wrong name.**
+/// Two cones on one axis with one apex and two slopes meet at the apex and
+/// nowhere else — `intersect` answers them
+/// [`SurfaceMeet::TouchAtOnePoint`](crate::SurfaceMeet::TouchAtOnePoint) — so a
+/// closed run stated on them names a curve that is not there, and
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] is what a plane touching a
+/// ball gets for the same thing. `a_circle_walked_between_two_spellings_of_one_cone.rs`
+/// pins the old name on one such pair and is outside the change that named
+/// these cones, so the two move together or not at all. One cone twice under
+/// any run but a whole circle is refused here too, as it always was.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] as
+/// [`which_of_these_circles_this_run_is`] gives them.
+fn where_two_coaxial_cones_cut(
+    one: &Cone,
+    other: &Cone,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    if whether_two_cones_share_an_axis(one, other) != Decision::Zero || one.apex() == other.apex() {
+        return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+    }
+    which_of_these_circles_this_run_is(
+        the_circles_two_coaxial_cones_cut(one, other),
+        run,
+        policy,
+        log,
+    )
+}
+
+/// The circles two cones on one axis with two apexes cross in, where
+/// `intersect` names them: from the steeper cone's apex, `d` up its axis to the
+/// other apex, at `d·s_shallow/(s_steep + s_shallow)` and
+/// `−d·s_shallow/(s_steep − s_shallow)`, or the one at `d/2` where the slopes
+/// are one.
+///
+/// **Drawn round the steeper cone, or the one that sorts first where neither
+/// is**, so the pair handed over either way round starts each circle at one
+/// point and walks it one way.
+fn the_circles_two_coaxial_cones_cut(one: &Cone, other: &Cone) -> Vec<Conic> {
+    let (steep, shallow) = match one.slope().total_cmp(&other.slope()) {
+        Ordering::Greater => (one, other),
+        Ordering::Less => (other, one),
+        Ordering::Equal => match Surface::Cone(*one).how_it_sorts_against(&Surface::Cone(*other)) {
+            Ordering::Greater => (other, one),
+            Ordering::Less | Ordering::Equal => (one, other),
+        },
+    };
+    let along = steep.axis().direction();
+    let apart = (shallow.apex() - steep.apex()).dot(along * along.length().recip());
+    let reaches = if steep.slope() == shallow.slope() {
+        vec![apart / 2.0]
+    } else {
+        let tilted = apart * shallow.slope();
+        vec![
+            tilted / (steep.slope() + shallow.slope()),
+            -tilted / (steep.slope() - shallow.slope()),
+        ]
+    };
+    reaches
+        .into_iter()
+        .map(|reach| a_circle_round_a_cones_axis(steep, reach, shallow.apex(), apart))
+        .collect()
+}
+
+/// The circle of the crossing of a cone and a ball on its axis that the run
+/// names.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the ball's
+/// centre is not **proved** on the axis, and where its skin runs through the
+/// apex — the two refusals `intersect` gives the pair, under the same name.
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the ball misses the cone,
+/// so the run names a circle that is not there — a **limit**, as for a plane
+/// that misses a ball.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] where a sign the circles turn on
+/// could not be settled, which takes a product leaving `f64`'s range, and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] as
+/// [`which_of_these_circles_this_run_is`] gives it.
+fn where_a_ball_on_a_cones_axis_cuts_it(
+    cone: &Cone,
+    ball: &Sphere,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    if whether_a_ball_sits_on_a_cones_axis(cone, ball) != Decision::Zero {
+        return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+    }
+    let two = match how_a_ball_on_a_cones_axis_meets_it(cone, ball) {
+        Decision::Neg => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        Decision::Zero => false,
+        Decision::Pos => match whether_a_ball_runs_through_a_cones_apex(cone, ball) {
+            Decision::Neg | Decision::Pos => true,
+            Decision::Zero => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+            Decision::Undecidable { .. } | _ => {
+                return Err(Error::CannotWorkOutHowBigACrossingIs);
+            }
+        },
+        Decision::Undecidable { .. } | _ => return Err(Error::CannotWorkOutHowBigACrossingIs),
+    };
+    which_of_these_circles_this_run_is(
+        the_circles_a_ball_on_a_cones_axis_cuts(cone, ball, two),
+        run,
+        policy,
+        log,
+    )
+}
+
+/// The one circle or the two a ball on a cone's axis cuts it in: `h` along the
+/// axis from the apex with `(1 + s²)h² − 2eh + e² − R² = 0`, `e` how far up the
+/// axis the centre sits.
+///
+/// The discriminant over four is written `R² + s²(R − |e|)(R + |e|)` rather than
+/// `(1 + s²)R² − s²e²`, which is the same number without the two large squares
+/// cancelling. It is only read where `intersect`'s exact sign said it is above
+/// zero, so a value that rounded below is taken as nothing.
+fn the_circles_a_ball_on_a_cones_axis_cuts(cone: &Cone, ball: &Sphere, two: bool) -> Vec<Conic> {
+    let along = cone.axis().direction();
+    let centre_at = (ball.centre() - cone.apex()).dot(along * along.length().recip());
+    let radius = ball.radius();
+    let squared_slope = cone.slope() * cone.slope();
+    let widening = 1.0 + squared_slope;
+    let middle = centre_at / widening;
+    let reaches = if two {
+        let room = radius * radius
+            + squared_slope * (radius - centre_at.abs()) * (radius + centre_at.abs());
+        let half = room.max(0.0).sqrt() / widening;
+        vec![middle + half, middle - half]
+    } else {
+        vec![middle]
+    };
+    reaches
+        .into_iter()
+        .map(|reach| a_circle_round_a_cones_axis(cone, reach, ball.centre(), radius))
+        .collect()
+}
+
+/// The circle on `cone` square to its axis, `reach` up it from the apex, sized
+/// against `beside` and `length` too, which are what `reach` was worked out
+/// from.
+fn a_circle_round_a_cones_axis(cone: &Cone, reach: f64, beside: Point, length: f64) -> Conic {
+    let along = cone.axis().direction();
+    let middle = cone.apex() + along * (reach / along.length());
+    let radius = cone.radius_at(reach);
+    let (across, and) = cone.basis();
+    Conic {
+        centre: middle,
+        across: across * radius,
+        and: and * radius,
+        size: how_big_this_is(&[middle, cone.apex(), beside], &[radius, reach, length]),
+    }
+}
+
 /// The two circles a cone and a pipe on one axis cross in, the one the axis
 /// points towards first.
 ///
@@ -2856,15 +3670,116 @@ fn the_two_circles_a_cone_and_a_pipe_cut(cone: &Cone, pipe: &Cylinder) -> Vec<Co
         .collect()
 }
 
+/// The circle a ring and a ball, a pipe or a cone on its axis share that the
+/// run names, drawn as the partner and the circle's own plane draw it.
+///
+/// # The circles are the namer's, asked again
+///
+/// [`intersect`](crate::intersect) names each circle by the plane square to
+/// the axis it lies in, and `rcad-topo`'s arrangement splits the faces on those
+/// planes and picks each circle by the planes halfway to its neighbours
+/// (§378.9). So the candidates here are those planes, bit for bit, and each is
+/// drawn as `[partner, plane]` — the pair
+/// [`which_two_surfaces_a_run_is_between`] reads a run naming that plane between
+/// the two faces as. An arc the arrangement names by the ring and the partner
+/// and a whole circle a file names by its plane are then one curve, started at
+/// one point and walked one way.
+///
+/// # What the plane costs, and the size that pays for it
+///
+/// A plane's offset is the middle of an enclosure of the circle's height no
+/// wider than sixteen roundings of the larger of the offset and `R + r`, so the
+/// circle drawn is on the partner and the plane to their own rounding and off
+/// the ring by up to eight of those. The size the walk charges its bound
+/// against is widened to the ring's centre and `R + r` for that reason:
+/// [`POINT_ALONG_A_CROSSING_ROUNDOFF`] is 256 roundings of it.
+///
+/// # A whole circle named by the two faces alone is still refused
+///
+/// A run right round one of these circles that names no plane is refused under
+/// the pair's old name, and the reason is `rcad-topo`'s `Model::validate`, not
+/// the arithmetic. Validate holds a ring's face to walking its two circles
+/// round the axis opposite ways round the tube by the plane the run names
+/// (§243.8), so a circle named by the two faces alone is never asked: answered
+/// here, a ring's band bounded by a pipe of thirteen with both circles walked
+/// the same way — a description that bounds no piece, refused
+/// `AClosedEdgeIsWalkedAgainstItsSurface` when the runs name their planes —
+/// built and validated (`a_ring_face_bounded_by_a_circle_on_a_coaxial_surface.rs`).
+/// The circle is there, so this is a **gap**, kept closed until validate asks
+/// its band question of such a circle too. A file names its plane, and so does
+/// `intersect`; an arc between two corners is answered.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] where the partner
+/// is not proved on the ring's axis, and [`Error::Undecidable`] where a sign
+/// could not be settled — `intersect`'s two refusals for the pair, so the
+/// namer and the evaluator refuse the same pairs under the same names. The
+/// first also for a run right round a circle, as above.
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the partner misses the
+/// tube, so the run names a circle that is not there: a **limit**, as for a
+/// plane that misses a ball.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] as
+/// [`which_of_these_circles_this_run_is`] gives them — the second for a run
+/// with no end and nothing picking it on a pair that shares two circles or
+/// more, which names none of them.
+fn where_a_ring_and_a_surface_on_its_axis_cut(
+    ring: &Torus,
+    partner: Surface,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    if run.run().it_comes_back_to_where_it_started() {
+        return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface);
+    }
+    let named = match crate::intersect::intersect(&Surface::Torus(*ring), &partner, policy, log)? {
+        SurfaceMeet::Curves(circles) => circles,
+        SurfaceMeet::Nothing => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        other @ (SurfaceMeet::TouchAtOnePoint { .. } | SurfaceMeet::SameSurface) => {
+            unreachable!("a ring and a surface on its axis share circles or nothing: {other:?}")
+        }
+    };
+    let mut candidates = Vec::with_capacity(named.len());
+    for circle in named {
+        let EdgeRun::RightRoundWhereItCrosses {
+            and: own @ Surface::Plane(_),
+        } = circle.run()
+        else {
+            unreachable!("`intersect` names a circle round a ring's axis by its plane: {circle:?}");
+        };
+        // A plane square to a pipe's or a cone's axis, or any plane against a
+        // ball, crosses it in a conic, and one of no size is refused below in
+        // `what_a_run_between_these_two_lies_on` rather than handed back.
+        let WhatARunLiesOn::Conic(drawn) =
+            what_a_run_between_these_two_lies_on([partner, *own], run, policy, log)?
+        else {
+            unreachable!("a plane square to the axis of {partner:?} crosses it in a conic");
+        };
+        candidates.push(Conic {
+            size: how_big_this_is(
+                &[ring.centre()],
+                &[drawn.size, ring.ring_radius() + ring.tube_radius()],
+            ),
+            ..drawn
+        });
+    }
+    which_of_these_circles_this_run_is(candidates, run, policy, log)
+}
+
 /// Which of a handful of candidate conics the run names, told by its ends and,
 /// where those do not settle it, by the half-spaces on it.
 ///
-/// **Three shapes of crossing need this and they are not alike.** A plane cuts a
-/// torus in two circles, a cone and a pipe on one axis cut two more, and two
-/// pipes of one width on axes that meet cut two ellipses; in all three the pair
-/// of surfaces names *both* and only the run says which. A run with neither an
-/// end nor a picker on it takes the only candidate there is, which is how a
-/// plane resting on a torus's tube gets its one circle.
+/// **Four shapes of crossing need this and they are not alike.** A plane cuts a
+/// torus in two circles, a cone and a pipe on one axis cut two more, a ring and
+/// a ball, a pipe or a cone on its axis up to four, and two pipes of one width
+/// on axes that meet cut two ellipses; in all four the pair of surfaces names
+/// *both* and only the run says which. A run with neither an end nor a picker
+/// on it takes the only candidate there is, which is how a plane resting on a
+/// torus's tube gets its one circle.
 ///
 /// # The ends answer first, and a picker is only a tie-break
 ///
@@ -2937,6 +3852,15 @@ fn which_of_these_circles_this_run_is(
 
 /// The circle a closed run whose two faces are the one cone lies on: through
 /// the run's own end, square to the cone's axis.
+///
+/// **Which spelling of the cone it is handed changes which way round the circle
+/// goes, and nothing else.** Turning the axis round negates both `up` and
+/// `reach` below, so `middle`, `radius` and the size come out the same bits,
+/// and [`Cone::basis`] keeps its first direction across and negates its second.
+/// So the circle is one point set and starts at one point either way, and runs
+/// right-handed about whichever axis it was handed — which is why the caller
+/// hands it the spelling that sorts first
+/// (`a_circle_walked_between_two_spellings_of_one_cone.rs`).
 ///
 /// **The pair of surfaces names nothing here**, the way a ball crossed with
 /// itself names nothing, so what names the curve is the run. It is closed, so
@@ -3603,6 +4527,54 @@ mod tests {
                 gap <= longest_step,
                 "the {which} point is {gap} from the corner, past the longest step {longest_step}"
             );
+        }
+    }
+
+    /// A ball of radius four centred on a pipe of radius one crosses it in two
+    /// circles, at `z = ±√15`, and a closed run whose corner is on either of
+    /// them is walked round that one, whichever face is listed first.
+    ///
+    /// A fuse writes each circle of its answer as a closed run with its corner
+    /// on it and nothing picking it. The marcher started every such run at the
+    /// first of its two seeds, the one ahead along the axis, so the circle
+    /// behind the centre was walked round the circle ahead, and a ball with a
+    /// bar through its centre was refused by its own mesh (Q1241).
+    #[test]
+    fn a_closed_run_round_either_circle_of_a_ball_on_a_pipes_axis_is_walked_round_that_one() {
+        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 1.0).expect("a radius"));
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 4.0).expect("a radius"));
+        let height = 15.0_f64.sqrt();
+        for level in [height, -height] {
+            let corner = Point::new(1.0, 0.0, level);
+            let run = NamedRun::new(
+                EdgeRun::RightRoundWhereItsFacesCross,
+                [corner, corner].map(|end| PredicatePoint::from(end.coordinates())),
+            )
+            .expect("a closed run with one corner");
+            for pair in [[&ball, &pipe], [&pipe, &ball]] {
+                let walked = walk(
+                    &run,
+                    pair,
+                    Deflection::of(0.01).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a circle of a ball on a pipe's axis is walked");
+                let off = walked.deviation().magnitude();
+                assert!(
+                    walked.points().len() > 2,
+                    "the circle at {level} has points"
+                );
+                for point in walked.points() {
+                    let [x, y, z] = point.coordinates();
+                    assert!(
+                        (z - level).abs() <= off
+                            && how_far_off(&ball, *point) <= off
+                            && how_far_off(&pipe, *point) <= off,
+                        "the run round the circle at {level} was walked through ({x}, {y}, {z})"
+                    );
+                }
+            }
         }
     }
 }

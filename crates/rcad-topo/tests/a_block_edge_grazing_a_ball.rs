@@ -17,14 +17,16 @@
 //! at height `h` and a block whose edge is the line `x = −1, y = 2⁻²⁵` therefore
 //! meet where that edge meets the ball, at `z = h ± 2⁻⁵¹`, `8.9e-16` apart.
 //!
-//! The edge runs along `z` rather than §244.2's `x` for the ball's sake. A ball
-//! here is one face whose seam is the half of `y = 0` with `x ≥ 0`, and an edge
-//! along `x` grazes it at `x = 0`, on the plane that seam is picked out by,
-//! where `Arrangement::turns_anticlockwise` refuses on the kept meet whether or
-//! not the other one is folded into it (§248.3, §317.1). An edge along `z` at
-//! `x = −1` grazes it at the equator, a whole unit from the seam, and is kept
-//! because order along a crossing refuses first there, before that turn is ever
-//! asked (§317.5).
+//! The edge runs along `z` rather than §244.2's `x` so that the pair is what a
+//! certified fuse refuses on. §248.3 chose it to keep the edge off the ball's
+//! seam; the edge along `x` refused on the turn at the kept meet instead,
+//! `Arrangement::turns_anticlockwise` over a box ending at the place (§317.1),
+//! and since Q914 it refuses on neither the turn nor the pair
+//! (`a_block_edge_grazing_a_ball_at_cx_16.rs`). An edge along `z` at `x = −1`
+//! grazes the ball at the equator, and a certified fuse refuses on the order of
+//! the two meets round the circles the block's two faces cut the ball in, with
+//! either solid first, before any turn there is asked. Q914 decides the order
+//! of two such meets along the edge itself, and not round a circle (§317.7).
 //!
 //! At `h = 0` both places are exact, `z = ±2⁻⁵¹`, and their boxes do not
 //! touch. At `h = 16` the last place of `16` is `2⁻⁴⁸` wide, so neither place is
@@ -73,9 +75,12 @@ fn two_meets_whose_boxes_touch_are_what_a_certified_fuse_refuses_on() {
 /// folds it.
 ///
 /// The fuse still refuses in the end, and for a reason this file is not about:
-/// the plane `x = −1` cuts the ball in a circle of radius `2⁻²⁵`, and no point
-/// can be placed inside that piece. It refuses the same way at `h = 0`, where
-/// there is no pair to fold — see the test below.
+/// the plane `x = −1` cuts the ball in a circle of radius `2⁻²⁵`, and a point
+/// found inside the piece the fold leaves at the one point could not be placed
+/// against the other solid (`a point in a piece that every solid could
+/// place`). At `h = 0`, where there is no pair to fold, the pieces between the
+/// two places hold no point at all and are placed by their sides — see the
+/// tests below.
 #[test]
 fn a_tolerant_policy_asked_about_the_same_two_meets_folds_them() {
     for rule in EVERY_RULE {
@@ -100,29 +105,78 @@ fn a_tolerant_policy_asked_about_the_same_two_meets_folds_them() {
 }
 
 /// The control: where the two meets are exact and apart, nothing asks whether
-/// they are one, under either policy.
-///
-/// What the fuse refuses on at `h = 0` is the tiny piece, the same as the
-/// tolerant fuse at `h = 16` — which is what says that refusal is not the fold.
-/// That piece holds no point with `f64` coordinates, which the next test
-/// shows, so `select` cannot place it (`docs/decisions.md` §346).
+/// they are one, under either policy, in either order.
 #[test]
 fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
         for rule in EVERY_RULE {
-            let records = what_it_recorded(0.0, rule, &policy);
-            assert!(
-                records
-                    .iter()
-                    .all(|record| record.predicate() != ALONG_A_CROSSING),
-                "{rule:?}: {records:#?}"
-            );
-            assert!(
-                records
-                    .iter()
-                    .any(|record| record.predicate() == "a point inside a piece of a face"),
-                "{rule:?}: {records:#?}"
-            );
+            for ball_first in [true, false] {
+                let (_, records) = fused_and_recorded(rule, &policy, ball_first);
+                assert!(
+                    records
+                        .iter()
+                        .all(|record| record.predicate() != ALONG_A_CROSSING),
+                    "{rule:?}, ball first {ball_first}: {records:#?}"
+                );
+            }
+        }
+    }
+}
+
+/// At `h = 0` every fuse gets past `select`, and none of the six answers.
+///
+/// The two places fence off three slivers that hold no point with `f64`
+/// coordinates (the next test), so no point search places them. Each is placed
+/// by the side it shares with a piece of the other solid's face, the ball's
+/// inside the block and the block's two inside the ball (`docs/decisions.md`
+/// §365.3; `src/fuse/select.rs` pins which pieces each rule then keeps). Until
+/// that rule, all six refused `a point inside a piece of a face` on the two
+/// places, under either policy.
+///
+/// What each answer would be is a solid with a sliver `2⁻⁵⁰` long and `2⁻⁷⁸`
+/// wide in it or of it, and each is refused
+/// `ACurvedFaceGoesRightRoundWithNoSeam` out of meshing the ball's face — the
+/// refusal §346.2's small ball on a cube's corner is given too. The
+/// intersection is the three slivers alone and the block less the ball has
+/// the ball's sliver as its dent, so the ball's face there is the sliver; the
+/// union and the ball less the block keep the ball less the sliver, and the
+/// mesher finds no cut from a rim that small up to both poles.
+///
+/// **The last two were refused earlier, while the answer was written**, by
+/// `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom`, until the
+/// joiner joined a ball's pieces (§229.2). The ball's skin outside the block
+/// was then three faces, cut apart along the long arcs of the two circles the
+/// block's faces cut. Joined, those arcs are no edges, the face is bounded by
+/// the sliver's two short arcs alone, and the refusal comes from the mesh.
+/// Neither ever answered.
+///
+/// Each comes back with the same two records, `side of a half-space`, under
+/// either policy, and the two policies agree. Neither record has been traced.
+#[test]
+fn the_slivers_no_point_is_inside_are_placed_by_their_sides_and_each_answer_is_refused_later() {
+    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        for rule in EVERY_RULE {
+            for ball_first in [true, false] {
+                let case = (policy.strictness(), rule, ball_first);
+                let (fused, records) = fused_and_recorded(rule, &policy, ball_first);
+                assert_eq!(
+                    records
+                        .iter()
+                        .map(|record| (record.predicate(), record.level()))
+                        .collect::<Vec<_>>(),
+                    [("side of a half-space", Level::Interval); 2],
+                    "{case:?}: {records:#?}"
+                );
+                match fused {
+                    Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }) => {}
+                    Ok(fused) => panic!(
+                        "{case:?}: the fuse answered with {} solids; check each against its \
+                         volume and pin it",
+                        fused.solids().len()
+                    ),
+                    Err(other) => panic!("{case:?}: {other:?}"),
+                }
+            }
         }
     }
 }
@@ -183,11 +237,26 @@ fn no_point_with_f64_coordinates_is_inside_the_piece_between_the_two_places() {
 /// else coming back is not what this file is about.
 fn what_it_recorded(height: f64, rule: Rule, policy: &Policy) -> Vec<Record> {
     let mut log = ProvenanceLog::new();
-    match fuse_a_block_edge_grazing_a_ball(height, rule, policy, &mut log) {
+    match fuse_a_block_edge_grazing_a_ball(height, rule, policy, true, &mut log) {
         Ok(_) => log.records().to_vec(),
         Err(Error::Undecidable { records }) => records.records().to_vec(),
         Err(other) => panic!("{rule:?} at height {height}: {other:?}"),
     }
+}
+
+/// What the fuse at `h = 0` gave, and every record it wrote, whatever it gave.
+fn fused_and_recorded(
+    rule: Rule,
+    policy: &Policy,
+    ball_first: bool,
+) -> (rcad_topo::Result<Fused>, Vec<Record>) {
+    let mut log = ProvenanceLog::new();
+    let fused = fuse_a_block_edge_grazing_a_ball(0.0, rule, policy, ball_first, &mut log);
+    let records = match &fused {
+        Err(Error::Undecidable { records }) => records.records().to_vec(),
+        Ok(_) | Err(_) => log.records().to_vec(),
+    };
+    (fused, records)
 }
 
 /// Whether a record's two inputs are the two places the edge cuts the ball at
@@ -218,6 +287,7 @@ fn fuse_a_block_edge_grazing_a_ball(
     height: f64,
     rule: Rule,
     policy: &Policy,
+    ball_first: bool,
     log: &mut ProvenanceLog,
 ) -> rcad_topo::Result<Fused> {
     let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
@@ -243,5 +313,9 @@ fn fuse_a_block_edge_grazing_a_ball(
             &Isometry::translation(Vector::new(0.0, 0.0, height - 2.0)).expect("a finite shift"),
         )
         .expect("a positive height");
-    model.fuse(&[ball], &[block], rule, policy, log)
+    if ball_first {
+        model.fuse(&[ball], &[block], rule, policy, log)
+    } else {
+        model.fuse(&[block], &[ball], rule, policy, log)
+    }
 }

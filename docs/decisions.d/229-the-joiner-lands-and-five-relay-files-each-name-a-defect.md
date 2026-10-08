@@ -33,7 +33,48 @@ fail for reasons outside the reader (§229.4).
 ### 229.2 The joiner: three of §224.2's four items, and why not the third
 
 `ff78ab00` builds items 1, 2 and 4. Two curved faces with the same surface bits,
-used the same way round, are one face. A band that goes right round the axis
+used the same way round, are one face.
+
+> **2026-10-05 (§407): closed for pipes.** The rule above is now the folded
+> one for a pipe — the same bits are no longer required, only the same point
+> set and the same `used`. A cone still needs the same bits, as this section
+> built it.
+
+> **2026-10-08 (Q1380): a ball is joined too.** §224.2 item 2 designed the
+> curved joiner for a cone or a cylinder and this section built only that, so
+> a ball's pieces stayed apart by omission, not by a decision. Now two pieces
+> of one ball used the same way round are one face, and a ball's group keeps
+> no seam: the mesher opens a ball's face along meridians of its own (§202.1,
+> §402). A group that makes up the whole ball is left apart, since a joined
+> face is never written as a whole closed surface. A ring's pieces are still
+> never joined.
+>
+> A ball of radius 2 united with the box `[0.5, 3]³`, either way round, and
+> the ball less the box, keep its skin as one face where they kept seven
+> (`a_ball_kept_to_a_corner_of_a_box.rs`). Three pins of the split moved to the
+> joined answer, each with its volume checked: a block poking into a ball
+> (one face of one wire), a ball cut through both poles (one face, where the
+> union kept two and `bake` joined them for the next fuse), and a ball shaved
+> by a turned block's face (one hole where it kept two).
+>
+> Two refusals moved one step on, and the row asked for neither: it asked to
+> keep those groups apart so neither refuses. **Both refused before the join
+> too**, by other names, so keeping them apart makes neither answer. A block
+> edge grazing a ball: the union and the ball less the block were refused
+> `CannotNameWhichPieceOfACrossingThisIs` writing the answer, and now all six
+> fuses, three rules both ways round, are refused
+> `ACurvedFaceGoesRightRoundWithNoSeam` meshing it, as the other three were
+> already. The joined face is a ball less a sliver `2⁻⁵⁰` long, the same
+> shape as the box's corner, so no rule of the joiner's tells them apart. A
+> half frustum against a ball: the unions and the ball less the half were
+> refused `TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`, the ball on both
+> sides of an edge between two of its own pieces, and are now refused
+> `AWireWillNotLieFlatOnItsFace` on the joined face, whose one ring runs over
+> the ball's north pole. A rule that kept a ring through a pole apart would
+> tell that one apart, and would only bring back the refusal the split itself
+> caused.
+
+A band that goes right round the axis
 keeps one dissolved edge as its seam — the one with the lowest corners from ring
 to ring, so the choice does not depend on argument order — and a group with a
 ring it cannot count, or with no such edge, is left apart. No ring of a curved

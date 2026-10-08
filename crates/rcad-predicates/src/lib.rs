@@ -83,7 +83,10 @@ pub use orient2d::{ORIENT2D, orient2d, orient2d_reporting_level, orient2d_tolera
 pub use orient3d::{
     ORIENT3D, orient3d, orient3d_of_points, orient3d_reporting_level, orient3d_tolerantly,
 };
-pub use planes::meet_of_three_planes;
+pub use planes::{
+    meet_of_three_planes, side_of_a_plane_where_three_planes_meet,
+    where_the_line_two_planes_cross_in_sorts, which_meet_comes_first_along_a_line,
+};
 pub use point::Point;
 pub use policy::{Measures, Policy, Severity, Strictness, resolve_under_policy};
 pub use provenance::{Approximation, Cause, ProvenanceLog, Record};

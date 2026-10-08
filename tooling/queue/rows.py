@@ -10,15 +10,12 @@ something other than blanks, and a heading is `## ` outside a fence.
 
 import re
 
-TIERS_IN_ORDER = ["1", "2", "2.2", "2.5", "3", "4"]
-# The queue page's tiers. tooling/queue-page/render.py has a label and a colour
-# for five and fails on any sixth, so it is handed the five until it has one
-# for 2.2 too (§307.4).
-TIERS = [tier for tier in TIERS_IN_ORDER if tier != "2.2"]
+TIERS_IN_ORDER = ["1", "2", "2.2", "2.5", "3", "4", "5"]
 CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
 TIER_HEADING = re.compile(r"^Tier (" + "|".join(re.escape(tier) for tier in TIERS_IN_ORDER) + r")( |$)")
-# The first word of a description may be a tag (§352): a defect's class, which
-# only a tier 1 row carries, or `small`, which a row of any tier may.
+# The first word of a description may be a tag (§352): a defect's class, or
+# `small`, which a row of any tier may carry. The class decides an open row's
+# tier: A and B are tier 1, C and D tier 5 (§403).
 CLASS = re.compile(r"^(wrong|crash|refuses)/[ABCD]$")
 SMALL = "small"
 WHAT = re.compile(r"^(\s*(?:\S+\s+){5})(\S+)(.*)$")
@@ -31,6 +28,11 @@ def heading_key(heading):
     if re.match(r"^Closed( |$)", heading):
         return "closed"
     return ""
+
+
+def tier_of_class(tag):
+    assert CLASS.match(tag), f"{tag!r} is not a class"
+    return "5" if tag.endswith(("/C", "/D")) else "1"
 
 
 class Row:

@@ -12,6 +12,7 @@ pins move on to places §232.5 did not predict.*
   243.5   Where both bends stop now
   243.6   What this leaves
   243.7   A bend whose axis is off the coordinate axes is refused
+  243.8   One plane square to the axis, along both its circles
 
 ### 243.1 What refused
 
@@ -63,7 +64,9 @@ one circle and the other side at the other (§377.3).
 The dispatched brief listed six legs. Legs 1, 3, 4 and 5 held as written. Leg
 2 needed one more condition: **the planes must hold the axis**, because a plane
 square to the axis also cuts a ring in two circles, or rests on it along one,
-and 243.4 is what happens without it. Leg 6 — one plane with one edge along it
+and 243.4 is what happens without it. *2026-10-04, Q826: one plane square to
+the axis, with both of its circles as the face's only edges, is followed now
+(243.8).* Leg 6 — one plane with one edge along it
 is the ring less one circle, not a half — holds because such a face never
 reaches the new function; the general rule refuses it as before. No new test
 pins leg 6.
@@ -134,6 +137,11 @@ pins the refusal. The puck is built by hand and not put through the sweep;
 nothing the test asks reads its wire. The rim is the part of the ring outside
 the pipe of the ring's radius between the two planes, so answering it is a gap,
 left open: nothing that has been dispatched builds a puck.
+
+*2026-10-04, Q826:* both planes are square to the axis, and since 243.8 that
+is followed for one plane along both of its circles. The rim is still refused,
+by the same name and earlier: each disk's plane rests on the tube, and at the
+circle where it rests the closed-edge rule finds no side to read (243.8).
 
 ### 243.5 Where both bends stop now
 
@@ -229,3 +237,167 @@ tell" come out as the same refusal, and nothing records which it was.
 *Looked at in §328: every plane `intersect` named two circles for is exactly
 square to the stored axis, so those refusals were a gap and are answered now;
 the one it refused leans off it, and "no" stays.*
+
+### 243.8 One plane square to the axis, along both its circles
+
+*Row Q826 (`lane-q826-the-top-half-of-a-ring-holds-its-points`, off
+`c11bf21f`).* The half-ring of §250.7 and §250.9, ring four and tube one
+keeping `z ≥ 0`, read back through `Deserialize`. Its wall is one torus face
+whose only edges are the two circles `z = 0` cuts the ring in, of radius five
+and three.
+
+**What refused, traced.** A temporary `eprintln!` in `holds.rs`, and a probe
+test asking all eight orientation choices, both removed. Each leg the row named
+held:
+
+- `classify_point` at `(4, 0, 0)` fires a ray that meets the wall at a box
+  round `(4.734, 0.746, 0.610)`, and the wall refuses it;
+- the wall reaches `what_a_curved_face_holds` with one trimming and two edges
+  along it, and `is_a_ring_face_between_two_planes` sends it to
+  `what_a_ring_face_between_two_planes_holds` (§377.3);
+- there step 1 refuses, because `how_the_axis_lies_on` gives `Neg` for the
+  plane `(0, 0, −1)·p = 0`.
+
+Asked directly at `(4, 0, 1)` and `(4, 0, −1)`, the wall refused
+`AFaceMissesPartOfWhereItsSurfacesCross` in all eight choices, as Q664
+measured.
+
+**The rule.** 243.2's leg 2 asks for the axis because a plane square to it also
+cuts a ring in two circles. With one such circle from each of two planes, the
+planes' sides do not settle the face: between two planes square to the axis
+the ring holds two bands, an inner and an outer, and 243.4's rim is one of
+them. **One plane square to the axis, along both of its circles, is the other
+case where one plane's side settles the face.** The plane `z = h`, with `|h|`
+less than the tube, cuts the ring in two circles round the axis, at `R ± s`
+with `s > 0`. The ring less those two circles is two pieces, the part above
+the plane and the part below it, and each has both circles as its whole edge.
+So a face whose only edges are those two circles is one of the two pieces, and
+the side of the plane it keeps is the piece. The answer exists, so the refusal
+was a gap (§16.10).
+
+`what_a_ring_face_between_two_planes_holds` now takes a plane whose normal lies
+exactly along the ring's axis (`lie_along_one_line`) as well as one that holds
+the axis. It reads the side kept at each circle off the wire, by step 2's
+closed-edge rule, as before. Then, when both planes are square to the axis:
+
+1. both edges must be along the one stored plane — the two cuts' surfaces
+   equal;
+2. the two sides must be equal;
+3. `point` is asked against that plane alone (`held_in_front_of_all`).
+
+Anything else is refused `AFaceMissesPartOfWhereItsSurfacesCross`, the name
+step 1 gave this shape before: one plane square to the axis and one not, two
+planes square to it that are not one stored plane, or two sides that differ.
+
+**When the two sides differ.** Both circles are stored running the same way
+round the axis. Where a circle runs round the axis, the closed-edge rule's
+longitude is square to it and the rule reads the latitude, `∇ × (a × ∇)` for
+`a = ê × w`, the tangent of the centre circle. That is `a` times `|∇|²`, and
+`a` is the same at the inner and the outer circle. Either half's wire walks its
+two circles opposite ways round, so a wire that walks both the same way round
+keeps one side at one circle and the other side at the other, and is no half.
+Of the eight choices in the read-back test, four walk the flat face's circles
+the same way round. In those four the wall is still refused, and so is
+`classify_point` at `(4, 0, 0)`, naming the wall. The row asked for
+`OnBoundary` in all eight. Answering those four would mean reading a side that
+one of the wire's own circles contradicts.
+
+**A plane resting on the tube** touches it along one circle. There the two
+gradients are parallel, the closed-edge rule finds no side to read
+(`Ok(None)`), and the face is refused at step 1 of the read. A temporary
+`eprintln!` showed this for 243.4's rim, at `(4, 0, −1)`.
+`a_pucks_rounded_rim_is_refused_rather_than_holding_the_inside_of_its_ring`
+still passes.
+
+**What is pinned**, in `tests/a_half_rings_flat_face_read_back_from_bytes.rs`.
+`the_wall_holds_the_half_of_the_ring_its_wire_keeps`: in the four choices whose
+flat face walks its circles opposite ways round, the wall holds three points on
+the tube on the side its wire keeps, does not hold two on the other side, and
+has four points of its two circles on its boundary; in the other four it
+refuses. `classify_point_finds_the_hole_outside_and_the_flat_face_on_the_skin`:
+`(4, 0, 0)` is `OnBoundary` in the first four and refused naming the wall in the
+other four. Which side the wire keeps comes from the half-ring's own walk,
+outer circle `Forward` on the flat face and wall used `Forward`, keeping
+`z ≥ 0`. Turning the walk over, or the use round, turns that side over. With
+`holds.rs` put back to `c11bf21f`, both tests fail, `classify_point` with
+`CannotFollowAFacesTrimming` at choice `(Reversed, Forward, Forward)`.
+
+**`Model::validate` passes a half-ring whose hole is walked the wrong way.**
+Asked of the eight read-back half-rings on `c11bf21f`, `validate` refused the
+four that walk the outer circle `Reversed` on the flat face, with
+`FacesDoNotAgreeWhichWayTheyFace`. It refused `(Forward, Forward, Reversed)`
+and `(Forward, Reversed, Reversed)` with `VolumeIsNotPositive`, and passed
+`(Forward, Reversed, Forward)` and `(Forward, Forward, Forward)`. The last one
+walks the flat face's hole the same way round as its outline. 250.7 recorded
+Q193's `validate` refusing the wall `AWireWillNotLieFlatOnItsFace` in all
+eight. On this base it does not.
+
+**What this leaves.**
+
+- `Model::validate` passes the half-ring whose flat face walks its hole the
+  same way round as its outline. Every corner of the flat face is on the ring,
+  and every corner of the wall is on the plane, so no corner says which side
+  either face keeps. Not traced. *2026-10-04, Q949: answered. `validate` now
+  reads a ring face's side of a plane square to its axis off its wire at each
+  circle, the way `holds.rs` does, and refuses two circles along one stored
+  plane that keep different sides with `AClosedEdgeIsWalkedAgainstItsSurface`
+  (`b4625fa8` traced it, `16ef0214` is the check in `validate.rs`, `346f8592`
+  the pins, merged as `45593a1c`).*
+- Two different planes square to the axis, one circle each, are refused. So is
+  one such plane stored twice, two ways. Where the planes cut the tube, as on a
+  washer's rounded rim between `z = ±h`, the band is told from its twin by the
+  pipe of the ring's own radius, which `intersect` names each circle by. Where
+  the planes rest on the tube, it is 243.4's rim, which Q104 holds.
+  *2026-10-06, Q950: answered where the planes cut the tube.
+  `what_a_ring_face_between_two_planes_holds` asks `intersect` whether two
+  planes square to the axis are one plane. One plane takes the rule above as it
+  stands; two take step 3, and then the side of the pipe of the ring's own
+  radius must name both circles (`e43dbc55`, pinned by
+  `a_washers_rounded_rim_holds_the_outer_band_between_its_planes_and_a_spools_waist_the_inner`
+  and `a_half_rings_wall_holds_its_half_with_one_circles_cap_stored_turned_round`).
+  `Model::validate` passes the outer and the inner band between `z = ±3` at
+  their one sound walk. The part of a ring in front of either plane, not both,
+  is still refused, and is Q1144.* *2026-10-06, Q1144: answered where each
+  circle is behind the other plane. For planes through the axis the face is the
+  part of the ring in front of either plane; for two planes square to it, the
+  ring less the band (`c4183211`, pinned by
+  `a_three_quarter_bends_wall_holds_the_three_quarters_between_its_caps_and_nothing_else`
+  and `a_grooved_rings_wall_holds_the_ring_less_the_band_the_groove_took`). One
+  circle in front of the other plane and one behind is still refused, Q1155.
+  `Model::validate` refuses the sound grooved ring, Q1153, and passes a ring
+  wall walked to keep the near side of both planes, Q1154.*
+  *2026-10-06, Q1153: answered. `Model::validate` now holds a ring face's two
+  circles round the axis to opposite ways round the tube, rather than reading
+  a corner off the other circle, and so it passes the sound grooved ring
+  (`a_grooved_rings_wall_holds_the_ring_less_the_band_the_groove_took`) and
+  refuses the ring wall walked to keep the near side of both planes, Q1154's
+  wall
+  (`a_bands_wall_walking_both_circles_the_same_way_round_the_tube_is_refused`).*
+- A wall whose two edges are one circle walked twice the same way round would
+  pass the side check here as it would for a plane through the axis. That is
+  Q790's question, not run for a plane square to the axis either.
+  *2026-10-06, Q790: answered. The same wall on `z = 0`, walked the same way
+  round twice, was read as a half too, and the check §377.3 puts back refuses
+  it (`ca9c8434`, pinned by
+  `a_wall_round_one_circle_round_the_axis_twice_the_same_way_is_refused`). This
+  closes Q951. The lane's probe, since removed, found `Model::validate`
+  refusing both such walls.*
+- §377.3's paragraph "One refusal is renamed" says this shape is refused at
+  step 1. It is answered now. §377 was outside this lane's write set.
+- `Model::validate` read a ring face's circle round the axis off the wrong
+  pair when the face across that circle was a pipe, a cone or a ball on the
+  same axis rather than a plane: `which_two_surfaces_a_run_is_between` puts
+  whichever curved face sorts first (a pipe, a cone and a ball each sort
+  before a ring) beside the plane, so a circle between a ring and a curved
+  partner never matched `[Torus, Plane]`, Q1153's band check was skipped, and
+  the side kept was read off the other circle's corner instead. It refused a
+  ring with its rim turned down to a pipe, and four other pieces of a ring
+  cut by a pipe, a cone or a ball on its axis. *2026-10-07, Q1173: answered.
+  `a_circle_round_the_axis` now also takes the face's own surface and returns
+  `Option<(Torus, Plane)>`, rather than reading the pair alone (`463e76b1`, a
+  one-ulp pin fix on top in `4cdda947`). Pinned in
+  `crates/rcad-topo/tests/a_ring_face_bounded_by_a_circle_on_a_coaxial_surface.rs`:
+  `intersect_names_no_crossing_of_a_ring_with_a_pipe_cone_or_ball_on_its_axis`,
+  `a_circle_named_only_by_the_ring_and_its_partner_is_refused_for_the_pair`,
+  `each_piece_walked_its_own_way_validates_and_holds_what_pappus_gives` and
+  `every_other_description_of_each_piece_is_refused`.*

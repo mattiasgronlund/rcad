@@ -134,8 +134,11 @@ gate_steps := "check-plugins \
     check-fuzz-triage-selftest \
     check-systemd-units \
     check-systemd-units-selftest \
+    check-triage-waits-for-the-night \
+    check-triage-waits-for-the-night-selftest \
     check-fuzz-yield-selftest \
     check-spend-selftest \
+    check-row-time-selftest \
     check-fmt \
     lint \
     test \
@@ -157,11 +160,21 @@ gate_steps := "check-plugins \
 # or split test then fails the gate of the lane that renamed it, not the land
 # gate after it. A test joins only when both its cost and its catches are scored
 # again, and leaves in the commit that fixes what it caught alone (§397.4).
-slow_tests := "rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_round_a_frustums_apex_answers_right \
-    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_round_a_pointed_cones_apex_answers_right \
-    rcad-step::whether_a_tolerant_policy_buys_anything_a_certified_one_does_not/no_tolerant_budget_reads_a_corpus_file_a_certified_policy_refuses \
-    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses \
-    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_steeper_plane_across_a_frustum_answers_right_or_refuses \
+slow_tests := "rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_four_round_a_frustums_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_four_turned_about_the_axis_round_a_frustums_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_six_round_a_frustums_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_six_turned_about_the_axis_round_a_frustums_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_four_round_a_pointed_cones_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_four_turned_about_the_axis_round_a_pointed_cones_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_six_round_a_pointed_cones_apex_answers_right \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_of_side_six_turned_about_the_axis_round_a_pointed_cones_apex_answers_right \
+    rcad-step::whether_a_tolerant_policy_buys_anything_a_certified_one_does_not/a_tolerant_budget_the_size_of_the_part_reads_no_corpus_file_a_certified_policy_refuses \
+    rcad-step::whether_a_tolerant_policy_buys_anything_a_certified_one_does_not/a_tolerant_budget_ten_thousand_parts_wide_reads_no_corpus_file_a_certified_policy_refuses \
+    rcad-step::whether_a_tolerant_policy_buys_anything_a_certified_one_does_not/an_absurd_tolerant_budget_reads_no_corpus_file_a_certified_policy_refuses \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_a_quarter_answers_right_or_refuses \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_three_eighths_answers_right_or_refuses \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_steeper_plane_at_a_lean_of_a_quarter_across_a_frustum_answers_right_or_refuses \
+    rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_steeper_plane_at_a_lean_of_three_eighths_across_a_frustum_answers_right_or_refuses \
     rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_every_rule_right \
     rcad-topo::whether_a_coarser_deflection_always_meshes/which_refusals_never_turned_into_a_mesh_anywhere_on_the_ladder \
     rcad-topo::whether_a_coarser_deflection_always_meshes/the_verdict_is_scoped_to_the_family_that_was_swept \
@@ -279,6 +292,7 @@ gate_reusable_steps := "check \
     check-systemd-units-selftest \
     check-fuzz-yield-selftest \
     check-spend-selftest \
+    check-row-time-selftest \
     check-fmt \
     lint \
     test \
@@ -2075,7 +2089,20 @@ check-fuzz-builds:
 # One fewer. `degenerate_curved_fuses.rs`'s wall lying on a bar's skin matched
 # its `Undecidable` and sent every other `Error` to `panic!`; that fuse now
 # answers every rule, and the test that replaced it has no match on a refusal.
-wildcard_arms := "97"
+#
+#     Q930's lane  97 -> 95
+#
+# Two fewer. `degenerate_curved_fuses.rs`'s block corner on a bar's wall and
+# block on a bar's cap each matched `TwoCurvesTouchWithoutCrossing` and sent
+# every other `Error` to `panic!`; the fold of a straight cut along a straight
+# crossing answers both, and the tests that replaced them match no refusal.
+#
+#     Q1272's lane  95 -> 96
+#
+# One more. `the_two_places_along_it` in `three_surfaces.rs` takes `A`'s sign,
+# which its caller has already certified as `Pos` or `Neg`, and names those
+# two; the arm for every other `Decision` is `unreachable!`.
+wildcard_arms := "96"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
@@ -2284,7 +2311,7 @@ check-wildcards-selftest:
 # Zero is a legitimate answer, and it is where this should end up: it says the
 # last gap somebody parked behind an `#[ignore]` has been closed, and
 # `test-ignored` then has nothing to run and says so.
-ignored_tests := "9"
+ignored_tests := "6"
 
 # An `#[ignore]`d test is a gap somebody parked, and this is what stops it being
 # forgotten.
@@ -3427,8 +3454,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "57" ]; then \
-        echo "found $n check-* recipes, expected 57"; \
+    if [ "$n" != "60" ]; then \
+        echo "found $n check-* recipes, expected 60"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -5678,8 +5705,9 @@ fuzz-overnight window="28800":
     # §90 then made it follow the last *green* commit, and that bought the same
     # staleness back in a smaller size: the night of 2026-09-21 fuzzed a commit
     # from before §182's fix and re-found that fix's family. Every morning's
-    # finding is replayed against `main` by `fuzz-triage` anyway, so a tip that
-    # nothing has read yet costs at most a finding that triage calls stale.
+    # finding is replayed against `main` by `fuzz-triage`, which
+    # `rcad-fuzz-triage.timer` runs at 08:30 (§410), so a tip that nothing has
+    # read yet costs at most a finding that triage calls stale.
     #
     # Deciding is separate from doing, in `fuzz-watermark` below, so that what
     # the night would move to can be asked without moving anything.
@@ -6224,7 +6252,7 @@ fuzz-overnight window="28800":
 # not a question the night needs answered — and waiting for it cost the night of
 # 2026-09-21 its freshness: it fuzzed a commit from before §182's fix. A finding
 # on a tip that turns out broken is replayed against `main` by `fuzz-triage`,
-# which is the check that was always doing the work.
+# which is the check that does the work, every morning at 08:30 (§410).
 #
 # Two conditions, each of them a way the night could otherwise go wrong:
 #
@@ -8085,6 +8113,10 @@ check-gate-fresh-cleanup-selftest:
 
 # The morning after a night's fuzzing, in one call.
 #
+# **`rcad-fuzz-triage.timer` runs it at 08:30, with no arguments** (§410).
+# Before that timer a night was replayed when somebody remembered to, and of
+# the eighteen nights up to 2026-10-05 that left inputs, one had been.
+#
 # What this replaces is four or five calls that each had to read a directory
 # somebody else wrote: the `latest` line, then the night's directory, then the
 # artifacts under it, then the decoder on each one, then whether any of it still
@@ -8275,9 +8307,12 @@ fuzz-triage night="" against="main":
 
     tellable=$(grep -c . <"$manifest" || true)
     echo
+    # `cargo` by name and not through `mise exec`: the 08:30 timer has no `mise`
+    # on its PATH, and the `mise exec -- just` that started this recipe has
+    # already set what mise.toml's `[env]` adds. `check-fuzz-triage-selftest`.
     decode=(cargo run -q --profile test -p rcad-fuzz-explain -- --triage)
-    echo "\$ mise exec -- ${decode[*]}   (replaying $tellable input(s) in one process)"
-    (cd "$work" && mise exec -- "${decode[@]}") <"$manifest" >"$report"
+    echo "\$ ${decode[*]}   (replaying $tellable input(s) in one process)"
+    (cd "$work" && "${decode[@]}") <"$manifest" >"$report"
     triage_status=$?
     if [ "$triage_status" -ne 0 ]; then
         echo "fuzz-triage: the decoder itself failed (exit $triage_status), so nothing was replayed"
@@ -8389,6 +8424,14 @@ fuzz-promote target file name="":
 # recipe's parse and not about which tree it borrows: pointing it at `main` from
 # a lane would have every gate build a second worktree of the workspace to
 # decode a fixture of twenty junk bytes.
+#
+# **Every arm runs with a `mise` on its PATH that fails as a missing one does.**
+# `rcad-fuzz-triage.service` has no `mise` on its PATH: it starts `mise` by
+# absolute path, and `mise exec` does not add its own directory to the PATH it
+# passes on. The recipe called `mise exec` a second time, inside itself, and both
+# of the timer's first two mornings, 2026-10-07 and 10-08, ended on `mise:
+# command not found` with nothing replayed. Every arm passed on a session's
+# PATH, so none of them could have caught it.
 [private]
 check-fuzz-triage-selftest:
     #!/usr/bin/env bash
@@ -8415,7 +8458,12 @@ check-fuzz-triage-selftest:
         echo "--- got ---"; echo "$got"
         exit 1
     }
-    triage() { RCAD_FUZZ_LOGS="$logs" just fuzz-triage "$1" HEAD 2>&1; }
+    no_mise="$dir/no-mise"
+    mkdir -p "$no_mise"
+    printf '#!/bin/sh\necho "mise: command not found (the 08:30 timer has no mise on its PATH)" >&2\nexit 127\n' \
+        >"$no_mise/mise"
+    chmod +x "$no_mise/mise"
+    triage() { PATH="$no_mise:$PATH" RCAD_FUZZ_LOGS="$logs" just fuzz-triage "$1" HEAD 2>&1; }
 
     verdicts="$night/fuzz-triage-verdicts.tsv"
     header=$(printf 'target\tfiles\tstill_fails\tsample\tgroup')
@@ -8755,6 +8803,209 @@ check-systemd-units-selftest:
 
     [ "$failed" -eq 0 ]
 
+# `fuzz-triage` with no argument replays the night `latest` names, and `latest`
+# is written when a night finishes. A replay that starts while the night still
+# runs reads the night before instead, and every morning's verdicts are then a
+# day behind with nothing to say so. This holds the triage timer's hour clear of
+# the night's hard stop, and its own backstop clear of the next night (§410).
+#
+# **The hard stop is a sum, read out of the files:** the timer's hour, plus its
+# `AccuracySec=` (systemd's one minute when unset) and `RandomizedDelaySec=`,
+# plus the service's `TimeoutStartSec=` and `TimeoutStopSec=`. The replay's end
+# is the same sum over its own pair. Both are counted from the night's start, so
+# a night that crosses midnight needs no case of its own.
+#
+# **What it cannot read, it refuses.** An `OnCalendar=` that is not one time
+# every day, a span in a unit it does not know, a missing timeout, a key written
+# twice: each fails naming the line, because a guess here is a pass that holds
+# nothing. So does `Persistent=true` on either timer, since a catch-up run fires
+# at boot, at an hour no line here says.
+[doc("The morning's fuzz triage timer fires after the night's hard stop and ends before the next night.")]
+check-triage-waits-for-the-night tracked="tooling/systemd":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # What `key=` is set to in a unit file, or nothing. systemd adds up a key
+    # like `OnCalendar=` written twice and keeps the last of most others, so
+    # reading one of them would be a guess either way.
+    value() {
+        local file=$1 key=$2 count
+        count=$(grep -cE "^[[:space:]]*$key[[:space:]]*=" "$file" || true)
+        [ "$count" -le 1 ] || { echo "$file sets $key= $count times, and this reads one"; exit 1; }
+        sed -nE "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*(.*[^[:space:]])?[[:space:]]*\$/\1/p" "$file"
+    }
+
+    # A span in seconds: a bare number, or a number of s, min or h. systemd
+    # reads `8h 10min` and `infinity` too, and this refuses both.
+    seconds() {
+        local file=$1 key=$2 default=${3:-} span
+        span=$(value "$file" "$key") || { echo "$span"; exit 1; }
+        if [ -z "$span" ]; then
+            [ -n "$default" ] || { echo "$file sets no $key=, and this adds up only what is written"; exit 1; }
+            span=$default
+        fi
+        [[ "$span" =~ ^([0-9]+)(s|min|h)?$ ]] \
+            || { echo "$file: $key=$span is a span this cannot read; write seconds, or one number of s, min or h"; exit 1; }
+        case "${BASH_REMATCH[2]}" in
+            "" | s) echo $((10#${BASH_REMATCH[1]})) ;;
+            min) echo $((10#${BASH_REMATCH[1]} * 60)) ;;
+            h) echo $((10#${BASH_REMATCH[1]} * 3600)) ;;
+        esac
+    }
+
+    # Seconds after midnight, for the one `OnCalendar=` form that fires once a day.
+    at() {
+        local file=$1 cal daily='^\*-\*-\* ([0-9]{2}):([0-9]{2})(:([0-9]{2}))?$'
+        cal=$(value "$file" OnCalendar) || { echo "$cal"; exit 1; }
+        [[ "$cal" =~ $daily ]] \
+            || { echo "$file: OnCalendar=$cal is not one time every day (*-*-* HH:MM:SS), and this reads no other form"; exit 1; }
+        echo $((10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[4]:-0}))
+    }
+
+    # The longest a run can last past its timer's hour: how late the timer may
+    # fire, then how long the service may take to start and to stop.
+    runs_for() {
+        local unit=$1 late spread start stop
+        late=$(seconds "$unit.timer" AccuracySec 1min) || { echo "$late"; exit 1; }
+        spread=$(seconds "$unit.timer" RandomizedDelaySec 0) || { echo "$spread"; exit 1; }
+        start=$(seconds "$unit.service" TimeoutStartSec) || { echo "$start"; exit 1; }
+        stop=$(seconds "$unit.service" TimeoutStopSec) || { echo "$stop"; exit 1; }
+        echo $((late + spread + start + stop))
+    }
+
+    clock() {
+        printf '%02d:%02d:%02d' $(($1 / 3600 % 24)) $(($1 / 60 % 60)) $(($1 % 60))
+    }
+
+    night="{{tracked}}/rcad-fuzz"
+    triage="{{tracked}}/rcad-fuzz-triage"
+    for unit in "$night.service" "$night.timer" "$triage.service" "$triage.timer"; do
+        [ -f "$unit" ] || { echo "$unit is not there, so there is no morning to hold clear of the night"; exit 1; }
+    done
+
+    for timer in "$night.timer" "$triage.timer"; do
+        persistent=$(value "$timer" Persistent) || { echo "$persistent"; exit 1; }
+        case "$persistent" in
+            "" | 0 | no | false | off) ;;
+            *)
+                echo "$timer sets Persistent=$persistent: a catch-up run fires at boot, whatever the hour, and no sum here bounds it"
+                exit 1
+                ;;
+        esac
+    done
+
+    night_at=$(at "$night.timer") || { echo "$night_at"; exit 1; }
+    night_end=$(runs_for "$night") || { echo "$night_end"; exit 1; }
+    triage_clock=$(at "$triage.timer") || { echo "$triage_clock"; exit 1; }
+    triage_runs=$(runs_for "$triage") || { echo "$triage_runs"; exit 1; }
+    triage_at=$(( (triage_clock - night_at + 86400) % 86400 ))
+    triage_end=$((triage_at + triage_runs))
+
+    if [ "$triage_at" -lt "$night_end" ]; then
+        echo "the night can run until $(clock $((night_at + night_end))), and the triage timer fires at $(clock "$triage_clock")"
+        echo "a replay started then reads the night before's latest, so every morning's verdicts would be a day behind"
+        exit 1
+    fi
+    if [ "$triage_end" -gt 86400 ]; then
+        echo "the triage can run until $(clock $((night_at + triage_end))), past the next night's start at $(clock "$night_at")"
+        exit 1
+    fi
+    echo "the triage timer fires at $(clock "$triage_clock"), after the night's hard stop at $(clock $((night_at + night_end))), and is stopped by $(clock $((night_at + triage_end))), before the next night at $(clock "$night_at")"
+
+# Pins `check-triage-waits-for-the-night` against unit files this writes itself,
+# so each way the morning can land on the night is tried without touching the
+# real timers. Each arm asserts the sentence its case produces, for the reason
+# `check-systemd-units-selftest` gives: an always-failing check passes every
+# failing arm, and only the passing arms catch it.
+[private]
+check-triage-waits-for-the-night-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    work=$(mktemp -d -- "${TMPDIR:-/tmp}/rcad-triage-waits-selftest.XXXXXX")
+    trap 'rm -rf -- "$work"' EXIT
+    tracked="$work/tracked"
+    mkdir -p "$tracked"
+
+    units() {
+        printf '[Timer]\nOnCalendar=*-*-* 00:10:00\nPersistent=false\nAccuracySec=1min\n' >"$tracked/rcad-fuzz.timer"
+        printf '[Service]\nTimeoutStartSec=29400\nTimeoutStopSec=120\n' >"$tracked/rcad-fuzz.service"
+        printf '[Timer]\nOnCalendar=*-*-* 08:30:00\nPersistent=false\n' >"$tracked/rcad-fuzz-triage.timer"
+        printf '[Service]\nTimeoutStartSec=14400\nTimeoutStopSec=120\n' >"$tracked/rcad-fuzz-triage.service"
+    }
+
+    failed=0
+    check() {
+        local name=$1 want_rc=$2 needle=$3
+        local out rc=0
+        out=$({{ just_executable() }} check-triage-waits-for-the-night "$tracked" 2>&1) || rc=$?
+        if [ "$rc" -ne "$want_rc" ]; then
+            echo "check-triage-waits-for-the-night drifted from its own fixtures: $name wanted exit $want_rc, got $rc"
+            sed 's/^/    /' <<<"$out"
+            failed=1
+            return
+        fi
+        if ! grep -qF -- "$needle" <<<"$out"; then
+            echo "check-triage-waits-for-the-night drifted from its own fixtures: $name did not say \"$needle\""
+            sed 's/^/    /' <<<"$out"
+            failed=1
+        fi
+    }
+
+    # One: the units as tracked. 00:10, plus a minute of AccuracySec, plus
+    # 29400 s and 120 s, is 08:23:00. The triage timer sets no AccuracySec, so
+    # its minute is systemd's default: 08:30 plus 60, 14400 and 120 s is 12:33.
+    units
+    check "08:30" 0 "fires at 08:30:00, after the night's hard stop at 08:23:00, and is stopped by 12:33:00"
+
+    # Two: inside the night's backstop, which is the morning a day behind.
+    sed -i 's/08:30:00/08:15:00/' "$tracked/rcad-fuzz-triage.timer"
+    check "08:15 names the night's stop" 1 "the night can run until 08:23:00"
+    check "08:15 names its own hour" 1 "the triage timer fires at 08:15:00"
+
+    # Three: one minute is the difference. 08:22 is before the stop that the
+    # AccuracySec minute moves to 08:23; a sum that left it out would pass this.
+    units
+    sed -i 's/08:30:00/08:22:00/' "$tracked/rcad-fuzz-triage.timer"
+    check "08:22 is inside the AccuracySec minute" 1 "the night can run until 08:23:00"
+
+    # Four: a backstop that runs into the next night.
+    units
+    sed -i 's/TimeoutStartSec=14400/TimeoutStartSec=16h/' "$tracked/rcad-fuzz-triage.service"
+    check "a sixteen-hour backstop" 1 "past the next night's start at 00:10:00"
+
+    # Five: a night that crosses midnight is counted from its own start. 22:00
+    # plus 29580 s is 06:13 the next day, and 06:30 is after it.
+    units
+    sed -i 's/00:10:00/22:00:00/' "$tracked/rcad-fuzz.timer"
+    sed -i 's/08:30:00/06:30:00/' "$tracked/rcad-fuzz-triage.timer"
+    check "a night across midnight" 0 "after the night's hard stop at 06:13:00"
+
+    # Six: forms this does not read are refused, not guessed at.
+    units
+    sed -i 's/^OnCalendar=.*/OnCalendar=daily/' "$tracked/rcad-fuzz-triage.timer"
+    check "OnCalendar=daily" 1 "OnCalendar=daily is not one time every day"
+    units
+    sed -i 's/TimeoutStartSec=14400/TimeoutStartSec=infinity/' "$tracked/rcad-fuzz-triage.service"
+    check "an unbounded triage" 1 "TimeoutStartSec=infinity is a span this cannot read"
+    units
+    sed -i '/TimeoutStopSec/d' "$tracked/rcad-fuzz.service"
+    check "a missing timeout" 1 "sets no TimeoutStopSec="
+    units
+    printf 'OnCalendar=*-*-* 04:00:00\n' >>"$tracked/rcad-fuzz-triage.timer"
+    check "a second OnCalendar" 1 "sets OnCalendar= 2 times"
+
+    # Seven: a catch-up run starts at boot, at no hour the files say.
+    units
+    sed -i 's/Persistent=false/Persistent=true/' "$tracked/rcad-fuzz-triage.timer"
+    check "Persistent=true" 1 "sets Persistent=true"
+
+    # Eight: no triage pair at all, which is the tree before §410.
+    units
+    rm "$tracked/rcad-fuzz-triage.timer"
+    check "no triage timer" 1 "rcad-fuzz-triage.timer is not there"
+
+    [ "$failed" -eq 0 ]
+
 # Q146: which target finds the most per core-hour, read straight off the logs
 # `fuzz-overnight` already writes, with no new state of its own kept anywhere.
 # `docs/decisions.md` §265 is the analysis this reproduces; §265.4's coverage
@@ -8762,21 +9013,12 @@ check-systemd-units-selftest:
 # the house shape. `tooling/fuzz-yield/log_stats.py` holds the arithmetic for
 # one log — runs, coverage at start/30m/end, the hour it last rose — kept in
 # its own file because that half a plain Python test can cover without a
-# fixture night on disk. This recipe holds the shell around it: which nights,
-# which files, and how Q147's verdicts fold in.
-#
-# **`$night/artifacts/<target>/` is a cumulative copy, not that night's own
-# finds.** `fuzz-overnight`'s `cp -Rn` stamps every file's mtime with whenever
-# that night's copy-out ran, carry-over and new find alike, so mtime cannot
-# tell them apart. A night's "new files" here is instead a filename diff
-# against the nearest earlier night on disk that has any artifacts at all —
-# the one thing about a find that survives being copied forward every night
-# since.
-#
-# **A night with no `fuzz-triage-verdicts.tsv` says "not triaged", never
-# `0`.** `just fuzz-triage` (Q147) is what writes that file, and a night it has
-# not reached yet has told this recipe nothing, which is a different answer
-# from "nothing here is still failing".
+# fixture night on disk. `tooling/fuzz-yield/nights.py` holds which artifact
+# files are new on a night and how Q147's verdicts fold in, and says why each
+# rule is the one it is; the queue page reads a night through the same two
+# files, so the page and this report cannot disagree about it. This recipe
+# holds the shell around them: which nights, which files, and whether the code
+# changed.
 #
 # **Whether a target's code changed since the night before** (Q232,
 # `docs/decisions.md` §298.2) is answered from the *build* worktree, not the
@@ -8806,6 +9048,7 @@ fuzz-yield from="" to="":
     from='{{ from }}'
     to='{{ to }}'
     stats='{{ justfile_directory() }}/tooling/fuzz-yield/log_stats.py'
+    nights_py='{{ justfile_directory() }}/tooling/fuzz-yield/nights.py'
     nightly_worktree="${RCAD_NIGHTLY_FUZZ_WORKTREE:-/home/mattias/git/mattiasgronlund/rcad-nightly-fuzz}"
 
     # `docs/decisions.md` §298.1's table, copied by hand: add a target or a new
@@ -8908,28 +9151,6 @@ fuzz-yield from="" to="":
         exit 0
     fi
 
-    artifacts_dir() {
-        local night="$1" target="$2" candidate
-        candidate="$root/$night/artifacts/$target"
-        [ -d "$candidate" ] && { echo "$candidate"; return 0; }
-        candidate="$root/artifacts-rescued-$night/$target"
-        [ -d "$candidate" ] && { echo "$candidate"; return 0; }
-        return 1
-    }
-
-    # Walks the whole list on disk, not just `[from, to]`: the nearest earlier
-    # night with anything to diff against can sit outside the range asked for.
-    nearest_earlier() {
-        local night="$1" target="$2" i idx=-1
-        for i in "${!nights[@]}"; do
-            [ "${nights[$i]}" = "$night" ] && { idx=$i; break; }
-        done
-        for ((i = idx - 1; i >= 0; i--)); do
-            artifacts_dir "${nights[$i]}" "$target" >/dev/null && { echo "${nights[$i]}"; return 0; }
-        done
-        return 1
-    }
-
     for night in "${nights[@]}"; do
         [ -n "$from" ] && [[ "$night" < "$from" ]] && continue
         [ -n "$to" ] && [[ "$night" > "$to" ]] && continue
@@ -8944,17 +9165,15 @@ fuzz-yield from="" to="":
             continue
         fi
 
-        verdicts="$night_dir/fuzz-triage-verdicts.tsv"
         for log in "${logs[@]}"; do
-            if grep -q ': skipped,' "$log"; then
-                echo "  $(basename "$log" .log)"
-                echo "    status: skipped — no time left in the window"
-                continue
-            fi
-
             line=$(python3 "$stats" "$log")
             IFS=$'\t' read -r status target fork window_s runs cov_start cov_30 cov_end rise_s <<<"$line"
             case "$status" in
+                SKIPPED)
+                    echo "  $(basename "$log" .log)"
+                    echo "    status: skipped — no time left in the window"
+                    continue
+                    ;;
                 NOLAUNCH)
                     echo "  $(basename "$log" .log)"
                     echo "    status: never launched, no 'Running \`...\`' line in this log"
@@ -8981,31 +9200,8 @@ fuzz-yield from="" to="":
             echo "    coverage: $cov_start at start, $cov_30 at 30m, $cov_end at end"
             awk -v r="$rise_s" 'BEGIN { printf "    last rose: hour %.1f\n", r / 3600 }'
             echo "    code changed since the previous night: $(changed_status "$night" "$target")"
-
-            if artifacts=$(artifacts_dir "$night" "$target"); then
-                if prev=$(nearest_earlier "$night" "$target"); then
-                    prev_dir=$(artifacts_dir "$prev" "$target")
-                    new=$(comm -13 <(ls "$prev_dir" | sort) <(ls "$artifacts" | sort) \
-                        | sed -E 's/-[0-9a-f]{40}$//' | sort | uniq -c)
-                    if [ -z "$new" ]; then
-                        echo "    new files: none since $prev"
-                    else
-                        echo "    new files since $prev: $(awk '{printf "%s%s %s", sep, $1, $2; sep=", "}' <<<"$new")"
-                    fi
-                else
-                    n=$(find "$artifacts" -maxdepth 1 -type f | wc -l)
-                    echo "    new files: no earlier night on disk to diff against — counting all $n as new, not tonight's own find"
-                fi
-            else
-                echo "    new files: no artifacts directory for $target under $night"
-            fi
-
-            if [ -f "$verdicts" ]; then
-                faults=$(awk -F'\t' -v t="$target" 'NR > 1 && $1 == t && $3 == "yes"' "$verdicts" | wc -l)
-                echo "    faults: $faults distinct, still failing on main"
-            else
-                echo "    faults: night not triaged"
-            fi
+            new_files_and_faults=$(python3 "$nights_py" "$root" "$night" "$target") || exit 1
+            sed 's/^/    /' <<<"$new_files_and_faults"
         done
     done
 
@@ -10266,7 +10462,9 @@ queue_running := ""
 # Where `queue-page` writes, so a selftest can point it at a scratch directory
 # instead of Mattias's real page (§230, §263). `check-queue-page-selftest` and
 # `check-queue-api-selftest` both set `RCAD_QUEUE_PAGE_DIR`, and the gate must
-# never write `~/rcad-queue-page` — the two facts are the same one.
+# never write `~/rcad-queue-page` — the two facts are the same one. Both set
+# `RCAD_FUZZ_LOGS` too, so the page they render reads a fixture night or none,
+# never whatever `~/rcad-fuzz-logs` holds on the machine running the gate.
 queue_page_dir := env_var_or_default("RCAD_QUEUE_PAGE_DIR", env_var("HOME") / "rcad-queue-page")
 
 # **One parse, and both readers use it.** `queue` decides what to dispatch and
@@ -10315,15 +10513,17 @@ _queue-rows file:
 # **The order comes from the tier field, not from where a row sits.**
 # `check-queue` makes the two agree, but the fill does not lean on that having
 # run, and its fixtures put a Tier 3 block above Tier 2.5, and Tier 2.2 above
-# Tier 2, to show it. The tiers go 1, 2, 2.2, 2.5, 3, 4 (§307), and a row whose
-# tier is none of them is refused rather than left out of the fill.
+# Tier 2, to show it. The tiers go 1, 2, 2.2, 2.5, 3, 4, 5 (§307, §403), and a
+# row whose tier is none of them is refused rather than left out of the fill.
 #
-# **Tier 1 goes in class order** (§352.3). A tier 1 row's description may start
-# with a class: how bad the defect is, then how likely a user's model meets it.
-# The fill walks wrong/A, wrong/B, wrong/C, crash/A to C, refuses/A to C, then
-# the rows with no class, then every D, and the file's order only breaks ties
-# inside one class. The line order cannot carry it: the merge driver keeps the
-# frame side's order within a block, so a merge across a re-tag would undo it.
+# **Tiers 1 and 5 go in class order** (§352.3, §403.3). A defect's description
+# may start with a class: how bad the defect is, then how likely a user's model
+# meets it. A and B are tier 1 and C and D tier 5, so the fill walks tier 1 as
+# wrong/A, wrong/B, crash/A, crash/B, refuses/A, refuses/B, then the rows with
+# no class, and tier 5 as wrong/C, crash/C, refuses/C, then the same for D. The
+# file's order only breaks ties inside one class. The line order cannot carry
+# it: the merge driver keeps the frame side's order within a block, so a merge
+# across a re-tag would undo it.
 #
 # **Rows tagged `small` go out in bundles** (§352.4): one lane takes up to
 # `queue_bundle` of them, and its line is `take Q1,Q2 (a bundle of 2 small rows,
@@ -10345,7 +10545,8 @@ _queue-rows file:
 # `done`, `drop`, `park`, `after`, `rank`, `tier`, `tag` and `pick`, with `show`
 # and `running` to read. `tier` moves an open row to another tier and, like
 # `add`, writes that tier's heading when the file has none (§307). `tag` sets,
-# replaces or removes a row's class or `small` (§352.2).
+# replaces or removes a row's class or `small` (§352.2), and a class moves the
+# row to the tier it names (§403.4).
 # Each takes the lock on the claims file in the git common directory, checks the
 # file as it would be with `check-queue`, and writes only if that passes. `just
 # queue take` with no arguments, or any verb given the wrong ones, prints the
@@ -10409,7 +10610,7 @@ queue mode="" *args:
         -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' '
         BEGIN {
             FS = "\037"
-            nt = split("1 2 2.2 2.5 3 4", tiers, " ")
+            nt = split("1 2 2.2 2.5 3 4 5", tiers, " ")
             for (t = 1; t <= nt; t++) known[tiers[t]] = 1
             nc = split("wrong/A wrong/B wrong/C crash/A crash/B crash/C refuses/A refuses/B refuses/C - wrong/D crash/D refuses/D", classes, " ")
             for (k = 1; k <= nc; k++) if (classes[k] != "-") isclass[classes[k]] = 1
@@ -10427,7 +10628,7 @@ queue mode="" *args:
             ln[r] = $2; id[r] = $5; tier[r] = $6; st[r] = $7; ws[r] = $9; raw[r] = $11
             at[$5] = r
             split($10, word, " ")
-            cl[r] = ($6 == "1" && (word[1] in isclass)) ? word[1] : "-"
+            cl[r] = (($6 == "1" || $6 == "5") && (word[1] in isclass)) ? word[1] : "-"
             small[r] = (word[1] == "small")
         }
         END {
@@ -10532,15 +10733,15 @@ queue mode="" *args:
                 if (kind[i] == "closedelsewhere") line = line (line == "" ? "" : ", ") id[i] " (" cwhere[i] ")"
             print "closed elsewhere: " (line == "" ? "none" : line)
             for (i = 1; i <= r; i++) {
-                if (tier[i] != "1" || kind[i] == "parked" || kind[i] == "closed" || kind[i] == "closedelsewhere") continue
+                if (kind[i] == "parked" || kind[i] == "closed" || kind[i] == "closedelsewhere") continue
                 if (cl[i] ~ /\/[AB]$/) { ab++; abof[substr(cl[i], 1, index(cl[i], "/") - 1)]++ }
                 else if (cl[i] ~ /\/C$/) inc++
                 else if (cl[i] ~ /\/D$/) ind++
-                else unclassed++
+                else if (tier[i] == "1") unclassed++
             }
             for (x = 1; x <= w; x++) if (small[walk[x]]) smallready++
-            printf "tier 1, open and not parked: %d in A or B (%d wrong, %d crash, %d refuses), %d in C, %d in D, %d with no class; %d small row%s ready, and a bundle is %d\n", \
-                ab, abof["wrong"], abof["crash"], abof["refuses"], inc, ind, unclassed, smallready, (smallready == 1 ? "" : "s"), bundle
+            printf "tier 1, open and not parked: %d in A or B (%d wrong, %d crash, %d refuses), %d with no class; tier 5: %d in C, %d in D; %d small row%s ready, and a bundle is %d\n", \
+                ab, abof["wrong"], abof["crash"], abof["refuses"], unclassed, inc, ind, smallready, (smallready == 1 ? "" : "s"), bundle
         }
         function refuse(line, msg) {
             printf "queue: %s:%s: cannot read %s; just check-queue says what is wrong\n", file, line, msg > "/dev/stderr"
@@ -10601,12 +10802,16 @@ queue mode="" *args:
 # that writes, and so does `ff-main`; run by hand, it just re-renders now.
 #
 # The logic is `tooling/queue-page/render.py`; this only hands it the
-# directory to write. The renderer writes through a temporary file and a
-# rename on its own — see `write_atomically` there — so this recipe does not
-# repeat that.
-[doc("Render docs/queue.md's history and current state as one page, to RCAD_QUEUE_PAGE_DIR or ~/rcad-queue-page.")]
+# directory to write and `{{ fuzz_log_root }}`, which the page's fuzzing
+# section reads the overnight fuzz job's nights from. The renderer writes
+# through a temporary file and a rename on its own — see `write_atomically`
+# there — so this recipe does not repeat that.
+#
+# The fuzzing section is only as fresh as the last render: the page re-renders
+# on a queue write, `ff-main` or this recipe, not when a fuzz night ends.
+[doc("Render docs/queue.md's history, current state and fuzz nights as one page, to RCAD_QUEUE_PAGE_DIR or ~/rcad-queue-page.")]
 queue-page:
-    @python3 '{{ justfile_directory() }}/tooling/queue-page/render.py' '{{ queue_page_dir }}'
+    @python3 '{{ justfile_directory() }}/tooling/queue-page/render.py' '{{ queue_page_dir }}' '{{ fuzz_log_root }}'
 
 # Renders a scratch repository's `docs/queue.md` history into a scratch
 # directory and checks both charts' counts, by commit, against a count taken
@@ -10616,10 +10821,22 @@ queue-page:
 #
 # Three commits are enough to move every count `tally()` tracks at least once:
 # an open row closing, a row parking, and a tier gaining and losing a row. The
+# last also opens a row in tiers 2.2 and 5, and the render starts from a cache
+# holding the last commit's tally as a five-tier renderer wrote it, as the real
+# page's cache did when tiers 2.2 and 5 reached the page (§403.8). The
 # renderer's `.history-cache.json` holds one tally per commit sha verbatim, so
 # reading it back is reading the render's real output, not recomputing it.
+#
+# The fuzzing section reads a fixture log root with one night of each kind the
+# table tells apart: a finished night with its first artifacts (09-10), a build
+# that failed (09-11), no directory at all (09-12), a triaged night with new
+# finds, carried-over ones and a skipped log (09-13), and an unfinished newest
+# night that `latest` does not name yet (09-14). Every expected cell is worked
+# out by hand from the fixture logs. A second render then checks the fuzz
+# cache both ways: a log left alone is served from it, a log that grew is read
+# again.
 [private]
-[doc("queue-page's two charts, checked against a hand count of a scratch repository's own commits.")]
+[doc("queue-page's two charts and fuzzing section, checked against hand counts of a scratch repository and fixture fuzz nights.")]
 check-queue-page-selftest:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -10731,6 +10948,12 @@ check-queue-page-selftest:
     ```
     ```
 
+    ## Tier 2.2
+
+    ```
+    Q5  2.2  todo  opus  docs/e.md  a tier 2.2 row §307
+    ```
+
     ## Tier 2.5
 
     ```
@@ -10746,6 +10969,12 @@ check-queue-page-selftest:
     ```
     ```
 
+    ## Tier 5
+
+    ```
+    Q6  5  todo  opus  docs/f.md  wrong/C a tier 5 row §403
+    ```
+
     ## Closed
 
     ```
@@ -10754,11 +10983,50 @@ check-queue-page-selftest:
     ```
     MD
     g add docs/queue.md
-    g commit -q -m "commit C: Q3 closes, Q4 parks in tier 1"
+    g commit -q -m "commit C: Q3 closes, Q4 parks in tier 1, Q5 and Q6 open in tiers 2.2 and 5"
     sha_c=$(g rev-parse HEAD)
 
-    RCAD_QUEUE_PAGE_DIR="$out" "$j" --justfile '{{ justfile() }}' --working-directory "$hub" queue-page \
-        || fail "queue-page failed to render the scratch history"
+    mkdir -p "$out"
+    jq -n --arg sha "$sha_c" '{($sha): {"by_tier":{"1":1,"2":0,"2.5":0,"3":0,"4":0},"parked":3,"closed":2}}' \
+        > "$out/.history-cache.json" || fail "could not write the five-tier cache"
+
+    fuzz="$root/fuzz-logs"
+    running() {
+        printf '     Running `target/release/%s -artifact_prefix=/x/ -max_total_time=%s -fork=%s /corpus`\n' "$1" "$3" "$2"
+    }
+    run_line() {
+        printf '#%s: cov: %s ft: 1 corp: 1 exec/s: 1 oom/timeout/crash: 0/0/0 time: %ss\n' "$1" "$2" "$3"
+    }
+    mkdir -p "$fuzz/2026-09-10/artifacts/demo_target" "$fuzz/2026-09-11" \
+        "$fuzz/2026-09-13/artifacts/demo_target" "$fuzz/2026-09-14"
+    { running demo_target 4 28800; run_line 1000 500 0; run_line 2000 600 1800; run_line 5000 900 28800; } \
+        > "$fuzz/2026-09-10/fuzz-demo.log"
+    printf 'error: the build failed\n' > "$fuzz/2026-09-11/build.log"
+    { running demo_target 2 3600; run_line 100 900 0; run_line 200 950 1800; run_line 1234567 1000 3600; } \
+        > "$fuzz/2026-09-13/fuzz-demo.log"
+    printf 'fuzz-skip: skipped, -42 s left in the window\n' > "$fuzz/2026-09-13/fuzz-skip.log"
+    { running demo_target 1 60; run_line 10 1000 0; run_line 20 1100 60; } > "$fuzz/2026-09-14/fuzz-demo.log"
+    running ghost_target 1 60 > "$fuzz/2026-09-14/fuzz-nodata.log"
+    for name in crash-deadbeefdeadbeefdeadbeefdeadbeefdeadbeef timeout-cafebabecafebabecafebabecafebabecafebabe; do
+        printf x > "$fuzz/2026-09-10/artifacts/demo_target/$name"
+        printf x > "$fuzz/2026-09-13/artifacts/demo_target/$name"
+    done
+    printf x > "$fuzz/2026-09-13/artifacts/demo_target/crash-beadfeedbeadfeedbeadfeedbeadfeedbeadfeed"
+    printf x > "$fuzz/2026-09-13/artifacts/demo_target/slow-unit-c0ffeec0c0ffeec0c0ffeec0c0ffeec0c0ffeec0"
+    {
+        printf 'target\tfiles\tstill_fails\tsample\tgroup\n'
+        printf 'demo_target\t2\tyes\tsample-a\tpanic-a\n'
+        printf 'demo_target\t1\tyes\tsample-d\tpanic-d\n'
+        printf 'demo_target\t1\tno\tsample-b\tpanic-b\n'
+        printf 'ghost_target\t1\tyes\tsample-c\tpanic-c\n'
+    } > "$fuzz/2026-09-13/fuzz-triage-verdicts.tsv"
+    printf '2026-09-13 08:15  abc1234 (0 days old, 0 behind main)  2 targets, nothing found  %s/2026-09-13\n' "$fuzz" \
+        > "$fuzz/latest"
+
+    render() {
+        RCAD_QUEUE_PAGE_DIR="$out" RCAD_FUZZ_LOGS="$fuzz" "$j" --justfile '{{ justfile() }}' --working-directory "$hub" queue-page
+    }
+    render || fail "queue-page failed to render the scratch history"
     [ -f "$out/index.html" ] || fail "queue-page did not write index.html"
     [ -f "$out/.history-cache.json" ] || fail "queue-page did not write .history-cache.json"
 
@@ -10767,19 +11035,55 @@ check-queue-page-selftest:
         canon=$(jq -cS -n "$2")
         [ "$got" = "$canon" ] || fail "commit $1: tally is $got, expected $canon"
     }
-    expect_tally "$sha_a" '{"by_tier":{"1":2,"2":0,"2.5":0,"3":0,"4":0},"parked":0,"closed":0}'
-    expect_tally "$sha_b" '{"by_tier":{"1":1,"2":1,"2.5":0,"3":0,"4":0},"parked":0,"closed":1}'
-    expect_tally "$sha_c" '{"by_tier":{"1":1,"2":0,"2.5":0,"3":0,"4":0},"parked":1,"closed":2}'
+    expect_tally "$sha_a" '{"by_tier":{"1":2,"2":0,"2.2":0,"2.5":0,"3":0,"4":0,"5":0},"parked":0,"closed":0}'
+    expect_tally "$sha_b" '{"by_tier":{"1":1,"2":1,"2.2":0,"2.5":0,"3":0,"4":0,"5":0},"parked":0,"closed":1}'
+    expect_tally "$sha_c" '{"by_tier":{"1":1,"2":0,"2.2":1,"2.5":0,"3":0,"4":0,"5":1},"parked":1,"closed":2}'
 
     grep -q '3 commits' "$out/index.html" || fail "the page does not say 3 commits, so it did not walk all three"
     grep -q 'id="qp-by-tier"' "$out/index.html" || fail "the by-tier chart is missing from the page"
     grep -q 'id="qp-progress"' "$out/index.html" || fail "the progress chart is missing from the page"
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits"
+    grep -q '<h3>Tier 2.2</h3><ul><li><code>Q5</code>' "$out/index.html" || fail "the ready list leaves out tier 2.2's Q5"
+    grep -q '<h3>Tier 5</h3><ul><li><code>Q6</code>' "$out/index.html" || fail "the ready list leaves out tier 5's Q6"
+
+    has() { grep -qF -- "$1" "$out/index.html" || fail "$2"; }
+    has 'abc1234 (0 days old, 0 behind main)  2 targets, nothing found' "the latest line is not on the page"
+    has '<tr><th rowspan="2">2026-09-14<div class="qp-note">not in <code>latest</code> yet: still running, or ended without writing it</div></th><td><code>demo_target</code></td><td class="n">0.0</td><td class="n" title="20">20</td><td class="n">1000</td><td class="n">1100</td><td class="n">1100</td><td class="n">0.0</td><td>no artifacts directory</td><td class="faults">not triaged</td></tr><tr><td><code>ghost_target</code></td><td colspan="8">launched, but no coverage line was ever printed</td></tr>' \
+        "09-14 is newest and latest names 09-13, so it should be marked unfinished, with a covered target and one that never printed coverage"
+    has '<tr><th rowspan="2">2026-09-13</th><td><code>demo_target</code></td><td class="n">2.0</td><td class="n" title="1234567">1.2M</td><td class="n">900</td><td class="n">950</td><td class="n">1000</td><td class="n">1.0</td><td>1 crash, 1 slow-unit (since 2026-09-10)</td><td class="faults">2</td></tr><tr><td><code>fuzz-skip</code></td><td colspan="8">skipped: no time left in the window</td></tr>' \
+        "09-13's row: 2 x 1 h, 1234567 runs, a crash and a slow unit new against 09-10 (the two carried over are not), two faults still failing, and a skipped log"
+    has '<tr><th>2026-09-12</th><td colspan="9">no directory for this night</td></tr>' "09-12 has no directory and should say so"
+    has "<tr><th>2026-09-11</th><td colspan=\"9\">fuzzed nothing: no fuzz logs. The build's own log is <code>$fuzz/2026-09-11/build.log</code></td></tr>" \
+        "09-11 has a build log and no fuzz logs, and should say it fuzzed nothing"
+    has '<tr><th rowspan="1">2026-09-10</th><td><code>demo_target</code></td><td class="n">32.0</td><td class="n" title="5000">5.0K</td><td class="n">500</td><td class="n">600</td><td class="n">900</td><td class="n">8.0</td><td>first night on disk: all 2 counted</td><td class="faults">not triaged</td></tr>' \
+        "09-10's row: 4 x 8 h, its two artifacts counted as the first night on disk, and no verdicts file"
+    has '<tr><th>2026-09-08</th><td colspan="9">no directory for this night</td></tr>' \
+        "the table should run seven calendar nights back from 09-14, to 09-08"
+    ! grep -qF '2026-09-07' "$out/index.html" || fail "the table runs past seven nights, to 09-07"
+    [ "$(grep -oF 'not in <code>latest</code> yet' "$out/index.html" | wc -l)" -eq 1 ] \
+        || fail "only the newest night can be unfinished"
+    has '<title>2026-09-10: 900 at the end of the night</title>' "the chart has no point for 09-10"
+    has '<title>2026-09-13: 1000 at the end of the night</title>' "the chart has no point for 09-13"
+    has '<title>2026-09-14: 1100 at the end of the night</title>' "the chart has no point for 09-14"
+    # 09-13 and 09-14 are one line; 09-10 stands alone, because 09-11 and 09-12
+    # have no coverage and a line across them would draw nights that never ran.
+    lines=$(grep -oE '<polyline class="qp-cov-line" points="[^"]*"' "$out/index.html")
+    [ "$(wc -l <<<"$lines")" -eq 1 ] && [ "$(grep -oE '[0-9.]+,[0-9.]+' <<<"$lines" | wc -l)" -eq 2 ] \
+        || fail "the coverage chart should draw one line of two points, 09-13 to 09-14, and none across the gap from 09-10: $lines"
+
+    # The cache: a log whose size and mtime are unchanged is not read again, so
+    # a value planted in its entry shows on the page; a log that grew is.
+    jq --arg log "$fuzz/2026-09-10/fuzz-demo.log" '.logs[$log].summary[7] = 4242' "$out/.fuzz-cache.json" \
+        > "$out/planted.json" && mv "$out/planted.json" "$out/.fuzz-cache.json" || fail "could not plant a value in the fuzz cache"
+    run_line 1300000 1050 3700 >> "$fuzz/2026-09-13/fuzz-demo.log"
+    render || fail "queue-page failed to render a second time"
+    has '<title>2026-09-10: 4242 at the end of the night</title>' "an unchanged log was read again rather than served from the cache"
+    has '<title>2026-09-13: 1050 at the end of the night</title>' "a log that grew was served stale from the cache"
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits, the ready list holds every tier, and the fuzzing section matches its fixture nights"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
 #
-# **Headings**: the tiers 1, 2, 2.2, 2.5, 3 and 4 and then `## Closed`, each at
+# **Headings**: the tiers 1, 2, 2.2, 2.5, 3, 4 and 5 and then `## Closed`, each at
 # most once and in that order, and no fenced block under anything else, since
 # rows there would be rows nobody ranked. `## Closed` must be there; a tier with
 # no rows may leave its heading out, and `just queue add` or `tier` writes it
@@ -10788,11 +11092,13 @@ check-queue-page-selftest:
 # it. An `after:` names rows that can still finish. An open row sits under its
 # own tier, and a closed one under Closed.
 #
-# **A class is the first word of a tier 1 row's description** (§352.2): wrong,
+# **A class is the first word of a defect's description** (§352.2): wrong,
 # crash or refuses, then `/` and a bucket A to D. A first word shaped like a
 # class that is none of them is refused as a typo, and so is a class on a row of
-# any other tier, since the fill ranks only tier 1 by class. `small` has nothing
-# to check: any tier may carry it.
+# a tier other than 1 and 5, since the fill ranks only those by class. The class
+# names an open row's tier (§403): A and B sit in tier 1, C and D in tier 5,
+# and a tier 5 row with no class is refused. A closed row keeps the tier it
+# closed in. `small` has nothing to check: any tier may carry it.
 #
 # **An `after:` may name a `Q` row this copy does not hold yet** (§263.5): the
 # other dispatcher's new row, handed out by `just queue add` in its worktree and
@@ -10839,7 +11145,7 @@ _queue-check file decisions:
     } | LC_ALL=C awk -v file='{{ file }}' -v slots='{{ queue_slots }}' '
         BEGIN {
             FS = "\037"
-            nt = split("1 2 2.2 2.5 3 4", tiers, " ")
+            nt = split("1 2 2.2 2.5 3 4 5", tiers, " ")
             for (i = 1; i <= nt; i++) {
                 rank[tiers[i]] = i; istier[tiers[i]] = 1
                 headings = headings "Tier " tiers[i] ", "
@@ -10904,10 +11210,14 @@ _queue-check file decisions:
             }
             n = split(what, w, " ")
             if (n == 0 || w[n] !~ /^§[0-9]+(\.[0-9]+)?$/) err(line, id ": the description does not end in a §N or §N.M")
-            if (w[1] ~ /^[a-z]+\/[A-Z]$/) {
-                if (w[1] !~ /^(wrong|crash|refuses)\/[ABCD]$/) err(line, id ": \"" w[1] "\" is not a class: wrong, crash or refuses, then /A, /B, /C or /D")
-                else if (tier != "1") err(line, id ": the class " w[1] " ranks tier 1 rows only, and this row is tier " tier)
+            isclass = (w[1] ~ /^(wrong|crash|refuses)\/[ABCD]$/)
+            if (w[1] ~ /^[a-z]+\/[A-Z]$/ && !isclass) err(line, id ": \"" w[1] "\" is not a class: wrong, crash or refuses, then /A, /B, /C or /D")
+            else if (isclass && tier != "1" && tier != "5") err(line, id ": the class " w[1] " ranks tier 1 and tier 5 rows only, and this row is tier " tier)
+            else if (isclass && !closed) {
+                want = (w[1] ~ /\/[CD]$/) ? "5" : "1"
+                if (tier != want) err(line, id ": the class " w[1] " puts an open row in tier " want ", and this row is tier " tier "; move it with just queue tier " id " " want " (§403)")
             }
+            if (tier == "5" && !closed && !isclass) err(line, id ": an open tier 5 row carries a class C or D (§403), and this one has none; give it one with just queue tag, or move it with just queue tier")
             s = what
             while (match(s, /§[0-9]+(\.[0-9]+)?/)) { cite(line, id, substr(s, RSTART, RLENGTH)); s = substr(s, RSTART + RLENGTH) }
             hk = key(head)
@@ -10942,7 +11252,7 @@ _queue-check file decisions:
             bad++
         }
         function key(h,    w) {
-            if (h ~ /^Tier (1|2|2\.2|2\.5|3|4)( |$)/) { split(h, w, " "); return w[2] }
+            if (h ~ /^Tier (1|2|2\.2|2\.5|3|4|5)( |$)/) { split(h, w, " "); return w[2] }
             if (h ~ /^Closed( |$)/) return "closed"
             return ""
         }
@@ -10979,9 +11289,12 @@ _queue-check file decisions:
 # the file, tier 2.2 included, a row a running lane blocks, two items of one fuse
 # file taken together while the same item twice is not, a directory blocking a
 # file in both directions, `-` fitting beside anything, `after:` on a running row
-# and on a done one, and a tier the fill does not know refused. §352 adds tier 1
-# in class order against the order in the file, with the measure line counted by
-# hand; a full bundle of small rows going ahead of tier 1, and a lone small row
+# and on a done one, and a tier the fill does not know refused. §403 adds tier 5
+# taken last though written first, a class naming the wrong tier for an open
+# row refused while a closed row keeps its tier, and a tier 5 row with no class
+# refused. §352 adds tiers 1 and 5 in class order against the order in the file,
+# with the measure line counted by hand; a full bundle of small rows going ahead
+# of tier 1, and a lone small row
 # still printed as a bundle; a partial bundle waiting for its tier and pulling the
 # later small rows forward, one overlapping its leader; and a small row a running
 # lane blocks, which neither joins nor completes a bundle.
@@ -11053,17 +11366,24 @@ check-queue-selftest:
     ```
     ```
 
+    ## Tier 5
+
+    ```
+    Q7  5  todo  opus  tooling/queue/queue.py  wrong/C a defect only a probe builds §230
+    ```
+
     ## Closed
 
     ```
     T9  1  done:42df376e  -  justfile  the first row of the test plan §226
     D1  2  dropped:§226  opus  -  dropped for the queue §226
+    D2  1  dropped:§226  opus  -  refuses/C closed in tier 1, before tier 5 was there §226
     ```
     MD
 
     got=$(q _queue-check "$dir/good.md" "$decisions" 2>&1) \
         || fail "a queue with nothing wrong in it was rejected"
-    grep -qF '8 rows; 3 ready, 1 waiting, 1 running in 4 slots, 1 parked, 2 closed' <<<"$got" \
+    grep -qF '10 rows; 4 ready, 1 waiting, 1 running in 4 slots, 1 parked, 3 closed' <<<"$got" \
         || fail "the line a pass prints does not count the good queue's rows"
     got=$(q check-queue "$dir/good.md" 2>&1) \
         || fail "check-queue rejected the good queue against the sections in decisions_dir"
@@ -11086,7 +11406,7 @@ check-queue-selftest:
     refused id          's/^Q4 /X4 /'                               'X4: an id is'
     grep -qE "^$dir/id.md:[0-9]+: X4: " <<<"$got" || fail "id: the refusal does not name the line and the id"
     refused same-id     's/^Q5 /Q4 /'                               'the id is used on line'
-    refused tier        's/^T1  1 /T1  5 /'                         'tier "5"'
+    refused tier        's/^T1  1 /T1  7 /'                         'tier "7"'
     refused state       's/lane:lane-q2/running/'                   'state "running"'
     refused sha         's/done:42df376e/done:42DF/'                'state "done:42DF"'
     refused after-none  's/after:Q2/after:T99/'                     'T99, which is not a row'
@@ -11108,7 +11428,10 @@ check-queue-selftest:
     refused fields      's/^Q4 .*/Q4  2.5  parked:§13  opus  docs\//' 'five fields and a description'
     refused empty       '/^[TDQ][0-9]/d'                            'has no rows'
     refused class-typo  's/refuses\/B make/wrong\/E make/'          '"wrong/E" is not a class'
-    refused class-tier  's/  changes how the work/  wrong\/C changes how the work/' 'the class wrong/C ranks tier 1 rows only, and this row is tier 2.2'
+    refused class-tier  's/  changes how the work/  wrong\/C changes how the work/' 'the class wrong/C ranks tier 1 and tier 5 rows only, and this row is tier 2.2'
+    refused c-in-tier-1 's/refuses\/B make/refuses\/C make/'        'the class refuses/C puts an open row in tier 5, and this row is tier 1'
+    refused b-in-tier-5 's/wrong\/C a defect/wrong\/B a defect/'    'the class wrong/B puts an open row in tier 1, and this row is tier 5'
+    refused no-class-5  's/  wrong\/C a defect/  a defect/'         'an open tier 5 row carries a class C or D'
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
@@ -11118,12 +11441,14 @@ check-queue-selftest:
     takes() { grep '^take ' <<<"$got" | cut -d' ' -f2 | tr '\n' ' '; }
 
     fence order <<'MD'
-    Q30  3  todo  opus  docs/a.md  tier three, written first §230
+    Q50  5  todo  opus  docs/g.md  wrong/C tier five, written first §230
+    Q30  3  todo  opus  docs/a.md  tier three §230
     Q25  2.5  todo  opus  docs/b.md  tier two and a half §230
     Q22  2.2  todo  opus  docs/f.md  tier two point two, written above tier two §230
     Q20  2  todo  opus  docs/c.md  tier two §230
     T11  1  todo  opus  docs/d.md  tier one §230
     T12  1  todo  opus  docs/e.md  tier one again §230
+    Q40  4  todo  opus  docs/h.md  tier four §230
     MD
     drive order next 2
     [ "$(takes)" = "T11 T12 " ] || fail "two slots did not go to the two tier 1 rows"
@@ -11134,24 +11459,29 @@ check-queue-selftest:
     drive order next 5
     [ "$(takes)" = "T11 T12 Q20 Q22 Q25 " ] \
         || fail "tier 2.5 was not taken after tier 2.2, and before tier 3, which is written above both"
+    drive order next 8
+    [ "$(takes)" = "T11 T12 Q20 Q22 Q25 Q30 Q40 Q50 " ] \
+        || fail "tier 5 was not taken last, after tier 4, though it is written first"
 
     fence classes <<'MD'
     Q1  1  todo  opus  docs/a.md  no class, written first §230
-    Q2  1  todo  opus  docs/b.md  refuses/D a refusal only past the scale envelope §230
+    Q2  5  todo  opus  docs/b.md  refuses/D a refusal only past the scale envelope §230
     Q3  1  todo  opus  docs/c.md  refuses/A a refusal a real file met §230
-    Q4  1  todo  opus  docs/d.md  crash/C a crash only a probe builds §230
+    Q4  5  todo  opus  docs/d.md  crash/C a crash only a probe builds §230
     Q5  1  todo  opus  docs/e.md  wrong/B a wrong answer on a flush pair §230
-    Q6  1  todo  opus  docs/f.md  wrong/D a wrong answer at 1e308 §230
+    Q6  5  todo  opus  docs/f.md  wrong/D a wrong answer at 1e308 §230
     Q7  1  todo  opus  docs/g.md  wrong/B another wrong answer, later in the file §230
     Q8  2  todo  opus  docs/h.md  tier two §230
     Q9  1  parked:§230  opus  docs/i.md  wrong/A parked, so out of the measure §230
+    Q10  5  todo  opus  docs/j.md  refuses/C a refusal only a probe builds §230
+    Q11  4  todo  opus  docs/k.md  tier four §230
     MD
-    drive classes next 8
-    [ "$(takes)" = "Q5 Q7 Q4 Q3 Q1 Q6 Q2 Q8 " ] \
-        || fail "tier 1 was not taken wrong before crash before refuses, A to C, then no class, then D"
+    drive classes next 10
+    [ "$(takes)" = "Q5 Q7 Q3 Q1 Q8 Q11 Q4 Q10 Q6 Q2 " ] \
+        || fail "tiers 1 and 5 were not each taken wrong before crash before refuses, A before B and C before D, with no class after B"
     drive classes
-    grep -qxF 'tier 1, open and not parked: 3 in A or B (2 wrong, 0 crash, 1 refuses), 1 in C, 2 in D, 1 with no class; 0 small rows ready, and a bundle is 5' <<<"$got" \
-        || fail "the measure line does not count the classes fixture's tier 1 rows"
+    grep -qxF 'tier 1, open and not parked: 3 in A or B (2 wrong, 0 crash, 1 refuses), 1 with no class; tier 5: 2 in C, 2 in D; 0 small rows ready, and a bundle is 5' <<<"$got" \
+        || fail "the measure line does not count the classes fixture's tier 1 and tier 5 rows"
 
     bundled() {
         got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 --set queue_bundle "$2" queue "${@:3}" 2>&1) \
@@ -11200,11 +11530,11 @@ check-queue-selftest:
 
     fence badtier <<'MD'
     Q1  1  todo  opus  docs/a.md  a row the fill knows §230
-    Q2  5  todo  opus  docs/b.md  a tier the fill does not know §230
+    Q2  7  todo  opus  docs/b.md  a tier the fill does not know §230
     MD
     got=$("$j" --set queue_file "$dir/badtier.md" --set queue_running 1 queue next 2 2>&1) \
-        && fail "the fill took from a file holding a row of tier 5, rather than refuse it"
-    grep -qF 'cannot read the tier "5"' <<<"$got" || fail "the fill did not say which tier it could not read"
+        && fail "the fill took from a file holding a row of tier 7, rather than refuse it"
+    grep -qF 'cannot read the tier "7"' <<<"$got" || fail "the fill did not say which tier it could not read"
 
     fence lane <<'MD'
     Q1  1  lane:lane-q1  opus  justfile#queue  running §230
@@ -11326,10 +11656,14 @@ check-queue-merge-driver:
 # meeting. §307's verb is here too: `tier` moving a row to tier 2.2, which the
 # fixture has no heading for, writing that heading in its place, and refusing a
 # move to the row's own tier, to a tier that does not exist, and of a closed
-# row; and `add` writing the heading the same way. §352's are here too: `tag`
-# setting, replacing and removing a class, refusing one outside tier 1 and a
-# typo, `tier` refusing a row that carries one, `add` refused a class on tier 2,
-# and two small rows taken onto one branch holding one slot, not two. The
+# row; `add` writing the heading the same way; and `tier` moving a row up from
+# tier 3 into 2.2, whose new heading lands above the row (§403.7). §352's are
+# here too: `tag` setting, replacing and removing a class, refusing one outside
+# tiers 1 and 5 and a typo, `tier` refusing a row that carries one, `add`
+# refused a class on tier 2, and two small rows taken onto one branch holding
+# one slot, not two. §403's: a C class moving its row to tier 5 and writing the
+# heading, a B class moving it back, `tier` taking a C row to tier 5 and
+# refusing a B row there, and `add` refused a C class on tier 1. The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -11345,6 +11679,7 @@ check-queue-api-selftest:
     j='{{ just_executable() }}'
     page_dir="$root/queue-page"
     export RCAD_QUEUE_PAGE_DIR="$page_dir"
+    export RCAD_FUZZ_LOGS="$root/no-fuzz-logs"
     got=""
     fail() {
         echo "just queue drifted from its selftest: $1"
@@ -11462,8 +11797,8 @@ check-queue-api-selftest:
     got=$(check "$lanes/idle") || fail "the file tier wrote fails check-queue"
     got=$(q "$lanes/idle" tier Q4 2.2 2>&1) && fail "tier moved Q4 to the tier it is in already"
     grep -qF 'Q4 is tier 2.2 already' <<<"$got" || fail "tier did not say Q4 is in tier 2.2 already"
-    got=$(q "$lanes/idle" tier Q2 5 2>&1) && fail "tier moved Q2 to tier 5, which does not exist"
-    grep -qF "'5' is not a tier" <<<"$got" || fail "tier did not say 5 is not a tier"
+    got=$(q "$lanes/idle" tier Q2 7 2>&1) && fail "tier moved Q2 to tier 7, which does not exist"
+    grep -qF "'7' is not a tier" <<<"$got" || fail "tier did not say 7 is not a tier"
     got=$(q "$lanes/idle" tier T1 2 2>&1) && fail "tier moved T1, which is closed"
     grep -qF 'T1 is closed' <<<"$got" || fail "tier did not say T1 is closed"
     g "$hub" worktree add -q -b spare "$lanes/spare" main
@@ -11471,6 +11806,13 @@ check-queue-api-selftest:
         || fail "add refused tier 2.2, whose heading the file does not have yet"
     got=$(awk -v id="$got" '/^## / { h = $0 } $1 == id { print h }' "$lanes/spare/docs/queue.md")
     [ "$got" = "## Tier 2.2" ] || fail "add did not write ## Tier 2.2 over the row it added"
+    g "$hub" worktree add -q -b up "$lanes/up" main
+    grep -q '^## Tier 2.2' "$lanes/up/docs/queue.md" && fail "the tree for moving a row up has ## Tier 2.2 already"
+    up=$(q "$lanes/up" add 3 opus - "a row moved up into a tier with no heading yet §230") || fail "add for the row to move up failed"
+    got=$(q "$lanes/up" tier "$up" 2.2 2>&1) || fail "tier refused to move $up up from tier 3 to tier 2.2, whose heading goes above it"
+    got=$(awk -v id="$up" '/^## / { h = $0 } $1 == id { print h ": " $2 }' "$lanes/up/docs/queue.md")
+    [ "$got" = "## Tier 2.2: 2.2" ] || fail "tier did not leave $up once, under ## Tier 2.2"
+    got=$(check "$lanes/up") || fail "the file tier wrote moving a row up fails check-queue"
 
     got=$(q "$two" take Q2 lane-q2 2>&1) || fail "two could not take Q2"
     got=$(q "$one" running 2>&1) || fail "running failed"
@@ -11668,19 +12010,38 @@ check-queue-api-selftest:
     grep -qF "$ranked is tagged wrong/A already" <<<"$got" || fail "tag did not say the row carries wrong/A already"
     got=$(q "$tag_wt" tag "$ranked" wrong/E 2>&1) && fail "tag accepted wrong/E, which is no class"
     grep -qF "'wrong/E' is not a tag" <<<"$got" || fail "tag did not say wrong/E is not a tag"
+    under() { awk -v id="$1" '/^## / { h = $0 } $1 == id { print h ": " $2 " " $6 }' "$tag_wt/docs/queue.md"; }
+    got=$(q "$tag_wt" tag "$ranked" refuses/C 2>&1) || fail "tag refused a C class on a tier 1 row"
+    grep -qxF "$ranked: tag wrong/A -> refuses/C, tier 1 -> 5, at the foot of ## Tier 5" <<<"$got" \
+        || fail "tag did not say the C class moved the row to tier 5"
+    [ "$(under "$ranked")" = "## Tier 5: 5 refuses/C" ] || fail "tag refuses/C did not move the row under ## Tier 5"
+    got=$(awk '/^## / { printf "%s|", $0 }' "$tag_wt/docs/queue.md")
+    [[ "$got" == *"|## Tier 4|## Tier 5|## Closed|" ]] || fail "tag did not write ## Tier 5 between ## Tier 4 and ## Closed"
+    got=$(check "$tag_wt") || fail "the file tag wrote moving a row to tier 5 fails check-queue"
+    got=$(q "$tag_wt" tag "$ranked" wrong/B 2>&1) || fail "tag refused a B class on a tier 5 row"
+    [ "$(under "$ranked")" = "## Tier 1: 1 wrong/B" ] || fail "tag wrong/B did not move the row back under ## Tier 1"
+    got=$(q "$tag_wt" tier "$ranked" 5 2>&1) && fail "tier moved a row of class B to tier 5"
+    grep -qF "carries the class wrong/B, which puts it in tier 1" <<<"$got" || fail "tier did not say a B row belongs in tier 1"
+    got=$(q "$tag_wt" add 1 opus - "refuses/C a class add writes onto a tier 1 row §230" 2>&1) \
+        && fail "add wrote a C class onto a tier 1 row"
+    grep -qF 'the class refuses/C puts an open row in tier 5, and this row is tier 1' <<<"$got" \
+        || fail "add's refusal of a C row in tier 1 did not carry check-queue's reason"
+    got=$(q "$tag_wt" apply add 1 opus - "refuses/C a C row filed in tier 1 and moved §230" + tier @1 5 2>&1) \
+        || fail "tier refused to move a C row to tier 5, the tier its class names"
+    [ "$(under "$(sed -n '1p' <<<"$got")")" = "## Tier 5: 5 refuses/C" ] || fail "tier did not move the C row under ## Tier 5"
     got=$(q "$tag_wt" tier "$ranked" 2 2>&1) && fail "tier moved a row carrying a class out of tier 1"
     grep -qF "remove it first with \`tag $ranked -\`" <<<"$got" || fail "tier did not name the tag step that frees the row"
     got=$(q "$tag_wt" tag "$ranked" - 2>&1) || fail "tag refused to remove the class"
     [ "$(words "$ranked")" = "a defect" ] || fail "tag - did not leave the description as add wrote it"
     got=$(q "$tag_wt" tier "$ranked" 2 2>&1) || fail "tier refused a row whose class was removed"
     got=$(q "$tag_wt" tag "$ranked" crash/C 2>&1) && fail "tag put a class on a tier 2 row"
-    grep -qF "$ranked is tier 2, and a class ranks tier 1 rows only" <<<"$got" || fail "tag did not say a class ranks tier 1 only"
+    grep -qF "$ranked is tier 2, and a class ranks tier 1 and tier 5 rows only" <<<"$got" || fail "tag did not say a class ranks tiers 1 and 5 only"
     got=$(q "$tag_wt" tag "$ranked" small 2>&1) || fail "tag refused small on a tier 2 row"
     [ "$(words "$ranked")" = "small a" ] || fail "tag did not put small in front of the description"
     got=$(check "$tag_wt") || fail "the file tag wrote fails check-queue"
     got=$(q "$tag_wt" add 2 sonnet - "wrong/B a class add writes onto a tier 2 row §230" 2>&1) \
         && fail "add wrote a class onto a tier 2 row"
-    grep -qF 'the class wrong/B ranks tier 1 rows only, and this row is tier 2' <<<"$got" \
+    grep -qF 'the class wrong/B ranks tier 1 and tier 5 rows only, and this row is tier 2' <<<"$got" \
         || fail "add's refusal did not carry check-queue's reason"
 
     first_small=$(q "$tag_wt" add 2 sonnet - "small the first row of a bundle §230") || fail "add for the first small row failed"
@@ -12634,8 +12995,8 @@ check-ff-main-selftest:
     grep -qF "git worktree add" <<<"$got" || fail "the empty case did not name the way back"
 
 # One clean merge of a verified lane onto main, or a named stop (§383.4 item 2,
-# §384). The `lander` agent runs it once, and `lanes.js` hands any stop to the
-# Opus merger with the stop line in its brief (§383.5).
+# §384). The `lander` agent runs it, and `lanes.js` hands any stop to the Opus
+# merger with the stop line in its brief (§383.5).
 #
 # It runs `merger.md`'s steps 1, 3, 4 and 5 as they stand, from a tree of its
 # own: fetch, branch from `origin/main`, unlock, check the sha, merge, close the
@@ -12647,14 +13008,33 @@ check-ff-main-selftest:
 # attempts run out. Its last line is one line of JSON holding `mergedSchema`'s
 # fields and `stop`.
 #
+# **Landers share one gate** (§397.5). The first call starts one run in a
+# session of its own and follows its log for at most `LAND_WAIT` seconds, 540
+# by default, and while its last line says the run is still going, `just land
+# wait` follows it again, as `verify-lane` does (§385.2). The run writes its
+# lane's entry to a spool under `rcad-land/` in the git common directory and
+# waits on the `flock` beside it, which goes when the process does. Holding it,
+# a run whose lane an earlier holder landed reports that merge. Any other run
+# lands its own lane, then every lane waiting whose run is alive, oldest first,
+# each with its own merge commit and queue apply, gates them once, and leaves a
+# result file for each other lane it pushed. A lane that stops is put back out
+# of the batch for its own run, and a red gate with other lanes in it goes back
+# to `origin/main` and lands its own lane alone.
+#
+# **A run outlives its lander**, so the Opus merger that `lanes.js` hands a stop
+# to runs `just land wait-for <lane branch>` from its own tree before it reads
+# `origin/main`. That waits, for the same 540 s and with the same exit 3, while
+# a live run's entry names the lane or anyone holds the lock, and exits 0 once
+# neither is so.
+#
 # `--steps` names a file holding the lane's `add`, `after` and `tag` steps, one
 # word to a line and a `+` line between steps, so that no row's text ever passes
 # through a shell (§384.2). The logic is `tooling/land/land.py`; this hands it
 # the arguments, and `LAND_JUST` is the one seam `check-land-selftest` uses to
 # put a stub where `just` would run the gate, `ff-main` and `mark-finished`. A
-# stop exits 1, and `[no-exit-message]` keeps `just`'s own error line from
-# landing after the JSON, so that line is the last on a stop too.
-[doc("Merge one verified lane onto main as merger.md's steps 1, 3, 4 and 5 do, or stop and say which stop; ends with one line of JSON.")]
+# stop exits 1, a run still going 3 and a refusal 2, and `[no-exit-message]`
+# keeps `just`'s own error line from landing after the last line.
+[doc("Merge one verified lane onto main as merger.md's steps 1, 3, 4 and 5 do, sharing one gate with the lanes waiting, or stop and say which stop: `just land <args>`, then `just land wait` while it says it is still running. Ends with one line of JSON.")]
 [no-exit-message]
 land *args:
     #!/usr/bin/env bash
@@ -12664,6 +13044,21 @@ land *args:
 # Pins `land` against repositories it builds itself, each with a bare `origin`
 # on disk, one per arm: a clean merge lands and prints its JSON, and each stop
 # of §383.4 item 2 stops by name and pushes nothing.
+#
+# Four arms pin §397.5, with a second lane and a lander for it: two landers
+# waiting on the lock share one gate, a red batch falls back to the holder's own
+# lane, an entry whose run was killed is never taken, and a holder killed in its
+# gate drops the lock. The test holds the lock from a `flock` process of its own,
+# never on one of its fds, which every `just land` it starts would inherit.
+#
+# The dead-entry arm also pins `wait-for`'s two legs. A run stopped with
+# `SIGSTOP` while it waits on the lock keeps its entry alive and never takes the
+# lock when it is freed, so `wait-for` with the lock free must still wait on the
+# entry; then, with the run killed and the lock held, it must wait on the lock.
+# The briefs in `lanes.js` and `lander.md` are held to the `wait` and `wait-for`
+# lines, `wait-for` ahead of the merger's ancestor check.
+# Which waiting run gets the lock first is not fixed, so those arms hold either
+# order to the same outcome.
 #
 # **A stub stands where `just` would run a recipe**, on `LAND_JUST`, the way the
 # fuzz selftests put a stub `cargo` on `PATH`. The real `gate` would gate this
@@ -12733,13 +13128,17 @@ check-land-selftest:
         gate)
             n=$(( $(cat "$STUB_DIR/gates" 2>/dev/null || echo 0) + 1 ))
             echo "$n" >"$STUB_DIR/gates"
+            if [ -e "$STUB_DIR/gate-blocks" ] && [ "$n" = 1 ]; then
+                touch "$STUB_DIR/gate-started"
+                for _ in $(seq 1200); do sleep 0.05; done
+            fi
             case "$(cat "$STUB_DIR/race" 2>/dev/null)" in
                 code) race code ;;
                 docs) race docs ;;
                 docs-once) [ "$n" != 1 ] || race docs ;;
             esac
             echo "=== gate summary ==="
-            if [ -e "$STUB_DIR/gate-fails" ]; then
+            if [ -e "$STUB_DIR/gate-fails" ] || { [ -e "$STUB_DIR/gate-fails-with-lane2" ] && [ -e lane2.rs ]; }; then
                 echo "gate: FAIL  first failure: test (exit 100)"
                 exit 1
             fi
@@ -12753,6 +13152,14 @@ check-land-selftest:
     required=$(grep -F "required: ['start_sha', 'worktree_path', 'merge_branch'" .claude/workflows/lanes.js \
         | grep -oE "'[a-z_]+'" | tr -d "'" | tr '\n' ' ' || true)
     [ -n "$required" ] || { echo "found no mergedSchema required list in .claude/workflows/lanes.js, so the JSON would be held to nothing"; exit 1; }
+    grep -qxF '  mise exec -- just land wait' .claude/workflows/lanes.js \
+        || { echo "the lander's brief in .claude/workflows/lanes.js no longer follows just land with just land wait"; exit 1; }
+    grep -qF 'mise exec -- just land wait' .claude/agents/lander.md \
+        || { echo ".claude/agents/lander.md no longer follows just land with just land wait"; exit 1; }
+    waits_at=$(grep -m1 -nxF '  mise exec -- just land wait-for ${branchOf(lane)}' .claude/workflows/lanes.js | cut -d: -f1 || true)
+    checks_at=$(grep -m1 -nxF '  git merge-base --is-ancestor ${branchOf(lane)} origin/main' .claude/workflows/lanes.js | cut -d: -f1 || true)
+    [ -n "$waits_at" ] && [ -n "$checks_at" ] && [ "$waits_at" -lt "$checks_at" ] \
+        || { echo "the merger's brief in .claude/workflows/lanes.js does not run just land wait-for ahead of its ancestor check (lines '$waits_at' and '$checks_at'), so it can read origin/main while the lander's run still lands the lane (§397.5)"; exit 1; }
     steps_line='add 2.2 sonnet justfile small a row the lane left, ending in §384 + tag @1 small'
     arm=""
     at=""
@@ -12802,6 +13209,36 @@ check-land-selftest:
             >"$at/lander/target/land-steps.txt"
         lane_sha=$(git -C "$at/lane" rev-parse HEAD)
     }
+    second_lane() {
+        git -C "$at/hub" worktree add -q -b lane-y "$at/lane2" origin/main
+        printf 'fn lane2() {}\n' >"$at/lane2/lane2.rs"
+        git -C "$at/lane2" add lane2.rs
+        git -C "$at/lane2" commit -q -m "the second lane's work"
+        git -C "$at/hub" worktree add -q --detach "$at/verify2" origin/main
+        git -C "$at/hub" worktree add -q --detach "$at/lander2" origin/main
+        for tree in lane2 verify2 lander2; do
+            git -C "$at/hub" worktree lock --reason "an agent at work" "$at/$tree"
+        done
+        lane2_sha=$(git -C "$at/lane2" rev-parse HEAD)
+    }
+    hold_lock() {
+        rm -f "$at/held" "$at/release"
+        mkdir -p "$at/hub/.git/rcad-land"
+        flock "$at/hub/.git/rcad-land/lock" -c "touch '$at/held'; for _ in \$(seq 1200); do [ ! -e '$at/release' ] || exit 0; sleep 0.05; done" &
+        until_there "$at/held"
+    }
+    release_lock() {
+        touch "$at/release"
+        wait
+    }
+    until_there() {
+        for _ in $(seq 400); do
+            if [ $# -eq 1 ] && [ -e "$1" ]; then return 0; fi
+            if [ $# -eq 2 ] && grep -qF "$2" "$1" 2>/dev/null; then return 0; fi
+            sleep 0.05
+        done
+        fail "waited 20 s for $1 ${2:-}"
+    }
     another_merge() {
         git -C "$at/stub/other" pull -q --ff-only origin main
         printf '%s\n' "$2" >>"$at/stub/other/$1"
@@ -12809,9 +13246,30 @@ check-land-selftest:
         git -C "$at/stub/other" commit -q -m "another merge"
         git -C "$at/stub/other" push -q origin HEAD:main
     }
+    land_in() {
+        local tree=$1 wait=$2
+        shift 2
+        got=$(STUB_DIR="$at/stub" LAND_JUST="$dir/bin/just" LAND_WAIT="$wait" \
+            {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$at/$tree" land "$@" 2>&1) && rc=0 || rc=$?
+    }
     run() {
-        got=$(STUB_DIR="$at/stub" LAND_JUST="$dir/bin/just" \
-            {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$at/lander" land "$@" 2>&1) && rc=0 || rc=$?
+        land_in lander 60 "$@"
+        ended
+    }
+    wait_for() {
+        land_in "$1" 60 wait
+        ended
+    }
+    start_in() {
+        local tree=$1
+        shift
+        land_in "$tree" 0.2 "$@"
+        [ "$rc" -eq 3 ] || fail "a run started in $tree ended with exit $rc while it waited, not 3 for one still going"
+        [[ "$(printf '%s\n' "$got" | tail -n 1)" == "land: still running (pid "* ]] || fail "a run still going does not say so on its last line"
+        until_there "$at/$tree/target/land/log" 'land: waiting for the land lock'
+    }
+    ended() {
+        [ "$rc" -ne 3 ] || fail "the run was still going a minute later"
         json=$(printf '%s\n' "$got" | tail -n 1)
         local missing
         missing=$(python3 -c 'import json, sys; d = json.loads(sys.argv[1]); print(" ".join(k for k in (sys.argv[2].split() + ["stop"]) if k not in d))' "$json" "$required" 2>&1) \
@@ -12826,6 +13284,14 @@ check-land-selftest:
     }
     gates() {
         cat "$at/stub/gates" 2>/dev/null || echo 0
+    }
+    on_origin() {
+        git -C "$at/origin.git" merge-base --is-ancestor "$1" main 2>/dev/null
+    }
+    spool_empty() {
+        local left
+        left=$(find "$at/hub/.git/rcad-land/spool" "$at/hub/.git/rcad-land/results" -type f)
+        [ -z "$left" ] || fail "the spool still holds $left"
     }
     stopped() {
         [ "$rc" -ne 0 ] || fail "it exited 0 on a stop"
@@ -12859,6 +13325,17 @@ check-land-selftest:
     want=$(printf '%s\n' "just queue apply done Q1 ${lane_sha:0:8} + $steps_line" 'just check-queue' 'just gate quiet' \
         'just ff-main' "just mark-finished $at/lane $at/verify $at/lander")
     [ "$(cat "$at/stub/log")" = "$want" ] || fail "the recipes it ran were, in order: $(cat "$at/stub/log")"
+    spool_empty
+    ran=$json
+    land_in lander 60 wait
+    [ "$rc" -eq 0 ] && [ "$(printf '%s\n' "$got" | tail -n 1)" = "$ran" ] || fail "a wait after the run ended did not print its JSON again"
+    land_in lander 60 Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 2 ] || fail "a second just land in a tree that has started a run exited $rc, not 2"
+    log="$at/lander/target/land/log"
+    grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z land: waiting for the land lock$' "$log" \
+        || fail "$log's 'waiting for the land lock' line carries no UTC timestamp (§411.4)"
+    grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z land: holding the land lock$' "$log" \
+        || fail "$log's 'holding the land lock' line carries no UTC timestamp (§411.4)"
 
     fixture sha-differs
     run Q1 lane-x "$(git -C "$at/origin.git" rev-parse main)" merge-x "$at/lane" "$at/verify"
@@ -12925,7 +13402,100 @@ check-land-selftest:
     run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     stopped steps
     ! git -C "$at/hub" rev-parse -q --verify merge-x >/dev/null || fail "it branched before it read the steps"
-    echo "land merges a clean lane and prints its JSON, and stops by name on each of 9 stops"
+
+    fixture shared
+    second_lane
+    hold_lock
+    start_in lander --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
+    release_lock
+    wait_for lander
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the first lane did not merge beside a second"
+    [ "$(field worktree_path) $(field rows_closed)" = "$at/lander [\"Q1 done:${lane_sha:0:8}\"]" ] \
+        || fail "the first lane's JSON names another tree or another lane's rows"
+    first="$(field merged_sha) $(field merge_branch)"
+    wait_for lander2
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the second lane did not merge beside the first"
+    [ "$(field worktree_path) $(field rows_closed) $(field rows_added)" = "$at/lander2 [\"Q2 done:${lane2_sha:0:8}\"] []" ] \
+        || fail "the second lane's JSON names another tree or another lane's rows"
+    [ "$(field merged_sha) $(field merge_branch)" = "$first" ] \
+        || fail "the two lanes name different merges, $first and $(field merged_sha) $(field merge_branch), so they did not share one push"
+    [ "$(field merged_sha)" = "$(git -C "$at/origin.git" rev-parse main)" ] || fail "merged_sha is not what origin/main holds"
+    [ "$(gates)" = 1 ] || fail "two lanes waiting together ran $(gates) gates, not one"
+    [ "$(git -C "$at/origin.git" log --merges --grep 'by just land' --format=%H main | wc -l)" -eq 2 ] \
+        || fail "origin/main does not hold one merge commit for each lane"
+    [ "$(grep -c '^just ff-main' "$at/stub/log")" -eq 1 ] || fail "ff-main did not run exactly once for one push"
+    marked=$(grep '^just mark-finished ' "$at/stub/log" | cut -d' ' -f3- | tr ' ' '\n' | sort || true)
+    [ "$marked" = "$(printf '%s\n' "$at"/{lane,verify,lander,lane2,verify2,lander2} | sort)" ] \
+        || fail "mark-finished was given, all told: $marked"
+    for tree in lane verify lander lane2 verify2 lander2; do
+        ! locked "$tree" || fail "the $tree tree is still locked"
+    done
+    spool_empty
+
+    fixture red-batch
+    second_lane
+    touch "$at/stub/gate-fails-with-lane2"
+    hold_lock
+    start_in lander Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
+    release_lock
+    wait_for lander
+    both=$got
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the lane the gate passes alone did not merge after a red batch"
+    wait_for lander2
+    both+=$got
+    [ "$rc" -eq 1 ] && [ "$(field stop)" = gate ] || fail "the lane the gate fails on did not stop at the gate"
+    [ "$(gates)" = 3 ] || fail "a red batch, then each lane alone, is 3 gates, not $(gates)"
+    on_origin "$lane_sha" || fail "the lane the gate passes is not on origin/main"
+    ! on_origin "$lane2_sha" || fail "the lane the gate fails on reached origin/main"
+    grep -qF 'land: the gate failed with 2 lanes merged, so lane-' <<<"$both" || fail "nothing says the batch fell back to one lane"
+    spool_empty
+
+    fixture dead-entry
+    second_lane
+    hold_lock
+    start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
+    waiter=$(cat "$at/lander2/target/land/pid")
+    kill -STOP -- "-$waiter"
+    release_lock
+    land_in verify 0.5 wait-for lane-y
+    [ "$rc" -eq 3 ] || fail "wait-for exited $rc with the lock free and a live run waiting to land lane-y, not 3 for still running"
+    grep -qxF "land: still running: the run in $at/lander2 (pid $waiter) waits to land it. Run \`mise exec -- just land wait-for lane-y\` to keep waiting" <<<"$got" \
+        || fail "wait-for does not name the run that waits to land lane-y"
+    hold_lock
+    kill -9 -- "-$waiter"
+    land_in verify 0.5 wait-for lane-y
+    [ "$rc" -eq 3 ] || fail "wait-for exited $rc while a holder had the land lock, not 3 for still running"
+    grep -qF 'land: still running: a holder has the land lock.' <<<"$got" || fail "wait-for does not say a holder has the lock"
+    start_in lander Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    release_lock
+    wait_for lander
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the live lane did not land beside an entry whose run was killed"
+    [ "$(gates)" = 1 ] || fail "one live lane ran $(gates) gates"
+    ! on_origin "$lane2_sha" || fail "it landed a lane whose run was gone, which the Opus merger lands too (§397.5 item 7)"
+    grep -qF 'land: the run that waited to land lane-y' <<<"$got" || fail "nothing says the dead entry was dropped"
+    spool_empty
+    land_in verify 5 wait-for lane-y
+    [ "$rc" -eq 0 ] || fail "wait-for exited $rc once no run was landing lane-y, not 0"
+    grep -qxF 'land: no run is landing lane-y; fetch origin before you read origin/main' <<<"$got" \
+        || fail "wait-for does not say that no run is landing lane-y"
+
+    fixture killed-holder
+    second_lane
+    touch "$at/stub/gate-blocks"
+    start_in lander Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    until_there "$at/stub/gate-started"
+    start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
+    kill -9 -- "-$(cat "$at/lander/target/land/pid")"
+    wait_for lander2
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a lane waiting behind a holder that was killed did not land"
+    on_origin "$lane2_sha" || fail "the waiting lane is not on origin/main"
+    ! on_origin "$lane_sha" || fail "the killed holder's lane reached origin/main"
+    [ "$(gates)" = 2 ] || fail "the killed holder's gate and the waiting lane's are 2 gates, not $(gates)"
+    grep -qF 'land: the run that waited to land lane-x' <<<"$got" || fail "nothing says the killed holder's entry was dropped"
+    spool_empty
+    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, and wait-for waits on a live entry and on a held lock"
 
 # A verifier's fixed steps for one lane, run for it (§383.4 item 4, §385): unlock
 # the lane's tree, `git log` from the base to the branch, the files outside the
@@ -12973,9 +13543,10 @@ verify-lane *args:
 # where `gate quiet` ran it; a `pinsOnly` lane; a `sameBehaviour` lane whose
 # tests pass with the source reverted, and one whose test fails there, which
 # says the behaviour changed (§399); a lines-that-run count of 0; a source path
-# holding test code the branch changed; a lane that names no test; a run longer
-# than one call, which a second call follows to its end; and an input file it
-# cannot read, or that marks a lane both `pinsOnly` and `sameBehaviour`.
+# holding test code the branch changed; a lane that names no test; a write-set
+# entry naming one item of a file, matched against the file it is in; a run
+# longer than one call, which a second call follows to its end; and an input
+# file it cannot read, or that marks a lane both `pinsOnly` and `sameBehaviour`.
 #
 # The JSON's fields are held to `verdictSchema` in `lanes.js`, read out of that
 # file, so a field the schema renames fails here and not in a verifier's report.
@@ -13261,6 +13832,16 @@ check-verify-lane-selftest:
     [ "$(field lines_that_run | tail -n 1)" = "lines that run: 0" ] || fail "a note counted as lines that run"
     no_test_ran
 
+    fixture one-item-write-set
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/lib.txt#something
+    run
+    [ "$(field files_outside_write_set)" = "[]" ] \
+        || fail "a write-set entry naming one item of a file did not match a change to that file: $(field files_outside_write_set)"
+    [ "$(field tests_pass_on_branch) $(field tests_fail_without_fix)" = "(absent) (absent)" ] || fail "a lane naming no test got a test field"
+    no_test_ran
+
     fixture resume
     printf 'fixed\n' >"$at/lane/src/lib.txt"
     lane_commit
@@ -13290,7 +13871,7 @@ check-verify-lane-selftest:
     call target/verify-lane.txt
     [ "$rc" -eq 2 ] && grep -qF 'both pinsOnly and sameBehaviour' <<<"$got" || fail "an input marking the lane both pinsOnly and sameBehaviour did not refuse"
     [ ! -e "$at/verify/target/verify-lane" ] || fail "it started a run on an input marking the lane both pinsOnly and sameBehaviour"
-    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 14 arms"
+    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 15 arms"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #
@@ -13697,3 +14278,44 @@ spend since="" until="" report="all" lane="":
 [private]
 check-spend-selftest:
     @PYTHONDONTWRITEBYTECODE=1 python3 tooling/session-spend/check-spend.py
+
+# Where each queue row's time went, from its `take` to merged and pruned.
+#
+# For each row worked in `lanes` runs it prints the elapsed time, the agents'
+# running time, the waits between them, the slot time and the attempts; under
+# the rows, the total share, median and p90 of every part, step and bucket.
+# `--detail` lists each attempt's steps and what each step's time went to:
+# the model writing, each kind of command, each tool. `--json` prints the same
+# numbers. Rows are picked by Q id, or by `--since`/`--until` dates, the last
+# seven days by default. `docs/decisions.md` §411 is the spec, and §411.10 the
+# rules it chose where §411 said nothing.
+#
+# **Every sum is checked, and a broken one stops it before it prints.** A step's
+# buckets add up to its running time and a row's parts to its elapsed time, in
+# whole milliseconds, so there is no tolerance to pick. A real row that breaks
+# one is a finding about a rule, never a reason to loosen the check.
+#
+# Like `spend` it reads transcripts and never the repository, so it cannot be a
+# `check-` and is not in `gate_steps`; `check-row-time-selftest` holds what does
+# not move with the week. The claims file is the one `just queue` writes, in the
+# git common directory.
+[doc("Where each queue row's time went, take to prune: `just row-time`, `just row-time Q1311 --detail`, `just row-time --since 2026-10-01 --json`.")]
+row-time *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    claims="$(git rev-parse --path-format=absolute --git-common-dir)/rcad-queue-claims"
+    exec python3 tooling/row-time/row_time.py \
+        '{{claude_config}}/projects' \
+        '-home-mattias-git-mattiasgronlund-rcad' \
+        "$claims" {{args}}
+
+# What `row-time` decides that does not move with the week: the made-up run
+# records, transcripts and claims file it builds hold every case of
+# `docs/decisions.md` §411.9's list, and one whose buckets do not add up, which
+# has to make `row-time` fail rather than print. It needs no transcripts and no
+# Claude Code, so it runs on a runner like any other check.
+# `PYTHONDONTWRITEBYTECODE` for `check-spend-selftest`'s reason: the cases
+# import `row_time` as a module.
+[private]
+check-row-time-selftest:
+    @PYTHONDONTWRITEBYTECODE=1 python3 tooling/row-time/check-row-time.py

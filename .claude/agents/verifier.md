@@ -213,8 +213,9 @@ the rows its work leaves (§383.4). Check them as you check any claim: on a
   and each such item that is work for later has one.
 - None repeats an open row on `origin/main`: `git fetch origin`, then look in
   `git show origin/main:docs/queue.md`.
-- Each follows `lane.md`'s rules: the tier, a class only on a tier 1 row and
-  from what `remaining` says, `small` only where nothing needs a trace.
+- Each follows `lane.md`'s rules: the tier, a class from what `remaining`
+  says, on a tier 1 row for A and B and a tier 5 row for C and D (§403),
+  `small` only where nothing needs a trace.
 
 A step missing, wrong or repeated is a `fix_first`, with the step to add,
 change or drop in `fixes`.

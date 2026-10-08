@@ -14,6 +14,10 @@ side its wire keeps. Of the 24 fuses in 377.1, 14 now answer correctly. The
 other 10, five for a quarter inside the half and five for a quarter against one
 of its caps, stop later, in `fuse/assemble.rs`.
 
+**Answered by Q756, 377.4**: those ten were §378.3's refusal, two circles on
+one plane through the ring's axis given one name. With a closed crossing named
+by which circle it is (§378.6), all 24 answer correctly.
+
 ### 377.1 The replay on the base
 
 Q667 (§361) rebuilt every bend after §232.6 was written, so the lane measured
@@ -99,6 +103,17 @@ using the half-space `intersect` names each circle by. A probe without it
 showed the side check refusing all three such walls first. So it was dropped,
 which also saves an `intersect` per query.
 
+*2026-10-06, Q790: the check is back. Those walls walk the circle once each
+way. A wall that walks it twice the same way round, built straight into the
+arena (`a_piece_of_pipe_walking_each_circle` in `holds.rs`), passed the side
+check, and all six (two walks times three ways of storing and using the far
+cap) were read as a half. `are_on_two_circles` now runs after the side check
+passes, naming each corner's circle by the picker `intersect` tells it by, and
+refuses the wall `AFaceMissesPartOfWhereItsSurfacesCross` unless the names
+differ (`74780e25`, pinned by
+`a_wall_round_one_circle_twice_the_same_way_is_refused_rather_than_read_as_a_half`).
+The lane's probe, since removed, found `Model::validate` refusing all six.*
+
 **One refusal is renamed.** A ring face with two edges along one plane that
 does not hold the axis, such as the top half of a ring on `z = 0`, used to be
 refused by the general rule with `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`.
@@ -107,6 +122,10 @@ It now reaches this rule, and step 1 refuses it with
 either name for a torus face, and `SolidBuilder` refuses both forms of the top
 half of a ring before any face is asked
 (`building_a_solid_out_of_faces.rs`).
+
+*Since 2026-10-04 (§243.8) this shape is answered rather than refused: a
+plane square to a ring's axis is read the same way as one holding it, and the
+flat half of a ring on `z = 0` is the piece its wire keeps.*
 
 ### 377.4 The answers now, pinned
 
@@ -118,10 +137,14 @@ Each quarter of the ring is `2π²`, out of `2π²Rr² = 8π²` for the whole ri
 |---|---|---|---|
 | 0, 1 (inside the half) | intersection | `2π²` | `2π²` |
 | 0, 1 | difference | `2π²` (the other quarter) | nothing |
-| 0, 1 | union | `ResultIsNotManifold` | `ResultIsNotManifold` |
+| 0, 1 | union | `4π²` (the half) | `4π²` (the half) |
 | 2, 3 (against a cap) | intersection | nothing | nothing |
-| 2, 3 | difference | `ResultIsNotManifold` | `2π²` (the quarter) |
-| 2, 3 | union | `ResultIsNotManifold` | `ResultIsNotManifold` |
+| 2, 3 | difference | `4π²` (the half) | `2π²` (the quarter) |
+| 2, 3 | union | `6π²` | `6π²` |
+
+When this row landed, the three cells now `4π²` and `6π²` were refused
+`ResultIsNotManifold { count: 4 }`, and the test pinned them so. Q756 moved
+them; 377.5 says why they answer.
 
 For example, quarter 0 with the half first: the intersection measured
 `19.7061 ± 0.3921` and the difference `19.7061 ± 0.3899`, against
@@ -140,17 +163,45 @@ answer outside this row's write set moved.
 
 ### 377.5 What this leaves
 
-**The ten `ResultIsNotManifold` refusals are the next stop.** They are five
-fuses, each at two quarter turns. They should
-answer the half bend (`4π²`) for the union with a quarter inside it and for
-the half less a quarter against its cap, and three quarters of the ring
-(`6π²`) for the union with a quarter against a cap. `fuse/assemble.rs` raises
-the error (`.map_err(|_| Error::ResultIsNotManifold { count: by.len() })`)
-after the pieces are chosen, and all ten reported `count: 4`.
-The same pairs' other rules answer correctly, so the pieces are probably
-placed right and the choosing or the writing back is what fails, but this is
-not traced. `fuse/` was outside this row's write set. The test pins each of the
-ten as the refusal, so a fix that answers them fails it and points here.
+**The ten `ResultIsNotManifold` refusals were the next stop, and Q756 answered
+them.** They are five fuses, each at two quarter turns. They should answer the
+half bend (`4π²`) for the union with a quarter inside it and for the half less
+a quarter against its cap, and three quarters of the ring (`6π²`) for the
+union with a quarter against a cap. `fuse/assemble.rs` raised the error
+(`.map_err(|_| Error::ResultIsNotManifold { count: by.len() })`) after the
+pieces were chosen, and all ten reported `count: 4`. This row left it untraced,
+and Q788 was filed to trace and fix it once Q756 landed.
+
+It was §378.3's refusal. The half bend's two caps lie on `y = 0`, a plane
+through the ring's axis, and cut the ring in two circles, round `(4, 0, 0)`
+and round `(−4, 0, 0)`. Assembly named a closed crossing by its two surfaces
+alone, so both circles had one name: one input vertex was handed over to the
+other and the two circles became one edge with four faces along it. Each of
+the ten answers has both circles on `y = 0` as edges: the half bend's two cap
+edges, or one cap edge and the seam where the quarter's wall meets the half's.
+Q756 names a closed crossing by which circle of the ring it is as well
+(§378.6), and changes nothing else in `crates/rcad-topo/src`. With the base's
+`assemble.rs` put back, both moved tests fail on their first such fuse with
+`ResultIsNotManifold { count: 4 }`, and with Q756's they pass. So **Q788 is
+answered by Q756** and needed no fix of its own.
+
+The pins moved with Q756's second run
+(`lane-q756-two-quarter-bends-end-to-end-on-one-ring-2`). Each of the ten
+comes back one solid that passes `Model::validate` and measures inside
+`measure`'s bound at deflection `0.01`. The test prints each measurement:
+
+| quarter turned | rule | half first | half second |
+|---|---|---|---|
+| 0 | union | `39.41224 ± 0.78427` | `39.41222 ± 0.78427` |
+| 1 | union | `39.41224 ± 0.78427` | `39.41226 ± 0.78427` |
+| 2 | difference | `39.41224 ± 0.78427` | (the quarter, as before) |
+| 3 | difference | `39.41224 ± 0.78427` | (the quarter, as before) |
+| 2 | union | `59.11849 ± 1.17640` | `59.11849 ± 1.17640` |
+| 3 | union | `59.11833 ± 1.17640` | `59.11833 ± 1.17640` |
+
+against `4π² = 39.47842` and `6π² = 59.21763`. Command: `mise exec -- just t
+-p rcad-topo --test a_half_bend_fused_with_a_quarter_bend_on_one_torus
+--no-capture`.
 
 The first run did not run the test file against the base `holds.rs` in its
 final form: its attempt to check the base file out over its own was refused by

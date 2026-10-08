@@ -159,6 +159,32 @@ impl Surface {
         }
     }
 
+    /// The second coordinate this surface pinches to one point at, read
+    /// without its sign, or `None` for one that pinches nowhere.
+    ///
+    /// A ball pinches at both poles, `±π/2`. A cone pinches at its apex, `0`
+    /// on either nappe — and because `Cone::point_at(·, 0)` is the apex
+    /// whatever the first coordinate, a caller that tries `pinch` and then
+    /// `-pinch` to reach both of a ball's poles lands on the cone's one apex
+    /// twice, which costs one extra predicate call and answers the same, so
+    /// it is right rather than merely harmless: there is one apex.
+    ///
+    /// A plane, a cylinder and a torus pinch nowhere. The torus is the one
+    /// case where that is the whole of what makes its chart different from a
+    /// ball's: a step of one radian round the ring carries `R + r·cos v`,
+    /// which is never less than `R − r` and so is never nothing, and a step
+    /// round the tube carries `r` everywhere. Both of a torus's coordinates
+    /// run right round instead, which costs it **two** seams where a ball has
+    /// one seam and two poles.
+    #[must_use]
+    pub fn where_it_pinches(&self) -> Option<f64> {
+        match self {
+            Surface::Sphere(_) => Some(core::f64::consts::FRAC_PI_2),
+            Surface::Cone(_) => Some(0.0),
+            Surface::Plane(_) | Surface::Cylinder(_) | Surface::Torus(_) => None,
+        }
+    }
+
     /// Which way a point moves when this surface's **first** coordinate goes up,
     /// at `at`.
     ///
@@ -181,10 +207,11 @@ impl Surface {
     /// **This is meant to be the one spelling of it.** `rcad-topo` works the
     /// same direction out for itself in `validate.rs`, as
     /// `the_way_it_is_parametrised_about` crossed into `gradient_of`, and keeps
-    /// a second `gradient_of` in `mesh.rs` besides. Two spellings of one
-    /// question is how two answers come to disagree (`docs/decisions.md`
-    /// §23.8), so those are to call this. Rewiring them is not this method's
-    /// own change.
+    /// a second `gradient_of` in `mesh.rs` besides. `rcad-step`'s `brep.rs`
+    /// keeps a third, torus-only and spelled as `validate.rs`'s is
+    /// (`docs/decisions.md` §390, Q824). Three spellings of one question is
+    /// how two answers come to disagree (`docs/decisions.md` §23.8), so those
+    /// are to call this. Rewiring them is not this method's own change.
     ///
     /// # Where there is no answer
     ///

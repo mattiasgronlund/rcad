@@ -40,8 +40,9 @@
 //! Each block of the first shape takes half of the cap of height two that
 //! `x = ±3` cuts off the ball: the cap holds `π h² (3r − h) / 3 = 52π/3`, so
 //! each piece holds `26π/3`, and its curved skin is half the cap's
-//! `2πrh = 20π`, which is `10π`. The half ball holds `250π/3` and its skin is
-//! `2πr² = 50π`.
+//! `2πrh = 20π`, which is `10π`. The ball less both pieces holds
+//! `500π/3 − 52π/3 = 448π/3` and keeps `100π − 20π = 80π` of its skin. The half
+//! ball holds `250π/3` and its skin is `2πr² = 50π`.
 //!
 //! Every vertex of a mesh is on the ball and every triangle a chord of it, so a
 //! meshed round wall sits inside the ball, by no more than [`DEFLECTION`]. A
@@ -53,7 +54,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 const RADIUS: f64 = 5.0;
 
@@ -65,6 +66,13 @@ const ONE_PIECE: f64 = 26.0 * PI / 3.0;
 
 /// The area of one piece's curved skin.
 const ONE_PIECES_SKIN: f64 = 10.0 * PI;
+
+/// What the ball holds once both pieces are taken out of it.
+const THE_BALL_LESS_THE_TWO_PIECES: f64 =
+    4.0 * PI * RADIUS * RADIUS * RADIUS / 3.0 - 2.0 * ONE_PIECE;
+
+/// The area of the ball's skin once both pieces are taken out of it.
+const THE_SKIN_THE_TWO_PIECES_LEAVE: f64 = 4.0 * PI * RADIUS * RADIUS - 2.0 * ONE_PIECES_SKIN;
 
 /// What the ball less everything above its equator holds.
 const THE_HALF_BALL: f64 = 250.0 * PI / 3.0;
@@ -113,37 +121,48 @@ fn two_blocks_meeting_a_balls_equator_from_opposite_sides_less_the_ball_lose_a_p
     }
 }
 
-/// The ball less the two blocks, and the ball united with them, get past naming
-/// their edges and stop one step on, in the mesher, on a refusal §330.6 already
-/// names.
+/// The ball less the two blocks is the ball without the two pieces they cut
+/// off it, and the ball united with them is that and the two blocks, whichever
+/// block is named first and whichever side the ball is on.
 ///
-/// In both, the skin comes out as pieces of the ball, which the joiner never
-/// joins, meeting along stretches of the equator. One of them holds the north pole
-/// and goes right round, so the mesher cuts it as a cap and reads which pole it
-/// reaches off the surface across its **first** edge. That edge runs along the
-/// equator between two pieces of the skin, with the ball on both sides of it,
-/// so there is no other surface to read and the cap is refused as one with no
-/// seam. A temporary print in `which_pole_this_cap_reaches`, since removed,
-/// showed the ball on both sides of that edge in all six fuses.
-///
-/// **When these answer**, the ball less the blocks holds
-/// `500π/3 − 52π/3 = 448π/3`, and the union that and the two blocks,
-/// `2800 + 448π/3`.
+/// All six stopped in the mesher until Q508. The skin comes out as pieces of
+/// the ball, which the joiner never joins, meeting along stretches of the
+/// equator. One of them holds the north pole and goes right round, so the
+/// mesher cuts it as a cap, and it read which pole the cap reaches off the
+/// surface across the cap's **first** edge. That edge runs along the equator
+/// between two pieces of the skin, with the ball on both sides of it, so there
+/// was no other surface to read and the cap was refused
+/// `ACurvedFaceGoesRightRoundWithNoSeam` (§330.6's second bullet). A temporary
+/// print in `which_pole_this_cap_reaches`, since removed, showed the ball on
+/// both sides of that edge in all six fuses. That function now reads the pole
+/// off the walk round the cap's rim.
 #[test]
-fn a_ball_less_or_united_with_two_blocks_meeting_its_equator_from_opposite_sides_stops_in_the_mesher()
+fn a_ball_less_or_united_with_two_blocks_meeting_its_equator_from_opposite_sides_keeps_all_of_it_but_the_two_pieces()
  {
     for below_first in [true, false] {
         let mut model = a_model();
         let (ball, blocks) = the_ball_between_two_blocks(&mut model, below_first);
-        stops_in_the_mesher(&mut model, &[ball], &blocks, Rule::Difference);
+        let answer = fused(&mut model, &[ball], &blocks, Rule::Difference);
+        assert_eq!(answer.len(), 1, "the ball less two pieces is one solid");
+        measures(
+            volume_of(&model, &answer),
+            THE_BALL_LESS_THE_TWO_PIECES,
+            Wall::Outside(THE_SKIN_THE_TWO_PIECES_LEAVE),
+        );
         for ball_first in [true, false] {
             let mut model = a_model();
             let (ball, blocks) = the_ball_between_two_blocks(&mut model, below_first);
-            if ball_first {
-                stops_in_the_mesher(&mut model, &[ball], &blocks, Rule::Union);
+            let answer = if ball_first {
+                fused(&mut model, &[ball], &blocks, Rule::Union)
             } else {
-                stops_in_the_mesher(&mut model, &blocks, &[ball], Rule::Union);
-            }
+                fused(&mut model, &blocks, &[ball], Rule::Union)
+            };
+            assert_eq!(answer.len(), 1, "the ball joins the two blocks into one");
+            measures(
+                volume_of(&model, &answer),
+                2.0 * 7.0 * 20.0 * 10.0 + THE_BALL_LESS_THE_TWO_PIECES,
+                Wall::Outside(THE_SKIN_THE_TWO_PIECES_LEAVE),
+            );
         }
     }
 }
@@ -313,23 +332,6 @@ fn fused(
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a fuse writes a sound model or writes nothing");
     answer
-}
-
-fn stops_in_the_mesher(model: &mut Model, arguments: &[SolidKey], tools: &[SolidKey], rule: Rule) {
-    let refused = model
-        .fuse(
-            arguments,
-            tools,
-            rule,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .map(|fused| fused.solids().len())
-        .expect_err("a skin piece with the ball both sides of its first edge cannot yet be meshed");
-    assert!(
-        matches!(refused, Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }),
-        "this {rule:?} names its edges and stops in the mesher: {refused:?}"
-    );
 }
 
 fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {

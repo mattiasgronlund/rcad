@@ -590,19 +590,21 @@ fn a_run_along_a_cones_ruling_is_walked_as_a_straight_line_from_both_public_door
     }
 }
 
-/// A cone against a ball, against another cone, or against a pipe that does not
-/// share its axis is refused by name, in both orders.
+/// A cone against a ball, a pipe or another cone that does not share its axis
+/// is refused by name, in both orders.
 ///
-/// A pipe that *does* share the axis is no longer on this list: the two cross in
-/// two circles and `intersect` names them. So the pipe appears here twice, once
-/// for each way of not sharing the axis — leaning against it, and running
-/// parallel to it but off to one side — because those are the two signs
-/// `where_a_cone_and_a_pipe_cross` asks and either one alone would leave half
-/// the refusal unpinned.
+/// A partner that *does* share the axis is no longer on this list: they cross
+/// in circles square to it and `intersect` names them —
+/// [`a_ball_and_a_cone_on_the_cone_s_axis_are_named_not_refused`] is that half.
+/// So the ball and the second cone stand one to the side of it here, and the
+/// pipe appears twice, once for each way of not sharing the axis — leaning
+/// against it, and running parallel to it but off to one side — because those
+/// are the two signs `where_a_cone_and_a_pipe_cross` asks and either one alone
+/// would leave half the refusal unpinned.
 #[test]
 fn a_cone_against_a_ball_a_pipe_off_its_axis_or_another_cone_is_refused_by_name() {
     let cone = Surface::Cone(a_right_angled_cone());
-    let ball = Surface::Sphere(Sphere::new(Point::new(0.0, 0.0, 4.0), 2.0).expect("a radius"));
+    let ball = Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 4.0), 2.0).expect("a radius"));
     let leaning_pipe = Surface::Cylinder(
         rcad_geom::Cylinder::new(
             Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(1.0, 0.0, 1.0))
@@ -621,7 +623,7 @@ fn a_cone_against_a_ball_a_pipe_off_its_axis_or_another_cone_is_refused_by_name(
     );
     let other_cone = Surface::Cone(
         Cone::new(
-            Axis::new(Point::new(0.0, 0.0, 10.0), Vector::new(0.0, 0.0, -1.0))
+            Axis::new(Point::new(1.0, 0.0, 10.0), Vector::new(0.0, 0.0, -1.0))
                 .expect("a direction with length"),
             1.0,
         )
@@ -638,6 +640,46 @@ fn a_cone_against_a_ball_a_pipe_off_its_axis_or_another_cone_is_refused_by_name(
                     &mut ProvenanceLog::new()
                 ),
                 Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+                "{pair:?}"
+            );
+        }
+    }
+}
+
+/// The ball and the second cone the test above used to refuse, back on the
+/// cone's axis, and named.
+///
+/// The ball of radius two centred four up sits inside the upper nappe: the side
+/// is `4/√2 ≈ 2.83` from its centre, so the two miss. The cone of slope one
+/// pointing down from ten up meets the right-angled one where `|z| = |z − 10|`,
+/// which is the one circle at `z = 5`.
+#[test]
+fn a_ball_and_a_cone_on_the_cone_s_axis_are_named_not_refused() {
+    let cone = Surface::Cone(a_right_angled_cone());
+    let ball = Surface::Sphere(Sphere::new(Point::new(0.0, 0.0, 4.0), 2.0).expect("a radius"));
+    let other_cone = Surface::Cone(
+        Cone::new(
+            Axis::new(Point::new(0.0, 0.0, 10.0), Vector::new(0.0, 0.0, -1.0))
+                .expect("a direction with length"),
+            1.0,
+        )
+        .expect("a positive slope"),
+    );
+    let one_circle = SurfaceMeet::Curves(vec![
+        NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a whole circle needs nothing picking it"),
+    ]);
+
+    for (partner, answer) in [(ball, SurfaceMeet::Nothing), (other_cone, one_circle)] {
+        for pair in [[&cone, &partner], [&partner, &cone]] {
+            assert_eq!(
+                intersect(
+                    pair[0],
+                    pair[1],
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new()
+                ),
+                Ok(answer.clone()),
                 "{pair:?}"
             );
         }

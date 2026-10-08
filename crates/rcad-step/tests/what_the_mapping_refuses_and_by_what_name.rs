@@ -145,6 +145,52 @@ fn a_loop_that_is_not_an_edge_loop_is_refused_by_name() {
 fn a_vertex_loop_at_a_cones_apex_bounds_nothing_and_the_cone_imports() {
     let import = read(&a_pointed_cone_with_its_apex_written_as_a_loop([0.0; 3]))
         .unwrap_or_else(|why| panic!("a cone whose apex is a vertex loop imports: {why}"));
+    the_pointed_cone_is_sound_and_encloses_what_it_should(&import);
+}
+
+/// The same cone with its half-angle cut to twelve digits, `0.463647609001`,
+/// the way an Open CASCADE exporter writes it, imports, with its slope put
+/// back from its corners (`docs/decisions.md` §366.7).
+///
+/// The tangent of the cut angle is `0.5000000000002424`, which puts the apex
+/// the reader works out `3.9e-12` above the origin: far outside the box round
+/// the corner the file wrote there, so the loop stands off the apex and was
+/// refused by name. The cone is placed on its cap with its radius there, so
+/// the corner on the cap says nothing about the slope, and the apex says one
+/// half exactly; half a unit in the twelfth digit holds `atan(0.5)`.
+#[test]
+fn a_pointed_cone_whose_half_angle_was_cut_to_twelve_digits_has_its_slope_from_its_apex() {
+    let import = read(&a_pointed_cone_written_with([0.0; 3], "0.463647609001"))
+        .unwrap_or_else(|why| panic!("a cone whose half-angle was cut imports: {why}"));
+    the_pointed_cone_is_sound_and_encloses_what_it_should(&import);
+}
+
+/// The same cut, in degrees, `26.5650511771` of a degree written as
+/// `0.0174532925199433` radians, is refused as it was before §366.7: the number
+/// the reader takes the tangent of is a product, and the file's twelve digits
+/// are not its digits, so nothing is put back from the corners.
+#[test]
+fn a_pointed_cone_whose_half_angle_was_cut_in_degrees_keeps_the_tangent() {
+    let in_degrees = a_pointed_cone_written_with([0.0; 3], "26.5650511771").replace(
+        "#2=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));\n",
+        "#2=(CONVERSION_BASED_UNIT('DEGREE',#8)NAMED_UNIT(*)PLANE_ANGLE_UNIT());\n\
+         #8=PLANE_ANGLE_MEASURE_WITH_UNIT(PLANE_ANGLE_MEASURE(0.0174532925199433),#9);\n\
+         #9=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));\n",
+    );
+    assert!(
+        in_degrees.contains("'DEGREE'"),
+        "the header's angle unit is replaced"
+    );
+    let Refusal::ALoopThisReaderDoesNotWalk { face, keyword, .. } = refusal(&in_degrees) else {
+        panic!("the apex the tangent puts the cone at is not the corner the file wrote");
+    };
+    assert_eq!(face, EntityId(135));
+    assert_eq!(keyword, "VERTEX_LOOP");
+}
+
+/// The pointed cone read back is a sound model and encloses `πr²h/3`, a number
+/// nothing in this kernel supplied.
+fn the_pointed_cone_is_sound_and_encloses_what_it_should(import: &Import) {
     let mut log = ProvenanceLog::new();
     import
         .model()
@@ -202,6 +248,11 @@ const A_CONES_HEIGHT: f64 = 8.0;
 /// capped flat at the top, whose cone face carries `apex` as a second bound:
 /// a `VERTEX_LOOP` of one corner, the way `nist_ctc_05` `#1340` writes one.
 fn a_pointed_cone_with_its_apex_written_as_a_loop(apex: [f64; 3]) -> String {
+    a_pointed_cone_written_with(apex, &real(A_CONES_SLOPE.atan()))
+}
+
+/// The same cone, with its half-angle written as `half_angle`.
+fn a_pointed_cone_written_with(apex: [f64; 3], half_angle: &str) -> String {
     let radius = A_CONES_SLOPE * A_CONES_HEIGHT;
     let [x, y, z] = apex.map(real);
     format!(
@@ -235,7 +286,6 @@ fn a_pointed_cone_with_its_apex_written_as_a_loop(apex: [f64; 3]) -> String {
         header = a_header(".MILLI."),
         radius = real(radius),
         height = real(A_CONES_HEIGHT),
-        half_angle = real(A_CONES_SLOPE.atan()),
     )
 }
 

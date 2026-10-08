@@ -352,4 +352,65 @@ of 0 to 25 edges. After a restart, it read re-found edges as new ground.
 - **Why R's cone-or-torus target ran 2.4 times as many inputs** (§272.5) is
   not known. It may be the restart, which resets job length and re-orders the
   seed list. It may be the spread that slice 1 already shows between two
-  identical runs. One pair of runs cannot say.
+  identical runs. One pair of runs cannot say. §272.8 is a second pair.
+
+### 272.8 Two identical arms side by side, one slice — 2026-10-08
+
+*Queue row Q213, which §272.4 and §272.7 left: run the even split twice side
+by side on one commit, and measure how far two identical runs drift apart. A
+read-only lane ran it (run `wf_1d172cac-3d2`) and changed no code. Every
+number below is from its report, which gives the command behind each; the
+report is that run's `journal.jsonl` under session
+`7e0b4050-c5e7-4c79-b9c6-f16d95a5d801`. Its logs, timing records and end
+corpora are in its tree's `target/q213/` (`wf_1d172cac-3d2-1`) and nowhere
+else yet.*
+
+**What ran.** Two arms, A and B, each run as arm E of §272.1, two forks a target
+and no restarts, with the five binaries §272 used, built at 3319f838. A ran on
+cores 0, 1, 3, 6, 9, 12, 13, 15, 18 and 21, B on 2, 4, 5, 7, 10, 14, 16, 17,
+19 and 22, for one slice of 9 736 s, §272.1's length, from 09:43:31Z to
+12:27:01Z. Other lanes were building and testing on the machine at the same
+time. The load average was 34.6 at the start and 25.1 at the end, on 24 cores.
+
+| target | runs, A | runs, B | B over A |
+|---|---|---|---|
+| `where_two_surfaces_cross` | 311 780 | 283 017 | 0.91 |
+| the reader | 76 146 853 | 76 526 460 | 1.00 |
+| the writer | 553 778 | 545 999 | 0.99 |
+| the fuse | 497 214 | 529 431 | 1.06 |
+| the cone-or-torus target | 1 191 387 | 1 575 680 | 1.32 |
+
+Runs are libFuzzer's `#N` on each fork parent's last line. The timing records'
+`runs` give the same ratios to within 0.02.
+
+**Two identical arms drift up to 1.32 times apart in runs in one slice, and
+the cone-or-torus target is again the one that drifts most.** Slice 1 of
+§272.4, the only other pair of identical runs, had R at 1.29 times E on it.
+Two samples, both about 1.3. R's 2.4 times E over three slices (§272.5) is far
+past either, so the spread between identical runs does not explain most of it.
+That leaves the restart as the likelier cause: R restarted at both boundaries,
+and no identical arm ever restarted. That is not shown. Two samples are not a
+spread, and nothing here ran a restart alone.
+
+**On the coverage the fork parents log, which counts the timing crate, A and B
+end 7, 47, 9, 8 and 1 edges apart**, in the table's order: 3 916 and 3 909,
+5 680 and 5 727, 11 513 and 11 504, 20 651 and 20 643, 3 138 and 3 139. The
+reader's 47 is larger than any gap §272.6 read between R and E. Those gaps
+were 0 to 9 edges, measured with the timing directory unset, which is the
+other count. So this does not settle §272.4's question. It does point the way
+§272.6 already went: the end gaps are within what two identical runs drift.
+
+**The count the row asked for was not measured.** The lane hard-linked both
+arms' end corpora (`target/q213/{A,B}/end-corpus/<target>/`) and began the
+measuring pass with the timing directory unset. Its measuring script,
+`target/q213/measure.py`, starts libFuzzer in a session of its own. So a pass
+it killed or wrapped in `timeout` went on running, and it ended up with two or
+three copies of one pass on the same two cores. It judged those numbers
+unreliable and reported none. It also reported that nothing it started was
+still running. At 12:40Z, fifteen processes with its tree in their command
+lines were running, started between 12:34:53Z and 12:36:11Z. The measuring
+pass alone, on the corpora already linked, is Q1383.
+
+**A third pair is not run.** The question it would answer, restart or spread,
+steers nothing. The rule is not built (§272.6), and §272.7 already says a
+cheaper restart is not worth measuring until a rule has a signal to act on.

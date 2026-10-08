@@ -135,6 +135,19 @@ remaining partner, another bend on the same ring, is the turned copy the
 builder refuses. That is why no fuse is pinned. Once any of those three
 refusals is lifted, the classification in 250.1 is what a fuse would get.
 
+*Q191's measurement (`b187bab9`), once the builder makes the turned copy
+(Q190).* Fusing the quarter bend with a copy of itself turned half a turn is
+exactly that lifted refusal: the copy's caps are the bend's other disks. A
+temporary print in `what_a_round_wire_encloses` counted eight calls reaching
+it in each of the six rule-and-order combinations, two per cap, each at the
+other bend's cap centre — once through `coincident_face`
+(`face_holds_the_point`) and once through the ray `classify_uncertain_point`
+fires from the point. With the half-space not asked, both unions refuse
+`ResultIsNotManifold { count: 1 }`; the intersections and differences still
+come out right. Pinned in
+`tests/a_bends_cap_holds_one_of_the_two_disks.rs`'s
+`a_bend_fused_with_its_copy_turned_half_a_turn_comes_to_what_each_rule_says`.
+
 ### 250.5 What this leaves
 
 - `select.rs` and `holds.rs` each have their own copy of the meridian-circle
@@ -257,7 +270,9 @@ the six points above, `classify_point` gives `CannotFollowAFacesTrimming` at
 `(4, 0, 0)` and `(0, 0, 0)`, and both `validate` and `mesh` refuse the wall
 `AWireWillNotLieFlatOnItsFace`. So 250.6's reasoned `NotHeld` does not show on
 this commit, and Q415 owns the flat face. **Answered in 250.9** (Q664, Q415
-filed again).
+filed again). *2026-10-04, Q826: on `c11bf21f`, `validate` passes two of the
+eight, one of them walking the flat face's hole the same way round as its
+outline (§243.8).*
 
 Through `SolidBuilder`, with the wall split into two faces along its top
 circle, only one wall shape reaches the mesher at all: a rim
@@ -267,6 +282,10 @@ circle, only one wall shape reaches the mesher at all: a rim
 A pipe of radius four, or a `RightRoundWhereItsFacesCross` rim, gives
 `ACrossingBetweenATorusAndAnotherCurvedSurface`, and a rim from
 `PartOfWhereItCrosses` with no seam gives `ADraftWireIsTooShort { steps: 1 }`.
+
+**Built since §390, in 250.10** (Q194): the table above is history. All three
+spellings build the half-ring, and its flat face answers all six points
+right.
 
 ### 250.8 One lookup, one rule, in `holds.rs` (Q117, Q118, Q199)
 
@@ -367,12 +386,88 @@ answer tests fail, `classify_point` at `(0, 0, 0)` with
 - `classify_point` at `(4, 0, 0)`, on the flat face and so on the skin, is
   still refused `CannotFollowAFacesTrimming`, now naming the **wall**. Asked
   directly at `(4, 0, 1)` and `(4, 0, −1)`, the wall refuses
-  `AFaceMissesPartOfWhereItsSurfacesCross` in all eight choices. The route was
-  not traced. That a ray from the point meets the wall, and that
-  `is_a_ring_face_between_two_planes` takes a wall with one plane along two
-  edges (§377) and then refuses a plane that does not hold the axis, is a
-  hypothesis. The test pins the refusal naming the wall, so it moves when the
-  wall is answered. Q826 holds it: Q789, the same wall built in the arena,
-  filed again with this test in its write set.
+  `AFaceMissesPartOfWhereItsSurfacesCross` in all eight choices. **Answered in
+  §243.8** (Q826): the route was traced as this item guessed it, and the wall
+  is now the half of the ring its wire keeps. `(4, 0, 0)` is `OnBoundary` in
+  the four choices whose flat face walks its two circles opposite ways round.
+  In the other four the wall's wire keeps a different side of `z = 0` at each
+  circle, and the wall is still refused, naming it.
 - The puck's lid (250.5) rests on the tube in one circle that no picker names,
   and stays refused. Q104 holds it.
+
+### 250.10 The half-ring built face by face, answered (Q194)
+
+*Row Q194 (`lane-q194-a-half-ring-built-face-by-face`, off `ad706857`).*
+250.7's half-ring, written through `SolidBuilder` in its three wall spellings
+and eight orientation choices each, as 250.7 wrote it. The flat face is added
+first and the wall second, and the shell lists them in that order. The third
+spelling puts both corners on `−x`, at `(−5, 0, 0)` and `(−3, 0, 0)`, since its
+seam over `(−4, 0, 1)` has to end at them. A choice is written
+`(outer, hole, wall)`: which way the flat face walks each circle, and which way
+the shell uses the wall. The wall walks each circle the other way from the flat
+face.
+
+**What builds**, on `ad706857`, each answer from `SolidBuilder::build` under
+`Policy::certified()`, and `Model::validate` passing every one that builds:
+
+| choice | no seam | seam over `(4, 0, 1)` | seam over `(−4, 0, 1)` |
+|---|---|---|---|
+| `(F, R, F)`, the half-ring | builds | builds | builds |
+| `(F, F, ·)`, `(R, R, ·)` | `AClosedEdgeIsWalkedAgainstItsSurface` | the same | the same |
+| `(R, F, R)` | `FacesDoNotAgreeWhichWayTheyFace` | the same | the same |
+| `(F, R, R)` | `VolumeIsNotPositive` | `FacesDoNotAgreeWhichWayTheyFace` | the same |
+| `(R, F, F)` | `FacesDoNotAgreeWhichWayTheyFace` | **builds, wrongly** | **builds, wrongly** |
+
+So 250.7's two refusals are gone, as §390 said they would be. Four choices walk
+the flat face's two circles the same way round, and Q949's check refuses them
+(243.8). `(R, F, F)` is the next paragraph.
+
+**The answers**, asked of the half-ring in each spelling, are all right:
+`face_holds_the_point` on the flat face gives `Held` at `(4, 0, 0)` and
+`(3.5, 0, 0)`, `NotHeld` at `(0, 0, 0)` and `(6, 0, 0)`, and `OnItsBoundary` at
+`(5, 0, 0)` and `(3, 0, 0)`, each read off `r` against 3 and 5.
+`classify_point` gives `OnBoundary` at `(4, 0, 0)` and `Outside` at
+`(0, 0, 0)`. So 250.6's reasoned `NotHeld` does not show through this door
+either, and `what_a_round_wire_encloses` is left as it is. Each half-ring holds
+Pappus's `π² r² R = 4π² = 39.478`, half of the whole ring's `2π² r² R`, at
+deflections `0.1`, `0.03` and `0.01`, each within the error its own
+measurement states. All of it is pinned in
+`tests/a_half_ring_built_face_by_face.rs`, and every refusal in the table by
+name.
+
+**`(R, F, F)` with a seam is a wrong answer.** It is the half-ring with every
+loop of both faces walked backwards and both faces still used `Forward`. With
+no seam it is refused. With either seam it builds, passes `validate`, and is
+two shapes at once. An uncommitted probe in the new test file printed, for
+both seams:
+
+- `measure` holds the top half: `39.413` at `0.01` against Pappus's `39.478`;
+- the wall's `face_holds_the_point` gives `NotHeld` at `(4, 0, 1)`,
+  `(−4, 0, 1)` and `(0, 4, 1)`, and `Held` at `(4, 0, −1)` and `(0, −4, −1)`:
+  the bottom half;
+- `classify_point` gives `Outside` at `(4, 0, 0.5)`, `(−4, 0, 0.5)` and
+  `(4, 0, 1)`, and `Inside` at `(4, 0, −0.5)`.
+
+The half-ring's own builds, asked the same, give the top half every time,
+which is right. A quarter bend with every loop walked backwards in the same way, its caps' circles
+and its wall's wire turned round and every face used `Forward`, was refused
+`AClosedEdgeIsWalkedAgainstItsSurface` by the same probe. So it is the seam
+across a band that lets it through. The test does not pin the two seamed
+`(R, F, F)` builds, as neither a solid nor a refusal
+(`is_every_loop_walked_backwards_round_a_seam`).
+
+Why `validate` passes it is **not traced**. A guess, not run: the wire keeps
+`z ≤ 0` at both circles, so Q949's check, which compares the sides kept at
+circles along one plane only with each other, agrees with itself. `holds.rs`
+reads that side. The mesher cuts the patch the seam closes, which is the top
+half whichever way the loop runs, so the mesh balances and the volume is
+positive. Nothing compares the side the circles keep with the side the seam
+is on. The class is `wrong/C`: only a probe has built it.
+
+**What this leaves.**
+
+- `SolidBuilder::build` and `Model::validate` pass a seamed ring band whose
+  every loop is walked backwards, and `measure` and `classify_point` then
+  disagree about which half it is. Filed as a row on `validate.rs`, to trace
+  it and refuse it, and to turn the two seamed `(R, F, F)` choices in the new
+  test into pinned refusals.

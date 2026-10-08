@@ -13,7 +13,9 @@
 //!
 //! Two pieces meet at a corner when they name the same corner, and the name is
 //! either the input vertex it is or the three planes it is the meet of, sorted.
-//! No coordinate is ever compared: two faces solving the same three planes in a
+//! An input vertex with exactly three planes round it is named by those planes
+//! too, so a piece of the other solid that meets it there names it alike. No
+//! coordinate is ever compared: two faces solving the same three planes in a
 //! different order would round differently, and comparing what they rounded to
 //! would either miss the join or invent one.
 //!
@@ -22,10 +24,11 @@
 //! [`Error::ResultIsNotManifold`]. That is the whole manifold check, and it
 //! lands here because this is where an edge with three claimants is *discovered*
 //! rather than searched for. The one edge with four claimants that is not
-//! refused is a line two input faces rest against each other along, with both
-//! sides of each kept: it is no edge of either input, and
-//! [`Assembly::part_each_line_two_faces_rest_against_each_other_along`] gives
-//! each face its own before anything is counted.
+//! refused is a line two faces rest against each other along, with both sides
+//! of each kept: it is no edge of either input, or — since Q803 — one input's
+//! own edge resting on a face of the other, kept as that input's edge; either
+//! way [`Assembly::part_each_line_two_faces_rest_against_each_other_along`]
+//! gives each face its own before anything is counted.
 //!
 //! # Two pieces on one plane are one face
 //!
@@ -57,16 +60,19 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    DynamicRange, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, PlaneAgreement, Point,
-    Surface, SurfaceMeet, Vector, which_way_a_closed_crossing_turns,
+    Cone, DynamicRange, EdgeRun, HalfSpace, Isometry, MeetOfThree, Orientation, Picker, Plane,
+    PlaneAgreement, Point, Surface, SurfaceMeet, Vector, meet_of_three_surfaces,
+    which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{
-    Approximation, Cause, Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
+    Approximation, Cause, Decision, Level, Measures, Point as PredicatePoint, Policy,
+    ProvenanceLog, Record,
 };
 use smallvec::SmallVec;
 
 use crate::holds::{
     WhereTheCurveIsCentred, a_picker_that_tells_the_two_arcs_apart,
+    the_nappe_an_arc_that_does_not_close_is_on, the_nappe_of, the_picker_naming_the_circle_through,
     where_a_closed_crossing_is_centred,
 };
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
@@ -87,7 +93,9 @@ use super::arrange::{
 };
 use super::bake::{grown_by, what_writing_the_corner_down_cost};
 use super::select::Chosen;
-use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
+use super::{
+    FaceMeet, MeetPoint, NamesOfOnePoint, Sameness, Scratch, as_exact_as_it_is, gave_up, middle_of,
+};
 
 /// Work out the whole result: its corners, edges, faces, shells and solids.
 ///
@@ -100,7 +108,9 @@ use super::{FaceMeet, MeetPoint, Sameness, Scratch, gave_up, middle_of};
 /// a void has nothing round it, [`Error::Undecidable`] when one shell could not
 /// be placed inside or outside another, and
 /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's one
-/// corner is a pole of the surface it is drawn on.
+/// corner is a pole of the surface it is drawn on, and
+/// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
+/// coplanar pieces both wind as its outline.
 pub(crate) fn assemble(
     model: &Model,
     scratch: &Scratch,
@@ -108,7 +118,7 @@ pub(crate) fn assemble(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Assembly> {
-    let mut assembly = Assembly::from_the_pieces(model, scratch, chosen)?;
+    let mut assembly = Assembly::from_the_pieces(model, scratch, chosen, policy, log)?;
     assembly.join_up_what_is_one_face(log)?;
     assembly.runs = assembly.how_each_edge_runs()?;
     assembly.shells = assembly.group_into_shells()?;
@@ -129,8 +139,10 @@ pub(crate) fn assemble(
 /// # Errors
 ///
 /// [`Error::Undecidable`] when two of the input's planes cannot be told apart at
-/// all, and [`Error::ResultIsNotManifold`] when one of its edges is claimed by
-/// other than two faces, which means the input was already broken.
+/// all, [`Error::ResultIsNotManifold`] when one of its edges is claimed by
+/// other than two faces, which means the input was already broken, and
+/// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
+/// its coplanar faces both wind as its outline.
 pub(crate) fn joined_faces_of_an_input(
     model: &Model,
     solid: SolidView<'_>,
@@ -164,6 +176,113 @@ pub(crate) struct InputSide {
     pub(crate) start: VertexKey,
     /// The plane of the face on the other side.
     pub(crate) across: Plane,
+}
+
+/// Every side of every piece, each with the edge of an answer it would be,
+/// named the way [`Assembly::from_the_pieces`] names the sides of the pieces it
+/// keeps. Two sides of two pieces that come back with one edge are one side,
+/// which is what `select` places a piece by when no point inside it can be
+/// found (`docs/decisions.md` §365.3).
+///
+/// **The same naming, over every piece and not only the kept ones.** The
+/// corners are [`Corners::of`], the edges [`Edges::of`] and so
+/// [`which_arc_this_is`], and the vertices that only start a closed edge are
+/// read through as they are for the kept pieces. A second matcher would be a
+/// second answer to which sides are one, and the two could disagree.
+///
+/// **`None` where a straight side's two ends come out one corner.** Two
+/// corners of two names that land on one `f64` triple are one corner
+/// ([`Corners::of`]), and a piece can have a straight side between two such.
+/// Two fuses in the suite reach one in a piece no rule keeps, a seed of the
+/// fuse fuzzer's corpus and the draw of
+/// `a_fused_draw_hands_its_provenance_back_through_the_door.rs`, and asserting
+/// it panicked both; a KiCad pin header reaches one in pieces the rule keeps,
+/// where [`sides_of`] now leaves the side out (§365.7). Here nothing is named
+/// then, and no piece is placed by a side.
+///
+/// # Errors
+///
+/// Whatever [`Corners::with_each_closed_curve_started_once`],
+/// [`Corners::of`] and [`Edges::of`] give.
+pub(crate) fn the_edge_each_side_of_every_piece_is(
+    model: &Model,
+    scratch: &Scratch,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<Vec<Vec<NamedSide>>>> {
+    let on_three_planes = input_corners_on_exactly_three_planes(model, scratch);
+    let no_corner_of_the_answer = vertices_read_through(
+        model,
+        scratch
+            .pieces
+            .iter()
+            .flat_map(|piece| &piece.wires)
+            .collect(),
+        &scratch.names_of_one_point,
+        &on_three_planes,
+    );
+    let wires: Vec<Vec<Cow<'_, [FaceMeet]>>> = scratch
+        .pieces
+        .iter()
+        .map(|piece| {
+            piece
+                .wires
+                .iter()
+                .map(|wire| read_through(wire, &no_corner_of_the_answer, model))
+                .collect()
+        })
+        .collect();
+    let wires = with_the_halves_of_each_whole_curve_joined(wires, policy, log)?;
+    let mut corners = Corners::with_each_closed_curve_started_once(
+        model,
+        on_three_planes,
+        &scratch.names_of_one_point,
+        wires.iter().flatten().flat_map(|wire| wire.iter()),
+        policy,
+        log,
+    )?;
+    let mut edges = Edges::default();
+    let mut named = Vec::with_capacity(scratch.pieces.len());
+    for (piece, wires) in scratch.pieces.iter().zip(&wires) {
+        let mut of_this_piece = Vec::new();
+        for meet in wires.iter().flat_map(|wire| wire.iter()) {
+            let from = corners.of(model, &meet.ends[0], policy, log)?;
+            let to = corners.of(model, &meet.ends[1], policy, log)?;
+            if from == to
+                && meet
+                    .carried_by
+                    .iter()
+                    .all(|surface| surface.as_plane().is_some())
+            {
+                return Ok(None);
+            }
+            let seam = the_seam_a_side_runs_along(model, &piece.ancestors, meet);
+            let side = edges.of(
+                meet,
+                seam,
+                from,
+                to,
+                piece.ancestors[0],
+                false,
+                &corners,
+                policy,
+                log,
+            )?;
+            of_this_piece.push(NamedSide {
+                side: meet.clone(),
+                edge: side.edge,
+            });
+        }
+        named.push(of_this_piece);
+    }
+    Ok(Some(named))
+}
+
+/// One side of a piece, and the edge of an answer it would be.
+pub(crate) struct NamedSide {
+    pub(crate) side: FaceMeet,
+    /// Two sides of two pieces with the same number here are one side.
+    pub(crate) edge: usize,
 }
 
 /// The whole result, in scratch.
@@ -383,13 +502,25 @@ impl Assembly {
     ///
     /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's
     /// one corner is a pole of the surface it is drawn on, where nothing says
-    /// which way it runs.
-    fn from_the_pieces(model: &Model, scratch: &Scratch, chosen: &[Chosen]) -> Result<Self> {
-        let only_where_a_closed_edge_starts = vertices_that_only_start_a_closed_edge(
+    /// which way it runs, and whatever [`name_of_the_closed_crossing_through`]
+    /// gives when it asks which of a plane's two circles round a ring a closed
+    /// side is on.
+    fn from_the_pieces(
+        model: &Model,
+        scratch: &Scratch,
+        chosen: &[Chosen],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Self> {
+        let on_three_planes = input_corners_on_exactly_three_planes(model, scratch);
+        let no_corner_of_the_answer = vertices_read_through(
             model,
             chosen
                 .iter()
-                .flat_map(|kept| &scratch.pieces[kept.piece].wires),
+                .flat_map(|kept| &scratch.pieces[kept.piece].wires)
+                .collect(),
+            &scratch.names_of_one_point,
+            &on_three_planes,
         );
         let kept_wires: Vec<Vec<Cow<'_, [FaceMeet]>>> = chosen
             .iter()
@@ -397,20 +528,25 @@ impl Assembly {
                 scratch.pieces[kept.piece]
                     .wires
                     .iter()
-                    .map(|wire| read_through(wire, &only_where_a_closed_edge_starts, model))
+                    .map(|wire| read_through(wire, &no_corner_of_the_answer, model))
                     .collect()
             })
             .collect();
+        let kept_wires = with_the_halves_of_each_whole_curve_joined(kept_wires, policy, log)?;
         let mut corners = Corners::with_each_closed_curve_started_once(
             model,
+            on_three_planes,
+            &scratch.names_of_one_point,
             kept_wires.iter().flatten().flat_map(|wire| wire.iter()),
-        );
+            policy,
+            log,
+        )?;
         let mut edges = Edges::default();
         let mut faces = Vec::new();
         for (kept, kept_wires) in chosen.iter().zip(&kept_wires) {
             let piece = &scratch.pieces[kept.piece];
             let turned_round = piece.orientation.is_reversed() != kept.reversed;
-            let wires = kept_wires
+            let wires: Vec<Vec<Side>> = kept_wires
                 .iter()
                 .map(|wire| {
                     sides_of(
@@ -420,9 +556,20 @@ impl Assembly {
                         model,
                         &mut corners,
                         &mut edges,
+                        policy,
+                        log,
                     )
                 })
+                .filter(|sides| {
+                    piece.surface.as_plane().is_none()
+                        || sides
+                            .as_ref()
+                            .map_or(true, |sides| encloses_something(sides))
+                })
                 .collect::<Result<_>>()?;
+            if wires.is_empty() {
+                continue;
+            }
             let (surface, used) = match (piece.surface.as_plane(), turned_round) {
                 (Some(flat), true) => (Surface::Plane(flat.reversed()), Orientation::Forward),
                 (Some(_) | None, false) => (piece.surface, Orientation::Forward),
@@ -449,7 +596,7 @@ impl Assembly {
             &assembly.edges,
             &assembly.corners,
             &mut assembly.faces,
-        );
+        )?;
         Ok(assembly)
     }
 
@@ -499,6 +646,7 @@ impl Assembly {
                     sides.push(Side {
                         edge,
                         forward: edges[edge].ends[0] == from,
+                        read_against: None,
                     });
                 }
                 wires.push(sides);
@@ -586,45 +734,74 @@ impl Assembly {
     /// seam that piece is cut open along. The answer is the two solids as they
     /// stood, two lumps.
     ///
-    /// **Only where each pair is pieces of one input face, walking the line
-    /// opposite ways.** Four darts from four input faces is a line both solids
-    /// have an edge along — two cubes touching along part of an edge, or the
-    /// frame and the comb of `degenerate_fuses.rs` — and those stay one edge and
-    /// are refused: no `Model` holds four faces along one edge, and §80.9 leaves
-    /// two touching solids as an answer for that relation unbuilt.
+    /// **A prism lying along one of its edges on a block's top face** is the
+    /// same with one difference: the prism's two darts are its two faces either
+    /// side of its own edge, two input faces and not one. The top face's two
+    /// pieces are parted off them, the top face is one face again, and the
+    /// prism keeps its edge. That is parted only where it is two lumps:
+    ///
+    /// - **The prism's faces lie on the outer side of the face they rest on**
+    ///   ([`Assembly::rest_on_the_outer_side_of`]). Inside it, they are the
+    ///   walls of a prism lying in the block along its edge, kept turned round
+    ///   in the block less the prism, and the answer is one solid pinched along
+    ///   the line, not two.
+    /// - **Nothing else joins the two pairs into one shell**
+    ///   ([`Assembly::a_line_whose_two_sides_are_joined_some_other_way`]). A
+    ///   solid lying on a block along one edge and reaching down into it
+    ///   somewhere else is one solid that touches itself along the line, and a
+    ///   shell that touches itself is what §17.4 refuses.
+    ///
+    /// **Four darts from four input faces stay one edge and are refused**: a
+    /// line both solids have an edge along — two cubes touching along part of
+    /// an edge, or the frame and the comb of `degenerate_fuses.rs`. No `Model`
+    /// holds four faces along one edge, and §80.9 leaves two touching solids as
+    /// an answer for that relation unbuilt.
     ///
     /// Which pair keeps the edge is the one whose first dart comes first; the
     /// other is moved onto a copy. **Each takes the input edges of its own input
-    /// face**, so that a bar whose seam is the touching line hands the seam to
-    /// the skin's edge and not to the wall's, which is dissolved; the line is no
-    /// edge of the wall, so the wall's takes none.
+    /// faces**, so that a bar whose seam is the touching line hands the seam to
+    /// the skin's edge and not to the wall's, which is dissolved, and the
+    /// prism's edge goes to the prism's; the line is no edge of the wall or the
+    /// top face, so theirs takes none.
     ///
     /// # Panics
     ///
-    /// If an input edge the line is a piece of runs along neither input face.
-    /// Every one was named by a side of a piece of one of them, along that
-    /// face's own boundary or its seam.
+    /// If an input edge the line is a piece of runs along none of the four
+    /// faces' input faces. Every one was named by a side of a piece of one of
+    /// them, along that face's own boundary or its seam.
     fn part_each_line_two_faces_rest_against_each_other_along(&mut self, model: &Model) {
-        for by in self.claimants_of_each_edge() {
-            let Some(moving) = self.the_second_of_two_input_faces_along(&by) else {
+        let claimants = self.claimants_of_each_edge();
+        let mut partings: Vec<Option<[[Dart; 2]; 2]>> = claimants
+            .iter()
+            .map(|by| self.the_two_pairs_along(by))
+            .collect();
+        while let Some(joined) =
+            self.a_line_whose_two_sides_are_joined_some_other_way(&claimants, &partings)
+        {
+            partings[joined] = None;
+        }
+        for (kept, parting) in partings.into_iter().enumerate() {
+            let Some([staying, moving]) = parting else {
                 continue;
             };
-            let kept = self.edge_of(by[0]);
-            let runs_along = |input: EdgeKey, dart: Dart| {
+            let runs_along = |input: EdgeKey, pair: [Dart; 2]| {
                 model
                     .edge(input)
                     .expect("a side of a piece runs along an edge of the model the fuse was given")
                     .neighbouring_faces()
-                    .any(|face| self.faces[dart.face].ancestors.contains(&face))
+                    .any(|face| {
+                        pair.iter()
+                            .any(|dart| self.faces[dart.face].ancestors.contains(&face))
+                    })
             };
             let (keeping, parting): (Vec<EdgeKey>, Vec<EdgeKey>) = self.edges[kept]
                 .from
                 .iter()
-                .partition(|&&input| !runs_along(input, moving[0]));
+                .partition(|&&input| !runs_along(input, moving));
             for &input in &keeping {
                 assert!(
-                    runs_along(input, by[0]),
-                    "an input edge a parted line is a piece of runs along one of the two faces"
+                    runs_along(input, staying),
+                    "an input edge a parted line is a piece of runs along one of its faces"
                 );
             }
             let original = &self.edges[kept];
@@ -643,24 +820,126 @@ impl Assembly {
         }
     }
 
-    /// The two darts to move onto an edge of their own, where four darts along
-    /// one edge are two pairs, each pair from pieces of one input face and
-    /// walking the edge opposite ways; `None` for anything else.
-    fn the_second_of_two_input_faces_along(&self, by: &[Dart]) -> Option<[Dart; 2]> {
-        let &[first, _, _, _] = by else {
+    /// The two pairs four darts along one edge part into, the pair holding the
+    /// first dart first; `None` where they do not part.
+    ///
+    /// Each pair walks the edge opposite ways and at least one is pieces of one
+    /// input face. Where both are, it is a bar's skin on a wall or on another
+    /// bar. Where only one is, the other two must rest on its outer side.
+    fn the_two_pairs_along(&self, by: &[Dart]) -> Option<[[Dart; 2]; 2]> {
+        let &[first, second, third, fourth] = by else {
             return None;
         };
-        let ancestors = |dart: Dart| &self.faces[dart.face].ancestors;
-        let (keeping, moving): (Vec<Dart>, Vec<Dart>) = by
-            .iter()
-            .partition(|&&dart| ancestors(dart) == ancestors(first));
-        let keeping = <[Dart; 2]>::try_from(keeping).ok()?;
-        let moving = <[Dart; 2]>::try_from(moving).ok()?;
-        let one_face_both_ways = |[one, other]: [Dart; 2]| {
-            ancestors(one) == ancestors(other)
-                && self.side_of(one).forward != self.side_of(other).forward
+        let both_ways =
+            |[one, other]: [Dart; 2]| self.side_of(one).forward != self.side_of(other).forward;
+        [
+            [[first, second], [third, fourth]],
+            [[first, third], [second, fourth]],
+            [[first, fourth], [second, third]],
+        ]
+        .into_iter()
+        .filter(|&[staying, moving]| both_ways(staying) && both_ways(moving))
+        .find(|&[staying, moving]| {
+            match (
+                self.pieces_of_one_input_face(staying),
+                self.pieces_of_one_input_face(moving),
+            ) {
+                (true, true) => {
+                    self.faces[staying[0].face].ancestors != self.faces[moving[0].face].ancestors
+                }
+                (true, false) => self.rest_on_the_outer_side_of(moving, staying),
+                (false, true) => self.rest_on_the_outer_side_of(staying, moving),
+                (false, false) => false,
+            }
+        })
+    }
+
+    fn pieces_of_one_input_face(&self, [one, other]: [Dart; 2]) -> bool {
+        self.faces[one.face].ancestors == self.faces[other.face].ancestors
+    }
+
+    /// Whether two faces resting along a line lie on the side the face they
+    /// rest on points to: every corner of theirs on that side of its plane or
+    /// on the plane, and at least one off it.
+    ///
+    /// The face rested on is stored with its plane pointing out of the
+    /// material, turned round where the rule turned it, so the side it points
+    /// to is outside whatever the rule.
+    ///
+    /// **Only flat faces resting on a flat face are asked**, and anything
+    /// curved stays one edge and refused: a straight-sided flat face lies
+    /// within its corners, and a curved one can bulge past them. **Every
+    /// corner is asked, not only those near the line**, so a face with a corner
+    /// on the inner side anywhere, or one the arithmetic cannot place, leaves
+    /// the line one edge and refused. A piece of the face rested on has every
+    /// corner on its plane and none off it, so it is never taken for one
+    /// resting there.
+    fn rest_on_the_outer_side_of(&self, resting: [Dart; 2], on: [Dart; 2]) -> bool {
+        let Some(plane) = self.faces[on[0].face].surface.as_plane() else {
+            return false;
         };
-        (one_face_both_ways(keeping) && one_face_both_ways(moving)).then_some(moving)
+        resting.iter().all(|dart| {
+            let face = &self.faces[dart.face];
+            if face.surface.as_plane().is_none() {
+                return false;
+            }
+            let mut off_the_plane = false;
+            for corner in face
+                .wires
+                .iter()
+                .flatten()
+                .flat_map(|side| self.edges[side.edge].ends)
+            {
+                match plane.side_of_point(PredicatePoint::from(
+                    self.corners[corner].point.coordinates(),
+                )) {
+                    Decision::Pos => off_the_plane = true,
+                    Decision::Zero => {}
+                    Decision::Neg | Decision::Undecidable { .. } => return false,
+                    other => panic!(
+                        "which side of a plane a corner is on came back as a decision nothing \
+                         here knows: {other:?}"
+                    ),
+                }
+            }
+            off_the_plane
+        })
+    }
+
+    /// An edge parted onto two faces of one solid resting on a face of another
+    /// whose two pairs other edges join into one shell all the same, or `None`
+    /// when no parting leaves one.
+    ///
+    /// Each line a parting is kept for joins only its own pairs, and every
+    /// other edge joins every face along it. Dropping one parting can only join
+    /// more, so the caller asks again until this answers `None`. A bar's skin
+    /// parted off a wall is not asked, and is parted as Q760 left it.
+    fn a_line_whose_two_sides_are_joined_some_other_way(
+        &self,
+        claimants: &[Vec<Dart>],
+        partings: &[Option<[[Dart; 2]; 2]>],
+    ) -> Option<usize> {
+        let mut shells = Sameness::of(self.faces.len());
+        for (by, parting) in claimants.iter().zip(partings) {
+            match parting {
+                Some(pairs) => {
+                    for [one, other] in pairs {
+                        shells.join(one.face, other.face);
+                    }
+                }
+                None => {
+                    for dart in by {
+                        shells.join(by[0].face, dart.face);
+                    }
+                }
+            }
+        }
+        partings.iter().position(|parting| {
+            parting.is_some_and(|[staying, moving]| {
+                !(self.pieces_of_one_input_face(staying) && self.pieces_of_one_input_face(moving))
+                    && shells.leader(staying[0].face) == shells.leader(moving[0].face)
+            })
+        })
     }
 
     /// Fold every run of faces that is really one flat region into one face.
@@ -689,15 +968,18 @@ impl Assembly {
     /// # Errors
     ///
     /// [`Error::ResultIsNotManifold`] when an edge is claimed by other than two
-    /// faces, and [`Error::Undecidable`] when two planes cannot be told apart at
-    /// all.
+    /// faces, [`Error::Undecidable`] when two planes cannot be told apart at
+    /// all, and [`Error::TheFuseWroteABrokenAnswer`] when two rings of a joined
+    /// flat face both wind as its outline ([`Assembly::rings_round`]).
     ///
     /// # Panics
     ///
-    /// If a joined face comes out with two outlines, which is the answer
-    /// pinching to a point at a corner, or with a ring of fewer than three
-    /// sides. Both are broken internal invariants and a corrupt solid is worse
-    /// than a crash (§4.1).
+    /// Where [`Assembly::rings_round`] cannot tell which ring of a joined flat
+    /// face is its outline, as its own `# Panics` lists, or where a ring comes
+    /// out bounding nothing: fewer than three sides, unless it is one side that
+    /// closes on itself, two different sides not both straight, or a ring of a
+    /// whole closed surface ([`Assembly::sides_of`]). Both are broken internal
+    /// invariants and a corrupt solid is worse than a crash (§4.1).
     fn join_up_what_is_one_face(&mut self, log: &mut ProvenanceLog) -> Result<bool> {
         let along = self.darts_along_each_edge()?;
         let mut dissolved = self.edges_with_one_face_on_both_sides(&along, log)?;
@@ -706,7 +988,7 @@ impl Assembly {
             dissolved[edge] = false;
         }
         let same = joined_across(&along, &dissolved, self.faces.len());
-        let joined = self.rings_of_each_joined_face(&same, &along, &dissolved)?;
+        let joined = self.rings_of_each_joined_face(&same, &along, &dissolved, log)?;
         let renumbered = self.what_is_left(&joined, &along, &dissolved);
         // **A closed curve cut where nothing meets it** is joined back up even
         // where no face was: a pointed cone less a block whose walls are tangent
@@ -782,7 +1064,7 @@ impl Assembly {
                         let agreement = agreement_of_two_planes(mine, theirs, log)?;
                         Ok(agreement == PlaneAgreement::SameWay)
                     }
-                    (None, None) => Ok(one_cone_or_pipe_the_same_way_round(mine, theirs)),
+                    (None, None) => Ok(one_cone_pipe_or_ball_the_same_way_round(mine, theirs)),
                     (Some(_), None) | (None, Some(_)) => Ok(false),
                 }
             })
@@ -803,6 +1085,7 @@ impl Assembly {
         same: &Sameness,
         along: &[[Dart; 2]],
         dissolved: &[bool],
+        log: &mut ProvenanceLog,
     ) -> Result<Vec<JoinedFace>> {
         let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for face in 0..self.faces.len() {
@@ -826,7 +1109,7 @@ impl Assembly {
             let (surface, used, rings) = match self.faces[members[0]].surface.as_plane() {
                 Some(_) => {
                     let plane = plane_of_the_joined_face(&members, &self.faces);
-                    let rings = self.rings_round(&members, along, dissolved, plane)?;
+                    let rings = self.rings_round(&members, along, dissolved, plane, log)?;
                     (Surface::Plane(plane), Orientation::Forward, rings)
                 }
                 // The lowest spelling by bits, so the face does not depend on
@@ -855,25 +1138,43 @@ impl Assembly {
         Ok(joined)
     }
 
-    /// The edges between pieces of one cone or pipe that stay edges after all:
-    /// one seam across each band the joining makes, and every edge of a group
-    /// that cannot be joined.
+    /// The edges between pieces of one cone, pipe or ball that stay edges after
+    /// all: one seam across each band the joining makes, and every edge of a
+    /// group that cannot be joined.
+    ///
+    /// **A ball keeps no seam.** It has no one axis for a ring to go round, and
+    /// the mesher opens a ball's face along meridians of its own: a ball less a
+    /// disc along one half a turn from the rim, a ball less several in strips
+    /// from pole to pole, a cap up to its pole (`open_the_ball_along_a_seam`,
+    /// `open_the_ball_into_strips` and `cut_a_cap_up_to_its_pole` in `mesh.rs`,
+    /// §202.1, §402). So every group on a ball is joined whole, and the ball's
+    /// skin round a box's corner, cut by the box's three planes into eight
+    /// pieces, comes back as the one face it is
+    /// (`a_ball_kept_to_a_corner_of_a_box.rs`, §229.2). **Except the whole
+    /// ball**: a group whose rings come out empty is every piece of it, and a
+    /// joined face is never written as a whole closed surface, so its edges all
+    /// stay and the ball stays in the pieces the fuse cut it into. Q1345's
+    /// trial joined that too and failed 18 `rcad-topo` tests, a panic in
+    /// `mesh.rs` among them.
     ///
     /// **A ring that goes right round needs a seam**, and the pieces a fuse
     /// leaves carry none — the arrangement cuts a cone's wall into pieces that
     /// each lie flat, and the input's own seam is not among their sides. Joined,
     /// a wall the block took a notch out of is a band with two rings right
     /// round it and nothing across, which is not a face the writer can lay out
-    /// flat (`AWireWillNotLieFlatOnItsFace`). So one of the dissolved edges
-    /// that runs from one ring to the other stays, as the seam (§224.2 item 2).
-    /// Which one is read off its corners, lowest first, and never off its index
-    /// here, which depends on the order the solids were handed over — the same
+    /// flat (`AWireWillNotLieFlatOnItsFace`). So dissolved edges that run from
+    /// one ring to the other stay, as the seam (§224.2 item 2): one edge where
+    /// one runs across, and otherwise a chain of rulings, as where a box inside
+    /// a bar cuts its wall into a grid ([`Assembly::a_seam_across_the_band`]).
+    /// Which is read off the corners, lowest first, and never off the indices
+    /// here, which depend on the order the solids were handed over — the same
     /// rule [`Assembly::which_to_keep_first`] keeps a corner by.
     ///
     /// Anything else that goes right round — a group with other than two such
-    /// rings, no edge across, or a seam that still leaves a ring going round —
-    /// and a group whose rings cannot be counted, stays apart. The answer is
-    /// then the one the fuse gave before it joined curved faces at all.
+    /// rings, neither an edge nor a chain of rulings across, or a seam that
+    /// still leaves a ring going round — and a group whose rings cannot be
+    /// counted, stays apart. The answer is then the one the fuse gave before it
+    /// joined curved faces at all.
     fn edges_a_curved_face_keeps(&self, along: &[[Dart; 2]], dissolved: &[bool]) -> Vec<usize> {
         let same = joined_across(along, dissolved, self.faces.len());
         let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
@@ -888,12 +1189,21 @@ impl Assembly {
             let inside: Vec<usize> = (0..self.edges.len())
                 .filter(|&edge| dissolved[edge] && members.contains(&along[edge][0].face))
                 .collect();
+            if matches!(self.faces[members[0]].surface, Surface::Sphere(_)) {
+                if self
+                    .rings_of_a_curved_face(&members, along, dissolved)
+                    .is_empty()
+                {
+                    staying.extend(inside);
+                }
+                continue;
+            }
             if self.needs_no_seam(&members, along, dissolved) {
                 continue;
             }
             let seam = self.a_seam_across_the_band(&members, along, dissolved, &inside);
             match seam {
-                Some(seam) => staying.push(seam),
+                Some(seam) => staying.extend(seam),
                 None => staying.extend(inside),
             }
         }
@@ -913,26 +1223,76 @@ impl Assembly {
     /// (`fuse_laws_over_a_cone.rs`,
     /// `a_cone_united_with_what_it_shares_with_a_block_is_the_cone`).
     ///
-    /// A ring of several arcs that goes right round is not covered: that one
-    /// does need a seam, and [`Assembly::a_seam_across_the_band`] finds it.
+    /// A ring of several sides that goes right round beside a second ring is
+    /// not covered: the band between them does need a seam, and
+    /// [`Assembly::a_seam_across_the_band`] finds it.
+    ///
+    /// **One ring right round a cone and nothing else is a cap round its
+    /// apex**, and needs no seam either, however many sides it has. The other
+    /// piece that ring cuts the nappe into runs on for ever, and a face is
+    /// bounded, so the face holds the apex, as the input's own skin does inside
+    /// its rim. The mesher cuts such a face up to the apex
+    /// (`BuildingAMesh::cut_a_cap_up_to_its_pole` in `mesh.rs`), as it cuts a
+    /// nappe a cube stood on its corner leaves in three arcs. A cone less a
+    /// block whose floor is just above the apex leaves its skin outside the
+    /// block in three pieces whose one ring of four sides goes right round,
+    /// and left apart they were two faces too many
+    /// (`a_block_face_through_a_cones_apex.rs`, `docs/decisions.md` §347.4).
+    /// On a pipe one ring right round bounds no face, so this is the cone's
+    /// alone.
     fn needs_no_seam(&self, members: &[usize], along: &[[Dart; 2]], dissolved: &[bool]) -> bool {
         let surface = self.faces[members[0]].surface;
-        self.rings_of_a_curved_face(members, along, dissolved)
-            .iter()
-            .all(|ring| {
-                ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(false)
-            })
+        let rings = self.rings_of_a_curved_face(members, along, dissolved);
+        if let (Surface::Cone(_), [ring]) = (&surface, rings.as_slice())
+            && self.a_ring_goes_right_round(ring, &surface) == Some(true)
+        {
+            return true;
+        }
+        rings.iter().all(|ring| {
+            ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(false)
+        })
     }
 
-    /// The dissolved edge that runs from one ring of a band to the other with
-    /// the lowest corners, where keeping it leaves a face that lies flat.
+    /// The dissolved edges to keep as the seam across a band, where keeping
+    /// them leaves a face that lies flat: one edge from one ring to the other
+    /// where there is one, and otherwise the chain of rulings from ring to ring
+    /// with the fewest edges.
+    ///
+    /// **A seam is a chain of edges where no one edge runs across.** A box
+    /// standing inside a bar cuts the bar's wall at the box's floor and roof as
+    /// well as down its four walls, so the wall comes back as a grid of 24
+    /// pieces, 8 round by 3 up, and each line down it is three rulings broken
+    /// where the floor and the roof cross it. No one edge runs from rim to rim,
+    /// and asking for one left all 24 pieces apart where the answer has one
+    /// wall (`a_box_inside_a_bar.rs`). The corners in the middle of the chain
+    /// stay, as every corner where pieces of one cone or pipe met does
+    /// ([`Assembly::what_is_left`]).
+    ///
+    /// **A chain is of rulings only**, which keep their angle round the axis,
+    /// so it cuts the wall straight down as the input's own seam did. That is
+    /// measured and not traced: a pointed cone united with a cube stood on its
+    /// corner round its apex has no edge from its rim to the ring round its
+    /// apex, and the fewest edges across are two arcs where the cube's planes
+    /// cross the wall. Kept as the seam, they joined the nine pieces into a face
+    /// the mesher refused, `TwoPatchesOfTheMeshDrewTheSameSide`
+    /// (`a_wire_that_rings_a_cones_apex.rs`). Chains of any edges were refused
+    /// that way in seven tests across four files, a frustum with a cube round
+    /// its apex among them, and all seven answer with the pieces apart. A seam
+    /// of one edge is kept whatever it runs along, as it was before chains.
+    ///
+    /// **Which is read off the corners and never off the indices here**, which
+    /// depend on the order the solids were handed over: of the chains with the
+    /// fewest edges, the one whose corners come lowest one after another by
+    /// [`Assembly::which_to_keep_first`]. For one edge that is the edge whose
+    /// lower end is lowest, then whose other end is, the rule a seam was chosen
+    /// by before chains.
     fn a_seam_across_the_band(
         &self,
         members: &[usize],
         along: &[[Dart; 2]],
         dissolved: &[bool],
         inside: &[usize],
-    ) -> Option<usize> {
+    ) -> Option<Vec<usize>> {
         let surface = self.faces[members[0]].surface;
         let rings = self.rings_of_a_curved_face(members, along, dissolved);
         let [one, other] = rings.as_slice() else {
@@ -942,25 +1302,22 @@ impl Assembly {
             ring.iter().map(|&dart| self.starts_at(dart)).collect()
         };
         let (one, other) = (corners_of(one), corners_of(other));
-        let lowest_first = |edge: usize| {
-            let mut ends = self.edges[edge].ends;
-            ends.sort_by(|&a, &b| self.which_to_keep_first(a, b));
-            ends
-        };
-        let seam = inside
+        let rulings: Vec<usize> = inside
             .iter()
             .copied()
             .filter(|&edge| {
-                let [a, b] = self.edges[edge].ends;
-                (one.contains(&a) && other.contains(&b)) || (one.contains(&b) && other.contains(&a))
+                let [from, to] = self.edges[edge].ends;
+                from != to && matches!(self.edges[edge].arc, WhichArc::TheOnlyOne)
             })
-            .min_by(|&a, &b| {
-                let (a, b) = (lowest_first(a), lowest_first(b));
-                self.which_to_keep_first(a[0], b[0])
-                    .then_with(|| self.which_to_keep_first(a[1], b[1]))
-            })?;
+            .collect();
+        let seam = match self.the_lowest_way_across(inside, &one, &other)? {
+            one_edge if one_edge.len() == 1 => one_edge,
+            _ => self.the_lowest_way_across(&rulings, &one, &other)?,
+        };
         let mut with_the_seam = dissolved.to_vec();
-        with_the_seam[seam] = false;
+        for &edge in &seam {
+            with_the_seam[edge] = false;
+        }
         let rings = self.rings_of_a_curved_face(members, along, &with_the_seam);
         rings
             .iter()
@@ -968,8 +1325,102 @@ impl Assembly {
             .then_some(seam)
     }
 
-    /// The rings round a joined face on a cone or a pipe, in the order they are
-    /// first come to.
+    /// The chain of `edges` from a corner of `one` to a corner of `other` with
+    /// the fewest edges, and of those the one whose corners come lowest one
+    /// after another, walked from whichever ring that puts first; or `None`
+    /// where no chain joins them, or where two of `edges` join the same two
+    /// corners of it, which would leave the choice between them to the indices.
+    fn the_lowest_way_across(
+        &self,
+        edges: &[usize],
+        one: &BTreeSet<usize>,
+        other: &BTreeSet<usize>,
+    ) -> Option<Vec<usize>> {
+        let mut next_to: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for &edge in edges {
+            let [a, b] = self.edges[edge].ends;
+            next_to.entry(a).or_default().push(b);
+            next_to.entry(b).or_default().push(a);
+        }
+        let there = self.the_lowest_walk(&next_to, one, other)?;
+        let back = self.the_lowest_walk(&next_to, other, one)?;
+        let back_is_lower = there
+            .iter()
+            .zip(&back)
+            .map(|(&there, &back)| self.which_to_keep_first(back, there))
+            .find(|order| order.is_ne())
+            .is_some_and(Ordering::is_lt);
+        let corners = if back_is_lower { back } else { there };
+        corners
+            .windows(2)
+            .map(|step| {
+                let [only] = edges
+                    .iter()
+                    .copied()
+                    .filter(|&edge| {
+                        let [a, b] = self.edges[edge].ends;
+                        [a, b] == [step[0], step[1]] || [b, a] == [step[0], step[1]]
+                    })
+                    .collect::<Vec<_>>()[..]
+                else {
+                    return None;
+                };
+                Some(only)
+            })
+            .collect()
+    }
+
+    /// The corners of the chain through `next_to` from a corner of `from` to
+    /// one of `to` with the fewest steps, and of those the one whose corners
+    /// come lowest one after another, or `None` where none joins them.
+    ///
+    /// Every corner is first given how many steps it is from `to`. The walk
+    /// then starts at the lowest corner of `from` that is fewest steps away,
+    /// and steps each time to the lowest neighbour one step nearer. A corner in
+    /// the middle is never on either ring: one on `to` would be no steps away,
+    /// and one on `from` nearer than where the walk started would have been the
+    /// start.
+    fn the_lowest_walk(
+        &self,
+        next_to: &BTreeMap<usize, Vec<usize>>,
+        from: &BTreeSet<usize>,
+        to: &BTreeSet<usize>,
+    ) -> Option<Vec<usize>> {
+        let mut away: BTreeMap<usize, usize> = to.iter().map(|&corner| (corner, 0)).collect();
+        let mut waiting: std::collections::VecDeque<usize> = to.iter().copied().collect();
+        while let Some(corner) = waiting.pop_front() {
+            let further = away[&corner] + 1;
+            for &next in next_to.get(&corner).into_iter().flatten() {
+                if let std::collections::btree_map::Entry::Vacant(unseen) = away.entry(next) {
+                    unseen.insert(further);
+                    waiting.push_back(next);
+                }
+            }
+        }
+        let lowest = |one: &usize, other: &usize| self.which_to_keep_first(*one, *other);
+        let fewest = from.iter().filter_map(|corner| away.get(corner)).min()?;
+        let mut at = from
+            .iter()
+            .copied()
+            .filter(|corner| away.get(corner) == Some(fewest))
+            .min_by(lowest)
+            .expect("the fewest steps away is how far some corner of the ring is");
+        let mut walk = vec![at];
+        while away[&at] > 0 {
+            let nearer = away[&at] - 1;
+            at = next_to[&at]
+                .iter()
+                .copied()
+                .filter(|next| away.get(next) == Some(&nearer))
+                .min_by(lowest)
+                .expect("a corner some steps away has a neighbour one step nearer");
+            walk.push(at);
+        }
+        Some(walk)
+    }
+
+    /// The rings round a joined face on a cone, a pipe or a ball, in the order
+    /// they are first come to.
     ///
     /// **No ring is the outline**, and that is §31.3's rule and not a shortcut:
     /// a curved face's invariant is that every wire keeps the material on its
@@ -1022,7 +1473,7 @@ impl Assembly {
             Surface::Cylinder(pipe) => pipe.axis(),
             Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) => return None,
             // A surface kind added to `rcad-geom` after this has no ring count
-            // here, so its pieces are left apart as a ball's are.
+            // here, so its pieces are left apart as a ring's are.
             _ => return None,
         };
         let round = |at: Point| axis.direction().cross(at - axis.origin());
@@ -1086,17 +1537,30 @@ impl Assembly {
             .collect()
     }
 
-    /// # Panics
+    /// The rings of one joined flat face, its outline first and then its holes.
     ///
-    /// If more than one ring winds with the plane's normal, or if none does.
-    /// Two outlines means the joined region touches itself at a corner, which
-    /// is a solid this kernel cannot hold. No outline means the region is
-    /// bounded by holes alone, which is a region with no outside — every face
-    /// that got here came out of [`Assembly::from_the_pieces`] or
-    /// [`Assembly::from_one_input_solid`] with an outline of its own, and
-    /// joining only ever takes an edge *away* from between two of them.
+    /// The outline is the one ring that winds with the plane's normal, and the
+    /// holes wind against it. No outline at all would be a region bounded by
+    /// holes alone, which has no outside — every face that got here came out of
+    /// [`Assembly::from_the_pieces`] or [`Assembly::from_one_input_solid`] with
+    /// an outline of its own, and joining only ever takes an edge *away* from
+    /// between two of them.
     ///
-    /// **A ring whose corners enclose nothing is placed by that same rule**,
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] where a ring's winding cannot be decided.
+    ///
+    /// [`Error::TheFuseWroteABrokenAnswer`], `broken`
+    /// [`Invalid::HoleWindsWithTheOuterWire`], where two rings wind with the
+    /// normal. Either the joined region touches itself at a corner, which is a
+    /// solid this kernel cannot hold, or a hole's corners lie within a rounding
+    /// of each other and wind the wrong way as stored: a cube turned so its
+    /// corner rests on another's face, with its three planes meeting a rounding
+    /// outside the face, leaves the face a hole of that size
+    /// (`a_turned_cube_with_its_corner_on_a_face.rs`, Q1287). Written, either
+    /// face is one [`Model::validate`] refuses for that `broken`.
+    ///
+    /// **A ring whose corners enclose nothing is placed by the rule above**,
     /// because its corners cannot place it. A half disk has two corners, so the
     /// hole a half ball pokes through a knife's face, joined across the axis
     /// from the knife's other half, winds round no area at all (§200.1's two
@@ -1114,17 +1578,46 @@ impl Assembly {
     /// (`a_joined_flat_face_whose_rings_enclose_no_area.rs`).
     /// A ring shown to hold the others is the outline and the rest are holes;
     /// with none shown to, and only one ring left that nothing could place,
-    /// that one is the outline by the rule above. Two or more left unplaced
-    /// still panics — a ring along a torus, or with a side along a hyperbola —
-    /// and no answer is known to reach it: a torus refuses every fuse before
-    /// here (`how_often_a_fuse_with_a_torus_refuses.rs`).
+    /// that one is the outline by the rule above.
+    ///
+    /// # Panics
+    ///
+    /// Where the rings still cannot say which one is the outline:
+    ///
+    /// - **A ring winding neither way.** Nothing reaches it:
+    ///   [`winding_round`] answers `Neg`, `Zero` or `Pos`, or refuses.
+    /// - **No ring winding with the plane, and none of those enclosing nothing
+    ///   holding the others**, every one of them answering `Some(false)`.
+    ///   Nothing keeps answers off it: two bars united and then united with the
+    ///   half bar whose corner is their lens's corner reach it, both ways round
+    ///   (`a_half_bar_whose_corner_is_the_lens_corner_mostly_answers` in
+    ///   `a_lens_whose_hole_is_half_a_disk.rs`, Q1290).
+    /// - **Two or more rings enclosing nothing that nothing could place** — a
+    ///   ring along a torus. No shape is known to reach it. It is not that a
+    ///   torus refuses every fuse before the joining: a bend fused with a copy
+    ///   of itself reaches [`Assembly::join_up_what_is_one_face`] under all
+    ///   three rules (Q597). What keeps two rings along one torus off one
+    ///   joined flat face so far is the gap in `which_way_an_edge_runs_round`
+    ///   (`fuse/arrange.rs`) that stops the one probe that would put them there.
+    ///   A ring with a side along a hyperbola was the other such ring (Q1253),
+    ///   and a shape reached it: united with a cone closed by a ball, a cut
+    ///   cone's wall has an outline and a hole of two corners each, each with a
+    ///   side along a hyperbola. Such a side is placed now (Q1289).
+    /// - **Two or more rings each holding the others**, which would mean the
+    ///   answer's rings cross. Nobody has traced whether any shape reaches it.
     fn rings_round(
         &self,
         members: &[usize],
         along: &[[Dart; 2]],
         dissolved: &[bool],
         plane: Plane,
+        log: &mut ProvenanceLog,
     ) -> Result<Vec<Vec<Dart>>> {
+        let corners_of = |ring: &[Dart]| -> Vec<[f64; 3]> {
+            ring.iter()
+                .map(|&dart| self.corners[self.starts_at(dart)].point.coordinates())
+                .collect()
+        };
         let mut walked: BTreeSet<Dart> = BTreeSet::new();
         let mut outline: Option<Vec<Dart>> = None;
         let mut holes = Vec::new();
@@ -1136,17 +1629,16 @@ impl Assembly {
                         continue;
                     }
                     let ring = self.ring_from(start, along, dissolved, &mut walked);
-                    let corners: Vec<[f64; 3]> = ring
-                        .iter()
-                        .map(|&dart| self.corners[self.starts_at(dart)].point.coordinates())
-                        .collect();
+                    let corners = corners_of(&ring);
                     match winding_round(&corners, plane.normal().components())? {
                         Decision::Pos => {
-                            assert!(
-                                outline.is_none(),
-                                "a face joined out of coplanar pieces has one outline, and this \
-                                 one has two, so the answer touches itself at a corner"
-                            );
+                            if let Some(first) = &outline {
+                                return Err(no_one_ring_is_the_outline(
+                                    &[corners_of(first), corners],
+                                    Invalid::HoleWindsWithTheOuterWire,
+                                    log,
+                                ));
+                            }
                             outline = Some(ring);
                         }
                         Decision::Neg => holes.push(ring),
@@ -1230,11 +1722,18 @@ impl Assembly {
     /// the two, and nothing for any other. The piece of the plane between an
     /// arc and its chord is the part inside the arc's surface on the side of
     /// the chord the arc bulges to, because every arc counted is of a crossing
-    /// that closes round the inside of its surface — a circle or an ellipse. A
-    /// straight side is its own chord and adds nothing. So a corner is held
-    /// when the turns add up to one, either way round, and not when they add
-    /// up to none. The outline of a bar united across a tube's wall runs along
-    /// two pipes and so does its hole
+    /// that closes round the inside of its surface — a circle or an ellipse —
+    /// or of a cone's parabola or one branch of its hyperbola, which bounds the
+    /// inside of the cone's nappe it is on, a convex region the chord's line
+    /// meets in the chord alone (`holds.rs`'s
+    /// `the_way_into_an_arc_that_does_not_close` has why). On a hyperbola's
+    /// plane the inside of the other nappe is a second region, and a point
+    /// there is in no piece of the arc. A straight side is its own chord and
+    /// adds nothing. So a corner is held when the turns add up to one, either
+    /// way round, and not when they add up to none. The outline of a bar
+    /// united across a tube's wall runs along two pipes and so does its hole,
+    /// and a cut cone's wall united with a cone closed by a ball has an outline
+    /// and a hole each with a side along a hyperbola
     /// (`a_joined_flat_face_whose_rings_enclose_no_area.rs`).
     ///
     /// A corner on an arc's surface is outside that arc's piece: it is not on
@@ -1252,8 +1751,9 @@ impl Assembly {
     /// not the region either circle bounds — and where no corner is placed. Of
     /// a ring along more than one surface, `None` too where its corners are not
     /// on one line, where a closed side is one of several, for an arc along a
-    /// torus or along a cone's parabola or hyperbola, and for an arc whose
-    /// bulge reads along its chord.
+    /// torus, for an arc along a cone's parabola or hyperbola whose plane holds
+    /// the apex or whose ends are not both on one nappe, for an arc whose bulge
+    /// reads along its chord, and where a corner's nappe cannot be settled.
     ///
     /// # Panics
     ///
@@ -1576,7 +2076,7 @@ impl Assembly {
             }
         }
 
-        // **A corner where pieces of one cone or pipe met stays a corner**, and
+        // **A corner where pieces of one cone, pipe or ball met stays a corner**, and
         // that departs from §224.2 item 3 on purpose. It has only two surfaces
         // round it, which §31.3 reads out of the model rather than re-deriving,
         // so nothing needs it gone. And folding the arcs either side into one
@@ -1602,15 +2102,21 @@ impl Assembly {
             // the only corner a closed curve has. Dissolving it leaves the
             // joined edge with no ends at all.
             match by[..] {
-                [one, other] if one != other && !where_curved_pieces_met[corner] => {
+                [one, other]
+                    if one != other
+                        && !where_curved_pieces_met[corner]
+                        && !by
+                            .iter()
+                            .any(|&edge| self.is_the_apex_of_a_cone_along(corner, edge)) =>
+                {
                     straight_through.insert((lump, corner));
                 }
                 _ => still_a_corner[corner] = true,
             }
         }
-        let kept = self.a_corner_to_keep_on_each_closed_run(&leaving, &straight_through);
-        let closed_a_curve_up = !kept.is_empty();
-        for (lump, corner) in kept {
+        let kept = self.the_corners_each_closed_run_keeps(&leaving, &straight_through);
+        let closed_a_curve_up = !kept.closed_up.is_empty();
+        for (lump, corner) in kept.closed_up.into_iter().chain(kept.left_in_pieces) {
             straight_through.remove(&(lump, corner));
             still_a_corner[corner] = true;
         }
@@ -1631,36 +2137,91 @@ impl Assembly {
         }
     }
 
-    /// One corner to keep on each run of edges that closes on itself with every
-    /// corner along it walked straight through.
+    /// Whether `corner` is the apex of a cone `edge` is carried by, which no
+    /// lump walks straight through.
+    ///
+    /// **Two rulings of one cone are not one straight line**, though both run
+    /// through the apex. A plane through a pointed cone's apex cuts it in two
+    /// rulings, and where nothing else meets there the lump has only those two
+    /// edges at the apex. Folded, they were one straight edge between their far
+    /// ends, beside the cap's chord between the same two corners, and the
+    /// shell was refused by the mesher that measures it
+    /// (`a_block_face_through_a_cones_apex.rs`, `docs/decisions.md` §347.4).
+    ///
+    /// **The apex is never a point walked straight through**, so keeping it is
+    /// never wrong. A face on a cone lies on one nappe (the arrangement's
+    /// `part_the_two_nappes_at_the_apex` keeps it to one), and every edge of it
+    /// that reaches the apex leaves it heading along a ruling of that nappe.
+    /// Two rulings of one nappe are never opposite, since a cone's slope is
+    /// finite.
+    ///
+    /// **The match is exact, not a direction test at the corner.** The
+    /// arrangement puts the node where two rulings cross at the apex as the
+    /// cone stores it, so that corner is the apex bit for bit, and
+    /// [`Corners::of`] already takes two corners at the same bits to be one
+    /// ([`exactly_at`]). A corner only near the apex has other bits, and is not
+    /// kept on this ground. A test of whether the two edges leave the corner in
+    /// opposite directions would read two rounded directions instead, and on a
+    /// nearly flat cone, whose slope is large, the two rulings a plane through
+    /// its axis cuts are nearly opposite.
+    fn is_the_apex_of_a_cone_along(&self, corner: usize, edge: usize) -> bool {
+        let at = exactly_at(self.corners[corner].point);
+        self.edges[edge]
+            .carried_by
+            .iter()
+            .any(|surface| match surface {
+                Surface::Cone(cone) => exactly_at(cone.apex()) == at,
+                Surface::Plane(_)
+                | Surface::Cylinder(_)
+                | Surface::Sphere(_)
+                | Surface::Torus(_) => false,
+                // A surface kind added to `rcad-geom` after this is not read
+                // as having an apex.
+                _ => false,
+            })
+    }
+
+    /// The corners to keep on each run of edges that closes on itself with
+    /// every corner along it walked straight through: one corner where the run
+    /// is closed up, and every corner where it is left in pieces. Folding all
+    /// of them would leave a joined edge with no ends at all.
     ///
     /// **A closed curve cut into pieces and joined back up** is such a run: a
     /// pointed cone's rim, cut where a block's walls are tangent to it and
     /// holding its own one corner, keeps two edges at every one of those
-    /// corners once the pieces are joined. Folding them all leaves a joined edge
-    /// with no ends at all (`fuses_that_touch.rs`,
+    /// corners once the pieces are joined (`fuses_that_touch.rs`,
     /// `a_pointed_cone_on_its_apex_whose_rim_touches_two_walls_fuses_by_every_rule`).
     /// The run becomes one closed edge with one corner, as the input had.
-    ///
-    /// **Only a run that is all pieces of one input edge**, which is then a
-    /// closed input edge given back whole. A ball's meridian circle cut at both
-    /// poles is a closed run too, of pieces of two different edges, and closing
-    /// it up puts a closed edge's one corner on a pole, where nothing says which
-    /// way it runs: 22 tests across the ball-and-block files failed when every
-    /// closed run was closed up.
-    ///
-    /// Keeping every corner instead leaves a ring of arcs going right round a
-    /// cone with no seam, which the writer refuses
+    /// Keeping every corner there instead leaves a ring of arcs going right
+    /// round a cone with no seam, which the writer refuses
     /// (`AWireWillNotLieFlatOnItsFace`) — measured on that same pair.
     ///
-    /// Which corner is chosen off what the corner *is* and never off its index
-    /// here, which depends on the order the solids were handed over: an input
-    /// vertex first, then the lowest point.
-    fn a_corner_to_keep_on_each_closed_run(
+    /// **Only a run that is all pieces of one input edge is closed up**, which
+    /// is then a closed input edge given back whole. A ball's meridian circle
+    /// cut at both poles is a closed run too, of pieces of two different edges,
+    /// and closing it up puts a closed edge's one corner on a pole, where
+    /// nothing says which way it runs: 22 tests across the ball-and-block files
+    /// failed when every closed run was closed up.
+    ///
+    /// **Any other closed run is left in the pieces it was cut into**, every
+    /// corner kept, which is what the answer is when nothing else in the fuse
+    /// is joined and the joining is skipped altogether. A unit ball united with
+    /// a block that a second block's plane `x = 0` reaches through a chain is
+    /// cut by that plane through both poles, into two arcs from pole to pole
+    /// that are pieces of no input edge, and the poles have nothing else along
+    /// them. Folded, the two arcs were one edge with no ends, and that fuse
+    /// panicked here wherever another face of it was joined
+    /// (`a_ball_cut_through_both_poles_by_a_linked_blocks_plane.rs`,
+    /// `docs/decisions.md` §400.5).
+    ///
+    /// Which corner a closed-up run keeps is chosen off what the corner *is*
+    /// and never off its index here, which depends on the order the solids
+    /// were handed over: an input vertex first, then the lowest point.
+    fn the_corners_each_closed_run_keeps(
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
         straight_through: &BTreeSet<(usize, usize)>,
-    ) -> Vec<(usize, usize)> {
+    ) -> ClosedRuns {
         let runs = runs_through(self.edges.len(), leaving, straight_through);
         let mut corners_of_run: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
         let mut run_keeps_a_corner: BTreeSet<usize> = BTreeSet::new();
@@ -1681,17 +2242,26 @@ impl Assembly {
                     .push(&self.edges[edge].from);
             }
         }
-        corners_of_run
-            .into_iter()
-            .filter(|(run, _)| !run_keeps_a_corner.contains(run))
-            .filter(|(run, _)| is_one_input_edge(&pieces_of[run]))
-            .map(|(_, corners)| {
-                corners
-                    .into_iter()
-                    .min_by(|&(_, one), &(_, other)| self.which_to_keep_first(one, other))
-                    .expect("a run is listed with the corners it walks through")
-            })
-            .collect()
+        let mut kept = ClosedRuns {
+            closed_up: Vec::new(),
+            left_in_pieces: Vec::new(),
+        };
+        for (run, corners) in corners_of_run {
+            if run_keeps_a_corner.contains(&run) {
+                continue;
+            }
+            if is_one_input_edge(&pieces_of[&run]) {
+                kept.closed_up.push(
+                    corners
+                        .into_iter()
+                        .min_by(|&(_, one), &(_, other)| self.which_to_keep_first(one, other))
+                        .expect("a run is listed with the corners it walks through"),
+                );
+            } else {
+                kept.left_in_pieces.extend(corners);
+            }
+        }
+        kept
     }
 
     fn which_to_keep_first(&self, one: usize, other: usize) -> core::cmp::Ordering {
@@ -1869,6 +2439,7 @@ impl Assembly {
                 } else {
                     self.walks_a_closed_up_run_the_way_it_is_stored(dart)?
                 },
+                read_against: None,
             });
         }
         // Three sides, **or one that closes on itself**, which is the rule
@@ -1982,8 +2553,11 @@ impl Assembly {
     /// # Errors
     ///
     /// [`Error::Invalid`] when a shell encloses nothing at all, or when a void
-    /// has no shell around it. [`Error::Undecidable`] when no point on a shell
-    /// could be placed inside or outside another.
+    /// has no shell around it. [`Error::AFaceTrimmedByACurveThisCannotFollow`]
+    /// naming the input face, when no point on a shell could be placed and one
+    /// met a face of another shell that nobody can follow.
+    /// [`Error::Undecidable`] when no point on a shell could be placed inside or
+    /// outside another for any other reason.
     fn nest_the_shells(
         &self,
         model: &Model,
@@ -2053,9 +2627,65 @@ impl Assembly {
     /// nothing can place, is abandoned for the next one — choosing which corner
     /// to look at decides nothing (§5).
     ///
+    /// **Each side is asked from the corner it starts at**, so every corner of
+    /// every wire is asked. Asking the first end of each edge instead asked a
+    /// ball's one pole twice, down its seam and back up it, and its other pole
+    /// never: a ball touching a block's top with its north pole was refused for
+    /// want of the south pole, which is inside
+    /// (`tests/a_shell_inside_another_names_its_refusal.rs`).
+    ///
+    /// **Running out of corners is a refusal, and it says which one.** A corner
+    /// whose ray met a face of `outer` that [`SolidView::face_holds_the_point`]
+    /// cannot follow was never asked at all, and that is
+    /// [`Containment::CannotFollowAFacesTrimming`], deliberately not
+    /// `Undecidable` (`docs/decisions.md` §4.2, §35.6). This used to fold it
+    /// into [`Error::Undecidable`] with a record of a point it never asked —
+    /// the first corner of the whole answer — so a caller read "loosen the
+    /// policy" off a refusal no policy moves. Since Q1002 a flat face the cuts
+    /// cannot follow winds its own chords and arcs, so this refusal needs a
+    /// hollow whose rays still meet a face nobody can follow; nothing in this
+    /// crate's tests reaches it as of this writing (`docs/decisions.md`
+    /// §35.6).
+    ///
+    /// **So is a corner whose ray could not be fired at a face on a ring**,
+    /// [`Containment::CannotFireARayAtAFacesSurface`], which is refused
+    /// [`Error::CannotFireARayAtAFacesSurface`] for the same reason: that
+    /// question was never put either. It used to stay with the undecided
+    /// corners, for want of a variant that said so. No fuse is known to reach
+    /// it: a fuse with a ring in it crosses every surface of the other solid
+    /// with the ring, wherever the two faces are, and row Q883's probes were
+    /// refused there — a ball inside a bend or under the top half of a ring
+    /// `ACrossingBetweenATorusAndAnotherCurvedSurface`, and a block grooved by
+    /// a half ring `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` for a wall
+    /// five clear of the ring.
+    ///
+    /// **A face nobody can follow wins over a corner left undecided**, when
+    /// both happen, and so does a face no ray could be fired at; the first of
+    /// those two wins over the second. Either refusal is true, and only one can
+    /// be returned; naming the face folds an undecided corner into "never
+    /// asked", which costs a caller a policy that might have helped, where the
+    /// other way round folds "never asked" into "undecided", which is the
+    /// mistake §35.6 keeps the two apart to stop. The face named is the
+    /// caller's: `apart` is thrown away when the fuse returns, so a key into it
+    /// names nothing.
+    ///
+    /// **The record names the corners that were asked.** When every corner came
+    /// back on the skin of `outer` or undecided, the one record says "one shell
+    /// inside another" over each of those corners once, in the order they were
+    /// asked. It used to name the first corner of the whole answer, which
+    /// nothing asked: a block less a ball touching its top and bottom with its
+    /// two poles named the block's corner at the origin. That refusal is still
+    /// a gap, since the ball is a hollow of the block and a point of it off its
+    /// poles would say so.
+    ///
     /// # Errors
     ///
-    /// [`Error::Undecidable`] when no corner of `hollow` could be placed.
+    /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] naming the input face
+    /// a face of `outer` was cut from, when a corner of `hollow` met that face
+    /// and none was placed. [`Error::CannotFireARayAtAFacesSurface`] the same
+    /// way, when a corner's ray could not be fired at a face of `outer` on a
+    /// ring and none was placed. [`Error::Undecidable`] when every corner of
+    /// `hollow` asked came back on the skin of `outer` or undecided.
     fn one_shell_is_inside_another(
         &self,
         apart: &Model,
@@ -2066,12 +2696,15 @@ impl Assembly {
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
         let solid = apart.solid_at(written.solids[outer]);
+        let mut unfollowed = None;
+        let mut unfired = None;
+        let mut not_placed = Vec::new();
         for &face in &self.shells[hollow] {
             for side in self.faces[face].wires.iter().flatten() {
-                let at = self.corners[self.edges[side.edge].ends[0]].point;
+                let corner = self.edges[side.edge].ends[usize::from(!side.forward)];
+                let at = self.corners[corner].point;
                 let mut trial = ProvenanceLog::new();
-                let placed = solid.classify_point(at, policy, &mut trial);
-                match placed {
+                match solid.classify_point(at, policy, &mut trial) {
                     Containment::Inside => {
                         trial.drain_into(log);
                         return Ok(true);
@@ -2080,25 +2713,66 @@ impl Assembly {
                         trial.drain_into(log);
                         return Ok(false);
                     }
-                    // A corner nothing could place is abandoned for the next one,
-                    // and a face nobody can follow is the same kind of silence:
-                    // running out of corners is already a refusal, so nothing
-                    // here has to be a panic. This was `unreachable!` on the
-                    // grounds that the fuse refuses curved solids at entry —
-                    // `docs/decisions.md` §35 records why that stops holding.
-                    Containment::OnBoundary
-                    | Containment::Undecidable { .. }
-                    | Containment::CannotFollowAFacesTrimming { .. }
-                    | Containment::CannotFireARayAtAFacesSurface { .. } => (),
+                    Containment::CannotFollowAFacesTrimming { face } => {
+                        unfollowed.get_or_insert(face);
+                    }
+                    Containment::CannotFireARayAtAFacesSurface { face } => {
+                        unfired.get_or_insert(face);
+                    }
+                    Containment::OnBoundary | Containment::Undecidable { .. } => {
+                        if !not_placed.contains(&corner) {
+                            not_placed.push(corner);
+                        }
+                    }
                 }
             }
         }
+        if let Some(face) = unfollowed {
+            return Err(Error::AFaceTrimmedByACurveThisCannotFollow {
+                face: self.the_input_face_it_was_cut_from(apart, written, face),
+            });
+        }
+        if let Some(face) = unfired {
+            return Err(Error::CannotFireARayAtAFacesSurface {
+                face: self.the_input_face_it_was_cut_from(apart, written, face),
+            });
+        }
+        let asked: Vec<PredicatePoint> = not_placed
+            .iter()
+            .map(|&corner| PredicatePoint::from(self.corners[corner].point.coordinates()))
+            .collect();
         Err(gave_up(
             ONE_SHELL_INSIDE_ANOTHER,
-            &[PredicatePoint::from(self.corners[0].point.coordinates())],
+            &asked,
             Measures::Length,
             log,
         ))
+    }
+
+    /// The caller's face that `face`, written into `apart`, was cut out of.
+    ///
+    /// The first of its ancestors, where coplanar pieces were joined: any of
+    /// them is a face the piece is part of, and the first is the one a fuse
+    /// names elsewhere too.
+    ///
+    /// # Panics
+    ///
+    /// If `face` is not one [`Assembly::write_into`] wrote into `apart`, or the
+    /// face it was written from has no ancestor. Both are this crate's own
+    /// bookkeeping.
+    fn the_input_face_it_was_cut_from(
+        &self,
+        apart: &Model,
+        written: &Written,
+        face: FaceKey,
+    ) -> FaceKey {
+        let slot = face.slot_in(apart.id());
+        let index = written
+            .faces
+            .iter()
+            .position(|&each| each == slot)
+            .expect("every face of `apart` was written from a face of the answer");
+        self.faces[index].ancestors[0]
     }
 
     /// What each edge of the result runs along, by §31.3's table.
@@ -2140,6 +2814,11 @@ impl Assembly {
     /// walks as a straight line with no points on it
     /// (`two_bars_on_one_pipe_answer_the_same_however_the_pipe_is_written`).
     ///
+    /// **A rim between two different curved faces names the plane its edge was
+    /// cut out of**, where its edge was named by one:
+    /// [`the_plane_of_a_rim_between_two_curved_faces`] says why the two faces
+    /// alone may name nothing to follow.
+    ///
     /// `None` everywhere else, which is where [`EdgeRun::RightRoundWhereItsFacesCross`]
     /// stays. Three shapes come back `None` for a reason worth naming: an edge
     /// that is not closed, which is not this kind of run at all; an edge other
@@ -2164,7 +2843,10 @@ impl Assembly {
                 let [one, other] = <[usize; 2]>::try_from(by.as_slice()).ok()?;
                 let either_side = self.faces[one].surface;
                 if !one_surface(&self.faces[other].surface, &either_side) {
-                    return None;
+                    return the_plane_of_a_rim_between_two_curved_faces(
+                        [either_side, self.faces[other].surface],
+                        &edge.carried_by,
+                    );
                 }
                 match edge.carried_by {
                     [met, across]
@@ -2326,12 +3008,49 @@ impl Assembly {
     }
 }
 
+/// The plane a closed rim between two different curved faces was cut out of,
+/// where its edge was named by one: the `and` its run carries.
+///
+/// **Two curved faces either side of a rim may touch rather than cross.** A
+/// ball of a bar's radius centred on the bar's top cap is tangent to the pipe
+/// all the way round the rim, so the union keeps the pipe below the rim and
+/// the ball above it, and `rcad_geom::walk` has no crossing of the two to
+/// follow: it refused the rim
+/// [`CannotFollowACrossingWhereItsSurfacesAreTangent`](rcad_geom::Error). The
+/// cap's plane cuts each of them in that one circle, and a run naming it is
+/// walked as the plane against a face.
+///
+/// **Only an edge whose name came under more than one pair reaches here with a
+/// plane in it.** The edge carries the pair of the first side that named it,
+/// and a side of a curved face names that face's surface and its partner. Two
+/// different curved faces whose sides are named alike are therefore each other's
+/// partners, with no plane between them, unless
+/// [`the_name_each_closed_curve_goes_by`] joined the names of two pairs, and it
+/// joins only a plane against a ball, a pipe or a cone whose one closed curve
+/// the other pair shares. So the plane here crosses each face in this rim.
+fn the_plane_of_a_rim_between_two_curved_faces(
+    faces: [Surface; 2],
+    carried_by: &[Surface; 2],
+) -> Option<Surface> {
+    if faces.iter().any(|surface| surface.as_plane().is_some()) {
+        return None;
+    }
+    carried_by
+        .iter()
+        .find(|surface| surface.as_plane().is_some())
+        .copied()
+}
+
 /// An arc of a ring, the surface it runs along, and whether it bulges
 /// to the left of the chord from its first end to its second.
 struct Bulging {
     ends: [[f64; 3]; 2],
     surface: Surface,
     left: bool,
+    /// Where the plane cuts `surface`, a cone, in a parabola or a hyperbola,
+    /// the cone and the nappe the arc is on; `None` for an arc of a curve
+    /// that closes.
+    nappe: Option<(Cone, Decision)>,
 }
 
 /// How each arc of `ring` bulges against its chord, for
@@ -2355,17 +3074,24 @@ fn how_each_arc_bulges(
                 return Some(None);
             };
             let surface = the_curved_one(dart)?;
-            match surface {
-                Surface::Cylinder(_) | Surface::Sphere(_) => (),
-                Surface::Cone(_) => {
-                    where_a_closed_crossing_is_centred(&surface, plane)?;
+            let nappe = match surface {
+                Surface::Cylinder(_) | Surface::Sphere(_) => None,
+                Surface::Cone(_)
+                    if where_a_closed_crossing_is_centred(&surface, plane).is_some() =>
+                {
+                    None
+                }
+                Surface::Cone(cone) => {
+                    let ends = [from, to].map(|at| assembly.corners[at].point);
+                    let on = the_nappe_an_arc_that_does_not_close_is_on(&cone, plane, ends)?;
+                    Some((cone, on))
                 }
                 Surface::Plane(_) | Surface::Torus(_) => return None,
                 // A kind added to `rcad-geom` after this has not been shown
                 // to bound the region inside it, so an arc along it is not
                 // counted.
                 _ => return None,
-            }
+            };
             let ends = [from, to].map(|at| assembly.corners[at].point.coordinates());
             let into_the_arc = (assembly.corners[corner].point + towards).coordinates();
             let left = match winding_round(&[ends[0], ends[1], into_the_arc], normal).ok()? {
@@ -2378,6 +3104,7 @@ fn how_each_arc_bulges(
                 ends,
                 surface,
                 left,
+                nappe,
             }))
         })
         .collect::<Option<_>>()
@@ -2397,6 +3124,17 @@ fn turns_round(arcs: &[Option<Bulging>], normal: [f64; 3], at: [f64; 3]) -> Opti
                     "which side of a surface a corner is on came back as a decision \
                      nothing here knows: {other:?}"
                 ),
+            }
+            if let Some((cone, nappe)) = &arc.nappe {
+                let found = the_nappe_of(cone, PredicatePoint::from(at).enclosure());
+                match found {
+                    Decision::Pos | Decision::Neg | Decision::Zero if found != *nappe => {
+                        return Some(0);
+                    }
+                    Decision::Pos | Decision::Neg | Decision::Zero => (),
+                    Decision::Undecidable { .. } => return None,
+                    other => panic!("which nappe a corner is on came back as {other:?}"),
+                }
             }
             let left = match winding_round(&[arc.ends[0], arc.ends[1], at], normal).ok()? {
                 Decision::Pos => true,
@@ -2793,6 +3531,30 @@ impl Face {
 struct Side {
     edge: usize,
     forward: bool,
+    /// For a side of a **closed** edge made in [`Edges::of`], what `forward`
+    /// was read against. [`every_closed_edge_read_off_one_spelling`] reads it.
+    /// `None` for every other side.
+    read_against: Option<ReadAgainst>,
+}
+
+/// What [`Edges::of`] read a closed side's way round against, kept so that
+/// [`every_closed_edge_read_off_one_spelling`] can read the side again against
+/// what the side across was read against.
+#[derive(Clone, Copy)]
+struct ReadAgainst {
+    /// The curved one of the piece's own crossing pair, which need not be a
+    /// surface of either face the answer keeps along the edge. A disc cut from
+    /// one bar is read against that bar's pipe, and the edge is stored by the
+    /// other bar's wall.
+    surface: Surface,
+    /// The gradients of the piece's crossing pair at the edge's corner, as
+    /// [`which_way_a_closed_crossing_turns`] takes them: the crossing the side
+    /// walks.
+    crossing: [Vector; 2],
+    /// The gradient and the axis that crossing was read against: `surface`'s
+    /// own, or at a ball's pole the ball's and its lid's way out
+    /// ([`the_lid_a_circle_from_a_pole_bounds`]).
+    frame: [Vector; 2],
 }
 
 /// Where one face walks along one edge: the face, the ring, and how far round
@@ -2829,6 +3591,15 @@ struct Renumbered {
     closed_a_curve_up: bool,
 }
 
+/// The corners kept on the runs of edges that close on themselves with every
+/// corner walked straight through, as lump and corner.
+struct ClosedRuns {
+    /// One corner of each run that becomes one closed edge again.
+    closed_up: Vec<(usize, usize)>,
+    /// Every corner of each run that stays in the pieces it was cut into.
+    left_in_pieces: Vec<(usize, usize)>,
+}
+
 /// One face of the result while it is being put back together out of the pieces
 /// that turned out to be one flat region.
 struct JoinedFace {
@@ -2836,11 +3607,12 @@ struct JoinedFace {
     members: Vec<usize>,
     surface: Surface,
     used: Orientation,
-    /// Carried through the joining untouched: only flat faces and pieces of a
-    /// cone or a pipe are ever joined, and a whole closed surface is a ball.
+    /// Carried through the joining untouched: a whole closed surface is a ball
+    /// with no edge on it to be joined across, and pieces that join up into a
+    /// whole ball are left apart ([`Assembly::edges_a_curved_face_keeps`]).
     is_a_whole_closed_surface: bool,
-    /// On a plane, the outline first and then one ring per hole. On a cone or a
-    /// pipe, in the order they were first come to (§31.3).
+    /// On a plane, the outline first and then one ring per hole. On a cone, a
+    /// pipe or a ball, in the order they were first come to (§31.3).
     rings: Vec<Vec<Dart>>,
 }
 
@@ -2877,17 +3649,17 @@ fn how_much_space_it_encloses(
     how_much_space_a_curved_solid_encloses(solid, policy, log)
 }
 
-/// Whether two curved faces are pieces of one cone or one pipe, used the same
-/// way round, so that an edge between them is not boundary at all.
+/// Whether two curved faces are pieces of one cone, one pipe or one ball, used
+/// the same way round, so that an edge between them is not boundary at all.
 ///
 /// **A pipe is one pipe however it is written**: its axis turned round, or its
 /// origin slid along it where [`name_of_the_surface_either_way_round`] folds
 /// that exactly. Two bars stacked on one pipe, the upper one written in its own
 /// frame, leave the wall as two spellings either side of the circle between
 /// them. Left apart, that circle is an edge with the one surface on both sides,
-/// and every later fuse of the answer asks `intersect` about it, hears
-/// `SameSurface` and refuses `AFaceMeetsItsNeighbourOnItsOwnSurface`
-/// (`docs/decisions.md` §231.5, §325.5). Joined, the face takes the lowest of
+/// which every later fuse of the answer has to bake the two faces as one to get
+/// past (`docs/decisions.md` §231.5, §325.5, `faces_baked_as_one` in
+/// [`bake`](super::bake)). Joined, the face takes the lowest of
 /// its spellings ([`Assembly::rings_of_each_joined_face`]) and every closed
 /// side read off another is read again
 /// ([`Assembly::turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way`]).
@@ -2903,49 +3675,97 @@ fn how_much_space_it_encloses(
 /// The same surface used the other way round is a sheet of no thickness with
 /// material either side, which is two faces and not one.
 ///
-/// **Only a cone or a pipe.** Their rings are asked how often they go round the
-/// axis ([`Assembly::a_ring_goes_right_round`]), and a ball or a ring has no
-/// one axis to ask about, so pieces of those stay apart.
-fn one_cone_or_pipe_the_same_way_round(mine: &Face, theirs: &Face) -> bool {
+/// **A ball is one ball by its centre and radius**, which is all it holds and
+/// all [`one_surface`] compares, so it has one spelling and nothing to turn
+/// round. Its pieces join with no ring counted at all
+/// ([`Assembly::edges_a_curved_face_keeps`], §229.2).
+///
+/// **Not a ring.** A cone's and a pipe's rings are asked how often they go
+/// round the axis ([`Assembly::a_ring_goes_right_round`]), and a ring has two
+/// ways round with no count here for either, so pieces of one stay apart.
+fn one_cone_pipe_or_ball_the_same_way_round(mine: &Face, theirs: &Face) -> bool {
     let one = match mine.surface {
-        Surface::Cylinder(_) => one_surface(&mine.surface, &theirs.surface),
+        Surface::Cylinder(_) | Surface::Sphere(_) => one_surface(&mine.surface, &theirs.surface),
         Surface::Cone(_) => {
             name_of_surface_bits(&mine.surface) == name_of_surface_bits(&theirs.surface)
         }
-        Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) | _ => false,
+        Surface::Plane(_) | Surface::Torus(_) | _ => false,
     };
     one && mine.used == theirs.used
 }
 
 /// Whether two surfaces are one point set, however each is written.
-fn one_surface(one: &Surface, other: &Surface) -> bool {
+pub(super) fn one_surface(one: &Surface, other: &Surface) -> bool {
     name_of_the_surface_either_way_round(one) == name_of_the_surface_either_way_round(other)
 }
 
-/// Turn round each side of a closed edge that was read off the other spelling
-/// of the surface the mesher reads it off.
+/// Turn round each side of a closed edge that was read off another spelling of
+/// the surface the answer stores the edge by, or off another surface that runs
+/// the other way round the edge.
 ///
-/// [`Edges::of`] reads which way a side walks a closed edge off that side's own
-/// pair of surfaces, and a pipe, a cone or a bend written with its axis the
-/// other way round is wound about the other way. Where the two faces either
-/// side are two spellings of one surface, the two sides are then each read
-/// against their own winding, and a union of two bars stacked on one pipe came
-/// back with both walls walking the circle between them "backwards" —
-/// `CoedgesRunTheSameWay`.
+/// [`Edges::of`] reads which way a side walks a closed edge off the curved
+/// surface of that side's own crossing pair ([`Side::read_against`]), and a
+/// pipe, a cone or a bend written with its axis the other way round is wound
+/// about the other way. Two places that goes wrong, both `CoedgesRunTheSameWay`:
 ///
-/// **The spelling that counts is the one the mesher reads**, which is the lower
-/// of the two faces' surfaces by their bits
-/// (`the_way_a_closed_edge_where_its_faces_touch_runs` in `mesh.rs`: the two
-/// gradients are parallel, so the crossing gives no direction and the winding
-/// of that one surface is all there is). That is a property of the two faces
-/// and not of which was handed over first, so the answer does not depend on
-/// argument order.
+/// - **Two curved faces on two spellings of one surface**: each side is read
+///   against its own face's winding, and a union of two bars stacked on one
+///   pipe came back with both walls walking the circle between them
+///   "backwards" (`docs/decisions.md` §231.3).
+/// - **A flat face against a wall on another spelling**: a disc cut from one
+///   bar is read against that bar's pipe while the wall across it, from the
+///   other bar, is what the edge is stored by. Two bars overlapping on one pipe
+///   written opposite ways, intersected or differenced, have that rim (§359).
 ///
-/// **Whether a spelling winds the other way is exact**: turning an axis round
-/// negates every product [`the_way_it_is_parametrised_about`] is made of, so
-/// the two windings are exact negatives of each other and their dot product is
-/// never a rounding away from zero.
-fn every_closed_edge_read_off_one_spelling(edges: &[Edge], corners: &[Corner], faces: &mut [Face]) {
+/// So the surface compared is the one each side was read against, not its
+/// face's.
+///
+/// **The spelling that counts is the curved one of the two faces' surfaces**,
+/// the lower by bits where both are curved ([`the_curved_one_of`]). It is what
+/// `Model::validate` reads the edge's way back off, and with two curved faces it
+/// is what the mesher reads too (`the_way_a_closed_edge_where_its_faces_touch_runs`
+/// in `mesh.rs`: the two gradients are parallel, so the crossing gives no
+/// direction and the winding of that one surface is all there is). That is a
+/// property of the two faces and not of which was handed over first, so the
+/// answer does not depend on argument order.
+///
+/// **A side read against another spelling of that surface is turned by the
+/// two windings.** Whether a spelling winds the other way is exact: turning an
+/// axis round negates every product [`the_way_it_is_parametrised_about`] is
+/// made of, so the two windings are exact negatives of each other and their
+/// dot product is never a rounding away from zero.
+///
+/// **A side read against a different surface altogether is read again against
+/// what the side across was read against, where that is the reference
+/// itself** ([`runs_the_other_way_read_against`]). Shapes reach that since a
+/// rim can come under two names ([`the_name_each_closed_curve_goes_by`]):
+/// uniting the dome on a shaft of its radius reads the pipe's side against the
+/// pipe and the ball's against the ball, and a frustum on a bar of its narrow
+/// radius the cone's against the cone. Upright, the pipe's longitude and the
+/// ball's run the same way round the rim, and the two readings agree. **Laid on
+/// its side they do not** (Q1377): the rim is then a meridian of the ball, whose
+/// longitude is square to it, so the ball's side is read against its latitude,
+/// or at a pole against its lid, and along `+y` and `±x` that runs the other way
+/// from the pipe's longitude. Left as read, both faces walked the rim the same
+/// way, and 42 of the 72 fuses of `fuses_that_touch.rs`'s dome lying on its side
+/// were refused `CoedgesRunTheSameWay` or `FacesDoNotAgreeWhichWayTheyFace`. A
+/// side read against neither the reference nor a spelling of it, beside another
+/// such side, is left as it was read.
+///
+/// # Errors
+///
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] where a side read again cannot
+/// be told.
+///
+/// # Panics
+///
+/// If a side of a closed edge does not say what it was read against. Every
+/// side here was made by [`Edges::of`], which says it for each closed side.
+fn every_closed_edge_read_off_one_spelling(
+    edges: &[Edge],
+    corners: &[Corner],
+    faces: &mut [Face],
+) -> Result<()> {
     let mut claimants: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); edges.len()];
     for (face, walked) in faces.iter().enumerate() {
         for (wire, ring) in walked.wires.iter().enumerate() {
@@ -2961,25 +3781,75 @@ fn every_closed_edge_read_off_one_spelling(edges: &[Edge], corners: &[Corner], f
         if edge.ends[0] != edge.ends[1] {
             continue;
         }
-        let surfaces = [one, other].map(|(face, _, _)| faces[face].surface);
-        if surfaces.iter().any(|surface| surface.as_plane().is_some())
-            || surfaces[0] == surfaces[1]
-            || !one_surface(&surfaces[0], &surfaces[1])
-        {
+        let Some(reference) =
+            the_curved_one_of(&[one, other].map(|(face, _, _)| faces[face].surface))
+        else {
             continue;
-        }
+        };
         let at = corners[edge.ends[0]].point;
-        let reference = *surfaces
-            .iter()
-            .min_by_key(|surface| name_of_surface_bits(surface))
-            .expect("two surfaces");
         let wound = the_way_it_is_parametrised_about(&reference, at);
-        for ((face, wire, position), surface) in [one, other].into_iter().zip(surfaces) {
-            if the_way_it_is_parametrised_about(&surface, at).dot(wound) < 0.0 {
+        let reads = [one, other].map(|(face, wire, position)| {
+            faces[face].wires[wire][position]
+                .read_against
+                .expect("Edges::of says what each closed side was read against")
+        });
+        let the_reference_itself = |read: &ReadAgainst| {
+            name_of_surface_bits(&read.surface) == name_of_surface_bits(&reference)
+        };
+        for (index, (face, wire, position)) in [one, other].into_iter().enumerate() {
+            let (read, across) = (&reads[index], &reads[1 - index]);
+            let turn = if the_reference_itself(read) {
+                false
+            } else if one_surface(&read.surface, &reference) {
+                the_way_it_is_parametrised_about(&read.surface, at).dot(wound) < 0.0
+            } else if the_reference_itself(across) {
+                runs_the_other_way_read_against(read, across)?
+            } else {
+                false
+            };
+            if turn {
                 let side = &mut faces[face].wires[wire][position];
                 side.forward = !side.forward;
             }
         }
+    }
+    Ok(())
+}
+
+/// Whether the crossing `read` walks runs the other way round against its own
+/// frame from the way it runs against `across`'s.
+///
+/// Read with [`which_way_a_closed_crossing_turns`], the rule both sides were
+/// read with, so this is the side read again against the other frame and not a
+/// second rule.
+///
+/// `false` where `across`'s frame says nothing about this crossing: square to
+/// both its legs, the crossing would run along the gradient of a surface the
+/// edge lies on. Nothing is turned there, and the sweep reads the edge back.
+///
+/// # Errors
+///
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] where either reading cannot be
+/// told.
+///
+/// # Panics
+///
+/// If [`which_way_a_closed_crossing_turns`] grows a fifth answer, as
+/// [`which_way_a_closed_edge_is_walked`] says.
+fn runs_the_other_way_read_against(read: &ReadAgainst, across: &ReadAgainst) -> Result<bool> {
+    let way = |[gradient, axis]: [Vector; 2]| {
+        which_way_a_closed_crossing_turns(read.crossing, gradient, axis)
+    };
+    match (way(read.frame), way(across.frame)) {
+        (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => Ok(true),
+        (Decision::Pos, Decision::Pos)
+        | (Decision::Neg, Decision::Neg)
+        | (Decision::Zero, _)
+        | (_, Decision::Zero) => Ok(false),
+        (Decision::Undecidable { enclosure }, _) | (_, Decision::Undecidable { enclosure }) => {
+            Err(Error::CannotTellWhichWayAClosedEdgeRuns { enclosure })
+        }
+        other => panic!("a fifth answer out of the closed-edge rule: {other:?}"),
     }
 }
 
@@ -3021,6 +3891,42 @@ fn plane_of_the_joined_face(members: &[usize], faces: &[Face]) -> Plane {
         })
         .expect("a joined face is made of at least one piece")
 }
+
+/// Refuse a joined flat face whose rings do not say which one is its outline,
+/// and record their corners.
+///
+/// Each ring's winding was decided exactly, on the corners as stored, so
+/// nothing here is undecided: the corners describe something no face can be.
+/// `broken` is what [`Model::validate`] would refuse the face for if it were
+/// written as it stands — a second ring winding with the plane goes in as a
+/// hole that winds with its outline, [`Invalid::HoleWindsWithTheOuterWire`].
+///
+/// Each ring's first corner is recorded again after its last, so a reader can
+/// tell where one ring stops and the next starts. The enclosure is infinite for
+/// the reason [`gave_up`] gives: there is no width here for a policy to accept.
+fn no_one_ring_is_the_outline(
+    rings: &[Vec<[f64; 3]>],
+    broken: Invalid,
+    log: &mut ProvenanceLog,
+) -> Error {
+    let corners: Vec<PredicatePoint> = rings
+        .iter()
+        .flat_map(|ring| ring.iter().chain(ring.first()))
+        .map(|&corner| PredicatePoint::from(corner))
+        .collect();
+    log.push(Record::new(
+        WHICH_RING_IS_THE_OUTLINE,
+        &corners,
+        Level::Interval,
+        f64::INFINITY,
+        Measures::Area,
+    ));
+    Error::TheFuseWroteABrokenAnswer { broken }
+}
+
+/// The name the choice of a joined flat face's outline goes by in provenance
+/// records.
+const WHICH_RING_IS_THE_OUTLINE: &str = "which ring of a joined flat face is its outline";
 
 /// The corner an input vertex is, made the first time it is asked for.
 fn corner_of(
@@ -3089,6 +3995,128 @@ fn runs_through(
         }
     }
     runs
+}
+
+/// Every input vertex the wires through it read past as though it were not
+/// there ([`read_through`]): where a closed input edge only started
+/// ([`vertices_that_only_start_a_closed_edge`]), and where one wire walks on
+/// along one curve and nothing else ends ([`corners_one_wire_walks_past`]).
+///
+/// **A wire every side of which would start at one of the second kind keeps
+/// them.** It goes right round one closed curve with nothing else on it, so
+/// read through it would be one side with no corner to start at. Those
+/// vertices then stay, and the answer is refused as it was before Q1302.
+fn vertices_read_through(
+    model: &Model,
+    wires: Vec<&Vec<FaceMeet>>,
+    names_of_one_point: &[NamesOfOnePoint],
+    on_three_planes: &BTreeMap<VertexSlot, [Plane; 3]>,
+) -> BTreeSet<VertexSlot> {
+    let mut read_past = vertices_that_only_start_a_closed_edge(model, wires.iter().copied());
+    let mut walked_past =
+        corners_one_wire_walks_past(model, &wires, names_of_one_point, on_three_planes);
+    for wire in &wires {
+        let starts: Vec<Option<VertexSlot>> = wire
+            .iter()
+            .map(|side| match &side.ends[0] {
+                MeetPoint::Existing { vertex, .. } => Some(vertex.slot_in(model.id())),
+                MeetPoint::OfThreeSurfaces { .. }
+                | MeetPoint::WhereAClosedCurveStarts { .. }
+                | MeetPoint::HalfWayRoundAClosedCurve { .. }
+                | MeetPoint::APoleOfAClosedSurface { .. } => None,
+            })
+            .collect();
+        let read = |start: &Option<VertexSlot>| {
+            start.is_some_and(|slot| read_past.contains(&slot) || walked_past.contains(&slot))
+        };
+        if starts.iter().all(read) {
+            for slot in starts.into_iter().flatten() {
+                walked_past.remove(&slot);
+            }
+        }
+    }
+    read_past.append(&mut walked_past);
+    read_past
+}
+
+/// The input vertices where exactly two kept sides end, one wire arriving
+/// along one curve and leaving along the same curve, and no other side ends
+/// under any name the point goes by.
+///
+/// **Such a vertex cannot be a corner of the answer**, since each of the two
+/// edges either side of it would have that one wire along it and nothing
+/// else, and the answer would be refused as not a manifold. So read past, it
+/// costs no answer that was one.
+///
+/// **It is where pieces of one curved surface met in an earlier fuse.** The
+/// joiner keeps such a corner on purpose (`what_is_left`), and the next fuse
+/// bakes the pieces as one face, so the corner has only the curve's two
+/// surfaces round it, and no surface through it cuts the other solid's face
+/// along that curve. Two bars on one pipe, the lower one with a box through
+/// its wall, then the upper one: the first union keeps `(1.5, ±1.3229, 2)` on
+/// the circle the bars meet on, where the box's face `x = 1.5`, gone from the
+/// union, split the wall. The second union drops both caps there and keeps the
+/// lower wall walking the circle through those corners and the upper wall
+/// walking past them, and was refused `ResultIsNotManifold { count: 1 }`
+/// (Q1302). It is §245.5's rule for hole A, which was built only for a vertex
+/// that starts a closed edge, taken where it is all a vertex can be.
+///
+/// **Every other name the point goes by is ruled out by name**, the ways
+/// [`Corners::of`] would give it another side: an arrangement that found it to
+/// be a meet of three surfaces too ([`NamesOfOnePoint`]), exactly three planes
+/// round it ([`input_corners_on_exactly_three_planes`]), and another end that
+/// lands on the very same `f64` triple. A closed side starting there ends
+/// there twice, so it is counted and rules the vertex out.
+fn corners_one_wire_walks_past(
+    model: &Model,
+    wires: &[&Vec<FaceMeet>],
+    names_of_one_point: &[NamesOfOnePoint],
+    on_three_planes: &BTreeMap<VertexSlot, [Plane; 3]>,
+) -> BTreeSet<VertexSlot> {
+    let mut sides_ending: BTreeMap<VertexSlot, usize> = BTreeMap::new();
+    let mut walked_past: BTreeMap<VertexSlot, usize> = BTreeMap::new();
+    let mut lands_at: BTreeMap<VertexSlot, [u64; 3]> = BTreeMap::new();
+    let mut ends_landing: BTreeMap<[u64; 3], usize> = BTreeMap::new();
+    for wire in wires {
+        for (index, side) in wire.iter().enumerate() {
+            for end in &side.ends {
+                let at = exactly_at(middle_of(end.point()));
+                *ends_landing.entry(at).or_default() += 1;
+                if let MeetPoint::Existing { vertex, .. } = end {
+                    let slot = vertex.slot_in(model.id());
+                    *sides_ending.entry(slot).or_default() += 1;
+                    lands_at.insert(slot, at);
+                }
+            }
+            let next = &wire[(index + 1) % wire.len()];
+            if let MeetPoint::Existing { vertex, .. } = &side.ends[1]
+                && walks_on_along_one_curve(side, next, *vertex)
+            {
+                *walked_past.entry(vertex.slot_in(model.id())).or_default() += 1;
+            }
+        }
+    }
+    let another_name: BTreeSet<VertexSlot> = names_of_one_point
+        .iter()
+        .filter_map(|one_point| match &one_point.kept {
+            MeetPoint::Existing { vertex, .. } => Some(vertex.slot_in(model.id())),
+            MeetPoint::OfThreeSurfaces { .. }
+            | MeetPoint::WhereAClosedCurveStarts { .. }
+            | MeetPoint::HalfWayRoundAClosedCurve { .. }
+            | MeetPoint::APoleOfAClosedSurface { .. } => None,
+        })
+        .chain(on_three_planes.keys().copied())
+        .collect();
+    sides_ending
+        .into_iter()
+        .filter(|&(slot, ending)| {
+            ending == 2
+                && walked_past.get(&slot) == Some(&1)
+                && !another_name.contains(&slot)
+                && ends_landing[&lands_at[&slot]] == 2
+        })
+        .map(|(slot, _)| slot)
+        .collect()
 }
 
 /// The input vertices where the kept pieces do nothing but walk along one
@@ -3205,15 +4233,22 @@ fn the_closed_edge_it_only_starts(
 /// Whether a wire arrives at `vertex` along `arriving` and leaves it along
 /// `leaving` as though the vertex were not there.
 fn walks_straight_through(arriving: &FaceMeet, leaving: &FaceMeet, vertex: VertexKey) -> bool {
+    walks_on_along_one_curve(arriving, leaving, vertex) && arriving.along == leaving.along
+}
+
+/// Whether a wire arrives at `vertex` along `arriving` and leaves it along
+/// `leaving` on the same two surfaces with the material on the same side,
+/// along whichever input edges, and the two do not come back round to where
+/// the first started, which would make them one closed side.
+fn walks_on_along_one_curve(arriving: &FaceMeet, leaving: &FaceMeet, vertex: VertexKey) -> bool {
     matches!(&leaving.ends[0], MeetPoint::Existing { vertex: from, .. } if *from == vertex)
         && arriving.carried_by == leaving.carried_by
         && arriving.material_side == leaving.material_side
-        && arriving.along == leaving.along
         && arriving.ends[0] != leaving.ends[1]
 }
 
 /// One wire of a kept piece, with the two sides either side of every vertex in
-/// `walked_through` read as one side.
+/// `walked_through` read as one side, running along the input edges of both.
 ///
 /// Borrowed as it is when the wire passes through none of them, which is every
 /// wire of almost every fuse.
@@ -3221,9 +4256,11 @@ fn walks_straight_through(arriving: &FaceMeet, leaving: &FaceMeet, vertex: Verte
 /// # Panics
 ///
 /// If every side of the wire starts at one of those vertices. A side leaving
-/// one runs along the closed edge that starts there, so it can only stop
+/// one where a closed edge starts runs along that edge, so it can only stop
 /// somewhere that edge is cut, and a vertex it could stop at would be where
 /// another closed edge starts: then one side would run along two input edges.
+/// And [`vertices_read_through`] keeps every vertex one wire walks past in a
+/// wire where this would happen.
 fn read_through<'a>(
     wire: &'a [FaceMeet],
     walked_through: &BTreeSet<VertexSlot>,
@@ -3252,13 +4289,160 @@ fn read_through<'a>(
         let arriving = read
             .pop()
             .expect("the side before one leaving a vertex walked through arrives at it");
+        let mut along = arriving.along.clone();
+        for edge in &side.along {
+            if !along.contains(edge) {
+                along.push(*edge);
+            }
+        }
         read.push(FaceMeet {
             ends: [arriving.ends[0].clone(), side.ends[1].clone()],
             approximation: the_wider(arriving.approximation, side.approximation),
+            along,
             ..arriving
         });
     }
     Cow::Owned(read)
+}
+
+/// The wires of the pieces with the two halves of a closed curve cut at a pole
+/// read as one closed side, wherever another side closes on the same curve
+/// whole.
+///
+/// **A ball's side of a rim can come in halves where the other side's is
+/// whole.** A ball's poles are straight up and down from its centre, so a
+/// ball centred on the end cap of a bar lying along `x` or `y`, of the bar's
+/// radius, has both poles on the cap's rim. `arrange` cuts the circle the
+/// cap's plane cuts the ball in at both poles
+/// (`across_a_circle_that_starts_at_a_pole`, §194.4), so a piece of the ball
+/// walks the rim as two halves, while the bar's cap and pipe walk it as one
+/// closed side at the bar's seam corner. [`the_name_each_closed_curve_goes_by`]
+/// gave the two pairs one name, but only for sides that close, so the rim was
+/// three edges with one face each and every fuse of that dome was refused
+/// `ResultIsNotManifold { count: 1 }` (Q1143).
+///
+/// So the two halves become one side from where the first starts round to
+/// where the second ends, which is the same place, and
+/// [`Corners::with_each_closed_curve_started_once`] gives it the curve's one
+/// corner with the whole sides' starts. **Only where some side closes on the
+/// curve under a name the halves' name joins.** Halves that every face along
+/// the curve brings are two edges with two faces each already, and joined
+/// there a circle whose only corner is a pole would have no direction to read
+/// (§194.4).
+///
+/// Two sides are halves of one curve when one arrives where the other leaves,
+/// at the place half way round, on the same two surfaces, with the material on
+/// the same side and along the same input edges, and the two together close.
+///
+/// # Errors
+///
+/// Whatever [`name_of_the_closed_crossing_through`] gives.
+fn with_the_halves_of_each_whole_curve_joined<'a>(
+    wires: Vec<Vec<Cow<'a, [FaceMeet]>>>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Vec<Vec<Cow<'a, [FaceMeet]>>>> {
+    let a_half = |side: &FaceMeet| {
+        side.ends
+            .iter()
+            .any(|end| matches!(end, MeetPoint::HalfWayRoundAClosedCurve { .. }))
+    };
+    if !wires
+        .iter()
+        .flatten()
+        .flat_map(|wire| wire.iter())
+        .any(a_half)
+    {
+        return Ok(wires);
+    }
+    let mut named: Vec<(&[Surface; 2], CurveName, bool)> = Vec::new();
+    for side in wires.iter().flatten().flat_map(|wire| wire.iter()) {
+        let closes = closes_on_itself(side);
+        if closes || a_half(side) {
+            let curve = name_of_the_closed_crossing_through(
+                &side.carried_by,
+                side.ends[0].point(),
+                policy,
+                log,
+            )?;
+            named.push((&side.carried_by, curve, closes));
+        }
+    }
+    let goes_by = the_name_each_closed_curve_goes_by(
+        named
+            .iter()
+            .map(|&(carried_by, curve, _)| (carried_by, curve)),
+        policy,
+    );
+    let one_name = |curve: CurveName| goes_by.get(&curve).copied().unwrap_or(curve);
+    let whole: BTreeSet<CurveName> = named
+        .iter()
+        .filter(|&&(_, _, closes)| closes)
+        .map(|&(_, curve, _)| one_name(curve))
+        .collect();
+    let to_join: BTreeSet<CurveName> = named
+        .iter()
+        .filter(|&&(_, curve, closes)| !closes && whole.contains(&one_name(curve)))
+        .map(|&(_, curve, _)| curve)
+        .collect();
+    if to_join.is_empty() {
+        return Ok(wires);
+    }
+    let mut joined = Vec::with_capacity(wires.len());
+    for piece in wires {
+        let mut of_this_piece = Vec::with_capacity(piece.len());
+        for mut wire in piece {
+            while let Some(at) = where_two_halves_of_one_of(&wire, &to_join, policy, log)? {
+                let mut read = wire.to_vec();
+                read.rotate_left(at);
+                let leaving = read.remove(1);
+                let arriving = &mut read[0];
+                arriving.ends[1] = leaving.ends[1].clone();
+                arriving.approximation = the_wider(arriving.approximation, leaving.approximation);
+                wire = Cow::Owned(read);
+            }
+            of_this_piece.push(wire);
+        }
+        joined.push(of_this_piece);
+    }
+    Ok(joined)
+}
+
+/// Where in `wire` a side arrives half way round one of the curves in
+/// `to_join` and the next side leaves from there to close it, as the place of
+/// the first of the two; `None` where no two sides do.
+///
+/// # Errors
+///
+/// Whatever [`name_of_the_closed_crossing_through`] gives.
+fn where_two_halves_of_one_of(
+    wire: &[FaceMeet],
+    to_join: &BTreeSet<CurveName>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<usize>> {
+    for (at, arriving) in wire.iter().enumerate() {
+        let leaving = &wire[(at + 1) % wire.len()];
+        let halves = matches!(arriving.ends[1], MeetPoint::HalfWayRoundAClosedCurve { .. })
+            && wire.len() > 1
+            && leaving.ends[0] == arriving.ends[1]
+            && leaving.ends[1] == arriving.ends[0]
+            && leaving.carried_by == arriving.carried_by
+            && leaving.material_side == arriving.material_side
+            && leaving.along == arriving.along
+            && matches!(arriving.ends[0], MeetPoint::WhereAClosedCurveStarts { .. });
+        if halves
+            && to_join.contains(&name_of_the_closed_crossing_through(
+                &arriving.carried_by,
+                arriving.ends[0].point(),
+                policy,
+                log,
+            )?)
+        {
+            return Ok(Some(at));
+        }
+    }
+    Ok(None)
 }
 
 /// The wider of two descriptions' slop, or whichever one there is.
@@ -3268,6 +4452,47 @@ fn the_wider(one: Option<Approximation>, other: Option<Approximation>) -> Option
         (Some(one), Some(_) | None) => Some(one),
         (None, other) => other,
     }
+}
+
+/// Each corner of an input solid with exactly three planes round it, and those
+/// three planes, for [`Corners::of`] to name it by.
+///
+/// **An input corner can lie on an edge of the other solid**, and then that
+/// solid's pieces bring the same corner as the meet of three planes. A comb's
+/// tooth corner on the floor-and-wall edge of an ell, turned, is one: the two
+/// solids store the floor and the wall with the same bits, selection keeps
+/// the floor and the wall of whichever solid came first, and the tooth's own
+/// wall brings the comb's vertex. Named as the vertex on one side and as the
+/// three planes on the other, and rounded 4 ulps apart in `y`, the one corner
+/// was two, and four edges got one face each, in one order only (§351.5).
+///
+/// Only three planes, because only there is the meet one point that the three
+/// names settle on their own ([`names_of_the_three_surfaces`]). A corner with
+/// four planes round it, or with anything curved, keeps its vertex's name.
+fn input_corners_on_exactly_three_planes(
+    model: &Model,
+    scratch: &Scratch,
+) -> BTreeMap<VertexSlot, [Plane; 3]> {
+    let mut on_three_planes = BTreeMap::new();
+    for solid in scratch.arguments.iter().chain(&scratch.tools) {
+        for side in solid
+            .faces
+            .iter()
+            .flat_map(|face| face.wires.iter().flatten())
+        {
+            let corner = &side.start;
+            let [one, other, last] = corner.around.as_slice() else {
+                continue;
+            };
+            let (Some(one), Some(other), Some(last)) =
+                (one.as_plane(), other.as_plane(), last.as_plane())
+            else {
+                continue;
+            };
+            on_three_planes.insert(corner.vertex.slot_in(model.id()), [*one, *other, *last]);
+        }
+    }
+    on_three_planes
 }
 
 /// The corners built so far, and the ways to find one again.
@@ -3280,6 +4505,32 @@ struct Corners {
     /// the one corner of a closed curve, wherever a piece started it. See
     /// [`Corners::with_each_closed_curve_started_once`].
     taken_over: BTreeMap<CornerName, usize>,
+    /// The input corners named by their three planes rather than as vertices.
+    /// See [`input_corners_on_exactly_three_planes`].
+    on_three_planes: BTreeMap<VertexSlot, [Plane; 3]>,
+    /// For every name some arrangement found to be one point with another, the
+    /// one name all of that point's names go by: the least of them, so that
+    /// which face folded which cannot matter. See
+    /// [`Corners::join_the_names_of_each_point`].
+    goes_by: BTreeMap<CornerName, CornerName>,
+    /// Where a point of more than one name goes when one of the names is an
+    /// input corner, and which corner that is, by the name the point goes by.
+    put_at: BTreeMap<CornerName, (PredicatePoint, VertexKey)>,
+    /// For every closed curve the kept sides bring under more than one name,
+    /// the one name each of them goes by. See
+    /// [`the_name_each_closed_curve_goes_by`].
+    curves: BTreeMap<CurveName, CurveName>,
+}
+
+/// What one closed curve of the answer is called and where it could start,
+/// gathered by [`Corners::with_each_closed_curve_started_once`].
+#[derive(Default)]
+struct OneClosedCurve<'a> {
+    /// Every name a kept side brings it under.
+    names: BTreeSet<CurveName>,
+    /// Where each kept side along it starts: the input vertex, or `None` where
+    /// its own two surfaces start it, with the name that side brings it under.
+    starts: Vec<(Option<VertexSlot>, CurveName, &'a MeetPoint)>,
 }
 
 /// What two faces agree to call the same corner.
@@ -3289,22 +4540,27 @@ struct Corners {
 /// a join or invent one; comparing the *names* of the surfaces cannot.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CornerName {
-    /// A corner the input already had.
+    /// A corner the input already had, unless exactly three planes meet there
+    /// ([`input_corners_on_exactly_three_planes`]).
     Vertex(VertexSlot),
     /// One of the places three surfaces meet, each surface written out as the
     /// bits it stores and sorted so the three arrive the same way round
     /// whichever face asked, and **which** of their meeting points this is.
+    /// An input corner with exactly three planes round it is this, with
+    /// `which` zero.
     ///
     /// Three surfaces can meet at more than one point, so the three names do not
     /// pick a corner on their own; §31.3 is where that field comes from and it
     /// is what stops two different corners being joined into one.
     Meet([[u64; 9]; 3], u8),
     /// The one point on a closed crossing that nothing else cuts, named by the
-    /// two surfaces it runs between.
-    RoundACurve([[u64; 9]; 2]),
+    /// two surfaces it runs between and which of their closed crossings it is
+    /// ([`name_of_the_closed_crossing_through`]), and by what picks that
+    /// crossing out of the others the two cross in ([`which_curve_of_the_pair`]).
+    RoundACurve(CurveName, WhichCurveOfThePair),
     /// The point across a closed crossing from where it starts, named the same
     /// way, for a crossing that starts at a pole.
-    HalfWayRoundACurve([[u64; 9]; 2]),
+    HalfWayRoundACurve(CurveName, WhichCurveOfThePair),
     /// A pole of a closed surface, named by that surface and which of its two
     /// poles this is (§38.1).
     Pole([u64; 9], bool),
@@ -3336,94 +4592,266 @@ impl Corners {
     ///
     /// A curve with two input vertices on it that other kept sides end at is
     /// left with both: it is cut there, and nothing here joins the halves.
+    ///
+    /// Every name an arrangement found to be one point with another goes by
+    /// one name from the start, [`Corners::join_the_names_of_each_point`].
+    ///
+    /// **A curve is named by which of its two surfaces' closed crossings it
+    /// is, and not by the two surfaces alone**
+    /// ([`name_of_the_closed_crossing_through`]). A plane through a ring's
+    /// axis cuts it in two circles. Two quarter bends end to end, from `+x`
+    /// round to `+y` and on round to `−x`, keep a cap on `y = 0` at each end,
+    /// and named by the plane and the ring alone the two circles were one
+    /// curve: the vertex at `(3, 0, 0)` was handed over to the one at
+    /// `(−3, 0, 0)`, and the union was refused with four faces along one edge
+    /// (§378.3).
+    ///
+    /// **A curve cut by two pairs of surfaces is one curve and gets one
+    /// corner**, chosen the same way from the starts of both
+    /// ([`the_name_each_closed_curve_goes_by`]). Where none of them is an
+    /// input vertex, the lowest start either pair puts on it is the corner.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`name_of_the_closed_crossing_through`] gives.
     fn with_each_closed_curve_started_once<'a>(
         model: &Model,
+        on_three_planes: BTreeMap<VertexSlot, [Plane; 3]>,
+        names_of_one_point: &[NamesOfOnePoint],
         kept_sides: impl Iterator<Item = &'a FaceMeet>,
-    ) -> Self {
-        let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<[[u64; 9]; 2]>>> = BTreeMap::new();
-        let mut on_curve: BTreeMap<[[u64; 9]; 2], Vec<(VertexSlot, &MeetPoint)>> = BTreeMap::new();
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Self> {
+        let mut sides: Vec<(&FaceMeet, Option<CurveName>)> = Vec::new();
         for meet in kept_sides {
-            let curve = closes_on_itself(meet).then(|| names_of_the_two_surfaces(&meet.carried_by));
+            let curve = if closes_on_itself(meet) {
+                Some(name_of_the_closed_crossing_through(
+                    &meet.carried_by,
+                    meet.ends[0].point(),
+                    policy,
+                    log,
+                )?)
+            } else {
+                None
+            };
+            sides.push((meet, curve));
+        }
+        let mut corners = Self {
+            on_three_planes,
+            curves: the_name_each_closed_curve_goes_by(
+                sides
+                    .iter()
+                    .filter_map(|&(meet, curve)| Some((&meet.carried_by, curve?))),
+                policy,
+            ),
+            ..Self::default()
+        };
+        let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<CurveName>>> = BTreeMap::new();
+        let mut on_curve: BTreeMap<CurveName, OneClosedCurve<'_>> = BTreeMap::new();
+        for (meet, curve) in sides {
+            let one_name = curve.map(|curve| corners.curve_goes_by(curve));
+            if let (Some(curve), Some(one_name)) = (curve, one_name) {
+                on_curve.entry(one_name).or_default().names.insert(curve);
+            }
             for end in &meet.ends {
-                let MeetPoint::Existing { vertex, .. } = end else {
-                    continue;
+                let slot = match end {
+                    MeetPoint::Existing { vertex, .. } => Some(vertex.slot_in(model.id())),
+                    MeetPoint::WhereAClosedCurveStarts { .. } => None,
+                    MeetPoint::OfThreeSurfaces { .. }
+                    | MeetPoint::HalfWayRoundAClosedCurve { .. }
+                    | MeetPoint::APoleOfAClosedSurface { .. } => continue,
                 };
-                let slot = vertex.slot_in(model.id());
-                closes.entry(slot).or_default().insert(curve);
-                if let Some(curve) = curve {
-                    on_curve.entry(curve).or_default().push((slot, end));
+                if let Some(slot) = slot {
+                    closes.entry(slot).or_default().insert(one_name);
+                }
+                if let (Some(curve), Some(one_name)) = (curve, one_name) {
+                    on_curve
+                        .entry(one_name)
+                        .or_default()
+                        .starts
+                        .push((slot, curve, end));
                 }
             }
         }
-        let mut corners = Self::default();
-        for (curve, mut candidates) in on_curve {
-            let only_closes_this =
-                |slot: &VertexSlot| closes[slot] == BTreeSet::from([Some(curve)]);
-            candidates.sort_by(|(one, at_one), (other, at_other)| {
-                only_closes_this(one)
-                    .cmp(&only_closes_this(other))
+        corners.join_the_names_of_each_point(model, names_of_one_point, policy, log)?;
+        for (curve, OneClosedCurve { names, mut starts }) in on_curve {
+            if names.len() == 1 && starts.iter().all(|(slot, _, _)| slot.is_none()) {
+                continue;
+            }
+            let only_closes_this = |slot: &Option<VertexSlot>| {
+                slot.is_some_and(|slot| closes[&slot] == BTreeSet::from([Some(curve)]))
+            };
+            let mut round = BTreeSet::new();
+            for (_, _, end) in &starts {
+                if matches!(end, MeetPoint::WhereAClosedCurveStarts { .. }) {
+                    round.insert(corners.goes_by(corners.name_of(model, end, policy, log)?));
+                }
+            }
+            starts.sort_by(|(one, one_named, at_one), (other, other_named, at_other)| {
+                one.is_none()
+                    .cmp(&other.is_none())
+                    .then_with(|| only_closes_this(one).cmp(&only_closes_this(other)))
                     .then_with(|| lowest_first(at_one.point(), at_other.point()))
                     .then_with(|| one.cmp(other))
+                    .then_with(|| one_named.cmp(other_named))
             });
-            candidates.dedup_by_key(|(slot, _)| *slot);
-            let (_, first) = candidates[0];
-            let start = corners.of(model, first);
-            corners
-                .taken_over
-                .insert(CornerName::RoundACurve(curve), start);
-            for (slot, _) in &candidates[1..] {
-                if only_closes_this(slot) {
-                    corners.taken_over.insert(CornerName::Vertex(*slot), start);
+            starts.dedup_by_key(|(slot, named, _)| (*slot, slot.is_none().then_some(*named)));
+            let (_, _, first) = starts[0];
+            let start = corners.of(model, first, policy, log)?;
+            for name in round {
+                corners.taken_over.insert(name, start);
+            }
+            for (slot, _, _) in &starts[1..] {
+                if let Some(slot) = slot.filter(|slot| only_closes_this(&Some(*slot))) {
+                    let vertex = corners.goes_by(CornerName::Vertex(slot));
+                    corners.taken_over.insert(vertex, start);
                 }
             }
         }
-        corners
+        Ok(corners)
     }
 
-    fn of(&mut self, model: &Model, end: &MeetPoint) -> usize {
-        let name = match end {
-            MeetPoint::Existing { vertex, .. } => CornerName::Vertex(vertex.slot_in(model.id())),
-            MeetPoint::OfThreeSurfaces {
-                surfaces, which, ..
-            } => CornerName::Meet(names_of_the_three_surfaces(surfaces), *which),
-            MeetPoint::WhereAClosedCurveStarts { carried_by, .. } => {
-                CornerName::RoundACurve(names_of_the_two_surfaces(carried_by))
+    /// The name every name of `curve`'s closed curve goes by: `curve` itself
+    /// unless [`the_name_each_closed_curve_goes_by`] found that curve brought
+    /// under more than one name.
+    fn curve_goes_by(&self, curve: CurveName) -> CurveName {
+        self.curves.get(&curve).copied().unwrap_or(curve)
+    }
+
+    /// Make every name of one point go by one name, and put the point where
+    /// its input corner is, when one of its names is an input corner.
+    ///
+    /// **A union of names, not a map from one name to one corner.** A meet
+    /// can be folded into a corner of one solid on one face and into a corner
+    /// of the other solid on another, and then all three are one point; a meet
+    /// can be folded into a second meet that a third face folds into a
+    /// corner. Each fold was decided by an arrangement under the policy the
+    /// fuse was asked under (§284.7), so nothing here asks again.
+    ///
+    /// The name a point goes by is the least of its names, and where it goes
+    /// is the lowest of its input corners, put where [`Corners::of`] would put
+    /// that corner alone. Both are taken over every face of both groups, so
+    /// neither the order the solids came in nor which pieces are kept moves
+    /// them. The input corner wins as it wins the fold, where its point is the
+    /// one the faces round it agree on.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Corners::name_of`] gives.
+    fn join_the_names_of_each_point(
+        &mut self,
+        model: &Model,
+        names_of_one_point: &[NamesOfOnePoint],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let mut leads_to: BTreeMap<CornerName, CornerName> = BTreeMap::new();
+        let leader = |leads_to: &BTreeMap<CornerName, CornerName>, mut name: CornerName| {
+            while let Some(&next) = leads_to.get(&name) {
+                name = next;
             }
-            MeetPoint::HalfWayRoundAClosedCurve { carried_by, .. } => {
-                CornerName::HalfWayRoundACurve(names_of_the_two_surfaces(carried_by))
-            }
-            MeetPoint::APoleOfAClosedSurface {
-                surface,
-                at_the_top,
-                ..
-            } => CornerName::Pole(name_of_surface_bits(surface), *at_the_top),
+            name
         };
-        if let Some(&chosen) = self.taken_over.get(&name) {
-            return chosen;
+        for one_point in names_of_one_point {
+            let kept = self.name_of(model, &one_point.kept, policy, log)?;
+            for (surfaces, which) in &one_point.folded {
+                let folded = CornerName::Meet(names_of_the_three_surfaces(surfaces), *which);
+                let (one, other) = (leader(&leads_to, kept), leader(&leads_to, folded));
+                match one.cmp(&other) {
+                    Ordering::Less => leads_to.insert(other, one),
+                    Ordering::Greater => leads_to.insert(one, other),
+                    Ordering::Equal => None,
+                };
+            }
         }
-        let point = end.point();
+        for &name in leads_to.keys() {
+            let least = leader(&leads_to, name);
+            self.goes_by.insert(name, least);
+            self.goes_by.insert(least, least);
+        }
+        for one_point in names_of_one_point {
+            let MeetPoint::Existing { vertex, .. } = &one_point.kept else {
+                continue;
+            };
+            let point = self.where_it_goes(model, &one_point.kept);
+            let name = self.goes_by(self.name_of(model, &one_point.kept, policy, log)?);
+            let lower = match self.put_at.get(&name) {
+                None => true,
+                Some((already, theirs)) => lowest_first(point, *already)
+                    .then_with(|| vertex.slot_in(model.id()).cmp(&theirs.slot_in(model.id())))
+                    .is_lt(),
+            };
+            if lower {
+                self.put_at.insert(name, (point, *vertex));
+            }
+        }
+        Ok(())
+    }
+
+    /// The corner `end` names, made the first time it is asked for.
+    ///
+    /// **A corner on three planes is put where the three planes alone put
+    /// it**, [`where_three_planes_meet_whichever_face_asks`], and not where the
+    /// spelling that arrived first put it. An input corner on three planes was
+    /// solved by `bake` from the three as its solid stores them, and a meet of
+    /// the same three by `arrange` from the three turned to face the one way,
+    /// so the two can round a few ulps apart. Which of them arrives depends on
+    /// which pieces selection kept, and that depends on the order the solids
+    /// came in. Picking the lower of what arrived would still let the order
+    /// decide where the corner goes whenever only one of them arrives (§351.5).
+    ///
+    /// **A point of more than one name with an input corner among them goes
+    /// where that corner goes**, whichever of its names arrives
+    /// ([`Corners::join_the_names_of_each_point`]), and is as wide as the
+    /// wider of the corner and what arrived.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Corners::name_of`] gives.
+    fn of(
+        &mut self,
+        model: &Model,
+        end: &MeetPoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<usize> {
+        let name = self.goes_by(self.name_of(model, end, policy, log)?);
+        if let Some(&chosen) = self.taken_over.get(&name) {
+            return Ok(chosen);
+        }
+        let (point, wobble, was) = match self.put_at.get(&name) {
+            Some(&(input_corner, vertex)) => (
+                input_corner,
+                input_corner.uncertainty().max(end.point().uncertainty()),
+                Some(vertex),
+            ),
+            None => {
+                let point = self.where_it_goes(model, end);
+                let was = match end {
+                    MeetPoint::Existing { vertex, .. } => Some(*vertex),
+                    MeetPoint::OfThreeSurfaces { .. }
+                    | MeetPoint::WhereAClosedCurveStarts { .. }
+                    | MeetPoint::HalfWayRoundAClosedCurve { .. }
+                    | MeetPoint::APoleOfAClosedSurface { .. } => None,
+                };
+                (point, point.uncertainty(), was)
+            }
+        };
         let at = middle_of(point);
         if let Some(&already) = self.named.get(&name) {
-            self.settle_on_the_lower_rounding(already, at, point.uncertainty());
-            return already;
+            self.settle_on_the_lower_rounding(already, at, wobble);
+            return Ok(already);
         }
-        let was = match end {
-            MeetPoint::Existing { vertex, .. } => Some(*vertex),
-            MeetPoint::OfThreeSurfaces { .. }
-            | MeetPoint::WhereAClosedCurveStarts { .. }
-            | MeetPoint::HalfWayRoundAClosedCurve { .. }
-            | MeetPoint::APoleOfAClosedSurface { .. } => None,
-        };
         let index = match self.at.get(&exactly_at(at)) {
             Some(&already) => {
-                self.made[already].wobble = self.made[already].wobble.max(point.uncertainty());
+                self.made[already].wobble = self.made[already].wobble.max(wobble);
                 self.made[already].from = self.made[already].from.or(was);
                 already
             }
             None => {
                 self.made.push(Corner {
                     point: at,
-                    wobble: point.uncertainty(),
+                    wobble,
                     from: was,
                 });
                 self.at.insert(exactly_at(at), self.made.len() - 1);
@@ -3431,7 +4859,87 @@ impl Corners {
             }
         };
         self.named.insert(name, index);
-        index
+        Ok(index)
+    }
+
+    /// The name every name of `name`'s point goes by: `name` itself unless an
+    /// arrangement found the point to be more than one name.
+    fn goes_by(&self, name: CornerName) -> CornerName {
+        self.goes_by.get(&name).copied().unwrap_or(name)
+    }
+
+    /// What `end` is called, before [`Corners::goes_by`] is asked.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`name_of_the_closed_crossing_through`] gives, for a point
+    /// named by the closed crossing it is on.
+    fn name_of(
+        &self,
+        model: &Model,
+        end: &MeetPoint,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<CornerName> {
+        Ok(match end {
+            MeetPoint::Existing { vertex, .. } => {
+                match self.on_three_planes.get(&vertex.slot_in(model.id())) {
+                    Some(planes) => CornerName::Meet(
+                        names_of_the_three_surfaces(&planes.map(Surface::Plane)),
+                        0,
+                    ),
+                    None => CornerName::Vertex(vertex.slot_in(model.id())),
+                }
+            }
+            MeetPoint::OfThreeSurfaces {
+                surfaces, which, ..
+            } => CornerName::Meet(names_of_the_three_surfaces(surfaces), *which),
+            MeetPoint::WhereAClosedCurveStarts {
+                carried_by,
+                picked_by,
+                point,
+            } => CornerName::RoundACurve(
+                name_of_the_closed_crossing_through(carried_by, *point, policy, log)?,
+                which_curve_of_the_pair(picked_by),
+            ),
+            MeetPoint::HalfWayRoundAClosedCurve {
+                carried_by,
+                picked_by,
+                point,
+            } => CornerName::HalfWayRoundACurve(
+                name_of_the_closed_crossing_through(carried_by, *point, policy, log)?,
+                which_curve_of_the_pair(picked_by),
+            ),
+            MeetPoint::APoleOfAClosedSurface {
+                surface,
+                at_the_top,
+                ..
+            } => CornerName::Pole(name_of_surface_bits(surface), *at_the_top),
+        })
+    }
+
+    /// Where `end` goes when it is the only name of its point: where its three
+    /// planes alone put it, when it is on three planes, and where it arrived
+    /// otherwise.
+    fn where_it_goes(&self, model: &Model, end: &MeetPoint) -> PredicatePoint {
+        let three_planes = match end {
+            MeetPoint::Existing { vertex, .. } => self
+                .on_three_planes
+                .get(&vertex.slot_in(model.id()))
+                .copied(),
+            MeetPoint::OfThreeSurfaces { surfaces, .. } => {
+                match surfaces.map(|surface| surface.as_plane().copied()) {
+                    [Some(one), Some(other), Some(last)] => Some([one, other, last]),
+                    [_, _, _] => None,
+                }
+            }
+            MeetPoint::WhereAClosedCurveStarts { .. }
+            | MeetPoint::HalfWayRoundAClosedCurve { .. }
+            | MeetPoint::APoleOfAClosedSurface { .. } => None,
+        };
+        three_planes
+            .and_then(where_three_planes_meet_whichever_face_asks)
+            .unwrap_or_else(|| end.point())
     }
 
     /// Keep the lower of two roundings of one corner, so that which face asked
@@ -3450,6 +4958,11 @@ impl Corners {
     /// **This is not a coordinate deciding what is one corner.** The name has
     /// already decided that. It picks between two roundings of a corner both
     /// spellings agree on, and the wobble carries how far apart they were.
+    ///
+    /// **A corner on three planes no longer reaches it with two roundings**:
+    /// [`Corners::of`] puts every spelling of one at the same point. Picking
+    /// the lower of what arrived is only order-free when every spelling
+    /// arrives in both orders, and which ones arrive is selection's to decide.
     fn settle_on_the_lower_rounding(&mut self, corner: usize, at: Point, uncertainty: f64) {
         let made = &mut self.made[corner];
         made.wobble = made.wobble.max(uncertainty);
@@ -3476,6 +4989,46 @@ impl Corners {
     }
 }
 
+/// Where three planes meet, worked out from the three alone: each turned to
+/// face the one way, put in [`Surface::how_it_sorts_against`]'s order, and
+/// solved by Cramer's rule.
+///
+/// That is the solve `arrange` makes for every meet of three planes
+/// (`three_planes_faced_the_one_way`, then `meet_of_three_surfaces`), so a meet
+/// that arrives from a piece lands on the same bits here, and an input corner
+/// on the same three planes lands on them too.
+///
+/// `None` where Cramer's rule cannot bound the meet. `meet_of_three_surfaces`
+/// then goes on along the line two of the planes cross in, which wants a
+/// policy, and the caller keeps the point that arrived. A meet from a piece
+/// already went that way, so it is the same point. An input corner keeps the
+/// point `bake` solved, and that one case can still round apart from a meet of
+/// the same planes.
+fn where_three_planes_meet_whichever_face_asks(planes: [Plane; 3]) -> Option<PredicatePoint> {
+    let mut faced = planes.map(|flat| {
+        let backwards = flat
+            .coefficients()
+            .iter()
+            .find(|coefficient| **coefficient != 0.0)
+            .is_some_and(|coefficient| *coefficient < 0.0);
+        Surface::Plane(if backwards { flat.reversed() } else { flat })
+    });
+    faced.sort_by(Surface::how_it_sorts_against);
+    let [
+        Surface::Plane(one),
+        Surface::Plane(other),
+        Surface::Plane(last),
+    ] = faced
+    else {
+        unreachable!("three planes sorted are still three planes")
+    };
+    let point = Plane::meet_of_three(&one, &other, &last).ok()?;
+    point
+        .uncertainty()
+        .is_finite()
+        .then(|| as_exact_as_it_is(point))
+}
+
 /// Whether a side starts and ends at one corner, which only a closed curve does.
 fn closes_on_itself(meet: &FaceMeet) -> bool {
     match &meet.ends {
@@ -3495,6 +5048,106 @@ fn closes_on_itself(meet: &FaceMeet) -> bool {
             | MeetPoint::APoleOfAClosedSurface { .. },
             _,
         ] => false,
+    }
+}
+
+/// For every closed curve that comes under more than one name, the one name
+/// all of them go by: the least, so that which side arrived first cannot
+/// matter.
+///
+/// **One circle can be where more than two surfaces cross**, and each face
+/// along it names it by its own surface and the partner it was cut by. A ball
+/// of a bar's radius centred on the bar's top cap cuts the cap's plane in the
+/// cap's own rim, which the pipe cuts it in too, and the pipe is tangent to
+/// the ball all the way round. Uniting the two, the pipe's side of the rim is
+/// the plane and the pipe, started at the bar's seam corner, and the ball's is
+/// the plane and the ball, started where that pair starts a circle. Named by
+/// its two surfaces alone that was two edges with one face along each, and
+/// every rule both ways round was refused as not a manifold; a frustum on a bar
+/// of its narrow cap's radius was the same with a cone for the ball (Q1118).
+///
+/// **Two names are one curve where both are one plane against a ball, a pipe
+/// or a cone, and the plane and the two curved surfaces share more than a
+/// point.** Such a pair crosses in one closed curve or in nothing that closes
+/// ([`which_of_them_a_closed_crossing_runs_round`]), and either curve is a
+/// conic in the plane. Two different conics in one plane share at most four
+/// points, so where the three share more than a point
+/// ([`MeetOfThree::MoreThanAPoint`]) the two are one conic. A ring is left
+/// out: a plane can cut it in two circles, and its pair's name tells only a
+/// plane through its axis's two apart (§378.4).
+///
+/// **Two curved surfaces with no plane between them are left apart.** The
+/// argument above is about conics in one plane. A cone and a pipe on one axis
+/// cross in two circles, one either side of the apex, and only one of them can
+/// be a plane's rim; their name says which
+/// ([`which_of_the_pairs_closed_crossings_it_is`]), but nothing here asks
+/// whether the three share it, so a join would need an argument of its own.
+///
+/// A meet of the three that cannot be worked out joins nothing, and its
+/// records are not kept, as `arrange.rs` keeps none for the fold it makes of
+/// the same three: the answer is then refused as not a manifold, as it was
+/// before anything was asked.
+fn the_name_each_closed_curve_goes_by<'a>(
+    closed: impl Iterator<Item = (&'a [Surface; 2], CurveName)>,
+    policy: &Policy,
+) -> BTreeMap<CurveName, CurveName> {
+    let mut cut_out_of: BTreeMap<CurveName, (Plane, Surface)> = BTreeMap::new();
+    for (carried_by, curve) in closed {
+        if let Some(pair) = the_plane_and_the_ball_pipe_or_cone_of(carried_by) {
+            cut_out_of.entry(curve).or_insert(pair);
+        }
+    }
+    let mut leads_to: BTreeMap<CurveName, CurveName> = BTreeMap::new();
+    let leader = |leads_to: &BTreeMap<CurveName, CurveName>, mut name: CurveName| {
+        while let Some(&next) = leads_to.get(&name) {
+            name = next;
+        }
+        name
+    };
+    let named: Vec<(&CurveName, &(Plane, Surface))> = cut_out_of.iter().collect();
+    for (at, &(&one, (flat, mine))) in named.iter().enumerate() {
+        for &(&other, (other_flat, theirs)) in &named[at + 1..] {
+            if !one_surface(&Surface::Plane(*flat), &Surface::Plane(*other_flat))
+                || !matches!(
+                    meet_of_three_surfaces(
+                        [&Surface::Plane(*flat), mine, theirs],
+                        policy,
+                        &mut ProvenanceLog::new(),
+                    ),
+                    Ok(MeetOfThree::MoreThanAPoint)
+                )
+            {
+                continue;
+            }
+            let (one, other) = (leader(&leads_to, one), leader(&leads_to, other));
+            match one.cmp(&other) {
+                Ordering::Less => leads_to.insert(other, one),
+                Ordering::Greater => leads_to.insert(one, other),
+                Ordering::Equal => None,
+            };
+        }
+    }
+    let mut goes_by = BTreeMap::new();
+    for &name in leads_to.keys() {
+        let least = leader(&leads_to, name);
+        goes_by.insert(name, least);
+        goes_by.insert(least, least);
+    }
+    goes_by
+}
+
+/// The plane and the ball, pipe or cone of a pair, or `None` for any other
+/// pair: two curved surfaces, two planes, or a plane and a ring.
+fn the_plane_and_the_ball_pipe_or_cone_of(carried_by: &[Surface; 2]) -> Option<(Plane, Surface)> {
+    let ([Surface::Plane(flat), round] | [round, Surface::Plane(flat)]) = carried_by else {
+        return None;
+    };
+    match round {
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) => Some((*flat, *round)),
+        Surface::Plane(_) | Surface::Torus(_) => None,
+        // A kind added to `rcad-geom` after this has not been shown to cross a
+        // plane in at most one closed curve.
+        _ => None,
     }
 }
 
@@ -3555,14 +5208,6 @@ fn names_of_the_three_surfaces(surfaces: &[Surface; 3]) -> [[u64; 9]; 3] {
     named
 }
 
-/// The two surfaces a closed crossing runs between, named either way round and
-/// sorted, so both faces along it name its corners alike.
-fn names_of_the_two_surfaces(carried_by: &[Surface; 2]) -> [[u64; 9]; 2] {
-    let mut named = carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
-    named.sort_unstable();
-    named
-}
-
 /// A point as three bit patterns, for finding two corners that are the same
 /// point however they were named.
 ///
@@ -3587,13 +5232,18 @@ fn exactly_at(point: Point) -> [u64; 3] {
 
 /// What names one edge of the answer: the two corners it runs between, and —
 /// for an edge that closes, where those are one corner — the two surfaces
-/// either side of it. See [`which_curve_it_is`]. The third is, for an arc of a
+/// either side of it and which of their closed crossings it is. See
+/// [`which_curve_it_is`]. The third is, for an arc of a
 /// closed crossing between a plane and a surface that curves right round — a
 /// ball's circle, or a cone's rim circle — that curved surface and that plane,
-/// and which of the crossing's two arcs between the same two corners it is; see
-/// [`which_arc_of_a_circle_this_is`].
+/// or for an arc of the circle two balls, or a cone and a second cone, a pipe
+/// or a ball on its axis, cross in, the two of them, and which of the
+/// crossing's two arcs between the same two corners it is; see
+/// [`which_arc_of_a_circle_this_is`]. The fourth is, for an arc of a
+/// hyperbola or a parabola a plane cuts on a cone, that cone and that plane;
+/// see [`which_open_crossing_of_a_cone_this_is`].
 ///
-/// The fourth is whether the edge is straight: both surfaces either side are
+/// The fifth is whether the edge is straight: both surfaces either side are
 /// planes. **A straight side and a curved one can share both corners**, and
 /// they are two edges. A half disk is one: `z ≤ 0.5` cut out of a half ball
 /// leaves on the plane `z = 0.5` a chord along `x = 0` and an arc round the
@@ -3603,8 +5253,9 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// the way the surfaces' own names would (see [`which_curve_it_is`]).
 type EdgeName = (
     [usize; 2],
-    Option<[[u64; 9]; 2]>,
+    Option<CurveName>,
     Option<([[u64; 9]; 2], bool)>,
+    Option<[[u64; 9]; 2]>,
     bool,
 );
 
@@ -3623,7 +5274,9 @@ impl Edges {
     /// corners no longer pick an edge out on their own: a closed edge starts and
     /// ends at the one corner it has, so a bar's two cap circles would be one
     /// edge if the pair were the key. Sorting the two surfaces is what makes the
-    /// faces either side agree about which edge they share.
+    /// faces either side agree about which edge they share, and where the two
+    /// faces were cut by two different pairs of surfaces, `corners` gives the
+    /// one name the curve goes by ([`the_name_each_closed_curve_goes_by`]).
     ///
     /// **The input edges it is a piece of are every side's along it**, and not
     /// the first side's. Where a cut on one face runs along the boundary of the
@@ -3632,16 +5285,45 @@ impl Edges {
     /// solids were handed over, and the history of the edge would depend on it.
     /// `seam` is [`the_seam_a_side_runs_along`], which `meet` cannot carry.
     ///
+    /// **A closed side is read against the curved surface of `meet`'s own
+    /// pair**, which the side carries as [`Side::read_against`] with the
+    /// crossing and the frame it was read with, because the answer may keep
+    /// another spelling of that surface along the edge, or another surface
+    /// altogether, and [`every_closed_edge_read_off_one_spelling`] has to know
+    /// which one this was and be able to read the side again.
+    ///
+    /// **A closed side is read at its edge's one corner**, and not where its
+    /// own pair starts the curve. A side whose start another corner took over
+    /// ([`Corners::with_each_closed_curve_started_once`]) starts somewhere the
+    /// other sides along the edge are not read. The two halves of a rim cut at
+    /// a ball's poles, read as one side
+    /// ([`with_the_halves_of_each_whole_curve_joined`]), start at a pole, and
+    /// a dome lying on a bar along `−y` read there had its ball walk the rim the
+    /// way the pipe did and was refused `FacesDoNotAgreeWhichWayTheyFace`; read
+    /// at the bar's seam corner it answers (Q1368).
+    ///
     /// # Panics
     ///
-    /// If a straight side has no length. §17.4 prevents one rather than
-    /// filtering it out afterwards, so one reaching here means the splitter is
-    /// wrong — and a *closed* side is not one, which is why the two ends being
-    /// the same corner is checked against what carries it.
+    /// If a straight side has no length. Every caller leaves such a side out
+    /// before asking — [`sides_of`] drops it and
+    /// [`the_edge_each_side_of_every_piece_is`] gives up at it — so one
+    /// reaching here means a caller stopped doing that. A *closed* side is not
+    /// one, which is why the two ends being the same corner is checked against
+    /// what carries it.
     ///
     /// `turned_round` is whether the rule turns this face's piece round, which
     /// only a closed edge starting at a ball's pole needs to know — see
     /// [`the_way_a_circle_from_a_pole_is_walked`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] as
+    /// [`Assembly::from_the_pieces`] says, and whatever [`which_curve_it_is`]
+    /// and [`which_way_a_closed_edge_is_walked`] give.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the policy and the log travel as arguments, never as fields (CLAUDE.md)"
+    )]
     fn of(
         &mut self,
         meet: &FaceMeet,
@@ -3650,6 +5332,9 @@ impl Edges {
         to: usize,
         face: FaceKey,
         turned_round: bool,
+        corners: &Corners,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
     ) -> Result<Side> {
         let carried_by = meet.carried_by;
         let along: Vec<EdgeKey> = meet.along.iter().copied().chain(seam).collect();
@@ -3661,11 +5346,13 @@ impl Edges {
             "a piece of a flat face has a side with no length"
         );
         let at = middle_of(meet.ends[0].point());
-        let named = which_curve_it_is(from, to, carried_by);
+        let named = which_curve_it_is(from, to, meet, policy, log)?
+            .map(|curve| corners.curve_goes_by(curve));
         let key = (
             [from.min(to), from.max(to)],
             named,
             which_arc_of_a_circle_this_is(meet, from, to),
+            which_open_crossing_of_a_cone_this_is(meet, from, to),
             carried_by
                 .iter()
                 .all(|surface| surface.as_plane().is_some()),
@@ -3695,13 +5382,17 @@ impl Edges {
                 self.made.len() - 1
             }
         };
-        let forward = if from == to {
-            which_way_a_closed_edge_is_walked(meet, at, turned_round)?
+        let (forward, read_against) = if from == to {
+            which_way_a_closed_edge_is_walked(meet, corners.made[from].point, turned_round)?
                 .ok_or(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face })?
         } else {
-            self.made[edge].ends[0] == from
+            (self.made[edge].ends[0] == from, None)
         };
-        Ok(Side { edge, forward })
+        Ok(Side {
+            edge,
+            forward,
+            read_against,
+        })
     }
 }
 
@@ -3723,6 +5414,17 @@ impl Edges {
 /// round, `sides_of` turns every side of it round with it and the face's use
 /// says so — which is what the sweep reads.
 ///
+/// **The answer is against the curved one of `meet`'s pair**, handed back with
+/// what it was read against, and [`every_closed_edge_read_off_one_spelling`]
+/// turns it round afterwards where the answer stores the edge by another
+/// spelling of that surface, or by another surface that runs the other way
+/// round it. The path for a circle from a ball's pole reads against the lid's
+/// normal and not against a winding, and is never turned by that pass itself:
+/// the surface it is read against is a ball, a ball has no second spelling
+/// (`name_of_the_surface_either_way_round` folds nothing for it), and where the
+/// ball is what the edge is stored by, the pass leaves the ball's own side
+/// alone and reads the side across again against the lid.
+///
 /// # Errors
 ///
 /// Whatever [`a_closed_crossing_is_walked_the_way_it_is_stored`] gives up with,
@@ -3741,44 +5443,56 @@ fn which_way_a_closed_edge_is_walked(
     meet: &FaceMeet,
     at: Point,
     turned_round: bool,
-) -> Result<Option<bool>> {
+) -> Result<Option<(bool, Option<ReadAgainst>)>> {
     let [mine, partner] = meet.carried_by;
-    if the_curved_one_of(&meet.carried_by).is_none() {
+    let Some(curved) = the_curved_one_of(&meet.carried_by) else {
         // Two planes cross in a straight line, which does not close, so nothing
         // reaches here — and a wire with no curved surface either side of it has
         // no longitude to run along.
-        return Ok(Some(true));
-    }
-    let outward = [gradient_of(&mine, at), gradient_of(&partner, at)];
+        return Ok(Some((true, None)));
+    };
+    let crossing = [gradient_of(&mine, at), gradient_of(&partner, at)];
+    let read_against = |frame| {
+        Some(ReadAgainst {
+            surface: curved,
+            crossing,
+            frame,
+        })
+    };
     match a_closed_crossing_is_walked_the_way_it_is_stored(
         [&mine, &partner],
-        outward,
+        crossing,
         at,
         meet.material_side,
     )? {
-        Some(forward) => Ok(Some(forward)),
+        Some(forward) => Ok(Some((
+            forward,
+            read_against([
+                gradient_of(&curved, at),
+                the_way_it_is_parametrised_about(&curved, at),
+            ]),
+        ))),
         None => {
             let Some(lid) = the_lid_a_circle_from_a_pole_bounds(meet, turned_round) else {
                 return Ok(None);
             };
-            let runs_along_stored = match which_way_a_closed_crossing_turns(
-                outward,
-                gradient_of(&lid.ball, at),
-                lid.outward,
-            ) {
-                Decision::Pos => true,
-                Decision::Neg => false,
-                Decision::Zero => return Ok(None),
-                Decision::Undecidable { enclosure } => {
-                    return Err(Error::CannotTellWhichWayAClosedEdgeRuns { enclosure });
-                }
-                other => panic!("a fifth answer out of the closed-edge rule: {other:?}"),
-            };
-            Ok(Some(match meet.material_side {
+            let frame = [gradient_of(&lid.ball, at), lid.outward];
+            let runs_along_stored =
+                match which_way_a_closed_crossing_turns(crossing, frame[0], frame[1]) {
+                    Decision::Pos => true,
+                    Decision::Neg => false,
+                    Decision::Zero => return Ok(None),
+                    Decision::Undecidable { enclosure } => {
+                        return Err(Error::CannotTellWhichWayAClosedEdgeRuns { enclosure });
+                    }
+                    other => panic!("a fifth answer out of the closed-edge rule: {other:?}"),
+                };
+            let forward = match meet.material_side {
                 Decision::Neg => runs_along_stored,
                 Decision::Pos => !runs_along_stored,
                 other => panic!("a face with no side to its material: {other:?}"),
-            }))
+            };
+            Ok(Some((forward, read_against(frame))))
         }
     }
 }
@@ -3972,16 +5686,20 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
         // and `a_pipe_alongside_one_of_a_cones_rulings_holds_it` are the two
         // demonstrations.
         //
-        // **`false` rests on `intersect` and not on the geometry** for cone
-        // against cone as well: two cones that share an apex meet along
-        // rulings, which are lines. No such pair reaches here — `intersect`
-        // answers `ACrossingBetweenAConeAndAnotherCurvedSurface` for every
-        // cone-and-cone that is not the same cone.
+        // **Cone against cone is half the geometry and half `intersect`.** Two
+        // cones on one axis meet in circles — two, or one halfway between the
+        // apexes for one slope — or at their one apex and nowhere else, which
+        // `intersect` answers as touching and builds no run for. None of that
+        // holds a line, so `false` is about the geometry there. Two cones that
+        // share an apex with their axes leaning apart *do* meet along rulings,
+        // which are lines (§50.2 item 4), and what keeps the arm right for them
+        // is that `intersect` refuses every cone-and-cone off one axis by name.
+        // `where_two_cones_cross` in `rcad-geom` carries the table.
         //
         // So **two** of the three rows here are right only for as long as
         // those refusals stand, and both are rows to revisit the day one
-        // lifts: cone against cone, and cone against a pipe it is not coaxial
-        // with. Only the coaxial pipe and the ball answer out of the shapes
+        // lifts: a cone against a cone or a pipe it is not coaxial with. The
+        // ball, the coaxial pipe and the coaxial cone answer out of the shapes
         // themselves.
         [
             Surface::Cone(_),
@@ -4069,7 +5787,17 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
 /// the room is not granted: the picker is the one the stored ends alone earn,
 /// exactly as before the room existed, and the next fuse may refuse it as it
 /// always did — `a_near_semicircle_keeps_its_centre_behind_its_picker` measures
-/// the band. Two exact ends on the chord's own plane need neither, and keep it.
+/// the band.
+///
+/// **Two exact ends on the chord's own plane keep it, with no room**, and the
+/// next fuse's boxes for them straddle it: the bottom arc of a window a box
+/// cuts in a pipe's wall is stored with its ends at `x = 1.9364916731037085`
+/// and picked by `0.5x ≥ 0.9682458365518543`, and the next fuse solves each end
+/// into `x ∈ [1.9364916731037083, 1.9364916731037085]`. Neither of the two ways
+/// [`a_picker_that_tells_the_two_arcs_apart`] knows can read such a picker. The
+/// next fuse reads the arc by where the middle of the other arc sits instead:
+/// `into_the_arc_away_from_the_centre` in `holds.rs` for the shorter, as the
+/// window's is, and `into_the_arc_on_the_centres_side` for the longer.
 fn the_half_space_both_ends_are_on(
     facing: Vector,
     ends: [Point; 2],
@@ -4147,19 +5875,240 @@ fn lowered_until(
 /// split it in two and leave each half with one face along it. Measured: the
 /// skew family's not-a-solid share went from under three in a hundred to three
 /// and a half.
-fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option<[[u64; 9]; 2]> {
+///
+/// **The two surfaces can cross in two closed curves**, and then which of them
+/// this is goes in the name too, [`name_of_the_closed_crossing_through`].
+///
+/// # Errors
+///
+/// Whatever [`name_of_the_closed_crossing_through`] gives.
+fn which_curve_it_is(
+    from: usize,
+    to: usize,
+    meet: &FaceMeet,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<CurveName>> {
     if from != to {
-        return None;
+        return Ok(None);
     }
-    let mut named = carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
+    Ok(Some(name_of_the_closed_crossing_through(
+        &meet.carried_by,
+        meet.ends[0].point(),
+        policy,
+        log,
+    )?))
+}
+
+/// What names a closed crossing: the two surfaces it runs between, a plane named
+/// at any scale and anything else either way round, the two sorted, and which
+/// of their closed crossings it is ([`which_of_the_pairs_closed_crossings_it_is`])
+/// where that is known to need saying.
+///
+/// One curve can come under two of these, cut by two pairs, and then goes by
+/// the least of them ([`the_name_each_closed_curve_goes_by`]).
+type CurveName = ([[u64; 9]; 2], Option<[u64; 4]>);
+
+/// The name of the closed crossing of `carried_by` through `point`, the same
+/// from both faces along it and in both argument orders.
+///
+/// **Two surfaces can cross in more than one closed curve**, so their two names
+/// do not pick one out on their own — as three surfaces can meet at more than
+/// one point, which is why [`CornerName::Meet`] carries `which` (§31.3). A
+/// plane through a ring's axis cuts the ring in two circles, one either side of
+/// the axis. Named by the plane and the ring alone, two quarter bends from `+x`
+/// round to `+y` and on round to `−x` had their two caps' circles on `y = 0`
+/// made one curve, then one corner, then one edge with four faces along it, and
+/// the union was refused (§378.3).
+///
+/// **A cone and a second cone, a pipe or a ball on its axis cross in two
+/// circles too**, one either side of a flat half-space square to the axis. A
+/// bar of radius one down a pointed cone's axis crosses the cone's surface at
+/// `z = 1` and at `z = −1`, on the nappe beyond the apex. Their union, fused
+/// again with a cube far from it, draws the bar's wall's edge on the cone again,
+/// and the far nappe with it, so the wall comes apart at `z = −1`. Named by the
+/// pipe and the cone alone the new circle was the wall's circle at `z = 1`: its
+/// start was handed to the input corner at `z = 1`, the cone face and the two
+/// bands' three wires ran along one edge, and every order was refused
+/// `ResultIsNotManifold { count: 4 }`
+/// (`tests/a_pointed_cone_drilled_along_its_axis.rs`).
+///
+/// Only those pairs are told apart here. Other pairs that cross in more than
+/// one closed curve — a plane square to a ring's axis, cutting an inner and an
+/// outer circle, two rings, a ball and a pipe, and a thin pipe through a fat
+/// one — are still named by their surfaces alone. No fuse of the first two
+/// reaches this name, because `intersect` refuses a part of each (§378.8).
+/// Whether a fuse of the last two can hand one loop's start to an input corner
+/// on the other, as the cone's did, has not been asked.
+///
+/// **A plane is named at any scale** ([`name_of_the_plane_at_any_scale`]), as
+/// the arcs of these crossings are, because two turned faces can spell one
+/// plane in a ratio an ulp from one. A ball's skin carries the circle as the
+/// spelling of whichever block's face cut it first, and the flat face along it
+/// can be the other block's. Named either way round only, every fuse of a ball,
+/// or a bar crossing the plane, with a block whose face holds the whole circle
+/// and a second block spelling that plane at the other scale gave the circle's
+/// two sides two names, two edges of one face each, and was refused
+/// `ResultIsNotManifold { count: 1 }`
+/// (`tests/a_turned_plane_exactly_proportional_to_another.rs`).
+///
+/// # Errors
+///
+/// Whatever [`which_of_the_pairs_closed_crossings_it_is`] gives.
+fn name_of_the_closed_crossing_through(
+    carried_by: &[Surface; 2],
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<CurveName> {
+    let mut named = carried_by.map(|surface| {
+        if surface.as_plane().is_some() {
+            name_of_the_plane_at_any_scale(&surface)
+        } else {
+            name_of_the_surface_either_way_round(&surface)
+        }
+    });
     named.sort_unstable();
-    Some(named)
+    Ok((
+        named,
+        which_of_the_pairs_closed_crossings_it_is(carried_by, point, policy, log)?,
+    ))
+}
+
+/// Which of the two circles its two surfaces cross in passes through `point`,
+/// for a plane through a ring's axis and for a cone and a second cone, a pipe
+/// or a ball on its axis: the four numbers of the flat half-space `intersect`
+/// picks that circle by, as `holds.rs` looks it up
+/// ([`the_picker_naming_the_circle_through`]). `None` for any other pair of
+/// surfaces, for a plane square to a ring's axis, whose two circles are picked
+/// by a pipe and not by a half-space, and for a point that no one circle
+/// certainly keeps, which leaves the crossing named by its two surfaces alone,
+/// as it was before this was asked.
+///
+/// **Every spelling of the two gives one circle the same four numbers, once
+/// each zero is turned the right way up.** The two faces along one circle can
+/// hold two spellings of the plane — a bend's cap faces out of the bend, and
+/// the next bend's cap on the same plane faces the other way — and of the ring
+/// or the cone, its axis written either way round. `intersect` writes the
+/// circles' half-spaces from the two as stored, and the two circles get one
+/// half-space and that half-space turned round. For a plane and a ring the
+/// normal is the axis crossed with the plane's normal and the offset that
+/// normal read at the ring's centre. For a cone the normal is the cone's axis
+/// direction — the steeper cone's, for two — and the offset that direction read
+/// at a point on the axis worked out from the apexes, the ball's centre and the
+/// slopes, none of which turns with the axis. Turning the plane or an axis
+/// round negates every number of both, because a product or a difference of
+/// negated numbers rounds to the negation of the same sum, and so does an exact
+/// dot rounded to the nearest `f64`, which is how
+/// `HalfSpace::through_a_point_facing` writes an offset. So the half-space that
+/// keeps a given circle holds the same numbers either way — except that a zero
+/// may come back `-0.0`, which adding zero turns back, as in [`exactly_at`].
+/// `intersect` reads a cone against anything the same in either order.
+/// `each_circle_a_plane_through_a_rings_axis_cuts_is_one_name_however_the_two_are_spelled`
+/// and `each_circle_round_a_cones_axis_is_one_name_however_the_two_are_spelled`
+/// ask every spelling.
+///
+/// The two circles get two different half-spaces, because each one picks its
+/// own circle and leaves the other out.
+///
+/// # Errors
+///
+/// Whatever `intersect` gives for the two.
+fn which_of_the_pairs_closed_crossings_it_is(
+    carried_by: &[Surface; 2],
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<[u64; 4]>> {
+    match carried_by {
+        [Surface::Plane(_), Surface::Torus(_)]
+        | [Surface::Torus(_), Surface::Plane(_)]
+        | [
+            Surface::Cone(_),
+            Surface::Cone(_) | Surface::Cylinder(_) | Surface::Sphere(_),
+        ]
+        | [Surface::Cylinder(_) | Surface::Sphere(_), Surface::Cone(_)] => (),
+        [_, _] => return Ok(None),
+    }
+    let Some(Picker::InFrontOf(this_circle)) =
+        the_picker_naming_the_circle_through(&carried_by[0], &carried_by[1], point, policy, log)?
+    else {
+        return Ok(None);
+    };
+    let [x, y, z] = this_circle.normal().components();
+    Ok(Some(
+        [x, y, z, this_circle.offset()].map(|number| (number + 0.0).to_bits()),
+    ))
+}
+
+/// Which curve of its pair a closed crossing's corner is on: what picks the
+/// curve out of the others its two surfaces cross in, written out as bits by
+/// [`which_curve_of_the_pair`], and `None` where nothing picks it.
+type WhichCurveOfThePair = Option<[u64; 10]>;
+
+/// The name of what picks a closed crossing out of the others its two surfaces
+/// cross in, for the corner it starts at: `None` where the pair crosses in one
+/// closed curve and nothing picks it.
+///
+/// **A bar down a pointed cone's axis is why.** The bar's wall crosses the
+/// cone's surface in a circle either side of the apex, at `z = −1` and `z = 1`
+/// for the cone of slope one, and named by the two surfaces alone both circles
+/// started at one corner. The union and the bar less the cone keep the bar's
+/// band between them, so the two circles were one closed edge with four faces
+/// along it — the band's two wires, the band below and the cone — and both
+/// were refused as not a manifold (`tests/a_pointed_cone_drilled_along_its_axis.rs`).
+///
+/// **The same from both faces along the curve and in both argument orders.**
+/// Both faces carry the one pair of surfaces, and `intersect` builds what picks
+/// each curve from the two whichever is handed to it first — the cone's apex
+/// and axis, for a cone and a pipe on one axis. A flat picker is written as its
+/// four numbers with each zero turned the right way up, as
+/// [`which_of_the_pairs_closed_crossings_it_is`] writes one: a cone or a pipe
+/// spelled with its axis turned round hands back the half-space holding a given
+/// curve as the reverse of the one picking the other, which is the same four
+/// numbers but for the sign of a zero. A curved picker is written as the surface named
+/// either way round ([`name_of_the_surface_either_way_round`]) and which side
+/// of it it keeps. The slot ahead of the numbers says which kind of picker it
+/// is, so a ball and a pipe never share a name.
+///
+/// # Panics
+///
+/// If more than one picker picks the curve, or if the picker is of a kind this
+/// crate has not been taught. `intersect` picks every closed curve it picks out
+/// with one picker, and [`Picker`] is `#[non_exhaustive]` and lives in another
+/// crate, so a change to either arrives with no compile error and this is what
+/// notices. Two curves under one name are a wrong answer; a crash is not.
+fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
+    let picker = match picked_by {
+        [] => return None,
+        [only] => only,
+        more => panic!("a closed crossing picked out by more than one picker: {more:?}"),
+    };
+    let mut name = [0; 10];
+    let (kind, surface) = match picker {
+        Picker::InFrontOf(half_space) => {
+            let [x, y, z] = half_space.normal().components();
+            for (slot, number) in name[1..].iter_mut().zip([x, y, z, half_space.offset()]) {
+                *slot = (number + 0.0).to_bits();
+            }
+            return Some(name);
+        }
+        Picker::OutsideABall(ball) => (1, Surface::Sphere(*ball)),
+        Picker::OutsideAPipe(pipe) => (2, Surface::Cylinder(*pipe)),
+        Picker::InsideAPipe(pipe) => (3, Surface::Cylinder(*pipe)),
+        other => panic!("a picker nothing here can name: {other:?}"),
+    };
+    name[0] = kind;
+    name[1..].copy_from_slice(&name_of_the_surface_either_way_round(&surface));
+    Some(name)
 }
 
 /// Which of the two arcs between its corners a side is of a closed crossing
 /// between a plane and a surface that curves right round — a ball's circle, or
 /// a cone's rim circle and the ellipse a steeper plane leaves — together with
-/// that curved surface and that plane, or `None` for any other side.
+/// that curved surface and that plane, or of the circle two balls cross in, or
+/// a cone and a second cone, a pipe or a ball on its axis, together with the
+/// two; `None` for any other side.
 ///
 /// **Both arcs run between the same two corners and along the same two
 /// surfaces**, so nothing [`which_curve_it_is`] reads tells them apart. Most
@@ -4201,7 +6150,10 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
 /// **Both named either way round, because two faces along one arc can carry
 /// two spellings of one surface** (§231.3) — a plane facing the other way, a
 /// pipe written with its axis turned round or its origin slid along the axis —
-/// and the fold is what keeps them one edge. Every fold is exact, so two
+/// and the fold is what keeps them one edge. The plane is folded further, to
+/// every multiple of its four numbers and not only the negation
+/// ([`name_of_the_plane_at_any_scale`]), because two turned faces can spell one
+/// plane a factor an ulp from one apart. Every fold is exact, so two
 /// different surfaces never come out with one name, and a spelling the fold
 /// leaves apart can only split an edge, which is refused, and never pair the
 /// faces of two different arcs (§330).
@@ -4255,6 +6207,64 @@ fn which_curve_it_is(from: usize, to: usize, carried_by: [Surface; 2]) -> Option
 /// pointed cone — the shape that has an apex on its own face — and gets a sound
 /// answer.
 ///
+/// # Two balls cross in a circle too
+///
+/// **And an answer can keep both its arcs between two corners.** A half ball
+/// of radius 3 cut to `z ≤ 0`, with a ball of radius 1.5 at `(2, 0, 0)` poking
+/// out of its rim: the small ball's skin is cut by the big ball's along the
+/// circle `x = 2.6875` and by the flat face along `z = 0`, every cut drawn in
+/// full, and the two circles cross at `(2.6875, ±1.3332, 0)`. The union keeps
+/// three of the four pieces that leaves, two of them either side of the arc
+/// above `z = 0`, and the third and the half ball's skin either side of the arc
+/// below. Named
+/// by their corners alone the two arcs were one edge with four faces along it,
+/// and the union both ways round and the small ball less the half ball were
+/// refused `ResultIsNotManifold { count: 4 }` (queue row Q1192,
+/// `tests/a_rung_whose_ray_meets_a_face_nobody_follows.rs`).
+///
+/// **The sign rule holds as it stands.** At a point of the circle the two
+/// gradients are the two radii there, and their cross product is zero only on
+/// the line through both centres. The circle two balls cross in is square to
+/// that line and centred on it, and has a radius that is not zero wherever it
+/// has two corners, so it never touches the line. The two balls are read in
+/// the order their names sort in, and **a ball has one spelling**
+/// (`name_of_the_surface_either_way_round` folds nothing for it), so nothing is
+/// turned round for how a face spells it. Where the two are one ball there is
+/// no circle, and nothing is named.
+///
+/// # So does a cone and a second cone, a pipe or a ball on its axis
+///
+/// **And a wall through the axis leaves both arcs between the same two
+/// corners.** The frustum of slope 1 cut to `x ≥ 0`, against a steeper frustum,
+/// a bar of radius 4 or a ball of radius 3 on its axis: the wall `x = 0` puts
+/// two corners on each circle the pair crosses in, at `(0, ±4, 4)` for the
+/// first two. The partner's skin holds the whole circle, so a rule keeping the
+/// partner's skin either side of the arc at `x < 0` keeps that arc as well as
+/// the one along the cone. Named by their corners alone the two were one edge
+/// with four faces along it, and the unions both ways round and the partner
+/// less the half were refused `ResultIsNotManifold { count: 4 }` (queue row
+/// Q1269, `tests/a_cone_hollowed_along_its_axis.rs`).
+///
+/// **The sign rule holds as it stands.** `intersect` names a cone against
+/// another curved surface only where the two share an axis, and refuses every
+/// other such pair, so a side carried by one of these pairs is on a circle
+/// square to that axis and centred on it. Both gradients lie in the plane
+/// through the axis and the point, so `∇S × ∇T` runs along the circle, and the
+/// same turn about the axis carries it from one point to the next, so it never
+/// vanishes on a circle where it does not vanish at one point. It vanishes
+/// everywhere on the one circle a ball inscribed in a cone touches it round,
+/// and that circle does not reach here: a frustum of slope 3/4 against the ball
+/// of radius 3 it holds is refused before any edge is named, and so is the
+/// half of it (`a_ball_a_frustum_touches_round_one_circle_is_refused_before_its_arcs_are_named`
+/// in that test file). A cone and a pipe written with the axis turned round
+/// have the same gradient, so the two are named either way round and nothing
+/// is turned round for how a face spells them.
+///
+/// Other pairs of curved surfaces that cross in closed curves — a ball and a
+/// pipe, two pipes — are not named here. Their curves can touch the line where
+/// the two gradients line up, two equal pipes square to each other do at two
+/// points, and the sign rule says nothing there.
+///
 /// # Panics
 ///
 /// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`],
@@ -4264,7 +6274,46 @@ fn which_arc_of_a_circle_this_is(
     from: usize,
     to: usize,
 ) -> Option<([[u64; 9]; 2], bool)> {
-    let round_one = which_of_them_a_closed_crossing_runs_round(&meet.carried_by)?;
+    let (named, mine_is_the_first, spelled_the_other_way_round) = match meet.carried_by {
+        [ball @ Surface::Sphere(_), other @ Surface::Sphere(_)] => {
+            let named = [name_of_surface_bits(&ball), name_of_surface_bits(&other)];
+            match named[0].cmp(&named[1]) {
+                Ordering::Less => (named, true, false),
+                Ordering::Greater => ([named[1], named[0]], false, false),
+                Ordering::Equal => return None,
+            }
+        }
+        [
+            one @ Surface::Cone(_),
+            other @ (Surface::Cone(_) | Surface::Cylinder(_) | Surface::Sphere(_)),
+        ]
+        | [
+            one @ (Surface::Cylinder(_) | Surface::Sphere(_)),
+            other @ Surface::Cone(_),
+        ] => {
+            let named = [
+                name_of_the_surface_either_way_round(&one),
+                name_of_the_surface_either_way_round(&other),
+            ];
+            match named[0].cmp(&named[1]) {
+                Ordering::Less => (named, true, false),
+                Ordering::Greater => ([named[1], named[0]], false, false),
+                Ordering::Equal => return None,
+            }
+        }
+        [_, _] => {
+            let round_one = which_of_them_a_closed_crossing_runs_round(&meet.carried_by)?;
+            let flat = &meet.carried_by[1 - round_one];
+            (
+                [
+                    name_of_the_surface_either_way_round(&meet.carried_by[round_one]),
+                    name_of_the_plane_at_any_scale(flat),
+                ],
+                round_one == 0,
+                is_written_the_other_way_round(flat),
+            )
+        }
+    };
     // A whole ball's seam is walked down and back up by the one face, with a
     // material side that names the half of the meridian it is and not a side
     // (`Arrangement::the_whole_surface`), so the rule below would read its two
@@ -4282,17 +6331,59 @@ fn which_arc_of_a_circle_this_is(
         Decision::Pos => false,
         other => panic!("a side of a face was walked with no material side: {other:?}"),
     };
-    let mine_is_the_round_one = round_one == 0;
-    let along_the_round_one_then_the_plane = along_mine_then_partner == mine_is_the_round_one;
-    let flat = &meet.carried_by[1 - round_one];
+    let along_the_first_then_the_second = along_mine_then_partner == mine_is_the_first;
     Some((
-        [
-            name_of_the_surface_either_way_round(&meet.carried_by[round_one]),
-            name_of_the_surface_either_way_round(flat),
-        ],
-        (along_the_round_one_then_the_plane != walked_from_the_far_corner)
-            != is_written_the_other_way_round(flat),
+        named,
+        (along_the_first_then_the_second != walked_from_the_far_corner)
+            != spelled_the_other_way_round,
     ))
+}
+
+/// Which crossing of a plane and a cone a side is on, when that crossing is a
+/// hyperbola or a parabola, as the cone named either way round and the plane
+/// named at any scale; `None` for any other side.
+///
+/// **Two planes that each cut a cone in an open curve can cross it at the same
+/// two points**, the two where the line the planes meet along goes through the
+/// cone, and an answer can keep an arc of each between them. A frustum of slope
+/// 1 under the planes `2x + z = 3` and `8x + 3z = −3` keeps an arc of each from
+/// `(−6, −13.75, 15)` to `(−6, 13.75, 15)`, and the frustum the planes
+/// `2x − z = 1` and `2x + z = 11` cut to a chip keeps an arc of each from
+/// `(3, −4, 5)` to `(3, 4, 5)`. Named by their corners alone, the two arcs were
+/// one edge with four faces along it, the cone's face twice and each plane's
+/// once, and every fuse of either shape was refused
+/// `ResultIsNotManifold { count: 4 }` (queue row Q1176,
+/// `tests/a_walk_neither_winding_nor_the_axis_places.rs`).
+///
+/// **Which crossing is all there is to say, and no sign is.** A branch of a
+/// hyperbola and a parabola are open curves, and two points of one bound one
+/// piece of it. [`which_arc_of_a_circle_this_is`] needs a sign as well because
+/// a crossing that closes leaves two arcs between two points.
+///
+/// **The names do not split one arc in two.** A hyperbola or a parabola does
+/// not lie on a line, so it spans one plane, and the two faces along one arc
+/// both carry that plane, whose name at any scale is the same for every
+/// spelling of it ([`name_of_the_plane_at_any_scale`]). As with a closed
+/// crossing (§330), a spelling of the cone the fold leaves apart can only split
+/// an edge, which is refused, and never pairs the faces of two different arcs.
+fn which_open_crossing_of_a_cone_this_is(
+    meet: &FaceMeet,
+    from: usize,
+    to: usize,
+) -> Option<[[u64; 9]; 2]> {
+    let (flat, cone) = match meet.carried_by {
+        [flat @ Surface::Plane(_), cone @ Surface::Cone(_)]
+        | [cone @ Surface::Cone(_), flat @ Surface::Plane(_)] => (flat, cone),
+        [_, _] => return None,
+    };
+    let open = the_crossing_of_these_runs_straight(&meet.carried_by) == Some(false)
+        && which_of_them_a_closed_crossing_runs_round(&meet.carried_by).is_none();
+    (from != to && open).then(|| {
+        [
+            name_of_the_surface_either_way_round(&cone),
+            name_of_the_plane_at_any_scale(&flat),
+        ]
+    })
 }
 
 /// Whether a plane is spelled facing the other way from the spelling its name
@@ -4312,6 +6403,88 @@ fn is_written_the_other_way_round(flat: &Surface) -> bool {
         .into_iter()
         .find(|number| *number != 0.0)
         .is_some_and(|number| number < 0.0)
+}
+
+/// A name for the points of a plane, the same for every spelling of them:
+/// two planes get one name exactly when their four coefficients are in one
+/// ratio, whatever that ratio is.
+///
+/// **A ratio of `−1` is not the only one a fuse meets.** `intersect` calls two
+/// planes one surface whenever their coefficients are exactly proportional,
+/// and [`Plane::transformed`](rcad_geom::Plane) does not scale a turned normal
+/// back to length one, so two solids turned to put a face on one plane can
+/// spell it `(−c, c, 0, 0)` and `(c′, −c′, 0, 0)` with `c` and `c′` an ulp
+/// apart. [`name_of_the_surface_either_way_round`] folds only the negation and
+/// gave those two names, so the arc they both run along was two edges of one
+/// face each, and so was a whole circle
+/// ([`name_of_the_closed_crossing_through`],
+/// `tests/a_turned_plane_exactly_proportional_to_another.rs`).
+///
+/// **The fold is exact.** Each coefficient that is not zero is an odd whole
+/// number times a power of two. Multiplying all four by one number multiplies
+/// every odd part by one odd ratio and adds one step to every power, so the odd
+/// parts divided by their greatest common divisor, and each power less the
+/// first one's, do not move — and the signs are turned so the first number that
+/// is not zero is positive, as [`is_written_the_other_way_round`] reads it.
+/// Two coefficient sets with one name are in one ratio by the same argument
+/// read backwards, so two different planes never share one. Slot 0 is `0`, the
+/// kind [`name_of_surface_bits`] gives a plane; slots 1 to 4 hold the odd parts
+/// with the turned sign in the top bit, and slots 5 to 8 the powers.
+///
+/// # Panics
+///
+/// If the surface is not a plane, as [`is_written_the_other_way_round`] does,
+/// or if one of its coefficients is not a finite number: `intersect` refuses
+/// a plane holding one before any crossing of it is walked.
+fn name_of_the_plane_at_any_scale(flat: &Surface) -> [u64; 9] {
+    let flat = flat
+        .as_plane()
+        .expect("a closed crossing this names runs between a plane and a curved surface");
+    let parts = flat.coefficients().map(|number| {
+        assert!(
+            number.is_finite(),
+            "a plane with a crossing walked holds finite numbers: {number}"
+        );
+        (number != 0.0).then(|| odd_part_and_power_of_two(number))
+    });
+    let common = parts.iter().flatten().fold(0, |common, &(odd, _, _)| {
+        greatest_common_divisor(common, odd)
+    });
+    let &(_, first_power, first_is_negative) = parts
+        .iter()
+        .flatten()
+        .next()
+        .expect("a plane's normal is never zero");
+    let mut name = [0; 9];
+    for (slot, part) in parts.iter().enumerate() {
+        if let &Some((odd, power, negative)) = part {
+            name[1 + slot] = (odd / common) | (u64::from(negative != first_is_negative) << 63);
+            name[5 + slot] = (power - first_power).cast_unsigned();
+        }
+    }
+    name
+}
+
+/// `number` as an odd whole number times two to a power, and whether it is
+/// negative: `(odd, power, negative)`.
+fn odd_part_and_power_of_two(number: f64) -> (u64, i64, bool) {
+    const FRACTION_BITS: u64 = (1 << 52) - 1;
+    let bits = number.abs().to_bits();
+    let stored_power = i64::try_from(bits >> 52).expect("eleven bits");
+    let (whole, power) = if stored_power == 0 {
+        (bits & FRACTION_BITS, -1074)
+    } else {
+        ((bits & FRACTION_BITS) | (1 << 52), stored_power - 1075)
+    };
+    let zeros = whole.trailing_zeros();
+    (whole >> zeros, power + i64::from(zeros), number < 0.0)
+}
+
+fn greatest_common_divisor(mut one: u64, mut other: u64) -> u64 {
+    while other != 0 {
+        (one, other) = (other, one % other);
+    }
+    one
 }
 
 /// Which of two surfaces a closed crossing runs round — `0` or `1` — or `None`
@@ -4373,6 +6546,20 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 /// than by using the face reversed in its shell is what keeps the two coedges of
 /// every edge running opposite ways in the arena, which is the invariant a model
 /// is built on.
+///
+/// **A straight side whose two ends are one corner is left out.** The
+/// arrangement keeps two meets apart wherever it can order them along a
+/// crossing, and over a KiCad pin header's stored planes it orders three meets
+/// of planes that by design meet at one notch corner, `8e-18` to `1.6e-17`
+/// apart. All three round to the corner's own `f64` triple, so [`Corners::of`]
+/// makes them one corner, and a side between two of them has no length as the
+/// answer's corners are written (`docs/decisions.md` §365.7). Every face that
+/// has the side names its two ends through the same [`Corners`], so every one
+/// of them leaves it out, and no edge is left with one face along it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the policy and the log travel as arguments, never as fields (CLAUDE.md)"
+)]
 fn sides_of(
     wire: &[FaceMeet],
     turned_round: bool,
@@ -4380,13 +6567,33 @@ fn sides_of(
     model: &Model,
     corners: &mut Corners,
     edges: &mut Edges,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> Result<Vec<Side>> {
     let mut sides = Vec::new();
     for meet in wire {
-        let from = corners.of(model, &meet.ends[0]);
-        let to = corners.of(model, &meet.ends[1]);
+        let from = corners.of(model, &meet.ends[0], policy, log)?;
+        let to = corners.of(model, &meet.ends[1], policy, log)?;
+        if from == to
+            && meet
+                .carried_by
+                .iter()
+                .all(|surface| surface.as_plane().is_some())
+        {
+            continue;
+        }
         let seam = the_seam_a_side_runs_along(model, ancestors, meet);
-        sides.push(edges.of(meet, seam, from, to, ancestors[0], turned_round)?);
+        sides.push(edges.of(
+            meet,
+            seam,
+            from,
+            to,
+            ancestors[0],
+            turned_round,
+            corners,
+            policy,
+            log,
+        )?);
     }
     if turned_round {
         sides.reverse();
@@ -4395,6 +6602,31 @@ fn sides_of(
         }
     }
     Ok(sides)
+}
+
+/// Whether a wire of a flat piece of the answer bounds anything: whether some
+/// edge of it is walked more often one way than the other.
+///
+/// A wire on a plane that walks every edge of it as often each way goes out
+/// along lines and back along the same lines, and encloses nothing as its
+/// corners are written. Only a flat piece is asked: the one wire of a whole
+/// closed surface is a seam walked out and back, and bounds the whole surface. A KiCad pin header's wall keeps such a wire: the strip between a
+/// notch's chamfer and the plane of another notch's chamfer, which by design
+/// meet the wall at one line, is `9.5e-17` wide over the stored planes, and its
+/// four corners round to two `f64` triples, which [`Corners::of`] makes two
+/// corners (`docs/decisions.md` §365.7). Its two short sides are then
+/// [`sides_of`]'s sides with no length and are left out, and its two long ones
+/// are one edge walked out and back.
+///
+/// **Leaving such a wire out keeps every edge's faces paired.** It walks each
+/// of its edges once each way, so it takes one face's use off each side of every
+/// one of them and leaves the uses the other faces make as they were.
+fn encloses_something(sides: &[Side]) -> bool {
+    let mut how_often: BTreeMap<usize, i64> = BTreeMap::new();
+    for side in sides {
+        *how_often.entry(side.edge).or_default() += if side.forward { 1 } else { -1 };
+    }
+    how_often.values().any(|&walked| walked != 0)
 }
 
 /// The seam of a piece's input face that `side` runs the whole of, where it
@@ -4450,7 +6682,7 @@ fn the_seam_a_side_runs_along(
 mod tests {
     use rcad_geom::{
         Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Scale, Sphere, Surface,
-        SurfaceMeet, Torus,
+        SurfaceMeet, Torus, intersect,
     };
     use std::collections::BTreeSet;
 
@@ -4461,10 +6693,12 @@ mod tests {
     use super::super::Scratch;
     use super::super::select::choose;
     use super::{
-        Assembly, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, JoinedFace, Lump,
-        MeetPoint, Model, Point, PredicatePoint, Side, Vector, VertexKey, WhichArc, WireStep,
-        Written, assemble, names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
-        the_half_space_both_ends_are_on, vertices_that_only_start_a_closed_edge,
+        Assembly, Bulging, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, JoinedFace,
+        Lump, MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector, VertexKey, WhichArc,
+        WireStep, Written, assemble, name_of_the_closed_crossing_through,
+        names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
+        the_half_space_both_ends_are_on, the_nappe_an_arc_that_does_not_close_is_on, turns_round,
+        vertices_that_only_start_a_closed_edge, winding_round,
     };
 
     /// A corner that settles on a lower rounding leaves the coordinate it came
@@ -4488,12 +6722,24 @@ mod tests {
         let upright = flat(Vector::new(0.0, 0.0, 1.0));
         let starts = |carried_by: [Surface; 2], at: [f64; 3]| MeetPoint::WhereAClosedCurveStarts {
             carried_by,
+            picked_by: SmallVec::new(),
             point: PredicatePoint::from(at),
         };
 
         let mut corners = Corners::default();
-        let moved = corners.of(&model, &starts([across, along], [1.0, 0.0, 0.0]));
-        let again = corners.of(&model, &starts([across, along], [0.0, 0.0, 0.0]));
+        let mut corner_of = |end: MeetPoint| {
+            corners
+                .of(
+                    &model,
+                    &end,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("two planes ask no question")
+        };
+        let moved = corner_of(starts([across, along], [1.0, 0.0, 0.0]));
+        let again = corner_of(starts([across, along], [0.0, 0.0, 0.0]));
+        let other = corner_of(starts([across, upright], [1.0, 0.0, 0.0]));
         assert_eq!(again, moved, "one name is one corner");
         assert_eq!(
             corners.made[moved].point,
@@ -4501,7 +6747,6 @@ mod tests {
             "the lower of the two roundings is the one kept"
         );
 
-        let other = corners.of(&model, &starts([across, upright], [1.0, 0.0, 0.0]));
         assert_ne!(
             other, moved,
             "a corner was joined to one that had already moved off this coordinate"
@@ -4511,6 +6756,190 @@ mod tests {
             2,
             "two names on one place is two corners"
         );
+    }
+
+    /// The two circles a plane through a ring's axis cuts it in are two
+    /// names, and each is one name in all four spellings of the plane and the
+    /// ring, in either order (§378.6).
+    #[test]
+    fn each_circle_a_plane_through_a_rings_axis_cuts_is_one_name_however_the_two_are_spelled() {
+        let flat = |facing: f64| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, facing, 0.0))
+                    .expect("a coordinate direction is a unit normal"),
+            )
+        };
+        let ring = |axis: Axis| {
+            Surface::Torus(Torus::new(axis, 4.0, 1.0).expect("a tube narrower than its ring"))
+        };
+        let spellings = [
+            [flat(-1.0), ring(Axis::z())],
+            [flat(1.0), ring(Axis::z())],
+            [ring(Axis::z().reversed()), flat(-1.0)],
+            [ring(Axis::z().reversed()), flat(1.0)],
+        ];
+        let names_through = |x: f64| -> BTreeSet<_> {
+            spellings
+                .iter()
+                .map(|carried_by| {
+                    name_of_the_closed_crossing_through(
+                        carried_by,
+                        PredicatePoint::from([x, 0.0, 0.0]),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect("a plane through the axis cuts two circles")
+                })
+                .collect()
+        };
+        let (round_plus_x, round_minus_x) = (names_through(3.0), names_through(-3.0));
+        assert_eq!(round_plus_x.len(), 1, "{round_plus_x:?}");
+        assert_eq!(round_minus_x.len(), 1, "{round_minus_x:?}");
+        assert_ne!(round_plus_x, round_minus_x, "two circles named as one");
+    }
+
+    /// The two circles a cone crosses a pipe, a ball or a steeper cone on its
+    /// axis in are two names, and each is one name with every axis written
+    /// either way round, in either order.
+    ///
+    /// The cone leans one from its apex at the origin, so its circle at height
+    /// `z` has radius `|z|`. A pipe of radius one crosses it at `z = 1` and at
+    /// `z = −1`, on the far nappe. A ball of radius `2.5` at `(0, 0, 3.5)` crosses
+    /// it where `(z − 3.5)² + z² = 6.25`, which is `2z² − 7z + 6 = 0`, at
+    /// `z = 1.5` and `z = 2`. A cone leaning two from `(0, 0, 3)` crosses it where
+    /// `|z| = 2|z − 3|`, at `z = 2` and `z = 6`.
+    #[test]
+    fn each_circle_round_a_cones_axis_is_one_name_however_the_two_are_spelled() {
+        let up_from = |height: f64| {
+            let axis = Axis::new(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, 1.0))
+                .expect("a direction with length");
+            [axis, axis.reversed()]
+        };
+        let cone = |axis: Axis, slope: f64| {
+            Surface::Cone(Cone::new(axis, slope).expect("a positive slope"))
+        };
+        let cones = up_from(0.0).map(|axis| cone(axis, 1.0));
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(0.0, 0.0, 3.5), 2.5).expect("a ball of radius 2.5"),
+        );
+        let partners = [
+            (
+                "a pipe",
+                up_from(0.0).map(|axis| {
+                    Surface::Cylinder(Cylinder::new(axis, 1.0).expect("a pipe of radius one"))
+                }),
+                [1.0, -1.0],
+            ),
+            ("a ball", [ball, ball], [1.5, 2.0]),
+            (
+                "a steeper cone",
+                up_from(3.0).map(|axis| cone(axis, 2.0)),
+                [2.0, 6.0],
+            ),
+        ];
+        for (partner, spellings, heights) in partners {
+            let names_at = |height: f64| -> BTreeSet<_> {
+                let mut names = BTreeSet::new();
+                for one in cones {
+                    for other in spellings {
+                        for carried_by in [[one, other], [other, one]] {
+                            names.insert(
+                                name_of_the_closed_crossing_through(
+                                    &carried_by,
+                                    PredicatePoint::from([height.abs(), 0.0, height]),
+                                    &Policy::certified(),
+                                    &mut ProvenanceLog::new(),
+                                )
+                                .unwrap_or_else(|why| {
+                                    panic!("the cone and {partner} cross in two circles: {why:?}")
+                                }),
+                            );
+                        }
+                    }
+                }
+                names
+            };
+            let [one, other] = heights.map(names_at);
+            assert_eq!(one.len(), 1, "the cone and {partner}: {one:?}");
+            assert_eq!(other.len(), 1, "the cone and {partner}: {other:?}");
+            assert_ne!(
+                one, other,
+                "the cone and {partner}: two circles named as one"
+            );
+        }
+    }
+
+    /// The two circles a bar of radius one down a cone's axis crosses the
+    /// cone's surface in, at `z = 1` and `z = −1`, start at corners of two
+    /// names, and each starts at a corner of one name whichever face asks,
+    /// in either order, with the cone's axis written either way round.
+    ///
+    /// The pickers are what `intersect` hands each face, so this asks it for
+    /// them as the arrangement does, the face's own surface first.
+    #[test]
+    fn each_circle_a_pipe_down_a_cones_axis_cuts_starts_at_a_corner_of_its_own() {
+        let model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a pipe of radius one"));
+        let cones = [Axis::z(), Axis::z().reversed()]
+            .map(|axis| Surface::Cone(Cone::new(axis, 1.0).expect("a cone leaning one")));
+        let corners = Corners::default();
+        let names_at = |height: f64| {
+            let on_it = PredicatePoint::from([1.0, 0.0, height]);
+            let mut names = BTreeSet::new();
+            for cone in cones {
+                for carried_by in [[pipe, cone], [cone, pipe]] {
+                    let SurfaceMeet::Curves(runs) = intersect(
+                        &carried_by[0],
+                        &carried_by[1],
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect("a pipe and a cone on one axis cross in circles") else {
+                        panic!("a pipe and a cone on one axis cross in curves");
+                    };
+                    let picked_by = runs
+                        .iter()
+                        .find_map(|run| {
+                            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                                panic!("each of the two circles is picked out: {run:?}");
+                            };
+                            picked_by
+                                .iter()
+                                .all(|picker| picker.side_of_point(on_it) == Decision::Pos)
+                                .then(|| picked_by.clone())
+                        })
+                        .expect("one of the two circles holds the point");
+                    let starts = MeetPoint::WhereAClosedCurveStarts {
+                        carried_by,
+                        picked_by,
+                        point: on_it,
+                    };
+                    names.insert(
+                        corners
+                            .name_of(
+                                &model,
+                                &starts,
+                                &Policy::certified(),
+                                &mut ProvenanceLog::new(),
+                            )
+                            .expect("no ring to ask about"),
+                    );
+                }
+            }
+            names
+        };
+        let (above, below) = (names_at(1.0), names_at(-1.0));
+        assert_eq!(
+            above.len(),
+            1,
+            "the circle at z = 1 under more than one name"
+        );
+        assert_eq!(
+            below.len(),
+            1,
+            "the circle at z = −1 under more than one name"
+        );
+        assert!(above.is_disjoint(&below), "two circles start at one corner");
     }
 
     /// Why every pair with a ball or a ring on it is answered `false`.
@@ -5336,6 +7765,7 @@ mod tests {
                 wires: vec![vec![Side {
                     edge: 0,
                     forward: true,
+                    read_against: None,
                 }]],
                 is_a_whole_closed_surface: false,
             }],
@@ -5393,7 +7823,11 @@ mod tests {
                 ancestors: Vec::new(),
                 surface,
                 used: Orientation::Forward,
-                wires: vec![vec![Side { edge: 0, forward }]],
+                wires: vec![vec![Side {
+                    edge: 0,
+                    forward,
+                    read_against: None,
+                }]],
                 is_a_whole_closed_surface: false,
             };
             let mut assembly = Assembly {
@@ -5471,7 +7905,15 @@ mod tests {
             ancestors: Vec::new(),
             surface: Surface::Plane(surface),
             used: Orientation::Forward,
-            wires: vec![(0..3).map(|edge| Side { edge, forward }).collect()],
+            wires: vec![
+                (0..3)
+                    .map(|edge| Side {
+                        edge,
+                        forward,
+                        read_against: None,
+                    })
+                    .collect(),
+            ],
             is_a_whole_closed_surface: false,
         };
 
@@ -5499,6 +7941,48 @@ mod tests {
             model.data().shells.len(),
             model.data().solids.len(),
         ]
+    }
+
+    /// A corner is the apex of a cone an edge there is carried by when it is
+    /// the apex the cone stores, bit for bit but for the sign of a zero, and
+    /// not when it is the next `f64` along from it (§347.4, Q862).
+    #[test]
+    fn only_a_corner_exactly_at_a_cones_apex_is_read_as_the_apex() {
+        let apex = Point::new(0.0, -0.7, 3.3);
+        let cone = Cone::new(
+            Axis::new(apex, Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+            0.5,
+        )
+        .expect("a cone leaning a half");
+        let through_the_apex =
+            Plane::from_point_and_normal(apex, Vector::new(1.0, 0.0, 0.0)).expect("a unit normal");
+        let corner = |point: Point| Corner {
+            point,
+            wobble: 0.0,
+            from: None,
+        };
+        let assembly = Assembly {
+            corners: vec![
+                corner(apex),
+                corner(Point::new(-0.0, -0.7, 3.3)),
+                corner(Point::new(0.0, -0.7, f64::from_bits(3.3f64.to_bits() + 1))),
+                corner(Point::new(0.0, 1.3, 7.3)),
+            ],
+            edges: vec![Edge {
+                ends: [0, 3],
+                carried_by: [Surface::Plane(through_the_apex), Surface::Cone(cone)],
+                arc: WhichArc::TheOnlyOne,
+                from: Vec::new(),
+            }],
+            runs: vec![EdgeRun::Straight],
+            faces: Vec::new(),
+            shells: Vec::new(),
+            solids: Vec::new(),
+        };
+        let read: Vec<bool> = (0..4)
+            .map(|corner| assembly.is_the_apex_of_a_cone_along(corner, 0))
+            .collect();
+        assert_eq!(read, [true, true, false, false]);
     }
 
     /// A broken answer is refused, and the caller's model does not so much as
@@ -5789,6 +8273,7 @@ mod tests {
         let round_the_cap = |ends| side([cap(), pipe()], ends, &[circle]);
         let half_way = MeetPoint::HalfWayRoundAClosedCurve {
             carried_by: [cap(), pipe()],
+            picked_by: SmallVec::new(),
             point: PredicatePoint::from([-5.0, 0.0, 0.0]),
         };
 
@@ -5872,6 +8357,44 @@ mod tests {
             along: along.iter().copied().collect(),
             approximation: None,
         }
+    }
+
+    /// **A point inside the other nappe is in no piece of a hyperbola's arc**
+    /// (Q1289). The wall `x = −12` cuts the cone of slope 1 about `z` in the
+    /// hyperbola `z² − y² = 144`, and the arc of its upper branch under its
+    /// chord on `z = 18` bulges down, towards the lower branch. `(−12, 0, 15)`
+    /// is between the arc and its chord. `(−12, 0, −15)` is inside the cone too,
+    /// and on the side of the chord the arc bulges to, but on the lower nappe.
+    #[test]
+    fn a_point_inside_the_other_nappe_is_not_between_a_hyperbolas_arc_and_its_chord() {
+        let cone = Cone::new(Axis::z(), 1.0).expect("a positive slope");
+        let wall =
+            Plane::from_point_and_normal(Point::new(-12.0, 0.0, 0.0), Vector::new(-1.0, 0.0, 0.0))
+                .expect("a normal with length");
+        let reach = 180.0_f64.sqrt();
+        let ends = [
+            Point::new(-12.0, reach, 18.0),
+            Point::new(-12.0, -reach, 18.0),
+        ];
+        let nappe = the_nappe_an_arc_that_does_not_close_is_on(&cone, &wall, ends)
+            .expect("both ends are up the axis from the apex");
+        assert_eq!(nappe, Decision::Pos);
+        let normal = wall.normal().components();
+        let ends = ends.map(|end| end.coordinates());
+        let left = winding_round(&[ends[0], ends[1], [-12.0, 0.0, 12.0]], normal)
+            .expect("three corners off one line")
+            == Decision::Pos;
+        let arcs = [Some(Bulging {
+            ends,
+            surface: Surface::Cone(cone),
+            left,
+            nappe: Some((cone, nappe)),
+        })];
+        assert!(
+            matches!(turns_round(&arcs, normal, [-12.0, 0.0, 15.0]), Some(1 | -1)),
+            "between the arc and its chord"
+        );
+        assert_eq!(turns_round(&arcs, normal, [-12.0, 0.0, -15.0]), Some(0));
     }
 
     /// The plane `z = 0`, facing out of a bar that stands on it.

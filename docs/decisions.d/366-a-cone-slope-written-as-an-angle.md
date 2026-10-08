@@ -18,6 +18,7 @@ its write set (366.5). 366.2's last paragraph and 366.6 are Q821's.*
   366.4   What it changed in the writer target
   366.5   What this leaves
   366.6   A frustum and a block read back from rounded text
+  366.7   A cone's slope put back from its corners
 
 ### 366.1 The cap circle, in the stored frame
 
@@ -94,6 +95,14 @@ written. `cone_from` taking the tangent of any angle is the reader's leniency.
 It is not a channel. **A reader that recovers the slope some other way**, from
 the corners for instance, was not examined. That is a change to the reader,
 and this lane's write set did not hold it.
+
+**2026-10-05:** The reader now does, where the file cut the half-angle and
+the corners agree (366.7). A half-angle written to seventeen digits is never
+read that way, and `atan(0.5)` written in its sixteen is not either
+(`a_half_angle_written_to_every_digit_an_f64_has_keeps_its_tangent`). One
+this writer writes in fewer digits could be, but only where the corners agree
+to the bit on a slope whose angle rounds to the same text. The round trips
+above are run again by the gate.
 
 **`most_slopes_over_one_come_back_from_no_half_angle` shows the limit and
 cannot pin the search.** Not one of its 100 000 slopes comes back from an angle
@@ -223,6 +232,19 @@ ball whose seam is refused. The draws are pinned by
 `a_turned_ball_whose_seam_plane_passes_near_the_origin_comes_back_from_its_own_file`
 and `a_seam_picked_from_the_other_side_is_a_different_run`.
 
+*2026-10-05, Q1010, lane `lane-q1010-a-turned-ball-written-on-the-world-chart`
+off `39218a67`.* The 38 `AWireThatStandsStillAtAPole` are gone: a whole ball
+turned off `z` is written cut open on the `z` line, and the target compares
+it by its surface, its poles and its seam (§404). The same command prints
+
+    5 of 400 drawn models refused
+         1  ACurveTheFacesEitherSideOfItDoNotName { first: "plane", second: "cone", closed: true }
+         4  ASolidWithNoShell
+    0 sound models refused where a flat face meets a cone or a ring
+
+and no comparison that panicked. The test now also fails on any ball refused
+at its pole.
+
 ### 366.5 What this leaves
 
 - `every_shape_seed_is_the_shape_it_is_named_for`, in
@@ -277,3 +299,165 @@ is §42.9's refusal of a corner provably off its face, which the house keeps
 until healing has a consumer (Q25), or a gap in the room a corner on a cone is
 given, was not traced. Neither were the three fuses the 13-digit rounding
 turned from decided to `Undecidable`. Each has a row.
+
+**2026-10-05:** Q827 traced it, and it was neither: the corners are exact and
+the slope is what moved. 366.7 has the fix, after which every file at all
+three digit counts is read back and all 144 fuses of each are decided.
+
+**2026-10-05, Q828.** The three 13-digit `Undecidable` fuses were traced to
+`FrustumAndBlock { side: 11, narrow: 1, wide: 3, up_per_unit_wider: 2, at: [7,
+4] }`: the frustum's apex sits at `(7, 4, −3)`, slope one half, so the cone it
+is cut from, swept to `z = 11` — the block's own roof — has radius exactly
+seven, tangent to both `x = 0` and `y = 11`. Reading the file rounded to
+thirteen digits and then written out again at seventeen — what an importer
+that re-exports a file it read does — defeats 366.7's corner recovery: the
+angle now carries seventeen digits of its own, so
+`its_angle_is_written_as`'s half-unit bracket no longer holds the true angle,
+and the reader takes the tangent of the thirteen-digit angle instead, a slope
+`0.49999999999999234`, `7.66e-15` short of one half. At `z = 11` that is a
+radius `1.07e-13` short of seven, and the sliver where the swept circle falls
+short of the two walls is a C-shaped piece with two necks that thin. Since
+Q897 (`a7e263e9`) the rungs of `rungs_towards_each_crossing` reach into a
+piece this thin, and all three rules answer within
+`how_far_rounding_can_move_a_volume` of the exact reading; before, at
+`b00d9291`, the same piece was `Undecidable` for every rule. Pinned in
+`a_frustum_tangent_to_two_walls_at_its_blocks_roof_is_read_back_rounded_and_reexported`,
+in `crates/rcad-step/tests/a_fuse_read_back_from_rounded_text.rs`.
+
+### 366.7 A cone's slope put back from its corners
+
+*2026-10-05, Q955, lane `lane-q955-a-cone-slope-read-back-from-its-corners`,
+off `3b1ffe9f`. Everything below was run, and each number names its test.*
+
+**The gap.** Q827 traced `FrustumAndBlock { side: 8, narrow: 2, wide: 3,
+up_per_unit_wider: 2, at: [4, 4] }` at twelve digits. The cut moves one real,
+the half-angle, to `0.463647609001`, which `tan` reads back as the slope
+`0.5000000000002424`. The corner `(7, 4, 1)`, written exactly, is then
+`1.30e-12` off the cone, 52.3 times the `16·ε·L` a corner of a curved face is
+given, and exactly on the cone of slope one half, whose angle `0.463647609001`
+is to twelve digits. In all 48 files only the half-angle moved. The answer
+exists and the arithmetic missed it, so §16.10 calls it a gap.
+
+**What the reader does.** `cone_from`, in `crates/rcad-step/src/geometry.rs`,
+asks `the_slope_of`, which takes the tangent of the angle written, as before,
+unless all three of these hold. Then it takes the slope the corners agree on.
+
+1. **The file wrote the angle in radians, as a real**, and it lies strictly
+   between nought and a right angle. The tokenizer keeps the place of the last
+   digit each real was written to (`LastDigit`, in `token.rs`): `-12` for
+   `0.463647609001` and for `4.63647609001E-01`, and `-13` for
+   `0.4636476090010`, whose last zero is a digit the file wrote. The `f64`
+   cannot keep that, and its shortest spelling drops the zero. `Record` keeps
+   it for each attribute that is a real or wraps one once (`last_digits`, in
+   `graph.rs`). `Value::Real` is unchanged. A file in degrees takes the
+   tangent of a product, and its twelve digits are not that number's digits.
+   `a_pointed_cone_whose_half_angle_was_cut_in_degrees_keeps_the_tangent`
+   pins it, and fails when the radian test is taken out.
+2. **Every corner off the placement's own plane puts the cone at the same
+   `f64` slope** (`a_slope_every_corner_agrees_on`). A corner `ρ` from the
+   axis and `h` along it says `(ρ − R) / h`. The corners are the face's as
+   the file wrote them: both ends of every edge of its `EDGE_LOOP`s, and the
+   corner of a `VERTEX_LOOP` (`corners_as_written`, in `brep.rs`). They are
+   read before the face is described, and so they are not counted in
+   `integers_read_as_reals` (`point_read_ahead_at`). The loop's corner counts
+   even though the walk drops it at the apex, because on a cone placed on its
+   cap the apex is the one corner off the placement's plane.
+   - **A face with no corner off that plane** has nothing to agree on, and
+     takes the tangent. A cone placed at its apex finds its apex on the
+     plane, and a cone placed on its cap finds the cap's corner there.
+     Pinned by
+     `a_cone_face_with_no_corner_off_its_placements_plane_has_no_slope_from_its_corners`.
+   - **Corners that say two slopes**, or a slope of nought or below, take the
+     tangent too. Agreeing means the same bits. That is what short corners
+     along an axis written as a unit direction give. Corners that work out an
+     ulp apart are not given one of their two answers. Pinned by
+     `corners_that_say_two_slopes_or_none_have_no_slope_from_their_corners`
+     and `the_slope_comes_from_the_corners_only_where_the_angle_was_cut_and_they_agree`.
+3. **The angle written is that slope's angle to within half a unit in its
+   last digit, in exact arithmetic** (`its_angle_is_written_as`). It never asks
+   `atan`, which is the platform's and is bounded by nothing Rust publishes.
+   `atan_between` brackets the angle with `+`, `−`, `×`, `/` and `sqrt` alone.
+   Rust's docs say each of these gives the exact answer rounded, and each
+   result is moved one `f64` outwards. A slope above one turns round on
+   `π/2 − atan(1/s)`. `FRAC_PI_2` is below `π/2` and the next `f64` above it,
+   which
+   `frac_pi_2_and_the_next_f64_up_stand_either_side_of_a_right_angle`
+   shows by comparing their exact decimals with `π/2`'s. Two halvings,
+   `atan(x) = 2·atan(x / (1 + √(1 + x²)))`, bring the argument below `0.2`.
+   There the series alternates and shrinks, so it stops below the angle after
+   a term taken away and above it after a term added. The bracket holds each
+   angle `bc -l` worked out to 45 digits
+   (`atan_between_brackets_angles_worked_out_to_forty_five_digits`). It is at
+   most 49 ulps wide over 100 001 slopes from `1e-3` to `1e3`
+   (`atan_between_holds_the_platforms_atan_over_slopes_from_a_thousandth_to_a_thousand`).
+   The text `D` is not an `f64` either. The `f64` it reads as is within half an
+   ulp of it, and a whole ulp is taken off the half unit for that. The half
+   unit is parsed, which rounds correctly, and taken one `f64` lower. So a yes
+   means `D − half ≤ lo ≤ atan(slope) ≤ hi ≤ D + half`, and a no takes the
+   tangent.
+
+**A yes is never wrong, on any input**, by the chain above. A no can be wrong
+only where the angle lies within the bracket's width and an ulp of the edge of
+the half unit, and then the tangent is taken, as before. On the 48 files it is
+nowhere near the edge: at twelve digits `|0.463647609001 − atan(0.5)|` is
+`1.94e-13` (`bc -l`) against a half unit of `5e-13`, and the bracket at slope
+one half is at most 64 ulps, `3.6e-15`, wide. **On an angle written whole the
+answer is no**: this writer writes `atan(0.5)` as `0.4636476090008061`, whose
+half unit, `5e-17`, is narrower than an ulp. The tangent is taken, and 366.2's
+bit-for-bit round trips are untouched
+(`a_half_angle_written_to_every_digit_an_f64_has_keeps_its_tangent`).
+
+**A short angle is read at its own digits.** `0.46` with corners that agree
+on one half is taken as one half, since `atan(0.5)` is `0.46` to two digits.
+Reading a short text as exact would refuse what both its corners and its
+text, at the digits it has, say. No floor on the digit count was set, and no
+measurement asks for one. **No room was widened.** `Model::validate` checks
+the corners against the cone this builds exactly as against any other. §174.4's
+cut corners stay a limit under Q25.
+
+**What it moved.**
+
+    mise exec -- just t -p rcad-step --test a_fuse_read_back_from_rounded_text \
+        a_frustum_up_through_a_block --no-capture
+
+    11 digits (48 of 48 files had a real moved): 144 decided, refused {}; ...
+        reader refused {}; worst volume move 0.00e0 of the bound
+    12 digits (48 of 48 files had a real moved): 144 decided, refused {}; ...
+        reader refused {}; worst volume move 0.00e0 of the bound
+    13 digits (48 of 48 files had a real moved): 144 decided, refused {}; ...
+        reader refused {}; worst volume move 0.00e0 of the bound
+
+Before, the reader refused 48, 48 and 40, and 3 of the 24 fuses of the eight
+read at 13 digits were `Undecidable`. The test now asserts that nothing is
+refused. `a_pointed_cone_whose_half_angle_was_cut_to_twelve_digits_has_its_slope_from_its_apex`
+is the same gap on one hand-written cone, placed on its cap. Its tangent put
+the apex `3.9e-12` above the corner the file wrote there.
+
+`how_often_a_real_file_imports` counts the same before and after: kicad
+`165 / 323 imported`, 95 refused for a corner off a curved face, nist
+`1 / 44 imported`. Two refused files moved:
+
+- `Fuseholder_TR5_Littelfuse_No560_No460.step`: its two 45° chamfer cones,
+  `CONICAL_SURFACE('',#451,1.,0.785398163397)`, have corners that agree on
+  slope one exactly, and the worst corner off a curved face is now 97.442
+  spacings, not 362.007.
+- `nist_stc_06_asme1_ap242-e3.stp`: its two drill points, half-angle
+  `1.0297442587` to ten digits, carry a `VERTEX_LOOP` at `z = 70.4822675346`.
+  The tangent put the apex at `70.48226753468838`, `8.8e-11` off, and the loop
+  was refused, `ALoopThisReaderDoesNotWalk`. The apex corner says slope
+  `1.6642794823614244`, whose angle is the text to ten digits. Now the loop
+  stands on the apex, the solid reaches the builder (nist: 12 files, not 11),
+  and the file is refused for a hole in a face that winds the same way as the
+  outer wire. That reason was not traced. §376.5 called these apex corners a
+  modelling tolerance. Q751 lists `nist_stc_06` among its four files, and for
+  this file the miss was the angle's own cut.
+
+**What this leaves.**
+
+- A file that writes its angles in degrees and cuts them still takes the
+  tangent of the product and is refused the same way. Shown only on the
+  hand-written cone above, so a row of class C.
+- `nist_stc_06_asme1_ap242-e3.stp`'s new first refusal, a hole winding the
+  way its outer wire does, is untraced. It has a row.
+- Q751's text still names `nist_stc_06` among the files its apex loops refuse.
+  It no longer does.

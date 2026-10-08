@@ -160,6 +160,16 @@ turned configuration is rounded and so a different configuration, or it may
 be a gap. Nothing here tells the two apart, and `A_TURNED_PAIR_IS_NOT_A_SOLID`'s
 doc no longer implies the ordering. The row that would settle it is below.
 
+*Later, §351.6:* the turned band is 0.52% to 2.3% since Q711, from a rate of
+0.78%, 726 of 92 844 fuses at `RCAD_SOAK_SEED` 11 to 22 and
+`RCAD_SOAK_FACTOR=20`; it was 1.6% to 7.3% from 2.448%, as 303.3's table has
+it. That rate is below the 2.227% this section measured for the lattice
+family, which was not measured again, so on those figures the ordering this
+observation reasoned from no longer holds. One cause of what it
+suspected was a gap: a box and a taller one in the same place were a solid
+upright and `count: 1` turned, and since §351.6 they unite to the taller box
+turned too.
+
 ### 303.5 What is left
 
 - **The other four bands are unmeasured at a soak.** `A_FLUSH_PAIR_IS_NOT_A_SOLID`,

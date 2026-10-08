@@ -24,6 +24,8 @@ for its own row (395.4).*
   395.4   What the room still leaves: apex meets that miss it
   395.5   The tests, and what fails without the change
   395.6   What this leaves
+  395.7   The KiCad fold is right, and rule B is not: three planes that share a line
+  395.8   The fold reads `bake`'s room for three planes `bake` solved the corner among
 
 ### 395.1 The probe
 
@@ -154,7 +156,10 @@ argument does not use the bound either. Three planes meet once, and two
 straight crossings on a flat face that both run through the corner cross
 nowhere else. A meet left beside the corner on both of those crossings is a
 second crossing of two straight lines, so keeping it as a node keeps a
-topology that cannot be, at any distance.
+topology that cannot be, at any distance. **That holds only for three planes
+that pin a point.** Three that share a line in the file have two crossings
+that are one line written twice, and rule B folds two such meets, 1.6 and 326
+units off their corners, in a KiCad relay (395.7).
 
 **Why this row does not take it.** Rule B passes the whole workspace
 (`2925 tests run: 2925 passed`) and it also changes one fold in a real input.
@@ -166,7 +171,9 @@ imported solid (`Model::room_a_corner_of_this_solid_gets`, §368), which is
 wider than the rounding. Today it stays a node and the round trip passes.
 Under rule B it is folded and the round trip passes too. Whether that is the
 same solid for the right reason is a question about the imported room, not
-about the touch, and it gets its own row with this measurement.
+about the touch, and it gets its own row with this measurement. Q848 answered
+it in 395.7: that fold is right, rule B is not, and the bound that folds the 5
+pyramids and keeps the wrong ones apart is `bake`'s room.
 
 ### 395.5 The tests, and what fails without the change
 
@@ -201,7 +208,250 @@ this base.
 - **Apex meets of a corner's own three planes that miss its grown box**
   (395.4): 5 pyramid unions at 1/256 and 1/4096, refuses/B. Rule B closes
   them. Its row has to say whether the KiCad fold it adds is right, and that
-  is about §368's room for imported solids.
+  is about §368's room for imported solids. Q848 did (395.7): rule B folds
+  wrong meets too, and `bake`'s room is the bound.
 - §253.6's `place_a_corner` question, and §288.5's ball shapes, are as they
   were. The fold's count is now the only thing between the grazing block's
   second place and the corner, and the unit test that holds it still holds.
+
+### 395.7 The KiCad fold is right, and rule B is not: three planes that share a line
+
+*Queue row Q848. Lane `lane-q848-apex-meets-folded-with-no-bound`, off
+`4d03c642`. No code changed: this answers the question 395.4 left, and keeps
+the bound.*
+
+**The fold 395.4 named is right. Rule B is not.** In the same KiCad file it
+also folds two meets of three planes that share a line, 1.6 and 326 units off
+their corners. So the bound stays. The bound that folds the right meets and
+keeps those two apart is `bake`'s own room (§368), and growing the fold's room
+by a smaller length than that answers all 648 of the pyramid table. The fold
+cannot read that room yet: `derive_a_corner` keeps none of it on
+`BakedCorner`, and `bake.rs` is outside this row's files.
+
+**The probe.** 395.1's, rebuilt as a scratch edit to
+`the_corner_that_is_this_place` and taken back out. `Q848_RULE_B` switches
+rule B in, and `Q848_EXTRA_ROOM=<length>` adds a length to the fold's room.
+Every call where rule B and the base rule disagree is logged. The log has how
+many corners on both crossings `bake` solved among the three planes, how far
+the meet's narrowed box sticks out past the corner's own box and how far it
+misses it, both in fold rooms and taken as the largest over the three axes,
+the boxes, the three planes and the corner's `around`. 395.1's scratch table
+test was put back to count the 648 unions. The KiCad test printed each file's
+name. A Python script in exact fractions read the logged planes, which are
+printed as shortest round-trip `f64`s and so are the stored numbers exactly.
+
+**The table on this base**, with the 108 unions of each fold:
+
+| Fold | 1 | 1/4 | 1/16 | 1/64 | 1/256 | 1/4096 |
+|---|---|---|---|---|---|---|
+| Base rule | 108 | 108 | 108 | 108 | 107 | 104 |
+| Rule B | 108 | 108 | 108 | 108 | 108 | 108 |
+| Fold's room plus `1e-9` | 108 | 108 | 108 | 108 | 108 | 108 |
+
+On the base the log has 13 calls. In every one there is one place, `bake`
+solved one corner among the three planes, and the place does not reach that
+corner's room. They miss the apex's own box by 3.7 to 133 fold rooms,
+measured as above. 395.4's "1.3 to 60" came from a probe that was not kept,
+and measured something else. With `1e-9` added to the room, no call is left
+where the two rules disagree. Rule B over the workspace gave `3140 tests run:
+3138 passed (1 slow), 2 failed, 9 skipped`. The two that failed are the two
+pins rule B turns round: `a_pyramid_whose_apex_meets_miss_even_its_room_is_still_refused`
+and the unit test
+`a_meet_of_three_planes_bake_solved_the_corner_among_is_folded_only_while_its_box_reaches_the_corners_room`.
+
+**The fold 395.4 named.** The file is `Relay_StandexMeder_UMS.step`. The
+vertex is `#406`, at `(0.285985, −1.27e-16, 2.78e-16)`. Six faces meet there:
+
+- A: `#400`, tilted 3.18° about the x axis, falling towards `y < 0`;
+- B: `#685`, tilted 3.18° the other way, falling towards `y > 0`;
+- C: the floor `z = 0`, as `#810` and `#888`, which the joiner made one face;
+- D: the wall `x = 0.285985`, as the two triangles `#1217` and `#1431`.
+
+A, B and C all pass through the x axis. The tilted faces make a groove, and at
+this vertex its depth is zero. `bake` solved the corner from A, C and D, and
+their exact meet lies inside the solved box. Face A has two edges ending here:
+`#405` runs along its crossing with D, and `#413` along its crossing with B.
+The fold asks where those two crossings meet, which is the meet of A, B and D.
+Worked out exactly from the stored planes, it is `(0.285985, 3.2439e-13,
+−1.7792e-14)`: 22.94 fold rooms off the solved corner.
+
+The 22.94 comes from B. B passes 2.5 fold rooms (`3.6e-14`) off both the
+stored vertex and the solved corner, while A, C and D each pass within 0.05
+of a room. That miss is the file's own. B is written as the point `(−1.145,
+1.8, 0.1)` with a 13-digit normal, and that point lies `3.6e-14` off the plane
+through the x axis. A and B cross at 6.36°, so a move of `3.6e-14` in B moves
+the line they cross in by `3.6e-14 / (2 sin 3.18°) = 3.26e-13`.
+
+**The fold is right.** A, B and D are three faces round the vertex. Their
+normals are well spread (the volume they span is 0.11), so the three pin one
+point. A node left `3.26e-13` from the corner on both of face A's edges would
+be a second crossing of the same two edges. The fold puts the meet onto the
+corner, a move of `3.26e-13`. That is `3.4e-5` of `bake`'s room off a plane
+for this solid, which is `9.6e-9`: the largest coordinate is 9.6, so
+`1e-9 × 9.6`, plus `64 ε × 9.6`, plus the fold's own room. So the solid was
+accepted with a corner that could sit much further from B than this.
+
+**What rule B also folds.** On the base, each of the relay's two fuses, before
+and after the round trip, logs one call: the one above. Under rule B each logs
+five:
+
+| Corner | Face | Three planes | Meet off the corner | Right? |
+|---|---|---|---|---|
+| `#406`, `(0.285985, 0, 0)` | A | A, B, D | 22.94 rooms, `3.26e-13` | yes |
+| `#406` | B | A, B, D | 22.94 rooms | yes |
+| `(−0.264874, 6.5e-13, 2e-16)` | B | A, B and the wall `x = −0.264874` | 22.90 rooms | yes, for the same reason |
+| `(−0.264874, 6.5e-13, 2e-16)` | B | A, B, C | at `x = −325.95`, 326 units | **no** |
+| `(−0.264874, 1.8, 0.1)` | B | B and `y = 1.8` written two ways | at `x = −1.9000000000003`, 1.635 units | **no** |
+
+The plane `y = 1.8` is stored once as normal `(1.1e-16, 1, −1.1e-16)` with
+offset `1.7999999999999998`, and once as `(0, 1, −4.4e-47)` with offset `1.8`.
+In the last two rows all three planes are in the corner's `around`, so §356's
+rule holds. Each passes within `bake`'s room of the corner. **But the three do
+not pin a point.** In the file they share a line: the x axis, or the line
+where B meets `y = 1.8`. Their meet is wherever rounding puts it on that line,
+here 34 times the solid's size away, or 1.6 units along an edge. §356.3's
+argument is that two straight crossings which both run through the corner
+cross nowhere else. It takes for granted that they cross. Here the two
+crossings are one line written twice. Rule B folds both meets. The round trip
+still passes, because both sides fold alike, and that tells us nothing about
+whether the fold is right.
+
+**So the bound stays, and it should be `bake`'s room.** Each plane round a
+corner passes through the corner's box grown by `bake`'s room, which is
+`allowed_wobble` plus the rounding (§368). Measured in space, the right folds
+are at most `1.9e-12` from their corners (the pyramids, 133 rooms of
+`1.42e-14`) and `3.26e-13` (the relay). The two wrong ones are 1.6 and 326.
+`bake`'s room is `9.6e-9` for the relay, and for a pyramid it is at least
+`1e-9` times its largest coordinate, which is never below `√(2/3)`. So `bake`'s
+room lies between the two groups, more than 400 times the furthest right fold
+and 1.7e8 times shorter than the nearer wrong one. The `1e-9` row of the table shows what it does to
+the pyramids. Neither family §356.2 named makes this fix. It is the room in
+space, measured with the room `bake` granted rather than the rounding alone.
+§356.2 turned that family down at ×1000 the rounding because it was a
+tolerance. `bake`'s room is not a tolerance chosen for the fold. It is the one
+every plane round the corner was already checked against.
+
+**Why this row does not build it.** The fold would have to read `bake`'s room
+off the corner. `derive_a_corner` reads it from
+`Model::room_a_corner_of_this_solid_gets` and then drops it, so it has to go
+onto `BakedCorner` in `bake.rs`, which is not one of this row's files. Q723
+grows the fold's room to `bake`'s for a curved triple. It is filed as refuses/C
+because nobody had built a shape that needs it. The 5 pyramids are a shape
+that needs it, of class B, so this row files that work again with `bake.rs` in
+its files. The pin and the unit test stay as they are. Their comments now say
+the bound is needed and why.
+
+**Not measured:** how the relay's fuses answer with `bake`'s room in the
+fold, and the workspace with that room. The probe only added `1e-9` and ran
+it on the table.
+
+**What this leaves:**
+
+- **Fold a meet of three planes `bake` solved the corner among while it lies
+  within `bake`'s room of the corner**, with the room carried on
+  `BakedCorner`. Refuses/B: the 5 pyramids. Keep the relay's two far meets
+  apart, and turn round the pin and the unit test. Q1036 did (395.8).
+- Q723 then needs only its curved triple.
+
+### 395.8 The fold reads `bake`'s room for three planes `bake` solved the corner among
+
+*Queue row Q1036. Lane `lane-q1036-a-pyramid-apex-folded-within-bakes-room`,
+off `aa0e33d7`. All 648 pyramids of the table unite, the relay's two far
+meets stay nodes, and no fold the base made is lost anywhere in the
+workspace.*
+
+**The change.** `derive_a_corner` grows a corner by
+`what_writing_the_corner_down_cost` plus `validate`'s room off a plane before
+it asks each plane round it, and now keeps that sum on the corner,
+`BakedCorner::room_its_planes_were_asked_with`. A corner read out of the
+model, which nothing asked, keeps `None`. `the_corner_that_is_this_place`
+grows the corner by that room where the face and the two crossings' partners
+are three planes `bake` solved the corner among, and by the rounding alone
+everywhere else. Then the same three tests as before decide it, for both
+kinds: the meet's place reaches the grown box, it is the only place that
+does, and every point of its narrowed box lies inside the grown box. The rule
+of §356 that took such a meet however far its box reached, once it touched the
+grown box, is gone. `bake_placed_the_corner_on_the_three_planes` still reads
+`around.len() >= 3` (§294.9), and the fold asserts the room is there whenever
+it says yes.
+
+**The probe.** A scratch edit to the fold, taken back out, worked out the
+base's answer beside the new one on every call and logged every call where
+they differ, with how far the narrowed box sticks out past the corner's own
+box, in roundings and in `bake`'s rooms.
+
+**The table.** Over the 648 unions, the fold is asked 31 104 times, every time
+about three planes `bake` solved the apex among. The two rules differ on 27
+calls, all at folds of 1/256 and 1/4096, and on each the base leaves a node
+and the new rule folds. Those meets stick out 3.7 to 133 roundings past the
+apex's own box. `bake`'s room for the table's pyramids is `1.0e-9` to
+`4.0e-9`, and the furthest of the 27 sticks out `1.65e-3` of it. Every one of
+the 648 unites with the two solids, their volumes and an empty log. Measured
+from the middles of the boxes, those meets are at most `2.3e-12` from the
+apex.
+
+**The relay.** `bake`'s room for `Relay_StandexMeder_UMS.step` is `9.6e-9`.
+Each of its two fuses in the round trip has five calls where the base leaves a
+node. The new rule folds three of them, the meets 22.9 roundings (`3.26e-13`)
+off `#406` on faces A and B and off the corner at `x = −0.264874`, the three
+395.7 calls right. It leaves the two that 395.7 calls wrong: 1.635 units off,
+`1.7e8` of `bake`'s rooms, and 325.7 units off, `3.4e10` of them. The relay's
+fuses refuse either way. The round trip's cut by a box refuses with two
+regions of one face that cannot be told apart, under this rule and under rule
+B, and a union with a cube far from it refuses the same way. So no answer of
+the relay can show the two meets stay nodes, and nothing public says whether
+a meet was folded. The unit test below holds the bound instead, at a step past
+`bake`'s room, and the relay's meets are `1.7e8` rooms past that.
+
+**The workspace.** With the probe in, `mise exec -- just t --workspace
+--no-fail-fast` logged 79 calls where the rules differ, every one on three
+planes `bake` solved the corner among, and every one a node the base left and
+the new rule folds. None the base folded is left now. They come from the
+pyramid tests, the KiCad round trip's relay, and the unit test below.
+
+**Where `bake`'s room runs out.** A scratch test united each of the table's
+108 turns, spellings and heights at finer folds:
+
+| Fold | `2⁻¹²` | `2⁻¹⁶` | `2⁻²⁰` | `2⁻²⁴` | `2⁻²⁸` | `2⁻³²` |
+|---|---|---|---|---|---|---|
+| United | 108 | 108 | 108 | 74 | 5 | 0 |
+
+At `2⁻²⁰` the furthest apex meet sticks out a quarter of `bake`'s room. At
+`2⁻²⁴` the furthest folded one sticks out `0.9993` of it and the nearest left
+`1.009`, and the 34 that refuse refuse on cells that cannot be told apart or a
+decision left unsettled. The planes still pin a point there, so by §356's
+argument the fold would be right, and this is a gap, not a limit. A room in
+space cannot tell it from the relay: both are three stored planes that meet
+far from the corner. What tells them apart is how far the three normals are
+from sharing a line. Here they span a volume about the fold; the relay's span
+one at the rounding, so a rounding of one plane could make them share a line.
+That is a row of its own, refuses/C, since only a probe builds it.
+
+**The tests**, and what fails without the change:
+
+- `a_meet_of_three_planes_bake_solved_the_corner_among_is_folded_only_while_its_box_lies_within_bakes_room`,
+  in `arrange.rs`, turned round from
+  `..._is_folded_only_while_its_box_reaches_the_corners_room` (395.5). A box
+  that misses the rounding and lies in `bake`'s room folds, one reaching a
+  step past `bake`'s room on every side does not, though it holds the corner.
+  Both fail on the base rule.
+- `a_meet_of_three_planes_bake_solved_the_corner_among_is_folded_further_off_than_one_with_a_cut_in_it`,
+  renamed from `..._is_the_corner_however_far_its_box_reaches` (§356.5), which
+  this change makes false. Its body is unchanged and passes either way.
+- `a_pyramid_whose_apex_meets_miss_the_rounding_but_lie_within_bakes_room_is_united`,
+  in `a_corner_with_four_planes_round_it.rs`: folds 1/256 and 1/4096 at every
+  height, turn and spelling, 216 unions. With fold 1 added to the at-every-
+  height test, the file now holds all 648.
+- `the_four_pyramids_whose_apex_meets_missed_the_rounding_come_back_with_their_corners`,
+  turned round from `a_pyramid_whose_apex_meets_miss_even_its_room_is_still_refused`:
+  each of the four is united and keeps the corners it was built with, each
+  within `1e-9`.
+
+**What this leaves:**
+
+- **A pyramid folded by `2⁻²⁴` or finer** refuses 34 of 108 unions, from apex
+  meets past `bake`'s room. Refuses/C. The fix family named above: fold a
+  meet of three planes `bake` solved the corner among however far it is, when
+  the three normals are proved to span more than any rounding of the planes
+  could take away, and keep `bake`'s room as the bound otherwise.
+- Q723 is untouched: it is a triple with a curved surface in it.

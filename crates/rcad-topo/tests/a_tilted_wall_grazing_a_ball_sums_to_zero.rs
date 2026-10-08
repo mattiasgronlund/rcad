@@ -36,6 +36,17 @@
 //! its intersection is the cap past the first wall. The union and the
 //! difference under a tolerant policy do not mesh the ball's face, which is
 //! another row's to mend (§244.5), and are not pinned here.
+//!
+//! # Why Q699 does not order these two
+//!
+//! Q699 orders two places whose boxes hold the start **at one end each**, as
+//! the edge grazing a ball at `x = 16` has them: the one point of such a box
+//! at the start is the start, which is off the ball, so the box proves its
+//! place lies past the start or short of it. Here both `z` boxes hold `16`
+//! inside them, and each is wide enough, `2.3e-14`, to hold both true places
+//! `16 ± 2⁻⁵¹`. So nothing in either box says which of the two places it is,
+//! and the order still goes to the policy. What does say it is which root of
+//! the line's quadratic each meet is, and that is `rcad-geom`'s to hand over.
 
 use rcad_geom::{
     Deflection, EdgeRun, Isometry, MeetOfThree, NamedRun, Point, Scale, Surface, Vector,
@@ -67,6 +78,10 @@ fn round_either_walls_circle_the_two_places_sweep_exactly_zero() {
         let [x, y, z] = place.enclosure();
         assert_eq!([x.lo(), x.hi(), y.lo(), y.hi()], [0.0; 4], "{place:?}");
         assert!(z.lo() < 16.0 && 16.0 < z.hi(), "{place:?}");
+        assert!(
+            z.lo() <= 16.0 - f64::powi(2.0, -49) && 16.0 + f64::powi(2.0, -48) <= z.hi(),
+            "each box holds both places, 16 ± 2⁻⁵¹, past the f64s either side of 16: {place:?}"
+        );
     }
 
     for wall in walls {
@@ -131,7 +146,7 @@ fn a_certified_fuse_refuses_on_the_order_of_the_two_places() {
                 "{rule:?}, ball first {ball_first}: {refused:#?}"
             );
             if ball_first {
-                assert_eq!(refused.measures(), Measures::Volume, "{rule:?}");
+                assert_eq!(refused.measures(), Measures::Length, "{rule:?}");
                 assert_eq!(refused.enclosure(), widest, "{rule:?}");
             } else {
                 assert_eq!(refused.measures(), Measures::Length, "{rule:?}");

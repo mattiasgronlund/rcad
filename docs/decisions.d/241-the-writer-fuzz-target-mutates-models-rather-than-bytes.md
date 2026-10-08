@@ -190,8 +190,10 @@ the writer's or the reader's, not the target's.
    but they are what caps 241.3's "came back the same".
 
 *Since Q730 (2026-09-30) a ball upright on `z` is written and comes back the
-same. A ball turned so its poles leave the `z` line through its centre is still
-refused `AWireThatStandsStillAtAPole` (`a_ball_turned_off_z_is_refused_at_its_pole`).*
+same. A ball turned so its poles leave the `z` line through its centre was
+still refused `AWireThatStandsStillAtAPole` until Q1010 (2026-10-05), which
+writes it as the same ball cut open on that line and reads it back as that
+(§404, `a_ball_turned_off_z_comes_back_as_the_same_ball_with_its_poles_on_z`).*
 
 ### 241.6 What is left
 
@@ -260,3 +262,62 @@ reaching tori as it reached cones. `how_often_a_turned_bend_comes_back_from_its_
 turns the bend about `x`, `y` and `z` by every tenth of a radian: of 372, the
 reader refuses 28, all about `x` or `y`, and the writer refuses one seam. Neither
 was traced.*
+
+*Since Q843 (2026-10-04) the writer writes the one turned bend it refused,
+ring 7 and tube 1 turned about y by 5.0 and moved by (3, 5, 10). Its seam's
+plane has as offset the turned normal dotted with the move in plain f64, 32
+ulps from the ring's centre dotted and rounded once, and of every f64 centre
+the reader could hold on the ring exactly one reads back as that plane: 23
+steps of x and 19 of z out, at 15.88 of the 16 units the reader allows. So a
+gap and not a limit (a_turned_bends_seam_has_one_centre_its_plane_reads_back_from
+in write.rs). The writer now looks that far for a ring's seam
+(the_nearest_centre_a_ring_holds_its_circle_at), asking the reader's own
+rule (`a_surface_holds_the_circle` in brep.rs, shared rather than copied
+since Q957), and how_often_a_turned_bend_comes_back_from_its_own_file
+writes all 372; the reader still refuses 28 (Q842).*
+
+*Since Q842 (2026-10-04) the 28 are traced, and the gap is Q497's. The
+reader builds a `TOROIDAL_SURFACE`'s axis with `Axis::new`, which scales the
+written direction to length one again, and keeps a seam's `PLANE` normal as
+written (§313.3). The writer writes both as one direction, so where the
+scaling moves a bit the seam's plane and the ring's axis are two spellings of
+it: turned about x by 2.5, `(0, -0.5984721441039565, -0.8011436155469336)`
+against `(…, -0.8011436155469337)`, crossing to `(5.55e-17, 0, 0)` and not
+exactly nothing. `rcad_geom`'s walk tells a plane square to a ring's axis from
+one holding it by that exact zero (`where_a_plane_cuts_a_torus`), so it takes
+the seam's plane for one holding the axis, and neither of
+`the_two_meridian_circles` in walk.rs holds the seam's two ends:
+`which_of_these_circles_this_run_is` refuses. The reader's own
+`which_of_a_rings_two_circles` asks the same zero and adds no picker, which is
+why the row saw the same count with it and without. Q489's
+`two_meridian_circles` in intersect.rs is not reached: a file's run is never
+named by `intersect`.*
+
+*Of the 372, the bends whose placed ring axis keeps its bits under
+`Axis::new` number 296, and every one comes back the same; of the 76 whose
+axis moves, 28 are refused and 48 are read back with the axis moved, so none
+comes back the same (`how_often_a_turned_bend_comes_back_from_its_own_file`
+now pins all five counts). With the reader's torus arm keeping a direction
+whose `|d·d − 1|` comes out within 64ε in plain f64, the reach
+`Plane::NORMAL_LENGTH_ROUNDOFF` gives a plane's normal, made by hand in
+geometry.rs and point.rs, measured and taken out again, all 372
+came back the same, every located number bit for bit, and of
+`how_often_a_model_the_mutator_draws_is_refused`'s 400 draws the 3 the reader
+refused went to none and the 29 that came back with a different surface went
+to 24, the rest being pipes and cones. So the answer exists in the file and
+the reader loses it: a gap, and its fix is Q497's write set, not this row's.
+The walk's own zero test is not the gap — a plane that is not exactly square
+to a ring's axis does not cross it in circles round the axis, and drawing them
+there would need a bound on the lean charged to the walk's deviation that
+nothing names.*
+
+*Since Q1000 (2026-10-05, §355.6) the reader keeps a pipe's, a cone's and a
+ring's axis as the file wrote it (`Axis::as_written`), and a saved model
+loads with the axis bits it was saved with. Of the 372 turned bends all 372
+come back the same and none is refused
+(`how_often_a_turned_bend_comes_back_from_its_own_file` pins `(372, 0, 372, 0,
+0)`, and 76 for the ring axes `Axis::new` would have moved). Of
+`how_often_a_model_the_mutator_draws_is_refused`'s 400 draws, the 29
+comparisons that stopped at a different surface and the 3 at a file the
+reader refused went to none. The walk's own zero test is unchanged, for the
+reason the paragraph above gives.*

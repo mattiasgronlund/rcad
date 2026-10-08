@@ -175,6 +175,14 @@ as well. That is the reader's to fix, and it is the row 390.5 files.
   of §229.4 read from its STEP file is refused for it. A fillet round a disc
   is a shape files hold. Filed as a row on `brep.rs`, with this file's
   pinned test to turn back into `f886614e`'s, checked against Pappus.
+
+  *2026-10-04, Q824 (`5f117641`):* where the travel is square to a torus's
+  longitude, the reader now stores the circle by the rule `rcad-topo` uses —
+  the second reference where the two surfaces cross, the mesher's rule where
+  a flat face touches the torus. The bit-for-bit spelling reads and meets
+  Pappus at three deflections. The one-ulp spelling is still refused
+  `AClosedEdgeIsWalkedAgainstItsSurface`, now at the lid's circle and in
+  `rcad-topo`, not the reader: Q946.
 - **A torus face with a hole that reaches a whole turn round the ring by a
   seam is refused** `CurvedFaceWithAHoleGoesTooFarRound`. Reasoned, not run:
   no such solid was built here. Filed as a row to build one and see.

@@ -350,6 +350,19 @@ pub enum Refusal {
     /// the file carries a modelling tolerance somebody chose, and no arithmetic
     /// would put those corners on their surfaces.
     ///
+    /// **A third kind is a corner written exactly on a surface whose own number
+    /// the file cut.** An exporter that writes every real to eleven to thirteen
+    /// digits leaves a corner in short numbers where it was and moves a cone's
+    /// half-angle, so the slope read back is off and the exact corner misses it
+    /// by tens of times the room a curved corner gets: all 48 frustum files of
+    /// `a_fuse_read_back_from_rounded_text.rs` at 11 and 12 digits. The reader
+    /// now puts a cone's slope back from its corners where they agree on one and
+    /// the half-angle written is that slope's angle cut to the file's digits,
+    /// so this name is no longer given to those (`docs/decisions.md` §366.7). A
+    /// cone whose corners do not agree to the bit, one written in a unit other
+    /// than the radian, and every other surface keep the number the file wrote,
+    /// and a corner that misses it is still refused here.
+    ///
     /// **The sweep no longer refuses the first kind, and this variant is still
     /// here for the second.** `Model::what_writing_a_point_down_costs` is the
     /// width of the number, `not_provably_off` widens the corner into a box that

@@ -29,9 +29,14 @@
 //! - anything curved against a cone `intersect` does still refuse outright, and
 //!   **one cone twice is not that pair**: `intersect` has always answered it as
 //!   one surface, and since §214 `walk` does too. For a cone against a *different*
-//!   cone the refusal is the degree-four space curve; for a cone coaxial with a
-//!   pipe it is two circles, which `intersect` names now, and the refusal moves
-//!   one step later to `three_surfaces.rs`.
+//!   cone off its axis the refusal is the degree-four space curve, and on its
+//!   axis it is circles or the apex alone, which `intersect` names since Q1122;
+//!   for a cone coaxial with a
+//!   pipe it is two circles, which `intersect` names now, and where a cap plane
+//!   square to their axis meets both, which `three_surfaces.rs` answers now too
+//!   (Q981). The arrangement draws that pair since Q987, and since Q1118 the
+//!   assembly joins its pieces, so a frustum against a bar of its narrow
+//!   radius answers.
 //!
 //! The families are chosen to measure each of those rather than to average them
 //! away.
@@ -77,16 +82,8 @@ use cones::{a_frustum, a_pointed_cone};
 /// How many pairs each family draws.
 const DRAWS: usize = 16;
 
-/// What every refusal of a cone against a coaxial pipe says today.
-///
-/// `intersect` names that pair now, so the fuse gets past the geometry and stops
-/// where three surfaces have to be solved at once. Written out because the
-/// assertion that uses it is the record of *which* wall the family sits behind,
-/// and a message compared against itself would record nothing.
-const THREE_SURFACES_AND_ONLY_ONE_FLAT: &str = "geometry: where three surfaces meet is only \
-     worked out when two of them are flat, and fewer than two of these are";
-
 /// A deterministic sequence, so that a rate is one number and not a range.
+#[derive(Clone)]
 struct Draw(u64);
 
 impl Draw {
@@ -124,7 +121,8 @@ enum Family {
     /// pipe**, which crosses in exactly two circles and not in a degree-four
     /// curve (§50.11).
     AFrustumAgainstABar,
-    /// Two coaxial frustums of different slopes: cone against cone.
+    /// Two coaxial frustums of different slopes and one apex: cone against
+    /// cone, meeting at the apex alone.
     TwoFrustumsOnOneAxis,
 }
 
@@ -174,12 +172,7 @@ fn a_block(
 
 fn a_pair(family: Family, draw: &mut Draw) -> Option<(Model, SolidKey, SolidKey)> {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    // A power-of-two slope, so every corner of the cone sits exactly on it, and
-    // never above `1/√2` so that a cube stood on its corner leans every one of
-    // its planes across it — see the note at the top of the file.
-    let slope = 2.0_f64.powi(i32::try_from(draw.next() % 3).ok()? - 3);
-    let far = draw.whole(6, 12);
-    let near = draw.whole(1, 4);
+    let [slope, near, far] = a_cones_sizes(draw)?;
 
     Some(match family {
         Family::AFrustumAgainstACornerUpCube | Family::APointedConeAgainstACornerUpCube => {
@@ -234,6 +227,19 @@ fn a_pair(family: Family, draw: &mut Draw) -> Option<(Model, SolidKey, SolidKey)
     })
 }
 
+/// A cone's slope and its near and far heights, `[slope, near, far]`, the first
+/// thing every family draws.
+///
+/// A power-of-two slope, so every corner of the cone sits exactly on it, and
+/// never above `1/√2` so that a cube stood on its corner leans every one of its
+/// planes across it — see the note at the top of the file.
+fn a_cones_sizes(draw: &mut Draw) -> Option<[f64; 3]> {
+    let slope = 2.0_f64.powi(i32::try_from(draw.next() % 3).ok()? - 3);
+    let far = draw.whole(6, 12);
+    let near = draw.whole(1, 4);
+    Some([slope, near, far])
+}
+
 /// Every rule, both ways round, over one family.
 fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>) {
     let policy = Policy::certified();
@@ -279,28 +285,60 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 ///
 /// # What is asserted and what is only reported
 ///
-/// The two curved-tool families are each asserted at **nothing answered**, and
-/// they have **one assertion apiece** because the reason is no longer the same
-/// one.
+/// The two curved-tool families have **one assertion apiece**: the bar, since
+/// Q1118, and the second frustum, since Q1122, are both asserted at everything
+/// answered.
 ///
 /// `AFrustumAgainstABar` is a cone coaxial with a pipe. That pair crosses in
 /// exactly two circles, so the old shared reason — a degree-four space curve —
 /// was never true of it (§50.11). **The pin was written to break the day
 /// `intersect` named the pair. `intersect` names it now, and the pin did not
-/// break**, because the fuse gets one step further and stops at a different
-/// wall: where three surfaces meet is only worked out when two of them are flat,
-/// and a cone, a pipe and a cap plane give one flat surface out of three. All 96
-/// refusals say so, and this is the number and the name to re-derive when
-/// `three_surfaces.rs` learns the case — which §50.6 keeps out of this unit.
+/// break**, because the fuse got one step further and stopped at a different
+/// wall: where three surfaces meet was only worked out when two of them were
+/// flat, and a cone, a pipe and a cap plane give one flat surface out of three.
+/// All 96 refusals said so.
 ///
-/// A pin that holds for a new reason is a pin saying nothing until the reason is
-/// written down, so the refusals are asserted by name here and not only counted.
+/// **`three_surfaces.rs` has learnt that case, and the rate did not move: 0 of
+/// 96 again.** A plane square to the axis a cone and a pipe share cuts each in a
+/// circle about one centre, so the three meet in a whole circle or nowhere, and
+/// `what_a_plane_square_to_their_one_axis_leaves` tells which from the squared
+/// radii (Q981). Every refusal moved on past that meet, and they no longer
+/// shared one wall: 48 said *nothing can put points in order along this curve*
+/// and 48 said *two curves on one face touch without crossing*.
 ///
-/// `TwoFrustumsOnOneAxis` is a cone against another cone, which §50.2 item 4
-/// keeps out of scope: two cones sharing an apex meet along rulings, which are
-/// lines, so naming the pair would turn `assemble`'s *"this crossing holds no
-/// straight line"* into a wrong answer rather than a refusal — the wrong answer
-/// §4.1 ranks below refusing. It **stays** pinned at nothing answered.
+/// **Both were the frustum's narrow rim, which is one circle three surfaces
+/// cut, and Q987 traced and drew it: 0 of 96 again.** The bar has the narrow
+/// cap's radius, so the cap's plane, the cone and the pipe all pass through
+/// the rim. Traced on slope a half, near 2 and far 8: with the frustum handed
+/// over first, the cap was arranged first, and the pipe's circle was drawn
+/// beside the rim it is, so two crossings left each node the same way and bent
+/// alike: the touch. With the bar first, its skin was, and the cone's two
+/// circles there were refused as a pair nothing could put points in order
+/// along: the order. `fuse/arrange.rs` now folds a curve
+/// two partners cut a face in into one crossing, starts a circle a cone and a
+/// pipe cross in, and reads the side of the cone off the rim it also cuts. Every
+/// face is cut into the pieces it has, and all 96 refused one step on, in
+/// `fuse/assemble.rs`, as an edge with one face along it. The rim came out of
+/// the frustum's faces named by the cap's plane and the cone, at the frustum's
+/// seam corner, and out of the bar's skin named by the cap's plane and the pipe,
+/// started where that pair starts a circle: two names for one edge, each with
+/// one face.
+///
+/// **Q1118 gave the rim one name and one corner: 96 of 96.** Two names of
+/// closed curves are one curve where both are one plane against a ball, a pipe
+/// or a cone and the three share more than a point, and the curve starts at the
+/// corner a curve two coincident faces bring would. Every answer holds what
+/// the closed forms say,
+/// [`every_fuse_of_a_frustum_and_a_bar_of_its_narrow_radius_holds_what_the_closed_forms_say`].
+///
+/// `TwoFrustumsOnOneAxis` is a cone against another cone, and was pinned at
+/// nothing answered while `intersect` refused every such pair. §50.2 item 4
+/// held it out because two cones sharing an apex meet along rulings — but only
+/// where their axes lean apart, and those are still refused. **This family's
+/// two frustums share an apex and an axis, and meet at the apex alone**, which
+/// is off both of their faces, so since Q1122 every one of its 96 fuses
+/// answers, and `assemble`'s *"this crossing holds no straight line"* is right
+/// about every cone-and-cone pair that reaches it.
 ///
 /// The two corner-up-cube families are asserted at **something answered and
 /// something refused**, and no more than that. Every plane of such a cube leans
@@ -440,37 +478,27 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                     family.named()
                 );
             }
-            Family::AFrustumAgainstABar => {
-                assert_eq!(
-                    answered,
-                    0,
-                    "{}: this is a cone coaxial with a pipe, which crosses in exactly two \
-                     circles (§50.11). `intersect` names that pair now, so what holds this \
-                     family at nothing answered is one step further down: where three \
-                     surfaces meet is only worked out when two of them are flat, and a cone, \
-                     a pipe and a cap plane give one flat surface out of three. It answered \
-                     {answered} of {fuses} here. When this breaks, re-derive the number over \
-                     this whole family and pin the measured one — do not relax it to a floor \
-                     and do not guess it (§19.1)",
-                    family.named()
-                );
-                assert_eq!(
-                    gave_up,
-                    BTreeMap::from([(THREE_SURFACES_AND_ONLY_ONE_FLAT.to_owned(), fuses)]),
-                    "{}: every one of these refusals is the three-surface meet, measured. A \
-                     different name here means the wall moved and this pin's reason has to be \
-                     re-derived with it (§15.10)",
-                    family.named()
-                );
-            }
+            Family::AFrustumAgainstABar => assert_eq!(
+                (answered, refused),
+                (96, 0),
+                "{}: this is a cone coaxial with a pipe, which crosses in exactly two circles \
+                 (§50.11). `intersect` names that pair, `three_surfaces.rs` answers a cap square \
+                 to their axis (Q981), the arrangement draws the narrow rim the cap, the cone \
+                 and the pipe share (Q987) and the assembly gives that rim one name (Q1118), so \
+                 every fuse was measured answering. It answered {answered} of {fuses} here, \
+                 refusing {gave_up:?}. When this breaks, re-derive the number over this whole \
+                 family rather than relax it (§19.1)",
+                family.named()
+            ),
             Family::TwoFrustumsOnOneAxis => assert_eq!(
-                answered,
-                0,
-                "{}: this is a cone against another cone, which §50.2 item 4 keeps out of \
-                 scope — two cones that share an apex meet along rulings, which are lines, so \
-                 naming the pair turns `the_crossing_of_these_runs_straight`'s `false` into a \
-                 wrong answer rather than a refusal. It stays pinned at nothing answered, and \
-                 it answered {answered} of {fuses}",
+                (answered, refused),
+                (96, 0),
+                "{}: two frustums of one apex and two slopes on one axis meet at that apex and \
+                 nowhere else, which `intersect` answers as touching since Q1122, so no face is \
+                 cut by the other cone; every fuse was measured answering, and \
+                 `a_cone_hollowed_along_its_axis.rs` checks what they hold. It answered \
+                 {answered} of {fuses} here. When this breaks, re-derive the number over the \
+                 family rather than relax it (§19.1)",
                 family.named()
             ),
             Family::AFrustumAgainstABlock => assert!(
@@ -483,6 +511,72 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
                  a rate: re-derive this number rather than relax it (§19.1)",
                 family.named()
             ),
+        }
+    }
+}
+
+/// Every fuse of the family `AFrustumAgainstABar` draws, against the closed
+/// forms, so that its rate counts answers that hold what they should.
+///
+/// The bar has the narrow cap's radius `r = slope · near` and runs from
+/// `−far` to `far` up the frustum's axis: it passes up through the narrow
+/// cap, whose rim it shares, and ends flush with the wide cap. Below the
+/// narrow cap it is outside the frustum and above it inside, since the
+/// frustum is `slope · z` wide at height `z`. So the frustum holds
+/// `π slope² (far³ − near³) / 3`, the bar below the narrow cap
+/// `πr² (far + near)` and the bar above it `πr² (far − near)`, and every rule
+/// is one solid: the union is the frustum and the bar below, the intersection
+/// the bar above, the frustum less the bar is the frustum bored through, and
+/// the bar less the frustum is the bar below.
+#[test]
+fn every_fuse_of_a_frustum_and_a_bar_of_its_narrow_radius_holds_what_the_closed_forms_say() {
+    let policy = Policy::certified();
+    let how_fine = Deflection::of(0.01).expect("a positive length");
+    let pi = core::f64::consts::PI;
+    let mut draw = Draw(0x5EED);
+    for _ in 0..DRAWS {
+        let [slope, near, far] =
+            a_cones_sizes(&mut draw.clone()).expect("every family draws these first");
+        let (model, cone, bar) = a_pair(Family::AFrustumAgainstABar, &mut draw)
+            .expect("every pair of this family is built");
+        let r = slope * near;
+        let frustum = pi * slope * slope * (far.powi(3) - near.powi(3)) / 3.0;
+        let below = pi * r * r * (far + near);
+        let above = pi * r * r * (far - near);
+        for (one, other, rule, holds) in [
+            (cone, bar, Rule::Union, frustum + below),
+            (bar, cone, Rule::Union, frustum + below),
+            (cone, bar, Rule::Intersection, above),
+            (bar, cone, Rule::Intersection, above),
+            (cone, bar, Rule::Difference, frustum - above),
+            (bar, cone, Rule::Difference, below),
+        ] {
+            let mut fused = model.clone();
+            let cone_first = one == cone;
+            let what = format!(
+                "the {rule:?} of slope {slope}, near {near}, far {far} (frustum first: \
+                 {cone_first})"
+            );
+            let answer = fused
+                .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what} answers since Q1118, and refused {why}"));
+            fused
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what} does not validate: {why}"));
+            let [solid] = answer.solids() else {
+                panic!("{what} is one solid, not {:?}", answer.solids());
+            };
+            let measured = fused
+                .solid(*solid)
+                .expect("the fuse made the key")
+                .measure(how_fine, &policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what} measures: {why}"));
+            assert!(
+                (measured.volume() - holds).abs() <= measured.volume_error(),
+                "{what} holds {} against {holds}, out by more than the {} its mesh declares",
+                measured.volume(),
+                measured.volume_error()
+            );
         }
     }
 }

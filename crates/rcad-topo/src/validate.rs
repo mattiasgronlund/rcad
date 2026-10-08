@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    Deflection, DynamicRange, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, NamedRun, Orientation,
-    Plane, PlaneAgreement, Point, SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE,
-    SIDE_OF_TORUS, Scale, Surface, Vector, which_two_surfaces_a_run_is_between,
-    which_way_a_closed_crossing_turns,
+    Cone, Deflection, DynamicRange, EdgeRun, HalfSpace, Isometry, NEAREST_F64_POINT_ROUNDOFF,
+    NamedRun, Orientation, Picker, Plane, PlaneAgreement, Point, SIDE_OF_A_HALF_SPACE,
+    SIDE_OF_CONE, SIDE_OF_CYLINDER, SIDE_OF_PLANE, SIDE_OF_SPHERE, SIDE_OF_TORUS, Scale, Surface,
+    Vector, how_a_plane_leans_against_a_cone, where_a_cones_apex_stands_against_a_plane,
+    which_two_surfaces_a_run_is_between, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::expansion::{
     expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
@@ -20,8 +21,8 @@ use crate::builder::the_ends_are_the_whole_of_it;
 use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
 use crate::holds::{
-    Trimming, how_the_axis_lies_on, the_face_across, the_side_this_face_lies_on,
-    what_trims_this_face,
+    Trimming, how_the_axis_lies_on, lie_along_one_line, the_face_across,
+    the_picker_naming_the_circle_through, the_side_this_face_lies_on, what_trims_this_face,
 };
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::measure::signed_volume_over;
@@ -235,7 +236,7 @@ impl Model {
         self.check_wires(scope)?;
         self.check_faces(scope, policy, log)?;
         self.check_which_side_of_its_trimming_each_curved_face_lies_on(scope)?;
-        self.check_closed_edges_are_walked_the_way_their_surfaces_wind(scope)?;
+        self.check_closed_edges_are_walked_the_way_their_surfaces_wind(scope, policy, log)?;
         self.check_no_flat_face_is_used_reversed(scope)?;
         self.check_no_face_use_carries_a_placement(scope)?;
         self.check_shells_and_solids(scope, policy, log)?;
@@ -545,10 +546,12 @@ impl Model {
     /// (`docs/decisions.md` §219.6) — so those are then asked how far the
     /// curve on each plane can reach off the other, against `rounding`, the
     /// room [`Model::what_writing_a_plane_down_costs`] gives a corner against
-    /// its own face's plane. Only a pipe has that bound
-    /// ([`how_far_a_crossing_reaches_off_another_plane`]); an edge that names
-    /// any other curved surface between two planes proved different is
-    /// refused, which is the safe way for a missing bound to fall.
+    /// its own face's plane. A pipe, a ball and a torus have that bound, and a
+    /// cone where the plane crosses it in an ellipse (Q612), in straight lines
+    /// through its apex ([`how_far_a_crossing_reaches_off_another_plane`],
+    /// Q613), or, for an arc, in a parabola or a hyperbola (Q1086); an edge whose
+    /// crossing has none between two planes proved different is refused, which
+    /// is the safe way for a missing bound to fall.
     ///
     /// # Errors
     ///
@@ -924,7 +927,10 @@ impl Model {
     /// **Which side of the partner the face's material lies on** is read off a
     /// corner of the face that is off it ([`the_side_this_face_lies_on`]). A
     /// face with no such corner — a bar's cap has its one corner *on* the wall —
-    /// says nothing, and is skipped rather than guessed at.
+    /// says nothing, and is skipped rather than guessed at. A corner past the
+    /// half-space picking the edge's curve out of two says the side a step from
+    /// the curve towards it meets, since the face may cross the other curve on
+    /// the way ([`which_side_of_it_this_face_lies_on`], row Q1190).
     ///
     /// # A circle round a ring's tube is not read off a corner
     ///
@@ -947,6 +953,36 @@ impl Model {
     ///   tube's own cross-section. That side is fact, not read, so the rule
     ///   holds the cap's walk to the way it faces, and the two coedges of the
     ///   edge running opposite ways carry that onto the ring's face.
+    ///
+    /// # Nor does a ring's face say at its circles round the axis
+    ///
+    /// A plane square to a ring's axis cuts it in two circles round the axis,
+    /// and the ring less those two is two pieces, one each side of the plane,
+    /// each with both circles as its whole edge (`docs/decisions.md` §243.8). A
+    /// half-ring's flat face has every corner on the ring and its wall every
+    /// corner on the plane, so no corner says which side either keeps, and the
+    /// sweep asked nothing of a half-ring whose flat face walks its hole the
+    /// same way round as its outline. Nor did the mesh notice: it drew the flat
+    /// face by its plane and its wires' places in the face, and the wall as the
+    /// half its outer circle's walk gives, which are the half-ring's own
+    /// triangles.
+    ///
+    /// So at a circle round the axis ([`a_circle_round_the_axis`]), the side of
+    /// the plane the ring's face keeps is read off the way its wire walks the
+    /// circle ([`the_side_its_wire_keeps`]). The plane is the face across, or
+    /// the circle's own plane where the run names one beside a pipe, cone or
+    /// ball across: a ring with its rim turned down to a pipe has the same two
+    /// pieces with the same corners (row Q1173). **With two such circles, along one
+    /// plane or two**, the face is one of the two pieces of the ring between
+    /// them, and each leaves its two circles going opposite ways round the
+    /// tube: that is what the face is held to, by each circle's side and the
+    /// side of the pipe of the ring's own radius that names it
+    /// ([`its_circles_round_the_axis_bound_a_band_of_the_tube`]), and no corner
+    /// is read there. Two planes leave the band between them or the ring less
+    /// it, a grooved ring's wall, and both have the same corners: read off the
+    /// other circle's, the grooved ring was refused (row Q1153). Where that
+    /// cannot be read, the side must be the side read at every other circle
+    /// along the same stored plane, and the corners are read as before.
     ///
     /// **Both gradients are the ones the solid uses**, which is the clause §36.6
     /// got wrong: it says the face's orientation does not come into it, and for a
@@ -985,9 +1021,13 @@ impl Model {
     fn check_closed_edges_are_walked_the_way_their_surfaces_wind(
         &self,
         scope: &Scope,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
     ) -> Result<()> {
         for slot in scope.solids.keys() {
-            self.check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(slot)?;
+            self.check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(
+                slot, policy, log,
+            )?;
         }
         Ok(())
     }
@@ -1043,9 +1083,14 @@ impl Model {
     fn check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(
         &self,
         slot: SolidSlot,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
     ) -> Result<()> {
         let solid = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
         for face in solid.faces() {
+            let bounds_a_band_of_the_tube =
+                its_circles_round_the_axis_bound_a_band_of_the_tube(solid, face, policy, log)?;
+            let mut sides_kept: Vec<SideKept> = Vec::new();
             for coedge in face.wires().flat_map(WireView::coedges) {
                 let edge = coedge.edge();
                 match edge.stored_run() {
@@ -1067,15 +1112,17 @@ impl Model {
                     across.location() == face.location(),
                     "two faces along one edge are placed apart, which the door refuses"
                 );
-                let at = edge.stored_ends()[0];
-                let outward = |used: FaceView<'_>| {
-                    gradient_of(&used.stored_surface(), at) * used.orientation().sign()
-                };
-                let names_it = which_two_surfaces_a_run_is_between(
-                    edge.stored_run(),
-                    [&face.stored_surface(), &across.stored_surface()],
-                );
+                let asked = what_the_rule_is_asked_at(face, across, edge);
+                let names_it = asked.names_it;
                 let partner = names_it[1];
+                if a_circle_round_the_axis(face.stored_surface(), names_it).is_some() {
+                    if bounds_a_band_of_the_tube {
+                        continue;
+                    }
+                    if let Some(kept) = the_side_its_wire_keeps(&asked, coedge)? {
+                        the_same_side_as_at_its_other_circles(&mut sides_kept, partner, kept)?;
+                    }
+                }
                 let read = match a_circle_round_the_tube(names_it) {
                     Some(RoundTheTube::OnTheRing) => {
                         the_other_circles_round_the_tube_are_walked_the_other_way(
@@ -1089,7 +1136,9 @@ impl Model {
                         Some(Decision::Neg)
                     }
                     Some(RoundTheTube::OnThePlane) | None if partner == across.stored_surface() => {
-                        which_side_of_it_this_face_lies_on(solid, face, across)?
+                        which_side_of_it_this_face_lies_on(
+                            solid, face, across, asked.at, policy, log,
+                        )?
                     }
                     Some(RoundTheTube::OnThePlane) | None => {
                         which_side_of_a_surface_a_run_names_this_face_lies_on(solid, face, partner)?
@@ -1098,16 +1147,11 @@ impl Model {
                 let Some(material) = read else {
                     continue;
                 };
-                let (partner_outward, material) = if partner == across.stored_surface() {
-                    (outward(across), turned_by(material, across.orientation()))
-                } else {
-                    (gradient_of(&partner, at), material)
-                };
                 let Some(walks_it_forward) = a_closed_crossing_is_walked_the_way_it_is_stored(
                     [&names_it[0], &names_it[1]],
-                    [outward(face), partner_outward],
-                    at,
-                    material,
+                    asked.outward,
+                    asked.at,
+                    turned_by(material, asked.partner_turn),
                 )?
                 else {
                     continue;
@@ -2005,12 +2049,14 @@ pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
 /// most the end's distance from `on` (the step from the end to `V` is along
 /// `n`, and `|m·n| ≤ 1`), plus `m·(X − V)` — and `X − V` lies in `on`, so
 /// only the part of `m` square to `n` reads it, which is `|n × m|` long.
+/// What is left is how far apart two points of the crossing can be, which is
+/// the crossing's width and is all each surface below has to say. What the
+/// end misses the crossing by is left out: it is multiplied by `|n × m|`,
+/// which is a rounding wherever the answer is near the room it is held to.
 ///
 /// **A pipe** of radius `R` about the unit axis `a` is crossed by `on` in an
 /// ellipse whose longest half-width is `R / |n·a|`, so `|X − V|` is at most
-/// twice that, for the whole ellipse and so for any arc of it. What the end
-/// misses the ellipse by is left out: it is multiplied by `|n × m|`, which is
-/// a rounding wherever the answer is near the room it is held to.
+/// twice that, for the whole ellipse and so for any arc of it.
 ///
 /// **A plane along the axis** crosses the pipe in two lines, and an arc there
 /// is drawn straight between its ends — `n·a == 0.0` is the very test the walk
@@ -2020,36 +2066,248 @@ pub(crate) fn the_curved_surface_a_run_names(run: &EdgeRun) -> Option<Surface> {
 /// can draw; `R / 0` is infinite, and the answer is a NaN or infinite, which
 /// no room holds.
 ///
+/// **A plane through a cone's apex, leaning at or past the cone's own angle**,
+/// crosses it in one or two of the straight lines through the apex, and an arc
+/// there is drawn straight between its ends just the same
+/// ([`the_walk_draws_it_straight`]), so two faces that cross in one of those
+/// lines are kept the same way (Q613). A closed run there is left to the
+/// width, which has none for it.
+///
+/// **A plane that misses a cone's apex, leaning at or past the cone's own
+/// angle**, crosses it in a parabola or a hyperbola, which runs on for ever and
+/// has no width. An arc of one gets the width of the arc instead, read off its
+/// two ends: [`how_wide_an_arc_of_one_branch_is`] (Q1086). A closed run there
+/// is left to the width, which has none for it, and the walk refuses it too.
+///
+/// **A ball** of radius `r` is crossed by any plane in a circle no wider than
+/// the ball, so the width is `2r`.
+///
+/// **A torus** lies inside the ball of radius `R + r` about its centre, for a
+/// ring of `R` and a tube of `r`, so whatever a plane crosses it in is no wider
+/// than `2(R + r)` — and a plane square to the axis through the centre crosses
+/// it in a circle that wide, so `R + r` alone would be short by half. The
+/// circles the walk draws for it are inside that ball too: round the axis they
+/// are at most `R + r` from it, and round the tube they are `r` across.
+///
+/// **A cone** is [`how_wide_a_plane_crosses_a_cone`].
+///
 /// Worked in plain `f64` as [`off_a_plane_by_no_more_than_writing_it_down_cost`]
 /// is: the distances are what [`Plane::signed_distance_to`] rounds, and the
-/// caller's room is sixteen times that.
+/// caller's room is sixteen times that. The cone's two widths are the
+/// exception, and say why.
 fn how_far_a_crossing_reaches_off_another_plane(
     on: &Plane,
     off: &Plane,
     run: &EdgeRun,
     [start, end]: [Point; 2],
 ) -> Option<f64> {
-    let (EdgeRun::RightRoundWhereItCrosses {
-        and: Surface::Cylinder(pipe),
-    }
-    | EdgeRun::PartOfWhereItCrosses {
-        and: Surface::Cylinder(pipe),
-        ..
-    }) = run
+    let (EdgeRun::RightRoundWhereItCrosses { and } | EdgeRun::PartOfWhereItCrosses { and, .. }) =
+        run
     else {
         return None;
     };
-    let leans = on.normal().dot(pipe.axis().direction());
-    if leans == 0.0 && matches!(run, EdgeRun::PartOfWhereItCrosses { .. }) {
+    let an_arc = matches!(run, EdgeRun::PartOfWhereItCrosses { .. });
+    if an_arc && the_walk_draws_it_straight(on, and) {
         return Some(
             off.signed_distance_to(start)
                 .abs()
                 .max(off.signed_distance_to(end).abs()),
         );
     }
-    let widest = 2.0 * pipe.radius() / leans.abs();
+    let widest = if let Surface::Cone(cone) = and
+        && an_arc
+        && the_walk_draws_one_branch_of_an_endless_bend(on, cone)
+    {
+        how_wide_an_arc_of_one_branch_is(cone, [start, end])
+    } else {
+        how_wide_a_plane_crosses(on, and)?
+    };
     let tilt = on.normal().cross(off.normal()).length();
     Some(off.signed_distance_to(start).abs() + on.signed_distance_to(start).abs() + widest * tilt)
+}
+
+/// Whether `on` crosses `and` in straight lines by the very tests the walk
+/// draws a run between them straight by, so that an arc there is the straight
+/// line between its two ends.
+///
+/// For a pipe that is `n·a == 0.0`, which is the walk's own test written out
+/// again. For a cone it is two proved signs, the apex on `on` and `E` at or
+/// below nothing, asked of `rcad-geom`'s own two functions for them. The walk
+/// asks the same two signs: it works both numbers out exactly, rounds each
+/// to the nearest `f64`, which keeps its sign, and refuses where it cannot work
+/// them out, so it never draws a curve where these say straight lines.
+fn the_walk_draws_it_straight(on: &Plane, and: &Surface) -> bool {
+    if let Surface::Cylinder(pipe) = and {
+        return on.normal().dot(pipe.axis().direction()) == 0.0;
+    }
+    if let Surface::Cone(cone) = and {
+        return where_a_cones_apex_stands_against_a_plane(on, cone) == Decision::Zero
+            && matches!(
+                how_a_plane_leans_against_a_cone(on, cone),
+                Decision::Zero | Decision::Neg
+            );
+    }
+    false
+}
+
+/// Whether the walk draws a run between `on` and `cone` along a parabola or one
+/// branch of a hyperbola: the apex off `on`, and `E` at or below nothing.
+///
+/// The same two proved signs [`the_walk_draws_it_straight`] asks, with the
+/// apex's the other way round, and for the same reason: the walk turns on the
+/// signs of those same two numbers. A sign that could not be proved is neither
+/// shape, and leaves the arc to [`how_wide_a_plane_crosses_a_cone`], which has
+/// no width for it.
+fn the_walk_draws_one_branch_of_an_endless_bend(on: &Plane, cone: &Cone) -> bool {
+    matches!(
+        where_a_cones_apex_stands_against_a_plane(on, cone),
+        Decision::Pos | Decision::Neg
+    ) && matches!(
+        how_a_plane_leans_against_a_cone(on, cone),
+        Decision::Zero | Decision::Neg
+    )
+}
+
+/// How far apart two points of the arc between `ends` can be, where a plane
+/// that misses `cone`'s apex crosses it in a parabola or in a hyperbola: twice
+/// `H·√(1 + t²)`, for `t` the slope and `H` the larger of the two ends' heights
+/// `|(end − apex)·w|` up the unit axis `w`.
+///
+/// **An arc of one branch is highest at one of its ends.** Take two directions
+/// in the plane: `across`, square to the axis as well, and `down`, square to
+/// `across`. A step along `across` does not change the height `(X − apex)·w`,
+/// so along the branch the height changes only with how far along `down` a
+/// point is. The branch is `vertex + across·u + down·c·u²` for a parabola and
+/// `centre + down·c·cosh σ + across·b·sinh σ` for one branch of a hyperbola —
+/// the two `where_a_plane_cuts_a_cone` in `rcad-geom` derives and walks — so
+/// the height is `h₀ + k·u²` or `h₀ + k·cosh σ`. A cone holds one point at
+/// height nought, its apex, which the plane misses, so the height keeps one
+/// sign along the branch; and it grows without end, since `|X − apex|` does
+/// and is `|height|·√(1 + t²)` on a cone. So `k` has the height's sign, and
+/// `|height|` is `|h₀| + |k|·u²` or `|h₀| + |k|·cosh σ`. Both are least at the
+/// vertex and grow either side of it, and on any stretch of the parameter they
+/// are largest at one end of it. The walk draws a branch between the
+/// parameters of the run's two ends (`walk_an_endless_bend`), so an arc is one
+/// such stretch, whether it lies to one side of the vertex or runs through it.
+///
+/// **So the arc lies in the ball of radius `H·√(1 + t²)` about the apex**, and
+/// no two of its points are further apart than that ball is across.
+/// `every_point_of_an_arc_of_one_branch_is_within_the_reach_of_its_ends` walks
+/// arcs of both shapes, through the vertex and to one side of it, and finds
+/// none outside.
+///
+/// **No arc runs from one nappe to the other.** A parabola lies wholly on one;
+/// a hyperbola's two branches lie one on each, and the walk refuses a run whose
+/// two ends it cannot prove are on one side of the apex
+/// (`which_branch_of_a_hyperbola_this_run_is`), so no curve between two ends on
+/// two nappes is ever drawn for this to bound. The test file
+/// `a_closed_edge_between_two_planes_its_curve_leaves.rs` builds one, in
+/// `an_arc_from_one_branch_of_a_hyperbola_to_the_other_is_refused`.
+///
+/// What an end misses the branch by is left out, as it is for every width
+/// here: it moves `H` by no more than itself, and the width is multiplied by
+/// `|n × m|`. The heights are worked in intervals and taken at the most they
+/// can be, and `‖w‖` at the least; the products and the root at the end round
+/// by an ulp or two of the width, as the ellipse's do.
+fn how_wide_an_arc_of_one_branch_is(cone: &Cone, ends: [Point; 2]) -> f64 {
+    let along = cone.axis().direction().components().map(Interval::exactly);
+    let apex = cone.apex().coordinates().map(Interval::exactly);
+    let [one, other] = ends.map(|end| {
+        let at = end.coordinates().map(Interval::exactly);
+        let height = dot([0, 1, 2].map(|axis| at[axis] - apex[axis]), along);
+        height.lo().abs().max(height.hi().abs())
+    });
+    let slope = Interval::exactly(cone.slope());
+    // `height = (X − apex)·w/‖w‖`, and `|X − apex|` is `|height|·√(1 + t²)`.
+    let reach_per_height = (Interval::exactly(1.0) + slope * slope).hi() / dot(along, along).lo();
+    2.0 * one.max(other) * reach_per_height.sqrt()
+}
+
+/// How far apart two points of the curve `on` crosses `and` in can be, for the
+/// four curved surfaces [`how_far_a_crossing_reaches_off_another_plane`] says
+/// why of; `None` for any other.
+///
+/// Asked one surface at a time rather than by a `match`, which would need a
+/// wildcard arm for the kinds [`Surface`] has yet to grow (`docs/decisions.md`
+/// §40). A flat `and` between flat faces says nothing about where the edge
+/// bends, and `check_something_curved_says_where_this_edge_bends` has refused it
+/// before this is asked.
+fn how_wide_a_plane_crosses(on: &Plane, and: &Surface) -> Option<f64> {
+    if let Surface::Sphere(ball) = and {
+        return Some(2.0 * ball.radius());
+    }
+    if let Surface::Torus(ring) = and {
+        return Some(2.0 * (ring.ring_radius() + ring.tube_radius()));
+    }
+    if let Surface::Cone(cone) = and {
+        return how_wide_a_plane_crosses_a_cone(on, cone);
+    }
+    let Surface::Cylinder(pipe) = and else {
+        return None;
+    };
+    Some(2.0 * pipe.radius() / on.normal().dot(pipe.axis().direction()).abs())
+}
+
+/// How far apart two points of the ellipse `on` crosses `cone` in can be, or
+/// `None` where the crossing is not proved to be an ellipse.
+///
+/// For `n` and `w` the plane's normal and the cone's axis at length one, `t`
+/// the slope and `h` the apex's distance from `on`, the crossing is an ellipse
+/// wherever `E = (n·w)² − t²|n × w|²` is above zero, and its two half-widths
+/// are `|h|t/E` and `|h|t/√E` — `where_a_plane_cuts_a_cone` in `rcad-geom`
+/// derives both, and draws that ellipse. `E` is at most `(n·w)²`, which is at
+/// most one, so the first is the longer, and no two points of an ellipse are
+/// further apart than twice its longer half-width: the width is `2|h|t/E`.
+///
+/// **That is the whole ellipse, on whichever nappe it lies.** Only `|h|` enters
+/// it, so the apex may stand on either side of `on`; and a frustum is a piece of
+/// the same double cone [`Cone`] stores by its apex and slope, so its rim is a
+/// piece of this same ellipse. A plane through the apex that cuts across the
+/// cone meets it there and nowhere else, and gets a width of nothing.
+///
+/// **Worked in intervals, unlike the rest.** `E` is a small difference of two
+/// near-equal numbers wherever the plane leans at nearly the cone's own angle,
+/// and `f64` can round it up by more than it is, which would shrink the width.
+/// So `E` is taken at the least it can be and `h` at the most; the division and
+/// the root at the end round by an ulp or two of the width, which is a rounding
+/// of a term already held to sixteen times the rounding.
+///
+/// **A plane whose `E` is not proved above zero gets no width**: a parabola or
+/// a hyperbola runs on for ever, and a closed run on one names nothing the walk
+/// draws. An arc of one gets no width here either, and needs none: the caller
+/// has already bounded it by its two ends, along a straight line through the
+/// apex (Q613) and along a parabola or a hyperbola alike
+/// ([`how_wide_an_arc_of_one_branch_is`], Q1086).
+fn how_wide_a_plane_crosses_a_cone(on: &Plane, cone: &Cone) -> Option<f64> {
+    let normal = on.normal().components().map(Interval::exactly);
+    let along = cone.axis().direction().components().map(Interval::exactly);
+    let apex = cone.apex().coordinates().map(Interval::exactly);
+    let slope = Interval::exactly(cone.slope());
+    let square_to_both = [
+        normal[1] * along[2] - normal[2] * along[1],
+        normal[2] * along[0] - normal[0] * along[2],
+        normal[0] * along[1] - normal[1] * along[0],
+    ];
+    let up = dot(normal, along);
+    let leaning = up * up - slope * slope * dot(square_to_both, square_to_both);
+    if leaning.lo() <= 0.0 {
+        return None;
+    }
+    let reach = dot(normal, apex) - Interval::exactly(on.offset());
+    let furthest_reach = reach.lo().abs().max(reach.hi().abs());
+    // `h = reach/‖n‖` and `E = leaning/(‖n‖²‖w‖²)`, put into `2|h|t/E`.
+    Some(
+        2.0 * furthest_reach
+            * cone.slope()
+            * dot(normal, normal).hi().sqrt()
+            * dot(along, along).hi()
+            / leaning.lo(),
+    )
+}
+
+/// `one·other`, with every rounding on the way taken outward.
+fn dot(one: [Interval; 3], other: [Interval; 3]) -> Interval {
+    one[0] * other[0] + one[1] * other[1] + one[2] * other[2]
 }
 
 /// Every one of `held` named exactly once by `named`, and none of them left out.
@@ -2128,7 +2386,7 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// finer meshes are read for a sign and thrown away**; nothing a caller measures
 /// is worked out here.
 ///
-/// # A fold is retried; every other refusal still stops it
+/// # A fold is retried; every other refusal but one still stops it
 ///
 /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] is the one refusal a finer
 /// deflection is *expected* to cure, and it is cured the way a crossing is in
@@ -2139,11 +2397,40 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// mesh came back flat and whose next mesh folded, so the bulge a third mesh
 /// would have found was never asked for.
 ///
-/// **Every other refusal is still the stopping condition and not a failure**:
-/// the coarsest mesh was built and checked, and what this is looking for is a
-/// point off the flat that no mesh of this solid holds. Handing the refusal on
-/// would replace a named answer about the shape with one about a deflection
-/// nobody asked for.
+/// **Every other refusal but one is still the stopping condition and not a
+/// failure**: the coarsest mesh was built and checked, and what this is looking
+/// for is a point off the flat that no mesh of this solid holds. Handing the
+/// refusal on would replace a named answer about the shape with one about a
+/// deflection nobody asked for.
+///
+/// # Placing it took away the space is handed on
+///
+/// [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] is the one refusal that
+/// *is* the answer this is looking for. A finer mesh refused that way found the
+/// point off the flat: it encloses space where the solid was made. It is only
+/// where the placement puts it that the space is gone. Stopping there would
+/// return the zero, and the caller would then call a sound solid
+/// [`Invalid::VolumeIsNotPositive`], "its faces do not point outwards", which
+/// is the misreport `docs/decisions.md` §333.6 objects to. So it is handed on,
+/// and the caller gets the name [`SolidView::mesh`] gives the same solid.
+///
+/// **No solid is known to reach that arm, so it is a guard** (§379.5, Q783).
+/// To reach it the coarsest mesh has to enclose exactly nothing both where the
+/// solid was made and where it lands, and a finer one has to enclose space
+/// where it was made. Where it was made, a sound solid's coarsest mesh encloses
+/// exactly nothing when every point of it lies on one plane, and the shape
+/// §41.6 found that way, a cap of a ball, now carries a point off its rim's
+/// plane: a cut across a rim that is one closed edge is charged two steps.
+/// A cap whose rim is **two** half circles, which that charge does not cover,
+/// was built to look for the gap, 0.25 high and put out at `2^52` where the
+/// ulp is 1. Its coarsest mesh still encloses `912.6666666666666` where it was
+/// made, against `0` where it lands, so it is refused by name before this loop
+/// is reached
+/// (`a_thin_cap_placed_where_its_height_rounds_away_is_refused_by_name`). And
+/// with this loop logging every solid that reached it, the whole `rcad-topo`
+/// suite sent one: a model of the fuzz corpus whose coarsest mesh was flat and
+/// whose first rung was refused `DeflectionBelowWhatAMeshCanReach`, its floor
+/// at `1.2e217`. That is a search, not a proof, so the arm stays.
 ///
 /// # What stops it
 ///
@@ -2166,8 +2453,9 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// # Errors
 ///
 /// Whatever [`the_coarsest_mesh_whose_sides_do_not_cross`] makes of the solid,
-/// and [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] when two faces along one
-/// side do not.
+/// [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] when two faces along one
+/// side do not, and [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] when a
+/// finer mesh is refused that way.
 pub(crate) fn how_much_space_a_curved_solid_encloses(
     view: SolidView<'_>,
     policy: &Policy,
@@ -2189,11 +2477,26 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
                 }
             }
             Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
-            Err(_) => break,
+            Err(why) => {
+                hand_on_a_refusal_that_found_the_space(why)?;
+                break;
+            }
         }
         room /= 2.0;
     }
     Ok(0.0)
+}
+
+/// `Err(why)` when a finer mesh of the zero ladder was refused because it found
+/// the space and the placement took it away, and `Ok(())`, which stops the
+/// ladder, for any other refusal.
+///
+/// The doc comment of [`how_much_space_a_curved_solid_encloses`] says why.
+fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
+    if matches!(why, Error::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }) {
+        return Err(why);
+    }
+    Ok(())
 }
 
 /// The solid meshed as coarsely as a mesh gets, or — when that mesh's own sides
@@ -2224,7 +2527,8 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 /// points and the two faces stop drawing the same side (`docs/decisions.md`
 /// §285.4). The zero ladder in [`how_much_space_a_curved_solid_encloses`]
 /// already retried a fold one step on (§208.3); this is the same retry at the
-/// first mesh.
+/// first mesh. It is asked further down than a crossing is, for the reason
+/// under "What stops a fold".
 ///
 /// # Why this is not a fixed finer deflection
 ///
@@ -2239,8 +2543,8 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 /// stops decides what it costs and never what it lets through: a solid that
 /// stops early is refused, never passed.
 ///
-/// It stops below half the distance between the two closest corners of the
-/// solid that are not in the same place — the finest feature the sweep can read
+/// A crossing stops below half the distance between the two closest corners of
+/// the solid that are not in the same place — the finest feature the sweep can read
 /// without meshing. That is **a cost bound and not a proof that finer would not
 /// help**: a wall thinner than half its nearest corner pair, between two arcs
 /// whose corners sit far apart, would still be refused, as a crossing. The model's own linear tolerance was the first floor tried, and it is
@@ -2254,9 +2558,48 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 /// [`Error::MoreMeshPointsThanASolidWillHold`] and a patch with more triangles
 /// than the triangulator will hold each end it too.
 ///
-/// A solid that folds at every deflection walks the same ladder, down to the
-/// same floor: the floor is the solid's corners and not which refusal came
-/// back, so a fold costs no more meshes than a crossing does.
+/// # What stops a fold
+///
+/// **The corner floor is argued for chords that cross, and a fold is not
+/// that.** A chord at deflection `d` strays at most `d`, so a crossing goes once
+/// `d` is under half the gap: linear in the gap. A fold is one side two patches
+/// both draw through their insides. A point a patch puts inside is its own, so
+/// both ends of that side are points the two faces share, on the edges between
+/// them, and where those are two curves apart the side spans the gap between
+/// them. It goes once one of the two patches will not draw a side that long and
+/// puts a point inside instead. `rcad-mesh` takes a point inside wherever a
+/// triangle's charge is over `d`, and charges a side `L` long across a curved
+/// surface at least `L²/(3ρ)`, with `ρ` the radius
+/// [`how_flat_a_curved_face_gets`] reads for it; so such a side is gone once
+/// `d < L²/(3ρ)`. **Quadratic in the gap**, where the corner
+/// floor is linear: the bulge a curved face has over a gap `L` is about
+/// `L²/(8ρ)`, which is small beside `L` whenever the face is wide beside the
+/// gap.
+///
+/// The ball less a pointed cone in `a_cone_hollowed_along_its_axis.rs` is that
+/// case: a ring of the ball's band and the cone's band between two circles 2
+/// apart, on a ball of radius 3. Both bands drew the same sides from circle to
+/// circle at every deflection down to the corner floor of 1 and were refused;
+/// the ball takes a point inside below `4/9`, and at 0.4375 the ring measures
+/// its closed form.
+///
+/// So a fold is asked down to `closest²/(6ρ)` — half of `closest²/(3ρ)`, so
+/// that the halving lands on a rung below it — with `closest` standing in for
+/// the gap the way it does for a crossing, and `ρ` the flattest radius any
+/// curved face of the solid bends at ([`how_flat_a_curved_face_gets`]). Never
+/// above the corner floor, and the corner floor alone when a face is on a
+/// surface that function has not been taught. That is again **a cost bound and
+/// not a proof**: two curves closer than any two corners still fold past it.
+/// What it costs is a mesh whose sides across the flattest face are about
+/// `closest / √2`, which is the size of the finest feature the corners show.
+///
+/// **It still ends.** The halving from half the box's width reaches the floor
+/// in about `log₂(3ρ·width/closest²)` rungs, and a solid that folds at every
+/// deflection walks those rungs and is refused with the finest fold. The three
+/// refusals that end a crossing's ladder before its floor end this one too.
+/// Where `closest²` rounds to zero, or `ρ` is out of range, the floor is zero,
+/// and `Deflection::of` refusing a length that is not above zero ends it, as it
+/// ends the zero ladder.
 ///
 /// Whichever ends it, **the finest mesh's crossing or fold is what is handed
 /// back**. A face that meshed at a finer deflection was not what stopped the
@@ -2291,10 +2634,23 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     let Some(closest) = how_close_two_corners_come(view) else {
         return Err(finest_refusal);
     };
-    let finest = closest / 2.0;
+    let finest_for_a_crossing = closest / 2.0;
+    let finest_for_a_fold = match how_flat_a_curved_face_gets(view, [low, high]) {
+        Some(flattest) if flattest > 0.0 => {
+            finest_for_a_crossing.min(closest * closest / (6.0 * flattest))
+        }
+        _ => finest_for_a_crossing,
+    };
+    let finest = |refusal: &Error| {
+        if its_sides_cross(refusal) {
+            finest_for_a_crossing
+        } else {
+            finest_for_a_fold
+        }
+    };
     let (low, high) = (low.coordinates(), high.coordinates());
     let mut room = (0..3).fold(0.0, |widest: f64, axis| widest.max(high[axis] - low[axis])) / 2.0;
-    while room >= finest {
+    while room >= finest(&finest_refusal) {
         let Ok(less) = Deflection::of(room) else {
             break;
         };
@@ -2359,6 +2715,58 @@ fn how_close_two_corners_come(view: SolidView<'_>) -> Option<f64> {
     closest
 }
 
+/// The largest `ρ` such that `rcad-mesh` charges a side `L` long across any
+/// curved face of the solid at least `L²/(3ρ)`, or `None` when a face's
+/// surface is one this has not been taught. Zero when every face is flat.
+///
+/// Each is read off how `rcad-mesh`'s `how_far_a_flat_piece_strays` charges
+/// a triangle, which `a_step_that_stays_within` turns round:
+///
+/// - **A ball or a pipe** is charged `L²/(3r)`, `L` the whole chord on a ball
+///   and the chord across the axis on a pipe, so `ρ` is its radius.
+/// - **A cone** is charged `L²/(2·w·√(1 + t²))` across a ruling, `w` the widest
+///   the patch is from the axis, so `ρ = w·√(1 + t²)` covers it with room. The
+///   face lies inside `within`, and a point of the cone is its slope times how
+///   far up the axis it is from the axis, which over a box is largest at one of
+///   its corners; so the widest corner of `within` bounds `w`.
+/// - **A torus** is charged `a²/(3r) + b²/(2S)` for a side `a` round the tube
+///   and `b` round the ring, `S ≤ R + r`. Its chord is at most `a + b`, so
+///   `L² ≤ 2(a² + b²)` and the charge is at least `L²/(6(R + r))`: `ρ` is
+///   `2(R + r)`.
+fn how_flat_a_curved_face_gets(view: SolidView<'_>, within: [Point; 2]) -> Option<f64> {
+    let [low, high] = within.map(|corner| corner.coordinates());
+    let corners_of_the_box = (0..8).map(|which: usize| {
+        let pick = |axis: usize| {
+            if which >> axis & 1 == 0 {
+                low[axis]
+            } else {
+                high[axis]
+            }
+        };
+        Point::new(pick(0), pick(1), pick(2))
+    });
+    let mut flattest = 0.0_f64;
+    for face in view.faces() {
+        let radius = match face.surface() {
+            Surface::Plane(_) => continue,
+            Surface::Sphere(ball) => ball.radius(),
+            Surface::Cylinder(pipe) => pipe.radius(),
+            Surface::Torus(ring) => 2.0 * (ring.ring_radius() + ring.tube_radius()),
+            Surface::Cone(cone) => {
+                let up = cone.axis().direction();
+                let widest = corners_of_the_box
+                    .clone()
+                    .map(|corner| cone.radius_at(up.dot(corner - cone.apex())))
+                    .fold(0.0, f64::max);
+                widest * cone.slope().hypot(1.0)
+            }
+            _ => return None,
+        };
+        flattest = flattest.max(radius);
+    }
+    Some(flattest)
+}
+
 /// Whether the triangulator refused a face because two pieces of its boundary
 /// met where they should not — the refusals a chord cutting across a hole, or
 /// across another chord, comes back as.
@@ -2367,7 +2775,12 @@ fn how_close_two_corners_come(view: SolidView<'_>) -> Option<f64> {
 /// cure it. Every corner of a loop sits on that loop's own edges, so two of them
 /// on one point of the chart means the wire meets itself there, or the chart
 /// sends two places to one — a seam used twice, two poles rounding onto the
-/// centre. Both are fixed by the solid, not by where the chords fall. The third
+/// centre. A wire that sets off from one corner of the model twice, and is two
+/// loops touching there, no longer gets this far: the mesher cuts it apart
+/// first (`docs/decisions.md` §364). What meets itself here and is still
+/// refused is a slit, a loop that passes a pole, or one whose two visits are
+/// not one point of the chart. All of it is fixed by the solid, not by where
+/// the chords fall. The third
 /// way, two chord points of different edges landing on the same double by
 /// accident, needs those edges within a rounding of each other, far below the
 /// halving's floor of half the closest corner pair, so the halving could only
@@ -2648,15 +3061,16 @@ pub(crate) fn side_of_surface(surface: &Surface, point: PredicatePoint) -> Decis
 /// # Panics
 ///
 /// If `material_side` is neither [`Decision::Pos`] nor [`Decision::Neg`].
-/// This one *is* a broken internal invariant and not caller input: the only
-/// caller, [`Model::validate`](crate::Model::validate)'s own
-/// `check_closed_edges_are_walked_the_way_their_surfaces_wind`, only ever
-/// passes a value [`which_side_of_it_this_face_lies_on`] or
+/// This one *is* a broken internal invariant and not caller input:
+/// [`Model::validate`](crate::Model::validate)'s own
+/// `check_closed_edges_are_walked_the_way_their_surfaces_wind` passes
+/// [`Decision::Neg`] when it reads a side off a wire or knows a cap's, and
+/// otherwise a value [`which_side_of_it_this_face_lies_on`] or
 /// [`which_side_of_a_surface_a_run_names_this_face_lies_on`] read off a real
-/// corner, and both hand back [`the_side_this_face_lies_on`], whose own
-/// `Ok(Some(_))` is never anything but
-/// [`Decision::Pos`] or [`Decision::Neg`] — it filters `Zero` out and turns
-/// `Undecidable` into an `Err` before it can reach here.
+/// corner, and both hand back [`the_side_this_face_lies_on`] or
+/// [`the_side_this_face_lies_on_with_a_picker`], whose own `Ok(Some(_))` is
+/// never anything but [`Decision::Pos`] or [`Decision::Neg`] — each filters
+/// `Zero` out and turns `Undecidable` into an `Err` before it can reach here.
 ///
 /// If [`which_way_a_closed_crossing_turns`] grows a fifth answer. [`Decision`]
 /// is `#[non_exhaustive]`, so a last arm is forced; a fifth kind of answer to
@@ -2709,8 +3123,28 @@ fn turned_by(side: Decision, orientation: Orientation) -> Decision {
     }
 }
 
-/// Which side of the face across an edge this face lies on, as its own corners
-/// say.
+/// Which side of the face across a closed edge this face lies on next to that
+/// edge, as its own corners say. `at` is the edge's corner where it is stored.
+///
+/// **A corner's own sign is that side only where the partner does not cross
+/// the face again between them.** Where the two surfaces cross in two closed
+/// curves, one each side of a flat half-space facing along their axis, a face
+/// bounded by one of them can run on across the other, which is no edge of it.
+/// A bar's wall from below a pointed cone's apex up to the cone's own nappe
+/// crosses the other nappe on the way: its corner at the bottom is inside the
+/// cone, and next to the edge the wall is outside it. Read off that corner, the
+/// bar and the cone's union was refused
+/// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`] (row Q1190).
+///
+/// So a corner past the half-space picking the edge's curve out says the side a
+/// step from the curve towards that half-space meets
+/// ([`what_a_corner_past_the_picker_says`]), and every other corner says its own
+/// sign, as before. That holds for any face on the surface bounded by the
+/// curve, whatever else of the partner it crosses: in front of the half-space
+/// the partner crosses the surface in this curve alone, so a corner there is
+/// on the side it reads, and everything past it is on the curve's side towards
+/// it. `arrange.rs`'s `whether_past_the_picker` reads a point of the fuse's
+/// arrangement the same way.
 ///
 /// `None` when every corner of it is on that surface and nothing says — a bar's
 /// cap has its one corner on the wall, and that is the case §36.6 already names.
@@ -2718,6 +3152,9 @@ fn which_side_of_it_this_face_lies_on(
     solid: SolidView<'_>,
     face: FaceView<'_>,
     across: FaceView<'_>,
+    at: Point,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> Result<Option<Decision>> {
     let surface = across.surface();
     let mut corners_on_it = Vec::new();
@@ -2728,13 +3165,246 @@ fn which_side_of_it_this_face_lies_on(
             corners_on_it.push(edge.end().key());
         }
     }
-    the_side_this_face_lies_on(
+    let trimming = Trimming {
+        surface,
+        corners_on_it,
+    };
+    let Some(past) = what_a_corner_past_the_picker_says(
+        &face.stored_surface(),
+        &across.stored_surface(),
+        at,
+        policy,
+        log,
+    )?
+    else {
+        return the_side_this_face_lies_on(face, &trimming);
+    };
+    the_side_this_face_lies_on_with_a_picker(
         face,
-        &Trimming {
-            surface,
-            corners_on_it,
-        },
+        &trimming,
+        &past.moved_into_place(&face.location()),
     )
+}
+
+/// The flat half-space picking a closed edge's curve out of the two its
+/// surfaces cross in, and the side of the partner a step from the curve
+/// towards that half-space's flat surface meets.
+struct PastThePicker {
+    /// Everything on or in front of it holds the edge's curve and not the
+    /// other one.
+    picker: HalfSpace,
+    /// The partner's sign a step past the curve towards the flat surface:
+    /// [`Decision::Zero`] where the two surfaces touch rather than cross there.
+    side: Decision,
+}
+
+impl PastThePicker {
+    /// The same, with the half-space moved where the face sits. A movement
+    /// keeps which side of the curve a step goes to, so the side comes along
+    /// unchanged.
+    fn moved_into_place(&self, movement: &Isometry) -> Self {
+        Self {
+            picker: self.picker.transformed(movement),
+            side: self.side,
+        }
+    }
+}
+
+/// What a corner past the half-space picking out the curve through `at` says,
+/// for a face on `surface` with `partner` across, all three where stored; `None`
+/// where every corner says its own sign.
+///
+/// **Only where both curves go right round one axis and the half-space faces
+/// exactly along it**, which are the pairs `arrange.rs`'s
+/// `whether_past_the_picker` names: a pipe and anything [`intersect`] cuts it in
+/// two such curves by, the axis being the pipe's; a cone and a pipe, a second
+/// cone or a ball on its axis, the axis being the cone's; and a ball and a cone
+/// whose axis runs through its centre, the axis again being the cone's. Each
+/// curve then cuts the surface in two, the half-space holds the edge's curve
+/// and not the other, and everything of the surface past the half-space's flat
+/// surface is on the curve's side towards it: on a cone through the apex, which
+/// joins the two nappes, and on a ball as the cap past the flat surface.
+///
+/// The half-space is the one [`intersect`] names the curve by, found the one
+/// way that is looked up ([`the_picker_naming_the_circle_through`]). A pair
+/// `intersect` refuses to name, a cone leaning off a pipe's axis as a
+/// countersink on a turned bore comes back from a file, has no half-space, and
+/// its corners say their own signs as they always did.
+///
+/// The side is the partner's gradient against the step from `at` towards the
+/// flat surface, laid onto the surface: `|g|²·d − (g·d)·g` for the surface's
+/// gradient `g` and `d` the half-space's normal turned round, and `d` itself on
+/// a pipe, whose gradient is square to its axis. On a cone that runs along the
+/// ruling, and on a ball along the line of longitude.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when [`intersect`] cannot settle the two surfaces.
+fn what_a_corner_past_the_picker_says(
+    surface: &Surface,
+    partner: &Surface,
+    at: Point,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<PastThePicker>> {
+    if !matches!(
+        partner,
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+    ) {
+        return Ok(None);
+    }
+    let axis = if let Surface::Cylinder(pipe) = surface {
+        pipe.axis()
+    } else if let (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) =
+        (surface, partner)
+    {
+        cone.axis()
+    } else {
+        return Ok(None);
+    };
+    let named = match the_picker_naming_the_circle_through(
+        surface,
+        partner,
+        PredicatePoint::from(at.coordinates()),
+        policy,
+        log,
+    ) {
+        Ok(named) => named,
+        Err(Error::Geometry(_)) => return Ok(None),
+        Err(other) => return Err(other),
+    };
+    let Some(Picker::InFrontOf(picker)) = named else {
+        return Ok(None);
+    };
+    if !lie_along_one_line(picker.normal().components(), axis.direction().components()) {
+        return Ok(None);
+    }
+    let down = picker
+        .normal()
+        .components()
+        .map(|along| Interval::exactly(-along));
+    let step = if matches!(surface, Surface::Cylinder(_)) {
+        down
+    } else {
+        let across = the_way_out_of(surface, at);
+        let (squared, leaning) = (dot(across, across), dot(across, down));
+        core::array::from_fn(|index| squared * down[index] - leaning * across[index])
+    };
+    Ok(Some(PastThePicker {
+        picker,
+        side: dot(the_way_out_of(partner, at), step).sign(),
+    }))
+}
+
+/// [`the_side_this_face_lies_on`], with a corner past `past`'s half-space
+/// saying `past`'s side rather than its own sign.
+///
+/// # Errors
+///
+/// [`Invalid::AFaceStraddlesSomethingTrimmingIt`] when two corners say
+/// opposite sides, and [`Error::Undecidable`] when a corner's side of the
+/// half-space or of the partner, or the side `past` says, could not be settled.
+fn the_side_this_face_lies_on_with_a_picker(
+    face: FaceView<'_>,
+    trimming: &Trimming,
+    past: &PastThePicker,
+) -> Result<Option<Decision>> {
+    let mut found: Option<Decision> = None;
+    for corner in face
+        .wires()
+        .flat_map(WireView::coedges)
+        .map(CoedgeView::start)
+    {
+        if trimming.corners_on_it.contains(&corner.key()) {
+            continue;
+        }
+        let at = PredicatePoint::from(corner.point().coordinates());
+        let against_the_picker = past.picker.side_of_point(at);
+        if let Decision::Undecidable { enclosure } = against_the_picker {
+            return Err(gave_up_at(SIDE_OF_A_HALF_SPACE, at, enclosure));
+        }
+        let side = if against_the_picker == Decision::Neg {
+            past.side
+        } else {
+            assert!(
+                matches!(against_the_picker, Decision::Pos | Decision::Zero),
+                "a corner came back with a decision nothing here knows: {against_the_picker:?}"
+            );
+            side_of_surface(&trimming.surface, at)
+        };
+        if let Decision::Undecidable { enclosure } = side {
+            return Err(gave_up_at(
+                name_of_surface(&trimming.surface),
+                at,
+                enclosure,
+            ));
+        }
+        if side == Decision::Zero {
+            continue;
+        }
+        assert!(
+            matches!(side, Decision::Pos | Decision::Neg),
+            "a corner came back with a decision nothing here knows: {side:?}"
+        );
+        match found {
+            None => found = Some(side),
+            Some(already) if already == side => {}
+            Some(_) => return Err(Invalid::AFaceStraddlesSomethingTrimmingIt.into()),
+        }
+    }
+    Ok(found)
+}
+
+/// The refusal for a sign `named` could not settle at `at`.
+fn gave_up_at(named: &'static str, at: PredicatePoint, enclosure: f64) -> Error {
+    let mut records = ProvenanceLog::new();
+    records.push(Record::new(
+        named,
+        &[at],
+        Level::Exact,
+        enclosure,
+        Measures::Area,
+    ));
+    Error::Undecidable { records }
+}
+
+/// Which way a ball, a pipe or a cone faces outwards at `at`, as a box, from
+/// the numbers it stores with no normalization in it (§31.2): `x` for a ball
+/// and `|w|²·x − k·(x·w)·w` for the other two, `x` running from the centre,
+/// the axis's origin or the apex, `w` the axis direction, and `k` one for a
+/// pipe and `1 + slope²` for a cone.
+///
+/// # Panics
+///
+/// On any other kind, which [`what_a_corner_past_the_picker_says`] never hands
+/// it.
+fn the_way_out_of(surface: &Surface, at: Point) -> [Interval; 3] {
+    let from_it = |to: Point| -> [Interval; 3] {
+        let (at, to) = (at.coordinates(), to.coordinates());
+        core::array::from_fn(|axis| Interval::exactly(at[axis]) - Interval::exactly(to[axis]))
+    };
+    if let Surface::Sphere(ball) = surface {
+        return from_it(ball.centre());
+    }
+    let (out, along, steepness) = if let Surface::Cylinder(pipe) = surface {
+        (
+            from_it(pipe.axis().origin()),
+            pipe.axis().direction(),
+            Interval::exactly(1.0),
+        )
+    } else if let Surface::Cone(cone) = surface {
+        let slope = Interval::exactly(cone.slope());
+        (
+            from_it(cone.apex()),
+            cone.axis().direction(),
+            Interval::exactly(1.0) + slope * slope,
+        )
+    } else {
+        panic!("only a ball, a pipe or a cone is read past a picker, not {surface:?}");
+    };
+    let along = along.components().map(Interval::exactly);
+    let (squared, shadow) = (dot(along, along), steepness * dot(out, along));
+    core::array::from_fn(|axis| squared * out[axis] - shadow * along[axis])
 }
 
 /// Which side of a surface that a run names, and that no face of the solid
@@ -2882,6 +3552,308 @@ fn the_other_circles_round_the_tube_are_walked_the_other_way(
         }
     }
     Ok(())
+}
+
+/// The side of one stored plane a ring's face keeps at one of its circles
+/// round the axis, as its wire says.
+struct SideKept {
+    plane: Surface,
+    kept: Decision,
+}
+
+/// The ring and the plane, when a closed edge of a face stored on `on` is one
+/// of the two circles round the axis that a plane square to the ring's axis
+/// cuts it in: `on` is a ring and `names_it[1]`, the partner the edge's run
+/// names, is that plane.
+///
+/// **`names_it[0]` need not be the ring.** Where the face across is a pipe, a
+/// cone or a ball and the run names the circle's own plane, which is how
+/// `rcad-step` reads a circle between two different curved faces and the
+/// fuse's `the_plane_of_a_rim_between_two_curved_faces` writes one,
+/// [`which_two_surfaces_a_run_is_between`] puts whichever of the two curved
+/// faces sorts first beside the plane, and a ring sorts after all three. The
+/// edge is still on the ring, since it is an edge of a ring face, and on the
+/// plane, since the run says so, so it is still one of those two circles. Read
+/// as the pair alone, it was not, and the ring face's side of the plane was
+/// read off the other circle's corner: a ring with its rim turned down to a
+/// pipe was refused (row Q1173).
+///
+/// Asked exactly, the way `holds.rs`'s `what_a_ring_face_between_two_planes_holds`
+/// reads the same pair, through [`lie_along_one_line`]: every component of the
+/// stored normal crossed into the stored axis direction is exactly zero. A
+/// plane whose normal is not exactly along the axis is not asked about, and
+/// its edges are read off the corners as before.
+fn a_circle_round_the_axis(
+    on: Surface,
+    names_it: [Surface; 2],
+) -> Option<(rcad_geom::Torus, Plane)> {
+    let (Surface::Torus(ring), Surface::Plane(flat)) = (on, names_it[1]) else {
+        return None;
+    };
+    lie_along_one_line(
+        flat.normal().components(),
+        ring.axis().direction().components(),
+    )
+    .then_some((ring, flat))
+}
+
+/// What the closed-edge rule is asked with at one closed edge of a face.
+struct AskedAt {
+    /// The face's own surface and the partner, as the run names them.
+    names_it: [Surface; 2],
+    /// Each of the two surfaces' gradients, turned the way the solid uses it.
+    outward: [Vector; 2],
+    /// How the solid uses the partner: as stored when no face of it is on it.
+    partner_turn: Orientation,
+    /// The edge's corner, where it is stored.
+    at: Point,
+}
+
+/// What the closed-edge rule is asked with where `face` and `across` meet
+/// along `edge`, everything as stored.
+fn what_the_rule_is_asked_at(
+    face: FaceView<'_>,
+    across: FaceView<'_>,
+    edge: EdgeView<'_>,
+) -> AskedAt {
+    let at = edge.stored_ends()[0];
+    let outward =
+        |used: FaceView<'_>| gradient_of(&used.stored_surface(), at) * used.orientation().sign();
+    let names_it = which_two_surfaces_a_run_is_between(
+        edge.stored_run(),
+        [&face.stored_surface(), &across.stored_surface()],
+    );
+    let partner = names_it[1];
+    let (partner_outward, partner_turn) = if partner == across.stored_surface() {
+        (outward(across), across.orientation())
+    } else {
+        (gradient_of(&partner, at), Orientation::Forward)
+    };
+    AskedAt {
+        names_it,
+        outward: [outward(face), partner_outward],
+        partner_turn,
+        at,
+    }
+}
+
+/// Which side of `names_it[1]` a face keeps next to a closed edge, read off
+/// the way its wire walks the edge.
+///
+/// This is the closed-edge rule [`a_closed_crossing_is_walked_the_way_it_is_stored`]
+/// run backwards, as `holds.rs` reads which side of a plane a ring's face keeps
+/// (`docs/decisions.md` §243.3, §243.8). `asked` is what the sweep hands the
+/// rule going forwards, and the side comes back turned round when the
+/// partner's face is used reversed, because the sweep turns a side round
+/// before handing it in.
+///
+/// Handed back into the rule at the same edge, this side gives back the walk it
+/// was read from, so it checks nothing there (§392.2). What it is for is
+/// comparing two edges.
+///
+/// `None` where the rule finds no way round to read, which is the two surfaces
+/// touching rather than crossing.
+fn the_side_its_wire_keeps(asked: &AskedAt, coedge: CoedgeView<'_>) -> Result<Option<Decision>> {
+    let Some(forward_if_it_keeps_the_back) = a_closed_crossing_is_walked_the_way_it_is_stored(
+        [&asked.names_it[0], &asked.names_it[1]],
+        asked.outward,
+        asked.at,
+        Decision::Neg,
+    )?
+    else {
+        return Ok(None);
+    };
+    let walked_forward = coedge.orientation_on_its_edge() == Orientation::Forward;
+    let handed = if walked_forward == forward_if_it_keeps_the_back {
+        Decision::Neg
+    } else {
+        Decision::Pos
+    };
+    Ok(Some(turned_by(handed, asked.partner_turn)))
+}
+
+/// The side of `plane` a ring's face keeps at one circle round the axis is the
+/// side it keeps at every other circle along the same stored plane.
+///
+/// # Errors
+///
+/// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`] when an earlier circle
+/// along `plane` kept the other side.
+fn the_same_side_as_at_its_other_circles(
+    sides_kept: &mut Vec<SideKept>,
+    plane: Surface,
+    kept: Decision,
+) -> Result<()> {
+    match sides_kept.iter().find(|read| read.plane == plane) {
+        Some(read) if read.kept != kept => {
+            Err(Invalid::AClosedEdgeIsWalkedAgainstItsSurface.into())
+        }
+        Some(_) => Ok(()),
+        None => {
+            sides_kept.push(SideKept { plane, kept });
+            Ok(())
+        }
+    }
+}
+
+/// Whether a ring's face has two circles round the axis, along planes square to
+/// it, and leaves them going opposite ways round the tube, which is what the
+/// sweep then holds it to at those circles in place of a corner.
+///
+/// **Both bands between two such circles have the same corners**, as §392.2
+/// found for circles round the tube. The ring less the two circles is two
+/// pieces, and a face whose only edges they are is one of them: the band
+/// between the planes, a barrel's wall, or the ring less that band, which a
+/// groove turned into the ring's rim leaves. The corner of each circle is on
+/// the side of the other circle's plane the band keeps, so read off it, the
+/// side kept at a grooved ring's circle came out the band's (row Q1153).
+///
+/// **What does say it is the other circle.** Each piece runs on round the tube
+/// from one of its circles and back towards the other, so it leaves them going
+/// opposite ways round the tube ([`which_way_round_the_tube_it_leaves`]).
+/// Which way it leaves one is the side of its plane it keeps there, read off the
+/// wire, and the side of the pipe of the ring's own radius that [`intersect`]
+/// names that circle by. A wire leaving both the same way round bounds neither
+/// piece; nor does one with three such circles, since two of them would be
+/// left the same way.
+///
+/// The wire read at one circle is still the only thing saying which piece the
+/// face is, and that is right: each piece is a face. Whether the solid round it
+/// is sound is the faces across' to say, whose own corners are read as before.
+///
+/// `false`, leaving every circle to be read as before, when the face has fewer
+/// than two such circles, or one of them is where the plane touches the tube,
+/// or the pipe names no one circle through its corner.
+///
+/// # Errors
+///
+/// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`] for two circles left the
+/// same way round the tube; whatever [`intersect`] gives for a plane and the
+/// ring, and whatever finding the face across an edge refuses.
+fn its_circles_round_the_axis_bound_a_band_of_the_tube(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    let mut ways_left: Vec<bool> = Vec::new();
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        if !matches!(
+            edge.stored_run(),
+            EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. }
+        ) {
+            continue;
+        }
+        let Some(across) = the_face_across(solid, face, edge)? else {
+            continue;
+        };
+        let asked = what_the_rule_is_asked_at(face, across, edge);
+        let Some((ring, flat)) = a_circle_round_the_axis(face.stored_surface(), asked.names_it)
+        else {
+            continue;
+        };
+        let Some(up_the_outside) =
+            which_way_round_the_tube_it_leaves(&asked, &ring, &flat, coedge, policy, log)?
+        else {
+            return Ok(false);
+        };
+        if ways_left.contains(&up_the_outside) {
+            return Err(Invalid::AClosedEdgeIsWalkedAgainstItsSurface.into());
+        }
+        ways_left.push(up_the_outside);
+    }
+    Ok(ways_left.len() == 2)
+}
+
+/// Whether a ring's face leaves a circle round the axis going round the tube
+/// the way that runs up its outside and down its inside, "up" being the way
+/// the ring's axis is stored pointing.
+///
+/// On the outer circle of a plane square to the axis, that way round runs up
+/// and away from the plane on the side the axis points to; on the inner
+/// circle it runs down. So the face goes that way exactly when it keeps the
+/// side of the plane the axis points to at an outer circle, or the other side
+/// at an inner one. The side is read off the wire ([`the_side_its_wire_keeps`]),
+/// and which circle it is off the side of the pipe of the ring's own radius
+/// that [`intersect`] names it by (`holds.rs`'s
+/// `the_picker_naming_the_circle_through`), the same reading
+/// `what_a_ring_face_between_two_planes_holds` tells the two bands apart by.
+///
+/// `None` when the rule finds no way round to read, which is the plane resting
+/// on the tube, or when no one circle certainly keeps the corner.
+///
+/// # Errors
+///
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the rule cannot, and
+/// whatever [`intersect`] gives for the plane and the ring.
+///
+/// `ring` is the face's own surface and `flat` the plane `asked.names_it[1]`,
+/// as [`a_circle_round_the_axis`] found them. The side is read against `flat`
+/// with the pair the run names, whichever curved surface is first in it, since
+/// that pair is what both faces along the edge read its walk by.
+///
+/// # Panics
+///
+/// When [`intersect`] names a circle that a plane square to the ring's axis
+/// cuts it in by anything but the pipe.
+fn which_way_round_the_tube_it_leaves(
+    asked: &AskedAt,
+    ring: &rcad_geom::Torus,
+    flat: &Plane,
+    coedge: CoedgeView<'_>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<bool>> {
+    let Some(kept) = the_side_its_wire_keeps(asked, coedge)? else {
+        return Ok(None);
+    };
+    let corner = PredicatePoint::from(asked.at.coordinates());
+    let Some(picker) = the_picker_naming_the_circle_through(
+        &Surface::Plane(*flat),
+        &Surface::Torus(*ring),
+        corner,
+        policy,
+        log,
+    )?
+    else {
+        return Ok(None);
+    };
+    let outer = matches!(picker, Picker::OutsideAPipe(_));
+    assert!(
+        outer || matches!(picker, Picker::InsideAPipe(_)),
+        "a plane square to a ring's axis names its circles by the pipe, and this one by {picker:?}"
+    );
+    let keeps_the_side_the_axis_points_to =
+        (kept == Decision::Pos) == faces_the_way_its_axis_points(flat, ring);
+    Ok(Some(keeps_the_side_the_axis_points_to == outer))
+}
+
+/// Whether a plane whose normal lies exactly along a ring's axis points the
+/// way the axis does.
+///
+/// Along one line, the normal is an exact multiple of the axis direction, so a
+/// component is zero in both or in neither, and the multiple's sign is whether
+/// the signs agree where they are not zero. Nothing is worked out, so nothing
+/// rounds.
+///
+/// # Panics
+///
+/// When the two are zero along different components, which
+/// [`lie_along_one_line`] has shown they are not.
+fn faces_the_way_its_axis_points(flat: &Plane, ring: &rcad_geom::Torus) -> bool {
+    let (normal, along) = (
+        flat.normal().components(),
+        ring.axis().direction().components(),
+    );
+    let axis = (0..3)
+        .find(|&axis| along[axis] != 0.0)
+        .expect("an axis has a direction");
+    assert!(
+        normal[axis] != 0.0,
+        "a normal along the axis is zero where the axis is not: {normal:?} and {along:?}"
+    );
+    (normal[axis] > 0.0) == (along[axis] > 0.0)
 }
 
 /// Which of the two surfaces either side of an edge names which way it runs.
@@ -3759,15 +4731,16 @@ fn magnitude_of(tag: Option<Approximation>) -> f64 {
 #[cfg(test)]
 mod tests {
     use rcad_geom::{
-        Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface,
-        Vector,
+        Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, NamedRun, Orientation,
+        Picker, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
     };
-    use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
+    use rcad_predicates::{Approximation, Cause, Point as PredicatePoint, Policy, ProvenanceLog};
     use smallvec::SmallVec;
 
     use super::{
-        Decision, Scope, a_closed_crossing_is_walked_the_way_it_is_stored,
-        as_coarse_as_a_mesh_gets, gradient_of, winding_of, winding_round,
+        Decision, Scope, a_circle_round_the_axis, a_closed_crossing_is_walked_the_way_it_is_stored,
+        as_coarse_as_a_mesh_gets, gradient_of, hand_on_a_refusal_that_found_the_space,
+        how_wide_an_arc_of_one_branch_is, winding_of, winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -5722,5 +6695,173 @@ mod tests {
             winding_round(&square, [0.0, 0.0, 1.0]).expect("a flat square winds"),
             Decision::Pos
         );
+    }
+
+    /// A plane whose normal is one `f64` ulp off a torus axis direction: the
+    /// naive `f64` cross product of the two still rounds to the zero vector,
+    /// but the exact cross [`lie_along_one_line`](crate::holds::lie_along_one_line)
+    /// reads is not zero, so the plane is not really square to the axis.
+    ///
+    /// Found by taking a direction off the unit circle,
+    /// `(0.3742512179995787, 0.9273273563450136)`, and moving its `x` one
+    /// `f64::next_up` to `0.3742512179995788`. Before this row,
+    /// `a_circle_round_the_axis` read the naive cross and answered `true` for
+    /// this pair, the same wrong answer `holds.rs`'s exact
+    /// `what_a_ring_face_between_two_planes_holds` would never give.
+    #[test]
+    fn a_plane_one_ulp_off_square_to_a_torus_axis_is_not_square_to_it_exactly() {
+        let flat = Plane::from_point_and_normal(
+            Point::origin(),
+            Vector::new(0.3742512179995787, 0.9273273563450136, 0.0),
+        )
+        .expect("a unit normal");
+        let axis = Axis::new(
+            Point::origin(),
+            Vector::new(0.3742512179995788, 0.9273273563450136, 0.0),
+        )
+        .expect("a unit direction");
+        let ring = Torus::new(axis, 5.0, 1.0).expect("a ring wider than its tube");
+        assert_eq!(
+            flat.normal().cross(ring.axis().direction()),
+            Vector::zero(),
+            "the naive f64 cross still rounds to the zero vector at one ulp"
+        );
+        assert!(
+            a_circle_round_the_axis(
+                Surface::Torus(ring),
+                [Surface::Torus(ring), Surface::Plane(flat)]
+            )
+            .is_none(),
+            "the exact cross is not zero, so this is not a circle round the axis"
+        );
+    }
+
+    /// A finer mesh of the zero ladder refused because placing the solid took
+    /// away the space it encloses is handed on, not read as a reason to stop.
+    ///
+    /// Stopping returns the zero, and the caller then calls the solid
+    /// `VolumeIsNotPositive` (§333.6). No solid is known to send this refusal
+    /// from a finer rung, so the rung is asked directly (§379.5, Q783). The
+    /// unit ball at `1.08e16`, which lands flat, is refused `4/3` where it
+    /// was made and `0` where it lands, and those are the numbers used.
+    #[test]
+    fn a_finer_mesh_that_lost_its_space_to_the_placement_is_handed_on() {
+        let Err(Error::PlacingItTookAwayTheSpaceItsMeshEncloses {
+            enclosed_where_made,
+            enclosed_where_placed,
+        }) = hand_on_a_refusal_that_found_the_space(
+            Error::PlacingItTookAwayTheSpaceItsMeshEncloses {
+                enclosed_where_made: 4.0 / 3.0,
+                enclosed_where_placed: 0.0,
+            },
+        )
+        else {
+            panic!("the refusal was not handed on");
+        };
+        assert_eq!(
+            (enclosed_where_made, enclosed_where_placed),
+            (4.0 / 3.0, 0.0)
+        );
+
+        assert!(
+            hand_on_a_refusal_that_found_the_space(Error::DeflectionBelowWhatAMeshCanReach {
+                asked: 5.0,
+                closest: 1e217,
+            })
+            .is_ok(),
+            "the floor still stops the ladder"
+        );
+    }
+
+    /// The bound [`how_wide_an_arc_of_one_branch_is`] publishes: every point of
+    /// an arc of a parabola or of one branch of a hyperbola is within half that
+    /// width of the cone's apex.
+    ///
+    /// Walked finely on the lid `z = 4`: arcs of a parabola running through its
+    /// vertex, evenly and not, to one side of it, and from it; arcs of a
+    /// hyperbola's branch on each nappe, through the vertex, from it and to one
+    /// side of it. Each is walked both ways round, and every point the walk puts
+    /// down is inside the ball, give or take how far the walk says its points may
+    /// stray.
+    #[test]
+    fn every_point_of_an_arc_of_one_branch_is_within_the_reach_of_its_ends() {
+        let lid =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a plane");
+        // The lid crosses this one in `x = 1 − y²`.
+        let parabola = Cone::new(
+            Axis::new(Point::new(1.0, 0.0, 3.5), Vector::new(-1.0, 0.0, 1.0)).expect("an axis"),
+            1.0,
+        )
+        .expect("a cone");
+        let on_the_parabola = |y: f64| Point::new(1.0 - y * y, y, 4.0);
+        // And this one in `(x − 1.25)² = y² + 0.75²`, whose branch at `x ≤ 0.5`
+        // is on one nappe and whose branch at `x ≥ 2` is on the other.
+        let hyperbola = Cone::new(
+            Axis::new(Point::new(1.25, 0.0, 3.25), Vector::new(-1.0, 0.0, 0.0)).expect("an axis"),
+            1.0,
+        )
+        .expect("a cone");
+        let near = |[y, x]: [f64; 2]| Point::new(1.25 - x, y, 4.0);
+        let far = |[y, x]: [f64; 2]| Point::new(1.25 + x, y, 4.0);
+        let below = |[y, x]: [f64; 2]| [-y, x];
+        // `y² + 0.75² = x²` at the vertex, and on the triangles 3-4-5 and 8-15-17.
+        let [vertex, three_four_five, eight_fifteen] =
+            [[0.0, 0.75], [1.0, 1.25], [1.40625, 1.59375]];
+        let arcs = [
+            (parabola, [on_the_parabola(-2.0), on_the_parabola(2.0)]),
+            (parabola, [on_the_parabola(-1.0), on_the_parabola(2.0)]),
+            (parabola, [on_the_parabola(0.5), on_the_parabola(2.0)]),
+            (parabola, [on_the_parabola(0.0), on_the_parabola(-1.5)]),
+            (
+                hyperbola,
+                [near(below(three_four_five)), near(eight_fifteen)],
+            ),
+            (hyperbola, [near(vertex), near(eight_fifteen)]),
+            (hyperbola, [near(three_four_five), near(eight_fifteen)]),
+            (hyperbola, [far(below(eight_fifteen)), far(three_four_five)]),
+            (hyperbola, [far(vertex), far(below(three_four_five))]),
+        ];
+        let under_everything = HalfSpace::through_a_point_facing(
+            Point::new(0.0, 0.0, 100.0),
+            Vector::new(0.0, 0.0, -1.0),
+        )
+        .expect("a half-space");
+        let mut outside = Vec::new();
+        for (cone, ends) in arcs {
+            let reach = how_wide_an_arc_of_one_branch_is(&cone, ends) / 2.0;
+            for [from, to] in [ends, [ends[1], ends[0]]] {
+                let run = NamedRun::new(
+                    EdgeRun::PartOfWhereItCrosses {
+                        and: Surface::Cone(cone),
+                        picked_by: smallvec::smallvec![Picker::from(under_everything)],
+                    },
+                    [from, to].map(|end| PredicatePoint::from(end.coordinates())),
+                )
+                .expect("a run");
+                let walked = rcad_geom::walk(
+                    &run,
+                    [&Surface::Plane(lid), &Surface::Plane(lid)],
+                    Deflection::of(1e-6).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("the walk draws the arc");
+                assert!(
+                    walked.points().len() > 10,
+                    "{from:?} to {to:?} walked too coarsely"
+                );
+                let stray = walked.deviation().magnitude();
+                for point in walked.points() {
+                    let from_the_apex = (*point - cone.apex()).length();
+                    if from_the_apex > reach + stray {
+                        outside.push(format!(
+                            "{point:?} on {from:?} to {to:?}: {from_the_apex} from the apex, past {reach}"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(outside.is_empty(), "{outside:#?}");
     }
 }

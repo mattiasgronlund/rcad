@@ -48,7 +48,8 @@ wall (12), and answers on the flat face at `x = 0` (13). `classify_point`
 of `(1, 0, 1)`, `(−1, 0, 1)` and `(1, 0.5, 0.5)` all come back
 `CannotFollowAFacesTrimming` on face 11; `(1, 0, 3)`, outside the box, comes
 back `Outside`. Every one of those refusals was raised at `holds.rs:1131`,
-in `the_sides_of`, reached through `what_a_face_cut_by_part_of_a_crossing_holds`.
+in `every_reading_of_the_sides_of`, reached through
+`what_a_face_cut_by_part_of_a_crossing_holds`.
 
 ### 325.2 Why both places refuse
 
@@ -163,6 +164,11 @@ the block off it answers the same `8π` half bar
    bits (§229.2), or `crossing_for` could let an edge between two spellings
    through. Neither has been tried. `crates/rcad-topo/src/fuse/assemble.rs`,
    `crates/rcad-topo/src/fuse/arrange.rs`.
+
+   **Closed for pipes by §407, 2026-10-05.** The first of the two fixes
+   landed (Q354, `84538a4e`): the joiner now folds a pipe's spelling before
+   comparing, which is what §325.4's own 2026-09-29 note already recorded for
+   this row's own case.
 
 Once row 1 lands, the half bars reach `assemble` for the first time. Then
 they are §247.3's shape for putting an open arc between two spellings of

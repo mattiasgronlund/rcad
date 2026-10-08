@@ -29,7 +29,8 @@ the apex, and an edge does not pass one point twice.
 It is read that way in three places: `walk_one_outline`, so a flat face whose
 sides are all straight or rulings is walked as a polygon;
 `a_side_of_it_is_part_of_a_crossing`, so such a flat face goes to that walk;
-and `the_sides_of`, so a cone face's ruling side is a straight side. Every
+and `every_reading_of_the_sides_of`, so a cone face's ruling side is a
+straight side. Every
 number asked is stored, so a corner rounded off its line fails the test and is
 refused as before, and a plane leaned off the apex cuts a curve and is never
 read as straight.
@@ -88,29 +89,50 @@ points, each checked against that arithmetic before the kernel is asked.
 branch, all six fuses come back `Invalid(EdgeHasNoLength)`. The sentence in
 `a_half_frustums_corners_on_two_rulings_stay_two_corners`'s doc stays.
 
-**A quarter of a pointed cone refuses, and it refused before.** It is the
+**A quarter of a pointed cone refused, and now answers (Q820).** It is the
 `x ≥ 0`, `y ≥ 0` part of the cone of slope a half, eight tall, built face by
 face. Its skin is cut by `x = 0` and `y = 0`, both through the apex, so 389.3
-refuses it. Measured on `b1136e72` and on this branch:
+asks `is_a_family_this_follows`'s two-apex-cut arm,
+`do_two_planes_through_the_apex_meet_inside`, which it passes: the two planes
+meet along the axis, inside the cone, so the wedge they keep is one run of
+rulings, `0 < φ < 90°`. Reading the skin's two sides that start at the apex
+wanted its own fix: `which_side_of_its_neighbour_a_side_keeps` now reads such a
+side at its *end* instead, since the cone has no gradient at the apex itself
+(§389's own doc on that function). Measured on `b1136e72` and after Q820:
 
-| Asked | `b1136e72` | This branch |
+| Asked | `b1136e72` | After Q820 |
 |---|---|---|
-| the skin, at any point | refused, `AFaceTrimmedByACurveThisCannotFollow` | the same |
+| the skin, at any point | refused, `AFaceTrimmedByACurveThisCannotFollow` | answers, right |
 | each flat triangle | refused, the same name | answers, right |
-| `classify_point((1, 1, 6))`, inside | `CannotFollowAFacesTrimming`, the skin | the same |
+| `classify_point((1, 1, 6))`, inside | `CannotFollowAFacesTrimming`, the skin | `Inside` |
 | `(3, 3, 6)`, `(1, 1, 9)`, `(1, 1, −6)` | `Outside` | `Outside` |
 
-So the change brought in no new refusal there, and took two away. The skin is
-still a **gap**: `x = 0` and `y = 0` meet along the axis, inside the cone, and
-every half-plane round a line inside the cone meets the nappe in one ruling, so
-the wedge they keep is one run, `0 < φ < 90°`. What tells this from the two
-sheets of 389.3 is where the two planes meet, against the cone: a line strictly
-inside it keeps one run whichever wedge is kept. That wants the cone's sign
-along the cross product of two stored normals, settled exactly, and it is filed
-rather than built here.
-`a_quarter_of_a_pointed_cone_has_its_skin_refused_by_name_though_it_is_one_piece`
-and the quarter's cuts in `two_planes_through_the_apex_leave_a_nappe_in_two_sheets`
-pin it.
+`a_quarter_of_a_pointed_cone_holds_its_points` pins it, on either nappe, in
+place of
+`a_quarter_of_a_pointed_cone_has_its_skin_refused_by_name_though_it_is_one_piece`.
+The other three quarters of the same cone still have their skin and cap
+refused by name, which is a gap and not this one: `holds.rs` follows each
+face's two cuts, but the part in front of both is the opposite quarter, so
+answering the other three needs "in front of any", which `holds.rs` has only
+for a sphere's faces and two discs together. Filed as Q943.
+`three_quarters_of_a_pointed_cone_have_their_skin_and_cap_refused_by_name`
+pins it.
+
+**Since Q1009 (`0e4c04d5`), the skin answers too, as the part in front of the
+cap and of either plane.** `the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of`
+(`crates/rcad-topo/src/holds.rs`) takes a cone face cut by two planes through
+its apex that meet strictly inside the cone and one closing cap the apex is
+strictly in front of, whose side on each plane lies strictly behind the
+other and in front of or on the cap, and whose rim runs from a corner on one
+plane to a corner on the other, leaving the first in front: the part behind
+both planes is one run of rulings, the rim leaving one plane in front is the
+rest of the cap's boundary curve, and what is left is one piece with the
+face's own boundary. The test is renamed
+`three_quarters_of_a_pointed_cone_hold_their_points`
+(`crates/rcad-topo/tests/a_solid_carrying_a_run_along_a_cones_ruling.rs:591`)
+and runs on both nappes, each ruling and the rim held, the missing quarter's
+points not, and `classify_point` checked over a `16³` grid against the closed
+form.
 
 ### 389.6 What moved, and what this leaves
 
@@ -119,7 +141,9 @@ pin it.
   `the_face_down_the_axis_holds_its_four_corners_and_not_the_other_nappe`,
   `the_skin_of_a_half_frustum_holds_its_own_half_between_the_caps`,
   `point_in_solid_answers_a_half_frustum_as_its_own_sizes_say` and
-  `a_quarter_of_a_pointed_cone_has_its_skin_refused_by_name_though_it_is_one_piece`.
+  `a_quarter_of_a_pointed_cone_holds_its_points`.
 - §334.1's last paragraph is corrected: the six fuses stopped at the cone skin,
   not the flat face.
-- Left: the quarter's skin (389.5), filed as a row.
+- The other three quarters' skin and cap, refused by name for want of "in
+  front of any" (389.5), filed as Q943, both answer since Q1009
+  (`0e4c04d5`): nothing is left of this item.

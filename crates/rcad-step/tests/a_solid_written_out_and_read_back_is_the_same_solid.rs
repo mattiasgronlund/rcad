@@ -213,8 +213,9 @@ fn where_its_corners_are(solid: rcad_topo::SolidView<'_>) -> Vec<[u64; 3]> {
 /// The file leaves both poles unwritten and walks the seam there and back, the
 /// way `kicad/LED_D5.0mm.step` writes its dome, and the reader puts a pole
 /// back at each turn. The seam is half of a great circle, which is written as
-/// the `CIRCLE` of the ball's own centre and radius turned the way that picks
-/// the half the model's seam is.
+/// the `CIRCLE` of the ball's own centre and radius about its plane's normal,
+/// with the seam running along it or against it to pick the half the model's
+/// seam is.
 #[test]
 fn a_ball_written_out_and_read_back_is_the_same_ball() {
     let mut covered = Covered::new();
@@ -234,23 +235,270 @@ fn a_ball_written_out_and_read_back_is_the_same_ball() {
     covered.report("a ball");
 }
 
-/// A ball turned so its poles leave the `z` line through its centre is
-/// refused, because this kernel's sphere pinches only on that line.
+/// A ball turned so its poles leave the `z` line through its centre is written
+/// as the same ball with its poles on that line, and comes back as that ball.
 ///
-/// The reader would put each pole back where it was written, which is where
-/// the ball it reads does not pinch, and `Model::validate` refuses such a pole.
-/// A ball moved without a turn is still written: its poles stay on the line.
+/// This kernel's sphere pinches only on the `z` line through its centre, so
+/// the poles cannot go out where the turn put them: the reader would put them
+/// back where the ball it reads does not pinch. The file is the one written
+/// for the same ball moved to that centre and not turned, byte for byte
+/// (`docs/decisions.md` §404). Until then the writer refused it at its pole.
 #[test]
-fn a_ball_turned_off_z_is_refused_at_its_pole() {
-    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
-    let turned = Isometry::rotation(&rcad_geom::Axis::x(), 0.5).expect("a finite angle");
-    model.add_ball(4.0, &turned).expect("a ball of radius four");
+fn a_ball_turned_off_z_comes_back_as_the_same_ball_with_its_poles_on_z() {
+    let half_a_radian_about_x = Isometry::rotation(&rcad_geom::Axis::x(), 0.5).expect("a turn");
+    let about_y_and_moved = Isometry::translation(Vector::new(3.0, -7.0, 11.0))
+        .expect("a finite offset")
+        .compose(&Isometry::rotation(&rcad_geom::Axis::y(), 1.1).expect("a turn"));
+    for (radius, turned, centre) in [
+        (4.0, half_a_radian_about_x, Point::origin()),
+        (2.5, about_y_and_moved, Point::new(3.0, -7.0, 11.0)),
+    ] {
+        let scale = Scale::new(Unit::Millimetre, 20.0).expect("a working size");
+        let mut model = Model::new(scale);
+        model.add_ball(radius, &turned).expect("a ball");
+        let mut moved = Model::new(scale);
+        let to_its_centre = Isometry::translation(centre - Point::origin()).expect("a move");
+        moved.add_ball(radius, &to_its_centre).expect("a ball");
+        let ball = the_one_face(&model).surface();
+        assert_eq!(
+            format!("{ball:?}"),
+            format!("{:?}", the_one_face(&moved).surface()),
+            "the turned ball is not centred where the test says"
+        );
+        let poles_where_turned = the_poles_of(&model);
+        assert!(
+            poles_where_turned
+                .iter()
+                .all(|pole| ball.the_way_its_first_coordinate_runs_at(*pole).is_some()),
+            "the turn left a pole on the z line: {poles_where_turned:?}"
+        );
+
+        let text = rcad_step::write(&model, "a ball").expect("a turned ball is written");
+        assert_eq!(
+            text,
+            rcad_step::write(&moved, "a ball").expect("a moved ball is written")
+        );
+        let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let import = Import::read(&file, &policy, &mut log).expect("a turned ball is read back");
+        let back = import.model();
+        back.validate(&policy, &mut log)
+            .expect("a turned ball comes back sound");
+        assert_eq!(
+            (
+                back.faces().count(),
+                back.edges().count(),
+                back.vertices().count()
+            ),
+            (1, 1, 2)
+        );
+        assert_eq!(
+            format!("{:?}", the_one_face(back).surface()),
+            format!("{ball:?}")
+        );
+        let [x, y, z] = centre.coordinates();
+        assert_eq!(
+            the_poles_of(back),
+            [Point::new(x, y, z - radius), Point::new(x, y, z + radius)]
+        );
+    }
+}
+
+/// A turned ball too small beside its height for `z ± r` to stand apart from
+/// `z` is still refused at its pole: there are no two poles on the `z` line to
+/// write it with.
+#[test]
+fn a_turned_ball_too_small_for_its_height_is_refused_at_its_pole() {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 1e20).expect("a working size"));
+    let high_and_turned = Isometry::translation(Vector::new(0.0, 0.0, 1e20))
+        .expect("a finite offset")
+        .compose(&Isometry::rotation(&rcad_geom::Axis::x(), 0.5).expect("a turn"));
+    model
+        .add_ball(1.0, &high_and_turned)
+        .expect("a ball of radius one");
+    assert_eq!(1e20 + 1.0, 1e20);
 
     let refused = rcad_step::write(&model, "a turned ball");
     assert!(
         matches!(refused, Err(CannotWrite::AWireThatStandsStillAtAPole)),
         "expected the pole to stop it, got {refused:?}"
     );
+}
+
+/// A ball a file cut open along a slit off the `z` line — here its poles are
+/// along `x` — is read as the whole ball, with its poles on the `z` line and
+/// the seam `add_ball` cuts. Written out again it is the file of that ball.
+///
+/// The slit is the file's: one `EDGE_CURVE` walked there and back, between
+/// two corners where this kernel's ball does not pinch. Walked as written it
+/// is a wire of two steps, which `SolidBuilder` refuses as too short to bound
+/// anything (`docs/decisions.md` §404).
+#[test]
+fn a_ball_a_file_cut_open_off_the_z_line_is_read_as_the_same_ball() {
+    let text = a_ball_cut_open_along_a_slit(["3.,2.,3.", "-1.,2.,3."], "2.", "1.,2.,3.", "2.");
+    let back = the_slit_file_read(&text).expect("a ball cut open off z is read");
+    assert_eq!(
+        (
+            back.faces().count(),
+            back.edges().count(),
+            back.vertices().count()
+        ),
+        (1, 1, 2)
+    );
+    assert_eq!(
+        the_poles_of(&back),
+        [Point::new(1.0, 2.0, 1.0), Point::new(1.0, 2.0, 5.0)]
+    );
+    let mut moved = Model::new(back.scale());
+    moved
+        .add_ball(
+            2.0,
+            &Isometry::translation(Vector::new(1.0, 2.0, 3.0)).expect("a move"),
+        )
+        .expect("a ball");
+    assert_eq!(
+        rcad_step::write(&back, "a ball").expect("the ball read is written"),
+        rcad_step::write(&moved, "a ball").expect("a moved ball is written")
+    );
+}
+
+/// The slit's corners at `centre ± 2·(cos 1, sin 1, 0)`, written in twelve
+/// significant digits the way a real file writes them. Each misses the ball
+/// by about `1e-12`, thousands of roundings, and is read as on it: the corners
+/// are not read into the solid, so they are held to the digits the file was
+/// written in (`docs/decisions.md` §404).
+#[test]
+fn a_slit_written_in_twelve_digits_is_read_as_the_whole_ball() {
+    let text = a_ball_cut_open_along_a_slit(
+        [
+            "2.08060461174,3.68294196962,3.",
+            "-0.0806046117363,0.317058030384,3.",
+        ],
+        "2.",
+        "1.,2.,3.",
+        "2.",
+    );
+    let back = the_slit_file_read(&text).expect("a twelve-digit slit is read");
+    assert_eq!(
+        the_poles_of(&back),
+        [Point::new(1.0, 2.0, 1.0), Point::new(1.0, 2.0, 5.0)]
+    );
+}
+
+/// A slit whose circle, or one of whose corners, is a thousandth off the ball
+/// is not read as the whole ball: the file is walked as written and refused.
+#[test]
+fn a_slit_a_thousandth_off_its_ball_is_refused() {
+    for text in [
+        a_ball_cut_open_along_a_slit(["3.,2.,3.", "-1.,2.,3."], "2.002", "1.,2.,3.", "2."),
+        a_ball_cut_open_along_a_slit(["3.002,2.,3.", "-1.,2.,3."], "2.", "1.,2.,3.", "2."),
+    ] {
+        let read = the_slit_file_read(&text);
+        assert!(read.is_err(), "read as {read:?}");
+    }
+}
+
+/// A ball too small beside its height for its poles to stand apart on the
+/// `z` line is not read on it either, the writer's limit from the other side.
+#[test]
+fn a_slit_ball_too_small_for_its_height_is_refused() {
+    let text =
+        a_ball_cut_open_along_a_slit(["1.,0.,1.E20", "-1.,0.,1.E20"], "1.", "0.,0.,1.E20", "1.");
+    let read = the_slit_file_read(&text);
+    assert!(read.is_err(), "read as {read:?}");
+}
+
+/// The text of a file holding one ball of `radius` about `centre`, its axis
+/// written along `x`, cut open along a `CIRCLE` of `circle_radius` about the
+/// same centre in the plane square to `z`, between `corners`, walked there and
+/// back.
+fn a_ball_cut_open_along_a_slit(
+    corners: [&str; 2],
+    circle_radius: &str,
+    centre: &str,
+    radius: &str,
+) -> String {
+    format!(
+        "ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('a ball cut open along a slit'),'2;1');
+FILE_NAME('a turned slit','',(''),(''),'','','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+#1=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));
+#2=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));
+#3=(NAMED_UNIT(*)SOLID_ANGLE_UNIT()SI_UNIT($,.STERADIAN.));
+#4=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-7),#1,'','');
+#5=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#4))GLOBAL_UNIT_ASSIGNED_CONTEXT((#1,#2,#3))REPRESENTATION_CONTEXT('',''));
+#6=CARTESIAN_POINT('',({centre}));
+#7=DIRECTION('',(1.,0.,0.));
+#8=AXIS2_PLACEMENT_3D('',#6,#7,$);
+#9=SPHERICAL_SURFACE('',#8,{radius});
+#10=CARTESIAN_POINT('',({centre}));
+#11=DIRECTION('',(0.,0.,1.));
+#12=AXIS2_PLACEMENT_3D('',#10,#11,$);
+#13=CIRCLE('',#12,{circle_radius});
+#14=CARTESIAN_POINT('',({}));
+#15=VERTEX_POINT('',#14);
+#16=CARTESIAN_POINT('',({}));
+#17=VERTEX_POINT('',#16);
+#18=EDGE_CURVE('',#15,#17,#13,.T.);
+#19=ORIENTED_EDGE('',*,*,#18,.T.);
+#20=ORIENTED_EDGE('',*,*,#18,.F.);
+#21=EDGE_LOOP('',(#19,#20));
+#22=FACE_OUTER_BOUND('',#21,.T.);
+#23=ADVANCED_FACE('',(#22),#9,.T.);
+#24=CLOSED_SHELL('',(#23));
+#25=MANIFOLD_SOLID_BREP('',#24);
+ENDSEC;
+END-ISO-10303-21;
+",
+        corners[0], corners[1]
+    )
+}
+
+/// The model a slit file reads as, checked sound, or the reader's refusal.
+fn the_slit_file_read(text: &str) -> Result<Model, String> {
+    let file = StepFile::read(text.as_bytes()).expect("the slit file parses");
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let import = Import::read(&file, &policy, &mut log).map_err(|why| format!("{why:?}"))?;
+    let back = import.model().clone();
+    back.validate(&policy, &mut log)
+        .expect("a slit file read is sound");
+    Ok(back)
+}
+
+/// The one face of the one solid of `model`.
+fn the_one_face(model: &Model) -> rcad_topo::FaceView<'_> {
+    let mut faces = model
+        .solids()
+        .flat_map(|solid| solid.faces().collect::<Vec<_>>());
+    let (Some(face), None) = (faces.next(), faces.next()) else {
+        panic!("a ball is one face");
+    };
+    face
+}
+
+/// The two poles the one face of `model` stands still at, lowest first.
+fn the_poles_of(model: &Model) -> [Point; 2] {
+    let mut poles: Vec<Point> = the_one_face(model)
+        .wires()
+        .flat_map(|wire| wire.steps().collect::<Vec<_>>())
+        .filter_map(|step| {
+            let rcad_topo::WireStepView::Pole(pole) = step else {
+                return None;
+            };
+            Some(pole.point())
+        })
+        .collect();
+    poles.sort_by(|one, other| one.coordinates()[2].total_cmp(&other.coordinates()[2]));
+    let [low, high] = poles[..] else {
+        panic!("a ball stands still at two poles, not at {poles:?}");
+    };
+    [low, high]
 }
 
 /// A bar cut off by a slanted plane meets it in an **ellipse**, and it is
@@ -472,25 +720,21 @@ fn the_short_side_of_a_bar_sliced_along_its_length_is_written_with_arcs_and_come
 }
 
 /// The long side of the same bar is written with its two long arcs and comes
-/// back the same solid, corner for corner and bit for bit — **and the fuse
-/// then refuses the copy read back where it cuts the original**, which is the
-/// reader's gap and not this writer's.
+/// back the same solid, corner for corner and bit for bit, and a block cuts
+/// the copy read back into the same pieces it cuts the bar as built.
 ///
 /// The model names each long arc by a half-space whose plane is the slice, so
-/// both corners are on it. The reader names an arc by a half-space through the
-/// corners that it lowers by a few roundings so that both are sure to be in
-/// front (`Walk::the_arc_between`). For a short arc that is a picker the fuse
-/// reads, because the circle's centre is behind it. For a long arc the centre
-/// is in front too, and `a_picker_that_tells_the_two_arcs_apart` in
-/// `rcad-topo` reads a picker only when its plane holds both ends or the centre
-/// is not in front, so the cut stops at
-/// [`rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow`]. The test
-/// checks both pickers on both sides, so it is not the writer's arc that
-/// fails here: the arc the copy holds is the one that went out, measured the
-/// same.
+/// both corners are on it. `a_picker_that_tells_the_two_arcs_apart` in
+/// `rcad-topo` reads a picker only when its plane holds both ends or the
+/// circle's centre is not in front, and a long arc has its centre on its own
+/// side of the chord. The reader used to name every arc by a plane through the
+/// corners lowered by a few roundings, which put a long arc's centre in front,
+/// and the copy's cut stopped at
+/// [`rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow`] (Q771). So the
+/// test checks that the reader's pickers hold both ends exactly, as the
+/// model's do, and that the cut comes out the same.
 #[test]
-fn the_long_side_of_a_bar_sliced_along_its_length_comes_back_the_same_and_its_long_arcs_stop_a_fuse()
- {
+fn the_long_side_of_a_bar_sliced_along_its_length_comes_back_the_same_and_cuts_the_same() {
     use rcad_geom::Picker;
     use rcad_predicates::{Decision, Point as PredicatePoint};
 
@@ -536,6 +780,25 @@ fn the_long_side_of_a_bar_sliced_along_its_length_comes_back_the_same_and_its_lo
     assert_eq!(here.surface_area(), back.surface_area(), "area");
     assert_eq!(here.centroid(), back.centroid(), "centroid");
 
+    let cutter = |model: &mut Model| a_block(model, [2.0, 3.0, 2.0], Vector::new(-1.0, 3.0, 3.0));
+    let cut_here = cut_by_a_third_solid(&model, built, &cutter, deflection)
+        .unwrap_or_else(|why| panic!("the long side is not cut: {why}"));
+    let left: f64 = cut_here.iter().map(|piece| piece.volume()).sum();
+    assert!(
+        !cut_here.is_empty() && left < here.volume(),
+        "the cut has to leave something and take something away, or the comparison below \
+         compares two solids nothing happened to: {left} of {}",
+        here.volume()
+    );
+    let cut_back = cut_by_a_third_solid(there, came, &cutter, deflection)
+        .unwrap_or_else(|why| panic!("the long side read back is not cut: {why}"));
+    assert_eq!(cut_here.len(), cut_back.len(), "pieces");
+    for (one, other) in cut_here.iter().zip(&cut_back) {
+        assert_eq!(one.volume(), other.volume(), "a piece's volume");
+        assert_eq!(one.surface_area(), other.surface_area(), "a piece's area");
+        assert_eq!(one.centroid(), other.centroid(), "a piece's centroid");
+    }
+
     let where_the_arcs_ends_and_centre_are = |model: &Model, solid: SolidKey| {
         let mut sides = Vec::new();
         for face in model.solid(solid).expect("this model made the key").faces() {
@@ -559,37 +822,27 @@ fn the_long_side_of_a_bar_sliced_along_its_length_comes_back_the_same_and_its_lo
         }
         sides
     };
-    let built_sides = where_the_arcs_ends_and_centre_are(&model, built);
-    let read_sides = where_the_arcs_ends_and_centre_are(there, came);
-    assert_eq!(built_sides.len(), 4, "two arcs, each walked by two faces");
-    assert!(
-        built_sides
-            .iter()
-            .all(|[start, end, _]| *start == Decision::Zero && *end == Decision::Zero),
-        "the model's own pickers hold both ends of each arc: {built_sides:?}"
-    );
-    assert_eq!(read_sides.len(), 4, "two arcs, each walked by two faces");
-    assert!(
-        read_sides
-            .iter()
-            .all(|sides| sides.iter().all(|side| *side == Decision::Pos)),
-        "the reader's pickers have both ends and the centre in front: {read_sides:?}"
-    );
-
-    let cutter = |model: &mut Model| a_block(model, [2.0, 3.0, 2.0], Vector::new(-1.0, 3.0, 3.0));
-    let cut_here = cut_by_a_third_solid(&model, built, &cutter, deflection)
-        .unwrap_or_else(|why| panic!("the long side is not cut: {why}"));
-    assert!(!cut_here.is_empty(), "the cut left nothing");
-    let cut_back = cut_by_a_third_solid(there, came, &cutter, deflection);
-    assert!(
-        matches!(
-            cut_back,
-            Err(rcad_topo::Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+    for (whose, sides) in [
+        (
+            "the model's own",
+            where_the_arcs_ends_and_centre_are(&model, built),
         ),
-        "the copy read back was expected to stop the cut where the reader's picker is one \
-         the fuse does not read, and got {:?}; if it now cuts, compare the pieces here",
-        cut_back.map(|pieces| pieces.len())
-    );
+        (
+            "the reader's",
+            where_the_arcs_ends_and_centre_are(there, came),
+        ),
+    ] {
+        assert_eq!(sides.len(), 4, "two arcs, each walked by two faces");
+        assert!(
+            sides
+                .iter()
+                .all(|[start, end, centre]| *start == Decision::Zero
+                    && *end == Decision::Zero
+                    && *centre == Decision::Pos),
+            "{whose} pickers hold both ends of each long arc and have its centre in front: \
+             {sides:?}"
+        );
+    }
 }
 
 /// Which side of the slice [`a_bar_sliced_along_its_length`] keeps.
@@ -707,10 +960,10 @@ fn a_bar_sliced_along_its_length(model: &mut Model, side: Side) -> SolidKey {
 /// (`ADraftWireDoesNotClose`) — what stopped `SW_NKK_BB15AH` and the two
 /// `Relay_StandexMeder_DIP` relays once Q766 let them past the writer.
 ///
-/// Not [`Covered::the_same_solid_comes_back`], because the fuse cannot cut the
-/// slab as built — a block through its flat back leaves a decision the fuse
-/// cannot settle, before any round trip — so the cut is required to come out
-/// the same on both sides, refusal and all.
+/// Not [`Covered::the_same_solid_comes_back`], because this test also checks
+/// that the scoop is a curved face used reversed, and that each cap meets it
+/// in one arc. The cut by a third solid is required to answer on both sides,
+/// each side's volume checked against the closed form.
 #[test]
 fn a_slab_with_a_round_scoop_out_of_it_is_written_with_loops_that_close_and_comes_back_the_same() {
     let policy = Policy::certified();
@@ -766,15 +1019,35 @@ fn a_slab_with_a_round_scoop_out_of_it_is_written_with_loops_that_close_and_come
     let cutter = |model: &mut Model| a_block(model, [2.0, 1.5, 2.0], Vector::new(-1.0, -7.0, 1.0));
     let [cut_here, cut_back] = [(&model, built), (there, came)].map(|(from, key)| {
         cut_by_a_third_solid(from, key, &cutter, deflection)
-            .map(|pieces| {
-                pieces
-                    .iter()
-                    .map(|piece| (piece.volume(), piece.surface_area(), piece.centroid()))
-                    .collect::<Vec<_>>()
-            })
-            .map_err(|why| why.to_string())
+            .unwrap_or_else(|why| panic!("the slab less the block does not answer: {why}"))
     });
-    assert_eq!(cut_here, cut_back, "the cut");
+    // The slab's own closed form is 4 times the area between the scoop
+    // circle's chord at y = -3 and the one at y = -5:
+    // 24 - (12 + 25 * asin(0.8) - 24). Of the block, only x in [-1, 1],
+    // y in [-6, -5.5], z in [1, 3] lies in the slab's back, short of where
+    // the scoop has eaten into it; the rest of the block is outside the
+    // slab's y range or inside the scoop's void, so 2, not the block's own
+    // 6, comes off.
+    let slab = 4.0 * (24.0 - (12.0 + 25.0 * 0.8_f64.asin() - 24.0));
+    let closed_form = slab - 2.0;
+    for pieces in [&cut_here, &cut_back] {
+        let [piece] = pieces.as_slice() else {
+            panic!("the slab less the block is one solid, not {}", pieces.len());
+        };
+        assert!(
+            (piece.volume() - closed_form).abs() <= piece.volume_error(),
+            "the slab less the block measured {} ± {}, and the closed form is {closed_form}",
+            piece.volume(),
+            piece.volume_error()
+        );
+    }
+    let as_tuples = |pieces: &[Measurement]| {
+        pieces
+            .iter()
+            .map(|piece| (piece.volume(), piece.surface_area(), piece.centroid()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(as_tuples(&cut_here), as_tuples(&cut_back), "the cut");
 }
 
 /// The slab of the test above, built face by face: bottom cap, scoop, top cap,
@@ -975,6 +1248,74 @@ fn a_slice_off_the_side_of_a_ball_is_written_with_its_arcs_and_comes_back_the_sa
     });
 }
 
+/// A whole ball of radius four whose seam, from pole to pole on the side
+/// facing `+x`, has its plane facing the other way from the edge's own turn:
+/// once with the plane turned round to face `−y` and the seam drawn down from
+/// the north pole, and once with the plane facing `+y` and the seam drawn up
+/// from the south pole. `add_ball` draws it down with the plane facing `+y`.
+///
+/// **How the plane was chosen.** Writing `A`, `B` for the seam's ends and `n`
+/// for its plane's normal, the circle about `n` runs from `A` to `B` along the
+/// half in front of `(B − A) × n` (`Walk::the_arc_between`). Either choice
+/// above puts `(B − A) × n` along `−x`, away from the half the run picks, so
+/// the edge cannot run along the circle about `n`: the writer either turns
+/// the circle over to about `−n` or runs the edge against the circle.
+///
+/// The reader names the seam by the plane through the circle's centre about
+/// the circle's own axis (`Walk::the_surface_that_names_the_curve`), so the
+/// circle turned over came back with the seam's plane reversed: `(0, 1, 0)`
+/// for `(0, −1, 0)` and the other way round, and the ball facing `−y`
+/// measured `267.77308911728187` read back where it measured
+/// `267.7805495679834` built. No ball test before this one drew such a seam:
+/// `add_ball`'s runs along the circle about its plane's normal. Since Q776 the
+/// writer writes the circle about `n` and runs the edge against it
+/// (`EDGE_CURVE` `same_sense` false), as every other seam on a ball has done
+/// since Q767, and the plane comes back bit for bit.
+#[test]
+fn a_ball_whose_seam_runs_against_its_planes_turn_comes_back_with_the_same_plane() {
+    let north = Point::new(0.0, 0.0, 4.0);
+    let south = Point::new(0.0, 0.0, -4.0);
+    for (called, from, to, facing) in [
+        (
+            "a ball whose seam's plane faces -y",
+            north,
+            south,
+            Vector::new(0.0, -1.0, 0.0),
+        ),
+        (
+            "a ball whose seam runs up from the south pole",
+            south,
+            north,
+            Vector::new(0.0, 1.0, 0.0),
+        ),
+    ] {
+        let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+        let built = a_whole_ball_drawn_face_by_face(&mut model, [from, to], facing);
+        let text = rcad_step::write(&model, called)
+            .unwrap_or_else(|why| panic!("{called} is not written: {why}"));
+        let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
+        let import = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{called} is refused on the way back in: {why}"));
+        let [(_, came)] = import.solids() else {
+            panic!("one solid came back as {}", import.solids().len());
+        };
+        let [here, back] = [(&model, built), (import.model(), *came)].map(|(from, key)| {
+            the_plane_its_seam_is_cut_from(from.solid(key).expect("this model made the key"))
+        });
+        assert_eq!(
+            back, here,
+            "{called}: the seam's plane, as the bits of its normal and its offset"
+        );
+        assert!(
+            text.contains(",.F.);"),
+            "{called}: the seam runs against its circle, or this does not reach same_sense"
+        );
+        comes_back_the_same(called, &model, built, &|model| {
+            a_block(model, [10.0, 10.0, 5.0], Vector::new(-5.0, -5.0, -5.0))
+        });
+    }
+}
+
 /// Two bars of radius five meeting at a mitre, sliced along their length by
 /// `z = −3`: the two pipes cross in an arc of an ellipse in the mitre's plane.
 ///
@@ -1026,6 +1367,315 @@ fn a_disc_drawn_on_the_top_of_a_bar_is_written_with_arcs_and_comes_back_the_same
         4,
         "the bar's two caps and the two halves of the disc's rim"
     );
+}
+
+/// The same disc with its rim named by a ball rather than a pipe is refused by
+/// name, rather than written as a chord.
+///
+/// The ball of radius one about the disc's centre crosses the top in exactly
+/// the rim, so the model is sound. The writer reads a curve drawn on a flat
+/// face off a pipe and nothing else, and until Q764 wrote any other as a
+/// `LINE`: both halves of the rim went out as the chord from `(1, 0, 4)` to
+/// `(−1, 0, 4)`, and the reader refused the file the writer had written.
+#[test]
+fn a_disc_drawn_on_a_bar_and_named_by_a_ball_is_refused_by_name_rather_than_written_as_a_chord() {
+    use rcad_geom::Sphere;
+
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+    let ball = Surface::Sphere(Sphere::new(the_discs_centre(), 1.0).expect("a positive radius"));
+    let built = a_bar_with_a_disc_drawn_on_its_top_by(&mut model, ball);
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a ball through the rim says where it runs");
+    assert_eq!(
+        open_bends(&model, built),
+        [["plane", "plane"], ["plane", "plane"]],
+        "the two halves of the disc's rim"
+    );
+    let refused = rcad_step::write(&model, "a disc drawn on a bar by a ball")
+        .expect_err("a half circle named by a ball is not written as its chord");
+    assert!(
+        matches!(
+            refused,
+            CannotWrite::ACurveTheFacesEitherSideOfItDoNotName {
+                first: "plane",
+                second: "plane",
+                closed: false,
+            }
+        ),
+        "refused as {refused:?}"
+    );
+}
+
+/// The same disc with its rim named by the pipe of radius one about the bar's
+/// own axis, whose origin is on the floor four below the top, is written as
+/// the file of the disc drawn by the pipe standing on the top, and comes back
+/// the same.
+///
+/// The writer wrote the rim's circle at the pipe's axis origin, which no face
+/// along the rim holds, so the reader named the rim by the plane `z = 0` the
+/// circle lay in and refused the file (Q775). It now writes the circle where
+/// the axis meets the top.
+#[test]
+fn a_disc_drawn_on_a_bar_by_the_pipe_about_its_own_axis_comes_back_the_same() {
+    use rcad_geom::{Axis, Cylinder};
+
+    let called = "a disc drawn by the pipe about the bar's axis";
+    let scale = Scale::new(Unit::Millimetre, 4.0).expect("a working size");
+    let mut model = Model::new(scale);
+    let about_the_bars_axis =
+        Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a positive radius"));
+    let built = a_bar_with_a_disc_drawn_on_its_top_by(&mut model, about_the_bars_axis);
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the pipe about the bar's axis says where the rim runs");
+    let text = comes_back_the_same(called, &model, built, &|model| {
+        a_block(model, [2.0, 2.0, 2.0], Vector::new(0.0, -1.0, 3.0))
+    });
+    let mut standing_on_the_top = Model::new(scale);
+    a_bar_with_a_disc_drawn_on_its_top(&mut standing_on_the_top);
+    assert_eq!(
+        text,
+        rcad_step::write(&standing_on_the_top, called).expect("the disc on its own top"),
+        "the rim's circle is where the axis meets the top"
+    );
+}
+
+/// That disc turned and moved, drawn by the pipe about the bar's axis or by
+/// that pipe moved up its axis to three above the top, is written, read back
+/// and sound every time, and its rim comes back named by a pipe of the axis
+/// direction and radius it went out with.
+///
+/// Where the axis meets the turned top is worked out in `f64` and rounds, so
+/// the pipe read back runs through a point an ulp or so off the model's line;
+/// the reader holds the circle there all the same. The turns are those of
+/// `how_often_a_turned_disc_drawn_on_a_bar_comes_back_from_its_own_file`: a
+/// tenth to `6.2` about each of `x`, `y` and `z`, unmoved and moved by
+/// `(3, 5, 10)`, so 372 for each pipe.
+#[test]
+fn every_turned_disc_drawn_by_a_pipe_off_its_top_comes_back_from_its_own_file() {
+    use rcad_geom::{Axis, Cylinder};
+
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let (mut came_back, mut refused) = (0, Vec::new());
+    for standing_at in [0.0, 7.0] {
+        let drawn = Cylinder::new(
+            Axis::new(
+                Point::new(0.0, 0.0, standing_at),
+                Vector::new(0.0, 0.0, 1.0),
+            )
+            .expect("a direction"),
+            1.0,
+        )
+        .expect("a positive radius");
+        for about in [Axis::x(), Axis::y(), Axis::z()] {
+            for tenths in 1..63 {
+                for moved in [Vector::zero(), Vector::new(3.0, 5.0, 10.0)] {
+                    let turned = Isometry::translation(moved)
+                        .expect("a finite offset")
+                        .compose(
+                            &Isometry::rotation(&about, f64::from(tenths) * 0.1)
+                                .expect("a finite angle about a unit axis"),
+                        );
+                    let mut model =
+                        Model::new(Scale::new(Unit::Millimetre, 16.0).expect("a working size"));
+                    let built =
+                        a_bar_with_a_disc_drawn_on_its_top_by(&mut model, Surface::Cylinder(drawn));
+                    model
+                        .place_solid(built, &turned)
+                        .expect("a bar can be turned");
+                    let went = the_pipes_its_runs_name(model.solid(built).expect("its key"));
+                    match the_pipes_its_runs_name_back(&model, &policy, &mut log) {
+                        Ok(back)
+                            if back.len() == went.len()
+                                && went.iter().zip(&back).all(|(went, back)| {
+                                    went.axis().direction() == back.axis().direction()
+                                        && went.radius() == back.radius()
+                                }) =>
+                        {
+                            came_back += 1;
+                        }
+                        Ok(back) => {
+                            refused.push(format!("{turned:?}: {went:?} came back {back:?}"))
+                        }
+                        Err(why) => refused.push(format!("{turned:?}: {why}")),
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!((came_back, refused.first()), (744, None));
+}
+
+/// The same disc with its rim named by a pipe of radius `0.8` whose axis
+/// leans off the top's normal along `(3, 0, 4)`, so the rim is an ellipse of
+/// sizes `0.8` and `1` rather than a circle, is refused by name rather than
+/// written as that ellipse.
+///
+/// The pipe's axis runs through the disc's centre along `(3, 0, 4) / 5`, and
+/// crosses the top at `(±1, 0, 4)` along its long way and would cross it at
+/// `(0, ±0.8, 4)` along its short one — `1 = 0.8 / (4 / 5)`, the same
+/// sizes-from-a-lean arithmetic the slanted cap uses
+/// (`a_bar_with_a_slanted_cap_is_written_with_an_ellipse_and_comes_back_the_same`).
+/// The model is sound: `(1, 0, 4)` and `(-1, 0, 4)` are each exactly `0.8`
+/// from that axis, so this is the disc's own rim and not some other curve.
+///
+/// `an_arc_of_a_circle_on_a_flat_face` only ever writes a `CIRCLE` about the
+/// pipe's own axis — the curve the pipe's cross-section draws square to that
+/// axis — which is this rim only where the axis is square to the face. Here
+/// it leans, so the function's `held` check fails exactly as it does for a
+/// run named by a ball, and the write refuses by name instead of writing the
+/// ellipse the plane and pipe actually cross in.
+///
+/// **This is a limit, not a gap** (`docs/decisions.md` §16.10). The writer
+/// could draw that ellipse — `where_a_plane_crosses_a_pipe` is a pure
+/// function of the plane and the pipe, not of whether the pipe is a face —
+/// but two pipes leaning the opposite way off the rim's long axis cross the
+/// top in the same ellipse, and with no face here naming either pipe, no
+/// reader has grounds to pick one over the other. The reader already says as
+/// much for an `ELLIPSE` between two flat faces
+/// (`Walk::the_surface_that_names_the_curve`'s doc comment, `brep.rs`): "no
+/// single surface this kernel holds crosses a plane in a given ellipse and is
+/// written down from the ellipse alone without choosing a slope for it — … a
+/// tilted cylinder would do, and which tilt is a choice this reader has no
+/// consumer to make it for". So no file this reader reads could carry this
+/// rim: the curve alone does not say which pipe drew it, and the only face
+/// that could is the one Q775 found this exact model does not have.
+#[test]
+fn a_disc_drawn_on_a_bar_by_a_leaning_pipe_is_refused_by_name_rather_than_written_as_an_ellipse() {
+    use rcad_geom::{Axis, Cylinder};
+
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+    let leaning = Surface::Cylinder(
+        Cylinder::new(
+            Axis::new(the_discs_centre(), Vector::new(3.0, 0.0, 4.0)).expect("a direction"),
+            0.8,
+        )
+        .expect("a positive radius"),
+    );
+    let built = a_bar_with_a_disc_drawn_on_its_top_by(&mut model, leaning);
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the leaning pipe crosses the top in exactly the rim");
+    assert_eq!(
+        open_bends(&model, built),
+        [["plane", "plane"], ["plane", "plane"]],
+        "the two halves of the disc's rim"
+    );
+    let refused = rcad_step::write(&model, "a disc drawn on a bar by a leaning pipe")
+        .expect_err("an ellipse drawn by a leaning pipe is not written between two flat faces");
+    assert!(
+        matches!(
+            refused,
+            CannotWrite::ACurveTheFacesEitherSideOfItDoNotName {
+                first: "plane",
+                second: "plane",
+                closed: false,
+            }
+        ),
+        "refused as {refused:?}"
+    );
+}
+
+/// Every pipe a run of `solid` names, where the solid puts it, in the order
+/// its faces, wires and coedges are walked.
+fn the_pipes_its_runs_name(solid: rcad_topo::SolidView<'_>) -> Vec<rcad_geom::Cylinder> {
+    let mut pipes = Vec::new();
+    for face in solid.faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                if let EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Cylinder(pipe),
+                    ..
+                } = coedge.edge().run()
+                {
+                    pipes.push(pipe);
+                }
+            }
+        }
+    }
+    pipes
+}
+
+/// [`the_pipes_its_runs_name`] for the one solid of `model` written out and
+/// read back, which has to come back sound.
+fn the_pipes_its_runs_name_back(
+    model: &Model,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Vec<rcad_geom::Cylinder>, String> {
+    let text = rcad_step::write(model, "a turned disc").map_err(|why| format!("{why:?}"))?;
+    let file = StepFile::read(text.as_bytes()).map_err(|why| why.to_string())?;
+    let import = Import::read(&file, policy, log).map_err(|why| why.to_string())?;
+    let [(_, came)] = import.solids() else {
+        return Err(format!("{} solids came back", import.solids().len()));
+    };
+    let there = import.model();
+    there.validate(policy, log).map_err(|why| why.to_string())?;
+    Ok(the_pipes_its_runs_name(
+        there.solid(*came).expect("this model made the key"),
+    ))
+}
+
+/// Half a bar whose straight edge across the floor is named by a pipe it is
+/// one of the straight lines of, rather than said to be straight, is written
+/// with a `LINE` and comes back the same.
+///
+/// The floor and the flat side are two planes that cross in that edge, and
+/// the pipe of radius five along `x` through `(0, 3, 4)` holds it as well.
+/// The walk draws an edge straight where the face's plane holds the pipe's
+/// axis direction. The writer sent every open edge between two flat faces
+/// whose run names a pipe to an arc of that pipe's circle, which has no arc
+/// running along the axis, and refused the edge by name (Q775).
+///
+/// The cut stays clear of the flat side: a block across the floor's edge is
+/// refused on the solid that went out, as an edge that runs along part of a
+/// curve rather than the whole of one, and cut on the one that came back, whose
+/// edge is straight.
+#[test]
+fn a_bar_whose_straight_edge_is_named_by_a_pipe_it_lies_along_is_written_with_a_line_and_comes_back_the_same()
+ {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+    let built = half_a_bar_whose_edge_across_the_floor_is_named_by_a_pipe(&mut model);
+    assert_eq!(
+        open_bends(&model, built),
+        [["pipe", "plane"], ["pipe", "plane"], ["plane", "plane"]],
+        "the two half circles and the edge across the floor"
+    );
+    let text = comes_back_the_same(
+        "half a bar whose edge across the floor is named by a pipe",
+        &model,
+        built,
+        &|model| a_block(model, [2.0, 2.0, 2.0], Vector::new(-1.0, 1.0, 3.0)),
+    );
+    assert_eq!(
+        text.matches("LINE(").count(),
+        4,
+        "the edge across the floor, the one across the top and the two up the sides"
+    );
+}
+
+/// A bar whose seam is named by the plane through its axis, rather than said to
+/// be straight, is written with a `LINE` and comes back the same.
+///
+/// That is the one run an open edge with the one pipe on both sides is written
+/// as a `LINE` from, since Q764: a plane that holds two points of the wall at
+/// one place round the axis holds the straight line between them. Read back,
+/// the seam is straight, and the solid is the same one, cut and all.
+#[test]
+fn a_bar_whose_seam_is_named_by_the_plane_through_its_axis_is_written_with_a_line_and_comes_back_the_same()
+ {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+    let built = a_bar_whose_seam_is_named_by_the_plane_through_its_axis(&mut model);
+    assert_eq!(open_bends(&model, built), [["pipe", "pipe"]], "the seam");
+    let text = comes_back_the_same(
+        "a bar whose seam is named by its plane",
+        &model,
+        built,
+        &|model| a_block(model, [2.0, 2.0, 2.0], Vector::new(1.0, -1.0, 1.0)),
+    );
+    assert_eq!(text.matches("LINE(").count(), 1, "the seam");
 }
 
 /// The outer side of a rod bent round a ring, whose ring meets a pipe in four
@@ -1098,6 +1748,281 @@ fn the_corner_of_a_slab_with_a_round_edge_is_written_where_its_faces_rest_on_the
     );
 }
 
+/// The top of a bent rod sawn off flat at `z = 3`, three of its radius of
+/// five above its middle, is written with the two circles the saw cut crosses
+/// its ring in, and comes back the same.
+///
+/// A plane square to a ring's axis and nearer its centre than the tube's
+/// radius crosses it in two circles about the axis, of radii `R ± √(r² − h²)`:
+/// here `10 ± √(25 − 9)`, which is `14` and `6` with no rounding. The flat
+/// face meets the ring along an open quarter of each, so each circle carries
+/// an open edge between a plane and a ring. Until Q778 the writer wrote only
+/// the circle a plane resting on the tube touches it along, and refused this
+/// as `{ first: "plane", second: "ring", closed: false }`.
+#[test]
+fn the_top_of_a_bent_rod_sawn_off_flat_is_written_with_both_circles_the_cut_crosses_its_ring_in() {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 14.0).expect("a working size"));
+    let built = the_top_of_a_bent_rod_sawn_off_flat(&mut model);
+    assert_eq!(
+        open_bends(&model, built),
+        [
+            ["pipe", "plane"],
+            ["pipe", "plane"],
+            ["pipe", "ring"],
+            ["pipe", "ring"],
+            ["plane", "ring"],
+            ["plane", "ring"],
+        ],
+        "the outer and the inner circle where the cut crosses the ring, where the \
+         ring carries on as a pipe, and where the ends cut the pipes"
+    );
+    let text = comes_back_the_same(
+        "the top of a bent rod sawn off flat",
+        &model,
+        built,
+        &|model| a_block(model, [2.0, 2.0, 4.0], Vector::new(7.0, 7.0, 2.0)),
+    );
+    assert_eq!(
+        the_radii_of_the_circles_written(&text),
+        [5.0, 5.0, 5.0, 5.0, 6.0, 14.0].map(f64::to_bits),
+        "the tube's circle at each end of each pipe and of the bend, and the \
+         inner and the outer circle the cut crosses the ring in"
+    );
+}
+
+/// The radius of every `CIRCLE` in the file, as its bits, smallest first.
+fn the_radii_of_the_circles_written(text: &str) -> Vec<u64> {
+    let mut radii: Vec<f64> = text
+        .lines()
+        .filter_map(|line| line.strip_suffix(");")?.split_once("=CIRCLE("))
+        .map(|(_, body)| {
+            let (_, radius) = body
+                .rsplit_once(',')
+                .unwrap_or_else(|| panic!("a CIRCLE with no radius: {body}"));
+            radius.parse::<f64>().expect("a radius")
+        })
+        .collect();
+    radii.sort_by(f64::total_cmp);
+    radii.into_iter().map(f64::to_bits).collect()
+}
+
+/// The cap the plane `z = 3` cuts off a ball of radius five, whose rim is one
+/// closed circle between the flat floor and the ball, is written and comes
+/// back the same, its rim walked the same way round by both faces.
+///
+/// Until Q777 the writer wrote an edge between a flat face and a ball only
+/// where it stopped short of right round, and refused this one by name as
+/// `{ first: "plane", second: "ball", closed: true }`. A closed edge is stored
+/// running the way the ball winds, about `+z`, and the reader reads which way
+/// each face walks it off the circle's own turn. The floor faces `−z`, so the
+/// circle the floor's plane crosses the ball in turns about `−z`, and the
+/// writer turns it over.
+#[test]
+fn a_cap_cut_off_a_ball_along_one_closed_circle_is_written_and_comes_back_the_same() {
+    let called = "a cap cut off a ball";
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 5.0).expect("a working size"));
+    let built = a_ball_cut_by_a_flat_face_along_one_closed_circle(&mut model);
+    let text = comes_back_the_same(called, &model, built, &|model| {
+        a_block(model, [2.0, 2.0, 2.0], Vector::new(-1.0, -1.0, 3.5))
+    });
+    assert_eq!(
+        the_closed_circles_written(&text),
+        [([-0.0, -0.0, 1.0].map(f64::to_bits), true)],
+        "the rim, about the floor's normal turned over to +z, and run its own way"
+    );
+    let (back, came) = reads_back_as(called, &text, (&model, built), &|model| {
+        a_block(model, [2.0, 2.0, 2.0], Vector::new(-1.0, -1.0, 3.5))
+    });
+    let [here, there] = [model.solid(built), back.model().solid(came)]
+        .map(|solid| the_runs_its_closed_edges_name(solid.expect("its key")));
+    assert_eq!(
+        there, here,
+        "{called}: which way each face walks the rim, and what its run names"
+    );
+}
+
+/// A rod of radius two with a ball of its own radius on its end, whose rim is
+/// one closed circle named by the plane `z = 4` it lies in, is written, and
+/// reads back as the same rod with its rim in two halves: the solid
+/// [`a_bar_with_a_dome_on_top`] builds, bit for bit.
+///
+/// Until Q777 the writer wrote an edge between a pipe and a ball only where it
+/// stopped short of right round, and refused this one by name as
+/// `{ first: "pipe", second: "ball", closed: true }`. **The reader cuts such a
+/// circle in two at its far point**, `(−2, 0, 4)`, and names each half by the
+/// plane the file's circle lies in (`Walk::describe_the_halves_of_a_circle`,
+/// §189.3), so the corner it adds is the one way the solid read back differs
+/// from the one built, and it measures as the rod built with that corner. The
+/// written rim turns about the plane's own normal, `+z`, which is the way the
+/// ball winds and the model stores the rim; and each half reads back naming
+/// that plane bit for bit.
+#[test]
+fn a_rod_with_a_ball_on_its_end_and_one_closed_rim_comes_back_with_its_rim_in_two_halves() {
+    let scale = Scale::new(Unit::Millimetre, 6.0).expect("a working size");
+    let mut model = Model::new(scale);
+    let built = a_rod_with_a_ball_on_its_end_whose_rim_is_one_closed_circle(&mut model);
+    let text = rcad_step::write(&model, "a rod with a ball on its end")
+        .unwrap_or_else(|why| panic!("the rod with one closed rim is not written: {why}"));
+    assert_eq!(
+        the_closed_circles_written(&text),
+        [
+            ([0.0, 0.0, 1.0].map(f64::to_bits), true),
+            ([0.0, 0.0, 1.0].map(f64::to_bits), true)
+        ],
+        "the floor's circle and the rim, each about +z and run its own way"
+    );
+    let mut halves = Model::new(scale);
+    let halved = a_bar_with_a_dome_on_top(&mut halves);
+    let (back, came) = reads_back_as(
+        "a rod with a ball on its end",
+        &text,
+        (&halves, halved),
+        &|model| a_block(model, [2.0, 2.0, 2.0], Vector::new(1.0, -1.0, 1.0)),
+    );
+    let rims: Vec<[u64; 4]> = the_runs_its_closed_edges_name(model.solid(built).expect("its key"))
+        .into_iter()
+        .filter_map(|(_, and)| and)
+        .collect();
+    let [rim, _] = rims[..] else {
+        panic!("the rod's rim is walked twice, naming its plane each time: {rims:?}");
+    };
+    assert_eq!(
+        the_planes_its_halves_name(back.model().solid(came).expect("its key")),
+        [rim, rim],
+        "the plane each half of the rim names read back, as the bits of its normal and offset"
+    );
+}
+
+/// A closed rim between a rod and a ball of its own radius on its end, named
+/// by its two faces alone, is refused by `SolidBuilder`, so no model built
+/// face by face carries one for the writer to name.
+///
+/// The ball touches the pipe round the rim and crosses it nowhere, so there is
+/// no crossing to follow (§124), and the builder refuses it as it settles a
+/// point onto both. A fuse refuses the same dome on a shaft before any edge is
+/// drawn (`TwoCurvesTouchWithoutCrossing` in `fuses_that_touch.rs`). So the one
+/// closed rim between a pipe and a ball a model holds names the plane it lies
+/// in, and that one is written.
+#[test]
+fn a_rods_closed_rim_named_by_its_faces_alone_is_refused_by_the_solid_builder() {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 6.0).expect("a working size"));
+    let refused = a_rod_with_a_ball_on_its_end_whose_rim_runs_or_why(
+        &mut model,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )
+    .expect_err("a rim the faces only touch round names no crossing to follow");
+    let rcad_topo::Error::ADraftEdgeHasACrossingThatCannotBeFollowed { edge: 2, why } = &refused
+    else {
+        panic!("refused at another step, as {refused:?}");
+    };
+    assert!(
+        matches!(
+            **why,
+            rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent { .. }
+        ),
+        "the rim is refused as {why:?}"
+    );
+}
+
+/// The axis of every `CIRCLE` the file runs an edge right round, as the bits
+/// it was written with, and that edge's `same_sense`, in the file's order.
+fn the_closed_circles_written(text: &str) -> Vec<([u64; 3], bool)> {
+    let bodies: std::collections::HashMap<&str, &str> = text
+        .lines()
+        .filter_map(|line| line.strip_suffix(';')?.split_once('='))
+        .collect();
+    let inside = |id: &str, keyword: &str| -> Vec<&str> {
+        bodies[id]
+            .strip_prefix(keyword)
+            .and_then(|rest| rest.strip_prefix("(''"))
+            .and_then(|rest| rest.strip_suffix(')'))
+            .unwrap_or_else(|| panic!("{id} is not a {keyword}"))
+            .split(',')
+            .skip(1)
+            .collect()
+    };
+    let mut circles = Vec::new();
+    for line in text.lines() {
+        let Some((id, body)) = line.strip_suffix(';').and_then(|line| line.split_once('=')) else {
+            continue;
+        };
+        if !body.starts_with("EDGE_CURVE(") {
+            continue;
+        }
+        let edge = inside(id, "EDGE_CURVE");
+        if edge[0] != edge[1] || !bodies[edge[2]].starts_with("CIRCLE(") {
+            continue;
+        }
+        let place = inside(edge[2], "CIRCLE")[0];
+        let axis = inside(place, "AXIS2_PLACEMENT_3D")[1];
+        let way: Vec<u64> = bodies[axis]
+            .trim_start_matches("DIRECTION('',(")
+            .trim_end_matches("))")
+            .split(',')
+            .map(|number| number.parse::<f64>().expect("a number").to_bits())
+            .collect();
+        circles.push(([way[0], way[1], way[2]], edge[3] == ".T."));
+    }
+    circles
+}
+
+/// For each use of a closed edge of `solid`, in the order its faces and wires
+/// walk them: whether it is walked against the way the edge is stored, and
+/// the bits of the plane its run names, if it names one.
+fn the_runs_its_closed_edges_name(
+    solid: rcad_topo::SolidView<'_>,
+) -> Vec<(bool, Option<[u64; 4]>)> {
+    let mut uses = Vec::new();
+    for face in solid.faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                let edge = coedge.edge();
+                if !edge.is_closed().expect("a run kind this test knows") {
+                    continue;
+                }
+                let and = if let EdgeRun::RightRoundWhereItCrosses {
+                    and: Surface::Plane(cut),
+                } = edge.run()
+                {
+                    Some(the_bits_of(cut))
+                } else {
+                    None
+                };
+                uses.push((coedge.orientation_on_its_edge().is_reversed(), and));
+            }
+        }
+    }
+    uses
+}
+
+/// The bits of the plane each open run of `solid` names whose two faces are a
+/// pipe and a ball, in the order its faces, wires and coedges walk them.
+fn the_planes_its_halves_name(solid: rcad_topo::SolidView<'_>) -> Vec<[u64; 4]> {
+    let mut planes = Vec::new();
+    for face in solid.faces() {
+        if !matches!(face.surface(), Surface::Cylinder(_)) {
+            continue;
+        }
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                if let EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Plane(cut),
+                    ..
+                } = coedge.edge().run()
+                {
+                    planes.push(the_bits_of(cut));
+                }
+            }
+        }
+    }
+    planes
+}
+
+fn the_bits_of(cut: Plane) -> [u64; 4] {
+    let [x, y, z] = cut.normal().components().map(f64::to_bits);
+    [x, y, z, cut.offset().to_bits()]
+}
+
 /// Write `built` out, read it back, and require the same solid: sound, the
 /// same corners bit for bit, the same volume, area and centroid, and the same
 /// answer to a cut by `cutter`, refusal and all. Hands back what was written.
@@ -1111,10 +2036,24 @@ fn comes_back_the_same(
     built: SolidKey,
     cutter: &dyn Fn(&mut Model) -> SolidKey,
 ) -> String {
-    let policy = Policy::certified();
-    let mut log = ProvenanceLog::new();
     let text = rcad_step::write(model, called)
         .unwrap_or_else(|why| panic!("{called} is not written: {why}"));
+    reads_back_as(called, &text, (model, built), cutter);
+    text
+}
+
+/// Read `text` back and require it to be `expected`: sound, the same corners
+/// bit for bit, the same volume, area and centroid, and the same answer to a
+/// cut by `cutter`, refusal and all. Hands back what was read, and the solid
+/// it holds.
+fn reads_back_as(
+    called: &str,
+    text: &str,
+    (model, built): (&Model, SolidKey),
+    cutter: &dyn Fn(&mut Model) -> SolidKey,
+) -> (Import, SolidKey) {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
     let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
     let import = Import::read(&file, &policy, &mut log)
         .unwrap_or_else(|why| panic!("{called} is refused on the way back in: {why}"));
@@ -1156,7 +2095,7 @@ fn comes_back_the_same(
             .map_err(|why| why.to_string())
     });
     assert_eq!(cut_here, cut_back, "{called}: the cut");
-    text
+    (import, came)
 }
 
 /// What the two faces either side of each open edge of `solid` that bends sit
@@ -1219,6 +2158,18 @@ fn a_solid_drawn_face_by_face(
     faces: Vec<(Surface, Vec<Vec<Step>>)>,
     inside_out: &[usize],
 ) -> SolidKey {
+    a_solid_drawn_face_by_face_or_why(model, corners, edges, faces, inside_out)
+        .unwrap_or_else(|why| panic!("the solid drawn face by face is not sound: {why}"))
+}
+
+/// [`a_solid_drawn_face_by_face`], or why `SolidBuilder` refuses it.
+fn a_solid_drawn_face_by_face_or_why(
+    model: &mut Model,
+    corners: &[Point],
+    edges: Vec<(usize, usize, EdgeRun)>,
+    faces: Vec<(Surface, Vec<Vec<Step>>)>,
+    inside_out: &[usize],
+) -> rcad_topo::Result<SolidKey> {
     use rcad_geom::Orientation;
     use rcad_topo::{DraftStep, SolidBuilder};
 
@@ -1267,9 +2218,7 @@ fn a_solid_drawn_face_by_face(
         skin.push((builder.add_face(surface, &wires).expect("a face"), used));
     }
     builder.add_shell(&skin).expect("a shell");
-    builder
-        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
-        .unwrap_or_else(|why| panic!("the solid drawn face by face is not sound: {why}"))
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
 /// Part of where a face crosses `and`: the side of the plane through `through`
@@ -1353,6 +2302,95 @@ fn a_bar_with_a_dome_on_top(model: &mut Model) -> SolidKey {
     )
 }
 
+/// The bar of [`a_bar_with_a_dome_on_top`] with its rim drawn as one closed
+/// circle: one corner on it at `(2, 0, 4)`, and a run that names the plane
+/// `z = 4` the circle lies in, since the pipe and the ball only touch there.
+fn a_rod_with_a_ball_on_its_end_whose_rim_is_one_closed_circle(model: &mut Model) -> SolidKey {
+    let centre = Point::new(0.0, 0.0, 4.0);
+    let rim = Surface::Plane(a_plane(centre, Vector::new(0.0, 0.0, 1.0)));
+    a_rod_with_a_ball_on_its_end_whose_rim_runs_or_why(
+        model,
+        EdgeRun::RightRoundWhereItCrosses { and: rim },
+    )
+    .unwrap_or_else(|why| panic!("the solid drawn face by face is not sound: {why}"))
+}
+
+/// That rod with its rim running along `rim`, or why `SolidBuilder` refuses it.
+fn a_rod_with_a_ball_on_its_end_whose_rim_runs_or_why(
+    model: &mut Model,
+    rim: EdgeRun,
+) -> rcad_topo::Result<SolidKey> {
+    use Step::{Forward, Pole, Reversed};
+    use rcad_geom::{Axis, Cylinder, Sphere};
+
+    let centre = Point::new(0.0, 0.0, 4.0);
+    let up_the_dome = Surface::Plane(a_plane(Point::origin(), Vector::new(0.0, 1.0, 0.0)));
+    a_solid_drawn_face_by_face_or_why(
+        model,
+        &[
+            Point::new(2.0, 0.0, 0.0),
+            Point::new(2.0, 0.0, 4.0),
+            Point::new(0.0, 0.0, 6.0),
+        ],
+        vec![
+            (0, 0, EdgeRun::RightRoundWhereItsFacesCross),
+            (0, 1, EdgeRun::Straight),
+            (1, 1, rim),
+            (
+                1,
+                2,
+                part_of(up_the_dome, centre, Vector::new(1.0, 0.0, 0.0)),
+            ),
+        ],
+        vec![
+            (
+                Surface::Plane(a_plane(Point::origin(), Vector::new(0.0, 0.0, -1.0))),
+                vec![vec![Reversed(0)]],
+            ),
+            (
+                Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a positive radius")),
+                vec![vec![Forward(0), Forward(1), Reversed(2), Reversed(1)]],
+            ),
+            (
+                Surface::Sphere(Sphere::new(centre, 2.0).expect("a positive radius")),
+                vec![vec![Forward(2), Forward(3), Pole(2), Reversed(3)]],
+            ),
+        ],
+        &[],
+    )
+}
+
+/// The cap the plane `z = 3` cuts off the top of the ball of radius five about
+/// the origin: the ball, with a seam from the rim at `(4, 0, 3)` up to the pole,
+/// and the floor facing `−z`, whose rim is one closed circle of radius four.
+fn a_ball_cut_by_a_flat_face_along_one_closed_circle(model: &mut Model) -> SolidKey {
+    use Step::{Forward, Pole, Reversed};
+    use rcad_geom::Sphere;
+
+    let floor = a_plane(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.0, -1.0));
+    let up_the_ball = Surface::Plane(a_plane(Point::origin(), Vector::new(0.0, 1.0, 0.0)));
+    a_solid_drawn_face_by_face(
+        model,
+        &[Point::new(4.0, 0.0, 3.0), Point::new(0.0, 0.0, 5.0)],
+        vec![
+            (0, 0, EdgeRun::RightRoundWhereItsFacesCross),
+            (
+                0,
+                1,
+                part_of(up_the_ball, Point::origin(), Vector::new(1.0, 0.0, 0.0)),
+            ),
+        ],
+        vec![
+            (Surface::Plane(floor), vec![vec![Reversed(0)]]),
+            (
+                Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a positive radius")),
+                vec![vec![Forward(0), Forward(1), Pole(1), Reversed(1)]],
+            ),
+        ],
+        &[],
+    )
+}
+
 /// The ball of radius five about the origin, cut down to `z ≥ 0` and
 /// `y ≤ −3`: the ball, the floor `z = 0` and the wall `y = −3`, with corners at
 /// `(±4, −3, 0)`.
@@ -1396,6 +2434,61 @@ fn a_slice_off_the_side_of_a_ball(model: &mut Model) -> SolidKey {
         ],
         &[],
     )
+}
+
+/// The whole ball of radius four about the origin, one face, with its seam
+/// from `ends[0]` to `ends[1]` on the side facing `+x`, cut from the plane
+/// `y = 0` facing `facing`.
+fn a_whole_ball_drawn_face_by_face(
+    model: &mut Model,
+    ends: [Point; 2],
+    facing: Vector,
+) -> SolidKey {
+    use Step::{Forward, Pole, Reversed};
+    use rcad_geom::Sphere;
+
+    let cut = Surface::Plane(a_plane(Point::origin(), facing));
+    a_solid_drawn_face_by_face(
+        model,
+        &ends,
+        vec![(
+            0,
+            1,
+            part_of(cut, Point::origin(), Vector::new(1.0, 0.0, 0.0)),
+        )],
+        vec![(
+            Surface::Sphere(Sphere::new(Point::origin(), 4.0).expect("a positive radius")),
+            vec![vec![Forward(0), Pole(1), Reversed(0), Pole(0)]],
+        )],
+        &[],
+    )
+}
+
+/// The plane the one seam of `solid` is cut from, as the bits of its normal
+/// and then of its offset.
+fn the_plane_its_seam_is_cut_from(solid: rcad_topo::SolidView<'_>) -> [u64; 4] {
+    let mut planes: Vec<[u64; 4]> = solid
+        .faces()
+        .flat_map(|face| face.wires().collect::<Vec<_>>())
+        .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+        .map(|coedge| {
+            let run = coedge.edge().run();
+            let EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(cut),
+                ..
+            } = run
+            else {
+                panic!("a ball's seam is cut from a plane, not run {run:?}");
+            };
+            let [x, y, z] = cut.normal().components().map(f64::to_bits);
+            [x, y, z, cut.offset().to_bits()]
+        })
+        .collect();
+    planes.dedup();
+    let [plane] = planes[..] else {
+        panic!("a whole ball has one seam, not {planes:?}");
+    };
+    plane
 }
 
 /// A bar of radius five along `x` from its cap at `x = −8` and one along `y` to
@@ -1482,18 +2575,27 @@ fn two_bars_meeting_at_a_mitre(model: &mut Model) -> SolidKey {
 /// own on the same plane, and the circle between them is two half circles the
 /// model names by the pipe of radius one standing on the cap.
 fn a_bar_with_a_disc_drawn_on_its_top(model: &mut Model) -> SolidKey {
-    use Step::{Forward, Reversed};
     use rcad_geom::{Axis, Cylinder};
 
-    let centre = Point::new(0.0, 0.0, 4.0);
-    let top = Surface::Plane(a_plane(centre, Vector::new(0.0, 0.0, 1.0)));
     let drawn = Surface::Cylinder(
         Cylinder::new(
-            Axis::new(centre, Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+            Axis::new(the_discs_centre(), Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
             1.0,
         )
         .expect("a positive radius"),
     );
+    a_bar_with_a_disc_drawn_on_its_top_by(model, drawn)
+}
+
+/// [`a_bar_with_a_disc_drawn_on_its_top`] with the two half circles named by
+/// `drawn`, which has to cross the top in the circle of radius one about
+/// [`the_discs_centre`].
+fn a_bar_with_a_disc_drawn_on_its_top_by(model: &mut Model, drawn: Surface) -> SolidKey {
+    use Step::{Forward, Reversed};
+    use rcad_geom::{Axis, Cylinder};
+
+    let centre = the_discs_centre();
+    let top = Surface::Plane(a_plane(centre, Vector::new(0.0, 0.0, 1.0)));
     a_solid_drawn_face_by_face(
         model,
         &[
@@ -1520,6 +2622,125 @@ fn a_bar_with_a_disc_drawn_on_its_top(model: &mut Model) -> SolidKey {
             ),
             (top, vec![vec![Forward(2)], vec![Reversed(4), Reversed(3)]]),
             (top, vec![vec![Forward(3), Forward(4)]]),
+        ],
+        &[],
+    )
+}
+
+/// Where the disc [`a_bar_with_a_disc_drawn_on_its_top_by`] draws is centred,
+/// on the bar's top.
+fn the_discs_centre() -> Point {
+    Point::new(0.0, 0.0, 4.0)
+}
+
+/// A bar of radius two about `z`, four tall, whose seam at `x = 2` is not
+/// [`EdgeRun::Straight`] but the piece in front of `x = 0` of where the plane
+/// `y = 0` crosses the wall.
+fn a_bar_whose_seam_is_named_by_the_plane_through_its_axis(model: &mut Model) -> SolidKey {
+    use Step::{Forward, Reversed};
+    use rcad_geom::{Axis, Cylinder};
+
+    let through_the_axis = Surface::Plane(a_plane(Point::origin(), Vector::new(0.0, 1.0, 0.0)));
+    a_solid_drawn_face_by_face(
+        model,
+        &[Point::new(2.0, 0.0, 0.0), Point::new(2.0, 0.0, 4.0)],
+        vec![
+            (0, 0, EdgeRun::RightRoundWhereItsFacesCross),
+            (
+                0,
+                1,
+                part_of(
+                    through_the_axis,
+                    Point::origin(),
+                    Vector::new(1.0, 0.0, 0.0),
+                ),
+            ),
+            (1, 1, EdgeRun::RightRoundWhereItsFacesCross),
+        ],
+        vec![
+            (
+                Surface::Plane(a_plane(Point::origin(), Vector::new(0.0, 0.0, -1.0))),
+                vec![vec![Reversed(0)]],
+            ),
+            (
+                Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a positive radius")),
+                vec![vec![Forward(0), Forward(1), Reversed(2), Reversed(1)]],
+            ),
+            (
+                Surface::Plane(a_plane(
+                    Point::new(0.0, 0.0, 4.0),
+                    Vector::new(0.0, 0.0, 1.0),
+                )),
+                vec![vec![Forward(2)]],
+            ),
+        ],
+        &[],
+    )
+}
+
+/// The half `y ≥ 0` of a bar of radius two about `z`, four tall, whose edge
+/// across the floor from `(2, 0, 0)` to `(−2, 0, 0)` is not
+/// [`EdgeRun::Straight`] but the piece nearer the floor of where a face crosses
+/// the pipe of radius five along `x` through `(0, 3, 4)`. That pipe crosses
+/// the floor in the lines `y = 0` and `y = 6`, and the flat side in `z = 0` and
+/// `z = 8`.
+fn half_a_bar_whose_edge_across_the_floor_is_named_by_a_pipe(model: &mut Model) -> SolidKey {
+    use Step::{Forward, Reversed};
+    use rcad_geom::{Axis, Cylinder};
+
+    let floor = a_plane(Point::origin(), Vector::new(0.0, 0.0, -1.0));
+    let top = a_plane(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0));
+    let along_the_floor = Surface::Cylinder(
+        Cylinder::new(
+            Axis::new(Point::new(0.0, 3.0, 4.0), Vector::new(1.0, 0.0, 0.0)).expect("a direction"),
+            5.0,
+        )
+        .expect("a positive radius"),
+    );
+    let in_front = Vector::new(0.0, 1.0, 0.0);
+    a_solid_drawn_face_by_face(
+        model,
+        &[
+            Point::new(2.0, 0.0, 0.0),
+            Point::new(-2.0, 0.0, 0.0),
+            Point::new(2.0, 0.0, 4.0),
+            Point::new(-2.0, 0.0, 4.0),
+        ],
+        vec![
+            (
+                0,
+                1,
+                part_of(
+                    along_the_floor,
+                    Point::new(0.0, 1.5, 2.0),
+                    Vector::new(0.0, -4.0, -3.0),
+                ),
+            ),
+            (
+                1,
+                0,
+                part_of(Surface::Plane(floor), Point::origin(), in_front),
+            ),
+            (2, 3, EdgeRun::Straight),
+            (
+                3,
+                2,
+                part_of(Surface::Plane(top), Point::new(0.0, 0.0, 4.0), in_front),
+            ),
+            (0, 2, EdgeRun::Straight),
+            (1, 3, EdgeRun::Straight),
+        ],
+        vec![
+            (Surface::Plane(floor), vec![vec![Forward(0), Forward(1)]]),
+            (Surface::Plane(top), vec![vec![Reversed(3), Reversed(2)]]),
+            (
+                Surface::Plane(a_plane(Point::origin(), Vector::new(0.0, -1.0, 0.0))),
+                vec![vec![Forward(4), Forward(2), Reversed(5), Reversed(0)]],
+            ),
+            (
+                Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a positive radius")),
+                vec![vec![Reversed(1), Forward(5), Forward(3), Reversed(4)]],
+            ),
         ],
         &[],
     )
@@ -1755,6 +2976,100 @@ fn the_corner_of_a_slab_with_a_round_edge(model: &mut Model) -> SolidKey {
                 second_end,
                 vec![vec![Forward(8), Reversed(14), Reversed(3), Reversed(13)]],
             ),
+        ],
+        &[],
+    )
+}
+
+/// The part above `z = 3` of a rod of radius five bent round a quarter of the
+/// ring of radius ten about `z`: a pipe along `y` at `x = 10` from its end at
+/// `y = −4` up to `y = 0`, the quarter of the ring from there round to `x = 0`,
+/// and a pipe along `x` at `y = 10` on to its end at `x = −4`.
+///
+/// So the flat face `z = 3` meets the ring along a quarter of the circle of
+/// radius fourteen, from `(14, 0, 3)` to `(0, 14, 3)`, and a quarter of the
+/// circle of radius six, from `(0, 6, 3)` to `(6, 0, 3)`, and meets each pipe
+/// along two straight lines. The ring meets each pipe in the part of its
+/// tube's circle above the cut, and each end cuts its pipe in the same.
+fn the_top_of_a_bent_rod_sawn_off_flat(model: &mut Model) -> SolidKey {
+    use Step::{Forward, Reversed};
+    use rcad_geom::{Axis, Cylinder, Torus};
+
+    let x = Vector::new(1.0, 0.0, 0.0);
+    let y = Vector::new(0.0, 1.0, 0.0);
+    let z = Vector::new(0.0, 0.0, 1.0);
+    let flat = |at: Point, facing: Vector| Surface::Plane(a_plane(at, facing));
+    let pipe = |at: Point, along: Vector| {
+        Surface::Cylinder(
+            Cylinder::new(Axis::new(at, along).expect("a direction"), 5.0)
+                .expect("a positive radius"),
+        )
+    };
+    let cut = flat(Point::new(0.0, 0.0, 3.0), -z);
+    let first_end = flat(Point::new(0.0, -4.0, 0.0), -y);
+    let second_end = flat(Point::new(-4.0, 0.0, 0.0), -x);
+    a_solid_drawn_face_by_face(
+        model,
+        &[
+            Point::new(14.0, -4.0, 3.0),
+            Point::new(14.0, 0.0, 3.0),
+            Point::new(0.0, 14.0, 3.0),
+            Point::new(-4.0, 14.0, 3.0),
+            Point::new(-4.0, 6.0, 3.0),
+            Point::new(0.0, 6.0, 3.0),
+            Point::new(6.0, 0.0, 3.0),
+            Point::new(6.0, -4.0, 3.0),
+        ],
+        vec![
+            (0, 1, EdgeRun::Straight),
+            (1, 2, part_of(cut, Point::new(14.0, 0.0, 3.0), x + y)),
+            (2, 3, EdgeRun::Straight),
+            (3, 4, EdgeRun::Straight),
+            (4, 5, EdgeRun::Straight),
+            (5, 6, part_of(cut, Point::new(6.0, 0.0, 3.0), x + y)),
+            (6, 7, EdgeRun::Straight),
+            (7, 0, EdgeRun::Straight),
+            (
+                1,
+                6,
+                part_of(flat(Point::origin(), y), Point::new(10.0, 0.0, 3.0), z),
+            ),
+            (
+                2,
+                5,
+                part_of(flat(Point::origin(), x), Point::new(0.0, 10.0, 3.0), z),
+            ),
+            (7, 0, part_of(first_end, Point::new(10.0, -4.0, 3.0), z)),
+            (3, 4, part_of(second_end, Point::new(-4.0, 10.0, 3.0), z)),
+        ],
+        vec![
+            (
+                cut,
+                vec![vec![
+                    Reversed(0),
+                    Reversed(7),
+                    Reversed(6),
+                    Reversed(5),
+                    Reversed(4),
+                    Reversed(3),
+                    Reversed(2),
+                    Reversed(1),
+                ]],
+            ),
+            (
+                Surface::Torus(Torus::new(Axis::z(), 10.0, 5.0).expect("a working ring")),
+                vec![vec![Forward(1), Forward(9), Forward(5), Reversed(8)]],
+            ),
+            (
+                pipe(Point::new(10.0, 0.0, 0.0), y),
+                vec![vec![Forward(0), Forward(8), Forward(6), Forward(10)]],
+            ),
+            (
+                pipe(Point::new(0.0, 10.0, 0.0), x),
+                vec![vec![Forward(2), Forward(11), Forward(4), Reversed(9)]],
+            ),
+            (first_end, vec![vec![Forward(7), Reversed(10)]]),
+            (second_end, vec![vec![Forward(3), Reversed(11)]]),
         ],
         &[],
     )

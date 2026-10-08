@@ -121,6 +121,23 @@ fn the_sweep_names_a_witness_and_not_the_worst_wall() {
 /// `standing`: one written plain, one leaned by `1e-100`, so the two lines they
 /// cut it in meet at `x = 0` and are `1e-99` apart at `x = 10` — the shape the
 /// two-sided walk needs. It never gets there.
+///
+/// **The tolerant fuse stopped on the two lines touching at one corner**
+/// (`TwoCurvesTouchWithoutCrossing`) until Q901 landed Q676's order of two
+/// meets of three planes by their planes. It then stopped a step later,
+/// refused `Undecidable` at *a point inside a piece of a face*: the record's
+/// corners were `(5, 5, 0)` and `(10, 5, 0)` and two boxes a rounding above
+/// them in `y`, the sliver between the two walls. That sliver is about
+/// `1e-99` wide at a `y` of `5`, so no `f64` point lies inside it — but
+/// §365.9's `by_the_piece_across_a_side` places it anyway, by taking the
+/// placement of the square across `y = 5` on the same face: the leaning
+/// knife's plane holds `(0, 5, 10)` and not `(5, 5, 10)`, and the sliver lies
+/// on the same side of it as the square. So the refusal was a gap, not a
+/// limit, and Q1357 closed it. The tolerant fuse now stops a piece later, at
+/// *a point in a piece that every solid could place*, on a wall piece with
+/// corners `(-0, 5, 2)`, `(-5, [5-ulp, 5], 2)`, `(-5, .., 5)`, `(-0, 5, 5)`: a
+/// point was found inside and no ray placed it. Nobody has traced that stop.
+/// It is still not the two-sided walk.
 #[test]
 fn two_walls_a_hair_apart_are_caught_before_the_walk_gets_a_two_sided_piece() {
     let (mut model, standing, plain_knife, leaning_knife) = a_block_between_two_knives();
@@ -136,9 +153,13 @@ fn two_walls_a_hair_apart_are_caught_before_the_walk_gets_a_two_sided_piece() {
         &Policy::tolerant(1e6),
         &mut ProvenanceLog::new(),
     );
-    assert!(
-        matches!(with_slop, Err(Error::TwoCurvesTouchWithoutCrossing { .. })),
-        "the two lines touching at one corner is what a tolerant fuse stops on: {with_slop:?}"
+    let Err(Error::Undecidable { records }) = &with_slop else {
+        panic!("a tolerant fuse is refused for the sliver between the walls: {with_slop:?}");
+    };
+    assert_eq!(
+        records.records().last().map(|record| record.predicate()),
+        Some("a point in a piece that every solid could place"),
+        "the sliver between the two walls is what a tolerant fuse stops on: {with_slop:?}"
     );
 
     let certified = model.fuse(

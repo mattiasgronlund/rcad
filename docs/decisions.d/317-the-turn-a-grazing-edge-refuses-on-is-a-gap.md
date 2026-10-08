@@ -171,3 +171,78 @@ still does what §248.3 wanted, for a reason other than the one it gave.
   places, `(±2⁻⁵¹, 1, −2⁻²⁵)`. The numerical-refusal skill says that an
   `Interval` stop on exact input is suspect, since level 3 should have taken it.
   Seen in the same probe run, and not looked at.
+
+### 317.7 What closed it — 2026-10-05
+
+*Q914, lane `lane-q914-a-turn-read-off-its-root` off `96681fd6`, after Q699
+and Q902 (§406.3).*
+
+**Measured on the base first**, with a probe that printed every record. At
+`cx = 16` under `Policy::certified`, every rule with the ball first refused on
+317.1's turn, `orient3d`, `2⁻⁴⁹` wide; with the block first, on `order along
+a crossing` between the two places along the block's edge, `5.33e-15` wide.
+Under `Policy::tolerant(25.0)` every rule, either solid first, was
+`ResultIsNotManifold { count: 3 }`. The edge along `z` of
+`a_block_edge_grazing_a_ball.rs` at `h = 16` refused under `Policy::certified`
+on `order along a crossing` with either solid first; a print in the order
+showed every such question asked round a circle the block's faces cut the
+ball in, never along the edge. Its tolerant run folds the two meets, records
+`orient3d` resolved to `Zero` at the fold, and refuses `a point in a piece that
+every solid could place`, as that file's doc says.
+
+**The turn: 317.4's second way, built by §406.3 and opened to a curved face.**
+`the_turn_where_two_planes_cross_a_quadric` stopped where the curved surface is
+the face. §406.3's argument does not use which of the three the face lies on:
+the determinant is a fact about three gradients at one point, it is
+`∇Q · (n₁ × n₂)` up to the row the curved one is in (the first row, for the
+ball's own face, with no turn of sign), and the sign is proved by two exact
+signs of `Q` along the planes' line, at the true meet; the node's box only
+picks which of the line's two meets that is. What a curved face adds is that
+the turn is taken about its own gradient, which must not be nothing at the
+node. It is not wherever the route answers: it answers only where the sign
+along the line changes once across a side of the box, which is a simple root,
+where `∇Q · (n₁ × n₂)` is not nothing. A cone's apex, where `∇Q` is nothing,
+is a double root of every line through it, or the line lies along a ruling, so
+the route stays silent there. And still only at a node that stands for one
+meet (§406.3). The stop is gone, and
+`the_turn_on_a_balls_face_where_a_block_edge_grazes_it_is_read_off_the_root`
+in `fuse/arrange.rs` checks the two signs at `16` against the same shape at
+`0`, where the places are exact and the determinant decides.
+
+**The order along the edge: a gap, decided by the quadric at the shared end.**
+The two places' boxes along the edge's `x` are `[15.999999999999998, 16]` and
+`[16, 16.000000000000004]`, each already between two neighbouring `f64`, so
+`MeetOfThree::boxed_tight` cannot narrow them apart. But the edge's point at
+`16` is `2⁻¹⁰³` inside the ball, proved by the exact sign §406.3 reads along
+the line, so neither place is at `16`, and the one whose box ends there comes
+first along `x`. `Arrangement::as_the_quadric_says` reads that for two nodes
+on a straight crossing whose boxes share one end along its axis, where a node
+whose three surfaces are the face's plane, the partner plane and a quadric
+stands for one meet and the line's point at that end is off the quadric
+(`MeetOfThree::the_line_is_off_the_quadric_at`). The row named another way, by
+which root each place is: `meet_of_three_surfaces` numbers its two places by
+the step along `(through + s·direction) / minor`, and `minor`'s sign is picked
+by a ranking in `f64`, so which way `which: 0` lies along the edge is one more
+leg to prove, and the shared end needs none of it. It reads the nodes' own
+boxes; two meets whose boxes overlap by more than one end are not reached by
+it, and none has been seen.
+
+**What each fuse gives now.** At `cx = 16`, every rule, either solid first,
+under either policy, refuses `Undecidable` with one record, `a point inside a
+piece of a face`, whose inputs are the two places. No fuse answers, so nothing
+is held to a volume. `every_fuse_refuses_on_a_point_inside_a_piece_between_the_two_places`
+pins all twelve; it was `a_certified_fuse_refuses_on_the_turn_at_the_place_below_16`.
+The edge along `z` at `h = 16` is unchanged under either policy: its order is
+asked round the circles, which the shared-end rule does not reach.
+
+**What this leaves.**
+
+- At `cx = 16`, `a point inside a piece of a face` between the two places,
+  every fuse. §365.3's rule places the same slivers on the edge along `z` at
+  `h = 0`; why it does not place these is not traced. Refuses/B.
+- On the edge along `z` at `h = 16`, under `Policy::certified`, `order along a
+  crossing` between the two meets round each circle the block's two faces cut
+  the ball in, with either solid first. Q699 orders two such meets where the
+  walked start lies between them; here it does not. Refuses/B.
+- Q909 traces the tolerant results, which moved: at `cx = 16` every fuse is now
+  the certified refusal above, not `ResultIsNotManifold { count: 3 }`.

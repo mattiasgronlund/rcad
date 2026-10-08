@@ -5,16 +5,22 @@
 //! and two quadrics has no second plane to cross, and in general it is a quartic
 //! — two conics in one plane — which nothing in this milestone solves.
 //!
-//! **Two families of it are not a quartic**, and both are ordinary mechanical
-//! CAD:
+//! **Three families of it are not a quartic**, and all three are ordinary
+//! mechanical CAD:
 //!
 //! - Two quadrics that square `p` the same way differ by something *linear*, so
 //!   every point they share sits on one flat surface and the triple is two
 //!   planes and a quadric after all. Two pipes running the same way are it, and
 //!   so are two balls.
+//! - Two surfaces turned about one axis — a ball, a pipe, a cone — are cut by a
+//!   plane square to that axis in two circles about one centre, which are one
+//!   circle or share nothing. A bar through a ball and a cap across both is it.
 //! - A plane that misses one of the two settles the triple on its own, and a
 //!   plane that touches one at a single point leaves one candidate and one sign
 //!   question. A ball and a bar both resting on a block's floor are it.
+//! - Two surfaces turned about one axis share circles square to it, and a
+//!   plane parallel to the axis cuts each in a chord, touches it or misses it.
+//!   A D-flat on a shaft across a chamfer cone is it.
 //!
 //! Every corner below is worked out by hand first and written in the test, and
 //! every one of them lands on a whole number — so a box round it has no width
@@ -29,7 +35,7 @@
 #![forbid(unsafe_code)]
 
 use rcad_geom::{
-    Axis, Cylinder, Error, MeetOfThree, Plane, Point, Sphere, Surface, Vector,
+    Axis, Cone, Cylinder, Error, MeetOfThree, Plane, Point, Sphere, Surface, Torus, Vector,
     meet_of_three_surfaces,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
@@ -64,6 +70,21 @@ fn pipe(through: [f64; 3], direction: [f64; 3], radius: f64) -> Surface {
 fn ball(centre: [f64; 3], radius: f64) -> Surface {
     Surface::Sphere(
         Sphere::new(Point::new(centre[0], centre[1], centre[2]), radius).expect("a radius"),
+    )
+}
+
+/// A cone of `slope` with its apex at `apex`, its axis along `direction`.
+fn cone(apex: [f64; 3], direction: [f64; 3], slope: f64) -> Surface {
+    Surface::Cone(
+        Cone::new(
+            Axis::new(
+                Point::new(apex[0], apex[1], apex[2]),
+                Vector::new(direction[0], direction[1], direction[2]),
+            )
+            .expect("a direction with length"),
+            slope,
+        )
+        .expect("a slope"),
     )
 }
 
@@ -543,45 +564,666 @@ fn two_bars_leaning_across_each_other_and_a_plane_are_still_refused() {
     );
 }
 
-/// A ball and a bar that the plane cuts in curves rather than grazes is the
-/// other half of what is left, and it is refused for the same reason.
+/// A ball and a bar that the plane cuts in curves rather than grazes, about two
+/// different axes, is the other half of what is left, and it is refused for the
+/// same reason.
 ///
-/// A pipe of radius three up `z` and a ball of radius five about the origin meet
-/// where `x² + y² = 9` and `z = ±4`, so `(3, 0, 4)` is on both in whole numbers.
-/// The plane `z = 4` holds it too. A ball squares `p` as `I` and a pipe as
-/// `I − ẑẑᵀ`, which is not the same way, and the plane cuts each in a circle —
-/// so both roads are shut and the quartic is what is left.
+/// A pipe of radius three up `z` and a ball of radius five about `(4, 0, 0)`.
+/// The floor `z = 0` cuts the pipe in `x² + y² = 9` and the ball in
+/// `(x − 4)² + y² = 25`, and subtracting leaves `8x = 0` — so the corners are
+/// `(0, ±3, 0)`, in whole numbers. A ball squares `p` as `I` and a pipe as
+/// `I − ẑẑᵀ`, which is not the same way; the floor cuts each in a circle, so
+/// it grazes neither; and the two circles are about two different centres. All
+/// three roads are shut and the quartic is what is left.
 #[test]
-fn a_ball_and_a_bar_a_plane_cuts_right_through_are_still_refused() {
-    let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 4.0]);
+fn a_ball_and_a_bar_off_its_axis_that_a_plane_cuts_right_through_are_still_refused() {
+    let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
     let upright = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 3.0);
-    let round = ball([0.0, 0.0, 0.0], 5.0);
+    let round = ball([4.0, 0.0, 0.0], 5.0);
 
-    let corner = PredicatePoint::from([3.0, 0.0, 4.0]);
-    for surface in [&cap, &upright, &round] {
-        assert_eq!(
-            which_side_of(surface, corner),
-            Decision::Zero,
-            "(3, 0, 4) is exactly on {surface:?}"
-        );
+    for corner in [[0.0, 3.0, 0.0], [0.0, -3.0, 0.0]] {
+        for surface in [&floor, &upright, &round] {
+            assert_eq!(
+                which_side_of(surface, PredicatePoint::from(corner)),
+                Decision::Zero,
+                "{corner:?} is exactly on {surface:?}"
+            );
+        }
     }
 
     assert_eq!(
-        meet([&cap, &upright, &round]),
+        meet([&floor, &upright, &round]),
         Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
     );
 }
 
-/// Three curved surfaces and no plane at all is refused before either road is
-/// tried, because both of them start from a plane.
+/// **A bar through a ball and a cap square to the bar**, which is the third
+/// road: the cap cuts each of the two in a circle about the bar's axis, and two
+/// circles about one centre are one circle or share nothing.
+///
+/// A pipe of radius three up `z` and a ball of radius five about the origin
+/// meet where `x² + y² = 9` and `z = ±4`. The caps `z = ±4` cut the ball in
+/// `x² + y² = 25 − 16`, which is the pipe's own circle, so the three share it
+/// whole — checked at four whole-number points on it. The caps `z = ±2` cut the
+/// ball in `x² + y² = 21` against the pipe's `9`, and nothing is on both.
 #[test]
-fn three_curved_surfaces_are_refused_before_either_road_is_tried() {
-    let here = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0);
-    let there = pipe([6.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0);
+fn a_cap_across_a_bar_through_a_ball_shares_their_circle_or_nothing() {
+    let upright = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 3.0);
     let round = ball([0.0, 0.0, 0.0], 5.0);
 
+    for height in [4.0, -4.0] {
+        let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, height]);
+        for corner in [[3.0, 0.0], [0.0, 3.0], [-3.0, 0.0], [0.0, -3.0]] {
+            let point = PredicatePoint::from([corner[0], corner[1], height]);
+            for surface in [&cap, &upright, &round] {
+                assert_eq!(
+                    which_side_of(surface, point),
+                    Decision::Zero,
+                    "{point:?} is exactly on {surface:?}"
+                );
+            }
+        }
+        assert_eq!(
+            meet([&cap, &upright, &round]),
+            Ok(MeetOfThree::MoreThanAPoint),
+            "the cap z = {height}"
+        );
+    }
+    for height in [2.0, -2.0] {
+        let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, height]);
+        assert_eq!(
+            meet([&cap, &upright, &round]),
+            Ok(MeetOfThree::Nowhere),
+            "the cap z = {height}"
+        );
+    }
+}
+
+/// A cone is a double cone (`cone.rs` says so out loud), so a plane square to
+/// its axis cuts it on either side of the apex, and a bar about the same axis
+/// shares a whole circle with it on both.
+///
+/// A cone of slope one with its apex at the origin is `x² + y² = z²`, and a
+/// pipe of radius three about the same axis is `x² + y² = 9`. The planes
+/// `z = ±3` cut both in one circle; `z = 2` cuts the cone in a circle of radius
+/// two and shares nothing with the pipe.
+#[test]
+fn a_bar_and_a_cone_about_one_axis_share_a_circle_on_either_nappe_and_nothing_between() {
+    let upright = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 3.0);
+    let pointed = cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+
+    for height in [3.0, -3.0] {
+        let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, height]);
+        for corner in [[3.0, 0.0], [0.0, -3.0]] {
+            let point = PredicatePoint::from([corner[0], corner[1], height]);
+            for surface in [&cap, &upright, &pointed] {
+                assert_eq!(
+                    which_side_of(surface, point),
+                    Decision::Zero,
+                    "{point:?} is exactly on {surface:?}"
+                );
+            }
+        }
+        assert_eq!(
+            meet([&cap, &upright, &pointed]),
+            Ok(MeetOfThree::MoreThanAPoint),
+            "the plane z = {height}"
+        );
+    }
+    let between = flat([0.0, 0.0, 1.0], [0.0, 0.0, 2.0]);
     assert_eq!(
-        meet([&here, &there, &round]),
+        meet([&between, &upright, &pointed]),
+        Ok(MeetOfThree::Nowhere)
+    );
+}
+
+/// **A plane through a cone's apex, square to its axis, touches the cone there
+/// and nowhere else**, so the three meet at the apex or not at all.
+///
+/// A ball of radius five resting on the floor at the origin, from above or from
+/// below, touches it at the apex: one corner, the stored apex itself, exactly
+/// on all three. A pipe of radius three about the same axis does not pass
+/// through its own axis, so it shares nothing with them.
+#[test]
+fn a_plane_through_a_cones_apex_meets_a_ball_resting_there_at_the_apex_and_a_bar_nowhere() {
+    let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
+    let pointed = cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+
+    for centre in [5.0, -5.0] {
+        let resting = ball([0.0, 0.0, centre], 5.0);
+        assert_eq!(
+            corners_of([&floor, &pointed, &resting]),
+            vec![[0.0, 0.0, 0.0]],
+            "a ball about (0, 0, {centre})"
+        );
+    }
+
+    let upright = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 3.0);
+    assert_eq!(meet([&floor, &pointed, &upright]), Ok(MeetOfThree::Nowhere));
+}
+
+/// **Every pair of balls, bars and cones about one axis, cut square at every
+/// whole height, against the closed form** — along each of the three axes, the
+/// axis off the origin, and each pipe and cone written pointing both ways.
+///
+/// A plane square to the axis cuts a ball of radius `R` about height `c` in a
+/// circle of radius² `R² − (h − c)²`, a pipe in one of `r²`, and a cone of
+/// `slope` with its apex at height `a` in one of `slope²(h − a)²`. Two circles
+/// about one centre share all of themselves when the two numbers are equal and
+/// above zero, the one centre when both are zero, and nothing otherwise. Every
+/// number here is a whole number or a half, so the oracle rounds nothing.
+///
+/// Pairs that bend the same way — two balls, two pipes, two cones of one
+/// slope — are the first road's and are swept anyway: the closed form does not
+/// care which road answers, and two roads that disagreed would show here.
+#[test]
+fn every_pair_about_one_axis_cut_square_to_it_meets_where_the_closed_form_says() {
+    let mut shapes = Vec::new();
+    for centre in [-2.0, 0.0, 3.0] {
+        for radius in [1.0, 2.0, 3.0, 5.0] {
+            shapes.push(AboutTheAxis::Ball { centre, radius });
+        }
+    }
+    for radius in [1.0, 2.0, 3.0] {
+        for up in [true, false] {
+            shapes.push(AboutTheAxis::Pipe { radius, up });
+        }
+    }
+    for apex in [-1.0, 0.0, 2.0] {
+        for slope in [0.5, 1.0, 2.0] {
+            for up in [true, false] {
+                shapes.push(AboutTheAxis::Cone { apex, slope, up });
+            }
+        }
+    }
+
+    let (mut shared, mut at_one_point, mut nowhere) = (0usize, 0usize, 0usize);
+    for along in 0..3 {
+        for (first, one) in shapes.iter().enumerate() {
+            for other in &shapes[first + 1..] {
+                for height in -4..=4 {
+                    let height = f64::from(height);
+                    let facing = if height < 0.0 { -1.0 } else { 1.0 };
+                    let cap = flat(
+                        on_the_axis_direction(along, facing),
+                        on_the_axis(along, height),
+                    );
+                    let (here, there) = (one.built(along), other.built(along));
+                    let mine = one.squared_radius_at(height);
+                    let theirs = other.squared_radius_at(height);
+                    let answer = meet([&cap, &here, &there]);
+                    let what = format!("{one:?} and {other:?} along axis {along}, cut at {height}");
+                    if mine < 0.0 || theirs < 0.0 || mine != theirs {
+                        assert_eq!(answer, Ok(MeetOfThree::Nowhere), "{what}");
+                        nowhere += 1;
+                    } else if mine > 0.0 {
+                        assert_eq!(answer, Ok(MeetOfThree::MoreThanAPoint), "{what}");
+                        shared += 1;
+                    } else {
+                        assert_eq!(
+                            corners_of([&cap, &here, &there]),
+                            vec![on_the_axis(along, height)],
+                            "{what}"
+                        );
+                        at_one_point += 1;
+                    }
+                }
+            }
+        }
+    }
+    println!("{shared} shared a circle, {at_one_point} met at one point, {nowhere} nowhere");
+    assert_eq!(
+        shared + at_one_point + nowhere,
+        3 * 630 * 9,
+        "the sweep stopped short"
+    );
+    for (count, what) in [
+        (shared, "shared a circle"),
+        (at_one_point, "met at one point"),
+        (nowhere, "met nowhere"),
+    ] {
+        assert!(count >= 30, "only {count} pairs {what}");
+    }
+}
+
+/// A surface turned about the line `x = 2`, `y = −3` along one coordinate axis,
+/// placed by how far along that axis it sits.
+#[derive(Clone, Copy, Debug)]
+enum AboutTheAxis {
+    Ball { centre: f64, radius: f64 },
+    Pipe { radius: f64, up: bool },
+    Cone { apex: f64, slope: f64, up: bool },
+}
+
+impl AboutTheAxis {
+    /// The surface, with its axis along coordinate axis `along`.
+    fn built(self, along: usize) -> Surface {
+        let which_way = |up: bool| on_the_axis_direction(along, if up { 1.0 } else { -1.0 });
+        match self {
+            AboutTheAxis::Ball { centre, radius } => ball(on_the_axis(along, centre), radius),
+            AboutTheAxis::Pipe { radius, up } => {
+                pipe(on_the_axis(along, 0.0), which_way(up), radius)
+            }
+            AboutTheAxis::Cone { apex, slope, up } => {
+                cone(on_the_axis(along, apex), which_way(up), slope)
+            }
+        }
+    }
+
+    /// The squared radius of the circle the plane square to the axis at
+    /// `height` cuts this in, below zero where it misses.
+    fn squared_radius_at(self, height: f64) -> f64 {
+        match self {
+            AboutTheAxis::Ball { centre, radius } => {
+                radius * radius - (height - centre) * (height - centre)
+            }
+            AboutTheAxis::Pipe { radius, .. } => radius * radius,
+            AboutTheAxis::Cone { apex, slope, .. } => {
+                slope * slope * (height - apex) * (height - apex)
+            }
+        }
+    }
+}
+
+/// The point `how_far` along the line `x = 2`, `y = −3` turned onto coordinate
+/// axis `along`.
+fn on_the_axis(along: usize, how_far: f64) -> [f64; 3] {
+    let mut place = [0.0; 3];
+    place[along] = how_far;
+    place[(along + 1) % 3] = 2.0;
+    place[(along + 2) % 3] = -3.0;
+    place
+}
+
+/// A direction of length `length` along coordinate axis `along`.
+fn on_the_axis_direction(along: usize, length: f64) -> [f64; 3] {
+    let mut direction = [0.0; 3];
+    direction[along] = length;
+    direction
+}
+
+/// **A D-flat on a shaft, across the circles a chamfer cone and a ball on its
+/// axis cross the shaft in.** The flat runs beside the axis, parallel to it,
+/// and cuts each circle in a chord.
+///
+/// A shaft of radius five up `z`, flattened at `x = 3`, which leaves `y = ±4`
+/// on its skin. A cone of slope one with its apex at `z = 8` crosses the
+/// shaft where `|z − 8| = 5`, at `z = 3` and `13`; a ball of radius 13 about
+/// `(0, 0, 20)` crosses it where `(z − 20)² = 169 − 25`, at `z = 8` and `32`.
+/// So the corners are `(3, ±4, h)` at each, whole numbers, lower first and
+/// `+y` first at each, since `n × w` is `−y`.
+#[test]
+fn a_d_flat_on_a_shaft_meets_a_chamfer_cone_and_a_ball_on_its_axis_at_the_ends_of_chords() {
+    let shaft = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0);
+    let d_flat = flat([1.0, 0.0, 0.0], [3.0, 0.0, 0.0]);
+    let chamfer = cone([0.0, 0.0, 8.0], [0.0, 0.0, 1.0], 1.0);
+    let round = ball([0.0, 0.0, 20.0], 13.0);
+
+    for (other, heights) in [(&chamfer, [3.0, 13.0]), (&round, [8.0, 32.0])] {
+        let wanted: Vec<[f64; 3]> = heights
+            .iter()
+            .flat_map(|&height| [[3.0, 4.0, height], [3.0, -4.0, height]])
+            .collect();
+        assert_eq!(corners_of([&d_flat, &shaft, other]), wanted, "{other:?}");
+        assert_eq!(
+            meet([other, &d_flat, &shaft]),
+            meet([&shaft, other, &d_flat]),
+            "the answer depends on which three they are, not the order"
+        );
+    }
+}
+
+/// **A flat beside the axis that touches one of the circles a cone and a ball
+/// share, or misses both, though it cuts the cone and the ball.**
+///
+/// A cone of slope one with its apex at the origin and a ball of radius five
+/// about `(0, 0, 7)` cross where `2t² − 14t + 24 = 0`, at `z = 3` and `4`, in
+/// circles of radius three and four. The flat `x = 4` touches the upper circle
+/// at `(4, 0, 4)` and misses the lower; the flat `x = 4.5` is inside the ball's
+/// reach of five and misses both circles.
+#[test]
+fn a_flat_beside_a_cone_and_a_ball_on_its_axis_touches_one_of_their_circles_or_misses_both() {
+    let pointed = cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+    let round = ball([0.0, 0.0, 7.0], 5.0);
+
+    let touching = flat([1.0, 0.0, 0.0], [4.0, 0.0, 0.0]);
+    assert_eq!(
+        corners_of([&touching, &pointed, &round]),
+        vec![[4.0, 0.0, 4.0]]
+    );
+
+    let missing = flat([1.0, 0.0, 0.0], [4.5, 0.0, 0.0]);
+    assert_eq!(meet([&missing, &pointed, &round]), Ok(MeetOfThree::Nowhere));
+}
+
+/// **An axis that leans to the plane is not this road**, even with a ball
+/// centred on it: the plane cuts the pipe in an ellipse, and an ellipse and a
+/// circle are the quartic again.
+///
+/// A pipe of radius twelve along `(0, 3, 4)` through the origin and a ball of
+/// radius thirteen about `(0, 3, 4)`, cut by the floor `z = 0`. The `x` axis is
+/// square to the pipe's axis whatever its stored direction rounded to, so
+/// `(±12, 0, 0)` is on the pipe, and `144 + 9 + 16 = 169` puts it on the ball:
+/// two corners, in whole numbers, that nothing here reaches.
+#[test]
+fn a_bar_leaning_to_the_plane_is_still_refused_though_a_ball_sits_on_its_axis() {
+    let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
+    let leaning = pipe([0.0, 0.0, 0.0], [0.0, 3.0, 4.0], 12.0);
+    let round = ball([0.0, 3.0, 4.0], 13.0);
+
+    for corner in [[12.0, 0.0, 0.0], [-12.0, 0.0, 0.0]] {
+        for surface in [&floor, &leaning, &round] {
+            assert_eq!(
+                which_side_of(surface, PredicatePoint::from(corner)),
+                Decision::Zero,
+                "{corner:?} is exactly on {surface:?}"
+            );
+        }
+    }
+
+    assert_eq!(
+        meet([&floor, &leaning, &round]),
+        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+    );
+}
+
+/// **Three curved surfaces, two of which bend the same way, are a plane and
+/// two curved surfaces** (Q1284). Two quadrics that square `p` the same way
+/// differ by a plane: every point both hold is on it, and every point on it
+/// and on one of them is on the other. So the plane takes the place of one of
+/// the two, and the roads above answer the triple.
+///
+/// A cut cone less a cone closed by a ball, in `rcad-topo`'s
+/// `a_joined_flat_face_whose_rings_enclose_no_area.rs`, asks this of a cone of
+/// slope one up `z` with its apex at the origin, a second with its apex at
+/// `z = 3`, and the ball of radius `√148` about `(0, 0, 15)`. The cones are
+/// `x² + y² = z²` and `x² + y² = (z − 3)²`, which differ by `6z = 9`, the
+/// plane `z = 1.5`, and the ball reaches down to `15 − √148`, about `2.83`, and
+/// no lower. So the three share nothing.
+#[test]
+fn two_cones_of_one_slope_and_a_ball_above_the_plane_between_them_share_nothing() {
+    let lower = cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+    let upper = cone([0.0, 0.0, 3.0], [0.0, 0.0, 1.0], 1.0);
+    let round = ball([0.0, 0.0, 15.0], 148.0_f64.sqrt());
+
+    for triple in [
+        [&lower, &upper, &round],
+        [&round, &lower, &upper],
+        [&upper, &round, &lower],
+    ] {
+        assert_eq!(meet(triple), Ok(MeetOfThree::Nowhere), "{triple:?}");
+    }
+}
+
+/// **Where the plane two of them differ by does cut the third**, by two of
+/// the roads. Each corner is checked exactly on all three surfaces.
+///
+/// - Three cones of slope one up `z`, with their apexes at the origin, at
+///   `z = 10` and at `(6, 0, 0)`. The first two differ by `z = 5`, where each
+///   is the circle `x² + y² = 25`, and the third is `(x − 6)² + y² = 25`
+///   there: all three bend the same way, so the plane and the first and third
+///   cones are two planes and a cone, and they meet at `(3, ±4, 5)`.
+/// - Two bars of radius five up `z`, six apart, and a ball of radius 13 about
+///   the origin. The bars differ by `x = 3`, beside the axis the first bar
+///   and the ball share, and those two share the circles of radius five at
+///   `z = ±12`. The plane cuts each at `y = ±4`: four corners, `(3, ±4, ±12)`.
+#[test]
+fn three_curved_surfaces_meet_where_the_plane_two_of_them_differ_by_cuts_the_third() {
+    let up = [0.0, 0.0, 1.0];
+    let cones = [
+        cone([0.0, 0.0, 0.0], up, 1.0),
+        cone([0.0, 0.0, 10.0], up, 1.0),
+        cone([6.0, 0.0, 0.0], up, 1.0),
+    ];
+    let bars_and_a_ball = [
+        pipe([0.0, 0.0, 0.0], up, 5.0),
+        pipe([6.0, 0.0, 0.0], up, 5.0),
+        ball([0.0, 0.0, 0.0], 13.0),
+    ];
+
+    for (triple, wanted) in [
+        (&cones, vec![[3.0, -4.0, 5.0], [3.0, 4.0, 5.0]]),
+        (
+            &bars_and_a_ball,
+            vec![
+                [3.0, 4.0, -12.0],
+                [3.0, -4.0, -12.0],
+                [3.0, 4.0, 12.0],
+                [3.0, -4.0, 12.0],
+            ],
+        ),
+    ] {
+        let [one, other, third] = triple.each_ref();
+        assert_eq!(corners_of([one, other, third]), wanted, "{triple:?}");
+        for order in [
+            [third, one, other],
+            [other, third, one],
+            [other, one, third],
+        ] {
+            assert_eq!(
+                meet(order),
+                meet([one, other, third]),
+                "the answer depends on which three they are, not the order"
+            );
+        }
+    }
+}
+
+/// **Two cones of a slope whose square no `f64` holds still differ by a
+/// stored plane.** Cones of slope `s` up `z`, with their apexes at heights
+/// `h₁` and `h₂`, differ by `2s²(h₁ − h₂)·z = s²(h₁² − h₂²)`, each side
+/// several `f64` long where `s²` is, and the plane is `z = (h₁ + h₂)/2`
+/// whatever `s` is. A bar of radius 100 about the same axis is wider there
+/// than the cones' circle, so each three share nothing.
+///
+/// Slopes `0.01` to `0.99` by hundredths, against 38 pairs of whole heights
+/// with the lower one below 4 and the upper below 12: 3762 triples, all
+/// answered. With the two sides rounded to the nearest `f64` before
+/// [`Plane::from_coefficients`] divides them, rather than divided exactly
+/// first, 641 of them were refused, the stored plane an ulp off the true one
+/// (Q1284, the division swapped out by hand and the sweep counted).
+#[test]
+fn two_cones_of_a_slope_no_f64_squares_still_differ_by_a_stored_plane() {
+    let bar = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 100.0);
+    for hundredths in 1..100 {
+        let slope = f64::from(hundredths) / 100.0;
+        for low in 0..4 {
+            for high in (low + 1)..12 {
+                let lower = cone([0.0, 0.0, f64::from(low)], [0.0, 0.0, 1.0], slope);
+                let upper = cone([0.0, 0.0, f64::from(high)], [0.0, 0.0, 1.0], slope);
+                assert_eq!(
+                    meet([&lower, &upper, &bar]),
+                    Ok(MeetOfThree::Nowhere),
+                    "slope {slope}, apexes at {low} and {high}"
+                );
+            }
+        }
+    }
+}
+
+/// **Two quadrics that bend the same way and differ by a number share
+/// nothing**, and neither does any third surface with them. Two bars up `z`
+/// of radius three and five are `x² + y² = 9` and `x² + y² = 25`, and `0 = 16`
+/// holds nowhere.
+#[test]
+fn two_bars_on_one_axis_with_two_radii_and_a_ball_share_nothing() {
+    let thin = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 3.0);
+    let thick = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0);
+    let round = ball([4.0, 0.0, 0.0], 5.0);
+    assert_eq!(meet([&thin, &thick, &round]), Ok(MeetOfThree::Nowhere));
+    assert_eq!(meet([&round, &thick, &thin]), Ok(MeetOfThree::Nowhere));
+}
+
+/// **One surface written twice is no plane**, so a triple with a repeat in it
+/// is refused as it was before any pair was read as a plane, whether or not
+/// the third bends the same way.
+#[test]
+fn a_surface_written_twice_beside_a_third_curved_one_is_still_refused() {
+    let round = ball([0.0, 0.0, 0.0], 5.0);
+    for third in [
+        pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 3.0),
+        ball([6.0, 0.0, 0.0], 5.0),
+    ] {
+        assert_eq!(
+            meet([&round, &round, &third]),
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat),
+            "{third:?}"
+        );
+        assert_eq!(
+            meet([&third, &round, &round]),
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat),
+            "{third:?}"
+        );
+    }
+}
+
+/// **A plane no stored plane is exactly is still refused, and that is a gap.**
+/// Two balls of radius five about the origin and `(3, 3, 0)` differ by
+/// `6x + 6y = 18`, the plane `x + y = 3`. A stored plane's normal has length
+/// one, `(1/√2, 1/√2, 0)` rounded, and its offset is `3/√2` rounded, and
+/// three times that rounded normal is not an `f64`, so no stored plane is
+/// `x + y = 3`. A bar of radius three up `z` with them meets both balls at
+/// `(3, 0, ±4)` and `(0, 3, ±4)`, whole numbers on all three, and the points
+/// are there.
+#[test]
+fn two_balls_whose_plane_no_stored_plane_is_and_a_bar_are_still_refused() {
+    let here = ball([0.0, 0.0, 0.0], 5.0);
+    let there = ball([3.0, 3.0, 0.0], 5.0);
+    let bar = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 3.0);
+
+    for corner in [
+        [3.0, 0.0, 4.0],
+        [3.0, 0.0, -4.0],
+        [0.0, 3.0, 4.0],
+        [0.0, 3.0, -4.0],
+    ] {
+        for surface in [&here, &there, &bar] {
+            assert_eq!(
+                which_side_of(surface, PredicatePoint::from(corner)),
+                Decision::Zero,
+                "{corner:?} is exactly on {surface:?}"
+            );
+        }
+    }
+
+    assert_eq!(
+        meet([&here, &there, &bar]),
+        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+    );
+}
+
+/// A ring about `z` through the origin.
+fn ring(ring_radius: f64, tube_radius: f64) -> Surface {
+    Surface::Torus(Torus::new(Axis::z(), ring_radius, tube_radius).expect("a tube inside its ring"))
+}
+
+/// **A bend's end cap across the bar of its ring's radius on its axis**: the
+/// bar crosses the tube in the circles on its top and its bottom, and the cap,
+/// a plane holding the axis, cuts each circle either side of the axis. Ring
+/// four, tube one, and the cap `y = 0`, meet at `(±4, 0, ±1)`; ring six, tube
+/// two, and the cap `x = 0`, at `(0, ±6, ±2)`. Lower circles first along `+z`,
+/// and on each the `−(n × z)` side first.
+///
+/// Refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` before row Q1376, which
+/// stopped every fuse of such a bend and bar at its caps.
+#[test]
+fn a_bends_cap_meets_a_bar_of_its_rings_radius_where_the_bars_circles_cross_it() {
+    for (cap, bar, bend, corners) in [
+        (
+            flat([0.0, 1.0, 0.0], [0.0; 3]),
+            pipe([0.0, 0.0, -2.0], [0.0, 0.0, 1.0], 4.0),
+            ring(4.0, 1.0),
+            [
+                [-4.0, 0.0, -1.0],
+                [4.0, 0.0, -1.0],
+                [-4.0, 0.0, 1.0],
+                [4.0, 0.0, 1.0],
+            ],
+        ),
+        (
+            flat([-1.0, 0.0, 0.0], [0.0; 3]),
+            pipe([0.0, 0.0, -4.0], [0.0, 0.0, 1.0], 6.0),
+            ring(6.0, 2.0),
+            [
+                [0.0, -6.0, -2.0],
+                [0.0, 6.0, -2.0],
+                [0.0, -6.0, 2.0],
+                [0.0, 6.0, 2.0],
+            ],
+        ),
+    ] {
+        for order in [
+            [&cap, &bar, &bend],
+            [&bend, &cap, &bar],
+            [&bar, &bend, &cap],
+        ] {
+            assert_eq!(corners_of(order), corners, "{order:?}");
+        }
+    }
+}
+
+/// The same road for a ball and a cone on the ring's axis, whose circles sit
+/// at heights no `f64` holds. The ball of radius four about the centre of ring
+/// four, tube one, crosses the tube at `(31/8, ±√63/8)`, and the cone of slope
+/// four from the centre at `h = ±15/17` and `±1`, `4|h|` out. Each corner is a
+/// box a few roundings wide holding the corner worked out by hand.
+///
+/// A pipe that misses the tube shares nothing with the ring, and a ball off
+/// the axis is not this road and is refused as before.
+#[test]
+fn a_cap_holding_a_rings_axis_meets_a_ball_or_a_cone_on_it_at_their_circles() {
+    let cap = flat([0.0, 1.0, 0.0], [0.0; 3]);
+    let bend = ring(4.0, 1.0);
+    let the_balls = 63f64.sqrt() / 8.0;
+    let (fifteen, sixty) = (15.0 / 17.0, 60.0 / 17.0);
+    for (other, by_hand) in [
+        (
+            ball([0.0; 3], 4.0),
+            vec![
+                [-3.875, -the_balls],
+                [3.875, -the_balls],
+                [-3.875, the_balls],
+                [3.875, the_balls],
+            ],
+        ),
+        (
+            cone([0.0; 3], [0.0, 0.0, 1.0], 4.0),
+            vec![
+                [-4.0, -1.0],
+                [4.0, -1.0],
+                [-sixty, -fifteen],
+                [sixty, -fifteen],
+                [-sixty, fifteen],
+                [sixty, fifteen],
+                [-4.0, 1.0],
+                [4.0, 1.0],
+            ],
+        ),
+    ] {
+        let answer = meet([&cap, &other, &bend]).expect("these three meet");
+        let MeetOfThree::At(points) = &answer else {
+            panic!("{other:?}: {answer:?}");
+        };
+        assert_eq!(points.len(), by_hand.len(), "{other:?}: {answer:?}");
+        for (point, [x, z]) in points.iter().zip(by_hand) {
+            let sides = point.enclosure();
+            for (side, expected) in [(sides[0], x), (sides[1], 0.0), (sides[2], z)] {
+                assert!(
+                    side.width() <= 1e-14
+                        && side.lo() - 1e-15 <= expected
+                        && expected <= side.hi() + 1e-15,
+                    "{other:?}: {point:?} where the corner is ({x}, 0, {z})"
+                );
+            }
+        }
+    }
+
+    assert_eq!(
+        meet([&cap, &pipe([0.0; 3], [0.0, 0.0, 1.0], 2.0), &bend]),
+        Ok(MeetOfThree::Nowhere)
+    );
+    assert_eq!(
+        meet([&cap, &ball([0.0, 1e-9, 0.0], 4.0), &bend]),
         Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
     );
 }

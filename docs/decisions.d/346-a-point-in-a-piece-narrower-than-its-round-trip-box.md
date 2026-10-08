@@ -149,6 +149,13 @@ could hand on. So for placing by a point this is a **limit**: the point does
 not exist. For the fuse it is still a **gap**, because the fuse's answer
 exists. It is deferred to a row that owns 5 or decides 6.
 
+§365 decided 6, and Q712 built it (§365.3, §365.5): each of the three
+slivers is placed by the side it shares with a piece of the other solid's
+face, so all six fuses get past `select`. None answers yet. The union and
+the ball less the block are refused `CannotNameWhichPieceOfACrossingThisIs`,
+the intersection and the block less the ball
+`ACurvedFaceGoesRightRoundWithNoSeam`.
+
 ### 346.4 The pins
 
 The row named nine more test files that name this refusal. **No pin in any of
@@ -160,14 +167,20 @@ version sized the box by the candidate before its trip as well as by the point
 after it. On `52eb56fb` the same command ran 1129 and failed one:
 `the_named_control_seeds_still_land_either_side_of_the_fuse` in
 `every_model_the_fuse_fuzzer_kept_is_fused_again.rs`, where the seed
-`a_curved_face_with_a_hole_that_goes_too_far_round` refused on both halves
-instead of one. A probe showed why. A candidate is a step of one radius from
+`a_curved_face_with_a_hole_that_goes_too_far_round` — since Q932,
+`a_cube_with_a_unit_ball_nearly_inside_it` — refused on both halves instead of
+one. A probe showed why. A candidate is a step of one radius from
 the middle of the corners, so before its trip it can be three units out where
 the point it comes back as is two. That grew one ball's box from `1.14e-13` to
 `1.71e-13`, and it lost the only candidate inside a cap near the ball's top.
 The candidate before its trip is off the surface, and the box only has to hold
 the true point at the two coordinates the trip came back with, so it is not
 one of the numbers the bound is about. `3e0abbe7` takes it out.
+
+*Since Q920 that seed's first half answers too (§95.4), so the pin now reads
+both halves `Ok` and none refused. The mistake above would still fail it: the
+half it refused was the second, the union, since the first was refused
+already.*
 
 **Q335 does not move, and it is not this piece.**
 `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` in `fusing_solids.rs`
@@ -185,7 +198,9 @@ of doubles. So it gives up for another reason, which was not traced here.
   `ACurvedFaceGoesRightRoundWithNoSeam` there are limits of meshing a ball
   `1e-14` across in a unit model or signs of a wrong answer is the next
   question. `s = 2⁻⁴⁰` shows it without this fix.
-- **The grazing block needs family 5 or 6 of 346.3.**
+- **The grazing block got family 6 of 346.3** (§365.3, built by Q712).
+  Its slivers are placed, and its six fuses are now refused after `select`,
+  while each answer is written (§365.5).
 - **Q335's refusal is a different one** (346.4), still untraced.
 - **The fold is still shown only by `arrange.rs`'s two unit tests** (§288.5).
   Neither test in `two_meets_reach_one_corner.rs` can show it through a fuse
@@ -235,21 +250,43 @@ each spacing along it is another chance for a double to fall inside.
    the cap turned by `1` (`3.6e-17` deep) was never held: the interval sum
    rounds by more than the cap is deep. Narrowed, it is asked exactly. The same
    narrowing is used where `select` compares the ray with the stored planes.
+   *Since Q996 `select` asks it through `classify.rs`'s `side_of_a_flat_face`,
+   the ray's own copy, and stretches a box through `classify.rs`'s
+   `stretched_to_the_plane`; it keeps no copy of either, and no longer compares
+   the ray with the stored planes (below).*
 
 **Measured, on the base and after.** A throwaway probe fused every draw with
 both policies and both argument orders (`crates/rcad-topo/tests/q658_probe.rs`,
 taken out). On the base all 56 refused `a point inside a piece of a face`.
-After, each draw answers alike under both policies and both orders:
+After, each draw answers alike under both policies and both orders. The third
+column is since §402 (Q904), the fourth since Q668, and the last since Q996;
+the paragraphs on each row below say why:
 
-| draws (`off`, turned) | refused with |
-|---|---|
-| −0.5: 1, 1.5, 2.5, 3; −0.3: 0.3, 0.5, 1.5, 2.5, 3; +0.3: 2.5 | `a point in a piece that every solid could place` |
-| −0.3: 2; +0.3: 0.5 | `CurvedFaceWithAHoleGoesTooFarRound` |
-| +0.3: 5; +0.5: 5 | `Invalid::FacesDoNotAgreeWhichWayTheyFace` |
+| draws (`off`, turned) | refused with, after Q658 | since §402 | since Q668 | since Q996 |
+|---|---|---|---|---|
+| −0.5: 1; −0.3: 0.3, 0.5 | `a point in a piece that every solid could place` | the same | answers | answers |
+| −0.5: 1.5, 2.5, 3; −0.3: 1.5, 2.5, 3; +0.3: 2.5 | `a point in a piece that every solid could place` | the same | the same | answers |
+| −0.3: 2; +0.3: 0.5 | `CurvedFaceWithAHoleGoesTooFarRound` | answers | answers | answers |
+| +0.3: 5; +0.5: 5 | `Invalid::FacesDoNotAgreeWhichWayTheyFace` | answers | answers | answers |
 
-`what_each_ball_shaved_by_a_turned_blocks_face_is_refused_with` pins that
-table and fails on the base. `mise exec -- just t -p rcad-topo --no-fail-fast`:
-1209 run, 1209 passed, 11 skipped. No other pin moved.
+`what_each_ball_shaved_by_a_turned_blocks_face_comes_to` pins that table, its
+last column now, and was `…_is_refused_with` until Q904. Q658's pin failed on
+its base. `mise exec -- just t -p rcad-topo --no-fail-fast`: 1209 run, 1209
+passed, 11 skipped. No other pin moved.
+
+A draw that answers is checked to validate, to be one solid where the circle is
+on the block's face and two where it is beside it, to measure within the error
+it publishes of `8 + 4π/3` summed over its solids, and to keep a face on the
+ball with two holes. The cap is below `1e-29` in volume and the closed form
+leaves it out. The volumes are measured summed because the turn rounds the
+block's corners: on its own, the block measured `7.999999999999997` with an
+error of `1.4e-15` in `off 0.3` turned 0.5 (a throwaway probe, taken out),
+which is the solid's own distance from `8` and not its sums' (§338.1). `mise
+exec -- just t -p rcad-topo --test a_ball_shaved_by_a_turned_blocks_face
+--no-capture` prints each of the 16 answers, four draws in two orders under two
+policies: from `12.16826` to `12.16910`, against `12.18879`, with published
+errors from `0.12615` to `0.12655`. The two policies give the same volume, and
+the two orders give it to within `3e-14`.
 
 **Why the first row still refuses: the block's ray and its stored plane
 disagree about the cap.** A trace printed each segment's placement against the
@@ -265,6 +302,103 @@ is not in `select.rs`**: it is `classify.rs`'s reading of a flat face by its
 corner triangles rather than its stored plane (`count_a_polygon`). Why the
 other first-row draws refuse was not traced one by one.
 
+*2026-10-04, Q668: traced one by one; three of the ten answer.* *Queue row
+Q668, lane `lane-q668-a-ball-shaved-by-a-turned-blocks-face`, off
+`2c349f2b`.* An `eprintln` in `settle_against_each` (taken out) printed each
+segment's placement against the block and the guard's verdict, in all four
+runs of each draw. In seven, `off −0.5` turned 1.5, 2.5, 3, `off −0.3` turned
+1.5, 2.5, 3 and `off +0.3` turned 2.5, the ray said `Outside` and the guard
+said the two disagree. In three, `off −0.5` turned 1 and `off −0.3` turned 0.3
+and 0.5, the ray said `Undecidable` certified and `OnBoundary` tolerant, and
+the guard was silent: the segment is a box `2e-8` tall, and its sign against
+the corners' triangle is not settled, where the stored plane, asked with the
+height it cannot see narrowed away, settles it exactly. Q658's reading of
+`off −0.3` turned 0.3 is reproduced; `off −0.5` turned 1 was not among the six
+it traced. That `off +0.3` turned 2.5 refuses for the same reason as the
+first six was a guess and is wrong: its cap is beside the block, `0.3` past its
+face `y = 0`, the ray's `Outside` is right by either reading, and the guard
+drops the point because it asks the plane of every triangle of the face `x = 0`
+however far from that face the point is.
+
+**What changed, in `classify.rs`.** Where a ray's count turns on which side of
+a triangle the point is, the face's stored plane is asked too: the ray crosses
+the plane ahead when the point and the target are on opposite sides of it.
+Where the triangle's certified sign says otherwise, or cannot say and the plane
+can, no count is trusted and the ray names the face. The point's box is then
+stretched along an axis to the plane, as `select` stretches one (item 4 above,
+Q671's box). If the face holds every point of the stretched box and no other
+face holds any, the skin inside the box is that face alone, so the point is
+inside exactly when it is on the face's inner side of the plane. Otherwise the
+answer is `Undecidable`. A point exactly on a triangle's plane still goes to
+the outline as before, since every stored corner is one.
+
+**Why not let the ray cross the face by its stored plane outright.** The ray
+finds the triangle it passes through by the triangle's edges, which are the
+corners'. Reading only the side by the plane mixes the two: a point in the
+sliver within a sliver's depth of the face's edge could be counted through the
+face where the plane meets the ray beyond that edge, past a second face that
+puts the point outside. That was reasoned and not run, so it is a guess with no
+class (§360.5), and it is why the plane is asked alone only over a box no other
+face holds.
+
+**What it does to the draws.** The three answer, in all four runs each, and
+hold the test file's checks. `a_segment_up_through_the_cap_is_inside_the_block`
+pins one segment from each of three draws against the block alone: `Inside`
+under both policies, where it was `Undecidable` and `OnBoundary` in two and
+`Outside` in the third. The seven still refused (until Q996, below): the ray now says `Inside` for
+the six whose cap is on the block's face, the plane's answer, and `select`'s
+guard still drops them, since it reads every triangle and not the ray's answer.
+With the guard switched off by a throwaway check in `select.rs` (taken out),
+all forty runs of the ten draws came back `Ok(Answers)` against the pin that
+still had them refused, so each validated, was one solid or two as the side of
+the circle says, measured within its error of `8 + 4π/3`, and kept a face with
+two holes on the ball.
+
+**What else moved.** `mise exec -- just t --workspace --no-fail-fast`: 3006
+run, 3004 passed, 2 failed, 9 skipped. `mise exec -- just test-slow`: 40 run,
+40 passed. Each of the two is a point the ray read by corners and the plane now
+reads, and each new answer is the stored plane's exact sign, printed by a
+throwaway `eprintln` in the new rule (taken out):
+
+- `the_quarter_turned_knife_holds_the_axis_by_its_corners_and_not_by_its_plane`
+  in `a_narrow_lune_from_a_pole_corner.rs`: `(0, 1.1e-16, −0.5)` against the
+  knife, `Inside` before and `Outside` now. The stored plane, normal
+  `(−2.2e-16, −1, 0)` and offset `−4.4e-16`, puts it `3.3e-16` outside, which
+  that test's own second assertion says. Renamed at the merge to
+  `the_quarter_turned_knife_holds_the_axis_by_its_corners_and_places_a_point_by_its_plane`.
+- `which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_it_measures`
+  in `meshing_a_plane_cut_along_a_cones_other_nappe.rs`: the apex against the
+  block at lean one quarter, turn one, `Outside` before and `Inside` now. The
+  steep face's stored plane has offset `4.4e-16`, so the origin is `4.4e-16`
+  on the block's side of it. The test's claim survives the move: `(0.25, 1.0)`
+  and `(0.375, 1.0)` are both inside, and only the second measures.
+
+*2026-10-05, Q996: the guard is dropped, and the seven answer.* *Queue row
+Q996, lane `lane-q996-drop-the-stored-plane-guard`, off `8ac9f1c8`.*
+`the_ray_and_the_stored_planes_disagree_about` is gone from `select.rs`. It
+dropped a point wherever any triangle of any straight-sided flat face of the
+solid and that face's stored plane put it on opposite sides, whatever the ray
+then said and however far the point was from the face. Since Q668 the ray asks
+the stored plane at every triangle its count turns on, so the guard only threw
+away answers the ray had already checked. With only the guard's call taken
+out, `mise exec -- just t -p rcad-topo --no-fail-fast`: 1378 run, 1377 passed,
+1 failed, 8 skipped. The one failure was Q658's pin, where all 28 runs of the
+seven draws answered and held the file's checks; it now has every draw answer.
+No pin moved in `a_narrow_lune_from_a_pole_corner.rs` or
+`fuses_that_must_agree.rs`, nor in any other file. `mise exec -- just pre-gate
+gate-lane`: 3027 run, 3027 passed, 48 skipped.
+
+**Why dropped and not narrowed.** Narrowing it to points over the face, those
+whose foot on the plane the face holds, keeps six of the seven refused: their
+points are in the sliver over the face `x = 0`, which is exactly where the ray
+now asks the plane. Narrowing it to faces the ray did not ask needs the ray to
+say which it asked. What the guard still caught that the ray does not is a
+point in one face's sliver whose ray line passes through a neighbouring face's
+triangle instead: a point within a few roundings of the edge the two share,
+the case "Why not let the ray cross the face by its stored plane outright"
+above already names. It was reasoned and not run, so it is a guess with no
+class (§360.5), and a row of its own builds it.
+
 **The second row gets past `select`**, and the mesher refuses a face of the
 ball with a hole of radius about `1e-8`. The refusal is `cut_up`'s fallback in
 `mesh.rs`, after `cut_a_ring_across` and `cut_a_hole_up_to_both_poles` both
@@ -273,10 +407,47 @@ ball face whose outer loop and hole reach no pole, which neither cut takes —
 was not traced; that second reading is a guess nobody has run, so it carries no
 class.
 
+*2026-10-04, Q904: traced, and it was the shape, though not that one.* The
+plane of the block's face `y = 0` cuts the ball too, beside the block, in a
+circle `|off|` from the ball's middle and `2 acos |off|` round in longitude:
+`2.532` for `off ±0.3`, `2.094` for `0.5`. So the ball's skin is a face that
+holds both poles and has two holes, that wide circle and the tiny one of
+`x = 0`, about `1.3e-8` round. An `eprintln` in the base's
+`cut_off_what_goes_too_far_round` (taken out) printed that face in all eight
+runs of this row, two draws in two orders under two policies: two loops, both
+enclosing less than nothing of the chart, so both holes, neither going right
+round, and the wide one first. Only a face of one wire was opened along a seam
+(§202.1), and the first loop went more than a quarter turn round, so the face
+went to `cut_a_ring_across`, which declined because no loop goes right round,
+and to `cut_a_hole_up_to_both_poles`, which declined because no loop encloses
+any of the chart, so there is no outer loop to cut the hole up to. **A gap**:
+the skin exists. §402 fills it by opening such a face into strips from pole to
+pole. A second `eprintln`, in the branch's strip cut and taken out too, printed
+two strips of one hole each for the face of every answer, and each such strip
+is cut exactly as the one hole of a ball less a disc is (§402.3). With the
+base's `mesh.rs` put back, all eight runs refuse
+`CurvedFaceWithAHoleGoesTooFarRound` again.
+
 **The third row gets past `select` and the answer's own check refuses it.** In
 `off +0.5` turned 5 the segment through the cap was placed `Outside` the block,
 which is right: the cap is beside the block. What `validate` then found two
 faces disagreeing about was not traced.
+
+*2026-10-04, Q904: traced. The answer was built wrong and the check was
+right.* The ball's skin is the same face with two holes, and here the tiny hole
+came first, `1.1e-8` and `2.0e-8` round for `off 0.5` and `0.3`. A first loop
+no more than a quarter turn round was handed over whole, so the triangulator
+had the tiny hole for the face's outer loop and filled it, not the skin round
+it. The check is `every_side_of_the_skin_is_used_both_ways` in `validate.rs`,
+over the coarsest mesh. An `eprintln` there (taken out) printed, in all eight
+runs, the sides that were not used once each way and the faces whose triangles
+used them: four sides drawn by the face with two holes and one cap of the ball,
+and four drawn by it and the other cap. The ball, beside the block, is three
+faces there: those two caps of one wire each, the tiny one beyond `x = 0` and
+the one beyond `y = 0`, and the face with both their circles for holes. The
+strips cut that face as they do the second row's, and all eight runs answer.
+With the base's `mesh.rs` put back, all eight refuse
+`Invalid(FacesDoNotAgreeWhichWayTheyFace)` again.
 
 **A guess Q658 named, demonstrated.** A flat piece's candidate is three doubles
 off its plane by a rounding, and a round wire's partner is asked about the point
@@ -327,7 +498,8 @@ All three tests fail on the base with the hold they assert against.
 taken out). Every answer that changed became `None`. 111 of them had been
 `Some(false)`, which the caller reads the same way. 9 had been `Some(true)`:
 the three new unit tests, and six in
-`what_each_ball_shaved_by_a_turned_blocks_face_is_refused_with`, on the disks of
+`what_each_ball_shaved_by_a_turned_blocks_face_is_refused_with` (now
+`…_comes_to`), on the disks of
 `off −0.3` turned 0.3 and turned 2. The probe also wrote two lines that were cut
 by two test processes writing at once. In each of the six, the point was within
 `2.1e-17` of the disk's centre, on the ball's side of the plane. Exact
@@ -343,13 +515,178 @@ costs one fuse some correct first candidates without changing its answer.
 point itself. `InPlane` reads a point that is off the plane at the place where
 the line from its reference point through that point meets the plane. Whether
 that place can be far enough from the point's foot to matter was not traced.
-It is a guess nobody has run, so it carries no class.
+It is a guess nobody has run, so it carries no class. *Q685: it can, and the
+corners are now read over the same box; below.*
+
+**The winding read off the plane (Q685).** *Queue row Q685, lane
+`lane-q685-a-candidate-a-rounding-off-a-flat-pieces-plane`, off `34bd7ffd`.*
+`InPlane`'s reference point `r` is `max(|offset|, 1)` off the plane, above the
+plane's point `o` nearest the origin, and every turn it answers is the turn of
+the places where lines from `r` meet the plane. A point `h` high, whose foot is
+`f`, is read at `f + (f − o)·h/(d − h)`, with `d` the height of `r`: similar
+triangles, since the line from `r` through the point leaves the plane's normal
+through `o` at the ratio `d : d − h`. So the read place is
+`|f − o|·|h|/(d − h)` from the foot. A rounding off the plane is about `ε·M`
+high for coordinates of size `M`, so on a plane through the origin, or near
+it, the reading is about `ε·M²` from the foot, and the row's figure is right.
+On a plane far from the origin it is `|f − o|/|offset|` times the height,
+which is about the height itself when the piece is near `o`. The case that
+matters is the opposite of "a plane that does not pass near the origin": a
+plane near the origin, with the piece far along it.
+
+*Measured through the public API.* A throwaway probe (`tests/q685_probe.rs`,
+taken out) built a bar of radius 1 about `x = 10⁶`, cut off above by the plane
+`x + z = 0`, which runs through the origin, and a block whose wall
+`x = 999999.00002` cuts a sliver `2e-5` wide off the near end of that cap, and
+fused them by all three rules both ways round, certified. A throwaway
+`eprintln` in `place_the_piece` printed every candidate on the cap and what
+`the_piece_holds` said of it, and `q685_read.py` (in the lane's scratchpad)
+worked out each double candidate's foot and the place `InPlane` reads it at,
+in exact rationals. The cap's stored plane has normal
+`(0.7071067811865476, 0, 0.7071067811865476)` and offset
+`−1.1152634371569548e-11`, and `r` is `(0.7071067811786614, 0,
+0.7071067811786614)`. Every double candidate on the cap lies on `x + z = 0`
+exactly, so each is `1.115e-11` high, and each was read `1.115e-5` from its
+foot in `x` and in `z`, which is `|f − o|·h/d` with `|f − o| = 1.414e6` and
+`d = 1`. 312 of them, over the six fuses, had their foot in the sliver and were
+read outside it. **None was held or dropped for it**: every one came back
+`None`, the turn against the sliver's chord undecided, with enclosures from
+`4.6e-5` to `6.9e-5`. The chord's corners are where the plane, the wall and the
+pipe meet, boxes about `4e-10` wide, and `InPlane` spreads a corner's box along
+the normal by the same `|c − o|/d` it moves the point by. All six fuses
+answered and validated. The same block and bar turned about `y` by `0.3` or
+`0.5`, so that the bar's own cap is the leaning plane, were refused at `order
+along a crossing` before `select`, at `10⁶`, `10⁵`, `10³` and at the origin
+alike, so they could not be used.
+
+*Demonstrated where the corners are exact.* A corner narrower along the normal
+than the point is high does not hide it. The unit test
+`a_point_a_rounding_off_a_far_half_disk_whose_foot_is_short_of_its_chord_is_not_held`
+in `select.rs` puts a half disk `2²⁰` out on `x + z = 0`: the ball of radius 1
+round `(2²⁰, 0, −2²⁰)` and the chord `x = 2²⁰`, whose two corners `(2²⁰, ±1,
+−2²⁰)` are exact and on all three surfaces. A point one spacing of `z`
+(`2⁻³³`) off the plane, with its foot `2⁻²⁰` short of the chord, is read about
+`8.6e-5` further out in `x`, over the chord, and on the base `the_piece_holds`
+answered `Some(true)` for it. **`wrong/C`**: a wrong hold sends a point of one
+piece to place another, inside §3.5's envelope (the half disk's radius is `1`
+at `10⁶`), and only that probe has built it. No public shape was found whose
+chord or straight side has corners that narrow beside a double candidate.
+
+*The fix.* `the_piece_holds` winds the corners and reads each bulge's chord
+over the box Q671 stretched to the plane, as it asks the partners. A turn
+settled over that box is the turn of the point and of a point of the plane
+beside it, which `InPlane` reads where it is, so the corners are read at the
+plane and no tolerance is added. The test's point now comes back `None`, and
+its foot `Some(false)`. A candidate on the plane stretches to itself and is
+read as before. `mise exec -- just t -p rcad-topo --no-fail-fast`: 1474 run,
+1474 passed, 8 skipped. No pin moved.
 
 **What this leaves**, each for a row of its own:
 
 - The first row needs `classify.rs` to read a flat face's crossing by its stored
   plane, or `select` to place a piece some other way (§346.3 family 6).
+  *Q668: done above for three of its draws. The other seven need `select.rs`'s
+  `the_ray_and_the_stored_planes_disagree_about` narrowed or dropped, now that
+  the ray names a face where the two readings part; with it off, all ten
+  answer. Two pins outside Q668's files moved to the plane's answer, and its
+  merge re-pinned both.* *Q996: dropped; all ten answer.*
+- A point in one face's sliver whose ray crosses the neighbouring face instead,
+  above, built to see whether the ray places it by the corners.
 - The second row needs `mesh.rs`'s `cut_up` traced for a ball face with a
-  small hole.
+  small hole. *Q904: done above; it answers since §402.*
 - The third row needs the answer's check traced for which two faces disagree.
+  *Q904: done above; it answers since §402.*
 - The winding of a point off a flat piece's plane, above, if anyone runs it.
+  *Q685: run; a half disk with exact corners held a point whose foot was
+  outside it, and the corners and chords are now read over the stretched box.*
+- `a_face_of_the_input_holds` still winds an input face's corners round the
+  candidate itself, when it asks whether a piece lies on a flat face of the
+  same plane, so the same reading could put a piece on a face its foot is off.
+  A guess nobody has run, so it has no class.
+  *Q1107 (2026-10-07): run.* On the side of a bar `2^20` out on `x + y = 0`
+  with exact corners, the face held a point a spacing off whose foot was
+  `2^-20` short of its near edge, and did not hold one whose foot was `2^-20`
+  past it (**`wrong/C`**;
+  `a_point_a_rounding_off_a_far_face_is_on_it_where_its_foot_is` in
+  `select.rs`). The corners are now wound round `stretched_to_the_plane`'s box,
+  the fan cannot say for either point, and
+  `the_model_says_one_of_its_faces_holds` answers as each foot says. No fuse
+  reaches it: `the_piece_holds` holds the same box first
+  (`a_square_beside_a_far_face_does_not_hold_a_point_read_over_their_edge`),
+  and a throwaway probe over `just t -p rcad-topo` saw the box and the point
+  wind differently only in that test, 2 of 132457 calls.
+
+### 346.7 A point in one face's sliver whose ray crosses the neighbour — 2026-10-06
+
+*Queue row Q997, finished by a second lane,
+`lane-q997-finish-the-sliver-fix-and-re-pin-the-apex`, off `f660ae39`, after a
+first lane, `lane-q997-a-point-by-an-edge-whose-ray-crosses-the-neighbour`
+(`75154f3f`), did the work and stopped on a pin outside its write set.*
+
+§346.6's "Why dropped and not narrowed" guessed that dropping the stored-plane
+guard left one case uncaught: a point in one flat face's sliver, within a few
+roundings of the edge it shares with a neighbour, whose ray line from
+`classify_uncertain_point` passes through the neighbour's triangle instead of
+its own. It was reasoned and not run, so it had no class. Q997 ran it, and it
+is real.
+
+**The probe.** A throwaway probe (not kept; its shape is in `75154f3f`'s commit
+message) walked 48 turned cubes of side 2, six axes — `(1, 2, 3)`,
+`(3, −1, 2)`, `(1, 1, 1)`, `(−2, 1, 5)`, `(0, 0, 1)`, `(5, 3, −1)` — by eight
+angles — `0.3, 0.5, 1, 1.5, 2, 2.5, 3, 5` — every edge, and every double within
+two spacings of 60 points along each edge: 4,320,000 points, each checked by
+`classify_point` (certified) against every stored plane's exact sign (the cube
+is convex, so the planes agree). On the base: 180,458 wrong, 38,943 of them in
+the row's exact shape (one face's corners and plane parting, the ray line
+through the neighbour's triangle and none of its own), 559,822 Undecidable.
+After the fix: 21,411 wrong, 3 in the row's shape, 1,212,465 Undecidable.
+
+**The fix, in `classify.rs`.** Before any ray, every straight-sided flat face
+whose triangles and stored plane part about the point is found
+(`its_corners_and_plane_part_at`): a face is beside the point unless it holds
+none of the point's box stretched to its plane, and where two faces part,
+both are. Each face beside the point is asked what its plane says
+(`what_its_plane_says_beside_it`); where none is beside it, the ray runs as
+before. `what_its_plane_says_beside_it` itself no longer trusts its own plane
+where another flat face's corners and plane part about the stretched box.
+
+**The cost.** Undecidable rose from 559,822 to 1,212,465 in the probe — about
+493,000 points the ray used to answer, right, are now refused rather than
+risk the 38,943 the row names.
+
+**The pins.** Two points in
+`tests/a_point_in_one_faces_sliver_by_its_edge.rs`, each checked against exact
+rationals: `a_point_past_a_faces_plane_whose_line_crosses_the_neighbour_is_not_put_inside`
+(a cube turned 3 about `(−2, 1, 5)`, where the base put it Inside and the
+stored planes say Outside) and
+`a_point_short_of_a_faces_plane_whose_line_crosses_no_triangle_is_not_put_outside`
+(turned 5, where the base put it Outside and the stored planes say Inside).
+Both now come back Undecidable under both policies; both failed on the base,
+where they came back Inside and Outside.
+
+**The apex re-pin.** The fix moves three entries of
+`meshing_a_plane_cut_along_a_cones_other_nappe.rs`'s
+`which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_it_measures`:
+`(0.25, 3.0)`, `(0.375, 0.0)` and `(0.375, 3.0)` go from Inside, Inside and
+Outside to OnBoundary. In each of the three, the steep face's stored plane has
+an offset of exactly `0.0` (`0000000000000000`, checked with a throwaway test
+that printed every face's plane offset and its bits, then taken out), so the
+apex sits exactly on that plane, and the other five stored planes put it 5 to
+12 units inside. OnBoundary is the stored planes' answer (§17.1); the pins
+being replaced were the corners' reading of the same face. The
+`does_not_measure` column did not move.
+
+**What this leaves.** Two rows, filed from Q997:
+
+- **A rebuild of Q997's own probe**, after Q997, since it was not kept: 21,411
+  of 4,320,000 points are still answered by the corners where the stored
+  planes say the other, and 1,212,465 are Undecidable, about 493,000 of them
+  answered right before Q997. Two shapes seen and not traced one by one: a
+  point exactly on a turned cube's top plane in a side face's sliver, which
+  `is_beside` lets through because the face's outline, read at the plane,
+  holds none of the stretched box; and points two faces apart, where
+  `what_its_plane_says_beside_it` still answers.
+- **`is_outside_the_box` answering Outside past a solid's outermost corner**,
+  where a turned solid's stored planes can meet past the box its corners
+  build, so a point between the two could be inside and still come back
+  Outside. A guess from Q997's lane, not run, so no class.

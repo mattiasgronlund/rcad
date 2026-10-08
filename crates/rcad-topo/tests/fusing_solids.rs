@@ -7,8 +7,11 @@
 //! here every corner is exactly representable, so the arithmetic is exact and
 //! the numbers can be compared with `==`.
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
-use rcad_predicates::{Approximation, Cause, Policy, ProvenanceLog};
+use rcad_geom::{Axis, Deflection, DynamicRange, Isometry, Point, Scale, Vector};
+use rcad_predicates::{
+    Approximation, Cause, Decision, Point as PredicatePoint, Policy, ProvenanceLog,
+    meet_of_three_planes, side_of_a_plane_where_three_planes_meet,
+};
 use rcad_topo::{Containment, Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey, VertexKey};
 
 fn a_model() -> Model {
@@ -537,6 +540,205 @@ fn a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_
     );
 }
 
+/// Exit criterion 7, the refusing half (§17.2). Two turned cubes overlap by
+/// less than a double can see, a certified fuse refuses what they share, and
+/// it is right to: **no solid a `Model` can hold is the answer**.
+///
+/// The pair is the one `two_turned_cubes_a_rounding_apart.rs` turns by `0.3`.
+/// Two cubes of side two, the second moved by `(2, 0.5, 0.25)`, both turned
+/// about the axis through `(1, 0, 0)` along `(1, 2, 3)`. The first cube's face
+/// `x = 2` and the second's face `x = 0` then face exactly opposite ways, and
+/// their offsets add up to `2^-52`, which that file pins. So what the two
+/// share is a slab `1.5` by `1.75` across and about `2^-52` thick.
+///
+/// **Why no model holds the slab, shown here and not argued.** It is convex,
+/// so its corners are the points where three of the twelve planes meet and
+/// every other plane has the point behind it, and the planes decide that
+/// exactly. There are eight, each on exactly three planes, so two corners on
+/// two common planes are the two ends of an edge, and there are twelve. Four
+/// of the edges cross the slab. `meet_of_three_planes` puts a box round each
+/// corner, and the two boxes of the shortest edge lie within `2.75e-15` of each
+/// other while some corner's box lies `2.178` or more from the origin. However
+/// an answer places its corners inside their boxes, its largest coordinate over
+/// its shortest edge is past `7.9e14`. `Model::validate` refuses a model past
+/// `1e11` (`docs/decisions.md` §3.5). The fuse asks its own answer the same
+/// before it writes it, because its inputs are inside that range, which the
+/// first lines check. So this refusal is not a gap the arithmetic failed to
+/// reach (§16.10). There is no answer to reach. §17's exit table says which
+/// other kinds of refusal were tried for this half and why each had an answer.
+///
+/// **Where the fuse stops is earlier, in selection.** The slab's face on the
+/// second cube's bottom is a strip `2^-52` wide, and no candidate point could
+/// be shown to lie inside it. The record names that strip's four corners. If
+/// selection learns to place it, the range check will refuse the answer as
+/// `Invalid::DynamicRangeTooWide` instead, and this test will fail. That is on
+/// purpose: criterion 7 would then need another demonstration (§353.5).
+#[test]
+fn what_two_turned_cubes_a_rounding_deep_in_each_other_share_is_too_thin_to_hold_and_is_refused() {
+    let (mut model, one, other) = two_turned_cubes_a_rounding_deep_in_each_other();
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("each cube on its own is a sound solid");
+
+    let planes: Vec<[f64; 4]> = [one, other]
+        .iter()
+        .flat_map(|&solid| {
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .faces()
+                .map(|face| face.plane().coefficients())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let corners = corners_of_what_every_plane_has_behind_it(&planes);
+    assert_eq!(corners.len(), 8, "the slab is a box: {corners:?}");
+    let mut edges = Vec::new();
+    for (at, (three, end)) in corners.iter().enumerate() {
+        for (other_three, other_end) in &corners[at + 1..] {
+            let common = three
+                .iter()
+                .filter(|plane| other_three.contains(plane))
+                .count();
+            if common == 2 {
+                edges.push(the_farthest_apart_two_points_of(*end, *other_end));
+            }
+        }
+    }
+    assert_eq!(edges.len(), 12, "a box has twelve edges");
+    let shortest = edges.into_iter().fold(f64::INFINITY, f64::min);
+    let largest = corners
+        .iter()
+        .map(|(_, corner)| {
+            corner
+                .enclosure()
+                .iter()
+                .map(|side| side.lo().abs().min(side.hi().abs()))
+                .fold(0.0, f64::max)
+        })
+        .fold(0.0, f64::max);
+    let spread =
+        DynamicRange::measure(largest, shortest).expect("a coordinate and an edge are lengths");
+    assert!(
+        !spread.is_within_supported_range() && spread.ratio() > 7.9e14,
+        "an edge of at most {shortest:e} at a coordinate of at least {largest} is a spread of {:e}",
+        spread.ratio()
+    );
+
+    let refused = model.fuse(
+        &[other],
+        &[one],
+        Rule::Intersection,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+
+    let Err(Error::Undecidable { records }) = refused else {
+        panic!("a slab no model can hold is refused as undecided: {refused:?}");
+    };
+    let [record] = records.records() else {
+        panic!("the fuse stops at the first piece it cannot place: {records:?}");
+    };
+    assert_eq!(record.predicate(), "a point inside a piece of a face");
+    let named: Vec<[usize; 3]> = corners
+        .iter()
+        .filter(|(_, corner)| {
+            record
+                .inputs()
+                .iter()
+                .any(|input| boxes_overlap(*input, *corner))
+        })
+        .map(|(three, _)| *three)
+        .collect();
+    let on_all_of_them: Vec<usize> = named[0]
+        .into_iter()
+        .filter(|plane| named.iter().all(|three| three.contains(plane)))
+        .collect();
+    let the_second_cubes_bottom = planes.len() / 2;
+    assert_eq!(
+        (named.len(), on_all_of_them),
+        (4, vec![the_second_cubes_bottom]),
+        "the four corners of the slab's face on the second cube's bottom, where a cube's \
+         faces come bottom first: {:?}",
+        record.inputs()
+    );
+}
+
+/// [`what_two_turned_cubes_a_rounding_deep_in_each_other_share_is_too_thin_to_hold_and_is_refused`]'s
+/// pair: built the way `two_turned_cubes_a_rounding_apart.rs` builds it, at a
+/// turn of `0.3`.
+fn two_turned_cubes_a_rounding_deep_in_each_other() -> (Model, SolidKey, SolidKey) {
+    let mut model = a_model();
+    let one = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
+    let other = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side two");
+    let turn = Isometry::rotation(
+        &Axis::new(Point::new(1.0, 0.0, 0.0), Vector::new(1.0, 2.0, 3.0))
+            .expect("a direction with length"),
+        0.3,
+    )
+    .expect("a rotation");
+    model
+        .place_solid(one, &turn)
+        .expect("this model made the key");
+    model
+        .place_solid(
+            other,
+            &turn.compose(&Isometry::translation(Vector::new(2.0, 0.5, 0.25)).expect("a shift")),
+        )
+        .expect("this model made the key");
+    (model, one, other)
+}
+
+/// Every point where three of `planes` meet and every other one of them has
+/// the point strictly behind it, with the three it lies on.
+///
+/// Strictly, so that each corner found lies on exactly three planes. Asked of
+/// the planes themselves with `side_of_a_plane_where_three_planes_meet`, which
+/// is exact, and never of the box round the point.
+fn corners_of_what_every_plane_has_behind_it(
+    planes: &[[f64; 4]],
+) -> Vec<([usize; 3], PredicatePoint)> {
+    let mut corners = Vec::new();
+    for first in 0..planes.len() {
+        for second in first + 1..planes.len() {
+            for third in second + 1..planes.len() {
+                let three = [first, second, third];
+                let meet = three.map(|at| planes[at]);
+                let everything_else_has_it_behind = planes
+                    .iter()
+                    .enumerate()
+                    .filter(|(at, _)| !three.contains(at))
+                    .all(|(_, plane)| {
+                        side_of_a_plane_where_three_planes_meet(meet, *plane) == Ok(Decision::Neg)
+                    });
+                if everything_else_has_it_behind {
+                    let corner = meet_of_three_planes(meet[0], meet[1], meet[2])
+                        .expect("three planes with a point behind every other plane meet");
+                    corners.push((three, corner));
+                }
+            }
+        }
+    }
+    corners
+}
+
+/// The furthest apart any point of one box and any point of the other can be.
+fn the_farthest_apart_two_points_of(one: PredicatePoint, other: PredicatePoint) -> f64 {
+    let (one, other) = (one.enclosure(), other.enclosure());
+    let across =
+        |axis: usize| one[axis].hi().max(other[axis].hi()) - one[axis].lo().min(other[axis].lo());
+    across(0).hypot(across(1)).hypot(across(2))
+}
+
+fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
+    let (one, other) = (one.enclosure(), other.enclosure());
+    (0..3).all(|axis| one[axis].lo() <= other[axis].hi() && other[axis].lo() <= one[axis].hi())
+}
+
 /// Two towers `1e308` tall, a certified fuse settles them, and nothing it
 /// decided is left in the log.
 ///
@@ -549,7 +751,10 @@ fn a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_
 /// candidate there is half way between two corners at `z = 1e308`, and adding
 /// the two first came to `2e308`, so each candidate was a box reaching from
 /// `9e307` to infinity and no winding could place one. The middle is `1e308`,
-/// a double, and halving first reaches it (`docs/decisions.md` §353).
+/// a double, and halving first reaches it (`docs/decisions.md` §353). The half
+/// is now
+/// [`what_two_turned_cubes_a_rounding_deep_in_each_other_share_is_too_thin_to_hold_and_is_refused`],
+/// whose answer does not exist.
 ///
 /// An answer at all also says `InPlane::of`'s second reach ran: the first,
 /// `1e308` further out along the top's normal, overflows, and without the

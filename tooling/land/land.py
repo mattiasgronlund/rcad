@@ -17,25 +17,43 @@ this never settles anything itself.
 It ends with one line of JSON holding `mergedSchema`'s fields from `lanes.js`,
 and a `stop` naming the stop, empty when it merged.
 
+**Landers share one gate** (§397.5). `just land <arguments>` starts one run in
+a session of its own and follows its log for at most `LAND_WAIT` seconds, 540
+by default, and `just land wait` follows it again, as `just verify-lane` does
+(§385.2). The run writes its lane's entry to a spool in the git common
+directory and waits on a `flock` there. Holding it, a run whose lane an earlier
+holder landed reports that merge and ends. Any other run lands its own lane,
+then every lane waiting whose run is alive, oldest first, each with its own
+merge commit and queue apply, and gates them once. A red gate with other lanes
+in it goes back to `origin/main` and lands its own lane alone. A run outlives
+its lander, so the Opus merger runs `just land wait-for <lane branch>` from its
+own tree, which waits until no run is landing that lane.
+
 Python rather than bash because the tree it runs from is switched under it:
 python reads the whole file before it runs, bash reads a script as it goes.
 """
 
+import fcntl
 import glob
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import time
 
 MERGE_ATTEMPTS = 3
 DOCS_CATCH_UPS = 5
 JUST = os.environ.get("LAND_JUST", "just")
+WAIT = float(os.environ.get("LAND_WAIT", "540"))
+STATE = os.path.join("target", "land")
 ROW = re.compile(r"^[TDQ][0-9]+$")
 SHA = re.compile(r"^[0-9a-f]{7,40}$")
 STEP_ARGS = {"add": 4, "after": 2, "tag": 2}
 USAGE = ("usage: just land [--steps <file>] <row>[,<row>...] <lane branch> <lane sha> "
-         "<merge branch> [<tree to unlock and mark finished>...]")
+         "<merge branch> [<tree to unlock and mark finished>...], then just land wait for as long as "
+         "its last line says it is still running")
 
 
 class Stop(Exception):
@@ -46,7 +64,18 @@ class Stop(Exception):
 
 
 def main(argv):
-    report = {
+    if argv == ["wait"]:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip()
+        return follow(os.path.join(top, STATE), None)
+    if len(argv) == 2 and argv[0] == "wait-for":
+        return wait_for(argv[1])
+    if argv == ["--detached-run"]:
+        return detached_run()
+    return start(argv)
+
+
+def new_report():
+    return {
         "start_sha": "",
         "worktree_path": "",
         "merge_branch": "",
@@ -64,34 +93,54 @@ def main(argv):
         "needs_judgement": [],
         "stop": "",
     }
+
+
+def start(argv):
+    """Checks the arguments and the tree, then starts the run and follows it.
+
+    A stop here comes before there is any run, so this prints the JSON itself
+    and unlocks its own tree, as a stop in the run does. A tree that has
+    started a run already is refused whatever the arguments, since unlocking
+    it would free a tree a run is still at work in.
+    """
+    report = new_report()
     try:
-        land(argv, report)
+        top = output("git", "rev-parse", "--show-toplevel")
+        report["worktree_path"] = top
+        state = os.path.join(top, STATE)
+        if os.path.exists(state):
+            print(f"land: {state} is there already, so this tree has started a run; "
+                  f"`mise exec -- just land wait` follows it or prints its result again")
+            return 2
+        try:
+            args = parsed(argv)
+            report["merge_branch"] = args["merge_branch"]
+            args["steps"] = read_steps(args["steps"])
+            args["start_sha"] = report["start_sha"] = output("git", "rev-parse", "HEAD")
+            refuse_unless_a_clean_linked_tree()
+        except Stop:
+            unlock(top, report)
+            raise
     except Stop as stop:
+        return ended(report, stop)
+    os.makedirs(state)
+    write(os.path.join(state, "printed"), "0")
+    write_json(os.path.join(state, "args.json"), args)
+    with open(os.path.join(state, "log"), "w", encoding="utf-8") as log:
+        child = subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "--detached-run"],
+            cwd=top, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    write(os.path.join(state, "pid"), f"{child.pid}\n")
+    return follow(state, child)
+
+
+def ended(report, stop):
+    if stop is not None:
         report["stop"] = stop.name
         report["not_merged_because"] = stop.why
         print(f"land: stopped at {stop.name}: {stop.why}", flush=True)
     print(json.dumps(report, ensure_ascii=False), flush=True)
     return 0 if report["merged"] else 1
-
-
-def land(argv, report):
-    """Unlocks its own tree on every stop as well, last of the unlocks, as `merger.md` step 5 does.
-
-    A stop goes to the Opus merger, which works in a tree of its own, and this
-    tree left locked would hold a slot that `just queue next` counts (§263.4).
-    """
-    top = output("git", "rev-parse", "--show-toplevel")
-    report["worktree_path"] = top
-    try:
-        args = parsed(argv)
-        report["merge_branch"] = args["merge_branch"]
-        steps = read_steps(args["steps"])
-        report["start_sha"] = output("git", "rev-parse", "HEAD")
-        refuse_unless_a_clean_linked_tree()
-        merge_and_push(args, steps, report)
-    finally:
-        unlock(top, report)
-    finish(args["trees"] + [top], report)
 
 
 def parsed(argv):
@@ -164,24 +213,223 @@ def refuse_unless_a_clean_linked_tree():
         raise Stop("tree", f"this tree has uncommitted changes, and just land switches it: {status}")
 
 
-def merge_and_push(args, steps, report):
+def follow(state, child):
+    """Print what the run logged since the last call, until it ends or this call's time is up.
+
+    Exits with the run's own code once it has ended, its JSON the last line,
+    and 3 while it is still going.
+    """
+    try:
+        with open(os.path.join(state, "pid"), encoding="utf-8") as f:
+            pid = int(f.read())
+    except (OSError, ValueError):
+        print(f"land: no run has started in this tree. {USAGE}")
+        return 2
+    ended_file = os.path.join(state, "exit")
+    deadline = time.monotonic() + WAIT
+    printed = False
+    while True:
+        done = os.path.exists(ended_file)
+        printed = print_new(state) or printed
+        if done:
+            if not printed:
+                print(last_line(read(os.path.join(state, "log"))))
+            return int(read(ended_file).strip() or 1)
+        if not running(pid, child):
+            if os.path.exists(ended_file):
+                continue
+            print(f"land: the run (pid {pid}) ended without finishing; {os.path.join(state, 'log')} "
+                  f"holds what it ran")
+            return 1
+        if time.monotonic() >= deadline:
+            branch = read_json(os.path.join(state, "args.json"))["branch"]
+            print(f"land: still running (pid {pid}). Run `mise exec -- just land wait` to keep waiting; "
+                  f"from another tree, run `mise exec -- just land wait-for {branch}` until it says no run is "
+                  f"landing it, then fetch origin before you read origin/main")
+            return 3
+        time.sleep(0.2)
+
+
+def print_new(state):
+    """Prints the whole lines the log gained since the last print, and says whether there were any."""
+    at_path = os.path.join(state, "printed")
+    try:
+        at = int(read(at_path) or 0)
+    except ValueError:
+        at = 0
+    with open(os.path.join(state, "log"), "rb") as f:
+        f.seek(at)
+        gained = f.read()
+    cut = gained.rfind(b"\n") + 1
+    if cut == 0:
+        return False
+    sys.stdout.write(gained[:cut].decode("utf-8", errors="replace"))
+    sys.stdout.flush()
+    write(at_path, str(at + cut))
+    return True
+
+
+def running(pid, child):
+    if child is not None:
+        return child.poll() is None
+    try:
+        return stat_fields(pid)[0] != "Z"
+    except OSError:
+        return False
+
+
+def wait_for(branch):
+    """Waits at most `LAND_WAIT` seconds for no run to be landing `branch`, for the Opus merger in another tree.
+
+    A detached run outlives the lander that started it, so `lanes.js` can hand
+    the lane to the Opus merger while the run, or a holder that took its
+    entry, may still push it (§397.5). So it waits while a live run's entry
+    names the lane, and while anyone holds the lock: a holder can be landing an
+    entry whose run died after the holder listed it, and which holder took
+    which lanes is not to be read without the lock.
+    """
+    spool = Spool()
+    lock = os.open(spool.lock, os.O_RDWR | os.O_CREAT, 0o644)
+    deadline = time.monotonic() + WAIT
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            why = "a holder has the land lock"
+        else:
+            landing = [entry for entry in spool.everyone() if entry["branch"] == branch and alive(entry)]
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            if not landing:
+                print(f"land: no run is landing {branch}; fetch origin before you read origin/main")
+                return 0
+            why = f"the run in {landing[0]['tree']} (pid {landing[0]['pid']}) waits to land it"
+        if time.monotonic() >= deadline:
+            print(f"land: still running: {why}. Run `mise exec -- just land wait-for {branch}` to keep waiting")
+            return 3
+        time.sleep(0.5)
+
+
+def detached_run():
+    """The run itself, in a session of its own, writing the log `follow` prints.
+
+    Its last line is the JSON, and the `exit` file it writes after that is what
+    tells `follow` it is over.
+    """
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    top = output("git", "rev-parse", "--show-toplevel")
+    state = os.path.join(top, STATE)
+    args = read_json(os.path.join(state, "args.json"))
+    report = new_report()
+    report.update(worktree_path=top, merge_branch=args["merge_branch"], start_sha=args["start_sha"])
+    stop = None
+    try:
+        land(args, report)
+        assert report["merged"], "land returned with no stop and no merge"
+    except Stop as raised:
+        stop = raised
+    code = ended(report, stop)
+    write(os.path.join(state, "exit"), f"{code}\n")
+    return code
+
+
+def land(args, report):
+    """Waits for the land lock, then lands this lane, alone or with the lanes waiting, or reports that an earlier holder did.
+
+    The lock is never released by hand: it goes when the process does, so a
+    run killed anywhere never holds it. Every spool entry and result file is
+    removed under the lock, so a holder never reads one half gone.
+    """
+    top = report["worktree_path"]
+    spool = Spool()
+    own = spool.add(args, top)
+    say("land: waiting for the land lock")
+    lock = os.open(spool.lock, os.O_RDWR | os.O_CREAT, 0o644)
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    say("land: holding the land lock")
+    try:
+        result = spool.result(own)
+        others = []
+        try:
+            if result is None:
+                others = hold_batch(own, report, spool)
+            else:
+                say(f"land: an earlier run landed {own['branch']}, in {result['merged_sha']}")
+                report.update(result)
+        finally:
+            unlock(top, report)
+        if result is None:
+            finish(own, others, report, spool)
+        else:
+            report["needs_judgement"] += mark_finished([top])
+    finally:
+        spool.forget(own)
+
+
+def hold_batch(own, report, spool):
+    """Lands this run's own lane, then every lane waiting whose run is alive, oldest first, and gates them once.
+
+    Its own lane goes first, so a stop of its own comes before any other lane's
+    queue apply, and leaves none to throw away. Its own lane and verifier trees
+    are unlocked straight after the switch, as `merger.md` step 1 does, and the
+    other lanes' only once their merge is pushed. Returns the other lanes it
+    landed.
+    """
     command("fetch", "git", "fetch", "origin")
-    command("switch", "git", "switch", "-c", args["merge_branch"], "origin/main")
-    for tree in args["trees"]:
+    command("switch", "git", "switch", "-c", own["merge_branch"], "origin/main")
+    for tree in own["trees"]:
         unlock(tree, report)
-    tip = lane_tip(args["branch"], args["sha"])
-    merge("conflict", "git", "merge", "--no-ff", "--no-commit", args["branch"])
-    refuse_if_section_0_names(args["rows"])
-    apply_queue(args["rows"], tip, steps, report)
+    landing = land_or_reset(own)
+    others = []
+    for entry in spool.waiting(own):
+        try:
+            entry["landing"] = land_or_reset(entry)
+        except Stop as stop:
+            say(f"land: {entry['branch']} stopped at {stop.name}, so it is left for its own run: {stop.why}")
+            continue
+        others.append(entry)
+    try:
+        gate_and_push(report)
+    except Stop as stop:
+        if stop.name != "gate" or not others:
+            raise
+        say(f"land: the gate failed with {len(others) + 1} lanes merged, so {own['branch']} lands alone "
+            f"and the others are left for their own runs: {stop.why}")
+        command("fetch", "git", "fetch", "origin")
+        command("reset", "git", "reset", "-q", "--hard", "origin/main")
+        landing = land_or_reset(own)
+        others = []
+        gate_and_push(report)
+    report["rows_closed"] = landing["rows_closed"]
+    report["rows_added"] = landing["rows_added"]
+    report["needs_judgement"] += landing["needs_judgement"]
+    return others
+
+
+def land_or_reset(entry):
+    """`land_one`, with a stop putting the branch back where it was, mid-merge or not."""
+    before = output("git", "rev-parse", "HEAD")
+    try:
+        return land_one(entry)
+    except Stop:
+        command("reset", "git", "reset", "-q", "--hard", before)
+        raise
+
+
+def land_one(entry):
+    """One lane's merge commit: the sha check, the merge, the §0 check, its queue apply, `check-queue` and the commit."""
+    landing = {"rows_closed": [], "rows_added": [], "unlocked": [], "needs_judgement": []}
+    tip = lane_tip(entry["branch"], entry["sha"])
+    merge("conflict", "git", "merge", "--no-ff", "--no-commit", entry["branch"])
+    refuse_if_section_0_names(entry["rows"])
+    apply_queue(entry["rows"], tip, entry["steps"], landing)
     command("check-queue", JUST, "check-queue")
     command("commit", "git", "add", "docs/queue.md")
-    message = f"Merge {args['branch']}: {', '.join(args['rows'])} done, by just land"
+    message = f"Merge {entry['branch']}: {', '.join(entry['rows'])} done, by just land"
     command("commit", "git", "commit", "-q", "-m", message)
     left = output("git", "status", "--short")
     if left:
         raise Stop("commit", f"git status --short prints something after the merge commit: {left}")
-    report["gate_pass_line"] = gate()
-    push(report)
+    return landing
 
 
 def lane_tip(branch, reported):
@@ -217,7 +465,7 @@ def refuse_if_section_0_names(rows):
                                 f"(§172.5), and that wants a reader")
 
 
-def apply_queue(rows, tip, steps, report):
+def apply_queue(rows, tip, steps, landing):
     short = output("git", "rev-parse", "--short=8", tip)
     batch = [["done", row, short] for row in rows] + steps
     words = []
@@ -226,13 +474,20 @@ def apply_queue(rows, tip, steps, report):
     rc, said, out = run_split(JUST, "queue", "apply", *words)
     if rc != 0:
         raise Stop("queue-apply", f"just queue apply refused the batch: {last_line(said)}")
-    report["rows_closed"] = [f"{row} done:{short}" for row in rows]
+    landing["rows_closed"] = [f"{row} done:{short}" for row in rows]
     ids = [line for line in out.splitlines() if ROW.match(line.strip())]
     adds = [step for step in steps if step[0] == "add"]
     if len(ids) != len(adds):
-        report["needs_judgement"].append(f"queue apply printed {len(ids)} new ids for {len(adds)} add steps")
+        landing["needs_judgement"].append(f"queue apply printed {len(ids)} new ids for {len(adds)} add steps")
     for row_id, (_, tier, model, _write_set, what) in zip(ids, adds):
-        report["rows_added"].append(f"{row_id.strip()} tier {tier} {model}: {what[:80]}")
+        landing["rows_added"].append(f"{row_id.strip()} tier {tier} {model}: {what[:80]}")
+
+
+def gate_and_push(report):
+    report["push_attempts"] = 0
+    report["docs_catch_ups"] = 0
+    report["gate_pass_line"] = gate()
+    push(report)
 
 
 def gate():
@@ -277,15 +532,128 @@ def push(report):
         report["gate_pass_line"] = gate()
 
 
-def finish(trees, report):
-    """`ff-main`, then `mark-finished` on the lane's, the verifier's and this tree, once the push went through."""
+def finish(own, others, report, spool):
+    """`ff-main`, then every lane's trees unlocked and marked finished, and last a result file for each other lane.
+
+    The results go last so that each holds every field. A holder that dies
+    before writing them leaves those lanes on `main` with no result, so each of
+    their runs stops at already-on-main, which goes to the Opus merger (§384.3).
+    """
+    shared = []
     rc, said = run(JUST, "ff-main")
     report["ff_main"] = last_line(said)
     if rc != 0:
-        report["needs_judgement"].append(f"ff-main refused, and the tree it would move is not this one: {last_line(said)}")
+        shared.append(f"ff-main refused, and the tree it would move is not this one: {last_line(said)}")
+    for entry in others:
+        for tree in entry["trees"]:
+            unlock(tree, entry["landing"])
+    shared += mark_finished(own["trees"] + [tree for entry in others for tree in entry["trees"]] + [own["tree"]])
+    report["needs_judgement"] += shared
+    for entry in others:
+        landing = entry["landing"]
+        spool.leave_result(entry, {
+            "merge_branch": report["merge_branch"],
+            "merged": True,
+            "merged_sha": report["merged_sha"],
+            "gate_pass_line": report["gate_pass_line"],
+            "push_attempts": report["push_attempts"],
+            "docs_catch_ups": report["docs_catch_ups"],
+            "ff_main": report["ff_main"],
+            "rows_closed": landing["rows_closed"],
+            "rows_added": landing["rows_added"],
+            "unlocked": landing["unlocked"],
+            "needs_judgement": landing["needs_judgement"] + shared,
+        })
+
+
+def mark_finished(trees):
     rc, said = run(JUST, "mark-finished", *trees)
     if rc != 0:
-        report["needs_judgement"].append(f"mark-finished refused, so the run's trees wait out their hour: {last_line(said)}")
+        return [f"mark-finished refused, so the run's trees wait out their hour: {last_line(said)}"]
+    return []
+
+
+class Spool:
+    """The lanes waiting to land, one JSON file each, and the result a holder leaves for each lane it landed.
+
+    Both sit in the git common directory, beside the lock, so every tree of the
+    repository sees the same ones. A file's name starts with the time it was
+    written, so sorting the names puts the oldest first.
+    """
+
+    def __init__(self):
+        common = output("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
+        where = os.path.join(common, "rcad-land")
+        self.lock = os.path.join(where, "lock")
+        self.entries = os.path.join(where, "spool")
+        self.results = os.path.join(where, "results")
+        os.makedirs(self.entries, exist_ok=True)
+        os.makedirs(self.results, exist_ok=True)
+
+    def add(self, args, top):
+        pid = os.getpid()
+        entry = dict(args, id=f"{time.time_ns():020d}-{pid}", pid=pid, pid_start=stat_fields(pid)[19], tree=top)
+        write_json(self.entry_path(entry), entry)
+        return entry
+
+    def waiting(self, own):
+        """The other entries to land, oldest first: each one's run alive, and no earlier holder's result for it.
+
+        An entry whose run is gone is dropped, with any result it never read.
+        `lanes.js` has handed that lane to the Opus merger, and taking it as well
+        would land it twice (§397.5 item 7).
+        """
+        everyone = self.everyone()
+        assert own["id"] in [entry["id"] for entry in everyone], f"this run's own entry {own['id']} is not in {self.entries}"
+        found = []
+        for entry in everyone:
+            if entry["id"] == own["id"]:
+                continue
+            if not alive(entry):
+                say(f"land: the run that waited to land {entry['branch']}, from {entry['tree']}, is gone, so its "
+                    f"entry is dropped and the lane left to the Opus merger")
+                self.forget(entry)
+            elif not os.path.exists(self.result_path(entry)):
+                found.append(entry)
+        return found
+
+    def everyone(self):
+        """Every entry, oldest first. Read it holding the lock, since a holder removes entries."""
+        names = sorted(name for name in os.listdir(self.entries) if name.endswith(".json"))
+        return [read_json(os.path.join(self.entries, name)) for name in names]
+
+    def result(self, entry):
+        path = self.result_path(entry)
+        return read_json(path) if os.path.exists(path) else None
+
+    def leave_result(self, entry, result):
+        write_json(self.result_path(entry), result)
+
+    def forget(self, entry):
+        os.remove(self.entry_path(entry))
+        if os.path.exists(self.result_path(entry)):
+            os.remove(self.result_path(entry))
+
+    def entry_path(self, entry):
+        return os.path.join(self.entries, f"{entry['id']}.json")
+
+    def result_path(self, entry):
+        return os.path.join(self.results, f"{entry['id']}.json")
+
+
+def alive(entry):
+    """Whether the run that wrote `entry` is still going: its pid is there, not a zombie, and started when the entry says."""
+    try:
+        fields = stat_fields(entry["pid"])
+    except OSError:
+        return False
+    return fields[0] != "Z" and fields[19] == entry["pid_start"]
+
+
+def stat_fields(pid):
+    """`/proc/<pid>/stat` from field 3, the state, on: field 22, the time the process started, is at 19."""
+    with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
+        return f.read().rsplit(")", 1)[1].split()
 
 
 def unlock(tree, report):
@@ -321,6 +689,37 @@ def run_split(*cmd):
     if said:
         print(said, flush=True)
     return result.returncode, said, result.stdout
+
+
+def say(line):
+    """Prints a line to the detached run's log, timestamped so a reader of the log alone can tell when it waited (§411.4).
+
+    The lines `follow` and `ended` print directly — `land: still running ...`,
+    `land: stopped at ...`, the JSON — go through plain `print`, not `say`, and
+    stay bare: `lanes.js` and `lander.md` match them as they stand.
+    """
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    print(f"{stamp} {line}", flush=True)
+
+
+def read(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def write(path, text):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def read_json(path):
+    return json.loads(read(path))
+
+
+def write_json(path, data):
+    """Writes through a file beside it and a rename, so a reader never sees half of it."""
+    write(path + ".tmp", json.dumps(data, ensure_ascii=False))
+    os.replace(path + ".tmp", path)
 
 
 def last_line(said):

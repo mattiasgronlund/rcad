@@ -35,7 +35,7 @@ use cones::{a_frustum, a_pointed_cone};
 
 /// Every fuse of the family's two apex-near families that refuses in the
 /// mesher, recounted on this tree: the 96 fuses of
-/// `a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses`
+/// the two `a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_…` tests
 /// and the 32 of `a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses`.
 ///
 /// There were eighteen (§285.1). Sixteen were caps of the pointed cone refused
@@ -109,13 +109,17 @@ fn two_quarters_are_nearest_one_corner_when_the_kept_rim_is_under_a_third_of_a_t
 /// one of them measures at all.
 ///
 /// The block's placement is rounded, so its steep face misses the apex by a
-/// rounding. The block itself puts the apex inside it at three of the six,
-/// outside at two, and on its boundary at one. Since Q846's four-corner cuts
-/// (§354), only `(0.25, 1.0)` still fails to measure at every deflection; the
-/// other outside one, `(0.375, 3.0)`, measures, and so does `(0.375, 1.0)`,
-/// which the apex is inside. So the apex's own side of the face still does
-/// not say which of these caps measure: `(0.25, 1.0)` and `(0.375, 3.0)` are
-/// both outside, and only one of them does.
+/// rounding. The block itself puts the apex inside it at two of the six, and
+/// on its boundary at the other four; at `(0.25, 3.0)`, `(0.375, 0.0)` and
+/// `(0.375, 3.0)` the steep face's stored plane has an offset of exactly
+/// zero, so the apex sits exactly on it, 5 to 12 units inside every other
+/// stored plane, and `OnBoundary` is the stored planes' answer (§346.7) where
+/// the corners alone used to say Inside, Inside and Outside. Since Q846's
+/// four-corner cuts (§354), only `(0.25, 1.0)` still fails to measure at
+/// every deflection; `(0.375, 3.0)` measures, and so does
+/// `(0.375, 1.0)`. So the apex's own side of the face still does not say
+/// which of these caps measure: `(0.25, 1.0)` and `(0.375, 1.0)` are both
+/// inside, and only one of them does.
 #[test]
 fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_it_measures() {
     let policy = Policy::certified();
@@ -139,11 +143,11 @@ fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_i
         seen,
         [
             (0.25, 0.0, Containment::OnBoundary, false),
-            (0.25, 1.0, Containment::Outside, true),
-            (0.25, 3.0, Containment::Inside, false),
-            (0.375, 0.0, Containment::Inside, false),
+            (0.25, 1.0, Containment::Inside, true),
+            (0.25, 3.0, Containment::OnBoundary, false),
+            (0.375, 0.0, Containment::OnBoundary, false),
             (0.375, 1.0, Containment::Inside, false),
-            (0.375, 3.0, Containment::Outside, false),
+            (0.375, 3.0, Containment::OnBoundary, false),
         ]
     );
 }

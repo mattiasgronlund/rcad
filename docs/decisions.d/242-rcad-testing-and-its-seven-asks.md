@@ -485,10 +485,11 @@ Q80 landed as `5684991d`, with four tests added at merge.
   that on the base and the tip alike. That is Q98.
 - **Outside this repo:** the `practices` plugin's `fuse-debugging` skill still
   names the three boxes as `count: 1`'s sharpest form. The sharpest live form is
-  now a box and a taller one turned together,
-  `a_box_and_a_taller_one_in_the_same_place_are_refused_once_they_are_turned`.
-  The skill lives in the marketplace repo, so Mattias has been told rather than
-  the skill edited.
+  now a box and a taller one turned together, in
+  `an_edge_with_one_face_along_it.rs`. The skill lives in the marketplace repo,
+  so Mattias has been told rather than the skill edited. *Later:* that pair
+  unites to the taller box turned too since §351.6, and its test is
+  `a_box_and_a_taller_one_in_the_same_place_unite_to_the_taller_box_turned_too`.
 
 Q80 merged cleanly beside §243, which had already moved the quarter-bend pin in
 `copying_a_solid.rs` (Q82), and did not move it again. Q86 is next in the chain,

@@ -26,6 +26,16 @@ row). `a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuse
 is that, with the same call and two planes in it as the control, because what is
 refused has to be shown to be the degree and not the call.
 
+**Corrected for Q1271.** Where the ball is centred on the pipe's axis, a plane
+square to that axis, one holding it (Q1259) and one parallel to it and off it
+(Q1271) are answered now, because the ball and the pipe share circles square
+to the axis and each of those planes cuts them without a quartic. The
+demonstration's first ray plane, `z = 0.5`, is the third kind, and is kept as a
+control that is answered. Its ray plane is now `x + 16z = 8`, which leans to the
+pipe's axis and cuts the pipe in an ellipse and the ball in a circle: that is
+the quartic, and it is refused, with four points there to find. Nearly every
+ray through a point is such a plane, so the route's verdict stands.
+
 That is a demonstration and not a paragraph, which is what CLAUDE.md asks of a
 claim that something cannot be done. **The family of fixes is named and it is
 one**: an algebraic solver for a plane and two quadrics, which §31.2 already
@@ -253,6 +263,41 @@ reaches them is a face of a *caller's* solid:
 
 Both are edited here rather than left broken, because the branch has to compile;
 they are lane 5's files and lane 5 should read them.
+
+> **2026-10-04 note (Q504): running out of corners is no longer always
+> `Undecidable`.** Folding a corner nobody can follow into the undecided ones made
+> `one_shell_is_inside_another` report "undecided" for a question it never put,
+> which is the mixing this section keeps apart. Since Q504 (316286ba), when no
+> corner of a hollow was placed and one met a face nobody can follow, it is
+> refused `Error::AFaceTrimmedByACurveThisCannotFollow` naming the caller's face
+> that face was cut from; `Error::Undecidable` is left for the corners that were
+> asked and not answered.
+> `crates/rcad-topo/tests/a_shell_inside_another_names_its_refusal.rs` pins it.
+>
+> **2026-10-05 note (Q1007): since Q1002, the fuses that file pins now answer.**
+> A flat face the cuts cannot follow winds its own chords and arcs instead of
+> being handed to `one_shell_is_inside_another`'s abandon-the-corner arm, so the
+> notched block's top is no longer such a face and every fuse in that file
+> answers, each checked against its volume by hand. The file's name is now
+> about what it used to pin rather than what it pins.
+>
+> **2026-10-06 note (Q883): each side is asked from the corner it starts at,
+> and a ball's other pole is now reached.** `one_shell_is_inside_another` used
+> to ask each side at `self.edges[side.edge].ends[0]`, the first end of its
+> edge whichever way the side walks it, so a ball's one face — walked down its
+> seam and back up it — had its north pole asked twice and its south pole
+> never (16330bc9). Each side is now asked from `ends[!forward]`, the corner
+> `Assembly::starts_at` reads off a dart, so every corner of every wire is
+> asked. The `Error::Undecidable` record raised when every corner comes back
+> `OnBoundary` or `Undecidable` now names the corners actually asked, not
+> `self.corners[0]`, the whole answer's first corner and not a corner anyone
+> asked about (28fa7550). And a corner whose `Containment` comes back
+> `CannotFireARayAtAFacesSurface` — a ray that could not be fired at a ring
+> face — is refused by the new `Error::CannotFireARayAtAFacesSurface`, naming
+> the caller's face the ring face was cut from, rather than folded into
+> `Undecidable` for want of a variant (b6e47fa6). No fuse is known to reach
+> that last arm: every probe with a ring in it was refused earlier, at a
+> curved-surface crossing, before `nest_the_shells` runs.
 
 ### 35.7 §31.10 item 5, scored: nothing this lane builds reaches `mesh.rs`'s two claims
 

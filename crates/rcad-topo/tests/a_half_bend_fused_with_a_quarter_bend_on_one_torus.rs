@@ -9,6 +9,13 @@
 //! at every point, the centres of its own caps too (§232.6), and every fuse
 //! stopped on "a point in a piece that every solid could place".
 //!
+//! Past that, ten of them were refused `ResultIsNotManifold`: every union, and
+//! the half less a quarter against its cap. The half bend's two caps cut the
+//! ring in two circles on `y = 0`, and assembly named both circles by the plane
+//! and the ring alone, so it joined them into one edge with four faces along
+//! it. A closed crossing is now named by which circle it is as well (§378.6),
+//! and all ten answer.
+//!
 //! The ring is four and the tube one, so the whole ring holds `2π²·4·1 = 8π²`
 //! and each quarter of it `2π²`. Every answer is held to that, within what
 //! `measure` says it can be out by, and passes `Model::validate`.
@@ -17,7 +24,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Scale, Surface};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Model, OnAFace, Rule, SolidKey};
+use rcad_topo::{Containment, Model, OnAFace, Rule, SolidKey};
 
 mod rings;
 
@@ -30,9 +37,6 @@ enum Answer {
     Nothing,
     /// One solid holding this many quarters of the ring.
     Quarters(u32),
-    /// Refused with `ResultIsNotManifold`, which `fuse/assemble.rs` raises
-    /// once the pieces are chosen; not traced (§377).
-    NotManifold,
 }
 
 /// A quarter bend inside the half bend, at either end of it.
@@ -40,8 +44,7 @@ enum Answer {
 /// The quarter turned `0` runs from `+x` to `+y`, and turned `1` from `+y` to
 /// `−x`; the half bend runs from `+x` round through `+y` to `−x`. So the
 /// intersection is the quarter, the half less the quarter is the other quarter,
-/// and the quarter less the half is nothing. The union is the half bend, and
-/// is refused.
+/// and the quarter less the half is nothing. The union is the half bend.
 #[test]
 fn a_quarter_bend_inside_a_half_bend_fuses_to_the_quarters_it_should() {
     for quarter_turned in [0, 1] {
@@ -50,8 +53,8 @@ fn a_quarter_bend_inside_a_half_bend_fuses_to_the_quarters_it_should() {
             (Rule::Intersection, false, Answer::Quarters(1)),
             (Rule::Difference, true, Answer::Quarters(1)),
             (Rule::Difference, false, Answer::Nothing),
-            (Rule::Union, true, Answer::NotManifold),
-            (Rule::Union, false, Answer::NotManifold),
+            (Rule::Union, true, Answer::Quarters(2)),
+            (Rule::Union, false, Answer::Quarters(2)),
         ] {
             a_fuse_comes_to(quarter_turned, half_first, rule, answer);
         }
@@ -64,7 +67,7 @@ fn a_quarter_bend_inside_a_half_bend_fuses_to_the_quarters_it_should() {
 /// `+x`, so each shares one cap's disk with the half bend and nothing else.
 /// The intersection is nothing and the quarter less the half is the quarter.
 /// The half less the quarter is the half bend and the union is three quarters
-/// of the ring, and both are refused.
+/// of the ring.
 #[test]
 fn a_quarter_bend_against_a_half_bends_cap_fuses_to_the_quarters_it_should() {
     for quarter_turned in [2, 3] {
@@ -72,9 +75,9 @@ fn a_quarter_bend_against_a_half_bends_cap_fuses_to_the_quarters_it_should() {
             (Rule::Intersection, true, Answer::Nothing),
             (Rule::Intersection, false, Answer::Nothing),
             (Rule::Difference, false, Answer::Quarters(1)),
-            (Rule::Difference, true, Answer::NotManifold),
-            (Rule::Union, true, Answer::NotManifold),
-            (Rule::Union, false, Answer::NotManifold),
+            (Rule::Difference, true, Answer::Quarters(2)),
+            (Rule::Union, true, Answer::Quarters(3)),
+            (Rule::Union, false, Answer::Quarters(3)),
         ] {
             a_fuse_comes_to(quarter_turned, half_first, rule, answer);
         }
@@ -156,7 +159,6 @@ fn a_fuse_comes_to(quarter_turned: u32, half_first: bool, rule: Rule, answer: An
     );
     let fused = model.fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new());
     let quarters = match (answer, fused) {
-        (Answer::NotManifold, Err(Error::ResultIsNotManifold { .. })) => return,
         (Answer::Nothing, Ok(fused)) => {
             assert!(fused.solids().is_empty(), "{named}: {fused:?}");
             return;
@@ -188,6 +190,11 @@ fn holds_quarters_of_the_ring(model: &Model, (solid, quarters): (SolidKey, u32),
         )
         .unwrap_or_else(|why| panic!("{named}: the answer does not measure: {why:?}"));
     let pappus = f64::from(quarters) * 2.0 * PI * PI;
+    println!(
+        "{named}: measures {} give or take {}, against {pappus}",
+        measured.volume(),
+        measured.volume_error()
+    );
     assert!(
         (measured.volume() - pappus).abs() <= measured.volume_error(),
         "{named} holds {pappus}, and measures {} give or take {}",

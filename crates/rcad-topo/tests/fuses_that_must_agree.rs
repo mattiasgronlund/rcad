@@ -144,7 +144,7 @@ use rcad_geom::{
     Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Invalid, Model, Rule, SolidBuilder, SolidKey};
 
 use comparison::{
     Answer, Face, Picking, Run, Step, WhatItSitsOn, answer_of, bits, turned_to_its_smallest,
@@ -227,8 +227,10 @@ const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 ///
 /// Twenty-four per cent, chosen from measurement rather than from taste, and it
 /// is a threshold on a **deterministic** number: [`measured`] runs from a fixed
-/// seed, so the shipped corpus of 429 turned fuses refuses 96 of them, 22.38%,
-/// every run on every machine. There is no sampling noise for the threshold to
+/// seed, so the shipped corpus of 429 turned fuses refused 96 of them, 22.38%,
+/// every run on every machine, when it was chosen. Just before Q1288 it was 45
+/// of 447, 10.07%, and since Q1288 it is 39 of 447, 8.72%. There is no sampling
+/// noise for the threshold to
 /// have to clear, so what it has to clear instead is ordinary drift — 1.6 points
 /// is seven fuses — and what it has to catch is a regression. The three undeserved
 /// refusals recorded so far are each worth several times that on their own: the
@@ -271,7 +273,13 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// unnoticed rather than as a target.
 ///
 /// Eighteen per cent. [`measured`] runs from a fixed seed, so the shipped corpus
-/// of 429 skew fuses refuses 51 of them, 11.89%, every run on every machine.
+/// of 429 skew fuses refused 51 of them, 11.89%, every run on every machine.
+/// Measured on Q901's merge it was 441 fuses and 39 refused, 8.84%, and since
+/// Q1145 it is 27 refused, 6.12%, which leaves this threshold further off than
+/// the drift below argues for; it was moved down with neither. Just before
+/// Q1279 it was 30 of 447, 6.71%, and since Q1279 it is 16 of 447, 3.58%;
+/// the threshold was not moved then either. Since Q1357 it is 13 of 447,
+/// 2.91%, and the threshold stays where it is.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
 /// drift — 6.1 points is twenty-six fuses, nearly four times the headroom
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
@@ -562,27 +570,26 @@ const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.019..=0.084;
 
 /// The same for the turned family, a rate judged the same way.
 ///
-/// The shipped corpus gives 14 of 441, the lattice family's count exactly, and
-/// this family is a rotation of that one. Do not read the equality as anything:
-/// this is the one of the six that the two seeds after `b4890f1` also moved, 13
-/// on 423 and 10 on 426 before it landed on 14 on 429, so it went past the
-/// lattice family's count rather than settling on it.
-/// [`A_LATTICE_PAIR_IS_NOT_A_SOLID`] has the attribution.
+/// **The rate is 0.78%** — 726 of 92 844 fuses, twelve fresh seeds (11 to 22)
+/// at a [`SOAK_FACTOR`] of 20, between 48 and 78 a seed — so the convention
+/// gives 0.52% to 2.3%. The shipped corpus gives 6 of 441.
 ///
-/// **The rate is 2.45%** — 29 847 of 1 219 248 fuses, 48 fresh seeds at a
-/// [`SOAK_FACTOR`] of 66 — so the convention gives 1.6% to 7.3%. It is a
-/// little *above* the lattice family's 2.23%, although getting on for a quarter
-/// of this family's fuses refuse before they get far enough to find out
-/// whether the answer is a solid; §303.4 has what that does and does not say.
-///
-/// It was 2.2% to 9.8%, the lattice band copied because the shipped counts
-/// matched, and it was exposed the same way. Its 48 soaked seeds all passed,
-/// but the lowest came in at 559 of 25 401, 2.2007%, one fuse over that floor,
-/// and at the shipped size 4 of 400 fresh seeds failed it. The shipped 14 is a
-/// low draw for this family rather than a high one: at 441 fuses a fresh seed
-/// gives 3.96% on average, because the nineteen replayed seeds give 8 of their
-/// 57 fuses not a solid, and in a small draw they weigh an eighth of it.
-const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.016..=0.073;
+/// It was 2.45%, 29 847 of 1 219 248 fuses at a factor of 66, and the band
+/// 1.6% to 7.3%, until an input corner with exactly three planes round it was
+/// named by those planes (`docs/decisions.md` §351.6). The shipped corpus gave
+/// 14 of 441 then. In the configuration §351.6 traced, a corner of one solid
+/// lying on an edge of the other was named as a vertex by one solid's pieces
+/// and as the meet of three planes by the other's, so one corner was two and
+/// edges were left with one face each. **Two kinds of fuse moved, and they move
+/// the rate opposite ways**: fuses that were not a solid and are answered now,
+/// and answers that are not a solid now. Each of the second kind measured is
+/// two solids touching along an edge, refused `count: 4` unturned and now
+/// turned as well. Over the 67 pairs of
+/// [`swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit`], counting a
+/// rule both ways round as one: ten that answered one way round only and five
+/// that answered neither way answer both ways now, and two unions that
+/// answered both ways answer neither, so 24 fuses not a solid became 8.
+const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0052..=0.023;
 
 /// How many of its own spreads a draw may land past an end of a not-a-solid
 /// rate band before [`Tally::rate_of_answers_that_were_not_solids_must_be_within`]
@@ -909,6 +916,11 @@ fn swapping_the_two_sides_of_a_lattice_pair_changes_not_one_bit() {
     tally.report_what_it_compared("commutativity, lattice pairs");
 }
 
+/// Commutativity over the turned pairs.
+///
+/// **Since Q1288 a fuse here may be refused for an answer with an edge too
+/// short beside its coordinates**, counted by name ([`a_flat_refusal`]) rather
+/// than failed: 8 of its 276 fuses are, and 12 are refused in all, from 20.
 #[test]
 fn swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit() {
     let tally = over(CASES, a_turned_pair(), |configuration, tally| {
@@ -920,41 +932,36 @@ fn swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit() {
     );
 }
 
-/// §48.2 item 5's defect, at the first configuration that found it, **and it is
-/// wrong**.
+/// §48.2 item 5's defect, at the first configuration that found it, fixed.
 ///
 /// A frame and a comb, turned together by one sixty-fourth of a turn about
-/// `(-2, -1, 0)`. What the two share is two solids, and whether the kernel can
-/// hold them depends on which of the pair is handed over first: comb against
-/// frame gives the two, frame against comb gives
-/// [`Error::ResultIsNotManifold`]. Whether four faces end up along one edge is a
-/// fact about the answer, and the answer does not know which argument came
-/// first.
+/// `(-2, -1, 0)`. What the two share is two solids. Comb against frame gave the
+/// two, and frame against comb gave [`Error::ResultIsNotManifold`]. Whether four
+/// faces end up along one edge is a fact about the answer, and the answer does
+/// not know which argument came first.
 ///
 /// **The same pair unturned gives the two solids either way round**, which is
 /// the control: the two are in the same places relative to each other, and the
 /// only thing between the two rows is that the rotation leaves nothing exactly
 /// representable.
 ///
-/// This is pinned rather than fixed, and what is left of it is now named.
-/// **Two** things split one corner of this pair in two, and only one of them is
-/// still here:
+/// **Two** things split one corner of this pair in two:
 ///
 /// - The two solids are flush on a plane and name it opposite ways round, so a
 ///   corner on it was solved from `P, Q, R` by one face and from `−P, Q, R` by
-///   another. That is gone: three planes are named whichever way each of them
-///   faces now (§48, W5, `assemble::names_of_the_three_surfaces`), which is what
-///   brings the second row below back to the two solids.
+///   another. Three planes are named whichever way each of them faces now (§48,
+///   W5, `assemble::names_of_the_three_surfaces`).
 /// - The two solids also have an input **vertex** each at one shared corner —
 ///   `11v1` and `23v1` — and the rotation lands the two a last bit apart, so
-///   neither the names nor `assemble::exactly_at`'s coordinates join them. That
-///   one is roadmap §7.4's vertex-on-face entry, it needs no fuse to reach, and
-///   it is what the first row below is.
+///   neither the names nor `assemble::exactly_at`'s coordinates joined them.
+///   An input corner with exactly three planes round it is named by those
+///   planes now and put where the three alone put it (§351.6), and that brought
+///   the first order back to the two solids.
 ///
-/// **The day that is fixed this test fails**, and what replaces it is deleting
-/// [`both_agree_about_whether_there_is_an_answer`]'s exemption for this family.
+/// With both gone, [`both_agree_about_whether_there_is_an_answer`] fails on
+/// this family rather than counting.
 #[test]
-fn turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first() {
+fn turning_a_frame_and_a_comb_shares_the_same_two_solids_whichever_comes_first() {
     let frame = Placed {
         shape: Shape::Frame { width: 4, depth: 3 },
         skew: Skew::none(),
@@ -990,16 +997,41 @@ fn turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first() {
         steps: 1,
     }))
     .build();
-    assert_eq!(
-        what_a_fuse_came_back_with(&model, keys[0], keys[1], Rule::Intersection),
-        WhatCameBack::NotASolid,
-        "pinning what happens today, and it is wrong"
-    );
-    assert_eq!(
-        what_a_fuse_came_back_with(&model, keys[1], keys[0], Rule::Intersection),
-        WhatCameBack::Solids(2),
-        "the same two solids, handed over the other way round"
-    );
+    for (arguments, tools) in [(keys[0], keys[1]), (keys[1], keys[0])] {
+        assert_eq!(
+            what_a_fuse_came_back_with(&model, arguments, tools, Rule::Intersection),
+            WhatCameBack::Solids(2),
+            "turned, either order shares the same two solids"
+        );
+    }
+    let forwards = shared(&model, keys[0], keys[1]);
+    let backwards = shared(&model, keys[1], keys[0]);
+    if let Err(why) = same_answer(
+        &answer_of(&forwards.0, &forwards.1),
+        &answer_of(&backwards.0, &backwards.1),
+        Rule::Intersection,
+        "swapping the frame and the comb",
+    ) {
+        panic!("{why}");
+    }
+}
+
+/// What a certified intersection of `arguments` with `tools` hands back, in a
+/// copy of `model`.
+fn shared(model: &Model, arguments: SolidKey, tools: SolidKey) -> (Model, Vec<SolidKey>) {
+    let mut model = model.clone();
+    let solids = model
+        .fuse(
+            &[arguments],
+            &[tools],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the frame and the comb share two solids")
+        .solids()
+        .to_vec();
+    (model, solids)
 }
 
 /// The same defect with **no rotation and no tilt at all**, fixed.
@@ -1582,6 +1614,15 @@ fn every_certified_fuse_of_a_pair_somewhere_else_in_f64_is_decided() {
 /// agreeing in the last bits, which is where most of the refusals come from. So
 /// the rate is as much a statement about how degenerate the corpus is as about
 /// the filters, and the two families have to be read together.
+///
+/// **Since Q1288 it is 39 of 447 refused, from 45**, all 45 then under *a
+/// point inside a piece of a face*. A plane of one solid now places a piece
+/// with every corner on or in front of it and one strictly, so a piece a
+/// rounding across whose corners lie on that solid's planes is placed. 33
+/// still name the point, and 6 are [`AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES`]:
+/// fuses that get as far as an answer and find its shortest edge `7.7e15` to
+/// `2.9e16` times shorter than its largest coordinate, a limit
+/// ([`a_flat_refusal`]).
 #[test]
 fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
     let tally = measured(a_turned_pair(), |configuration, tally| {
@@ -1614,11 +1655,44 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
 /// something the total cannot. §17.7 records that every refusal the turned
 /// family has ever produced named `"side of plane"`, with
 /// `"a point inside a piece of a face"` turning up rarely and no seed ever
-/// naming a third. This family's leading cause is `"order along a crossing"`, which
-/// that corpus essentially never reaches — and reaching it is the point. Three
-/// cut lines through one point put two intersections at the same place on a
-/// line, and an ordering that is a tie is not a comparison any amount of
-/// precision settles.
+/// naming a third. This family's leading cause was `"order along a crossing"`,
+/// which that corpus essentially never reaches — and reaching it is the point.
+/// Three cut lines through one point put two intersections at the same place
+/// on a line, and their two boxes overlap, so no reading of the boxes can put
+/// them in order.
+///
+/// **The planes can, and since Q901 they are asked.** Each of the two is the
+/// meet of the face's plane, the crossing's partner and one plane more, and
+/// `which_meet_comes_first_along_a_line` settles their order exactly, a tie
+/// included. On the shipped corpus that took every refusal off the order: 441
+/// fuses, 39 refused then, and all 39 named `"a point inside a piece of a
+/// face"`, one step further on. That is what the cause below now pins.
+///
+/// **Since Q1145 it is 27 refused, all 27 still under that name.** The 33 the
+/// corpus refused just before each stopped first, as Q1069 traced them, on a
+/// flat piece where three cut lines meet at one point, which leaves a side a
+/// rounding long, and a
+/// turn about that side settled nothing in the fan that was to prove a point
+/// inside. Two turns of opposite sign now put the point outside a triangle of
+/// the fan without it. `tests/three_cut_lines_through_one_corner_of_a_skew_pair.rs`
+/// pins the two pairs that answer now, all six of their fuses, and a third
+/// pair that got past that piece and stopped on the next.
+///
+/// **Since Q1279 it is 16 of 447 refused, from 30**, all 30 then under that
+/// name. Q1146 found the stops on slivers that hold no `f64` point, where
+/// three planes meet by design, and a plane of one solid now places a piece
+/// with every corner on or in front of it and one strictly. 15 still name the
+/// point, and one is [`AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES`], at a spread
+/// of `5 · 2^51`, which is what the third pair's union is refused at: an edge
+/// `2^-51` long beside a coordinate of 5, a limit ([`a_flat_refusal`]).
+///
+/// **Since Q1357 it is 13 of 447, from 16**: 12 name the point, and the edge
+/// too short is still one. The three are the rules of one pair, a comb and a
+/// leaning ell standing on its top, which stopped on a triangle a rounding
+/// across in the plane of the ell's floor and well off it. A flat piece no
+/// other rule places now takes the placement of the piece of its own face
+/// across a side that no plane of the other solid holds but the face's own
+/// (`tests/a_sliver_on_the_plane_of_a_face_it_misses.rs`).
 #[test]
 fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
     let tally = measured(a_skew_pair(), |configuration, tally| {
@@ -1642,7 +1716,7 @@ fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
             tally.fuses.get(),
             SKEW_REFUSALS_MUST_STAY_BELOW * 100.0
         );
-        tally.the_cause_named_most_often_is(ORDER_ALONG_A_LINE);
+        tally.the_cause_named_most_often_is(A_POINT_INSIDE_A_PIECE);
     }
 }
 
@@ -1685,6 +1759,10 @@ fn how_often_a_certified_fuse_of_a_pair_leaning_the_same_way_refuses() {
 /// [`the_same_wall_built_from_a_longer_edge_is_the_same_plane`] — so the last
 /// bit of a coefficient is a fair thing to ask about, and the diff was the one
 /// word that section predicted.
+///
+/// **Since Q1279 a fuse here may be refused for an answer with an edge too
+/// short beside its coordinates**, counted by name ([`a_flat_refusal`]) rather
+/// than failed: 2 of its 276 fuses are, and 22 are refused in all, from 28.
 #[test]
 fn swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit() {
     let tally = over(CASES, a_skew_pair(), |configuration, tally| {
@@ -1831,8 +1909,8 @@ fn a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all() {
 /// [`a_solid_with_a_copy_of_itself_taken_away_is_nothing_at_all`] assert over
 /// the flat families, asserted here for real rather than pinned.
 ///
-/// The bar refused `A \ A` on [`A_POINT_EVERY_SOLID_COULD_PLACE`] until
-/// §224.4 and the ball never did. That read as a statement about a surface that
+/// The bar refused `A \ A` on `"a point in a piece that every solid could
+/// place"` until §224.4 and the ball never did. That read as a statement about a surface that
 /// closes round a seam, and it was not: the ball has no flat face, and the
 /// bar's refusal was its flat caps, each a disk with one corner that winding
 /// counted as holding nothing.
@@ -2261,23 +2339,23 @@ fn what_a_block_and_a_ball_take_up_adds_up_only_as_well_as_the_mesh_does() {
     );
 }
 
-/// Absorption, over a round solid: `A ∪ (A ∩ B)` is `A` — asserted, **on the
-/// part of the family that answers**.
+/// Absorption, over a round solid: `A ∪ (A ∩ B)` is `A` — asserted, and it
+/// compares on 67 of 67.
 ///
 /// The first fuse answers every time. The second is handed half a ball whose
 /// flat face lies exactly in the block's floor and whose skin lies exactly on a
 /// piece of the answer's own boundary. That second fuse refused on every draw,
-/// naming [`A_POINT_EVERY_SOLID_COULD_PLACE`], until §351 made selection ask
+/// naming `"a point in a piece that every solid could place"`, until §351 made selection ask
 /// whether a **flat** piece lies on a face before firing the ray, as it already
-/// did for a curved one: 67 of 67 on the shipped corpus before, 25 of 67 after,
-/// and the 42 that answer are the block, as the law says.
+/// did for a curved one: 67 of 67 on the shipped corpus before, 25 of 67 after.
 ///
-/// **What still refuses has not been traced**, and names the same predicate.
-/// So the floor is [`A_THINNER_LAW_STILL_COMPARES_THIS_MUCH`], which a halving
-/// of the 63% crosses, and the cause the remaining refusals name is pinned
-/// beside it. Twelve values of `RCAD_SOAK_SEED` all gave the same 42, as the
-/// seed does not reach this family. The control is the same law
-/// over the lattice family, which
+/// **The 25 answer since row Q1062**, and all 67 are the block, as the law
+/// says. Measured with Q1062's new step switched off by hand, the 25 came back
+/// under the same name. `select.rs` wound a flat face's corners round the
+/// point to ask whether the face holds it, and a point on a spoke of every fan
+/// of those corners, such as the middle of a rectangle, could not be said to be
+/// held; it now asks `SolidView::face_holds_the_point` there. The control is
+/// the same law over the lattice family, which
 /// [`a_solid_united_with_what_it_shares_with_another_is_itself`] asserts in
 /// full, so the difference between the two rows is the curve and nothing else.
 #[test]
@@ -2319,22 +2397,28 @@ fn a_block_united_with_what_it_shares_with_a_ball_is_the_block() {
         );
         Ok(())
     });
-    tally.report_what_it_compared_at_least(
-        "absorption over a ball",
-        A_THINNER_LAW_STILL_COMPARES_THIS_MUCH,
-    );
-    tally.the_cause_named_most_often_is(A_POINT_EVERY_SOLID_COULD_PLACE);
+    tally.report_what_it_compared("absorption over a ball");
+    tally.refuses_no_more_than(NOTHING_REFUSES);
 }
 
-/// `A \ (A \ B)` is `A ∩ B`, over a round solid — **and it cannot run today**
-/// either, for the same reason.
+/// A ceiling on the share refused that only a share of exactly nothing is
+/// under, so [`Tally::refuses_no_more_than`] asks that no fuse refused.
+const NOTHING_REFUSES: f64 = f64::MIN_POSITIVE;
+
+/// `A \ (A \ B)` is `A ∩ B`, over a round solid — asserted, and it compares on
+/// 67 of 67.
 ///
 /// Two ways to the same half ball: cut the dent and then cut the dent's
 /// complement back out of the block, against sharing the block with the ball
-/// once. The second cut is handed the dent, whose skin is the ball's own, so it
-/// refuses on [`A_POINT_EVERY_SOLID_COULD_PLACE`] on 61 of 61. Pinned, with
+/// once. The second cut is handed the dent, whose skin is the ball's own: a
+/// dome whose only corner is on the rim where the block's floor cuts it, so no
+/// corner says which side of the floor the dome keeps. Until row Q1024 that
+/// cut refused on [`A_FACE_NOBODY_FOLLOWS`] on 67 of 67: a point in a piece was
+/// found, and the ray that was to place it met the dome. `holds.rs` now reads
+/// the dome's side off the way its wire walks the rim, and every draw gets
+/// both sides and agrees.
 /// [`taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_share`]
-/// as the flat control.
+/// is the flat control.
 #[test]
 fn taking_the_dent_out_of_a_block_again_leaves_what_the_block_and_the_ball_share() {
     let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;
@@ -2385,26 +2469,29 @@ fn taking_the_dent_out_of_a_block_again_leaves_what_the_block_and_the_ball_share
         );
         Ok(())
     });
-    tally.nothing_was_compared_because_it_all_refused(
-        "A \\ (A \\ B) = A ∩ B over a ball, which refuses",
-        A_POINT_EVERY_SOLID_COULD_PLACE,
-    );
+    tally.report_what_it_compared("A \\ (A \\ B) = A ∩ B over a ball");
 }
 
-/// `((A ∪ B) \ B) ∪ B` is `A ∪ B`, over a round solid — **and it stops at a
-/// different refusal from the other two**, which is why it is worth having
-/// separately.
+/// `((A ∪ B) \ B) ∪ B` is `A ∪ B`, over a round solid — asserted since row
+/// Q1080, and it compares on 67 of 67.
 ///
-/// The deepest chain any curved family has been asked for. The middle fuse takes
-/// the ball back out of the answer the first one built, and what stops it is not
-/// two coincident faces but [`WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON`] — the
-/// dome the union left is a face whose every corner sits on the ball's skin, so
-/// nothing in the model says which side of it the face is on. §30.8 item 10, on
-/// 61 of 61.
+/// The deepest chain any curved family has been asked for. The middle fuse
+/// takes the ball back out of the answer the first one built.
 ///
-/// Two laws blocked by one refusal and a third blocked by another is a sharper
-/// statement than *"the laws do not run over a ball"*, and it says the ball
-/// needs both closed and not either.
+/// **It stopped earlier until row Q1024**, at
+/// [`WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON`]: the dome the union left is a
+/// face on the ball's sphere whose only corner is on the rim where the block's
+/// floor cuts it, so no corner said which side of the floor the dome keeps
+/// (§30.8 item 10). `holds.rs` now reads that side off the way the dome's wire
+/// walks the rim, and the fuse gets one step further. Past that, it refused
+/// on 67 of 67, naming `"a point in a piece that every solid could place"` (0 compared): a
+/// point in a piece was found and no ray could place it, every middle fuse
+/// landing on the half of a bar's wall that Q1080 answers (Q1066).
+///
+/// **It answers since row Q1080**, which stopped
+/// `count_where_the_ray_meets_it` (`classify.rs`) from grazing a ray on a
+/// face that holds none of the point: 67 of 67 comparisons get both sides,
+/// 201 fuses and 0 refused, and the law holds on each.
 #[test]
 fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_union_again() {
     let coordinates = Coordinates::LieOnARoundWallAndMayCoincide;
@@ -2449,10 +2536,8 @@ fn taking_a_ball_out_of_its_union_with_a_block_and_putting_it_back_gives_the_uni
         );
         Ok(())
     });
-    tally.nothing_was_compared_because_it_all_refused(
-        "((A ∪ B) \\ B) ∪ B = A ∪ B over a ball, which refuses",
-        WHICH_SIDE_OF_ITS_TRIMMING_A_FACE_LIES_ON,
-    );
+    tally.report_what_it_compared("((A ∪ B) \\ B) ∪ B = A ∪ B over a ball");
+    tally.refuses_no_more_than(NOTHING_REFUSES);
 }
 
 /// Associativity of union over a **curved trio**, which no law in this file had
@@ -3846,29 +3931,40 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
     );
 }
 
-/// The predicate that settles which of two points on a crossing comes first.
+/// The search for a point inside a piece of a face, which the skew family's
+/// refusals name since Q901.
 ///
 /// Named here because [`how_often_a_certified_fuse_of_a_skew_pair_refuses`]
 /// asserts on it rather than only printing it, and a bare string in an
 /// assertion is a thing that goes stale silently.
 ///
-/// It was `"order along a line"` until the arrangement learned to draw a curve
-/// that closes, and the same question about a straight crossing is still the
-/// same question — the count this family asserts on did not move.
-const ORDER_ALONG_A_LINE: &str = "order along a crossing";
+/// It was `"order along a crossing"`, the predicate that settles which of two
+/// points on a crossing comes first, until Q901 had that order asked of the
+/// planes two points a rounding apart are the meets of.
+const A_POINT_INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 
-/// What the fuse gives up on when it is handed two curved faces lying on the
-/// same surface.
+/// What a flat fuse refuses when its answer keeps an edge too short to stand
+/// beside its own coordinates: [`Invalid::DynamicRangeTooWide`], as
+/// [`a_flat_refusal`] names it.
+const AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES: &str =
+    "an answer with an edge too short beside its coordinates";
+
+// `"a point in a piece that every solid could place"` is what the fuse gives
+// up on when it is handed two curved faces lying on the same surface (§36.16's
+// row; `a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all` is the
+// plainest shape that reaches it, and every law that puts an answer back
+// against one of its own inputs reaches it too). It was `"a point inside a
+// piece of a face"` until §217, which split that one name in two. No test
+// still names it as a constant (Q1080 answered the last refusal that did).
+
+/// What a fuse refuses when a point inside a piece was found and the ray that
+/// was to place it met a face whose trimming nothing here follows:
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`], as [`fused`] names it.
 ///
-/// §36.16's row. `a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all` is
-/// the plainest shape that reaches it, and every law that puts an answer back
-/// against one of its own inputs reaches it too.
-///
-/// **This was *a point inside a piece of a face* until §217**, which split that
-/// one name in two. The whole family moved to the other side of the split — all
-/// 67 of these refusals found a point inside the piece and could not place it
-/// against every solid — so this is repointed rather than widened to hold both.
-const A_POINT_EVERY_SOLID_COULD_PLACE: &str = "a point in a piece that every solid could place";
+/// Counted under `"a point in a piece that every solid could place"` until row
+/// Q882 named the face rather than calling the point undecided
+/// (`docs/decisions.md` §35.6).
+const A_FACE_NOBODY_FOLLOWS: &str = "a face trimmed by a curve this cannot follow";
 
 /// The refusal §30.8 item 10 owns, as [`fused`] names it.
 ///
@@ -4242,10 +4338,10 @@ fn fused(
                 Coordinates::LieOnARoundWallAndMayCoincide | Coordinates::LieOnAConesWall => {
                     a_curved_refusal(&why)
                 }
-                Coordinates::AreExactlyRepresentable
-                | Coordinates::AreUnderAGeneralRotation
-                | Coordinates::SitOnTiltedWalls
-                | Coordinates::LieOnARoundWall => None,
+                Coordinates::AreUnderAGeneralRotation | Coordinates::SitOnTiltedWalls => {
+                    a_flat_refusal(&why)
+                }
+                Coordinates::AreExactlyRepresentable | Coordinates::LieOnARoundWall => None,
             };
             let Some(named) = allowed else {
                 return Err(TestCaseError::fail(format!("{rule:?} went wrong: {why}")));
@@ -4257,11 +4353,33 @@ fn fused(
     }
 }
 
+/// The one refusal a flat fuse whose corners are not all exact is allowed to
+/// hit by name, rather than as a predicate giving up: an answer with an edge
+/// too short to stand beside its largest coordinate in `f64`,
+/// [`Invalid::DynamicRangeTooWide`]. Anything else is a bug, so this hands back
+/// `None` for it and [`fused`] fails.
+///
+/// **A limit and not a gap**, by `Assembly::check_dynamic_range`'s argument in
+/// `fuse/assemble.rs`: the ratio is a length over a length, so no scaling of
+/// the answer fits the two in `f64` together, and the short edge is where the
+/// two inputs' stored planes really put it.
+///
+/// **The turned and skew families reach it since Q1279 and Q1288**, which let
+/// `by_a_plane` in `fuse/select.rs` place a piece with corners on the plane, so
+/// fuses that stopped for want of a point inside a piece of a face now get as
+/// far as the answer, and some answers keep a side a rounding long.
+/// `tests/three_cut_lines_through_one_corner_of_a_skew_pair.rs` pins one: an
+/// edge `2^-51` long beside a coordinate of 5.
+fn a_flat_refusal(why: &Error) -> Option<&'static str> {
+    matches!(why, Error::Invalid(Invalid::DynamicRangeTooWide { .. }))
+        .then_some(AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES)
+}
+
 /// The refusals a curved fuse is allowed to hit today, by name.
 ///
 /// Every one is a gap the kernel's own error documentation already owns: §30.8
-/// item 10 for the first, §33.1 for the second, §31.2 row 8 for the third, and
-/// §47.2 for the last two. Anything else is a bug, so this hands back `None` for
+/// item 10 for the first, §33.1 for the second, §31.2 row 8 for the third,
+/// §35.6 for a face nobody follows, and §47.2 for the last two. Anything else is a bug, so this hands back `None` for
 /// it and [`fused`] fails.
 ///
 /// **The last two are kept apart rather than folded into one name**, which is
@@ -4280,6 +4398,7 @@ fn a_curved_refusal(why: &Error) -> Option<&'static str> {
             Some(WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT)
         }
         Error::CannotTellTheCellsOfAFaceApart { .. } => Some(CANNOT_TELL_THE_CELLS_OF_A_FACE_APART),
+        Error::AFaceTrimmedByACurveThisCannotFollow { .. } => Some(A_FACE_NOBODY_FOLLOWS),
         Error::ACrossingThisCannotBeOrderedAlong => Some(ORDERING_ALONG_AN_ENDLESS_BEND),
         Error::Geometry(rcad_geom::Error::TheCrossingOfTheseTwoSurfacesIsNotClosed) => {
             Some(A_CROSSING_THAT_DOES_NOT_CLOSE)
@@ -4355,21 +4474,23 @@ impl Fused {
 ///
 /// # Which family this fails on, and which it only counts on
 ///
-/// **It counts on every family and fails on the round one.** Turning it on found
-/// the disagreement immediately on the flat families — on the turned pairs, on
-/// the skew pairs, and, once the shape was shrunk, on the lattice pairs, where
-/// nothing rounds at all. The lattice end of that is fixed and now says so
-/// ([`a_lattice_pair_unites_to_the_same_solid_whichever_way_round_it_is_handed_over`]);
-/// what is left on the turned end is pinned by hand in
-/// [`turning_a_pair_makes_what_the_two_share_depend_on_which_one_comes_first`],
-/// which names the one cause still open.
+/// **It counts on the lattice and skew families and fails on the rest.** Turning
+/// it on found the disagreement immediately on the flat families — on the
+/// turned pairs, on the skew pairs, and, once the shape was shrunk, on the
+/// lattice pairs, where nothing rounds at all. The lattice end of that is fixed
+/// and now says so
+/// ([`a_lattice_pair_unites_to_the_same_solid_whichever_way_round_it_is_handed_over`]).
+/// The turned end is fixed too
+/// ([`turning_a_frame_and_a_comb_shares_the_same_two_solids_whichever_comes_first`],
+/// §351.6): the swap property drew none over 979 turned pairs at a
+/// [`SOAK_FACTOR`] of 20, nor did any property of this file at a factor of 5,
+/// so the turned family fails here now.
 ///
-/// The fuse is not this lane's to fix (§48.4), and a property that is red for a
-/// reason already written down stops catching the reasons that are not. So what
-/// the flat families get is a count in their report and a pin with their name
-/// on it, and what the curved families get is a failure — they have never
-/// handed back an answer no `Model` can hold at all, so a disagreement there
-/// would be new.
+/// A property that is red for a reason already written down stops catching
+/// the reasons that are not. So what the lattice and skew families get is a
+/// count in their report, and what the turned and curved families get is a
+/// failure — the curved ones have never handed back an answer no `Model` can
+/// hold at all, so a disagreement there would be new.
 ///
 /// **The counted rate is the number to watch.** It is printed by [`Tally::report`]
 /// and it is zero on a fixed kernel.
@@ -4390,10 +4511,9 @@ fn both_agree_about_whether_there_is_an_answer(
         .disagreed_about_being_a_solid
         .set(tally.disagreed_about_being_a_solid.get() + 1);
     match coordinates {
-        Coordinates::AreExactlyRepresentable
-        | Coordinates::AreUnderAGeneralRotation
-        | Coordinates::SitOnTiltedWalls => Ok(()),
-        Coordinates::LieOnARoundWall
+        Coordinates::AreExactlyRepresentable | Coordinates::SitOnTiltedWalls => Ok(()),
+        Coordinates::AreUnderAGeneralRotation
+        | Coordinates::LieOnARoundWall
         | Coordinates::LieOnARoundWallAndMayCoincide
         | Coordinates::LieOnAConesWall
         | Coordinates::LieOnATurnedRoundWall => Err(TestCaseError::fail(format!(
@@ -4540,10 +4660,9 @@ struct Tally {
     /// How often two runs of one question disagreed about whether the answer
     /// was a solid at all.
     ///
-    /// §48.2 item 5's blind spot, now a number. Zero is the only right value and
-    /// it is not zero today — see
-    /// [`both_agree_about_whether_there_is_an_answer`] for which families it
-    /// fails on and which it only counts on.
+    /// §48.2 item 5's blind spot, now a number. Zero is the only right value —
+    /// see [`both_agree_about_whether_there_is_an_answer`] for which families
+    /// it fails on and which it only counts on.
     disagreed_about_being_a_solid: Cell<usize>,
     /// Comparisons a property set out to make, and made.
     ///
@@ -4692,32 +4811,6 @@ impl Tally {
             "the refusals mostly named {most:?} and not {predicate:?}, so this family \
              has stopped reaching the branch it was built for: {gave_up:?}"
         );
-    }
-
-    /// Report, and pin that the property compared **nothing**, because every
-    /// second fuse in it refused and named `predicate`.
-    ///
-    /// The counterpart of [`Tally::report_what_it_compared`] for a law that
-    /// cannot run yet. A property that has stopped comparing anything must not
-    /// read as a pass (§14.7), and the honest form of that is not a floor it
-    /// fails but an assertion that says out loud what today's kernel does — the
-    /// shape [`a_bar_with_a_copy_of_itself_taken_away_is_nothing_at_all`]
-    /// already uses at one hand-written pair, over a whole family.
-    ///
-    /// **The day the refusal closes, this fails**, and what replaces it is
-    /// [`Tally::report_what_it_compared`] and the law asserted for real.
-    fn nothing_was_compared_because_it_all_refused(&self, what: &str, predicate: &str) {
-        self.report(what);
-        let meant_to = self.meant_to_compare.get();
-        assert!(meant_to > 0, "{what} never tried to compare anything");
-        assert_eq!(
-            self.compared.get(),
-            0,
-            "{what}: {} of {meant_to} comparisons got both sides, so this law has started \
-             running and should be asserted rather than pinned",
-            self.compared.get()
-        );
-        self.the_cause_named_most_often_is(predicate);
     }
 
     /// Insist the share of fuses whose answer was not a solid is one a draw of
@@ -5701,8 +5794,10 @@ impl Dice {
 /// One ring, written down from two of its own corners, has to come back as one
 /// list.
 ///
-/// The ring below goes through the origin twice, which is what a turned pair
-/// does when both inputs have a corner at the point the turn holds still.
+/// The ring below goes through the origin twice. A union makes such a ring
+/// where one solid covers the corner of a frame and leaves its top face a C
+/// whose ends touch, upright or turned:
+/// `the_turned_pair_whose_union_lost_a_face_one_way_round.rs` pins one.
 #[test]
 fn a_ring_that_goes_through_one_corner_twice_reads_the_same_from_either_side() {
     let here = [0.0, 0.0, 0.0];

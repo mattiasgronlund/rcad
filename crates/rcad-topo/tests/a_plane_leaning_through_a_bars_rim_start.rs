@@ -15,7 +15,9 @@
 //! point on the cap circle, `2.5e-15` round from the rim start, in a box `±3`
 //! ulps wide along `x`. Going round the cap circle from `(0, −5, 0)`, the two
 //! cannot be put in order from that box, although the exact answer is a sweep
-//! of `−1.26e-14` and a box one ulp wide decides it. A **gap**.
+//! of `−1.26e-14`. That was a **gap**, and all six fuses refused on it. Since
+//! Q209 the order asks a box one checked step narrower, `[5 − 1 ulp, 5]` along
+//! `x`, which decides it, and all six answer under both policies.
 //!
 //! **A plane exactly on `z = y` is ordered, and all six fuses answer.** Built
 //! face by face so its face is `z = y` to the bit, the meet is `(5, 0, 0)`
@@ -24,6 +26,14 @@
 //! Until §330 named such an arc by its plane as well as by the wall, the two
 //! came out as one edge with four faces along it, and those four fuses refused
 //! `ResultIsNotManifold { count: 4 }`. All six are measured now.
+//!
+//! **A cube stood on its corner with a face through the bar's top rim start
+//! reaches the fold the turned block no longer does.** On the faces that have
+//! the rim start, the meet of that face, the cap plane and the wall is the
+//! rim start, within what writing it down cost, and makes no node; the cube's
+//! face has no rim start and keeps the meet. Until the arrangements handed on
+//! the names they folded (§284.8), the answer got two corners there and all
+//! six fuses refused `ResultIsNotManifold { count: 1 }`.
 //!
 //! Every fuse here has its volume worked out by hand: measured against it where
 //! the fuse answers, and carried in the message where it refuses. The bar is
@@ -38,8 +48,8 @@ use std::f64::consts::PI;
 use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
 };
-use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{DraftEdge, DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_topo::{DraftEdge, DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 const RADIUS: f64 = 5.0;
 const HEIGHT: f64 = 10.0;
@@ -52,107 +62,69 @@ const A_CUBE_FORTY_ON_A_SIDE: f64 = (2.0 * REACH) * (2.0 * REACH) * (2.0 * REACH
 /// middle cuts it in half.
 const A_PRISM_UNDER_Z_EQUALS_Y: f64 = A_CUBE_FORTY_ON_A_SIDE / 2.0;
 
-/// **The six fuses of §252.8, all refused on the order of two points round the
-/// bar's cap circle.**
+/// **The six fuses of §252.8, each one solid of the volume worked out by
+/// hand, under `Policy::certified()` and with nothing in the log.**
 ///
-/// The refusing face is the bar's bottom cap, `z = 0`, and the crossing is the
-/// cap circle, where that plane meets the wall. The two points are the meet of
-/// the cap plane, the wall and the turned face, a box round
+/// The face that refused them all until Q209 is the bar's bottom cap, `z = 0`,
+/// and the crossing is the cap circle, where that plane meets the wall. On it
+/// lie the meet of the cap plane, the wall and the turned face, round
 /// `(5 − 6.3e-31, 2.512e-15, 0)`, and the rim start `(5, 0, 0)` itself. They
-/// are two points: the box's `y` side is one ulp wide and above zero. The
+/// are two points: the meet's `y` side is one ulp wide and above zero. The
 /// order round the circle from `(0, −5, 0)` is the sign of a sweep whose exact
-/// value is `−1.26e-14`, and the box's `x` side, `[5 − 3 ulps, 5 + 3 ulps]`,
-/// makes that sweep straddle zero with an enclosure of `3.55e-14`.
+/// value is `−1.26e-14`. The box the quadratic along the two planes' line puts
+/// round the meet is `[5 − 3 ulps, 5 + 3 ulps]` along `x`, and over it the
+/// sweep straddles zero with an enclosure of `3.55e-14`. That refused all six.
+///
+/// One checked step onto the wall narrows that side to `[5 − 1 ulp, 5]`
+/// (`MeetOfThree::boxed_tight`), and over it the sweep is proved negative.
+/// The order round the circle asks the narrowed box only where the meet's own
+/// box cannot say. The meet then stays a node of its own, `2.5e-15` round from
+/// the rim start, on the cap, on the wall and on the turned face alike, and
+/// each fuse comes back as one solid.
 #[test]
-fn a_block_turned_to_lean_through_a_bars_rim_start_cannot_order_two_points_round_its_cap() {
+fn a_block_turned_to_lean_through_a_bars_rim_start_answers_all_six_fuses_with_one_solid_each() {
     let policy = Policy::certified();
     let (model, bar, block) = a_bar_and(a_block_turned_to_lean_along_z_equals_y);
 
-    for (rule, arguments, tools, by_hand) in the_six_fuses(bar, block, A_CUBE_FORTY_ON_A_SIDE) {
-        let mut model = model.clone();
-        let refused = model.fuse(
-            &[arguments],
-            &[tools],
-            rule,
-            &policy,
-            &mut ProvenanceLog::new(),
-        );
-        let Err(Error::Undecidable { records }) = &refused else {
-            panic!(
-                "{rule:?}: expected Error::Undecidable on \"order along a crossing\", which \
-                 stands in for one solid of volume {by_hand} (§284); got {refused:?}"
-            );
-        };
-        let [record] = records.records() else {
-            panic!("{rule:?}: one record, not {records:?}");
-        };
-        assert_eq!(
-            record.predicate(),
-            "order along a crossing",
-            "{rule:?}: Error::Undecidable stands in for one solid of volume {by_hand} (§284)"
-        );
-        let [meet, rim_start] = record.inputs() else {
-            panic!("{rule:?}: two points to order, not {:?}", record.inputs());
-        };
-        assert_eq!(
-            *rim_start,
-            PredicatePoint::Exact([RADIUS, 0.0, 0.0]),
-            "{rule:?}: the second point is the bar's rim start"
-        );
+    for fuse in the_six_fuses(bar, block, A_CUBE_FORTY_ON_A_SIDE) {
+        let log = one_solid_measured_right(&model, fuse, &policy);
         assert!(
-            meet.enclosure()[1].lo() > 0.0,
-            "{rule:?}: the meet {meet:?} is off the rim start, so the two are not one point"
+            log.records().is_empty(),
+            "{:?}: a certified fuse logs nothing, not {log:?}",
+            fuse.0
         );
     }
 }
 
-/// **Under a tolerant policy the order is settled, and the fuse comes apart
-/// one stage on.**
+/// **Under a tolerant policy the six answer the same way**, and for the same
+/// reason: the order round the cap circle is proved, so nothing is left for the
+/// policy to read, and the log stays empty.
 ///
-/// The enclosure of `3.55e-14` is a volume, so its wobble at a working size of
-/// 100 is `3.55e-18`, against a budget of `64·ε·100 = 1.42e-12`. The policy
-/// reads it as zero, and the meet is folded into the rim start on the cap and
-/// on the wall. The turned face keeps the meet as a corner of its own, so the
-/// faces no longer agree where their edges end, and every fuse is refused on an
-/// edge with one face along it.
+/// Before Q209 the policy was asked. The enclosure of `3.55e-14` is a volume,
+/// so its wobble at a working size of 100 is `3.55e-18`, against a budget of
+/// `64·ε·100 = 1.42e-12`, and the policy read it as zero. The meet was folded
+/// into the rim start on the cap and on the wall, while the turned face, which
+/// has no rim start to fold it into, kept it as a corner of its own (§284.7).
+/// The faces then disagreed on where their edges end, and every fuse was
+/// refused `ResultIsNotManifold { count: 1 }`. With the order proved, the meet
+/// is a node on all three faces and they agree.
 ///
-/// A print of every edge not claimed by two faces (§330.5) showed that, in all
-/// six: four edges with one face each, the diameter on `z = 0` and the half
-/// ellipse on the wall, each once from the rim start `(5, 0, 0)` for the cap
-/// and the wall and once from the meet `(5, 2.5e-15, 0)` for the turned face,
-/// all to `(−5, 2.5e-15, 0)`. The union with the bar first and the bar less the
-/// block refused `count: 3` before §330, on the cap circle's arc: the ellipse's
-/// arc on the wall ran between the same two corners and got the same name, so
-/// the wall claimed that edge twice. With the plane in the name those are two
-/// edges, the cap's arc claimed by the cap and the wall, and the ellipse's by
-/// the wall alone.
-///
-/// **The turned face keeps the meet because it has no rim start to fold it
-/// into** (§284.7). The rim start is the bar's vertex, so only the bar's faces
-/// have a node for it. Folding the meet into it drops the meet's name, so the
-/// cap and the wall hand on the rim start and the turned face the meet, and
-/// `assemble` names those two corners. A probe that gave them one name made all
-/// six fuses answer and measure within `volume_error` of the volumes these
-/// messages carry. That is a gap, and the fix is to carry the name through the
-/// fold in `arrange.rs`. This pin fails the day it lands.
+/// This pair no longer reaches the fold §284.7 found. Since §284.8 a meet
+/// folded into an input corner is handed on with the corner, so the faces
+/// would agree even if it did, and
+/// `a_cube_on_its_corner_leaning_through_a_bars_top_rim_start_answers_all_six_fuses`
+/// is a shape that does reach it, under a certified policy.
 #[test]
-fn under_a_tolerant_policy_the_turned_block_is_ordered_and_its_faces_disagree_on_a_corner() {
+fn under_a_tolerant_policy_the_turned_block_answers_all_six_fuses_with_one_solid_each_too() {
     let (model, bar, block) = a_bar_and(a_block_turned_to_lean_along_z_equals_y);
     let policy = Policy::tolerant(model.scale().nominal_size());
 
-    for (rule, arguments, tools, by_hand) in the_six_fuses(bar, block, A_CUBE_FORTY_ON_A_SIDE) {
-        let mut model = model.clone();
-        let refused = model.fuse(
-            &[arguments],
-            &[tools],
-            rule,
-            &policy,
-            &mut ProvenanceLog::new(),
-        );
+    for fuse in the_six_fuses(bar, block, A_CUBE_FORTY_ON_A_SIDE) {
+        let log = one_solid_measured_right(&model, fuse, &policy);
         assert!(
-            matches!(refused, Err(Error::ResultIsNotManifold { count: 1 })),
-            "{rule:?}: expected Error::ResultIsNotManifold {{ count: 1 }}, which stands in for \
-             one solid of volume {by_hand} (§284); got {refused:?}"
+            log.records().is_empty(),
+            "{:?}: nothing is left for the policy to read, not {log:?}",
+            fuse.0
         );
     }
 }
@@ -176,43 +148,168 @@ fn a_plane_exactly_through_a_bars_rim_start_answers_all_six_fuses_right_under_bo
         Policy::certified(),
         Policy::tolerant(model.scale().nominal_size()),
     ] {
-        for (rule, arguments, tools, by_hand) in the_six_fuses(bar, prism, A_PRISM_UNDER_Z_EQUALS_Y)
-        {
-            let mut model = model.clone();
-            let fused = model
-                .fuse(
-                    &[arguments],
-                    &[tools],
-                    rule,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-                .unwrap_or_else(|refused| {
-                    panic!("{rule:?} is one solid of volume {by_hand}: {refused:?}")
-                });
-            model
-                .validate(&policy, &mut ProvenanceLog::new())
-                .unwrap_or_else(|broken| panic!("{rule:?} came back broken: {broken:?}"));
-            let [solid] = fused.solids() else {
-                panic!("{rule:?} is one solid: {:?}", fused.solids());
-            };
-            let measured = model
-                .solid(*solid)
-                .expect("this model made the key")
-                .measure(
-                    Deflection::of(0.01).expect("a positive length"),
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-                .expect("a solid measures");
-            assert!(
-                (measured.volume() - by_hand).abs() <= measured.volume_error(),
-                "{rule:?}: measured {} ± {} against {by_hand} by hand",
-                measured.volume(),
-                measured.volume_error()
-            );
+        for fuse in the_six_fuses(bar, prism, A_PRISM_UNDER_Z_EQUALS_Y) {
+            one_solid_measured_right(&model, fuse, &policy);
         }
     }
+}
+
+/// **A cube stood on its corner, with a face leaning through the top rim start
+/// of a bar, answers all six fuses under `Policy::certified()`.**
+///
+/// The bar has radius 4 and stands from `z = 3` to `z = 8`, so its top cap
+/// circle starts at `(4, 0, 8)`. The cube is eight on a side, stood on its
+/// corner at `(0, 0, 4)`, and one of its faces passes through the rim start
+/// to within rounding: the meet of that face, the top cap plane and the wall
+/// comes out at `(4 + 1 ulp, −3.8e-16, 8)`. That is inside what writing the
+/// rim start down cost, so on the cap and on the wall the meet is the rim
+/// start and makes no node of its own. The cube's face has no rim start, keeps
+/// the meet as a node, and names it by its three surfaces.
+///
+/// Until the arrangements handed on what they folded (§284.8), the answer got
+/// both, the rim start by its vertex and the meet by its three surfaces, a few
+/// ulps apart, and all six fuses refused `ResultIsNotManifold { count: 1 }`.
+/// It is the fifteenth draw of the corner-up cubes that
+/// `a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike`
+/// stands against a bar, and those six were the only refusals there that were
+/// not an undecided order.
+///
+/// Nothing here is worked out by hand. The volumes are held to one another:
+/// union and intersection make up the two solids, and each difference is its
+/// solid less the intersection, within the measured errors.
+#[test]
+fn a_cube_on_its_corner_leaning_through_a_bars_top_rim_start_answers_all_six_fuses() {
+    let policy = Policy::certified();
+    let (model, bar, cube) = a_bar_and_a_cube_on_its_corner();
+    let one_bar = PI * 4.0 * 4.0 * 5.0;
+    let one_cube = 8.0 * 8.0 * 8.0;
+
+    let measured = |rule, arguments, tools| {
+        let (volume, error, log) = one_solid_measured(&model, rule, arguments, tools, &policy);
+        assert!(
+            log.records().is_empty(),
+            "{rule:?}: a certified fuse logs nothing, not {log:?}"
+        );
+        (volume, error)
+    };
+    let bar_less = measured(Rule::Difference, bar, cube);
+    let cube_less = measured(Rule::Difference, cube, bar);
+    let within = |what: &str, sum: f64, error: f64, of: f64| {
+        assert!(
+            (sum - of).abs() <= error,
+            "{what}: {sum} ± {error} against {of}"
+        );
+    };
+    for (one, other) in [(bar, cube), (cube, bar)] {
+        let union = measured(Rule::Union, one, other);
+        let both = measured(Rule::Intersection, one, other);
+        within(
+            "union and intersection make up the bar and the cube",
+            union.0 + both.0,
+            union.1 + both.1,
+            one_bar + one_cube,
+        );
+        within(
+            "the bar less the cube, and the intersection, make up the bar",
+            bar_less.0 + both.0,
+            bar_less.1 + both.1,
+            one_bar,
+        );
+        within(
+            "the cube less the bar, and the intersection, make up the cube",
+            cube_less.0 + both.0,
+            cube_less.1 + both.1,
+            one_cube,
+        );
+        assert!(
+            both.0 > both.1,
+            "the two overlap, or this measures nothing: {both:?}"
+        );
+    }
+}
+
+/// One of the six fuses on a copy of `model`, held to one solid that
+/// validates and measures within its own `volume_error` of the volume by hand.
+/// Hands back what the fuse logged.
+fn one_solid_measured_right(
+    model: &Model,
+    (rule, arguments, tools, by_hand): (Rule, SolidKey, SolidKey, f64),
+    policy: &Policy,
+) -> ProvenanceLog {
+    let (volume, error, log) = one_solid_measured(model, rule, arguments, tools, policy);
+    println!("{rule:?} under {policy:?}: measured {volume} ± {error} against {by_hand} by hand");
+    assert!(
+        (volume - by_hand).abs() <= error,
+        "{rule:?}: measured {volume} ± {error} against {by_hand} by hand (§284.4)"
+    );
+    log
+}
+
+/// One fuse on a copy of `model`, held to one solid that validates, with its
+/// volume, its `volume_error` and what the fuse logged.
+fn one_solid_measured(
+    model: &Model,
+    rule: Rule,
+    arguments: SolidKey,
+    tools: SolidKey,
+    policy: &Policy,
+) -> (f64, f64, ProvenanceLog) {
+    let mut model = model.clone();
+    let mut log = ProvenanceLog::new();
+    let fused = model
+        .fuse(&[arguments], &[tools], rule, policy, &mut log)
+        .unwrap_or_else(|refused| panic!("{rule:?} is one solid: {refused:?}"));
+    model
+        .validate(policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|broken| panic!("{rule:?} came back broken: {broken:?}"));
+    let [solid] = fused.solids() else {
+        panic!("{rule:?} is one solid: {:?}", fused.solids());
+    };
+    let measured = model
+        .solid(*solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a solid measures");
+    (measured.volume(), measured.volume_error(), log)
+}
+
+/// A bar of radius 4 from `z = 3` to `z = 8`, and a cube eight on a side stood
+/// on its corner at `(0, 0, 4)`: turned about the line through the origin
+/// along `(1, −1, 0)` until its long diagonal stands upright, as
+/// `how_often_a_fuse_with_a_cone_refuses.rs` stands its cubes.
+fn a_bar_and_a_cube_on_its_corner() -> (Model, SolidKey, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bar = model
+        .add_round_bar(
+            4.0,
+            5.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, 3.0)).expect("a finite shift"),
+        )
+        .expect("a bar of radius four, five tall");
+    let square = ProfileBuilder::new(vec![[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+    let cube = model
+        .add_extrusion(&square, 8.0, &Isometry::identity())
+        .expect("a cube");
+    let diagonal_up = Isometry::rotation(
+        &Axis::new(Point::origin(), Vector::new(1.0, -1.0, 0.0)).expect("a direction"),
+        (1.0f64 / 3.0).sqrt().acos(),
+    )
+    .expect("a finite turn");
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(0.0, 0.0, 4.0))
+                .expect("a finite shift")
+                .compose(&diagonal_up),
+        )
+        .expect("this model made the key");
+    (model, bar, cube)
 }
 
 fn a_bar_and(knife: fn(&mut Model) -> SolidKey) -> (Model, SolidKey, SolidKey) {

@@ -20,43 +20,33 @@
 //! The bit-identical spelling is the oracle: it already carried the equator's
 //! plane, so the hair-apart one must come out with the same run.
 //!
-//! # Refused by the reader, both spellings alike
+//! **The reader stores each circle round the ring the way `rcad-topo` does**
+//! (`docs/decisions.md` §390.5). The equator by `Model::validate`'s second
+//! reference, which stores it running down the ring angle; the circles where
+//! the flat faces rest on the rim by the mesher's rule for faces that touch.
+//! Stored by the file's `ORIENTED_EDGE` flags instead, both spellings were
+//! refused `AClosedEdgeIsWalkedAgainstItsSurface` at the equator.
 //!
-//! **Neither spelling reaches the mesher yet, and the stop is the reader's.**
-//! `f886614e` wrote this file when the mesher refused the lower band
-//! `CornersCoincide`, and `rcad-topo` now meshes a band that goes right round
-//! the ring: the same disc written face by face through `SolidBuilder` builds
-//! and holds what Pappus gives
-//! (`a_disc_with_a_round_rim_in_two_bands_holds_what_pappus_gives` in
-//! `rcad-topo`, `docs/decisions.md` §390). Read from this file it is refused
-//! `AClosedEdgeIsWalkedAgainstItsSurface` at the equator.
+//! # The one-ulp spelling is refused past the reader, at the lid
 //!
-//! The reader says which way a closed edge is stored from the way its curved
-//! surface's first coordinate runs, and on a torus that is round the tube,
-//! square to every circle round the ring; the travel dots it to exactly zero,
-//! so the reader falls back to the file's own `ORIENTED_EDGE` flags
-//! (`which_way_round_a_closed_edge_is_stored` in `brep.rs`). `Model::validate`
-//! reads the second reference there, `∇C` crossed into that first direction,
-//! which stores the equator running down the ring angle; the flags store it the
-//! way its `CIRCLE` runs, up the ring angle, and the lower band's `.F.` use is
-//! then read as walking it against its surface. With the reader
-//! reading that second reference between two curved faces, as an uncommitted
-//! probe, the bit-for-bit spelling got past the equator and was refused
-//! `AWireWillNotLieFlatOnItsFace` on a band instead, and the one-ulp spelling
-//! was refused too. Not traced, but the likeliest reason: the disc written
-//! through `SolidBuilder` needed the lower band's use of the bottom circle, where
-//! the flat face touches the torus, the other way round from this file's flag,
-//! so the flags miss the mesher's rule for faces that touch as well.
-//!
-//! So this pins the refusal both spellings meet today. When the reader stores
-//! these circles the way the mesher does, `git show
-//! f886614e:crates/rcad-step/tests/a_closed_circle_between_one_torus_written_twice.rs`
-//! is the test this turns back into — the equator named by its plane, the
-//! sweep passed and the equator's points within the published deviation — with
-//! the volume held to Pappus, `18π + 3π² + 4π/3`.
+//! **The upper band's torus one ulp wider no longer touches the lid at the
+//! file's corner.** The lid rests on that torus round a circle one ulp out
+//! from `(3, 0, 1)`, so at the corner the torus's gradient leans in by an ulp
+//! and crosses the lid's normal to `(0, 1.07e-14, 0)`, where the bit-for-bit
+//! spelling crosses to nothing. `Model::validate` and the mesher read that as
+//! the two crossing, and store the circle by the latitude, while the side of
+//! the lid the band lies on is read off its far corner, below the lid. The two
+//! readings disagree, and the import is refused
+//! `AClosedEdgeIsWalkedAgainstItsSurface`. Stored the other way, as where the
+//! two touch, it was refused `AWireWillNotLieFlatOnItsFace` instead (a probe in
+//! the reader, not kept). Neither is the reader's to settle, so that spelling
+//! is pinned to the refusal it meets.
 
 mod written_by_hand;
 
+use std::f64::consts::PI;
+
+use rcad_geom::{Deflection, EdgeRun, Point, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, Refusal, StepFile};
 use rcad_topo::{Error, Invalid};
@@ -66,17 +56,13 @@ const RING: f64 = 3.0;
 const TUBE: f64 = 1.0;
 
 #[test]
-fn a_torus_written_twice_bit_for_bit_is_refused_where_the_reader_guesses_the_equators_way() {
-    the_reader_stores_the_equator_against_the_sweeps_rule(RING);
+fn a_torus_written_twice_bit_for_bit_names_the_equator_by_its_plane() {
+    the_equator_is_named_by_its_plane_and_meshed_round(RING);
 }
 
 #[test]
-fn a_torus_written_twice_one_ulp_apart_is_refused_where_the_reader_guesses_the_equators_way() {
-    the_reader_stores_the_equator_against_the_sweeps_rule(RING.next_up());
-}
-
-fn the_reader_stores_the_equator_against_the_sweeps_rule(upper_ring: f64) {
-    let text = a_disc_with_a_round_rim_in_two_bands(upper_ring);
+fn a_torus_written_twice_one_ulp_apart_is_refused_where_the_lid_rests_on_the_wider_ring() {
+    let text = a_disc_with_a_round_rim_in_two_bands(RING.next_up());
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
     let refused = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new());
     assert!(
@@ -85,9 +71,110 @@ fn the_reader_stores_the_equator_against_the_sweeps_rule(upper_ring: f64) {
             Err(Refusal::TheSolidTheFileDescribesIsNotOne { why, .. })
                 if matches!(**why, Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface))
         ),
-        "the disc with its upper band's ring {upper_ring} came back {:?}",
+        "the disc with its upper band's ring one ulp wide came back {:?}",
         refused.map(|import| import.solids().len())
     );
+}
+
+fn the_equator_is_named_by_its_plane_and_meshed_round(upper_ring: f64) {
+    let text = a_disc_with_a_round_rim_in_two_bands(upper_ring);
+    let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let import =
+        Import::read(&file, &policy, &mut log).expect("a disc with a round rim in two bands reads");
+    let [(_, disc)] = import.solids() else {
+        panic!("one MANIFOLD_SOLID_BREP is one solid");
+    };
+    let model = import.model();
+    let solid = model.solid(*disc).expect("this model made the key");
+
+    let mut equator = None;
+    for face in solid.faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                let edge = coedge.edge();
+                if edge.start().point().coordinates()[2] != 0.0
+                    || edge.start().key() != edge.end().key()
+                {
+                    continue;
+                }
+                equator = Some(edge.key());
+                let EdgeRun::RightRoundWhereItCrosses { and } = edge.run() else {
+                    panic!(
+                        "the two bands are one torus, so the equator has to carry the surface \
+                         that names it; it says {:?}",
+                        edge.run()
+                    );
+                };
+                let Surface::Plane(flat) = and else {
+                    panic!("a circle round a torus's axis is named by its own plane, not {and:?}");
+                };
+                assert_eq!(
+                    flat.normal().cross(Vector::new(0.0, 0.0, 1.0)).length(),
+                    0.0,
+                    "the plane is square to the torus's axis, not to {:?}",
+                    flat.normal()
+                );
+                assert_eq!(
+                    flat.signed_distance_to(Point::new(0.0, 0.0, 0.0)),
+                    0.0,
+                    "the plane is the equator's own"
+                );
+            }
+        }
+    }
+    let equator = equator.expect("the rim has a closed circle at its outer equator");
+
+    model
+        .validate(&policy, &mut log)
+        .expect("the model the reader built passes the full sweep");
+    let mesh = solid
+        .mesh(Deflection::of(0.01).expect("a length"), &policy, &mut log)
+        .expect("the disc meshes");
+    let allowed = mesh.deviation().magnitude();
+    let along = mesh.points_along_edge(equator);
+    assert!(
+        along.len() > 8,
+        "a whole circle of radius four at a hundredth came back with {} points",
+        along.len()
+    );
+    for &at in along {
+        let [x, y, z] = mesh.points()[at as usize].coordinates();
+        let off = ((x * x + y * y).sqrt() - (RING + TUBE)).abs().max(z.abs());
+        assert!(
+            off <= allowed,
+            "{:?} is {off} off the equator, past the published {allowed}",
+            [x, y, z]
+        );
+    }
+
+    holds_what_pappus_gives(&solid, &policy, &mut log);
+}
+
+/// The disc's volume against Pappus, on its cross-section: the rectangle
+/// `0 ≤ ρ ≤ 3`, `|z| ≤ 1` has area `6` and centroid `ρ = 3/2`, so it sweeps
+/// `18π`; the half of the tube's disc outside `ρ = 3` has area `π/2` and its
+/// centroid `4/(3π)` past that line, so it sweeps `3π² + 4π/3`. The same
+/// figure `rcad-topo`'s `a_disc_with_a_round_rim_in_two_bands_holds_what_pappus_gives`
+/// holds the disc built face by face to.
+fn holds_what_pappus_gives(
+    solid: &rcad_topo::SolidView<'_>,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) {
+    let pappus = 18.0 * PI + 3.0 * PI * PI + 4.0 * PI / 3.0;
+    for deflection in [0.1, 0.03, 0.01] {
+        let measured = solid
+            .measure(Deflection::of(deflection).expect("a length"), policy, log)
+            .unwrap_or_else(|why| panic!("the disc at {deflection} was refused {why:?}"));
+        assert!(
+            (measured.volume() - pappus).abs() <= measured.volume_error(),
+            "at {deflection} the disc measured {} where Pappus gives {pappus}, allowed {}",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
 }
 
 /// A disc of radius `RING` and thickness `2·TUBE` centred on the origin, with

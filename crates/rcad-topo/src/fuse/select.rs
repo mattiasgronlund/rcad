@@ -35,25 +35,83 @@
 //! its normal, and that is [`orient3d_of_points`] against a fourth point off the
 //! plane whose side has been proved — see [`InPlane`]. No new predicate, and
 //! nothing is projected into two dimensions, which is §15.5's rule.
+//!
+//! # A piece no point places is placed by a side it shares
+//!
+//! **Only where the search above placed no point inside the piece**, whether
+//! it found none or found some and no ray placed them. A fuse that placed a
+//! point in every piece never gets here, and answers as it did.
+//! A piece can be narrower than the spacing of `f64`, and then no point it
+//! could be handed is inside it (§346.3). Or every point found inside it can
+//! be one no ray places. Q1064 brought the first such piece here, half of a
+//! bar's wall lying on a pipe that a wall of the other solid lies on too, and
+//! holds none of the half; since Q1080 the ray places that piece itself, as
+//! `classify.rs` no longer grazes on a face that holds none of the point. The
+//! rule is still reached where a point was found, confirmed with a temporary
+//! print in `choose` (Q1079): a turned pair
+//! (`swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit`,
+//! `how_often_a_certified_fuse_of_a_turned_pair_refuses`), a solid with a
+//! torus face (`how_often_a_certified_fuse_with_a_torus_in_it_refuses`), the
+//! fuzz corpus (`every_seed_in_the_checked_in_corpus_is_fused_without_panicking`)
+//! and a fused draw (`a_fused_draw_hands_its_provenance_back_through_the_door`)
+//! each reach it. Such a piece is placed against a solid by a side it shares with a
+//! piece cut from one of that solid's faces, from which side of that face its
+//! own material is on ([`SidesItShares`], §365.3).
+//!
+//! **And where no side it shares places it either, by a corner** that the
+//! other solid's ray puts strictly inside or strictly outside it
+//! ([`by_a_corner`], §365.7): every open neighbourhood of a corner meets the
+//! piece's inside, and that inside is all on one side of the solid.
+//!
+//! # Or a flat piece outside a flat solid by a plane
+//!
+//! A flat piece with straight sides is placed outside a solid with only flat
+//! faces when the plane of one of that solid's faces has the whole solid on or
+//! behind it, every corner of the piece on or in front of it and one strictly
+//! in front, each corner asked as the meet of three planes, exactly
+//! ([`by_a_plane`], Q991, Q1288). Two turned cubes whose facing faces lie a
+//! rounding apart have no point inside either face that a ray can place, and
+//! nor does the triangle a rounding across that a turned cube's corner, just
+//! inside a block's face, cuts out of it; this is what answers both.
+//!
+//! **The plane comes last where no point was found inside the piece, and first
+//! where one was found and none placed.** That is the order each rule came in:
+//! the sides and the corners were tried only where no point was found, or only
+//! a rung of [`rungs_towards_each_crossing`] was (§365.6), until Q1064 tried
+//! them after the plane where a point was found as well. So every piece one of
+//! them placed before is placed by the same rule now.
+//!
+//! # And last, by the piece of its own face across a side
+//!
+//! A flat piece none of those placed, against solids with only flat faces,
+//! takes the placement of the piece of its own face across one of its straight
+//! sides, where no plane of those solids but the face's own holds that side
+//! ([`by_the_piece_across_a_side`], §365.9). Near most of such a side the
+//! solids' skin is that plane or nothing, so the two pieces sit alike. It is
+//! tried after every other rule, so a piece any of them placed is placed as
+//! before.
 
 use rcad_geom::{
-    Cone, EdgeRun, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
+    Cone, Cylinder, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
     Vector, intersect,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
-    orient3d_of_points,
+    orient3d_of_points, side_of_a_plane_where_three_planes_meet,
 };
 
+use crate::classify::{side_of_a_flat_face, stretched_to_the_plane};
 use crate::holds::{
-    the_half_space_naming_the_meridian_circle_through, the_meridian_half_space_keeps,
+    how_the_axis_lies_on, lie_along_one_line, the_half_space_naming_the_meridian_circle_through,
+    the_meridian_half_space_keeps,
 };
 use crate::validate::side_of_surface;
-use crate::{Containment, Error, Model, Result, SolidView};
+use crate::{Containment, Error, FaceKey, Model, Result, SolidView, VertexKey};
 
-use super::arrange::{Piece, agreement_of_two_planes};
-use super::bake::{BakedFace, BakedSolid};
-use super::{FaceMeet, Scratch, as_exact_as_it_is, gave_up, middle_of, the_other_way};
+use super::arrange::{Piece, agreement_of_two_planes, name_of_surface_bits};
+use super::assemble::{NamedSide, the_edge_each_side_of_every_piece_is};
+use super::bake::{BakedCorner, BakedFace, BakedSolid};
+use super::{FaceMeet, MeetPoint, Scratch, as_exact_as_it_is, gave_up, middle_of, the_other_way};
 
 /// Which pieces of the two groups a fuse keeps.
 ///
@@ -88,8 +146,21 @@ pub(crate) struct Chosen {
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`] when no point inside a piece could be placed against
-/// the solids it has to be placed against.
+/// [`Error::Undecidable`] when a piece could not be placed against the solids
+/// it has to be placed against, and neither a side it shares, nor a corner, nor
+/// a plane ([`by_a_plane`]), nor the piece of its own face across a side
+/// ([`by_the_piece_across_a_side`]) placed it: under [`INSIDE_A_PIECE`] when no
+/// point inside it was found, and under [`PLACED_AGAINST_EVERY_SOLID`] when a
+/// point was found and could not be placed, or only a rung of
+/// [`rungs_towards_each_crossing`], [`shorter_steps_across_a_curved_piece`] or
+/// [`between_the_middles_of_a_cone_pieces_sides`] was found.
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
+/// a point offered before the rungs was found inside the piece and the ray
+/// from a point tried met a face of a solid that nothing here can follow; no
+/// side, corner, plane or piece across is tried then. The same refusal, naming
+/// the same kind of face, when only a rung was found inside and a rung's ray
+/// met such a face, once no side, corner, plane or piece across has placed the
+/// piece.
 pub(crate) fn choose(
     model: &Model,
     scratch: &Scratch,
@@ -105,6 +176,7 @@ pub(crate) fn choose(
         "every piece is cut from one operand"
     );
 
+    let mut by_a_shared_side = SidesItShares::of(model, scratch, &solids);
     let mut chosen = Vec::new();
     for (index, (piece, &mine)) in scratch.pieces.iter().zip(&scratch.cut_from).enumerate() {
         let side = if mine < arguments {
@@ -120,20 +192,51 @@ pub(crate) fn choose(
             None => None,
         };
         let candidates = candidate_points(piece, &corners);
+        let mut place = |against: &[usize], log: &mut ProvenanceLog| -> Result<Placement> {
+            let (unplaced, the_plane_first, unfollowed) = match place_the_piece(
+                model,
+                &solids,
+                against,
+                &candidates,
+                piece,
+                in_plane.as_ref(),
+                policy,
+                log,
+            )? {
+                Search::Placed(placement) => return Ok(placement),
+                Search::NoPointInside => (INSIDE_A_PIECE, false, None),
+                Search::OnlyRungsInside { unfollowed } => {
+                    (PLACED_AGAINST_EVERY_SOLID, false, unfollowed)
+                }
+                Search::NoPointInsidePlaced => (PLACED_AGAINST_EVERY_SOLID, true, None),
+            };
+            let mut by_its_sides_or_corners = |log: &mut ProvenanceLog| {
+                by_a_shared_side
+                    .place(index, against, policy, log)
+                    .or_else(|| by_a_corner(model, &solids, against, &corners, policy, log))
+            };
+            let by_its_plane = || by_a_plane(&solids, against, mine, piece);
+            let placed = if the_plane_first {
+                by_its_plane().or_else(|| by_its_sides_or_corners(log))
+            } else {
+                by_its_sides_or_corners(log).or_else(by_its_plane)
+            };
+            let by_the_piece_across = |in_plane: &InPlane| {
+                by_the_piece_across_a_side(
+                    model, scratch, &solids, against, index, in_plane, policy, log,
+                )
+            };
+            let placed = placed.or_else(|| in_plane.as_ref().and_then(by_the_piece_across));
+            placed.ok_or_else(|| match unfollowed {
+                Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
+                None => gave_up(unplaced, &corners.concat(), Measures::Length, log),
+            })
+        };
 
         let own_group: Vec<usize> = (0..solids.len())
             .filter(|&other| other != mine && (other < arguments) == (mine < arguments))
             .collect();
-        let against_own = place_the_piece(
-            model,
-            &solids,
-            &own_group,
-            &candidates,
-            piece,
-            in_plane.as_ref(),
-            policy,
-            log,
-        )?;
+        let against_own = place(&own_group, log)?;
         if keeps(
             row_for(Rule::Union).row(side).fate(against_own),
             against_own,
@@ -147,16 +250,7 @@ pub(crate) fn choose(
         let other_group: Vec<usize> = (0..solids.len())
             .filter(|&other| (other < arguments) != (mine < arguments))
             .collect();
-        let against_other = place_the_piece(
-            model,
-            &solids,
-            &other_group,
-            &candidates,
-            piece,
-            in_plane.as_ref(),
-            policy,
-            log,
-        )?;
+        let against_other = place(&other_group, log)?;
         let fate = row_for(rule).row(side).fate(against_other);
         if let Some(reversed) = keeps(fate, against_other, mine) {
             chosen.push(Chosen {
@@ -323,21 +417,62 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
     }
 }
 
-/// Where one piece sits relative to a set of solids.
+/// Where one piece sits relative to a set of solids, or which of the two ways
+/// the search for a point to place it by ran out.
 ///
 /// Inside beats on, and on beats outside: a piece lying on one solid of a group
 /// but buried in another is inside the union of them. So is a piece lying on
 /// two of them that face opposite ways — see [`LyingOn::placement`].
 ///
+/// **Two searches happen here, and a caller that cannot tell them apart is told
+/// the wrong thing.** [`Search::NoPointInside`] says no point inside the piece
+/// was found, which is [`INSIDE_A_PIECE`] unless a side the piece shares places
+/// it ([`SidesItShares`]), a corner does ([`by_a_corner`]), a plane does
+/// ([`by_a_plane`]) or the piece across a side does
+/// ([`by_the_piece_across_a_side`]); [`Search::NoPointInsidePlaced`] says one
+/// was found and could not be classified against every solid in the set, which
+/// is [`PLACED_AGAINST_EVERY_SOLID`] unless a plane, a side, a corner or the
+/// piece across a side places the piece. The first says to look at the piece's
+/// trimming, the second says the piece is fine and a surface further down gave
+/// up — the lens in §216.4 is the second wearing the first's name. Neither is a
+/// refusal here, so that the caller can try the plane, the sides, the corners
+/// and the pieces across before it refuses.
+///
+/// **The rungs of [`rungs_towards_each_crossing`] come last**, after
+/// [`points_in_a_sliver_of_a_ball`] too, so a piece any earlier point placed
+/// is placed by that point as it was. A piece only a rung was found inside,
+/// and that no rung could place, is [`Search::OnlyRungsInside`] and not a
+/// refusal here: before the rungs it was a piece with no point found, which a
+/// side it shares or a corner could place, and a rung that cannot be
+/// classified must not take that away (`docs/decisions.md` §365.6). A curved
+/// piece's rungs are [`shorter_steps_across_a_curved_piece`] and then
+/// [`between_the_middles_of_a_cone_pieces_sides`], offered only where no
+/// earlier point was found inside the piece, so a piece one was found in and
+/// not placed is refused or placed as it was.
+///
+/// **A point whose ray met a face nobody can follow was never placed, and the
+/// refusal says which face**, as `assemble.rs`'s `one_shell_is_inside_another`
+/// does for a hollow's corners and for the same reason (§35.6). This used to
+/// be [`PLACED_AGAINST_EVERY_SOLID`], and a caller read "loosen the policy" off
+/// a refusal no policy moves. It wins over another point left undecided, when
+/// both happen, for the reason that function gives.
+///
+/// **A rung's ray that met such a face is named too, but by the caller**, and
+/// only once a side, a corner and a plane have each failed to place the piece:
+/// [`Search::OnlyRungsInside`] carries the face, so §365.6's order stands. Q1040
+/// found the piece that reaches it, the skin of a ball poking out of a half
+/// ball's rim, placed against a cut ball in its own group whose skin nobody
+/// follows (`tests/a_rung_whose_ray_meets_a_face_nobody_follows.rs`); it was
+/// refused under [`PLACED_AGAINST_EVERY_SOLID`].
+///
 /// # Errors
 ///
-/// [`Error::Undecidable`], under one of **two** names, because two searches
-/// happen here and a caller that cannot tell them apart is told the wrong
-/// thing. [`INSIDE_A_PIECE`] when no candidate was inside the piece at all;
-/// [`PLACED_AGAINST_EVERY_SOLID`] when one was and it could not be classified
-/// against every solid in the set. The first says to look at the piece's
-/// trimming, the second says the piece is fine and a surface further down gave
-/// up — the lens in §216.4 is the second wearing the first's name.
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] naming the caller's face,
+/// when a point offered before the rungs was inside the piece, no point placed
+/// it, and one of them met that face. Such a point that none placed for any
+/// other reason is [`Search::NoPointInsidePlaced`], which the caller refuses
+/// under [`PLACED_AGAINST_EVERY_SOLID`] when no plane, side or corner places
+/// the piece.
 #[expect(
     clippy::too_many_arguments,
     reason = "every one of these is a different thing the placement depends on, and bundling \
@@ -352,24 +487,34 @@ fn place_the_piece(
     in_plane: Option<&InPlane>,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Placement> {
+) -> Result<Search> {
     if against.is_empty() {
-        return Ok(Placement::Outside);
+        return Ok(Search::Placed(Placement::Outside));
     }
     let also_picked_by = what_else_each_round_wire_asks(piece, policy, log)?;
-    let try_one =
-        |candidate: PredicatePoint, log: &mut ProvenanceLog| -> Result<Option<Option<Placement>>> {
-            if the_piece_holds(piece, in_plane, &also_picked_by, candidate) != Some(true) {
-                return Ok(None);
-            }
-            let mut trial = ProvenanceLog::new();
-            let settled =
-                settle_against_each(model, solids, against, candidate, piece, policy, &mut trial)?;
-            if settled.is_some() {
+    let meridians = the_meridian_circle_each_side_runs_round(piece, policy, log)?;
+    let mut unfollowed = None;
+    let mut try_one = |candidate: PredicatePoint,
+                       log: &mut ProvenanceLog|
+     -> Result<Option<Option<Placement>>> {
+        if the_piece_holds(piece, in_plane, &also_picked_by, &meridians, candidate) != Some(true) {
+            return Ok(None);
+        }
+        let mut trial = ProvenanceLog::new();
+        let settled =
+            settle_against_each(model, solids, against, candidate, piece, policy, &mut trial)?;
+        Ok(Some(match settled {
+            Settled::At(placement) => {
                 trial.drain_into(log);
+                Some(placement)
             }
-            Ok(Some(settled))
-        };
+            Settled::MetAFaceNobodyFollows(face) => {
+                unfollowed.get_or_insert(face);
+                None
+            }
+            Settled::Abandoned => None,
+        }))
+    };
     let mut one_was_inside = false;
     for &candidate in candidates {
         let Some(settled) = try_one(candidate, log)? else {
@@ -377,7 +522,7 @@ fn place_the_piece(
         };
         one_was_inside = true;
         if let Some(placement) = settled {
-            return Ok(placement);
+            return Ok(Search::Placed(placement));
         }
     }
     if !one_was_inside {
@@ -387,21 +532,627 @@ fn place_the_piece(
             };
             one_was_inside = true;
             if let Some(placement) = settled {
-                return Ok(placement);
+                return Ok(Search::Placed(placement));
             }
         }
     }
-    let which_search_gave_up = if one_was_inside {
-        PLACED_AGAINST_EVERY_SOLID
+    let mut a_rung_was_inside = false;
+    let mut rungs = rungs_towards_each_crossing(piece);
+    if !one_was_inside {
+        rungs.extend(shorter_steps_across_a_curved_piece(piece));
+        rungs.extend(between_the_middles_of_a_cone_pieces_sides(piece));
+    }
+    for rung in rungs {
+        let Some(settled) = try_one(rung, log)? else {
+            continue;
+        };
+        a_rung_was_inside = true;
+        if let Some(placement) = settled {
+            return Ok(Search::Placed(placement));
+        }
+    }
+    if one_was_inside {
+        if let Some(face) = unfollowed {
+            return Err(Error::AFaceTrimmedByACurveThisCannotFollow { face });
+        }
+        return Ok(Search::NoPointInsidePlaced);
+    }
+    Ok(if a_rung_was_inside {
+        Search::OnlyRungsInside { unfollowed }
     } else {
-        INSIDE_A_PIECE
+        Search::NoPointInside
+    })
+}
+
+/// What [`place_the_piece`] found.
+enum Search {
+    Placed(Placement),
+    /// No point offered was proved inside the piece.
+    NoPointInside,
+    /// Only rungs of [`rungs_towards_each_crossing`],
+    /// [`shorter_steps_across_a_curved_piece`] or
+    /// [`between_the_middles_of_a_cone_pieces_sides`] were, and none of them
+    /// could be classified against every solid in the set.
+    OnlyRungsInside {
+        /// The first face a rung's ray met whose trimming nothing here
+        /// follows, if one did.
+        unfollowed: Option<FaceKey>,
+    },
+    /// A point offered before the rungs was proved inside the piece, and no
+    /// point inside it could be classified against every solid in the set.
+    NoPointInsidePlaced,
+}
+
+/// §365.3's rule: a piece no point inside which was placed, placed against each
+/// solid by a side it shares with a piece cut from one of that solid's faces.
+///
+/// A piece `P` and a solid `S`. If a side of `P` is also a side of a piece cut
+/// from a face `G` of `S`, the other piece's side runs along none of `G`'s own
+/// edges, `P`'s side names `G`'s surface bit for bit as its partner, and `P` is
+/// not on `G`'s surface, then **`P` is inside `S` when its material is on
+/// `S`'s inner side of `G`**, and outside it otherwise.
+///
+/// `P` was cut by every surface of `S`, so it is all inside `S` or all outside
+/// it, which is what one point already rests on (§17.4). Beside the middle of
+/// the side, `S`'s skin is `G` alone, because the side is a cut of `G` and not
+/// one of its edges, and `P` is on the side of `G`'s surface that
+/// [`FaceMeet::material_side`] names, which the walk that made the side decided
+/// for nothing (§36.6). No number is built and nothing is a tolerance.
+///
+/// **None of this asks whether a point was found inside `P`**, so the rule
+/// holds where one was found and the ray could not place it. Nor can `P` lie on
+/// another face of `S`: beside the middle of the side, `S`'s skin is `G` alone.
+/// The piece Q1064 brought here is
+/// half of a bar's wall, `x ≥ 0`, against a block over `x < 0` that a bar on
+/// the same pipe was united with first. Every point of the half lies on the
+/// pipe, which that first bar's wall is on and holds none of, and the ray from
+/// each grazed that wall. Its two sides on `x = 0` are cuts of the block's
+/// face there, and its material is on the face's outer side. Since Q1080 the
+/// ray places that half itself and it no longer comes here.
+///
+/// Which sides are one is [`the_edge_each_side_of_every_piece_is`], the
+/// naming `assemble` gives the kept pieces, worked out once and only for a fuse
+/// that reaches here, so a fuse that placed every piece by a point or a plane
+/// never pays for it.
+struct SidesItShares<'a> {
+    model: &'a Model,
+    scratch: &'a Scratch,
+    solids: &'a [&'a BakedSolid],
+    /// Every side of every piece with the edge it names: `None` until a piece
+    /// first needs it, and `Some(None)` when the naming gave up.
+    named: Option<Option<Vec<Vec<NamedSide>>>>,
+    /// What naming the sides asked the policy, kept out of the log until a
+    /// piece is placed by them.
+    asked: ProvenanceLog,
+}
+
+impl<'a> SidesItShares<'a> {
+    fn of(model: &'a Model, scratch: &'a Scratch, solids: &'a [&'a BakedSolid]) -> Self {
+        Self {
+            model,
+            scratch,
+            solids,
+            named: None,
+            asked: ProvenanceLog::new(),
+        }
+    }
+
+    /// Where piece number `piece` sits against the solids `against`, or `None`
+    /// when some solid of them could not be placed this way and none had the
+    /// piece inside it.
+    ///
+    /// **Nothing here refuses.** A naming that gives up, a plane agreement
+    /// that cannot be told, or two shared sides that disagree each leave the
+    /// piece where the point search left it, and unless a corner, a plane or
+    /// the piece across a side places it the caller refuses under the name that
+    /// search ran out under,
+    /// as it did before this was tried.
+    fn place(
+        &mut self,
+        piece: usize,
+        against: &[usize],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Option<Placement> {
+        if self.named.is_none() {
+            self.named = Some(
+                the_edge_each_side_of_every_piece_is(
+                    self.model,
+                    self.scratch,
+                    policy,
+                    &mut self.asked,
+                )
+                .ok()
+                .flatten(),
+            );
+        }
+        let named = self.named.as_ref().and_then(Option::as_ref)?;
+        let mut trial = ProvenanceLog::new();
+        let mut inside_one = false;
+        let mut outside_every_one = true;
+        for &solid in against {
+            match self.is_inside(named, piece, solid, policy, &mut trial) {
+                Some(true) => inside_one = true,
+                Some(false) => (),
+                None => outside_every_one = false,
+            }
+        }
+        let placement = if inside_one {
+            Placement::Inside
+        } else if outside_every_one {
+            Placement::Outside
+        } else {
+            return None;
+        };
+        self.asked.drain_into(log);
+        trial.drain_into(log);
+        Some(placement)
+    }
+
+    /// Whether piece number `piece` is inside solid number `solid`, read off
+    /// every side it shares with a piece cut from a face of that solid, or
+    /// `None` when no side says or two say different things.
+    fn is_inside(
+        &self,
+        named: &[Vec<NamedSide>],
+        piece: usize,
+        solid: usize,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Option<bool> {
+        let mine = &self.scratch.pieces[piece];
+        let mut found = None;
+        for shared in &named[piece] {
+            let theirs = named
+                .iter()
+                .zip(&self.scratch.cut_from)
+                .enumerate()
+                .filter(|(_, (_, from))| **from == solid)
+                .flat_map(|(other, (sides, _))| sides.iter().map(move |side| (other, side)))
+                .filter(|(_, side)| side.edge == shared.edge && side.side.along.is_empty());
+            for (other, _) in theirs {
+                let cut_from = &self.scratch.pieces[other];
+                let face = self.solids[solid]
+                    .faces
+                    .iter()
+                    .find(|face| face.keys == cut_from.ancestors)
+                    .expect("a piece is cut from a face of the solid it is credited to");
+                if name_of_surface_bits(&shared.side.carried_by[1])
+                    != name_of_surface_bits(&face.surface)
+                {
+                    continue;
+                }
+                let on_its_surface =
+                    do_they_face_the_same_way(mine, outward_plane_of(mine), face, policy, log)
+                        .ok()?;
+                if on_its_surface.is_some() {
+                    return None;
+                }
+                let inner = if face.orientation.is_reversed() {
+                    Decision::Pos
+                } else {
+                    Decision::Neg
+                };
+                let inside = shared.side.material_side == inner;
+                if found.is_some_and(|already| already != inside) {
+                    return None;
+                }
+                found = Some(inside);
+            }
+        }
+        found
+    }
+}
+
+/// The rule after §365.3's: a piece no point inside which was placed, and that
+/// no side it shares placed, placed against each solid by the first of its own
+/// corners the solid's ray puts strictly inside or strictly outside it.
+///
+/// **Why a corner can place a piece.** A piece `P` and a solid `S`. `P` was cut
+/// by every surface of `S`, so its inside crosses no face of `S`, and that
+/// inside lies all inside `S`, all outside it, or all on its skin — the premise
+/// one point already rests on (§17.4). A corner `c` of `P` is on `P`'s
+/// outline, so every open neighbourhood of `c` meets `P`'s inside. When `c` is
+/// strictly inside `S`, a neighbourhood of it is inside `S` too, and the part of
+/// `P`'s inside it meets is inside `S`, which puts all of `P` inside `S`; it
+/// cannot be on `S`'s skin, which that neighbourhood does not touch. Strictly
+/// outside is the same argument the other way. No number is built and nothing
+/// is a tolerance: the ray decides the sign about the corner's whole box.
+///
+/// **A corner on `S`'s skin says nothing**, since a piece on either side of a
+/// face, or on it, can have its corner there, so
+/// [`Containment::OnBoundary`] is never read as a placement. Nor is a corner on
+/// the stored surface of any face of `S`, wherever on that surface it is: the
+/// ray reads a flat face by its stored corners, which a turned solid keeps a
+/// rounding off the stored plane, and about a point on that plane it can
+/// certify a side the plane does not have (§316.3, §351). The point search
+/// keeps such points from the ray by [`coincident_face`], which a corner has no
+/// face of its own to be asked of, so a corner any face's surface cannot put
+/// strictly on one side is passed over.
+///
+/// The piece this was built for is the strip of a KiCad pin header's wall
+/// between two notch chamfers that meet it at one line by design, and a
+/// rounding apart over the stored planes, so no `f64` lies between them
+/// (`docs/decisions.md` §365.7). Inside one solid of the group is inside,
+/// outside every one is outside, and anything else is `None`, so the caller
+/// tries [`by_a_plane`] where it has not yet, and refuses under the name the
+/// point search ran out under if nothing places the piece. What the ray asked
+/// the policy goes into the log only when the piece is placed.
+fn by_a_corner(
+    model: &Model,
+    solids: &[&BakedSolid],
+    against: &[usize],
+    corners: &[Vec<PredicatePoint>],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Option<Placement> {
+    let mut trial = ProvenanceLog::new();
+    let mut inside_one = false;
+    let mut outside_every_one = true;
+    for &index in against {
+        let solid: SolidView<'_> = model.solid_at(solids[index].key.slot_in(model.id()));
+        match is_inside_by_a_corner(solid, corners, policy, &mut trial) {
+            Some(true) => inside_one = true,
+            Some(false) => (),
+            None => outside_every_one = false,
+        }
+    }
+    let placement = if inside_one {
+        Placement::Inside
+    } else if outside_every_one {
+        Placement::Outside
+    } else {
+        return None;
     };
-    Err(gave_up(
-        which_search_gave_up,
-        &corners_of(piece).concat(),
-        Measures::Length,
-        log,
-    ))
+    trial.drain_into(log);
+    Some(placement)
+}
+
+/// Whether the first corner `solid`'s ray places strictly is inside it, or
+/// `None` when no corner off every one of its surfaces was placed strictly.
+fn is_inside_by_a_corner(
+    solid: SolidView<'_>,
+    corners: &[Vec<PredicatePoint>],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Option<bool> {
+    corners.iter().flatten().find_map(|&corner| {
+        if !is_off_every_surface_of(solid, corner) {
+            return None;
+        }
+        let mut ray = ProvenanceLog::new();
+        let inside = match solid.classify_uncertain_point(corner, policy, &mut ray) {
+            Containment::Inside => true,
+            Containment::Outside => false,
+            Containment::OnBoundary
+            | Containment::Undecidable { .. }
+            | Containment::CannotFollowAFacesTrimming { .. }
+            | Containment::CannotFireARayAtAFacesSurface { .. } => return None,
+        };
+        ray.drain_into(log);
+        Some(inside)
+    })
+}
+
+/// Whether every face of `solid` puts `point` strictly on one side of its
+/// stored surface.
+fn is_off_every_surface_of(solid: SolidView<'_>, point: PredicatePoint) -> bool {
+    solid.faces().all(|face| {
+        let surface = face.surface();
+        let side = surface.as_plane().map_or_else(
+            || side_of_surface(&surface, point),
+            |flat| side_of_a_flat_face(flat, point),
+        );
+        matches!(side, Decision::Pos | Decision::Neg)
+    })
+}
+
+/// A flat piece with straight sides placed outside each solid by a plane of
+/// one of that solid's faces that has the whole solid on or behind it, every
+/// corner of the piece on or in front of it, and one corner strictly in front.
+/// Outside every solid of the group is outside; anything else is `None`, and
+/// the caller tries the sides and the corners where it has not yet, then the
+/// piece across a side ([`by_the_piece_across_a_side`]), or refuses.
+///
+/// **Why a plane can place a piece.** Every face of a solid `S` here is flat,
+/// so `S`'s skin is polygons with straight sides, which lie in the hull of
+/// their corners, and so does `S`. With every corner of `S` on or behind a
+/// plane `σ`, all of `S` is. A piece `P` with straight sides lies in the hull
+/// of its own corners too, so with each of them on or in front of `σ` all of
+/// `P` is. One corner strictly in front puts `P`'s plane off `σ`, so the two
+/// planes cross in a line, `P` lies on one side of that line, and `P`'s inside,
+/// which is open in its plane, lies strictly in front of `σ`: it shares no
+/// point with `S`, though a side of `P` may lie on `σ`. Unlike [`by_a_corner`],
+/// this does not lean on `P` having been cut by every surface of `S`.
+///
+/// **A corner on `σ` is allowed because a piece a rounding across has them.**
+/// A cube turned so that its corner touches a block's face from inside, with
+/// its three planes meeting `1e−16` inside the face, crosses that face in
+/// three lines cutting out a triangle a rounding across, in front of all
+/// three planes. No point is found inside it, two of its corners are on each
+/// of the three planes, and with every corner strictly in front asked for, all
+/// of Q1208's 201 random turns of that kind were refused (Q1288,
+/// `tests/a_turned_cube_with_its_corner_on_a_face.rs`).
+///
+/// **Each corner is asked as the one point where three planes meet**
+/// ([`side_of_a_plane_where_three_planes_meet`]), never by its box, and the
+/// answer is exact, so nothing goes into the log. The boxes are what cannot
+/// say. Two cubes turned so that two faces lie a rounding apart face to face
+/// have every corner of one within a box's width of the other's face, and a
+/// point picked inside one face lies on its plane, a rounding off the other's,
+/// where the ray cannot tell which side it starts on: every fuse of the two
+/// was refused, though the cubes share no point
+/// (`tests/two_turned_cubes_a_rounding_apart.rs`).
+///
+/// A corner of the input is the meet of the surfaces round it when they are
+/// exactly three planes, since bake solved it from those three
+/// ([`BakedCorner::around`](super::bake::BakedCorner)); a meet the arrangement
+/// placed is the meet of the three surfaces it names. Any other corner, a
+/// corner of `P` not on `P`'s own plane, or a curved surface on `P` or on `S`
+/// leaves this rule out.
+fn by_a_plane(
+    solids: &[&BakedSolid],
+    against: &[usize],
+    mine: usize,
+    piece: &Piece,
+) -> Option<Placement> {
+    let corners = the_planes_meeting_at_each_corner_of_a_piece(piece, solids[mine])?;
+    against
+        .iter()
+        .all(|&index| is_in_front_of_a_plane_with_all_of_it_behind(solids[index], &corners))
+        .then_some(Placement::Outside)
+}
+
+/// The three planes each corner of a flat piece with straight sides is the
+/// one meeting point of, as coefficients, or `None` where the piece is not
+/// that or some corner is not such a meet on the piece's own plane.
+fn the_planes_meeting_at_each_corner_of_a_piece(
+    piece: &Piece,
+    own: &BakedSolid,
+) -> Option<Vec<[[f64; 4]; 3]>> {
+    let flat = *piece.surface.as_plane()?;
+    piece
+        .wires
+        .iter()
+        .flatten()
+        .map(|side| {
+            if !is_straight(side) {
+                return None;
+            }
+            Some(the_planes_meeting_at(&side.ends[0], own, flat)?.map(|plane| plane.coefficients()))
+        })
+        .collect()
+}
+
+/// Whether `side` runs where two planes meet, and so along a straight line.
+fn is_straight(side: &FaceMeet) -> bool {
+    side.carried_by
+        .iter()
+        .all(|surface| surface.as_plane().is_some())
+}
+
+/// The three planes `end` is the one meeting point of, one of them `flat`
+/// either way round, or `None` where it is no such meet.
+fn the_planes_meeting_at(end: &MeetPoint, own: &BakedSolid, flat: Plane) -> Option<[Plane; 3]> {
+    let three = match end {
+        MeetPoint::Existing { vertex, .. } => three_planes(&the_corner_at(own, *vertex).around)?,
+        MeetPoint::OfThreeSurfaces { surfaces, .. } => three_planes(surfaces)?,
+        MeetPoint::WhereAClosedCurveStarts { .. }
+        | MeetPoint::HalfWayRoundAClosedCurve { .. }
+        | MeetPoint::APoleOfAClosedSurface { .. } => return None,
+    };
+    three
+        .iter()
+        .any(|plane| *plane == flat || *plane == flat.reversed())
+        .then_some(three)
+}
+
+/// Whether the plane of some face of `solid`, turned to face out of it, has
+/// every corner of the solid on or behind it, every one of `corners` on or in
+/// front of it, and one of `corners` strictly in front.
+fn is_in_front_of_a_plane_with_all_of_it_behind(
+    solid: &BakedSolid,
+    corners: &[[[f64; 4]; 3]],
+) -> bool {
+    let Some(its_own) = the_planes_meeting_at_each_corner_of_a_solid(solid) else {
+        return false;
+    };
+    solid.faces.iter().any(|face| {
+        let outward = outward_plane_of_face(face)
+            .expect("every face of a solid whose corners all meet three planes is flat")
+            .coefficients();
+        let side = |three: &[[f64; 4]; 3]| side_of_a_plane_where_three_planes_meet(*three, outward);
+        corners
+            .iter()
+            .all(|three| matches!(side(three), Ok(Decision::Pos | Decision::Zero)))
+            && corners.iter().any(|three| side(three) == Ok(Decision::Pos))
+            && its_own
+                .iter()
+                .all(|three| matches!(side(three), Ok(Decision::Neg | Decision::Zero)))
+    })
+}
+
+/// The three planes each corner of every face of `solid` is the one meeting
+/// point of, as coefficients, or `None` where a face is curved or a corner
+/// has other than three planes round it.
+fn the_planes_meeting_at_each_corner_of_a_solid(solid: &BakedSolid) -> Option<Vec<[[f64; 4]; 3]>> {
+    if solid
+        .faces
+        .iter()
+        .any(|face| face.surface.as_plane().is_none())
+    {
+        return None;
+    }
+    solid
+        .faces
+        .iter()
+        .flat_map(|face| face.wires.iter().flatten())
+        .map(|edge| Some(three_planes(&edge.start.around)?.map(|plane| plane.coefficients())))
+        .collect()
+}
+
+/// The last rule: a flat piece that no point, side it shares, corner or plane
+/// placed takes the placement of the piece of its own face across one of its
+/// straight sides, where no plane of a solid it is placed against holds that
+/// side, unless that plane is the face's own.
+///
+/// **Why a neighbour can place a piece.** `P` and `P′` are pieces of one flat
+/// face `F` that share a side `s`, and `S` is a solid with only flat faces.
+/// Each of the two was cut by every plane of `S`, so each lies all inside `S`,
+/// all outside it or all on its skin (§17.4). A plane of `S` that does not hold
+/// both ends of `s` meets the line of `s` in one point at most, so all but a
+/// few points `m` of `s` lie on no plane of `S` but `F`'s own.
+///
+/// - Off `S`'s skin, `m` has a neighbourhood all inside `S` or all outside it,
+///   and that neighbourhood meets the inside of `P` and of `P′`, so the two
+///   are placed alike.
+/// - On it, `m` is on a face of `S` in `F`'s plane and on no other plane of
+///   `S`, so near `m` `S`'s skin is a disk of that plane, with `S` on one side.
+///   `P` and `P′` both reach into that disk, so both lie on `S`'s skin, on the
+///   same face plane, facing the same way.
+///
+/// A plane of `S` that holds both ends of `s` and is not `F`'s is where `P`
+/// and `P′` can differ, along an edge of `S`, so such a side is passed over.
+/// Each end is asked as the meet of its three planes, exactly, as
+/// [`by_a_plane`] asks, so nothing goes into the log for it. `P′` is placed by
+/// [`place_the_piece`], its own point search, and what that asked the policy
+/// goes into the log only when it places `P`.
+///
+/// The piece this was built for is a triangle a rounding across on a comb's
+/// top, cut out by two of the comb's walls and a leaning wall of an ell
+/// standing on that top, all three through the comb's corner at the foot of a
+/// tooth (`docs/decisions.md` §365.9). It holds no `f64` point, every corner
+/// of it is on the plane of the ell's floor, though well off the floor, and
+/// the ell is not convex, so no plane of the ell has it in front. The piece
+/// across its side along the comb's own wall `y = 1` holds points, and the
+/// ray places them.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the neighbour is placed by place_the_piece, which asks for all of these"
+)]
+fn by_the_piece_across_a_side(
+    model: &Model,
+    scratch: &Scratch,
+    solids: &[&BakedSolid],
+    against: &[usize],
+    piece: usize,
+    in_plane: &InPlane,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Option<Placement> {
+    let mine = &scratch.pieces[piece];
+    let flat = *mine.surface.as_plane()?;
+    let own = solids[scratch.cut_from[piece]];
+    let theirs: Vec<Plane> = against
+        .iter()
+        .flat_map(|&index| &solids[index].faces)
+        .map(|face| face.surface.as_plane().copied())
+        .collect::<Option<_>>()?;
+    let others: Vec<[f64; 4]> = theirs
+        .iter()
+        .filter(|plane| **plane != flat && **plane != flat.reversed())
+        .map(Plane::coefficients)
+        .collect();
+    mine.wires.iter().flatten().find_map(|side| {
+        if !no_plane_holds_both_ends(side, own, flat, &others) {
+            return None;
+        }
+        let across = &scratch.pieces[the_piece_across(scratch, piece, side)?];
+        let mut trial = ProvenanceLog::new();
+        let candidates = candidate_points(across, &corners_of(across));
+        let search = place_the_piece(
+            model,
+            solids,
+            against,
+            &candidates,
+            across,
+            Some(in_plane),
+            policy,
+            &mut trial,
+        );
+        let Ok(Search::Placed(placement)) = search else {
+            return None;
+        };
+        trial.drain_into(log);
+        Some(placement)
+    })
+}
+
+/// Whether `side` is straight and every one of `planes` puts one end of it
+/// or the other strictly on one side, each end asked exactly as the meet of
+/// its three planes, one of them `flat`.
+fn no_plane_holds_both_ends(
+    side: &FaceMeet,
+    own: &BakedSolid,
+    flat: Plane,
+    planes: &[[f64; 4]],
+) -> bool {
+    if !is_straight(side) {
+        return false;
+    }
+    let Some(ends) = side
+        .ends
+        .iter()
+        .map(|end| Some(the_planes_meeting_at(end, own, flat)?.map(|plane| plane.coefficients())))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    planes.iter().all(|&plane| {
+        ends.iter().any(|&three| {
+            matches!(
+                side_of_a_plane_where_three_planes_meet(three, plane),
+                Ok(Decision::Pos | Decision::Neg)
+            )
+        })
+    })
+}
+
+/// The other piece cut from the same face as piece number `piece` that has
+/// `side` as a side, run the other way, if there is one.
+fn the_piece_across(scratch: &Scratch, piece: usize, side: &FaceMeet) -> Option<usize> {
+    let mine = &scratch.pieces[piece];
+    let from = scratch.cut_from[piece];
+    scratch
+        .pieces
+        .iter()
+        .zip(&scratch.cut_from)
+        .enumerate()
+        .find(|&(other, (theirs, &their_from))| {
+            other != piece
+                && their_from == from
+                && theirs.ancestors == mine.ancestors
+                && theirs.wires.iter().flatten().any(|their_side| {
+                    their_side.carried_by == side.carried_by
+                        && their_side.ends[0] == side.ends[1]
+                        && their_side.ends[1] == side.ends[0]
+                })
+        })
+        .map(|(other, _)| other)
+}
+
+/// The corner of `solid` that is `vertex`.
+///
+/// # Panics
+///
+/// If no face of `solid` has a corner there: a piece names as a corner of the
+/// input only a corner of the face it was cut from.
+fn the_corner_at(solid: &BakedSolid, vertex: VertexKey) -> &BakedCorner {
+    &solid
+        .faces
+        .iter()
+        .flat_map(|face| face.wires.iter().flatten())
+        .find(|edge| edge.start.vertex == vertex)
+        .expect("a corner of the input a piece names is a corner of its own solid")
+        .start
+}
+
+/// The three planes `surfaces` are, or `None` when they are not three planes.
+fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
+    let [first, second, third] = surfaces else {
+        return None;
+    };
+    Some([*first.as_plane()?, *second.as_plane()?, *third.as_plane()?])
 }
 
 /// Whether one piece of a face holds a point on its surface, or `None` when
@@ -416,7 +1167,9 @@ fn place_the_piece(
 /// bounded, a circle on a sphere leaves two caps and neither is the outer one,
 /// so there is nothing to wind and what answers instead is which side of each
 /// bounding curve the piece's own material lies on — which the arrangement
-/// already worked out and put on [`FaceMeet::material_side`].
+/// already worked out and put on [`FaceMeet::material_side`]. Where two
+/// surfaces cross in two closed curves that side holds more than the piece, and
+/// the side also asks what picks its curve out ([`what_else_a_curved_side_asks`]).
 ///
 /// The one thing a *flat* piece may not have any more is a polygon: the disk a
 /// bar takes out of a block's face is bounded by one closed curve and has one
@@ -426,7 +1179,10 @@ fn place_the_piece(
 /// A round wire's partner's inside is the region it bounds only where the
 /// partner leaves one region on the plane. A torus leaves two, so
 /// `also_picked_by` — one entry per wire, from [`what_else_each_round_wire_asks`]
-/// — says what else must hold the point, or `None` where nothing can say.
+/// — says what else must hold the point, or `None` where nothing can say. An
+/// arc of one of those two circles is read the same way: `meridians`, one
+/// entry per side of every wire, from [`the_meridian_circle_each_side_runs_round`],
+/// says which disk its bulge is in ([`in_the_bulge_of`]).
 ///
 /// **A flat piece's curved partners are asked about the point and a point of
 /// the plane beside it at once**, through [`side_of_a_partner_by_its_plane`]. A
@@ -434,12 +1190,24 @@ fn place_the_piece(
 /// the plane it is wider a rounding off it than on it by far more than a
 /// rounding: a point inside the ball beside a disk `1e-8` wide can have its
 /// foot outside the disk, and asked about the point alone the disk held it
-/// (`docs/decisions.md` §346.6). The corners are still wound round the point
-/// itself, as they were.
+/// (`docs/decisions.md` §346.6).
+///
+/// **So are its corners and the chord across each bulge, over the same box.**
+/// [`InPlane`] reads a point off its plane where the line from its reference
+/// point through it meets the plane, and that is `|f − o|·h/(d − h)` from the
+/// foot `f`: `h` the point's height, `d` the reference point's, at most
+/// `max(|offset|, 1)`, and `o` the plane's point nearest the origin. On a plane
+/// through the origin, `2²⁰` out, a point one spacing high is read `8.6e-5`
+/// from its foot, and a half disk held a point whose foot was short of its
+/// chord
+/// (`a_point_a_rounding_off_a_far_half_disk_whose_foot_is_short_of_its_chord_is_not_held`).
+/// A turn settled over the box is the same for the point and for a point of
+/// the plane beside it, which the plane reads where it is.
 fn the_piece_holds(
     piece: &Piece,
     in_plane: Option<&InPlane>,
     also_picked_by: &[Option<Vec<Picker>>],
+    meridians: &[Vec<Option<Picker>>],
     point: PredicatePoint,
 ) -> Option<bool> {
     // A piece that is the **whole** of a closed surface is trimmed by nothing.
@@ -455,13 +1223,23 @@ fn the_piece_holds(
         {
             return Some(false);
         }
-        return Some(piece.wires.iter().flatten().all(|side| {
+        for side in piece.wires.iter().flatten() {
             let found = match side.carried_by[1].as_plane() {
-                Some(flat) => side_of_a_plane(flat, point),
+                Some(flat) => side_of_a_flat_face(flat, point),
                 None => side_of_surface(&side.carried_by[1], point),
             };
-            found == side.material_side
-        }));
+            if found != side.material_side {
+                return Some(false);
+            }
+            for picker in what_else_a_curved_side_asks(piece, side) {
+                match picker.side_of_point(point) {
+                    Decision::Pos => (),
+                    Decision::Neg | Decision::Zero => return Some(false),
+                    Decision::Undecidable { .. } | _ => return None,
+                }
+            }
+        }
+        return Some(true);
     };
     // **A flat piece's corners are a polygon and its sides need not be**
     // (§38.5). Where a bar's wall cuts a plane the side between two corners is an
@@ -505,9 +1283,16 @@ fn the_piece_holds(
             None => {
                 let corners: Vec<PredicatePoint> =
                     wire.iter().map(|side| side.ends[0].point()).collect();
-                winding += in_plane.winding_around(core::slice::from_ref(&corners), point)?;
-                for side in wire {
-                    winding += in_the_bulge_of(flat, side, in_plane, point)?;
+                winding +=
+                    in_plane.winding_around(core::slice::from_ref(&corners), reaching_the_plane)?;
+                for (index, side) in wire.iter().enumerate() {
+                    winding += in_the_bulge_of(
+                        flat,
+                        side,
+                        meridians[position][index].as_ref(),
+                        in_plane,
+                        reaching_the_plane,
+                    )?;
                 }
             }
         }
@@ -554,93 +1339,10 @@ fn side_of_a_partner_by_its_plane(
 fn is_beyond_the_plane_from_the_centre(flat: &Plane, ball: &Sphere, point: PredicatePoint) -> bool {
     let centres_side = flat.side_of_point(PredicatePoint::from(ball.centre().coordinates()));
     matches!(
-        (side_of_a_plane(flat, point), centres_side),
+        (side_of_a_flat_face(flat, point), centres_side),
         (Decision::Pos, Decision::Neg | Decision::Zero)
             | (Decision::Neg, Decision::Pos | Decision::Zero)
     )
-}
-
-/// `point`'s box stretched along one axis until it holds a point of `flat`
-/// too, or `None` when no stretch could be proved to reach the plane. A point
-/// the plane holds comes back as it is.
-///
-/// The axis is the one the plane's normal has most of, and the box keeps its
-/// other two sides. Each of its two ends across that axis is moved out until
-/// the plane's own sign puts that end's face on its own side of the plane, or
-/// on it. Every line along the axis through the box then crosses the plane
-/// between the two faces, so the box holds a point of the plane as well as
-/// every point it held. The first try past the point is where the plane
-/// crosses the axis through the middle of the box, worked out in `f64`; nothing
-/// about it is trusted, and a try the sign does not prove is passed over.
-fn stretched_to_the_plane(flat: &Plane, point: PredicatePoint) -> Option<PredicatePoint> {
-    if flat.side_of_point(point) == Decision::Zero {
-        return Some(point);
-    }
-    let normal = flat.normal().components();
-    let along = (0..3)
-        .max_by(|&one, &other| normal[one].abs().total_cmp(&normal[other].abs()))
-        .expect("three axes");
-    let middle = middle_of(point).coordinates();
-    let crossing = (0..3)
-        .filter(|&axis| axis != along)
-        .fold(flat.offset(), |rest, axis| {
-            rest - normal[axis] * middle[axis]
-        })
-        / normal[along];
-    let mut boxed = point.enclosure();
-    let low = an_end_on_its_side(flat, boxed, along, boxed[along].lo(), crossing, -1.0)?;
-    let high = an_end_on_its_side(flat, boxed, along, boxed[along].hi(), crossing, 1.0)?;
-    boxed[along] = Interval::new(low, high).expect("each end only ever moves away from the other");
-    Some(as_exact_as_it_is(PredicatePoint::Constructed(boxed)))
-}
-
-/// Where along `along` the face of `boxed` on the `way` end is on that end's
-/// side of `flat`, or on it: `own_end` when its face already is, and otherwise
-/// the first of a run of tries from `crossing`, or from `own_end` when the
-/// crossing is not past it, each step twice the one before. `way` is `-1.0` for
-/// the low end and `1.0` for the high one. `None` when no try is proved.
-fn an_end_on_its_side(
-    flat: &Plane,
-    boxed: [Interval; 3],
-    along: usize,
-    own_end: f64,
-    crossing: f64,
-    way: f64,
-) -> Option<f64> {
-    let ends_side = if (flat.normal().components()[along] > 0.0) == (way > 0.0) {
-        Decision::Pos
-    } else {
-        Decision::Neg
-    };
-    let is_on_its_side = |end: f64| {
-        let mut face = boxed;
-        face[along] = Interval::exactly(end);
-        let side = side_of_a_plane(flat, PredicatePoint::Constructed(face));
-        side == ends_side || side == Decision::Zero
-    };
-    if is_on_its_side(own_end) {
-        return Some(own_end);
-    }
-    let size = boxed.iter().fold(flat.offset().abs(), |largest, side| {
-        largest.max(side.lo().abs()).max(side.hi().abs())
-    });
-    let mut step = size.max(f64::MIN_POSITIVE) * f64::EPSILON;
-    let mut end = if (crossing - own_end) * way > 0.0 {
-        crossing
-    } else {
-        own_end + way * step
-    };
-    for _ in 0..64 {
-        if !end.is_finite() {
-            return None;
-        }
-        if is_on_its_side(end) {
-            return Some(end);
-        }
-        end += way * step;
-        step *= 2.0;
-    }
-    None
 }
 
 /// Whether `point`, taken as being on `cone`, is on the half of it `piece` is
@@ -694,6 +1396,77 @@ fn how_far_up_the_axis(cone: &Cone, point: PredicatePoint) -> Decision {
         .map(|axis| (at[axis] - Interval::exactly(apex[axis])) * Interval::exactly(up[axis]))
         .fold(Interval::exactly(0.0), |so_far, term| so_far + term)
         .sign()
+}
+
+/// What a side of a curved piece asks a point besides which side of its
+/// partner the point is on: what picks the closed curve it runs along out of
+/// the other one its two surfaces cross in, which must hold the point strictly
+/// inside. Nothing where the piece has a side along that other curve too, or
+/// where the side's ends do not say which curve it runs along.
+///
+/// **Two surfaces can cross in two closed curves, and then the partner's side
+/// does not say which piece holds a point.** A ball on a cone's axis pushing
+/// out through its side crosses the cone in two circles, and they cut each
+/// surface in three: a band between them, bounded by both, and beyond each
+/// circle a part bounded by that circle alone. Crossing a circle crosses to the
+/// other side of the partner, so the two parts beyond are on one side of it and
+/// the band is alone on the other. The ball's cap below the lower circle and
+/// its cap above the upper one are both inside the cone, and a point of the
+/// upper one, `(2.93, 0, 4.66)`, was taken as a point of the lower one and
+/// found inside a frustum the lower cap is wholly below (Q1197).
+///
+/// What tells the two parts beyond apart is what `intersect` names each curve
+/// by, the `picked_by` of [`MeetPoint::WhereAClosedCurveStarts`]. For a ball,
+/// a pipe or a second cone on a cone's axis, and for a pipe through a ball,
+/// that is a half-space square to the axis whose plane lies between the two
+/// curves, facing its own. That plane meets each surface only inside its band
+/// — on the cone and the ball a circle between the two, on a pipe through a
+/// ball a circle inside the ball and the ball's equator outside the pipe — so
+/// each part beyond a curve, which does not meet the plane, lies wholly on its
+/// own curve's side of it: the half-space holds the cap beyond its circle, or
+/// everything of the cone past it, the other nappe included, and nothing of the
+/// part beyond the other curve. For two curves of another shape a picker can
+/// still only rule points out, so asking it never holds a point that the
+/// partner alone did not.
+///
+/// **A piece with sides along both curves asks neither.** It is the band, alone
+/// on its side of the partner, so the partner already says, and the two
+/// pickers hold opposite halves of it: asked both, the band of a pointed cone
+/// inside the ball of `tests/a_cone_hollowed_along_its_axis.rs` held no point,
+/// and was placed only by a side it shares. A side between two corners where a
+/// third surface cuts its curve does not say which curve it is, so a piece with
+/// such a side along the partner asks nothing of it, as before.
+///
+/// **A piece with a side along one curve only can still be part of the band**,
+/// where its face stops short of the other curve: the frustum from `z = 2` of
+/// that file holds only the upper circle, and its piece inside the ball runs
+/// from its own rim up to it. The picker then rules out the points of the piece
+/// beyond the half-space's plane, which costs candidates and keeps nothing it
+/// should not; there the plane is the frustum's rim, `z = 2`, and costs none.
+fn what_else_a_curved_side_asks<'a>(piece: &'a Piece, side: &'a FaceMeet) -> &'a [Picker] {
+    let Some(mine) = which_curve_it_runs_along(side) else {
+        return &[];
+    };
+    let along_one_curve = piece
+        .wires
+        .iter()
+        .flatten()
+        .filter(|other| other.carried_by[1] == side.carried_by[1])
+        .all(|other| which_curve_it_runs_along(other) == Some(mine));
+    if along_one_curve { mine } else { &[] }
+}
+
+/// What picks the closed curve `side` runs along out of the others its two
+/// surfaces cross in, as an end of it where the curve starts or half way round
+/// carries it, or `None` when neither end is one.
+fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
+    side.ends.iter().find_map(|end| match end {
+        MeetPoint::WhereAClosedCurveStarts { picked_by, .. }
+        | MeetPoint::HalfWayRoundAClosedCurve { picked_by, .. } => Some(picked_by.as_slice()),
+        MeetPoint::Existing { .. }
+        | MeetPoint::OfThreeSurfaces { .. }
+        | MeetPoint::APoleOfAClosedSurface { .. } => None,
+    })
 }
 
 /// One when `point` is between a curved side of a flat piece and the chord
@@ -776,9 +1549,39 @@ fn how_far_up_the_axis(cone: &Cone, point: PredicatePoint) -> Decision {
 /// `rcad-geom`, and the ellipse is admitted: the sign
 /// `(n·a)²(1 + s²) − s²|n|²|a|² > 0` is exact, and the region an ellipse's
 /// inside leaves on a plane is one convex piece just as a circle's is.
+///
+/// **A torus is counted on a plane square to its axis, along the outer of the
+/// two circles it cuts there** ([`runs_round_the_outer_circle`]). The torus's
+/// inside on such a plane is the band between two circles round the axis, so
+/// a point its sign holds is inside the outer circle, and a side along that
+/// circle whose material is inside the torus has the outer disk on its left:
+/// the ball's paragraph carries over. A side along the inner circle with its
+/// material inside the torus bites into the piece, and the bite is part of the
+/// inner disk, which the torus's sign already took out, so it counts nothing.
+/// The top halves of the two half bends of one ring have their floors on
+/// `z = 0` with all four corners on the `x` axis, so the corners wind round
+/// nothing, and until the outer arc was counted no point was held and every
+/// fuse of the two was refused [`INSIDE_A_PIECE`] (row Q1268). A side whose
+/// material is outside the torus still counts nothing; whether that holds is
+/// row Q1305's.
+///
+/// **A torus is counted on a plane through its axis too, along either of the
+/// two meridian circles it cuts there, on the point's own side of the
+/// half-space `meridian` that names the side's circle.** The torus's inside on
+/// such a plane is the two circles' disks, one each side of that half-space's
+/// plane, which [`intersect`] proved clears both: so a point the torus's sign
+/// holds and the half-space keeps is in the side's own disk, and the ball's
+/// paragraph carries over. Without the half-space the bulge would count the
+/// other disk's points on the same side of the chord, which the torus's sign
+/// holds just as surely. A bend's start cap is a half disk with nothing but
+/// its chord along the floor and half a meridian circle round it, so its
+/// corners wind round nothing, and until its arc was counted no point was held
+/// and every fuse of two bends' top halves meeting flush was refused
+/// [`INSIDE_A_PIECE`] (row Q1373).
 fn in_the_bulge_of(
     flat: &Plane,
     side: &FaceMeet,
+    meridian: Option<&Picker>,
     in_plane: &InPlane,
     point: PredicatePoint,
 ) -> Option<i32> {
@@ -790,7 +1593,11 @@ fn in_the_bulge_of(
             Some(false) => is_on_the_nappe_the_side_is_on(&cone, side, point),
             None => false,
         },
-        Surface::Plane(_) | Surface::Torus(_) | _ => false,
+        Surface::Torus(ring) => match meridian {
+            Some(this_circle) => every_picker_keeps(core::slice::from_ref(this_circle), point)?,
+            None => runs_round_the_outer_circle(flat, &ring, side)?,
+        },
+        Surface::Plane(_) | _ => false,
     };
     if !one_round_region || side.material_side != Decision::Neg {
         return Some(0);
@@ -832,6 +1639,29 @@ fn is_on_the_nappe_the_side_is_on(cone: &Cone, side: &FaceMeet, point: Predicate
         how_far_up(point),
     ];
     signs.iter().all(decided) && signs[0] == signs[1] && signs[1] == signs[2]
+}
+
+/// Whether `side`, along `ring` on `flat`, runs round the outer of the two
+/// circles a plane square to the ring's axis cuts it in: `false` on a plane
+/// that is not square to the axis, and `None` where the side's end cannot be
+/// shown off the pipe of the ring's own radius, which has one circle inside it
+/// and the other outside.
+///
+/// Square is asked exactly, as `holds.rs` asks it ([`lie_along_one_line`]).
+fn runs_round_the_outer_circle(flat: &Plane, ring: &Torus, side: &FaceMeet) -> Option<bool> {
+    if !lie_along_one_line(
+        flat.normal().components(),
+        ring.axis().direction().components(),
+    ) {
+        return Some(false);
+    }
+    let pipe = Cylinder::new(ring.axis(), ring.ring_radius())
+        .expect("a ring's radius is finite and above nothing, which is all a pipe's needs");
+    match pipe.side_of(side.ends[0].point()) {
+        Decision::Pos => Some(true),
+        Decision::Neg => Some(false),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
+    }
 }
 
 /// The surface that cut a wire made of one closed curve, or `None` for a wire
@@ -928,11 +1758,59 @@ fn the_pickers_of_the_meridian_circle_through(
     )
 }
 
+/// For every side of every wire of a flat piece, the half-space naming the
+/// meridian circle of a ring the side runs along, which [`in_the_bulge_of`]
+/// reads its bulge's disk by; `None` for a side along anything else, for one
+/// on a plane that does not hold the ring's axis exactly
+/// ([`how_the_axis_lies_on`]), and for one whose corner no one circle
+/// certainly keeps. Nothing for a curved piece.
+///
+/// Worked out once per piece, as [`what_else_each_round_wire_asks`] is, since
+/// the answer is about the side and not about the point.
+///
+/// # Errors
+///
+/// Whatever [`intersect`] gives for the piece's plane against a ring whose
+/// axis it holds.
+fn the_meridian_circle_each_side_runs_round(
+    piece: &Piece,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Vec<Vec<Option<Picker>>>> {
+    let Some(flat) = piece.surface.as_plane() else {
+        return Ok(Vec::new());
+    };
+    let mut each = Vec::with_capacity(piece.wires.len());
+    for wire in &piece.wires {
+        let mut sides = Vec::with_capacity(wire.len());
+        for side in wire {
+            sides.push(
+                if let Surface::Torus(ring) = &side.carried_by[1]
+                    && how_the_axis_lies_on(flat, ring) == Decision::Zero
+                {
+                    the_half_space_naming_the_meridian_circle_through(
+                        &piece.surface,
+                        &side.carried_by[1],
+                        side.ends[0].point(),
+                        policy,
+                        log,
+                    )?
+                } else {
+                    None
+                },
+            );
+        }
+        each.push(sides);
+    }
+    Ok(each)
+}
+
 /// Whether every one of `pickers` keeps `point`: `Some(false)` when one
 /// certainly rules it out, `None` when one cannot say.
 ///
 /// Each list is empty or holds the one half-space naming a ring's meridian
-/// circle ([`what_else_each_round_wire_asks`]), so each picker is asked what
+/// circle ([`what_else_each_round_wire_asks`],
+/// [`the_meridian_circle_each_side_runs_round`]), so each picker is asked what
 /// `holds.rs` asks it, [`the_meridian_half_space_keeps`], and a point on its
 /// plane is kept.
 fn every_picker_keeps(pickers: &[Picker], point: PredicatePoint) -> Option<bool> {
@@ -943,8 +1821,8 @@ fn every_picker_keeps(pickers: &[Picker], point: PredicatePoint) -> Option<bool>
     Some(kept)
 }
 
-/// Where one point sits relative to each solid in the set, or `None` when this
-/// point cannot say.
+/// Where one point sits relative to each solid in the set, or why this point
+/// cannot say.
 ///
 /// **Whether the piece lies on a face of the solid is asked first, and the ray
 /// only after it**, for every piece. The ray was never what settles `ON`. §17.1
@@ -967,6 +1845,18 @@ fn every_picker_keeps(pickers: &[Picker], point: PredicatePoint) -> Option<bool>
 /// piece around it, and an undecided answer is a box straddling a plane — every
 /// corner of a turned solid is one, which is why `A \ A` there needs coincidence
 /// asked at all. Either abandons this candidate rather than being read as `ON`.
+///
+/// **A point off every face but between one face's stored plane and its
+/// corners' triangles is the ray's to place.** The fuse cuts along the stored
+/// plane, and a turned solid's corners are a rounding off it, so the two can
+/// put the point on opposite sides of the face (§200.1). Wherever the ray's
+/// count turns on such a triangle it asks the stored plane too, and where the
+/// two part it places the point by the plane or says `Undecidable`
+/// (`classify.rs`'s `count_a_polygon`, §346.6). `select` once dropped every
+/// point any triangle and its face's plane disagreed about, whatever the ray
+/// then said and however far the point was from that face, and with them every
+/// point of a cap a turned block's face takes off a ball
+/// (`tests/a_ball_shaved_by_a_turned_blocks_face.rs`).
 fn settle_against_each(
     model: &Model,
     solids: &[&BakedSolid],
@@ -975,7 +1865,7 @@ fn settle_against_each(
     piece: &Piece,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Option<Placement>> {
+) -> Result<Settled> {
     let mut lying_on = LyingOn::default();
     for &index in against {
         if let Some(same_way) = coincident_face(model, solids[index], piece, point, policy, log)? {
@@ -992,27 +1882,47 @@ fn settle_against_each(
         if !matches!(placed, Containment::Undecidable { .. }) {
             ray.drain_into(log);
         }
-        if matches!(placed, Containment::Inside | Containment::Outside)
-            && the_ray_and_the_stored_planes_disagree_about(solid, point)
-        {
-            return Ok(None);
-        }
         match placed {
-            Containment::Inside => return Ok(Some(Placement::Inside)),
+            Containment::Inside => return Ok(Settled::At(Placement::Inside)),
             Containment::Outside => (),
             // A face nobody can follow is not a piece that could be placed
             // somewhere else, and reading it as `Outside` would drop material.
             // This was `unreachable!`, on the grounds that the fuse refuses
             // curved solids at entry; `docs/decisions.md` §35 records why that
             // argument stops holding and why what replaces it is a refusal
-            // about a caller's solid rather than a panic.
-            Containment::CannotFollowAFacesTrimming { .. }
-            | Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(None),
+            // about a caller's solid rather than a panic. `solid` is the
+            // caller's, so `face` is a key the caller can read.
+            Containment::CannotFollowAFacesTrimming { face } => {
+                return Ok(Settled::MetAFaceNobodyFollows(face));
+            }
+            // `Error::CannotFireARayAtAFacesSurface` exists since Q883, and
+            // `assemble.rs`'s `one_shell_is_inside_another` returns it. Here it
+            // still stays with the undecided points, because no fuse is known
+            // to reach this arm: the point beside it answers every point whose
+            // box no face of the solid meets (§323), and every shape Q1125
+            // tried either answered or was refused before a point was put to a
+            // ray (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`). A
+            // fuse that reaches it is what changing this waits for (§35.6).
+            Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(Settled::Abandoned),
             // Coincidence was asked above and found no face the piece lies on.
-            Containment::OnBoundary | Containment::Undecidable { .. } => return Ok(None),
+            Containment::OnBoundary | Containment::Undecidable { .. } => {
+                return Ok(Settled::Abandoned);
+            }
         }
     }
-    Ok(Some(lying_on.placement()))
+    Ok(Settled::At(lying_on.placement()))
+}
+
+/// What one point inside a piece says about where the piece sits.
+enum Settled {
+    /// Where the piece sits against every solid asked.
+    At(Placement),
+    /// The ray from the point met this face of a caller's solid, whose
+    /// trimming nothing here follows, so the point was never placed. Not
+    /// `Undecidable`: the question was never put (`docs/decisions.md` §35.6).
+    MetAFaceNobodyFollows(FaceKey),
+    /// The point says nothing, and the next one is tried.
+    Abandoned,
 }
 
 /// The solids of a group a piece lies flush on, the first of each way round.
@@ -1061,102 +1971,6 @@ impl LyingOn {
             (None, None) => Placement::Outside,
         }
     }
-}
-
-/// Whether the ray and the arrangement put `point` on opposite sides of one of
-/// `solid`'s flat faces.
-///
-/// **The two read one face from two descriptions.** The arrangement cuts along
-/// the face's stored plane, which is the face (§17.1). The ray fans the face's
-/// corners into triangles and asks which side of *those* the point is on
-/// (`classify.rs`'s `count_a_polygon`), and a turned solid's corners are not on
-/// its stored planes: turning a block a quarter turn about the `z` axis leaves
-/// the face through the axis with corners `(∓6, ±8.9e-16, z)`, whose triangles
-/// hold the axis exactly, while its stored plane misses the axis by 4.4e-16
-/// (`a_knife_through_the_axis` in `tests/a_narrow_lune_from_a_pole_corner.rs`).
-/// A point between the two is certified on one side by the ray and was proved
-/// on the other side by the arrangement, and the piece it stands for is then
-/// placed on the wrong side of the solid (§200.1).
-///
-/// So a candidate either description could be wrong about is abandoned, as one
-/// the ray cannot honestly place, and the next is tried. Nothing here is a
-/// tolerance: both sides are signs, and a candidate is dropped only when two
-/// signs that were both decided say opposite things. A sign that could not be
-/// decided is left to the ray's own answer.
-///
-/// **A point on the plane is not this check's to catch.** The ray does not say
-/// `OnBoundary` there whenever it cannot tell: a face whose stored corner sits
-/// `1e-30` off its planes has triangles that put a point on the face certainly
-/// off it (§316.3). Counting that as a disagreement was measured and drops
-/// every candidate of a piece lying on such a face, since every one of them is
-/// on the plane: the two boxes of `tests/three_flat_seeds_that_fuse_one_way_round.rs`
-/// then refuse both ways round, by union, intersection and difference alike
-/// (§351). What catches it is [`settle_against_each`] asking whether the piece
-/// lies on a face before the ray is fired at all.
-fn the_ray_and_the_stored_planes_disagree_about(
-    solid: SolidView<'_>,
-    point: PredicatePoint,
-) -> bool {
-    solid.faces().any(|face| {
-        let Some(plane) = face.surface().as_plane().copied() else {
-            return false;
-        };
-        let every_side_is_straight = face.wires().all(|wire| {
-            wire.coedges()
-                .all(|coedge| coedge.edge().stored_run() == &EdgeRun::Straight)
-        });
-        if !every_side_is_straight {
-            return false;
-        }
-        let Some(off_the_plane) = InPlane::of(&plane) else {
-            return false;
-        };
-        let on_the_side_of_the_reference = match side_of_a_plane(&plane, point) {
-            Decision::Pos => off_the_plane.turned_round,
-            Decision::Neg => !off_the_plane.turned_round,
-            Decision::Zero | Decision::Undecidable { .. } => return false,
-            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
-        };
-        let mut disagree = false;
-        face.for_each_triangle(|corners| {
-            let [a, b, c] = corners.map(|corner| PredicatePoint::from(corner.coordinates()));
-            let reference = orient3d_of_points(a, b, c, off_the_plane.from);
-            let this_one = orient3d_of_points(a, b, c, point);
-            let decided = |turn: &Decision| matches!(turn, Decision::Pos | Decision::Neg);
-            if decided(&reference)
-                && decided(&this_one)
-                && (reference == this_one) != on_the_side_of_the_reference
-            {
-                disagree = true;
-            }
-        });
-        disagree
-    })
-}
-
-/// Which side of `flat` a point is on, asked of the point with each coordinate
-/// the plane cannot see narrowed to one end of its interval.
-///
-/// **A plane whose normal has no part along an axis cannot tell apart two
-/// points that differ only along it**, so narrowing that coordinate changes
-/// nothing about the answer and everything about whether it can be given. A
-/// segment up through a cap a fraction of a spacing deep
-/// ([`segments_up_through_a_cap`]) is one double in the two coordinates such a
-/// plane sees, and narrowed it is asked exactly. Asked as a box, the interval
-/// sum rounds by more than the cap is deep and cannot say: the cap of
-/// `tests/a_ball_shaved_by_a_turned_blocks_face.rs` turned by `1` about `z`
-/// is `3.6e-17` deep, and no segment through it was held until this narrowed
-/// it.
-fn side_of_a_plane(flat: &Plane, point: PredicatePoint) -> Decision {
-    let PredicatePoint::Constructed(mut boxed) = point else {
-        return flat.side_of_point(point);
-    };
-    for (axis, part) in flat.normal().components().into_iter().enumerate() {
-        if part == 0.0 {
-            boxed[axis] = Interval::exactly(boxed[axis].lo());
-        }
-    }
-    flat.side_of_point(as_exact_as_it_is(PredicatePoint::Constructed(boxed)))
 }
 
 /// Whether the face of `solid` that `point` lies on faces the same way as
@@ -1275,7 +2089,23 @@ fn of_two_curved_kinds(one: &Surface, other: &Surface) -> bool {
 /// Whether the material of one face of an input holds a point already known to
 /// be on that face's surface.
 ///
-/// A flat face with straight sides is wound, the way it always was. A **curved**
+/// A flat face with straight sides is wound, the way it always was, and asked
+/// of the model where the winding cannot say
+/// ([`the_model_says_one_of_its_faces_holds`]).
+///
+/// **Its corners are wound round the point's box stretched to the plane**
+/// ([`stretched_to_the_plane`]), as [`the_piece_holds`] winds a piece's.
+/// [`InPlane`] reads a point off its plane where the line from its reference
+/// point through it meets the plane, and `2²⁰` out on a plane through the
+/// origin a point a spacing off is read about `1e-4` from its foot. Wound round
+/// the point alone, a face held such a point whose foot was off it, and did not
+/// hold one whose foot was on it
+/// (`a_point_a_rounding_off_a_far_face_is_on_it_where_its_foot_is`,
+/// `docs/decisions.md` §346.6). Over the box the fan cannot say for either, and
+/// the model answers both. A point on the plane stretches to itself and is
+/// wound as before.
+///
+/// A **curved**
 /// one is [`SolidView::face_holds_the_point`], which is the one authority on that
 /// question (§35) and which the fuse can call here because what it is asked
 /// about is a face of an *input* — a face the model holds, with corners it holds
@@ -1291,6 +2121,14 @@ fn of_two_curved_kinds(one: &Surface, other: &Surface) -> bool {
 /// and its copy answered. Only [`OnAFace::Held`](crate::OnAFace::Held) counts
 /// here, as a zero winding does not count above: a point on the face's rim says
 /// nothing about the piece around it.
+///
+/// **A curved face of the input can be several faces of the model**, which the
+/// bake hands over as one because they are one surface used one way: a bar's
+/// wall in two bands on one pipe is one face with a key per band. It holds a
+/// point when any of them does. Asked of the first key alone, the wall of a
+/// round bar lying on the upper band read as off the bar's wall whenever the
+/// lower band was listed first, and every such fuse was refused `Undecidable`
+/// at [`PLACED_AGAINST_EVERY_SOLID`] (row Q977).
 fn a_face_of_the_input_holds(
     model: &Model,
     solid: &BakedSolid,
@@ -1315,9 +2153,6 @@ fn a_face_of_the_input_holds(
             }
             return Ok(false);
         }
-        let Some(in_plane) = InPlane::of(flat) else {
-            return Ok(false);
-        };
         let corners: Vec<Vec<PredicatePoint>> = face
             .wires
             .iter()
@@ -1328,11 +2163,79 @@ fn a_face_of_the_input_holds(
         // piece's normal, and a face pressed against this one from the other
         // side runs the other way — which is what the agreement above already
         // said. Zero is the only answer that puts the point outside it.
-        return Ok(in_plane
-            .winding_around(&corners, point)
-            .is_some_and(|winding| winding != 0));
+        let winding = InPlane::of(flat)
+            .zip(stretched_to_the_plane(flat, point))
+            .and_then(|(in_plane, reaching_the_plane)| {
+                in_plane.winding_around(&corners, reaching_the_plane)
+            });
+        if let Some(winding) = winding {
+            return Ok(winding != 0);
+        }
+        return Ok(the_model_says_one_of_its_faces_holds(
+            view, face, point, policy, log,
+        ));
     }
-    Ok(view.face_holds_the_point(face.keys[0], point, policy, log)? != crate::OnAFace::NotHeld)
+    for &key in &face.keys {
+        if view.face_holds_the_point(key, point, policy, log)? != crate::OnAFace::NotHeld {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether [`SolidView::face_holds_the_point`] says one of the model's faces
+/// that `face` was baked from holds `point`, for a flat face with straight
+/// sides whose corners [`InPlane::winding_around`] could not wind round the
+/// point's box stretched to the plane.
+///
+/// **A point a rounding off the plane beside the face's edge comes here**, as
+/// the fan over that box runs across the edge, and the model reads it beside
+/// its foot: [`SolidView::face_holds_the_point`] counts from a point off the
+/// face's first corner, as far off the plane as that corner's largest
+/// coordinate, where [`InPlane`] counts from one beside the origin
+/// (`a_point_a_rounding_off_a_far_face_is_on_it_where_its_foot_is`).
+///
+/// **What the fan cannot see.** Every triangle of the fan has its apex at a
+/// corner of the face, and a point on a spoke from that apex is on the edge of
+/// two triangles, neither of which can say it holds it. The middle of a
+/// rectangle is on both its diagonals, so every apex leaves it on a spoke. A
+/// bar's cap flush on a block's floor is that case: the one point found inside
+/// the cap is its middle, under the middle of the floor, so the cap was never
+/// read as lying on the floor, the ray called the point on the block's skin,
+/// and the fuse was refused (Q1062). `holds.rs` counts the sides a half-line
+/// crosses instead, reading a corner on that line as below it, so it has no
+/// spokes to sit on.
+///
+/// **Why a `Held` puts the piece on the face**, as a winding that is not zero
+/// does. The caller proved the piece's plane and the face's plane one plane,
+/// and `point` was proved inside the piece. The piece was cut by every surface
+/// of the solid, so its inside lies all on the face or all off it (§17.4), and
+/// a point of that inside the face's material holds, away from its outline,
+/// puts it on the face.
+///
+/// Only [`OnAFace::Held`](crate::OnAFace::Held) counts, as in the caller. Any
+/// other answer, and a refusal, leave the point where the fan left it: off
+/// this face, for the next face and then the ray to place. So a point the fan
+/// placed is placed as it was, and what the model was asked goes into the log
+/// only when it says the face holds the point.
+fn the_model_says_one_of_its_faces_holds(
+    view: SolidView<'_>,
+    face: &BakedFace,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> bool {
+    face.keys.iter().any(|&key| {
+        let mut trial = ProvenanceLog::new();
+        let held = matches!(
+            view.face_holds_the_point(key, point, policy, &mut trial),
+            Ok(crate::OnAFace::Held)
+        );
+        if held {
+            trial.drain_into(log);
+        }
+        held
+    })
 }
 
 /// The plane a piece's material is *behind*: the piece's own plane, turned round
@@ -1384,6 +2287,13 @@ fn corners_of(piece: &Piece) -> Vec<Vec<PredicatePoint>> {
 /// Nothing is projected into the plane's own two coordinates, which would round
 /// exact corners into inexact ones and manufacture the undecidability M2.5
 /// exists to measure (§15.5).
+///
+/// **A point off the plane is read where the line from the reference point
+/// through it meets the plane**, not at its foot, and the two can be far apart:
+/// `M` out on a plane through the origin, a point a rounding high is read about
+/// `M` times that height from its foot. A caller that needs the foot asks about
+/// a box that reaches the plane, as [`the_piece_holds`] and
+/// [`a_face_of_the_input_holds`] do.
 pub(crate) struct InPlane {
     from: PredicatePoint,
     /// Whether [`InPlane::from`] came out above the plane rather than below it.
@@ -1499,7 +2409,18 @@ impl InPlane {
 
     /// `1` or `-1` when `point` is strictly inside the triangle, signed the way
     /// the triangle turns; `0` when it is outside; `None` when it is on the
-    /// triangle's own boundary or a turn could not be decided.
+    /// triangle's own boundary, or when it might be inside and a turn could not
+    /// be decided.
+    ///
+    /// **Two turns of opposite sign put the point outside, whatever the third
+    /// one is**, so `0` does not wait for the third to be decided. A point
+    /// inside the triangle or on its boundary turns the same way about all
+    /// three sides, or not at all about some of them, and never one way about
+    /// one side and the other way about another; and every sign the third
+    /// turn could have gives `0` here once the other two disagree. That is the
+    /// piece three cut lines meeting at one point leave (Q1145): one side of it
+    /// is a rounding long, every fan from every corner holds a triangle on that
+    /// side, and the turn about it is undecidable for every point there is.
     fn inside_triangle(
         &self,
         first: PredicatePoint,
@@ -1510,18 +2431,20 @@ impl InPlane {
         let mut positives = 0;
         let mut negatives = 0;
         let mut zeros = 0;
+        let mut undecided = 0;
         for [from, to] in [[first, second], [second, third], [third, first]] {
             match self.turn(from, to, point) {
                 Decision::Pos => positives += 1,
                 Decision::Neg => negatives += 1,
                 Decision::Zero => zeros += 1,
-                Decision::Undecidable { .. } | _ => return None,
+                Decision::Undecidable { .. } => undecided += 1,
+                _ => return None,
             }
         }
         if positives > 0 && negatives > 0 {
             return Some(0);
         }
-        if zeros > 0 {
+        if zeros > 0 || undecided > 0 {
             return None;
         }
         Some(if positives > 0 { 1 } else { -1 })
@@ -1563,6 +2486,12 @@ impl InPlane {
 /// pipe that cut it has its axis, which is a point of the plane provably inside
 /// that ball or pipe.
 ///
+/// **A ring between two such curves has neither**, and the middles of both can
+/// be in its hole. What reaches it is a point between the two curves along a
+/// line through one of their middles ([`between_the_round_wires`]), offered
+/// after every other candidate here, so a piece one of those placed is placed
+/// as it was.
+///
 /// **A curved piece's corners are not on its surface once they are blended**,
 /// and a point off the surface says nothing about a region drawn on it. Every
 /// blend is therefore put back onto the surface through its own two coordinates.
@@ -1596,6 +2525,7 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
         for side in piece.wires.iter().flatten() {
             candidates.extend(half_way_across_the_chord_to_a_cone(flat, side));
         }
+        candidates.extend(between_the_round_wires(flat, piece));
         return candidates;
     }
     // **A piece bounded by one closed curve has one corner**, and every blend of
@@ -1606,20 +2536,7 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
     // not depend on anything but the piece.
     let middle = middle_of_the_corners(wires);
     let reach = how_big_the_surface_is(&piece.surface, middle);
-    for axis in 0..3 {
-        for way in [1.0, -1.0] {
-            let mut step = [0.0; 3];
-            step[axis] = way * reach;
-            candidates.push(PredicatePoint::from(
-                [0, 1, 2].map(|which| middle.coordinates()[which] + step[which]),
-            ));
-        }
-    }
-    if let Some(towards) = towards_every_flat_sides_material(piece) {
-        candidates.push(PredicatePoint::from(
-            (middle + towards * reach).coordinates(),
-        ));
-    }
+    candidates.extend(steps_from_the_middle(piece, middle, reach));
     // **A step of one radius towards a cone's apex goes past it** wherever the
     // cone's radius is more than its height, and lands on the other half of
     // the cone, where the piece is not (§350). Half way from the corners'
@@ -1635,6 +2552,123 @@ fn candidate_points(piece: &Piece, wires: &[Vec<PredicatePoint>]) -> Vec<Predica
         .into_iter()
         .filter_map(|candidate| back_onto_the_surface(&piece.surface, candidate))
         .collect()
+}
+
+/// The steps [`candidate_points`] takes across a curved piece from the middle
+/// of its corners, taken again at a half, a quarter, an eighth and a sixteenth
+/// of the length, each put back onto the surface. Nothing for a flat piece,
+/// whose last points are [`rungs_towards_each_crossing`].
+///
+/// **A step of one radius can be too long for every way it goes.** A block
+/// over a frustum's rim, its wall at `x = 2` and its floor at `z = 5`, has its
+/// wall's plane cut the cone below the floor in a hyperbola whose lowest point
+/// is `(2, 0, 4)`. The piece between that and the circle at `z = 5` has two
+/// corners, `(2, ±1.5, 5)`, and is nowhere more than one unit deep, while the
+/// cone there is `2.5` across: every step of `2.5` from `(2, 0, 5)`, put back
+/// on the cone, lands on that circle or outside the piece. Half the step
+/// towards the side of both planes the piece is on, `(2.88, 0, 4.12)`, comes
+/// back as `(2.06, 0, 4.12)`, inside it. A single block finds its way round
+/// that by a side the piece shares with it (§365.3), but placed against the
+/// block and a second solid together, even a cube far away, it has no side to
+/// share with the second, and its corners lie on the block's edge, where no
+/// corner places it: such fuses were refused `"a point inside a piece of a
+/// face"` (`tests/a_frustums_wall_cut_below_a_blocks_floor.rs`).
+///
+/// The lengths are the reach halved, which is exact, and the steps are tried
+/// only where no other point was found inside the piece, after every other
+/// point, by [`place_the_piece`]'s rule for a rung: so a piece any earlier
+/// point placed is placed by that point as it was.
+fn shorter_steps_across_a_curved_piece(piece: &Piece) -> Vec<PredicatePoint> {
+    if piece.surface.as_plane().is_some() {
+        return Vec::new();
+    }
+    let middle = middle_of_the_corners(&corners_of(piece));
+    let reach = how_big_the_surface_is(&piece.surface, middle);
+    [2.0, 4.0, 8.0, 16.0]
+        .into_iter()
+        .flat_map(|shorter| steps_from_the_middle(piece, middle, reach / shorter))
+        .filter_map(|step| back_onto_the_surface(&piece.surface, step))
+        .collect()
+}
+
+/// For a piece of a cone, the point half way between each two places where a
+/// side cut by a plane is crossed square to its chord, put back onto the cone;
+/// offered after [`shorter_steps_across_a_curved_piece`], under the same rule.
+///
+/// **Every corner of a piece can lie on one circle while the piece hangs below
+/// it.** The nested cups of
+/// `tests/a_joined_flat_face_whose_rings_enclose_no_area.rs` have their second
+/// cone's skin cut by the cups' wall `x = −12` and a flush block's wall
+/// `x = −11`: the piece between them is a band hanging off the circle of radius
+/// 14 at `z = 16`, its four corners all on that circle and its two hyperbola
+/// sides reaching down to `(−12, 0, 14)` and `(−11, 0, 13)`. Every blend of the
+/// corners comes back onto that circle, which is the piece's own side, and the
+/// steps from their middle go down the cone by `14/2ᵏ`, while the band at
+/// `y = 0` is between `z = 13` and `14`, two to three below them: no point
+/// offered was inside it, and every fuse with the cups first was refused
+/// [`INSIDE_A_PIECE`] (row Q1224).
+///
+/// A side's curve is crossed square to its chord where
+/// [`half_way_across_the_chord_to_a_cone`] aims, once on each nappe for a
+/// hyperbola, and half way between the two sides' crossings on the band's own
+/// nappe is `(−11.5, 0, 13.5)`, which is on the cone exactly and inside the
+/// band. Nothing is trusted: the caller proves each point inside the piece or
+/// drops it.
+fn between_the_middles_of_a_cone_pieces_sides(piece: &Piece) -> Vec<PredicatePoint> {
+    let Surface::Cone(cone) = &piece.surface else {
+        return Vec::new();
+    };
+    let mut crossed = Vec::new();
+    for side in piece.wires.iter().flatten() {
+        let Some(flat) = side.carried_by[1].as_plane() else {
+            continue;
+        };
+        let Some(chord) = Chord::of(flat, side) else {
+            continue;
+        };
+        crossed.extend(
+            chord
+                .where_the_cone_crosses(cone)
+                .into_iter()
+                .map(|step| chord.middle + chord.across * step)
+                .filter(Point::is_finite),
+        );
+    }
+    let mut candidates = Vec::new();
+    for (index, &one) in crossed.iter().enumerate() {
+        for &other in &crossed[index + 1..] {
+            candidates.push(PredicatePoint::from(
+                (one + (other - one) * 0.5).coordinates(),
+            ));
+        }
+    }
+    candidates
+        .into_iter()
+        .filter_map(|candidate| back_onto_the_surface(&piece.surface, candidate))
+        .collect()
+}
+
+/// Six steps of `reach` from `middle`, one each way along each axis, and one
+/// more towards the side of every plane that cut the piece that the piece is
+/// on ([`towards_every_flat_sides_material`]), none of them put back onto the
+/// piece's surface yet.
+fn steps_from_the_middle(piece: &Piece, middle: Point, reach: f64) -> Vec<PredicatePoint> {
+    let mut steps = Vec::new();
+    for axis in 0..3 {
+        for way in [1.0, -1.0] {
+            let mut step = [0.0; 3];
+            step[axis] = way * reach;
+            steps.push(PredicatePoint::from(
+                [0, 1, 2].map(|which| middle.coordinates()[which] + step[which]),
+            ));
+        }
+    }
+    if let Some(towards) = towards_every_flat_sides_material(piece) {
+        steps.push(PredicatePoint::from(
+            (middle + towards * reach).coordinates(),
+        ));
+    }
+    steps
 }
 
 /// Which way from a curved piece's corners its material lies, as far as the
@@ -1689,17 +2723,12 @@ fn towards_every_flat_sides_material(piece: &Piece) -> Option<Vector> {
 /// straight side, and for a side with nothing to go round or no length to go
 /// square to.
 fn half_way_into_either_arc(flat: &Plane, side: &FaceMeet) -> Vec<PredicatePoint> {
-    let [start, end] = [0, 1].map(|which| middle_of(side.ends[which].point()));
-    let chord = end - start;
-    let Ok(across) = flat.normal().cross(chord).normalized() else {
+    let Some(chord) = Chord::of(flat, side) else {
         return Vec::new();
     };
-    let middle = start + chord * 0.5;
     let mut candidates = Vec::new();
-    for centre in the_middles_of_a_round_wire(flat, &side.carried_by[1]) {
-        let off = across.dot(middle_of(centre) - middle);
-        let reach = (off * off + chord.length_squared() / 4.0).sqrt();
-        let points = [off + reach, off - reach].map(|to| middle + across * (to / 2.0));
+    for both in chord.where_the_circles_cross(flat, &side.carried_by[1]) {
+        let points = both.map(|to| chord.middle + chord.across * (to / 2.0));
         if points.iter().all(Point::is_finite) {
             candidates.extend(points.map(|point| PredicatePoint::from(point.coordinates())));
         }
@@ -1740,37 +2769,210 @@ fn half_way_across_the_chord_to_a_cone(flat: &Plane, side: &FaceMeet) -> Vec<Pre
     let Surface::Cone(cone) = side.carried_by[1] else {
         return Vec::new();
     };
-    let [start, end] = [0, 1].map(|which| middle_of(side.ends[which].point()));
-    let chord = end - start;
-    let Ok(across) = flat.normal().cross(chord).normalized() else {
+    let Some(chord) = Chord::of(flat, side) else {
         return Vec::new();
     };
-    let middle = start + chord * 0.5;
-    let up = cone.axis().direction();
-    let widening = 1.0 + cone.slope() * cone.slope();
-    let from_apex = middle - cone.apex();
-    let (along_now, along_per_step) = (from_apex.dot(up), across.dot(up));
-    let square = widening * along_per_step * along_per_step - up.length_squared();
-    let linear =
-        2.0 * (widening * along_now * along_per_step - up.length_squared() * from_apex.dot(across));
-    let constant =
-        widening * along_now * along_now - up.length_squared() * from_apex.length_squared();
-    let steps: Vec<f64> = if square == 0.0 {
-        vec![-constant / linear]
-    } else {
+    chord
+        .where_the_cone_crosses(&cone)
+        .into_iter()
+        .map(|step| chord.middle + chord.across * (step / 2.0))
+        .filter(Point::is_finite)
+        .map(|point| PredicatePoint::from(point.coordinates()))
+        .collect()
+}
+
+/// Points ever nearer each place [`half_way_into_either_arc`] and
+/// [`half_way_across_the_chord_to_a_cone`] go half way to: a quarter of the way
+/// back from it towards the chord's middle, an eighth, and so on, and as far
+/// again past it where the side's material is outside its partner. Nothing for
+/// a curved piece, whose last points are [`shorter_steps_across_a_curved_piece`].
+///
+/// **Half way can be in a hole when the side is long.** A tube's cap less a bar
+/// across its wall is a C (`tests/a_tube_less_a_bar_united_with_a_second_bar.rs`):
+/// the outer arc runs the long way round from `(2.6875, ±1.3332)`, so half way
+/// from its chord's middle `(2.6875, 0)` to `(−3, 0)` is `(−0.15625, 0)`, in the
+/// tube's hole, and the other way it is in the bar. Every point offered before
+/// was in the one or the other, and every fuse of the two refused. The first
+/// rung in the C is half as far again past the bar's arc as its chord's middle
+/// is from it, `(1.5028, ±1.6382)`; a quarter of the way back from `(−3, 0)`,
+/// `(−1.578125, 0)`, is in it too.
+///
+/// Near a crossing on the side's own arc the piece is on the side
+/// `material_side` names, so some rung is in it wherever the piece is wider
+/// there than the rung is near. **The ladder stops at `2⁻⁵²` of the way**,
+/// where a rung is within a rounding of the crossing it is built from and the
+/// next could not be told from it; a piece thinner than that beside every
+/// crossing gets the points it got before, and is refused by the same name.
+/// The shallow rungs of every side come before the deep ones of any, since a
+/// rung nearer a partner is harder to classify against the solid it bounds.
+///
+/// These are offered after every other point, even [`points_in_a_sliver_of_a_ball`],
+/// so they place only pieces nothing else did (`docs/decisions.md` §365.6).
+fn rungs_towards_each_crossing(piece: &Piece) -> Vec<PredicatePoint> {
+    let Some(flat) = piece.surface.as_plane() else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    for side in piece.wires.iter().flatten() {
+        let Some(chord) = Chord::of(flat, side) else {
+            continue;
+        };
+        let mut crossings: Vec<f64> = chord
+            .where_the_circles_cross(flat, &side.carried_by[1])
+            .into_iter()
+            .flatten()
+            .collect();
+        if let Surface::Cone(cone) = &side.carried_by[1] {
+            crossings.extend(chord.where_the_cone_crosses(cone));
+        }
+        let material_is_outside = side.material_side == Decision::Pos;
+        lines.push((chord, crossings, material_is_outside));
+    }
+    let mut rungs = Vec::new();
+    let mut back = 1.0;
+    for depth in 1..f64::MANTISSA_DIGITS {
+        back /= 2.0;
+        for (chord, crossings, material_is_outside) in &lines {
+            for &crossing in crossings {
+                if depth > 1 {
+                    rungs.push(chord.middle + chord.across * (crossing * (1.0 - back)));
+                }
+                if *material_is_outside {
+                    rungs.push(chord.middle + chord.across * (crossing * (1.0 + back)));
+                }
+            }
+        }
+    }
+    rungs
+        .into_iter()
+        .filter(Point::is_finite)
+        .map(|point| PredicatePoint::from(point.coordinates()))
+        .collect()
+}
+
+/// The middle of a curved side's chord, and the way square to the chord in the
+/// piece's plane.
+struct Chord {
+    middle: Point,
+    across: Vector,
+    length_squared: f64,
+}
+
+impl Chord {
+    /// `None` for a side with no length to go square to.
+    fn of(flat: &Plane, side: &FaceMeet) -> Option<Self> {
+        let [start, end] = [0, 1].map(|which| middle_of(side.ends[which].point()));
+        let chord = end - start;
+        let across = flat.normal().cross(chord).normalized().ok()?;
+        Some(Self {
+            middle: start + chord * 0.5,
+            across,
+            length_squared: chord.length_squared(),
+        })
+    }
+
+    /// How far along [`Chord::across`] from the middle the circle round each of
+    /// [`the_middles_of_a_round_wire`] through the chord's two ends crosses,
+    /// both ways.
+    fn where_the_circles_cross(&self, flat: &Plane, partner: &Surface) -> Vec<[f64; 2]> {
+        the_middles_of_a_round_wire(flat, partner)
+            .into_iter()
+            .map(|centre| {
+                let off = self.across.dot(middle_of(centre) - self.middle);
+                let reach = (off * off + self.length_squared / 4.0).sqrt();
+                [off + reach, off - reach]
+            })
+            .collect()
+    }
+
+    /// How far along [`Chord::across`] from the middle the line crosses
+    /// `cone`, as [`half_way_across_the_chord_to_a_cone`] reads it.
+    fn where_the_cone_crosses(&self, cone: &Cone) -> Vec<f64> {
+        let up = cone.axis().direction();
+        let widening = 1.0 + cone.slope() * cone.slope();
+        let from_apex = self.middle - cone.apex();
+        let (along_now, along_per_step) = (from_apex.dot(up), self.across.dot(up));
+        let square = widening * along_per_step * along_per_step - up.length_squared();
+        let linear = 2.0
+            * (widening * along_now * along_per_step
+                - up.length_squared() * from_apex.dot(self.across));
+        let constant =
+            widening * along_now * along_now - up.length_squared() * from_apex.length_squared();
+        if square == 0.0 {
+            return vec![-constant / linear];
+        }
         let discriminant = linear * linear - 4.0 * square * constant;
         let root = discriminant.max(0.0).sqrt();
         vec![
             (-linear + root) / (2.0 * square),
             (-linear - root) / (2.0 * square),
         ]
-    };
-    steps
-        .into_iter()
-        .map(|step| middle + across * (step / 2.0))
-        .filter(Point::is_finite)
-        .map(|point| PredicatePoint::from(point.coordinates()))
-        .collect()
+    }
+}
+
+/// Points between the round wires of a flat piece: along the line from each
+/// round wire's middle through its corner, the middle of every stretch between
+/// two places, one after the other, where that line crosses a round wire.
+///
+/// **A ring has no blend of corners inside it, and its middles can all be in
+/// its hole.** The ring a hole leaves in a round cap is bounded by two whole
+/// circles with one corner each, so its corner blends are its two corners and
+/// the one point half way between them, and the middle of each circle is
+/// inside the hole wherever the hole covers the cap's middle. A plate of radius
+/// 10 round `(−6, 0, 0)` with a hole of radius 5 round `(−3, 0, 0)` had that
+/// one blend, `(0.5, −2.5, 0)`, in the hole too, and every fuse of the two
+/// refused (`tests/a_plate_with_an_off_centre_hole.rs`, `docs/decisions.md`
+/// §365.2).
+///
+/// A line through a hole's middle leaves the hole and then the outline, once
+/// each way along it, since a disk is convex and the hole is inside the
+/// outline, so the stretch between the two is the ring. Each round wire is read
+/// as the circle round its middle through its corner, which is exactly what a
+/// ball or a pipe square to the plane cuts and only near what a leaning pipe or
+/// a cone does; nothing about a candidate is trusted, so a wire read wrongly
+/// only costs candidates. Nothing for a piece with fewer than two round wires,
+/// whose one middle is already offered.
+fn between_the_round_wires(flat: &Plane, piece: &Piece) -> Vec<PredicatePoint> {
+    let mut through_its_corner = Vec::new();
+    for wire in &piece.wires {
+        let Some(partner) = round_wire_of(wire) else {
+            continue;
+        };
+        let corner = middle_of(wire[0].ends[0].point());
+        for middle in the_middles_of_a_round_wire(flat, &partner) {
+            through_its_corner.push((middle_of(middle), corner));
+        }
+    }
+    if through_its_corner.len() < 2 {
+        return Vec::new();
+    }
+    let mut candidates = Vec::new();
+    for &(from, corner) in &through_its_corner {
+        let Ok(along) = (corner - from).normalized() else {
+            continue;
+        };
+        let mut crossings: Vec<f64> = through_its_corner
+            .iter()
+            .flat_map(|&(middle, on_it)| {
+                let off = from - middle;
+                let half_way = along.dot(off);
+                let below =
+                    half_way * half_way - off.length_squared() + (on_it - middle).length_squared();
+                let reach = below.sqrt();
+                [-half_way - reach, -half_way + reach]
+            })
+            .filter(|step| step.is_finite())
+            .collect();
+        crossings.sort_by(f64::total_cmp);
+        candidates.extend(
+            crossings
+                .windows(2)
+                .map(|both| from + along * ((both[0] + both[1]) / 2.0))
+                .filter(Point::is_finite)
+                .map(|point| PredicatePoint::from(point.coordinates())),
+        );
+    }
+    candidates
 }
 
 /// The middle of a piece's corners, which is somewhere near it and nowhere in
@@ -1820,12 +3022,19 @@ fn how_big_the_surface_is(surface: &Surface, there: Point) -> f64 {
 /// axis or centre, so both are provably inside — which is what the winding
 /// count then checks, in exact arithmetic and with no trust placed here.
 ///
-/// **A torus has two answers, and both are offered.** A plane cuts a torus in
-/// up to four circles, and where it goes through the torus's axis it cuts two,
-/// one round each place the ring crosses the plane. Which of the two a given
-/// wire goes round is not known here, and does not need to be: nothing about a
-/// candidate is trusted, so the one that is not inside is ruled out by the same
-/// count that proves the other in.
+/// **A torus has two answers on a plane through its axis, and both are
+/// offered.** A plane cuts a torus in up to four circles, and where it goes
+/// through the torus's axis it cuts two, one round each place the ring crosses
+/// the plane. Which of the two a given wire goes round is not known here, and
+/// does not need to be: nothing about a candidate is trusted, so the one that
+/// is not inside is ruled out by the same count that proves the other in.
+///
+/// **On a plane square to its axis it has one**, the foot of the torus's
+/// centre: the two circles it cuts there are both round the axis. The point is
+/// in the hole and holds nothing, and what it is for is the arcs. Without it
+/// the half ring a half bend's floor is on had no middle to step from, so
+/// [`half_way_into_either_arc`] and [`rungs_towards_each_crossing`] offered
+/// nothing off the `x` axis its four corners lie on (row Q1268).
 ///
 /// Nothing where the division has nothing to divide by, which is a pipe running
 /// along the plane rather than through it — and then the wire it cut is not a
@@ -1845,6 +3054,11 @@ fn the_middles_of_a_round_wire(flat: &Plane, partner: &Surface) -> Vec<Predicate
                     + axis.direction()
                         * ((offset - normal.dot(axis.origin() - Point::origin())) / along),
             ]
+        }
+        Surface::Torus(ring)
+            if lie_along_one_line(normal.components(), ring.axis().direction().components()) =>
+        {
+            vec![ring.centre()]
         }
         Surface::Torus(ring) => where_the_ring_crosses_the_plane(normal, offset, ring),
         // **The same point, and it takes a proof rather than a picture.** Where
@@ -2244,18 +3458,24 @@ fn nothing_to_measure_from(piece: &Piece, log: &mut ProvenanceLog) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Cone, Orientation, Plane, Point, Sphere, Surface, Torus};
+    use rcad_geom::{
+        Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface,
+        SurfaceMeet, Torus, Vector, intersect,
+    };
     use rcad_predicates::{
-        Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
+        Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
     };
     use smallvec::SmallVec;
 
     use super::{
-        InPlane, Piece, candidate_points, corners_of, every_picker_keeps, midway_between,
+        InPlane, Piece, Rule, a_face_of_the_input_holds, candidate_points, choose, corners_of,
+        every_picker_keeps, midway_between, the_meridian_circle_each_side_runs_round,
         the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
-    use crate::fuse::{FaceMeet, MeetPoint};
+    use crate::fuse::bake::{BakedFace, BakedSolid, bake};
+    use crate::fuse::{FaceMeet, MeetPoint, Scratch};
+    use crate::{Model, ProfileBuilder};
 
     /// Adding first overflows here: `1e308 + 1.5e308` is past the largest
     /// double, and the middle, `1.25e308`, is not.
@@ -2280,6 +3500,39 @@ mod tests {
         assert_eq!(middle, PredicatePoint::Exact([2.0 * smallest, 0.0, 0.0]));
     }
 
+    /// The triangle a fan of the top of
+    /// `tests/three_cut_lines_through_one_corner_of_a_skew_pair.rs`'s two
+    /// leaning blocks holds: from `(1, 1)` to the corner `(3, 1)`, and on to a
+    /// second meet a rounding from that corner, all at `z = 2`. Its first and
+    /// last sides run along one line, opposite ways, so a point off that line
+    /// turns one way about the first and the other way about the last. Which
+    /// way it turns about the short side nothing can say, and that is not
+    /// needed to know the point is outside (Q1145).
+    #[test]
+    fn a_point_off_a_triangle_with_a_side_a_rounding_long_is_outside_it() {
+        let top = Plane::from_coefficients([0.0, 0.0, 1.0, -2.0]).expect("a normal");
+        let in_plane = InPlane::of(&top).expect("a plane with a point off it");
+        let apex = PredicatePoint::from([1.0, 1.0, 2.0]);
+        let corner = PredicatePoint::from([3.0, 1.0, 2.0]);
+        let a_rounding_away = PredicatePoint::Constructed([
+            Interval::around(3.0, 2e-15).expect("a finite box"),
+            Interval::around(1.0, 1e-15).expect("a finite box"),
+            Interval::exactly(2.0),
+        ]);
+        let well_inside_the_top = PredicatePoint::from([7.0 / 3.0, 4.0 / 3.0, 2.0]);
+        assert!(
+            matches!(
+                in_plane.turn(corner, a_rounding_away, well_inside_the_top),
+                Decision::Undecidable { .. }
+            ),
+            "the short side's turn is the one nothing can say"
+        );
+        assert_eq!(
+            in_plane.inside_triangle(apex, corner, a_rounding_away, well_inside_the_top),
+            Some(0)
+        );
+    }
+
     /// The torus `a_quarter_bend(4, 1)` is drawn on, and the plane `y = 0` its
     /// end cap lies on.
     fn a_bend_and_its_end_cap_plane() -> (Surface, Plane) {
@@ -2297,6 +3550,18 @@ mod tests {
             .collect();
         middles.sort_by(|one, other| one[0].total_cmp(&other[0]));
         assert_eq!(middles, [[-4.0, 0.0, 0.0], [4.0, 0.0, 0.0]]);
+    }
+
+    /// Both circles `z = 0.5` cuts the bend in are round the axis, so their
+    /// middle is where the axis meets the plane.
+    #[test]
+    fn a_plane_square_to_a_bends_axis_offers_where_the_axis_meets_it() {
+        let (ring, _) = a_bend_and_its_end_cap_plane();
+        let across = Plane::from_coefficients([0.0, 0.0, 1.0, -0.5]).expect("a normal");
+        assert_eq!(
+            the_middles_of_a_round_wire(&across, &ring),
+            [PredicatePoint::from([0.0, 0.0, 0.5])]
+        );
     }
 
     /// The torus's inside on `y = 0` is two disks, and the sign of the torus
@@ -2418,6 +3683,57 @@ mod tests {
         );
     }
 
+    /// A bend's start cap on `y = 0`: its chord along the floor `z = 0` from
+    /// `(3, 0, 0)` to `(5, 0, 0)`, and half of the meridian circle round
+    /// `(4, 0, 0)` over the top, as the top half of a quarter bend has it. Its
+    /// two corners wind round nothing, so what holds a point is the arc's
+    /// bulge. The torus's sign holds the other disk, round `(−4, 0, 0)`, as
+    /// surely, and its upper half is on the bulge's side of the chord's line
+    /// too: only the half-space naming the arc's circle keeps it out (Q1373).
+    #[test]
+    fn a_bends_start_cap_holds_its_own_half_disk_and_not_the_other_disks_half() {
+        let (ring, _) = a_bend_and_its_end_cap_plane();
+        let cap = Plane::from_coefficients([0.0, -1.0, 0.0, 0.0]).expect("a normal");
+        let floor = Plane::from_coefficients([0.0, 0.0, -1.0, 0.0]).expect("a normal");
+        let corner = |x: f64, which: u8| MeetPoint::OfThreeSurfaces {
+            surfaces: [Surface::Plane(cap), ring, Surface::Plane(floor)],
+            which,
+            point: PredicatePoint::from([x, 0.0, 0.0]),
+        };
+        let half_disk = Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(cap),
+            orientation: Orientation::Forward,
+            wires: vec![vec![
+                FaceMeet {
+                    carried_by: [Surface::Plane(cap), Surface::Plane(floor)],
+                    ends: [corner(3.0, 0), corner(5.0, 1)],
+                    material_side: Decision::Neg,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+                FaceMeet {
+                    carried_by: [Surface::Plane(cap), ring],
+                    ends: [corner(5.0, 1), corner(3.0, 0)],
+                    material_side: Decision::Neg,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+            ]],
+            is_the_whole_surface: false,
+        };
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&half_disk, PredicatePoint::from(at))
+        };
+        assert_eq!(holds([4.0, 0.0, 0.5]), Some(true), "inside the half disk");
+        assert_eq!(holds([4.0, 0.0, -0.5]), Some(false), "under its chord");
+        assert_eq!(
+            holds([-4.0, 0.0, 0.5]),
+            Some(false),
+            "in the other disk, on the bulge's side of the chord's line"
+        );
+    }
+
     /// A piece of the wall `y = −10` inside the lower nappe of `x² + y² = (z/2)²`:
     /// one arc of the hyperbola and the chord `z = −52` across it, corners
     /// `(±24, −10, −52)`. The upper nappe's region on the same wall is inside the
@@ -2529,6 +3845,77 @@ mod tests {
         assert_eq!(holds([1.0, 0.0, -10.0]), Some(false), "the opposite wedge");
     }
 
+    /// A ball of radius 3 four up a cone of slope 1 crosses it in two circles,
+    /// at `z = 2 ∓ √2/2`, and `intersect` picks each out by a half-space
+    /// either side of `z = 2`. The ball's cap below the lower circle and its cap
+    /// above the upper one are both inside the cone, so the lower cap's side
+    /// alone held `(2.93, 0, 4.66)`, a point of the upper cap (Q1197). The
+    /// cone's band between the circles has a side along each, whose pickers
+    /// hold opposite halves of it, and it holds points either side of `z = 2`.
+    #[test]
+    fn a_balls_cap_below_a_cone_holds_nothing_of_its_cap_above() {
+        let cone = Surface::Cone(Cone::new(Axis::z(), 1.0).expect("a positive slope"));
+        let ball =
+            Surface::Sphere(Sphere::new(Point::from([0.0, 0.0, 4.0]), 3.0).expect("a radius"));
+        let SurfaceMeet::Curves(circles) = intersect(
+            &ball,
+            &cone,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a ball on a cone's axis crosses it") else {
+            panic!("a ball pushing out through a cone's side crosses it in curves");
+        };
+        let side = |on: Surface, partner: Surface, height: f64| {
+            let at = PredicatePoint::from([height, 0.0, height]);
+            let picked_by = circles
+                .iter()
+                .find_map(|circle| {
+                    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = circle.run() else {
+                        panic!("each of the two circles is picked out: {circle:?}");
+                    };
+                    picked_by
+                        .iter()
+                        .all(|picker| picker.side_of_point(at) == Decision::Pos)
+                        .then(|| picked_by.clone())
+                })
+                .expect("one of the two circles holds the point");
+            let starts = MeetPoint::WhereAClosedCurveStarts {
+                carried_by: [on, partner],
+                picked_by,
+                point: at,
+            };
+            vec![FaceMeet {
+                carried_by: [on, partner],
+                ends: [starts.clone(), starts],
+                material_side: Decision::Neg,
+                along: SmallVec::new(),
+                approximation: None,
+            }]
+        };
+        let piece = |surface: Surface, wires: Vec<Vec<FaceMeet>>| Piece {
+            ancestors: Vec::new(),
+            surface,
+            orientation: Orientation::Forward,
+            wires,
+            is_the_whole_surface: false,
+        };
+        let [low, high] = [-1.0, 1.0].map(|way| 2.0 + way * 2.0_f64.sqrt() / 2.0);
+        let lower_cap = piece(ball, vec![side(ball, cone, low)]);
+        let band = piece(cone, vec![side(cone, ball, low), side(cone, ball, high)]);
+        let holds = |piece: &Piece, at: [f64; 3]| {
+            the_piece_holds(piece, None, &[], &[], PredicatePoint::from(at))
+        };
+        assert_eq!(holds(&lower_cap, [0.75, 0.0, 1.1]), Some(true), "the cap");
+        assert_eq!(
+            holds(&lower_cap, [2.93, 0.0, 4.66]),
+            Some(false),
+            "the cap above"
+        );
+        assert_eq!(holds(&band, [1.5, 0.0, 1.5]), Some(true), "below z = 2");
+        assert_eq!(holds(&band, [2.5, 0.0, 2.5]), Some(true), "above z = 2");
+    }
+
     /// A disk on `z = 0` cut by a ball of radius 1 round `(0, 0, −0.75)`, so
     /// `√0.4375 ≈ 0.661` across from its middle. `(0.67, 0, −0.1)` is inside
     /// the ball, on the centre's side of the plane, and its foot `(0.67, 0, 0)`
@@ -2617,6 +4004,157 @@ mod tests {
         );
     }
 
+    /// A half disk a million units out on `x + z = 0`, a plane through the
+    /// origin: the ball of radius 1 round `(2²⁰, 0, −2²⁰)` cuts the plane in a
+    /// circle, and the chord `x = 2²⁰` across its middle keeps the half further
+    /// out. Its two corners are exact, on the plane, the ball and the chord.
+    ///
+    /// The point is one spacing of `z` off the plane, on the side
+    /// [`InPlane`]'s reference point is on, and its foot is `2⁻²⁰` short of the
+    /// chord, outside the half disk. `InPlane` reads a point off its plane where
+    /// the line from its reference point, one unit off the plane beside the
+    /// origin, meets the plane, and for a point `2²⁰` out that is `2²⁰` times the
+    /// point's height further out than its foot: about `8.6e-5` in `x`, so over
+    /// the chord. Read there the chord's turn put the point in the half disk
+    /// (`docs/decisions.md` §346.6, Q685).
+    #[test]
+    fn a_point_a_rounding_off_a_far_half_disk_whose_foot_is_short_of_its_chord_is_not_held() {
+        let out = f64::powi(2.0, 20);
+        let flat = Plane::from_coefficients([1.0, 0.0, 1.0, 0.0]).expect("a normal");
+        let ball = Sphere::new(Point::from([out, 0.0, -out]), 1.0).expect("a positive radius");
+        let chord = Plane::from_coefficients([1.0, 0.0, 0.0, -out]).expect("a normal");
+        let corner = |at: [f64; 3], which: u8| MeetPoint::OfThreeSurfaces {
+            surfaces: [
+                Surface::Plane(flat),
+                Surface::Sphere(ball),
+                Surface::Plane(chord),
+            ],
+            which,
+            point: PredicatePoint::from(at),
+        };
+        let [low, high] = [[out, -1.0, -out], [out, 1.0, -out]];
+        let half_disk = Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(flat),
+            orientation: Orientation::Forward,
+            wires: vec![vec![
+                FaceMeet {
+                    carried_by: [Surface::Plane(flat), Surface::Sphere(ball)],
+                    ends: [corner(low, 0), corner(high, 1)],
+                    material_side: Decision::Neg,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+                FaceMeet {
+                    carried_by: [Surface::Plane(flat), Surface::Plane(chord)],
+                    ends: [corner(high, 1), corner(low, 0)],
+                    material_side: Decision::Pos,
+                    along: SmallVec::new(),
+                    approximation: None,
+                },
+            ]],
+            is_the_whole_surface: false,
+        };
+        let short = out - f64::powi(2.0, -20);
+        let foot = PredicatePoint::from([short, 0.0, -short]);
+        let spacing = f64::powi(2.0, -33);
+        let point = PredicatePoint::from([short, 0.0, -short + spacing]);
+        assert_eq!(flat.side_of_point(foot), Decision::Zero);
+        assert_eq!(flat.side_of_point(point), Decision::Pos);
+        assert_eq!(ball.side_of(point), Decision::Neg);
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&half_disk, foot),
+            Some(false),
+            "short of the chord"
+        );
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&half_disk, point),
+            None,
+            "the point is read over the chord and its foot short of it"
+        );
+    }
+
+    /// A flat face `2²⁰` out on `x + y = 0`, a plane through the origin, and
+    /// two points a spacing off that plane in `x` and in `y` beside its near
+    /// edge `x = 2²⁰`, the one nearest the origin.
+    ///
+    /// The first point's foot is `2⁻²⁰` short of that edge, off the face, and
+    /// the point is on the side [`InPlane`]'s reference point is on, so it is
+    /// read about `1.7e-4` further out than its foot, over the edge. The second
+    /// point's foot is `2⁻²⁰` past the edge, on the face, and the point is on
+    /// the other side, so it is read about `3.4e-4` nearer the origin, back
+    /// over the edge. Wound round each point alone, the face held the first and
+    /// not the second (`docs/decisions.md` §346.6, Q1107). Wound round each
+    /// point's box stretched to the plane, the fan cannot say, and the model
+    /// answers as each foot says.
+    ///
+    /// **No fuse is known to reach this.** A point is asked of a face of an
+    /// input only once [`the_piece_holds`] has held its stretched box, and a
+    /// piece beside this face, sharing its edge with the same corners, does not
+    /// hold the first point
+    /// (`a_square_beside_a_far_face_does_not_hold_a_point_read_over_their_edge`).
+    #[test]
+    fn a_point_a_rounding_off_a_far_face_is_on_it_where_its_foot_is() {
+        let (model, solid, face) = a_far_face_on_a_plane_through_the_origin();
+        let on_it = |point: PredicatePoint| {
+            let piece = a_square_beside_the_far_face(face.surface);
+            a_face_of_the_input_holds(
+                &model,
+                &solid,
+                &face,
+                &piece,
+                point,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the corners are exact")
+        };
+        let out = f64::powi(2.0, 20);
+        let short = out - f64::powi(2.0, -20);
+        let past = out + f64::powi(2.0, -20);
+        let [below, above] = [f64::powi(2.0, -33), f64::powi(2.0, -32)];
+        let short_of_the_edge = PredicatePoint::from([short - below, -short - below, 0.5]);
+        let past_the_edge = PredicatePoint::from([past + above, -past + above, 0.5]);
+        assert!(
+            !on_it(PredicatePoint::from([short, -short, 0.5])),
+            "its foot"
+        );
+        assert!(
+            !on_it(short_of_the_edge),
+            "read over the edge, its foot short of it"
+        );
+        assert!(on_it(PredicatePoint::from([past, -past, 0.5])), "its foot");
+        assert!(
+            on_it(past_the_edge),
+            "read short of the edge, its foot past it"
+        );
+    }
+
+    /// The square beside the far face of the test above, sharing its near
+    /// edge, holds the first point's foot and not the point. [`the_piece_holds`]
+    /// winds the square's corners over the point's box stretched to the plane,
+    /// whose reading runs from beside the foot, in the square, to the point's,
+    /// on the face, and so crosses that edge. Every candidate is asked that
+    /// before any face of an input is, so a piece beside the face never hands
+    /// this point to [`a_face_of_the_input_holds`].
+    #[test]
+    fn a_square_beside_a_far_face_does_not_hold_a_point_read_over_their_edge() {
+        let (_, _, face) = a_far_face_on_a_plane_through_the_origin();
+        let square = a_square_beside_the_far_face(face.surface);
+        let short = f64::powi(2.0, 20) - f64::powi(2.0, -20);
+        let below = f64::powi(2.0, -33);
+        let foot = PredicatePoint::from([short, -short, 0.5]);
+        let point = PredicatePoint::from([short - below, -short - below, 0.5]);
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&square, foot),
+            Some(true)
+        );
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&square, point),
+            None
+        );
+    }
+
     /// A square on `z = 0` with the same ball's disk taken out of it. On the
     /// far side of the plane from the ball's centre the ball is narrower than
     /// the hole, so `(0.6, 0, 0.1)` is outside the ball while its foot
@@ -2659,6 +4197,7 @@ mod tests {
             .collect();
         let hole_starts = MeetPoint::WhereAClosedCurveStarts {
             carried_by: [Surface::Plane(flat), Surface::Sphere(ball)],
+            picked_by: SmallVec::new(),
             point: PredicatePoint::from([0.4375_f64.sqrt(), 0.0, 0.0]),
         };
         let hole = vec![FaceMeet {
@@ -2722,6 +4261,179 @@ mod tests {
         }
     }
 
+    /// The grazing block of `tests/a_block_edge_grazing_a_ball.rs` at `h = 0`.
+    ///
+    /// No point with `f64` coordinates is inside any of the three slivers its
+    /// two places fence off (§346.3), so no point search places them. Each is
+    /// placed by the side it shares with a piece of the other solid's face
+    /// (§365.3): the ball's sliver is inside the block, and the block's two are
+    /// inside the ball. Every other piece holds a point and is outside the other
+    /// solid. So an intersection keeps the three slivers and nothing else, and a
+    /// union keeps everything but them.
+    #[test]
+    fn the_three_slivers_of_a_block_edge_grazing_a_ball_are_placed_by_the_sides_they_share() {
+        let place = f64::powi(2.0, -51);
+        let edge = f64::powi(2.0, -25);
+        let the_two_places = [
+            PredicatePoint::Exact([-1.0, edge, -place]),
+            PredicatePoint::Exact([-1.0, edge, place]),
+        ];
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let ball = model
+            .add_ball(1.0 + place, &Isometry::identity())
+            .expect("a positive radius");
+        let square = ProfileBuilder::new(vec![
+            [-4.0, edge],
+            [-1.0, edge],
+            [-1.0, edge + 3.0],
+            [-4.0, edge + 3.0],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+        let block = model
+            .add_extrusion(
+                &square,
+                4.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, -2.0)).expect("a finite shift"),
+            )
+            .expect("a positive height");
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let scratch = Scratch::split_both_groups(&model, &[ball], &[block], &policy, &mut log)
+            .expect("the two places are exact and apart, so the cutting decides everything");
+        let mut kept = |rule: Rule| -> Vec<usize> {
+            choose(&model, &scratch, rule, &policy, &mut log)
+                .expect("every piece is placed, the three slivers by their sides")
+                .iter()
+                .map(|chosen| {
+                    assert!(!chosen.reversed, "{rule:?} turns nothing round");
+                    chosen.piece
+                })
+                .collect()
+        };
+
+        let inside_the_other = kept(Rule::Intersection);
+        let surfaces: Vec<Surface> = inside_the_other
+            .iter()
+            .map(|&index| {
+                let sliver = &scratch.pieces[index];
+                assert!(
+                    corners_of(sliver)
+                        .concat()
+                        .iter()
+                        .all(|corner| the_two_places.contains(corner)),
+                    "a sliver's corners are the two places: {sliver:?}"
+                );
+                sliver.surface
+            })
+            .collect();
+        let the_ball = Sphere::new(Point::from([0.0, 0.0, 0.0]), 1.0 + place).expect("a radius");
+        let the_wall_at = |coefficients| {
+            Surface::Plane(Plane::from_coefficients(coefficients).expect("a normal"))
+        };
+        assert_eq!(
+            surfaces,
+            [
+                Surface::Sphere(the_ball),
+                the_wall_at([0.0, -1.0, 0.0, edge]),
+                the_wall_at([1.0, 0.0, 0.0, 1.0]),
+            ],
+            "the ball's sliver, then the block's on y = 2^-25 and on x = -1"
+        );
+        let everything_else: Vec<usize> = (0..scratch.pieces.len())
+            .filter(|index| !inside_the_other.contains(index))
+            .collect();
+        assert_eq!(kept(Rule::Union), everything_else);
+        assert!(log.is_empty(), "a certified fuse asked nothing: {log:?}");
+    }
+
+    /// The side of a three-cornered bar one unit tall standing on
+    /// `(2²⁰, −2²⁰)`, `(2²⁰ + 1, −2²⁰ − 1)` and `(2²⁰ + 1, −2²⁰)`: the face on
+    /// `x + y = 0` between the first two, with the model and the baked bar it
+    /// is a face of. Its four corners are exact and on its plane.
+    fn a_far_face_on_a_plane_through_the_origin() -> (Model, BakedSolid, BakedFace) {
+        let out = f64::powi(2.0, 20);
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let triangle = ProfileBuilder::new(vec![
+            [out, -out],
+            [out + 1.0, -out - 1.0],
+            [out + 1.0, -out],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a triangle");
+        let bar = model
+            .add_extrusion(&triangle, 1.0, &Isometry::identity())
+            .expect("a positive height");
+        let [solid] = <[BakedSolid; 1]>::try_from(
+            bake(
+                &model,
+                &[bar],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar bakes"),
+        )
+        .expect("one solid");
+        let face = solid
+            .faces
+            .iter()
+            .find(|face| {
+                face.surface.as_plane().is_some_and(|flat| {
+                    let [x, y, z] = flat.normal().components();
+                    x == y && z == 0.0
+                })
+            })
+            .expect("the bar has a side on x + y = 0")
+            .clone();
+        let flat = face.surface.as_plane().expect("a flat face");
+        assert_eq!(flat.offset(), 0.0, "through the origin");
+        for edge in face.wires.iter().flatten() {
+            assert_eq!(flat.side_of_point(edge.start.point), Decision::Zero);
+        }
+        (model, solid, face)
+    }
+
+    /// A square on the far face's plane, from `x = 2²⁰ − 1` to its near edge
+    /// `x = 2²⁰` and one unit tall, its corners exact and wound the way its
+    /// plane's [`InPlane`] counts as one.
+    fn a_square_beside_the_far_face(flat: Surface) -> Piece {
+        let out = f64::powi(2.0, 20);
+        let corners = [
+            [out - 1.0, 1.0 - out, 0.0],
+            [out, -out, 0.0],
+            [out, -out, 1.0],
+            [out - 1.0, 1.0 - out, 1.0],
+        ];
+        let walls = [
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, out],
+            [0.0, 0.0, 1.0, -1.0],
+            [1.0, 0.0, 0.0, 1.0 - out],
+        ]
+        .map(|wall| Surface::Plane(Plane::from_coefficients(wall).expect("a normal")));
+        let corner = |which: usize| MeetPoint::OfThreeSurfaces {
+            surfaces: [flat, walls[(which + 3) % 4], walls[which]],
+            which: 0,
+            point: PredicatePoint::from(corners[which]),
+        };
+        let square = (0..4)
+            .map(|which| FaceMeet {
+                carried_by: [flat, walls[which]],
+                ends: [corner(which), corner((which + 1) % 4)],
+                material_side: Decision::Neg,
+                along: SmallVec::new(),
+                approximation: None,
+            })
+            .collect();
+        Piece {
+            ancestors: Vec::new(),
+            surface: flat,
+            orientation: Orientation::Forward,
+            wires: vec![square],
+            is_the_whole_surface: false,
+        }
+    }
+
     /// A ball of radius 1 whose centre is `below` under the origin, and the
     /// plane `z = 0` it cuts.
     fn a_ball_cutting_z_0_round_the_origin(below: f64) -> (Sphere, Plane) {
@@ -2741,7 +4453,13 @@ mod tests {
         let also_picked_by =
             what_else_each_round_wire_asks(piece, &Policy::certified(), &mut ProvenanceLog::new())
                 .expect("a plane crosses a torus in circles");
-        the_piece_holds(piece, Some(&in_plane), &also_picked_by, point)
+        let meridians = the_meridian_circle_each_side_runs_round(
+            piece,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a plane crosses a torus in circles");
+        the_piece_holds(piece, Some(&in_plane), &also_picked_by, &meridians, point)
     }
 
     /// A piece of `flat` bounded by whole circles it cuts `ring` in, one wire
@@ -2757,6 +4475,7 @@ mod tests {
             .map(|&corner| {
                 let starts = MeetPoint::WhereAClosedCurveStarts {
                     carried_by,
+                    picked_by: SmallVec::new(),
                     point: PredicatePoint::from(corner),
                 };
                 vec![FaceMeet {

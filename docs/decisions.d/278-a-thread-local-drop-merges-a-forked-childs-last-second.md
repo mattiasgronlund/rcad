@@ -201,3 +201,17 @@ of this lane's budget.
 still lose their runs, unchanged and unmeasured by this lane; measuring
 `-fork`'s own per-worker loss on a run long enough to average out job-count
 noise, if the 0.46% bound is ever worth tightening.
+
+### 278.7 Q187 waits until something needs a tighter bound than 0.46%
+
+*2026-10-08, the dispatcher.* Q187 is the second item of 278.6's "left", and
+its own text calls it low value. Nothing reads 267.6's 0.46% bound closely
+enough to need it tighter. No decision, row or report turns on whether the loss
+under `-fork` is 0.46% or 0.1%. So the measurement has no consumer, and §13
+says not to build it. The fill offered it today only because Q1270's write set
+held every rcad-topo row back. A slot going to it would cost a lane, and two
+cores of fuzzing beside lanes that are gating.
+
+It is parked, not dropped. Unpark it when a row, a section or a report needs
+the loss under `-fork` to better than 0.46%. Q174, comparing a week of nights
+against their logs (§269.7), is the likeliest place for that need to show up.

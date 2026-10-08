@@ -9,7 +9,7 @@
 //!
 //! A **pointed cone** ends at its apex, where the surface pinches to a point and
 //! has no normal. That is the same species of shape as a ball's pole, and it is
-//! answered with the same machinery: the mesher's `where_this_surface_pinches`
+//! answered with the same machinery: `Surface::where_it_pinches` in `rcad-geom`
 //! says a cone pinches at `v = 0`, and `cut_a_cap_up_to_its_pole` cuts the one
 //! loop of the face up to it exactly as it cuts a ball's cap. **A cone's apex
 //! needs no seam and no `WireStep::Pole`**, which is where it differs from a

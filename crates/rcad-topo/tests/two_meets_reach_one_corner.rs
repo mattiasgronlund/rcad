@@ -23,9 +23,11 @@
 //! - The grazing block's two places fence off three pieces — the ball's skin
 //!   inside the block and two slivers of the block's faces inside the ball —
 //!   and **no point with `f64` coordinates is inside any of them**
-//!   (`a_block_edge_grazing_a_ball.rs` shows it). `select` places a piece by a
-//!   point inside it, so it refuses there under any policy, and no better
-//!   point can be built (§346).
+//!   (`a_block_edge_grazing_a_ball.rs` shows it). Where the block reaches both
+//!   places, `select` places the three by the sides they share (§365.3), and
+//!   stops on a lens of the ball beyond the block's floor or roof instead.
+//!   Where it reaches one, the ball's sliver shares no side with the block and
+//!   is still refused. The test below says which piece each form stops on.
 //! - The small ball's piece inside the cube used to be refused the same way,
 //!   because `select` gave a point on a curved face a box floored at one unit
 //!   wide. That box is sized by the ball now, and the fuse gets past `select`.
@@ -61,15 +63,34 @@ const EVERY_CORNER: [Corner; 3] = [
     Corner::BottomPlaceBlockAbove,
 ];
 
+/// Each corner form refuses `a point inside a piece of a face`, on a piece of
+/// the ball, and which piece depends on where the block is.
+///
+/// - **With the block above the top place**, on the sliver between the two
+///   places. It holds no point with `f64` coordinates (§346.3), and it is
+///   outside the block, below its floor, touching the block only at the
+///   corner. So no side of it is a side of a piece of the block's faces, and
+///   the rule that places a piece by a side it shares (§365.3) cannot reach
+///   it.
+/// - **With the block reaching the other place**, the three slivers are placed
+///   by that rule, and the refusal moves to the ball's lens beyond `x = −1` on
+///   the far side of the block's floor or roof from the slivers. That lens runs
+///   between `(−1, ±2⁻²⁵, ±2⁻⁵¹)`, `2⁻²⁴` across and `2⁻²⁵` high, with both its
+///   corners on the plane of the block's face: the candidates blended from two
+///   corners lie on that plane, not in the lens. It is outside the block and
+///   touches it at one corner, so the rule does not reach it either. Until the
+///   rule these refused on the sliver, as the first one does.
 #[test]
-fn a_block_corner_where_its_edge_grazes_a_ball_refuses_on_the_piece_between_the_two_places() {
+fn a_block_corner_where_its_edge_grazes_a_ball_refuses_on_a_piece_of_the_ball_without_a_point() {
     let place = f64::powi(2.0, -51);
     let edge = f64::powi(2.0, -25);
-    let the_two_places = [
-        PredicatePoint::Exact([-1.0, edge, -place]),
-        PredicatePoint::Exact([-1.0, edge, place]),
-    ];
     for corner in EVERY_CORNER {
+        let refused_on = match corner {
+            Corner::TopPlaceBlockAbove => [[-1.0, edge, -place], [-1.0, edge, place]],
+            Corner::TopPlaceBlockBelow => [[-1.0, edge, place], [-1.0, -edge, place]],
+            Corner::BottomPlaceBlockAbove => [[-1.0, -edge, -place], [-1.0, edge, -place]],
+        }
+        .map(PredicatePoint::Exact);
         for policy in [Policy::certified(), Policy::tolerant(25.0)] {
             for rule in EVERY_RULE {
                 let mut model =
@@ -80,15 +101,14 @@ fn a_block_corner_where_its_edge_grazes_a_ball_refuses_on_the_piece_between_the_
                 ) {
                     Err(Error::Undecidable { records }) => records.records().to_vec(),
                     Ok(fused) => panic!(
-                        "{policy:?}: the fuse answered with {} solids, so `select` placed \
-                         a point in a piece §346 says holds no point with f64 coordinates. \
-                         These shapes can now show which place `a_corner_is_this_place` \
-                         folds (§288.3)",
+                        "{policy:?}: the fuse answered with {} solids, so every piece of the \
+                         ball was placed. These shapes can now show which place \
+                         `a_corner_is_this_place` folds (§288.3)",
                         fused.solids().len()
                     ),
                     Err(other) => panic!("{policy:?}: {other:?}"),
                 };
-                assert_the_one_refusal_is_the_piece(&records, &the_two_places, (corner, rule));
+                assert_the_one_refusal_is_the_piece(&records, &refused_on, (corner, rule));
             }
         }
     }

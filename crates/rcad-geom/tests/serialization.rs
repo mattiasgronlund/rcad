@@ -36,6 +36,58 @@ fn an_axis_comes_back_pointing_the_same_way() {
     assert_eq!(there_and_back(axis), axis);
 }
 
+/// An axis a turn left an ulp off length one comes back from its bytes with
+/// the bits it was stored with, because the way in is `Axis::as_written` and
+/// not `Axis::new`, which scales the direction again.
+///
+/// The three coordinate axes, each turned about `x`, `y`, `z` and `(1, 2, 3)`
+/// by every tenth of a radian up to a whole turn, and moved off the origin:
+/// `Axis::new` would have moved the direction of 175 of the 744, and the
+/// bytes move none. The ring of the turned bend in `rcad-step`'s
+/// `how_often_a_turned_bend_comes_back_from_its_own_file` is one of them,
+/// `z` turned about `x` by `2.5` (`docs/decisions.md` §355.6).
+#[test]
+fn an_axis_a_turn_left_comes_back_from_its_bytes_with_the_bits_it_was_stored_with() {
+    let bits = |axis: Axis| {
+        let [x, y, z] = axis.origin().coordinates();
+        let [u, v, w] = axis.direction().components();
+        [x, y, z, u, v, w].map(f64::to_bits)
+    };
+    let about = [
+        Axis::x(),
+        Axis::y(),
+        Axis::z(),
+        Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction"),
+    ];
+    let (mut turned, mut new_would_move, mut the_bytes_moved) = (0, 0, 0);
+    for axis in [Axis::x(), Axis::y(), Axis::z()] {
+        for spin in &about {
+            for tenths in 1..63 {
+                let turn = Isometry::translation(Vector::new(3.0, 5.0, 10.0))
+                    .expect("a finite offset")
+                    .compose(
+                        &Isometry::rotation(spin, f64::from(tenths) * 0.1)
+                            .expect("a finite angle about a unit axis"),
+                    );
+                let stored = axis.transformed(&turn);
+                turned += 1;
+                let scaled = Axis::new(stored.origin(), stored.direction()).expect("a finite axis");
+                if bits(scaled) != bits(stored) {
+                    new_would_move += 1;
+                }
+                if bits(there_and_back(stored)) != bits(stored) {
+                    the_bytes_moved += 1;
+                }
+            }
+        }
+    }
+    println!(
+        "{turned} turned axes: Axis::new would move {new_would_move}, the bytes moved \
+         {the_bytes_moved}"
+    );
+    assert_eq!((turned, new_would_move, the_bytes_moved), (744, 175, 0));
+}
+
 #[test]
 fn an_orientation_comes_back_the_same_way_round() {
     for orientation in [Orientation::Forward, Orientation::Reversed] {
@@ -197,8 +249,10 @@ fn a_cone_comes_back_with_the_same_apex_axis_and_slope() {
 /// every `# Panics` a cone can reach has to be a shape the arenas cannot hold.
 /// `Cone::basis`, `Cone::point_at` and `Cone::coordinates_of` all divide by or
 /// multiply through the axis direction and the slope, and
-/// `#[serde(try_from = "(Axis, f64)")]` makes `Cone::new` — and through it
-/// `Axis::new` — the only route in, on the wire as in code.
+/// `#[serde(try_from = "(Axis, f64)")]` makes `Cone::new` the only route in, on
+/// the wire as in code, and through it `Axis::as_written`, which keeps a
+/// direction only when its length is within a hair of one and hands any other
+/// to `Axis::new`'s checks.
 #[test]
 fn a_cone_stored_with_a_spread_that_is_not_a_spread_is_refused_on_the_way_in() {
     for slope in [
@@ -278,8 +332,10 @@ fn a_torus_comes_back_with_the_same_centre_axis_and_two_radii() {
 /// `Model` derives `Deserialize`, so a torus arrives from a stranger's bytes and
 /// every `# Panics` a torus can reach has to be a shape the arenas cannot hold.
 /// `Torus::basis` panics on an axis direction with no length, and
-/// `#[serde(try_from = "(Axis, f64, f64)")]` makes `Torus::new` — and through it
-/// `Axis::new` — the only route in, on the wire as in code.
+/// `#[serde(try_from = "(Axis, f64, f64)")]` makes `Torus::new` the only route
+/// in, on the wire as in code, and through it `Axis::as_written`, which keeps a
+/// direction only when its length is within a hair of one and hands any other
+/// to `Axis::new`'s checks.
 ///
 /// **The tube-against-ring row is the one no other surface has.** A ball, a pipe
 /// and a cone each carry one size and it is either a size or it is not; a torus

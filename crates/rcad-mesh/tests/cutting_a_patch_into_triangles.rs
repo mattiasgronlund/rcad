@@ -35,9 +35,11 @@
 //! mesher underneath is free to disagree with itself.
 
 use std::collections::HashSet;
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use rcad_geom::{Axis, Cylinder, Deflection, Plane, Point, Scale, Sphere, Surface, Vector};
+use rcad_geom::{
+    Axis, Cylinder, Deflection, Isometry, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
+};
 use rcad_mesh::{CannotTriangulate, Loop, Patch, TrimmedDomain, triangulate};
 use rcad_predicates::{Cause, Decision, orient2d};
 
@@ -450,6 +452,106 @@ fn the_other_ways_a_loop_can_land_on_another_loops_side_are_refused_too() {
     }
 }
 
+/// A loop that runs down one line and back up the same line rests its own
+/// corners on its own side, and is refused as a loop touching itself.
+///
+/// The loop is the sliver `rcad-topo`'s mesher once cut off a ring of 8 and 1
+/// (Q1307, Q1352): a quarter bend turned 27.1 degrees about `x`, written, read
+/// back and meshed at 1.8, before Q1344 stopped it cutting there. Every corner
+/// is within two roundings of the tube angle `π`. Its side from corner 2 down to
+/// corner 3 runs along `u = π` exactly, and corners 4 and 5 come back up the
+/// same line, so they sit on that side.
+///
+/// It came back as the 9 triangles Q1307's trace printed, a fan from corners 1
+/// and 2. Twice their area is `1.8601965322712705e-15` where twice the loop's
+/// is `1.86019653227127e-15`, the same but for the last rounding, since the
+/// stretch the loop runs down and back up encloses nothing. But the side from
+/// corner 2 to corner 3 was cut at corner 5, and the sides from 3 to 4 and from
+/// 4 to 5 were in no triangle at all. The face across that side draws it whole,
+/// so the mesher found a side drawn once and refused the whole solid
+/// `TwoPatchesOfTheMeshDrewTheSameSide`. No mesh of this loop can draw those
+/// three sides, since a triangle on them would have its three corners on one
+/// line.
+///
+/// Corners 0 and 3 are where the mesher had cut the face, and it says so with
+/// `with_corners_between_two_edges`; without that the same loop came back as
+/// 11 triangles, with the same three sides missing.
+#[test]
+fn a_loop_that_runs_back_up_its_own_side_is_refused() {
+    let on = PI;
+    let one_under = PI.next_down();
+    let two_under = one_under.next_down();
+    let two_over = PI.next_up().next_up();
+    let mut corners = vec![
+        [two_under, FRAC_PI_2],
+        [two_over, FRAC_PI_2 * 2.0 / 3.0],
+        [on, FRAC_PI_2 / 3.0],
+        [on, 0.0],
+    ];
+    let back_up = [
+        on, on, one_under, one_under, one_under, one_under, one_under, two_under, two_under,
+    ];
+    for (step, u) in (1_u32..).zip(back_up) {
+        corners.push([u, FRAC_PI_2 * f64::from(step) / 10.0]);
+    }
+    let ring = Torus::new(Axis::z(), 8.0, 1.0).expect("a tube inside its ring");
+    let deflection = Deflection::of(1.799_999_999_999_964).expect("a positive length");
+    let mut between = vec![false; 13];
+    between[0] = true;
+    between[3] = true;
+    let domain = domain_at(deflection, Surface::from(ring), corners.clone(), Vec::new())
+        .with_corners_between_two_edges(between);
+
+    match triangulate(&domain) {
+        Err(CannotTriangulate::LoopsTouch { corner, side, .. }) => {
+            assert_eq!(
+                side, 2,
+                "the side the loop runs back up is the one from corner 2"
+            );
+            assert!(
+                [4, 5].contains(&corner),
+                "corners 4 and 5 are the ones on that side, not {corner}"
+            );
+        }
+        Ok(patch) => {
+            let moved_to_zero: Vec<[f64; 2]> = corners
+                .iter()
+                .map(|corner| [corner[0] - PI, corner[1]])
+                .collect();
+            let missing: Vec<_> = every_side(&corners, &[])
+                .difference(&sides_of_the_triangles(&patch))
+                .copied()
+                .collect();
+            panic!(
+                "came back as {} triangles covering {} where the loop encloses {}, with \
+                 these sides in no triangle: {missing:?}",
+                patch.triangles().len(),
+                twice_the_area_of_the_triangles(&patch),
+                twice_the_area_of(&moved_to_zero).abs()
+            );
+        }
+        Err(other) => panic!("refused, but not as a loop touching itself: {other:?}"),
+    }
+}
+
+/// A loop with every corner on one line rests one on a side too, but encloses
+/// nothing, and comes back with no triangles, which is all of it.
+///
+/// Refusing it as well changed what `rcad-topo` says about a fuse whose answer
+/// is slivers `2⁻⁷⁸` wide (`a_block_edge_grazing_a_ball.rs`): a flat face of
+/// one is three corners on one line, and the solid is refused on its curved
+/// face instead.
+#[test]
+fn a_loop_with_every_corner_on_one_line_comes_back_with_no_triangles() {
+    let patch = triangulate(&domain_of(
+        flat(),
+        vec![[0.0, 0.0], [4.0, 0.0], [1.0, 0.0]],
+        Vec::new(),
+    ))
+    .expect("a loop that encloses nothing");
+    assert_eq!(patch.triangles(), &[] as &[[u32; 3]]);
+}
+
 /// A hole meeting the outline at a corner they both name is meshed, hole and
 /// all.
 ///
@@ -592,16 +694,446 @@ fn a_clockwise_disc_cut_by_corner_order_turns_every_triangle_anticlockwise() {
     );
 }
 
-/// Corner order cuts only a flat patch with no hole and an outline that turns
-/// one way at every corner. Every other patch asked for it is cut as though it
-/// had not been asked.
+/// A ring between a circle of 40 corners and one of 24 inside it, both about
+/// `(3, −5)`, the outline anticlockwise from `turn` and the hole clockwise from
+/// `turn + offset`, the way a face's hole runs against its outline.
+fn a_ring_turned_and_moved(turn: f64, offset: f64) -> (Vec<[f64; 2]>, Vec<[f64; 2]>) {
+    let round = |count: u32, radius: f64, from: f64| -> Vec<[f64; 2]> {
+        (0..count)
+            .map(|step| {
+                let angle = TAU * f64::from(step) / f64::from(count) + from;
+                [3.0 + radius * angle.cos(), -5.0 + radius * angle.sin()]
+            })
+            .collect()
+    };
+    let mut hole = round(24, 0.8, turn + offset);
+    hole.reverse();
+    (round(40, 2.0, turn), hole)
+}
+
+/// A ring's outline and hole are near-ties for the Delaunay test wherever a
+/// side of one faces a side of the other square, so the same ring turned and
+/// moved is cut into other triangles. Asked to be cut by the order of its
+/// corners, it is cut the same every time, whether or not the hole's first
+/// corner is across from the outline's (`docs/decisions.md` §379.5, Q1109).
+#[test]
+fn a_ring_cut_by_corner_order_is_cut_the_same_however_it_is_turned_and_moved() {
+    let turns = (0..12).map(|step| 0.3 * f64::from(step) + 0.01);
+    let by_delaunay: Vec<Vec<[u32; 3]>> = turns
+        .clone()
+        .map(|turn| {
+            let (outer, hole) = a_ring_turned_and_moved(turn, 0.0);
+            let mut triangles = triangulate(&domain_of(flat(), outer, vec![hole]))
+                .expect("a ring")
+                .triangles()
+                .to_vec();
+            for triangle in &mut triangles {
+                triangle.sort_unstable();
+            }
+            triangles.sort_unstable();
+            triangles
+        })
+        .collect();
+    let cut_differently = by_delaunay
+        .iter()
+        .filter(|triangles| **triangles != by_delaunay[0])
+        .count();
+    println!(
+        "the Delaunay test cut {cut_differently} of 11 turned rings differently from the first"
+    );
+    assert!(
+        cut_differently > 0,
+        "the Delaunay test cut every turned ring the same, so this tells corner order from it \
+         by nothing"
+    );
+
+    for offset in [0.0, 1.0, -2.5] {
+        let mut by_corner_order = Vec::new();
+        for turn in turns.clone() {
+            let name = format!("a ring turned by {turn}, its hole by {offset} more");
+            let (outer, hole) = a_ring_turned_and_moved(turn, offset);
+            let domain = domain_of(flat(), outer, vec![hole]).cut_by_corner_order();
+            check_everything(&name, &domain);
+            let patch = triangulate(&domain).expect("checked just above");
+            every_triangle_turns_anticlockwise(&name, &patch);
+            by_corner_order.push(patch.triangles().to_vec());
+        }
+        assert!(
+            by_corner_order
+                .iter()
+                .all(|triangles| *triangles == by_corner_order[0]),
+            "cut by corner order, the rings whose hole is turned {offset} more still came out in \
+             different triangles"
+        );
+        let (outer, hole) = a_ring_turned_and_moved(0.01, offset);
+        assert_ne!(
+            triangulate(
+                &domain_of(flat(), outer.clone(), vec![hole.clone()]).cut_by_corner_order()
+            ),
+            triangulate(&domain_of(flat(), outer, vec![hole])),
+            "the ring whose hole is turned {offset} more came out as spade cuts it, so it was \
+             not cut by corner order"
+        );
+    }
+}
+
+/// A ring whose outline runs clockwise and hole anticlockwise is cut into
+/// triangles that turn anticlockwise, like every other patch's.
+#[test]
+fn a_clockwise_ring_cut_by_corner_order_turns_every_triangle_anticlockwise() {
+    let (mut outer, mut hole) = a_ring_turned_and_moved(0.0, 0.0);
+    outer.reverse();
+    hole.reverse();
+    let domain = domain_of(flat(), outer, vec![hole]).cut_by_corner_order();
+    check_everything("a clockwise ring", &domain);
+    every_triangle_turns_anticlockwise(
+        "a clockwise ring",
+        &triangulate(&domain).expect("checked just above"),
+    );
+}
+
+/// A ring whose outline's corner 0 lies on the line through one of its hole's
+/// sides, or a rounding to either side of it, is cut into the unplaced ring's
+/// triangles, corner for corner and in order, under each of the twelve
+/// placements of `docs/decisions.md` §333.2 — where that side is at the end of
+/// the run of sides the corner sees that leaves the middle where it was.
+///
+/// The corner `(2, 4)` is on the line `u = 2` of the hole's side 7 and sees
+/// sides 5 and 6 from outside, and side 7 too once a rounding past the line:
+/// the run's middle is the hole's corner 6 either way. Placed, the corner
+/// lands a rounding to either side of the line, and once exactly on it. A
+/// corner on the line used to send the ring to spade, so on the base the ring
+/// on the line was cut into other triangles under all twelve placements, 14 of
+/// its 16 apart, and the ring a rounding past it under the one placement that
+/// put the corner back on the line, 12 apart (Q1274).
+#[test]
+fn a_ring_whose_corner_is_on_a_hole_sides_line_is_cut_the_same_wherever_it_is_put() {
+    for (nudged, nudge) in ON_THE_LINE_AND_A_ROUNDING_TO_EITHER_SIDE {
+        let (outline, hole) = an_octagon_round_an_octagon_from([2.0, 4.0], nudge);
+        let (unplaced, placed) = how_each_placement_cuts(nudged, &outline, &hole);
+        assert_eq!(
+            unplaced.start,
+            Some(6),
+            "{nudged}: the unplaced ring did not start the hole at its corner 6: {unplaced:?}"
+        );
+        for cut in &placed {
+            assert_eq!(
+                cut.triangles, unplaced.triangles,
+                "{nudged}, {}: placed, the ring was cut into other triangles than unplaced: \
+                 {cut:?} against {unplaced:?}",
+                cut.name
+            );
+        }
+    }
+}
+
+/// The same ring with its corner on the line through the hole's side at the
+/// other end of the run starts the hole one corner on wherever the placed
+/// corner sees that side, and is then cut into other triangles than the
+/// unplaced ring: a whole cut of the ring each time, but not the same one.
+///
+/// The corner `(−2, 4)` is on the line `u = −2` of the hole's side 3 and sees
+/// sides 4 and 5 from outside, whose middle is the hole's corner 5, and side 3
+/// too once a rounding past the line, which moves the middle to corner 4. The
+/// start is read from the corners the triangulator is handed, and no rule on
+/// those holds at both ends of the run (`the_corner_of_the_hole_across_from`
+/// in `triangulate.rs`); this pins what the rule does instead (Q1274).
+#[test]
+fn a_ring_whose_corner_is_a_rounding_off_a_hole_sides_line_starts_where_the_corner_sees() {
+    let mut started_elsewhere = 0;
+    for (nudged, nudge) in ON_THE_LINE_AND_A_ROUNDING_TO_EITHER_SIDE {
+        let (outline, hole) = an_octagon_round_an_octagon_from([-2.0, 4.0], nudge);
+        let (unplaced, placed) = how_each_placement_cuts(nudged, &outline, &hole);
+        for cut in core::iter::once(&unplaced).chain(&placed) {
+            let sees_side_3 = cut.sees.as_bytes()[3] == b'+';
+            assert_eq!(
+                cut.start,
+                Some(if sees_side_3 { 4 } else { 5 }),
+                "{nudged}, {}: the hole did not start where the corner's run puts the middle: \
+                 {cut:?}",
+                cut.name
+            );
+            assert_eq!(
+                cut.triangles == unplaced.triangles,
+                cut.start == unplaced.start,
+                "{nudged}, {}: the cut is not fixed by where the hole starts: {cut:?} against \
+                 {unplaced:?}",
+                cut.name
+            );
+        }
+        started_elsewhere += placed
+            .iter()
+            .filter(|cut| cut.start != unplaced.start)
+            .count();
+    }
+    println!(
+        "{started_elsewhere} of 36 placed rings start the hole at another corner than the \
+         unplaced ring"
+    );
+    assert!(
+        started_elsewhere > 0,
+        "every placement started the hole where the unplaced ring did, so this shows nothing \
+         about a start a rounding can move"
+    );
+}
+
+/// What a corner's `u` is moved by: nothing, or a rounding one way.
+type Nudge = fn(f64) -> f64;
+
+/// The corner on the line, and a rounding to either side of it along `u`.
+const ON_THE_LINE_AND_A_ROUNDING_TO_EITHER_SIDE: [(&str, Nudge); 3] = [
+    ("on the line", core::convert::identity),
+    ("a rounding up", f64::next_up),
+    ("a rounding down", f64::next_down),
+];
+
+/// A ring between an octagon with corners at `(±2, ±4)` and `(±4, ±2)`, run
+/// anticlockwise from `first` with its `u` moved by `nudge`, and an octagon
+/// with corners at `(±1, ±2)` and `(±2, ±1)` inside it, run clockwise from
+/// `(2, −1)`. The hole's side 3 runs along `u = −2` and its side 7 along
+/// `u = 2`, so the outline's corners `(−2, 4)` and `(2, 4)` lie on the line
+/// through one each.
+fn an_octagon_round_an_octagon_from(
+    first: [f64; 2],
+    nudge: Nudge,
+) -> (Vec<[f64; 2]>, Vec<[f64; 2]>) {
+    let outline = [
+        [2.0, 4.0],
+        [-2.0, 4.0],
+        [-4.0, 2.0],
+        [-4.0, -2.0],
+        [-2.0, -4.0],
+        [2.0, -4.0],
+        [4.0, -2.0],
+        [4.0, 2.0],
+    ];
+    let from = outline
+        .iter()
+        .position(|&corner| corner == first)
+        .expect("a corner of the outline");
+    let mut outline: Vec<[f64; 2]> = (0..8).map(|at| outline[(from + at) % 8]).collect();
+    outline[0][0] = nudge(outline[0][0]);
+    let hole = vec![
+        [2.0, -1.0],
+        [1.0, -2.0],
+        [-1.0, -2.0],
+        [-2.0, -1.0],
+        [-2.0, 1.0],
+        [-1.0, 2.0],
+        [1.0, 2.0],
+        [2.0, 1.0],
+    ];
+    (outline, hole)
+}
+
+/// How one ring is cut, placed or not: which of the hole's sides the
+/// outline's corner 0 is outside of, `+` for each side `orient2d` puts it
+/// outside, `-` inside and `0` on the line; which corner of the hole the cut
+/// starts from beside it; and the triangles.
+#[derive(Debug)]
+struct HowARingIsCut {
+    name: String,
+    sees: String,
+    start: Option<u32>,
+    triangles: Vec<[u32; 3]>,
+}
+
+/// The ring `outline` and `hole`, given in the plane `z = 5`'s own two
+/// coordinates, cut by corner order where it is and under each of the twelve
+/// placements, with one line printed for each.
+///
+/// Every cut is checked as a whole cut of its ring, and as taken by corner
+/// order rather than left to spade.
+fn how_each_placement_cuts(
+    nudged: &str,
+    outline: &[[f64; 2]],
+    hole: &[[f64; 2]],
+) -> (HowARingIsCut, Vec<HowARingIsCut>) {
+    let unplaced = how_a_ring_is_cut(
+        "unplaced",
+        placed_on_the_plane_z_5(&Isometry::identity(), outline),
+        placed_on_the_plane_z_5(&Isometry::identity(), hole),
+    );
+    for corners in [outline, hole] {
+        assert_eq!(
+            placed_on_the_plane_z_5(&Isometry::identity(), corners),
+            corners,
+            "the plane z = 5 at no placement does not hand its corners back as they went in"
+        );
+    }
+    let as_sets = |triangles: &[[u32; 3]]| -> HashSet<[u32; 3]> {
+        triangles
+            .iter()
+            .map(|&triangle| {
+                let mut corners = triangle;
+                corners.sort_unstable();
+                corners
+            })
+            .collect()
+    };
+    let unplaced_sets = as_sets(&unplaced.triangles);
+    println!(
+        "{nudged}, corner 0 at {:?}, unplaced: sees {}, starts the hole at {:?}",
+        outline[0], unplaced.sees, unplaced.start
+    );
+    let placed: Vec<HowARingIsCut> = the_twelve_placements()
+        .into_iter()
+        .map(|(name, placement)| {
+            let cut = how_a_ring_is_cut(
+                &name,
+                placed_on_the_plane_z_5(&placement, outline),
+                placed_on_the_plane_z_5(&placement, hole),
+            );
+            println!(
+                "    {name}: sees {}, starts the hole at {:?}, {} of {} triangles join other \
+                 points, the same cut: {}",
+                cut.sees,
+                cut.start,
+                as_sets(&cut.triangles).difference(&unplaced_sets).count(),
+                cut.triangles.len(),
+                cut.triangles == unplaced.triangles
+            );
+            cut
+        })
+        .collect();
+    (unplaced, placed)
+}
+
+fn how_a_ring_is_cut(name: &str, outline: Vec<[f64; 2]>, hole: Vec<[f64; 2]>) -> HowARingIsCut {
+    let sees = (0..hole.len())
+        .map(
+            |at| match orient2d(hole[at], hole[(at + 1) % hole.len()], outline[0]) {
+                Decision::Pos => '+',
+                Decision::Neg => '-',
+                Decision::Zero => '0',
+                Decision::Undecidable { .. } => {
+                    panic!("{name}: orient2d could not settle a side of the hole")
+                }
+                other => {
+                    panic!("{name}: orient2d came back with a decision nobody knows: {other:?}")
+                }
+            },
+        )
+        .collect();
+    let asked = domain_of(flat(), outline.clone(), vec![hole.clone()]).cut_by_corner_order();
+    check_everything(name, &asked);
+    let patch = triangulate(&asked).expect("checked just above");
+    every_triangle_turns_anticlockwise(name, &patch);
+    assert_ne!(
+        Ok(&patch),
+        triangulate(&domain_of(flat(), outline.clone(), vec![hole])).as_ref(),
+        "{name}: the ring came out as spade cuts it, so it was not cut by corner order"
+    );
+    let triangles = patch.triangles().to_vec();
+    let outline_corners = u32::try_from(outline.len()).expect("a small ring");
+    let start = (triangles[0][..2] == [0, 1]).then(|| triangles[0][2] - outline_corners);
+    HowARingIsCut {
+        name: name.to_owned(),
+        sees,
+        start,
+        triangles,
+    }
+}
+
+/// Where `corners`, in the plane `z = 5`'s own two coordinates, land in that
+/// plane's own two coordinates once both are moved by `placement`: each point
+/// moved out, and read on the moved plane, which is how `rcad-topo`'s mesher
+/// reads a placed flat face, from the points where they land
+/// (`docs/decisions.md` §362).
+fn placed_on_the_plane_z_5(placement: &Isometry, corners: &[[f64; 2]]) -> Vec<[f64; 2]> {
+    let stored =
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 5.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("the z axis is a unit normal");
+    let placed = stored.transformed(placement);
+    corners
+        .iter()
+        .map(|&[u, v]| {
+            let (u, v) =
+                placed.plane_coordinates_of(placement.apply_to_point(stored.point_at(u, v)));
+            [u, v]
+        })
+        .collect()
+}
+
+/// §249.3's eighth about `z`, and turns about two leaning axes, each alone and
+/// then shifted: the twelve placements of `docs/decisions.md` §333.2, as
+/// `rcad-topo`'s `a_placed_pipe_is_meshed_from_the_corners_it_stores.rs` builds
+/// them.
+fn the_twelve_placements() -> Vec<(String, Isometry)> {
+    let shifted_by = |shift: Vector| Isometry::translation(shift).expect("a finite shift");
+    let eighth = Isometry::rotation(&Axis::z(), core::f64::consts::FRAC_PI_4).expect("finite");
+    let mut placements = vec![("an eighth about z".to_owned(), eighth)];
+    for shift in [[3.0, -5.0, 7.0], [0.25, -0.5, 0.125], [0.1, 0.2, 0.3]] {
+        placements.push((
+            format!("an eighth about z, then {shift:?}"),
+            shifted_by(Vector::new(shift[0], shift[1], shift[2])).compose(&eighth),
+        ));
+    }
+    for about in [[1.0, 2.0, 3.0], [-3.0, 1.0, 0.5]] {
+        let axis = Axis::new(
+            Point::origin(),
+            Vector::new(about[0], about[1], about[2])
+                .normalized()
+                .expect("a direction with length"),
+        )
+        .expect("a unit direction is an axis");
+        for turn in [0.7, 2.5] {
+            let turned = Isometry::rotation(&axis, turn).expect("a finite angle");
+            placements.push((format!("{turn} about {about:?}"), turned));
+            placements.push((
+                format!("{turn} about {about:?}, then [3, 5, 7]"),
+                shifted_by(Vector::new(3.0, 5.0, 7.0)).compose(&turned),
+            ));
+        }
+    }
+    placements
+}
+
+/// Corner order cuts only a flat patch with no hole or one, an outline that
+/// turns one way at every corner and a hole that turns the other way, and on a
+/// ring only where every triangle of the cut turns the outline's way. Every
+/// other patch asked for it is cut as though it had not been asked.
 #[test]
 fn a_patch_corner_order_cannot_cut_is_cut_as_though_it_had_not_been_asked() {
-    let disc = a_disc_turned_and_moved(0.0);
-    let hole: Vec<[f64; 2]> = a_disc_turned_and_moved(0.0)
-        .into_iter()
+    let (disc, hole) = a_ring_turned_and_moved(0.0, 0.0);
+    let small_hole_at = |centre: [f64; 2]| -> Vec<[f64; 2]> {
+        (0..12)
+            .rev()
+            .map(|step| {
+                let angle = TAU * f64::from(step) / 12.0;
+                [centre[0] + 0.3 * angle.cos(), centre[1] + 0.3 * angle.sin()]
+            })
+            .collect()
+    };
+    let mut the_same_way_round = hole.clone();
+    the_same_way_round.reverse();
+    let a_hole_with_petals: Vec<[f64; 2]> = (0..60)
         .rev()
-        .map(|[u, v]| [3.0 + (u - 3.0) / 4.0, -5.0 + (v + 5.0) / 4.0])
+        .map(|step| {
+            let angle = TAU * f64::from(step) / 60.0;
+            let reach = 0.8 + 0.2 * (5.0 * angle).cos();
+            [3.0 + reach * angle.cos(), -5.0 + reach * angle.sin()]
+        })
+        .collect();
+    // 39 corners in a tenth of a turn and one across from them: stepped round
+    // in equal shares, the far side of the outline reaches across the hole.
+    let a_hole_bunched_up: Vec<[f64; 2]> = (0..40)
+        .rev()
+        .map(|step| {
+            let angle = if step == 39 {
+                TAU / 2.0 + TAU / 36.0
+            } else {
+                TAU / 36.0 + TAU / 10.0 * f64::from(step) / 38.0
+            };
+            [3.0 + 0.8 * angle.cos(), -5.0 + 0.8 * angle.sin()]
+        })
+        .collect();
+    // Touching the outline at its corner 0, (5, −5), with its own corner 0.
+    let a_hole_touching_the_outline: Vec<[f64; 2]> = (0..24)
+        .map(|step| {
+            let angle = -TAU * f64::from(step) / 24.0;
+            [4.0 + angle.cos(), -5.0 + angle.sin()]
+        })
         .collect();
     let five_petals: Vec<[f64; 2]> = (0..60)
         .map(|step| {
@@ -613,7 +1145,36 @@ fn a_patch_corner_order_cannot_cut_is_cut_as_though_it_had_not_been_asked() {
     let with_a_straight_corner = vec![[0.0, 0.0], [2.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
     let on_a_pipe = Surface::from(Cylinder::new(Axis::z(), 2.0).expect("a pipe"));
     for (name, surface, outer, holes) in [
-        ("a disc with a hole", flat(), disc.clone(), vec![hole]),
+        (
+            "a disc with two holes",
+            flat(),
+            disc.clone(),
+            vec![small_hole_at([2.0, -5.0]), small_hole_at([4.0, -5.0])],
+        ),
+        (
+            "a hole that runs the same way round as its outline",
+            flat(),
+            disc.clone(),
+            vec![the_same_way_round],
+        ),
+        (
+            "a hole with petals",
+            flat(),
+            disc.clone(),
+            vec![a_hole_with_petals],
+        ),
+        (
+            "a hole whose corners are bunched up on one side",
+            flat(),
+            disc.clone(),
+            vec![a_hole_bunched_up],
+        ),
+        (
+            "a hole touching the outline at a corner",
+            flat(),
+            disc.clone(),
+            vec![a_hole_touching_the_outline],
+        ),
         ("five petals", flat(), five_petals, Vec::new()),
         (
             "a corner that does not turn",

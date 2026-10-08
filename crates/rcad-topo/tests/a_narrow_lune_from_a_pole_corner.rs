@@ -9,12 +9,11 @@
 //! twice. Every test here aims at that lune.
 //!
 //! Since §200 some wedges are answered, and each of those is measured against
-//! its closed form: 29 cut by two knives, 11 intersections, 12 unions and 6
-//! differences, and 30 by one prism, 10 of each rule. 32 of them, all unions
-//! and differences, answer since §330 names an arc of a closed crossing by its
-//! plane as well as by the ball. The rest are still refused by name, most now
-//! at the flat pieces or in assembly rather than at the curved pieces. A case
-//! that moves either way fails, naming itself.
+//! its closed form. Of the 48 cases of each family, wedge by size by rule, 39
+//! answer cut by two knives with `x >= 0` first, 45 with the turned knife first
+//! (since Q1024 reads the side of a half ball's skin off its wire), and all 48
+//! cut by one prism. The rest are refused by name. A case that moves either way
+//! fails, naming itself.
 //!
 //! The ball's seam is the `+x` half of the meridian in `y = 0`, so a knife
 //! turned a quarter turn about the axis lies along the seam.
@@ -62,7 +61,7 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 /// (see [`a_knife_through_the_axis`]). At 90 degrees that sliver was where a
 /// flat piece of `x = 0` was placed on the wrong side of the knife, which ended
 /// in `ResultIsNotManifold` (§200.1); see
-/// [`the_quarter_turned_knife_holds_the_axis_by_its_corners_and_not_by_its_plane`].
+/// [`the_quarter_turned_knife_holds_the_axis_by_its_corners_and_places_a_point_by_its_plane`].
 /// Since the fuse drops a point the ray and the stored planes disagree about,
 /// the 90 degree wedge answers at every size as an intersection and a union,
 /// and so does the 10 degree one at radii 0.001 and 1000. The union needed one
@@ -79,6 +78,19 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 /// wedge's at radii 1 and 3. Most of the rest
 /// now reach the flat pieces and assembly and are refused there instead. A case
 /// that moves either way fails, naming itself.
+///
+/// **No case stops at `order along a crossing` since Q901**, which orders two
+/// meets of three planes that share two by the planes when their boxes cannot
+/// say. None answers for it: all twelve 45 degree cases, every size and every
+/// rule, are refused at *a point inside a piece of a face* instead, and that
+/// name takes the old one's place in [`moved_from_its_pin`].
+///
+/// **Ten of those twelve answer since Q1019**, which places a piece no point
+/// was found in by a corner the other solid's ray puts strictly inside or
+/// outside it (`docs/decisions.md` §365.7). Each is one solid that validates
+/// and measures its closed form. The difference at radius 0.001 is refused
+/// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`, and at radius 1000
+/// `CannotNameWhichPieceOfACrossingThisIs`.
 #[test]
 fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name() {
     let answered = [
@@ -90,6 +102,16 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
         (90.0, 1000.0, "Union"),
         (90.0, 3.0, "Intersection"),
         (90.0, 3.0, "Union"),
+        (45.0, 1.0, "Intersection"),
+        (45.0, 1.0, "Difference"),
+        (45.0, 1.0, "Union"),
+        (45.0, 0.001, "Intersection"),
+        (45.0, 0.001, "Union"),
+        (45.0, 1000.0, "Intersection"),
+        (45.0, 1000.0, "Union"),
+        (45.0, 3.0, "Intersection"),
+        (45.0, 3.0, "Difference"),
+        (45.0, 3.0, "Union"),
         (10.0, 1.0, "Difference"),
         (10.0, 1.0, "Union"),
         (10.0, 0.001, "Intersection"),
@@ -113,20 +135,9 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
         (170.0, 3.0, "Union"),
     ];
     let mut moved = Vec::new();
-    let rules: [(Rule, ClosedForm); 3] = [
-        (Rule::Intersection, |degrees, radius| {
-            degrees / 360.0 * a_balls_volume(radius)
-        }),
-        (Rule::Difference, |degrees, radius| {
-            (180.0 - degrees) / 360.0 * a_balls_volume(radius)
-        }),
-        (Rule::Union, |degrees, radius| {
-            (180.0 - degrees) / 360.0 * a_balls_volume(radius) + a_knifes_volume(radius)
-        }),
-    ];
     for degrees in WEDGES {
         for radius in RADII {
-            for (rule, closed_form) in rules {
+            for (rule, closed_form) in what_two_knives_leave() {
                 let mut model = a_model(radius);
                 let ball = model
                     .add_ball(radius, &Isometry::identity())
@@ -159,17 +170,21 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
 
 /// Why the 90 degree wedge was refused before it answered: the knife turned a
 /// quarter turn holds the axis by its corners and misses it by its stored
-/// plane, so a point in between is inside by the ray and outside by the plane.
+/// plane, so a point in between was inside by the corners and is outside by
+/// the plane.
 ///
 /// `(0, 1.1e-16, -0.5)` is the first point the fuse tried inside the half disk
 /// of `x = 0` that the knife does not cover. The fuse cuts along the stored
 /// plane, which puts that half disk on the outside, and the point with it. The
 /// ray fans the face's corners, `(∓6, ±8.9e-16, z)`, whose triangles hold the
-/// axis exactly, and certifies the point inside. The fuse now drops a point
-/// the two disagree about (`select.rs`'s
-/// `the_ray_and_the_stored_planes_disagree_about`).
+/// axis exactly, and it once certified the point inside by them. Since Q668
+/// the ray asks the stored plane too where the two part, and puts the point
+/// outside with it (§346). Since Q996, `select.rs` no longer drops such a
+/// point itself: its own copy of the guard,
+/// `the_ray_and_the_stored_planes_disagree_about`, is gone, and `select.rs`
+/// reads classify.rs's copies instead.
 #[test]
-fn the_quarter_turned_knife_holds_the_axis_by_its_corners_and_not_by_its_plane() {
+fn the_quarter_turned_knife_holds_the_axis_by_its_corners_and_places_a_point_by_its_plane() {
     let mut model = a_model(1.0);
     let knife = a_knife_through_the_axis(&mut model, 1.0, 90.0);
     let view = model.solid(knife).expect("this model made the key");
@@ -202,129 +217,34 @@ fn the_quarter_turned_knife_holds_the_axis_by_its_corners_and_not_by_its_plane()
     );
     assert_eq!(
         view.classify_uncertain_point(point, &Policy::certified(), &mut ProvenanceLog::new()),
-        rcad_topo::Containment::Inside,
-        "the ray puts it inside"
+        rcad_topo::Containment::Outside,
+        "the ray puts it outside, as the stored plane does"
     );
 }
 
 /// The same two knives, the turned one first.
 ///
 /// For a wedge of 90 degrees the turned knife lies along the seam. The first
-/// cut is answered everywhere here but once — the 10 degree wedge's knife,
-/// turned 170, at radius 1 (see
-/// [`a_ball_cut_down_its_polar_axis_off_its_seam_is_answered_or_refused_by_name`]).
-/// Whenever it is answered, cutting that half ball again by `x >= 0` is
-/// refused by name, on one of three refusals that depend on the angle and the
-/// size.
-#[test]
-fn a_wedge_cut_with_the_turned_knife_first_is_refused_by_name() {
-    for degrees in WEDGES {
-        for radius in RADII {
-            let mut model = a_model(radius);
-            let ball = model
-                .add_ball(radius, &Isometry::identity())
-                .expect("a ball");
-            let turned = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
-            let half = match model.fuse(
-                &[ball],
-                &[turned],
-                Rule::Intersection,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            ) {
-                Ok(fused) => fused.solids().to_vec(),
-                Err(why) => {
-                    assert_eq!(
-                        (degrees, radius, which_refusal(&why)),
-                        (10.0, 1.0, "ACurvedFaceGoesRightRoundWithNoSeam"),
-                        "only one first cut here is refused"
-                    );
-                    continue;
-                }
-            };
-            let second = a_knife_through_the_axis(&mut model, radius, 0.0);
-            let why = match model.fuse(
-                &half,
-                &[second],
-                Rule::Intersection,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            ) {
-                Err(why) => why,
-                Ok(fused) => panic!(
-                    "a {degrees} degree wedge of a ball of radius {radius} was answered \
-                     with {} solids; this test records a refusal, so move it to the \
-                     answered test",
-                    fused.solids().len()
-                ),
-            };
-            assert!(
-                matches!(
-                    which_refusal(&why),
-                    "a point in a piece that every solid could place"
-                        | "CannotTellTheCellsOfAFaceApart"
-                        | "order along a crossing"
-                ),
-                "a {degrees} degree wedge of a ball of radius {radius}: {why:?}"
-            );
-        }
-    }
-}
-
-/// The quarter wedge names the second of `place_the_piece`'s two searches.
+/// cut answers at every angle and size here, as
+/// [`a_ball_cut_down_its_polar_axis_off_its_seam_is_answered_or_refused_by_name`]
+/// pins, and that half ball is then cut again by `x >= 0`.
 ///
-/// The test above lets three names through, so it cannot say which of the two
-/// searches gave up. This one says it for one case: a point **was** found
-/// inside the piece, and what ran out is somewhere to stand that every solid
-/// could place. Until §216.4 both searches wrote *a point inside a piece of a
-/// face*, so this fuse wrote down the name of the search that had worked.
-#[test]
-fn a_quarter_wedge_stops_after_a_point_is_found_inside_the_piece_and_not_before() {
-    let radius = 1.0;
-    let mut model = a_model(radius);
-    let ball = model
-        .add_ball(radius, &Isometry::identity())
-        .expect("a ball");
-    let turned = a_knife_through_the_axis(&mut model, radius, 90.0);
-    let half = model
-        .fuse(
-            &[ball],
-            &[turned],
-            Rule::Intersection,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .expect("the first cut answers at every size")
-        .solids()
-        .to_vec();
-    let second = a_knife_through_the_axis(&mut model, radius, 0.0);
-    let why = model
-        .fuse(
-            &half,
-            &[second],
-            Rule::Intersection,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .expect_err("a 90 degree wedge of a ball of radius 1 is refused");
-    assert_eq!(
-        which_refusal(&why),
-        "a point in a piece that every solid could place"
-    );
-}
-
-/// A wedge cut in one fuse, by a prism whose edge **is** the polar axis.
+/// **The second cut was refused at every angle and size until Q1024**, naming
+/// the half ball's skin as a face whose trimming nothing here follows. That
+/// skin is a lune whose only corners are the poles, and both lie on the turned
+/// knife's face, so no corner said which side of that face the skin keeps; a
+/// point inside a piece of the second knife was found, and the ray that was to
+/// place it against the half ball met the skin. The skin's side is now read
+/// off the way its wire walks the rim (`holds.rs`'s
+/// `the_side_its_wire_keeps_along`), and every case in `answered` is one solid
+/// that validates and measures its closed form, the same three
+/// [`what_two_knives_leave`] gives the other order.
 ///
-/// This is not the lune §195.1 is about: the poles sit on the knife's edge
-/// rather than on its face, which the fuse sees before it sees any lune. The
-/// intersections in `answered` answer and measure since §200; the rest are
-/// refused by name. The quarter wedge of the ball of radius 1000 answers since
-/// the triangulator takes a corner under spade's floor as zero (§321.6). The
-/// difference and union answer wherever the intersection does since §330,
-/// which names an arc of the ball's crossing with a prism face by that face's
-/// plane as well.
+/// **The 90 degree wedge of the ball of radius 0.001 is refused
+/// `ResultIsNotManifold { count: 1 }` under every rule**, where the same wedge
+/// answers at radii 1, 3 and 1000. Not traced.
 #[test]
-fn a_wedge_cut_by_one_prism_whose_edge_is_the_polar_axis_is_answered_or_refused_by_name() {
+fn a_wedge_cut_with_the_turned_knife_first_is_answered_or_refused_by_name() {
     let answered = [
         (90.0, 1.0, "Intersection"),
         (90.0, 1.0, "Difference"),
@@ -332,9 +252,15 @@ fn a_wedge_cut_by_one_prism_whose_edge_is_the_polar_axis_is_answered_or_refused_
         (90.0, 1000.0, "Intersection"),
         (90.0, 1000.0, "Difference"),
         (90.0, 1000.0, "Union"),
+        (90.0, 3.0, "Intersection"),
+        (90.0, 3.0, "Difference"),
+        (90.0, 3.0, "Union"),
         (45.0, 1.0, "Intersection"),
         (45.0, 1.0, "Difference"),
         (45.0, 1.0, "Union"),
+        (45.0, 0.001, "Intersection"),
+        (45.0, 0.001, "Difference"),
+        (45.0, 0.001, "Union"),
         (45.0, 1000.0, "Intersection"),
         (45.0, 1000.0, "Difference"),
         (45.0, 1000.0, "Union"),
@@ -356,6 +282,175 @@ fn a_wedge_cut_by_one_prism_whose_edge_is_the_polar_axis_is_answered_or_refused_
         (170.0, 1.0, "Intersection"),
         (170.0, 1.0, "Difference"),
         (170.0, 1.0, "Union"),
+        (170.0, 0.001, "Intersection"),
+        (170.0, 0.001, "Difference"),
+        (170.0, 0.001, "Union"),
+        (170.0, 1000.0, "Intersection"),
+        (170.0, 1000.0, "Difference"),
+        (170.0, 1000.0, "Union"),
+        (170.0, 3.0, "Intersection"),
+        (170.0, 3.0, "Difference"),
+        (170.0, 3.0, "Union"),
+    ];
+    let mut moved = Vec::new();
+    for degrees in WEDGES {
+        for radius in RADII {
+            for (rule, closed_form) in what_two_knives_leave() {
+                let mut model = a_model(radius);
+                let half = the_ball_cut_by_the_turned_knife(&mut model, radius, degrees);
+                let second = a_knife_through_the_axis(&mut model, radius, 0.0);
+                let case = (degrees, radius, rule);
+                let outcome = model.fuse(
+                    &half,
+                    &[second],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                if let Some(how) = moved_from_its_pin(
+                    &mut model,
+                    outcome,
+                    is_pinned_as_answered(&answered, case),
+                    radius,
+                    closed_form(degrees, radius),
+                ) {
+                    moved.push(format!("{case:?}: {how}"));
+                }
+            }
+        }
+    }
+    assert!(moved.is_empty(), "{}", moved.join("\n"));
+}
+
+/// The half ball the quarter-turned knife leaves places a point on the second
+/// knife's face `x = 0` inside it, and a point past its skin outside it.
+///
+/// This is the point the quarter wedge stopped at until Q1024: a point inside
+/// a piece of the second knife **was** found, and the ray that was to place it
+/// met the half ball's skin, whose corners are both on the turned knife's face
+/// and say nothing about which side of it the skin keeps. `classify` came back
+/// `CannotFollowAFacesTrimming` naming that skin, and the fuse refused for it.
+/// The skin's side is now read off its wire, and the point is inside.
+#[test]
+fn the_half_ball_places_a_point_on_the_second_knifes_face_inside_it() {
+    let mut model = a_model(1.0);
+    let half = the_ball_cut_by_the_turned_knife(&mut model, 1.0, 90.0);
+    let [half] = half[..] else {
+        panic!("the first cut is one solid, not {half:?}");
+    };
+    let view = model.solid(half).expect("this model made the key");
+    for (point, placed) in [
+        ([0.0, 0.5, 0.25], rcad_topo::Containment::Inside),
+        ([0.0, 0.75, 0.75], rcad_topo::Containment::Outside),
+    ] {
+        assert_eq!(
+            view.classify_uncertain_point(
+                rcad_predicates::Point::from(point),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            ),
+            placed,
+            "the half ball y >= 0 places {point:?}"
+        );
+    }
+}
+
+/// What the two knives leave of the ball under each rule, whichever cuts
+/// first: the wedge `degrees` wide, the rest of the half ball, and that rest
+/// with the whole knife `x >= 0`.
+fn what_two_knives_leave() -> [(Rule, ClosedForm); 3] {
+    [
+        (Rule::Intersection, |degrees, radius| {
+            degrees / 360.0 * a_balls_volume(radius)
+        }),
+        (Rule::Difference, |degrees, radius| {
+            (180.0 - degrees) / 360.0 * a_balls_volume(radius)
+        }),
+        (Rule::Union, |degrees, radius| {
+            (180.0 - degrees) / 360.0 * a_balls_volume(radius) + a_knifes_volume(radius)
+        }),
+    ]
+}
+
+/// The ball of `radius` in `model`, less the knife turned `180 − degrees`: a
+/// half ball, which [`a_wedge_cut_with_the_turned_knife_first_is_answered_or_refused_by_name`]
+/// then cuts by the knife `x >= 0`.
+fn the_ball_cut_by_the_turned_knife(model: &mut Model, radius: f64, degrees: f64) -> Vec<SolidKey> {
+    let ball = model
+        .add_ball(radius, &Isometry::identity())
+        .expect("a ball");
+    let turned = a_knife_through_the_axis(model, radius, 180.0 - degrees);
+    fused(model, &[ball], &[turned], Rule::Intersection)
+}
+
+/// A wedge cut in one fuse, by a prism whose edge **is** the polar axis.
+///
+/// This is not the lune §195.1 is about: the poles sit on the knife's edge
+/// rather than on its face, which the fuse sees before it sees any lune. The
+/// intersections in `answered` answer and measure since §200; a case left out
+/// of it would have to be refused by name. The quarter wedge of the ball of radius 1000 answers since
+/// the triangulator takes a corner under spade's floor as zero (§321.6). The
+/// difference and union answer wherever the intersection does since §330,
+/// which names an arc of the ball's crossing with a prism face by that face's
+/// plane as well.
+///
+/// **Every case answers since §340.10.** Eighteen refused
+/// `ResultIsNotManifold`: the ball meets the prism's edge at its poles, and the
+/// box round a prism face stopped a rounding short of those two meets — at
+/// radius `0.001` the face's box began at `y = 0` and both poles came out at
+/// `y = −1.78e−35` — so the ball's cut across that face was dropped as missing
+/// it.
+#[test]
+fn a_wedge_cut_by_one_prism_whose_edge_is_the_polar_axis_is_answered_or_refused_by_name() {
+    let answered = [
+        (90.0, 1.0, "Intersection"),
+        (90.0, 1.0, "Difference"),
+        (90.0, 1.0, "Union"),
+        (90.0, 0.001, "Intersection"),
+        (90.0, 0.001, "Difference"),
+        (90.0, 0.001, "Union"),
+        (90.0, 1000.0, "Intersection"),
+        (90.0, 1000.0, "Difference"),
+        (90.0, 1000.0, "Union"),
+        (90.0, 3.0, "Intersection"),
+        (90.0, 3.0, "Difference"),
+        (90.0, 3.0, "Union"),
+        (45.0, 1.0, "Intersection"),
+        (45.0, 1.0, "Difference"),
+        (45.0, 1.0, "Union"),
+        (45.0, 0.001, "Intersection"),
+        (45.0, 0.001, "Difference"),
+        (45.0, 0.001, "Union"),
+        (45.0, 1000.0, "Intersection"),
+        (45.0, 1000.0, "Difference"),
+        (45.0, 1000.0, "Union"),
+        (45.0, 3.0, "Intersection"),
+        (45.0, 3.0, "Difference"),
+        (45.0, 3.0, "Union"),
+        (10.0, 1.0, "Intersection"),
+        (10.0, 1.0, "Difference"),
+        (10.0, 1.0, "Union"),
+        (10.0, 0.001, "Intersection"),
+        (10.0, 0.001, "Difference"),
+        (10.0, 0.001, "Union"),
+        (10.0, 1000.0, "Intersection"),
+        (10.0, 1000.0, "Difference"),
+        (10.0, 1000.0, "Union"),
+        (10.0, 3.0, "Intersection"),
+        (10.0, 3.0, "Difference"),
+        (10.0, 3.0, "Union"),
+        (170.0, 1.0, "Intersection"),
+        (170.0, 1.0, "Difference"),
+        (170.0, 1.0, "Union"),
+        (170.0, 0.001, "Intersection"),
+        (170.0, 0.001, "Difference"),
+        (170.0, 0.001, "Union"),
+        (170.0, 1000.0, "Intersection"),
+        (170.0, 1000.0, "Difference"),
+        (170.0, 1000.0, "Union"),
+        (170.0, 3.0, "Intersection"),
+        (170.0, 3.0, "Difference"),
+        (170.0, 3.0, "Union"),
     ];
     let mut moved = Vec::new();
     let rules: [(Rule, ClosedForm); 3] = [
@@ -427,7 +522,7 @@ fn moved_from_its_pin(
             assert!(
                 matches!(
                     which_refusal(&why),
-                    "order along a crossing"
+                    "a point inside a piece of a face"
                         | "CannotTellTheCellsOfAFaceApart"
                         | "ResultIsNotManifold"
                         | "CannotMeshAFace"
@@ -701,6 +796,9 @@ fn which_refusal(why: &Error) -> &str {
     }
     if let Error::Geometry(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs) = why {
         return "CannotNameWhichPieceOfACrossingThisIs";
+    }
+    if let Error::AFaceTrimmedByACurveThisCannotFollow { .. } = why {
+        return "AFaceTrimmedByACurveThisCannotFollow";
     }
     panic!("expected a refusal by name, got {why:?}")
 }

@@ -31,7 +31,8 @@
 //! [`a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_every_rule_right`]
 //! pins that. The frustum's cube kept a refusal of its own until §212 let a ring
 //! bound a face that also has a hole, and
-//! [`a_corner_up_cube_round_a_frustums_apex_answers_right`] pins that it is gone.
+//! [`a_corner_up_cube_of_side_four_round_a_frustums_apex_answers_right`] and the
+//! three beside it pin that it is gone.
 
 use std::collections::BTreeMap;
 
@@ -68,40 +69,60 @@ use cones::{a_frustum, a_pointed_cone};
 /// (§282): the part of the frustum's face inside the block and the part outside
 /// it glued into one by `arrange.rs`'s sign rule, which no point can be in.
 /// Since the rule places the bottom rim by which piece goes round the axis
-/// with it, twenty-eight of them answer right. The sixteen left find no point
-/// in a piece that is one cell, and the twelve that could not order along a
-/// crossing are the same twelve as before.
+/// with it, twenty-eight of them answer right. Sixteen more found no point in
+/// a piece that is one cell; each such piece is now placed by a side it shares
+/// with a piece of the other solid's face (`docs/decisions.md` §365.3), and
+/// all sixteen answer right. The twelve that could not order along a crossing
+/// were the same twelve as before.
+///
+/// **All ninety-six answer right since Q901**, which orders two meets of three
+/// planes that share two by the planes when their boxes cannot say: the twelve
+/// at three eighths, turned `0.5`, that could not order along a crossing answer
+/// now, each held to the four checks at the top of this file.
+///
+/// **The family is two tests, one per lean**, so that neither sets the slow
+/// tier's wall (`docs/decisions.md` §397.4). Their tallies add up to the counts
+/// above: the sixteen are all at a quarter, crossing `−6`.
 #[test]
-fn a_steeper_plane_across_a_frustum_answers_right_or_refuses() {
-    let mut cases = Vec::new();
-    for lean in [0.25, 0.375] {
-        for crossing in [-1.0, -3.0, -6.0] {
-            let lowest_on_the_upper_branch = -lean * crossing / (THE_FRUSTUM.slope - lean);
-            let solids = if lowest_on_the_upper_branch < THE_FRUSTUM.far {
-                OVERLAPPING
-            } else {
-                APART
-            };
-            for turn in [0.0, 0.5, 2.0, 3.0] {
-                cases.push(Case {
-                    cone: THE_FRUSTUM,
-                    block: a_leaning_block(lean, crossing, turn),
-                    solids,
-                });
-            }
-        }
-    }
+fn a_steeper_plane_at_a_lean_of_a_quarter_across_a_frustum_answers_right_or_refuses() {
     assert_eq!(
-        tally(&cases),
+        tally(&steeper_planes_across_the_frustum(0.25)),
         Tally {
-            right: 68,
-            refused: [
-                ("a point inside a piece of a face", 16),
-                ("order along a crossing", 12),
-            ]
-            .into()
+            right: 48,
+            refused: [].into()
         }
     );
+}
+
+#[test]
+fn a_steeper_plane_at_a_lean_of_three_eighths_across_a_frustum_answers_right_or_refuses() {
+    assert_eq!(
+        tally(&steeper_planes_across_the_frustum(0.375)),
+        Tally {
+            right: 48,
+            refused: [].into()
+        }
+    );
+}
+
+fn steeper_planes_across_the_frustum(lean: f64) -> Vec<Case> {
+    let mut cases = Vec::new();
+    for crossing in [-1.0, -3.0, -6.0] {
+        let lowest_on_the_upper_branch = -lean * crossing / (THE_FRUSTUM.slope - lean);
+        let solids = if lowest_on_the_upper_branch < THE_FRUSTUM.far {
+            OVERLAPPING
+        } else {
+            APART
+        };
+        for turn in [0.0, 0.5, 2.0, 3.0] {
+            cases.push(Case {
+                cone: THE_FRUSTUM,
+                block: a_leaning_block(lean, crossing, turn),
+                solids,
+            });
+        }
+    }
+    cases
 }
 
 /// The same blocks turned half round, so the frustum's apex is inside the
@@ -114,6 +135,14 @@ fn a_steeper_plane_across_a_frustum_answers_right_or_refuses() {
 /// share both arcs and at the coarsest mesh both draw the side between the arcs'
 /// middles (§285.4). That mesh retries a fold at half the room now, and both
 /// answer right.
+///
+/// **All thirty-two answer right since Q1171.** The eight that were left
+/// refused `CannotNameWhichPieceOfACrossingThisIs` were the block whose steep
+/// face runs through the apex, lean a quarter and crossing `0`, turned 3 and
+/// 3.5. That face cuts the cone in two rulings along `(¼, ±√3/4, 1)`, which no
+/// three `f64`s write, so `intersect` could not name them whole; it names the
+/// four halves the apex cuts them into now (§294.11), and each of the eight is
+/// held to the four checks at the top of this file.
 #[test]
 fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
     let mut cases = Vec::new();
@@ -129,8 +158,8 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 24,
-            refused: [("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 8)].into()
+            right: 32,
+            refused: [].into()
         }
     );
 }
@@ -170,31 +199,53 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
 /// leaves from the next corner along the rim, `0.027` round from the ruling at
 /// `0.002`. The two at lean one quarter still do not measure at `0.002`, and
 /// `the_eighteen_held_to_the_familys_four_checks` says why.
+///
+/// **The sixteen that could not name a piece answer right since Q1171**, each
+/// held to the same four checks. They are the faces through the apex, turned
+/// `0` or `3`, eight at each lean. Such a face cuts the cone in two rulings
+/// along `(¼, ±√3/4, 1)` at a quarter and `(⅜, ±√7/8, 1)` at three eighths,
+/// which no three `f64`s write, so `intersect` could not name them whole; it
+/// names the four halves the apex cuts them into now (§294.11). The face runs
+/// down past the apex, so all four halves cross it, two of them along the
+/// other nappe.
+///
+/// **The family is two tests, one per lean**, so that neither sets the slow
+/// tier's wall (`docs/decisions.md` §397.4). Their tallies add up to the counts
+/// above: the two that do not measure are at a quarter.
 #[test]
-fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
-    let mut cases = Vec::new();
-    for lean in [0.25, 0.375] {
-        for crossing in [0.0, 0.125, -0.125, 0.5] {
-            for turn in [0.0, 1.0, 3.0] {
-                cases.push(Case {
-                    cone: THE_POINTED_CONE,
-                    block: a_leaning_block(lean, crossing, turn),
-                    solids: OVERLAPPING,
-                });
-            }
-        }
-    }
+fn a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_a_quarter_answers_right_or_refuses() {
     assert_eq!(
-        tally(&cases),
+        tally(&steeper_faces_near_the_pointed_cones_apex(0.25)),
         Tally {
-            right: 78,
-            refused: [
-                ("Geometry(CannotNameWhichPieceOfACrossingThisIs)", 16),
-                ("the answer does not measure: CannotMeshAFace", 2),
-            ]
-            .into()
+            right: 46,
+            refused: [("the answer does not measure: CannotMeshAFace", 2)].into()
         }
     );
+}
+
+#[test]
+fn a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_three_eighths_answers_right_or_refuses() {
+    assert_eq!(
+        tally(&steeper_faces_near_the_pointed_cones_apex(0.375)),
+        Tally {
+            right: 48,
+            refused: [].into()
+        }
+    );
+}
+
+fn steeper_faces_near_the_pointed_cones_apex(lean: f64) -> Vec<Case> {
+    let mut cases = Vec::new();
+    for crossing in [0.0, 0.125, -0.125, 0.5] {
+        for turn in [0.0, 1.0, 3.0] {
+            cases.push(Case {
+                cone: THE_POINTED_CONE,
+                block: a_leaning_block(lean, crossing, turn),
+                solids: OVERLAPPING,
+            });
+        }
+    }
+    cases
 }
 
 /// A block that misses the frustum, below it, whose faces still cross the cone
@@ -213,9 +264,9 @@ fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
 /// worked out from the shapes now, as the steeper family works it out.
 ///
 /// **Twenty refused on a piece glued out of two cells** until §36.3's sign rule
-/// stopped doing that (§282.7 named them). Eight of them answer right now, eight
-/// still find no point in a piece that is one cell, and four refuse
-/// `ResultIsNotManifold` further on.
+/// stopped doing that (§282.7 named them). Twelve of them answer right now and
+/// eight still find no point in a piece that is one cell. Four of the twelve
+/// refused `ResultIsNotManifold` further on until §340.10.
 ///
 /// **Two of the eight did not measure until Q423**: the union and the
 /// cone-less-block of the block reaching up to `1.5`, turned `0`. They held
@@ -230,31 +281,58 @@ fn a_pointed_cone_with_its_apex_near_a_steeper_face_answers_right_or_refuses() {
 /// for ever is charged its two ends; both measure, `579.01` and `129.01`,
 /// against `579.03` and `129.03` from the shapes.
 ///
-/// **The four that refuse `ResultIsNotManifold` are every rule of one block**:
-/// leaned at `2`, from `−3` up to `1`, turned `0`. Its top face is parallel to a
-/// ruling of the cone, so it cuts the upper nappe in a parabola, and the ridge
-/// where the top face meets the leaning face passes through the frustum at
-/// `(1.3416, ±0.9266, 3.2610)`. The frustum's face and the leaning face are cut
-/// there, and **the top face is not**: `arrange.rs`'s
-/// `work_out_how_each_crossing_runs` drops the parabola as a cut that misses
-/// the face, because every node on it is provably outside `bake.rs`'s box round
-/// the face. The two nodes on the ridge are not off the face. They are the
-/// meets of the top face's plane, the leaning face's plane and the cone, with
-/// `x` from `1.341640786499873` to `1.3416407864998736`, and the box is the box
-/// round the face's *stored* corners, whose `x` rounded to `1.341640786499874`,
-/// a rounding further out. So the top face has no piece inside the cone, no rule
-/// keeps one, and the parabola's arc and the ridge between the two meets each
-/// have one face along them.
+/// **Four answer right since §340.10, every rule of one block**: leaned at `2`,
+/// from `−3` up to `1`, turned `0`. Its top face is parallel to a ruling of the
+/// cone, so it cuts the upper nappe in a parabola, and the ridge where the top
+/// face meets the leaning face passes through the frustum at
+/// `(1.3416, ±0.9266, 3.2610)`. All four refused `ResultIsNotManifold` because
+/// **the top face was not cut there**: `arrange.rs`'s
+/// `work_out_how_each_crossing_runs` dropped the parabola as a cut that misses
+/// the face, since every node on it was outside `bake.rs`'s box round the face.
+/// The two nodes on the ridge are the meets of the top face's plane, the
+/// leaning face's plane and the cone, with `x` from `1.341640786499873` to
+/// `1.3416407864998736`, and the box was the box round the face's *stored*
+/// corners, whose `x` rounded to `1.341640786499874`, a rounding further out.
+/// That box is grown by what writing a corner down costs now. All four measure:
+/// the union decides 6986 grid points, the intersection 17954, the cone less the
+/// block 16361 and the block less the cone 8579. Turned `1`, the same block
+/// refused `order along a crossing` instead, until §406.
 ///
-/// **That is a gap** (§16.10): the face reaches its ridge where its planes
-/// cross, not where its corners were rounded to. With the box grown by what
-/// writing a corner down costs, in the tree that traced this, all four answer
-/// and none of them wrongly. The intersection and both differences hold every
-/// grid point asked and do not measure, `DeflectionBelowWhatAMeshCanReach`, as
-/// the block reaching up to `1.5` did until Q423; the union holds every one of
-/// the 6986 grid points it decides, which is short of the 7 000 an answer that
-/// does not measure is held to. Turned `1`, the same block refuses `order along a
-/// crossing` instead, and those four are among the twenty counted below.
+/// **Twelve fewer stop at `order along a crossing` since Q901**, which orders
+/// two meets of three planes that share two by the planes when their boxes
+/// cannot say. Right answers went from 68 to 72, each held to the four checks
+/// at the top of this file, and refusals for want of a point inside a piece
+/// from 8 to 16. The sixteen are the blocks from `−3` up to `1` and up to
+/// `1.5`, leaned at a quarter, both turns and every rule, and the eight left at
+/// the order were the same two blocks leaned at `2` and turned `1`.
+///
+/// **None of the eight stops at the order since §406.** Turned `1`, the
+/// block's top and bottom and their side edges are a rounding off parallel to
+/// a ruling, so the top and the bottom cut the cone in ellipses `4.5e16` long
+/// and the side edges meet it again `2.26e16` and `4.48e16` out. Two meets by
+/// the frustum are put in order round the top's ellipse from its start
+/// `2.2e16` out, two far meets on it are left out because nothing drawn
+/// crosses there, and the two far meets of the bottom's side edges are boxed
+/// to an ulp and ordered round the bottom's ellipse, and how the edge leaves
+/// the ellipse there is read off the root. The block up to `1.5` answered right
+/// for the intersection and for the block less the cone, held to the four
+/// checks and deciding 30172 grid points each, and the other six refused inside
+/// the fuse, meshing what it built.
+///
+/// **All eight answer right since Q1074**, each held to the four checks. The six
+/// shared one cause: `rcad_geom::walk` placed the points of an arc of the top's
+/// ellipse by the frustum from the ellipse's centre `2.2e16` out, so the arc's
+/// one middle point rounded to `(−3, 0, 8)`, `(0, 0, 4)` or `(−2, 0, 8)`, one
+/// or two off the cone. Such an arc is walked round the cone now, along its
+/// rulings, and the mesher charges its floor by the arc's ends and not by the
+/// ellipse's far end (§406.5).
+///
+/// **The sixteen that found no point inside a piece answer right since
+/// Q929**, each held to the four checks. The piece is one of the cone's, and
+/// every step of one radius from its corners' middle missed it; the fuse
+/// offers the same steps at a half, a quarter, an eighth and a sixteenth of
+/// that after every other point, and one of them is inside it
+/// (`a_frustums_wall_cut_below_a_blocks_floor.rs`).
 #[test]
 fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right() {
     let mut cases = Vec::new();
@@ -283,13 +361,8 @@ fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer
     assert_eq!(
         tally(&cases),
         Tally {
-            right: 64,
-            refused: [
-                ("ResultIsNotManifold", 4),
-                ("a point inside a piece of a face", 8),
-                ("order along a crossing", 20),
-            ]
-            .into()
+            right: 96,
+            refused: [].into()
         }
     );
 }
@@ -306,25 +379,67 @@ fn a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer
 /// band between them and nothing else, so the walk takes them now and all 48 are
 /// right. The name says so rather than keeping `_or_refuses` over a body that
 /// does not, exactly as
-/// [`a_corner_up_cube_round_a_pointed_cones_apex_answers_right`] did.
+/// [`a_corner_up_cube_of_side_four_round_a_pointed_cones_apex_answers_right`]
+/// did.
+///
+/// **The family is four tests, one per side and turn**, so that none sets the
+/// slow tier's wall (`docs/decisions.md` §397.4). Each holds the three middles,
+/// twelve right, and the four add up to the 48.
 #[test]
-fn a_corner_up_cube_round_a_frustums_apex_answers_right() {
-    let mut cases = Vec::new();
-    for side in [4.0, 6.0] {
-        for middle in [0.0, 1.0, 2.5] {
-            for turn in [0.0, 0.7] {
-                cases.push(Case {
-                    cone: THE_FRUSTUM,
-                    block: a_corner_up_cube(side, middle, turn),
-                    solids: OVERLAPPING,
-                });
-            }
-        }
-    }
+fn a_corner_up_cube_of_side_four_round_a_frustums_apex_answers_right() {
     assert_eq!(
-        tally(&cases),
+        tally(&corner_up_cubes(
+            THE_FRUSTUM,
+            &[(4.0, 0.0), (4.0, 1.0), (4.0, 2.5)],
+            0.0
+        )),
         Tally {
-            right: 48,
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_corner_up_cube_of_side_four_turned_about_the_axis_round_a_frustums_apex_answers_right() {
+    assert_eq!(
+        tally(&corner_up_cubes(
+            THE_FRUSTUM,
+            &[(4.0, 0.0), (4.0, 1.0), (4.0, 2.5)],
+            0.7
+        )),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_corner_up_cube_of_side_six_round_a_frustums_apex_answers_right() {
+    assert_eq!(
+        tally(&corner_up_cubes(
+            THE_FRUSTUM,
+            &[(6.0, 0.0), (6.0, 1.0), (6.0, 2.5)],
+            0.0
+        )),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_corner_up_cube_of_side_six_turned_about_the_axis_round_a_frustums_apex_answers_right() {
+    assert_eq!(
+        tally(&corner_up_cubes(
+            THE_FRUSTUM,
+            &[(6.0, 0.0), (6.0, 1.0), (6.0, 2.5)],
+            0.7
+        )),
+        Tally {
+            right: 12,
             refused: BTreeMap::new()
         }
     );
@@ -340,25 +455,80 @@ fn a_corner_up_cube_round_a_frustums_apex_answers_right() {
 /// cone face runs right round the apex, a ring of arcs with no seam that the
 /// mesher could not walk. §208.4 taught it to, and all 40 are right now. The
 /// name says so rather than keeping `_or_refuses` over a body that does not.
+///
+/// **The family is four tests, one per side and turn**, as the frustum's is:
+/// eight right for each side-4 test and twelve for each side-6, 40 in all.
 #[test]
-fn a_corner_up_cube_round_a_pointed_cones_apex_answers_right() {
-    let mut cases = Vec::new();
-    for (side, middle) in [(4.0, 1.0), (4.0, 2.5), (6.0, 0.0), (6.0, 1.0), (6.0, 2.5)] {
-        for turn in [0.0, 0.7] {
-            cases.push(Case {
-                cone: THE_POINTED_CONE,
-                block: a_corner_up_cube(side, middle, turn),
-                solids: OVERLAPPING,
-            });
-        }
-    }
+fn a_corner_up_cube_of_side_four_round_a_pointed_cones_apex_answers_right() {
     assert_eq!(
-        tally(&cases),
+        tally(&corner_up_cubes(
+            THE_POINTED_CONE,
+            &[(4.0, 1.0), (4.0, 2.5)],
+            0.0
+        )),
         Tally {
-            right: 40,
+            right: 8,
             refused: [].into()
         }
     );
+}
+
+#[test]
+fn a_corner_up_cube_of_side_four_turned_about_the_axis_round_a_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally(&corner_up_cubes(
+            THE_POINTED_CONE,
+            &[(4.0, 1.0), (4.0, 2.5)],
+            0.7
+        )),
+        Tally {
+            right: 8,
+            refused: [].into()
+        }
+    );
+}
+
+#[test]
+fn a_corner_up_cube_of_side_six_round_a_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally(&corner_up_cubes(
+            THE_POINTED_CONE,
+            &[(6.0, 0.0), (6.0, 1.0), (6.0, 2.5)],
+            0.0
+        )),
+        Tally {
+            right: 12,
+            refused: [].into()
+        }
+    );
+}
+
+#[test]
+fn a_corner_up_cube_of_side_six_turned_about_the_axis_round_a_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally(&corner_up_cubes(
+            THE_POINTED_CONE,
+            &[(6.0, 0.0), (6.0, 1.0), (6.0, 2.5)],
+            0.7
+        )),
+        Tally {
+            right: 12,
+            refused: [].into()
+        }
+    );
+}
+
+/// A corner-up cube of each `(side, middle)` round `cone`, all turned `turn`
+/// about the axis.
+fn corner_up_cubes(cone: ConeShape, cubes: &[(f64, f64)], turn: f64) -> Vec<Case> {
+    cubes
+        .iter()
+        .map(|&(side, middle)| Case {
+            cone,
+            block: a_corner_up_cube(side, middle, turn),
+            solids: OVERLAPPING,
+        })
+        .collect()
 }
 
 /// The side-4 cube stood on its corner and centred on the pointed cone's apex,
@@ -382,8 +552,9 @@ fn a_corner_up_cube_round_a_pointed_cones_apex_answers_right() {
 /// says half. §208.4 walked a ring only when it was its face's **one** wire, so a
 /// frustum's band — ringed by arcs and holed by its own near cap — stayed
 /// refused; §212 walked that too, and
-/// [`a_corner_up_cube_round_a_frustums_apex_answers_right`] above is what holds
-/// the line now that there is no refusal left in this file to hold.
+/// [`a_corner_up_cube_of_side_four_round_a_frustums_apex_answers_right`] and the
+/// three beside it above are what hold the line now that there is no refusal
+/// left in this file to hold.
 #[test]
 fn a_corner_up_cube_centred_on_a_pointed_cones_apex_answers_every_rule_right() {
     let cases: Vec<Case> = [0.0, 0.7]
@@ -694,12 +865,10 @@ fn moved([x, y, z]: [f64; 3]) -> Isometry {
 /// Every way a fuse in this file refuses today, and the two ways an answer
 /// that holds every grid point it is asked about can still not be checked:
 /// a mesh finer than the mesher reaches, and a face it cannot mesh.
-const REFUSALS: [&str; 6] = [
+const REFUSALS: [&str; 4] = [
     "a point inside a piece of a face",
-    "ResultIsNotManifold",
     "the answer does not measure: DeflectionBelowWhatAMeshCanReach",
     "the answer does not measure: CannotMeshAFace",
-    "order along a crossing",
     "Geometry(CannotNameWhichPieceOfACrossingThisIs)",
 ];
 
@@ -846,7 +1015,7 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
     // frustum; every leaning block sits above 10 500. A corner-up cube's faces
     // lean `acos(1/√3) ≈ 54.7°` off the axis, which for slope one half is inside
     // the closed family, so each of them cuts an **ellipse** — the doc comment
-    // on `a_corner_up_cube_round_a_frustums_apex_answers_right` says so — and
+    // on `a_corner_up_cube_of_side_four_round_a_frustums_apex_answers_right` says so — and
     // every step here now follows an ellipse arc as it follows a circle's. The
     // count did not budge for that, so whatever leaves 9326 here is something
     // else again and nobody has named it. §211.
@@ -870,8 +1039,10 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
     // union and the cone-less-block of the family below the frustum's block
     // from `−8` to `1.875` leaned a quarter, whose corner reaches into the
     // frustum. The union of the steep block of that family that reaches up to
-    // `1.5` decides 7327, and it has been measured since Q423. Every other
-    // answer still decides at least 9326.
+    // `1.5` decides 7327, and it has been measured since Q423. The union and
+    // the block-less-cone of the steep block that reaches up to `1` decide 6986
+    // and 8579 since §340.10, and both measure. Every other answer still decides
+    // at least 9326.
     //
     // **An answer that does not measure is held to 7 000.** It was set for
     // that union, whose kept piece of the cone is bounded by an arc of the

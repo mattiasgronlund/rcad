@@ -1,0 +1,19 @@
+[Unit]
+Description=rcad: replay the night's fuzz findings against main, at 08:30
+
+[Timer]
+# After the night's hard stop: 00:10, plus up to a minute of AccuracySec, plus
+# its TimeoutStartSec and TimeoutStopSec, is 08:23 at the latest.
+# `check-triage-waits-for-the-night` holds this hour to that sum.
+OnCalendar=*-*-* 08:30:00
+
+# A catch-up run fires at boot, whatever the hour, so a boot during the night
+# would start the replay beside it, and the hour above would bound nothing. A
+# missed morning loses nothing: every night's `artifacts/` carries every crash
+# file of the nights before it, so the next morning replays this one's too.
+Persistent=false
+
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
