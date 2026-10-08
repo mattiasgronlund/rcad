@@ -70,7 +70,7 @@
 use core::cmp::Ordering;
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, EdgeRun, MeetOfThree, NamedRun, Orientation,
+    Axis, Cone, Cylinder, EdgeRun, HalfSpace, MeetOfThree, NamedRun, Orientation,
     POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane, PlaneAgreement, Point, Sphere, Surface,
     SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
     intersect, meet_of_three_surfaces, root_enclosing, where_a_closed_crossing_starts,
@@ -706,6 +706,10 @@ struct Crossing {
     /// rather than taken apart, because [`where_a_closed_crossing_starts`] wants
     /// exactly this and a second spelling of it is §23.8's shape again.
     run: NamedRun,
+    /// What picks this curve out of the others the pair names, empty when the
+    /// pair names one curve and there is nothing to pick
+    /// ([`the_pickers_of_each_run`]).
+    picked_by: SmallVec<[Picker; 2]>,
     /// How points on it are put in order.
     order: HowItRuns,
     /// Whether a face of the other group put this crossing here.
@@ -786,7 +790,7 @@ impl Crossing {
     /// What picks this curve out of the others the pair names. Empty when the
     /// pair names one curve and there is nothing to pick.
     fn picked_by(&self) -> &[Picker] {
-        pickers_of(&self.run)
+        &self.picked_by
     }
 }
 
@@ -881,9 +885,16 @@ enum HowItRuns {
     /// same place as the node a crossing with no other node is given there,
     /// which is a box round `from` wherever the two surfaces do not both
     /// certify it ([`where_the_crossing_starts`]).
+    ///
+    /// `wound_as` is the pair whose crossing is asked which way it winds: the
+    /// face's surface and the partner, or, for a circle a ring shares with a
+    /// surface on its axis, that surface and the circle's own plane in the
+    /// order that winds the way `∇S × ∇Q` runs
+    /// ([`how_a_circle_round_a_rings_axis_runs`]).
     RoundAClosedCurve {
         from: PredicatePoint,
         node: PredicatePoint,
+        wound_as: Box<[Surface; 2]>,
     },
     /// It runs on for ever **and bends**, so it has no axis to climb and
     /// nowhere to start: a plane cutting a cone in a parabola or in one branch
@@ -1248,9 +1259,11 @@ impl<'f> Arrangement<'f> {
             _ => return Err(Error::ACrossingThisCannotBeOrderedAlong),
         };
 
-        let mut wanted = runs;
+        let pickers = the_pickers_of_each_run(&runs);
+        let mut wanted: Vec<(NamedRun, SmallVec<[Picker; 2]>)> =
+            runs.into_iter().zip(pickers).collect();
         if let Some(at) = through {
-            wanted.retain(|run| nothing_rules_the_point_out(pickers_of(run), at));
+            wanted.retain(|(_, picked_by)| nothing_rules_the_point_out(picked_by, at));
             if wanted.len() != 1 {
                 return Err(Error::CannotTellWhichCurveOfACrossingAFaceRunsAlong {
                     face: self.face.keys[0],
@@ -1266,16 +1279,16 @@ impl<'f> Arrangement<'f> {
             _ => None,
         };
         let mut first = None;
-        for run in wanted {
+        for (run, picked_by) in wanted {
             let maybe = drawn.that_may_be(sorts_at, self.crossings.len());
-            let index = match self.crossing_like(&partner, &run, &maybe, policy, log)? {
+            let index = match self.crossing_like(&partner, &run, &picked_by, &maybe, policy, log)? {
                 Some(already) => {
                     self.crossings[already].cuts |= cuts;
                     already
                 }
                 None => {
                     let through_an_apex =
-                        a_ruling_through_an_apex(&self.surface, &partner, &run, policy, log)?;
+                        a_ruling_through_an_apex(&self.surface, &partner, &picked_by, policy, log)?;
                     let touching =
                         a_line_one_surface_rests_on_another_along(self.face, &partner, &run, log)?;
                     self.crossings.push(Crossing {
@@ -1283,6 +1296,7 @@ impl<'f> Arrangement<'f> {
                         through_an_apex,
                         touching,
                         run,
+                        picked_by,
                         // Filled in once there is a node to read it at.
                         order: HowItRuns::AlongAnAxis {
                             axis: 0,
@@ -1327,11 +1341,11 @@ impl<'f> Arrangement<'f> {
         &mut self,
         partner: &Surface,
         run: &NamedRun,
+        picked_by: &[Picker],
         maybe: &[usize],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Option<usize>> {
-        let picked_by = pickers_of(run);
         for &index in maybe {
             let mine = self.crossings[index].partner;
             let same = match (self.surface.as_plane(), mine.as_plane(), partner.as_plane()) {
@@ -1352,7 +1366,7 @@ impl<'f> Arrangement<'f> {
             if same && self.crossings[index].picked_by() == picked_by {
                 return Ok(Some(index));
             }
-            if !same && self.one_curve_two_partners_cut(index, partner, run, policy) {
+            if !same && self.one_curve_two_partners_cut(index, partner, run, picked_by, policy) {
                 self.crossings[index].also_cut_by.push(*partner);
                 return Ok(Some(index));
             }
@@ -1399,9 +1413,11 @@ impl<'f> Arrangement<'f> {
         index: usize,
         partner: &Surface,
         run: &NamedRun,
+        picked_by: &[Picker],
         policy: &Policy,
     ) -> bool {
         let (mine, my_run) = (self.crossings[index].partner, &self.crossings[index].run);
+        let my_pickers = self.crossings[index].picked_by();
         let three = [self.surface, mine, *partner];
         if three
             .iter()
@@ -1411,7 +1427,7 @@ impl<'f> Arrangement<'f> {
         {
             return false;
         }
-        let whole = [pickers_of(my_run).is_empty(), pickers_of(run).is_empty()];
+        let whole = [my_pickers.is_empty(), picked_by.is_empty()];
         if whole == [false, false]
             || !matches!(
                 meet_of_three_surfaces(
@@ -1426,8 +1442,8 @@ impl<'f> Arrangement<'f> {
         }
         match whole {
             [true, true] => true,
-            [true, false] => self.picks_the_whole_of(&mine, my_run, pickers_of(run)),
-            [false, true] => self.picks_the_whole_of(partner, run, pickers_of(my_run)),
+            [true, false] => self.picks_the_whole_of(&mine, my_run, picked_by),
+            [false, true] => self.picks_the_whole_of(partner, run, my_pickers),
             [false, false] => unreachable!("two curves both picked out were turned away above"),
         }
     }
@@ -2633,15 +2649,16 @@ impl<'f> Arrangement<'f> {
     ) -> rcad_geom::Result<(Decision, Measures)> {
         let [one, other] = [first, second].map(|node| self.nodes[node].point);
         let (decided, measures) = match self.crossings[crossing].order {
-            HowItRuns::RoundAClosedCurve { from, node } => {
-                let partner = self.crossings[crossing].partner;
-                round_a_closed_crossing_and_what_it_measures(
-                    [&self.surface, &partner],
-                    [from, node],
-                    one,
-                    other,
-                )?
-            }
+            HowItRuns::RoundAClosedCurve {
+                from,
+                node,
+                ref wound_as,
+            } => round_a_closed_crossing_and_what_it_measures(
+                [&wound_as[0], &wound_as[1]],
+                [from, node],
+                one,
+                other,
+            )?,
             HowItRuns::AlongAnAxis { .. } | HowItRuns::AlongABend { .. } => (
                 self.how_far_apart_along(crossing, one, other)?,
                 Measures::Length,
@@ -2721,9 +2738,10 @@ impl<'f> Arrangement<'f> {
                 one,
                 other,
             ),
-            HowItRuns::RoundAClosedCurve { from, .. } => {
-                let partner = self.crossings[crossing].partner;
-                which_comes_first_round_a_crossing([&self.surface, &partner], from, one, other)?
+            HowItRuns::RoundAClosedCurve {
+                from, ref wound_as, ..
+            } => {
+                which_comes_first_round_a_crossing([&wound_as[0], &wound_as[1]], from, one, other)?
             }
         })
     }
@@ -6807,30 +6825,109 @@ fn ahead_by_the_end_of_its_box_the_start_is_at(
     }
 }
 
-/// What picks one curve of a crossing out of the others, empty when the pair
-/// names one curve and there is nothing to pick.
+/// What picks each curve of a crossing out of the others, in the order of
+/// `runs`, every curve one pair of surfaces crosses in: empty for a curve that
+/// is the only one and has nothing to pick.
+///
+/// A piece of a crossing carries its own pickers. **A circle a ring shares
+/// with a ball, a pipe or a cone on its axis carries a plane instead**, the
+/// one square to the axis it lies in ([`EdgeRun::RightRoundWhereItCrosses`]),
+/// and that plane is a rounding: the circle is on the ring and the other
+/// surface exactly and off the plane by up to sixteen roundings. So it is not
+/// asked whether a point is on that plane. The plane halfway between two
+/// neighbouring circles' planes is proved by `intersect` to part the two, so a
+/// circle is picked by being in front of the plane halfway to the one below it
+/// and behind the one halfway to the one above, the way a ball and a pipe on
+/// its axis have their two circles picked by a half-space square to it.
 ///
 /// # Panics
 ///
-/// If the run is a kind this crate has not been taught. Empty is what says "the
-/// pair names one curve", and answering it for a kind that carries pickers picks
-/// the wrong curve of two rather than refusing — [`EdgeRun`] is
-/// `#[non_exhaustive]` and lives in another crate, so a new kind arrives with no
-/// compile error and this assert is what notices. A wrong curve is a wrong
+/// If a run is a kind this crate has not been taught, or such a circle whose
+/// plane does not face the way its neighbours' do. Empty is what says "the
+/// pair names one curve", and answering it for a kind that carries pickers
+/// picks the wrong curve of two rather than refusing — [`EdgeRun`] is
+/// `#[non_exhaustive]` and lives in another crate, so a new kind arrives with
+/// no compile error and this assert is what notices. A wrong curve is a wrong
 /// answer; a crash is not.
-fn pickers_of(run: &NamedRun) -> &[Picker] {
-    if let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() {
-        return picked_by;
-    }
+fn the_pickers_of_each_run(runs: &[NamedRun]) -> Vec<SmallVec<[Picker; 2]>> {
+    let levels: Vec<&Plane> = runs
+        .iter()
+        .filter_map(|run| {
+            let EdgeRun::RightRoundWhereItCrosses {
+                and: Surface::Plane(level),
+            } = run.run()
+            else {
+                return None;
+            };
+            Some(level)
+        })
+        .collect();
+    runs.iter()
+        .map(|run| {
+            if let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() {
+                return picked_by.iter().copied().collect();
+            }
+            if let EdgeRun::RightRoundWhereItCrosses {
+                and: Surface::Plane(level),
+            } = run.run()
+            {
+                return the_halfway_planes_round(level, &levels);
+            }
+            assert!(
+                matches!(
+                    run.run(),
+                    EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross
+                ),
+                "a run nothing here can say what picks out: {:?}",
+                run.run()
+            );
+            SmallVec::new()
+        })
+        .collect()
+}
+
+/// The half-spaces that pick the circle on `level` out of the circles on
+/// `levels`, all square to one ring's axis and `level` among them: in front of
+/// the plane halfway to the next one down and behind the plane halfway to the
+/// next one up, each as `intersect` proves it parts the two.
+///
+/// # Panics
+///
+/// If the planes do not all face the way `level` does, which every circle
+/// `intersect` names round one ring does, or two of them are one plane.
+fn the_halfway_planes_round(level: &Plane, levels: &[&Plane]) -> SmallVec<[Picker; 2]> {
+    let normal = level.normal();
     assert!(
-        matches!(
-            run.run(),
-            EdgeRun::Straight | EdgeRun::RightRoundWhereItsFacesCross
-        ),
-        "a run nothing here can say what picks out: {:?}",
-        run.run()
+        levels.iter().all(|other| other.normal() == normal),
+        "the circles round one ring face one way: {levels:?}"
     );
-    &[]
+    let below = levels
+        .iter()
+        .map(|other| other.offset())
+        .filter(|offset| *offset < level.offset())
+        .max_by(f64::total_cmp);
+    let above = levels
+        .iter()
+        .map(|other| other.offset())
+        .filter(|offset| *offset > level.offset())
+        .min_by(f64::total_cmp);
+    assert_eq!(
+        levels
+            .iter()
+            .filter(|other| other.offset() == level.offset())
+            .count(),
+        1,
+        "two circles round one ring on one plane: {levels:?}"
+    );
+    let halfway = |other: f64| {
+        HalfSpace::new(normal, level.offset() / 2.0 + other / 2.0)
+            .expect("a plane's normal has a length and the two offsets are finite")
+    };
+    below
+        .map(|other| Picker::InFrontOf(halfway(other)))
+        .into_iter()
+        .chain(above.map(|other| Picker::InFrontOf(halfway(other).reversed())))
+        .collect()
 }
 
 /// Whether nothing among `picked_by` rules `at` out.
@@ -7138,6 +7235,12 @@ fn how_a_crossing_runs(
     // nothing about being able to order it, and reading the two as the same
     // question is what gave a ball with a pipe through it four pieces where it
     // has three.
+    if let EdgeRun::RightRoundWhereItCrosses {
+        and: level @ Surface::Plane(_),
+    } = run.run()
+    {
+        return how_a_circle_round_a_rings_axis_runs(surface, partner, level, run, log);
+    }
     if !a_pair_that_crosses_in_a_conic(surface, partner, log)? {
         return Err(Error::ACrossingThisCannotBeOrderedAlong);
     }
@@ -7145,9 +7248,68 @@ fn how_a_crossing_runs(
         Ok(from) => Ok(HowItRuns::RoundAClosedCurve {
             from: PredicatePoint::from(from.coordinates()),
             node: where_the_crossing_starts(surface, partner, from),
+            wound_as: Box::new([*surface, *partner]),
         }),
         Err(_) => Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
+}
+
+/// How points along a circle a ring shares with a ball, a pipe or a cone on
+/// its axis are put in order: round the circle that surface and the circle's
+/// own plane `level` cross in, which is the circle as the run names it
+/// ([`EdgeRun::RightRoundWhereItCrosses`]), and the way `∇S × ∇Q` runs round
+/// it.
+///
+/// **`rcad-geom` orders a plane's circle and not a ring's**: a ring and the
+/// surface on its axis cross in up to four circles winding either way, and
+/// [`which_comes_first_round_a_crossing`] has no row for the pair. The circle
+/// is the same one, and a plane's circle winds about the plane's normal, so it
+/// is asked of the round surface and the plane, in the order whose
+/// `∇A × ∇B` points the way `∇S × ∇Q` does where the circle starts. The two
+/// are along one tangent there, so the sign of their dot product is that
+/// order, and a crossing that cuts rather than touches leaves it off zero.
+///
+/// # Errors
+///
+/// [`Error::ACrossingThisCannotBeOrderedAlong`] where the circle has no start,
+/// and [`Error::Undecidable`](crate::Error::Undecidable) where the two
+/// directions could not be compared.
+fn how_a_circle_round_a_rings_axis_runs(
+    surface: &Surface,
+    partner: &Surface,
+    level: &Surface,
+    run: &NamedRun,
+    log: &mut ProvenanceLog,
+) -> Result<HowItRuns> {
+    let round = if matches!(surface, Surface::Torus(_)) {
+        partner
+    } else {
+        surface
+    };
+    let Ok(from) = where_a_closed_crossing_starts(run, [surface, partner], log) else {
+        return Err(Error::ACrossingThisCannotBeOrderedAlong);
+    };
+    let at = PredicatePoint::from(from.coordinates());
+    let forward = cross_of(gradient_at(surface, at), gradient_at(partner, at));
+    let as_named = cross_of(gradient_at(level, at), gradient_at(round, at));
+    let agree = dot_of(forward, as_named).sign();
+    let wound_as = if agree == Decision::Pos {
+        [*level, *round]
+    } else if agree == Decision::Neg {
+        [*round, *level]
+    } else {
+        return Err(gave_up(
+            WHICH_WAY_A_CROSSING_RUNS,
+            &[at],
+            Measures::ManyLengths { how_many: 4 },
+            log,
+        ));
+    };
+    Ok(HowItRuns::RoundAClosedCurve {
+        from: at,
+        node: where_the_crossing_starts(surface, partner, from),
+        wound_as: Box::new(wound_as),
+    })
 }
 
 /// The direction of the one line `surface` and `partner` rest against each
@@ -7420,7 +7582,7 @@ fn the_side_of_a_resting_plane_a_cone_face_lies_on(
 fn a_ruling_through_an_apex(
     surface: &Surface,
     partner: &Surface,
-    run: &NamedRun,
+    picked_by: &[Picker],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<ThroughAnApex>> {
@@ -7430,7 +7592,7 @@ fn a_ruling_through_an_apex(
     if a_plane_cuts_a_cone_in_rulings(flat, cone) != Some(true) {
         return Ok(None);
     }
-    let [Picker::InFrontOf(picker), rest @ ..] = pickers_of(run) else {
+    let [Picker::InFrontOf(picker), rest @ ..] = picked_by else {
         return Ok(None);
     };
     let apex = PredicatePoint::from(cone.apex().coordinates());
@@ -7860,7 +8022,10 @@ fn a_pair_that_crosses_in_a_conic(
         // Two planes cross in a straight line and are answered one step up, so
         // this arm is about the shape of the crossing and not about reaching it.
         (Surface::Plane(_), Surface::Plane(_))
-        // A ball against a ring crosses in a quartic.
+        // A ball against a ring crosses in a quartic. On the ring's axis it
+        // crosses in circles, which `intersect` names by their planes and
+        // `how_a_circle_round_a_rings_axis_runs` orders before this is asked,
+        // and so does a pipe or a cone there.
         | (Surface::Sphere(_), Surface::Torus(_))
         | (Surface::Torus(_), Surface::Sphere(_))
         // So does every other pair among the pipe, the cone and the ring, bar
@@ -9645,6 +9810,7 @@ mod tests {
         arrangement.crossings[circle].order = HowItRuns::RoundAClosedCurve {
             from: on_the_circle,
             node: on_the_circle,
+            wound_as: Box::new([arrangement.surface, arrangement.crossings[circle].partner]),
         };
 
         let corners = [0, 4, 10, 24];
@@ -10307,9 +10473,10 @@ mod what_the_curved_arrangement_reaches {
         a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
         a_plane_lies_along_a_pipes_axis, along_a_bend, cross_of, dominant_axis_of_a_direction,
         gradient_at, how_a_crossing_runs, how_a_plane_leans_against_a_cone,
-        round_a_closed_crossing_and_what_it_measures, side_of_surface, split_a_face,
-        the_turn_where_two_planes_cross_a_quadric, two_pipes_run_along_one_line,
-        where_a_cones_apex_stands_against_a_plane, where_the_crossing_starts,
+        nothing_rules_the_point_out, round_a_closed_crossing_and_what_it_measures, side_of_surface,
+        split_a_face, the_pickers_of_each_run, the_turn_where_two_planes_cross_a_quadric,
+        two_pipes_run_along_one_line, where_a_cones_apex_stands_against_a_plane,
+        where_the_crossing_starts,
     };
     use crate::{Error, Model, SolidKey};
 
@@ -10672,6 +10839,77 @@ mod what_the_curved_arrangement_reaches {
         let inner = ordered_round_the_axis(3.0);
         assert_eq!(outer, Decision::Pos, "the outer circle winds about `+n`");
         assert_eq!(inner, Decision::Neg, "and the inner one about `-n`");
+    }
+
+    /// A ring and the bar of its own radius on its axis cross in the circles on
+    /// the top and the bottom of the tube, which `intersect` names by their
+    /// planes, `z = −1` and `z = 1` for ring four, tube one (rows Q1334 and
+    /// Q1376). Each is picked out of the pair by the plane halfway between
+    /// the two, so it holds its own points and not the other's, and each is
+    /// ordered round the way `∇S × ∇Q` runs along it: on the ring the top
+    /// circle winds about `+z` and the bottom one about `−z`, since `∇S × ∇Q`
+    /// there is the height times the way round, and on the bar each the other
+    /// way.
+    ///
+    /// Before Q1376 picking either panicked, "a run nothing here can say what
+    /// picks out", and ordering one refused `ACrossingThisCannotBeOrderedAlong`.
+    #[test]
+    fn the_circles_a_ring_shares_with_a_bar_on_its_axis_are_picked_and_ordered() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let ring = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a tube inside its ring"));
+        let bar = Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius"));
+        for (face, partner, top_winds_up) in [(ring, bar, true), (bar, ring, false)] {
+            let SurfaceMeet::Curves(runs) = intersect(&face, &partner, &policy, &mut log)
+                .expect("a bar of the ring's radius crosses its tube")
+            else {
+                panic!("two circles");
+            };
+            let pickers = the_pickers_of_each_run(&runs);
+            assert_eq!(pickers.len(), 2, "{runs:?}");
+            for (picked_by, up) in pickers.iter().zip([-1.0, 1.0]) {
+                for other_up in [-1.0, 1.0] {
+                    assert_eq!(
+                        nothing_rules_the_point_out(
+                            picked_by,
+                            PredicatePoint::from([4.0, 0.0, other_up])
+                        ),
+                        other_up == up,
+                        "the circle at {up} against a point at {other_up}: {picked_by:?}"
+                    );
+                }
+            }
+
+            for (run, up) in runs.iter().zip([-1.0, 1.0]) {
+                let point =
+                    |angle: f64| PredicatePoint::from([4.0 * angle.cos(), 4.0 * angle.sin(), up]);
+                let ran = how_a_crossing_runs(&face, &partner, run, point(0.0), &mut log)
+                    .unwrap_or_else(|why| panic!("the circle at {up}: {why:?}"));
+                let HowItRuns::RoundAClosedCurve { from, wound_as, .. } = ran else {
+                    panic!("the circle at {up} closes");
+                };
+                let winds_up = (up > 0.0) == top_winds_up;
+                for angle in [2.0, 5.0] {
+                    let decided = which_comes_first_round_a_crossing(
+                        [&wound_as[0], &wound_as[1]],
+                        from,
+                        point(angle),
+                        point(angle + 0.01),
+                    )
+                    .unwrap_or_else(|why| panic!("the circle at {up}: {why:?}"));
+                    assert_eq!(
+                        decided,
+                        if winds_up {
+                            Decision::Pos
+                        } else {
+                            Decision::Neg
+                        },
+                        "{face:?} against {partner:?}, the circle at {up}, from {from:?}"
+                    );
+                }
+            }
+        }
+        assert!(log.is_empty(), "nothing here was approximated: {log:?}");
     }
 
     /// §244.2's walked start sits `2⁻¹⁰³` inside the ball, on the block edge

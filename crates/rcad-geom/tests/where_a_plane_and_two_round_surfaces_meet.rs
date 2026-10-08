@@ -35,7 +35,7 @@
 #![forbid(unsafe_code)]
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, Error, MeetOfThree, Plane, Point, Sphere, Surface, Vector,
+    Axis, Cone, Cylinder, Error, MeetOfThree, Plane, Point, Sphere, Surface, Torus, Vector,
     meet_of_three_surfaces,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
@@ -1108,6 +1108,122 @@ fn two_balls_whose_plane_no_stored_plane_is_and_a_bar_are_still_refused() {
 
     assert_eq!(
         meet([&here, &there, &bar]),
+        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+    );
+}
+
+/// A ring about `z` through the origin.
+fn ring(ring_radius: f64, tube_radius: f64) -> Surface {
+    Surface::Torus(Torus::new(Axis::z(), ring_radius, tube_radius).expect("a tube inside its ring"))
+}
+
+/// **A bend's end cap across the bar of its ring's radius on its axis**: the
+/// bar crosses the tube in the circles on its top and its bottom, and the cap,
+/// a plane holding the axis, cuts each circle either side of the axis. Ring
+/// four, tube one, and the cap `y = 0`, meet at `(±4, 0, ±1)`; ring six, tube
+/// two, and the cap `x = 0`, at `(0, ±6, ±2)`. Lower circles first along `+z`,
+/// and on each the `−(n × z)` side first.
+///
+/// Refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` before row Q1376, which
+/// stopped every fuse of such a bend and bar at its caps.
+#[test]
+fn a_bends_cap_meets_a_bar_of_its_rings_radius_where_the_bars_circles_cross_it() {
+    for (cap, bar, bend, corners) in [
+        (
+            flat([0.0, 1.0, 0.0], [0.0; 3]),
+            pipe([0.0, 0.0, -2.0], [0.0, 0.0, 1.0], 4.0),
+            ring(4.0, 1.0),
+            [
+                [-4.0, 0.0, -1.0],
+                [4.0, 0.0, -1.0],
+                [-4.0, 0.0, 1.0],
+                [4.0, 0.0, 1.0],
+            ],
+        ),
+        (
+            flat([-1.0, 0.0, 0.0], [0.0; 3]),
+            pipe([0.0, 0.0, -4.0], [0.0, 0.0, 1.0], 6.0),
+            ring(6.0, 2.0),
+            [
+                [0.0, -6.0, -2.0],
+                [0.0, 6.0, -2.0],
+                [0.0, -6.0, 2.0],
+                [0.0, 6.0, 2.0],
+            ],
+        ),
+    ] {
+        for order in [
+            [&cap, &bar, &bend],
+            [&bend, &cap, &bar],
+            [&bar, &bend, &cap],
+        ] {
+            assert_eq!(corners_of(order), corners, "{order:?}");
+        }
+    }
+}
+
+/// The same road for a ball and a cone on the ring's axis, whose circles sit
+/// at heights no `f64` holds. The ball of radius four about the centre of ring
+/// four, tube one, crosses the tube at `(31/8, ±√63/8)`, and the cone of slope
+/// four from the centre at `h = ±15/17` and `±1`, `4|h|` out. Each corner is a
+/// box a few roundings wide holding the corner worked out by hand.
+///
+/// A pipe that misses the tube shares nothing with the ring, and a ball off
+/// the axis is not this road and is refused as before.
+#[test]
+fn a_cap_holding_a_rings_axis_meets_a_ball_or_a_cone_on_it_at_their_circles() {
+    let cap = flat([0.0, 1.0, 0.0], [0.0; 3]);
+    let bend = ring(4.0, 1.0);
+    let the_balls = 63f64.sqrt() / 8.0;
+    let (fifteen, sixty) = (15.0 / 17.0, 60.0 / 17.0);
+    for (other, by_hand) in [
+        (
+            ball([0.0; 3], 4.0),
+            vec![
+                [-3.875, -the_balls],
+                [3.875, -the_balls],
+                [-3.875, the_balls],
+                [3.875, the_balls],
+            ],
+        ),
+        (
+            cone([0.0; 3], [0.0, 0.0, 1.0], 4.0),
+            vec![
+                [-4.0, -1.0],
+                [4.0, -1.0],
+                [-sixty, -fifteen],
+                [sixty, -fifteen],
+                [-sixty, fifteen],
+                [sixty, fifteen],
+                [-4.0, 1.0],
+                [4.0, 1.0],
+            ],
+        ),
+    ] {
+        let answer = meet([&cap, &other, &bend]).expect("these three meet");
+        let MeetOfThree::At(points) = &answer else {
+            panic!("{other:?}: {answer:?}");
+        };
+        assert_eq!(points.len(), by_hand.len(), "{other:?}: {answer:?}");
+        for (point, [x, z]) in points.iter().zip(by_hand) {
+            let sides = point.enclosure();
+            for (side, expected) in [(sides[0], x), (sides[1], 0.0), (sides[2], z)] {
+                assert!(
+                    side.width() <= 1e-14
+                        && side.lo() - 1e-15 <= expected
+                        && expected <= side.hi() + 1e-15,
+                    "{other:?}: {point:?} where the corner is ({x}, 0, {z})"
+                );
+            }
+        }
+    }
+
+    assert_eq!(
+        meet([&cap, &pipe([0.0; 3], [0.0, 0.0, 1.0], 2.0), &bend]),
+        Ok(MeetOfThree::Nowhere)
+    );
+    assert_eq!(
+        meet([&cap, &ball([0.0, 1e-9, 0.0], 4.0), &bend]),
         Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
     );
 }
