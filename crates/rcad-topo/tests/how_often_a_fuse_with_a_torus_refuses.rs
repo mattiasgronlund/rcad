@@ -29,7 +29,7 @@
 //! for every family below, how many of the tool's planes fall in each of the
 //! three rows.
 //!
-//! # Two refusals answer for all five, and both of them are true
+//! # Two refusals answer for four of the five, and both of them are true
 //!
 //! This paragraph has said three different things across three lanes, and the
 //! rate under it has been 0 of 96 for every one of them. What changed each time
@@ -50,25 +50,30 @@
 //! |---|---|---|
 //! | a slab square to the axis | `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` | the slab's four sides run parallel to the axis and off it, and such a plane cuts Cassini ovals |
 //! | a wedge through the axis | the same | two of its planes hold the axis; the one that closes it radially does neither |
-//! | a bar through the hole | `ACrossingBetweenATorusAndAnotherCurvedSurface` | a torus and a pipe cross in a space curve of degree eight |
-//! | a ball in the bend | the same | a torus and a ball, likewise |
+//! | a bar through the hole | none: all 96 answered since row Q1334 | the bar is on the bend's axis and one narrower than the hole, so it misses the tube, and `intersect` answers that |
+//! | a ball in the bend | `ACrossingBetweenATorusAndAnotherCurvedSurface` | a torus and a ball off its axis cross in a space curve of degree up to eight |
 //! | a second bend | the same | two tori, likewise |
 //!
 //! Both are `intersect`'s, both are raised before the arrangement is reached,
 //! and both are **gaps** in `rcad-geom` rather than anything topology can close:
 //! the curves are all there and none of them can be named with the runs this
-//! kernel has. So the first two rows are the theorem above, and the last three
-//! are §36.20's quartic-and-worse, still weighed and still left. Neither
+//! kernel has. So the first two rows are the theorem above, and the last two
+//! are §36.20's quartic-and-worse, still weighed and still left. A bar on the
+//! axis that does reach the tube is still refused, and
+//! `a_bend_and_a_bar_through_its_tube_on_its_axis_are_refused_by_name` says
+//! why. Neither
 //! refusal touches `a_bend_fused_with_a_copy_of_itself_is_the_bend_or_nothing`
 //! below — the one test in this file that does reach the arrangement,
 //! `select::choose` and `assemble`'s `join_up_what_is_one_face`, under all
 //! three rules — because fusing a bend with an exact copy of itself draws no
 //! plane-and-torus crossing at all.
 //!
-//! The rate has not moved through any of this — 0 of 96, three times over. That
+//! The rate did not move through any of this — 0 of 96, three times over. That
 //! is the finding rather than a disappointment: a refusal walking down the
 //! pipeline one stage per lane is what it looks like when several true blockers
 //! are stacked, and only the last of them tells you where a bend really stops.
+//! Row Q1334 moved the bar through the hole to 96 of 96, by answering a pipe on
+//! a ring's axis that misses its tube; the other four rows have not moved.
 //!
 //! # The control is the whole reason these numbers mean anything
 //!
@@ -83,7 +88,7 @@
 //! |---|---:|---:|
 //! | a slab square to the axis | 0 of 96 answered | **96 of 96** |
 //! | a wedge through the axis | 0 of 96 | **96 of 96** |
-//! | a bar through the hole | 0 of 96 | **96 of 96** |
+//! | a bar through the hole | **96 of 96** | **96 of 96** |
 //! | a ball in the bend | 0 of 96 | 0 of 96 |
 //! | a second bend | 0 of 96 | — |
 //!
@@ -146,8 +151,8 @@ enum Tool {
     /// A wedge with two faces through the axis. Two of its planes are the other
     /// family `intersect` names, and the one that closes it radially is not.
     WedgeThroughTheAxis,
-    /// A round bar through the middle of the ring: a torus against a pipe,
-    /// which runs to degree eight.
+    /// A round bar through the middle of the ring, on its axis and one
+    /// narrower than the hole: a torus against a pipe that misses its tube.
     BarThroughTheHole,
     /// A ball resting in the bend: a torus against a sphere.
     BallInTheBend,
@@ -288,12 +293,18 @@ fn how_each_fuse_went(curved: Curved, tool: Tool) -> (usize, usize, BTreeMap<Str
 ///
 /// # What is asserted and what is only reported
 ///
-/// **Every bend family is asserted at nothing answered.** That is not a rate to
-/// be improved by tuning: each of the five tools carries at least one plane that
-/// is neither square to the torus's axis nor through it, or is itself curved,
-/// and both of those are shapes this vocabulary has no arm for. A fuse that
-/// answered one would be answering something it cannot name, which §4.1 ranks
-/// below refusing.
+/// **Every bend family but the bar through the hole is asserted at nothing
+/// answered.** That is not a rate to be improved by tuning: each of those four
+/// tools carries at least one plane that is neither square to the torus's axis
+/// nor through it, or is curved and off the axis, and both of those are shapes
+/// this vocabulary has no arm for. A fuse that answered one would be answering
+/// something it cannot name, which §4.1 ranks below refusing.
+///
+/// **The bar through the hole is asserted at everything answered**, each answer
+/// validated here and its volume checked in
+/// `a_bend_and_a_bar_through_its_hole_on_its_axis_fuse_into_what_pappus_gives`.
+/// It stands on the bend's axis one narrower than the hole, and `intersect`
+/// answers a pipe on a ring's axis that misses the tube (row Q1334, §378).
 ///
 /// **The controls are reported and one thing about them is asserted**: that some
 /// of them answer. That is what makes the rows above mean anything — the same
@@ -337,7 +348,9 @@ fn how_often_a_certified_fuse_with_a_torus_in_it_refuses() {
 
     let mut controls_answered = 0;
     for (curved, tool, fuses, answered) in every {
-        if curved == Curved::ABend {
+        if curved == Curved::ABend && matches!(tool, Tool::BarThroughTheHole) {
+            assert_eq!(answered, fuses, "{}", tool.named());
+        } else if curved == Curved::ABend {
             assert_eq!(
                 answered,
                 0,
@@ -354,6 +367,121 @@ fn how_often_a_certified_fuse_with_a_torus_in_it_refuses() {
         "not one control answered anything, so the rows above measure the tools rather than \
          the torus and the whole comparison says nothing"
     );
+}
+
+/// The table's bar through the hole, checked answer by answer: every ring and
+/// tube the draws take, every rule both ways round, validates and holds what
+/// Pappus gives. The bar is one narrower than the hole, so it misses the tube,
+/// and `intersect` answers a bend's ring against a pipe on its axis that
+/// misses it with nothing (row Q1334, §378). So the union is the two solids
+/// apart, the intersection nothing, and each difference its argument.
+#[test]
+fn a_bend_and_a_bar_through_its_hole_on_its_axis_fuse_into_what_pappus_gives() {
+    let policy = Policy::certified();
+    let pi = core::f64::consts::PI;
+    for ring in [4.0, 5.0, 6.0, 7.0, 8.0] {
+        for tube in [1.0, 2.0] {
+            let bar_radius = ring - tube - 1.0;
+            let (model, bend, bar) = a_bend_and_a_bar_on_its_axis(ring, tube, bar_radius);
+            let the_bend = pi * pi * ring * tube * tube / 2.0;
+            let the_bar = pi * bar_radius * bar_radius * 4.0 * tube;
+            for (rule, arguments, tools, solids, volume) in [
+                (Rule::Union, bend, bar, 2, the_bend + the_bar),
+                (Rule::Union, bar, bend, 2, the_bend + the_bar),
+                (Rule::Intersection, bend, bar, 0, 0.0),
+                (Rule::Intersection, bar, bend, 0, 0.0),
+                (Rule::Difference, bend, bar, 1, the_bend),
+                (Rule::Difference, bar, bend, 1, the_bar),
+            ] {
+                let named = format!("ring {ring}, tube {tube}, {rule:?}");
+                let mut answer = model.clone();
+                let fused = answer
+                    .fuse(
+                        &[arguments],
+                        &[tools],
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{named}: {why}"));
+                answer
+                    .validate(&policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{named}: {why}"));
+                assert_eq!(fused.solids().len(), solids, "{named}");
+                let (mut measured, mut allowed) = (0.0, 0.0);
+                for solid in fused.solids() {
+                    let held = answer
+                        .solid(*solid)
+                        .expect("the fuse made the key")
+                        .measure(
+                            Deflection::of(0.01).expect("a length"),
+                            &policy,
+                            &mut ProvenanceLog::new(),
+                        )
+                        .unwrap_or_else(|why| panic!("{named}: {why}"));
+                    measured += held.volume();
+                    allowed += held.volume_error();
+                }
+                assert!(
+                    (measured - volume).abs() <= allowed,
+                    "{named}: measured {measured} where Pappus gives {volume}, allowed {allowed}"
+                );
+            }
+        }
+    }
+}
+
+/// A bar on a bend's axis that does reach its tube, the bar of the ring's own
+/// radius, which crosses the tube at its top and its bottom, is still refused
+/// by name under every rule. `intersect` finds the two circles and does not
+/// hand them back: named by their planes, as commit `9eead79c` did, the
+/// difference of the bar less the bend panicked in the arrangement's
+/// `pickers_of`, which has not been taught that run (row Q1334, §378).
+#[test]
+fn a_bend_and_a_bar_through_its_tube_on_its_axis_are_refused_by_name() {
+    let policy = Policy::certified();
+    for (ring, tube) in [(4.0, 1.0), (6.0, 2.0)] {
+        let (model, bend, bar) = a_bend_and_a_bar_on_its_axis(ring, tube, ring);
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            for (arguments, tools) in [(bend, bar), (bar, bend)] {
+                let fused = model.clone().fuse(
+                    &[arguments],
+                    &[tools],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                );
+                assert!(
+                    matches!(
+                        fused,
+                        Err(Error::Geometry(
+                            rcad_geom::Error::ACrossingBetweenATorusAndAnotherCurvedSurface
+                        ))
+                    ),
+                    "ring {ring}, tube {tube}, {rule:?}: {fused:?}"
+                );
+            }
+        }
+    }
+}
+
+/// A quarter bend and a round bar of `bar_radius` on its axis, four tubes tall
+/// and standing across the bend's middle, in a model of their own.
+fn a_bend_and_a_bar_on_its_axis(
+    ring: f64,
+    tube: f64,
+    bar_radius: f64,
+) -> (Model, SolidKey, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bend = a_quarter_bend(&mut model, ring, tube);
+    let bar = model
+        .add_round_bar(
+            bar_radius,
+            4.0 * tube,
+            &Isometry::translation(Vector::new(0.0, 0.0, -2.0 * tube)).expect("a finite shift"),
+        )
+        .expect("a bar with a radius and a height");
+    (model, bend, bar)
 }
 
 /// **The theorem in the module note, made into a measurement.**

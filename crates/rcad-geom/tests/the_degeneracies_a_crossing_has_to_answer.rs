@@ -654,7 +654,7 @@ fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_under_the_same_name(
         a_ball([1.0, 0.0, 0.0], 3.0),
         a_pipe([1.0, 0.0, 1.0], [0.0, 0.0, 0.0], 0.7),
         a_cone([0.0, 0.0, 1.0], [1.0, 0.0, 5.0], 1.0),
-        a_bend([0.0, 0.0, 1.0], [0.0, 0.0, 1.0], 3.0, 1.5),
+        a_bend([0.0, 0.0, 1.0], [0.5, 0.0, 1.0], 3.0, 1.5),
     ];
     let curved_refusals = [
         Error::ACrossingBetweenAConeAndAnotherCurvedSurface,
