@@ -8,6 +8,8 @@
 //! leaves a corner a rounding off where its three planes meet. So the cube the
 //! planes bound can poke a rounding past that box at its outermost corner, and
 //! a point in that tip came back `Outside` where every plane put it inside.
+//! `SolidView::shares_space_with` read the same box the same way, and called a
+//! block resting a spacing above that box `Apart` from the cube (Q1331).
 //!
 //! Every answer here is checked against the stored planes' exact signs. A cube
 //! is convex, so it holds a point exactly when each of its six planes puts the
@@ -15,7 +17,7 @@
 
 use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, FaceView, Model, SolidKey, SolidView};
+use rcad_topo::{Containment, FaceView, Model, SharedSpace, SolidKey, SolidView};
 
 /// A point one spacing above the top of a cube's box, turned `2.5` about
 /// `(1, 1, 1)`, under the corner whose three planes meet above that box. The
@@ -41,6 +43,60 @@ fn a_point_above_a_turned_cubes_box_that_every_plane_puts_inside_is_inside() {
             ),
             Containment::Inside,
             "{policy:?}"
+        );
+    }
+}
+
+/// A block of side 1 standing one spacing above the box of the cube above,
+/// over the corner whose three planes meet above that box (Q1331).
+///
+/// The two boxes miss, and the boxes alone answered `Apart` both ways round,
+/// which is a proof that no point is in both. Yet a point three spacings above
+/// the cube's box, so two into the block, is inside both by every stored plane
+/// of each. Both are convex, so that is exact, and `Shared` is the whole
+/// answer. No corner of either is inside the other and no two faces share a
+/// plane, so the search finds nothing: `NothingFound`, which claims nothing.
+#[test]
+fn a_block_one_spacing_above_a_turned_cubes_box_is_not_called_apart_from_it() {
+    let policy = Policy::certified();
+    let (mut model, cube) = a_cube_of_side_2_turned([1.0, 1.0, 1.0], 2.5);
+    let block = model
+        .add_cube(1.0, &policy, &mut ProvenanceLog::new())
+        .expect("a cube of side 1");
+    model
+        .place_solid(
+            block,
+            &Isometry::translation(Vector::new(-1.4, 0.0, 1.401_524_820_729_244_6))
+                .expect("a finite shift"),
+        )
+        .expect("this model made the key");
+    let cube = model.solid(cube).expect("this model made the key");
+    let block = model.solid(block).expect("this model made the key");
+
+    let (_, top_of_the_cube) = cube.box_around_it().expect("a cube has a box");
+    let (bottom_of_the_block, _) = block.box_around_it().expect("a cube has a box");
+    assert_eq!(
+        top_of_the_cube.coordinates()[2].next_up(),
+        bottom_of_the_block.coordinates()[2]
+    );
+    let in_both = [
+        -0.891_818_517_366_446,
+        0.490_293_696_637_201_5,
+        1.401_524_820_729_245,
+    ];
+    assert_eq!(
+        what_the_stored_planes_say(cube, in_both),
+        Containment::Inside
+    );
+    assert_eq!(
+        what_the_stored_planes_say(block, in_both),
+        Containment::Inside
+    );
+
+    for [one, other] in [[cube, block], [block, cube]] {
+        assert_eq!(
+            one.shares_space_with(other, &policy, &mut ProvenanceLog::new()),
+            SharedSpace::NothingFound
         );
     }
 }

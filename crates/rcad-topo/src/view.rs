@@ -1,4 +1,8 @@
-use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Segment, Surface, Vector};
+use std::collections::HashMap;
+
+use rcad_geom::{
+    EdgeRun, Isometry, Orientation, Plane, PlaneAgreement, Point, Segment, Surface, Vector,
+};
 use rcad_predicates::{Approximation, Point as PredicatePoint, Policy, ProvenanceLog};
 use smallvec::SmallVec;
 
@@ -137,13 +141,24 @@ impl<'m> SolidView<'m> {
         seen.then(|| (Point::from(low), Point::from(high)))
     }
 
-    /// An axis-aligned box the whole solid fits inside, or `None` when it has no
-    /// faces at all.
+    /// An axis-aligned box round every stored corner of the solid and every
+    /// curved face whole, or `None` when it has no faces at all.
     ///
-    /// **This is the one [`SolidView::box_around_its_corners`] is not**, and the
-    /// difference is what a ray caster needs: a point outside this box is
-    /// outside the solid with nothing left over, which is a proof and not a
-    /// shortcut, and a ray target picked from it is clear of every face.
+    /// **This is the one [`SolidView::box_around_its_corners`] is not**: it
+    /// holds how far a curved face bulges past its corners, and a ray target
+    /// picked from it is clear of every face.
+    ///
+    /// **It is not a box the whole solid fits inside, so a point past it is not
+    /// proved outside by it alone.** A face is its stored plane
+    /// (`docs/decisions.md` §17.1), and a turn leaves a corner a rounding off
+    /// where its planes meet, so the solid those planes bound can reach past
+    /// this box at its outermost corner. A cube of side 2 turned `2.5` about
+    /// `(1, 1, 1)` holds a point three spacings above this box that every one of
+    /// its six planes puts inside, and forty turned cubes hold 3897 points past
+    /// theirs (`tests/a_point_a_rounding_past_a_turned_solids_corner.rs`,
+    /// Q1157, Q1331). A proof that a point, or another solid, is clear of this
+    /// one reads this box opened out to where the planes meet
+    /// (`SolidView::box_opened_out_to_where_its_planes_meet`).
     ///
     /// A flat face is the box round its own corners, exactly as before. The two
     /// curved ones bulge away from theirs and each is bounded by an argument
@@ -177,6 +192,86 @@ impl<'m> SolidView<'m> {
             });
         }
         round_them_all
+    }
+
+    /// The box from `low` to `high`, opened out to hold every corner of a flat
+    /// face where that face's stored plane meets the stored planes across its
+    /// two straight sides there; `None` where three such planes cannot be
+    /// shown to meet in a point.
+    ///
+    /// Handed [`SolidView::box_around_it`], this is the box a proof that
+    /// something is clear of the solid reads, for the reason that one's doc
+    /// gives: the solid the stored planes bound reaches a rounding past the
+    /// stored corners at a turned corner.
+    ///
+    /// Each straight side of a flat face's outline runs along where its plane
+    /// meets the plane across that side, from one meeting of three planes to
+    /// the next, and a flat outline lies inside the box round its corners. So
+    /// this box holds every flat face along its straight sides between flat
+    /// faces, and the stored box holds the rest as it did. A corner where four
+    /// or more faces meet is placed once from each face's side, and each of
+    /// those places is taken in. A corner whose two sides run along one plane
+    /// is no corner of the outline, which runs straight on through it, and is
+    /// passed over.
+    ///
+    /// **A corner beside a curved face is not opened out**: the stored box is
+    /// all there is there, and where a plane and a curved surface meet a
+    /// rounding past it is not asked here.
+    ///
+    /// Asked only where the stored box has already answered, since a solid of a
+    /// thousand faces is a thousand meetings worked out. `classify.rs` keeps a
+    /// copy of this, `opened_out_to_where_its_planes_meet`, that its `Outside`
+    /// shortcut reads (Q1157); the two are one reading and must stay so.
+    pub(crate) fn box_opened_out_to_where_its_planes_meet(
+        self,
+        low: Point,
+        high: Point,
+    ) -> Option<(Point, Point)> {
+        let planes: HashMap<FaceKey, Plane> = self
+            .faces()
+            .filter_map(|face| Some((face.key(), *face.surface().as_plane()?)))
+            .collect();
+        let (mut low, mut high) = (low.coordinates(), high.coordinates());
+        for face in self.faces() {
+            let Some(flat) = planes.get(&face.key()) else {
+                continue;
+            };
+            for wire in face.wires() {
+                let across: Vec<Option<&Plane>> = wire
+                    .coedges()
+                    .map(|coedge| {
+                        let edge = coedge.edge();
+                        if *edge.stored_run() != EdgeRun::Straight {
+                            return None;
+                        }
+                        edge.neighbouring_faces()
+                            .find(|&other| other != face.key())
+                            .and_then(|other| planes.get(&other))
+                    })
+                    .collect();
+                let next_round = across.iter().cycle().skip(1);
+                for (into, out_of) in across.iter().zip(next_round) {
+                    let (Some(into), Some(out_of)) = (into, out_of) else {
+                        continue;
+                    };
+                    if matches!(
+                        into.agreement_with(out_of),
+                        PlaneAgreement::SameWay | PlaneAgreement::OppositeWay
+                    ) {
+                        continue;
+                    }
+                    let meet = Plane::meet_of_three(flat, into, out_of).ok()?;
+                    for (axis, side) in meet.enclosure().into_iter().enumerate() {
+                        if !(side.lo().is_finite() && side.hi().is_finite()) {
+                            return None;
+                        }
+                        low[axis] = low[axis].min(side.lo());
+                        high[axis] = high[axis].max(side.hi());
+                    }
+                }
+            }
+        }
+        Some((Point::from(low), Point::from(high)))
     }
 
     /// An axis-aligned box one face of this solid fits inside, or `None` when
