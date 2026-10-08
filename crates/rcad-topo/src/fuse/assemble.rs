@@ -2579,28 +2579,6 @@ impl Assembly {
         let mut volumes = Vec::new();
         for &solid in &written.solids {
             let volume = how_much_space_it_encloses(apart.solid_at(solid), policy, log)?;
-            if std::env::var("PROBE_Q1353").is_ok() {
-                let view = apart.solid_at(solid);
-                eprintln!(
-                    "PROBE shell volume {volume:e}, {} faces",
-                    view.faces().count()
-                );
-                for face in view.faces() {
-                    let corners: Vec<String> = face
-                        .wires()
-                        .map(|wire| {
-                            wire.coedges()
-                                .map(|coedge| format!("{:?}", coedge.start().point()))
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        })
-                        .collect();
-                    eprintln!(
-                        "PROBE   face {:?}: {corners:?}",
-                        face.plane().coefficients()
-                    );
-                }
-            }
             if !volume.is_finite() {
                 return Err(Error::VolumeTooLargeToMeasure);
             }

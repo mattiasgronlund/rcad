@@ -40,7 +40,7 @@
 
 use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
-use rcad_topo::{Error, Measurement, Model, Rule, SolidKey};
+use rcad_topo::{Error, Invalid, Measurement, Model, Rule, SolidKey};
 
 /// The turns at which the two touching faces leave a gap, and what their
 /// offsets add up to there: `-2^-51` and `-2^-52`.
@@ -187,42 +187,29 @@ fn every_corner_of_each_cube_is_in_front_of_the_others_touching_face_only_when_a
     }
 }
 
-/// A limit, not a gap: every answer needs an edge `2.2e-16` long at `2.18`.
-/// Since Q676 orders the corners along their edges it is refused in
-/// selection, at the search for a point inside a piece. With the second cube
-/// as argument that piece is the slab's own face on the second cube's bottom.
-/// With the first, the two strips `2^-52` wide on the first cube's bottom,
-/// between its face `x = 2` and the plane of the second cube's face `x = 0`,
-/// are placed outside by the second cube's bottom plane since Q991, and the
-/// refusal moved to the strip between the same two planes on the first cube's
-/// top, from `y = 0` to `0.5`. That strip is outside the second cube too, with
-/// two of its corners on the plane of the second cube's face `y = 0.5` and the
-/// other two in front of it, and since Q1288 `by_a_plane` takes that and places
-/// it. The refusal moved on to the rest of that strip, from `y = 0.5` to `2`,
-/// which is inside the second cube, so no plane of it has a corner in front.
+/// A limit, not a gap: every answer needs an edge `2.2e-16` long at `2.18`,
+/// and every fuse is now refused for just that, `DynamicRangeTooWide` at a
+/// spread of `3.9e16` to `7.5e16`.
+///
+/// It used to stop sooner, in selection, at the search for a point inside a
+/// piece. Q991 and Q1288 placed the strips `2^-52` wide on the first cube's
+/// bottom, and on its top from `y = 0` to `0.5`, outside the second cube by
+/// one of its planes. The last stop was the rest of the top strip, from
+/// `y = 0.5` to `2`, inside the second cube. Since Q1353 `by_a_plane` places a
+/// piece inside a solid when every plane of the solid has every corner of the
+/// piece on or behind it and one strictly behind (`docs/decisions.md` §417),
+/// which that strip has, so every fuse gets as far as writing the sliver and
+/// is refused for the edge it needs.
 #[test]
 fn two_cubes_overlapping_by_a_rounding_are_refused_for_the_sliver_between_them() {
-    for (what, refused_at) in every_fuse_refused(A_ROUNDING_INTO_EACH_OTHER) {
-        assert_eq!(
-            refused_at, "a point inside a piece of a face",
-            "{what} refused at {refused_at}"
-        );
-    }
-}
-
-/// Every fuse of the two cubes at `angle`, each refused `Undecidable`, with the
-/// predicate the first record names.
-fn every_fuse_refused(angle: f64) -> Vec<(&'static str, &'static str)> {
-    let (mut model, a, b) = two_turned_cubes(angle);
-    [
+    let (mut model, a, b) = two_turned_cubes(A_ROUNDING_INTO_EACH_OTHER);
+    for (what, left, right, rule) in [
         ("a union b", a, b, Rule::Union),
         ("b union a", b, a, Rule::Union),
         ("a and b", a, b, Rule::Intersection),
         ("a less b", a, b, Rule::Difference),
         ("b less a", b, a, Rule::Difference),
-    ]
-    .into_iter()
-    .map(|(what, left, right, rule)| {
+    ] {
         let outcome = model.fuse(
             &[left],
             &[right],
@@ -230,16 +217,14 @@ fn every_fuse_refused(angle: f64) -> Vec<(&'static str, &'static str)> {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         );
-        let Err(Error::Undecidable { records }) = outcome else {
-            panic!("{angle} {what} is refused Undecidable, and came back {outcome:?}");
-        };
-        let first = records
-            .records()
-            .first()
-            .unwrap_or_else(|| panic!("{angle} {what} names what it could not decide"));
-        (what, first.predicate())
-    })
-    .collect()
+        assert!(
+            matches!(
+                outcome,
+                Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) if ratio > 1e16
+            ),
+            "{what} is refused for an edge a rounding long, and came back {outcome:?}"
+        );
+    }
 }
 
 fn two_turned_cubes(angle: f64) -> (Model, SolidKey, SolidKey) {
