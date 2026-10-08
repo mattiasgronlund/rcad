@@ -11,10 +11,10 @@
 //!
 //! **The builder is the door.** A fuse that cuts a rim between two faces on one
 //! cone written two ways names the plane that cut it
-//! (`Assembly::the_surface_that_cut_each_closed_rim` folds the spelling), so it
-//! does not write this run itself. Handed this frustum, united with a block
-//! clear of it, the fuse joins the two bands into one wall about `−z` and the
-//! rim is gone from its answer.
+//! (`Assembly::the_surface_that_cut_each_edge_its_faces_do_not_name` folds the
+//! spelling), so it does not write this run itself. Handed this frustum,
+//! united with a block clear of it, the fuse joins the two bands into one
+//! wall about `−z` and the rim is gone from its answer.
 //!
 //! # Which way the rim runs
 //!
