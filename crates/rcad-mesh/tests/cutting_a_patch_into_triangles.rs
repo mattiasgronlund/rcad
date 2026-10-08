@@ -35,10 +35,10 @@
 //! mesher underneath is free to disagree with itself.
 
 use std::collections::HashSet;
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, Isometry, Plane, Point, Scale, Sphere, Surface, Vector,
+    Axis, Cylinder, Deflection, Isometry, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
 };
 use rcad_mesh::{CannotTriangulate, Loop, Patch, TrimmedDomain, triangulate};
 use rcad_predicates::{Cause, Decision, orient2d};
@@ -450,6 +450,106 @@ fn the_other_ways_a_loop_can_land_on_another_loops_side_are_refused_too() {
             "{what}: got {refusal:?}"
         );
     }
+}
+
+/// A loop that runs down one line and back up the same line rests its own
+/// corners on its own side, and is refused as a loop touching itself.
+///
+/// The loop is the sliver `rcad-topo`'s mesher once cut off a ring of 8 and 1
+/// (Q1307, Q1352): a quarter bend turned 27.1 degrees about `x`, written, read
+/// back and meshed at 1.8, before Q1344 stopped it cutting there. Every corner
+/// is within two roundings of the tube angle `π`. Its side from corner 2 down to
+/// corner 3 runs along `u = π` exactly, and corners 4 and 5 come back up the
+/// same line, so they sit on that side.
+///
+/// It came back as the 9 triangles Q1307's trace printed, a fan from corners 1
+/// and 2. Twice their area is `1.8601965322712705e-15` where twice the loop's
+/// is `1.86019653227127e-15`, the same but for the last rounding, since the
+/// stretch the loop runs down and back up encloses nothing. But the side from
+/// corner 2 to corner 3 was cut at corner 5, and the sides from 3 to 4 and from
+/// 4 to 5 were in no triangle at all. The face across that side draws it whole,
+/// so the mesher found a side drawn once and refused the whole solid
+/// `TwoPatchesOfTheMeshDrewTheSameSide`. No mesh of this loop can draw those
+/// three sides, since a triangle on them would have its three corners on one
+/// line.
+///
+/// Corners 0 and 3 are where the mesher had cut the face, and it says so with
+/// `with_corners_between_two_edges`; without that the same loop came back as
+/// 11 triangles, with the same three sides missing.
+#[test]
+fn a_loop_that_runs_back_up_its_own_side_is_refused() {
+    let on = PI;
+    let one_under = PI.next_down();
+    let two_under = one_under.next_down();
+    let two_over = PI.next_up().next_up();
+    let mut corners = vec![
+        [two_under, FRAC_PI_2],
+        [two_over, FRAC_PI_2 * 2.0 / 3.0],
+        [on, FRAC_PI_2 / 3.0],
+        [on, 0.0],
+    ];
+    let back_up = [
+        on, on, one_under, one_under, one_under, one_under, one_under, two_under, two_under,
+    ];
+    for (step, u) in (1_u32..).zip(back_up) {
+        corners.push([u, FRAC_PI_2 * f64::from(step) / 10.0]);
+    }
+    let ring = Torus::new(Axis::z(), 8.0, 1.0).expect("a tube inside its ring");
+    let deflection = Deflection::of(1.799_999_999_999_964).expect("a positive length");
+    let mut between = vec![false; 13];
+    between[0] = true;
+    between[3] = true;
+    let domain = domain_at(deflection, Surface::from(ring), corners.clone(), Vec::new())
+        .with_corners_between_two_edges(between);
+
+    match triangulate(&domain) {
+        Err(CannotTriangulate::LoopsTouch { corner, side, .. }) => {
+            assert_eq!(
+                side, 2,
+                "the side the loop runs back up is the one from corner 2"
+            );
+            assert!(
+                [4, 5].contains(&corner),
+                "corners 4 and 5 are the ones on that side, not {corner}"
+            );
+        }
+        Ok(patch) => {
+            let moved_to_zero: Vec<[f64; 2]> = corners
+                .iter()
+                .map(|corner| [corner[0] - PI, corner[1]])
+                .collect();
+            let missing: Vec<_> = every_side(&corners, &[])
+                .difference(&sides_of_the_triangles(&patch))
+                .copied()
+                .collect();
+            panic!(
+                "came back as {} triangles covering {} where the loop encloses {}, with \
+                 these sides in no triangle: {missing:?}",
+                patch.triangles().len(),
+                twice_the_area_of_the_triangles(&patch),
+                twice_the_area_of(&moved_to_zero).abs()
+            );
+        }
+        Err(other) => panic!("refused, but not as a loop touching itself: {other:?}"),
+    }
+}
+
+/// A loop with every corner on one line rests one on a side too, but encloses
+/// nothing, and comes back with no triangles, which is all of it.
+///
+/// Refusing it as well changed what `rcad-topo` says about a fuse whose answer
+/// is slivers `2⁻⁷⁸` wide (`a_block_edge_grazing_a_ball.rs`): a flat face of
+/// one is three corners on one line, and the solid is refused on its curved
+/// face instead.
+#[test]
+fn a_loop_with_every_corner_on_one_line_comes_back_with_no_triangles() {
+    let patch = triangulate(&domain_of(
+        flat(),
+        vec![[0.0, 0.0], [4.0, 0.0], [1.0, 0.0]],
+        Vec::new(),
+    ))
+    .expect("a loop that encloses nothing");
+    assert_eq!(patch.triangles(), &[] as &[[u32; 3]]);
 }
 
 /// A hole meeting the outline at a corner they both name is meshed, hole and
