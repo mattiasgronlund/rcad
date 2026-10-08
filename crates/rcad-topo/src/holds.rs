@@ -965,7 +965,11 @@ fn what_a_ring_face_between_two_planes_holds(
         if across.location() != face.location() {
             return Err(refuse());
         }
-        let cap = across.stored_surface();
+        let names_it = which_two_surfaces_a_run_is_between(
+            edge.stored_run(),
+            [&ring, &across.stored_surface()],
+        );
+        let cap = names_it[1];
         let Some(flat) = cap.as_plane() else {
             panic!("a face this was sent is trimmed by planes only, and this one by {cap:?}");
         };
@@ -985,16 +989,12 @@ fn what_a_ring_face_between_two_planes_holds(
             }
             other => panic!("the axis came back with a decision nothing here knows: {other:?}"),
         }
-        let names_it = which_two_surfaces_a_run_is_between(edge.stored_run(), [&ring, &cap]);
-        if names_it != [ring, cap] {
-            return Err(refuse());
-        }
         let kept =
             the_side_its_wire_keeps(solid, face, across, coedge, names_it)?.ok_or_else(refuse)?;
         let corner = edge.start().key();
         cuts.push(Cut {
             surface: cap,
-            placed: across.surface(),
+            placed: the_surface_an_edge_cuts(face, across, edge),
             kept,
             corners_on_it: vec![corner],
         });
