@@ -49,8 +49,11 @@
 //! circles, so `holds.rs` refused both `AFaceMissesPartOfWhereItsSurfacesCross`
 //! and every such point came back `CannotFollowAFacesTrimming`. A **gap**
 //! (Q1218): a point past the same half-space now says the same side there too.
-//! Fused again with a far cube, the union is still refused, in the fuse's
-//! arrangement of the wall; that is pinned below.
+//!
+//! **Then a fuse of the union could not walk its wall.** Fused again with a far
+//! cube, the wall's edge on the circle at `z = 1` was read off the seam corner
+//! too, this time in the fuse's arrangement, and every order was refused
+//! `CannotTellTheCellsOfAFaceApart`. A **gap** (Q1354), closed the same way.
 //!
 //! The closed forms, from the slices of the shared piece: inside the bar the cone
 //! holds a disc of radius `z` for `z` up to one and the whole unit disc above it,
@@ -59,9 +62,9 @@
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Deflection, Isometry, Point, Scale, Surface, Vector};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, FaceKey, Model, Rule, SolidKey, WireView};
+use rcad_topo::{Containment, Error, Model, Rule, SolidKey};
 
 mod cones;
 
@@ -165,20 +168,31 @@ fn every_point_round_the_union_is_placed_where_the_shapes_say_across_the_other_n
 }
 
 /// The union fused again with a cube far from it is refused
-/// `CannotTellTheCellsOfAFaceApart` on the bar's wall below the cone, every
-/// way round. **A gap**: the answer is the two solids apart, `364π` and the
-/// cube's `8`.
+/// `ResultIsNotManifold { count: 4 }`, every way round. **A gap**: the answer
+/// is the two solids apart, `364π` and the cube's `8`.
 ///
-/// The refusal is the fuse's arrangement of that wall
-/// (`fuse/arrange.rs`, where only that error is made), and the cube cuts
-/// nothing of it; what is there is the wall's own circle on the cone at
-/// `z = 1` and the other nappe it crosses at `z = −1`. Pinned so that a change
-/// making it answer is seen.
+/// **Its wall is now cut right, and the two circles are then named one
+/// curve.** The cube cuts nothing of the bar's wall from `z = −15` up to the
+/// circle at `z = 1`, but the fuse draws the wall's own edge on the cone again,
+/// and the cone's other nappe with it, so the wall comes apart at `z = −1` into
+/// two bands. In `assemble.rs` a closed curve is named by its two surfaces
+/// alone wherever they are not a plane through a ring's axis
+/// (`name_of_the_closed_crossing_through`), so the new circle at `z = −1` and
+/// the wall's circle at `z = 1` are one curve, and
+/// `Corners::with_each_closed_curve_started_once` hands the start of the one at
+/// `z = −1` to the input corner at `z = 1`. Both circles are then one edge, along
+/// which the cone face and the two bands' three wires run.
+///
+/// **Before that, the bands could not be told apart** (Q1354). The arrangement
+/// read which side of the circle at `z = 1` the wall lies on off its one corner
+/// off the cone, the seam corner at `z = −15`, which is past the half-space
+/// `z ≥ 0` that picks the circle out and inside the other nappe. So the wall was
+/// walked inside out and the fuse was refused `CannotTellTheCellsOfAFaceApart`
+/// on it. That corner is now read as a node past that half-space is.
 #[test]
-fn the_union_and_a_far_cube_are_refused_on_the_bar_wall_across_the_other_nappe() {
+fn the_union_and_a_far_cube_are_refused_for_naming_both_circles_one_curve() {
     for cone_first in [true, false] {
         let (mut model, union) = the_union(cone_first);
-        let wall = the_bar_wall_below_the_cone(&model, union);
         let cube = model
             .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
             .expect("a whole-number cube");
@@ -197,9 +211,9 @@ fn the_union_and_a_far_cube_are_refused_on_the_bar_wall_across_the_other_nappe()
                 &mut ProvenanceLog::new(),
             );
             assert!(
-                matches!(got, Err(Error::CannotTellTheCellsOfAFaceApart { face }) if face == wall),
+                matches!(got, Err(Error::ResultIsNotManifold { count: 4 })),
                 "the union (cone first: {cone_first}) and a far cube, union first: {}, came back \
-                 {got:?}, where the pin says it is refused on the bar's wall {wall:?}",
+                 {got:?}, where the pin says four faces run along the two circles' one edge",
                 arguments[0] == union
             );
         }
@@ -213,23 +227,6 @@ fn the_union(cone_first: bool) -> (Model, SolidKey) {
         panic!("the union (cone first: {cone_first}) is one solid, not {answer:?}");
     };
     (model, union)
-}
-
-/// The union's face on the bar's pipe that reaches down to its floor at
-/// `z = −15`.
-fn the_bar_wall_below_the_cone(model: &Model, union: SolidKey) -> FaceKey {
-    let solid = model.solid(union).expect("this model made the key");
-    let mut walls = solid.faces().filter(|face| {
-        matches!(face.surface(), Surface::Cylinder(_))
-            && face
-                .wires()
-                .flat_map(WireView::points)
-                .any(|corner| corner.coordinates()[2] == -15.0)
-    });
-    let (Some(wall), None) = (walls.next(), walls.next()) else {
-        panic!("the union has one face on the pipe down to the bar's floor");
-    };
-    wall.key()
 }
 
 fn fused(rule: Rule, cone_first: bool) -> Result<(Model, Vec<SolidKey>), Error> {
