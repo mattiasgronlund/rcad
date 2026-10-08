@@ -436,11 +436,13 @@ pub enum Error {
     /// cone. `intersect` finds them and names each circle by its plane
     /// (row Q1334, then Q1376 for the rest of the axis), and
     /// `three_surfaces` meets a plane holding the axis there the same way
-    /// (§378). What is still not done: `walk.rs` has no row for walking one
-    /// of these circles, so the evaluator still refuses the pair under this
-    /// name even once `intersect` has answered it, and a second torus about
-    /// the same axis is not named at all. (b) The general case wants §29's
-    /// whole second stage over again with a torus in it.
+    /// (§378). `walk.rs` now draws an arc of one of these circles too
+    /// (Q1396, `where_a_ring_and_a_surface_on_its_axis_cut`), and refuses
+    /// only a run right round a whole circle named by the two faces alone,
+    /// which `rcad-topo`'s `Model::validate` does not yet ask for — that
+    /// function's own doc says why. A second torus about the same axis is
+    /// still not named at all. (b) The general case wants §29's whole second
+    /// stage over again with a torus in it.
     #[error("a torus crossing another curved surface is a space curve of degree up to eight")]
     ACrossingBetweenATorusAndAnotherCurvedSurface,
 

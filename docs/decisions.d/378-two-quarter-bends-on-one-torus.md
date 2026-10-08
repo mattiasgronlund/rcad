@@ -390,3 +390,31 @@ is a tiny positive number instead of zero and it names two circles,
 `2.356e-9` apart, rather than one. Walking either one still refuses under this
 section's name, for the same reason: no row in `walk.rs` for a ring against a
 curved surface, coaxial or not.
+
+### 378.10 Q1396: walk answers; the twelve fuses now refuse a meshing gap instead
+
+Row Q1396 (`bc6eb2d4`) gave `walk.rs`'s `what_a_run_between_these_two_lies_on`
+the row §378.9 found missing: `where_a_ring_and_a_surface_on_its_axis_cut`
+names the arc `assemble` built — the ring and the bar, between two corners,
+round the circle the bar and that circle's plane cross in — by picking the
+plane `intersect` already named it by and walking it as the bar and that
+plane. The bend and the bar on its axis no longer refuse
+`ACrossingBetweenATorusAndAnotherCurvedSurface` at all.
+
+**What refuses now instead.** All twelve fuses (two bends — ring four tube
+one, ring six tube two — three rules, both ways round) refuse
+`ACurvedFaceGoesRightRoundWithNoSeam`, raised from `rcad-topo`'s `mesh.rs`,
+`BuildingAMesh::cut_a_cap_up_to_its_pole`, while `assemble`'s `nest_the_shells`
+meshes the answer to measure it
+(`a_bend_and_a_bar_through_its_tube_on_its_axis_are_refused_where_a_piece_of_the_bend_is_meshed`
+in `tests/how_often_a_fuse_with_a_torus_refuses.rs`). On ring four tube one the
+refused wire, in the torus's chart of (round the tube, round the ring), has
+corners `(π/2, 0)`, `(3π/2, 0)`, `(3π/2, π/4)`, `(3π/2, π/2)`, `(5π/2, π/2)`,
+`(5π/2, π/4)`: it takes the start cap's inner half and the end cap's outer
+half, so it climbs a whole turn round the tube instead of the half each cap's
+own half-space bounds. A **gap** (§16.10), not this section's naming again —
+Pappus gives every answer, the shared part being a quarter of
+`π²Rr² − 4πr³/3`.
+
+**Open as Q1402** (tier 1): the piece is built from the wrong pair of halves,
+and a lead is named there but not run — not traced here.
