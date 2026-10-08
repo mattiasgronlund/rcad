@@ -113,7 +113,10 @@
 //!   the bottom seam corner lands, because the block's face is one ulp off the
 //!   moved seam plane, as the bar's is, though the other way. Under
 //!   `tolerant(100)`, where the bar answers, the sound frustum refuses
-//!   `CannotNameWhichPieceOfACrossingThisIs` further on.
+//!   `CannotNameWhichPieceOfACrossingThisIs` further on: meshing its answer,
+//!   the walk along the cut asks a hyperbola's vertex a rounding from the
+//!   cone's apex which side of the apex it is on, to pick a branch the ends
+//!   already pick (§294.14).
 //!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
@@ -121,11 +124,11 @@
 use std::f64::consts::PI;
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, Deflection, Isometry, Plane, Point, Scale, Surface, SurfaceMeet, Vector,
-    how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe, intersect,
-    where_a_cones_apex_stands_against_a_plane,
+    Axis, Cone, Cylinder, Deflection, Isometry, NamedRun, Plane, Point, Scale, Surface,
+    SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
+    intersect, walk, where_a_cones_apex_stands_against_a_plane,
 };
-use rcad_predicates::{Decision, Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 mod cones;
@@ -1102,10 +1105,24 @@ fn a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_the
 /// `rcad-geom`. Not, asked on its own, where the face crosses the cone:
 /// `intersect` names the hyperbola's two branches under either policy
 /// (`a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is`).
-/// Where the fuse raises it is not traced. The corners moved off the wall and
-/// off the cap give `CannotTellTheCellsOfAFaceApart`, as at every placement
-/// tried. The bar, placed the same way and cut by the half past its seam, is
-/// half the bar under both rules.
+/// The corners moved off the wall and off the cap give
+/// `CannotTellTheCellsOfAFaceApart`, as at every placement tried. The bar,
+/// placed the same way and cut by the half past its seam, is half the bar under
+/// both rules.
+///
+/// **Where it is refused** (§294.14, Q1397): after the answer is put together,
+/// when `nest_the_shells` meshes it to measure it, and the mesher walks the
+/// edge the face cuts along the cone between two corners on the bottom and top
+/// circles. `rcad_geom::walk` names the run as one branch of the hyperbola the
+/// face cuts, and picks the branch by asking each branch's vertex which side of
+/// the apex it is on, in `which_branch_of_a_hyperbola_this_run_is`. The face
+/// misses the apex by `5e-16`, so each vertex is within `1e-15` of the apex and
+/// placed only to `9.9e-14`, and `which_side_of_the_apex` refuses
+/// (`walking_the_cut_along_a_turned_and_shifted_frustums_seam_asks_a_point_a_rounding_from_the_apex`).
+/// **A gap**: the branch the corners are on is the one opening along the
+/// axis, which needs no vertex. Picked that way in a probe, the sound frustum
+/// and the corner moved a quarter turn round answered both rules with half the
+/// frustum, `26π/3` on a fine mesh, and validated.
 #[test]
 fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_is_refused_where_the_bar_answers()
  {
@@ -1147,6 +1164,108 @@ fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_is_re
                 rule,
                 &policy,
                 outcome,
+            );
+        }
+    }
+}
+
+/// **Where the tolerant fuse is refused: walking the cut along the seam asks
+/// which side of the apex a point a rounding from the apex is** (§294.14).
+/// The block's face misses the cone's apex by `5e-16`, so the two cross in a
+/// hyperbola whose two vertices stand about `1e-15` either side of the apex.
+/// `rcad_geom::walk`, handed that crossing between the two seam corners, finds
+/// both corners on the axis's side of the apex, and then asks the first
+/// vertex which side it is on, to pick the branch the corners are on. The
+/// vertex is placed only to `9.9e-14`, so its box holds the apex: `certified`
+/// cannot tell, `tolerant(100)` reads it as on the plane through the apex, and
+/// that names no branch either. Either way the walk refuses
+/// `CannotNameWhichPieceOfACrossingThisIs`, whichever of the two runs
+/// `intersect` names it is handed, since a run with ends is named by its ends.
+/// The fuse meets this when it meshes its answer to nest the shells.
+///
+/// Which branch the corners are on was never in doubt. Each branch opens away
+/// from the apex along the face's own slope, one each way, and the direction
+/// down the slope always runs against the axis, so the branch the corners are
+/// on is the one opening along the axis. Picked that way, the fuse answers.
+#[test]
+fn walking_the_cut_along_a_turned_and_shifted_frustums_seam_asks_a_point_a_rounding_from_the_apex()
+{
+    let placement = the_turn_then_the_shift();
+    let (mut model, frustum) = read_back(Shape::Frustum(placement), WHERE_THE_FRUSTUM_PUTS_IT);
+    let block = a_block(
+        &mut model,
+        THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+        &placement,
+    );
+    let the_seam_plane = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+        .expect("y = 0 holds the frustum's axis and both its seam corners")
+        .transformed(&placement)
+        .reversed();
+    let face = the_face_with_the_normal_of(&model, block, &the_seam_plane);
+    let cone = the_frustums_cone(&model, frustum);
+    assert_eq!(
+        how_a_plane_leans_against_a_cone(&face, &cone),
+        Decision::Neg,
+        "the face is steeper than the cone, so a face that misses the apex crosses it in a \
+         hyperbola"
+    );
+    let apex = placement.apply_to_point(Point::origin()).coordinates();
+    assert_eq!(cone.apex().coordinates(), apex);
+    let the_seam_corners = [Point::new(1.0, 0.0, 2.0), Point::new(3.0, 0.0, 6.0)]
+        .map(|corner| PredicatePoint::from(placement.apply_to_point(corner).coordinates()));
+    let [face, cone] = [Surface::Plane(face), Surface::Cone(cone)];
+
+    for (policy, certified) in [
+        (Policy::certified(), true),
+        (Policy::tolerant(100.0), false),
+    ] {
+        let met = intersect(&face, &cone, &policy, &mut ProvenanceLog::new());
+        let Ok(SurfaceMeet::Curves(branches)) = met else {
+            panic!("{policy:?}: the hyperbola is named: {met:?}");
+        };
+        for branch in branches {
+            let run = NamedRun::new(branch.run().clone(), the_seam_corners)
+                .expect("a branch of a hyperbola does not go right round");
+            let mut log = ProvenanceLog::new();
+            let walked = walk(
+                &run,
+                [&face, &cone],
+                Deflection::of(0.01).expect("a length"),
+                &policy,
+                &mut log,
+            );
+            assert!(
+                matches!(
+                    walked,
+                    Err(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
+                ),
+                "{policy:?}: {walked:?}"
+            );
+            let [record] = log.records() else {
+                panic!("{policy:?}: one record, {log:?}");
+            };
+            assert_eq!(
+                record.predicate(),
+                "which side of a cone's apex",
+                "{policy:?}"
+            );
+            let read_as = if certified {
+                matches!(record.outcome(), Decision::Undecidable { .. })
+            } else {
+                record.outcome() == Decision::Zero
+            };
+            assert!(read_as, "{policy:?}: {record:?}");
+            let [vertex] = record.inputs() else {
+                panic!("{policy:?}: one point asked about, {record:?}");
+            };
+            assert!(vertex.uncertainty() < 2e-13, "{policy:?}: {vertex:?}");
+            assert!(
+                vertex
+                    .enclosure()
+                    .iter()
+                    .zip(apex)
+                    .all(|(side, at)| side.lo() <= at && at <= side.hi()),
+                "{policy:?}: the vertex's box {vertex:?} holds the apex {apex:?}"
             );
         }
     }
