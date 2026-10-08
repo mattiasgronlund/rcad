@@ -618,9 +618,10 @@ const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0052..=0.023;
 /// calls it a move.
 ///
 /// Three. The ends already sit at two thirds and three times the rate, so the
-/// spread only has to cover a draw straying past an end by chance, and at three
-/// the binomial puts that under one run in twenty thousand at every factor from
-/// 1 to 660 for both rows that use it. §303.3.
+/// spread only has to cover a draw straying past an end by chance. At three,
+/// with each row's rate measured at a soak and no configuration giving more
+/// than one answer that is not a solid, that is under one run in a million
+/// for every row that uses it at every factor from 1 to 660 (§303.6).
 const A_DRAW_STRAYS_THIS_MANY_SPREADS: f64 = 3.0;
 
 /// The same for the family whose outlines lean over.
@@ -1564,11 +1565,12 @@ fn every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing() {
 /// floor of 2.2% while the family's rate is 2.23%. Judged against the rate with
 /// the draw's own spread, they and the lowest and highest of §303's 113 soaked
 /// seeds are inside, and a draw at half the rate is not. At the shipped 441
-/// fuses, none at all still fires.
+/// fuses, none at all still fires. No lattice configuration gives two answers
+/// that are not solids (§303.6), so they come together one at a time.
 #[test]
 fn the_lattice_band_takes_in_every_soaked_seed_and_still_fires_on_half_the_rate() {
     let share = |not_a_solid: usize, fuses: usize| not_a_solid as f64 / fuses as f64;
-    let soak = band_for_a_draw_of(25_401, &A_LATTICE_PAIR_IS_NOT_A_SOLID);
+    let soak = band_for_a_draw_of(25_401, 1.0, &A_LATTICE_PAIR_IS_NOT_A_SOLID);
     for not_a_solid in [519, 555, 556, 615] {
         assert!(
             soak.contains(&share(not_a_solid, 25_401)),
@@ -1579,13 +1581,57 @@ fn the_lattice_band_takes_in_every_soaked_seed_and_still_fires_on_half_the_rate(
         !soak.contains(&share(283, 25_401)),
         "283 of 25 401 is half the lattice family's rate, and {soak:?} takes it in"
     );
-    let shipped = band_for_a_draw_of(441, &A_LATTICE_PAIR_IS_NOT_A_SOLID);
+    let shipped = band_for_a_draw_of(441, 1.0, &A_LATTICE_PAIR_IS_NOT_A_SOLID);
     assert!(shipped.contains(&share(14, 441)));
     assert!(shipped.contains(&share(1, 441)));
     assert!(
         !shipped.contains(&share(0, 441)),
         "a family that no longer reaches four faces along one edge at all has to fire"
     );
+}
+
+/// The turned family's configurations as `4066f85b` fused them, eight seeds
+/// at a [`SOAK_FACTOR`] of 66: 2 286 gave one answer that was not a solid,
+/// 537 gave two and 539 all three. On that tree a draw's count spread 1.23
+/// times as wide as the binomial's, over 200 fresh draws of 128
+/// configurations, and that is the spread the band has to allow (§303.6).
+/// Counted from those configurations, each such answer came with 1.87 of
+/// them, itself included, so the band's spread is the binomial's times the
+/// square root of that.
+#[test]
+fn answers_that_are_not_solids_coming_three_to_a_configuration_widen_the_band() {
+    let tally = Tally::default();
+    for (of_three, configurations) in [(0, 64_374), (1, 2_286), (2, 537), (3, 539)] {
+        for _ in 0..configurations {
+            tally.a_configuration_was_not_a_solid_this_often(of_three);
+        }
+        tally.fuses.set(tally.fuses.get() + 3 * configurations);
+        tally
+            .not_a_solid
+            .set(tally.not_a_solid.get() + of_three * configurations);
+    }
+    let together = tally.how_many_not_solids_come_together();
+    assert_eq!(together, 9_285.0 / 4_977.0);
+
+    let rate = 0.016..=0.073;
+    let stray =
+        |together: f64| band_for_a_draw_of(tally.fuses.get(), together, &rate).end() - rate.end();
+    let widened = stray(together) / stray(1.0);
+    assert!(
+        (widened - together.sqrt()).abs() < 1e-12,
+        "the ceiling moved out {widened} times as far, not the square root of {together}"
+    );
+}
+
+/// A draw whose answers that are not solids were not counted configuration
+/// by configuration cannot say how they came together, so it cannot be judged.
+#[test]
+#[should_panic(expected = "counted with its configuration")]
+fn an_answer_that_is_not_a_solid_counted_outside_its_configuration_stops_the_band() {
+    let tally = Tally::default();
+    tally.fuses.set(3);
+    tally.not_a_solid.set(1);
+    tally.how_many_not_solids_come_together();
 }
 
 /// The same for the family built to be degenerate. Coplanar faces and shared
@@ -4263,9 +4309,11 @@ fn every_rule(
     configuration: Configuration,
 ) -> Result<(), TestCaseError> {
     let (model, keys) = configuration.build();
+    let before = tally.not_a_solid.get();
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         fused(tally, coordinates, &model, &[keys[0]], &[keys[1]], rule)?;
     }
+    tally.a_configuration_was_not_a_solid_this_often(tally.not_a_solid.get() - before);
     Ok(())
 }
 
@@ -4697,6 +4745,15 @@ struct Tally {
     /// see [`both_agree_about_whether_there_is_an_answer`] for which families
     /// it fails on and which it only counts on.
     disagreed_about_being_a_solid: Cell<usize>,
+    /// How many configurations [`every_rule`] asked had none, one, two or all
+    /// three of their fuses come back not a solid.
+    ///
+    /// The three fuses of one configuration are not three draws: a union, an
+    /// overlap and a difference of the same two solids. Whether they come back
+    /// not a solid together or one at a time is what sets how far a draw's
+    /// count strays, so a not-a-solid band is only as right as this is
+    /// measured (§303.6).
+    not_a_solid_of_three: Cell<[usize; 4]>,
     /// Comparisons a property set out to make, and made.
     ///
     /// Every property here returns `Ok(())` the moment a fuse comes back with
@@ -4724,6 +4781,14 @@ impl Tally {
         self.compared.set(self.compared.get() + 1);
     }
 
+    /// One configuration's three fuses are asked, and `of_three` of them came
+    /// back not a solid.
+    fn a_configuration_was_not_a_solid_this_often(&self, of_three: usize) {
+        let mut counts = self.not_a_solid_of_three.get();
+        counts[of_three] += 1;
+        self.not_a_solid_of_three.set(counts);
+    }
+
     fn report(&self, what: &str) {
         let fuses = self.fuses.get();
         println!(
@@ -4738,6 +4803,13 @@ impl Tally {
                 "    {} of them disagreed with their other way round about whether the \
                  answer is a solid",
                 self.disagreed_about_being_a_solid.get()
+            );
+        }
+        let [none, one, two, three] = self.not_a_solid_of_three.get();
+        if none + one + two + three > 0 {
+            println!(
+                "    configurations with none, one, two and three of their fuses not a solid: \
+                 {none}, {one}, {two}, {three}"
             );
         }
         // Two decimal places, because the rarest cause a soak turns up runs at
@@ -4855,13 +4927,57 @@ impl Tally {
     /// the one or too loose for the other, so each end is moved out by
     /// [`A_DRAW_STRAYS_THIS_MANY_SPREADS`] of its own spread at this draw's size.
     ///
+    /// That spread is the binomial's, which counts every fuse as a draw of its
+    /// own. A configuration is the draw, and its three fuses can come back not
+    /// a solid together, so the spread is widened by
+    /// [`Tally::how_many_not_solids_come_together`] (§303.6).
+    ///
     /// The floor never goes below one fuse. None at all is the family no longer
     /// reaching the configuration it was built for, and that fires at any size.
     fn rate_of_answers_that_were_not_solids_must_be_within(&self, rate: RangeInclusive<f64>) {
         self.share_of_answers_that_were_not_solids_must_be_within(band_for_a_draw_of(
             self.fuses.get(),
+            self.how_many_not_solids_come_together(),
             &rate,
         ));
+    }
+
+    /// For each fuse that came back not a solid, how many of its
+    /// configuration's three fuses did, itself included, on average.
+    ///
+    /// One when no configuration gave more than one, which is nearly every
+    /// draw of every family on this tree; three when every one that gave any
+    /// gave all three. A draw's
+    /// configurations are drawn one after another from one seed, so its count
+    /// is a sum of independent counts out of three, and its variance is at most
+    /// this many times the binomial's. With `X` a configuration's count and `p`
+    /// the rate, `E[X²]` is this times `E[X] = 3p`, so `Var X = this · 3p −
+    /// 9p²`, which is at most the binomial's `3p(1 − p)` times this because
+    /// this is at most three (§303.6).
+    ///
+    /// One for a draw with none at all, which the floor fails anyway.
+    ///
+    /// # Panics
+    ///
+    /// If a fuse came back not a solid outside [`every_rule`], whose
+    /// configuration was not counted, so the spread would leave it out.
+    fn how_many_not_solids_come_together(&self) -> f64 {
+        let counts = self.not_a_solid_of_three.get();
+        let (fuses, together) = (0..4).fold((0, 0), |(fuses, together), of_three| {
+            (
+                fuses + of_three * counts[of_three],
+                together + of_three * of_three * counts[of_three],
+            )
+        });
+        assert_eq!(
+            fuses,
+            self.not_a_solid.get(),
+            "every fuse that came back not a solid has to be counted with its configuration"
+        );
+        if fuses == 0 {
+            return 1.0;
+        }
+        together as f64 / fuses as f64
     }
 
     /// Insist the share of fuses whose answer was not a solid this kernel can
@@ -4898,9 +5014,22 @@ impl Tally {
 /// rate is inside `rate`: each end moved out by
 /// [`A_DRAW_STRAYS_THIS_MANY_SPREADS`] of its own spread at that size, and the
 /// floor never under one fuse.
-fn band_for_a_draw_of(fuses: usize, rate: &RangeInclusive<f64>) -> RangeInclusive<f64> {
+///
+/// The spread is the binomial's widened by the square root of `together`,
+/// [`Tally::how_many_not_solids_come_together`].
+fn band_for_a_draw_of(
+    fuses: usize,
+    together: f64,
+    rate: &RangeInclusive<f64>,
+) -> RangeInclusive<f64> {
+    assert!(
+        (1.0..=3.0).contains(&together),
+        "a configuration has three fuses, so {together} cannot be how many come back not a \
+         solid together"
+    );
     let fuses = fuses as f64;
-    let stray = |end: f64| A_DRAW_STRAYS_THIS_MANY_SPREADS * (end * (1.0 - end) / fuses).sqrt();
+    let stray =
+        |end: f64| A_DRAW_STRAYS_THIS_MANY_SPREADS * (together * end * (1.0 - end) / fuses).sqrt();
     let floor = (rate.start() - stray(*rate.start())).max(1.0 / fuses);
     let ceiling = rate.end() + stray(*rate.end());
     floor..=ceiling
