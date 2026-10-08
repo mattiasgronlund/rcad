@@ -67,7 +67,8 @@ use rcad_geom::{
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftEdge, DraftStep, Error, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+    DraftEdge, DraftStep, Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder,
+    SolidKey,
 };
 use smallvec::smallvec;
 
@@ -232,15 +233,18 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 /// `rings_round` there. **Neither the answer nor the panic is reached.**
 ///
 /// **Every rule, both ways round, is refused
-/// `AFaceTrimmedByACurveThisCannotFollow` on the second solid's floor.**
-/// `select` finds `(0, ±3.75, 0)` inside the first solid's floor, a rung
-/// towards its outer arc from the middle of the arc's chord, and asks whether
-/// the second solid's floor, flush with it, holds that point. `holds.rs`
-/// cannot read that floor's inner arc, from `(±3, 0, 0)` round the axis: in
-/// `the_way_a_side_runs` no way into it is found (a temporary print, Q1268),
-/// because `the_way_into_an_arc` reads no arc of a circle a plane cuts a ring
-/// in (row Q1267). The volumes above are what the answer is checked against
-/// once it reads one.
+/// `AFaceTrimmedByACurveThisCannotFollow` on the second solid's wall**, as the
+/// quarter bends below are and for the same reason: nothing in `holds.rs` says
+/// whether a point on a ring is inside a face with an arc among its sides. The
+/// volumes above are what the answer is checked against once it does.
+///
+/// Until Q1267 every one was refused on the second solid's floor, by
+/// `holds.rs`. `select` finds `(0, ±3.75, 0)` inside the first solid's floor,
+/// a rung towards its outer arc from the middle of the arc's chord, and asks
+/// whether the second solid's floor, flush with it, holds that point.
+/// `the_way_a_side_runs` found no way into that floor's inner arc, from
+/// `(±3, 0, 0)` round the axis (a temporary print, Q1268), because
+/// `the_way_into_an_arc` read no arc of a circle a plane cuts a ring in.
 ///
 /// Until Q1268 every one was refused a step earlier, `a point inside a piece
 /// of a face` on the first solid's floor, named by its four corners `(±5, 0,
@@ -258,7 +262,7 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 /// reads a picker whose plane holds both ends on any circle a plane cuts a
 /// ring in, and so reads every arc of both solids' floors, caps and walls.
 #[test]
-fn the_top_halves_of_two_half_bends_are_refused_where_the_second_floor_is_asked_a_point() {
+fn the_top_halves_of_two_half_bends_are_refused_where_the_second_wall_is_asked_a_point() {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for turned_first in [false, true] {
             let mut model =
@@ -291,43 +295,42 @@ fn the_top_halves_of_two_half_bends_are_refused_where_the_second_floor_is_asked_
             let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
                 panic!("{what}: {refused:?}");
             };
-            let floor = Surface::Plane(
-                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
-                    .expect("the z axis is a unit normal"),
-            );
-            let second = model.solid(other).expect("this model made the key");
-            assert!(
-                second
-                    .faces()
-                    .any(|its| its.key() == face && its.surface() == floor),
-                "{what}: the refusal names {face:?}, not the second solid's floor"
-            );
+            assert_names_the_second_wall(&model, other, face, &what);
         }
     }
 }
 
-/// **Half-meridians the arrangement reads, and a floor `holds.rs` cannot.**
-/// The top halves, `z ≥ 0`, of two quarter bends of one ring, ring 4 and tube
-/// 1: one from `+x` round to `+y`, the other from `+y` round to `−x`, meeting
-/// flush on `x = 0`. Pappus gives each `π/2 · 4 · π/2 = π²`, so the union is
-/// the top half of a half bend, `2π²`, the intersection is nothing, and each
-/// difference is the first quarter, `π²`. Unlike the half bends' floors above,
-/// each floor's four corners are not on one line.
+/// **Half-meridians the arrangement reads, a floor `holds.rs` reads, and a
+/// wall it cannot.** The top halves, `z ≥ 0`, of two quarter bends of one
+/// ring, ring 4 and tube 1: one from `+x` round to `+y`, the other from `+y`
+/// round to `−x`, meeting flush on `x = 0`. Pappus gives each
+/// `π/2 · 4 · π/2 = π²`, so the union is the top half of a half bend, `2π²`,
+/// the intersection is nothing, and each difference is the first quarter, `π²`.
+/// Unlike the half bends' floors above, each floor's four corners are not on
+/// one line.
 ///
 /// **Every rule, both ways round, is refused `AFaceTrimmedByACurveThisCannotFollow`
-/// on the second solid's floor**, from `the_way_a_side_runs` in `holds.rs`
-/// (a temporary print, Q617): asked about a point, it cannot read the floor's
-/// quarter of a circle round the axis, because `the_way_into_an_arc` reads no
-/// arc of a ring's circle. Until Q617 every one was refused a step earlier, in
-/// the arrangement, on the first solid's start cap: its side over the tube is
-/// half of a meridian circle, picked by the start's own side of the axis and
+/// on the second solid's wall**, by the arm of
+/// `what_a_face_cut_by_part_of_a_crossing_holds` in `holds.rs` that refuses
+/// every face on a ring with an arc among its sides (a temporary print, Q1267):
+/// rays fired from the first solid meet the second wall, and nothing in
+/// `holds.rs` says whether a point on a ring is inside such a face. The volumes
+/// above are what the answer is checked against once it does.
+///
+/// Until Q1267 every one was refused a step earlier, on the second solid's
+/// floor, because `the_way_into_an_arc` read no arc of a ring's circle: it asked
+/// for a centre before its first way, a picker whose plane holds both ends, and
+/// two circles have no one centre. Then, the arc read, because no gradient of a
+/// ring was read to say which side of the floor's arcs the floor keeps
+/// (a temporary print, Q1267). Until Q617 every one was refused earlier still,
+/// in the arrangement, on the first solid's start cap: its side over the tube
+/// is half of a meridian circle, picked by the start's own side of the axis and
 /// `z ≥ 0` (a print in `which_way_an_edge_runs_round`, Q617).
 ///
-/// So no answer here or above yet checks which way round the arrangement reads
-/// such an arc; flipping that reading's sign leaves both refusals as they are.
-/// Once `holds.rs` reads these arcs, this pair's volumes are what checks it.
+/// The arrangement and `holds.rs` now read such an arc by one spelling, and
+/// `a_quarter_and_a_half_bends_floor_hold_their_own_points` checks its sign.
 #[test]
-fn the_top_halves_of_two_quarter_bends_are_refused_where_the_second_floor_is_asked_a_point() {
+fn the_top_halves_of_two_quarter_bends_are_refused_where_the_second_wall_is_asked_a_point() {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for turned_first in [false, true] {
             let mut model =
@@ -353,19 +356,99 @@ fn the_top_halves_of_two_quarter_bends_are_refused_where_the_second_floor_is_ask
             let Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) = refused else {
                 panic!("{what}: {refused:?}");
             };
-            let floor = Surface::Plane(
-                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
-                    .expect("the z axis is a unit normal"),
-            );
-            let second = model.solid(other).expect("this model made the key");
-            assert!(
-                second
-                    .faces()
-                    .any(|its| its.key() == face && its.surface() == floor),
-                "{what}: the refusal names {face:?}, not the second solid's floor"
-            );
+            assert_names_the_second_wall(&model, other, face, &what);
         }
     }
+}
+
+/// **A quarter bend's floor and a half bend's hold their own points**, which
+/// checks the way `the_way_into_an_arc` reads into an arc of a circle a plane
+/// cuts a ring in, and how far in the piece between such an arc and its chord
+/// reaches. Each floor is a band of `z = 0` between the circles of radius 3
+/// and 5, with the two arcs bulging the same way off their chords.
+///
+/// Each point is in the band or out of it by more than a rounding, and the
+/// ones that tell a wrong reading apart:
+///
+/// - `(2.9, 2.9, 0)` on the quarter floor is past its outer chord `x + y = 5`
+///   and inside the circle of radius 5: held only if that arc is read on the
+///   far side of its chord from the axis. Read the other way round, it is in
+///   no piece and outside the polygon of chords. It is past the inner chord
+///   too, and the ring holds it, so reading the ring's own sign as the inside
+///   of each circle, as for a ball, puts it in both pieces, which cancel, and
+///   answers it not held (tried, Q1267).
+/// - `(2, 2, 0)` is between the chords, so inside the polygon, and inside the
+///   circle of radius 3, so in the inner arc's piece, which the floor leaves
+///   out. The ring's own sign there is outside, in the hole.
+/// - `(0, 2, 0)` on the half floor, whose four corners are all on the `x` axis
+///   so the polygon of chords has no area: it is inside both circles, in both
+///   pieces, which cancel, where `(0, 4, 0)` is in the outer piece alone.
+#[test]
+fn a_quarter_and_a_half_bends_floor_hold_their_own_points() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let quarter = the_top_half_of_a_quarter_bend(&mut model, false)
+        .unwrap_or_else(|why| panic!("the top half of a quarter bend: {why:?}"));
+    let half = the_top_half_of_a_half_bend(&mut model, false)
+        .unwrap_or_else(|why| panic!("the top half of a half bend: {why:?}"));
+    for (solid, asked) in [
+        (
+            quarter,
+            [
+                ([2.9, 2.9, 0.0], OnAFace::Held),
+                ([2.2, 2.2, 0.0], OnAFace::Held),
+                ([4.0, 0.5, 0.0], OnAFace::Held),
+                ([2.0, 2.0, 0.0], OnAFace::NotHeld),
+                ([3.6, 3.6, 0.0], OnAFace::NotHeld),
+                ([-1.0, 4.0, 0.0], OnAFace::NotHeld),
+            ],
+        ),
+        (
+            half,
+            [
+                ([0.0, 4.0, 0.0], OnAFace::Held),
+                ([-2.9, 2.9, 0.0], OnAFace::Held),
+                ([4.0, 0.5, 0.0], OnAFace::Held),
+                ([0.0, 2.0, 0.0], OnAFace::NotHeld),
+                ([0.0, 5.5, 0.0], OnAFace::NotHeld),
+                ([0.0, -4.0, 0.0], OnAFace::NotHeld),
+            ],
+        ),
+    ] {
+        let solid = model.solid(solid).expect("this model made the key");
+        let floor = solid
+            .faces()
+            .find(|face| {
+                face.surface()
+                    == Surface::Plane(
+                        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                            .expect("the z axis is a unit normal"),
+                    )
+            })
+            .expect("a bend's top half has a floor on z = 0");
+        for (at, expected) in asked {
+            let held = solid
+                .face_holds_the_point(
+                    floor.key(),
+                    rcad_predicates::Point::from(at),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{at:?} is answered: {why:?}"));
+            assert_eq!(held, expected, "{at:?}");
+        }
+    }
+}
+
+/// That `face`, which a fuse was refused on, is the wall of `second`, the face
+/// on the ring.
+fn assert_names_the_second_wall(model: &Model, second: SolidKey, face: FaceKey, what: &str) {
+    let second = model.solid(second).expect("this model made the key");
+    assert!(
+        second
+            .faces()
+            .any(|its| its.key() == face && matches!(its.surface(), Surface::Torus(_))),
+        "{what}: the refusal names {face:?}, not the second solid's wall"
+    );
 }
 
 fn assert_measures(model: &Model, solid: SolidKey, volume: f64, what: &str) {

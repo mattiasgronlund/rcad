@@ -385,9 +385,49 @@ fn what_a_round_wire_encloses(
         return Err(cannot());
     }
     let corner = where_it_is_stored(solid, coedge.start().key());
+    which_side_of_a_rings_circle(
+        face,
+        &partner.stored_surface(),
+        corner,
+        side,
+        point,
+        policy,
+        log,
+    )
+}
+
+/// Which side of the circle `face`'s plane cuts `ring` in through `corner`
+/// `point` is on: [`Decision::Neg`] inside the circle, [`Decision::Pos`]
+/// outside it, [`Decision::Zero`] on it. `side` is the ring's own sign at
+/// `point`, already settled, and `ring` and `corner` are as stored in `face`'s
+/// own frame; [`what_a_round_wire_encloses`] has why the ring's sign alone does
+/// not say, and why the circle is named where the face is stored.
+///
+/// [`what_a_flat_face_of_chords_and_arcs_holds`] asks it of an arc of such a
+/// circle too, for the same reason: the piece between the arc and its chord is
+/// the inside of the circle on the arc's side of the chord, and neither the
+/// disk of a circle round the axis nor one meridian circle's disk alone is the
+/// ring's inside on the plane.
+///
+/// # Errors
+///
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when [`intersect`] names no
+/// one circle through `corner`, [`Error::Undecidable`] when the picker naming
+/// it cannot say which side of it `point` is on, and whatever [`intersect`]
+/// makes of the plane and the ring.
+fn which_side_of_a_rings_circle(
+    face: FaceView<'_>,
+    ring: &Surface,
+    corner: Point,
+    side: Decision,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Decision> {
+    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let Some(this_circle) = the_picker_naming_the_circle_through(
         &face.stored_surface(),
-        &partner.stored_surface(),
+        ring,
         PredicatePoint::from(corner.coordinates()),
         policy,
         log,
@@ -2191,6 +2231,15 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 /// surface's own, and the side of the chord line the point is on against the
 /// side [`the_way_into_an_arc`] says the arc is on. Nothing is built.
 ///
+/// **On a ring's circle the ring's own sign is not the inside of the circle**:
+/// on a plane square to the axis the ring holds the band between its two
+/// circles, and on a plane through the axis both circles' disks. So there the
+/// first sign is [`which_side_of_a_rings_circle`], the reading a round wire on
+/// a ring is counted by. Reading the ring's sign instead put a point of a
+/// quarter bend's floor past both chords in both pieces, which cancelled, and
+/// answered it not held
+/// (`a_quarter_and_a_half_bends_floor_hold_their_own_points`).
+///
 /// **A parabola or a hyperbola's branch reads the same**, with the inside of
 /// the curve the convex region `K` the branch bounds
 /// ([`the_way_into_an_arc_that_does_not_close`] has why the chord line meets it
@@ -2292,6 +2341,21 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
             [Decision::Neg, Decision::Pos]
         };
         let read = side_of_surface(&side.across_placed, point);
+        let read = if matches!(side.across, Surface::Torus(_))
+            && matches!(read, Decision::Pos | Decision::Neg | Decision::Zero)
+        {
+            which_side_of_a_rings_circle(
+                face,
+                &side.across,
+                side.start.at,
+                read,
+                point,
+                policy,
+                log,
+            )?
+        } else {
+            read
+        };
         let inside = if matches!(read, Decision::Neg | Decision::Zero)
             && is_on_the_other_nappe_from_the_arc(flat, side, point)?
         {
@@ -3391,7 +3455,11 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 ///
 /// The arc's own curve is where the flat one of the two surfaces cuts the round
 /// one, and it has to be a curve that **closes**: a ball's circle, or a cone's
-/// or a pipe's circle or ellipse ([`where_a_closed_crossing_is_centred`]). Its
+/// or a pipe's circle or ellipse ([`where_a_closed_crossing_is_centred`]), or
+/// one of the two circles a plane square to a ring's axis or through it cuts
+/// the ring in. Two circles have no one centre, so a ring's is read by the
+/// first way below alone, which asks for none; [`intersect`] names no other run
+/// of a plane and a ring, and refuses the quartic every other plane cuts. Its
 /// chord line splits that curve in two, and the whole of this arc is strictly on
 /// one side of the line, because a line meets a conic at two points and those
 /// two are the arc's own ends. So "which of the two arcs" *is* "which side of
@@ -3479,8 +3547,15 @@ pub(crate) fn the_way_into_an_arc(
     picked_by: &[Picker],
 ) -> Option<[Interval; 3]> {
     let flat = surface.as_plane().or_else(|| across.as_plane())?;
-    let centred = where_a_closed_crossing_is_centred(surface, flat)
-        .or_else(|| where_a_closed_crossing_is_centred(across, flat))?;
+    let round = if surface.as_plane().is_some() {
+        across
+    } else {
+        surface
+    };
+    let centred = where_a_closed_crossing_is_centred(round, flat);
+    if centred.is_none() && !matches!(round, Surface::Torus(_)) {
+        return None;
+    }
     let boxes = ends.map(PredicatePoint::enclosure);
     let [from, to] = boxes;
     let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
@@ -3491,7 +3566,11 @@ pub(crate) fn the_way_into_an_arc(
         Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) | _ => None,
     });
     let by_its_normal = halves.clone().find_map(|half| {
-        if !a_picker_that_tells_the_two_arcs_apart(half, flat, &centred, ends) {
+        let tells_them_apart = match &centred {
+            Some(centred) => a_picker_that_tells_the_two_arcs_apart(half, flat, centred, ends),
+            None => holds_both_ends(half, ends),
+        };
+        if !tells_them_apart {
             return None;
         }
         match dot(exactly(half.normal().components()), square_to_the_chord).sign() {
@@ -3501,23 +3580,18 @@ pub(crate) fn the_way_into_an_arc(
         }
     });
     by_its_normal.or_else(|| {
-        let round = if surface.as_plane().is_some() {
-            across
-        } else {
-            surface
-        };
+        let centred = centred.as_ref()?;
         halves.find_map(|half| {
-            into_the_arc_on_the_centres_side(
-                half,
-                flat,
-                round,
-                &centred,
-                boxes,
-                square_to_the_chord,
-            )
-            .or_else(|| {
-                into_the_arc_away_from_the_centre(half, flat, &centred, boxes, square_to_the_chord)
-            })
+            into_the_arc_on_the_centres_side(half, flat, round, centred, boxes, square_to_the_chord)
+                .or_else(|| {
+                    into_the_arc_away_from_the_centre(
+                        half,
+                        flat,
+                        centred,
+                        boxes,
+                        square_to_the_chord,
+                    )
+                })
         })
     })
 }
@@ -3543,13 +3617,12 @@ pub(crate) fn a_picker_that_tells_the_two_arcs_apart(
     centred: &WhereTheCurveIsCentred,
     ends: [PredicatePoint; 2],
 ) -> bool {
-    let sides = ends.map(|at| half.side_of_point(at));
-    if sides.iter().all(|side| *side == Decision::Zero) {
+    if holds_both_ends(half, ends) {
         return true;
     }
-    if !sides
+    if !ends
         .iter()
-        .all(|side| matches!(side, Decision::Zero | Decision::Pos))
+        .all(|&at| matches!(half.side_of_point(at), Decision::Zero | Decision::Pos))
     {
         return false;
     }
@@ -3557,6 +3630,14 @@ pub(crate) fn a_picker_that_tells_the_two_arcs_apart(
         where_the_curves_centre_sits(half, flat, centred),
         Decision::Zero | Decision::Neg
     )
+}
+
+/// Whether `half`'s own plane holds both `ends`, read over the whole of each
+/// end's box: the first way [`the_way_into_an_arc`] reads an arc, and the one
+/// that asks for no centre.
+fn holds_both_ends(half: &HalfSpace, ends: [PredicatePoint; 2]) -> bool {
+    ends.iter()
+        .all(|&at| half.side_of_point(at) == Decision::Zero)
 }
 
 /// Which side of `half` the centre of the closed curve `flat` cuts sits on.
@@ -6419,8 +6500,8 @@ fn held_in_front_of_any(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> 
     })
 }
 
-/// The gradient of a plane, a ball, a cone or a pipe at `at`, as a box, as the
-/// surface is stored; `None` for any other kind.
+/// The gradient of a plane, a ball, a cone, a pipe or a ring at `at`, as a box,
+/// as the surface is stored; `None` for any other kind.
 ///
 /// Only the sign of a dot against this is ever read, so a positive factor is
 /// dropped where one falls out. A cone's own sign is
@@ -6438,6 +6519,13 @@ fn held_in_front_of_any(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> 
 /// gradient is twice `|w|²x − (x·w)w`: the part of `x` square to the axis,
 /// scaled by `|w|²`. It points out of the pipe and is zero only on the axis,
 /// which no point of the pipe's skin is on.
+///
+/// A ring's is `validate.rs`'s `gradient_of`, the gradient of
+/// `(w·w)(x·x + R² − r²)² − 4R²|x × w|²` at `x = at − centre` over four:
+/// `(w·w)(x·x − R² − r²)x + 2R²(x·w)w`. On the ring's skin it is a positive
+/// multiple of the way out of the tube, so it is nowhere zero there, and it
+/// is what lets a flat face read which side of a ring's circle it keeps
+/// ([`which_side_of_its_neighbour_a_side_keeps`]).
 fn gradient_at(surface: &Surface, at: Point) -> Option<[Interval; 3]> {
     match surface {
         Surface::Plane(flat) => Some(exactly(flat.normal().components())),
@@ -6475,7 +6563,22 @@ fn gradient_at(surface: &Surface, at: Point) -> Option<[Interval; 3]> {
                 squared * out[axis] - how_far_along * along[axis]
             }))
         }
-        Surface::Torus(_) | _ => None,
+        Surface::Torus(ring) => {
+            let at = at.coordinates();
+            let centre = ring.centre().coordinates();
+            let out: [Interval; 3] = core::array::from_fn(|axis| {
+                Interval::exactly(at[axis]) - Interval::exactly(centre[axis])
+            });
+            let along = exactly(ring.axis().direction().components());
+            let big = Interval::exactly(ring.ring_radius());
+            let small = Interval::exactly(ring.tube_radius());
+            let bulge = dot(along, along) * (dot(out, out) - big * big - small * small);
+            let lift = Interval::exactly(2.0) * big * big * dot(out, along);
+            Some(core::array::from_fn(|axis| {
+                bulge * out[axis] + lift * along[axis]
+            }))
+        }
+        _ => None,
     }
 }
 
