@@ -34,8 +34,9 @@
 //!   intersections and a difference with the ball since Q1270 put its pole
 //!   among the points walked along the wall's arc, and the steep frustum's
 //!   unions and the half less it since Q1337 put the steep cone's apex on the
-//!   half's floor as well as its wall; every other rule is refused after the
-//!   meet.
+//!   half's floor as well as its wall, and the bar's unions and the bar less
+//!   the half since Q1338 named the cone in the run of the arc between two
+//!   pieces of the bar's wall; every other rule is refused after the meet.
 //!
 //! Without a wall no fuse here asks the order round one of these circles. A
 //! seam puts one node on a face's circle beside its start, and each face has
@@ -468,9 +469,9 @@ fn a_half_frustum_against_a_steeper_frustum_whose_apex_is_on_its_floor_answers_e
 /// `S = (100 − √2)π/3`, `(620 + √2)π/6`, `(100 − √2)π/6`, `(404 + √2)π/6` and
 /// `(116 + √2)π/6`.
 ///
-/// **What answers is the intersection with the bar, both ways, `124π/3`, the
-/// half less the bar, `128π/3`, the intersection with the ball, both ways,
-/// `(100 − √2)π/6`, and the half less the ball, `(404 + √2)π/6`.**
+/// **Every rule answers against the bar, and against the ball the
+/// intersection, both ways, `(100 − √2)π/6`, and the half less the ball,
+/// `(404 + √2)π/6`.**
 ///
 /// The partner's skin holds the whole circle, and the arc of it at `x < 0`,
 /// between the same two corners as the arc along the cone, was one edge with
@@ -478,12 +479,20 @@ fn a_half_frustum_against_a_steeper_frustum_whose_apex_is_on_its_floor_answers_e
 /// `ResultIsNotManifold { count: 4 }`, with the partner's skin three times
 /// along it and the cone once, and so were the steep frustum's above.
 /// `fuse/assemble.rs`'s `which_arc_of_a_circle_this_is` names the two arcs
-/// apart since Q1269, and each of those rules now stops one step on, and is
-/// not fixed:
+/// apart since Q1269, and each of those rules then stopped one step on:
 ///
-/// - against the bar, the unions and the bar less the half are refused
+/// - against the bar, the unions and the bar less the half were refused
 ///   `ACurvedFaceGoesRightRoundWithNoSeam`, by the mesh the fuse checks its
-///   answer with;
+///   answer with (Q1338). They keep the bar's wall below the circle and the
+///   piece of it at `x < 0` above, two pieces with the arc at `x < 0` between
+///   them, and the joiner leaves them apart. That arc's run named the pipe
+///   twice: a pipe either side, and the pipe again in `and`, since a pipe sorts
+///   ahead of a cone. The walk put no point between the arc's ends, the mesher
+///   read the half turn between them the wrong way round, and the piece above
+///   went right round the pipe with one wire. An arc between two pieces of one
+///   surface now names the other surface in `and`, here the cone
+///   (`fuse/assemble.rs`'s `the_surface_that_cut_each_edge_its_faces_do_not_name`),
+///   and they answer `608π/3`, `608π/3` and `356π/3`;
 /// - against the ball, the unions and the ball less the half are refused
 ///   `AWireWillNotLieFlatOnItsFace`, by the mesh the fuse checks its answer
 ///   with. They keep the ball less the piece of it inside the half, one face
@@ -515,16 +524,16 @@ fn a_wall_through_the_circle_a_cone_crosses_a_bar_or_a_ball_in_is_placed_and_hal
         },
         |model| a_ball_four_up(model, 3.0),
     ];
-    use Gives::{Holds, NoSeam, NotFlat};
+    use Gives::{Holds, NotFlat};
     let root = 2.0_f64.sqrt();
     let wanted = [
         [
-            NoSeam,
-            NoSeam,
+            Holds(608.0 * PI / 3.0),
+            Holds(608.0 * PI / 3.0),
             Holds(124.0 * PI / 3.0),
             Holds(124.0 * PI / 3.0),
             Holds(128.0 * PI / 3.0),
-            NoSeam,
+            Holds(356.0 * PI / 3.0),
         ],
         [
             NotFlat,
@@ -600,7 +609,6 @@ fn a_ball_a_frustum_touches_round_one_circle_is_refused_before_its_arcs_are_name
 enum Gives {
     Holds(f64),
     HoldsTwo(f64, f64),
-    NoSeam,
     NotFlat,
 }
 
@@ -614,8 +622,7 @@ impl Gives {
             (Gives::HoldsTwo(smaller, larger), Ok(volumes)) => {
                 matches!(volumes[..], [one, other] if near(one, *smaller) && near(other, *larger))
             }
-            (Gives::NoSeam, Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }))
-            | (Gives::NotFlat, Err(Error::AWireWillNotLieFlatOnItsFace { .. })) => true,
+            (Gives::NotFlat, Err(Error::AWireWillNotLieFlatOnItsFace { .. })) => true,
             _ => false,
         }
     }
