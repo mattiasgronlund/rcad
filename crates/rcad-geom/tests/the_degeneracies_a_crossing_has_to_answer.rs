@@ -23,10 +23,14 @@
 //! | seam-crossing intersections | walking a crossing that runs across a face's seam | 3D points, and the seam never comes into it |
 //! | two lines no `f64` half-space separates | **refused**, and it is a gap |
 //!
-//! The last two rows are not §7.4's. They are the pairs a file can state and
-//! this crate cannot name — a pipe into a bend, a pipe into a countersink — and
-//! they are here because the evaluator used to *panic* on them where the namer
-//! refused, so what they check is that both halves now say the same word.
+//! The last two tests are not §7.4's. They are pairs a file can state —
+//! a pipe into a bend, a pipe into a countersink — that the evaluator used to
+//! *panic* on where the namer refused, so what they checked was that both
+//! halves said the same word. Since row Q1376 the namer no longer refuses the
+//! bend: it names the two circles the pipe's rim and the tube's share, and
+//! only the evaluator still refuses, for want of a row in `walk.rs` rather
+//! than for want of a name. The countersink pair is unchanged, both halves
+//! still refusing it under its own name.
 //!
 //! # Why tangency is an answer and not a band
 //!
@@ -488,20 +492,30 @@ fn two_lines_off_the_lattice_are_named_just_as_the_same_pair_on_it_is() {
     assert_eq!(runs.len(), 2);
 }
 
-/// A pipe and a bend, exactly as one KiCad file holds them, refused by name by
-/// **both halves** rather than named by one and panicked on by the other.
+/// A pipe and a bend, exactly as one KiCad file holds them. In the reals the
+/// pipe's radius, `0.5`, is the ring's radius `0.4` plus its tube's radius
+/// `0.1` on the nose, so the pipe should rest on the tube's outer rim all the
+/// way round — `the_heights_a_ring_crosses_a_pipe_at`'s "zero" row, one
+/// circle. `0.5 − 0.4` stored as `f64` is `0.09999999999999998`, one bit short
+/// of `0.1`: squared, `0.009999999999999995`, one bit less than
+/// `tube² = 0.1 × 0.1 = 0.010000000000000002`. Carried through as exact
+/// rationals on those bits rather than rounded again, `room = tube² − (a −
+/// R)²` is `7205759403792793 / 2¹¹⁰`, about `5.55e-18` — positive on the bits
+/// stored, not on a print rounded to look like zero. So `f64` lands on the
+/// "above zero" row instead: two circles a hair's width (`2.356e-9`) apart,
+/// where the reals give one.
 ///
-/// The naming half has always said `ACrossingBetweenATorusAndAnotherCurvedSurface`
-/// for this pair. The evaluator used to `panic!`, on the argument that no run of
-/// such a pair can exist because the namer never builds one — and that argument
-/// only ever covered the runs this crate builds itself. [`NamedRun`] is public,
-/// `Model` is `Deserialize`, and a STEP file is a stranger's bytes: a pipe face
-/// and a bend face sharing an edge is a shape a file states, and reading it
-/// reached this with no naming call in between.
+/// Since row Q1376, `intersect` names both. The evaluator has not followed:
+/// `walk.rs`'s `what_a_run_between_these_two_lies_on` has no row yet for a
+/// ring against another curved surface, so walking either circle, or finding
+/// where it starts, still refuses `ACrossingBetweenATorusAndAnotherCurvedSurface`
+/// — the gap `docs/decisions.d/378-two-quarter-bends-on-one-torus.md` files
+/// for later, not a limit.
 ///
-/// The shapes are the ones the corpus panicked on, to the digit.
+/// The shapes are the ones the corpus panicked on before Q1376, to the digit.
 #[test]
-fn a_pipe_running_into_a_bend_is_refused_by_name_rather_than_crashing_the_evaluator() {
+fn a_pipe_that_should_rest_on_a_bends_tube_crosses_it_in_two_circles_because_0_5_minus_0_4_rounds_short()
+ {
     let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 0.5);
     let bend = Surface::Torus(
         Torus::new(
@@ -513,16 +527,30 @@ fn a_pipe_running_into_a_bend_is_refused_by_name_rather_than_crashing_the_evalua
         .expect("a ring wider than its tube"),
     );
 
-    assert_eq!(
-        intersect(
-            &pipe,
-            &bend,
-            &Policy::certified(),
-            &mut ProvenanceLog::new()
-        ),
-        Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-        "the naming half has always refused this pair"
-    );
+    let met = intersect(
+        &pipe,
+        &bend,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a positive room, however thin, is two circles, not a refusal");
+    let SurfaceMeet::Curves(runs) = &met else {
+        panic!("a pipe just outside a bend's tube is two circles: {met:?}");
+    };
+    assert_eq!(runs.len(), 2, "{met:?}");
+    for (run, offset) in runs
+        .iter()
+        .zip([-16.150_000_002_356_08, -16.149_999_997_643_917])
+    {
+        let EdgeRun::RightRoundWhereItCrosses {
+            and: Surface::Plane(flat),
+        } = run.run()
+        else {
+            panic!("each circle names its own plane: {run:?}");
+        };
+        assert_eq!(flat.normal(), Vector::new(0.0, 0.0, -1.0));
+        assert_eq!(flat.offset(), offset);
+    }
 
     let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a closed curve is never a piece with nothing picking it");
@@ -537,7 +565,7 @@ fn a_pipe_running_into_a_bend_is_refused_by_name_rather_than_crashing_the_evalua
             )
             .map(|walked| walked.points().len()),
             Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
-            "the evaluator refuses what the namer refuses, whichever face asks"
+            "walk has no row yet for a ring against a curved surface, whichever face asks"
         );
         assert_eq!(
             where_a_closed_crossing_starts(&whole, along, &mut ProvenanceLog::new()),

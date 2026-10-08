@@ -59,9 +59,10 @@
 //! the curves are all there and none of them can be named with the runs this
 //! kernel has. So the first two rows are the theorem above, and the last two
 //! are §36.20's quartic-and-worse, still weighed and still left. A bar on the
-//! axis that does reach the tube is still refused, and
-//! `a_bend_and_a_bar_through_its_tube_on_its_axis_are_refused_by_name` says
-//! why. Neither
+//! axis that does reach the tube is still refused, now where the answer is
+//! walked, and
+//! `a_bend_and_a_bar_through_its_tube_on_its_axis_are_refused_where_the_answer_is_walked`
+//! says why. Neither
 //! refusal touches `a_bend_fused_with_a_copy_of_itself_is_the_bend_or_nothing`
 //! below — the one test in this file that does reach the arrangement,
 //! `select::choose` and `assemble`'s `join_up_what_is_one_face`, under all
@@ -433,12 +434,20 @@ fn a_bend_and_a_bar_through_its_hole_on_its_axis_fuse_into_what_pappus_gives() {
 
 /// A bar on a bend's axis that does reach its tube, the bar of the ring's own
 /// radius, which crosses the tube at its top and its bottom, is still refused
-/// by name under every rule. `intersect` finds the two circles and does not
-/// hand them back: named by their planes, as commit `9eead79c` did, the
-/// difference of the bar less the bend panicked in the arrangement's
-/// `pickers_of`, which has not been taught that run (row Q1334, §378).
+/// by name under every rule, and now only where the answer is walked.
+///
+/// `intersect` names the two circles by their planes (rows Q1334 and Q1376,
+/// §378), the arrangement picks each out by the plane halfway to the other and
+/// orders points round it as round its plane's circle, and the corner where a
+/// cap of the bend crosses a circle is `three_surfaces`'s sixth road. So every
+/// face is split. What refuses is `assemble` measuring the answer while it
+/// nests the shells: it names an arc of such a circle by the ring and the bar
+/// with a half-space through its chord, and `walk` has no row for a ring
+/// against a curved surface, so meshing that arc refuses
+/// `ACrossingBetweenATorusAndAnotherCurvedSurface`. A **gap** (§16.10): the
+/// arc is on the circle its plane and the bar cross in, which `walk` follows.
 #[test]
-fn a_bend_and_a_bar_through_its_tube_on_its_axis_are_refused_by_name() {
+fn a_bend_and_a_bar_through_its_tube_on_its_axis_are_refused_where_the_answer_is_walked() {
     let policy = Policy::certified();
     for (ring, tube) in [(4.0, 1.0), (6.0, 2.0)] {
         let (model, bend, bar) = a_bend_and_a_bar_on_its_axis(ring, tube, ring);
