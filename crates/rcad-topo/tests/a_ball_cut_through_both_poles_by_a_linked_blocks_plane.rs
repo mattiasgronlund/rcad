@@ -12,10 +12,15 @@
 //! the link's planes cut, and joining folds every corner with two edges along
 //! it. Both poles were folded, the two arcs became one edge with no ends, and
 //! the union panicked in `fuse/assemble.rs`: *a run of edges that became one
-//! edge has two ends left*. Now a closed run like that keeps every corner, as
-//! the answer does when nothing else in the fuse is joined, and the union is
+//! edge has two ends left*. Then a closed run like that kept every corner, as
+//! the answer does when nothing else in the fuse is joined, and the union was
 //! one solid of the volume below. The other rules joined nothing and answered
 //! before as well.
+//!
+//! **Now the two arcs are gone** (§229.2). The ball is on both sides of them,
+//! so the joiner's ball arm joins the two pieces into the one face the union
+//! keeps of the ball, the ball less the cap the slab takes, and nothing is left
+//! along the poles to fold.
 //!
 //! Every answer has a curved face, so each is measured against its own bound.
 
@@ -74,15 +79,16 @@ fn the_other_rules_answer_the_same_three() {
     }
 }
 
-/// The union keeps the ball in two faces, either side of the circle `x = 0`,
-/// and fused again with a cube far from it is two solids, the union as it
-/// stands and the cube, both ways round.
+/// The union keeps the ball in one face, the ball less the cap the slab
+/// takes, and fused again with a cube far from it is two solids, the union as
+/// it stands and the cube, both ways round.
 ///
-/// It was refused `AFaceMeetsItsNeighbourOnItsOwnSurface` on one of the ball's
-/// two faces: the arrangement asked where the face meets its neighbour across
-/// that circle, and the neighbour is the same ball. Now `bake` hands the two
-/// faces over as one, and the circle between them is left out as a seam is
-/// (row Q575).
+/// It was refused `AFaceMeetsItsNeighbourOnItsOwnSurface` while the union kept
+/// the ball in two faces, either side of the circle `x = 0`: the arrangement
+/// asked where one meets its neighbour across that circle, and the neighbour
+/// is the same ball. Then `bake` handed the two faces over as one, and the
+/// circle between them was left out as a seam is (row Q575). Now the union
+/// joins them itself (§229.2).
 #[test]
 fn the_union_fused_again_with_a_far_cube_is_the_union_and_the_cube() {
     let truth = BALL + SLAB + LINK - THE_BLOCKS_SHARE - the_ball_and_the_slab_share();
@@ -91,8 +97,8 @@ fn the_union_fused_again_with_a_far_cube_is_the_union_and_the_cube() {
         let (mut model, first) = fused(Rule::Union, true);
         assert_eq!(
             balls_faces(&model, &first),
-            2,
-            "{what}: the union keeps the ball in two faces"
+            1,
+            "{what}: the union keeps the ball in one face"
         );
         let far = model
             .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())

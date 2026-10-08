@@ -1053,7 +1053,7 @@ impl Assembly {
                         let agreement = agreement_of_two_planes(mine, theirs, log)?;
                         Ok(agreement == PlaneAgreement::SameWay)
                     }
-                    (None, None) => Ok(one_cone_or_pipe_the_same_way_round(mine, theirs)),
+                    (None, None) => Ok(one_cone_pipe_or_ball_the_same_way_round(mine, theirs)),
                     (Some(_), None) | (None, Some(_)) => Ok(false),
                 }
             })
@@ -1127,9 +1127,24 @@ impl Assembly {
         Ok(joined)
     }
 
-    /// The edges between pieces of one cone or pipe that stay edges after all:
-    /// one seam across each band the joining makes, and every edge of a group
-    /// that cannot be joined.
+    /// The edges between pieces of one cone, pipe or ball that stay edges after
+    /// all: one seam across each band the joining makes, and every edge of a
+    /// group that cannot be joined.
+    ///
+    /// **A ball keeps no seam.** It has no one axis for a ring to go round, and
+    /// the mesher opens a ball's face along meridians of its own: a ball less a
+    /// disc along one half a turn from the rim, a ball less several in strips
+    /// from pole to pole, a cap up to its pole (`open_the_ball_along_a_seam`,
+    /// `open_the_ball_into_strips` and `cut_a_cap_up_to_its_pole` in `mesh.rs`,
+    /// §202.1, §402). So every group on a ball is joined whole, and the ball's
+    /// skin round a box's corner, cut by the box's three planes into eight
+    /// pieces, comes back as the one face it is
+    /// (`a_ball_kept_to_a_corner_of_a_box.rs`, §229.2). **Except the whole
+    /// ball**: a group whose rings come out empty is every piece of it, and a
+    /// joined face is never written as a whole closed surface, so its edges all
+    /// stay and the ball stays in the pieces the fuse cut it into. Q1345's
+    /// trial joined that too and failed 18 `rcad-topo` tests, a panic in
+    /// `mesh.rs` among them.
     ///
     /// **A ring that goes right round needs a seam**, and the pieces a fuse
     /// leaves carry none — the arrangement cuts a cone's wall into pieces that
@@ -1163,6 +1178,15 @@ impl Assembly {
             let inside: Vec<usize> = (0..self.edges.len())
                 .filter(|&edge| dissolved[edge] && members.contains(&along[edge][0].face))
                 .collect();
+            if matches!(self.faces[members[0]].surface, Surface::Sphere(_)) {
+                if self
+                    .rings_of_a_curved_face(&members, along, dissolved)
+                    .is_empty()
+                {
+                    staying.extend(inside);
+                }
+                continue;
+            }
             if self.needs_no_seam(&members, along, dissolved) {
                 continue;
             }
@@ -1384,8 +1408,8 @@ impl Assembly {
         Some(walk)
     }
 
-    /// The rings round a joined face on a cone or a pipe, in the order they are
-    /// first come to.
+    /// The rings round a joined face on a cone, a pipe or a ball, in the order
+    /// they are first come to.
     ///
     /// **No ring is the outline**, and that is §31.3's rule and not a shortcut:
     /// a curved face's invariant is that every wire keeps the material on its
@@ -1438,7 +1462,7 @@ impl Assembly {
             Surface::Cylinder(pipe) => pipe.axis(),
             Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) => return None,
             // A surface kind added to `rcad-geom` after this has no ring count
-            // here, so its pieces are left apart as a ball's are.
+            // here, so its pieces are left apart as a ring's are.
             _ => return None,
         };
         let round = |at: Point| axis.direction().cross(at - axis.origin());
@@ -2041,7 +2065,7 @@ impl Assembly {
             }
         }
 
-        // **A corner where pieces of one cone or pipe met stays a corner**, and
+        // **A corner where pieces of one cone, pipe or ball met stays a corner**, and
         // that departs from §224.2 item 3 on purpose. It has only two surfaces
         // round it, which §31.3 reads out of the model rather than re-deriving,
         // so nothing needs it gone. And folding the arcs either side into one
@@ -3556,11 +3580,12 @@ struct JoinedFace {
     members: Vec<usize>,
     surface: Surface,
     used: Orientation,
-    /// Carried through the joining untouched: only flat faces and pieces of a
-    /// cone or a pipe are ever joined, and a whole closed surface is a ball.
+    /// Carried through the joining untouched: a whole closed surface is a ball
+    /// with no edge on it to be joined across, and pieces that join up into a
+    /// whole ball are left apart ([`Assembly::edges_a_curved_face_keeps`]).
     is_a_whole_closed_surface: bool,
-    /// On a plane, the outline first and then one ring per hole. On a cone or a
-    /// pipe, in the order they were first come to (§31.3).
+    /// On a plane, the outline first and then one ring per hole. On a cone, a
+    /// pipe or a ball, in the order they were first come to (§31.3).
     rings: Vec<Vec<Dart>>,
 }
 
@@ -3597,8 +3622,8 @@ fn how_much_space_it_encloses(
     how_much_space_a_curved_solid_encloses(solid, policy, log)
 }
 
-/// Whether two curved faces are pieces of one cone or one pipe, used the same
-/// way round, so that an edge between them is not boundary at all.
+/// Whether two curved faces are pieces of one cone, one pipe or one ball, used
+/// the same way round, so that an edge between them is not boundary at all.
 ///
 /// **A pipe is one pipe however it is written**: its axis turned round, or its
 /// origin slid along it where [`name_of_the_surface_either_way_round`] folds
@@ -3623,16 +3648,21 @@ fn how_much_space_it_encloses(
 /// The same surface used the other way round is a sheet of no thickness with
 /// material either side, which is two faces and not one.
 ///
-/// **Only a cone or a pipe.** Their rings are asked how often they go round the
-/// axis ([`Assembly::a_ring_goes_right_round`]), and a ball or a ring has no
-/// one axis to ask about, so pieces of those stay apart.
-fn one_cone_or_pipe_the_same_way_round(mine: &Face, theirs: &Face) -> bool {
+/// **A ball is one ball by its centre and radius**, which is all it holds and
+/// all [`one_surface`] compares, so it has one spelling and nothing to turn
+/// round. Its pieces join with no ring counted at all
+/// ([`Assembly::edges_a_curved_face_keeps`], §229.2).
+///
+/// **Not a ring.** A cone's and a pipe's rings are asked how often they go
+/// round the axis ([`Assembly::a_ring_goes_right_round`]), and a ring has two
+/// ways round with no count here for either, so pieces of one stay apart.
+fn one_cone_pipe_or_ball_the_same_way_round(mine: &Face, theirs: &Face) -> bool {
     let one = match mine.surface {
-        Surface::Cylinder(_) => one_surface(&mine.surface, &theirs.surface),
+        Surface::Cylinder(_) | Surface::Sphere(_) => one_surface(&mine.surface, &theirs.surface),
         Surface::Cone(_) => {
             name_of_surface_bits(&mine.surface) == name_of_surface_bits(&theirs.surface)
         }
-        Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) | _ => false,
+        Surface::Plane(_) | Surface::Torus(_) | _ => false,
     };
     one && mine.used == theirs.used
 }

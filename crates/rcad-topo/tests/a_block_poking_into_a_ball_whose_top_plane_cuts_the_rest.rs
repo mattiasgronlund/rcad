@@ -1,9 +1,8 @@
 //! A ball of radius 1 at the origin and the block `[0.9, 10.9] × [−5, 5] ×
 //! [−9.5, 0.5]`, which pokes into the ball's side past `x = 0.9`. The block's
 //! top plane `z = 0.5` misses the cap the block takes, but the fuse cuts the
-//! ball along it outside the block too. So the ball below `z = 0.5` is one face
-//! with two wires: the `z = 0.5` circle, which goes right round the south pole,
-//! and the `x = 0.9` circle beside it as an island.
+//! ball along it outside the block too, into the cap above `z = 0.5` and the
+//! rest below it with the `x = 0.9` circle as an island.
 //!
 //! `docs/decisions.md` §400.5 measured it reaching the mesher's refusal of a
 //! wire right round beside one that is not, `AWireWillNotLieFlatOnItsFace`
@@ -11,6 +10,12 @@
 //! fuses that keep that face. The rim is walked at four corners at the fuse's
 //! deflection, one of them under the island, so the cut up to the pole from it
 //! is taken through the island.
+//!
+//! **The two pieces are one face again since the joiner's ball arm**
+//! (§229.2): the `z = 0.5` circle has the ball on both sides and is no edge,
+//! so the union both ways round and the ball less the block keep the ball's
+//! skin as one face of one wire, the `x = 0.9` circle: the ball less the cap
+//! the block takes.
 //!
 //! The answers are the closed forms: the block shares with the ball the cap
 //! past `x = 0.9`, and nothing past `z = 0.5`, since `0.9² + 0.5² > 1`.
@@ -57,11 +62,14 @@ fn a_block_poking_into_a_ball_measures_under_every_rule() {
             model
                 .validate(&Policy::certified(), &mut ProvenanceLog::new())
                 .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-            if rule == Rule::Union {
-                assert!(
-                    skins_by_wires(&model, &answer).contains(&2),
-                    "{what}: a face on the ball of two wires, got {:?}",
-                    skins_by_wires(&model, &answer)
+            if matches!(
+                (rule, ball_first),
+                (Rule::Union, _) | (Rule::Difference, true)
+            ) {
+                assert_eq!(
+                    skins_by_wires(&model, &answer),
+                    [1],
+                    "{what}: the ball's skin is one face of one wire"
                 );
             }
             assert_measures(&model, &answer, truth, &what);

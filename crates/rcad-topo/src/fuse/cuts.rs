@@ -56,9 +56,15 @@
 //! plane of both solids is the closure of the argument above: every face on
 //! either side of any edge of the answer is then diced by the one set, so the
 //! two sides agree about where the corners are wherever they come from.
-//! [`assemble`](super::assemble)'s joining folds the extra pieces back into one
-//! face and drops the corners that stopped being corners, so nothing of the
-//! split reaches the answer.
+//! [`assemble`](super::assemble)'s joining folds the extra pieces of a plane, a
+//! cone, a pipe or a ball back into one face (§229.2), and on a plane drops
+//! the corners that stopped being corners.
+//!
+//! **Some of the split still reaches the answer.** A corner where pieces of
+//! one curved surface met stays a corner; a band round a cone or a pipe keeps
+//! one seam, and a group on one whose rings cannot be counted, or that has no
+//! seam to keep, stays in its pieces; pieces that make up a whole ball stay
+//! apart; and a ring's pieces are never joined at all.
 //!
 //! # A crossing that splits nothing and is no edge is left off
 //!
