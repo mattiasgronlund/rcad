@@ -5250,12 +5250,9 @@ struct WalkingAWire {
     /// [`WalkingAWire::finish`] and is a different question.
     closes_on_one_curve: bool,
     /// Whether no edge of this wire is used twice, so that none of its sides is
-    /// a seam. Part of [`WalkingAWire::may_come_back_a_whole_turn_on`]; the rest
-    /// is measured as the walk goes.
+    /// a seam. That is the whole of
+    /// [`WalkingAWire::may_come_back_a_whole_turn_on`].
     no_side_of_this_wire_is_a_seam: bool,
-    /// Whether the walk ever stood at a pole — a pole step, a corner on one, or
-    /// a point along an edge that passes one.
-    stood_at_a_pole: bool,
     longitude: f64,
     started: bool,
     will_not_lie_flat: bool,
@@ -5287,7 +5284,6 @@ impl WalkingAWire {
             second_wraps,
             closes_on_one_curve,
             no_side_of_this_wire_is_a_seam,
-            stood_at_a_pole: false,
             longitude: 0.0,
             started: false,
             will_not_lie_flat: false,
@@ -5332,7 +5328,6 @@ impl WalkingAWire {
         let (raw, up) = sits_at;
         let up = self.in_the_turn_of_the_last_corner(up);
         if is_a_pole {
-            self.stood_at_a_pole = true;
             if self.corners.is_empty() {
                 self.set_off_at_a_pole = true;
             }
@@ -5678,10 +5673,25 @@ impl WalkingAWire {
     /// A wire that uses an edge twice uses it as a **seam**: the two sides of
     /// one meridian, which the patch lies between, so the walk down the far
     /// side has to bring the longitude back to where the walk up the near side
-    /// left it. A wire that stands at a **pole** has a side of the patch whose
-    /// width came from [`WalkingAWire::cross_the_pole`] rather than from a step
-    /// of a curve, and a wire through a pole is not a wire round one anyway.
-    /// Neither of those may wind, and that is what this keeps out.
+    /// left it. That may not wind, and it is all this keeps out.
+    ///
+    /// **A wire through one pole may wind round the other**, and keeping it
+    /// out cost a correct answer. The half frustum `x ≥ 0` against a ball four
+    /// up its axis leaves the ball less the piece inside the half as one face
+    /// whose one ring of two arcs runs over the north pole along the wall
+    /// `x = 0`. The face holds the south pole, so the walk round that ring comes
+    /// back `−6.283185307179586`, a whole turn, and it was refused
+    /// `AWireWillNotLieFlatOnItsFace` because it had stood at a pole
+    /// (`a_cone_hollowed_along_its_axis.rs`,
+    /// `a_half_frustum_whose_wall_crosses_the_circle_it_meets_a_bar_or_a_ball_in_answers_every_rule`).
+    /// The pole side's width is not a guess: [`WalkingAWire::cross_the_pole`]
+    /// and [`WalkingAWire::turn_at_a_corner_on_a_pole`] run it the way that
+    /// keeps the face on the left, so the turn the walk climbs is the turn the
+    /// wire makes. Which pole such a cap reaches is
+    /// [`BuildingAMesh::which_pole_this_cap_reaches`]'s, and that never takes a
+    /// pole a corner of the rim stands on, so a rim through one pole reaches
+    /// the other, and a rim through both reaches neither and is refused there
+    /// as `ACurvedFaceGoesRightRoundWithNoSeam`.
     ///
     /// **A ring is a cap only when it is the face's one wire**, and where it is
     /// not, [`BuildingAMesh::cut_off_what_goes_too_far_round`] is what says
@@ -5698,21 +5708,20 @@ impl WalkingAWire {
     /// **What is left may, and a cone is where it has to.** A pointed cone
     /// inside a cube stood on its corner keeps a piece of nappe round the apex
     /// bounded by three arcs, one from each of the cube's upper planes, meeting
-    /// at three corners off the apex. Three distinct edges, no seam, no pole
-    /// step and no corner on the apex — so the ring closes right round the
-    /// longitude, and the face is the piece of the nappe the apex is in.
-    /// [`BuildingAMesh::cut_a_cap_up_to_its_pole`] is what fills it, and
-    /// [`BuildingAMesh::which_pole_this_cap_reaches`] is what says which of the
-    /// two pieces the ring bounds is the face: the step the wire takes in space
-    /// against `∇S × ∇T` says which side of the cutting surface the material is
-    /// on, and the apex either is on that side or the face is the unbounded
-    /// rest of the nappe, which is no face at all and stays refused.
+    /// at three corners off the apex. Three distinct edges and no seam — so the
+    /// ring closes right round the longitude, and the face is the piece of the
+    /// nappe the apex is in. [`BuildingAMesh::cut_a_cap_up_to_its_pole`] is
+    /// what fills it, and [`BuildingAMesh::which_pole_this_cap_reaches`] is
+    /// what says which of the two pieces the ring bounds is the face: the one
+    /// on the left of the walk, and the apex either is on that side or the face
+    /// is the unbounded rest of the nappe, which is no face at all and stays
+    /// refused.
     ///
     /// One coedge whose two ends are its one corner is a ring too, and it is
     /// the one this kernel already meshed: `closes_on_one_curve` says it, the
     /// caller asks it first, and it needs none of the reasoning above.
     fn may_come_back_a_whole_turn_on(&self) -> bool {
-        self.no_side_of_this_wire_is_a_seam && !self.stood_at_a_pole
+        self.no_side_of_this_wire_is_a_seam
     }
 
     /// Cross the pole side the loop closes over, when the walk set off from a
@@ -6426,7 +6435,7 @@ fn which_side_of_a_surface_a_run_names_this_face_lies_on(
 /// skin was read as a cap right round the pole and cut up to it along the
 /// meridian that arc already runs down, which left a patch through the pole
 /// twice, refused `CornersCoincide`
-/// (`a_wall_through_the_circle_a_cone_crosses_a_bar_or_a_ball_in_is_placed_and_half_the_rules_stop_after`).
+/// (`a_half_frustum_whose_wall_crosses_the_circle_it_meets_a_bar_or_a_ball_in_answers_every_rule`).
 fn put_in_the_poles_a_crossing_passes(
     points: &mut Vec<Point>,
     ends: [Point; 2],
