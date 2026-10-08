@@ -5956,8 +5956,9 @@ const WHICH_SIDE_A_SIDE_KEEPS: &str = "which_side_a_side_keeps";
 ///   three sides of the block the bar is clear of.
 /// - Any other arc against a plane, both ends on the same side of it, when the
 ///   line the plane meets the arc's own plane in misses the arc's curve, meets
-///   it only behind the chord, or meets the branch of a hyperbola the arc is on
-///   behind it ([`an_arc_never_reaches_the_plane`]). The skin of
+///   it only behind the chord, meets the branch of a hyperbola the arc is on
+///   behind it, or meets only the other branch
+///   ([`an_arc_never_reaches_the_plane`]). The skin of
 ///   a ball cut down to four planes through its centre has each of its four arcs
 ///   against the plane across from it (row Q976).
 /// - An arc of a ring on a plane through the ring's axis, against another plane
@@ -6316,7 +6317,8 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// Whether an arc of the curve the plane `own` cuts `round` in never reaches
 /// the plane `cut`: the line the two planes meet in misses the curve, meets it
 /// only behind the arc's chord, or, on a hyperbola's plane, meets the arc's own
-/// branch behind it. `start` is either end of the arc and `into_the_arc` is
+/// branch behind it or meets only the other branch. `start` is either end of
+/// the arc and `into_the_arc` is
 /// [`the_way_into_an_arc`]. `false` when the two planes are side by side, when
 /// a ball's or a pipe's curve does not close, when the line runs along a
 /// direction the round surface's part of degree two is zero at, and when a
@@ -6352,6 +6354,23 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// each wall's hyperbola against the other wall, whose line runs up the axis,
 /// and its apex was refused for want of this
 /// (`tests/a_cone_skin_beside_a_plane_its_open_curve_never_reaches.rs`).
+///
+/// **A line shallower than the cone's side can meet the other branch twice**
+/// (row Q1391). There `a > 0`, and the meets are on one branch: the curve's
+/// part of degree two is negative strictly between them, so the segment between
+/// them is inside the cone, which is on one nappe or the other and never both,
+/// the apex being the only point between the nappes on the cone's surface. So
+/// the point halfway between them, `t = −b/a`, is on the nappe both meets are
+/// on, and when that is not the nappe `start` is on, neither meet is on the arc,
+/// though both may be in front of its chord. How far up the axis a point of the
+/// line is grows by `η = w·u` along it from `h₀`, its value at `|u|²x₀` less the
+/// apex, so this is the sign of `a·h₀ − η·b` against that of `w·(start − apex)`
+/// ([`the_middle_of_the_meets_is_on_the_other_nappe`]). It needs no sign of
+/// `b² − ac`: where the line misses the curve, the arc never reaches the plane
+/// anyway. The skin of a pointed cone kept to `x ≥ −12` and `z ≥ 2x − 12` has
+/// each plane's hyperbola against the other plane along the line `x = −12`,
+/// `z = −36`, under the apex, which meets each plane's lower branch twice, and
+/// its apex was refused for want of this (the same test file).
 ///
 /// **Why that is enough.** The arc lies on `own`, so it can be on `cut` only on
 /// that line, and only where the line meets its curve. The arc is all of the
@@ -6427,16 +6446,39 @@ fn an_arc_never_reaches_the_plane(
     let b = (past - before) * Interval::exactly(0.25);
     let meets = b * b - a * c;
     let grows = dot(into_the_arc, along);
-    let middle = a * dot(into_the_arc, less(start)) - grows * b;
+    let ahead = dot(into_the_arc, less(start));
+    let middle = a * ahead - grows * b;
     let apart = middle * middle - grows * grows * meets;
     match a.sign() {
         Decision::Pos => {
             meets.sign() == Decision::Neg
                 || (middle.sign() == Decision::Neg && apart.sign() == Decision::Pos)
+                || matches!(round, Surface::Cone(cone) if
+                    the_middle_of_the_meets_is_on_the_other_nappe(cone, start, off_from, along, a, b))
         }
         Decision::Neg => matches!(round, Surface::Cone(_)) && apart.sign() == Decision::Neg,
         Decision::Zero | Decision::Undecidable { .. } | _ => false,
     }
+}
+
+/// Whether the point halfway between where the line `(|u|²x₀ + t·u)/|u|²` of
+/// [`an_arc_never_reaches_the_plane`] meets `cone` is on the other nappe from
+/// the arc's end `start`, read as the sign of `a·h₀ − η·b` against the side of
+/// the apex `start` is on: `h₀ + η·t` is how far up the axis the line's point
+/// at `t` is, times `|u|²`, and the halfway point is `t = −b/a`.
+fn the_middle_of_the_meets_is_on_the_other_nappe(
+    cone: &rcad_geom::Cone,
+    start: Point,
+    off_the_apex: [Interval; 3],
+    along: [Interval; 3],
+    a: Interval,
+    b: Interval,
+) -> bool {
+    let axis = exactly(cone.axis().direction().components());
+    let [start, apex] = [start, cone.apex()].map(|point| exactly(point.coordinates()));
+    let up_to_start = dot(axis, core::array::from_fn(|i| start[i] - apex[i]));
+    let up_to_the_middle = a * dot(axis, off_the_apex) - dot(axis, along) * b;
+    (up_to_start * up_to_the_middle).sign() == Decision::Neg
 }
 
 /// Whether `round` is a ring and both `planes` hold its whole axis

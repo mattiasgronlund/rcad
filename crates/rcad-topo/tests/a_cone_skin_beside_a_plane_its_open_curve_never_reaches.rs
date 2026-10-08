@@ -1,5 +1,8 @@
-//! A cone's skin cut by two walls along its axis, each wall's hyperbola never
-//! reaching the other wall (row Q1235).
+//! A cone's skin cut by planes whose open curves never reach each other's
+//! plane, read at the apex, where the winding seen down the axis refuses and
+//! only the steps that read the skin as the part in front of its cuts answer.
+//!
+//! # Two walls along the axis (row Q1235)
 //!
 //! The pointed cone of slope 1, apex at the origin and base at `z = 20`, is
 //! cut by the block `[−12, 24] × [−24, 15] × [−1, 18]`. What is left of its
@@ -21,10 +24,23 @@
 //! which is where every ruling is seen, so the apex was refused
 //! `AFaceTrimmedByACurveThisCannotFollow` and `classify_point` there answered
 //! `CannotFollowAFacesTrimming`, though the apex is on the skin.
+//!
+//! # A wall and a slope meeting under the apex (row Q1391)
+//!
+//! The same cone cut by the prism `x ≥ −12`, `z ≥ 2x − 12`, `z ≤ 24`,
+//! `|y| ≤ 24` keeps the upper nappe below `z = 20` with `x ≥ −12` and
+//! `z ≥ 2x − 12`. Its sides are the hyperbola on `x = −12` from
+//! `(−12, ±16, 20)` down through `(−12, 0, 12)`, the one on `z = 2x − 12` from
+//! `(16, ±12, 20)` down through `(12, 0, 12)`, and two arcs of the base circle.
+//! The two planes meet in the line `x = −12`, `z = −36`, square to the axis
+//! and under the apex. On either plane that line misses the skin's branch of
+//! the hyperbola and meets the other nappe's branch twice, at
+//! `(−12, ±√1152, −36)`, both in front of each arc's chord, so each hyperbola
+//! read as crossing the other plane and the apex was refused the same way.
 
-use rcad_geom::{Isometry, Point, Scale, Surface, Vector};
+use rcad_geom::{Axis, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Model, OnAFace, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Containment, Model, OnAFace, ProfileBuilder, Rule, SolidKey, SolidView};
 
 mod cones;
 
@@ -40,15 +56,7 @@ fn the_skin_of_a_cone_cut_by_two_walls_along_its_axis_holds_its_apex() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let cut = a_cone_cut_by_two_walls_along_its_axis(&mut model);
     let solid = model.solid(cut).expect("this model made the key");
-    let skin = solid
-        .faces()
-        .find(|face| matches!(face.surface(), Surface::Cone(_)))
-        .expect("the cut cone has a skin");
-    let corners: Vec<[f64; 3]> = skin
-        .wires()
-        .flat_map(|wire| wire.points().collect::<Vec<_>>())
-        .map(|corner| corner.coordinates())
-        .collect();
+    let corners = corners_of_the_skin(solid);
     assert_eq!(
         corners
             .iter()
@@ -66,16 +74,7 @@ fn the_skin_of_a_cone_cut_by_two_walls_along_its_axis_holds_its_apex() {
         "{corners:?}"
     );
     assert_eq!(corners.len(), 4, "{corners:?}");
-    let asked = |at: [f64; 3]| {
-        solid
-            .face_holds_the_point(
-                skin.key(),
-                PredicatePoint::from(at),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|why| panic!("{at:?} is answered: {why:?}"))
-    };
+    let asked = |at| what_the_skin_holds(solid, at);
     assert_eq!(asked([0.0, 0.0, 0.0]), OnAFace::OnItsBoundary);
     assert_eq!(asked([3.0, 4.0, 5.0]), OnAFace::Held);
     assert_eq!(asked([-9.0, 12.0, 15.0]), OnAFace::Held);
@@ -96,11 +95,92 @@ fn the_apex_of_a_cone_cut_by_two_walls_along_its_axis_is_on_its_boundary() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let cut = a_cone_cut_by_two_walls_along_its_axis(&mut model);
     let solid = model.solid(cut).expect("this model made the key");
+    assert_the_apex_is_on_the_boundary(solid);
+}
+
+/// **The skin of a cone cut by a wall and a slope meeting under its apex holds
+/// its apex**, on its boundary. The corners are where each plane meets the base
+/// circle, `(−12, ±16, 20)` exactly and `(16, ±12, 20)` to a rounding of the
+/// slope's stored normal. The apex was refused
+/// `AFaceTrimmedByACurveThisCannotFollow` until each hyperbola was read as
+/// never reaching the other plane because both its meets with the line the two
+/// planes share are on the other nappe (Q1391). The other points are worked out
+/// by hand against `x ≥ −12` and `z ≥ 2x − 12`, each a whole unit or more off
+/// either plane or on one exactly.
+#[test]
+fn the_skin_of_a_cone_cut_by_a_wall_and_a_slope_meeting_under_its_apex_holds_its_apex() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let cut = a_cone_cut_by_a_wall_and_a_slope_meeting_under_its_apex(&mut model);
+    let solid = model.solid(cut).expect("this model made the key");
+    let corners = corners_of_the_skin(solid);
+    assert_eq!(corners.len(), 4, "{corners:?}");
+    for corner in &corners {
+        let near = |want: [f64; 3]| (0..3).all(|axis| (corner[axis] - want[axis]).abs() < 1e-12);
+        assert!(
+            [[-12.0, 16.0], [-12.0, -16.0], [16.0, 12.0], [16.0, -12.0]]
+                .iter()
+                .any(|&[x, y]| near([x, y, 20.0])),
+            "{corners:?}"
+        );
+    }
+    let asked = |at| what_the_skin_holds(solid, at);
+    assert_eq!(asked([0.0, 0.0, 0.0]), OnAFace::OnItsBoundary);
+    assert_eq!(asked([3.0, 4.0, 5.0]), OnAFace::Held);
+    assert_eq!(asked([11.0, 0.0, 11.0]), OnAFace::Held);
+    assert_eq!(asked([-12.0, 9.0, 15.0]), OnAFace::OnItsBoundary);
+    assert_eq!(asked([0.0, 20.0, 20.0]), OnAFace::OnItsBoundary);
+    assert_eq!(asked([13.0, 0.0, 13.0]), OnAFace::NotHeld);
+    assert_eq!(asked([-13.0, 0.0, 13.0]), OnAFace::NotHeld);
+    assert_eq!(asked([0.0, 5.0, -5.0]), OnAFace::NotHeld);
+}
+
+/// **The apex of the cone cut by a wall and a slope meeting under it is on its
+/// boundary**, where `classify_point` answered `CannotFollowAFacesTrimming`
+/// naming the skin until Q1391.
+#[test]
+fn the_apex_of_a_cone_cut_by_a_wall_and_a_slope_meeting_under_it_is_on_its_boundary() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let cut = a_cone_cut_by_a_wall_and_a_slope_meeting_under_its_apex(&mut model);
+    let solid = model.solid(cut).expect("this model made the key");
+    assert_the_apex_is_on_the_boundary(solid);
+}
+
+/// The apex is on the boundary, a point up the axis inside and one below the
+/// apex outside: every solid here keeps the axis from the apex to `z = 9`.
+fn assert_the_apex_is_on_the_boundary(solid: SolidView<'_>) {
     let classified =
         |at: Point| solid.classify_point(at, &Policy::certified(), &mut ProvenanceLog::new());
     assert_eq!(classified(Point::origin()), Containment::OnBoundary);
     assert_eq!(classified(Point::new(0.0, 0.0, 9.0)), Containment::Inside);
     assert_eq!(classified(Point::new(0.0, 0.0, -1.0)), Containment::Outside);
+}
+
+/// What the solid's one face on the cone answers for `at`, which must be
+/// answered.
+fn what_the_skin_holds(solid: SolidView<'_>, at: [f64; 3]) -> OnAFace {
+    solid
+        .face_holds_the_point(
+            the_skin(solid).key(),
+            PredicatePoint::from(at),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{at:?} is answered: {why:?}"))
+}
+
+fn corners_of_the_skin(solid: SolidView<'_>) -> Vec<[f64; 3]> {
+    the_skin(solid)
+        .wires()
+        .flat_map(|wire| wire.points().collect::<Vec<_>>())
+        .map(|corner| corner.coordinates())
+        .collect()
+}
+
+fn the_skin(solid: SolidView<'_>) -> rcad_topo::FaceView<'_> {
+    solid
+        .faces()
+        .find(|face| matches!(face.surface(), Surface::Cone(_)))
+        .expect("the cut cone has a skin")
 }
 
 /// The pointed cone of slope 1 with its base at `z = 20`, apex at the origin,
@@ -124,10 +204,34 @@ fn a_cone_cut_by_two_walls_along_its_axis(model: &mut Model) -> SolidKey {
             &Isometry::translation(Vector::new(0.0, 0.0, -1.0)).expect("a whole-number shift"),
         )
         .expect("a block");
+    the_one_solid_both_keep(model, cone, block)
+}
+
+/// The same cone less all but the prism `x ≥ −12`, `z ≥ 2x − 12`, `z ≤ 24`,
+/// `|y| ≤ 24`: the triangle `(−12, −36)`, `(18, 24)`, `(−12, 24)` in `x` and
+/// `z`, drawn in `x` and `y` and turned a quarter about `x`, which takes `y`
+/// to `z` exactly. Its top and ends are clear of the cone.
+fn a_cone_cut_by_a_wall_and_a_slope_meeting_under_its_apex(model: &mut Model) -> SolidKey {
+    let cone = cones::a_pointed_cone(model, 1.0, 20.0);
+    let profile = ProfileBuilder::new(vec![[-12.0, -36.0], [18.0, 24.0], [-12.0, 24.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a simple outline");
+    let laid_along_y = Isometry::quarter_turns(&Axis::x(), 1)
+        .expect("x is an axis")
+        .compose(
+            &Isometry::translation(Vector::new(0.0, 0.0, -24.0)).expect("a whole-number shift"),
+        );
+    let prism = model
+        .add_extrusion(&profile, 48.0, &laid_along_y)
+        .expect("a prism");
+    the_one_solid_both_keep(model, cone, prism)
+}
+
+fn the_one_solid_both_keep(model: &mut Model, one: SolidKey, other: SolidKey) -> SolidKey {
     let answer = model
         .fuse(
-            &[cone],
-            &[block],
+            &[one],
+            &[other],
             Rule::Intersection,
             &Policy::certified(),
             &mut ProvenanceLog::new(),
