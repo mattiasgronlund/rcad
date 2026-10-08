@@ -112,11 +112,14 @@
 //!   `certified` every corner refuses `side of plane` at the box round where
 //!   the bottom seam corner lands, because the block's face is one ulp off the
 //!   moved seam plane, as the bar's is, though the other way. Under
-//!   `tolerant(100)`, where the bar answers, the sound frustum refuses
-//!   `CannotNameWhichPieceOfACrossingThisIs` further on: meshing its answer,
-//!   the walk along the cut asks a hyperbola's vertex a rounding from the
-//!   cone's apex which side of the apex it is on, to pick a branch the ends
-//!   already pick (§294.14).
+//!   `tolerant(100)` it answers, as the bar does: half the frustum, `26π/3`,
+//!   from the sound frustum and the corner moved a quarter turn round, and the
+//!   unturned outcomes from the corners moved off the wall and off the cap.
+//!   Until Q1405 the sound frustum refused `CannotNameWhichPieceOfACrossingThisIs`
+//!   there: meshing its answer, the walk along the cut asked a hyperbola's
+//!   vertex a rounding from the cone's apex which side of the apex it is on, to
+//!   pick a branch the ends already pick (§294.14). The ends pick it now
+//!   (§294.15).
 //!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
@@ -367,8 +370,6 @@ enum Outcome {
     Undecidable(&'static str),
     CannotTellTheCellsOfAFaceApart,
     TwoCurvesTouchWithoutCrossing,
-    /// `CannotNameWhichPieceOfACrossingThisIs`, out of `rcad-geom`.
-    CannotNameWhichPieceOfACrossingThisIs,
 }
 
 #[test]
@@ -1098,36 +1099,34 @@ fn a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_the
 }
 
 /// **Under `tolerant(100)` the turned and shifted frustum cut along its seam
-/// is refused further on, where the turned and shifted bar answers**
-/// (§294.13). The policy takes the box round the bottom seam corner as on the
-/// block's face, and the sound frustum and the corner moved a quarter turn
-/// round then refuse `CannotNameWhichPieceOfACrossingThisIs` out of
-/// `rcad-geom`. Not, asked on its own, where the face crosses the cone:
-/// `intersect` names the hyperbola's two branches under either policy
+/// answers, as the turned and shifted bar does** (§294.15, Q1405). The policy
+/// takes the box round the bottom seam corner as on the block's face, which
+/// `certified` cannot tell
 /// (`a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is`).
-/// The corners moved off the wall and off the cap give
-/// `CannotTellTheCellsOfAFaceApart`, as at every placement tried. The bar,
-/// placed the same way and cut by the half past its seam, is half the bar under
-/// both rules.
+/// The sound frustum answers both rules with half the frustum, `26π/3` on a
+/// fine mesh, its whole model validates, and its corners are the turned
+/// frustum's shifted, to a rounding. The corner moved a quarter turn round is
+/// cut away and gives the sound answer to a rounding. The corners moved off the
+/// wall and off the cap give `CannotTellTheCellsOfAFaceApart`, as at every
+/// placement tried. The bar, placed the same way and cut by the half past its
+/// seam, is half the bar under both rules.
 ///
-/// **Where it is refused** (§294.14, Q1397): after the answer is put together,
-/// when `nest_the_shells` meshes it to measure it, and the mesher walks the
-/// edge the face cuts along the cone between two corners on the bottom and top
-/// circles. `rcad_geom::walk` names the run as one branch of the hyperbola the
-/// face cuts, and picks the branch by asking each branch's vertex which side of
-/// the apex it is on, in `which_branch_of_a_hyperbola_this_run_is`. The face
-/// misses the apex by `5e-16`, so each vertex is within `1e-15` of the apex and
-/// placed only to `9.9e-14`, and `which_side_of_the_apex` refuses
-/// (`walking_the_cut_along_a_turned_and_shifted_frustums_seam_asks_a_point_a_rounding_from_the_apex`).
-/// **A gap**: the branch the corners are on is the one opening along the
-/// axis, which needs no vertex. Picked that way in a probe, the sound frustum
-/// and the corner moved a quarter turn round answered both rules with half the
-/// frustum, `26π/3` on a fine mesh, and validated.
+/// **Until Q1405 the sound frustum and the corner moved a quarter turn round
+/// refused `CannotNameWhichPieceOfACrossingThisIs`** (§294.13, §294.14), when
+/// `nest_the_shells` meshed the answer to measure it. The mesher walks the edge
+/// the face cuts along the cone, between corners on the bottom and top circles,
+/// as one branch of the hyperbola the face cuts, and `rcad_geom::walk` picked
+/// the branch by asking each branch's vertex which side of the apex it is on.
+/// The face misses the apex by `5e-16`, so each vertex is within `1e-15` of the
+/// apex and placed only to `9.9e-14`, and neither policy could tell. The branch
+/// is named by the side of the apex the corners are on now
+/// (`walking_the_cut_along_a_turned_and_shifted_frustums_seam_names_the_branch_its_corners_are_on`).
 #[test]
-fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_is_refused_where_the_bar_answers()
- {
+fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_answers_as_the_bar_does()
+{
     let policy = Policy::tolerant(100.0);
     let placement = the_turn_then_the_shift();
+    let half_the_frustum = 26.0 * PI / 3.0;
     for rule in [Rule::Difference, Rule::Intersection] {
         let bar = fuse(
             Shape::Bar(placement),
@@ -1139,23 +1138,37 @@ fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_is_re
         .unwrap_or_else(|why| panic!("the bar, {rule:?}, refused: {why:?}"));
         holds(&bar, PI * RADIUS * RADIUS * HEIGHT / 2.0, rule, &policy);
 
-        for (moved_to, outcome) in [
-            (
-                WHERE_THE_FRUSTUM_PUTS_IT,
-                Outcome::CannotNameWhichPieceOfACrossingThisIs,
-            ),
-            (
-                THE_FRUSTUMS_CORNER_OFF_THE_WALL,
-                Outcome::CannotTellTheCellsOfAFaceApart,
-            ),
-            (
-                THE_FRUSTUMS_CORNER_OFF_THE_CAP,
-                Outcome::CannotTellTheCellsOfAFaceApart,
-            ),
-            (
-                THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND,
-                Outcome::CannotNameWhichPieceOfACrossingThisIs,
-            ),
+        let answer_of = |placement, moved_to| {
+            fuse(
+                Shape::Frustum(placement),
+                moved_to,
+                THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+                rule,
+                &policy,
+            )
+            .unwrap_or_else(|why| {
+                panic!(
+                    "the frustum at {placement:?} with its corner at {moved_to:?}, {rule:?}, \
+                     refused: {why:?}"
+                )
+            })
+        };
+        let sound = answer_of(placement, WHERE_THE_FRUSTUM_PUTS_IT);
+        holds(&sound, half_the_frustum, rule, &policy);
+        sound
+            .model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?} does not validate: {why:?}"));
+        let turned = answer_of(the_turn(), WHERE_THE_FRUSTUM_PUTS_IT);
+        the_same_corners_to_a_rounding(&sound, &turned, &the_shift(), rule);
+
+        let cut_away = answer_of(placement, THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND);
+        holds(&cut_away, half_the_frustum, rule, &policy);
+        the_same_corners_to_a_rounding(&cut_away, &sound, &Isometry::identity(), rule);
+
+        for moved_to in [
+            THE_FRUSTUMS_CORNER_OFF_THE_WALL,
+            THE_FRUSTUMS_CORNER_OFF_THE_CAP,
         ] {
             check(
                 Shape::Frustum(placement),
@@ -1163,33 +1176,33 @@ fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_is_re
                 THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
                 rule,
                 &policy,
-                outcome,
+                Outcome::CannotTellTheCellsOfAFaceApart,
             );
         }
     }
 }
 
-/// **Where the tolerant fuse is refused: walking the cut along the seam asks
-/// which side of the apex a point a rounding from the apex is** (§294.14).
-/// The block's face misses the cone's apex by `5e-16`, so the two cross in a
-/// hyperbola whose two vertices stand about `1e-15` either side of the apex.
-/// `rcad_geom::walk`, handed that crossing between the two seam corners, finds
-/// both corners on the axis's side of the apex, and then asks the first
-/// vertex which side it is on, to pick the branch the corners are on. The
-/// vertex is placed only to `9.9e-14`, so its box holds the apex: `certified`
-/// cannot tell, `tolerant(100)` reads it as on the plane through the apex, and
-/// that names no branch either. Either way the walk refuses
-/// `CannotNameWhichPieceOfACrossingThisIs`, whichever of the two runs
-/// `intersect` names it is handed, since a run with ends is named by its ends.
-/// The fuse meets this when it meshes its answer to nest the shells.
+/// **Walking the cut along the seam names the branch its corners are on by
+/// which side of the apex they are, and asks no point a rounding from the
+/// apex** (§294.15, Q1405). The block's face misses the cone's apex by
+/// `5e-16`, so the two cross in a hyperbola whose two vertices stand about
+/// `1e-15` either side of the apex. `rcad_geom::walk`, handed that crossing
+/// between the two seam corners, finds both corners on the axis's side of the
+/// apex, which names the branch opening against the face's `and` direction,
+/// since that direction always runs against the axis. Under either policy and
+/// whichever of the two runs `intersect` names it is handed, it walks that
+/// branch with nothing to record: every point it puts down is on the cone's
+/// wall between the bottom circle and the top one, on the face, and on the
+/// cone, to the walk's own deviation.
 ///
-/// Which branch the corners are on was never in doubt. Each branch opens away
-/// from the apex along the face's own slope, one each way, and the direction
-/// down the slope always runs against the axis, so the branch the corners are
-/// on is the one opening along the axis. Picked that way, the fuse answers.
+/// **Until Q1405 it refused `CannotNameWhichPieceOfACrossingThisIs`**
+/// (§294.14). It asked each branch's vertex which side of the apex it is on,
+/// and a vertex is placed only to `9.9e-14`, so its box held the apex:
+/// `certified` could not tell, and `tolerant(100)` read it as on the plane
+/// through the apex, which names no branch either. The fuse met this when it
+/// meshed its answer to nest the shells.
 #[test]
-fn walking_the_cut_along_a_turned_and_shifted_frustums_seam_asks_a_point_a_rounding_from_the_apex()
-{
+fn walking_the_cut_along_a_turned_and_shifted_frustums_seam_names_the_branch_its_corners_are_on() {
     let placement = the_turn_then_the_shift();
     let (mut model, frustum) = read_back(Shape::Frustum(placement), WHERE_THE_FRUSTUM_PUTS_IT);
     let block = a_block(
@@ -1209,16 +1222,15 @@ fn walking_the_cut_along_a_turned_and_shifted_frustums_seam_asks_a_point_a_round
         "the face is steeper than the cone, so a face that misses the apex crosses it in a \
          hyperbola"
     );
-    let apex = placement.apply_to_point(Point::origin()).coordinates();
-    assert_eq!(cone.apex().coordinates(), apex);
+    let apex = placement.apply_to_point(Point::origin());
+    assert_eq!(cone.apex().coordinates(), apex.coordinates());
+    let up = cone.axis().direction() * cone.axis().direction().length().recip();
     let the_seam_corners = [Point::new(1.0, 0.0, 2.0), Point::new(3.0, 0.0, 6.0)]
         .map(|corner| PredicatePoint::from(placement.apply_to_point(corner).coordinates()));
+    let (plane, slope) = (face, cone.slope());
     let [face, cone] = [Surface::Plane(face), Surface::Cone(cone)];
 
-    for (policy, certified) in [
-        (Policy::certified(), true),
-        (Policy::tolerant(100.0), false),
-    ] {
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
         let met = intersect(&face, &cone, &policy, &mut ProvenanceLog::new());
         let Ok(SurfaceMeet::Curves(branches)) = met else {
             panic!("{policy:?}: the hyperbola is named: {met:?}");
@@ -1233,40 +1245,30 @@ fn walking_the_cut_along_a_turned_and_shifted_frustums_seam_asks_a_point_a_round
                 Deflection::of(0.01).expect("a length"),
                 &policy,
                 &mut log,
-            );
+            )
+            .unwrap_or_else(|why| panic!("{policy:?}: the walk refused: {why:?}"));
             assert!(
-                matches!(
-                    walked,
-                    Err(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
-                ),
-                "{policy:?}: {walked:?}"
+                log.records().is_empty(),
+                "{policy:?}: nothing to record, {log:?}"
             );
-            let [record] = log.records() else {
-                panic!("{policy:?}: one record, {log:?}");
-            };
-            assert_eq!(
-                record.predicate(),
-                "which side of a cone's apex",
-                "{policy:?}"
-            );
-            let read_as = if certified {
-                matches!(record.outcome(), Decision::Undecidable { .. })
-            } else {
-                record.outcome() == Decision::Zero
-            };
-            assert!(read_as, "{policy:?}: {record:?}");
-            let [vertex] = record.inputs() else {
-                panic!("{policy:?}: one point asked about, {record:?}");
-            };
-            assert!(vertex.uncertainty() < 2e-13, "{policy:?}: {vertex:?}");
-            assert!(
-                vertex
-                    .enclosure()
-                    .iter()
-                    .zip(apex)
-                    .all(|(side, at)| side.lo() <= at && at <= side.hi()),
-                "{policy:?}: the vertex's box {vertex:?} holds the apex {apex:?}"
-            );
+            assert!(!walked.points().is_empty(), "{policy:?}: {walked:?}");
+            let room = 2.0 * walked.deviation().magnitude();
+            for point in walked.points() {
+                let height = (*point - apex).dot(up);
+                assert!(
+                    2.0 < height && height < 6.0,
+                    "{policy:?}: {point:?} is {height} up the axis, off the frustum's wall"
+                );
+                assert!(
+                    plane.signed_distance_to(*point).abs() <= room,
+                    "{policy:?}: {point:?} is off the face"
+                );
+                let out_from_the_axis = ((*point - apex) - up * height).length();
+                assert!(
+                    (out_from_the_axis - slope * height).abs() <= room,
+                    "{policy:?}: {point:?} is off the cone"
+                );
+            }
         }
     }
 }
@@ -1547,8 +1549,7 @@ fn check(
         }
         Outcome::Undecidable(_)
         | Outcome::CannotTellTheCellsOfAFaceApart
-        | Outcome::TwoCurvesTouchWithoutCrossing
-        | Outcome::CannotNameWhichPieceOfACrossingThisIs => {
+        | Outcome::TwoCurvesTouchWithoutCrossing => {
             refuses_as(shape, moved_to, partner, rule, policy, outcome);
         }
     }
@@ -1582,10 +1583,6 @@ fn refuses_as(
         Outcome::TwoCurvesTouchWithoutCrossing => {
             matches!(refused, Error::TwoCurvesTouchWithoutCrossing { .. })
         }
-        Outcome::CannotNameWhichPieceOfACrossingThisIs => matches!(
-            refused,
-            Error::Geometry(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
-        ),
         Outcome::ItBlamesItself | Outcome::TheSoundAnswer => {
             unreachable!("{refusal:?} is not a refusal")
         }
