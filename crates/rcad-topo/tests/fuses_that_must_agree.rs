@@ -551,6 +551,17 @@ const A_LATTICE_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.015..=0.067;
 /// nobody had a reason to move. Re-derive the other five from a new
 /// measurement freely; re-derive *this* one only alongside a measurement
 /// that says why more than 120 is fine.
+///
+/// **Measured at a soak for Q258.** Eight fresh seeds at [`SOAK_FACTOR`] 66
+/// (25 407 fuses a seed) pool to 24 570 of 203 256, 12.09%, each seed between
+/// 11.83% and 12.52% — notably lower than the single draw's 14.2% this band
+/// was checked against, but still well inside 10%–28%. Twenty-four seeds at
+/// factor 1 (447 fuses, the shipped size) spread from 9.84% to 14.09%, and
+/// two of them — seeds 9 and 21, both 44 of 447 — land under the fixed 10%
+/// floor by chance alone, an ordinary draw from a 12% family rather than a
+/// sign anything moved. That is why this row now goes through
+/// [`band_for_a_draw_of`] like the other five: the rate stays 10%–28%,
+/// unwidened, and only the comparison scales to the draw's own size.
 const A_FLUSH_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.10..=0.28;
 
 /// The same for the lattice pairs written somewhere else in `f64`.
@@ -566,6 +577,17 @@ const A_FLUSH_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.10..=0.28;
 /// family's own measurement: two thirds to three times 2.8% is 1.9% to 8.4%,
 /// which is 9 fuses to 36. The lattice family's band would have been a slightly
 /// higher one and reading either as the other's is what §17.7 forbids.
+///
+/// **Measured at a soak for Q258.** Eight fresh seeds at [`SOAK_FACTOR`] 66
+/// pool to 4 540 of 203 256, 2.23%, each seed between 2.01% and 2.38% — a
+/// bit lower than the 2.8% this band was built from, comfortably inside
+/// 1.9%–8.4%. Twenty-four seeds at factor 1 (447 fuses, the shipped size)
+/// spread from 1.79% to 3.80%, and two of them — seeds 3 and 11, both 8 of
+/// 447 — land under the fixed 1.9% floor by chance alone, an ordinary draw
+/// from a family whose rate has not moved. This row now goes through
+/// [`band_for_a_draw_of`] for the same reason the lattice and turned rows
+/// do: the band stays 1.9%–8.4%, and only the comparison scales to the
+/// draw's own size.
 const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.019..=0.084;
 
 /// The same for the turned family, a rate judged the same way.
@@ -683,6 +705,17 @@ const A_SKEW_PAIR_IS_NOT_A_SOLID_AT_LEAST: usize = 1;
 /// 1.3%, and `b4890f1` landed at 1.7% and 0.7%. Both trees were built and both
 /// rows measured; the other four stayed inside, the lattice and elsewhere rows
 /// by under a fuse.
+///
+/// **Measured at a soak for Q258.** Eight fresh seeds at [`SOAK_FACTOR`] 66
+/// pool to 4 515 of 203 256, 2.22%, each seed between 2.10% and 2.31% —
+/// noticeably higher than the 1.6% this band was built from, but still well
+/// inside 1.1%–4.9%. Twenty-four seeds at factor 1 (447 fuses, the shipped
+/// size) spread from 1.57% to 4.03%: every one of them stayed inside the
+/// fixed band, but at over half the room on each side, a small draw this
+/// family hasn't yet given is only a bad roll away. This row now goes
+/// through [`band_for_a_draw_of`] alongside the other two Q258 measured: the
+/// band stays 1.1%–4.9%, and only the comparison scales to the draw's own
+/// size.
 const A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.011..=0.049;
 
 #[test]
@@ -1564,7 +1597,7 @@ fn every_certified_fuse_of_a_pair_sharing_coordinates_is_decided() {
         every_rule(tally, Coordinates::AreExactlyRepresentable, configuration)
     });
     tally.report("§17.7 degenerate: pairs sharing coordinates, every rule");
-    tally.share_of_answers_that_were_not_solids_must_be_within(A_FLUSH_PAIR_IS_NOT_A_SOLID);
+    tally.rate_of_answers_that_were_not_solids_must_be_within(A_FLUSH_PAIR_IS_NOT_A_SOLID);
     assert_eq!(
         tally.refused.get(),
         0,
@@ -1587,7 +1620,7 @@ fn every_certified_fuse_of_a_pair_somewhere_else_in_f64_is_decided() {
         every_rule(tally, Coordinates::AreExactlyRepresentable, configuration)
     });
     tally.report("§17.7 control: pairs somewhere else in f64, every rule");
-    tally.share_of_answers_that_were_not_solids_must_be_within(A_PAIR_ELSEWHERE_IS_NOT_A_SOLID);
+    tally.rate_of_answers_that_were_not_solids_must_be_within(A_PAIR_ELSEWHERE_IS_NOT_A_SOLID);
     assert_eq!(
         tally.refused.get(),
         0,
@@ -1737,7 +1770,7 @@ fn how_often_a_certified_fuse_of_a_pair_leaning_the_same_way_refuses() {
         every_rule(tally, Coordinates::SitOnTiltedWalls, configuration)
     });
     tally.report("§22 control: both leaning alike, every rule");
-    tally.share_of_answers_that_were_not_solids_must_be_within(A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID);
+    tally.rate_of_answers_that_were_not_solids_must_be_within(A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID);
 }
 
 /// Commutativity over the one family that can put three cut lines through a
