@@ -258,10 +258,13 @@ whenever the quotient is inexact, so it is usually the `f64` after `up`. The
 lane before this one probed axes `(1, k, 0)` for `k` in 1, 2, 3, 5 and 7,
 normals `(0, 0, 1 − j·2⁻⁵³)` for `j` from 1 to 4, and centres `2⁵³ + 8 + 2m`
 for `m` from 0 to 29, walking five rooms up from the `f64` before `up`. The
-first named came two past `up`, so that `O` was `up`, on `(1, 5, 0)` at
-`j = 3` (`mise exec -- just t probe_where_the_threshold_sits --no-capture` at
-`7c4da5ab`, a probe since deleted). It printed `along=1 hist=[0, 0, 0, 0, 68, 52]`
-for `(1, 1, 0)`: 68 first named three past `up`, 52 not within the five.
+first named came two past `up`, so that `O` was `up`, at 4 of the 600 pairs:
+all on `(1, 5, 0)` at `j = 3`, with centres `2⁵³ + 8` plus 0, 8, 28 and 36.
+This lane ran it again at `7c4da5ab`, the commit holding the probe since
+deleted, with `mise exec -- just t probe_where_the_threshold_sits --no-capture`:
+it printed `along=5 hist=[0, 0, 0, 4, 58, 58]`, and
+`along=1 hist=[0, 0, 0, 0, 68, 52]` for `(1, 1, 0)`, 68 first named three past
+`up` and 52 not within the five.
 
 The turn's size, measured with the tests' own `f64` estimate of the bound: on
 this torus `1.4·10⁻³⁴`, and on the leaning plane of 314.4 `6.9·10⁻³⁵`, which
