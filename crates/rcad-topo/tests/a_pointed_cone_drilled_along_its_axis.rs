@@ -55,6 +55,14 @@
 //! too, this time in the fuse's arrangement, and every order was refused
 //! `CannotTellTheCellsOfAFaceApart`. A **gap** (Q1354), closed the same way.
 //!
+//! **Then the fuse with the cube named both circles one curve.** It draws the
+//! wall's circle on the cone again, the other nappe's circle with it, and the
+//! two were one closed curve named by the pipe and the cone alone, so both got
+//! one edge with four faces along it and every order was refused
+//! `ResultIsNotManifold { count: 4 }`. A **gap** (Q1375): a circle round a
+//! cone's axis is now named by which side it is on of the flat half-space that
+//! picks it out.
+//!
 //! The closed forms, from the slices of the shared piece: inside the bar the cone
 //! holds a disc of radius `z` for `z` up to one and the whole unit disc above it,
 //! so the two share `π/3 + 9π = 28π/3`. The cone holds `1000π/3`, and the bar
@@ -167,21 +175,33 @@ fn every_point_round_the_union_is_placed_where_the_shapes_say_across_the_other_n
     }
 }
 
-/// The union fused again with a cube far from it is refused
-/// `ResultIsNotManifold { count: 4 }`, every way round. **A gap**: the answer
-/// is the two solids apart, `364π` and the cube's `8`.
+/// The union fused again with a cube far from it is the two solids apart, the
+/// union's `364π` and the cube's `8`, every way round, and the sweep accepts
+/// them.
 ///
-/// **Its wall is now cut right, and the two circles are then named one
-/// curve.** The cube cuts nothing of the bar's wall from `z = −15` up to the
-/// circle at `z = 1`, but the fuse draws the wall's own edge on the cone again,
-/// and the cone's other nappe with it, so the wall comes apart at `z = −1` into
-/// two bands. In `assemble.rs` a closed curve is named by its two surfaces
-/// alone wherever they are not a plane through a ring's axis
-/// (`name_of_the_closed_crossing_through`), so the new circle at `z = −1` and
-/// the wall's circle at `z = 1` are one curve, and
-/// `Corners::with_each_closed_curve_started_once` hands the start of the one at
-/// `z = −1` to the input corner at `z = 1`. Both circles are then one edge, along
-/// which the cone face and the two bands' three wires run.
+/// **By hand.** The cone of slope one up to `z = 10` has a base of radius ten,
+/// so it holds `π · 10² · 10 / 3 = 1000π/3`, and the bar of radius one and
+/// length forty holds `40π`. Inside the bar, the cone holds a disc of radius
+/// `z` for `z` up to one, `∫₀¹ πz² dz = π/3`, and the whole unit disc from there
+/// to ten, `9π`, so the two share `28π/3`. The union holds
+/// `1000π/3 + 40π − 28π/3 = 972π/3 + 40π = 324π + 40π = 364π`. The cube of
+/// side two moved to `(20, 20, 20)` holds `8` and spans `20` to `22` along each
+/// axis, so every point of it is more than `28` from the cone's axis, and the
+/// union reaches ten from it at most, at the cone's rim.
+///
+/// **The two circles were named one curve, and every order was refused
+/// `ResultIsNotManifold { count: 4 }`.** The cube cuts nothing of the bar's
+/// wall from `z = −15` up to the circle at `z = 1`, but the fuse draws the
+/// wall's own edge on the cone again, and the cone's other nappe with it, so
+/// the wall comes apart at `z = −1` into two bands. While `assemble.rs` named a
+/// closed curve by its two surfaces alone wherever they were not a plane
+/// through a ring's axis (`name_of_the_closed_crossing_through`), the new
+/// circle at `z = −1` and the wall's circle at `z = 1` were one curve, and
+/// `Corners::with_each_closed_curve_started_once` handed the start of the one
+/// at `z = −1` to the input corner at `z = 1`. Both circles were then one edge,
+/// along which the cone face and the two bands' three wires ran. A **gap**
+/// (Q1375): a cone and a pipe on its axis now name a circle by the side it is
+/// on of the flat half-space through the apex that `intersect` picks it by.
 ///
 /// **Before that, the bands could not be told apart** (Q1354). The arrangement
 /// read which side of the circle at `z = 1` the wall lies on off its one corner
@@ -190,7 +210,8 @@ fn every_point_round_the_union_is_placed_where_the_shapes_say_across_the_other_n
 /// walked inside out and the fuse was refused `CannotTellTheCellsOfAFaceApart`
 /// on it. That corner is now read as a node past that half-space is.
 #[test]
-fn the_union_and_a_far_cube_are_refused_for_naming_both_circles_one_curve() {
+fn the_union_and_a_far_cube_fuse_to_the_two_apart_in_every_order() {
+    let slack = the_two_solids_fall_short_by();
     for cone_first in [true, false] {
         let (mut model, union) = the_union(cone_first);
         let cube = model
@@ -203,19 +224,42 @@ fn the_union_and_a_far_cube_are_refused_for_naming_both_circles_one_curve() {
             )
             .expect("this model made the key");
         for (arguments, tools) in [([union], [cube]), ([cube], [union])] {
-            let got = model.clone().fuse(
-                &arguments,
-                &tools,
-                Rule::Union,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            );
-            assert!(
-                matches!(got, Err(Error::ResultIsNotManifold { count: 4 })),
-                "the union (cone first: {cone_first}) and a far cube, union first: {}, came back \
-                 {got:?}, where the pin says four faces run along the two circles' one edge",
+            let order = format!(
+                "the union (cone first: {cone_first}) and a far cube, union first: {}",
                 arguments[0] == union
             );
+            let mut fused = model.clone();
+            let answer = fused
+                .fuse(
+                    &arguments,
+                    &tools,
+                    Rule::Union,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{order}: {why:?}"));
+            fused
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{order}: {why:?}"));
+            let mut got: Vec<f64> = answer
+                .solids()
+                .iter()
+                .map(|&solid| volume_of(&fused, solid))
+                .collect();
+            got.sort_by(f64::total_cmp);
+            let want = [8.0, CONE + BAR - SHARED];
+            assert_eq!(
+                got.len(),
+                want.len(),
+                "{order}: solids holding {got:?}, where the shapes say {want:?}"
+            );
+            for (got, want) in got.iter().zip(want) {
+                assert!(
+                    (got - want).abs() <= slack,
+                    "{order} holds {got}, where the shapes say {want} and the bare solids fall \
+                     {slack} short"
+                );
+            }
         }
     }
 }

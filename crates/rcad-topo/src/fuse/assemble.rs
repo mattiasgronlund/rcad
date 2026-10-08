@@ -72,8 +72,8 @@ use smallvec::SmallVec;
 
 use crate::holds::{
     WhereTheCurveIsCentred, a_picker_that_tells_the_two_arcs_apart,
-    the_half_space_naming_the_meridian_circle_through, the_nappe_an_arc_that_does_not_close_is_on,
-    the_nappe_of, where_a_closed_crossing_is_centred,
+    the_nappe_an_arc_that_does_not_close_is_on, the_nappe_of, the_picker_naming_the_circle_through,
+    where_a_closed_crossing_is_centred,
 };
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse, WireStep};
@@ -4846,10 +4846,12 @@ fn closes_on_itself(meet: &FaceMeet) -> bool {
 /// out: a plane can cut it in two circles, and its pair's name tells only a
 /// plane through its axis's two apart (§378.4).
 ///
-/// **Two curved surfaces with no plane between them are left apart.** A cone
-/// and a pipe on one axis cross in two circles, one either side of the apex,
-/// and their name does not say which, so the circle on the far nappe would be
-/// joined to the rim on the near one.
+/// **Two curved surfaces with no plane between them are left apart.** The
+/// argument above is about conics in one plane. A cone and a pipe on one axis
+/// cross in two circles, one either side of the apex, and only one of them can
+/// be a plane's rim; their name says which
+/// ([`which_of_the_pairs_closed_crossings_it_is`]), but nothing here asks
+/// whether the three share it, so a join would need an argument of its own.
 ///
 /// A meet of the three that cannot be worked out joins nothing, and its
 /// records are not kept, as `arrange.rs` keeps none for the fold it makes of
@@ -5658,8 +5660,8 @@ fn which_curve_it_is(
 
 /// What names a closed crossing: the two surfaces it runs between, a plane named
 /// at any scale and anything else either way round, the two sorted, and which
-/// of their closed crossings it is ([`which_meridian_circle_it_is`]) where that
-/// is known to need saying.
+/// of their closed crossings it is ([`which_of_the_pairs_closed_crossings_it_is`])
+/// where that is known to need saying.
 ///
 /// One curve can come under two of these, cut by two pairs, and then goes by
 /// the least of them ([`the_name_each_closed_curve_goes_by`]).
@@ -5677,10 +5679,23 @@ type CurveName = ([[u64; 9]; 2], Option<[u64; 4]>);
 /// made one curve, then one corner, then one edge with four faces along it, and
 /// the union was refused (§378.3).
 ///
-/// Only that pair is told apart here. Other pairs that cross in more than one
-/// closed curve — a plane square to a ring's axis, cutting an inner and an
-/// outer circle, and two rings — are still named by their surfaces alone, and
-/// no fuse of either has been run (§378.4).
+/// **A cone and a second cone, a pipe or a ball on its axis cross in two
+/// circles too**, one either side of a flat half-space square to the axis. A
+/// bar of radius one down a pointed cone's axis crosses the cone's surface at
+/// `z = 1` and at `z = −1`, on the nappe beyond the apex. Their union, fused
+/// again with a cube far from it, draws the bar's wall's edge on the cone again,
+/// and the far nappe with it, so the wall comes apart at `z = −1`. Named by the
+/// pipe and the cone alone the new circle was the wall's circle at `z = 1`: its
+/// start was handed to the input corner at `z = 1`, the cone face and the two
+/// bands' three wires ran along one edge, and every order was refused
+/// `ResultIsNotManifold { count: 4 }`
+/// (`tests/a_pointed_cone_drilled_along_its_axis.rs`).
+///
+/// Only those pairs are told apart here. Other pairs that cross in more than
+/// one closed curve — a plane square to a ring's axis, cutting an inner and an
+/// outer circle, two rings, a ball and a pipe, and two pipes — are still named
+/// by their surfaces alone, and no fuse of the first two has been run
+/// (§378.4).
 ///
 /// **A plane is named at any scale** ([`name_of_the_plane_at_any_scale`]), as
 /// the arcs of these crossings are, because two turned faces can spell one
@@ -5695,7 +5710,7 @@ type CurveName = ([[u64; 9]; 2], Option<[u64; 4]>);
 ///
 /// # Errors
 ///
-/// Whatever [`which_meridian_circle_it_is`] gives.
+/// Whatever [`which_of_the_pairs_closed_crossings_it_is`] gives.
 fn name_of_the_closed_crossing_through(
     carried_by: &[Surface; 2],
     point: PredicatePoint,
@@ -5712,33 +5727,42 @@ fn name_of_the_closed_crossing_through(
     named.sort_unstable();
     Ok((
         named,
-        which_meridian_circle_it_is(carried_by, point, policy, log)?,
+        which_of_the_pairs_closed_crossings_it_is(carried_by, point, policy, log)?,
     ))
 }
 
-/// Which of the two circles a plane through a ring's axis cuts the ring in
-/// passes through `point`: the four numbers of the half-space `intersect` picks
-/// that circle by, as `holds.rs` looks it up
-/// ([`the_half_space_naming_the_meridian_circle_through`]). `None` for any
-/// other pair of surfaces, and for a point that no one circle certainly keeps,
-/// which leaves the crossing named by its two surfaces alone, as it was before
-/// this was asked.
+/// Which of the two circles its two surfaces cross in passes through `point`,
+/// for a plane through a ring's axis and for a cone and a second cone, a pipe
+/// or a ball on its axis: the four numbers of the flat half-space `intersect`
+/// picks that circle by, as `holds.rs` looks it up
+/// ([`the_picker_naming_the_circle_through`]). `None` for any other pair of
+/// surfaces, for a plane square to a ring's axis, whose two circles are picked
+/// by a pipe and not by a half-space, and for a point that no one circle
+/// certainly keeps, which leaves the crossing named by its two surfaces alone,
+/// as it was before this was asked.
 ///
 /// **Every spelling of the two gives one circle the same four numbers, once
 /// each zero is turned the right way up.** The two faces along one circle can
 /// hold two spellings of the plane — a bend's cap faces out of the bend, and
-/// the next bend's cap on the same plane faces the other way — and of the ring,
-/// its axis written either way round. `intersect` writes the circles'
-/// half-spaces from the two as stored: the normal is the axis crossed with the
-/// plane's normal, the offset is that normal read at the ring's centre, and
-/// the two circles get that half-space and that half-space turned round.
-/// Turning the plane or the axis round negates every number of both, because a
-/// product or a difference of negated numbers rounds to the negation of the
-/// same sum, so the half-space that keeps a given circle holds the same
-/// numbers either way — except that a zero may come back `-0.0`, which adding
-/// zero turns back, as in [`exactly_at`].
+/// the next bend's cap on the same plane faces the other way — and of the ring
+/// or the cone, its axis written either way round. `intersect` writes the
+/// circles' half-spaces from the two as stored, and the two circles get one
+/// half-space and that half-space turned round. For a plane and a ring the
+/// normal is the axis crossed with the plane's normal and the offset that
+/// normal read at the ring's centre. For a cone the normal is the cone's axis
+/// direction — the steeper cone's, for two — and the offset that direction read
+/// at a point on the axis worked out from the apexes, the ball's centre and the
+/// slopes, none of which turns with the axis. Turning the plane or an axis
+/// round negates every number of both, because a product or a difference of
+/// negated numbers rounds to the negation of the same sum, and so does an exact
+/// dot rounded to the nearest `f64`, which is how
+/// `HalfSpace::through_a_point_facing` writes an offset. So the half-space that
+/// keeps a given circle holds the same numbers either way — except that a zero
+/// may come back `-0.0`, which adding zero turns back, as in [`exactly_at`].
+/// `intersect` reads a cone against anything the same in either order.
 /// `each_circle_a_plane_through_a_rings_axis_cuts_is_one_name_however_the_two_are_spelled`
-/// asks all four spellings.
+/// and `each_circle_round_a_cones_axis_is_one_name_however_the_two_are_spelled`
+/// ask every spelling.
 ///
 /// The two circles get two different half-spaces, because each one picks its
 /// own circle and leaves the other out.
@@ -5746,29 +5770,26 @@ fn name_of_the_closed_crossing_through(
 /// # Errors
 ///
 /// Whatever `intersect` gives for the two.
-fn which_meridian_circle_it_is(
+fn which_of_the_pairs_closed_crossings_it_is(
     carried_by: &[Surface; 2],
     point: PredicatePoint,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<[u64; 4]>> {
-    let (flat, ring) = match carried_by {
-        [Surface::Plane(flat), Surface::Torus(ring)]
-        | [Surface::Torus(ring), Surface::Plane(flat)] => (flat, ring),
+    match carried_by {
+        [Surface::Plane(_), Surface::Torus(_)]
+        | [Surface::Torus(_), Surface::Plane(_)]
+        | [
+            Surface::Cone(_),
+            Surface::Cone(_) | Surface::Cylinder(_) | Surface::Sphere(_),
+        ]
+        | [Surface::Cylinder(_) | Surface::Sphere(_), Surface::Cone(_)] => (),
         [_, _] => return Ok(None),
-    };
-    let Some(picker) = the_half_space_naming_the_meridian_circle_through(
-        &Surface::Plane(*flat),
-        &Surface::Torus(*ring),
-        point,
-        policy,
-        log,
-    )?
+    }
+    let Some(Picker::InFrontOf(this_circle)) =
+        the_picker_naming_the_circle_through(&carried_by[0], &carried_by[1], point, policy, log)?
     else {
         return Ok(None);
-    };
-    let Picker::InFrontOf(this_circle) = picker else {
-        unreachable!("a meridian circle is named by a flat half-space, and only that is kept")
     };
     let [x, y, z] = this_circle.normal().components();
     Ok(Some(
@@ -5798,10 +5819,10 @@ type WhichCurveOfThePair = Option<[u64; 10]>;
 /// each curve from the two whichever is handed to it first — the cone's apex
 /// and axis, for a cone and a pipe on one axis. A flat picker is written as its
 /// four numbers with each zero turned the right way up, as
-/// [`which_meridian_circle_it_is`] writes one: a cone or a pipe spelled with its
-/// axis turned round hands back the half-space holding a given curve as the
-/// reverse of the one picking the other, which is the same four numbers but
-/// for the sign of a zero. A curved picker is written as the surface named
+/// [`which_of_the_pairs_closed_crossings_it_is`] writes one: a cone or a pipe
+/// spelled with its axis turned round hands back the half-space holding a given
+/// curve as the reverse of the one picking the other, which is the same four
+/// numbers but for the sign of a zero. A curved picker is written as the surface named
 /// either way round ([`name_of_the_surface_either_way_round`]) and which side
 /// of it it keeps. The slot ahead of the numbers says which kind of picker it
 /// is, so a ball and a pipe never share a name.
@@ -6531,6 +6552,77 @@ mod tests {
         assert_eq!(round_plus_x.len(), 1, "{round_plus_x:?}");
         assert_eq!(round_minus_x.len(), 1, "{round_minus_x:?}");
         assert_ne!(round_plus_x, round_minus_x, "two circles named as one");
+    }
+
+    /// The two circles a cone crosses a pipe, a ball or a steeper cone on its
+    /// axis in are two names, and each is one name with every axis written
+    /// either way round, in either order.
+    ///
+    /// The cone leans one from its apex at the origin, so its circle at height
+    /// `z` has radius `|z|`. A pipe of radius one crosses it at `z = 1` and at
+    /// `z = −1`, on the far nappe. A ball of radius `2.5` at `(0, 0, 3.5)` crosses
+    /// it where `(z − 3.5)² + z² = 6.25`, which is `2z² − 7z + 6 = 0`, at
+    /// `z = 1.5` and `z = 2`. A cone leaning two from `(0, 0, 3)` crosses it where
+    /// `|z| = 2|z − 3|`, at `z = 2` and `z = 6`.
+    #[test]
+    fn each_circle_round_a_cones_axis_is_one_name_however_the_two_are_spelled() {
+        let up_from = |height: f64| {
+            let axis = Axis::new(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, 1.0))
+                .expect("a direction with length");
+            [axis, axis.reversed()]
+        };
+        let cone = |axis: Axis, slope: f64| {
+            Surface::Cone(Cone::new(axis, slope).expect("a positive slope"))
+        };
+        let cones = up_from(0.0).map(|axis| cone(axis, 1.0));
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(0.0, 0.0, 3.5), 2.5).expect("a ball of radius 2.5"),
+        );
+        let partners = [
+            (
+                "a pipe",
+                up_from(0.0).map(|axis| {
+                    Surface::Cylinder(Cylinder::new(axis, 1.0).expect("a pipe of radius one"))
+                }),
+                [1.0, -1.0],
+            ),
+            ("a ball", [ball, ball], [1.5, 2.0]),
+            (
+                "a steeper cone",
+                up_from(3.0).map(|axis| cone(axis, 2.0)),
+                [2.0, 6.0],
+            ),
+        ];
+        for (partner, spellings, heights) in partners {
+            let names_at = |height: f64| -> BTreeSet<_> {
+                let mut names = BTreeSet::new();
+                for one in cones {
+                    for other in spellings {
+                        for carried_by in [[one, other], [other, one]] {
+                            names.insert(
+                                name_of_the_closed_crossing_through(
+                                    &carried_by,
+                                    PredicatePoint::from([height.abs(), 0.0, height]),
+                                    &Policy::certified(),
+                                    &mut ProvenanceLog::new(),
+                                )
+                                .unwrap_or_else(|why| {
+                                    panic!("the cone and {partner} cross in two circles: {why:?}")
+                                }),
+                            );
+                        }
+                    }
+                }
+                names
+            };
+            let [one, other] = heights.map(names_at);
+            assert_eq!(one.len(), 1, "the cone and {partner}: {one:?}");
+            assert_eq!(other.len(), 1, "the cone and {partner}: {other:?}");
+            assert_ne!(
+                one, other,
+                "the cone and {partner}: two circles named as one"
+            );
+        }
     }
 
     /// The two circles a bar of radius one down a cone's axis crosses the
