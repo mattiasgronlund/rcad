@@ -17,10 +17,10 @@
 //
 // Since §383 and §384 the lane writes the rows it leaves, as `add` steps, and a
 // `merge` on such a lane goes to a Haiku lander that runs `just land` once. The
-// Opus merger takes a `fix_first`, a lane with no usable rows, and every merge
-// the recipe stopped on. Since §385 the verifier's fixed steps, and its re-runs
-// of the lane's numbers, are `just verify-lane`'s, and the verifier keeps the
-// reading.
+// Opus merger takes a `fix_first`, a lane with no usable rows, a `merge` whose
+// own gate did not read `gate: PASS` (§414), and every merge the recipe stopped
+// on. Since §385 the verifier's fixed steps, and its re-runs of the lane's
+// numbers, are `just verify-lane`'s, and the verifier keeps the reading.
 //
 // Since §416 a writing lane past its context budget does not carry on past it.
 // It commits what it has, lets go of its branch and reports `relay` with a
@@ -359,9 +359,11 @@ function mergeAfterTheLast(lane, prior) {
 
 // §383.4 item 3 and §383.5: a verifier's `merge` on a lane that wrote its rows
 // goes to the Haiku lander, which runs `just land` once. A `fix_first`, a lane
-// whose rows `just land` cannot take, and every merge the recipe stopped on go
-// to the Opus merger, with the stop in its brief. A lander that throws is a
-// stop too, never the end of the row: a `claude` process started before
+// whose rows `just land` cannot take, a `merge` whose own gate_summary did not
+// read `gate: PASS` (§414, so a verifier's red gate or an unrun one never
+// reaches the lander's gate too), and every merge the recipe stopped on go to
+// the Opus merger, with the stop in its brief. A lander that throws is a stop
+// too, never the end of the row: a `claude` process started before
 // `lander.md` existed cannot resolve the type (§384.3). One that died after its
 // push has landed the lane already, and its detached run can still be landing
 // it, which is why the merger's brief has it wait with `just land wait-for`,
@@ -375,7 +377,17 @@ function merging(lane, prior) {
 }
 
 function landable(prior) {
-  return !!prior.check && prior.check.verdict === 'merge' && stepsProblem(prior.report.rows) === null
+  return !!prior.check && prior.check.verdict === 'merge' && stepsProblem(prior.report.rows) === null && gatePassed(prior.check)
+}
+
+// The two lines `_gate-summary` prints are exactly `gate: PASS` and `gate:
+// FAIL  first failure: <step> (exit N)` (`just recipe _gate-summary`); a
+// served gate prints `gate: PASS` too. `gate_summary`'s own schema description
+// is "the summary block, verbatim, or why you could not run it" -- a verifier
+// that could not run the gate holds neither line, so it reads as not passed
+// here and the row goes to the Opus merger same as an outright FAIL (§414).
+function gatePassed(check) {
+  return typeof check.gate_summary === 'string' && check.gate_summary.split('\n').some((line) => line === 'gate: PASS')
 }
 
 // Null when every step is one `just land` takes: `add <tier> <model> <write
@@ -721,7 +733,7 @@ Then run these two:
   git fetch origin
   git merge-base --is-ancestor ${branchOf(lane)} origin/main
 Exit 0 from the second means the lander's run pushed before it stopped or died: merge nothing, and finish by merger.md's paragraph on just land.`
-    : 'The lander did not run: the verifier asked for fixes, or the lane wrote no rows just land takes.'
+    : 'The lander did not run: the verifier asked for fixes, the lane wrote no rows just land takes, or the gate the verifier ran did not read gate: PASS.'
   return `Merge queue ${rowsOf(lane)}, lane ${lane.label}, onto main, or say why not.
 Lane branch: ${branchOf(lane)}, which it reports ending at ${r.landed_sha}.
 The lane's write set: ${lane.writeSet.join(', ')}

@@ -100,7 +100,9 @@ most lanes.
 - **`dispatch-lanes`.** A writing lane's brief says nothing about the context
   hook. "Carry on past it" stays for a read-only brief that builds a probe or
   reads a listing.
-- **`check-lanes-workflow`, a twenty-first arm, with eleven cuts.** It fails
+- **`check-lanes-workflow`, a twenty-second arm, with eleven cuts.** Q1412's
+  §414 arm landed first and took the twenty-first, so Q1415's row text, which
+  says twenty-first, is one off. It fails
   on `main`'s `lanes.js` and `lane.md` with its first message and passes here.
   It was run against main's files by `git archive origin/main .claude CLAUDE.md
   tooling/verify-lane` into a scratch repo with the new justfile. `lanes.js`
