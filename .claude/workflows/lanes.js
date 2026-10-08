@@ -539,7 +539,8 @@ function WRITING(lane) {
 Your branch: ${branchOf(lane)}.
 
 ${lane.brief}
-${START(lane)}`
+${START(lane)}
+${handOver()}`
 }
 
 function READING(lane) {
@@ -573,8 +574,17 @@ Base of the branch: main at ${BASE}. Your first commands, in this order:
 Report what git rev-parse HEAD printed as continued_from, and ${BASE} as base_sha once the ancestor check exits 0. If the switch refuses because ${branch} is checked out in ${before.worktree_path}, run git -C ${before.worktree_path} switch --detach and then the switch again. If it still refuses, if HEAD is not ${before.landed_sha}, or if the ancestor check fails, stop and report it as blocked. Never reach for \`checkout -B\` or \`switch -C\`.
 
 Your report is the row's report, not only your part of it. Carry into it, beside your own, everything of the lane before you that still holds: each number (run it again if a commit since could move it), each test in tests_that_fail_without_the_change, each step in rows, each file in files_changed, its decisions_section, out_of_write_set_needs and remaining.
+${handOver()}
 
 The lane before you reported (JSON): ${JSON.stringify(before)}`
+}
+
+// Said in the brief as well as in lane.md: a `claude` process keeps the agent
+// types it started with through a `/clear`, so a dispatcher cleared after §416
+// sends lanes whose lane.md has no relay, from briefs that no longer tell them
+// to carry on past the warning (Q1422).
+function handOver() {
+  return 'When "Lane budget passed" comes and your row is not done, hand over (§416), even if this brief says to carry on past it: commit everything by explicit path, run git switch --detach, and report outcome relay, with landed_sha your last commit and a handoff saying what is done by commit, what is next in order, the places as file, function and lines, what you measured with its command, and what you tried that did not work.'
 }
 
 function reportSchema(lane, relay) {

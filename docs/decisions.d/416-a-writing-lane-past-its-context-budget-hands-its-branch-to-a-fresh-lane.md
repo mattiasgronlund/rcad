@@ -97,6 +97,13 @@ most lanes.
   everything, `git switch --detach`, report `relay` with a handoff that names
   places. This holds even when a brief says to carry on past the warning. A
   read-only lane has nothing to commit and reports what it has, as before.
+- **The brief carries the rule too (Q1422).** A `claude` process keeps the
+  agent types it started with through a `/clear`. A dispatcher cleared after
+  this landed reads the new `dispatch-lanes` and memory, stops telling its
+  lanes to carry on, and sends them with a `lane.md` that has no relay, so
+  they would stop at 150k with nothing handed on. `lanes.js` is read from the
+  tree at each call, so its `handOver()` sentence goes into every lane's brief
+  and every relay's.
 - **`dispatch-lanes`.** A writing lane's brief says nothing about the context
   hook. "Carry on past it" stays for a read-only brief that builds a probe or
   reads a listing.

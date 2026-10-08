@@ -2864,7 +2864,10 @@ check-skills-selftest:
 # are unlocked and marked finished; and that `relay` is an outcome a writing
 # lane may report. In `lane.md` it checks the rule to hand over, the `git
 # switch --detach` that frees the branch, and the rule to commit the failing
-# test first, which is what a relay starts from.
+# test first, which is what a relay starts from. And it checks that the lane's
+# brief and a relay's both carry the hand-over rule themselves, because a
+# `claude` process keeps its agent types through a `/clear`, so a dispatcher
+# cleared after §416 would send lanes whose `lane.md` has no relay (Q1422).
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -2962,6 +2965,8 @@ check-lanes-workflow:
     relay_rule='**When "Lane budget passed" comes and your row is not done, hand over** (§416).'
     relay_detach='2. Run `git switch --detach`, so the lane after you can check your branch out.'
     test_first='**Commit the failing test first, on its own, then the fix.** Once a test fails'
+    hand_over_use='${handOver()}'
+    hand_over_text='hand over (§416), even if this brief says to carry on past it'
     settings=.claude/settings.json
     script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
@@ -3312,6 +3317,11 @@ check-lanes-workflow:
             echo "$2/lane.md does not tell a lane to commit its failing test first and to hand over at the budget warning, letting go of its branch; a lane stopped there would hand on nothing (§416)"
             return 22
         fi
+        n=$(grep -cF -- "$hand_over_use" "$1" || true)
+        if [ "$n" != 2 ] || ! grep -qF -- "$hand_over_text" "$1"; then
+            echo "$1 does not put the hand-over rule into both the lane's brief and a relay's ('$hand_over_use' twice, found $n); a process cleared after §416 keeps a lane.md without it (Q1422)"
+            return 22
+        fi
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
     swap() {
@@ -3513,7 +3523,11 @@ check-lanes-workflow:
     grep -vF -- "$relay_detach" "$agents/lane.md" > "$dir/relay-holds-the-branch/agents/lane.md"
     fresh test-not-first
     grep -vF -- "$test_first" "$agents/lane.md" > "$dir/test-not-first/agents/lane.md"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22)
+    fresh hand-over-left-to-lane-md
+    S="$hand_over_use" awk 'index($0, ENVIRON["S"]) && !done { done = 1; sub(/\$\{handOver\(\)\}/, "") } { print }' "$file" > "$dir/hand-over-left-to-lane-md/lanes.js"
+    fresh hand-over-unsaid
+    swap "$file" "$hand_over_text" 'hand over (§416)' > "$dir/hand-over-unsaid/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
