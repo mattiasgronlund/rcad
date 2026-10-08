@@ -447,8 +447,15 @@ fn a_frustum_and_a_bar_of_radius_four_cross_in_one_circle_on_both_sides() {
 ///   `ACurvedFaceGoesRightRoundWithNoSeam`, by the mesh the fuse checks its
 ///   answer with;
 /// - against the ball, the unions and the ball less the half are refused
-///   `TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`, which `walk` gives
-///   for two balls of one centre and one radius.
+///   `AWireWillNotLieFlatOnItsFace`, by the mesh the fuse checks its answer
+///   with. They keep the ball less the piece of it inside the half, one face
+///   since the joiner joined a ball's pieces (§229.2), and its one ring of two
+///   arcs runs over the ball's north pole along the wall `x = 0`, with both
+///   poles' side kept. Why the mesher will not lay that ring flat is not
+///   traced. Left in pieces they were refused one step sooner,
+///   `TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`, which `walk` gives for
+///   two balls of one centre and one radius, the ball on either side of an
+///   edge between two of its own pieces.
 ///
 /// The ball's intersections and the half less the ball were refused
 /// `CannotMeshAFace` with `CornersCoincide` by the mesh the fuse checks its
@@ -478,7 +485,7 @@ fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_plac
         },
         |model| a_ball_four_up(model, 3.0),
     ];
-    use Gives::{Holds, NoSeam, NotManifold, OneBallTwice};
+    use Gives::{Holds, NoSeam, NotFlat, NotManifold};
     let root = 2.0_f64.sqrt();
     let wanted = [
         [
@@ -498,12 +505,12 @@ fn a_wall_through_the_circle_a_cone_crosses_a_frustum_a_bar_or_a_ball_in_is_plac
             NoSeam,
         ],
         [
-            OneBallTwice,
-            OneBallTwice,
+            NotFlat,
+            NotFlat,
             Holds((100.0 - root) * PI / 6.0),
             Holds((100.0 - root) * PI / 6.0),
             Holds((404.0 + root) * PI / 6.0),
-            OneBallTwice,
+            NotFlat,
         ],
     ];
     for (partner, wanted) in partners.into_iter().zip(wanted) {
@@ -572,7 +579,7 @@ enum Gives {
     Holds(f64),
     NotManifold(usize),
     NoSeam,
-    OneBallTwice,
+    NotFlat,
 }
 
 impl Gives {
@@ -585,12 +592,7 @@ impl Gives {
                 count == wanted
             }
             (Gives::NoSeam, Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }))
-            | (
-                Gives::OneBallTwice,
-                Err(Error::Geometry(
-                    rcad_geom::Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing,
-                )),
-            ) => true,
+            | (Gives::NotFlat, Err(Error::AWireWillNotLieFlatOnItsFace { .. })) => true,
             _ => false,
         }
     }

@@ -25,6 +25,14 @@
 //! are all holes, and it now opens one into strips from pole to pole, here a
 //! hole in each (§346.6, §402.5).
 //!
+//! **Where the union is one solid that face is joined now** (§229.2). The wide
+//! circle has the ball on both sides of it there and is no edge, so the
+//! joiner's ball arm folds the cap past `y = 0` back in, and the ball's skin is
+//! one face with one hole, the tiny circle the block's face cuts. Where the ball
+//! stands beside the block every piece of its skin is kept, which is the whole
+//! ball and is left in its three pieces: the tiny cap, the cap past `y = 0`,
+//! and the face with both holes.
+//!
 //! Three more answer since Q668. A point in the cap is between the block's
 //! stored plane `x = 0` and the triangles of its stored corners, and the ray
 //! that counted those triangles could not settle which side of them it was.
@@ -212,7 +220,9 @@ fn the_union_holds(
 /// The union validates; it is one solid where the circle is on the block's
 /// face and two, the block and the ball, where it is beside it; it measures
 /// within the error it publishes of [`THE_BLOCK_AND_THE_BALL`]; and the ball's
-/// skin in it keeps the face with two holes that §402 cuts into strips.
+/// skin in it is one face with one hole where the union is one solid, and
+/// where it is two, the three pieces of the whole ball, one of them the face
+/// with two holes that §402 cuts into strips.
 ///
 /// **Measured summed over the solids, not one by one.** The turn rounds the
 /// block's corners, so the block on its own measures a few `1e-15` off `8`,
@@ -259,9 +269,12 @@ fn the_answer_holds(
             "measures {volume}, {error} off at most, against {THE_BLOCK_AND_THE_BALL}"
         ));
     }
-    if !wires_of_each_ball_face.contains(&2) {
+    let wanted: &[usize] = if off < 0.0 { &[1] } else { &[1, 1, 2] };
+    let mut wires = wires_of_each_ball_face.clone();
+    wires.sort_unstable();
+    if wires != wanted {
         return Err(format!(
-            "no face on the ball with two holes; its faces have {wires_of_each_ball_face:?} wires"
+            "the ball's faces have {wires_of_each_ball_face:?} wires, not {wanted:?}"
         ));
     }
     Ok(())

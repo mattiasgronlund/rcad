@@ -33,7 +33,7 @@
 //! an `f64`: their boxes are `[15.999999999999998, 16]` and
 //! `[16, 16.000000000000004]`, and they share the point `16`.
 
-use rcad_geom::{Error as GeometryError, Isometry, Point, Scale, Vector};
+use rcad_geom::{Isometry, Point, Scale, Vector};
 use rcad_predicates::{Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog, Record};
 use rcad_topo::{Containment, Error, Fused, Model, ProfileBuilder, Rule};
 
@@ -134,14 +134,21 @@ fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
 /// places, under either policy.
 ///
 /// What each answer would be is a solid with a sliver `2⁻⁵⁰` long and `2⁻⁷⁸`
-/// wide in it or of it, and each is refused while it is written:
+/// wide in it or of it, and each is refused
+/// `ACurvedFaceGoesRightRoundWithNoSeam` out of meshing the ball's face — the
+/// refusal §346.2's small ball on a cube's corner is given too. The
+/// intersection is the three slivers alone and the block less the ball has
+/// the ball's sliver as its dent, so the ball's face there is the sliver; the
+/// union and the ball less the block keep the ball less the sliver, and the
+/// mesher finds no cut from a rim that small up to both poles.
 ///
-/// - the union and the ball less the block, whose ball face keeps a hole that
-///   size, by `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom`;
-/// - the intersection, which is the three slivers alone, and the block less
-///   the ball, whose dent is the ball's sliver, by
-///   `ACurvedFaceGoesRightRoundWithNoSeam` out of meshing the curved face —
-///   the refusal §346.2's small ball on a cube's corner is given too.
+/// **The last two were refused earlier, while the answer was written**, by
+/// `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom`, until the
+/// joiner joined a ball's pieces (§229.2). The ball's skin outside the block
+/// was then three faces, cut apart along the long arcs of the two circles the
+/// block's faces cut. Joined, those arcs are no edges, the face is bounded by
+/// the sliver's two short arcs alone, and the refusal comes from the mesh.
+/// Neither ever answered.
 ///
 /// Each comes back with the same two records, `side of a half-space`, under
 /// either policy, and the two policies agree. Neither record has been traced.
@@ -160,16 +167,8 @@ fn the_slivers_no_point_is_inside_are_placed_by_their_sides_and_each_answer_is_r
                     [("side of a half-space", Level::Interval); 2],
                     "{case:?}: {records:#?}"
                 );
-                let a_ball_face_with_a_hole = match (rule, ball_first) {
-                    (Rule::Union, _) | (Rule::Difference, true) => true,
-                    (Rule::Intersection, _) | (Rule::Difference, false) => false,
-                    (other, _) => panic!("a rule this file does not know: {other:?}"),
-                };
                 match fused {
-                    Err(Error::Geometry(GeometryError::CannotNameWhichPieceOfACrossingThisIs))
-                        if a_ball_face_with_a_hole => {}
-                    Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
-                        if !a_ball_face_with_a_hole => {}
+                    Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }) => {}
                     Ok(fused) => panic!(
                         "{case:?}: the fuse answered with {} solids; check each against its \
                          volume and pin it",

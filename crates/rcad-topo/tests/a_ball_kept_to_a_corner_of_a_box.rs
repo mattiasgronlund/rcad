@@ -25,7 +25,7 @@
 
 use std::f64::consts::PI;
 
-use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -95,6 +95,38 @@ fn a_ball_and_the_corner_of_a_box_answer_every_rule_both_ways() {
                 );
             }
         }
+    }
+}
+
+/// The union both ways round and the ball less the box keep the ball's skin
+/// outside the box as **one face**, the sphere less the three-sided patch
+/// inside the box, as a ball with that patch cut off is written.
+///
+/// The fuse cuts the ball's one face along the whole circles `x, y, z = 0.5`,
+/// eight pieces, and seven of them are outside the box. Until the joiner had a
+/// ball's arm they were seven faces, with nine edges between them that had the
+/// sphere on both sides, and `Q1024` and `Q1342` were both refusals met on such
+/// a split face (`docs/decisions.md` §229.2).
+#[test]
+fn a_balls_skin_outside_the_box_is_one_face() {
+    let corner = [0.5, 0.5, 0.5];
+    let piece = corner_of_a_ball(2.0, corner);
+    let (ball, block) = (32.0 * PI / 3.0, 2.5f64.powi(3));
+    for (rule, ball_first, volume, faces) in [
+        (Rule::Union, true, ball + block - piece, 7),
+        (Rule::Union, false, ball + block - piece, 7),
+        (Rule::Difference, true, ball - piece, 4),
+    ] {
+        let what = format!("{rule:?}, the ball first {ball_first}");
+        let (model, solid) = fused(rule, ball_first, corner, FAR_CORNER, &what);
+        assert_holds(&model, solid, volume, &what);
+        let answer = model.solid(solid).expect("this model made the key");
+        let on_the_ball = answer
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface::Sphere(_)))
+            .count();
+        assert_eq!(on_the_ball, 1, "{what}: faces on the ball");
+        assert_eq!(answer.faces().count(), faces, "{what}: faces in all");
     }
 }
 
