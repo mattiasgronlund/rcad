@@ -25,6 +25,7 @@ and rates, and a third occurrence of finding A.*
   290.6   What is short of three hours, and how to finish it
   290.7   Set beside the fuzz targets (§265.6, §265.7, §226.3)
   290.8   What the comparison can and cannot tell
+  290.9   Other load, not the suite's own tail — one figure for §290.5
 
 ### 290.1 What "fresh seeds" actually reaches, file by file
 
@@ -286,14 +287,19 @@ every chunk, calibration runs included. It correlates loosely with the system
 load average recorded alongside it — chunks 1-5, while the system-wide 1-minute
 load average was 17-30, ran at 349-405% CPU; chunks 6-17, once it settled to
 13-15, ran at 422-424% consistently. That is a correlation this run measured,
-not a proven cause: `taskset -c 0-5` pins this process's own threads to cores
-0-5, but nothing here checked whether other processes were also scheduled onto
-those same six cores during the busier early chunks, or whether the gap is
-instead this test workload's own uneven parallelism (a handful of long-running
-properties, such as chunk 15's 74s lattice-pair check or the turned-frustum
-property that ran into the SLOW markers past 300s, dominating wall time alone
-while the other five threads sit idle). Both are live explanations; this
-measurement does not separate them.
+not a proven cause at the time this was written: `taskset -c 0-5` pins this
+process's own threads to cores 0-5, but nothing here checked whether other
+processes were also scheduled onto those same six cores during the busier
+early chunks, or whether the gap is instead this test workload's own uneven
+parallelism (a handful of long-running properties, such as chunk 15's 74s
+lattice-pair check or the turned-frustum property that ran into the SLOW
+markers past 300s, dominating wall time alone while the other five threads
+sit idle). **Settled by §290.9 (Q230):** on one freshly measured chunk, the
+suite's own tail (nextest running out of queued tests before the last one
+finishes) costs only 11.6% of the shortfall from 600%; the other 88.4%
+happens while all six slots are full, which only other load on the machine
+can explain. The wall-based figure below — not its CPU-based twin — is the
+one §290.5 and later sections use as "per core-hour".
 
 **Over all 24 chunks** (adding Q227's seven, seeds 118-124, §290.3): wall-based
 `11041.44s / 3600 × 6 = 18.402` core-hours
@@ -425,10 +431,14 @@ partly an artifact of what they check (§265.6) and partly of which code they
 reach — cone and torus crossings, the STEP reader and writer — which is mostly
 disjoint from what these two topology-only test files exercise, so a
 zero-versus-nonzero comparison is measuring different attack surfaces as much
-as it is measuring different techniques. And §290.5's 34% gap between the
-two core-hour measures, and its correlation with system load that this run
-did not resolve into a cause, means neither "0.15" nor "0.23" is the row's own
-settled number for "per core-hour" until that is pinned down.
+as it is measuring different techniques. §290.5's 34% gap between the two
+core-hour measures, and its correlation with system load that this run did
+not resolve into a cause, meant neither "0.15" nor "0.23" was the row's own
+settled number for "per core-hour" — **until §290.9 (Q230) pinned it down**:
+most of that gap is other load sharing the machine, not this suite's own
+uneven parallelism, so the wall-based number is the one to use, and "0.15"
+(wall-based, two distinct findings) rather than "0.23" (its CPU-based twin)
+is the figure this section's "per core-hour" means from here on.
 
 **2026-09-29:** the "kept the same fixed case count every chunk" half of
 this paragraph is no longer true. Since Q231 (`1a46ffd8`) `over()` scales
@@ -488,3 +498,102 @@ widening what the soak explores. A soak's core-hours buy a bigger fresh draw
 per chunk and, separately, one more repetition of the same 19 replays per
 `over()` call — the second of those does not become a bigger search by
 running more chunks or raising the factor.
+
+### 290.9 Other load, not the suite's own tail — one figure for §290.5
+
+**Q230.** The machine was not idle while this was measured — `uptime` found
+load averages of 20-26 before the run and 10-21 after, and `pgrep -af
+cargo-nextest` showed two other `cargo nextest run` processes already going
+on this same box — so the idle-machine road §290.5 and §290.8 left open is
+closed for this row too. The other road is per-test timing. One fresh chunk,
+same command line as §290.3's twenty-four: `PROPTEST_RNG_SEED=300
+RCAD_SOAK_SEED=300 RCAD_SOAK_FACTOR=66 taskset -c 0-5 /usr/bin/time -v mise
+exec -- cargo nextest run -p rcad-topo --test fuses_that_must_agree --test
+fuses_that_touch --test-threads 6 --no-fail-fast`, this time also carrying
+`--message-format libtest-json-plus` (needs `NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1`,
+an experimental nextest flag) so every test writes a `{"event":"started", ...}`
+line the moment nextest launches it and a `{"event":"ok"/"ignored", ...,
+"exec_time":...}` line the moment it finishes, each flushed straight to the
+log. `uptime` before: `18:42:21 up 13 days, 30 min, 3 users, load average:
+20.17, 17.62, 25.55`. `uptime` after: `18:54:08 up 13 days, 41 min, 3 users,
+load average: 9.98, 16.48, 21.03`.
+
+**The split does not need an idle machine, because neither half of it does.**
+nextest's own dispatch rule is simple and load-independent: it starts a new
+test the instant a worker slot frees, for as long as any test is left
+waiting; concurrency can only drop below six once the queue itself runs dry.
+That rule, plus each test's own `exec_time`, is enough to replay exactly when
+six slots were full and when they were not — no wall-clock timestamp per
+line is needed, because the log's line order *is* the real order events
+happened in, and durations fill in the rest (a one-off script kept in the
+scratchpad, not the repository, run as `python3 analyze_q230.py`). The
+replay's own total, 681.785s, lands within 0.003s of nextest's own `Summary [
+681.788s] 102 tests run: 102 passed (21 slow), 3 skipped` line — the replay
+reproduces the real run closely enough to trust its breakdown.
+
+That breakdown: of 105 tests started (102 run, 3 skipped as `ignored`), the
+replay finds only 0.009s where a slot sat empty while a test was still
+waiting to be dispatched — noise, not a real gap. The other 50.855s of empty
+slot-time happens strictly after all 105 had already been dispatched: the
+genuine tail, running from t=663.223s to the end at t=681.785s (18.562s),
+while the second-to-last test,
+`what_a_block_and_a_ball_take_up_adds_up_inside_a_stated_share_of_what_they_declare`
+(148.226s), kept going after everything else was done. That test is this
+chunk's own version of §290.5's "the turned-frustum property that ran into
+the SLOW markers past 300s" —
+a long property, but one that only costs idle core-time because of *where*
+nextest happened to schedule it (second-to-last), not because it is slow —
+scheduling it earlier would have cost nothing, since five other tests would
+still have been running alongside it the whole time.
+
+**Most of the gap is not that tail.** `/usr/bin/time -v` on the same run:
+`User time (seconds): 3648.45`, `System time (seconds): 3.99`, `Percent of
+CPU this job got: 535%`, `Elapsed (wall clock) time: 11:22.51`. Against the
+six-core ceiling of `6 × 681.785 = 4090.71` core-seconds
+(`python3 -c "print(6*681.785)"`), the measured CPU of `3648.45+3.99=3652.44`
+core-seconds is short by `4090.71-3652.44=438.27` core-seconds
+(`python3 -c "print(6*681.785-(3648.45+3.99))"`) — 64.3 of the 600
+percentage points `535%` falls short of. The tail above accounts for
+`50.855/681.785*100=7.46` of those points
+(`python3 -c "print(50.855/681.785*100)"`); the remaining `56.82` points
+(`python3 -c "print(438.27-50.855); print((438.27-50.855)/681.785*100)"`,
+387.42 core-seconds) happened while nextest had all six slots full the whole
+time — not the tail at all. Six test processes nextest counted as running
+simply did not get six full cores' worth of CPU between them: `387.42 /
+438.27 = 88.4%` of the shortfall, against the tail's `11.6%`
+(`python3 -c "print(50.855/438.27*100); print(387.42/438.27*100)"`).
+
+**That 88.4% is other load, not the suite.** Each test here runs as its own
+process under nextest (not a thread sharing a lock with another test), and
+neither the test file nor anything it calls spins up its own threads —
+`grep -rn 'rayon\|std::thread\|thread::spawn' crates/rcad-topo/tests/
+fuses_that_must_agree.rs crates/rcad-topo/tests/fuses_that_touch.rs
+crates/rcad-topo/src/` finds nothing — so a test process that is not
+blocked on anything of its own and still does not get a full core must be
+getting pushed off the core by something that wants it too. `taskset -c 0-5`
+only pins this process's own six workers to those six cores; it reserves
+nothing, and two other `cargo nextest run` processes were on the box the
+whole time this chunk ran (named above), on a 24-core machine whose `uptime`
+load never fell under 10 during the run.
+
+**One core-hour figure.** §290.5's wall-based and CPU-based core-hour
+measures disagree because the CPU-based one is mostly counting how busy the
+rest of the machine happened to be, not a property of this suite — the same
+soak run again on a quieter or busier day would move that number without
+anything about the suite changing, as this section's own 11.6%/88.4% split
+shows for one chunk. The wall-based measure does not have that problem: six
+cores for N wall-hours is what taskset actually reserves and what a soak
+would actually be budgeted as, independent of what else lands on those cores
+meanwhile. §290.5's wall-based rate is therefore the one figure: `0.1630`
+distinct failures per core-hour over the 24-chunk, 18.402 core-hour budget.
+Its CPU-based twin, `0.2517`, is not used as "the" rate; §290.5 keeps it
+published as the second number it already was, not deleted.
+
+This chunk's own 11.6%/12%-ish split between tail and other load is this
+chunk's own measurement, not a constant: a different mix of concurrent lanes,
+or a chunk whose longest property lands earlier in the dispatch order instead
+of near the end, would move the two shares. What carries over chunk to chunk
+is the method — nextest cannot idle a slot except in the tail, so any
+shortfall beyond the tail's own small, directly-measured share is other load
+by elimination — and the conclusion it supports here: the tail is a minor,
+structural correction, not the reason the two core-hour measures disagree.
