@@ -39,7 +39,7 @@
 
 use std::collections::HashMap;
 
-use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
+use rcad_geom::{Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
     DraftStep, DraftVertex, Error, Invalid, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
@@ -136,49 +136,58 @@ fn the_sweep_names_a_witness_and_not_the_worst_wall() {
 /// limit, and Q1357 closed it. The tolerant fuse now stops a piece later, at
 /// *a point in a piece that every solid could place*, on a wall piece with
 /// corners `(-0, 5, 2)`, `(-5, [5-ulp, 5], 2)`, `(-5, .., 5)`, `(-0, 5, 5)`: a
-/// point was found inside and no ray placed it. Nobody has traced that stop.
-/// It is still not the two-sided walk.
+/// point was found inside and no ray placed it. §417's inside rule — which
+/// places a flat piece inside a convex flat solid by its face planes rather
+/// than by a ray — now decides that stop: both the tolerant fuse and the
+/// certified one answer one solid, each measuring `2450.0`
+/// (`3000 − 125 − 200 − 300 + 75`). It is still not the two-sided walk.
 #[test]
 fn two_walls_a_hair_apart_are_caught_before_the_walk_gets_a_two_sided_piece() {
-    let (mut model, standing, plain_knife, leaning_knife) = a_block_between_two_knives();
+    for policy in [Policy::tolerant(1e6), Policy::certified()] {
+        let (mut model, standing, plain_knife, leaning_knife) = a_block_between_two_knives();
 
-    model
-        .validate(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a wall with a hair of lean is a sound solid, corners and all");
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a wall with a hair of lean is a sound solid, corners and all");
 
-    let with_slop = model.fuse(
-        &[standing, plain_knife],
-        &[leaning_knife],
-        Rule::Union,
-        &Policy::tolerant(1e6),
-        &mut ProvenanceLog::new(),
-    );
-    let Err(Error::Undecidable { records }) = &with_slop else {
-        panic!("a tolerant fuse is refused for the sliver between the walls: {with_slop:?}");
-    };
-    assert_eq!(
-        records.records().last().map(|record| record.predicate()),
-        Some("a point in a piece that every solid could place"),
-        "the sliver between the two walls is what a tolerant fuse stops on: {with_slop:?}"
-    );
-
-    let certified = model.fuse(
-        &[standing, plain_knife],
-        &[leaning_knife],
-        Rule::Union,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(certified, Err(Error::Undecidable { .. })),
-        "a certified fuse gives up on the two planes earlier still: {certified:?}"
-    );
-
-    for outcome in [&with_slop, &certified] {
+        let outcome = model.fuse(
+            &[standing, plain_knife],
+            &[leaning_knife],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        );
         assert!(
             !matches!(outcome, Err(Error::Invalid(Invalid::WireTooShort { .. }))),
             "if this ever reaches the two-sided walk, §67's refusal has a driver \
              again and this test should become one: {outcome:?}"
+        );
+        let fused = outcome.unwrap_or_else(|why| {
+            panic!("{policy:?}: the sliver between the walls is placed by §417's inside rule now: {why:?}")
+        });
+        assert_eq!(
+            fused.solids().len(),
+            1,
+            "{policy:?}: the two walls and the sliver between them make one solid: {fused:?}"
+        );
+        let solid = fused.solids()[0];
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{policy:?}: the fused wall does not validate: {why}"));
+        let measured = model
+            .solid(solid)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{policy:?}: the fused wall does not measure: {why}"));
+        assert!(
+            (measured.volume() - 2450.0).abs() <= measured.volume_error(),
+            "{policy:?}: volume {} against 2450.0 (3000 − 125 − 200 − 300 + 75), error {}",
+            measured.volume(),
+            measured.volume_error()
         );
     }
 }
