@@ -44,6 +44,14 @@
 //! out now says the side a step from the circle towards that half-space meets,
 //! which is the side the wall keeps next to the circle.
 //!
+//! **Then the union could not place a point its wall or its cone face reached.**
+//! Each has one edge on where the cone and the pipe cross, and they cross in two
+//! circles, so `holds.rs` refused both `AFaceMissesPartOfWhereItsSurfacesCross`
+//! and every such point came back `CannotFollowAFacesTrimming`. A **gap**
+//! (Q1218): a point past the same half-space now says the same side there too.
+//! Fused again with a far cube, the union is still refused, in the fuse's
+//! arrangement of the wall; that is pinned below.
+//!
 //! The closed forms, from the slices of the shared piece: inside the bar the cone
 //! holds a disc of radius `z` for `z` up to one and the whole unit disc above it,
 //! so the two share `π/3 + 9π = 28π/3`. The cone holds `1000π/3`, and the bar
@@ -51,9 +59,9 @@
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Containment, Error, FaceKey, Model, Rule, SolidKey, WireView};
 
 mod cones;
 
@@ -117,6 +125,111 @@ fn every_rule_either_way_round_holds_its_closed_form_across_the_cones_other_napp
             );
         }
     }
+}
+
+/// Each point round the union, whichever went first, is placed where the two
+/// shapes put it.
+///
+/// The cone holds `0 ≤ z ≤ 10` within `|x, y| ≤ z`, and the bar `−15 ≤ z ≤ 25`
+/// within one of the axis. So `(1, 0, −5)` is on the bar's wall below the apex,
+/// `(0, 0, −5)` is inside the bar, and `(2, 0, −5)` is outside both, though
+/// inside the cone's other nappe; `(3, 0, 3)` is on the cone's skin beside the
+/// bar, and `(1.5, 0, 3)` inside the cone beside it.
+///
+/// **Every point a ray reached the bar's wall or the cone's face from was
+/// [`Containment::CannotFollowAFacesTrimming`]**: the first runs along the
+/// circle at `z = 1` and across the other nappe at `z = −1`, the second along
+/// the circle at `z = 1` alone, and each was refused
+/// `AFaceMissesPartOfWhereItsSurfacesCross` for having one edge where the cone
+/// and the pipe cross in two circles (row Q1218).
+#[test]
+fn every_point_round_the_union_is_placed_where_the_shapes_say_across_the_other_nappe() {
+    for cone_first in [true, false] {
+        let (model, union) = the_union(cone_first);
+        let solid = model.solid(union).expect("this model made the key");
+        for (at, want) in [
+            (Point::new(1.0, 0.0, -5.0), Containment::OnBoundary),
+            (Point::new(0.0, 0.0, -5.0), Containment::Inside),
+            (Point::new(2.0, 0.0, -5.0), Containment::Outside),
+            (Point::new(3.0, 0.0, 3.0), Containment::OnBoundary),
+            (Point::new(1.5, 0.0, 3.0), Containment::Inside),
+        ] {
+            let got = solid.classify_point(at, &Policy::certified(), &mut ProvenanceLog::new());
+            assert_eq!(
+                got, want,
+                "the union (cone first: {cone_first}) places {at:?} {got:?}, where the shapes say \
+                 {want:?}"
+            );
+        }
+    }
+}
+
+/// The union fused again with a cube far from it is refused
+/// `CannotTellTheCellsOfAFaceApart` on the bar's wall below the cone, every
+/// way round. **A gap**: the answer is the two solids apart, `364π` and the
+/// cube's `8`.
+///
+/// The refusal is the fuse's arrangement of that wall
+/// (`fuse/arrange.rs`, where only that error is made), and the cube cuts
+/// nothing of it; what is there is the wall's own circle on the cone at
+/// `z = 1` and the other nappe it crosses at `z = −1`. Pinned so that a change
+/// making it answer is seen.
+#[test]
+fn the_union_and_a_far_cube_are_refused_on_the_bar_wall_across_the_other_nappe() {
+    for cone_first in [true, false] {
+        let (mut model, union) = the_union(cone_first);
+        let wall = the_bar_wall_below_the_cone(&model, union);
+        let cube = model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a whole-number cube");
+        model
+            .place_solid(
+                cube,
+                &Isometry::translation(Vector::new(20.0, 20.0, 20.0)).expect("a finite move"),
+            )
+            .expect("this model made the key");
+        for (arguments, tools) in [([union], [cube]), ([cube], [union])] {
+            let got = model.clone().fuse(
+                &arguments,
+                &tools,
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            assert!(
+                matches!(got, Err(Error::CannotTellTheCellsOfAFaceApart { face }) if face == wall),
+                "the union (cone first: {cone_first}) and a far cube, union first: {}, came back \
+                 {got:?}, where the pin says it is refused on the bar's wall {wall:?}",
+                arguments[0] == union
+            );
+        }
+    }
+}
+
+fn the_union(cone_first: bool) -> (Model, SolidKey) {
+    let (model, answer) = fused(Rule::Union, cone_first)
+        .unwrap_or_else(|why| panic!("the union (cone first: {cone_first}): {why:?}"));
+    let [union] = answer[..] else {
+        panic!("the union (cone first: {cone_first}) is one solid, not {answer:?}");
+    };
+    (model, union)
+}
+
+/// The union's face on the bar's pipe that reaches down to its floor at
+/// `z = −15`.
+fn the_bar_wall_below_the_cone(model: &Model, union: SolidKey) -> FaceKey {
+    let solid = model.solid(union).expect("this model made the key");
+    let mut walls = solid.faces().filter(|face| {
+        matches!(face.surface(), Surface::Cylinder(_))
+            && face
+                .wires()
+                .flat_map(WireView::points)
+                .any(|corner| corner.coordinates()[2] == -15.0)
+    });
+    let (Some(wall), None) = (walls.next(), walls.next()) else {
+        panic!("the union has one face on the pipe down to the bar's floor");
+    };
+    wall.key()
 }
 
 fn fused(rule: Rule, cone_first: bool) -> Result<(Model, Vec<SolidKey>), Error> {
