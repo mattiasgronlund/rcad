@@ -57,7 +57,7 @@
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
-    Surface, Vector,
+    Sphere, Surface, Vector,
 };
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
@@ -995,6 +995,89 @@ fn the_skin_of_a_chip_between_two_hyperbolas_holds_the_lens_between_them() {
     }
 }
 
+/// The top of [`a_ball_dented_by_another_and_cut_flat`] is a crescent: the disc
+/// `x² + y² ≤ 25` on `z = 0` less the disc `(x − 6)² + y² < 25`. Both its arcs
+/// run between `(3, 4, 0)` and `(3, −4, 0)`, so their chords are one segment,
+/// and a point on it was refused `AFaceTrimmedByACurveThisCannotFollow` (queue
+/// row Q1258): a ball kept outside is no family the steps follow, so the face
+/// is read off its sides, and the point was on the chords of two arcs at once.
+///
+/// Every point of the segment is strictly inside the second disc, the one the
+/// face leaves out, so none is held. Off it, `(0, 0, 0)` and `(−4, 2, 0)` are in
+/// the first disc and outside the second, so held; `(2, 0, 0)` and `(4, 0, 0)`
+/// are inside both, and `(3, 5, 0)`, on the chord's line past its end, is
+/// outside both; `(3, 4, 0)` is a corner.
+#[test]
+fn the_top_of_a_ball_dented_by_another_holds_no_point_of_the_chord_its_two_arcs_share() {
+    let mut model = a_model();
+    let dented = a_ball_dented_by_another_and_cut_flat(&mut model);
+    let solid = model.solid(dented).expect("this model made the key");
+    let top = solid
+        .faces()
+        .find(|face| matches!(face.surface(), Surface::Plane(_)))
+        .expect("the dented ball has a flat face")
+        .key();
+    for (point, answer) in [
+        ([3.0, 0.0, 0.0], OnAFace::NotHeld),
+        ([3.0, 2.0, 0.0], OnAFace::NotHeld),
+        ([3.0, -3.5, 0.0], OnAFace::NotHeld),
+        ([0.0, 0.0, 0.0], OnAFace::Held),
+        ([-4.0, 2.0, 0.0], OnAFace::Held),
+        ([2.0, 0.0, 0.0], OnAFace::NotHeld),
+        ([4.0, 0.0, 0.0], OnAFace::NotHeld),
+        ([3.0, 5.0, 0.0], OnAFace::NotHeld),
+        ([3.0, 4.0, 0.0], OnAFace::OnItsBoundary),
+    ] {
+        let held = solid
+            .face_holds_the_point(
+                top,
+                PredicatePoint::from(point),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("the dented ball's top at {point:?}: {why:?}"));
+        assert_eq!(held, answer, "the dented ball's top at {point:?}");
+    }
+}
+
+/// The nearest cone face to a point on two chords at once, which
+/// `what_a_cone_face_seen_down_its_axis_holds` in `holds.rs` still refuses
+/// (queue row Q1258): it is never asked, because the solid is refused first.
+///
+/// **A lens alone never gets there.** A face on one nappe bounded by an arc of
+/// each of two planes between the same two corners is crossed by each ruling
+/// it holds in one piece, from the plane the apex is behind out to the plane
+/// the apex is in front of, so it is the part of the nappe in front of both
+/// cuts. It is bounded, so the second plane is reached along both rulings the
+/// first plane's branch runs off along, and its kept side falls along both, so
+/// along the way the branch runs off, their sum: `is_a_family_this_follows`
+/// takes the pair, and the steps answer the lens before it is read off its
+/// sides. [`a_chip_of_a_cone`] is that lens, and
+/// `the_skin_of_a_chip_between_two_hyperbolas_holds_the_lens_between_them`
+/// asks it on its chord. A chip whose second cut rises the way the branch runs
+/// off keeps the branch's far end, so it is not bounded.
+///
+/// **So the skin needs a second wire whose cuts the steps do not follow**, and
+/// [`a_chip_of_a_cone_holed_through`] gives it a square hole along the axis,
+/// whose walls `x = 2.8125` and `y = ±1.5` each have the apex behind them.
+/// Seen down the axis its two hyperbolas' arcs still share the chord `x = 3`.
+/// But building it meshes its faces, and a cone face with a hole that goes
+/// round nothing is refused there: `CurvedFaceWithAHoleGoesTooFarRound`. The
+/// key it names is the builder's own, so which face is not asked here; the skin
+/// is the one curved face.
+#[test]
+fn a_chip_of_a_cone_holed_through_is_refused_before_its_chord_is_asked() {
+    let mut model = a_model();
+    let refused = a_chip_of_a_cone_holed_through(&mut model);
+    assert!(
+        matches!(
+            refused,
+            Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
+        ),
+        "the holed chip: {refused:?}"
+    );
+}
+
 /// The part of the cone `r ≤ z` under the roof of
 /// `a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`
 /// and `a_frustum_under_two_steep_planes_is_answered_under_every_rule` from
@@ -1368,6 +1451,255 @@ fn a_chip_of_a_cone(model: &mut Model) -> SolidKey {
     builder
         .build(model, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a chip of a cone")
+}
+
+/// [`a_chip_of_a_cone`] with the square `[2, 2.8125] × [−1.5, 1.5]` cut out of
+/// it along the axis, described face by face. The hole runs from the skin up to
+/// the face on `2x − z = 1`, which is the top of the chip everywhere over the
+/// square, and has a flat wall on each of `x = 2`, `x = 2.8125` and `y = ±1.5`.
+///
+/// The hole's corners are exact on the cone: `2² + 1.5² = 2.5²` and
+/// `2.8125² + 1.5² = 3.1875²`. Above them, on `z = 2x − 1`, are `z = 3` and
+/// `z = 4.625`. What building it gives is handed back.
+fn a_chip_of_a_cone_holed_through(model: &mut Model) -> Result<SolidKey, Error> {
+    let skin = Cone::new(Axis::z(), 1.0).expect("a positive slope");
+    let rising =
+        Plane::from_point_and_normal(Point::new(3.0, 4.0, 5.0), Vector::new(-2.0, 0.0, 1.0))
+            .expect("a plane");
+    let falling =
+        Plane::from_point_and_normal(Point::new(3.0, 4.0, 5.0), Vector::new(2.0, 0.0, 1.0))
+            .expect("a plane");
+    let wall = |through: [f64; 3], facing: [f64; 3]| {
+        Plane::from_point_and_normal(
+            Point::new(through[0], through[1], through[2]),
+            Vector::new(facing[0], facing[1], facing[2]),
+        )
+        .expect("a plane")
+    };
+    let near_wall = wall([2.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+    let far_wall = wall([2.8125, 0.0, 0.0], [-1.0, 0.0, 0.0]);
+    let left_wall = wall([0.0, 1.5, 0.0], [0.0, -1.0, 0.0]);
+    let right_wall = wall([0.0, -1.5, 0.0], [0.0, 1.0, 0.0]);
+    let upper = HalfSpace::through_a_point_facing(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+        .expect("a half-space");
+    let on_the_upper_nappe = |plane| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(plane),
+        picked_by: smallvec::smallvec![Picker::from(upper)],
+    };
+
+    let mut builder = SolidBuilder::new();
+    let mut corner = |at: [f64; 3]| {
+        builder
+            .add_vertex(Point::new(at[0], at[1], at[2]))
+            .expect("a corner")
+    };
+    let left = corner([3.0, 4.0, 5.0]);
+    let right = corner([3.0, -4.0, 5.0]);
+    let [b00, b10, b11, b01] = [
+        [2.0, -1.5, 2.5],
+        [2.8125, -1.5, 3.1875],
+        [2.8125, 1.5, 3.1875],
+        [2.0, 1.5, 2.5],
+    ]
+    .map(&mut corner);
+    let [t00, t10, t11, t01] = [
+        [2.0, -1.5, 3.0],
+        [2.8125, -1.5, 4.625],
+        [2.8125, 1.5, 4.625],
+        [2.0, 1.5, 3.0],
+    ]
+    .map(&mut corner);
+    let mut edge = |from, to, run| builder.add_edge(from, to, run).expect("an edge");
+    let low = edge(right, left, on_the_upper_nappe(rising));
+    let high = edge(left, right, on_the_upper_nappe(falling));
+    let chord = edge(left, right, EdgeRun::Straight);
+    let round_right = edge(b00, b10, on_the_upper_nappe(right_wall));
+    let round_far = edge(b10, b11, on_the_upper_nappe(far_wall));
+    let round_left = edge(b11, b01, on_the_upper_nappe(left_wall));
+    let round_near = edge(b01, b00, on_the_upper_nappe(near_wall));
+    let [up00, up10, up11, up01] = [(b00, t00), (b10, t10), (b11, t11), (b01, t01)]
+        .map(|(from, to)| edge(from, to, EdgeRun::Straight));
+    let top_right = edge(t00, t10, EdgeRun::Straight);
+    let top_far = edge(t10, t11, EdgeRun::Straight);
+    let top_left = edge(t11, t01, EdgeRun::Straight);
+    let top_near = edge(t01, t00, EdgeRun::Straight);
+
+    let wire = |builder: &mut SolidBuilder, steps: &[(_, Orientation)]| {
+        let steps: Vec<DraftStep> = steps
+            .iter()
+            .map(|&(edge, way)| DraftStep::Along(builder.add_coedge(edge, way).expect("a coedge")))
+            .collect();
+        builder.add_wire(&steps).expect("a wire")
+    };
+    use Orientation::{Forward, Reversed};
+    let outline = wire(&mut builder, &[(low, Forward), (high, Forward)]);
+    let hole = wire(
+        &mut builder,
+        &[
+            (round_right, Forward),
+            (round_far, Forward),
+            (round_left, Forward),
+            (round_near, Forward),
+        ],
+    );
+    let lens = builder
+        .add_face(Surface::Cone(skin), &[outline, hole])
+        .expect("a face");
+    let outline = wire(&mut builder, &[(low, Reversed), (chord, Reversed)]);
+    let hole = wire(
+        &mut builder,
+        &[
+            (top_far, Reversed),
+            (top_right, Reversed),
+            (top_near, Reversed),
+            (top_left, Reversed),
+        ],
+    );
+    let under = builder
+        .add_face(Surface::Plane(rising), &[outline, hole])
+        .expect("a face");
+    let outline = wire(&mut builder, &[(high, Reversed), (chord, Forward)]);
+    let over = builder
+        .add_face(Surface::Plane(falling), &[outline])
+        .expect("a face");
+    let mut walls = Vec::new();
+    for (plane, steps) in [
+        (
+            far_wall,
+            [
+                (round_far, Reversed),
+                (up10, Forward),
+                (top_far, Forward),
+                (up11, Reversed),
+            ],
+        ),
+        (
+            near_wall,
+            [
+                (round_near, Reversed),
+                (up01, Forward),
+                (top_near, Forward),
+                (up00, Reversed),
+            ],
+        ),
+        (
+            left_wall,
+            [
+                (round_left, Reversed),
+                (up11, Forward),
+                (top_left, Forward),
+                (up01, Reversed),
+            ],
+        ),
+        (
+            right_wall,
+            [
+                (round_right, Reversed),
+                (up00, Forward),
+                (top_right, Forward),
+                (up10, Reversed),
+            ],
+        ),
+    ] {
+        let outline = wire(&mut builder, &steps);
+        walls.push(
+            builder
+                .add_face(Surface::Plane(plane), &[outline])
+                .expect("a face"),
+        );
+    }
+    let shell: Vec<_> = [lens, under, over]
+        .into_iter()
+        .chain(walls)
+        .map(|face| (face, Forward))
+        .collect();
+    builder.add_shell(&shell).expect("seven faces close");
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// The part of the ball of radius 5 at the origin below `z = 0` and outside the
+/// ball of radius 5 at `(6, 0, 0)`, described face by face. Its top on `z = 0`
+/// is a crescent between the arc of the first ball's circle through
+/// `(−5, 0, 0)` and the arc of the second's through `(1, 0, 0)`, both from
+/// `(3, 4, 0)` to `(3, −4, 0)`. Below, a face on each ball meets the other along
+/// the lower half of the circle `x = 3`, `y² + z² = 16`; the second ball's face
+/// is used turned round, since the material is outside that ball.
+///
+/// The two corners are exact on all three surfaces: `3² + 4² = 5²` and
+/// `(3 − 6)² + 4² = 5²`.
+fn a_ball_dented_by_another_and_cut_flat(model: &mut Model) -> SolidKey {
+    let first = Sphere::new(Point::origin(), 5.0).expect("a ball");
+    let second = Sphere::new(Point::new(6.0, 0.0, 0.0), 5.0).expect("a ball");
+    let top =
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0)).expect("a plane");
+    let picked = |through: Point, facing: Vector| {
+        smallvec::smallvec![Picker::from(
+            HalfSpace::through_a_point_facing(through, facing).expect("a half-space")
+        )]
+    };
+    let on_the_top = || EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(top),
+        picked_by: picked(Point::new(3.0, 0.0, 0.0), Vector::new(-1.0, 0.0, 0.0)),
+    };
+
+    let mut builder = SolidBuilder::new();
+    let near = builder
+        .add_vertex(Point::new(3.0, 4.0, 0.0))
+        .expect("a corner");
+    let far = builder
+        .add_vertex(Point::new(3.0, -4.0, 0.0))
+        .expect("a corner");
+    let rim = builder.add_edge(near, far, on_the_top()).expect("an arc");
+    let dent_rim = builder.add_edge(far, near, on_the_top()).expect("an arc");
+    let seam = builder
+        .add_edge(
+            near,
+            far,
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Sphere(second),
+                picked_by: picked(Point::origin(), Vector::new(0.0, 0.0, -1.0)),
+            },
+        )
+        .expect("an arc");
+    let face = |builder: &mut SolidBuilder, surface, steps: [_; 2]| {
+        let steps: Vec<DraftStep> = steps
+            .into_iter()
+            .map(|(edge, way)| DraftStep::Along(builder.add_coedge(edge, way).expect("a coedge")))
+            .collect();
+        let wire = builder.add_wire(&steps).expect("a wire");
+        builder.add_face(surface, &[wire]).expect("a face")
+    };
+    let crescent = face(
+        &mut builder,
+        Surface::Plane(top),
+        [
+            (rim, Orientation::Forward),
+            (dent_rim, Orientation::Forward),
+        ],
+    );
+    let outside = face(
+        &mut builder,
+        Surface::Sphere(first),
+        [(rim, Orientation::Reversed), (seam, Orientation::Forward)],
+    );
+    let dent = face(
+        &mut builder,
+        Surface::Sphere(second),
+        [
+            (dent_rim, Orientation::Reversed),
+            (seam, Orientation::Reversed),
+        ],
+    );
+    builder
+        .add_shell(&[
+            (crescent, Orientation::Forward),
+            (outside, Orientation::Forward),
+            (dent, Orientation::Reversed),
+        ])
+        .expect("three faces close");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a dented ball cut flat")
 }
 
 /// The volume of [`a_chip_of_a_cone`], by Simpson's rule over its slices.

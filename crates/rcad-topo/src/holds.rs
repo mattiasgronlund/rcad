@@ -2274,21 +2274,32 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 /// it splits in two.
 ///
 /// **A point on a chord is not on the face's boundary**, and the count of the
-/// polygon is not defined there, though the count of the face is. Just off the
-/// chord on the side away from the arc, the point is in no piece of that arc,
-/// and the polygon's count there is the walk with that chord read as having the
-/// point on that side of it — provided the half-line the walk runs crosses the
-/// chord rather than running along it, so it is aimed at a corner off the
-/// chord's line. On one side and the other of a chord the face's count is the
-/// same, because the polygon's and the piece's each change by one there and
-/// turned round; so that is the face's count at the point.
+/// polygon is not defined there, though the count of the face is: it is the
+/// count at every point near enough, since the face's boundary is not there.
+/// So the count is read a little way from the point towards a corner off the
+/// line of every chord it is on, and the half-line the walk runs is aimed at
+/// that corner. Every sign that reading needs is one already in hand: the
+/// corners' sides of the half-line's line are the point's own, since the point
+/// read is on that line, and its side of each chord through the point is the
+/// corner's side of it. Inside each such arc's curve still, it is in the arc's
+/// piece where that side is the arc's. Any number of chords through the point
+/// are read so (row Q1258).
+///
+/// **Where every corner is on those chords' lines**, there is no such corner.
+/// Two arcs running between the same two corners the opposite ways leave that
+/// with their two chords on one line, as the top of a ball dented by another and
+/// cut flat does (`tests/a_walk_neither_winding_nor_the_axis_places.rs`). Then
+/// every side of the polygon lies on that line, so it winds round no point off
+/// it, and the count just off the line is the two arcs' pieces alone. Read on
+/// the side away from the first arc, that is the second arc's piece where the
+/// second arc is on that side of its own chord, which runs the other way: where
+/// the two arcs are on the same side of their chords.
 ///
 /// # Errors
 ///
-/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the point is on the
-/// chords of two arcs at once, or on a chord with every corner of the face on
-/// that chord's line: a gap, for a point the walk would need two nudges for, and
-/// for a face no solid here has.
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when every corner of the face
+/// is on the line of a chord the point is on, but for the two arcs between the
+/// same two corners above: a gap, for faces no solid here has.
 ///
 /// [`Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`] when no point off
 /// the plane can be found ([`a_point_off_the_plane`]), and [`Error::Undecidable`]
@@ -2319,7 +2330,7 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
             None => return Ok(OnAFace::OnItsBoundary),
         }
     }
-    let mut on_a_chord: Option<(usize, Decision)> = None;
+    let mut chords = Vec::new();
     let mut along = Vec::with_capacity(sides.len());
     for (index, side) in sides.iter().enumerate() {
         let [from, to] = [side.start.placed, side.end.placed];
@@ -2340,11 +2351,12 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
         };
         let on_the_left =
             is_the_arc_left_of_its_chord(flat, side, *into_the_arc).ok_or_else(cannot)?;
-        let [arcs_side, away] = if on_the_left {
-            [Decision::Pos, Decision::Neg]
+        let arcs_side = if on_the_left {
+            Decision::Pos
         } else {
-            [Decision::Neg, Decision::Pos]
+            Decision::Neg
         };
+        let piece = if on_the_left { -1 } else { 1 };
         let read = side_of_surface(&side.across_placed, point);
         let read = if matches!(side.across, Surface::Torus(_))
             && matches!(read, Decision::Pos | Decision::Neg | Decision::Zero)
@@ -2372,13 +2384,12 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
             Decision::Zero if beside == arcs_side || beside == Decision::Zero => {
                 return Ok(OnAFace::OnItsBoundary);
             }
-            Decision::Neg if beside == arcs_side => winding += if on_the_left { -1 } else { 1 },
-            Decision::Neg if beside == Decision::Zero => {
-                if on_a_chord.is_some() {
-                    return Err(cannot());
-                }
-                on_a_chord = Some((index, away));
-            }
+            Decision::Neg if beside == arcs_side => winding += piece,
+            Decision::Neg if beside == Decision::Zero => chords.push(AChordThrough {
+                index,
+                arcs_side,
+                piece,
+            }),
             Decision::Zero | Decision::Neg | Decision::Pos => (),
             Decision::Undecidable { enclosure } => {
                 return Err(gave_up_on_a_side(&side.across_placed, point, enclosure));
@@ -2387,33 +2398,45 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
         }
     }
 
-    let mut corners = sides.iter().map(|side| side.start.placed);
-    let aim = match on_a_chord {
-        None => corners.next(),
-        Some((chord, _)) => {
-            let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
-            corners.find(|corner| {
-                matches!(
-                    decide(
-                        from,
-                        to,
-                        target,
-                        PredicatePoint::from(corner.coordinates()),
-                        policy,
-                        log
-                    ),
-                    Decision::Pos | Decision::Neg
-                )
+    let mut aimed = None;
+    for corner in sides.iter().map(|side| side.start.placed) {
+        let at = PredicatePoint::from(corner.coordinates());
+        let towards: Vec<Decision> = chords
+            .iter()
+            .map(|chord| {
+                let side = &sides[chord.index];
+                decide(side.start.placed, side.end.placed, target, at, policy, log)
             })
+            .collect();
+        if towards
+            .iter()
+            .all(|found| matches!(found, Decision::Pos | Decision::Neg))
+        {
+            aimed = Some((corner, towards));
+            break;
         }
     }
-    .ok_or_else(cannot)?;
+    let Some((aim, towards)) = aimed else {
+        let [one, other] = chords.as_slice() else {
+            return Err(cannot());
+        };
+        let [first, second] = [&sides[one.index], &sides[other.index]];
+        if first.start.key != second.end.key || first.end.key != second.start.key {
+            return Err(cannot());
+        }
+        if one.arcs_side == other.arcs_side {
+            winding += other.piece;
+        }
+        return Ok(held_where_it_winds(winding));
+    };
+    for (chord, toward) in chords.iter().zip(towards) {
+        along[chord.index] = toward;
+        if toward == chord.arcs_side {
+            winding += chord.piece;
+        }
+    }
 
     for (index, side) in sides.iter().enumerate() {
-        let along = match on_a_chord {
-            Some((chord, away)) if chord == index => away,
-            _ => along[index],
-        };
         let [from, to] = [side.start.placed, side.end.placed].map(|corner| {
             if corner == aim {
                 Decision::Zero
@@ -2421,15 +2444,29 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
                 decide(corner, aim, target, point, policy, log)
             }
         });
-        winding += crossing(from, to, along).ok_or_else(|| {
+        winding += crossing(from, to, along[index]).ok_or_else(|| {
             gave_up_turning_a_corner(point, whichever_of_them_was_not_read(from, to))
         })?;
     }
-    Ok(if winding == 0 {
+    Ok(held_where_it_winds(winding))
+}
+
+/// An arc of a flat face whose chord `point` is on, strictly inside the arc's
+/// curve, so strictly between the chord's ends: which side of the chord the
+/// arc is on, and what its piece adds to the count where the point is in it.
+struct AChordThrough {
+    index: usize,
+    arcs_side: Decision,
+    piece: i64,
+}
+
+/// A face holds a point it winds round, and no other.
+fn held_where_it_winds(winding: i64) -> OnAFace {
+    if winding == 0 {
         OnAFace::NotHeld
     } else {
         OnAFace::Held
-    })
+    }
 }
 
 /// Whether an arc lies on the left of its chord, going from its start to its
@@ -2536,7 +2573,10 @@ fn is_on_the_other_nappe_from_the_arc(
 /// A side across anything but a plane, or a ruling, is refused, since its curve
 /// is not flat and has no chord to read a piece off. So is `point` at the apex,
 /// which is where every ruling is seen, and a point on the chords of two arcs
-/// at once, as the flat face refuses it.
+/// at once, which the flat face reads since row Q1258. No cone face built
+/// reaches that here: a lens of two arcs alone is answered by the steps
+/// before this, and one with a hole is refused when it is built
+/// (`a_chip_of_a_cone_holed_through_is_refused_before_its_chord_is_asked`).
 ///
 /// # A side right round a closed curve
 ///
