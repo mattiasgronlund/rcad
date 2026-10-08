@@ -278,7 +278,8 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// Q1145 it is 27 refused, 6.12%, which leaves this threshold further off than
 /// the drift below argues for; it was moved down with neither. Just before
 /// Q1279 it was 30 of 447, 6.71%, and since Q1279 it is 16 of 447, 3.58%;
-/// the threshold was not moved then either.
+/// the threshold was not moved then either. Since Q1357 it is 13 of 447,
+/// 2.91%, and the threshold stays where it is.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
 /// drift — 6.1 points is twenty-six fuses, nearly four times the headroom
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
@@ -1684,6 +1685,14 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
 /// point, and one is [`AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES`], at a spread
 /// of `5 · 2^51`, which is what the third pair's union is refused at: an edge
 /// `2^-51` long beside a coordinate of 5, a limit ([`a_flat_refusal`]).
+///
+/// **Since Q1357 it is 13 of 447, from 16**: 12 name the point, and the edge
+/// too short is still one. The three are the rules of one pair, a comb and a
+/// leaning ell standing on its top, which stopped on a triangle a rounding
+/// across in the plane of the ell's floor and well off it. A flat piece no
+/// other rule places now takes the placement of the piece of its own face
+/// across a side that no plane of the other solid holds but the face's own
+/// (`tests/a_sliver_on_the_plane_of_a_face_it_misses.rs`).
 #[test]
 fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
     let tally = measured(a_skew_pair(), |configuration, tally| {
