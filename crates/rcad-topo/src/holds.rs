@@ -3167,18 +3167,7 @@ fn the_way_into_an_arc_that_does_not_close(
     else {
         return None;
     };
-    let apex_is_off_the_plane = matches!(
-        where_a_cones_apex_stands_against_a_plane(flat, cone),
-        Decision::Pos | Decision::Neg
-    );
-    let does_not_close = matches!(
-        how_a_plane_leans_against_a_cone(flat, cone),
-        Decision::Zero | Decision::Neg
-    );
-    if !apex_is_off_the_plane || !does_not_close {
-        return None;
-    }
-    let nappe_of_the_ends = the_nappe_both_ends_are_on(cone, ends)?;
+    let nappe_of_the_ends = the_nappe_an_arc_that_does_not_close_is_on(cone, flat, ends)?;
     let [from, to] = ends.map(|end| exactly(end.coordinates()));
     let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
     let square_to_the_chord = cross(exactly(flat.normal().components()), chord);
@@ -3194,6 +3183,35 @@ fn the_way_into_an_arc_that_does_not_close(
     })
 }
 
+/// The nappe of `cone` an arc between `ends` of the curve `flat` cuts it in is
+/// on, as [`the_nappe_both_ends_are_on`] reads it, where that curve is a
+/// parabola or one branch of a hyperbola: `None` unless the apex is strictly
+/// off the plane, the curve does not close, and both ends are on one nappe,
+/// each read exactly off the stored numbers.
+///
+/// On the plane, the inside of the cone on that nappe is the convex region the
+/// arc's branch bounds ([`the_way_into_an_arc_that_does_not_close`] has why),
+/// and on a hyperbola's plane the inside of the other nappe is a second region
+/// that is no part of it.
+pub(crate) fn the_nappe_an_arc_that_does_not_close_is_on(
+    cone: &rcad_geom::Cone,
+    flat: &Plane,
+    ends: [Point; 2],
+) -> Option<Decision> {
+    let apex_is_off_the_plane = matches!(
+        where_a_cones_apex_stands_against_a_plane(flat, cone),
+        Decision::Pos | Decision::Neg
+    );
+    let does_not_close = matches!(
+        how_a_plane_leans_against_a_cone(flat, cone),
+        Decision::Zero | Decision::Neg
+    );
+    if !apex_is_off_the_plane || !does_not_close {
+        return None;
+    }
+    the_nappe_both_ends_are_on(cone, ends)
+}
+
 /// [`Decision::Pos`] when both `ends` are strictly up `cone`'s axis from its
 /// apex and [`Decision::Neg`] when both are strictly down it, read exactly off
 /// the stored numbers; `None` otherwise.
@@ -3204,7 +3222,7 @@ fn the_nappe_both_ends_are_on(cone: &rcad_geom::Cone, ends: [Point; 2]) -> Optio
 
 /// Which way up `cone`'s axis from its apex `at` is, as a sign: the nappe it is
 /// on, or [`Decision::Zero`] level with the apex.
-fn the_nappe_of(cone: &rcad_geom::Cone, at: [Interval; 3]) -> Decision {
+pub(crate) fn the_nappe_of(cone: &rcad_geom::Cone, at: [Interval; 3]) -> Decision {
     let apex = exactly(cone.apex().coordinates());
     let up = exactly(cone.axis().direction().components());
     dot(core::array::from_fn(|axis| at[axis] - apex[axis]), up).sign()
@@ -6709,24 +6727,26 @@ fn the_picker_this_face_is_read_past(
 /// point says its own sign.
 ///
 /// **Only where both curves go right round one axis and the half-space faces
-/// exactly along it**, and of the pairs `Model::validate` reads a corner of the
-/// same way (`validate.rs`'s `what_a_corner_past_the_picker_says`, row Q1190),
-/// only those with no ball in them: a pipe and a pipe or a cone [`intersect`]
-/// cuts it in two such curves by, the axis being the pipe's, and a cone and a
-/// pipe or a second cone on its axis, the axis being the cone's. Each curve
+/// exactly along it**, which are the pairs `Model::validate` reads a corner of
+/// the same way (`validate.rs`'s `what_a_corner_past_the_picker_says`, row
+/// Q1190) and `arrange.rs`'s `whether_past_the_picker` reads a point of a
+/// fuse's arrangement by: a pipe and anything [`intersect`] cuts it in two such
+/// curves by, the axis being the pipe's; a cone and a pipe, a second cone or a
+/// ball on its axis, the axis being the cone's; and a ball and a cone whose
+/// axis runs through its centre, the axis again being the cone's. Each curve
 /// then cuts the surface in two, the half-space holds the edge's curve and not
 /// the other, and everything of the surface past the half-space's flat surface
 /// is on the curve's side towards it: on a cone through the apex, which joins
-/// the two nappes.
+/// the two nappes, and on a ball as the cap past the flat surface.
 ///
-/// **A ball on either side is left refused, though the same reading holds of
-/// it.** Read that way too, taking a cone closed by a ball on its axis out of
-/// a cut cone panics in `fuse/assemble.rs` — "2 rings of a joined face enclose
-/// no area between their corners" — where it was refused
-/// `AFaceTrimmedByACurveThisCannotFollow`
+/// A ball on either side was left out for a while (Q1218), because reading it
+/// let a cut cone and a cone closed by a ball on its axis reach a panic in
+/// `fuse/assemble.rs`'s `rings_round`, whose rings each ran along a hyperbola.
+/// That was `holds_the_other_rings` not reading an arc of a curve that does not
+/// close, and it does now
 /// (`tests/a_joined_flat_face_whose_rings_enclose_no_area.rs`'s
-/// `a_cut_cone_less_a_cone_closed_by_a_ball_is_refused_on_the_balls_cap`).
-/// A refusal is kept over a crash until that is fixed (row Q1218's report).
+/// `a_cut_cone_and_a_cone_closed_by_a_ball_are_answered_under_every_rule`,
+/// Q1289).
 ///
 /// The half-space is the one [`intersect`] names the curve by
 /// ([`the_picker_naming_the_circle_through`]). A pair `intersect` refuses to
@@ -6736,8 +6756,9 @@ fn the_picker_this_face_is_read_past(
 /// flat surface, laid onto the surface: `|g|²·d − (g·d)·g` for the surface's
 /// gradient `g` and `d` the half-space's normal turned round, and `d` itself on
 /// a pipe, whose gradient is square to its axis. On a cone that runs along the
-/// ruling. `None` where that is [`Decision::Zero`], which is the two surfaces
-/// touching rather than crossing there.
+/// ruling, and on a ball along the line of longitude. `None` where that is
+/// [`Decision::Zero`], which is the two surfaces touching rather than crossing
+/// there.
 ///
 /// # Errors
 ///
@@ -6750,12 +6771,17 @@ fn what_lies_past_the_picker(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<PastThePicker>> {
-    if !matches!(partner, Surface::Cylinder(_) | Surface::Cone(_)) {
+    if !matches!(
+        partner,
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+    ) {
         return Ok(None);
     }
     let axis = if let Surface::Cylinder(pipe) = surface {
         pipe.axis()
-    } else if let Surface::Cone(cone) = surface {
+    } else if let (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) =
+        (surface, partner)
+    {
         cone.axis()
     } else {
         return Ok(None);
