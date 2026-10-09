@@ -899,6 +899,48 @@ mod tests {
         );
     }
 
+    /// **A trial that settles back onto the point it set out from is shortened
+    /// by its exponent, as one that could not be settled is.** A pipe of radius
+    /// 4 about `z` and one of radius 1 along `x` at `z = 5` cross through the
+    /// fat one's axis in two loops, and the coarse walk's room is `f64::MAX / 4`.
+    /// From `(4, 0, 6)` along `−y` the first trial, `4.5e307`, cannot be
+    /// settled, and every trial from its root `6.7e153` down settles back onto
+    /// `(4, 0, 6)` exactly, a chord of `0`. Halved, the fifty shortenings ran
+    /// out at `2.4e139` and the walk was refused as the two pipes being tangent
+    /// while settling, which they are nowhere. Rooted, the trials from `6.7e153`
+    /// to `1.7e19` settle onto the seed, `4.1e9` cannot be settled, `6.4e4`
+    /// lands on the loop `1.8` away, and half that chord is taken.
+    #[test]
+    fn a_trial_that_settles_back_onto_its_start_is_shortened_by_its_root() {
+        let fat = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 4.0);
+        let thin = a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 5.0], 1.0);
+
+        let walked = march(
+            [&fat, &thin],
+            Point::new(4.0, 0.0, 6.0),
+            f64::MAX / 4.0,
+            1 << 20,
+        )
+        .expect("a thin pipe through a fat one's axis crosses it in two loops");
+
+        println!("{walked:?}");
+        for point in &walked.points {
+            assert!(
+                (f64::hypot(point.x(), point.y()) - 4.0).abs() <= walked.deviation
+                    && (f64::hypot(point.y(), point.z() - 5.0) - 1.0).abs() <= walked.deviation,
+                "a point on both pipes, not {point:?} give or take {}",
+                walked.deviation
+            );
+        }
+        assert!(
+            walked.points.iter().any(|point| point.z() < 5.0)
+                && walked.points.iter().any(|point| point.y() < 0.0)
+                && walked.points.iter().any(|point| point.y() > 0.0),
+            "the walk goes right round the thin pipe from above it: {:?}",
+            walked.points
+        );
+    }
+
     /// Two surfaces tangent along their crossing have no direction to follow,
     /// and saying so is the branch §24.1 built this to be able to watch.
     #[test]
