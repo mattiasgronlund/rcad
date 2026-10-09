@@ -401,14 +401,15 @@ fn a_bends_cap_holds_nothing_on_or_beside_the_rings_axis() {
 /// question: on the cap's plane the tube holds nothing nearer the axis than
 /// `g`, and the half-space is strictly on one side or the other there.
 ///
-/// **Two of the bend's answers are refusals where an answer exists.** The cap's
-/// corner is on the bend's skin and `(−g, 0, 0)` is outside it, and
-/// `classify_point` says `CannotFireARayAtAFacesSurface` of both, naming the
-/// wall. Both points are on the torus. The corner of the bend of ring four and
-/// tube one, `(3, 0, 0)`, answers `OnBoundary`, and the bend of ring four and
-/// tube `4 − g` refuses its corner `(g, 0, 0)` the same way, so it is not the
-/// ring's size. Why no ray was fired is not traced. A gap, pinned as it stands;
-/// Q418's lane filed it.
+/// **Both these answer, and so does the ring four, tube `4 − g` corner.** The
+/// cap's corner is on the bend's skin, `OnBoundary`, and `(−g, 0, 0)` is
+/// outside it, `Outside`. Before Q459's slide, `classify_point` said
+/// `CannotFireARayAtAFacesSurface` of both, naming the wall; the slide to
+/// `where_a_line_meets_a_surface` that answers the size-one question at
+/// `1e-159` also answers the ray this corner fires (§349.8, §349.10). The
+/// corner of the bend of ring four and tube one, `(3, 0, 0)`, answers
+/// `OnBoundary` too, and so does ring four and tube `4 − g`'s corner, pinned
+/// below.
 ///
 /// `g` keeps this inside §3.5's envelope: the bend is two across and `g` is
 /// about `1e-9`. At `g = 2⁻⁵²` the bend is refused at build,
@@ -419,12 +420,6 @@ fn a_bend_whose_tube_all_but_reaches_its_axis_holds_only_its_own_side_of_it() {
     let gap = 2.0_f64.powi(-30);
     let (model, solid, cap) = a_bend_and_its_cap_through(1.0, 1.0 - gap);
     let bend = model.solid(solid).expect("this model made the key");
-    let wall = bend
-        .faces()
-        .find(|face| face.surface().as_plane().is_none())
-        .expect("a bend has a curved wall")
-        .key();
-    let refused_at_the_wall = Containment::CannotFireARayAtAFacesSurface { face: wall };
     let a_hair = 2.0_f64.powi(-1000);
     let mut wrong = Vec::new();
     for (point, on_the_face, in_the_solid, why) in [
@@ -491,14 +486,14 @@ fn a_bend_whose_tube_all_but_reaches_its_axis_holds_only_its_own_side_of_it() {
         (
             [gap, 0.0, 0.0],
             OnAFace::OnItsBoundary,
-            refused_at_the_wall,
-            "the cap's corner, where OnBoundary is right",
+            Containment::OnBoundary,
+            "the cap's corner",
         ),
         (
             [-gap, 0.0, 0.0],
             OnAFace::NotHeld,
-            refused_at_the_wall,
-            "the other circle, where Outside is right",
+            Containment::Outside,
+            "the other circle",
         ),
         (
             [2.0 * gap, 0.0, 0.0],
@@ -670,4 +665,33 @@ fn on_and_beside_the_axis(model: &Model, solid: SolidKey, cap: FaceKey) -> Vec<[
         }
     }
     points
+}
+
+/// The cap's corner of a bend of ring four and tube `4 − g`, with
+/// `g = 2⁻³⁰`: the same shape as
+/// [`a_bend_whose_tube_all_but_reaches_its_axis_holds_only_its_own_side_of_it`]
+/// at four times the size. Before Q459's slide this corner refused the same
+/// way, `CannotFireARayAtAFacesSurface`; the slide answers it too, `OnBoundary`,
+/// so it is not the ring's size that moved the refusal (§349.10).
+#[test]
+fn a_bigger_bends_cap_corner_also_answers_since_the_slide() {
+    let gap = 2.0_f64.powi(-30);
+    let (model, solid, cap) = a_bend_and_its_cap_through(4.0, 4.0 - gap);
+    let bend = model.solid(solid).expect("this model made the key");
+    let found_on_the_face = bend.face_holds_the_point(
+        cap,
+        PredicatePoint::from([gap, 0.0, 0.0]),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    let found_in_the_solid = bend.classify_point(
+        Point::from([gap, 0.0, 0.0]),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(found_on_the_face, Ok(OnAFace::OnItsBoundary)),
+        "{found_on_the_face:?}"
+    );
+    assert_eq!(found_in_the_solid, Containment::OnBoundary);
 }
