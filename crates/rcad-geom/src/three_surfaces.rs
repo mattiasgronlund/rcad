@@ -2601,7 +2601,7 @@ fn what_a_plane_through_a_rings_axis_leaves_of_a_pipe_along_its_core(
         log,
     )? {
         Decision::Zero => return Ok(MeetOfThree::MoreThanAPoint),
-        sign @ (Decision::Pos | Decision::Neg) => sign,
+        sign @ Decision::Pos | sign @ Decision::Neg => sign,
         Decision::Undecidable { .. } => {
             unreachable!("`ask` hands an undecided sign back as an error")
         }
