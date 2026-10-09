@@ -1647,6 +1647,12 @@ fn in_the_bulge_of(
     in_plane: &InPlane,
     point: PredicatePoint,
 ) -> Option<i32> {
+    if let Surface::Torus(ring) = side.carried_by[1]
+        && meridian.is_none()
+        && side.material_side == Decision::Pos
+    {
+        return across_the_inner_disk(flat, &ring, side, in_plane, point);
+    }
     let one_round_region = match side.carried_by[1] {
         Surface::Sphere(_) => true,
         Surface::Cylinder(pipe) => pipe.is_cut_in_a_closed_curve_by(flat) == Some(true),
@@ -1664,20 +1670,72 @@ fn in_the_bulge_of(
     if !one_round_region || side.material_side != Decision::Neg {
         return Some(0);
     }
-    // Compared rather than matched, so that `Decision`'s wildcard arm is not
-    // written once more (§40): a zero or an undecided turn is `None` either way.
+    let turn = which_side_of_the_chord(flat, side, in_plane, point)?;
+    Some(if turn == Decision::Neg { 1 } else { 0 })
+}
+
+/// What a side along `ring` whose material is outside it counts for `point`,
+/// which [`the_piece_holds`] has already found outside the ring: on a plane
+/// square to the ring's axis, minus one along the outer circle and one along
+/// the inner where `point` is in the inner disk and on the arc's side of the
+/// chord, and nothing on any other plane or anywhere else. `None` where the
+/// pipe of the ring's own radius or the chord cannot say.
+///
+/// **The arc and its chord wind once round what is between them**, clockwise
+/// for an arc that runs clockwise round the axis, which is the outer circle's
+/// way with the material outside it on the left, and the other way round for
+/// the inner circle's. What is between an arc of the outer circle and its chord
+/// is outside the ring only where it is in the inner disk, and the inner disk
+/// is all outside the ring; a point outside the ring is in the inner disk
+/// exactly when it is inside the pipe of the ring's own radius, which runs
+/// between the two circles. Counting nothing, the piece of `z = 0` beyond the
+/// ring of four round a tube of one, between `x = 0` and a pipe of 10, held a
+/// point of the inner disk
+/// (`a_plate_beyond_a_rings_outer_circle_holds_no_point_of_the_inner_disk`),
+/// and the half disk inside the circle of 3 held none of its own
+/// (`a_half_disk_inside_a_rings_inner_circle_holds_its_own_points`).
+fn across_the_inner_disk(
+    flat: &Plane,
+    ring: &Torus,
+    side: &FaceMeet,
+    in_plane: &InPlane,
+    point: PredicatePoint,
+) -> Option<i32> {
+    if !is_square_to_the_axis(flat, ring) {
+        return Some(0);
+    }
+    let outer = runs_round_the_outer_circle(flat, ring, side)?;
+    match the_pipe_of_the_rings_own_radius(ring).side_of(point) {
+        Decision::Neg => (),
+        Decision::Pos => return Some(0),
+        Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+    }
+    let (where_the_arc_is, counts) = if outer {
+        (Decision::Pos, -1)
+    } else {
+        (Decision::Neg, 1)
+    };
+    let turn = which_side_of_the_chord(flat, side, in_plane, point)?;
+    Some(if turn == where_the_arc_is { counts } else { 0 })
+}
+
+/// Which side of the chord between `side`'s two ends, stretched to the plane,
+/// `point` is on: `Neg` on the right, `Pos` on the left, and `None` on the
+/// chord's line or where that could not be shown.
+fn which_side_of_the_chord(
+    flat: &Plane,
+    side: &FaceMeet,
+    in_plane: &InPlane,
+    point: PredicatePoint,
+) -> Option<Decision> {
     let [from, to] = side
         .ends
         .each_ref()
         .map(|end| stretched_to_the_plane(flat, end.point()));
     let turn = in_plane.turn(from?, to?, point);
-    if turn == Decision::Neg {
-        Some(1)
-    } else if turn == Decision::Pos {
-        Some(0)
-    } else {
-        None
-    }
+    // Compared rather than matched, so that `Decision`'s wildcard arm is not
+    // written once more (§40): a zero or an undecided turn is `None` either way.
+    (turn == Decision::Neg || turn == Decision::Pos).then_some(turn)
 }
 
 /// Whether `point` is, provably, on the same half of the double cone as both
@@ -1713,21 +1771,31 @@ fn is_on_the_nappe_the_side_is_on(cone: &Cone, side: &FaceMeet, point: Predicate
 /// shown off the pipe of the ring's own radius, which has one circle inside it
 /// and the other outside.
 ///
-/// Square is asked exactly, as `holds.rs` asks it ([`lie_along_one_line`]).
 fn runs_round_the_outer_circle(flat: &Plane, ring: &Torus, side: &FaceMeet) -> Option<bool> {
-    if !lie_along_one_line(
-        flat.normal().components(),
-        ring.axis().direction().components(),
-    ) {
+    if !is_square_to_the_axis(flat, ring) {
         return Some(false);
     }
-    let pipe = Cylinder::new(ring.axis(), ring.ring_radius())
-        .expect("a ring's radius is finite and above nothing, which is all a pipe's needs");
-    match pipe.side_of(side.ends[0].point()) {
+    match the_pipe_of_the_rings_own_radius(ring).side_of(side.ends[0].point()) {
         Decision::Pos => Some(true),
         Decision::Neg => Some(false),
         Decision::Zero | Decision::Undecidable { .. } | _ => None,
     }
+}
+
+/// Whether `flat` is square to `ring`'s axis, asked exactly, as `holds.rs`
+/// asks it ([`lie_along_one_line`]).
+fn is_square_to_the_axis(flat: &Plane, ring: &Torus) -> bool {
+    lie_along_one_line(
+        flat.normal().components(),
+        ring.axis().direction().components(),
+    )
+}
+
+/// The pipe round `ring`'s axis through the middle of its tube, which a plane
+/// square to the axis meets between the two circles it cuts the ring in.
+fn the_pipe_of_the_rings_own_radius(ring: &Torus) -> Cylinder {
+    Cylinder::new(ring.axis(), ring.ring_radius())
+        .expect("a ring's radius is finite and above nothing, which is all a pipe's needs")
 }
 
 /// The surface that cut a wire made of one closed curve, or `None` for a wire
