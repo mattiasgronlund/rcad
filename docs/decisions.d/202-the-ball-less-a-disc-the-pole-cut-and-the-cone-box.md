@@ -51,9 +51,18 @@ difference that base had** (net 24 → 27). It is refused
 back is mesh work: cutting up a cap whose one corner is a pole and which holds
 no pole.
 
-Every turned bar and ball fuse on the shipped corpus now answers, so
+Every turned bar and ball fuse the shipped corpus draws now answers, so
 `fuses_that_must_agree.rs` pins their demonstrated refusals at zero (bar 6 → 0,
 ball 3 → 0). The frustum still has some.
+
+**Scoped to the 128 configurations the fixed seed draws at `RCAD_SOAK_FACTOR`'s
+default of 1 (`MEASURED_CASES`), which is what "the shipped corpus" means
+above and nothing wider.** A soak past that corpus draws configurations the
+128 never do, and §290.4 B found one: a turned bar through a block, case 687
+of `RCAD_SOAK_SEED=112 RCAD_SOAK_FACTOR=66`, that refused a union the shipped
+128 never drew. It is not a new kind of gap — it is the same turned-fixture
+gap this section already names, just at a configuration outside what "now
+answers" above was ever measured against.
 
 Checked here, since the verifier never ran: `fuse/arrange.rs` and `assemble.rs`
 put back to `4514eff4`, then `just t -p rcad-topo --test
