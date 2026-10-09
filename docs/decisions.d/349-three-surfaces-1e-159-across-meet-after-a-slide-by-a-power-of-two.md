@@ -344,3 +344,15 @@ classified `Outside` before and after, so no answer moved there.
   the line's direction among them, span more binades than one slide fits. A
   direction written at a scale far from the surface's widens the span. Nothing
   here tried it.
+
+- 2026-10-09: Q1075's three bend refusals — the cap's corner and the other
+  circle of ring one, tube `1 − g`, and the cap's corner of ring four, tube
+  `4 − g` — all answer since the slide above. The pin in
+  `a_bends_cap_holds_one_of_the_two_disks.rs` moved: the two points of
+  `a_bend_whose_tube_all_but_reaches_its_axis_holds_only_its_own_side_of_it`
+  that read `refused_at_the_wall` now read `Containment::OnBoundary` and
+  `Containment::Outside`, and the ring four corner is pinned in its own test,
+  `a_bigger_bends_cap_corner_also_answers_since_the_slide`, both measured
+  against `2a06994c` first and the slide's tip after. What Q1075 still has
+  left is the root finder's refusal on the bend's quartic, carried as a row
+  after this one.
