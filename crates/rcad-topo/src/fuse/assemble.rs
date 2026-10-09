@@ -5484,6 +5484,14 @@ fn closes_on_itself(meet: &FaceMeet) -> bool {
 /// out: a plane can cut it in two circles, and its pair's name tells only a
 /// plane through its axis's two apart (§378.4).
 ///
+/// **One plane, at any scale.** Each pair holds the plane as its own side was
+/// cut, and a third solid's face on the same plane can cut the ball first and
+/// spell it with numbers an ulp apart in scale from the cap's. The two
+/// spellings were compared folding only the negation, so a ball on a bar's
+/// cap that a block's face spelled that way was refused as not a manifold in
+/// every fuse; they are compared by [`name_of_the_plane_at_any_scale`] now
+/// (`tests/a_turned_plane_exactly_proportional_to_another.rs`).
+///
 /// **Two curved surfaces with no plane between them are left apart.** The
 /// argument above is about conics in one plane. A cone and a pipe on one axis
 /// cross in two circles, one either side of the apex, and only one of them can
@@ -5515,7 +5523,8 @@ fn the_name_each_closed_curve_goes_by<'a>(
     let named: Vec<(&CurveName, &(Plane, Surface))> = cut_out_of.iter().collect();
     for (at, &(&one, (flat, mine))) in named.iter().enumerate() {
         for &(&other, (other_flat, theirs)) in &named[at + 1..] {
-            if !one_surface(&Surface::Plane(*flat), &Surface::Plane(*other_flat))
+            if name_of_the_plane_at_any_scale(&Surface::Plane(*flat))
+                != name_of_the_plane_at_any_scale(&Surface::Plane(*other_flat))
                 || !matches!(
                     meet_of_three_surfaces(
                         [&Surface::Plane(*flat), mine, theirs],
@@ -6896,7 +6905,8 @@ fn is_written_the_other_way_round(flat: &Surface) -> bool {
 /// apart. [`name_of_the_surface_either_way_round`] folds only the negation and
 /// gave those two names, so the arc they both run along was two edges of one
 /// face each, and so was a whole circle
-/// ([`name_of_the_closed_crossing_through`],
+/// ([`name_of_the_closed_crossing_through`]) and a bar's rim a ball sits on
+/// ([`the_name_each_closed_curve_goes_by`];
 /// `tests/a_turned_plane_exactly_proportional_to_another.rs`).
 ///
 /// **The fold is exact.** Each coefficient that is not zero is an odd whole

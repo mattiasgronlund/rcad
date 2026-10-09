@@ -36,13 +36,21 @@
 //! circle as one spelling and the flat face as the other, so the closed edge
 //! was named twice (`a_ball_cut_whole_by_a_plane_two_blocks_spell_an_ulp_apart_in_scale`).
 //!
+//! **So did a rim three surfaces meet in.** A ball on the cap of a bar of its
+//! own radius, the cap turned about `x` onto `y = z` and a block clear of both
+//! turned onto it with the other spelling, was refused the same way in every
+//! fuse with the bar spelling the plane `c′`: the rim's two names, the cap with
+//! the bar's wall and the plane with the ball, were joined only where the two
+//! planes were spelled alike or negated
+//! (`a_ball_on_a_bars_cap_a_block_spells_an_ulp_apart_in_scale`).
+//!
 //! # What each volume is held to
 //!
 //! Each block takes half of the cap of height two, `26π/3`, and half of its
-//! curved skin, `10π`. Every vertex of a mesh is on the ball and every triangle
-//! a chord of it, so a round wall bounding a solid from outside measures under
-//! its closed form and one that is a hole measures over, by no more than that
-//! wall's area times [`DEFLECTION`].
+//! curved skin, `10π`. Every vertex of a mesh is on its ball or its bar and
+//! every triangle a chord of it, so a round wall bounding a solid from outside
+//! measures under its closed form and one that is a hole measures over, by no
+//! more than that wall's area times [`DEFLECTION`].
 
 use core::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI};
 
