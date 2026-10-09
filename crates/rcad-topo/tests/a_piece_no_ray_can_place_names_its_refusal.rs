@@ -26,7 +26,8 @@
 //! placed by some other point or rule, and every one of those fuses is refused
 //! at a later piece no point was found inside. One test of that run,
 //! `a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_an_ulp_apart_are_refused`,
-//! stopped at its first fuse, so its others were not run.
+//! stopped at its first fuse; run again with all 24 of its fuses let through,
+//! it printed none.
 
 use core::f64::consts::{FRAC_PI_2, PI};
 
