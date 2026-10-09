@@ -1191,6 +1191,29 @@ fn a_thin_bar_through_a_fat_one_is_refused_by_the_check_after_the_arrangement() 
     }
 }
 
+#[test]
+fn probe_q1494() {
+    let off: f64 = std::env::var("PROBE_OFF").map_or(0.5, |v| v.parse().unwrap());
+    let seam: i32 = std::env::var("PROBE_SEAM").map_or(1, |v| v.parse().unwrap());
+    let which: usize = std::env::var("PROBE_RULE").map_or(0, |v| v.parse().unwrap());
+    let (rule, swapped) = every_rule_both_ways().nth(which).unwrap();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let [first, second] = a_thin_bar_through_a_fat_one(&mut model, off, seam);
+    let [one, other] = if swapped {
+        [second, first]
+    } else {
+        [first, second]
+    };
+    let answer = model.fuse(
+        &[one],
+        &[other],
+        rule,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    println!("{rule:?} swapped {swapped}: {answer:?}");
+}
+
 /// The trapezium rule [`what_a_thin_bar_through_a_fat_one_shares`] works the
 /// shared volume out by has closed in on it by 32 points, and what it gives is
 /// less than all of the thin bar.
