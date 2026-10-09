@@ -2306,7 +2306,7 @@ impl<'f> Arrangement<'f> {
             .filter(|node| node.crossings.contains(&crossing))
             .all(|node| {
                 node.vertex.is_none()
-                    && (self.face.bounds.provably_misses(node.point)
+                    && (self.is_provably_off_the_face(node.point)
                         || node.crossings.iter().all(|&other| {
                             other == crossing
                                 || left_out[other]
@@ -2314,6 +2314,18 @@ impl<'f> Arrangement<'f> {
                                 || self.the_faces_across_split_it_no_more(other, crossing)
                         }))
             })
+    }
+
+    /// Whether no point of `point`'s box is on the face: the box round the
+    /// face misses it, or it is strictly past a plane the face lies on one
+    /// side of ([`BakedFace::lies_in`]).
+    fn is_provably_off_the_face(&self, point: PredicatePoint) -> bool {
+        self.face.bounds.provably_misses(point)
+            || self
+                .face
+                .lies_in
+                .iter()
+                .any(|side| side.plane.side_of_point(point) == side.past_it())
     }
 
     /// Whether `along` is a crossing boundary edges run along, which the faces

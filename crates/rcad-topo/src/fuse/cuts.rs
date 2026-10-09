@@ -117,7 +117,7 @@ use std::collections::HashMap;
 use rcad_geom::{
     MeetOfThree, PlaneAgreement, Surface, SurfaceMeet, intersect, meet_of_three_surfaces,
 };
-use rcad_predicates::{Decision, Policy, ProvenanceLog};
+use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::{EdgeKey, Error, Result};
 
@@ -226,14 +226,9 @@ fn meets_it_only_on_its_boundary(face: &BakedFace, against: &BakedFace) -> bool 
             (agreement == PlaneAgreement::SameWay && mine.behind != theirs.behind)
                 || (agreement == PlaneAgreement::OppositeWay && mine.behind == theirs.behind)
         });
-        let past_it = if theirs.behind {
-            Decision::Pos
-        } else {
-            Decision::Neg
-        };
         on_the_other_side
             || anywhere_on_the_face
-                .is_some_and(|anywhere| theirs.plane.side_of_point(anywhere) == past_it)
+                .is_some_and(|anywhere| theirs.plane.side_of_point(anywhere) == theirs.past_it())
     })
 }
 

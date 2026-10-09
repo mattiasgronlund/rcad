@@ -1530,6 +1530,16 @@ impl ASideOfAPlane {
             Decision::Pos
         }
     }
+
+    /// The sign the plane gives a point strictly on the other side of it,
+    /// which no point of a face lying on this side is.
+    pub(crate) fn past_it(self) -> Decision {
+        if self.behind {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        }
+    }
 }
 
 /// Whether a face lies on the negative side of the face across a closed edge
