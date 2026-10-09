@@ -38,8 +38,8 @@
 //! the block, so the two overlap in a sliver, and every exact answer then
 //! needs a side shorter than the gap between two doubles, whose two ends round
 //! to one corner. Since queue row Q1353 the union and both differences answer
-//! as if the edge lay on the top, and the intersection is refused
-//! (`docs/decisions.md` §417). At `x = −2.5`,
+//! as if the edge lay on the top, and since queue row Q1442 the intersection
+//! answers no solid (`docs/decisions.md` §417). At `x = −2.5`,
 //! `−1.25` and `1.5` it stands a rounding above the top, the two share no
 //! point, and every answer is the two as they stand. That was a gap, refused
 //! for want of a point inside a piece of a face, until queue row Q1279 let a
@@ -164,8 +164,7 @@ fn every_answer_with_the_edge_a_rounding_into_the_top_needs_a_side_shorter_than_
     );
 }
 
-/// **The union and both differences answer as if the edge lay on the top, and
-/// the intersection is refused** `ResultIsNotManifold { count: 0 }`, under
+/// **Every rule both ways round answers as if the edge lay on the top**, under
 /// `Policy::certified()`.
 ///
 /// Every rule both ways round was refused `Undecidable` for want of *a point
@@ -184,8 +183,14 @@ fn every_answer_with_the_edge_a_rounding_into_the_top_needs_a_side_shorter_than_
 /// the sliver cut out of the block's top closes up, and what is written is the
 /// union of a prism resting on the top: the two as they stand, which validate
 /// and measure 240 and 24, as in [`LAID`]. Each difference is the first solid
-/// whole. The intersection is the sliver itself, and nothing of it is left to
-/// write.
+/// whole.
+///
+/// **The intersection is the sliver itself, and it is no solid.** Every wire
+/// of every piece of it walks out and back along the prism's edge, from
+/// `(−1.5, 0, 2)` to `(−1.5, 0, 8)`, and is left out. It was refused
+/// `ResultIsNotManifold { count: 0 }` until queue row Q1442: that edge was
+/// still made, with no face along it. It is now left out with the wires that
+/// walked it, and its two corners with it.
 #[test]
 fn the_prism_with_its_edge_a_rounding_into_the_blocks_top_answers_as_if_on_it() {
     let mut wrong = Vec::new();
@@ -202,10 +207,7 @@ fn the_prism_with_its_edge_a_rounding_into_the_blocks_top_answers_as_if_on_it() 
                 (Rule::Union, _) => differs(&model, answer, &[24.0, BLOCK]),
                 (Rule::Difference, false) => differs(&model, answer, &[BLOCK]),
                 (Rule::Difference, true) => differs(&model, answer, &[24.0]),
-                (Rule::Intersection, _) => match answer {
-                    Err(Error::ResultIsNotManifold { count: 0 }) => None,
-                    other => Some(format!("not refused with no face along an edge: {other:?}")),
-                },
+                (Rule::Intersection, _) => differs(&model, answer, &[]),
                 _ => unreachable!("EVERY_RULE holds only these three"),
             };
             if let Some(why) = outcome {
