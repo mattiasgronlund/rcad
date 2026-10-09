@@ -1678,8 +1678,11 @@ impl Assembly {
     /// bar standing inside the tube's wall is two pieces, and joined back up it
     /// is two whole circles of one corner each (`a_bar_inside_a_tubes_wall.rs`).
     /// A bar across the tube's wall, united with it, leaves an outline along
-    /// two pipes and a hole along two pipes, two corners each
-    /// (`a_joined_flat_face_whose_rings_enclose_no_area.rs`).
+    /// two pipes and a hole along two pipes, two corners each, and the top
+    /// halves of two half bends of one ring, united, leave on their joined
+    /// floor an outline and a hole each along one of the two circles the floor
+    /// cuts the ring in, two corners each
+    /// (`a_joined_flat_face_whose_rings_enclose_no_area.rs`, Q1387).
     /// A ring shown to hold the others is the outline and the rest are holes;
     /// with none shown to, and only one ring left that nothing could place,
     /// that one is the outline by the rule above.
@@ -1696,17 +1699,20 @@ impl Assembly {
     ///   half bar whose corner is their lens's corner reach it, both ways round
     ///   (`a_half_bar_whose_corner_is_the_lens_corner_mostly_answers` in
     ///   `a_lens_whose_hole_is_half_a_disk.rs`, Q1290).
-    /// - **Two or more rings enclosing nothing that nothing could place** — a
-    ///   ring along a torus. No shape is known to reach it. It is not that a
-    ///   torus refuses every fuse before the joining: a bend fused with a copy
-    ///   of itself reaches [`Assembly::join_up_what_is_one_face`] under all
-    ///   three rules (Q597). What keeps two rings along one torus off one
-    ///   joined flat face so far is the gap in `which_way_an_edge_runs_round`
-    ///   (`fuse/arrange.rs`) that stops the one probe that would put them there.
-    ///   A ring with a side along a hyperbola was the other such ring (Q1253),
+    /// - **Two or more rings enclosing nothing that nothing could place**: the
+    ///   ones [`Assembly::holds_the_other_rings`] answers `None` for. Of a ring
+    ///   along one torus, that is one whose plane rests on the tube, which
+    ///   touches it round one circle no picker names, and one where no corner
+    ///   of the other rings is placed. No shape is known to reach it. Two rings
+    ///   along one torus did, on the joined floor of the top halves of two half
+    ///   bends united, until such a ring was placed by its circle's disk
+    ///   (Q1387). A ring with a side along a hyperbola was another (Q1253),
     ///   and a shape reached it: united with a cone closed by a ball, a cut
     ///   cone's wall has an outline and a hole of two corners each, each with a
     ///   side along a hyperbola. Such a side is placed now (Q1289).
+    /// - **A ring along a torus with no `policy`**, which only a wholly flat
+    ///   input is joined with, so no such ring is there
+    ///   ([`joined_faces_of_an_input`]).
     /// - **Two or more rings each holding the others**, which would mean the
     ///   answer's rings cross. Nobody has traced whether any shape reaches it.
     fn rings_round(
@@ -1868,7 +1874,9 @@ impl Assembly {
     /// top halves of two half bends united join into the flat ring between two
     /// such circles (`a_joined_flat_face_whose_rings_enclose_no_area.rs`).
     ///
-    /// `None` where no corner is placed. Of a ring along more than one surface,
+    /// `None` where no corner is placed, and for a ring along a torus whose
+    /// plane rests on the tube and touches it round one circle, which no picker
+    /// names. Of a ring along more than one surface,
     /// `None` too where its corners are not on one line, where a closed side is
     /// one of several, for an arc along a torus, for an arc along a cone's
     /// parabola or hyperbola whose plane holds the apex or whose ends are not
@@ -5633,7 +5641,8 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// either side of it and which of their closed crossings it is. See
 /// [`which_curve_it_is`]. The third is, for an arc of a
 /// closed crossing between a plane and a surface that curves right round — a
-/// ball's circle, or a cone's rim circle — that curved surface and that plane,
+/// ball's circle, a cone's rim circle, or one of the two circles a plane cuts a
+/// ring in — that curved surface and that plane,
 /// or for an arc of the circle two balls, or a cone and a second cone, a pipe
 /// or a ball on its axis, cross in, the two of them, and which of the
 /// crossing's two arcs between the same two corners it is; see
@@ -6502,11 +6511,12 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 }
 
 /// Which of the two arcs between its corners a side is of a closed crossing
-/// between a plane and a surface that curves right round — a ball's circle, or
-/// a cone's rim circle and the ellipse a steeper plane leaves — together with
-/// that curved surface and that plane, or of the circle two balls cross in, or
-/// a cone and a second cone, a pipe or a ball on its axis, together with the
-/// two; `None` for any other side.
+/// between a plane and a surface that curves right round — a ball's circle, a
+/// cone's rim circle and the ellipse a steeper plane leaves, or one of the two
+/// circles a plane cuts a ring in — together with that curved surface and that
+/// plane, or of the circle two balls cross in, or a cone and a second cone, a
+/// pipe or a ball on its axis, together with the two; `None` for any other
+/// side.
 ///
 /// **Both arcs run between the same two corners and along the same two
 /// surfaces**, so nothing [`which_curve_it_is`] reads tells them apart. Most
@@ -6570,17 +6580,17 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// crossing paired the four faces crosswise: a lower half ball under two blocks
 /// side by side, united, had two faces walk one edge the same way, which the
 /// sweep refused (`tests/two_flat_faces_on_one_plane_facing_apart_along_an_arc.rs`).
-/// **The curved surface needs no such fold**: a pipe's and a cone's gradient
-/// are even in the axis direction, a pipe's does not move when its origin
-/// slides along the axis, and a ball has the one spelling.
+/// **The curved surface needs no such fold**: a pipe's, a cone's and a ring's
+/// gradient are even in the axis direction, a pipe's does not move when its
+/// origin slides along the axis, and a ball has the one spelling.
 ///
 /// **The plane costs here what it costs a closed edge, and not what it cost an
 /// open straight one.** [`which_curve_it_is`] records a plane in *every* open
 /// side's name splitting edges between two solids pressed flush, each working
 /// the plane they share out for itself. Only a side of a closed crossing
-/// between a plane and a ball, cone or pipe reaches this name, and those are
-/// the crossings every closed edge is already named by both surfaces of, folded
-/// the same way.
+/// between a plane and a ball, cone, pipe or ring reaches this name, and those
+/// are the crossings every closed edge is already named by both surfaces of,
+/// folded the same way.
 ///
 /// # A cone's rim circle is the same shape of thing, and its seam is not
 ///
@@ -6657,6 +6667,35 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// in that test file). A cone and a pipe written with the axis turned round
 /// have the same gradient, so the two are named either way round and nothing
 /// is turned round for how a face spells them.
+///
+/// # A plane and a ring cross in two circles
+///
+/// **And an answer can keep both halves of each between the same two
+/// corners.** The top halves, `z ≥ 0`, of the two half bends of one ring, ring
+/// 4 and tube 1, meet flush on `y = 0`, and united keep both floors and both
+/// walls: both halves of each circle `z = 0` cuts the ring in run between
+/// `(±5, 0, 0)`, or `(±3, 0, 0)`. Named by their corners alone the two halves
+/// were one edge with four faces along it, and the union both ways round was
+/// refused `ResultIsNotManifold { count: 4 }` (queue row Q1387,
+/// `tests/a_joined_flat_face_whose_rings_enclose_no_area.rs`).
+///
+/// **The sign rule holds on every circle named here.** `intersect` cuts a ring
+/// with a plane only where the plane is square to the ring's axis or holds it,
+/// and refuses every other plane as a quartic. At a point of a circle round
+/// the axis, `∇ring` lies in the plane through the axis and the point and has
+/// a part along the radius, and `∇plane` is the axis, so `∇ring × ∇plane` runs
+/// along the circle and the same turn about the axis carries it from one point
+/// to the next. That part along the radius vanishes only where the plane rests
+/// on the top or the bottom of the tube, and the one circle it touches there is
+/// named `RightRoundWhereItsFacesCross` with no picker, so
+/// [`the_picker_naming_the_circle_through`] answers `None` and so does this. On
+/// a meridian circle `∇ring` lies in the plane, square to `∇plane`, so their
+/// cross product runs along the circle and is never zero, since `∇ring` is not
+/// zero anywhere on the ring. A side is named only where exactly one of the two
+/// circles' pickers keeps its first end, which says the side is on that circle
+/// and not on the other. A ring written with its axis turned round has
+/// the same gradient, so the ring is named either way round, and the plane is
+/// folded as for a ball.
 ///
 /// Other pairs of curved surfaces that cross in closed curves — a ball and a
 /// pipe, two pipes — are not named here. Their curves can touch the line where
