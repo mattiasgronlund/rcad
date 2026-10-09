@@ -6007,10 +6007,11 @@ impl<'f> Arrangement<'f> {
         })
     }
 
-    /// On a ring's face: which side of a plane a walk is on, read off a
-    /// half-edge of it along the other circle that same plane cuts the ring in,
-    /// or `None` where the face is not a ring's, `partner` is not a plane, or no
-    /// half-edge runs along such a circle.
+    /// On a ring's face drawn on by one plane alone: which side of the plane a
+    /// walk is on, read off a half-edge of it along the other circle that plane
+    /// cuts the ring in, or `None` where the face is not a ring's, `partner` is
+    /// not a plane, some curve drawn on the face is not one of that plane's, or
+    /// no half-edge runs along such a circle.
     ///
     /// **Every node of such a walk is on the plane**, so the nodes say nothing
     /// ([`Arrangement::is_on_the_partner_of_a_crossing_through`]), and the half
@@ -6021,17 +6022,24 @@ impl<'f> Arrangement<'f> {
     /// each, and no piece of a ring with one circle round its axis cut out of
     /// it can be meshed (Q1513).
     ///
-    /// **Here the plane's sign is the side of both circles.** A plane cuts a
-    /// ring in two circles only square to its axis or through it (`intersect`'s
-    /// `where_a_plane_and_a_torus_cross`), and either way the two together cut
-    /// the ring into two pieces, one each side of the plane: the band over it
-    /// and the band under it, or the half on each side. The plane's sign is the
-    /// one sign all over each piece, and it is what
-    /// [`Arrangement::which_side_of_everything`] reads off a node of a walk
-    /// that is not on the plane, for either circle, since
-    /// [`Arrangement::whether_past_the_picker`] says [`PastThePicker::No`] on a
-    /// ring. The region left of a forward half-edge along either circle is the
-    /// plane's negative side, so a half-edge along one says the side of both.
+    /// **Where nothing else is drawn, the plane's sign is the side of both
+    /// circles.** A plane cuts a ring in two circles only square to its axis or
+    /// through it (`intersect`'s `where_a_plane_and_a_torus_cross`), and either
+    /// way the two together cut the ring into two pieces, one each side of the
+    /// plane: the band over it and the band under it, or the half on each side.
+    /// With no other curve drawn those two are the only regions, so the
+    /// plane's sign names the region a walk bounds. The region left of a
+    /// forward half-edge along either circle is the plane's negative side, so
+    /// a half-edge along one says the side of both.
+    ///
+    /// **With a second plane drawn the sign names no region**, and this says
+    /// nothing. Two planes square to the axis cut a ring into four bands, and
+    /// the band between them on the outside of the ring and the band between
+    /// them on the inside have the same sign against both planes. Read off the
+    /// other circle there, every walk round either band agreed with every
+    /// other, and the two bands were joined into one cell: a bar standing in a
+    /// whole ring's hole, in `a_plate_cut_by_a_whole_bend.rs`, whose two caps'
+    /// planes cut the ring between its equators.
     fn side_off_the_other_circle_a_plane_cuts_a_ring_in(
         &self,
         cycle: usize,
@@ -6040,7 +6048,11 @@ impl<'f> Arrangement<'f> {
         if !matches!(
             (self.surface, partner),
             (Surface::Torus(_), Surface::Plane(_))
-        ) {
+        ) || self
+            .arcs
+            .iter()
+            .any(|arc| self.crossings[arc.crossing].partner != *partner)
+        {
             return None;
         }
         self.cycles[cycle].iter().find_map(|&half_edge| {
