@@ -995,6 +995,179 @@ fn a_long_arc_whose_ends_no_plane_holds_comes_back_and_cuts_the_same() {
     }
 }
 
+#[test]
+#[ignore = "Q1460 probe, unfinished: the bar it builds is refused by SolidBuilder; see the relay handoff"]
+fn probe_q1460() {
+    use rcad_geom::{HalfSpace, Picker};
+    use rcad_predicates::expansion::{expansion_sign, expansion_sum, scale_expansion};
+    use rcad_predicates::{Decision, Point as PredicatePoint};
+
+    let [near, far, round] = [27_304_196.0_f64, 27_304_197.0, 38_613_965.0];
+    assert_eq!(near * near + far * far, round * round);
+    let k = 2f64.powi(-23);
+    for j in 0..=27 {
+        for t in [1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0] {
+            let s = 1.0 + t * 2f64.powi(-j);
+            let [n, f, r] = [near, far, round].map(|v| v * s * k);
+            let exact = [near, far, round]
+                .iter()
+                .all(|v| (v * s) * k / s / k == *v && (v * s) - v * t * 2f64.powi(-j) == *v);
+            let slice =
+                Plane::from_point_and_normal(Point::new(f, -n, 0.0), Vector::new(1.0, -1.0, 0.0))
+                    .expect("plane");
+            let pipe = rcad_geom::Cylinder::new(rcad_geom::Axis::z(), r).expect("pipe");
+            let meet = rcad_geom::intersect(
+                &Surface::Plane(slice),
+                &Surface::Cylinder(pipe),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let ends = [Point::new(f, -n, 0.0), Point::new(n, -f, 0.0)];
+            let facing = (ends[1] - ends[0]).cross(Vector::new(0.0, 0.0, -1.0));
+            let holds = [facing, facing.normalized().expect("n")].map(|normal| {
+                let through = HalfSpace::through_a_point_facing(ends[0], normal).expect("h");
+                ends.iter().all(|e| {
+                    through.side_of_point(PredicatePoint::from(e.coordinates())) == Decision::Zero
+                })
+            });
+            let on_slice = ends.map(|e| slice.side_of_point(PredicatePoint::from(e.coordinates())));
+            let builds = std::panic::catch_unwind(|| {
+                let mut model =
+                    Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+                a_bar_sliced_along_a_chord(
+                    &mut model,
+                    r,
+                    [[f, -n], [n, -f]],
+                    Vector::new(-1.0, 1.0, 0.0),
+                    Side::Long,
+                );
+            })
+            .is_ok();
+            if j < 12 {
+                continue;
+            }
+            println!(
+                "j {j} t {t} exact {exact} meet {} holds {holds:?} on_slice {on_slice:?} builds {builds}",
+                match &meet {
+                    Ok(_) => "ok".to_owned(),
+                    Err(e) => format!("err {e}"),
+                }
+            );
+        }
+    }
+    let s = 1.0 + 2f64.powi(-20);
+    let [near, far, radius] = [near, far, round].map(|n| n * s * k);
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0).expect("a working size"));
+    let built = a_bar_sliced_along_a_chord(
+        &mut model,
+        radius,
+        [[far, -near], [near, -far]],
+        Vector::new(-1.0, 1.0, 0.0),
+        Side::Long,
+    );
+    let text = rcad_step::write(&model, "probe")
+        .unwrap_or_else(|why| panic!("the bar is not written: {why}"));
+    let file = StepFile::read(text.as_bytes()).expect("parses");
+    let import = Import::read(&file, &policy, &mut log)
+        .unwrap_or_else(|why| panic!("the bar is refused on the way back in: {why}"));
+    let [(_, came)] = import.solids() else {
+        panic!("one solid came back as {}", import.solids().len());
+    };
+    let came = *came;
+    let there = import.model();
+    println!("validate: {:?}", there.validate(&policy, &mut log));
+    println!("scales {:?} {:?}", there.scale(), model.scale());
+    let on =
+        |half: &HalfSpace, at: Point| half.side_of_point(PredicatePoint::from(at.coordinates()));
+    for (whose, m, key) in [("built", &model, built), ("read", there, came)] {
+        for face in m.solid(key).expect("key").faces() {
+            for wire in face.wires() {
+                for coedge in wire.coedges() {
+                    let edge = coedge.edge();
+                    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = edge.run() else {
+                        continue;
+                    };
+                    let [Picker::InFrontOf(half)] = picked_by.as_slice() else {
+                        panic!("{picked_by:?}");
+                    };
+                    let [start, end] = [edge.start().point(), edge.end().point()];
+                    let centre = Point::new(0.0, 0.0, start.z());
+                    let f = half.normal();
+                    let e = half.offset();
+                    let mut fx2 = [0.0; 2];
+                    let mut fy2 = [0.0; 2];
+                    let a = scale_expansion(&[f.x()], f.x(), &mut fx2);
+                    let b = scale_expansion(&[f.y()], f.y(), &mut fy2);
+                    let mut ff = [0.0; 4];
+                    let c = expansion_sum(&fx2[..a], &fy2[..b], &mut ff);
+                    let mut ffr = [0.0; 8];
+                    let d = scale_expansion(&ff[..c], radius, &mut ffr);
+                    let mut ffrr = [0.0; 16];
+                    let g = scale_expansion(&ffr[..d], radius, &mut ffrr);
+                    let mut ee = [0.0; 2];
+                    let h = scale_expansion(&[-e], e, &mut ee);
+                    let mut diff = [0.0; 18];
+                    let l = expansion_sum(&ffrr[..g], &ee[..h], &mut diff);
+                    println!(
+                        "{whose}: half {half:?} ends {:?} centre {:?} circle-minus-plane {:?}",
+                        [on(half, start), on(half, end)],
+                        on(half, centre),
+                        expansion_sign(&diff[..l])
+                    );
+                }
+            }
+        }
+    }
+    let deflection = the_same_mesh_on_both_sides();
+    for cutter_at in [Vector::new(-1.0, 3.0, 3.0), Vector::new(2.5, -4.5, 3.0)] {
+        for policy in [Policy::certified(), Policy::tolerant(4.0)] {
+            for (whose, m, key) in [("built", &model, built), ("read", there, came)] {
+                let cutter = |model: &mut Model| a_block(model, [2.0, 3.0, 2.0], cutter_at);
+                let got = cut_under(m, key, &cutter, deflection, &policy);
+                println!("{cutter_at:?} {policy:?} {whose}: {got:?}");
+            }
+        }
+    }
+}
+
+fn cut_under(
+    model: &Model,
+    which: SolidKey,
+    cutter: &dyn Fn(&mut Model) -> SolidKey,
+    deflection: Deflection,
+    policy: &Policy,
+) -> Result<Vec<(f64, f64, Point)>, String> {
+    let position = model
+        .solids()
+        .position(|solid| solid.key() == which)
+        .expect("the solid is in the model it came from");
+    let mut scratch = model.clone();
+    let keep = scratch.solids().nth(position).expect("clone").key();
+    let knife = cutter(&mut scratch);
+    let fused = scratch
+        .fuse(
+            &[keep],
+            &[knife],
+            Rule::Difference,
+            policy,
+            &mut ProvenanceLog::new(),
+        )
+        .map_err(|why| why.to_string())?;
+    let pieces: Vec<SolidKey> = fused.solids().to_vec();
+    pieces
+        .into_iter()
+        .map(|piece| {
+            scratch
+                .solid(piece)
+                .and_then(|solid| solid.measure(deflection, policy, &mut ProvenanceLog::new()))
+                .map(|m| (m.volume(), m.surface_area(), m.centroid()))
+                .map_err(|why| why.to_string())
+        })
+        .collect()
+}
+
 /// Which side of the slice [`a_bar_sliced_along_its_length`] keeps.
 #[derive(Clone, Copy)]
 enum Side {
