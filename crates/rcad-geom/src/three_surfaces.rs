@@ -385,8 +385,8 @@ impl MeetOfThree {
 ///
 /// [`Error::Undecidable`] when a sign the answer depends on could not be
 /// settled, or when a product the exact arithmetic needs falls out of `f64`'s
-/// range, both where the three stand and slid into the middle of the range.
-/// Both carry the records of where they stand.
+/// range, both where the three stand and at both slides below. Both carry the
+/// records of where they stand.
 ///
 /// [`Error::Predicate`] wrapping
 /// [`PlanesDoNotMeetInAPoint`](rcad_predicates::Error::PlanesDoNotMeetInAPoint)
@@ -401,9 +401,10 @@ impl MeetOfThree {
 /// §322.4). The same three multiplied by a power of two are the same geometry at
 /// another size, and multiplying by a power of two is exact while every number
 /// stays normal. So a refusal where they stand is asked again of the triple slid
-/// until its lengths sit either side of one, and a corner found there is slid
-/// back. §349 says what the slide does to each kind of surface and where it
-/// cannot go.
+/// until its lengths sit either side of one, then, if that refuses too, slid
+/// until the largest sits at `2⁵⁰⁰`, and a corner found there is slid back. §349
+/// says what a slide does to each kind of surface and where it cannot go, and
+/// §349.11 why there are two.
 pub fn meet_of_three_surfaces(
     surfaces: [&Surface; 3],
     policy: &Policy,
@@ -470,10 +471,10 @@ fn the_meet_where_they_stand(
 }
 
 /// The meet of the same three surfaces slid along the range by a power of two,
-/// slid back — or `None` where no slide moves anything, the slide is not
-/// exact, or the slid triple refuses too.
+/// slid back — or `None` where no slide moves anything, no slide is exact, or
+/// every slid triple refuses too.
 ///
-/// **The slide centres the binades the lengths span on one**, rather than
+/// **The first slide centres the binades the lengths span on one**, rather than
 /// bringing the largest to one. What runs out is a product of two small
 /// lengths falling off the bottom or of two large ones running off the top,
 /// and centring leaves the two ends the same room. For a triple of one size
@@ -484,6 +485,16 @@ fn the_meet_where_they_stand(
 /// `every_point_where_three_surfaces_meet_is_on_all_three_of_them.rs`: 180 of
 /// 2051 triples refused with no slide, 52 with the largest brought to one, and
 /// none centred — every one of the 52 a place moved out by `2^shift`.
+///
+/// **Where that refuses too, the second brings the largest length to
+/// [`HIGHEST_BINADE_A_SLIDE_LIFTS_TO`].** Lengths that span more than about a
+/// thousand binades leave a centred product of the two largest past the top of
+/// `f64`. Brought down so the largest sits at `2⁵⁰⁰`, no product of two lengths
+/// runs off the top, and one that falls off the bottom is far under a rounding
+/// of the products near the top. Measured on the `each at its own size` row of
+/// the same file: 277 of 2051 triples refused with the centred slide alone, the
+/// first at 1000 binades of spread, and 108 with both, the first at 1200
+/// (`docs/decisions.md` §349.11).
 ///
 /// **Asked under a certified policy whatever the caller's was**, because a
 /// tolerant budget is a length at the size the caller wrote, and at another
@@ -501,10 +512,26 @@ fn the_meet_slid_into_range(surfaces: [&Surface; 3]) -> Option<MeetOfThree> {
     let (Some(lowest), Some(highest)) = (binades.iter().min(), binades.iter().max()) else {
         return None;
     };
-    let up = -(lowest + highest) / 2;
-    if up == 0 {
-        return None;
-    }
+    [
+        -(lowest + highest) / 2,
+        HIGHEST_BINADE_A_SLIDE_LIFTS_TO - highest,
+    ]
+    .into_iter()
+    .filter(|up| *up != 0)
+    .find_map(|up| the_meet_slid_by(surfaces, up))
+}
+
+/// Where the second slide puts the binade of the largest length.
+///
+/// A length below `2⁵⁰¹` times another is below `2¹⁰⁰²`, which leaves room to
+/// add up a few such products under `2¹⁰²⁴`. Every length below it stays a
+/// normal number, so the slide stays exact, while the lengths span at most
+/// `500 + 1022 = 1522` binades. Chosen by that argument, not tuned by a sweep
+/// (`docs/decisions.md` §349.11).
+const HIGHEST_BINADE_A_SLIDE_LIFTS_TO: i32 = 500;
+
+/// The meet of the same three surfaces slid by `2^up`, slid back.
+fn the_meet_slid_by(surfaces: [&Surface; 3], up: i32) -> Option<MeetOfThree> {
     let [first, second, third] = surfaces.map(|surface| the_same_surface_slid_by(surface, up));
     let (first, second, third) = (first?, second?, third?);
     match the_meet_where_they_stand(

@@ -132,11 +132,13 @@ billionth of the shape, which is what the row publishes, does not exist in the
 number type. **A limit** (§16.10), and the reason the generator's
 `SMALLEST_SCALE` of `−620` is a sound place for the family to stop.
 
-**Not claimed either way:** a triple whose lengths span more binades than any
-one slide can fit, so that a product of the smallest pair falls off the bottom
-while a product of the largest runs off the top. The row draws spreads up to
-about 650 binades and refuses none of them. Nothing here tried wider, so
-nothing here says whether that refusal would be a limit or a gap.
+**Wider than one slide fits** — a triple whose lengths span so many binades
+that a product of the smallest pair falls off the bottom while one of the
+largest runs off the top — was not drawn here; this row draws spreads up to
+about 650 binades and refuses none. Q460 drew it, and §349.11 has what it
+found: from 1000 binades the centred slide refuses, a second slide now answers
+every triple drawn under 1200, and what is still refused is three groups of gaps,
+each with an answer in `f64` shown for one triple.
 
 ### 349.6 Measured
 
@@ -356,3 +358,193 @@ classified `Outside` before and after, so no answer moved there.
   against `2a06994c` first and the slide's tip after. What Q1075 still has
   left is the root finder's refusal on the bend's quartic, carried as a row
   after this one.
+
+### 349.11 Three surfaces spread wider than one slide fits — 2026-10-09
+
+*Queue row Q460, from §349.5's last paragraph. Lane
+`lane-q460-three-surfaces-spread-wider-than-one-slide`, off `042443b9`, in two
+runs (§416). Two new rows draw triples whose lengths span up to two thousand
+binades. With the centred slide alone the first refusal comes at 1000 binades.
+A second slide, the largest length brought to `2⁵⁰⁰`, now answers every triple
+drawn under 1200 binades, and that is pinned. Three groups are still refused.
+Each is a gap: one triple of each is shown to have an answer in `f64`.*
+
+**The rows.** Both are in
+`every_point_where_three_surfaces_meet_is_on_all_three_of_them.rs`, and both
+draw 2051 triples of the control's planes, balls and pipes.
+
+- `three_surfaces_each_written_at_a_size_of_its_own_meet_until_they_span_1200_binades`
+  writes each surface at a power of two of its own, `2⁻¹⁰⁰⁰` to `2¹⁰⁰⁰`, so
+  the lengths span 0 to 1999 binades. It pins that none under 1200 is refused.
+- `three_surfaces_moved_far_out_and_written_tiny_are_refused_only_past_1000_binades`
+  moves the control out by `2^shift`, shift 31 to 1000, and writes it at
+  `2⁻⁶²⁰`. Once the shift is 53 binades past the scale, every place rounds to
+  `(2^shift, 2^shift, 2^shift)`. The planes then pass through that point and
+  the ball or pipe, `2⁻⁶²⁰` across, is centred on it. It pins that none under
+  1000 is refused.
+
+Each counts the refusals per hundred binades of spread and prints the first
+ten. In one nextest run of the file the four new tests took 0.004 s to
+0.066 s, as the file's other tests do.
+
+**Counted.** Refused triples per hundred binades of spread. Below 1000 neither
+row refuses any, with one slide or two.
+
+| Row | 1000 | 1100 | 1200 | 1300 | 1400 | 1500 | 1600 | 1700 | 1800 | 1900 | all |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| each at its own size, centred slide alone | 20 | 36 | 33 | 37 | 48 | 38 | 23 | 25 | 14 | 3 | 277 |
+| each at its own size, both slides | 0 | 0 | 1 | 0 | 9 | 33 | 23 | 25 | 14 | 3 | 108 |
+| moved far out, either | 86 | 137 | 141 | 124 | 129 | 140 | 27 | — | — | — | 784 |
+
+"Centred slide alone" is the tip with the slide list cut to its first entry by
+a `.take(1)`, which is what the base does. The lane's first run counted the same
+on the base itself.
+
+Every refusal is `Error::Undecidable`. On the each-at-its-own-size row the ten
+printed all carry the record `where three surfaces meet`, level `Exact`,
+enclosure `inf`, which is `an_exact_step_could_not_be_taken`. On the moved-far-out
+row eight of the ten printed carry that record, at level `Exact` or `Interval`.
+The other two are triples whose two planes come out as one plane, and they carry
+`where a plane and a ball cross` or `where a plane and a pipe cross`, level
+`Interval`, enclosure `5e-324`. No triple of three planes is refused on either
+row.
+
+**What the second slide answers.** Centred, lengths that span more than about
+a thousand binades put the largest past `2⁵⁰⁰`, and a product of two of them
+runs off the top. Brought down so the largest sits at `2⁵⁰⁰`, no product of two
+lengths runs off the top. Every length stays normal, so the slide stays exact,
+while the spread is at most `500 + 1022 = 1522` binades. A product that falls
+off the bottom there is kept in a box about a subnormal wide (§349.1). Where
+the products that decide the answer sit near the top, that box is far under a
+rounding of them.
+`two_planes_by_the_origin_and_a_ball_1100_binades_bigger_meet_where_the_ball_ends`
+is the named case: the planes `y = z = 2⁻⁵⁰⁰` and a ball of radius `3·2⁶⁰⁰`
+about the origin. Centred, the radius lands at `2⁵⁵⁰` and its square runs off
+the top. Slid down 101 binades, the planes sit at `2⁻⁶⁰¹`, and each corner
+comes back in a box that holds `±3·2⁶⁰⁰` and the `f64` below it.
+
+The second slide runs only where the centred one refused, so it moves no answer
+the centred one gave. The centred one stays first. §349.3 measured it on the
+`somewhere else` row, and the route through three curved surfaces needs it:
+its `B² − A·C` is degree six in the lengths (§349.3), and at `2⁵⁰⁰` that runs
+off the top. `500` was chosen by the argument in
+`HIGHEST_BINADE_A_SLIDE_LIFTS_TO`'s doc and not swept. `511` would reach 1533
+binades, and whether the sums near `2¹⁰²²` then fit was not run.
+
+**Group one: a line through the middle of a tiny ball or pipe far out —
+`refuses/D`.** This is every refusal on the moved-far-out row, and the second
+slide moves none of them. The line the two planes cross in is written from a
+point `2^shift` from the ball's centre. So the ball's constant `C = V·V − R²`
+holds a term near `2^(2·shift)` and `R²` near `2⁻¹²⁴⁰`, and in `B² − A·C` the
+two `2^(2·shift)` terms cancel down to `R²`. An exact sum of terms that far
+apart spans `2·shift + 1240` binades. That is past the 2098 binades between
+`f64`'s smallest subnormal and its largest number, so no slide of the whole
+triple holds it, and a box round `C` is wider than `R²`. That is the argument.
+The measurement is the count: 784 with one slide and 784 with two.
+
+`two_planes_through_a_ball_2440_binades_smaller_than_where_they_stand_are_refused`
+is the demonstration. Its triple is the planes `y = z = 2⁶⁰⁰` and a ball of
+radius `3·2⁻⁶²⁰` about `(2⁶⁰⁰, 2⁶⁰⁰, 2⁶⁰⁰)`. The test pins the refusal, and it
+shows that the answer exists. `3·2⁻⁶²⁰` is under half a last bit of `2⁶⁰⁰`, so
+the corners `2⁶⁰⁰ ± 3·2⁻⁶²⁰` lie inside `[2⁶⁰⁰⁻, 2⁶⁰⁰]` and `[2⁶⁰⁰, 2⁶⁰⁰⁺]`.
+Those boxes are one last bit wide, `1.1e-16` and `2.2e-16` of the largest
+number, where the row allows `1e-9`. That is measured the way the row measures,
+against the largest number involved. The ball itself is far smaller than either
+box, and no `f64` box of `x` there can be narrower. So the refusal is a gap
+(§16.10). It is class D: a radius of `2⁻⁶²⁰` at coordinates of `2³⁸⁰` or more,
+which is what 1000 binades of spread takes, puts the largest coordinate over
+the smallest feature at `2¹⁰⁰⁰` or more. §3.5's envelope stops at 1e11, about
+`2³⁷`.
+
+The fixes considered for group one. None was run but the second slide.
+
+- **One slide of the whole triple**, centred or not: the `2·shift + 1240`
+  binades above fit no slide. The second slide was run and moved none of the
+  784. At shift 1000 the spread is 1620, past what it holds. Under that, the
+  two big terms still cancel to an `R²` more than 2000 binades below them.
+- **A slide per surface, or per axis.** Neither is the same question. Moving
+  one surface and not another moves where they meet. Scaling `x` and not `y`
+  turns a ball into an egg, which this file has no route for.
+- **Moving the line's point next to the ball's centre** before the quadratic
+  is built. `V` is then about `R`, and nothing cancels. It is exact only where
+  the move is: along an axis the coordinate is copied. Along any other
+  direction the foot of the perpendicular divides by `D·D` and is a box, and
+  the exact level does not take a line that is a box (§349.8).
+- **Lagrange's form for a ball**, `B² − A·C = |D|²R² − |V×D|²`. The `2^shift`
+  part of `V` lies along `D`, so it drops out of `V×D` before anything is
+  squared. Along an axis `V×D` has no `2^shift` part at all. Not run, and a pipe
+  needs a form of its own.
+- **A wider exponent for `Exact` in `exact.rs`.** An exact number with an
+  exponent of its own reaches every one of these. `exact.rs` is not in this
+  row's write set.
+
+**Group two: lengths spread past 1522 binades — `refuses/C`.** 93 of the 108
+still refused on the each-at-its-own-size row. The 108 less the 15 of group
+three is 93, all from 1523 binades up. No slide with the largest at `2⁵⁰⁰`
+keeps the smallest length normal past 1522. A slide that keeps the smallest
+normal and the square of the largest under `2¹⁰²⁴` stops at 1533. Past 1533 no
+exact slide exists, because `slid_exactly` refuses every subnormal result.
+
+The witness is the triple the row prints at spread 1720: the planes
+`x = −4·2⁻³²⁷` and `z = −6·2⁻⁸⁵⁸`, and a pipe along `y` of radius `2⁸⁶²` about
+`(6, −1, 4)·2⁸⁶²`. The line runs along `y`, `√52·2⁸⁶²` from the pipe's axis,
+more than seven radii, so the answer is that they do not meet. The largest
+coordinate over the radius is 6, inside §3.5's envelope. The tiny lengths are
+planes' offsets, not features. Only a probe builds such a triple, so the class
+is C.
+
+Fixes for group two. None was run, and none is in this write set.
+
+- **A wider exponent in `exact.rs`**, as for group one.
+- **`slid_exactly` taking a subnormal result that keeps every bit.** It refuses
+  any subnormal, even an exact one. A length like `6·2⁻⁸⁵⁸` has two bits and
+  could go about fifty binades lower and come back the same. A length with a
+  full mantissa could go no lower, so this widens the row's draws a little and
+  a measured surface not at all.
+- **A slide that rounds the smallest lengths outward into boxes**, then
+  accepting only an answer that holds for every surface in the boxes. It could
+  give "they do not meet", as in the witness. It cannot give an exact corner,
+  and the routes here take exact surfaces.
+
+**Group three: 15 triples at 1522 binades and under — `refuses/C`, not
+traced.** The second slide is exact for each, and each is still refused. Their
+spreads are 1256, 1438, 1476, 1477, 1481, 1487, 1493, 1494, 1496, 1498, 1509,
+1509, 1513, 1519 and 1521. Each is two planes and a ball or a pipe, with one
+plane's offset at one end of the range and the curved surface or the other
+plane at the other. The witness is the triple at 1521: the planes
+`x = −5·2⁻⁹⁸²` and `y = 0`, and a ball of radius `5·2⁵³⁹` about
+`(−6·2⁵³⁹, 0, 0)`. The line runs along `z`, `6·2⁵³⁹` less a hair from the
+centre, more than the radius, so the answer is that they do not meet. The
+largest coordinate over the radius is 1.2, inside the envelope.
+
+Which step refuses was not traced. The first run's guess, not run, is that a
+difference such as `V` between a length near `2⁻⁹⁷⁰` and one near `2⁴⁹⁰` spans
+more than the 995 binades an exact square takes (`WIDEST_SQUARABLE_SPREAD`).
+That reading fits the triple at 1477. It does not fit the one at 1476, whose
+offsets to the pipe's axis each span under 800 binades. Q484 moves that
+window to 1048 binades, so this count may move with it.
+
+**Measured.** On this branch:
+
+- `mise exec -- just t -p rcad-geom --test
+  every_point_where_three_surfaces_meet_is_on_all_three_of_them --no-capture`:
+  12 run, 12 passed. It prints both rows' buckets and the first ten refusals of
+  each.
+- The same with `--no-fail-fast` and the slide list cut by `.take(1)`: 12 run,
+  10 passed, 2 failed. The two are
+  `two_planes_by_the_origin_and_a_ball_1100_binades_bigger_meet_where_the_ball_ends`,
+  refused with the record above, and the each-at-its-own-size row, on
+  `left: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 36]`. The cut was not committed.
+- Group three's fifteen: the row's print limit was changed to "every refusal
+  at 1522 binades or under" for one run and changed back, not committed.
+
+**What this leaves.**
+
+- Group one, `refuses/D`: a line through the middle of a ball or pipe
+  `2⁻⁶²⁰` across, `2^shift` out. A queue row, filed with this section.
+- Group two, `refuses/C`: lengths spread past 1522 binades. The fix family
+  that reaches all of it is a wider exponent in `exact.rs`. A queue row, filed
+  with this section, after Q484, which changes the same file's floor.
+- Group three, `refuses/C`: 15 triples under 1522 binades, not traced. A
+  queue row, filed with this section, after Q484.
+- §349.5's last paragraph now points here.
