@@ -2644,9 +2644,21 @@ impl<'f> Arrangement<'f> {
 
     /// The same, without asking a policy: [`Decision::Undecidable`] comes back
     /// as `None` for a caller that has another route to try.
+    ///
+    /// The boxes are asked first and the planes
+    /// ([`Arrangement::as_the_planes_say`]) where the boxes cannot say, as in
+    /// [`Arrangement::order_along`], because the route given up can be the
+    /// only one there is: a plate with a notch on the line of each edge of its
+    /// hole has one ray that can place the hole, and the boxes could not order
+    /// two nodes on it a rounding apart (Q992). A quadric
+    /// ([`Arrangement::as_the_quadric_says`]) is not asked here.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         let (decided, _) = self.as_the_boxes_say(crossing, first, second).ok()?;
-        matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero).then_some(decided)
+        match decided {
+            Decision::Pos | Decision::Neg | Decision::Zero => Some(decided),
+            Decision::Undecidable { .. } => self.as_the_planes_say(crossing, first, second),
+            _ => None,
+        }
     }
 
     /// Which of two nodes on a crossing comes first along it: [`Decision::Pos`]
