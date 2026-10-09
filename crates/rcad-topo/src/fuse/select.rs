@@ -1213,17 +1213,22 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// is `holds.rs`'s rule read the same way round.
 ///
 /// A round wire's partner's inside is the region it bounds only where the
-/// partner leaves one region on the plane. A torus leaves two, so
-/// `also_picked_by` — one entry per wire, from [`what_else_each_round_wire_asks`]
-/// — says what else must hold the point, or `None` where nothing can say. An
-/// arc of one of those two circles is read the same way: `meridians`, one
-/// entry per side of every wire, from [`the_meridian_circle_each_side_runs_round`],
-/// says which disk its bulge is in ([`in_the_bulge_of`]).
+/// partner leaves one region on the plane. A torus leaves two. On a plane
+/// through its axis they are the two meridian disks, and `also_picked_by` — one
+/// entry per wire, from [`what_else_each_round_wire_asks`] — says what else
+/// must hold the point, or `None` where nothing can say. An arc of one of
+/// those two circles is read the same way: `meridians`, one entry per side of
+/// every wire, from [`the_meridian_circle_each_side_runs_round`], says which
+/// disk its bulge is in ([`in_the_bulge_of`]).
 ///
-/// **A point outside a round wire's partner can still be inside what the wire
-/// bounds**, where the partner is a ring and the plane is square to its axis:
-/// both circles it cuts there go round the inner disk, which is outside the
-/// ring ([`in_the_inner_disk_of`]).
+/// **On a plane square to a ring's axis what a whole circle bounds is read
+/// from which of the two circles it is.** A point inside the ring is in the
+/// band between them, so inside what the outer circle bounds and outside what
+/// the inner one does ([`runs_round_the_outer_circle`]); no picker says that,
+/// and asked for one the band could not say what it held
+/// (`a_band_on_a_plane_square_to_a_bends_axis_holds_its_own_points`). A point
+/// outside the ring can still be inside what either bounds, since both go
+/// round the inner disk, which is outside the ring ([`in_the_inner_disk_of`]).
 ///
 /// **A flat piece's curved partners are asked about the point and a point of
 /// the plane beside it at once**, through [`side_of_a_partner_by_its_plane`]. A
@@ -1324,8 +1329,15 @@ fn the_piece_holds(
             Some(partner) => {
                 match side_of_a_partner_by_its_plane(flat, &partner, point, reaching_the_plane) {
                     Decision::Neg => {
-                        let pickers = also_picked_by[position].as_deref()?;
-                        if every_picker_keeps(pickers, reaching_the_plane)? {
+                        let in_its_disk = if let Surface::Torus(ring) = partner
+                            && is_square_to_the_axis(flat, &ring)
+                        {
+                            runs_round_the_outer_circle(flat, &ring, &wire[0])?
+                        } else {
+                            let pickers = also_picked_by[position].as_deref()?;
+                            every_picker_keeps(pickers, reaching_the_plane)?
+                        };
+                        if in_its_disk {
                             winding += inwards;
                         }
                     }
@@ -1881,7 +1893,9 @@ fn round_wire_of(wire: &[FaceMeet]) -> Option<Surface> {
 /// says which side is this wire's. A plane square to the axis cuts two
 /// concentric circles, named by pipes, and neither circle's disk is the tube's
 /// inside on one side of a pipe — so that family, and any wire whose corner no
-/// picker certainly keeps, is `None`.
+/// picker certainly keeps, is `None`. [`the_piece_holds`] does not ask this
+/// for that family: which circle the wire is says it all
+/// ([`runs_round_the_outer_circle`]).
 ///
 /// Asked once per piece rather than once per candidate, because the answer is
 /// about the wire and not about the point.
