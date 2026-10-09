@@ -760,21 +760,22 @@ fn a_cone_whose_radius_is_twice_its_height_inside_a_block_answers_every_rule_rig
     );
 }
 
-/// Q467: the sweep of §350.4's three families round a pointed cone that
-/// stops well short of its box, where the candidate half way to the apex
-/// (§350.3) is a much bigger step relative to the face than it is on
-/// §350.4's own cone (`far = 8`). Turns `0`, `1` and `3` for the leaning
-/// block and `0` and `0.7` for the corner-up cube are the same turns
-/// `zz_probe_q467` swept this row with; neither is written down in §350.4,
-/// so this is where that choice is made. The slab is `a_slab`'s own 2 by 12
-/// by 14 box, turned `0`, `0.5`, `1` and `1.5` about the axis — the same
-/// sweep as the frustum and pointed-cone families above, with `low` in
-/// place of their fixed placement.
+/// Q467: §350.4's three families round [`THE_STEEP_CONE`], the pointed cone of
+/// slope `2` up to `z = 3`, which §350.4 swept once in a throwaway test and
+/// took out. §350.4 wrote down neither its turns nor its slabs' heights, so
+/// they are chosen here: turns `0`, `1` and `3` for the leaning block, `0`
+/// and `0.7` for the corner-up cube, and `0`, `0.5`, `1` and `1.5` for
+/// `a_slab`'s 2 by 12 by 14 box at `low` of `−14`, `−8`, `−3`, `0` and `2`.
+/// Every solid count comes from [`a_leaning_blocks_solids`],
+/// [`a_corner_up_cubes_solids`] or [`a_slabs_solids`], which work it out by
+/// hand; none was read off the kernel.
 ///
-/// **Every family is split so that no one test sets the slow tier's wall**
-/// (`docs/decisions.md` §397.4): two tests for the leaning block (one lean
-/// that never refuses and one that does), one each for the corner-up cube
-/// and the slab. §350.5 gives each family's wall time.
+/// **The leaning block is two tests and each other family one, and none of
+/// them is short.** Each takes minutes, where the slow tier's pieces take
+/// about twenty seconds (`docs/decisions.md` §397.4); §350.5 gives each
+/// test's wall.
+///
+/// Leaned `0.25` or `0.375`, the block meets the cone at every crossing.
 #[test]
 fn a_steep_pointed_cone_with_a_gentle_lean_answers_every_rule_right() {
     let mut cases = Vec::new();
@@ -784,7 +785,7 @@ fn a_steep_pointed_cone_with_a_gentle_lean_answers_every_rule_right() {
                 cases.push(Case {
                     cone: THE_STEEP_CONE,
                     block: a_leaning_block(lean, crossing, turn),
-                    solids: OVERLAPPING,
+                    solids: a_leaning_blocks_solids(THE_STEEP_CONE, lean, crossing),
                 });
             }
         }
@@ -798,34 +799,28 @@ fn a_steep_pointed_cone_with_a_gentle_lean_answers_every_rule_right() {
     );
 }
 
-/// The same block leaned as steeply as the cone or four times steeper.
+/// The same block leaned `1` or `4`, against the steep cone's slope of `2`.
 ///
-/// Leaned `1`, crossing `0` and turned `0`, the union and the cone-less-block
-/// refuse `CannotMeshAFace`; every other lean-`1` fuse is right. Leaned `4`,
-/// crossing `0` refuses `CannotTellTheCellsOfAFaceApart` on every rule and
-/// every turn; crossing `−0.5` leans the block clear of the cone
-/// ([`APART`]), the other two crossings overlap it ([`OVERLAPPING`]), and
-/// every one of those twenty-four answers right.
+/// Leaned `1`, the block meets the cone at every crossing. Crossing `0`
+/// turned `0`, the union and the cone-less-block refuse `CannotMeshAFace`;
+/// every other lean-`1` fuse is right. Leaned `4`, crossing `0` puts the
+/// leaning face through the apex and nowhere else on the cone, a touch
+/// ([`APART`]), and refuses `CannotTellTheCellsOfAFaceApart` on every rule
+/// and every turn; crossing `−0.5` misses the cone ([`APART`]), the other two
+/// crossings meet it ([`OVERLAPPING`]), and every one of those twenty-four
+/// answers right.
 #[test]
 fn a_steep_pointed_cone_with_a_steep_or_steeper_lean_answers_right_or_refuses() {
     let mut cases = Vec::new();
-    for crossing in [0.0, 0.5, -0.5, 1.5] {
-        for turn in [0.0, 1.0, 3.0] {
-            cases.push(Case {
-                cone: THE_STEEP_CONE,
-                block: a_leaning_block(1.0, crossing, turn),
-                solids: OVERLAPPING,
-            });
-        }
-    }
-    for crossing in [0.0, 0.5, -0.5, 1.5] {
-        let solids = if crossing == -0.5 { APART } else { OVERLAPPING };
-        for turn in [0.0, 1.0, 3.0] {
-            cases.push(Case {
-                cone: THE_STEEP_CONE,
-                block: a_leaning_block(4.0, crossing, turn),
-                solids,
-            });
+    for lean in [1.0, 4.0] {
+        for crossing in [0.0, 0.5, -0.5, 1.5] {
+            for turn in [0.0, 1.0, 3.0] {
+                cases.push(Case {
+                    cone: THE_STEEP_CONE,
+                    block: a_leaning_block(lean, crossing, turn),
+                    solids: a_leaning_blocks_solids(THE_STEEP_CONE, lean, crossing),
+                });
+            }
         }
     }
     assert_eq!(
