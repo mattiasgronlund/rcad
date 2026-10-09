@@ -911,3 +911,118 @@ fn a_cone_less_a_whole_ball_pushing_out_through_its_side() {
         ],
     );
 }
+
+#[test]
+fn probe_q1248_one() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let ball = a_ball_four_up(&mut model, 3.0);
+    let frustum = a_frustum(&mut model, 1.0, 1.5, 8.0);
+    let answer = model.fuse(
+        &[ball],
+        &[frustum],
+        Rule::Difference,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    println!("{answer:?}");
+}
+
+#[test]
+fn probe_q1248() {
+    let report = |name: &str, gives: Vec<Result<Vec<(f64, f64)>, Error>>| {
+        println!("{name}:");
+        for ((rule, swapped), answer) in every_rule_both_ways().zip(gives) {
+            println!("  {rule:?} swapped {swapped}: {answer:?}");
+        }
+    };
+    report(
+        "half ball against the frustum",
+        what_each_rule_gives(|model| {
+            let ball = a_ball_four_up(model, 3.0);
+            let half = the_x_positive_half_between(model, ball, 0.0, 10.0);
+            [a_frustum(model, 1.0, 2.0, 8.0), half]
+        }),
+    );
+    report(
+        "half ball against the pointed cone",
+        what_each_rule_gives(|model| {
+            let ball = a_ball_four_up(model, 3.0);
+            let half = the_x_positive_half_between(model, ball, 0.0, 10.0);
+            [a_pointed_cone(model, 1.0, 8.0), half]
+        }),
+    );
+    report(
+        "half pointed cone against the ball",
+        what_each_rule_gives(|model| {
+            let cone = a_pointed_cone(model, 1.0, 8.0);
+            let half = the_x_positive_half_between(model, cone, -1.0, 10.0);
+            [half, a_ball_four_up(model, 3.0)]
+        }),
+    );
+    report(
+        "frustum from 1.5 against the ball",
+        what_each_rule_gives(|model| {
+            let ball = a_ball_four_up(model, 3.0);
+            [a_frustum(model, 1.0, 1.5, 8.0), ball]
+        }),
+    );
+    report(
+        "thin pipe through a fat one, fat seam up +y",
+        what_each_rule_gives(|model| {
+            let fat = model
+                .add_round_bar(
+                    4.0,
+                    10.0,
+                    &Isometry::quarter_turns(&Axis::z(), 1).expect("z is an axis"),
+                )
+                .expect("a fat bar");
+            [fat, a_thin_bar_along_x(model, 0.0)]
+        }),
+    );
+    report(
+        "thin pipe through a fat one off its axis, fat seam up +x",
+        what_each_rule_gives(|model| {
+            let fat = model
+                .add_round_bar(4.0, 10.0, &Isometry::identity())
+                .expect("a fat bar");
+            [fat, a_thin_bar_along_x(model, 0.5)]
+        }),
+    );
+}
+
+fn a_thin_bar_along_x(model: &mut Model, off: f64) -> SolidKey {
+    let placement = Isometry::translation(Vector::new(-10.0, off, 5.0))
+        .expect("a shift")
+        .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is an axis"));
+    model
+        .add_round_bar(1.0, 20.0, &placement)
+        .expect("a thin bar")
+}
+
+fn the_x_positive_half_between(
+    model: &mut Model,
+    solid: SolidKey,
+    low: f64,
+    high: f64,
+) -> SolidKey {
+    let profile = ProfileBuilder::new(vec![[0.0, -10.0], [10.0, -10.0], [10.0, 10.0], [0.0, 10.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+    let block = model
+        .add_extrusion(
+            &profile,
+            high - low,
+            &Isometry::translation(Vector::new(0.0, 0.0, low)).expect("a shift"),
+        )
+        .expect("a block");
+    model
+        .fuse(
+            &[solid],
+            &[block],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("half a solid")
+        .solids()[0]
+}
