@@ -1088,16 +1088,14 @@ fn a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate() {
         .expect("model.fuse answers Ok here, which is the bug");
     let error = model
         .validate(&policy, &mut ProvenanceLog::new())
-        .expect_err("the answer is corrupt: a known, unfixed defect (class wrong/B)");
-    match error {
-        Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) => {
-            assert!(
-                ratio > 1.0e15,
-                "ratio {ratio} is far smaller than the ~2.7e16-5.4e16 this defect gives"
-            );
-        }
-        other => panic!("expected Invalid(DynamicRangeTooWide), got {other:?}"),
-    }
+        .expect_err("the answer is corrupt: a known, unfixed defect, Q1562");
+    let Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) = error else {
+        panic!("expected Invalid(DynamicRangeTooWide), got {error:?}");
+    };
+    assert!(
+        ratio > 1.0e15,
+        "ratio {ratio} is far smaller than the ~2.7e16-5.4e16 this defect gives"
+    );
 }
 
 /// How many solids each rule leaves for [`a_leaning_block`] round a pointed
