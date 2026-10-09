@@ -24,7 +24,7 @@
 
 use core::f64::consts::{FRAC_PI_2, PI};
 
-use rcad_geom::{Axis, Isometry, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -110,16 +110,63 @@ fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() 
     }
 }
 
-/// A quarter bend and a copy placed a quarter turn either way round, or half a
-/// turn, by `place_solid` rather than written out: `cos(π/2)` is not nought,
-/// so the copy's cap is a rounding off the first bend's cap plane, the shape
-/// two cubes a rounding apart are (`tests/two_turned_cubes_a_rounding_apart.rs`).
+/// A quarter bend and a copy placed half a turn round by `place_solid` rather
+/// than written out: the copy's caps lie on planes through the ring's axis a
+/// rounding off the first bend's, `sin(π)` not being nought. The two bends are
+/// a quarter turn apart either way round, so every rule, both ways round,
+/// answers as the same two bends written out do
+/// (`two_bends_turned_by_whole_quarter_turns_answer_every_rule`), and each
+/// solid it answers with holds a quarter of the ring, `2π²`, within what
+/// `measure` says it can be out by.
+#[test]
+fn a_bend_placed_half_a_turn_round_from_another_answers_every_rule() {
+    for rule in EVERY_RULE {
+        for the_first_first in [true, false] {
+            let what = format!("half a turn round, {rule:?}, the first first {the_first_first}");
+            let mut model = a_model();
+            let first = a_quarter_bend(&mut model, 4.0, 1.0);
+            let placed = a_quarter_bend_placed_round_by(&mut model, PI);
+            let (arguments, tools) = if the_first_first {
+                ([first], [placed])
+            } else {
+                ([placed], [first])
+            };
+            let answer = model
+                .fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let expected = match rule {
+                Rule::Union => 2,
+                Rule::Difference => 1,
+                Rule::Intersection => 0,
+                other => panic!("not a rule this tries: {other:?}"),
+            };
+            assert_eq!(answer.solids().len(), expected, "{what}");
+            for &solid in answer.solids() {
+                holds_a_quarter_of_the_ring(&model, solid, &what);
+            }
+        }
+    }
+}
+
+/// A quarter bend and a copy placed a quarter turn either way round by
+/// `place_solid` rather than written out: `cos(π/2)` is not nought, so the
+/// copy's cap is a rounding off the first bend's cap plane, the shape two
+/// cubes a rounding apart are (`tests/two_turned_cubes_a_rounding_apart.rs`).
 /// Every rule both ways round is refused while the pieces are cut,
 /// `Undecidable` at `side of plane`, though the same two bends written out
 /// answer (`two_bends_turned_by_whole_quarter_turns_answer_every_rule`).
 #[test]
 fn a_bend_placed_a_quarter_turn_round_from_another_is_refused_before_a_ray() {
-    for turn in [FRAC_PI_2, -FRAC_PI_2, PI] {
+    for turn in [FRAC_PI_2, -FRAC_PI_2] {
         for rule in EVERY_RULE {
             for the_first_first in [true, false] {
                 let what = format!("{turn} round, {rule:?}, the first first {the_first_first}");
@@ -228,6 +275,27 @@ fn a_wedge(model: &mut Model, hair: f64) -> Result<SolidKey, Error> {
 
 fn at_height(z: f64) -> Isometry {
     Isometry::translation(Vector::new(0.0, 0.0, z)).expect("a finite shift")
+}
+
+/// That `solid` measures a quarter of a ring of 4 and tube 1, `2π²` by Pappus,
+/// within what `measure` says it can be out by.
+fn holds_a_quarter_of_the_ring(model: &Model, solid: SolidKey, what: &str) {
+    let measured = model
+        .solid(solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a hundredth of the tube"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{what}: the answer does not measure: {why:?}"));
+    let pappus = 2.0 * PI * PI;
+    assert!(
+        (measured.volume() - pappus).abs() <= measured.volume_error(),
+        "{what}: measures {} give or take {}, against {pappus}",
+        measured.volume(),
+        measured.volume_error()
+    );
 }
 
 /// How many solids the fuse answers with, once the model it leaves validates.
