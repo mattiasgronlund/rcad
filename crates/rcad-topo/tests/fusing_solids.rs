@@ -1547,3 +1547,95 @@ fn both_input_faces_that_were_joined_on_the_way_in_name_the_face_they_became() {
 fn a_deflection() -> Deflection {
     Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }
+
+#[test]
+fn probe_q1469() {
+    let golden = (1.0 + 0.618_033_988_749_895_f64) - 1.0;
+    for (m, size) in [(golden, 100.0), (golden, 1e160), (0.5, 100.0)] {
+        eprintln!("=== slope {m}, nominal size {size:e}");
+        probe_one(m, size);
+    }
+}
+
+fn probe_one(m: f64, size: f64) {
+    let mut model = Model::new(Scale::millimetres(size).expect("size"));
+    let block = ProfileBuilder::new(vec![[0.3, 0.0], [1.0, 0.0], [1.0, 1.0], [0.3, 1.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("block profile");
+    let b = model
+        .add_extrusion(&block, 1.0, &Isometry::identity())
+        .expect("block");
+    let wedge = ProfileBuilder::new(vec![
+        [-1.0, 1.0 - 2.0 * m],
+        [2.0, 1.0 + m],
+        [2.0, 3.0],
+        [-1.0, 3.0],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("wedge profile");
+    let a = model
+        .add_extrusion(
+            &wedge,
+            0.5,
+            &Isometry::translation(Vector::new(0.0, 0.0, 0.25)).expect("shift"),
+        )
+        .expect("wedge");
+
+    let x = 0.65;
+    let y = 1.0 - m * (1.0 - x);
+    let around = |c: f64| rcad_predicates::Interval::new(c - 1e-15, c + 1e-15).expect("box");
+    let point = PredicatePoint::Constructed([around(x), around(y), around(0.5)]);
+    let mut ray = ProvenanceLog::new();
+    let placed =
+        model
+            .solid(b)
+            .expect("b")
+            .classify_uncertain_point(point, &Policy::certified(), &mut ray);
+    eprintln!(
+        "PROBE classify: {placed:?}, {} records",
+        ray.records().len()
+    );
+    for face in model.solid(a).expect("a").faces() {
+        if let Some(flat) = face.surface().as_plane() {
+            eprintln!(
+                "PROBE wedge plane {:?} {:?}: (1,1,0.5) is {:?}",
+                flat.normal(),
+                flat.offset(),
+                flat.side_of_point(PredicatePoint::Exact([1.0, 1.0, 0.5]))
+            );
+        }
+    }
+
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            for (first, second) in [(a, b), (b, a)] {
+                let mut model = model.clone();
+                let mut log = ProvenanceLog::new();
+                let fused = model.fuse(&[first], &[second], rule, &policy, &mut log);
+                let said = match &fused {
+                    Ok(f) => format!(
+                        "Ok {} solids, volume {:e}, valid {:?}",
+                        f.solids().len(),
+                        volume_of(&model, f.solids()),
+                        model
+                            .validate(&policy, &mut ProvenanceLog::new())
+                            .map_err(|e| e.to_string())
+                    ),
+                    Err(Error::Undecidable { records }) => {
+                        format!("Undecidable, {} records", records.records().len())
+                    }
+                    Err(other) => format!("{other:?}"),
+                };
+                eprintln!(
+                    "PROBE {policy:?} {rule:?} wedge first {}: {said}, log {} records, {:?}",
+                    first == a,
+                    log.records().len(),
+                    log.records()
+                        .iter()
+                        .map(|r| (r.predicate(), r.approximation().is_some()))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+}
