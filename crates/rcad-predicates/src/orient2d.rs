@@ -1057,19 +1057,31 @@ mod tests {
     /// scaled by its own third exponent, gets level 3's answer from the whole
     /// cascade, and that answer is the whole-number one — while level 1's
     /// bound and level 2's interval run off the top on some of them.
+    ///
+    /// None of the spike's own turns need the third exponent to decide
+    /// `orient2d` itself —
+    /// `a_spike_at_the_origin_under_a_unit_square_is_decided_on_every_turn`
+    /// shows every one of them settled before it — so this test also walks
+    /// `a_turn_left_with_nothing_but_tiny_times_tiny_still_needs_the_third_exponent`'s
+    /// turn, the one turn here that does, and calls `orient2d` on it
+    /// unscaled. That is what makes this test fail if `orient2d` ever stops
+    /// trying the third exponent at its own call site; scaling the points by
+    /// hand and calling `decide` on the result, as the rest of this test
+    /// does, would not notice that at all.
     #[test]
     fn levels_one_and_two_overflowing_at_the_third_exponent_still_agree_with_level_three() {
         let corners = a_spike_at_the_origin_under_a_unit_square();
         let (mut level_one_overflowed, mut level_two_overflowed) = (0, 0);
         for t in [2f64.powi(-995), 2f64.powi(-1000), f64::from_bits(1)] {
             for (i, j, k) in every_turn(corners.len()) {
-                let [_, _, Some(third)] =
-                    exponents_to_try(corners[i].at(t), corners[j].at(t), corners[k].at(t))
+                let (unscaled_a, unscaled_b, unscaled_c) =
+                    (corners[i].at(t), corners[j].at(t), corners[k].at(t));
+                let [_, _, Some(third)] = exponents_to_try(unscaled_a, unscaled_b, unscaled_c)
                 else {
                     panic!("no corner is far enough from zero to lift");
                 };
-                let [a, b, c] = [i, j, k].map(|corner| {
-                    scaled_by_a_power_of_two(corners[corner].at(t), third)
+                let [a, b, c] = [unscaled_a, unscaled_b, unscaled_c].map(|point| {
+                    scaled_by_a_power_of_two(point, third)
                         .expect("the third exponent keeps every coordinate an f64")
                 });
                 let exactly = orient2d_exactly(a, b, c);
@@ -1081,6 +1093,11 @@ mod tests {
                     decide(&Orient2d { a, b, c }).0,
                     exactly,
                     "corners {i} {j} {k}"
+                );
+                assert_eq!(
+                    orient2d(unscaled_a, unscaled_b, unscaled_c),
+                    exactly,
+                    "corners {i} {j} {k}, t = {t:e}"
                 );
 
                 let predicate = Orient2d { a, b, c };
@@ -1099,6 +1116,11 @@ mod tests {
             "level 1 overflowed on {level_one_overflowed} and level 2 on {level_two_overflowed}, \
              so this no longer shows an overflow costing nothing"
         );
+
+        let t = f64::from_bits(1);
+        let (a, b, c) = ([1.0, 0.0], [0.0, t], [t, t]);
+        assert!(refused_before_the_third_exponent(a, b, c));
+        assert_eq!(orient2d(a, b, c), Decision::Neg);
     }
 
     fn top_of(binade: i32) -> f64 {
