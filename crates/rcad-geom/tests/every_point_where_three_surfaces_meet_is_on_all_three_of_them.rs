@@ -259,6 +259,291 @@ fn three_surfaces_written_among_the_subnormals_meet_in_a_box_a_subnormal_step_or
     );
 }
 
+/// Two planes `2⁻⁵⁰⁰` off the origin and a ball of radius `3·2⁶⁰⁰` about it:
+/// lengths that span 1100 binades, wider than the centred slide fits.
+///
+/// Centred, the ball's radius lands at `2⁵⁵⁰` and its square runs off the top.
+/// Brought down until the radius sits at `2⁵⁰⁰`, the planes are at `2⁻⁶⁰⁰`, still
+/// normal, so that slide is exact too, and every product that falls off the
+/// bottom there is a hair against the radius squared (§349.11).
+///
+/// The line `y = z = 2⁻⁵⁰⁰` meets the ball at `x = ±√(9·2¹²⁰⁰ − 2·2⁻¹⁰⁰⁰)`, a
+/// hair inside `±3·2⁶⁰⁰`, so between the `f64` either side of it: each box
+/// holds that pair and is a few last bits of the radius wide.
+#[test]
+fn two_planes_by_the_origin_and_a_ball_1100_binades_bigger_meet_where_the_ball_ends() {
+    let tiny = 2f64.powi(-500);
+    let end = 3.0 * 2f64.powi(600);
+    let flat = |normal: [f64; 3]| {
+        Surface::Plane(
+            Plane::from_point_and_normal(Point::new(tiny, tiny, tiny), Vector::from(normal))
+                .expect("an axis direction"),
+        )
+    };
+    let surfaces = [
+        flat([0.0, 1.0, 0.0]),
+        flat([0.0, 0.0, 1.0]),
+        Surface::Sphere(Sphere::new(Point::origin(), end).expect("a radius above zero")),
+    ];
+    assert_eq!(the_binades_spanned_by(&surfaces), (-500, 601));
+    let answer = meet_of_three_surfaces(
+        [&surfaces[0], &surfaces[1], &surfaces[2]],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a line through a ball 1100 binades bigger than its offsets is answered");
+    let MeetOfThree::At(points) = &answer else {
+        panic!("a line through a ball's middle meets it twice, not {answer:?}");
+    };
+    assert_eq!(points.len(), 2, "{points:?}");
+    for (point, side) in points.iter().zip([-1.0, 1.0]) {
+        let [x, y, z] = point.enclosure();
+        let inside = side * end.next_down();
+        assert!(
+            x.lo() <= inside.min(side * end) && inside.max(side * end) <= x.hi(),
+            "{x:?} does not hold the end of the ball on the {side} side"
+        );
+        assert!(
+            x.width() / end < NO_BOX_MAY_BE_A_BILLIONTH_OF_THE_SHAPE,
+            "{x:?}"
+        );
+        for other in [y, z] {
+            assert!(other.lo() <= tiny && tiny <= other.hi(), "{other:?}");
+        }
+    }
+}
+
+/// **A gap no slide reaches**: the planes `y = 2⁶⁰⁰` and `z = 2⁶⁰⁰` and a ball of
+/// radius `3·2⁻⁶²⁰` about `(2⁶⁰⁰, 2⁶⁰⁰, 2⁶⁰⁰)`, so the line runs through the
+/// ball's middle and meets it at `x = 2⁶⁰⁰ ± 3·2⁻⁶²⁰`.
+///
+/// The line is written from `(0, 2⁶⁰⁰, 2⁶⁰⁰)`, `2⁶⁰⁰` from the ball, so its
+/// quadratic is two terms of `2¹²⁰⁰` that cancel to the radius squared,
+/// `9·2⁻¹²⁴⁰`. Exact arithmetic needs both ends at once, 2440 binades, and no
+/// slide fits that. So it is refused, with the record of an exact step that could
+/// not be taken.
+///
+/// **The answer exists in `f64`**, and this is the demonstration. `3·2⁻⁶²⁰` is
+/// under half a last bit of `2⁶⁰⁰`, so the corners lie strictly inside
+/// `[2⁶⁰⁰⁻, 2⁶⁰⁰]` and `[2⁶⁰⁰, 2⁶⁰⁰⁺]`, each one last bit wide: `1.1e-16` and
+/// `2.2e-16` of the shape, where a row may hand back `1e-9`. A refusal of an
+/// answer that exists is a gap (§16.10), and §349.11 names the fixes that would
+/// reach it.
+#[test]
+fn two_planes_through_a_ball_2440_binades_smaller_than_where_they_stand_are_refused() {
+    let far = 2f64.powi(600);
+    let radius = 3.0 * 2f64.powi(-620);
+    let flat = |normal: [f64; 3]| {
+        Surface::Plane(
+            Plane::from_point_and_normal(Point::new(far, far, far), Vector::from(normal))
+                .expect("an axis direction"),
+        )
+    };
+    let surfaces = [
+        flat([0.0, 1.0, 0.0]),
+        flat([0.0, 0.0, 1.0]),
+        Surface::Sphere(Sphere::new(Point::new(far, far, far), radius).expect("a radius")),
+    ];
+    assert!(matches!(
+        meet_of_three_surfaces(
+            [&surfaces[0], &surfaces[1], &surfaces[2]],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ),
+        Err(Error::Undecidable { .. })
+    ));
+
+    let below = far.next_down();
+    let above = far.next_up();
+    assert!(radius < (far - below) / 2.0 && radius < (above - far) / 2.0);
+    for (lo, hi) in [(below, far), (far, above)] {
+        let box_of_x = Interval::new(lo, hi).expect("in order");
+        assert!(box_of_x.width() / far < NO_BOX_MAY_BE_A_BILLIONTH_OF_THE_SHAPE);
+    }
+}
+
+/// The control with each of its three surfaces written at a power of two of its
+/// own, from `2⁻¹⁰⁰⁰` to `2¹⁰⁰⁰`, so the lengths span up to two thousand binades.
+///
+/// Where the triple stands, or slid so the lengths are centred on one, nothing
+/// spread wider than about 1000 binades fits (§349.5). The second slide brings
+/// the largest length to `2⁵⁰⁰` and is exact while the smallest stays normal,
+/// so up to 1522 binades (§349.11). **So nothing under 1200 binades is refused**,
+/// which is pinned: before the second slide 56 of the 274 triples spread 1000 to
+/// 1199 binades wide were. What is still refused is printed and §349.11 sorts
+/// it.
+#[test]
+fn three_surfaces_each_written_at_a_size_of_its_own_meet_until_they_span_1200_binades() {
+    let scales = || -1000i32..=1000;
+    let drawn = (a_lattice_corner(), scales(), scales(), scales());
+    let mut runner = a_runner(CASES);
+    let tally = std::cell::RefCell::new(WideTally::default());
+    let outcome = runner.run(&drawn, |(corner, first, second, third)| {
+        let surfaces = [first, second, third]
+            .iter()
+            .enumerate()
+            .map(|(which, &scale)| {
+                Corner {
+                    elsewhere: Elsewhere { scale, shift: None },
+                    ..corner
+                }
+                .surfaces()[which]
+                    .clone()
+            })
+            .collect::<Vec<_>>();
+        let surfaces: [Surface; 3] = surfaces.try_into().expect("three");
+        tally.borrow_mut().meet(
+            &surfaces,
+            &format!("{corner:?} at 2^{first}, 2^{second}, 2^{third}"),
+        )
+    });
+    if let Err(why) = outcome {
+        panic!("{why}");
+    }
+    let tally = tally.into_inner();
+    tally.print("each at its own size");
+    assert_eq!(tally.refused[..12], [0; 12], "refused under 1200 binades");
+    assert!(tally.worst_box < NO_BOX_MAY_BE_A_BILLIONTH_OF_THE_SHAPE);
+}
+
+/// The control moved out by `2^shift`, up to `2¹⁰⁰⁰`, and written at `2⁻⁶²⁰`.
+/// Once the shift is 53 binades past the scale, a shift plus a small whole
+/// number rounds to the shift, so every place lands on `(2^shift, 2^shift,
+/// 2^shift)`: the planes pass through it and the ball or pipe is centred there,
+/// `2⁻⁶²⁰` across.
+///
+/// **Refused from 1000 binades of spread on, and that is a gap**:
+/// `two_planes_through_a_ball_2440_binades_smaller_than_where_they_stand_are_refused`
+/// is one of them, with its demonstration. Pinned so that nothing under 1000
+/// binades is refused and the count above it is printed (§349.11).
+#[test]
+fn three_surfaces_moved_far_out_and_written_tiny_are_refused_only_past_1000_binades() {
+    let drawn = (a_lattice_corner(), 31u32..=1000);
+    let mut runner = a_runner(CASES);
+    let tally = std::cell::RefCell::new(WideTally::default());
+    let outcome = runner.run(&drawn, |(corner, shift)| {
+        let corner = Corner {
+            elsewhere: Elsewhere {
+                scale: -620,
+                shift: Some(shift),
+            },
+            ..corner
+        };
+        tally
+            .borrow_mut()
+            .meet(&corner.surfaces(), &format!("{corner:?}"))
+    });
+    if let Err(why) = outcome {
+        panic!("{why}");
+    }
+    let tally = tally.into_inner();
+    tally.print("moved far out, written tiny");
+    assert_eq!(tally.refused[..10], [0; 10], "refused under 1000 binades");
+    assert!(tally.worst_box < NO_BOX_MAY_BE_A_BILLIONTH_OF_THE_SHAPE);
+}
+
+/// What a wide-spread row counts, a hundred binades of spread to a bucket.
+#[derive(Default)]
+struct WideTally {
+    drawn: [usize; 21],
+    refused: [usize; 21],
+    corners: usize,
+    worst_box: f64,
+    printed: usize,
+}
+
+impl WideTally {
+    fn meet(&mut self, surfaces: &[Surface; 3], what: &str) -> Result<(), TestCaseError> {
+        let (lowest, highest) = the_binades_spanned_by(surfaces);
+        let bucket = ((highest - lowest) / 100) as usize;
+        self.drawn[bucket] += 1;
+        let size = 2f64.powi(highest + 1);
+        let answer = meet_of_three_surfaces(
+            [&surfaces[0], &surfaces[1], &surfaces[2]],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let points = match answer {
+            Ok(MeetOfThree::At(points)) => points,
+            Ok(_) => return Ok(()),
+            Err(why) => {
+                self.refused[bucket] += 1;
+                if self.printed < 10 {
+                    self.printed += 1;
+                    let why = format!("{why:?}");
+                    println!(
+                        "REFUSED spread {} ({lowest}..{highest}): {what}\n    {:?}\n    {}",
+                        highest - lowest,
+                        surfaces,
+                        &why[..why.len().min(300)]
+                    );
+                }
+                return Ok(());
+            }
+        };
+        for point in points {
+            self.corners += 1;
+            let scale = the_largest_number_involved(size, point);
+            self.worst_box = self.worst_box.max(point.uncertainty() / scale);
+            for surface in surfaces {
+                let side = which_side_of(surface, point);
+                prop_assert!(
+                    matches!(side, Decision::Zero | Decision::Undecidable { .. }),
+                    "{what}: {point:?} certified {side:?} off {surface:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn print(&self, what: &str) {
+        for bucket in 0..self.drawn.len() {
+            if self.drawn[bucket] > 0 {
+                println!(
+                    "{what}: spread {}..{}: {} drawn, {} refused",
+                    bucket * 100,
+                    bucket * 100 + 99,
+                    self.drawn[bucket],
+                    self.refused[bucket]
+                );
+            }
+        }
+        println!(
+            "{what}: {} corners, widest box {:e} of the size",
+            self.corners, self.worst_box
+        );
+    }
+}
+
+/// The lowest and highest binade of any length the three surfaces store that is
+/// not zero.
+fn the_binades_spanned_by(surfaces: &[Surface; 3]) -> (i32, i32) {
+    let mut lengths = Vec::new();
+    for surface in surfaces {
+        match surface {
+            Surface::Plane(flat) => lengths.push(flat.offset()),
+            Surface::Sphere(ball) => {
+                lengths.extend(ball.centre().coordinates());
+                lengths.push(ball.radius());
+            }
+            Surface::Cylinder(pipe) => {
+                lengths.extend(pipe.axis().origin().coordinates());
+                lengths.push(pipe.radius());
+            }
+            other => panic!("nothing here measures {other:?}"),
+        }
+    }
+    let binades = lengths
+        .into_iter()
+        .filter(|length| *length != 0.0)
+        .map(|length| length.abs().log2().floor() as i32)
+        .collect::<Vec<_>>();
+    (
+        binades.iter().copied().min().unwrap_or(0),
+        binades.iter().copied().max().unwrap_or(0),
+    )
+}
+
 /// The triple the proptest seed `e0a2a205` shrank to, every number multiplied by
 /// `size`: the planes `y = 2` and `z = 0` and a ball of radius three about
 /// `(0, 1, 0)`.
