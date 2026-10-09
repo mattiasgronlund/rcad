@@ -175,3 +175,184 @@ unless named:
 - §322.4's last sentences and §322.7's last bullet say the uniformly tiny
   triple "refuses as it did". That was true when written and is not now. §322
   is not this lane's to edit, so the correction is this section.
+
+### 349.8 A line and a surface written `1e-159` across meet after the same slide — 2026-10-09
+
+*Queue row Q459, from §349.7's second bullet. Lane
+`lane-q459-a-line-meets-a-tiny-surface`, off `2a06994c`, in three runs (§416).
+`where_a_line_meets_a_surface` is the route `classify_point` takes to cast a
+ray. Written `2⁻⁵²⁸` across, it refused a ball, a pipe, a cone and a ring that
+it answers at size one, and so did `classify_point`. It now slides a refused
+question the way §349.3 slides three surfaces, and both answer.*
+
+**The refusal.** Each test in `where_a_line_meets_a_surface.rs` asks one
+question at size one and again with every number times `2⁻⁵²⁸`, the line's point
+and direction included, so the two are one question at two sizes. Before the
+slide (`dcdf610b`) the tiny one refused for
+`a_line_and_a_ball_written_about_1e_159_across_meet_where_they_do_at_size_one`
+and the same test for a pipe, a cone and a ring, and for
+`a_line_touching_a_ring_written_about_1e_159_across_touches_it_where_it_does_at_size_one`,
+a line along the top of the tube that touches it at `±√15`. Each refused with
+the record `where a line meets a surface`, level `Exact`, enclosure `inf`: a
+product of two lengths there is near `2⁻¹⁰⁵⁶` and a ring's quartic near
+`2⁻²¹¹²`, so an exact step could not be taken. Size one answers each, so each is
+a **gap** (§16.10). The plane answered at both sizes and its test is a pin:
+every product it takes is a length times a normal, near `2⁻⁵²⁸`.
+
+**The slide.** As in §349.3: a question refused `Error::Undecidable` is asked
+again with every length times one power of two, chosen so the binades the
+lengths span are centred on one, under `Policy::certified()`. The records where
+it stands are passed on only when the slid question refuses too. The lengths
+are the surface's (`the_lengths_of`) and the ends of the line's two boxes.
+
+**The line's direction is a length too, so it slides.** `2ᵏ·from + t·2ᵏ·along`
+is `2ᵏ` times the point at `t`, so a step `t` is the same number at both sizes
+and comes back as it was found, with nothing to move back. Sliding the point
+alone would have scaled `t` by `2⁻ᵏ`. Each test compares the tiny steps with
+the steps at size one **bit for bit**, which is as tight as a comparison gets:
+the tiny box is not one ulp wider.
+
+**A box slides exactly or the slide is not taken.** The row asked for the boxes
+to be moved outward, as `meet_of_three_surfaces` moves its corners back. That
+was not done. Each end of a box slides through `slid_exactly`, and one that
+would not stay a normal number sinks the slide, as a surface's length does
+(§349.2). A box rounded outward holds lines other than the one asked about. A
+line that was exact, each box one `f64`, would then no longer be, and the exact
+level could not run. A ring's quartic needs that level
+(`WhereALineMeetsARingNeedsTheLineExactly`). Nothing that comes back is a place
+in space, so no box has to move back.
+
+**What does move back is a touch's reach.** `MeetsAt::MaybeATouch` carries how
+far a ring's quartic reaches over the touch's box. That is a length to the
+fourth, so it comes back slid by `2⁻⁴ᵏ`, and outward where it rounds
+(`a_reach_slid_back`). Four times a slide can be more than the 2046 binades
+`multiplied_by_a_power_of_two` covers in its two steps. `2f64.powi(-1030)` is
+zero, so a slide down of 2060 binades puts both ends at zero, and one subnormal
+out from zero, `2⁻¹⁰⁷⁴`, does not hold `2⁻¹⁰⁶⁰`. So it goes in steps of at most
+a thousand binades, each a factor `f64` holds.
+`a_reach_slid_down_past_2046_binades_still_holds_where_it_lands` pins that. At
+`2⁻⁵²⁸` a length to the fourth is under the smallest subnormal, and the touch
+test pins the reach at exactly `(−2⁻¹⁰⁷⁴, 2⁻¹⁰⁷⁴)`.
+
+**A refusal by name passes through.** The first run threw the slid question's
+error away. A ring asked about a line that is a box, `2⁻⁵²⁸` across, then came
+back `Error::Undecidable`, because the quartic fell out of `f64` before the box
+was looked at. At size one the same question is refused
+`WhereALineMeetsARingNeedsTheLineExactly`. Now any refusal of the slid question
+but `Undecidable` comes back as it is, since it is the question's at any size.
+`a_torus_asked_about_a_line_that_is_a_box_1e_159_across_is_refused_by_the_same_name`
+pins it. `classify.rs` reads both refusals of a torus the same way, as
+`CannotFireARayAtAFacesSurface`, so this moves no answer there.
+
+**Through the public API, the refusal reached `classify_point`.** A throwaway
+test in `crates/rcad-topo/tests/` builds a ball of radius 3, a round bar of
+radius 3 and height 4, and a cube of side 4. It classifies 11 points under
+`Policy::certified()` at size one, then the same with every number times
+`2⁻⁵²⁸`, and prints each answer and how many records it logged. It was not
+committed. Before the slide, at `2⁻⁵²⁸`, 6 of the 8 points on the ball and bar
+came back `Undecidable { enclosure: 0.0 }` with no records: four inside and
+two outside. The cube's three points answered, and so did `(5, 0, 0)` beside
+the ball and `(5, 0, 2)` beside the bar. With the slide, all 22 answer as at
+size one, with no records.
+
+The tiny refusals logged nothing. `classify.rs`'s ray arm `Err(_) =>
+tally.grazed(0.0)` drops the records a refused ray cast carries, where the arm
+for `what_this_face_holds` drains them into the log. That was read, not
+traced. The slide answers these points, and no input on this branch
+is known to reach that arm. It is a row's to find one.
+
+**The slide answers two refusals at size one as well.** It does not wait for
+tiny numbers: any question refused `Undecidable` is asked again once the
+binades its lengths span are centred on one, and a bend's are not. Q1075's
+quarter bend of ring 1 and tube `1 − 2⁻³⁰` was refused
+`CannotFireARayAtAFacesSurface`, naming the wall, at its cap's corner
+`(2⁻³⁰, 0, 0)` and at `(−2⁻³⁰, 0, 0)` on the other circle. The bend of ring 4
+and tube `4 − 2⁻³⁰` was refused at the same two points. On this branch all four
+answer: `OnBoundary` at the corner and `Outside` on the other circle, which is
+what `a_bend_whose_tube_all_but_reaches_its_axis_holds_only_its_own_side_of_it`
+labels right. That test pins the two refusals of ring 1, so it now fails. It is
+Q1075's file and outside this row's write set. The bend of ring 4 and tube 1
+answered its corner `(3, 0, 0)` before and after.
+
+A throwaway print in `where_a_line_meets_a_ring` showed where the refusal was.
+`how_a_ring_cuts_the_line` builds the quartic exactly, and
+`where_a_polynomial_is_zero` returns `None` for it as written. Slid by `2¹⁴` for
+ring 1 and `2¹³` for ring 4, it finds four roots. For ring 1, cast from the
+corner, they are about `−0.2157`, `−1.9957e-10`, exactly `0` (the corner
+itself) and `0.2157`. **Why it gives up as written is not traced.** One guess,
+not run: a product underflows while the search closes in on the root at
+`t = 0`. That is a gap in `real_roots.rs`, which the slide covers here, and a
+row's to trace. The first run's print also caught plane casts from the points
+`2⁻¹⁰⁰⁰` off the axis refusing as written and answering slid. Those points
+classified `Outside` before and after, so no answer moved there.
+
+### 349.9 Measured
+
+- `mise exec -- just t -p rcad-geom --test where_a_line_meets_a_surface`: 21
+  run, 21 passed on the branch tip. On `dcdf610b`, the tests before the slide,
+  20 run, 15 passed, 5 failed: the ball, pipe, cone, ring and ring touch. On
+  `cc613892`, the slide that threw the slid refusal away, 21 run, 20 passed, 1
+  failed: the ring with a box line, left `Undecidable` and right
+  `WhereALineMeetsARingNeedsTheLineExactly`.
+- The first run measured two mutants. With `multiplied_by_a_power_of_two` in
+  place of the thousand-binade steps, the unit test fails with `[-5e-324,
+  5e-324] does not hold ±2^-1060`. With the reach left where it was worked out
+  (`-4 * up` made `0`), the touch test fails with left
+  `(-7.105427357601002e-15, 5.329070518200751e-15)`.
+- The `classify_point` probe:
+  `mise exec -- just t -p rcad-topo --test zz_probe_q459_tiny_classify
+  --no-capture`, on `dcdf610b` and on the branch tip. Its lines read `PROBE
+  size=1.1380524797363597e-159 ball r=3 point=[1.0, 0.0, 0.0]*size ->
+  Undecidable { enclosure: 0.0 } records=0` before and `-> Inside records=0`
+  after.
+- Every pin the slide moves, on the branch at `291bfa03`, each crate run with
+  `--no-fail-fast`. `mise exec -- just t -p rcad-topo --no-fail-fast`: 1766
+  run, 1765 passed, 1 failed, and the one is the bend pin above, with both
+  points `[9.313225746154785e-10, 0.0, 0.0]` and
+  `[-9.313225746154785e-10, 0.0, 0.0]` listed. `mise exec -- just t -p
+  rcad-step --no-fail-fast`: 338 run, 338 passed. `mise exec -- just t -p rcad
+  -p rcad-fuzz-explain -p rcad-fuzz-timing -p rcad-mesh -p rcad-predicates
+  --no-fail-fast`: 393 run, 393 passed. `mise exec -- just t -p rcad-geom
+  --no-fail-fast`: 1136 run, 1136 passed.
+- The bends: a throwaway test in `crates/rcad-topo/tests/` builds the quarter
+  bends of ring 4 and tube `4 − 2⁻³⁰`, ring 1 and tube `1 − 2⁻³⁰`, and ring 4
+  and tube 1, and classifies the corner and its mirror under
+  `Policy::certified()`. On `2a06994c` the first two print
+  `CannotFireARayAtAFacesSurface` at all four points. On the branch they print
+  `OnBoundary` and `Outside`. The third prints `OnBoundary` and `Outside` on
+  both. With an `eprintln!` of `where_a_polynomial_is_zero`'s answer in
+  `where_a_line_meets_a_ring`, each of those four casts prints `None` first and
+  then four roots for the slid question. Neither was committed.
+
+### 349.10 What this leaves
+
+- §349.7's second bullet is answered: the tiny line and surface were tried,
+  refused, and now meet where they do at size one.
+- §349.7's first bullet, `Sphere::side_of` at `2⁻⁵²⁸`, is untouched here and is
+  Q458's.
+- `classify_point`'s ray arm drops a refused ray cast's records (§349.8). A
+  queue row, filed with this section.
+- Q1075's two refusals and its ring 4 corner are answered (§349.8). Its pin, in
+  `a_bends_cap_holds_one_of_the_two_disks.rs`, still expects the refusals and
+  fails until it moves to `OnBoundary` and `Outside`. That file is not this
+  row's.
+- `where_a_polynomial_is_zero` gives up on the bend's quartic as written and
+  answers it slid (§349.8). Not traced. Whether a question the slide does not
+  move meets the same refusal was not run. A queue row, filed with this
+  section.
+- **Not claimed either way**, as in §349.5: a line and a surface whose lengths,
+  the line's direction among them, span more binades than one slide fits. A
+  direction written at a scale far from the surface's widens the span. Nothing
+  here tried it.
+
+- 2026-10-09: Q1075's three bend refusals — the cap's corner and the other
+  circle of ring one, tube `1 − g`, and the cap's corner of ring four, tube
+  `4 − g` — all answer since the slide above. The pin in
+  `a_bends_cap_holds_one_of_the_two_disks.rs` moved: the two points of
+  `a_bend_whose_tube_all_but_reaches_its_axis_holds_only_its_own_side_of_it`
+  that read `refused_at_the_wall` now read `Containment::OnBoundary` and
+  `Containment::Outside`, and the ring four corner is pinned in its own test,
+  `a_bigger_bends_cap_corner_also_answers_since_the_slide`, both measured
+  against `2a06994c` first and the slide's tip after. What Q1075 still has
+  left is the root finder's refusal on the bend's quartic, carried as a row
+  after this one.

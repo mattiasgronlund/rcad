@@ -782,7 +782,49 @@ pub enum MeetsAt {
 /// [`Error::WhereALineMeetsARingNeedsTheLineExactly`] for a torus asked about a
 /// line that is a box. A **gap**, and [`real_roots`](crate::real_roots)'s own
 /// doc says what closes it.
+///
+/// # A line and a surface written far down the range are slid up it first
+///
+/// A ball `2⁻⁵²⁸` across asked about a line its own size multiplies out to
+/// terms near `2⁻¹⁰⁵⁶`, and a ring's quartic to terms near `2⁻²¹¹²`, which
+/// `f64` does not hold. So a refusal where they stand is asked again with every
+/// length multiplied by one power of two, the way [`meet_of_three_surfaces`]
+/// asks again. **The line's direction is one of the lengths**, so the step along
+/// it does not move: `2ᵏ·from + t·2ᵏ·along` is `2ᵏ` times the point at `t`. What
+/// does move is how far a ring's quartic reaches over a touch, a length to the
+/// fourth, and it is slid back down. `docs/decisions.md` §349.8.
+///
+/// **The slide is not kept for tiny numbers.** Any refusal is asked again once
+/// the binades are off centre. A quarter bend of ring one and tube `1 − 2⁻³⁰`,
+/// cast at from its cap's corner `(2⁻³⁰, 0, 0)`, is answered slid by `2¹⁴`,
+/// where [`real_roots`](crate::real_roots) gives up on the quartic as written.
 pub fn where_a_line_meets_a_surface(
+    from: [Interval; 3],
+    along: [Interval; 3],
+    surface: &Surface,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<WhereALineMeetsIt> {
+    let mut records = ProvenanceLog::new();
+    let refused =
+        match where_a_line_meets_it_where_they_stand(from, along, surface, policy, &mut records) {
+            Err(refused @ Error::Undecidable { .. }) => refused,
+            answered => {
+                records.drain_into(log);
+                return answered;
+            }
+        };
+    match where_a_line_meets_it_slid_into_range(from, along, surface) {
+        None | Some(Err(Error::Undecidable { .. })) => {
+            records.drain_into(log);
+            Err(refused)
+        }
+        Some(slid) => slid,
+    }
+}
+
+/// Where a line meets one surface, worked out at the size they are written.
+fn where_a_line_meets_it_where_they_stand(
     from: [Interval; 3],
     along: [Interval; 3],
     surface: &Surface,
@@ -833,6 +875,113 @@ pub fn where_a_line_meets_a_surface(
         ));
     }
     Ok(found)
+}
+
+/// Where the same line meets the same surface slid along the range by a power
+/// of two — or `None` where no slide moves anything or the slide is not exact.
+///
+/// A refusal of the slid question comes back as it is. One by name, such as a
+/// ring asked about a line that is a box, is the refusal the question has at
+/// any size, where the question as it stands may have fallen out of `f64`
+/// before reaching it.
+///
+/// The slide centres the binades the lengths span on one, the line's two boxes
+/// among them, for the reason [`the_meet_slid_into_range`] gives, and it is
+/// asked under a certified policy for the reason given there too. A box slides
+/// end by end, and an end that would not stay a normal number sinks the slide
+/// as a surface's length does: a slid box that was rounded would hold other
+/// lines, and the exact level could no longer run on a line that was exact.
+///
+/// The steps come back as they are, since the line's direction slid with it.
+/// How far a ring's quartic reaches over a touch is a length to the fourth,
+/// so it comes back slid by four times the slide, outward.
+fn where_a_line_meets_it_slid_into_range(
+    from: [Interval; 3],
+    along: [Interval; 3],
+    surface: &Surface,
+) -> Option<Result<WhereALineMeetsIt>> {
+    let binades: SmallVec<[i32; 17]> = from
+        .iter()
+        .chain(&along)
+        .flat_map(|side| [side.lo(), side.hi()])
+        .chain(the_lengths_of(surface))
+        .filter(|length| *length != 0.0)
+        .map(binary_exponent)
+        .collect();
+    let (Some(lowest), Some(highest)) = (binades.iter().min(), binades.iter().max()) else {
+        return None;
+    };
+    let up = -(lowest + highest) / 2;
+    if up == 0 {
+        return None;
+    }
+    let slid_box = |boxed: [Interval; 3]| -> Option<[Interval; 3]> {
+        let [x, y, z] = boxed.map(|side| {
+            Some(
+                Interval::new(slid_exactly(side.lo(), up)?, slid_exactly(side.hi(), up)?)
+                    .expect("both ends moved exactly, and the same way"),
+            )
+        });
+        Some([x?, y?, z?])
+    };
+    let found = where_a_line_meets_it_where_they_stand(
+        slid_box(from)?,
+        slid_box(along)?,
+        &the_same_surface_slid_by(surface, up)?,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    let Ok(WhereALineMeetsIt::At(steps)) = found else {
+        return Some(found);
+    };
+    Some(Ok(WhereALineMeetsIt::At(
+        steps
+            .into_iter()
+            .map(|step| match step {
+                MeetsAt::Here(step) => MeetsAt::Here(step),
+                MeetsAt::MaybeATouch {
+                    inside,
+                    how_far_it_reaches,
+                } => MeetsAt::MaybeATouch {
+                    inside,
+                    how_far_it_reaches: a_reach_slid_back(how_far_it_reaches, -4 * up),
+                },
+            })
+            .collect(),
+    )))
+}
+
+/// How far a ring's quartic reaches over a box, slid by `2^exponent` and
+/// outward wherever that rounds.
+///
+/// Four times a slide can be past the 2046 binades
+/// [`multiplied_by_a_power_of_two`] spans in its two steps — `2⁻⁵²⁸` is four
+/// times 528 — so it goes in steps of at most a thousand, each a factor `f64`
+/// holds. An end that comes out a normal number was moved exactly. One that
+/// comes out a subnormal or zero was rounded at each step that left it there,
+/// and those roundings come to less than one subnormal between them, since
+/// each later step shrinks what the earlier ones lost; it is stepped one
+/// further out. One that runs off the top is infinite, which holds anything.
+fn a_reach_slid_back(reach: Interval, exponent: i32) -> Interval {
+    let outward = |end: f64, step: fn(f64) -> f64| {
+        let mut moved = end;
+        let mut left = exponent;
+        while left != 0 {
+            let part = left.clamp(-1000, 1000);
+            moved *= 2f64.powi(part);
+            left -= part;
+        }
+        if end == 0.0 || moved.is_normal() {
+            moved
+        } else {
+            step(moved)
+        }
+    };
+    Interval::new(
+        outward(reach.lo(), f64::next_down),
+        outward(reach.hi(), f64::next_up),
+    )
+    .expect("both ends moved the same way, and outward where they rounded")
 }
 
 impl MeetsAt {
@@ -4172,6 +4321,31 @@ mod tests {
             .iter()
             .map(|point| point.enclosure().map(|side| (side.lo() + side.hi()) / 2.0))
             .collect()
+    }
+
+    /// A reach of `±2¹⁰⁰⁰` slid down by `2⁻²⁰⁶⁰` lands on `±2⁻¹⁰⁶⁰`, a subnormal
+    /// `f64` holds, and the box that comes back holds it.
+    ///
+    /// `multiplied_by_a_power_of_two` takes `2⁻²⁰⁶⁰` as two factors of
+    /// `2⁻¹⁰³⁰`, and `2f64.powi(-1030)` is zero, so it would put both ends at
+    /// zero and one subnormal out from there is `2⁻¹⁰⁷⁴`, which does not hold
+    /// `2⁻¹⁰⁶⁰`. A ring's reach is slid by four times a slide, so this many
+    /// binades is a slide of 515, which a ring `2⁻⁵¹⁵` across asks for.
+    #[test]
+    fn a_reach_slid_down_past_2046_binades_still_holds_where_it_lands() {
+        let lands = 2f64.powi(-1000) * 2f64.powi(-60);
+        assert!(lands > 0.0 && !lands.is_normal(), "2^-1060 is a subnormal");
+        let reach = Interval::new(-(2f64.powi(1000)), 2f64.powi(1000)).expect("a box");
+        let slid = a_reach_slid_back(reach, -2060);
+        assert!(
+            slid.lo() <= -lands && lands <= slid.hi(),
+            "{slid:?} does not hold ±2^-1060"
+        );
+        assert_eq!(
+            (slid.lo(), slid.hi()),
+            (-lands.next_up(), lands.next_up()),
+            "one subnormal out from where it landed, and no further"
+        );
     }
 
     /// Ring 12/5 about `z` and the radius-5 pipe through `(12, 0, 0)` along
