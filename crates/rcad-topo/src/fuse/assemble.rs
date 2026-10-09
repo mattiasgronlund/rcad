@@ -119,7 +119,7 @@ pub(crate) fn assemble(
     log: &mut ProvenanceLog,
 ) -> Result<Assembly> {
     let mut assembly = Assembly::from_the_pieces(model, scratch, chosen, policy, log)?;
-    assembly.join_up_what_is_one_face(log)?;
+    assembly.join_up_what_is_one_face(Some(policy), log)?;
     assembly.runs = assembly.how_each_edge_runs()?;
     assembly.shells = assembly.group_into_shells()?;
     assembly.solids = assembly.nest_the_shells(model, policy, log)?;
@@ -136,6 +136,11 @@ pub(crate) fn assemble(
 /// profile points in a row and the extrusion of one has two side faces on a
 /// single plane — so the same joining runs on the way in, done by the same code.
 ///
+/// **It takes no policy, because `bake.rs` asks it only of a wholly flat
+/// solid**, and the one thing the joining needs a policy for is naming the
+/// circle a plane cuts a ring in, for a ring of a joined face that runs along a
+/// torus ([`Assembly::holds_the_other_rings`]). A flat solid has no such ring.
+///
 /// # Errors
 ///
 /// [`Error::Undecidable`] when two of the input's planes cannot be told apart at
@@ -143,13 +148,21 @@ pub(crate) fn assemble(
 /// other than two faces, which means the input was already broken, and
 /// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
 /// its coplanar faces both wind as its outline.
+///
+/// # Panics
+///
+/// If `solid` is not wholly flat.
 pub(crate) fn joined_faces_of_an_input(
     model: &Model,
     solid: SolidView<'_>,
     log: &mut ProvenanceLog,
 ) -> Result<Option<Vec<InputFace>>> {
+    assert!(
+        solid.is_wholly_flat(),
+        "bake.rs joins the faces of an input only when it is wholly flat"
+    );
     let mut assembly = Assembly::from_one_input_solid(model, solid);
-    if !assembly.join_up_what_is_one_face(log)? {
+    if !assembly.join_up_what_is_one_face(None, log)? {
         return Ok(None);
     }
     Ok(Some(assembly.as_input_faces()?))
@@ -1042,12 +1055,18 @@ impl Assembly {
     /// Answers `true` when it joined something, which is what lets
     /// [`joined_faces_of_an_input`] leave an input that needs nothing alone.
     ///
+    /// `policy` is `None` for an input that is wholly flat, which is the one
+    /// input [`joined_faces_of_an_input`] is asked of: only a ring along a
+    /// torus needs it ([`Assembly::holds_the_other_rings`]).
+    ///
     /// # Errors
     ///
     /// [`Error::ResultIsNotManifold`] when an edge is claimed by other than two
     /// faces, [`Error::Undecidable`] when two planes cannot be told apart at
-    /// all, and [`Error::TheFuseWroteABrokenAnswer`] when two rings of a joined
-    /// flat face both wind as its outline ([`Assembly::rings_round`]).
+    /// all, [`Error::TheFuseWroteABrokenAnswer`] when two rings of a joined
+    /// flat face both wind as its outline ([`Assembly::rings_round`]), and
+    /// whatever [`intersect`](rcad_geom::intersect) gives for a plane and a
+    /// ring whose circle a ring of a joined face runs round.
     ///
     /// # Panics
     ///
@@ -1058,8 +1077,13 @@ impl Assembly {
     /// different sides not both straight, or a ring of a whole closed surface
     /// ([`Assembly::with_each_ring_of_two_straight_sides_left_out`]). Both are
     /// broken internal invariants and a corrupt solid is worse than a crash
-    /// (§4.1).
-    fn join_up_what_is_one_face(&mut self, log: &mut ProvenanceLog) -> Result<bool> {
+    /// (§4.1). And with no `policy`, where a ring of a joined face runs along a
+    /// torus.
+    fn join_up_what_is_one_face(
+        &mut self,
+        policy: Option<&Policy>,
+        log: &mut ProvenanceLog,
+    ) -> Result<bool> {
         let along = self.darts_along_each_edge()?;
         let mut dissolved = self.edges_with_one_face_on_both_sides(&along, log)?;
         let staying = self.edges_a_curved_face_keeps(&along, &dissolved);
@@ -1067,7 +1091,7 @@ impl Assembly {
             dissolved[edge] = false;
         }
         let same = joined_across(&along, &dissolved, self.faces.len());
-        let joined = self.rings_of_each_joined_face(&same, &along, &dissolved, log)?;
+        let joined = self.rings_of_each_joined_face(&same, &along, &dissolved, policy, log)?;
         let renumbered = self.what_is_left(&joined, &along, &dissolved);
         // **A closed curve cut where nothing meets it** is joined back up even
         // where no face was: a pointed cone less a block whose walls are tangent
@@ -1164,6 +1188,7 @@ impl Assembly {
         same: &Sameness,
         along: &[[Dart; 2]],
         dissolved: &[bool],
+        policy: Option<&Policy>,
         log: &mut ProvenanceLog,
     ) -> Result<Vec<JoinedFace>> {
         let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
@@ -1188,7 +1213,7 @@ impl Assembly {
             let (surface, used, rings) = match self.faces[members[0]].surface.as_plane() {
                 Some(_) => {
                     let plane = plane_of_the_joined_face(&members, &self.faces);
-                    let rings = self.rings_round(&members, along, dissolved, plane, log)?;
+                    let rings = self.rings_round(&members, along, dissolved, plane, policy, log)?;
                     (Surface::Plane(plane), Orientation::Forward, rings)
                 }
                 // The lowest spelling by bits, so the face does not depend on
@@ -1690,6 +1715,7 @@ impl Assembly {
         along: &[[Dart; 2]],
         dissolved: &[bool],
         plane: Plane,
+        policy: Option<&Policy>,
         log: &mut ProvenanceLog,
     ) -> Result<Vec<Vec<Dart>>> {
         let corners_of = |ring: &[Dart]| -> Vec<[f64; 3]> {
@@ -1736,17 +1762,22 @@ impl Assembly {
             }
             None if enclosing_nothing.len() == 1 => enclosing_nothing.remove(0),
             None => {
-                let held: Vec<Option<bool>> = (0..enclosing_nothing.len())
-                    .map(|ring| {
-                        let others = enclosing_nothing
-                            .iter()
-                            .enumerate()
-                            .filter(|&(other, _)| other != ring)
-                            .map(|(_, other)| other)
-                            .chain(&holes);
-                        self.holds_the_other_rings(&enclosing_nothing[ring], others, &plane)
-                    })
-                    .collect();
+                let mut held: Vec<Option<bool>> = Vec::with_capacity(enclosing_nothing.len());
+                for ring in 0..enclosing_nothing.len() {
+                    let others = enclosing_nothing
+                        .iter()
+                        .enumerate()
+                        .filter(|&(other, _)| other != ring)
+                        .map(|(_, other)| other)
+                        .chain(&holes);
+                    held.push(self.holds_the_other_rings(
+                        &enclosing_nothing[ring],
+                        others,
+                        &plane,
+                        policy,
+                        log,
+                    )?);
+                }
                 let holding: Vec<usize> = (0..held.len())
                     .filter(|&ring| held[ring] == Some(true))
                     .collect();
@@ -1825,25 +1856,43 @@ impl Assembly {
     /// reading stays: on every chord the fuse builds down to a few millionths
     /// long, the rounding never puts the point on the wrong side.
     ///
-    /// `None` for a ring along a torus — a plane square to its axis cuts it in
-    /// two circles with the torus between them, so the inside of the torus is
-    /// not the region either circle bounds — and where no corner is placed. Of
-    /// a ring along more than one surface, `None` too where its corners are not
-    /// on one line, where a closed side is one of several, for an arc along a
-    /// torus, for an arc along a cone's parabola or hyperbola whose plane holds
-    /// the apex or whose ends are not both on one nappe, for an arc whose bulge
-    /// reads along its chord, and where a corner's nappe cannot be settled.
+    /// **A ring every side of which runs along one torus is the whole of one of
+    /// the two circles the plane cuts it in**, because the two circles do not
+    /// meet. The region it bounds is that circle's disk, and not the part of
+    /// the plane inside the torus: a plane square to the axis cuts it in two
+    /// circles round the axis with the torus between them, and a plane through
+    /// the axis in two meridian circles side by side. So the circle is named
+    /// the way [`intersect`](rcad_geom::intersect) names it, and the torus and
+    /// that picker together say which side of it a corner is on
+    /// ([`Assembly::what_the_disk_of_a_rings_circle_holds`]). The floors of the
+    /// top halves of two half bends united join into the flat ring between two
+    /// such circles (`a_joined_flat_face_whose_rings_enclose_no_area.rs`).
+    ///
+    /// `None` where no corner is placed. Of a ring along more than one surface,
+    /// `None` too where its corners are not on one line, where a closed side is
+    /// one of several, for an arc along a torus, for an arc along a cone's
+    /// parabola or hyperbola whose plane holds the apex or whose ends are not
+    /// both on one nappe, for an arc whose bulge reads along its chord, and
+    /// where a corner's nappe cannot be settled.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`intersect`](rcad_geom::intersect) gives for the plane and the
+    /// torus a ring runs along.
     ///
     /// # Panics
     ///
     /// On a [`Decision`] this crate has not been taught, for the reason
-    /// [`winding_round`] gives.
+    /// [`winding_round`] gives, and for a ring along a torus with no `policy`,
+    /// which only a wholly flat input is joined with.
     fn holds_the_other_rings<'a>(
         &self,
         ring: &[Dart],
         mut others: impl Iterator<Item = &'a Vec<Dart>>,
         plane: &Plane,
-    ) -> Option<bool> {
+        policy: Option<&Policy>,
+        log: &mut ProvenanceLog,
+    ) -> Result<Option<bool>> {
         let the_curved_one = |dart: Dart| {
             let [one, other] = self.edges[self.edge_of(dart)].carried_by;
             match (one.as_plane(), other.as_plane()) {
@@ -1852,19 +1901,31 @@ impl Assembly {
                 (Some(_), Some(_)) | (None, None) => None,
             }
         };
-        let along_one = the_curved_one(*ring.first()?).filter(|first| {
+        let Some(&first) = ring.first() else {
+            return Ok(None);
+        };
+        let along_one = the_curved_one(first).filter(|first| {
             ring.iter()
                 .all(|&dart| the_curved_one(dart).is_some_and(|curved| one_surface(&curved, first)))
         });
         if let Some(surface) = along_one {
             match surface {
                 Surface::Cylinder(_) | Surface::Sphere(_) | Surface::Cone(_) => (),
-                Surface::Plane(_) | Surface::Torus(_) => return None,
+                Surface::Torus(_) => {
+                    let policy = policy.expect(
+                        "a ring along a torus is on a face of a fuse's answer, and the fuse \
+                         hands its policy over",
+                    );
+                    return self.what_the_disk_of_a_rings_circle_holds(
+                        ring, others, plane, &surface, policy, log,
+                    );
+                }
+                Surface::Plane(_) => return Ok(None),
                 // A kind added to `rcad-geom` after this has not been shown to
                 // bound the region inside it, so a ring along it is not placed.
-                _ => return None,
+                _ => return Ok(None),
             }
-            return others.find_map(|other| {
+            return Ok(others.find_map(|other| {
                 other.iter().find_map(|&dart| {
                     let at = self.corners[self.starts_at(dart)].point.coordinates();
                     match crate::validate::side_of_surface(&surface, PredicatePoint::from(at)) {
@@ -1877,11 +1938,13 @@ impl Assembly {
                         ),
                     }
                 })
-            });
+            }));
         }
 
         let normal = plane.normal().components();
-        let arcs = how_each_arc_bulges(self, ring, plane, normal, the_curved_one)?;
+        let Some(arcs) = how_each_arc_bulges(self, ring, plane, normal, the_curved_one) else {
+            return Ok(None);
+        };
 
         let own: Vec<usize> = ring.iter().map(|&dart| self.starts_at(dart)).collect();
         let at_corner = |corner: usize| self.corners[corner].point.coordinates();
@@ -1892,11 +1955,11 @@ impl Assembly {
                     == Some(Decision::Zero)
             };
             if !own.iter().all(|&corner| on_the_line(corner)) {
-                return None;
+                return Ok(None);
             }
         }
 
-        others.find_map(|other| {
+        Ok(others.find_map(|other| {
             other.iter().find_map(|&dart| {
                 let corner = self.starts_at(dart);
                 if own.contains(&corner) {
@@ -1914,7 +1977,103 @@ impl Assembly {
                     _ => None,
                 }
             })
-        })
+        }))
+    }
+
+    /// Whether the disk of the circle `ring` runs right round holds the rings
+    /// `others`, for a ring every side of which is along `torus`, or `None`
+    /// where no corner of theirs is placed.
+    ///
+    /// **The circle is named by the picker `intersect` gives it**: the outside
+    /// of the pipe of the ring's own radius `R` for the outer of two circles
+    /// round the axis, its inside for the inner, and a flat half-space for one
+    /// of two meridian circles ([`the_picker_naming_the_circle_through`]). On
+    /// the plane the torus holds the band between two circles round the axis,
+    /// or the two meridian disks, so with `F` the torus's sign at a corner and
+    /// the picker either keeping it (on or past the pipe, or on or in front of
+    /// the half-space) or not:
+    ///
+    /// | circle | `F` below zero | `F` above zero, kept | `F` zero or above, not kept |
+    /// |---|---|---|---|
+    /// | outer, `OutsideAPipe` | held: in the band | not held: further out | held: nearer the axis than `R` |
+    /// | inner, `InsideAPipe` | not held: in the band | held: in the hole | not held: further from the axis than `R` |
+    /// | meridian, `InFrontOf` | held where kept, in this disk, and not in the other | not held | not held: on the other circle's side |
+    ///
+    /// A corner where `F` is zero and the picker keeps it is on this circle,
+    /// and is passed over for the next, as is a corner either sign cannot
+    /// place. Every sign is exact. A corner of the other ring is on the torus
+    /// when that ring is the other circle, so `F` alone never places it: the
+    /// picker does. `holds.rs`'s `which_side_of_a_rings_circle` reads a face's
+    /// circle by the same table.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`intersect`](rcad_geom::intersect) gives for `plane` and
+    /// `torus`.
+    ///
+    /// # Panics
+    ///
+    /// On a [`Decision`] this crate has not been taught, and where the circle's
+    /// picker is a kind [`intersect`](rcad_geom::intersect) does not name a
+    /// circle of a plane and a ring by.
+    fn what_the_disk_of_a_rings_circle_holds<'a>(
+        &self,
+        ring: &[Dart],
+        mut others: impl Iterator<Item = &'a Vec<Dart>>,
+        plane: &Plane,
+        torus: &Surface,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Option<bool>> {
+        let at = |dart: Dart| {
+            PredicatePoint::from(self.corners[self.starts_at(dart)].point.coordinates())
+        };
+        let Some(this_circle) = the_picker_naming_the_circle_through(
+            &Surface::Plane(*plane),
+            torus,
+            at(ring[0]),
+            policy,
+            log,
+        )?
+        else {
+            return Ok(None);
+        };
+        let outer = match this_circle {
+            Picker::OutsideAPipe(_) => Some(true),
+            Picker::InsideAPipe(_) => Some(false),
+            Picker::InFrontOf(_) => None,
+            other => panic!("intersect names a circle a plane cuts a ring in by {other:?}"),
+        };
+        Ok(others.find_map(|other| {
+            other.iter().find_map(|&dart| {
+                let corner = at(dart);
+                let kept = match this_circle.side_of_point(corner) {
+                    Decision::Pos | Decision::Zero => true,
+                    Decision::Neg => false,
+                    Decision::Undecidable { .. } => return None,
+                    other => {
+                        panic!("a picker came back with a decision nothing here knows: {other:?}")
+                    }
+                };
+                let inside_the_tube = match crate::validate::side_of_surface(torus, corner) {
+                    Decision::Neg => true,
+                    Decision::Pos => false,
+                    Decision::Zero if kept => return None,
+                    Decision::Zero => false,
+                    Decision::Undecidable { .. } => return None,
+                    other => panic!(
+                        "which side of a ring a corner is on came back as a decision nothing \
+                         here knows: {other:?}"
+                    ),
+                };
+                Some(match (outer, inside_the_tube, kept) {
+                    (Some(outer), true, _) => outer,
+                    (Some(outer), false, true) => !outer,
+                    (Some(outer), false, false) => outer,
+                    (None, inside_the_tube, kept) => inside_the_tube && kept,
+                })
+            })
+        }))
     }
 
     /// # Panics
