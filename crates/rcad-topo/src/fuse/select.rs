@@ -4806,7 +4806,7 @@ mod tests {
             .expect("five faces");
         let pyramid = builder
             .build(&mut model, &Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a face a tenth of the room off its apex is taken");
+            .expect("a face less than the room off its apex is taken");
         let [solid] = <[BakedSolid; 1]>::try_from(
             bake(
                 &model,
@@ -4818,5 +4818,82 @@ mod tests {
         )
         .expect("one solid");
         (model, solid)
+    }
+
+    /// A half disk `2²⁰` out on `x + y = 0`, cut from it by a ball round
+    /// `(2²⁰, −2²⁰, 0)` and the plane square to it through that centre, holds
+    /// no point across its chord when its two corners are points `1e-8` off its
+    /// plane, either side.
+    ///
+    /// Two corners wind round nothing, so what holds a point is the bulge:
+    /// which side of the chord between the corners it is on. [`InPlane`] reads
+    /// a corner `1e-8` off the plane about `1.5e-2` along it, out there, and
+    /// both corners the same way across the chord, so the chord as read held
+    /// points short of it or missed points past it. The bulge stretches the
+    /// chord's ends to the plane, as [`the_piece_holds`] stretches the corners
+    /// it winds round.
+    #[test]
+    fn a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord() {
+        let out = f64::powi(2.0, 20);
+        let flat = Plane::from_coefficients([1.0, 1.0, 0.0, 0.0]).expect("a normal");
+        let ball = Surface::Sphere(
+            Sphere::new(Point::from([out, -out, 0.0]), 1.0).expect("a positive radius"),
+        );
+        let across = Surface::Plane(
+            Plane::from_coefficients([1.0, -1.0, 0.0, -2.0 * out]).expect("a normal"),
+        );
+        for off in [1e-8, -1e-8] {
+            let aside = off / f64::sqrt(2.0);
+            let corner = |z: f64| MeetPoint::OfThreeSurfaces {
+                surfaces: [Surface::Plane(flat), ball, across],
+                which: 0,
+                point: PredicatePoint::from([out + aside, -out + aside, z]),
+            };
+            let side = |partner: Surface, ends: [MeetPoint; 2], material_side: Decision| FaceMeet {
+                carried_by: [Surface::Plane(flat), partner],
+                ends,
+                material_side,
+                along: SmallVec::new(),
+                approximation: None,
+            };
+            let half_disk = Piece {
+                ancestors: Vec::new(),
+                surface: Surface::Plane(flat),
+                orientation: Orientation::Forward,
+                wires: vec![vec![
+                    side(ball, [corner(1.0), corner(-1.0)], Decision::Neg),
+                    side(across, [corner(-1.0), corner(1.0)], Decision::Pos),
+                ]],
+                is_the_whole_surface: false,
+            };
+            let at = |beyond_the_chord: f64, z: f64| {
+                PredicatePoint::from([out + beyond_the_chord, -out - beyond_the_chord, z])
+            };
+            assert_eq!(
+                the_piece_holds_asked_as_selection_asks(&half_disk, at(0.5, 0.0)),
+                Some(true),
+                "{off:e} off: the half disk holds its middle"
+            );
+            assert_eq!(
+                the_piece_holds_asked_as_selection_asks(&half_disk, at(-0.5, 0.0)),
+                Some(false),
+                "{off:e} off: the half disk holds nothing of the other half"
+            );
+            let mut wrong = Vec::new();
+            for beyond_the_chord in [1e-3, 3e-3, 6e-3, -1e-3, -3e-3, -6e-3] {
+                for z in [-0.3, 0.0, 0.3] {
+                    let held = the_piece_holds_asked_as_selection_asks(
+                        &half_disk,
+                        at(beyond_the_chord, z),
+                    );
+                    if held == Some(beyond_the_chord < 0.0) {
+                        wrong.push(format!(
+                            "{beyond_the_chord:e} past the chord at z {z}: {held:?}"
+                        ));
+                    }
+                }
+            }
+            assert!(wrong.is_empty(), "{off:e} off: {wrong:#?}");
+        }
     }
 }
