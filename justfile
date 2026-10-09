@@ -8205,7 +8205,27 @@ check-fuzz-overnight-selftest:
 # None of the four is a call to a hooked function, so the first two counts
 # this script prints stay 0 and the exit code stays 0; this recipe is purely
 # about the two counts the jump-table split adds.
-[doc("The jump-table split in timing-hooked-calls.py, pinned against a hand-assembled fixture.")]
+#
+# A second, separate fixture pins the transitive walk added for
+# docs/decisions.d/273 §273.8's second blind spot (Q1452): a function named
+# `rcad_fuzz_timing_reaches_out` whose only call is to a function outside
+# the crate, which itself calls `bcmp` — defined locally in the fixture, at
+# its own address, so `nm` resolves it the way a linked binary's `bcmp`
+# interceptor does. Before the walk, this scan never looked past a
+# function's own name, so it missed this the same way it missed
+# `how_slow_the_name_says`'s `split_once("us-")` reaching `bcmp` through
+# `core`'s `StrSearcher::new`.
+#
+# A third fixture pins the half the walk's own commit left untested
+# (docs/decisions.d/419 §419.N, Q1452): a function named
+# `rcad_fuzz_timing_computed_through_helper` whose only call is to a helper
+# outside the crate, and the helper's only instruction is `call *%rax` —
+# computed, and with nothing in front of it that could set `%rax` from a
+# hooked GOT slot. Before `reachable_from` existed, `timing_computed` kept
+# only the computed calls found inside a function whose own symbol named
+# `rcad_fuzz_timing`, so this one — found in a function the walk must first
+# reach through a direct call — was invisible to it.
+[doc("The jump-table split and the transitive walk in timing-hooked-calls.py, pinned against hand-assembled fixtures.")]
 check-timing-hooked-calls-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -8260,6 +8280,66 @@ check-timing-hooked-calls-selftest:
     printf '%s\n' "$got" | grep -qxF "$stays_line" || {
         echo "$got"
         echo "expected the line above (1: only the real jump table)"
+        exit 1
+    }
+
+    cat >"$dir/offender.s" <<'ASM'
+    .text
+    .globl rcad_fuzz_timing_reaches_out
+    .type rcad_fuzz_timing_reaches_out, @function
+    rcad_fuzz_timing_reaches_out:
+    call outside_the_crate_helper
+
+    .globl outside_the_crate_helper
+    .type outside_the_crate_helper, @function
+    outside_the_crate_helper:
+    call bcmp
+
+    .globl bcmp
+    .type bcmp, @function
+    bcmp:
+    ret
+    ASM
+    as "$dir/offender.s" -o "$dir/offender.o"
+
+    if offender_got=$(fuzz/timing-hooked-calls.py "$dir/offender.o"); then
+        echo "$offender_got"
+        echo "timing-hooked-calls.py exited 0 against a fixture where rcad_fuzz_timing calls out to a function that calls bcmp — it must count as an offender"
+        exit 1
+    fi
+    offender_line="  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 1"
+    printf '%s\n' "$offender_got" | grep -qxF "$offender_line" || {
+        echo "$offender_got"
+        echo "expected the line above (1: rcad_fuzz_timing_reaches_out, through outside_the_crate_helper, to bcmp)"
+        exit 1
+    }
+    chain_line="    rcad_fuzz_timing_reaches_out -> outside_the_crate_helper -> bcmp"
+    printf '%s\n' "$offender_got" | grep -qxF "$chain_line" || {
+        echo "$offender_got"
+        echo "expected the chain line above"
+        exit 1
+    }
+
+    cat >"$dir/computed.s" <<'ASM'
+    .text
+    .globl rcad_fuzz_timing_computed_through_helper
+    .type rcad_fuzz_timing_computed_through_helper, @function
+    rcad_fuzz_timing_computed_through_helper:
+    call helper_with_a_computed_call
+
+    .globl helper_with_a_computed_call
+    .type helper_with_a_computed_call, @function
+    helper_with_a_computed_call:
+    call *%rax
+    ASM
+    as "$dir/computed.s" -o "$dir/computed.o"
+
+    computed_got=$(fuzz/timing-hooked-calls.py "$dir/computed.o") \
+        || { echo "$computed_got"; echo "timing-hooked-calls.py exited non-zero against a fixture where the only thing reached is a computed call, never a hook — a call this scan cannot see past is not itself an offender"; exit 1; }
+    computed_line="  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function, unscanned: 1"
+    printf '%s\n' "$computed_got" | grep -qxF "$computed_line" || {
+        echo "$computed_got"
+        echo "expected the line above (1: helper_with_a_computed_call's call *%rax, reached from rcad_fuzz_timing_computed_through_helper)"
         exit 1
     }
 
