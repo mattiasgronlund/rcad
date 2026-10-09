@@ -8020,6 +8020,70 @@ check-fuzz-overnight-selftest:
     rm -rf "$reader_persistent"
     }
 
+    # Twenty-nine: the fix for Q288/Q857 is that the guard scans every
+    # `librcad_fuzz_timing-*.rlib` it finds rather than trusting whichever one
+    # `find | head -n1` met first. This plants a second, unrelated rlib —
+    # clean, built directly here rather than by the stub `cargo` above, and
+    # left beside the one this build writes — so a guard that went back to
+    # reading only one of them could pick the clean one and miss the dirty
+    # one the stub writes when `STUB_TIMING_SANCOV=1`. The night must still
+    # fail on the one it actually built, not on whichever `find` meets first.
+    #
+    # `find`'s own order between the two is not alphabetical and not the
+    # order they were created in — checked directly: three directories
+    # created in one order came back in a different one, and the same two
+    # names that sorted one way at one tag sorted the other way at another.
+    # ext4 hashes each full name with a seed fixed for this filesystem, so
+    # the order is stable for a given name but not predictable from the name
+    # alone, and `$tag` carries this run's own PID and `$RANDOM`. So rather
+    # than assume any one stale name sorts first, this tries a few until one
+    # does, against an empty placeholder standing in for the real slot.
+    # Twenty-six of them failing at once is not a real possibility (each is
+    # roughly a coin flip), but it is checked rather than assumed, because a
+    # silent pass here would mean this arm tests nothing.
+    #
+    # Named so both directories end in `-$tag`, matching `clean_up`'s own
+    # `selftest-*"$tag"` glob, so the trap at the end of this script sweeps
+    # them away with everything else this run planted.
+    twenty_nine() {
+    : >"$dir/log"
+    base="fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing"
+    real_out="$base/selftest-$tag/out"
+    mkdir -p "$real_out"
+    touch "$real_out/librcad_fuzz_timing-selftest-$tag.rlib"
+
+    stale=""
+    for probe in a b c d e f g h i j k l m n o p q r s t u v w x y z; do
+        stale_out="$base/selftest-stale-$probe-$tag/out"
+        mkdir -p "$stale_out"
+        touch "$stale_out/librcad_fuzz_timing-selftest-stale-$probe-$tag.rlib"
+        first=$(find "$base" -name 'librcad_fuzz_timing-*.rlib' | head -n1)
+        case "$first" in
+            *"/selftest-stale-$probe-$tag/"*) stale="$probe"; break ;;
+        esac
+        rm -rf "$base/selftest-stale-$probe-$tag"
+    done
+    [ -n "$stale" ] \
+        || fail "none of 26 stale rlib names sorted before the one this build writes under find on this filesystem, so this arm could not set up its own test"
+
+    stale_out="$base/selftest-stale-$stale-$tag/out"
+    rm -f "$real_out"/librcad_fuzz_timing-*.rlib "$stale_out"/librcad_fuzz_timing-*.rlib
+    printf '.globl clean_stale_symbol\nclean_stale_symbol:\n' >"$stale_out/sym.s"
+    as "$stale_out/sym.s" -o "$stale_out/sym.o"
+    ar rcs "$stale_out/librcad_fuzz_timing-selftest-stale-$stale-$tag.rlib" "$stale_out/sym.o"
+
+    status=0
+    STUB_TIMING_SANCOV=1 run 8 || status=$?
+    [ "$status" -ne 0 ] \
+        || fail "a clean rlib beside the one this build wrote let the night report success"
+    grep -q 'sancov reference' "$dir/out" \
+        || fail "the night did not say why it failed: $(cat "$dir/out")"
+    grep -q 'BUILD FAILED' "$dir/logs/latest" \
+        || fail "an instrumented timing rlib did not read as a build failure in the summary: $(cat "$dir/logs/latest")"
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
+        || fail "the night fuzzed targets after finding a sancov reference in rcad-fuzz-timing's rlib"
+    }
+
     # **Which arms run at once, and why each still asserts what it says.** Run
     # in turn they took 86 s, nearly all of it the stub's sleeps (Q709), so
     # most of them run beside each other.
@@ -8038,8 +8102,9 @@ check-fuzz-overnight-selftest:
     #     timeout can change. None of them counts slow units, and none writes
     #     a crash, which would fail every night that asserts it exited 0.
     #   - Alone, after them: Three and Twenty-three count slow units exactly,
-    #     Twelve and Thirteen write crashes, and Sixteen writes the sancov rlib
-    #     that any other night's guard could meet first.
+    #     Twelve and Thirteen write crashes, and Sixteen and Twenty-nine write
+    #     a sancov rlib and a clean one beside it, either of which any other
+    #     night's guard could meet first.
     #
     # The clock arms. One, Four and Ten start first, together. One's ceiling
     # of 16 s is about 10 s above what it takes, and Four's 20 s about 9 s
@@ -8094,6 +8159,7 @@ check-fuzz-overnight-selftest:
     alone twelve
     alone thirteen
     alone sixteen
+    alone twenty_nine
     alone twenty_three
     arm="after the last"
     head_did_not_move
