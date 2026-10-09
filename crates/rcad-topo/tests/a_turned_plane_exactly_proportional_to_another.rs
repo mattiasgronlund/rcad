@@ -738,3 +738,131 @@ fn measures(found: f64, closed_form: f64, wall: Wall) {
         "measured {found}, closed form {closed_form}, {off} under it, on the wrong side or too far"
     );
 }
+
+mod rings;
+
+/// Probe only: the half bend of ring 4 and tube 1 turned a quarter turn, so it
+/// is on `x ≤ 0` with both caps on `x = 0` facing `+x`, then turned about `z` by
+/// `bend_turns`; and a round bar of radius 10 about `z` from `z = −2` to `2`
+/// cut back to `x ≥ 0`, turned about `z` by `bar_turns`. Every plane of the bar
+/// is square to the ring's axis or through it, and its wall is a pipe about the
+/// ring's axis, so nothing of it is a plane parallel to the axis off it.
+fn probe_pair(
+    model: &mut Model,
+    bend_turns: [f64; 2],
+    bar_turns: [f64; 2],
+) -> (SolidKey, SolidKey) {
+    let bend = rings::a_bend_turned_and_written_out(model, 4.0, 1.0, 2, 1).unwrap();
+    turned(model, bend, &Axis::z(), bend_turns);
+    let bar = model
+        .add_round_bar(
+            10.0,
+            4.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, -2.0)).unwrap(),
+        )
+        .unwrap();
+    let square = ProfileBuilder::new(vec![
+        [-20.0, -20.0],
+        [0.0, -20.0],
+        [0.0, 20.0],
+        [-20.0, 20.0],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .unwrap();
+    let cut = model
+        .add_extrusion(
+            &square,
+            7.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, -3.5)).unwrap(),
+        )
+        .unwrap();
+    let half = model
+        .fuse(
+            &[bar],
+            &[cut],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap()
+        .solids()[0];
+    turned(model, half, &Axis::z(), bar_turns);
+    (bend, half)
+}
+
+#[test]
+fn probe_q1223_leg_1() {
+    let rules = [Rule::Intersection, Rule::Union, Rule::Difference];
+    for far in [30.0] {
+        for half_width in [12.0] {
+            for (bend_turns, block_turns) in [
+                (TO_THE_LONGER_SPELLING, TO_THE_SHORTER_SPELLING),
+                (TO_THE_SHORTER_SPELLING, TO_THE_LONGER_SPELLING),
+                (TO_THE_SHORTER_SPELLING, TO_THE_SHORTER_SPELLING),
+                (TO_THE_LONGER_SPELLING, TO_THE_LONGER_SPELLING),
+            ] {
+                {
+                    let mut model = a_model();
+                    let (bend, slab) = probe_pair(&mut model, bend_turns, block_turns);
+                    let _ = (far, half_width);
+                    for (what, solid) in [("bend", bend), ("slab", slab)] {
+                        for face in model.solid(solid).unwrap().faces() {
+                            if let rcad_geom::Surface::Plane(_) = face.surface() {
+                                eprintln!("{what} plane {:?}", face.plane().coefficients());
+                            }
+                        }
+                    }
+                }
+                for bend_first in [true, false] {
+                    for rule in rules {
+                        let mut model = a_model();
+                        let (bend, slab) = probe_pair(&mut model, bend_turns, block_turns);
+                        let (arguments, tools) = if bend_first {
+                            (vec![bend], vec![slab])
+                        } else {
+                            (vec![slab], vec![bend])
+                        };
+                        let answer = model.fuse(
+                            &arguments,
+                            &tools,
+                            rule,
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        );
+                        let what = format!(
+                            "far {far} hw {half_width} bend {bend_turns:?} slab {block_turns:?} bend_first {bend_first} {rule:?}"
+                        );
+                        match answer {
+                            Ok(done) => {
+                                let solids = done.solids().to_vec();
+                                let valid = model
+                                    .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                                    .is_ok();
+                                let measured: Vec<(f64, f64)> = solids
+                                    .iter()
+                                    .map(|&solid| {
+                                        model
+                                            .solid(solid)
+                                            .unwrap()
+                                            .measure(
+                                                Deflection::of(DEFLECTION).unwrap(),
+                                                &Policy::certified(),
+                                                &mut ProvenanceLog::new(),
+                                            )
+                                            .map(|m| (m.volume(), m.volume_error()))
+                                            .unwrap_or((f64::NAN, f64::NAN))
+                                    })
+                                    .collect();
+                                eprintln!(
+                                    "{what}: {} solids, {measured:?}, valid {valid}",
+                                    solids.len()
+                                );
+                            }
+                            Err(why) => eprintln!("{what}: refused {why:?}"),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
