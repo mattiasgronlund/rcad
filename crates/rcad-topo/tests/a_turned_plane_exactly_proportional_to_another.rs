@@ -44,14 +44,15 @@
 //! planes were spelled alike or negated
 //! (`a_ball_on_a_bars_cap_a_block_spells_an_ulp_apart_in_scale`).
 //!
-//! **A ring's circle on such a plane is not seen either way.** §330.3 guessed a
-//! second place too: `which_of_the_pairs_closed_crossings_it_is` names each of
-//! the two circles a plane through a ring's axis cuts by the half-space
-//! `intersect` picks it with, whose normal is the ring's axis crossed with the
-//! plane's normal as stored and not scaled to length one, so a circle on
+//! **A ring's circle on such a plane is drawn twice.** §330.3 guessed a second
+//! place too: `which_of_the_pairs_closed_crossings_it_is` names each of the two
+//! circles a plane through a ring's axis cuts by the half-space `intersect`
+//! picks it with, whose normal is the ring's axis crossed with the plane's
+//! normal as stored and not scaled to length one, so a circle on
 //! `(c, c, 0, 0)` and on `(c′, c′, 0, 0)` could be given two names. Three
 //! families were built against a half bend of ring four and tube one to reach
-//! it, and none did:
+//! it. The third met that half-space a stage earlier, where the circle is
+//! drawn on the ring, and none reached the name:
 //!
 //! - Blocks turned onto `x = y`, as above, were refused
 //!   `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` in every fuse with the two
@@ -62,15 +63,20 @@
 //!   fuse with the two spellings alike was refused
 //!   `AFaceTrimmedByACurveThisCannotFollow` at a bar's bottom cap, and so were
 //!   the mixed spellings with the bars first; the bend first, those were refused
-//!   as below (a probe at `941790ef`).
+//!   on `side of plane` (a probe at `941790ef`).
 //! - Two bars cut back to the quarter `x ≤ 0`, `y ≥ 0` and turned onto
 //!   `x + y = 0` and `x = y`, one holding the whole circle at `3π/4` round the
-//!   ring on its face, answer every fuse with both spelling the plane alike, and
-//!   are refused `Undecidable` on `side of plane` in every fuse with the two
-//!   spellings mixed
+//!   ring on its face, answer every fuse with both spelling the plane alike.
+//!   With the two spellings mixed and the bend named first, every fuse is
+//!   refused `CannotTellTheCellsOfAFaceApart` on the bend's ring face:
+//!   `crossing_like` takes the two spellings for one plane but the two
+//!   half-spaces for two pickers, so each circle is drawn on the ring twice and
+//!   nothing tells which copy a walk along the other faces. With the bars named
+//!   first, every fuse is refused `Undecidable` on `side of plane` at a corner
+//!   on a bar's round wall
 //!   (`a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_an_ulp_apart_are_refused`).
-//!   A sign that could not be settled is not a circle named twice, so this does
-//!   not show the guess, and it does not show that no shape reaches it.
+//!   Neither shows whether the name would be given twice too, and neither shows
+//!   that no shape reaches it.
 //!
 //! # What each volume is held to
 //!
@@ -534,15 +540,39 @@ fn a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_alike_answ
 }
 
 /// **The same with the two bars spelling the plane an ulp apart in scale is
-/// refused, and not as a circle named twice.** The near bar turned to spell
-/// its faces with `c` and the far bar with `c′`, or the other way round, every
-/// fuse is refused [`Error::Undecidable`] with its last record on `side of
-/// plane`, whichever bar is named first and whichever side the bend is on. A
-/// circle given two names would have been refused `ResultIsNotManifold`, as the
-/// ball's and the bar's were before the closed edge's name folded the plane at
-/// any scale; this refusal is a sign that could not be settled, so whether
-/// `which_of_the_pairs_closed_crossings_it_is` gives the circle at `3π/4` one
-/// name or two is not seen here.
+/// refused, one way with the bend named first and another with the bars.** The
+/// near bar is turned to spell its faces with `c` and the far bar with `c′`, or
+/// the other way round, and either bar may be named first.
+///
+/// - **The bend named first**, every fuse is refused
+///   [`Error::CannotTellTheCellsOfAFaceApart`] on the bend's ring face, because
+///   each circle a bar's flat face cuts the ring in is drawn there twice.
+///   `crossing_like` takes the two spellings of a plane for one surface, but it
+///   folds a second crossing into the first only where both pick the circle
+///   out by the same half-space, and that half-space's normal is the ring's
+///   axis crossed with the plane's normal as stored: on `x = y`, `(c, c, 0)`
+///   for one bar and `(c′, c′, 0)` for the other. A walk along one copy of a
+///   circle then agrees with both walks along the other copy about every closed
+///   curve the two are placed against, and nothing says which of the two it
+///   faces. A probe on `30cb8564` printed both: the ring face carrying each of
+///   the four circles the bars' two planes cut the ring in twice, none folded
+///   into another, and `crossing_like` finding each pair one surface with
+///   pickers that differ.
+///   These were refused on `side of plane` until a point on the ring and on
+///   one bar's plane was placed against the other bar's exactly
+///   (`side_of_a_plane_holding_a_rings_axis`, Q1392): the two bars spell one
+///   plane through the axis, so `det[n_Q, w, n_P]` is exactly nought and the
+///   point is on it.
+/// - **The bars named first**, every fuse is still refused
+///   [`Error::Undecidable`] with its last record on `side of plane`, at the
+///   corner of the bar named first where its round wall, six from the axis,
+///   meets its bottom cap, `z = −2` or `z = 4`, and its face on `x + y = 0`. The
+///   corner's box straddles `x + y = 0`. No ring is among the surfaces it is
+///   on, so the exact placing above does not reach it.
+///
+/// So the circle at `3π/4` is drawn twice before any edge along it is named,
+/// and whether `which_of_the_pairs_closed_crossings_it_is` would name it twice
+/// as well is still not seen here.
 #[test]
 fn a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_an_ulp_apart_are_refused() {
     let c = f64::from_bits(FRAC_1_SQRT_2.to_bits() - 1);
@@ -582,6 +612,13 @@ fn a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_an_ulp_apa
                     let what = format!(
                         "{rule:?}, near bar first {near_first}, bend first {bend_first}: {refused:?}"
                     );
+                    if bend_first {
+                        assert!(
+                            matches!(refused, Err(Error::CannotTellTheCellsOfAFaceApart { .. })),
+                            "{what}"
+                        );
+                        continue;
+                    }
                     let Err(Error::Undecidable { records }) = refused else {
                         panic!("{what}");
                     };
