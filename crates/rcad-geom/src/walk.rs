@@ -4580,4 +4580,133 @@ mod tests {
             }
         }
     }
+
+    /// A ball of radius four a tenth off the axis of a pipe of radius one
+    /// crosses it in two loops, one either side of the plane through the ball's
+    /// centre square to the axis, and a closed run whose corner is on the loop
+    /// below is walked round that one, whichever face is listed first.
+    ///
+    /// The marcher has a seed on each loop and started every run nothing picks
+    /// at the first, the one above, so this run was walked round the loop above
+    /// (Q1262). The corner is on the side of the pipe away from where the ball
+    /// leans, where `(x − 0.1)² + z² = 16` puts it at `z = −√14.79`, so it is
+    /// not either seed.
+    #[test]
+    fn a_closed_run_round_the_lower_loop_of_a_ball_off_a_pipes_axis_is_walked_round_that_one() {
+        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 1.0).expect("a radius"));
+        let ball = Surface::Sphere(Sphere::new(Point::new(0.1, 0.0, 0.0), 4.0).expect("a radius"));
+        let corner = Point::new(-1.0, 0.0, -(14.79_f64.sqrt()));
+        let run = NamedRun::new(
+            EdgeRun::RightRoundWhereItsFacesCross,
+            [corner, corner].map(|end| PredicatePoint::from(end.coordinates())),
+        )
+        .expect("a closed run with one corner");
+        for pair in [[&ball, &pipe], [&pipe, &ball]] {
+            let walked = walk(
+                &run,
+                pair,
+                Deflection::of(0.01).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a loop of a ball off a pipe's axis is walked");
+            assert!(walked.points().len() > 2, "the loop below has points");
+            for point in walked.points() {
+                let [x, y, z] = point.coordinates();
+                assert!(
+                    z < 0.0,
+                    "the run round the loop below was walked through ({x}, {y}, {z})"
+                );
+            }
+        }
+    }
+
+    /// A thin pipe right through a fat one crosses it in two loops, one where
+    /// it goes in and one where it comes out, and a closed run whose corner is
+    /// on the second is walked round that one, whichever face is listed first.
+    ///
+    /// The fat pipe is radius four up `z` and the thin one radius one along `x`
+    /// half a unit off it, so the loops are either side of `x = 0`. The seed on
+    /// the `+x` loop comes first (Q1262). The corner is where the thin pipe's
+    /// top line, `y = 0.5, z = 1`, meets the fat wall at `x = −√15.75`.
+    #[test]
+    fn a_closed_run_round_the_far_loop_of_a_thin_pipe_through_a_fat_one_is_walked_round_that_one() {
+        let fat = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 4.0).expect("a radius"));
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::new(0.0, 0.5, 0.0), Vector::new(1.0, 0.0, 0.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let corner = Point::new(-(15.75_f64.sqrt()), 0.5, 1.0);
+        let run = NamedRun::new(
+            EdgeRun::RightRoundWhereItsFacesCross,
+            [corner, corner].map(|end| PredicatePoint::from(end.coordinates())),
+        )
+        .expect("a closed run with one corner");
+        for pair in [[&fat, &thin], [&thin, &fat]] {
+            let walked = walk(
+                &run,
+                pair,
+                Deflection::of(0.01).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a loop of a thin pipe through a fat one is walked");
+            assert!(walked.points().len() > 2, "the far loop has points");
+            for point in walked.points() {
+                let [x, y, z] = point.coordinates();
+                assert!(
+                    x < 0.0,
+                    "the run round the far loop was walked through ({x}, {y}, {z})"
+                );
+            }
+        }
+    }
+
+    /// A fuse puts a closed loop's corner where the marcher starts
+    /// ([`where_a_closed_crossing_starts`]), and the caller puts that corner at
+    /// both ends of what comes back — so nothing walked may sit on it, nor a
+    /// rounding off it. A mesh shifts each corner into its own frame and the
+    /// seed is worked out again there, which can land the two an ulp apart, and
+    /// a loop that held both was refused as two corners in one place (Q1508).
+    #[test]
+    fn a_closed_loop_started_at_its_own_corner_holds_that_corner_only_at_its_ends() {
+        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 2.0).expect("a radius"));
+        let ball = Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 0.0), 2.0).expect("a radius"));
+        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed curve is never a piece with nothing picking it");
+        let start =
+            where_a_closed_crossing_starts(&whole, [&ball, &pipe], &mut ProvenanceLog::new())
+                .expect("one loop of a ball through a pipe starts somewhere");
+        let [x, y, z] = start.coordinates();
+        for corner in [start, Point::new(x.next_up(), y, z)] {
+            let run = NamedRun::new(
+                EdgeRun::RightRoundWhereItsFacesCross,
+                [corner, corner].map(|end| PredicatePoint::from(end.coordinates())),
+            )
+            .expect("a closed run with one corner");
+            for deflection in [0.01, 0.1] {
+                let walked = walk(
+                    &run,
+                    [&ball, &pipe],
+                    Deflection::of(deflection).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("one loop of a ball through a pipe is walked");
+                let nearest = walked
+                    .points()
+                    .iter()
+                    .map(|point| (*point - corner).length())
+                    .fold(f64::INFINITY, f64::min);
+                assert!(
+                    nearest > 1e-6,
+                    "at {deflection} a point walked is {nearest} from the corner {corner:?}"
+                );
+            }
+        }
+    }
 }
