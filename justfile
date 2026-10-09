@@ -6033,16 +6033,37 @@ fuzz-overnight window="28800":
     # on this nightly rather than under `deps/`, because that is the directory
     # cargo passes as `--out-dir` for a lib crate here — found by name since the
     # hash in the path is not otherwise known.
-    timing_rlib=$(find fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing \
-        -name 'librcad_fuzz_timing-*.rlib' 2>/dev/null | head -n 1)
-    if [ -z "$timing_rlib" ]; then
+    timing_rlibs=$(find fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing \
+        -name 'librcad_fuzz_timing-*.rlib' 2>/dev/null)
+    if [ -z "$timing_rlibs" ]; then
         echo "rcad-fuzz-timing's rlib was not found by name after the build, so whether it carries coverage could not be checked"
         printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
         exit 1
     fi
-    sancov_refs=$(nm "$timing_rlib" 2>/dev/null | grep -ic sancov || true)
-    if [ "$sancov_refs" -ne 0 ]; then
-        echo "rcad-fuzz-timing's rlib carries $sancov_refs sancov reference(s) ($timing_rlib): the stand-in did not keep it out of coverage"
+    # More than one of these can exist at once — a hash directory left over
+    # from before the stand-in was wired in, or from a build made with
+    # different flags, sitting beside the one this build just made — and
+    # `find`'s order between them is not the order they were written in, so
+    # `| head -n1` used to read whichever one it met first (Q288, Q857).
+    # There is no mtime to sort by instead: a `cargo build` that changes
+    # nothing does not even touch the files in the directory it would have
+    # written to, checked directly by running the same build twice and
+    # comparing `find -printf '%T@'` before and after — every file, including
+    # `fingerprint/invoked.timestamp`, kept the first run's timestamp to the
+    # microsecond. So this checks every rlib `find` turns up, not one chosen
+    # among them, and fails if *any* carries a sancov reference. That can
+    # still fail a night over a stale rlib this build did not write — a build
+    # failure that costs a retry — but it can never pass a night whose
+    # current rlib carries one, which is the fault that must not happen.
+    sancov_found=()
+    while IFS= read -r candidate; do
+        [ -n "$candidate" ] || continue
+        refs=$(nm "$candidate" 2>/dev/null | grep -ic sancov || true)
+        [ "$refs" -eq 0 ] || sancov_found+=("$candidate ($refs)")
+    done <<<"$timing_rlibs"
+    if [ "${#sancov_found[@]}" -gt 0 ]; then
+        echo "rcad-fuzz-timing's rlib carries a sancov reference, so the stand-in did not keep it out of coverage:"
+        printf '    %s\n' "${sancov_found[@]}"
         printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
         exit 1
     fi
@@ -6809,6 +6830,18 @@ check-fuzz-overnight-selftest:
         rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*"$tag"
     }
     trap clean_up EXIT
+
+    # A gate killed mid-run (`SIGKILL`, so this recipe's own `trap` above
+    # never fires) leaves its `selftest-*` directories behind under the real
+    # `fuzz/target/`, forever — nothing else ever looks there to clean them
+    # up (Q244, Q437). The guard above now fails on *any* sancov rlib it
+    # finds rather than trusting whichever one `find` met first, so a stale
+    # one left this way no longer makes a bad night pass, but it could still
+    # fail a *good* night for a reason that has nothing to do with this run.
+    # So this run clears every leftover before any arm runs, rather than
+    # leaving the next run to inherit what a killed one did not finish
+    # cleaning up.
+    rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*
     mkdir -p "$dir/bin"
 
     # A fixture for `RCAD_STEP_CORPUS`, standing in for the 375 MiB the real
