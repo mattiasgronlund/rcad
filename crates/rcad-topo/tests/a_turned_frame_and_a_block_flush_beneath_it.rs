@@ -23,7 +23,7 @@ mod pairs;
 
 use rcad_geom::Deflection;
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Model, Rule, SolidKey};
 
 use comparison::{answer_of, same_answer};
 use pairs::{Configuration, Elsewhere, Placed, Shape, Skew, Turn};
@@ -36,63 +36,37 @@ fn a_turned_frame_and_the_block_flush_beneath_it_unite_to_one_solid_of_fourteen(
     both_ways_round_give(Rule::Union, 1, 14.0);
 }
 
-/// **Taking the block back out of the union is refused today**, though the
-/// answer is the frame. The union keeps one edge from the block's front to the
-/// frame's front, where a strip `2.8e-17` wide was left out, and the two fronts
-/// are planes with the same normal bits and offsets `0.0` and
-/// `-2.7755575615628914e-17`: parallel, and apart. No third plane meets both,
-/// and the second fuse stops at "where three surfaces meet" with no bound at
-/// all. A gap and not a limit (§16.10), since the frame is in the model; the
-/// lane that answers it turns this test round.
+/// **Taking the block back out of the union gives the frame back.** Over the
+/// turned planes the block's front and the frame's front have the same normal
+/// bits and offsets `2.7755575615628914e-17` and `0.0`, so the union, with the
+/// strip between them left out, had one edge with a front on either side and
+/// no third face at its end at the turned `(5, 0, 0)`. No three planes placed
+/// that corner, and the second fuse was refused at "where three surfaces meet"
+/// with no bound at all (queue row Q1446). The union now makes the two fronts
+/// one face (§426), and the answer is checked against the frame as it stood
+/// before either fuse.
 #[test]
-fn the_block_taken_back_out_of_the_union_is_refused_where_the_two_fronts_are_parallel() {
+fn the_block_taken_back_out_of_the_union_is_the_frame() {
     let (mut model, keys) = the_frame_and_the_block().build();
     let union = fuse_and_validate(&mut model, &[keys[FRAME]], &[keys[BLOCK]], Rule::Union);
-    let refused = model.fuse(
-        &union,
-        &[keys[BLOCK]],
-        Rule::Difference,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
+    let less_the_block = fuse_and_validate(&mut model, &union, &[keys[BLOCK]], Rule::Difference);
+    assert_eq!(
+        less_the_block.len(),
+        1,
+        "the union less the block is one solid"
     );
+    let measured = volume_of(&model, &less_the_block);
     assert!(
-        matches!(refused, Err(Error::Undecidable { .. })),
-        "the union less the block was expected to be refused as undecidable, and gave {:?}",
-        refused.map(|fused| fused.solids().len())
+        (measured - 12.0).abs() < 1e-9,
+        "the union less the block takes up {measured}, not 12"
     );
-}
-
-#[test]
-fn probe_q1446() {
-    let (mut model, keys) = the_frame_and_the_block().build();
-    let union = fuse_and_validate(&mut model, &[keys[FRAME]], &[keys[BLOCK]], Rule::Union);
-    for &solid in &union {
-        let view = model.solid(solid).unwrap();
-        for face in view.faces() {
-            eprintln!("face {:?} {:?}", face.key(), face.surface());
-            for wire in face.wires() {
-                for coedge in wire.coedges() {
-                    eprintln!(
-                        "   edge {:?} from {:?} {:?}",
-                        coedge.edge().key(),
-                        coedge.start().key(),
-                        coedge.start().point()
-                    );
-                }
-            }
-        }
-    }
-    let refused = model.fuse(
-        &union,
-        &[keys[BLOCK]],
+    if let Err(why) = same_answer(
+        &answer_of(&model, &[keys[FRAME]]),
+        &answer_of(&model, &less_the_block),
         Rule::Difference,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    eprintln!("{:#?}", refused.map(|fused| fused.solids().len()));
-    let block = model.solid(keys[BLOCK]).unwrap();
-    for face in block.faces() {
-        eprintln!("block face {:?} {:?}", face.key(), face.surface());
+        "uniting the block and taking it back out",
+    ) {
+        panic!("{why}");
     }
 }
 
