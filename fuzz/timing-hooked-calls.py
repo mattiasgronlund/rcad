@@ -114,6 +114,16 @@ NOT_ENTERED = [
         "ASan's set-up, which .preinit_array runs to the end before main; "
         "every later call returns at its first branch",
     ),
+    (
+        re.compile(r"_RNvNtC(?:s[0-9A-Za-z]*_)?3std9panicking15panic_with_hook"),
+        "a panic: the only hook ever set is libfuzzer-sys's, which runs the "
+        "default hook and then aborts",
+    ),
+    (
+        re.compile(r"_RNvNtC(?:s[0-9A-Za-z]*_)?3std5alloc8rust_oom"),
+        "a failed allocation: the alloc error hook is never set, and the "
+        "default one is followed by an abort",
+    ),
 ]
 
 CALLER_SAVED = {"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
