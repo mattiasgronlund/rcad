@@ -8225,6 +8225,19 @@ check-fuzz-overnight-selftest:
 # only the computed calls found inside a function whose own symbol named
 # `rcad_fuzz_timing`, so this one — found in a function the walk must first
 # reach through a direct call — was invisible to it.
+#
+# A fourth fixture pins the GOT-slot edge added for docs/decisions.d/419
+# §419.5's own finding (Q1533): a function named `rcad_fuzz_timing_got_slot`
+# whose only instruction calls through a GOT-shaped slot — `call
+# *slot(%rip)` — that a real `R_X86_64_RELATIVE` relocation, from an actual
+# `ld -pie` link rather than a guess at one, resolves to a helper outside the
+# crate, and the helper calls `bcmp`. Before this fix, a slot not on the
+# hooked list fell through both the hooked-slot check and the "computed,
+# unscanned" bucket — `(%rip)` with a comment excused it from the latter on
+# the assumption the former had already decided it — so neither `calls_out`
+# nor `reachable_from` ever saw this edge, the same wall §419.5 met building
+# `3319f838`: `merge_out` reaches `core`'s `StrSearcher::new` through a GOT
+# slot, not a literal `call <name>`.
 [doc("The jump-table split and the transitive walk in timing-hooked-calls.py, pinned against hand-assembled fixtures.")]
 check-timing-hooked-calls-selftest:
     #!/usr/bin/env bash
@@ -8340,6 +8353,56 @@ check-timing-hooked-calls-selftest:
     printf '%s\n' "$computed_got" | grep -qxF "$computed_line" || {
         echo "$computed_got"
         echo "expected the line above (1: helper_with_a_computed_call's call *%rax, reached from rcad_fuzz_timing_computed_through_helper)"
+        exit 1
+    }
+
+    cat >"$dir/gotslot.s" <<'ASM'
+    .text
+    .globl rcad_fuzz_timing_got_slot
+    .type rcad_fuzz_timing_got_slot, @function
+    rcad_fuzz_timing_got_slot:
+    call *slot(%rip)
+
+    .globl outside_the_crate_through_a_slot
+    .type outside_the_crate_through_a_slot, @function
+    outside_the_crate_through_a_slot:
+    call bcmp
+
+    .globl bcmp
+    .type bcmp, @function
+    bcmp:
+    ret
+
+    .data
+    .align 8
+    slot:
+    .quad outside_the_crate_through_a_slot
+    ASM
+    as "$dir/gotslot.s" -o "$dir/gotslot.o"
+    # `-pie` is what turns the assembler's own `R_X86_64_64` for `.quad
+    # outside_the_crate_through_a_slot` into a linked PIE's `R_X86_64_RELATIVE`
+    # against that same address — a plain `.o` never carries that relocation
+    # type, only a linked, position-independent image does, the same kind
+    # `cargo fuzz build`'s own ASan/libFuzzer binary is. `-e` names an existing
+    # symbol as the entry point only to keep `ld` quiet about missing `_start`;
+    # nothing here is ever run.
+    ld -pie -e rcad_fuzz_timing_got_slot -o "$dir/gotslot" "$dir/gotslot.o"
+
+    if gotslot_got=$(fuzz/timing-hooked-calls.py "$dir/gotslot"); then
+        echo "$gotslot_got"
+        echo "timing-hooked-calls.py exited 0 against a fixture where rcad_fuzz_timing calls through a GOT slot whose relocation resolves to a function that calls bcmp — it must count as an offender"
+        exit 1
+    fi
+    gotslot_line="  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 1"
+    printf '%s\n' "$gotslot_got" | grep -qxF "$gotslot_line" || {
+        echo "$gotslot_got"
+        echo "expected the line above (1: rcad_fuzz_timing_got_slot, through outside_the_crate_through_a_slot, to bcmp)"
+        exit 1
+    }
+    gotslot_chain_line="    rcad_fuzz_timing_got_slot -> outside_the_crate_through_a_slot -> bcmp"
+    printf '%s\n' "$gotslot_got" | grep -qxF "$gotslot_chain_line" || {
+        echo "$gotslot_got"
+        echo "expected the chain line above"
         exit 1
     }
 

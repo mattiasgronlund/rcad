@@ -275,3 +275,116 @@ So the demonstration the brief asked for is not there — same conclusion as
 the first lane reached, a different cause: not an unavailable symbol, but
 an edge this scan has never tracked, on a shape this row is the first to
 meet.
+
+### 419.6 Q1533: the GOT slot resolved through the relocation table — 2026-10-09
+
+*Branch `lane-q1533-a-call-through-a-got-slot-followed`, off `4dc3cb88`.*
+
+`scan()` now resolves a `call *SLOT(%rip)` slot through the same
+`R_X86_64_RELATIVE` table `hooked_slots` already reads. A slot already known
+to be hooked is unchanged. A slot that resolves to some other named function
+now gets a `calls_out` edge, exactly like a direct `call <name>`, so
+`reachable_from` and `reaches_hook` walk through it. A slot that resolves to
+no known function start falls into the existing "computed pointer,
+unscanned" bucket rather than being dropped — the same bucket a `call *%reg`
+this scan never traced to a slot already lands in.
+
+**The pin.** A fourth hand-assembled fixture in
+`check-timing-hooked-calls-selftest`: `rcad_fuzz_timing_got_slot` calls
+through a GOT-shaped slot — `call *slot(%rip)` — that a real link (`as`, then
+`ld -pie`, so `readelf -rW` shows a genuine `R_X86_64_RELATIVE`, not a
+hand-written comment standing in for one) resolves to
+`outside_the_crate_through_a_slot`, which calls `bcmp`. Against
+`4dc3cb88:fuzz/timing-hooked-calls.py` (the base script) this fixture
+reports `clean` and exits 0 — confirmed by running it. Against the fixed
+script it exits 1, with:
+
+```
+  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 1
+    rcad_fuzz_timing_got_slot -> outside_the_crate_through_a_slot -> bcmp
+```
+
+**The demonstration §419.5 could not give.** `3319f838`'s fuzz crate built
+again, the same way: `git archive 3319f838` into
+`target/q1533-3319f838-src`, then
+
+```
+$ cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
+    cargo +nightly fuzz build --target-dir <repo>/target/q1533-3319f838-build
+    Finished `release` profile [optimized + debuginfo] target(s) in 1m 25s
+```
+
+The fixed script against `where_two_surfaces_cross`:
+
+```
+  calls from rcad_fuzz_timing to a hooked function: 5 (4 outside SlowRun::is)
+  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function, unscanned: 249
+  tail jumps in rcad_fuzz_timing through a relative jump table, staying inside their own function: 14
+  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 2
+    rcad_fuzz_timing::stop_the_clock -> <rcad_fuzz_timing::Watch>::merge_out -> <core::str::pattern::StrSearcher>::new -> __interceptor_trampoline_bcmp -> bcmp
+    <rcad_fuzz_timing::Watch>::merge_out -> <core::str::pattern::StrSearcher>::new -> __interceptor_trampoline_bcmp -> bcmp
+```
+
+The fifth offender now reads as **2**, not 0: `merge_out` reaches
+`StrSearcher::new` through GOT slot `397908` (the same shape as §419.5's
+`397e40`), and two different crate functions reach it along that edge —
+`merge_out` itself and `stop_the_clock`, which calls `merge_out` — so
+`main`'s per-function chain walk names it twice, once from each entry
+point. §419.5's offender line (4, direct hits) is unchanged; this row's fix
+only ever touches the chain-offender line.
+
+`4dc3cb88`'s own (unfixed) script against the same binary reads the chain
+line as 0, the offender line as 4 — the exact gap §419.5 found, reproduced
+on a fresh build rather than read off the old one:
+
+```
+$ fuzz/timing-hooked-calls.py target/q1533-3319f838-build/.../where_two_surfaces_cross   # base script
+  calls from rcad_fuzz_timing to a hooked function: 5 (4 outside SlowRun::is)
+  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 0
+```
+
+The "computed, unscanned" count moves too, on this same binary: 69
+(`4dc3cb88`'s script, already past Q1452's walk-out-of-crate widening) to
+249 (this fix). Same cause as §419.5's own 4 → 71: resolving the GOT-slot
+edges widens `reachable_from`'s reachable set, which pulls in more
+functions a timing-crate function reaches only through one of these edges
+— each with real, unrelated `call *%reg` sites of its own that were never
+reachable before. Wider counting, not a new offender: the offender and
+chain-offender lines are what changed meaning, and both moved the way this
+row says.
+
+**Today's five targets, at this branch's own tip,** built with §419.3's own
+command into a target directory of this row's own:
+
+```
+$ cd fuzz && CI=1 RUSTC="<repo>/fuzz/rustc-stand-in.sh" \
+    RUSTFLAGS="-C target-cpu=x86-64-v3" \
+    cargo +nightly fuzz build --target-dir <repo>/target/q1533-fuzz-build
+    Finished `release` profile [optimized + debuginfo] target(s) in 2m 38s
+$ nm <repo>/target/q1533-fuzz-build/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/1722c9cc30ea4823/out/librcad_fuzz_timing-1722c9cc30ea4823.rlib \
+    | grep -ic sancov
+0
+```
+
+The fixed script against all five binaries, every target reading the same:
+
+```
+  calls from rcad_fuzz_timing to a hooked function: 1 (0 outside SlowRun::is)
+  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function, unscanned: 251
+  tail jumps in rcad_fuzz_timing through a relative jump table, staying inside their own function: 17
+  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 0
+  clean
+$ echo $?
+0
+```
+
+**Following GOT edges turns up no real hooked call in today's crate.** The
+chain-offender line reads 0 on every one of the five targets, and every
+target still exits 0. The "unscanned" line moves from 71 (`4dc3cb88`'s own
+script, read in §419.3/§419.5) to 251 here, the same widening as the
+`3319f838` build above and for the same reason — nothing to report as a
+new offender, since the count that would carry one stayed at 0.
+
+Q323, the indirect calls through a computed pointer, now starts counting at
+251 unscanned "can leave" calls and 17 table jumps per target (today's tip),
+rather than 71 and 17.
