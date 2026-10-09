@@ -998,6 +998,100 @@ fn a_bends_cap_flush_against_a_block() {
     );
 }
 
+/// The control row of [`a_bends_cap_flush_against_a_block`], pinned against
+/// the two closed forms it is built from rather than against each other.
+///
+/// `touching::a_bends_cap_against_a_block`'s control slides the block a whole
+/// unit clear along the cap's own plane, so the block (`from = reach`,
+/// `across = 2`, `reach = ring + tube + 1`) sits entirely past `x = ring +
+/// tube`, clear of the bend's tube in every direction: its own hand-worked
+/// box, `2 × (reach + 1) × (2 tube + 2)`, is `48` for ring 3, tube 1 and `108`
+/// for ring 5, tube 2. The bend is the quarter torus `fuses_that_touch.rs`
+/// already holds to `π²·ring·tube²/2` elsewhere in this file.
+///
+/// The two solids never touch here, so `A ∩ B` is two solids kept apart: both
+/// intersections hold no solid, both unions hold the block and the bend as
+/// two solids at the sum of the two closed forms to within what the union's
+/// mesh declares, and `bend \ block` holds the bend to within what its mesh
+/// declares. **`block \ bend` holds the block's own hand-worked volume
+/// exactly, with no error at all** — the block is never cut, so every one of
+/// its faces stays flat and the mesh declares nothing hidden. That is the
+/// claim this test's sibling's doc comment makes in prose; this pins the
+/// number rather than the word "exact".
+#[test]
+fn a_bends_cap_against_a_blocks_control_fuses_to_the_two_closed_forms() {
+    let pi = std::f64::consts::PI;
+    for (ring, tube, block_volume) in [(3u32, 1u32, 48.0), (5, 2, 108.0)] {
+        let built = Drawn {
+            shape: Shape::ABendsCapAgainstABlock { ring, tube },
+            apart: Apart::ClearByOne,
+        }
+        .build();
+        let (block, bend) = (built.first, built.second);
+        let bend_volume = pi * pi * f64::from(ring) * f64::from(tube) * f64::from(tube) / 2.0;
+        for (one, other, rule, solids, holds) in [
+            (block, bend, Rule::Union, 2, block_volume + bend_volume),
+            (bend, block, Rule::Union, 2, block_volume + bend_volume),
+            (block, bend, Rule::Intersection, 0, 0.0),
+            (bend, block, Rule::Intersection, 0, 0.0),
+            (block, bend, Rule::Difference, 1, block_volume),
+            (bend, block, Rule::Difference, 1, bend_volume),
+        ] {
+            let which = format!(
+                "ring {ring}, tube {tube}, {rule:?} (block first: {})",
+                one == block
+            );
+            let mut model = built.model.clone();
+            let answer = model
+                .fuse(
+                    &[one],
+                    &[other],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{which} refused {why}"));
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{which} does not validate: {why}"));
+            assert_eq!(
+                answer.solids().len(),
+                solids,
+                "{which} keeps {solids} solids"
+            );
+            let (volume, error) = volume_and_error(&model, answer.solids());
+            assert!(
+                (volume - holds).abs() <= error,
+                "{which} measures {volume} against {holds}, out by more than the {error} its \
+                 mesh declares"
+            );
+        }
+        // Pinned on its own: the block less the bend is not merely within a
+        // declared error of its own volume, it is that volume with the mesh
+        // declaring nothing hidden at all.
+        let mut model = built.model.clone();
+        let answer = model
+            .fuse(
+                &[block],
+                &[bend],
+                Rule::Difference,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("ring {ring}, tube {tube}, block \\ bend refused {why}"));
+        let (volume, error) = volume_and_error(&model, answer.solids());
+        assert_eq!(
+            volume, block_volume,
+            "ring {ring}, tube {tube}: block \\ bend measures {volume}, not exactly the block's \
+             own hand-worked volume {block_volume}"
+        );
+        assert_eq!(
+            error, 0.0,
+            "ring {ring}, tube {tube}: block \\ bend declares {error} hidden, not nothing"
+        );
+    }
+}
+
 /// A thin bar standing wholly inside a thick one, touching nothing, is united
 /// and hollowed out.
 ///
