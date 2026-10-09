@@ -949,8 +949,11 @@ fn a_unit_pointed_cone_with_a_lean_up_to_one_answers_right_or_refuses() {
 /// The same block leaned four times the cone's own slope, apart from the
 /// eight fuses at crossing `0`, turns `0` and `1`, which are a known defect
 /// ([`a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate`]).
-/// Crossing `0`, turn `3` refuses `ResultIsNotManifold` on every rule, and
-/// every other crossing answers right.
+/// Crossing `0` puts the leaning face through the apex and nowhere else on
+/// the cone, a touch ([`APART`]); turned `3` it refuses `ResultIsNotManifold`
+/// on every rule. Crossing `−0.5` misses the cone by `2` at the apex
+/// ([`APART`]), the other two crossings meet it ([`OVERLAPPING`]), and all
+/// thirty-six of those answer right.
 fn a_unit_pointed_cones_lean_four_cases_away_from_the_defect() -> Vec<Case> {
     let mut cases = vec![Case {
         cone: THE_UNIT_CONE,
