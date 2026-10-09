@@ -860,7 +860,7 @@ oracles.** One at a time, against the shipped code:
 | 4. History maps returned per operation | `the_input_keys_still_work_and_a_face_nothing_reaches_comes_through_once`, `a_face_that_is_swallowed_whole_has_no_image`, `every_face_of_the_answer_has_exactly_one_input_face_behind_it` |
 | 5. The catalogue as hand-written cases, each passing or refusing with a reason | `the_nine_planar_entries_as_a_table` and the eighteen per-entry tests beside it in `degenerate_fuses.rs`; `a_solid_that_runs_through_itself_cannot_be_fused` for the ninth entry, which no public API can build |
 | 6. The §11.2 metamorphic properties as a `proptest` suite | `what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up`, `uniting_the_first_two_and_then_the_third_is_uniting_the_last_two_and_then_the_first`, `taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_share`, and transform invariance in both halves — `turning_a_pair_a_quarter_turn_and_moving_it_a_whole_number_changes_not_one_bit` exactly, `turning_the_answer_to_a_fuse_agrees_with_fusing_the_turned_inputs` within the bound |
-| 7. `Policy::max_wobble` has a caller, judged against `ProvenanceLog::worst_wobble` | `Model::fuse` judges it after assembly and before the commit; `a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_prove` is the answering half, and `a_certified_fuse_over_a_tagged_input_succeeds_and_the_answer_keeps_the_tag` is §17.2's guard against reading the wrong quantity. **The refusing half has no test.** No fuse is known that the judgment refuses and whose answer does not exist. The one refusal by the judgment anybody has found is a gap, pinned as `a_tolerant_policy_bigger_than_the_model_refuses_two_turned_blocks_meeting_at_a_corner_that_a_certified_one_unites`. The refusing half was `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` until 2026-10-05 and `what_two_turned_cubes_a_rounding_deep_in_each_other_share_is_too_thin_to_hold_and_is_refused` until Q1353, and the two paragraphs after these tables say why each was dropped and what was tried since |
+| 7. `Policy::max_wobble` has a caller, judged against `ProvenanceLog::worst_wobble` | `Model::fuse` judges it after assembly and before the commit; `a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_prove` is the answering half, and `a_certified_fuse_over_a_tagged_input_succeeds_and_the_answer_keeps_the_tag` is §17.2's guard against reading the wrong quantity. **The refusing half has no test.** No fuse is known that the judgment refuses and whose answer does not exist. The one refusal by the judgment anybody has found was a gap, closed by Q1467 and pinned answering as `a_tolerant_policy_bigger_than_the_model_fuses_two_turned_blocks_meeting_at_a_corner_as_a_certified_one_does`. The refusing half was `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` until 2026-10-05 and `what_two_turned_cubes_a_rounding_deep_in_each_other_share_is_too_thin_to_hold_and_is_refused` until Q1353, and the two paragraphs after these tables say why each was dropped and what was tried since |
 | 8. A measured refusal rate under `Policy::certified()`, recorded in this file | §17.7, asserted by `how_often_a_certified_fuse_of_a_turned_pair_refuses` with `every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing` and `every_certified_fuse_of_a_pair_sharing_coordinates_is_decided` as its controls |
 
 | §14.8 oracle | The test that discharges it |
@@ -951,7 +951,7 @@ is not a claim that this half cannot be met.
 *Why the six are a gap.* The same pair answers under `Policy::certified()`,
 `tolerant(100)` and `tolerant(1e9)`, so its answer exists.
 `resolve_under_policy` reads each record as a wobble at the policy's working
-size, and the judgment reads the same log at the model's
+size, and the judgment read the same log at the model's
 `Scale::nominal_size`, which is `100` here. The pair's two `orient3d` records
 are each about `2.1e-4` wide. A volume is divided by the working size squared
 (§15.2), so at `100` each comes out `1e4` times what it is at `1e4`, about
@@ -959,8 +959,22 @@ are each about `2.1e-4` wide. A volume is divided by the working size squared
 the judgment then refused the solid built from them, which is what
 `Policy::wobble_is_acceptable`'s doc says its one budget is there to stop.
 §15.2 named this seam: the model's nominal size is a second copy of the
-policy's working size. The fix is filed as a row, and the pin is to be turned
-round to the union when it lands.
+policy's working size.
+
+*Closed 2026-10-09 (Q1467).* The judgment reads the log at the policy's
+working size now, and at the model's only under a certified policy, which
+carries none (§15.2's note of the same date). The pair answers under all five
+policies, every rule, both ways round: two blocks for a union, nothing for an
+intersection, the first block for a difference, each validated and measured.
+Under `tolerant(1e4)` and `tolerant(1e6)` each of those fuses still records
+decisions the policy accepted and that read past the budget at the model's
+size, so the pin still reaches the judgment. It is
+`a_tolerant_policy_bigger_than_the_model_fuses_two_turned_blocks_meeting_at_a_corner_as_a_certified_one_does`.
+Q1457's probe was not kept and has not been run again. If each of its fuses
+was on a 100 mm model, as the pair was, its other fuses cannot have moved:
+every working size it tried was at least the model's, dividing by a bigger
+size gives a wobble no bigger, so the judgment passes every log it passed
+before, and nothing before the judgment changed.
 
 *What this leaves.* Criterion 7's refusing half has no demonstration. No fuse
 is known that the judgment refuses and whose answer does not exist. Whether a

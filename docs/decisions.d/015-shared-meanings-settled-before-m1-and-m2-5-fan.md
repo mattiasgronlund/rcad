@@ -86,6 +86,19 @@ outside it produces a tag from an enclosure. No new plumbing. That the model's
 `Scale::nominal_size` is a second copy of the same number is a seam worth
 watching, not one to fix here.
 
+*Amended 2026-10-09 (Q1467): the seam opened, and is closed.* The fuse's
+judgment (§17.2) read its whole log at the model's `Scale::nominal_size`, while
+`resolve_under_policy` had accepted each record at the policy's working size.
+Under a tolerant policy bigger than the model, an area or a volume came out
+bigger at the judgment than when it was accepted, by the ratio of the two sizes
+to the power of one or two, and the fuse refused a solid built only out of
+decisions the policy had accepted (§17.8 names the pair). `Model::fused_under`
+now reads the log at the policy's working size. It reads it at the model's only
+under `Strictness::Certified`, which carries no size of its own, and whose
+budget of zero gives the same verdict at any positive size unless a record's
+wobble rounds down to zero. Nothing else in the crates' sources reads a record
+at the model's size.
+
 **This is an accounting figure, not a bound, and that has to be said out loud.**
 The true sensitivity of a predicate to a moved corner is its gradient at the
 configuration in hand, and a sliver triangle has a small one — the same
