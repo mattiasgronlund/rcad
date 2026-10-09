@@ -75,19 +75,26 @@
 //! `Policy::tolerant(100.0)` with the block first answered 51 and was refused
 //! in 148 before: 74 `Undecidable` on the triangle, 58 a hole winding with its
 //! outline and 16 an outline winding against its face. It answered 62 after
-//! that, and answers 68 since Q1442 left out an edge only wires enclosing
-//! nothing walked; the union and intersection of each hold 2000 between them.
-//! None is refused `Undecidable`, and the 131 left are refused by name once
-//! the answer is written with its corners rounded: 65 a hole winding with its
-//! outline, 16 an outline winding against its face, 34 a shell enclosing
-//! nothing and 16 an edge with four faces. The rule is exact, so it runs under
-//! `Policy::certified()` too, where the union of 16 of the 199 now answers
-//! either way round. 10 answered after Q1353: each validates and holds, within
-//! `1e−6`, what the turned cube moved `2⁻³⁰` further in gives, and how the tip
-//! is written in those 10 was not traced. The other 6 are Q1442's, whose three
+//! that, 68 after Q1442 left out an edge only wires enclosing nothing walked,
+//! and answers 104 since Q1506 left out the flat ring another plane walks
+//! back. The intersection of 102 of the 104 answers too, and the two hold 2000
+//! between them; the intersection of turns 13 and 314 is refused as an
+//! outline winding against its face, and their union is 1000 more than the
+//! turned cube less the block. None is refused `Undecidable`, and the 95 left
+//! are refused by name once the answer is written with its corners rounded:
+//! 63 a hole winding with its outline, 16 an outline winding against its face
+//! and 16 an edge with four faces. The 34 shells enclosing nothing of before
+//! Q1506 are gone. The rule is exact, so it runs under `Policy::certified()`
+//! too, where the union of 16 of the 199 answered either way round before
+//! Q1506. 10 answered after Q1353: each validates and holds, within `1e−6`,
+//! what the turned cube moved `2⁻³⁰` further in gives, and how the tip is
+//! written in those 10 was not traced. The other 6 are Q1442's, whose three
 //! crossings round to one point
 //! ([`six_random_turns_whose_crossings_round_to_one_corner_answer_every_fuse`]).
-//! 98 are refused for the range, and the rest by the names above.
+//! Since Q1506 the certified union answers 53 either way round, and is refused
+//! 95 for the range, 35 a hole winding with its outline and 16 an edge with
+//! four faces; with the block first each of the 53 validates and measures what
+//! the tolerant union measures. `docs/decisions.md` §417.3 has the counts.
 //! [`random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant`]
 //! keeps the first 60, 31 of which meet outside.
 //!
@@ -377,34 +384,43 @@ fn random_turns_whose_planes_meet_inside_the_block_answer() {
 /// inside a piece of a face any more (Q1353). The triangle the crossings cut
 /// out of the block's face is inside the turned cube, and `select.rs`'s
 /// `by_a_plane` now places it there: every corner of it is on or behind every
-/// plane of the turned cube, and strictly behind one. 15 answer the union and
+/// plane of the turned cube, and strictly behind one. 18 answer the union and
 /// the intersection, and the two hold both cubes between them; turns 47 and 48
-/// were refused `Undecidable` on the triangle before. The other 16 are refused
-/// by name, as `REFUSED` says, once the answer is written with its corners
+/// were refused `Undecidable` on the triangle before, and turns 8, 21 and 49
+/// `NoSpaceInside` until Q1506's rule left out the flat ring another plane
+/// walks back.
+///
+/// Turn 13 answers its union and is refused its intersection, as
+/// `ONLY_THE_UNION_ANSWERS` says; its union was refused as a hole winding with
+/// its outline until Q1506. With no intersection to hold it to, its union is
+/// held to the turned cube less the block, which answers: that is one cube
+/// less what they share, so the union is `2000 − (1000 −` it`)`, within the
+/// rounding the other checks allow. The other 12 are refused their union by
+/// name, as `REFUSED` says, once the answer is written with its corners
 /// rounded; what is left to reach them is the second half of
 /// `docs/decisions.md` §417.
 #[test]
 fn random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant() {
-    const REFUSED: [(usize, Refused); 16] = [
+    const REFUSED: [(usize, Refused); 12] = [
         (1, Refused::AHoleWindingWithItsOutline),
         (5, Refused::AHoleWindingWithItsOutline),
-        (8, Refused::NoSpaceInside),
         (9, Refused::AnEdgeWithFourFaces),
-        (13, Refused::AHoleWindingWithItsOutline),
         (14, Refused::AnOutlineWindingAgainstItsFace),
         (18, Refused::AnOutlineWindingAgainstItsFace),
-        (21, Refused::NoSpaceInside),
         (25, Refused::AHoleWindingWithItsOutline),
         (29, Refused::AHoleWindingWithItsOutline),
         (34, Refused::AHoleWindingWithItsOutline),
         (39, Refused::AnOutlineWindingAgainstItsFace),
-        (49, Refused::NoSpaceInside),
         (51, Refused::AHoleWindingWithItsOutline),
         (55, Refused::AnEdgeWithFourFaces),
         (57, Refused::AHoleWindingWithItsOutline),
     ];
+    const ONLY_THE_UNION_ANSWERS: [(usize, Refused); 1] =
+        [(13, Refused::AnOutlineWindingAgainstItsFace)];
     let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
     let mut outside = 0;
+    let mut both_answer = 0;
+    let mut only_the_union_answers = 0;
     for (index, (turn, at)) in q1208s_random_turns(60).into_iter().enumerate() {
         if where_the_planes_at_the_corner_meet(&turn, at) != Decision::Neg {
             continue;
@@ -435,6 +451,41 @@ fn random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_nam
             &tolerant(),
             &asked,
         );
+        if let Some(&(_, refused)) = ONLY_THE_UNION_ANSWERS
+            .iter()
+            .find(|&&(which, _)| which == number)
+        {
+            only_the_union_answers += 1;
+            let mut model = a_model();
+            let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
+            refused.assert_is(
+                fuse(
+                    &mut model,
+                    pair,
+                    Rule::Intersection,
+                    Order::BlockFirst,
+                    &tolerant(),
+                ),
+                &format!("{asked}, the intersection"),
+            );
+            let turned_less_the_block = volume_of_a_fuse(
+                &turn,
+                at,
+                Rule::Difference,
+                Order::TurnedFirst,
+                &tolerant(),
+                &asked,
+            );
+            let shared = 1000.0 - turned_less_the_block;
+            assert!(
+                (union - (2000.0 - shared)).abs() <= allowed,
+                "{asked}: the union is {union}, and the turned cube less the block \
+                 {turned_less_the_block} says {}",
+                2000.0 - shared
+            );
+            continue;
+        }
+        both_answer += 1;
         let intersection = volume_of_a_fuse(
             &turn,
             at,
@@ -451,6 +502,11 @@ fn random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_nam
         );
     }
     assert_eq!(outside, 31, "how many of the 60 meet outside the block");
+    assert_eq!(
+        (both_answer, only_the_union_answers),
+        (18, ONLY_THE_UNION_ANSWERS.len()),
+        "how many of the 31 answer both rules, and how many only the union"
+    );
 }
 
 /// Every rule both ways round answers one or more solids that validate, and
@@ -685,7 +741,7 @@ enum Refused {
     TooWideARange,
     /// A shell of the answer is the tip outside the face, which encloses
     /// nothing, or less than nothing, once its corners are rounded: all of the
-    /// turned cube less the block, and a shell of some unions.
+    /// turned cube less the block.
     NoSpaceInside,
     /// An edge of the answer has four faces along it, where the tip's sides
     /// meet the block's face.
