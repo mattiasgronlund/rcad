@@ -178,7 +178,13 @@ standing rules and a brief carries only what is this row's:
 - for a row that writes a section, `mise exec -- just claim-section '<what>'`
   before writing;
 - the verbatim API signatures and exact-arithmetic facts that lane needs,
-  because rediscovering those costs it twenty minutes.
+  because rediscovering those costs it twenty minutes;
+- for a row that compares two fuzz setups on coverage, how far two identical
+  runs drift apart. After one 9 736 s slice, measured with `RCAD_FUZZ_TIMINGS`
+  unset, one pair ended 60 edges apart on the reader, 10 on the writer and 0
+  to 3 on the other three targets (§272.9). A smaller gap says nothing, and
+  one pair is a floor, so ask for several runs a side. One measuring pass per
+  corpus is enough: two passes over one corpus agreed to within 2 edges.
 
 `base` is a sha you have seen go green: step 3's, or the sha a merger pushed,
 since it gated that tree. `sourcePaths` defaults to the `crates/<c>/src`
