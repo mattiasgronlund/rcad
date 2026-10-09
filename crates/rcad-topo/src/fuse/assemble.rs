@@ -2050,7 +2050,9 @@ impl Assembly {
             Picker::OutsideAPipe(_) => Some(true),
             Picker::InsideAPipe(_) => Some(false),
             Picker::InFrontOf(_) => None,
-            other => panic!("intersect names a circle a plane cuts a ring in by {other:?}"),
+            Picker::OutsideABall(_) | _ => {
+                panic!("intersect names a circle a plane cuts a ring in by {this_circle:?}")
+            }
         };
         Ok(others.find_map(|other| {
             other.iter().find_map(|&dart| {
