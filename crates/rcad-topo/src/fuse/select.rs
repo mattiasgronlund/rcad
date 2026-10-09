@@ -2091,11 +2091,15 @@ fn settle_against_each(
             // `Error::CannotFireARayAtAFacesSurface` exists since Q883, and
             // `assemble.rs`'s `one_shell_is_inside_another` returns it. Here it
             // still stays with the undecided points, because no fuse is known
-            // to reach this arm: the point beside it answers every point whose
-            // box no face of the solid meets (§323), and every shape Q1125
-            // tried either answered or was refused before a point was put to a
-            // ray (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`). A
-            // fuse that reaches it is what changing this waits for (§35.6).
+            // to be refused for it: the point beside it answers every point
+            // whose box no face of the solid meets (§323). Since Q1392 let the
+            // pieces of two bends placed a quarter turn round by a float turn be
+            // cut, their fuses reach this arm, but each piece whose point
+            // reached it is placed by some other point or rule, and the fuse is
+            // refused at a later piece no point was found inside
+            // (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`). A fuse
+            // refused for want of this ray is what changing this waits for
+            // (§35.6).
             Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(Settled::Abandoned),
             // Coincidence was asked above and found no face the piece lies on.
             Containment::OnBoundary | Containment::Undecidable { .. } => {

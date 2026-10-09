@@ -184,6 +184,18 @@ either — filed by Q1223's lane as **Q1495**. Once that answers,
 **Q1497** runs every fuse of both mixed pairings to see whether the circle is
 shown named twice there.
 
+**2026-10-09 note (Q1392, `1384425d`): the quarter bars are refused two ways
+now.** Q1392 places a point on the ring against a plane through its axis
+exactly (`side_of_a_plane_holding_a_rings_axis`). With the bend named first,
+all 12 mixed fuses are now refused `CannotTellTheCellsOfAFaceApart` on the
+bend's ring face: `Arrangement::crossing_like` takes the two spellings for one
+surface but their pickers, the ring's axis crossed with each stored normal,
+for two, so each circle is drawn twice. That is this section's unscaled
+half-space, met in arrange before `which_of_the_pairs_closed_crossings_it_is`
+names anything; **Q1538** folds it. With the bars named first, all 12 are still
+refused `Undecidable` on `side of plane`, at a corner on a bar's round wall;
+Q1495 is re-filed for those alone as **Q1539**, and Q1497 waits on both.
+
 ### 330.4 Whether a spelling can pair four faces crosswise
 
 §247.6 asked whether two spellings the fold leaves apart could pair the four
