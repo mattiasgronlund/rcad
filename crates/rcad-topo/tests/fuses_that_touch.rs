@@ -163,9 +163,13 @@
 //! clear of the bend, answers all 90. The 45 that keep the bend were refused
 //! writing it back, `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`,
 //! the stop §243.5 and §323.5 record, until the bend's wall was used forwards
-//! (§361). A torus against any other curved surface is refused by name, so a
-//! bar butted onto a bend's cap never reaches the rim the two share;
-//! [`a_bar_on_a_bends_cap_is_refused_before_its_rim_is_named`] pins that.
+//! (§361). A bar of the tube's radius butted onto a bend's cap with a flat far
+//! end is refused as a quartic for that end's plane;
+//! [`a_flat_ended_bar_on_a_bends_cap_is_refused_as_a_quartic`] pins that. Cut
+//! through the ring's axis instead, its pipe meets the ring in the cap's rim
+//! and in a loop crossing it, and
+//! [`a_bar_cut_through_the_rings_axis_on_a_bends_cap_by_every_rule_against_the_closed_forms`]
+//! holds every rule to the closed forms.
 //!
 //! # What is not built, and why
 //!
@@ -612,7 +616,7 @@ fn a_bar_cut_through_the_rings_axis_on_a_bends_cap_by_every_rule_against_the_clo
                 let mut fused = model.clone();
                 let answer = fused
                     .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
-                    .unwrap_or_else(|why| panic!("{which} refused {why}"));
+                    .unwrap_or_else(|why| panic!("{which} refused {why}: {why:?}"));
                 fused
                     .validate(&policy, &mut ProvenanceLog::new())
                     .unwrap_or_else(|why| panic!("{which} does not validate: {why}"));
