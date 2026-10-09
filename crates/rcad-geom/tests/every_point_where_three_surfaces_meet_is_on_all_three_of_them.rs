@@ -529,6 +529,12 @@ fn the_binades_spanned_by(surfaces: &[Surface; 3]) -> (i32, i32) {
                 lengths.extend(pipe.axis().origin().coordinates());
                 lengths.push(pipe.radius());
             }
+            Surface::Cone(cone) => lengths.extend(cone.apex().coordinates()),
+            Surface::Torus(ring) => {
+                lengths.extend(ring.centre().coordinates());
+                lengths.push(ring.ring_radius());
+                lengths.push(ring.tube_radius());
+            }
             other => panic!("nothing here measures {other:?}"),
         }
     }
