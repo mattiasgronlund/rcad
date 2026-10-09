@@ -506,7 +506,7 @@ fn bake_one_solid(
     let solid = model.solid_at(slot);
     let validate_allows = model.room_a_corner_of_this_solid_gets(slot);
     if solid.is_wholly_flat()
-        && let Some(joined) = joined_faces_of_an_input(model, solid, log)?
+        && let Some(joined) = joined_faces_of_an_input(model, solid, policy, log)?
     {
         return bake_the_joined_faces(model, key, solid, &joined, validate_allows, policy, log);
     }

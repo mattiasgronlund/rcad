@@ -58,6 +58,18 @@ is a no-op (`7f921572`).
 sign alone — and so the same defect for a flat face bounded by a meridian
 circle. It is outside this lane's files and is not fixed or measured here.
 
+**2026-10-09 (Q1512).** The pin named above as the refusal,
+`a_piece_on_a_plane_square_to_a_bends_axis_cannot_say_what_it_holds`, was
+renamed by row Q1501 to
+`a_band_on_a_plane_square_to_a_bends_axis_holds_its_own_points`
+(`fuse/select.rs:3880`): the band is no longer unplaced.  `the_piece_holds`
+now answers it there, asking `runs_round_the_outer_circle`
+(`fuse/select.rs:1831`, also asked at `:1335`, `:1689` and `:1730`), the
+disk's own circle rather than its partner's sign. `holds.rs` already answered
+the matching case for a flat face — not the meridian circles of 232.1 but the
+circles round the axis a plane square to it cuts — by
+`the_picker_naming_the_circle_through` (`holds.rs:569`), as §250.9 says.
+
 ### 232.3 A node on a crossing whose partner is the asked surface is on that surface
 
 `arrange.rs`'s `which_side_of_everything` asked a node on the far circle of the
