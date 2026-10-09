@@ -3539,7 +3539,7 @@ fn nothing_to_measure_from(piece: &Piece, log: &mut ProvenanceLog) -> Error {
 #[cfg(test)]
 mod tests {
     use rcad_geom::{
-        Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface,
+        Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface,
         SurfaceMeet, Torus, Vector, intersect,
     };
     use rcad_predicates::{
@@ -3812,6 +3812,96 @@ mod tests {
             Some(false),
             "in the other disk, on the bulge's side of the chord's line"
         );
+    }
+
+    /// The half of the plate `z = 0` with `x ≥ 0` beyond the ring of four
+    /// round a tube of one: between the circle of 5 the ring cuts it in and a
+    /// pipe of 10, its four corners on the line `x = 0`, so they wind round
+    /// nothing. The pipe's arc bulges over the whole half disk of 10, and the
+    /// ring's arc bites the half disk of 5 back out of it. The ring's sign takes
+    /// the tube out of that bite and not the inner disk, so a point there was
+    /// held (Q1305).
+    #[test]
+    fn a_plate_beyond_a_rings_outer_circle_holds_no_point_of_the_inner_disk() {
+        let plate = a_flat_piece_on_z_0(&[
+            (
+                a_pipe_about_z(10.0),
+                [0.0, -10.0],
+                [0.0, 10.0],
+                Decision::Neg,
+            ),
+            (the_plane_x_0(), [0.0, 10.0], [0.0, 5.0], Decision::Neg),
+            (a_ring_of_four(), [0.0, 5.0], [0.0, -5.0], Decision::Pos),
+            (the_plane_x_0(), [0.0, -5.0], [0.0, -10.0], Decision::Neg),
+        ]);
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&plate, PredicatePoint::from(at))
+        };
+        assert_eq!(holds([7.5, 0.0, 0.0]), Some(true), "on the plate");
+        assert_eq!(holds([4.0, 0.0, 0.0]), Some(false), "in the tube");
+        assert_eq!(holds([2.5, 0.0, 0.0]), Some(false), "in the inner disk");
+        assert_eq!(holds([-7.5, 0.0, 0.0]), Some(false), "past the chord");
+    }
+
+    /// The half of the plate `z = 0` with `x ≥ 0` inside the circle of 3 the
+    /// ring of four round a tube of one cuts it in: a half disk whose two
+    /// corners wind round nothing, so what holds a point is the ring's arc, and
+    /// until that was counted it held none (Q1305).
+    #[test]
+    fn a_half_disk_inside_a_rings_inner_circle_holds_its_own_points() {
+        let half_disk = a_flat_piece_on_z_0(&[
+            (a_ring_of_four(), [0.0, -3.0], [0.0, 3.0], Decision::Pos),
+            (the_plane_x_0(), [0.0, 3.0], [0.0, -3.0], Decision::Neg),
+        ]);
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&half_disk, PredicatePoint::from(at))
+        };
+        assert_eq!(holds([1.5, 0.0, 0.0]), Some(true), "in the half disk");
+        assert_eq!(holds([-1.5, 0.0, 0.0]), Some(false), "past the chord");
+        assert_eq!(holds([4.0, 0.0, 0.0]), Some(false), "in the tube");
+        assert_eq!(holds([7.5, 0.0, 0.0]), Some(false), "beyond the tube");
+    }
+
+    /// A piece of the plane `z = 0`, facing `+z`, walked side by side: each
+    /// side's partner, its two ends in the plane, and which side of the partner
+    /// the piece's material is on.
+    fn a_flat_piece_on_z_0(sides: &[(Surface, [f64; 2], [f64; 2], Decision)]) -> Piece {
+        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
+        let corner = |[x, y]: [f64; 2], partner: Surface| MeetPoint::OfThreeSurfaces {
+            surfaces: [Surface::Plane(flat), partner, the_plane_x_0()],
+            which: 0,
+            point: PredicatePoint::from([x, y, 0.0]),
+        };
+        let wire = sides
+            .iter()
+            .map(|&(partner, from, to, material_side)| FaceMeet {
+                carried_by: [Surface::Plane(flat), partner],
+                ends: [corner(from, partner), corner(to, partner)],
+                material_side,
+                along: SmallVec::new(),
+                approximation: None,
+            })
+            .collect();
+        Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(flat),
+            orientation: Orientation::Forward,
+            wires: vec![wire],
+            is_the_whole_surface: false,
+        }
+    }
+
+    fn a_ring_of_four() -> Surface {
+        Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a ring wider than its tube"))
+    }
+
+    fn a_pipe_about_z(radius: f64) -> Surface {
+        Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a positive radius"))
+    }
+
+    /// The plane `x = 0`, facing `−x`, out of a plate on `x ≥ 0`.
+    fn the_plane_x_0() -> Surface {
+        Surface::Plane(Plane::from_coefficients([-1.0, 0.0, 0.0, 0.0]).expect("a normal"))
     }
 
     /// A piece of the wall `y = −10` inside the lower nappe of `x² + y² = (z/2)²`:
