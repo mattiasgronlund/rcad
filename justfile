@@ -8232,8 +8232,8 @@ check-fuzz-overnight-selftest:
 # *slot(%rip)` — that a real `R_X86_64_RELATIVE` relocation, from an actual
 # `ld -pie` link rather than a guess at one, resolves to a helper outside the
 # crate, and the helper calls `bcmp`. Before this fix, a slot not on the
-# hooked list fell through both the hooked-slot check and the "computed,
-# unscanned" bucket — `(%rip)` with a comment excused it from the latter on
+# hooked list fell through both the hooked-slot check and the computed-call
+# bucket — `(%rip)` with a comment excused it from the latter on
 # the assumption the former had already decided it — so neither `calls_out`
 # nor `reachable_from` ever saw this edge, the same wall §419.5 met building
 # `3319f838`: `merge_out` reaches `core`'s `StrSearcher::new` through a GOT
@@ -8244,9 +8244,16 @@ check-fuzz-overnight-selftest:
 # function that calls `bcmp` with a `lea` and calls it through `%rax`, and
 # `rcad_fuzz_timing_dyn_call` takes the address of a vtable-shaped object
 # whose fourth word names another such function, and calls through
-# `0x18(%rax)`. Before the walk, both calls were counted as "computed,
-# unscanned" and the scan exited 0.
-[doc("The jump-table split and the transitive walk in timing-hooked-calls.py, pinned against hand-assembled fixtures.")]
+# `0x18(%rax)`. Before the walk, both calls were only counted as computed
+# calls that can leave the function, and the scan exited 0.
+#
+# A sixth fixture pins `NOT_ENTERED` (§419.7, Q323): three crate functions
+# each call one of std's `panic_with_hook`, std's `rust_oom` and ASan's
+# `AsanInitInternal`, under a crate hash no toolchain made, and each of those
+# calls `bcmp`; none may count. A fourth calls std's `default_hook`, which
+# also calls `bcmp`, and must count, so a cut that excused every function
+# would fail here.
+[doc("The jump-table split, the transitive walk and the function-pointer walk in timing-hooked-calls.py, pinned against hand-assembled fixtures.")]
 check-timing-hooked-calls-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -8291,7 +8298,7 @@ check-timing-hooked-calls-selftest:
     got=$(fuzz/timing-hooked-calls.py "$dir/fixture.o") \
         || { echo "$got"; echo "timing-hooked-calls.py exited non-zero against a fixture with no hooked call at all"; exit 1; }
 
-    leave_line="  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function, unscanned: 3"
+    leave_line="  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function: 3"
     printf '%s\n' "$got" | grep -qxF "$leave_line" || {
         echo "$got"
         echo "expected the line above (3: the bare jmp, the near miss, and the call)"
@@ -8357,7 +8364,7 @@ check-timing-hooked-calls-selftest:
 
     computed_got=$(fuzz/timing-hooked-calls.py "$dir/computed.o") \
         || { echo "$computed_got"; echo "timing-hooked-calls.py exited non-zero against a fixture where the only thing reached is a computed call, never a hook — a call this scan cannot see past is not itself an offender"; exit 1; }
-    computed_line="  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function, unscanned: 1"
+    computed_line="  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function: 1"
     printf '%s\n' "$computed_got" | grep -qxF "$computed_line" || {
         echo "$computed_got"
         echo "expected the line above (1: helper_with_a_computed_call's call *%rax, reached from rcad_fuzz_timing_computed_through_helper)"
@@ -8478,6 +8485,76 @@ check-timing-hooked-calls-selftest:
             exit 1
         }
     done
+
+    cat >"$dir/not_entered.s" <<'ASM'
+    .text
+    .globl rcad_fuzz_timing_panics
+    .type rcad_fuzz_timing_panics, @function
+    rcad_fuzz_timing_panics:
+    call _RNvNtCs1a2B3c_3std9panicking15panic_with_hook
+
+    .globl _RNvNtCs1a2B3c_3std9panicking15panic_with_hook
+    .type _RNvNtCs1a2B3c_3std9panicking15panic_with_hook, @function
+    _RNvNtCs1a2B3c_3std9panicking15panic_with_hook:
+    call bcmp
+
+    .globl rcad_fuzz_timing_runs_out_of_memory
+    .type rcad_fuzz_timing_runs_out_of_memory, @function
+    rcad_fuzz_timing_runs_out_of_memory:
+    call _RNvNtCs1a2B3c_3std5alloc8rust_oom
+
+    .globl _RNvNtCs1a2B3c_3std5alloc8rust_oom
+    .type _RNvNtCs1a2B3c_3std5alloc8rust_oom, @function
+    _RNvNtCs1a2B3c_3std5alloc8rust_oom:
+    call bcmp
+
+    .globl rcad_fuzz_timing_starts_asan
+    .type rcad_fuzz_timing_starts_asan, @function
+    rcad_fuzz_timing_starts_asan:
+    call _ZN6__asanL16AsanInitInternalEv
+
+    .globl _ZN6__asanL16AsanInitInternalEv
+    .type _ZN6__asanL16AsanInitInternalEv, @function
+    _ZN6__asanL16AsanInitInternalEv:
+    call bcmp
+
+    .globl rcad_fuzz_timing_calls_the_default_hook
+    .type rcad_fuzz_timing_calls_the_default_hook, @function
+    rcad_fuzz_timing_calls_the_default_hook:
+    call _RNvNtCs1a2B3c_3std9panicking12default_hook
+
+    .globl _RNvNtCs1a2B3c_3std9panicking12default_hook
+    .type _RNvNtCs1a2B3c_3std9panicking12default_hook, @function
+    _RNvNtCs1a2B3c_3std9panicking12default_hook:
+    call bcmp
+
+    .globl bcmp
+    .type bcmp, @function
+    bcmp:
+    ret
+    ASM
+    as "$dir/not_entered.s" -o "$dir/not_entered.o"
+    # Linked because an unlinked `.o` leaves each `call` to a global symbol
+    # as a zero displacement and a relocation, so `objdump` names whatever
+    # follows the call, and only the last function's `call bcmp` would land.
+    ld -pie -e rcad_fuzz_timing_panics -o "$dir/not_entered" "$dir/not_entered.o"
+
+    if not_entered_got=$(fuzz/timing-hooked-calls.py "$dir/not_entered"); then
+        echo "$not_entered_got"
+        echo "timing-hooked-calls.py exited 0 against a fixture where rcad_fuzz_timing calls std's default panic hook directly, and that hook calls bcmp — only panic_with_hook, rust_oom and AsanInitInternal are never entered"
+        exit 1
+    fi
+    not_entered_line="  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 1"
+    printf '%s\n' "$not_entered_got" | grep -qxF "$not_entered_line" || {
+        echo "$not_entered_got"
+        echo "expected the line above (1: the default hook; none through panic_with_hook, rust_oom or AsanInitInternal)"
+        exit 1
+    }
+    printf '%s\n' "$not_entered_got" | grep -qF "panicking::default_hook -> bcmp" || {
+        echo "$not_entered_got"
+        echo "expected a chain through std's default panic hook to bcmp"
+        exit 1
+    }
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and

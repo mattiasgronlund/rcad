@@ -50,41 +50,60 @@ resolves to an address with no function symbol at all is not a call this scan
 can name a target for either, the same as a `call *%reg` it never traced to a
 slot: it falls into the "can leave" bucket below rather than being dropped.
 
-**What this cannot see**: a call through a computed pointer — one where the
-register a `call *%reg` uses was not last set by a direct, in-function load
-of a hooked GOT slot, or a `call *SLOT(%rip)` whose relocation names no
-function symbol at all. Most `jmp *%reg` of this kind is not that: it is the
-tail of a relative jump table, the lowering of a match under `-fPIE` — `lea
-table(%rip),%base; movslq (%base,%idx,4),%off; add %base,%off; jmp *%off` —
-whose table holds offsets from its own base, so the jump can only land
-inside the function it is in, never at an imported symbol. This scan
-recognises that whole sequence, the load and the add of the same base
-register and the jump through the result, and reports it apart, as a jump
-that stays inside its own function. Everything else indirect that this scan
-could not trace to a hooked-slot load — a bare `jmp *%reg` the sequence does
-not match, every `call *%reg`, or a call through a memory operand (a vtable
-slot, a stored function pointer) — stays in the "can leave" bucket, since it
-might reach a target this scan did not name. `merge_out` alone made 12 such
-calls before docs/decisions.d/273's fix (counted below, `--computed`), and
-none of them can be ruled in or out by this scan; a `possibly reaches an
-unrecorded target` line says how many a given binary has. Closing that would
-need either a real points-to analysis of the binary or a runtime interposer
-that walks the caller's stack on every ASan memcmp hook — both bigger than
-this row. docs/decisions.d/273 says so and names the count for each target
-this script has been run on; docs/decisions.d/419 names the two buckets'
-counts for the five targets after the split added here (Q1444). The walk
-out of the crate stops at the same wall: a computed call met in a function
-it reaches, same as one met inside the crate, is counted in that bucket and
-not followed either — nothing past it is silently dropped, but nothing past
-it is named.
+A call through a computed pointer has no target this scan can read off the
+instruction: a `call *%reg` whose register was not last set by an
+in-function load of a hooked GOT slot, a call through a memory operand (a
+vtable slot, a stored function pointer), or a `call *SLOT(%rip)` whose
+relocation names no function symbol. Most `jmp *%reg` of this kind is not
+that: it is the tail of a relative jump table, the lowering of a match
+under `-fPIE` — `lea table(%rip),%base; movslq (%base,%idx,4),%off; add
+%base,%off; jmp *%off` — whose table holds offsets from its own base, so
+the jump can only land inside the function it is in. This scan recognises
+that whole sequence, the load and the add of the same base register and
+the jump through the result, and counts it apart, as a jump that stays
+inside its own function (Q1444). Everything else indirect is counted on
+the `can leave the function` line.
+
+Those calls are followed anyway, to everything they could land on
+(docs/decisions.d/419 §419.7). A computed call can only land on a function
+whose address some code made. The binary is position-independent, with no
+text relocations, so no instruction holds a function's address: code makes
+one with a rip-relative `lea` or load, and every pointer into the binary's
+own code that the loader writes into data is an `R_X86_64_RELATIVE`. A
+rip-relative reference that lands in code takes the function there. One
+that lands in data takes every function the relocations in that data object
+name, and every function named by the objects those point at, in turn. A
+data object runs from the address
+referenced to the next address anything names, which can take more
+functions than the code reaches but never fewer; a GOT entry is one 8-byte
+pointer of its own. So each address a function takes counts as a call it
+makes, and a second walk runs over direct calls and taken addresses
+together. A path from a `rcad_fuzz_timing` function to a hook outside
+`SlowRun::is` fails the scan and prints as a chain, with `&` in front of
+each function reached by its address rather than by a call.
+
+Neither walk enters a function `NOT_ENTERED` lists, each with the reason a
+hooked call past it cannot steer the mutator: ASan's set-up, which has
+finished before `main`, and the panic and failed-allocation paths, which
+end the process before libFuzzer draws another input. §419.7 shows each
+reason in the fuzz targets' own disassembly.
+
+**What this cannot see**: a pointer that code outside the reach stored and
+code inside it calls. The second walk follows only the addresses the reach
+itself takes. The `not followed` line counts the functions that reach a
+hook and whose address only code outside the reach takes. On the five fuzz
+targets those are the fuzz body and the harness around it, the kernel code
+the fuzz body takes the address of, ASan's interceptors, libFuzzer's own
+mutator, and std's backtrace printers behind the two cut paths. Telling
+whether one of them is ever called from inside the reach would need a
+runtime interposer that walks the caller's stack on every ASan memcmp hook
+(docs/decisions.d/273 §273.8).
 
 usage: timing-hooked-calls.py <binary> [<binary> ...]
 exit 0 and a `clean` line per binary if none reaches a hook outside `is`;
-exit 1 and the offending call(s) — address, kind, and inline chain — if any
-binary has one, or if a load of a hooked slot could not be matched to any
-call at all (the one case this script can tell you it might have missed a
-call, rather than merely one it cannot see, per the computed-pointer
-paragraph above).
+exit 1 and the offending call(s) — address, kind, and inline chain or the
+chain of functions — if any binary has one, or if a load of a hooked slot
+could not be matched to any call at all.
 """
 import bisect
 import re
@@ -107,7 +126,8 @@ for base in HOOKED_BASE:
 
 # Functions neither walk enters, each with the reason a hooked call made
 # past it cannot steer libFuzzer's mutator. docs/decisions.d/419 §419.7
-# shows each reason in the five fuzz targets' own disassembly.
+# shows each reason in the five fuzz targets' own disassembly. The Rust
+# names are matched with any crate hash, which changes between toolchains.
 NOT_ENTERED = [
     (
         re.compile(r"_ZN6__asanL16AsanInitInternalEv"),
@@ -146,7 +166,10 @@ for n in range(8, 16):
 def main():
     binaries = sys.argv[1:]
     if not binaries:
-        print(__doc__.strip().splitlines()[-4], file=sys.stderr)
+        usage = next(
+            line for line in __doc__.splitlines() if line.startswith("usage:")
+        )
+        print(usage, file=sys.stderr)
         return 2
 
     failed = False
@@ -220,8 +243,7 @@ def main():
         )
         print(
             f"  calls or tail jumps in rcad_fuzz_timing through a computed "
-            f"pointer that can leave the function, unscanned: "
-            f"{len(timing_computed)}"
+            f"pointer that can leave the function: {len(timing_computed)}"
         )
         print(
             f"  tail jumps in rcad_fuzz_timing through a relative jump "
@@ -244,8 +266,6 @@ def main():
             f"  functions whose address only code outside that reach takes, "
             f"reaching a hooked function, not followed: {len(hooked_elsewhere)}"
         )
-        for function in hooked_elsewhere:
-            print(f"    {demangle(function)}")
 
         if offenders or timing_unmatched or chain_offenders or pointer_offenders:
             failed = True
@@ -372,11 +392,9 @@ def scan(binary):
             # Anything else indirect — a register this scan could not trace
             # back to a hooked-slot load or a relative jump table, or a call
             # through a memory operand (a vtable slot, a stored function
-            # pointer) — is a target this scan cannot name at all, not one
-            # it named and found harmless. `merge_out` alone had 12 of
-            # these before §273's fix (docs/decisions.d/273 §273.3, using a
-            # different scan that also counts this way); see the module
-            # docstring.
+            # pointer) — has no target this instruction names. It is
+            # counted here and followed by the addresses the code takes;
+            # see the module docstring.
             if target is None and not table_jump and rest.startswith("*") and not (
                     "(%rip)" in rest and comment):
                 computed_calls.append((function, address, rest))
@@ -607,9 +625,8 @@ def reaches_hook(
     hit inside `timing_functions` itself is never this call's to report:
     `main`'s own `offenders` already covers every one of those, on every
     function in `timing_functions` in turn, so a chain that merely lands in
-    a second crate function would double it rather than add to it. A
-    computed call cannot be followed past, so a hook reachable only
-    through one stays unseen here, same as it always has inside the crate.
+    a second crate function would double it rather than add to it. A hook
+    reachable only through a computed call is `through_pointers`'s to find.
     """
     if function in memo:
         return memo[function]
@@ -657,9 +674,11 @@ def through_pointers(
     call from the function that took it follows each computed call in the
     reach to everything it could land on, unless the pointer came into the
     reach from outside it: a hook or callback another part of the program
-    stored in memory the reach reads. The third result names every such
-    function that reaches a hook, so that assumption is checked per binary
-    rather than taken on trust.
+    stored in memory the reach reads. The third result is every function
+    that could be such a pointer and reaches a hook. `main` prints only how
+    many there are; on the five fuzz targets they are the fuzz body's own
+    code, the harness, ASan's and libFuzzer's, and std's backtrace printers
+    (docs/decisions.d/419 §419.7).
 
     A timing function in `already_reported` reached a hook by direct calls
     alone, and `main` already prints its chain.
@@ -722,9 +741,7 @@ def through_pointers(
     taken_anywhere = {
         taken for outs in takes_address.values() for _, taken in outs
     }
-    hooked_elsewhere = sorted(
-        (taken_anywhere - taken_in_reach - reach) & reaches_a_hook
-    )
+    hooked_elsewhere = (taken_anywhere - taken_in_reach - reach) & reaches_a_hook
     return offenders, taken_in_reach, hooked_elsewhere
 
 
