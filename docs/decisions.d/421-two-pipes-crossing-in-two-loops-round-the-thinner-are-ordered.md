@@ -122,12 +122,14 @@ and up `+y`:
   such a trial, so its fifty halvings never come near the loop, and it hands
   back the first trial's settling error.
 - **Half off the axis**, in `every_rule_both_ways` order: the union with the
-  fat bar first `AWireWillNotLieFlatOnItsFace`; the union with the thin bar
-  first `CannotMeshAFace` `BoundaryCrossesItself`; the intersection both ways
-  `CannotMeshAFace` `CornersCoincide`; the fat bar less the thin
-  `AWireWillNotLieFlatOnItsFace`; the thin bar less the fat
-  `BoundaryCrossesItself`. Whether the answer's faces are wrong or the mesher
-  cannot cut a pipe face holding a quartic loop is not traced.
+  fat bar first `CurvedFaceWithAHoleGoesTooFarRound`; the union with the thin
+  bar first `CannotMeshAFace` `BoundaryCrossesItself`; the intersection both
+  ways `CannotMeshAFace` `CornersCoincide`; the fat bar less the thin
+  `CurvedFaceWithAHoleGoesTooFarRound`; the thin bar less the fat
+  `BoundaryCrossesItself`. The two that were `AWireWillNotLieFlatOnItsFace`
+  moved when Q1494 taught `mesh.rs`'s `cut_a_ring_across` to cut a ring with
+  islands in it. Every one is now traced to `walk.rs` (Q1262, Q1508), as the
+  pin's doc comment says.
 
 So the refusal has moved from the arrangement, inside the row's files, to
 `march.rs` and the mesher, outside them. It is still `refuses/B`, now in two
@@ -203,7 +205,8 @@ leg cannot be built until rows @1 and @2 of 421.7 land. Q1394 is unchanged.
 - **Row: the mesh half off the axis**, `refuses/B`: trace whether the answer's
   wires on the two pipe walls are wrong or `mesh.rs` cannot cut a pipe face
   holding a quartic loop, fix the side at fault, and turn the half-off half of
-  the pin into answers.
+  the pin into answers. Q1494 fixed the mesher's side; the rest waits on Q1262
+  and Q1508 in `walk.rs`.
 - Not rows: `whether_past_the_plane_between_two_loops` has no unit test of its
   own (421.3), and leaning pipes are argued in 421.2 but not built.
 - §39.4's and §36.8's rows for two pipes, and §34.10's, say so with a pointer
