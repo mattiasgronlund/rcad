@@ -9,9 +9,10 @@ effect of the queue work rather than needing its own trigger. It reads
 on a lane branch — plus the claims file `tooling/queue/queue.py` also reads,
 and writes a self-contained page: rows added against rows closed per day, two
 SVG charts of the queue's shape over every commit of `docs/queue.md` on main's
-first-parent line, a table of both by day, then the current ready, running and
-lately-closed rows, and what the overnight fuzz job did night by night — that
-last section is `fuzz_section.py`'s, read from the fuzz log root the caller
+first-parent line, a table of both by day, a table of the rows running now with
+the tier each was taken from and the agent it runs under, then the current
+ready, running and lately-closed rows, and what the overnight fuzz job did
+night by night — that last section is `fuzz_section.py`'s, read from the fuzz log root the caller
 names.
 `docs/decisions.md` §230, §263.
 
@@ -36,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 from collections import namedtuple
+from datetime import datetime, timezone
 
 sys.dont_write_bytecode = True
 QUEUE_TOOLING = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "queue"))
@@ -68,7 +70,8 @@ def main(argv):
     fuzz_cache_path = os.path.join(out_dir, ".fuzz-cache.json")
     fuzz, fuzz_cache = fuzz_section.section(fuzz_root, read_json(fuzz_cache_path))
     write_atomically(fuzz_cache_path, json.dumps(fuzz_cache, sort_keys=True))
-    page = render_page(points, current_state(tip), fuzz)
+    rendered_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    page = render_page(points, current_state(tip), fuzz, rendered_at)
     write_atomically(os.path.join(out_dir, "index.html"), page)
     return 0
 
@@ -204,26 +207,53 @@ def running_rows(verbs, here, tip):
     for row_id, hold in sorted(verbs.Claims(here.claims).holds().items()):
         before = set(claimed)
         found = verbs.has_a_tree(hold["branch"], branches, trees, claimed)
+        tree = tree_for(hold, trees, found, claimed - before)
         row = tip.find(row_id)
         rows.append({
             "id": row_id,
             "branch": hold["branch"],
-            "where": tree_path_for(hold, trees, found, claimed - before),
+            "where": tree.path if tree else f"no tree yet, taken from {hold['tree']}",
+            "agent": agent_of(tree) if tree else None,
+            "tier": tier_taken_from(hold, row),
+            "taken_by": os.path.basename(hold["tree"]),
             "what": row.text if row else f"{row_id}  -  -  -  {hold['write_set']}  (not merged into main yet)",
         })
     return rows
 
 
-def tree_path_for(hold, trees, found, newly_claimed):
+def tree_for(hold, trees, found, newly_claimed):
+    """The lane tree `has_a_tree` matched this hold to, or None when it matched none.
+
+    Only a tree an agent holds counts, as in the `branches` `has_a_tree` was
+    given: a lane's own tree left standing unlocked beside its merger's is not
+    where the row runs.
+    """
     if newly_claimed:
-        return next(iter(newly_claimed))
-    if found:
-        for tree in trees:
-            if tree.branch == hold["branch"]:
-                return tree.path
-            if hold["branch"].startswith("lane-") and tree.branch == "merge-" + hold["branch"][len("lane-"):]:
-                return tree.path
-    return f"no tree yet, taken from {hold['tree']}"
+        (path,) = newly_claimed
+        return next(tree for tree in trees if tree.path == path)
+    if not found:
+        return None
+    for tree in trees:
+        if not tree.is_lane:
+            continue
+        if tree.branch == hold["branch"]:
+            return tree
+        if hold["branch"].startswith("lane-") and tree.branch == "merge-" + hold["branch"][len("lane-"):]:
+            return tree
+    raise AssertionError(f"has_a_tree found a lane tree for {hold['branch']}, and no lane tree carries it")
+
+
+def agent_of(tree):
+    """The agent's name in a lane tree's lock, `agent <name> since <time>` (§55)."""
+    assert tree.is_lane, f"{tree.path} is not a lane tree, so its lock names no agent: {tree.locked!r}"
+    return tree.locked[len("agent "):].split(" since ")[0]
+
+
+def tier_taken_from(hold, row):
+    """The tier the take line records, or the row's tier in main's copy for a take line that records none."""
+    if hold["tier"] is not None:
+        return hold["tier"]
+    return row.tier if row else None
 
 
 def closed_rows(tip):
@@ -291,7 +321,7 @@ SLOT_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", 
 SLOT_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"]
 
 
-def render_page(points, state, fuzz):
+def render_page(points, state, fuzz, rendered_at):
     by_tier_chart = stacked_area(
         points=points,
         series=[(f"Tier {t}", lambda counts, t=t: counts["by_tier"][t]) for t in TIERS_IN_ORDER]
@@ -317,6 +347,7 @@ def render_page(points, state, fuzz):
         progress_chart=progress_chart,
         added_closed_chart=added_closed_chart,
         statistics_table=statistics_table(days),
+        running_table=running_table(state["running"], rendered_at),
         ready_section=ready_section(state["ready"]),
         running_section=running_section(state["running"]),
         closed_section=closed_section(state["closed"]),
@@ -446,6 +477,35 @@ def statistics_table(days):
 <thead><tr><th rowspan="2">Date</th><th colspan="2">Pace</th>
 <th colspan="{len(TIERS_IN_ORDER) + 2}">Open at the day's end</th><th rowspan="2" class="n">Closed so far</th></tr>
 <tr><th class="n">Added</th><th class="n">Closed</th>{tier_heads}<th class="n">Parked</th><th class="n">All open</th></tr></thead>
+<tbody>
+{body}
+</tbody>
+</table>"""
+
+
+def running_table(rows, rendered_at):
+    """One line per held row: the tier it was taken from, the agent whose tree it runs in, and who took it.
+
+    A slot has no number to show: `queue_slots` is a count (§397.7) and `just
+    queue running` an unnumbered list. A lane's tree appears after its take,
+    and the page renders only on a queue write or `ff-main`, so the table says
+    when it was rendered.
+    """
+    when = f'<p class="qp-sub">as of {html.escape(rendered_at)}, when this page was last rendered</p>'
+    if not rows:
+        return when + "\n<p>nothing running</p>"
+    lines = []
+    for row in rows:
+        tier = html.escape(row["tier"]) if row["tier"] is not None else "not recorded"
+        agent = f'<code>{html.escape(row["agent"])}</code>' if row["agent"] is not None else "no tree yet"
+        lines.append(
+            f'<tr><th><code>{html.escape(row["id"])}</code></th><td>{tier}</td><td>{agent}</td>'
+            f'<td><code>{html.escape(row["taken_by"])}</code></td></tr>'
+        )
+    body = "\n".join(lines)
+    return f"""{when}
+<table class="qp-stats">
+<thead><tr><th>Row</th><th>Tier taken from</th><th>Agent</th><th>Taken by</th></tr></thead>
 <tbody>
 {body}
 </tbody>
@@ -598,6 +658,9 @@ table.qp-stats .n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 
 <h2>Queue statistics</h2>
 {statistics_table}
+
+<h2>Running rows</h2>
+{running_table}
 
 <div class="qp-grid2">
 <div>

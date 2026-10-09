@@ -11362,6 +11362,13 @@ queue-page:
 # last commit's shape, and for a day with no commit, which keeps the day
 # before's shape and adds and closes nothing.
 #
+# The Running rows table reads a claims file written by hand, beside a lane's
+# tree and a verifier's detached tree, locked the way the worktree hook locks
+# them (§55). Its takes are one whose tier is not the row's tier now, as after a
+# `tier` move; one that records no tier, so the row's tier in main's copy
+# stands in; one for a row main's copy does not hold; one with neither; and one
+# released, which must not show.
+#
 # The fuzzing section reads a fixture log root with one night of each kind the
 # table tells apart: a finished night with its first artifacts (09-10), a build
 # that failed (09-11), no directory at all (09-12), a triaged night with new
@@ -11525,6 +11532,26 @@ check-queue-page-selftest:
     jq -n --arg sha "$sha_c" '{($sha): {"by_tier":{"1":1,"2":0,"2.5":0,"3":0,"4":0},"parked":3,"closed":2}}' \
         > "$out/.history-cache.json" || fail "could not write the five-tier cache"
 
+    sessions="$root/rcad-worktrees"
+    lane_tree="$sessions/dispatch-a-worktrees/wf_page-1"
+    g worktree add -q -b lane-q2 "$lane_tree" main || fail "could not add Q2's lane tree"
+    g worktree lock --reason "agent wf_page-1 since 2026-09-03T10:00:00Z" "$lane_tree"
+    verify_tree="$sessions/dispatch-a-worktrees/wf_page-2"
+    g worktree add -q --detach "$verify_tree" main || fail "could not add Q6's verifier tree"
+    git -C "$verify_tree" -c user.name=selftest -c user.email=selftest@invalid commit -q --allow-empty -m "Q6's lane commit"
+    g branch lane-q6 "$(git -C "$verify_tree" rev-parse HEAD)"
+    g worktree lock --reason "agent wf_page-2 since 2026-09-03T10:00:00Z" "$verify_tree"
+    claims="$(g rev-parse --path-format=absolute --git-common-dir)/rcad-queue-claims"
+    {
+        printf 'take\tQ2\t2026-09-03T10:00:00Z\t%s\tlane-q2\tdocs/b.md\t2\n' "$sessions/dispatch-a"
+        printf 'take\tQ5\t2026-09-03T10:01:00Z\t%s\tlane-q5\tdocs/e.md\n' "$sessions/dispatch-b"
+        printf 'take\tQ6\t2026-09-03T10:02:00Z\t%s\tlane-q6\tdocs/f.md\t5\n' "$sessions/dispatch-a"
+        printf 'take\tQ7\t2026-09-03T10:03:00Z\t%s\tlane-q7\t-\t3\n' "$sessions/dispatch-b"
+        printf 'release\tQ7\t2026-09-03T10:04:00Z\t%s\tdone\n' "$sessions/dispatch-b"
+        printf 'take\tQ8\t2026-09-03T10:05:00Z\t%s\tlane-q8\t-\t3\n' "$sessions/dispatch-b"
+        printf 'take\tQ9\t2026-09-03T10:06:00Z\t%s\tlane-q9\t-\n' "$sessions/dispatch-b"
+    } > "$claims"
+
     fuzz="$root/fuzz-logs"
     running() {
         printf '     Running `target/release/%s -artifact_prefix=/x/ -max_total_time=%s -fork=%s /corpus`\n' "$1" "$3" "$2"
@@ -11581,9 +11608,24 @@ check-queue-page-selftest:
     grep -q '<h3>Tier 5</h3><ul><li><code>Q6</code>' "$out/index.html" || fail "the ready list leaves out tier 5's Q6"
 
     has() { grep -qF -- "$1" "$out/index.html" || fail "$2"; }
-    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Ready)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
-    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Ready</h2> ' ] \
-        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, then Ready: $order"
+    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Running rows|Ready)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
+    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Ready</h2> ' ] \
+        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, then Running rows, then Ready: $order"
+    # Each line: the row, the tier its take was taken from, the agent whose tree it runs in, the dispatcher's tree.
+    has '<tr><th><code>Q2</code></th><td>2</td><td><code>wf_page-1</code></td><td><code>dispatch-a</code></td></tr>' \
+        "Q2's running line: taken from tier 2 though main's copy has it in tier 1 now, running in wf_page-1's tree on lane-q2"
+    has '<tr><th><code>Q5</code></th><td>2.2</td><td>no tree yet</td><td><code>dispatch-b</code></td></tr>' \
+        "Q5's running line: its take records no tier, so its tier in main's copy, and no tree carries lane-q5"
+    has '<tr><th><code>Q6</code></th><td>5</td><td><code>wf_page-2</code></td><td><code>dispatch-a</code></td></tr>' \
+        "Q6's running line: the detached tree wf_page-2 holds lane-q6's tip, so Q6 runs under that agent"
+    has '<tr><th><code>Q8</code></th><td>3</td><td>no tree yet</td><td><code>dispatch-b</code></td></tr>' \
+        "Q8's running line: in no copy of main, so the tier comes from its take alone"
+    has '<tr><th><code>Q9</code></th><td>not recorded</td><td>no tree yet</td><td><code>dispatch-b</code></td></tr>' \
+        "Q9's running line: in no copy of main and its take records no tier, so the page should say so"
+    [ "$(grep -oE '<tr><th><code>Q[0-9]+</code></th>' "$out/index.html" | tr '\n' ' ')" = '<tr><th><code>Q2</code></th> <tr><th><code>Q5</code></th> <tr><th><code>Q6</code></th> <tr><th><code>Q8</code></th> <tr><th><code>Q9</code></th> ' ] \
+        || fail "the running table should hold each held row once, and not Q7, which was released"
+    grep -qE '<p class="qp-sub">as of [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z, when this page was last rendered</p>' "$out/index.html" \
+        || fail "the running table does not say when the page was rendered"
     # Each row: added and closed that day, open by tier 1 2 2.2 2.5 3 4 5, parked, all open, closed so far.
     # A and B share 09-01, so its row is B's shape, not A's; 09-02 has no commit, so it keeps B's shape.
     has '<tr><th>2026-09-03</th><td class="n">3</td><td class="n">1</td><td class="n">1</td><td class="n">0</td><td class="n">1</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">1</td><td class="n">1</td><td class="n">4</td><td class="n">2</td></tr>' \
@@ -11627,7 +11669,7 @@ check-queue-page-selftest:
     render || fail "queue-page failed to render a second time"
     has '<title>2026-09-10: 4242 at the end of the night</title>' "an unchanged log was read again rather than served from the cache"
     has '<title>2026-09-13: 1050 at the end of the night</title>' "a log that grew was served stale from the cache"
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits, so do the statistics table's three days, Pace leads the page, the ready list holds every tier, and the fuzzing section matches its fixture nights"
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits, so do the statistics table's three days, the running table names each held row's tier, agent and dispatcher, Pace leads the page, the ready list holds every tier, and the fuzzing section matches its fixture nights"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
@@ -12297,9 +12339,13 @@ check-queue-api-selftest:
     two="$root/rcad-worktrees/two"
     g "$hub" worktree add -q -b one "$one" main && lock "$one"
     g "$hub" worktree add -q -b two "$two" main && lock "$two"
+    claims_file=$(g "$hub" rev-parse --path-format=absolute --git-common-dir)/rcad-queue-claims
 
     got=$(q "$one" take Q1 lane-q1 2>&1) || fail "the first take of Q1 was refused"
     grep -q '^Q1  1  lane:lane-q1 ' "$one/docs/queue.md" || fail "take did not write lane:lane-q1"
+    got=$(awk -F '\t' '$1 == "take" && $2 == "Q1"' "$claims_file")
+    [ "$(cut -f 5- <<<"$got")" = "$(printf 'lane-q1\tdocs/a.md\t1')" ] \
+        || fail "take did not write Q1's branch, write set and tier to the claims file"
     [ -f "$page_dir/index.html" ] || fail "queue take did not render queue-page to RCAD_QUEUE_PAGE_DIR"
     got=$(q "$two" take Q1 lane-q1-again 2>&1) && fail "a second worktree took Q1 while the first held it"
     grep -qF 'Q1 is held by lane-q1 from' <<<"$got" || fail "the second take did not name who holds Q1"
@@ -12492,7 +12538,6 @@ check-queue-api-selftest:
     # names here.
     batch_wt="$root/rcad-worktrees/batch"
     g "$hub" worktree add -q -b apply-batch "$batch_wt" main
-    claims_file=$(g "$hub" rev-parse --path-format=absolute --git-common-dir)/rcad-queue-claims
     row_a=$(q "$batch_wt" add 2 opus - "a row this batch takes in step 1 §230") || fail "add for row_a failed"
     row_b=$(q "$batch_wt" add 2 opus - "a row this batch takes in step 2 §230") || fail "add for row_b failed"
 
