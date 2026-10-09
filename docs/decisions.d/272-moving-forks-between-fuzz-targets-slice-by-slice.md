@@ -23,6 +23,8 @@ left behind in the scratchpad, since nothing below cites them by path.*
   272.5   What the rule did with its forks
   272.6   Verdict
   272.7   What this leaves
+  272.8   Two identical arms side by side, one slice — 2026-10-08
+  272.9   The two arms' coverage with the timing directory unset — 2026-10-09
 
 ### 272.1 What ran
 
@@ -414,3 +416,74 @@ pass alone, on the corpora already linked, is Q1383.
 **A third pair is not run.** The question it would answer, restart or spread,
 steers nothing. The rule is not built (§272.6), and §272.7 already says a
 cheaper restart is not worth measuring until a rule has a signal to act on.
+
+### 272.9 The two arms' coverage with the timing directory unset — 2026-10-09
+
+*Queue row Q1383, which §272.8 left: measure Q213's two end corpora with the
+timing directory unset, one pass per target and arm. A read-only lane ran it
+(run `wf_728a8da1-296`, its report in that run's `journal.jsonl` under session
+`c5002611-b420-4273-a11d-b3ee7ccfd39e`) and changed no code. It ran Q213's
+`measure.py` with the five binaries built at 3319f838, on threads 8 and 20,
+one pass at a time, A then B for each target, from 13:35Z to 17:15Z. Before
+the first pass and after the last, `pgrep -af target/q213` showed no process
+but its own. The dispatcher checked every figure below against
+`measure/results.txt`, then copied Q213's logs, timing records and every
+measuring pass, 2026-10-08's and these, into
+`/home/mattias/rcad-fuzz-logs/q213-two-identical-arms-2026-10-08`, which every
+file named in this subsection is relative to, and removed Q213's tree. The
+corpora and the crash artifacts were not copied, since nothing below cites
+them by path.*
+
+| target | cov, A | cov, B | gap | ft, A | ft, B | timeouts, A | timeouts, B |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| where_two_surfaces_cross | 3 072 | 3 075 | B +3 | 12 267 | 12 281 | 69 | 23 |
+| reader | 5 102 | 5 162 | B +60 | 17 644 | 17 679 | 0 | 0 |
+| writer | 10 870 | 10 860 | A +10 | 54 978 | 55 004 | 0 | 0 |
+| fuse | 19 968 | 19 967 | A +1 | 109 235 | 109 205 | 15 | 13 |
+| cones and tori | 2 548 | 2 548 | 0 | 7 638 | 7 639 | 0 | 1 |
+
+The coverage is `measure/results.txt` lines 4–13. The timeouts are the
+`timeout-*` files in each pass's own `measure/q1383-*` directory.
+
+**Two identical runs end up to 60 edges apart after one slice, so the 0 to 9
+edges §272.6 read between R and E are not a signal.** R against E was 0, −9,
++7, +2 and +4 in the table's order (§272.4); A against B is +3, +60, −10, −1
+and 0. On the reader and the writer, the two targets the rule gave a third
+fork, identical arms drifted further than R from E did: 60 against 9 and 10
+against 7. On the fuse and the cone-or-torus target this one pair drifted less
+than R from E, 1 against 2 and 0 against 4. One pair is one sample a target,
+and neither of those gaps points the rule's way (§272.6), so they change
+nothing. On the count the fork parents log, the two arms were 7, 47, 9, 8 and 1
+edges apart (§272.8). The reader is the largest gap on both counts, with B
+ahead on both.
+
+**One pass over a corpus repeats to within 2 edges.** Q213's passes of
+2026-10-08 measured three of A's end corpora while two or three copies of a
+pass shared the cores (§272.8). They read 5 102, 10 870 and 3 070 for the
+reader, the writer and `where_two_surfaces_cross`; these passes read 5 102,
+10 870 and 3 072 (`measure/results.txt` lines 1–3 against 4, 6 and 12). So the
+reader's 60 and the writer's 10 come from the corpora, not from the measuring.
+
+**Timeouts move this count by little.** The 2026-10-08 pass over A's
+`where_two_surfaces_cross` corpus left 215 timeout files and read 3 070; this
+one left 69 and read 3 072 (`measure/end-A-zg3c9pzs`,
+`measure/q1383-A-hcs_lasv`). A timed out three times as often as B on that
+target, on inputs that were mostly different (7 names in common), and ends 3
+edges behind. On the reader and the writer, where the gaps are largest, neither
+arm timed out.
+
+**The crash files are the 2026-09-26 harness's own asserts, and the same in
+both writer arms.** Each writer pass left 335 `crash-*` files, the same 335
+names in A and B and in 2026-10-08's pass over A; the fuse passes left 121 and
+123. Replayed on the 3319f838 binary by the dispatcher, nineteen of the first
+twenty writer files stop at `writer.rs:262`, a face read back with a different
+surface, and one at `writer.rs:186`, a written file the reader refuses. The
+first fuse file stops at `fuse.rs:490`, where `both_ways_round` returns an
+error.
+They are the old build's answers and say nothing about today's code. No row is
+filed for them.
+
+**Verdict: §272.6 stands.** The rule is not built. Two identical runs,
+measured with the timing directory unset, end up to 60 edges apart, and R and
+E ended at most 9 apart.
+No row is filed.
