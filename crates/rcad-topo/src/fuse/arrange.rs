@@ -96,6 +96,36 @@ use super::{
     must_decide, the_other_way,
 };
 
+mod probe {
+    use core::cell::Cell;
+    use std::io::Write;
+    thread_local! {
+        static ON: Cell<bool> = const { Cell::new(true) };
+        static HITS: Cell<u64> = const { Cell::new(0) };
+    }
+    pub(super) fn set_planes(on: bool) {
+        ON.with(|cell| cell.set(on));
+    }
+    pub(super) fn planes_on() -> bool {
+        ON.with(Cell::get)
+    }
+    pub(super) fn hit() {
+        HITS.with(|cell| cell.set(cell.get() + 1));
+    }
+    pub(super) fn hits() -> u64 {
+        HITS.with(Cell::get)
+    }
+    pub(super) fn log(line: &str) {
+        let args: Vec<String> = std::env::args().collect();
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad-worktrees-clean-up-dead-sessions/99341673-f80d-4d1e-bd63-fe0a14ac5f77/scratchpad/probe.log")
+            .unwrap();
+        writeln!(file, "{} | {line}", args.join(" ")).unwrap();
+    }
+}
+
 /// Cut one face into the pieces its cut surfaces leave behind.
 ///
 /// A face with nothing cutting it comes back as one piece: itself.
@@ -2646,7 +2676,23 @@ impl<'f> Arrangement<'f> {
     /// as `None` for a caller that has another route to try.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         let (decided, _) = self.as_the_boxes_say(crossing, first, second).ok()?;
-        matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero).then_some(decided)
+        match decided {
+            Decision::Pos | Decision::Neg | Decision::Zero => Some(decided),
+            Decision::Undecidable { .. } => {
+                let planes = self.as_the_planes_say(crossing, first, second);
+                if planes.is_some() {
+                    probe::hit();
+                    probe::log(&format!(
+                        "planes-decided {planes:?} on={:?} {:?} vs {:?}",
+                        self.crossings[crossing].partner,
+                        self.nodes[first].point,
+                        self.nodes[second].point
+                    ));
+                }
+                if probe::planes_on() { planes } else { None }
+            }
+            _ => None,
+        }
     }
 
     /// Which of two nodes on a crossing comes first along it: [`Decision::Pos`]
@@ -5310,16 +5356,44 @@ impl<'f> Arrangement<'f> {
         corners.dedup();
         assert!(!corners.is_empty(), "a lump has an arc in it");
 
-        for &from in &corners {
-            for crossing in self.nodes[from].crossings.clone() {
-                for forward in [true, false] {
-                    if let Some(found) =
-                        self.first_arc_met(from, Direction { crossing, forward }, home, lump_of)
-                    {
-                        return Ok(found);
+        let search = || {
+            for &from in &corners {
+                for crossing in self.nodes[from].crossings.clone() {
+                    for forward in [true, false] {
+                        let got = self.first_arc_met(
+                            from,
+                            Direction { crossing, forward },
+                            home,
+                            lump_of,
+                        );
+                        probe::log(&format!(
+                            "ray planes={} from={:?} along={:?} forward={forward} got={got:?}",
+                            probe::planes_on(),
+                            self.nodes[from].point,
+                            self.crossings[crossing].partner,
+                        ));
+                        if let Some(found) = got {
+                            return Some(found);
+                        }
                     }
                 }
             }
+            None
+        };
+        probe::set_planes(false);
+        let old = search();
+        probe::set_planes(true);
+        let hits_before = probe::hits();
+        let new = search();
+        let hits = probe::hits() - hits_before;
+        probe::log(&format!(
+            "piece_around old={old:?} new={new:?} planes-hits={hits}"
+        ));
+        if old != new {
+            probe::log("piece_around DIFFERS");
+        }
+        if let Some(found) = new {
+            return Ok(found);
         }
         Err(gave_up(
             AROUND_A_HOLE,
@@ -9353,6 +9427,62 @@ mod tests {
         assert_eq!(twice_the_area_of(plain), 2.0 * 2.0 * 4.0);
         for piece in &pieces {
             every_wire_closes(piece);
+        }
+    }
+
+    #[test]
+    fn probe_q992_sweep() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let plate = ProfileBuilder::new(vec![
+            [0.0, 0.0],
+            [3.0, 0.0],
+            [3.0, 1.0],
+            [5.0, 1.0],
+            [5.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 5.0],
+            [7.0, 5.0],
+            [7.0, 6.0],
+            [8.0, 6.0],
+            [8.0, 8.0],
+            [5.0, 8.0],
+            [5.0, 7.0],
+            [3.0, 7.0],
+            [3.0, 8.0],
+            [0.0, 8.0],
+            [0.0, 5.0],
+            [1.0, 5.0],
+            [1.0, 3.0],
+            [0.0, 3.0],
+        ])
+        .with_hole(vec![[3.0, 3.0], [5.0, 3.0], [5.0, 5.0], [3.0, 5.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a plate with a square hole");
+        let solid = model
+            .add_extrusion(&plate, 1.0, &Isometry::identity())
+            .expect("an extrusion");
+        let top = bake(
+            &model,
+            &[solid],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the plate bakes")
+        .swap_remove(0)
+        .faces
+        .into_iter()
+        .find(facing_up)
+        .expect("the plate has a top");
+        for k in -6..=6 {
+            let d = 2.5 + f64::from(k) * f64::powi(2.0, -51);
+            let cut = cut_by(&top, &[[-1.0, 3.0, 0.0, -d], [1.0, 0.0, 0.0, -6.5]]);
+            let mut log = ProvenanceLog::new();
+            let split = split_a_face(&cut, &Policy::certified(), &mut log);
+            super::probe::log(&format!(
+                "sweep k={k} split={:?} log-empty={}",
+                split.as_ref().map(|it| it.pieces.len()),
+                log.is_empty()
+            ));
         }
     }
 
