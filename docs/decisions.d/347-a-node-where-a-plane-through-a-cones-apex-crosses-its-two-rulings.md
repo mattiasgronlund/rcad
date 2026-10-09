@@ -16,6 +16,7 @@ just below the face. What refuses now refuses in the mesher.*
   347.6   §39.4's row and `CannotTellTheCellsOfAFaceApart`
   347.7   Where the numbers come from
   347.8   The frustum's floor through the apex (Q457)
+  347.9   Two curves of one pair, brought together (Q471)
 
 ### 347.1 What was built
 
@@ -244,6 +245,14 @@ is. **None of that was tried here** by building two curves of one pair that
 meet and running an arrangement on them, so the claim is "not reached by any
 shape this row built", not "cannot be reached".
 
+**2026-10-09 (Q471):** measured. 347.9 builds every pair above and runs
+each family to where its two curves would meet. Outside the apex's rulings,
+the two curves of a pair meet only where `intersect` refuses the shape by
+name, `ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo` for the two loop
+pairs, or where it names one curve, or where the surface cannot be made. So
+no shape reaches `place_the_meets` with two curves of one pair that meet
+today, and the two loop pairs will once their refusals are lifted.
+
 ### 347.6 §39.4's row and `CannotTellTheCellsOfAFaceApart`
 
 §283.6 asked for two edits, neither made here: drop "undemonstrated", and stop
@@ -367,3 +376,131 @@ Where the numbers come from: a scratch test in
 commit; `56π/3` by hand. Q457's verifier reverted `crates/rcad-topo/src` to
 `93768fd3` with the tests kept: the three new floor tests and both pins in
 `a_block_face_through_a_cones_apex.rs` fail, and all pass on the branch.
+
+### 347.9 Two curves of one pair, brought together (Q471) — 2026-10-09
+
+*Row Q471 (`lane-q471-two-curves-of-one-pair-that-meet`, off `5d65cf3f`),
+tests only, in three relays (§416). 347.5 said only that no shape Q207 built
+brought two curves of one of its pairs together.
+`crates/rcad-topo/tests/two_curves_of_one_pair_that_meet.rs` builds each pair
+through the public API, runs every fuse on it, three rules each way round,
+certified, in a model of 100 mm, and takes each family to where its two curves
+would meet. No source changed.*
+
+**Where two curves of one pair can meet.** Where two surfaces cross, each has
+a normal there, and the two normals are not parallel, the crossing near that
+point is one smooth curve and nothing else. So two curves of one pair can share
+a point only where the surfaces are tangent, or where one of them has no
+normal. A plane, a pipe and a ball have a normal everywhere. A ring has one
+everywhere unless its tube is at least as wide as the ring, and `Torus::new`
+refuses that ring, built or read from a file
+(`a_ring_whose_tube_is_as_wide_as_the_ring_cannot_be_made`). That leaves a
+cone's apex. So in each pair below, the two curves come together only as the
+shape is pushed to a tangency or through an apex, and the last column is that
+limit. At a tangency `intersect` names one curve, or refuses the shape by name
+before any arrangement, or one of the two surfaces cannot be made.
+
+Faces are listed union, intersection, first less second, second less first;
+`3+3` is two solids of three faces each.
+
+| pair | built | the six fuses, curves apart | where the two would meet |
+|---|---|---|---|
+| plane and pipe, along the axis | bar r 2 up `z` from 0 to 4, block `[1, 5] × [−5, 5] × [1, 3]`: lines at `y = ±√3` | all answer, faces 14, 4, 10, 8 | a plane resting on the pipe: one line |
+| two pipes side by side | bars r 2 up `z` at `(0, 0)` and `(2, 0)`: lines at `x = 1`, `y = ±√3` | all answer, faces 10, 4, 10, 4 | axes `r₁ + r₂` or `r₁ − r₂` apart: one line |
+| ball centred on a pipe's axis | ball r 2, bar r 1 down its axis from `z = −3` to 3: circles at `z = ±√3` | all answer, faces 5, 3, 2, 3+3 | a ball as wide as the pipe: one circle |
+| cone and pipe about one axis | pointed cone of slope 1 up to `z = 4`, bar r 1 from `z = −2` to 6: circles at `z = ±1` | all answer, faces 6, 3, 3, 3+3 | a pipe of no width or a flat cone: neither can be made |
+| plane square to a torus's axis | top half of a ring of 4 round a tube of 1, bar r 6 about its axis from `z = −2` to `1/2`: circles of radius `4 ± √3/2` | refused `CannotTellTheCellsOfAFaceApart`, 6 of 6 (Q1514) | the plane on top of the tube: one circle |
+| plane through a torus's axis | the same half ring, the `x ≥ 0` half of a bar r 10 from `z = −2` to 5: both meridian circles on its face `x = 0` | all answer, faces 6, 4, 4, 6 | a tube as wide as the ring: cannot be made |
+| plane and cone, apex off the plane | the same cone, block `[1, 6] × [−6, 6] × [−2, 6]`: a hyperbola branch on each nappe | all answer, faces 8, 3, 3, 8 | a plane through the apex: 347.1's rulings and node |
+| ball and pipe, off the axis | ball r 2, bar r 1 from `z = −3` to 3 at `x = 1/2`, and three more placements: two loops | refused `ACrossingThisCannotBeOrderedAlong`, 6 of 6 in each placement | the bar at `x = 1`, touching the ball from inside (Viviani): refused in `intersect`, `ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`, 6 of 6 |
+| two leaning pipes | bar r 2 up `z` from −2 to 2, bar r 1 along `x` at `y = 1/2`: two loops | all answer, faces 7, 3, 4, 3+3 | the thin bar at `y = 1`, resting inside, and two bars of r 1 whose axes meet (the Steinmetz cross): both refused in `intersect` the same way, 6 of 6 each |
+| plane and cone, apex on the plane | 347.3 | 347.3 | the node of 347.1 |
+
+Every answer is the solids its face counts list, `Model::validate` passes, and
+their volumes add up to the closed form within what the mesh at deflection
+`0.01` says it may miss by. Each test's doc comment gives its closed form; the
+two leaning pipes' is a 20 000-step midpoint rule.
+
+The pins, pair by pair, the answer first and the limit after:
+
+- Plane and pipe:
+  `a_block_along_a_bar_cuts_its_pipe_in_two_lines_and_every_fuse_answers`,
+  `a_plane_resting_on_a_pipe_touches_it_along_one_line`.
+- Two pipes side by side:
+  `two_bars_side_by_side_cross_in_two_lines_and_every_fuse_answers`,
+  `two_pipes_resting_side_by_side_touch_along_one_line`.
+- Ball on a pipe's axis:
+  `a_ball_on_a_bars_axis_crosses_it_in_two_circles_and_every_fuse_answers`,
+  `a_ball_on_a_pipes_axis_as_wide_as_the_pipe_touches_it_round_one_circle`.
+- Cone and pipe:
+  `a_cone_and_a_bar_on_one_axis_cross_in_two_circles_and_every_fuse_answers`,
+  `a_pipe_of_no_width_and_a_flat_cone_cannot_be_made`.
+- Plane square to a torus's axis:
+  `a_half_ring_cut_by_a_round_plate_is_refused_telling_the_cells_of_a_face_apart`,
+  `a_plane_resting_on_top_of_a_ring_touches_it_round_one_circle`.
+- Plane through a torus's axis:
+  `a_half_bar_on_a_rings_axis_cuts_the_tube_in_two_circles_and_every_fuse_answers`,
+  `a_ring_whose_tube_is_as_wide_as_the_ring_cannot_be_made`, and the floor
+  below, `a_half_bar_whose_floor_the_whole_ring_would_rest_on_is_refused_ordering_that_circle`.
+- Plane and cone, apex off the plane:
+  `a_block_beside_a_cones_apex_cuts_both_nappes_and_every_fuse_answers`,
+  `a_plane_cuts_a_cones_two_nappes_apart_unless_it_runs_through_the_apex`.
+- Ball and pipe off the axis:
+  `a_ball_with_a_bar_through_it_off_its_axis_is_refused_ordering_the_loops`,
+  `a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement`.
+- Two leaning pipes:
+  `a_thin_bar_through_a_thick_one_crosses_it_in_two_loops_and_every_fuse_answers`,
+  `a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_before_any_arrangement`,
+  `two_bars_of_one_radius_whose_axes_meet_are_refused_before_any_arrangement`.
+
+**What it settles.**
+
+- With the two curves apart, seven pairs answer every fuse right. Two are
+  refused before anything is asked about a meet: the plane square to a
+  torus's axis by Q1514's `CannotTellTheCellsOfAFaceApart`, and the ball and
+  pipe off the axis by `ACrossingThisCannotBeOrderedAlong`, the gap §39.4
+  lists for a ball's loops, still open after Q1483 ordered two pipes' loops.
+- Where the two curves would meet: for six pairs no shape the kernel can make
+  gets there, since the limit is one curve or a surface that cannot be made.
+  For the plane and cone it is the apex, 347.1's node. For the two loop pairs
+  shapes do get there, and `intersect` refuses them by name before any
+  arrangement. So nothing hands `place_the_meets` two curves of one pair that
+  meet, other than the rulings at an apex. That holds until the loop pairs are
+  named, and their rows ask what `place_the_meets` needs then.
+
+**The coaxial pairs 347.5 leaves out.** A ring with a pipe, a ball or a cone
+on its axis, a cone and a ball, and two cones, each on one axis, cross in
+circles round the axis at heights apart.
+`coaxial_circles_come_together_only_where_their_surfaces_touch` takes each to
+its limit. A pipe or a ball round the tube or in the hole, a cone resting on
+the tube (slope `3/4`, apex at `z = −7`, touching at `ρ = 4.8`, `z = −0.6`),
+and a ball resting in a cone each give one circle. Two cones of slopes
+`s₁ ≠ s₂` with apexes `d` apart cross at `s₂·d/(s₂ ± s₁)` from the first apex,
+one height only for `d = 0`, where they touch at the apex and nowhere else
+(`TouchAtOnePoint`, in `where_two_cones_cross`'s table; the test counts it as
+no curve). None of these was run through a fuse.
+
+**Why a block cannot reach a ring.** A block's sides parallel to the ring's
+axis and off it are planes `where_a_plane_and_a_torus_cross` refuses as
+`ACrossingBetweenAPlaneAndATorusThatIsAQuartic`, by its own table, even where
+the plane misses the tube: relay 1's probe, the block `[0, 10] × [−10, 10] ×
+[−1, 5]` against the half ring, was refused that way in all six fuses. That is
+Q618's refusal. So the plane through the axis is reached through a bar, which
+has no flat side parallel to its axis: a first fuse cuts the bar in half with a
+block, and the half bar's face `x = 0` holds both meridian circles. Its floor
+is at `z = −2` because at `z = −1` it is the plane the whole ring rests on.
+Every fuse is then refused `CannotFollowACrossingWhereItsSurfacesAreTangent`
+(`OrderingTheCircleAPlaneRestsOnARingAlong`), ordering points round the circle
+of radius 4 at `z = −1`, which lies on no face of the half ring. That is a gap
+— every answer exists — and is filed as a row.
+
+**Rows this leaves**, filed by the merge: a ball's two loops apart refused
+ordering (B); the Steinmetz cross and the thin bar resting inside a thick one,
+refused in `intersect` (B); Viviani's figure of eight, refused in `intersect`
+(C); the half bar whose floor the whole ring rests on (C). Q1514 already holds
+the half ring under a round plate.
+
+**Where the numbers come from.** `mise exec -- just t -p rcad-topo --test
+two_curves_of_one_pair_that_meet --no-fail-fast`, with each test's time read
+from `target/last-test.log`. The closed forms are worked by hand in each
+test's doc comment. Relay 1's quartic probe is described here and not kept.
