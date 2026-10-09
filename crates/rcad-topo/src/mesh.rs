@@ -9926,4 +9926,197 @@ mod tests {
         }]);
         model.key_for_solid(solid)
     }
+
+    /// A bar's wall with a window in it measures, whether a quarter cut runs
+    /// through the window or the window lies between two cuts.
+    ///
+    /// The wall is a ring with an island: its two cap circles go right round
+    /// and the window does not. A thin bar through a fat one off its axis
+    /// leaves the fat bar's wall this shape, with two windows, and its union
+    /// was refused `AWireWillNotLieFlatOnItsFace` at the check after the
+    /// arrangement (Q1494). The window from `(4, −3)` to `(4, 3)` is centred
+    /// on the circles' corner at `+x`, so the quarter cut from it runs through
+    /// the window at every deflection; the one from `(4, 3)` to `(3, 4)` lies
+    /// between the cuts at `+x` and `+y`.
+    ///
+    /// **Built without the sweep**, as [`a_band_between_two_circles`] is: no
+    /// fuse here leaves a pipe wall with a window but the thin bar through the
+    /// fat one, whose own walk is refused for other reasons, and
+    /// [`SolidView::mesh`] is public in its own right.
+    #[test]
+    fn a_bar_with_a_wedge_cut_out_through_a_window_in_its_wall_measures() {
+        for (sides, through_a_cut) in [
+            ([[4.0, -3.0], [4.0, 3.0]], true),
+            ([[4.0, 3.0], [3.0, 4.0]], false),
+        ] {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let bar = a_bar_with_a_wedge_cut_out_through_its_wall(&mut model, sides);
+            let [from, to] = sides;
+            let wedge = 25.0 * (to[1].atan2(to[0]) - from[1].atan2(from[0]));
+            let wanted = 250.0 * core::f64::consts::PI - wedge;
+            for length in [1.0, 0.1, 0.01] {
+                let measured = model
+                    .solid(bar)
+                    .expect("this model made the key")
+                    .measure(
+                        Deflection::of(length).expect("a length"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| {
+                        panic!("through a cut {through_a_cut}, at {length}: refused {why:?}")
+                    });
+                assert!(
+                    (measured.volume() - wanted).abs() <= measured.volume_error(),
+                    "through a cut {through_a_cut}, at {length}: {} where {wanted} is wanted, allowed {}",
+                    measured.volume(),
+                    measured.volume_error()
+                );
+            }
+        }
+    }
+
+    /// A bar of radius 5 about `z` from `z = 0` to `z = 10`, its cap circles
+    /// starting at `+x`, less the wedge from its axis out to the points
+    /// `sides` of the circle `x² + y² = 25`, between `z = 4` and `z = 6`.
+    ///
+    /// The wedge's two flat sides meet along the axis, its floor and its
+    /// ceiling are flat, and where it leaves the wall is a window of two
+    /// straight lines up the wall and two arcs round it. The first of `sides`
+    /// is the one less far round from `+x`, and the two are less than half a
+    /// turn apart.
+    fn a_bar_with_a_wedge_cut_out_through_its_wall(
+        model: &mut Model,
+        [from, to]: [[f64; 2]; 2],
+    ) -> crate::SolidKey {
+        let flat = |at: Point, facing: Vector| {
+            Plane::from_point_and_normal(at, facing).expect("a normal of length five")
+        };
+        let bottom_corner = model.add_vertex(Point::new(5.0, 0.0, 0.0));
+        let top_corner = model.add_vertex(Point::new(5.0, 0.0, 10.0));
+        let bottom_circle = model.add_closed_edge(bottom_corner);
+        let top_circle = model.add_closed_edge(top_corner);
+
+        let [low_from, low_to, high_to, high_from] =
+            [(from, 4.0), (to, 4.0), (to, 6.0), (from, 6.0)]
+                .map(|([x, y], z)| model.add_vertex(Point::new(x, y, z)));
+        let [low_middle, high_middle] =
+            [4.0, 6.0].map(|z| model.add_vertex(Point::new(0.0, 0.0, z)));
+        let half_way = Vector::new(from[0] + to[0], from[1] + to[1], 0.0);
+        let mut arc = |model: &mut Model, start, end, z: f64| {
+            let picker = rcad_geom::HalfSpace::through_a_point_facing(Point::origin(), half_way)
+                .expect("a direction");
+            model.add_edge_running(
+                start,
+                end,
+                EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Plane(flat(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, 1.0))),
+                    picked_by: SmallVec::from_buf([rcad_geom::Picker::from(picker)]),
+                },
+            )
+        };
+        let low_arc = arc(model, low_from, low_to, 4.0);
+        let high_arc = arc(model, high_from, high_to, 6.0);
+        let up_from = model.add_edge(low_from, high_from);
+        let up_to = model.add_edge(low_to, high_to);
+        let low_out_to_from = model.add_edge(low_middle, low_from);
+        let low_out_to_to = model.add_edge(low_middle, low_to);
+        let high_out_to_from = model.add_edge(high_middle, high_from);
+        let high_out_to_to = model.add_edge(high_middle, high_to);
+        let axis = model.add_edge(low_middle, high_middle);
+
+        let mut face = |model: &mut Model, surface, wires: &[&[(_, Orientation)]]| {
+            let wires = wires
+                .iter()
+                .map(|uses| {
+                    let coedges = uses
+                        .iter()
+                        .map(|&(edge, turn)| model.add_coedge(edge, turn))
+                        .collect();
+                    model.add_wire(coedges)
+                })
+                .collect();
+            model.add_face(surface, wires)
+        };
+        use Orientation::{Forward, Reversed};
+        let bottom = face(
+            model,
+            Surface::Plane(flat(Point::origin(), Vector::new(0.0, 0.0, -1.0))),
+            &[&[(bottom_circle, Reversed)]],
+        );
+        let top = face(
+            model,
+            Surface::Plane(flat(Point::new(0.0, 0.0, 10.0), Vector::new(0.0, 0.0, 1.0))),
+            &[&[(top_circle, Forward)]],
+        );
+        let wall = face(
+            model,
+            Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe")),
+            &[
+                &[(bottom_circle, Forward)],
+                &[(top_circle, Reversed)],
+                &[
+                    (high_arc, Forward),
+                    (up_to, Reversed),
+                    (low_arc, Reversed),
+                    (up_from, Forward),
+                ],
+            ],
+        );
+        let floor = face(
+            model,
+            Surface::Plane(flat(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))),
+            &[&[
+                (low_out_to_from, Forward),
+                (low_arc, Forward),
+                (low_out_to_to, Reversed),
+            ]],
+        );
+        let ceiling = face(
+            model,
+            Surface::Plane(flat(Point::new(0.0, 0.0, 6.0), Vector::new(0.0, 0.0, -1.0))),
+            &[&[
+                (high_out_to_to, Forward),
+                (high_arc, Reversed),
+                (high_out_to_from, Reversed),
+            ]],
+        );
+        let side_to = face(
+            model,
+            Surface::Plane(flat(Point::origin(), Vector::new(to[1], -to[0], 0.0))),
+            &[&[
+                (low_out_to_to, Forward),
+                (up_to, Forward),
+                (high_out_to_to, Reversed),
+                (axis, Reversed),
+            ]],
+        );
+        let side_from = face(
+            model,
+            Surface::Plane(flat(Point::origin(), Vector::new(-from[1], from[0], 0.0))),
+            &[&[
+                (axis, Forward),
+                (high_out_to_from, Forward),
+                (up_from, Reversed),
+                (low_out_to_from, Reversed),
+            ]],
+        );
+
+        let shell = model.add_shell(
+            [bottom, top, wall, floor, ceiling, side_to, side_from]
+                .into_iter()
+                .map(|face| crate::model::FaceUse {
+                    face,
+                    loc: Isometry::identity(),
+                    orient: Orientation::Forward,
+                })
+                .collect(),
+        );
+        let solid = model.add_solid(smallvec::smallvec![crate::model::ShellUse {
+            shell,
+            loc: Isometry::identity(),
+            orient: Orientation::Forward,
+        }]);
+        model.key_for_solid(solid)
+    }
 }

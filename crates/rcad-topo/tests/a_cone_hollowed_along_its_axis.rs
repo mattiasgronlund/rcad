@@ -1215,39 +1215,58 @@ fn probe_q1494() {
 }
 
 #[test]
-fn probe_ball_on_wall() {
-    let y: f64 = std::env::var("PROBE_OFF").map_or(0.3, |v| v.parse().unwrap());
-    let which: usize = std::env::var("PROBE_RULE").map_or(4, |v| v.parse().unwrap());
-    let (rule, swapped) = every_rule_both_ways().nth(which).unwrap();
+fn probe_pocket() {
+    let y: f64 = std::env::var("PROBE_OFF").map_or(0.0, |v| v.parse().unwrap());
+    let seam: i32 = std::env::var("PROBE_SEAM").map_or(1, |v| v.parse().unwrap());
+    let turn: f64 = std::env::var("PROBE_TURN").map_or(0.0, |v| v.parse().unwrap());
+    let two = std::env::var("PROBE_TWO").is_ok();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let fat = model
         .add_round_bar(
             4.0,
             10.0,
-            &Isometry::quarter_turns(
-                &Axis::z(),
-                std::env::var("PROBE_SEAM").map_or(1, |v| v.parse().unwrap()),
-            )
-            .expect("z is an axis"),
+            &Isometry::quarter_turns(&Axis::z(), seam).expect("z is an axis"),
         )
         .expect("a fat bar");
-    let turn: f64 = std::env::var("PROBE_TURN").map_or(0.0, |v| v.parse().unwrap());
-    let placement = Isometry::rotation(&Axis::z(), turn)
-        .expect("a turn")
-        .compose(&Isometry::translation(Vector::new(2.0, y, 5.0)).expect("a shift"))
-        .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is an axis"));
-    let ball = model
-        .add_round_bar(1.0, 10.0, &placement)
-        .expect("a thin bar");
-    let [one, other] = if swapped { [ball, fat] } else { [fat, ball] };
-    let answer = model.fuse(
-        &[one],
-        &[other],
-        rule,
+    let profile = ProfileBuilder::new(vec![
+        [3.0, y - 1.0],
+        [5.0, y - 1.0],
+        [5.0, y + 1.0],
+        [3.0, y + 1.0],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a rectangle");
+    let mut current = fat;
+    for at in if two { vec![0.0, PI] } else { vec![0.0] } {
+        let block = model
+            .add_extrusion(
+                &profile,
+                2.0,
+                &Isometry::rotation(&Axis::z(), turn + at)
+                    .expect("a turn")
+                    .compose(&Isometry::translation(Vector::new(0.0, 0.0, 4.0)).expect("a shift")),
+            )
+            .expect("a block");
+        let answer = model.fuse(
+            &[current],
+            &[block],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        println!("PROBE pocket at {at}: {answer:?}");
+        let Ok(answer) = answer else { return };
+        current = answer.solids()[0];
+    }
+    let measured = model.solid(current).unwrap().measure(
+        Deflection::of(0.001).expect("a fine mesh"),
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     );
-    println!("{rule:?} swapped {swapped}: {answer:?}");
+    println!(
+        "PROBE measured {:?}",
+        measured.map(|m| (m.volume(), m.volume_error()))
+    );
 }
 
 /// The trapezium rule [`what_a_thin_bar_through_a_fat_one_shares`] works the
