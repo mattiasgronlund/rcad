@@ -2644,9 +2644,21 @@ impl<'f> Arrangement<'f> {
 
     /// The same, without asking a policy: [`Decision::Undecidable`] comes back
     /// as `None` for a caller that has another route to try.
+    ///
+    /// The boxes are asked first and the planes
+    /// ([`Arrangement::as_the_planes_say`]) where the boxes cannot say, as in
+    /// [`Arrangement::order_along`], because the route given up can be the
+    /// only one there is: a plate with a notch on the line of each edge of its
+    /// hole has one ray that can place the hole, and the boxes could not order
+    /// two nodes on it a rounding apart (Q992). A quadric
+    /// ([`Arrangement::as_the_quadric_says`]) is not asked here.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         let (decided, _) = self.as_the_boxes_say(crossing, first, second).ok()?;
-        matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero).then_some(decided)
+        match decided {
+            Decision::Pos | Decision::Neg | Decision::Zero => Some(decided),
+            Decision::Undecidable { .. } => self.as_the_planes_say(crossing, first, second),
+            _ => None,
+        }
     }
 
     /// Which of two nodes on a crossing comes first along it: [`Decision::Pos`]
@@ -9351,6 +9363,101 @@ mod tests {
             .find(|piece| piece.wires.len() == 1)
             .expect("the other piece has no hole");
         assert_eq!(twice_the_area_of(plain), 2.0 * 2.0 * 4.0);
+        for piece in &pieces {
+            every_wire_closes(piece);
+        }
+    }
+
+    /// A plate with a square hole and a notch in each side, cut by two lines
+    /// that cross a rounding off the line of the hole's bottom edge. One ray
+    /// alone can say which piece the hole is in, and it needs the planes to
+    /// say it (Q992).
+    ///
+    /// Every other ray from a corner of the hole is given up, because each
+    /// notch has an edge on the line of one of the hole's edges: the ray along
+    /// that line runs along the notch's edge. The one left is the ray from
+    /// `(5, 3)` along `y = 3`, out of the plate's right side.
+    ///
+    /// The cuts are `x = 6.5` and `3y - x = 2.5`, which cross at `(6.5, 3)` in
+    /// exact arithmetic. The slanted plane is kept with its normal rounded to
+    /// length one, so it misses that point by a rounding, and `y = 3` meets
+    /// the two cuts at two nodes beside the node where the cuts cross, all
+    /// three with boxes that overlap. The boxes cannot say which of them the
+    /// ray meets first, or which end of the tiny arcs between them it passes,
+    /// and the three planes each node is the meet of can.
+    #[test]
+    fn a_hole_whose_only_ray_out_meets_two_cuts_a_rounding_apart_is_placed_by_the_planes() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let plate = ProfileBuilder::new(vec![
+            [0.0, 0.0],
+            [3.0, 0.0],
+            [3.0, 1.0],
+            [5.0, 1.0],
+            [5.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 5.0],
+            [7.0, 5.0],
+            [7.0, 6.0],
+            [8.0, 6.0],
+            [8.0, 8.0],
+            [5.0, 8.0],
+            [5.0, 7.0],
+            [3.0, 7.0],
+            [3.0, 8.0],
+            [0.0, 8.0],
+            [0.0, 5.0],
+            [1.0, 5.0],
+            [1.0, 3.0],
+            [0.0, 3.0],
+        ])
+        .with_hole(vec![[3.0, 3.0], [5.0, 3.0], [5.0, 5.0], [3.0, 5.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a plate with a square hole");
+        let solid = model
+            .add_extrusion(&plate, 1.0, &Isometry::identity())
+            .expect("an extrusion");
+        let top = bake(
+            &model,
+            &[solid],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the plate bakes")
+        .swap_remove(0)
+        .faces
+        .into_iter()
+        .find(facing_up)
+        .expect("the plate has a top");
+        let cut = cut_by(&top, &[[-1.0, 3.0, 0.0, -2.5], [1.0, 0.0, 0.0, -6.5]]);
+
+        let mut log = ProvenanceLog::new();
+        let pieces = split_a_face(&cut, &Policy::certified(), &mut log)
+            .expect("the ray from (5, 3) along y = 3 says which piece the hole is in")
+            .pieces;
+
+        assert!(
+            log.is_empty(),
+            "a ray given up leaves no record, and the planes decide exactly"
+        );
+        assert_eq!(pieces.len(), 4, "two cuts crossing inside the plate");
+        let holed = pieces
+            .iter()
+            .find(|piece| piece.wires.len() == 2)
+            .expect("the piece the hole is in keeps the hole");
+        assert_eq!(holed.wires[1].len(), 4, "the hole is still a square");
+        let corners: Vec<[f64; 3]> = holed.wires[0]
+            .iter()
+            .filter_map(|side| side.ends[0].point().exact_coordinates())
+            .collect();
+        assert!(
+            corners.contains(&[0.0, 8.0, 1.0]) && corners.contains(&[1.0, 3.0, 1.0]),
+            "the hole is in the piece above the slanted cut and left of x = 6.5"
+        );
+        assert_eq!(
+            pieces.iter().filter(|piece| piece.wires.len() == 1).count(),
+            3,
+            "the other three pieces have no hole"
+        );
         for piece in &pieces {
             every_wire_closes(piece);
         }
