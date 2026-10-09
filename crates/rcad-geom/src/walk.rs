@@ -4873,4 +4873,124 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn probe_q1520() {
+        let certified = Policy::certified();
+        let walk_it = |run: &NamedRun, pair: [&Surface; 2]| {
+            walk(
+                run,
+                pair,
+                Deflection::of(0.01).expect("a length"),
+                &certified,
+                &mut ProvenanceLog::new(),
+            )
+        };
+        let closed_at = |corner: PredicatePoint| {
+            NamedRun::new(EdgeRun::RightRoundWhereItsFacesCross, [corner, corner]).expect("a run")
+        };
+        // (1a) one loop, a box round a corner where the loop crosses the flat surface.
+        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 2.0).expect("a radius"));
+        let ball = Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 0.0), 2.0).expect("a radius"));
+        let y = (4.0_f64 - 0.25).sqrt();
+        for half in [0.0, 1e-12, 1e-9, 1e-3] {
+            let corner = PredicatePoint::Constructed([
+                Interval::around(0.5, half).expect("x"),
+                Interval::around(y, half).expect("y"),
+                Interval::around(0.0, half).expect("z"),
+            ]);
+            let got = walk_it(&closed_at(corner), [&ball, &pipe]).map(|w| w.points().len());
+            eprintln!("1a one loop, box half {half}: {got:?}");
+        }
+        // (1b) two loops, a box round a corner on the lower loop reaching up past z = 0.
+        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 1.0).expect("a radius"));
+        let ball = Surface::Sphere(Sphere::new(Point::new(0.1, 0.0, 0.0), 4.0).expect("a radius"));
+        let low = -(14.79_f64.sqrt());
+        for top in [low, low / 2.0, -1e-9, 1e-9, 0.5, -low] {
+            let corner = PredicatePoint::Constructed([
+                Interval::exactly(-1.0),
+                Interval::exactly(0.0),
+                Interval::new(low, top).expect("z"),
+            ]);
+            let got = walk_it(&closed_at(corner), [&ball, &pipe]).map(|w| {
+                let below = w
+                    .points()
+                    .iter()
+                    .filter(|p| p.coordinates()[2] < 0.0)
+                    .count();
+                (below, w.points().len())
+            });
+            eprintln!("1b two loops, box z [{low}, {top}]: {got:?}");
+        }
+        // (2) a thin pipe through a fat one on slanted axes, its loops nearly touching.
+        for (thin_way, gap) in [
+            (Vector::new(0.3, -0.2, 0.9), 2.99),
+            (Vector::new(0.3, -0.2, 0.9), 2.9),
+            (Vector::new(0.3, -0.2, 0.9), 2.5),
+            (Vector::new(0.7, 0.1, 0.7), 2.99),
+            (Vector::new(0.1, 0.5, -0.8), 2.99),
+            (Vector::new(-0.6, 0.2, 0.3), 2.95),
+        ] {
+            let fat_way = Vector::new(1.0, 1.0, 0.0);
+            let [thin_r, fat_r] = [1.0, 4.0];
+            let w1 = thin_way.normalized().expect("w1");
+            let w2 = fat_way.normalized().expect("w2");
+            let b = w1.cross(w2).normalized().expect("b");
+            let c = w1.dot(w2);
+            let a = (w1 - w2 * c).normalized().expect("a");
+            let o1 = Point::origin() + b * gap;
+            let fat = Surface::Cylinder(
+                Cylinder::new(
+                    crate::Axis::new(Point::origin(), fat_way).expect("ax"),
+                    fat_r,
+                )
+                .expect("r"),
+            );
+            let thin = Surface::Cylinder(
+                Cylinder::new(crate::Axis::new(o1, thin_way).expect("ax"), thin_r).expect("r"),
+            );
+            let named = crate::intersect(&fat, &thin, &certified, &mut ProvenanceLog::new());
+            let named = match named {
+                Ok(SurfaceMeet::Curves(runs)) => format!("{} curves", runs.len()),
+                Ok(_) => "other".to_string(),
+                Err(why) => format!("{why:?}"),
+            };
+            let reach_t =
+                (fat_r * fat_r - (gap + thin_r) * (gap + thin_r)).sqrt() / (1.0 - c * c).sqrt();
+            let (Surface::Cylinder(thin_c), Surface::Cylinder(fat_c)) = (thin, fat) else {
+                unreachable!()
+            };
+            let flat = the_flat_surface_between_two_loops(TwoLoopsHeldApartBy::AFatPipesAxis {
+                thin: thin_c,
+                fat: fat_c,
+            })
+            .expect("flat");
+            let n = flat.normal().normalized().expect("n");
+            eprintln!(
+                "2 thin {thin_way:?} gap {gap}: named {named}; clear t {reach_t}; normal along a {} along b {}",
+                n.dot(a),
+                n.dot(b)
+            );
+            for sign in [1.0, -1.0] {
+                let corner = o1 + b * thin_r + w1 * (sign * reach_t);
+                let reading = flat.normal().dot(corner - Point::origin()) - flat.offset();
+                let run = closed_at(PredicatePoint::from(corner.coordinates()));
+                for pair in [[&fat, &thin], [&thin, &fat]] {
+                    let got = walk_it(&run, pair).map(|w| {
+                        let mine = w
+                            .points()
+                            .iter()
+                            .filter(|p| ((**p - Point::origin()).dot(a) > 0.0) == (sign > 0.0))
+                            .count();
+                        (mine, w.points().len())
+                    });
+                    eprintln!(
+                        "   corner on loop {sign} (off its pipes {} {}), side reading {reading}: on its own loop {got:?}",
+                        how_far_off(&fat, corner),
+                        how_far_off(&thin, corner)
+                    );
+                }
+            }
+        }
+    }
 }
