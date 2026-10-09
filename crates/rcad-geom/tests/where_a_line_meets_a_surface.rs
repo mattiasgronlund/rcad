@@ -469,6 +469,27 @@ fn a_line_touching_a_ring_written_about_1e_159_across_touches_it_where_it_does_a
     }
 }
 
+/// A torus asked about a line that is a box is refused `2⁻⁵²⁸` across by the
+/// name it is refused by at size one.
+///
+/// Where they stand, the ring's quartic is near `2⁻²¹¹²` and falls out of
+/// `f64` before the box is looked at, which is a refusal of another kind. Slid
+/// up, it is the box that is refused, as at size one, and that is the refusal
+/// the question has at any size. `docs/decisions.md` §349.8.
+#[test]
+fn a_torus_asked_about_a_line_that_is_a_box_1e_159_across_is_refused_by_the_same_name() {
+    let smeared = [0.0; 3]
+        .map(|_| Interval::new(slid_exactly(-0.5, TINY), slid_exactly(0.5, TINY)).expect("a box"));
+    let answer = where_a_line_meets_a_surface(
+        smeared,
+        exactly([1.0, 0.0, 0.0].map(|side| slid_exactly(side, TINY))),
+        &slid(&Surface::Torus(a_ring()), TINY),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert_eq!(answer, Err(Error::WhereALineMeetsARingNeedsTheLineExactly));
+}
+
 /// One line and one surface, written at size one.
 struct Question {
     from: [f64; 3],
