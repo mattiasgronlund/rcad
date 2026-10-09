@@ -30,10 +30,13 @@
 //! `where_a_plane_and_a_torus_cross` refuses every such plane off the axis,
 //! even 20 from it against a reach of 5:
 //! `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`, row Q618. A block
-//! `[−6, 6]² × [−2, 0]`, and one `[−20, 20]² × [−1/2, 1/2]`, were refused that way in all six
-//! fuses, on `30a1b8da` and after Q1513 alike, and never reach the top face.
-//! The plate's wall is a pipe on the ring's own axis, and a pipe of radius 6
-//! misses a ring that reaches out to 5.
+//! `[−6, 6]² × [−2, 0]`, and one `[−20, 20]² × [−1/2, 1/2]`, were refused
+//! that way in all six fuses, on `30a1b8da` and after Q1513 alike, and never
+//! reach the top face. The plate's wall is a pipe on the ring's own axis, and
+//! a pipe of radius 6 misses a ring that reaches out to 5.
+//!
+//! The last test holds the ring's middle in a plate one thick, from
+//! `z = −1/2` to `z = 1/2`, which every fuse still refuses (§428.4).
 
 use core::f64::consts::PI;
 
@@ -41,7 +44,7 @@ use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Model, Rule, SolidBuilder, SolidKey};
 
 const RING: f64 = 4.0;
 const TUBE: f64 = 1.0;
@@ -91,6 +94,53 @@ fn the_plate_less_the_ring_is_grooved_and_the_ring_less_the_plate_is_its_top_hal
         &PLATE_AND_HALF_A_RING,
     );
     a_fuse_is(Rule::Difference, false, 4.0 * PI * PI, &HALF_A_RING);
+}
+
+/// A plate one thick, `z` in `[−1/2, 1/2]`, holds the middle of the ring
+/// between its two faces, and every fuse, both ways round, is refused
+/// `CannotTellTheCellsOfAFaceApart`.
+///
+/// Each of the ring's two faces is then cut by two planes square to its axis:
+/// its own equators' `z = 0` and one of the plate's faces. Between the two, the
+/// band outside the ring's radius and the band inside it have the same sign
+/// against both planes, and only their order round the tube tells them apart.
+/// That is the shape of row Q1500's pin too (§428.4), but that it is why this
+/// is refused has not been traced. The answers are plain. The slab of
+/// the ring with `|z| ≤ 1/2` holds `4√3π + 8π²/3`, which is the intersection;
+/// the union is the plate and the ring less that, the plate less the ring is
+/// `36π` less it, and the ring less the plate is two caps of `8π²/3 − 2√3π`.
+#[test]
+fn a_plate_holding_the_middle_of_the_ring_is_refused_by_every_fuse() {
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for plate_first in [true, false] {
+            let what = format!("{rule:?}, plate first: {plate_first}");
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let plate = model
+                .add_round_bar(
+                    PLATE,
+                    1.0,
+                    &Isometry::translation(Vector::new(0.0, 0.0, -0.5)).expect("a finite shift"),
+                )
+                .expect("a round plate");
+            let ring = a_whole_ring_cut_along_its_equators(&mut model);
+            let (first, second) = if plate_first {
+                ([plate], [ring])
+            } else {
+                ([ring], [plate])
+            };
+            let refused = model.fuse(
+                &first,
+                &second,
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            assert!(
+                matches!(refused, Err(Error::CannotTellTheCellsOfAFaceApart { .. })),
+                "{what}: {refused:?}"
+            );
+        }
+    }
 }
 
 /// Fuses the plate and the ring by `rule`, the plate first or second, and
