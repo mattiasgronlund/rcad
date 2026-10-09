@@ -5612,6 +5612,9 @@ impl<'f> Arrangement<'f> {
     /// in puts the cap's circle on the ball exactly there.
     fn whether_past_the_picker(&self, crossing: usize, at: PredicatePoint) -> PastThePicker {
         let partner = self.crossings[crossing].partner;
+        if let (Surface::Cylinder(this), Surface::Cylinder(other)) = (self.surface, partner) {
+            return self.whether_past_the_plane_between_two_loops(crossing, &this, &other, at);
+        }
         let axis = match (self.surface, partner) {
             (Surface::Cylinder(pipe), _) | (Surface::Sphere(_), Surface::Cylinder(pipe)) => {
                 pipe.axis()
@@ -5678,6 +5681,61 @@ impl<'f> Arrangement<'f> {
                 PastThePicker::Yes(found)
             }
             Some(_) | None => PastThePicker::CannotTell,
+        }
+    }
+
+    /// On a pipe another pipe cuts in two loops: whether a point is past the
+    /// flat half-space that picks one loop out, and if it is, which side of the
+    /// partner that loop has towards it.
+    ///
+    /// The half-space is the one `rcad_geom`'s `two_loops_either_side_of_a_pipe`
+    /// builds: its flat surface holds the fat pipe's axis, and it is only built
+    /// where neither loop reaches it. Past it, every point of either wall is on
+    /// one side of the loop in front of it, and which side depends only on
+    /// which wall this is.
+    ///
+    /// - **On the fat pipe's wall** the loop bounds a patch inside the thin pipe.
+    ///   The flat surface meets the fat wall in two straight lines, and a line
+    ///   that went into the thin pipe would come out again through a loop, which
+    ///   the flat surface misses; so the patch lies wholly in front, and every
+    ///   point past is outside the thin pipe's patch: the partner's positive side,
+    ///   even at a point of the other loop's patch, where the partner's sign is
+    ///   negative.
+    /// - **On the thin pipe's wall** the flat surface cuts one closed curve round
+    ///   the thin axis, between the two loops along every ruling and so inside
+    ///   the fat pipe. The part of the wall past it is one tube the loop in front
+    ///   never meets, so all of it is on the loop's side towards that curve: the
+    ///   partner's negative side, even beyond the other loop, where the partner's
+    ///   sign is positive.
+    ///
+    /// A point on the flat surface is outside the thin pipe on the fat wall and
+    /// inside the fat pipe on the thin wall, so the partner's sign there is the
+    /// side, and [`PastThePicker::No`] says so. A point whose box straddles it is
+    /// answered where the two readings agree.
+    fn whether_past_the_plane_between_two_loops(
+        &self,
+        crossing: usize,
+        this: &Cylinder,
+        other: &Cylinder,
+        at: PredicatePoint,
+    ) -> PastThePicker {
+        let [Picker::InFrontOf(picker)] = self.crossings[crossing].picked_by() else {
+            return PastThePicker::No;
+        };
+        let towards_the_flat_surface = match this.radius().partial_cmp(&other.radius()) {
+            Some(Ordering::Greater) => Decision::Pos,
+            Some(Ordering::Less) => Decision::Neg,
+            Some(Ordering::Equal) | None => return PastThePicker::CannotTell,
+        };
+        match picker.side_of_point(at) {
+            Decision::Pos | Decision::Zero => PastThePicker::No,
+            Decision::Neg => PastThePicker::Yes(towards_the_flat_surface),
+            Decision::Undecidable { .. } | _
+                if side_of_surface(&Surface::Cylinder(*other), at) == towards_the_flat_surface =>
+            {
+                PastThePicker::Yes(towards_the_flat_surface)
+            }
+            Decision::Undecidable { .. } | _ => PastThePicker::CannotTell,
         }
     }
 
