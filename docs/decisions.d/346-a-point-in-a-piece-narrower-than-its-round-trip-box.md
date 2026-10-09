@@ -72,7 +72,8 @@ environment switch between the two boxes, both taken out). The new box here is
 `52eb56fb`'s, which also sized by the candidate before its trip (346.4). On
 `3e0abbe7`, the committed test below sees one of the same three refusals at
 `2⁻⁴⁸`, `2⁻⁵⁰` and `2⁻⁵²` for every rule and policy; the other rows were not
-run again.
+run again then. **Q448 ran the same six-size probe once more, on `1e305989`
+(Q430's tip): every row below is still what it was.**
 
 | `s` | old box | new box |
 |---|---|---|
