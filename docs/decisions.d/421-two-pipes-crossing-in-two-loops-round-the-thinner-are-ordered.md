@@ -112,15 +112,21 @@ answer, so assembly ran. Pinned by
 in `tests/a_cone_hollowed_along_its_axis.rs`, with the fat bar's seam up `+x`
 and up `+y`:
 
-- **Through the axis**, all six rules:
+- **Through the axis.** This was all six rules refused
   `ACrossingAlongThisEdgeCouldNotBeFollowed`, from
   `CannotFollowACrossingWhereItsSurfacesAreTangent` at
-  `SettlingAPointOntoBothSurfaces`. Relay 1 traced it with prints in
-  `march.rs`'s `one_step`. From the seed `(4, 0, 6)`, the first trial,
-  `1.7e307` long, cannot be settled. Every shorter trial from `4.1e153` down
-  settles back onto the seed exactly, a chord of `0`. `one_step` only halves
-  such a trial, so its fifty halvings never come near the loop, and it hands
-  back the first trial's settling error.
+  `SettlingAPointOntoBothSurfaces`: relay 1 traced it with prints in
+  `march.rs`'s `one_step`, where, from the seed `(4, 0, 6)`, the first trial,
+  `1.7e307` long, could not be settled, and every shorter trial from `4.1e153`
+  down settled back onto the seed exactly, a chord of `0`, which `one_step`
+  only halved rather than root-shrinking, so its fifty halvings never came
+  near the loop. **Since Q1493 (`39b42e54`) root-shrinks a chord-`0` trial the
+  same way, the walk gets round both loops, and all six rules are refused by
+  the mesher instead**, by name: union `AWireWillNotLieFlatOnItsFace` with the
+  fat bar first and `CannotMeshAFace` `CornersCoincide` with the thin bar
+  first, intersection `CornersCoincide` both ways, the fat bar less the thin
+  `AWireWillNotLieFlatOnItsFace`, the thin bar less the fat
+  `ACurvedFaceGoesRightRoundWithNoSeam`.
 - **Half off the axis**, in `every_rule_both_ways` order: the union with the
   fat bar first `CurvedFaceWithAHoleGoesTooFarRound`; the union with the thin
   bar first `CannotMeshAFace` `BoundaryCrossesItself`; the intersection both
@@ -197,11 +203,9 @@ leg cannot be built until rows @1 and @2 of 421.7 land. Q1394 is unchanged.
 
 ### 421.7 What this leaves
 
-- **Row: the march through the axis**, `refuses/B`, in `march.rs`'s
-  `one_step`: shrink a trial that settles back onto its start (chord `0`) the
-  way a trial that fails to settle is shrunk, pin it in `march.rs`'s tests,
-  and turn the through-the-axis half of the pin into answers checked against
-  421.5.
+- **Row: the march through the axis** is done, by Q1493 (`39b42e54`): the
+  walk now gets round both loops. What is left of the through-the-axis half —
+  the six refusals now coming from the mesher instead (421.4) — is row Q1502.
 - **Row: the mesh half off the axis**, `refuses/B`: trace whether the answer's
   wires on the two pipe walls are wrong or `mesh.rs` cannot cut a pipe face
   holding a quartic loop, fix the side at fault, and turn the half-off half of

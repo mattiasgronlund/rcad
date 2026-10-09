@@ -4284,8 +4284,10 @@ pub(crate) fn a_pipe_lies_along_a_rings_core(
 /// outer arc lying past the third and its inner arc inside the second. A bar on
 /// a bend's cap has one half on each solid's curved face, where the other
 /// solid's face does not reach it, so no edge of a fuse's answer runs along
-/// either. The fuse does not leave them off yet: it draws the half on the bar's
-/// pipe face and is refused putting points in order along it.
+/// either. Since Q1470 the fuse leaves each half off the face across the cap
+/// from the face that carries it (`docs/decisions.md` §422); `rcad-topo`'s
+/// `a_bar_cut_through_the_rings_axis_on_a_bends_cap_by_every_rule_against_the_closed_forms`
+/// in `fuses_that_touch.rs` checks every rule against the closed forms.
 ///
 /// **Nothing draws the loop**: it is a quartic, and the walk refuses it by name.
 ///
