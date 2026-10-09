@@ -252,26 +252,6 @@ pub(crate) fn choose(
             .collect();
         let against_other = place(&other_group, log)?;
         let fate = row_for(rule).row(side).fate(against_other);
-        if std::env::var_os("PROBE_Q1248").is_some() {
-            eprintln!(
-                "piece {index} of solid {mine}, {:?}, corners {:?}: {against_other:?} -> {:?}",
-                piece.surface,
-                corners
-                    .iter()
-                    .map(|wire| wire
-                        .iter()
-                        .map(|c| c.enclosure().map(|i| i.lo()))
-                        .collect::<Vec<_>>())
-                    .collect::<Vec<_>>(),
-                keeps(fate, against_other, mine)
-            );
-            for side in piece.wires.iter().flatten() {
-                eprintln!(
-                    "    side along {:?} material {:?}, ends {:?}",
-                    side.carried_by[1], side.material_side, side.ends
-                );
-            }
-        }
         if let Some(reversed) = keeps(fate, against_other, mine) {
             chosen.push(Chosen {
                 piece: index,
@@ -525,12 +505,6 @@ fn place_the_piece(
             settle_against_each(model, solids, against, candidate, piece, policy, &mut trial)?;
         Ok(Some(match settled {
             Settled::At(placement) => {
-                if std::env::var_os("PROBE_Q1248").is_some() {
-                    eprintln!(
-                        "  placed {placement:?} against {against:?} by {:?}",
-                        candidate.enclosure().map(|i| i.lo())
-                    );
-                }
                 trial.drain_into(log);
                 Some(placement)
             }
