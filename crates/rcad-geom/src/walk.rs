@@ -3715,7 +3715,10 @@ fn the_two_circles_a_cone_and_a_pipe_cut(cone: &Cone, pipe: &Cylinder) -> Vec<Co
 /// is not proved on the ring's axis, and [`Error::Undecidable`] where a sign
 /// could not be settled — `intersect`'s two refusals for the pair, so the
 /// namer and the evaluator refuse the same pairs under the same names. The
-/// first also for a run right round a circle, as above.
+/// first also for a run right round a circle, as above, and for every run on a
+/// pipe of the tube's radius lying along the ring's core circle: `intersect`
+/// names a quartic loop there beside the circle the two touch in, nothing draws
+/// the loop, and a run's ends do not say which of the two it is on.
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the partner misses the
 /// tube, so the run names a circle that is not there: a **limit**, as for a
@@ -3749,7 +3752,7 @@ fn where_a_ring_and_a_surface_on_its_axis_cut(
             and: own @ Surface::Plane(_),
         } = circle.run()
         else {
-            unreachable!("`intersect` names a circle round a ring's axis by its plane: {circle:?}");
+            return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface);
         };
         // A plane square to a pipe's or a cone's axis, or any plane against a
         // ball, crosses it in a conic, and one of no size is refused below in
