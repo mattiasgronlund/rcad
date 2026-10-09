@@ -225,6 +225,19 @@ wrong answer — it is the same gap §191.4 already names, just not one the
 shipped corpus had shown for the bar. §202.2's "refuses nothing" needs
 scoping to the shipped corpus size, or needs re-checking against a larger one.
 
+**2026-10-09, Q425: this case answers since §321's triangulator flush.** The
+refusal was `CannotMeshAFace { why: CoordinateOutOfRange { position: 2, why:
+TooSmall } }` on `566db6f1` and on `199a606e` — a corner the triangulator's
+scaled coordinates underflowed past its own floor, exactly what §321's flush
+now sets to zero before spade sees it. Confirmed answering on `03ab99eb` (§321's
+flush, merged) and shown, in an exported tree with `199a606e`'s
+`triangulate.rs` swapped back in, to fail without it.
+`crates/rcad-topo/tests/a_turned_bar_whose_union_had_a_corner_under_the_triangulators_floor.rs`
+pins that the union validates and agrees in face count and in volume (within
+what the two meshes declare) with the upright union turned by the same
+rotation. §202.2's "refuses nothing" is scoped to the shipped corpus rather
+than widened, since a soak past it is what found this case in the first place.
+
 **Grouping.** Two distinct findings: different test, different assertion,
 different code path (a statistical tally band vs. a turned-vs-upright
 agreement check). A recurred twice (chunks 12 and 15) at nearly the same
