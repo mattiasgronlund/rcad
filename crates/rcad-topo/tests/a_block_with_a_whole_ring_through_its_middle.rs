@@ -204,7 +204,9 @@ fn kind(surface: &Surface) -> &'static str {
         Surface::Plane(_) => "plane",
         Surface::Cylinder(_) => "pipe",
         Surface::Torus(_) => "ring",
-        other => panic!("nothing here is made of {other:?}"),
+        Surface::Sphere(_) | Surface::Cone(_) | _ => {
+            panic!("nothing here is made of {surface:?}")
+        }
     }
 }
 
