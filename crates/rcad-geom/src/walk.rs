@@ -1217,7 +1217,8 @@ fn the_seed_on_the_loop_a_corner_is_on(
             .map_err(|_| Error::CannotWorkOutHowBigACrossingIs)?,
     );
     let the_corners_side = match which_side_of(&between, corner, policy, log) {
-        side @ (Decision::Pos | Decision::Neg) => side,
+        Decision::Pos => Decision::Pos,
+        Decision::Neg => Decision::Neg,
         Decision::Zero => return Ok(seeds[0].0),
         Decision::Undecidable { .. } => {
             return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
