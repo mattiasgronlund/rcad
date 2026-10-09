@@ -4487,9 +4487,10 @@ fn across(dart: Dart, along: &[[Dart; 2]], edge: usize) -> Dart {
 /// The plane a joined face sits on: the smallest of its pieces' planes, read as
 /// four numbers.
 ///
-/// The pieces all sit on the same plane and face the same way, but two solids
+/// The pieces all sit on one flat region and face the same way, but two solids
 /// that are flush against each other worked their planes out separately and the
-/// last bits may differ. Picking the smallest depends on the set of planes and
+/// last bits may differ: in the normal, or in the offset of two parallel planes
+/// a rounding apart (§426). Picking the smallest depends on the set of planes and
 /// not on the order the pieces arrived in, which is what keeps the answer the
 /// same when the two sides of the fuse are swapped.
 fn plane_of_the_joined_face(members: &[usize], faces: &[Face]) -> Plane {
