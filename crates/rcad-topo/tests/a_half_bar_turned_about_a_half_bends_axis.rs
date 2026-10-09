@@ -91,7 +91,13 @@ fn turned_by_a_quarter_of_pi_every_fuse_answers() {
     every_fuse_answers(&[FRAC_PI_4]);
 }
 
+/// A turn near `π/4` but not it, which the row this was filed by asked for
+/// beside `π/4` itself.
 #[test]
+#[expect(
+    clippy::approx_constant,
+    reason = "0.7853 is a turn near a quarter of pi on purpose, not a spelling of it"
+)]
 fn turned_by_0_7853_every_fuse_answers() {
     every_fuse_answers(&[0.7853]);
 }
