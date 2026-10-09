@@ -22,7 +22,7 @@
 
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, Isometry, Plane, Point, Sphere, Surface, SurfaceMeet, Torus,
-    Vector, intersect,
+    Vector, WhereFollowingACrossingGaveUp, intersect,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
@@ -244,6 +244,38 @@ fn a_half_ring_cut_by_a_round_plate_is_refused_telling_the_cells_of_a_face_apart
             matches!(surface, Surface::Plane(_)),
             !first_first,
             "{what}: refused on {surface:?}"
+        );
+    }
+}
+
+/// The half bar of
+/// `a_half_bar_on_a_rings_axis_cuts_the_tube_in_two_circles_and_every_fuse_answers`
+/// with its floor raised to `z = −1`. The floor is still clear of the half
+/// ring, which lies above `z = 0`, but it is the plane the whole ring would
+/// rest on, and it touches the ring's torus round the circle of radius 4 at
+/// `z = −1`. That circle lies on no face of the half ring, yet every fuse is
+/// refused ordering points along it.
+#[test]
+fn a_half_bar_whose_floor_the_whole_ring_would_rest_on_is_refused_ordering_that_circle() {
+    for (rule, first_first) in six_fuses() {
+        let mut model = a_model();
+        let said = fuse(
+            &mut model,
+            |model| a_half_ring_and_a_half_bar_with_its_floor_at(model, -1.0),
+            rule,
+            first_first,
+        );
+        assert!(
+            matches!(
+                said,
+                Err(rcad_topo::Error::Geometry(
+                    rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                        at: WhereFollowingACrossingGaveUp::OrderingTheCircleAPlaneRestsOnARingAlong,
+                        ..
+                    }
+                ))
+            ),
+            "{rule:?} (ring first: {first_first}): {said:?}"
         );
     }
 }
@@ -607,9 +639,15 @@ fn a_thin_bar_through_a_thick_one(model: &mut Model) -> [SolidKey; 2] {
 }
 
 fn a_half_ring_and_a_half_bar_on_its_axis(model: &mut Model) -> [SolidKey; 2] {
+    a_half_ring_and_a_half_bar_with_its_floor_at(model, -2.0)
+}
+
+/// The top half of a ring of 4 round a tube of 1 about `z`, and the `x ≥ 0`
+/// half of a bar of radius 10 about `z` from `floor` up to 5.
+fn a_half_ring_and_a_half_bar_with_its_floor_at(model: &mut Model, floor: f64) -> [SolidKey; 2] {
     let ring = rings::the_top_half_of_a_ring(model, 4.0, 1.0, false).expect("a half ring");
-    let bar = a_bar(model, 10.0, [0.0, 0.0, -2.0], 7.0);
-    let block = a_block(model, [0.0, -20.0, -2.0], [20.0, 20.0, 6.0]);
+    let bar = a_bar(model, 10.0, [0.0, 0.0, floor], 5.0 - floor);
+    let block = a_block(model, [0.0, -20.0, floor], [20.0, 20.0, 6.0]);
     let halved = model
         .fuse(
             &[bar],
