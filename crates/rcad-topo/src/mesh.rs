@@ -1081,15 +1081,19 @@ impl BuildingAMesh {
             })
             .collect();
         // **A wire that winds is only allowed beside wires that wind too**, or
-        // as the rim of a cap on a ball beside islands. The loops of a face cut
-        // the chart into stretches, and the one the face is has every one of
-        // its wires in its boundary. Two that go right round bound the band
-        // between them and [`BuildingAMesh::cut_a_ring_across`] cuts it. One
-        // that goes right round beside others that do not is a cap with
-        // islands in it when the surface is a ball and every other wire is a
-        // hole: the cap's side of its rim is the side holding the pole the walk
-        // keeps on its left, and each hole lies on the face, so on that side
-        // ([`BuildingAMesh::cut_a_cap_up_to_its_pole`]). Anything else of that
+        // as the rim of a cap on a ball beside islands, or as one of the two
+        // rims of a ring on a pipe beside islands. The loops of a face cut the
+        // chart into stretches, and the one the face is has every one of its
+        // wires in its boundary. Two that go right round bound the band between
+        // them and [`BuildingAMesh::cut_a_ring_across`] cuts it. One that goes
+        // right round beside others that do not is a cap with islands in it
+        // when the surface is a ball and every other wire is a hole: the cap's
+        // side of its rim is the side holding the pole the walk keeps on its
+        // left, and each hole lies on the face, so on that side
+        // ([`BuildingAMesh::cut_a_cap_up_to_its_pole`]). Two that go right
+        // round a pipe beside holes are a ring with islands in it, the band
+        // between the two with each hole on it, and the ring is cut across as
+        // a ring is, round the islands its cuts meet. Anything else of that
         // kind is refused the way a wire that will not lie flat has always been
         // refused. On a torus that is asked of each way round, the tube and the
         // ring, and a wire that went right round both was refused in
@@ -1099,6 +1103,7 @@ impl BuildingAMesh {
         let round_the_first_way = winding_round(|around| around.goes_right_round);
         let round_the_second_way = winding_round(|around| around.goes_right_round_the_second_way);
         if !a_cap_on_a_ball_with_islands_in_it(&surface, &walked)
+            && !a_ring_on_a_pipe_with_islands_in_it(&surface, &walked)
             && [round_the_first_way, round_the_second_way]
                 .iter()
                 .any(|&winding| winding > 0 && winding < walked.len())
@@ -1379,6 +1384,31 @@ impl BuildingAMesh {
             };
             return Ok(patches);
         }
+        // **A ring with islands in it is cut across as a ring is**, a cut that
+        // meets an island going round it, and each island no cut meets put
+        // whole into the one patch it lies in. A thin bar through a fat one
+        // off its axis leaves the fat bar's wall this shape, with a window
+        // where the thin bar goes in and one where it comes out (Q1494). Asked
+        // before anything reads `walked[0]` as the outline, since an island
+        // may be stored first.
+        if a_ring_on_a_pipe_with_islands_in_it(stored, &walked) {
+            let (rims, islands): (Vec<WalkedLoop>, Vec<WalkedLoop>) = walked
+                .into_iter()
+                .partition(|around| around.goes_right_round);
+            let Some(patches) = self.cut_a_ring_across(
+                face,
+                stored,
+                Chart::Upright,
+                &rims,
+                &islands,
+                whole_turn,
+                room,
+            )?
+            else {
+                return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
+            };
+            return Ok(patches);
+        }
         if walked.len() == 1
             && let Some((one, other)) = self.open_a_slit(face, stored, &walked[0], room)?
         {
@@ -1405,11 +1435,11 @@ impl BuildingAMesh {
             };
             return Ok(patches);
         }
-        // A **ring** is the one face with a hole that this can cut, and it is
-        // the one the fuse makes: a tube of a bar's wall between two planes,
-        // bounded by two curves that each go right round and by nothing else.
-        // Cut across both of them at once and what comes out is four patches
-        // with one loop each, which is the shape everything below expects.
+        // A **ring** is the face with a hole that the fuse makes most: a tube
+        // of a bar's wall between two planes, bounded by two curves that each
+        // go right round and by nothing else. Cut across both of them at once
+        // and what comes out is four patches with one loop each, which is the
+        // shape everything below expects.
         //
         // §31.10 item 5 and §35.7 both say this claim is the one lane 5
         // falsifies, and the sentence that stops being true is *"the fuse
@@ -1417,8 +1447,9 @@ impl BuildingAMesh {
         // cuts is a ball's skin whose outer loop reaches both poles and whose
         // hole reaches neither, which a half ball cut again leaves: it is cut
         // from the hole up to each pole instead. A ball's skin with only holes
-        // was opened into strips above, and a cap on a ball with islands in it
-        // was cut up to its pole. Any other face with one loop right round and
+        // was opened into strips above, a cap on a ball with islands in it
+        // was cut up to its pole, and a ring on a pipe with islands in it was
+        // cut across round them. Any other face with one loop right round and
         // another that is not has already been refused in
         // [`BuildingAMesh::cut_up`]. `Model` is `Deserialize` and `validate`
         // is the untrusted-import boundary (§16.11), so that is a refusal
@@ -1429,9 +1460,15 @@ impl BuildingAMesh {
         // upper planes cut is a ring too, and the arcs are the ring §208.4
         // taught the walk to come back a whole turn on.
         if walked.len() != 1 {
-            if let Some(patches) =
-                self.cut_a_ring_across(face, stored, Chart::Upright, &walked, whole_turn, room)?
-            {
+            if let Some(patches) = self.cut_a_ring_across(
+                face,
+                stored,
+                Chart::Upright,
+                &walked,
+                &[],
+                whole_turn,
+                room,
+            )? {
                 return Ok(patches);
             }
             let Some((one, other)) =
@@ -1498,6 +1535,7 @@ impl BuildingAMesh {
             stored,
             Chart::OnItsSide,
             &on_their_side,
+            &[],
             round_the_ring,
             room,
         )?
@@ -2403,8 +2441,9 @@ impl BuildingAMesh {
         })
     }
 
-    /// Cut a **ring** — two loops that each go right round the surface, with
-    /// nothing else bounding it — into four patches with one loop each.
+    /// Cut a **ring** — two loops that each go right round the surface, and
+    /// the `islands` between them — into four patches, each with one loop and
+    /// whichever islands no cut met.
     ///
     /// A tube is what a fuse leaves of a bar's wall between two planes, and it
     /// is the first face in this kernel with a hole in it that is not flat. It
@@ -2426,14 +2465,32 @@ impl BuildingAMesh {
     /// side, so that the four cuts run across the band from one circle to the
     /// other.
     ///
+    /// **A cut whose straight line meets an island goes round it**: straight
+    /// from its corner on one loop to the island's corner nearest that loop,
+    /// round the island to its corner nearest the other loop, and straight on
+    /// from there. The patch either side takes the island's half on its side
+    /// into its one loop ([`ACutAcrossARing::round_an_island`]). An island no
+    /// cut meets goes whole into the one patch it lies in, as a hole of it, as
+    /// on a cap ([`BuildingAMesh::cut_a_cap_up_to_its_pole`]). With no islands
+    /// every cut is straight, and the patches are the ones a ring was always
+    /// cut into, bit for bit.
+    ///
     /// `None` when the face is not a ring: two loops is not enough, they both
-    /// have to go right round, or there is nothing across to cut to.
+    /// have to go right round, or there is nothing across to cut to. `None` as
+    /// well when a cut meets two islands, two cuts meet one, a leg round an
+    /// island meets a loop, another island or another cut, or an island lies
+    /// in no patch.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the face, its surface and chart, its two kinds of loop, the turn and the room are each read"
+    )]
     fn cut_a_ring_across(
         &mut self,
         face: FaceView<'_>,
         stored: &Surface,
         chart: Chart,
         walked: &[WalkedLoop],
+        islands: &[WalkedLoop],
         whole_turn: f64,
         room: f64,
     ) -> Result<Option<Vec<Vec<WalkedLoop>>>> {
@@ -2494,7 +2551,7 @@ impl BuildingAMesh {
         let along_the_bottom = quarters
             .map(|at| nearest_longitude(&down, in_the_turn_of(&down, at, whole_turn), pinch));
 
-        let mut cuts = Vec::with_capacity(4);
+        let mut ends = Vec::with_capacity(4);
         for step in 0..4 {
             let leaving = up.corners[along_the_top[step]];
             let landing = down.corners[along_the_bottom[step]];
@@ -2509,7 +2566,61 @@ impl BuildingAMesh {
             ];
             self.on_a_cut.insert(up.points[along_the_top[step]]);
             self.on_a_cut.insert(down.points[along_the_bottom[step]]);
-            cuts.push(self.points_along_a_cut(face, stored, chart, leaving, arriving, room)?);
+            ends.push([leaving, arriving]);
+        }
+        let islands: Vec<WalkedLoop> = islands
+            .iter()
+            .map(|island| in_the_same_turn_as(island, &up, whole_turn))
+            .collect();
+        let Some(through) = where_a_rings_cuts_go_round_islands(&ends, &islands, whole_turn) else {
+            return Ok(None);
+        };
+        if !the_legs_round_islands_stay_inside_a_ring(
+            [&up, &down],
+            &islands,
+            &ends,
+            &through,
+            whole_turn,
+        ) {
+            return Ok(None);
+        }
+
+        let mut cuts = Vec::with_capacity(4);
+        for (&[leaving, arriving], round) in ends.iter().zip(&through) {
+            let Some(round) = round else {
+                let across =
+                    self.points_along_a_cut(face, stored, chart, leaving, arriving, room)?;
+                cuts.push(ACutAcrossARing {
+                    back: across.the_other_way(),
+                    across,
+                });
+                continue;
+            };
+            let [reached, left] = round.corners;
+            let to_the_island = self.points_along_a_cut(
+                face,
+                stored,
+                chart,
+                leaving,
+                round.island.corners[reached],
+                room,
+            )?;
+            let from_the_island = self.points_along_a_cut(
+                face,
+                stored,
+                chart,
+                round.island.corners[left],
+                arriving,
+                room,
+            )?;
+            self.on_a_cut
+                .extend([round.island.points[reached], round.island.points[left]]);
+            cuts.push(ACutAcrossARing::round_an_island(
+                round,
+                arriving[1] > leaving[1],
+                &to_the_island,
+                &from_the_island,
+            ));
         }
 
         // Every stretch is put on the end **unwrapped against what is already
@@ -2524,15 +2635,27 @@ impl BuildingAMesh {
                 &up.between(along_the_top[step], along_the_top[next]),
                 whole_turn,
             );
-            one.take_in_unwrapped(&cuts[next], whole_turn);
+            one.take_in_unwrapped(&cuts[next].across, whole_turn);
             one.take_in_unwrapped(
                 &down
                     .between(along_the_bottom[step], along_the_bottom[next])
                     .the_other_way(),
                 whole_turn,
             );
-            one.take_in_unwrapped(&cuts[step].the_other_way(), whole_turn);
+            one.take_in_unwrapped(&cuts[step].back, whole_turn);
             patches.push(vec![one]);
+        }
+        let met: Vec<usize> = through.iter().flatten().map(|round| round.which).collect();
+        for (_, island) in islands
+            .iter()
+            .enumerate()
+            .filter(|(at, _)| !met.contains(at))
+        {
+            let Some((patch, moved)) = the_patch_an_island_lies_in(&patches, island, whole_turn)
+            else {
+                return Ok(None);
+            };
+            patches[patch].push(moved);
         }
         Ok(Some(patches))
     }
@@ -3752,6 +3875,63 @@ impl ACutUpToThePole {
     }
 }
 
+/// One of a ring's four cuts, as the patch behind it walks it across from the
+/// loop running up to the loop running down, and as the patch ahead of it
+/// walks it back: the points strictly between its two ends. The patch behind
+/// is the one at lower longitude. A straight cut is the same points both
+/// ways; one round an island goes round the island's two halves, one each way.
+struct ACutAcrossARing {
+    across: WalkedLoop,
+    back: WalkedLoop,
+}
+
+impl ACutAcrossARing {
+    /// A cut that reaches its island at one corner and leaves it from another,
+    /// the island's half on each side going to the patch on that side.
+    ///
+    /// **An island is walked clockwise in the chart**, since the material is
+    /// outside it, so from the corner the cut reaches round to the one it
+    /// leaves from, the way the island is walked, is the half on the left of
+    /// the way the cut runs. The patch behind, at lower longitude, is on the
+    /// cut's left where it runs up the chart and on its right where it runs
+    /// down.
+    fn round_an_island(
+        round: &ARingsCutRoundAnIsland,
+        runs_up_the_chart: bool,
+        to_the_island: &WalkedLoop,
+        from_the_island: &WalkedLoop,
+    ) -> Self {
+        let [reached, left] = round.corners;
+        let on_its_left = round.island.between(reached, left);
+        let on_its_right = round.island.between(left, reached).the_other_way();
+        let (behind, ahead) = if runs_up_the_chart {
+            (on_its_left, on_its_right)
+        } else {
+            (on_its_right, on_its_left)
+        };
+        let round_one_half = |half: &WalkedLoop| {
+            let mut cut = to_the_island.clone();
+            cut.take_in(half);
+            cut.take_in(from_the_island);
+            cut
+        };
+        Self {
+            across: round_one_half(&behind),
+            back: round_one_half(&ahead).the_other_way(),
+        }
+    }
+}
+
+/// Where one of a ring's cuts goes round an island: which of the ring's
+/// islands it is, the island moved by whole turns of longitude so that its
+/// middle is within half a turn of the corner the cut leaves from, and the
+/// island's corner the cut reaches it at and the one it leaves it from.
+struct ARingsCutRoundAnIsland {
+    which: usize,
+    island: WalkedLoop,
+    corners: [usize; 2],
+}
+
 /// What [`BuildingAMesh::a_cut_through_an_island`] needs to find a cut that
 /// stays inside the face: the cap, the rim corner the cut leaves from, the
 /// cap's islands and which of them the cut goes through, the corners the other
@@ -3771,17 +3951,7 @@ impl ACutThroughAnIsland<'_> {
     /// that its middle is within half a turn of the rim corner the cut leaves
     /// from.
     fn the_island_in_its_turn(&self) -> WalkedLoop {
-        let island = &self.islands[self.which];
-        let (least, most) = longitudes_of(island);
-        let by = whole_turns_between((least + most) / 2.0, self.leaving[0], self.whole);
-        WalkedLoop {
-            corners: island
-                .corners
-                .iter()
-                .map(|corner| [corner[0] - by, corner[1]])
-                .collect(),
-            ..island.clone()
-        }
+        in_the_turn_nearest(&self.islands[self.which], self.leaving[0], self.whole)
     }
 
     /// Whether the meridian up from the island's corner `top` to the pole
@@ -3999,6 +4169,28 @@ fn a_cap_on_a_ball_with_islands_in_it(stored: &Surface, walked: &[WalkedLoop]) -
     rims.len() == 1
         && !islands.is_empty()
         && stored.where_it_pinches() == Some(core::f64::consts::FRAC_PI_2)
+        && how_far_the_second_coordinate_wraps(stored).is_none()
+        && islands.iter().all(|island| {
+            it_passes_each_of_its_points_once(island)
+                && how_much_of_the_chart_this_loop_encloses(island) < 0.0
+        })
+}
+
+/// Whether a face's loops are a ring on a pipe with islands in it: two loops
+/// right round, and at least one more, each passing each of its points once
+/// with the material outside it.
+///
+/// **Only on a pipe**, a surface whose longitude wraps and which pinches
+/// nowhere, where this was reached and measured. A band on a ball or a cone
+/// beside an island is the same shape and is still refused, for want of a
+/// solid that reaches it, and so is one on a torus.
+fn a_ring_on_a_pipe_with_islands_in_it(stored: &Surface, walked: &[WalkedLoop]) -> bool {
+    let (rims, islands): (Vec<&WalkedLoop>, Vec<&WalkedLoop>) =
+        walked.iter().partition(|around| around.goes_right_round);
+    rims.len() == 2
+        && !islands.is_empty()
+        && how_far_the_longitude_wraps(stored).is_some()
+        && stored.where_it_pinches().is_none()
         && how_far_the_second_coordinate_wraps(stored).is_none()
         && islands.iter().all(|island| {
             it_passes_each_of_its_points_once(island)
@@ -4406,6 +4598,98 @@ fn the_sides_of_a_rim(cap: &WalkedLoop, whole: f64) -> impl Iterator<Item = [[f6
     })
 }
 
+/// Which island each of a ring's cuts goes round, from the corner it leaves
+/// at each end of `ends`: `None` for a cut whose straight line meets none.
+/// It reaches the island at the island's corner furthest towards the loop it
+/// leaves, and leaves it from the corner furthest towards the loop it arrives
+/// on. `None` overall when a cut meets two islands, two cuts meet one, or a
+/// cut that meets one runs level across the chart, where neither loop is the
+/// nearer to any corner.
+fn where_a_rings_cuts_go_round_islands(
+    ends: &[[[f64; 2]; 2]],
+    islands: &[WalkedLoop],
+    whole: f64,
+) -> Option<Vec<Option<ARingsCutRoundAnIsland>>> {
+    let mut met = vec![false; islands.len()];
+    let mut through = Vec::with_capacity(ends.len());
+    for &[leaving, arriving] in ends {
+        let meets: Vec<usize> = (0..islands.len())
+            .filter(|&at| a_leg_meets_an_island(&islands[at], [leaving, arriving], None, whole))
+            .collect();
+        let which = match meets[..] {
+            [] => {
+                through.push(None);
+                continue;
+            }
+            [which] if !met[which] && leaving[1] != arriving[1] => which,
+            _ => return None,
+        };
+        met[which] = true;
+        let island = in_the_turn_nearest(&islands[which], leaving[0], whole);
+        let towards_leaving = (leaving[1] - arriving[1]).signum();
+        let corners = [
+            the_corner_furthest(&island, towards_leaving),
+            the_corner_furthest(&island, -towards_leaving),
+        ];
+        through.push(Some(ARingsCutRoundAnIsland {
+            which,
+            island,
+            corners,
+        }));
+    }
+    Some(through)
+}
+
+/// Whether each leg of a ring's cuts round islands stays inside the face: it
+/// meets neither loop but at the corner it leaves, no side of its own island
+/// but the two at the corner it ends at, no other island, and no other cut,
+/// a whole turn either side as well.
+fn the_legs_round_islands_stay_inside_a_ring(
+    rims: [&WalkedLoop; 2],
+    islands: &[WalkedLoop],
+    ends: &[[[f64; 2]; 2]],
+    through: &[Option<ARingsCutRoundAnIsland>],
+    whole: f64,
+) -> bool {
+    let sides_of = |cut: usize| -> Vec<[[f64; 2]; 2]> {
+        let [leaving, arriving] = ends[cut];
+        match &through[cut] {
+            None => vec![[leaving, arriving]],
+            Some(round) => {
+                let [reached, left] = round.corners.map(|corner| round.island.corners[corner]);
+                vec![[leaving, reached], [arriving, left]]
+            }
+        }
+    };
+    through.iter().enumerate().all(|(cut, round)| {
+        let Some(round) = round else {
+            return true;
+        };
+        let [leaving, arriving] = ends[cut];
+        let [reached, left] = round.corners;
+        [(leaving, reached), (arriving, left)]
+            .into_iter()
+            .all(|(from, corner)| {
+                let leg = [from, round.island.corners[corner]];
+                rims.iter().all(|rim| !a_leg_meets_the_rim(rim, leg, whole))
+                    && !a_leg_meets_an_island(&round.island, leg, Some(corner), whole)
+                    && islands
+                        .iter()
+                        .enumerate()
+                        .filter(|&(at, _)| at != round.which)
+                        .all(|(_, other)| !a_leg_meets_an_island(other, leg, None, whole))
+                    && (0..ends.len())
+                        .filter(|&other| other != cut)
+                        .flat_map(sides_of)
+                        .all(|side| {
+                            [-whole, 0.0, whole]
+                                .iter()
+                                .all(|&by| !two_sides_meet(leg, side.map(|[x, y]| [x + by, y])))
+                        })
+            })
+    })
+}
+
 /// Whether a straight leg from a rim corner meets a side of the rim other
 /// than at that corner.
 fn a_leg_meets_the_rim(cap: &WalkedLoop, leg: [[f64; 2]; 2], whole: f64) -> bool {
@@ -4567,6 +4851,21 @@ fn in_the_same_turn_as(chain: &WalkedLoop, frame: &WalkedLoop, whole: f64) -> Wa
             .map(|corner| [corner[0] + by, corner[1]])
             .collect(),
         ..chain.clone()
+    }
+}
+
+/// An island moved by whole turns of longitude so that its middle is within
+/// half a turn of `longitude`.
+fn in_the_turn_nearest(island: &WalkedLoop, longitude: f64, whole: f64) -> WalkedLoop {
+    let (least, most) = longitudes_of(island);
+    let by = whole_turns_between((least + most) / 2.0, longitude, whole);
+    WalkedLoop {
+        corners: island
+            .corners
+            .iter()
+            .map(|corner| [corner[0] - by, corner[1]])
+            .collect(),
+        ..island.clone()
     }
 }
 
@@ -9949,29 +10248,33 @@ mod tests {
             ([[4.0, -3.0], [4.0, 3.0]], true),
             ([[4.0, 3.0], [3.0, 4.0]], false),
         ] {
-            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-            let bar = a_bar_with_a_wedge_cut_out_through_its_wall(&mut model, sides);
-            let [from, to] = sides;
-            let wedge = 25.0 * (to[1].atan2(to[0]) - from[1].atan2(from[0]));
-            let wanted = 250.0 * core::f64::consts::PI - wedge;
-            for length in [1.0, 0.1, 0.01] {
-                let measured = model
-                    .solid(bar)
-                    .expect("this model made the key")
-                    .measure(
-                        Deflection::of(length).expect("a length"),
-                        &Policy::certified(),
-                        &mut ProvenanceLog::new(),
-                    )
-                    .unwrap_or_else(|why| {
-                        panic!("through a cut {through_a_cut}, at {length}: refused {why:?}")
-                    });
-                assert!(
-                    (measured.volume() - wanted).abs() <= measured.volume_error(),
-                    "through a cut {through_a_cut}, at {length}: {} where {wanted} is wanted, allowed {}",
-                    measured.volume(),
-                    measured.volume_error()
-                );
+            for window_first in [false, true] {
+                let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+                let bar =
+                    a_bar_with_a_wedge_cut_out_through_its_wall(&mut model, sides, window_first);
+                let [from, to] = sides;
+                let wedge = 25.0 * (to[1].atan2(to[0]) - from[1].atan2(from[0]));
+                let wanted = 250.0 * core::f64::consts::PI - wedge;
+                for length in [1.0, 0.1, 0.01] {
+                    let case = format!(
+                        "through a cut {through_a_cut}, window first {window_first}, at {length}"
+                    );
+                    let measured = model
+                        .solid(bar)
+                        .expect("this model made the key")
+                        .measure(
+                            Deflection::of(length).expect("a length"),
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        )
+                        .unwrap_or_else(|why| panic!("{case}: refused {why:?}"));
+                    assert!(
+                        (measured.volume() - wanted).abs() <= measured.volume_error(),
+                        "{case}: {} where {wanted} is wanted, allowed {}",
+                        measured.volume(),
+                        measured.volume_error()
+                    );
+                }
             }
         }
     }
@@ -9984,10 +10287,14 @@ mod tests {
     /// ceiling are flat, and where it leaves the wall is a window of two
     /// straight lines up the wall and two arcs round it. The first of `sides`
     /// is the one less far round from `+x`, and the two are less than half a
-    /// turn apart.
+    /// turn apart. The wall's wires are its bottom circle, its top one and the
+    /// window, or with `window_first` the window, the top circle and the
+    /// bottom one: neither is the outer one, and the mesher puts its cuts
+    /// round the circle it is handed first.
     fn a_bar_with_a_wedge_cut_out_through_its_wall(
         model: &mut Model,
         [from, to]: [[f64; 2]; 2],
+        window_first: bool,
     ) -> crate::SolidKey {
         use Orientation::{Forward, Reversed};
         let flat = |at: Point, facing: Vector| {
@@ -10049,19 +10356,22 @@ mod tests {
             Surface::Plane(flat(Point::new(0.0, 0.0, 10.0), Vector::new(0.0, 0.0, 1.0))),
             &[&[(top_circle, Forward)]],
         );
+        let bottom_rim: &[_] = &[(bottom_circle, Forward)];
+        let top_rim: &[_] = &[(top_circle, Reversed)];
+        let window: &[_] = &[
+            (high_arc, Forward),
+            (up_to, Reversed),
+            (low_arc, Reversed),
+            (up_from, Forward),
+        ];
         let wall = face(
             model,
             Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe")),
-            &[
-                &[(bottom_circle, Forward)],
-                &[(top_circle, Reversed)],
-                &[
-                    (high_arc, Forward),
-                    (up_to, Reversed),
-                    (low_arc, Reversed),
-                    (up_from, Forward),
-                ],
-            ],
+            if window_first {
+                &[window, top_rim, bottom_rim]
+            } else {
+                &[bottom_rim, top_rim, window]
+            },
         );
         let floor = face(
             model,
