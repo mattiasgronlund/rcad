@@ -24,6 +24,18 @@ function the crate's own source defines, however the compiler inlined it —
 and reads each hit's inline chain with `addr2line -i` to tell whether it
 belongs to `SlowRun::is` or to something else.
 
+A call that leaves a `rcad_fuzz_timing` function for one outside it — a
+direct `call <name>` the compiler did not inline — is followed too, as far
+as it goes: into `core`, `alloc`, `std`, or back into another crate's own
+code, however many hops, as long as every hop is itself a direct call this
+scan can read a name for. A path that ends at a hooked function counts as
+an offender the same as a direct one, and prints as a chain, `crate
+function -> ... -> hooked function`, rather than just a count.
+`docs/decisions.d/273` §273.8 found one of these that this scan's old
+filter — "the symbol names `rcad_fuzz_timing`" — could never have caught:
+`how_slow_the_name_says`'s `split_once("us-")` reaching `bcmp` through
+`core`'s `StrSearcher::new`.
+
 **What this cannot see**: a call through a computed pointer — one where the
 register a `call *%reg` uses was not last set by a direct, in-function load
 of a hooked GOT slot. Most `jmp *%reg` of this kind is not that: it is the
@@ -45,7 +57,11 @@ need either a real points-to analysis of the binary or a runtime interposer
 that walks the caller's stack on every ASan memcmp hook — both bigger than
 this row. docs/decisions.d/273 says so and names the count for each target
 this script has been run on; docs/decisions.d/419 names the two buckets'
-counts for the five targets after the split added here (Q1444).
+counts for the five targets after the split added here (Q1444). The walk
+out of the crate stops at the same wall: a computed call met in a function
+it reaches, same as one met inside the crate, is counted in that bucket and
+not followed either — nothing past it is silently dropped, but nothing past
+it is named.
 
 usage: timing-hooked-calls.py <binary> [<binary> ...]
 exit 0 and a `clean` line per binary if none reaches a hook outside `is`;
@@ -98,17 +114,41 @@ def main():
 
     failed = False
     for binary in binaries:
-        hits, unmatched, computed, table_jumps = scan(binary)
+        hits, unmatched, computed, table_jumps, calls_out, all_functions = scan(
+            binary
+        )
+        timing_functions = {f for f in all_functions if "rcad_fuzz_timing" in f}
         timing_hits = [h for h in hits if "rcad_fuzz_timing" in h["function"]]
         timing_unmatched = [
             load for fn, load in unmatched if fn and "rcad_fuzz_timing" in fn
         ]
-        timing_computed = [c for c in computed if "rcad_fuzz_timing" in c[0]]
+        reachable = reachable_from(timing_functions, calls_out)
+        timing_computed = [c for c in computed if c[0] in reachable]
         timing_table_jumps = [
             c for c in table_jumps if "rcad_fuzz_timing" in c[0]
         ]
 
         offenders = [h for h in timing_hits if not belongs_to_is(binary, h)]
+
+        hits_by_function = {}
+        for hit in hits:
+            hits_by_function.setdefault(hit["function"], []).append(hit)
+        memo = {}
+        chain_offenders = []
+        for function in sorted(timing_functions):
+            found = reaches_hook(
+                function,
+                timing_functions,
+                hits_by_function,
+                calls_out,
+                binary,
+                memo,
+                set(),
+            )
+            if found is not None and found[1]:
+                hit, chain = found
+                chain_offenders.append((function, chain, hit))
+
         print(f"{binary}:")
         print(
             f"  calls from rcad_fuzz_timing to a hooked function: {len(timing_hits)}"
@@ -128,11 +168,17 @@ def main():
             f"table, staying inside their own function: "
             f"{len(timing_table_jumps)}"
         )
+        print(
+            f"  calls from rcad_fuzz_timing reaching a hooked function "
+            f"through another function outside the crate: {len(chain_offenders)}"
+        )
 
-        if offenders or timing_unmatched:
+        if offenders or timing_unmatched or chain_offenders:
             failed = True
             for hit in offenders:
                 print_hit(binary, hit, "reaches a hook outside SlowRun::is")
+            for function, chain, hit in chain_offenders:
+                print_chain_offender(function, chain, hit)
             for fn, load in [
                 (f, l) for f, l in unmatched if f and "rcad_fuzz_timing" in f
             ]:
@@ -150,9 +196,11 @@ def main():
 
 def scan(binary):
     """Every call/tail-jump to a hooked function, every unmatched load, every
-    computed-pointer call or tail jump that can leave its function, and every
-    tail jump recognised as a relative jump table that cannot, anywhere in
-    `binary`."""
+    computed-pointer call or tail jump that can leave its function, every
+    tail jump recognised as a relative jump table that cannot, every direct
+    call or tail jump's own target function (the call graph a transitive
+    walk follows), and every function seen as a disassembly header,
+    anywhere in `binary`."""
     names_at = {}
     for line in run(["nm", binary]).splitlines():
         parts = line.split()
@@ -176,6 +224,8 @@ def scan(binary):
     unmatched_loads = []
     computed_calls = []
     table_jumps = []
+    calls_out = {}
+    all_functions = set()
     function = None
     regs = {}
     open_loads = {}
@@ -185,6 +235,7 @@ def scan(binary):
             for load in open_loads.values():
                 unmatched_loads.append((function, load))
             function, regs, open_loads = header.group(2), {}, {}
+            all_functions.add(function)
             continue
         insn = re.match(r"^\s+([0-9a-f]+):\s+(\S+)\s*(.*)$", line)
         if not insn:
@@ -199,7 +250,10 @@ def scan(binary):
 
         if mnemonic in ("call", "jmp"):
             target, kind, table_jump = None, None, False
-            direct = re.match(r"^([0-9a-f]+) <", rest)
+            direct = re.match(r"^([0-9a-f]+) <([^>]+)>", rest)
+            if direct:
+                callee = direct.group(2).split("+")[0]
+                calls_out.setdefault(function, []).append((address, callee))
             if direct and int(direct.group(1), 16) in hooked_addresses:
                 target, kind = int(direct.group(1), 16), "direct"
             elif rest.startswith("*") and "(%rip)" in rest and comment:
@@ -288,7 +342,21 @@ def scan(binary):
     for load in open_loads.values():
         unmatched_loads.append((function, load))
 
-    return hits, unmatched_loads, computed_calls, table_jumps
+    return hits, unmatched_loads, computed_calls, table_jumps, calls_out, all_functions
+
+
+def reachable_from(starts, calls_out):
+    """Every function a function in `starts` reaches, directly or
+    transitively, by a direct call or tail jump — `starts` included."""
+    seen = set(starts)
+    pending = list(starts)
+    while pending:
+        function = pending.pop()
+        for _, callee in calls_out.get(function, []):
+            if callee not in seen:
+                seen.add(callee)
+                pending.append(callee)
+    return seen
 
 
 def belongs_to_is(binary, hit):
@@ -309,6 +377,53 @@ def belongs_to_is(binary, hit):
     return "is" in chain[0::2]
 
 
+def reaches_hook(
+    function, timing_functions, hits_by_function, calls_out, binary, memo, on_stack
+):
+    """`None`, or the `(hit, chain)` by which `function` reaches a hook
+    outside `timing_functions` — every function whose symbol names
+    `rcad_fuzz_timing` — not excused as `SlowRun::is`'s own: the first one
+    found by following `function`'s own direct calls out, however far,
+    into `core`, `alloc`, `std`, or back into another crate's own code
+    (`chain` the callees between `function` and the hit, nearest first). A
+    hit inside `timing_functions` itself is never this call's to report:
+    `main`'s own `offenders` already covers every one of those, on every
+    function in `timing_functions` in turn, so a chain that merely lands in
+    a second crate function would double it rather than add to it. A
+    computed call cannot be followed past, so a hook reachable only
+    through one stays unseen here, same as it always has inside the crate.
+    """
+    if function in memo:
+        return memo[function]
+    if function in on_stack:
+        return None
+    on_stack.add(function)
+    result = None
+    if function not in timing_functions:
+        for hit in hits_by_function.get(function, []):
+            if not belongs_to_is(binary, hit):
+                result = (hit, [])
+                break
+    if result is None:
+        for _, callee in calls_out.get(function, []):
+            found = reaches_hook(
+                callee,
+                timing_functions,
+                hits_by_function,
+                calls_out,
+                binary,
+                memo,
+                on_stack,
+            )
+            if found is not None:
+                hit, chain = found
+                result = (hit, [callee] + chain)
+                break
+    on_stack.discard(function)
+    memo[function] = result
+    return result
+
+
 def addr2line_chain(binary, address):
     text = run(["addr2line", "-i", "-f", "-C", "-e", binary, f"0x{address:x}"])
     return text.splitlines()
@@ -320,6 +435,13 @@ def print_hit(binary, hit, why):
     print(f"    in {demangle(hit['function'])}")
     for frame in paired_chain(binary, hit["address"]):
         print(f"      {frame}")
+
+
+def print_chain_offender(function, chain, hit):
+    print(f"  {hit['address']:x}  {hit['mnemonic']} -> {hit['target']}  "
+          f"via {hit['kind']}  reaches a hook outside SlowRun::is through:")
+    names = [function] + chain + list(hit["target"])
+    print(f"    {' -> '.join(demangle(name) for name in names)}")
 
 
 def paired_chain(binary, address):

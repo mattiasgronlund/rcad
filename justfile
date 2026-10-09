@@ -8205,6 +8205,16 @@ check-fuzz-overnight-selftest:
 # None of the four is a call to a hooked function, so the first two counts
 # this script prints stay 0 and the exit code stays 0; this recipe is purely
 # about the two counts the jump-table split adds.
+#
+# A second, separate fixture pins the transitive walk added for
+# docs/decisions.d/273 §273.8's second blind spot (Q1452): a function named
+# `rcad_fuzz_timing_reaches_out` whose only call is to a function outside
+# the crate, which itself calls `bcmp` — defined locally in the fixture, at
+# its own address, so `nm` resolves it the way a linked binary's `bcmp`
+# interceptor does. Before the walk, this scan never looked past a
+# function's own name, so it missed this the same way it missed
+# `how_slow_the_name_says`'s `split_once("us-")` reaching `bcmp` through
+# `core`'s `StrSearcher::new`.
 [doc("The jump-table split in timing-hooked-calls.py, pinned against a hand-assembled fixture.")]
 check-timing-hooked-calls-selftest:
     #!/usr/bin/env bash
@@ -8260,6 +8270,43 @@ check-timing-hooked-calls-selftest:
     printf '%s\n' "$got" | grep -qxF "$stays_line" || {
         echo "$got"
         echo "expected the line above (1: only the real jump table)"
+        exit 1
+    }
+
+    cat >"$dir/offender.s" <<'ASM'
+    .text
+    .globl rcad_fuzz_timing_reaches_out
+    .type rcad_fuzz_timing_reaches_out, @function
+    rcad_fuzz_timing_reaches_out:
+    call outside_the_crate_helper
+
+    .globl outside_the_crate_helper
+    .type outside_the_crate_helper, @function
+    outside_the_crate_helper:
+    call bcmp
+
+    .globl bcmp
+    .type bcmp, @function
+    bcmp:
+    ret
+    ASM
+    as "$dir/offender.s" -o "$dir/offender.o"
+
+    if offender_got=$(fuzz/timing-hooked-calls.py "$dir/offender.o"); then
+        echo "$offender_got"
+        echo "timing-hooked-calls.py exited 0 against a fixture where rcad_fuzz_timing calls out to a function that calls bcmp — it must count as an offender"
+        exit 1
+    fi
+    offender_line="  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 1"
+    printf '%s\n' "$offender_got" | grep -qxF "$offender_line" || {
+        echo "$offender_got"
+        echo "expected the line above (1: rcad_fuzz_timing_reaches_out, through outside_the_crate_helper, to bcmp)"
+        exit 1
+    }
+    chain_line="    rcad_fuzz_timing_reaches_out -> outside_the_crate_helper -> bcmp"
+    printf '%s\n' "$offender_got" | grep -qxF "$chain_line" || {
+        echo "$offender_got"
+        echo "expected the chain line above"
         exit 1
     }
 
