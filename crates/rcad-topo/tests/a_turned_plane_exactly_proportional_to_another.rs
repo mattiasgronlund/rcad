@@ -72,12 +72,16 @@ const THE_BALL_LESS_THE_TWO_PIECES: f64 =
 const THE_SKIN_THE_TWO_PIECES_LEAVE: f64 = 4.0 * PI * RADIUS * RADIUS - 2.0 * ONE_PIECES_SKIN;
 
 /// The two turns that put a block's face `y = 0` on `x = y` spelled with
-/// `c = 0.707 106 781 186 547 5`.
+/// `c = 0.707 106 781 186 547 5`. About `x` instead of `z` they put a face
+/// `z = 0` on `y = z` spelled `(0, c, −c, 0)` the same way.
 const TO_THE_SHORTER_SPELLING: [f64; 2] = [0.29, 0.495_398_163_397_448_4];
 
 /// The two turns that put it there spelled with `c′ = 0.707 106 781 186 547 6`,
 /// which is [`FRAC_1_SQRT_2`] and the `f64` just above `c`.
 const TO_THE_LONGER_SPELLING: [f64; 2] = [0.45, 0.335_398_163_397_448_05];
+
+/// How long the bar a ball sits on is, from the cap through the ball's centre.
+const THE_BARS_LENGTH: f64 = 8.0;
 
 /// Before its turns, the block whose face on `x = y` holds the whole circle a
 /// round solid is cut in: `12 × 6 × 20`, every other face of it at least six
@@ -100,7 +104,7 @@ const THE_FAR_BLOCKS_VOLUME: f64 = 700.0;
 fn two_turns_put_a_face_on_one_plane_with_coefficients_an_ulp_apart_in_scale() {
     let mut model = a_model();
     let (_, [left, right]) = the_ball_and_two_blocks_on_one_side(&mut model, true);
-    let [shorter, longer] = [left, right].map(|block| the_face_on_x_equals_y(&model, block));
+    let [shorter, longer] = [left, right].map(|block| the_face_through_the_origin(&model, block));
     let c = f64::from_bits(FRAC_1_SQRT_2.to_bits() - 1);
     assert_eq!(shorter.coefficients(), [-c, c, 0.0, 0.0]);
     assert_eq!(
@@ -326,6 +330,105 @@ fn two_blocks_overlapping_on_a_plane_spelled_an_ulp_apart_in_scale_are_refused_o
     }
 }
 
+/// **A ball on a bar's cap, the cap's plane spelled one way by the bar and the
+/// other by a block that touches neither.** The bar is of the ball's radius,
+/// eight long, with the ball's centre on its bottom cap, so the ball's half on
+/// the bar's side is inside the bar and the cap's rim is a great circle of the
+/// ball as well as the end of the bar's wall: Q1118's dome on a shaft. The rim
+/// is where three surfaces meet, and the faces along it name it by two pairs,
+/// the cap's plane with the bar's wall and the plane with the ball. Both pairs
+/// are spelled with the plane as each face's side was cut, and the block's face
+/// on `y = z`, which cuts the ball's skin in that same circle, spells it with the
+/// other of `c` and `c′`. Joining the two names only where the two spellings were
+/// one or each other's negation, every fuse with the bar spelling the plane with
+/// `c′` and the block with `c` was refused `ResultIsNotManifold { count: 1 }`,
+/// whichever of the two is named first and whichever side the ball is on. The
+/// bar spelling it with `c` and the block with `c′` answered, and so did both
+/// spelling it with `c`.
+///
+/// The ball's half outside the bar is `250π/3` behind a skin of `50π`; the bar
+/// holds `200π` behind a wall of `80π`, and the block `20 × 3.5 × 20`.
+#[test]
+fn a_ball_on_a_bars_cap_a_block_spells_an_ulp_apart_in_scale() {
+    let c = f64::from_bits(FRAC_1_SQRT_2.to_bits() - 1);
+    let half_the_ball = 2.0 * PI * RADIUS * RADIUS * RADIUS / 3.0;
+    let its_skin = 2.0 * PI * RADIUS * RADIUS;
+    let the_bar = PI * RADIUS * RADIUS * THE_BARS_LENGTH;
+    let the_bars_wall = 2.0 * PI * RADIUS * THE_BARS_LENGTH;
+    let the_block = 1400.0;
+    for (bar_turns, block_turns, [the_bars_c, the_blocks_c]) in [
+        (
+            TO_THE_LONGER_SPELLING,
+            TO_THE_SHORTER_SPELLING,
+            [FRAC_1_SQRT_2, c],
+        ),
+        (
+            TO_THE_SHORTER_SPELLING,
+            TO_THE_LONGER_SPELLING,
+            [c, FRAC_1_SQRT_2],
+        ),
+    ] {
+        let mut model = a_model();
+        let [bar, block] =
+            the_bar_and_the_block_on_y_equals_z(&mut model, bar_turns, block_turns, true);
+        assert_eq!(
+            the_face_through_the_origin(&model, bar).coefficients(),
+            [0.0, the_bars_c, -the_bars_c, 0.0]
+        );
+        assert_eq!(
+            the_face_through_the_origin(&model, block).coefficients(),
+            [0.0, the_blocks_c, -the_blocks_c, 0.0]
+        );
+
+        for bar_first in [true, false] {
+            for ball_first in [true, false] {
+                let fuse = |rule| {
+                    let mut model = a_model();
+                    let ball = model
+                        .add_ball(RADIUS, &Isometry::identity())
+                        .expect("a ball of radius five");
+                    let others = the_bar_and_the_block_on_y_equals_z(
+                        &mut model,
+                        bar_turns,
+                        block_turns,
+                        bar_first,
+                    );
+                    let answer = fused(&mut model, ball_first, ball, others, rule);
+                    (answer.len(), volume_of(&model, &answer))
+                };
+
+                let (count, volume) = fuse(Rule::Intersection);
+                assert_eq!(count, 1, "only the bar holds any of the ball");
+                measures(volume, half_the_ball, Wall::Outside(its_skin));
+
+                let (count, volume) = fuse(Rule::Union);
+                assert_eq!(count, 2, "the block stands apart");
+                measures(
+                    volume,
+                    the_bar + half_the_ball + the_block,
+                    Wall::Outside(the_bars_wall + its_skin),
+                );
+
+                let (count, volume) = fuse(Rule::Difference);
+                if ball_first {
+                    assert_eq!(count, 1, "the dome on the cap is one solid");
+                    measures(volume, half_the_ball, Wall::Outside(its_skin));
+                } else {
+                    assert_eq!(count, 2, "the block stands apart");
+                    measures(
+                        volume,
+                        the_bar - half_the_ball + the_block,
+                        Wall::OutsideAndAHole {
+                            outside: the_bars_wall,
+                            hole: its_skin,
+                        },
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Which way a round wall of this area bounds the solid being measured.
 enum Wall {
     /// The solid is on the ball's side of it, so its mesh measures under.
@@ -333,6 +436,9 @@ enum Wall {
     /// The solid is round it, so its mesh leaves the hole too small and measures
     /// over.
     AHole(f64),
+    /// One wall of each kind, so the mesh measures under by no more than the
+    /// first's share and over by no more than the second's.
+    OutsideAndAHole { outside: f64, hole: f64 },
 }
 
 /// A round solid that `x = y` cuts in one whole closed curve, and what each
@@ -380,15 +486,17 @@ fn the_ball_and_two_blocks_on_one_side(
     (ball, blocks)
 }
 
-/// The plane of `block`'s face through the turns' axis, which is `x = y`.
-fn the_face_on_x_equals_y(model: &Model, block: SolidKey) -> rcad_geom::Plane {
+/// The plane of `solid`'s face through the origin, which every turn here is
+/// about: `x = y` for a block turned about `z`, `y = z` for a solid turned about
+/// `x`.
+fn the_face_through_the_origin(model: &Model, solid: SolidKey) -> rcad_geom::Plane {
     model
-        .solid(block)
+        .solid(solid)
         .expect("this model made the key")
         .faces()
         .map(|face| face.plane())
         .find(|plane| plane.coefficients()[3] == 0.0)
-        .expect("each block has a face through the turn's axis")
+        .expect("each solid turned here has a face through the turns' axis")
 }
 
 /// Fuse the round solid `round.made` builds with [`THE_NEAR_BLOCK`] and
@@ -400,11 +508,11 @@ fn every_fuse_with_the_two_blocks_answers(round: &CutWhole) {
     let [near, far] = the_near_and_the_far_block(&mut model, true);
     let c = f64::from_bits(FRAC_1_SQRT_2.to_bits() - 1);
     assert_eq!(
-        the_face_on_x_equals_y(&model, near).coefficients(),
+        the_face_through_the_origin(&model, near).coefficients(),
         [-c, c, 0.0, 0.0]
     );
     assert_eq!(
-        the_face_on_x_equals_y(&model, far).coefficients(),
+        the_face_through_the_origin(&model, far).coefficients(),
         [-FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0, 0.0]
     );
 
@@ -509,30 +617,69 @@ fn block(model: &mut Model, [low, high]: [[f64; 2]; 2], turns: [f64; 2]) -> Soli
             &Isometry::translation(Vector::new(0.0, 0.0, -10.0)).expect("a finite placement"),
         )
         .expect("building a box needs no decision");
+    turned(model, solid, &Axis::z(), turns);
+    solid
+}
+
+/// A bar of the ball's radius standing on its bottom cap at the origin, and a
+/// `20 × 3.5 × 20` block standing on the plane of that cap from six and a half
+/// to ten off the bar's axis, the bar turned about `x` by `bar_turns` and the
+/// block by `block_turns` to put the cap on `y = z`; the bar first when
+/// `bar_first`.
+///
+/// Neither is slid, so each one's face on `y = z` keeps an offset of exactly
+/// zero. The block is clear of the bar by a unit and a half, and of the ball
+/// about the origin by as much.
+fn the_bar_and_the_block_on_y_equals_z(
+    model: &mut Model,
+    bar_turns: [f64; 2],
+    block_turns: [f64; 2],
+    bar_first: bool,
+) -> [SolidKey; 2] {
+    let bar = model
+        .add_round_bar(RADIUS, THE_BARS_LENGTH, &Isometry::identity())
+        .expect("a bar of radius five");
+    let rectangle =
+        ProfileBuilder::new(vec![[-10.0, 6.5], [10.0, 6.5], [10.0, 10.0], [-10.0, 10.0]])
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a rectangle");
+    let block = model
+        .add_extrusion(&rectangle, 20.0, &Isometry::identity())
+        .expect("building a box needs no decision");
+    turned(model, bar, &Axis::x(), bar_turns);
+    turned(model, block, &Axis::x(), block_turns);
+    if bar_first {
+        [bar, block]
+    } else {
+        [block, bar]
+    }
+}
+
+/// Turn `solid` about `axis` by each of `turns` in order.
+fn turned(model: &mut Model, solid: SolidKey, axis: &Axis, turns: [f64; 2]) {
     for angle in turns {
         model
             .place_solid(
                 solid,
-                &Isometry::rotation(&Axis::z(), angle).expect("a finite turn"),
+                &Isometry::rotation(axis, angle).expect("a finite turn"),
             )
             .expect("this model made the key");
     }
-    solid
 }
 
-/// Fuse `round` with the two blocks, `round` first when `round_first`, under a
+/// Fuse `round` with `others`, `round` first when `round_first`, under a
 /// certified policy, and insist the model it leaves is valid.
 fn fused(
     model: &mut Model,
     round_first: bool,
     round: SolidKey,
-    blocks: [SolidKey; 2],
+    others: [SolidKey; 2],
     rule: Rule,
 ) -> Vec<SolidKey> {
     let (arguments, tools) = if round_first {
-        (vec![round], blocks.to_vec())
+        (vec![round], others.to_vec())
     } else {
-        (blocks.to_vec(), vec![round])
+        (others.to_vec(), vec![round])
     };
     let answer = model
         .fuse(
@@ -569,185 +716,17 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
         .sum()
 }
 
-mod rings;
-
-#[test]
-fn probe_q1223() {
-    let rules = [Rule::Intersection, Rule::Union, Rule::Difference];
-    let say = |what: &str, model: &Model, answer: &rcad_topo::Result<rcad_topo::Fused>| match answer
-    {
-        Ok(done) => {
-            let solids = done.solids().to_vec();
-            let valid = model
-                .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                .is_ok();
-            let volume: f64 = solids
-                .iter()
-                .map(|&solid| {
-                    model
-                        .solid(solid)
-                        .unwrap()
-                        .measure(
-                            Deflection::of(DEFLECTION).unwrap(),
-                            &Policy::certified(),
-                            &mut ProvenanceLog::new(),
-                        )
-                        .map(|m| m.volume())
-                        .unwrap_or(f64::NAN)
-                })
-                .sum();
-            eprintln!(
-                "{what}: {} solids, volume {volume}, valid {valid}",
-                solids.len()
-            );
-        }
-        Err(why) => eprintln!("{what}: refused {why:?}"),
-    };
-    // Shape B: the half bend unturned, the near block and the far block.
-    for near_first in [true, false] {
-        for bend_first in [true, false] {
-            for rule in rules {
-                let mut model = a_model();
-                let bend =
-                    rings::a_bend_turned_and_written_out(&mut model, 4.0, 1.0, 2, 0).unwrap();
-                let blocks = the_near_and_the_far_block(&mut model, near_first);
-                let (arguments, tools) = if bend_first {
-                    (vec![bend], blocks.to_vec())
-                } else {
-                    (blocks.to_vec(), vec![bend])
-                };
-                let answer = model.fuse(
-                    &arguments,
-                    &tools,
-                    rule,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                );
-                say(
-                    &format!("B near_first {near_first} bend_first {bend_first} {rule:?}"),
-                    &model,
-                    &answer,
-                );
-            }
-        }
-    }
-    // Shape A: the half bend turned onto x = y, the near block flush against its caps.
-    for (bend_turns, block_turns) in [
-        (TO_THE_LONGER_SPELLING, TO_THE_SHORTER_SPELLING),
-        (TO_THE_SHORTER_SPELLING, TO_THE_LONGER_SPELLING),
-        (TO_THE_SHORTER_SPELLING, TO_THE_SHORTER_SPELLING),
-    ] {
-        for bend_first in [true, false] {
-            for rule in rules {
-                let mut model = a_model();
-                let bend =
-                    rings::a_bend_turned_and_written_out(&mut model, 4.0, 1.0, 2, 0).unwrap();
-                for angle in bend_turns {
-                    model
-                        .place_solid(bend, &Isometry::rotation(&Axis::z(), angle).unwrap())
-                        .unwrap();
-                }
-                let near = block(&mut model, THE_NEAR_BLOCK, block_turns);
-                let (arguments, tools) = if bend_first {
-                    (vec![bend], vec![near])
-                } else {
-                    (vec![near], vec![bend])
-                };
-                let answer = model.fuse(
-                    &arguments,
-                    &tools,
-                    rule,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                );
-                say(
-                    &format!("A bend {bend_turns:?} bend_first {bend_first} {rule:?}"),
-                    &model,
-                    &answer,
-                );
-            }
-        }
-    }
-    // Leg 2: a bar of the ball's radius whose cap is on x = y, the ball, the far block.
-    for (bar_turns, block_turns) in [
-        (TO_THE_SHORTER_SPELLING, TO_THE_LONGER_SPELLING),
-        (TO_THE_LONGER_SPELLING, TO_THE_SHORTER_SPELLING),
-    ] {
-        let mut model = a_model();
-        let bar = model
-            .add_round_bar(
-                RADIUS,
-                8.0,
-                &Isometry::quarter_turns(&Axis::x(), 1).unwrap(),
-            )
-            .unwrap();
-        for angle in bar_turns {
-            model
-                .place_solid(bar, &Isometry::rotation(&Axis::z(), angle).unwrap())
-                .unwrap();
-        }
-        for face in model.solid(bar).unwrap().faces() {
-            if let rcad_geom::Surface::Plane(_) = face.surface() {
-                eprintln!("bar {bar_turns:?} cap {:?}", face.plane().coefficients());
-            }
-        }
-        for ball_first in [true, false] {
-            for bar_first in [true, false] {
-                for rule in rules {
-                    let mut model = a_model();
-                    let ball = model.add_ball(RADIUS, &Isometry::identity()).unwrap();
-                    let bar = model
-                        .add_round_bar(
-                            RADIUS,
-                            8.0,
-                            &Isometry::quarter_turns(&Axis::x(), 1).unwrap(),
-                        )
-                        .unwrap();
-                    for angle in bar_turns {
-                        model
-                            .place_solid(bar, &Isometry::rotation(&Axis::z(), angle).unwrap())
-                            .unwrap();
-                    }
-                    let far = block(&mut model, THE_FAR_BLOCK, block_turns);
-                    let others = if bar_first {
-                        vec![bar, far]
-                    } else {
-                        vec![far, bar]
-                    };
-                    let (arguments, tools) = if ball_first {
-                        (vec![ball], others)
-                    } else {
-                        (others, vec![ball])
-                    };
-                    let answer = model.fuse(
-                        &arguments,
-                        &tools,
-                        rule,
-                        &Policy::certified(),
-                        &mut ProvenanceLog::new(),
-                    );
-                    say(
-                        &format!(
-                            "2 bar {bar_turns:?} ball_first {ball_first} bar_first {bar_first} {rule:?}"
-                        ),
-                        &model,
-                        &answer,
-                    );
-                }
-            }
-        }
-    }
-}
-
 /// Insist a volume is off its closed form on the side `wall` says, by no more
 /// than the wall's area times [`DEFLECTION`].
 fn measures(found: f64, closed_form: f64, wall: Wall) {
-    let (off, area) = match wall {
-        Wall::Outside(area) => (closed_form - found, area),
-        Wall::AHole(area) => (found - closed_form, area),
+    let (under, over) = match wall {
+        Wall::Outside(area) => (area, 0.0),
+        Wall::AHole(area) => (0.0, area),
+        Wall::OutsideAndAHole { outside, hole } => (outside, hole),
     };
+    let off = closed_form - found;
     assert!(
-        (0.0..=area * DEFLECTION).contains(&off),
-        "measured {found}, closed form {closed_form}, {off} off on the wrong side or too far"
+        (-over * DEFLECTION..=under * DEFLECTION).contains(&off),
+        "measured {found}, closed form {closed_form}, {off} under it, on the wrong side or too far"
     );
 }
