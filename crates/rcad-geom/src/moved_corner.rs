@@ -152,34 +152,52 @@ pub const SURFACE_AFTER_SHIFTING_ROUNDOFF: f64 = 8.0 * f64::EPSILON;
 /// [`Cause::ConstructedPoint`] — **representation wobble, which refuses
 /// nothing** (§17.2), rather than an approximation anyone chose.
 ///
-/// # A shift that rounds nothing gives the moved corner exactly
+/// # A turn of a cube and a shift that round nothing give the moved corner exactly
 ///
 /// The box is there because the moved corner and the moved surfaces are each
 /// rounded on the way, separately, so what the corner was to its surfaces
 /// before the move it is only nearly afterwards. When nothing was rounded that
 /// is not so, and a box would turn an exact answer into a refusal: a bar moved
 /// by whole numbers whose seam lies on a block's wall asked *side of plane*
-/// about a box round `(0, 2, 1)` on `x = 0`, where the answer is `Zero`.
+/// about a box round `(0, 2, 1)` on `x = 0`, where the answer is `Zero`; and a
+/// bar turned three quarter turns about its own axis and halved through it was
+/// refused the order round a cap circle that starts exactly at the corner it
+/// boxed (Q1504).
 ///
 /// So the corner comes back as the exact point, with a wobble of zero, when
-/// **the moved corner is the stored corner plus the movement's shift, and every
-/// moved surface is its stored surface carried along by that shift**, each sum
-/// checked exactly rather than against a tolerance. That is sufficient and not
-/// merely plausible. The side a surface puts a point on is the sign of one
-/// expression in their numbers — `n·p − d` for a plane, `|p − c|² − r²` for a
-/// ball, and the same with the axis origin or the apex for the rest — and
-/// adding one vector to the point and to the surface's place, with `d` gaining
-/// `n·t`, leaves every one of those expressions exactly the number it was. So
-/// every question a surface round the corner answers about the moved corner is
-/// answered as it was before the move, whatever that answer was; the move added
-/// nothing, and there is nothing for a box to cover. It does not rest on the
-/// stored corner being exactly on its surfaces, which the model does not
-/// promise (§75.6), and it does not rest on how [`Surface::transformed`] does
-/// its arithmetic, only on what it handed back.
+/// **the moved corner is the stored corner turned by a turn of a cube and then
+/// shifted by the movement's shift, and every moved surface is its stored
+/// surface carried along by that same turn and shift**, each checked exactly
+/// rather than against a tolerance. One of the 24 turns that take a cube onto
+/// itself sends each axis onto an axis, so turning a point or a direction by it
+/// moves the coordinates about and negates some, and the check does that itself
+/// rather than trusting anyone else's arithmetic to. What is left that can round
+/// is each sum the shift adds and the dot product a plane's offset gains, and
+/// each is checked exactly. No turn at all is one of the 24, so a plain shift is
+/// the same check.
 ///
-/// A movement that turns fails the first sum for every corner off its axis, so
-/// in practice this is a shift and nothing else. A shift whose sums round, or
-/// whose products do, keeps its box: that is what the box is for.
+/// That is sufficient and not merely plausible. The side a surface puts a point
+/// on is the sign of one expression in their numbers — `n·p − d` for a plane,
+/// `|p − c|² − r²` for a ball, and for the rest the same lengths and dot
+/// products taken from the axis origin or the apex, along the axis direction.
+/// Turning the point and everything that places and points the surface by one
+/// turn changes no length and no dot product, and then adding one vector to the
+/// point and to the surface's place, with `d` gaining `n·t`, changes no
+/// difference. So every one of those expressions is exactly the number it was,
+/// and every question a surface round the corner answers about the moved corner
+/// is answered as it was before the move, whatever that answer was; the move
+/// added nothing, and there is nothing for a box to cover. It does not rest on
+/// the stored corner being exactly on its surfaces, which the model does not
+/// promise (§75.6), and it does not rest on how [`Isometry`] or
+/// [`Surface::transformed`] do their arithmetic, only on what they handed back.
+/// Nor does it rest on the turn checked against being the movement's own: it is
+/// read off where the movement sends the three axes, and whichever turn the
+/// handed-back numbers pass the checks against is a turn the argument holds for.
+///
+/// A movement whose turn is not a turn of a cube is checked as a shift alone,
+/// which it passes only where its turn left the corner and every surface round
+/// it exactly where they were. A move whose sums round, or whose products do,
+/// keeps its box whatever its turn: that is what the box is for.
 ///
 /// # Errors
 ///
@@ -199,7 +217,7 @@ pub fn where_a_corner_lands_after_moving<'a>(
     }
     let on: Vec<&Surface> = on.into_iter().collect();
     let moved = movement.apply_to_point(corner);
-    if a_shift_that_rounded_nothing(corner, moved, &on, movement) {
+    if a_move_that_rounded_nothing(corner, moved, &on, movement) {
         return Ok((
             PredicatePoint::from(moved.coordinates()),
             Approximation::new(0.0, Cause::ConstructedPoint),
@@ -226,65 +244,153 @@ pub fn where_a_corner_lands_after_moving<'a>(
 }
 
 /// Whether `movement` took the corner and every surface round it to exactly
-/// themselves shifted by its shift, with nothing rounded on the way.
-fn a_shift_that_rounded_nothing(
+/// themselves turned by a turn of a cube and then shifted by its shift, with
+/// nothing rounded on the way.
+///
+/// The turn is the one the movement sends the three axes to, and no turn at all
+/// when that is not a turn of a cube: a movement that turns some other way can
+/// still leave a corner and the surfaces round it where a shift alone puts them.
+fn a_move_that_rounded_nothing(
     corner: Point,
     moved: Point,
     on: &[&Surface],
     movement: &Isometry,
 ) -> bool {
+    let turn = TurnOfACube::the_one_sending_the_axes_where(movement).unwrap_or(TurnOfACube::NONE);
     let by = movement.translation_part();
-    is_exactly_shifted(corner, moved, by)
+    is_exactly_moved(corner, moved, turn, by)
         && on
             .iter()
-            .all(|surface| is_carried_exactly_by_its_shift(surface, movement, by))
+            .all(|surface| is_carried_exactly(surface, movement, turn, by))
 }
 
-/// Whether `after` is `before` plus `by`, each coordinate summed without a
-/// rounding.
-fn is_exactly_shifted(before: Point, after: Point, by: Vector) -> bool {
-    let [before, after, by] = [before.coordinates(), after.coordinates(), by.components()];
+/// One of the 24 turns that take a cube onto itself, as what it does to a
+/// vector: each component of the turned vector is one component of the vector,
+/// negated or not, so turning by it rounds nothing.
+///
+/// `isometry.rs` keeps its own, by the signs of a quaternion's coefficients.
+/// This one is read off where a movement sends the axes, so that what is
+/// checked here does not rest on how a movement stores its turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TurnOfACube([(usize, bool); 3]);
+
+impl TurnOfACube {
+    /// No turn at all, which is one of the 24.
+    const NONE: Self = Self([(0, false), (1, false), (2, false)]);
+
+    /// The turn of a cube `movement` sends `x`, `y` and `z` through, if it sends
+    /// each onto an axis, exactly and without a mirror.
+    fn the_one_sending_the_axes_where(movement: &Isometry) -> Option<Self> {
+        let mut rows = [None; 3];
+        let axes = [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+        ];
+        for (from, axis) in axes.into_iter().enumerate() {
+            let lands = movement.apply_to_vector(axis).components();
+            let mut onto = lands
+                .iter()
+                .enumerate()
+                .filter(|(_, component)| **component != 0.0);
+            let (Some((row, &component)), None) = (onto.next(), onto.next()) else {
+                return None;
+            };
+            if component.abs() != 1.0 || rows[row].is_some() {
+                return None;
+            }
+            rows[row] = Some((from, component < 0.0));
+        }
+        let turn = Self(
+            rows.map(|row| row.expect("three axes sent onto three different axes fill every row")),
+        );
+        turn.does_not_mirror().then_some(turn)
+    }
+
+    /// Whether the swap's determinant is `+1`: an even number of swapped pairs
+    /// and negations between them.
+    fn does_not_mirror(self) -> bool {
+        let [a, b, c] = self.0.map(|(from, _)| from);
+        let out_of_order = usize::from(a > b) + usize::from(a > c) + usize::from(b > c);
+        let negated = self.0.iter().filter(|(_, negated)| *negated).count();
+        (out_of_order + negated) % 2 == 0
+    }
+
+    /// `components` turned, with nothing rounded.
+    fn turned(self, components: [f64; 3]) -> [f64; 3] {
+        self.0.map(|(from, negated)| {
+            if negated {
+                -components[from]
+            } else {
+                components[from]
+            }
+        })
+    }
+
+    fn turned_vector(self, vector: Vector) -> Vector {
+        Vector::from(self.turned(vector.components()))
+    }
+}
+
+/// Whether `after` is `before` turned by `turn` and then plus `by`, each
+/// coordinate summed without a rounding.
+fn is_exactly_moved(before: Point, after: Point, turn: TurnOfACube, by: Vector) -> bool {
+    let [before, after, by] = [
+        turn.turned(before.coordinates()),
+        after.coordinates(),
+        by.components(),
+    ];
     (0..3).all(|axis| {
         let (sum, lost) = two_sum(before[axis], by[axis]);
         lost == 0.0 && sum == after[axis]
     })
 }
 
-/// Whether `surface`, moved, is the same surface with its place moved by
-/// exactly `by` and nothing else touched.
+/// Whether `surface`, moved, is the same surface with everything that points it
+/// turned by exactly `turn`, its place moved by exactly `turn` and `by`, and
+/// nothing else touched.
 ///
-/// Every number a surface stores is compared, the ones a shift must leave alone
+/// Every number a surface stores is compared, the ones a move must leave alone
 /// as well as the ones it moves, so that the answer is about what
 /// [`Surface::transformed`] handed back and not about how it got there.
-fn is_carried_exactly_by_its_shift(surface: &Surface, movement: &Isometry, by: Vector) -> bool {
+fn is_carried_exactly(
+    surface: &Surface,
+    movement: &Isometry,
+    turn: TurnOfACube,
+    by: Vector,
+) -> bool {
     match surface {
         Surface::Plane(flat) => {
             let moved = flat.transformed(movement);
-            moved.normal() == flat.normal()
-                && is_the_offset_it_should_have(moved.offset(), flat.offset(), flat.normal(), by)
+            let normal = turn.turned_vector(flat.normal());
+            moved.normal() == normal
+                && is_the_offset_it_should_have(moved.offset(), flat.offset(), normal, by)
         }
         Surface::Sphere(ball) => {
             let moved = ball.transformed(movement);
-            moved.radius() == ball.radius() && is_exactly_shifted(ball.centre(), moved.centre(), by)
+            moved.radius() == ball.radius()
+                && is_exactly_moved(ball.centre(), moved.centre(), turn, by)
         }
         Surface::Cylinder(pipe) => {
             let moved = pipe.transformed(movement);
-            moved.radius() == pipe.radius() && is_the_axis_shifted(pipe.axis(), moved.axis(), by)
+            moved.radius() == pipe.radius()
+                && is_the_axis_moved(pipe.axis(), moved.axis(), turn, by)
         }
         Surface::Cone(cone) => {
             let moved = cone.transformed(movement);
-            moved.slope() == cone.slope() && is_the_axis_shifted(cone.axis(), moved.axis(), by)
+            moved.slope() == cone.slope() && is_the_axis_moved(cone.axis(), moved.axis(), turn, by)
         }
         Surface::Torus(ring) => {
             let moved = ring.transformed(movement);
             moved.ring_radius() == ring.ring_radius()
                 && moved.tube_radius() == ring.tube_radius()
-                && is_the_axis_shifted(ring.axis(), moved.axis(), by)
+                && is_the_axis_moved(ring.axis(), moved.axis(), turn, by)
         }
     }
 }
 
-/// Whether a plane shifted by `by` holds exactly `offset + normal · by`.
+/// Whether a plane whose normal was turned to `normal` and then shifted by `by`
+/// holds exactly `offset + normal · by`.
 ///
 /// Summed through [`Exact`], so a dot product that rounds anywhere on the way
 /// is caught whichever order it was worked out in.
@@ -307,11 +413,11 @@ fn is_the_offset_it_should_have(moved: f64, offset: f64, normal: Vector, by: Vec
     }
 }
 
-/// Whether an axis moved to `after` is `before` with its origin moved by
-/// exactly `by` and its direction untouched.
-fn is_the_axis_shifted(before: Axis, after: Axis, by: Vector) -> bool {
-    after.direction() == before.direction()
-        && is_exactly_shifted(before.origin(), after.origin(), by)
+/// Whether an axis moved to `after` is `before` with its direction turned by
+/// exactly `turn` and its origin turned and then moved by exactly `by`.
+fn is_the_axis_moved(before: Axis, after: Axis, turn: TurnOfACube, by: Vector) -> bool {
+    after.direction() == turn.turned_vector(before.direction())
+        && is_exactly_moved(before.origin(), after.origin(), turn, by)
 }
 
 /// The largest magnitude anything in this move was worked out from.
@@ -470,10 +576,50 @@ mod tests {
     #[test]
     fn a_whole_number_shift_moves_a_corner_on_any_square_surface_exactly() {
         let whole = Isometry::translation(Vector::new(-7.0, 11.0, 5.0)).expect("a finite shift");
+        for (corner, surface) in a_corner_on_every_kind_of_square_surface() {
+            let (landed, wobble) = where_a_corner_lands_after_moving(corner, [&surface], &whole)
+                .expect("finite numbers");
+            let [x, y, z] = corner.coordinates();
+            assert_eq!(
+                landed,
+                PredicatePoint::from([x - 7.0, y + 11.0, z + 5.0]),
+                "{corner:?} on {surface:?}"
+            );
+            assert_eq!(wobble.magnitude(), 0.0);
+        }
+    }
+
+    /// A quarter turn about `x` and then a whole-number shift hands back the
+    /// exact corner round every kind of surface there is, as the shift alone
+    /// does: the turn sends `(x, y, z)` to `(x, −z, y)`, which rounds nothing.
+    #[test]
+    fn a_quarter_turn_and_a_whole_number_shift_move_a_corner_on_any_square_surface_exactly() {
+        let turned = Isometry::translation(Vector::new(-7.0, 11.0, 5.0))
+            .expect("a finite shift")
+            .compose(&Isometry::quarter_turns(&Axis::x(), 1).expect("a turn about x"));
+        for (corner, surface) in a_corner_on_every_kind_of_square_surface() {
+            let (landed, wobble) = where_a_corner_lands_after_moving(corner, [&surface], &turned)
+                .expect("finite numbers");
+            let [x, y, z] = corner.coordinates();
+            assert_eq!(
+                landed,
+                PredicatePoint::from([x - 7.0, -z + 11.0, y + 5.0]),
+                "{corner:?} on {surface:?}"
+            );
+            assert_eq!(wobble.magnitude(), 0.0, "{corner:?} on {surface:?}");
+        }
+    }
+
+    /// One corner on each kind of surface, every surface set square to the
+    /// axes and every number whole.
+    ///
+    /// Square to the axes because a slanted plane's offset gains a dot product,
+    /// and whole numbers times a normal that is not whole can round.
+    fn a_corner_on_every_kind_of_square_surface() -> [(Point, Surface); 5] {
         let flat =
             Plane::from_point_and_normal(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.0, 1.0))
                 .expect("a plane");
-        let rows = [
+        [
             (Point::new(1.0, 2.0, 3.0), Surface::Plane(flat)),
             (
                 Point::new(0.0, 0.0, 2.0),
@@ -491,21 +637,10 @@ mod tests {
                 Point::new(4.0, 0.0, 0.0),
                 Surface::Torus(Torus::new(Axis::z(), 3.0, 1.0).expect("a ring")),
             ),
-        ];
-        for (corner, surface) in rows {
-            let (landed, wobble) = where_a_corner_lands_after_moving(corner, [&surface], &whole)
-                .expect("finite numbers");
-            let [x, y, z] = corner.coordinates();
-            assert_eq!(
-                landed,
-                PredicatePoint::from([x - 7.0, y + 11.0, z + 5.0]),
-                "{corner:?} on {surface:?}"
-            );
-            assert_eq!(wobble.magnitude(), 0.0);
-        }
+        ]
     }
 
-    /// A shift that moves the corner without a rounding but rounds a surface
+    /// A move that takes the corner without a rounding but rounds a surface
     /// round it keeps the box, because the corner is then only nearly what it
     /// was to that surface.
     ///
@@ -513,8 +648,9 @@ mod tests {
     /// pipe written through a far point of its axis, whose origin's sum rounds
     /// where the corner's does not, and a slanted plane, whose offset gains a dot
     /// product that rounds where every coordinate's sum is exact. Each is beside
-    /// the same surface under a shift that rounds nothing, so what keeps the box
-    /// is the rounding and not the surface.
+    /// the same surface under a move that rounds nothing, so what keeps the box
+    /// is the rounding and not the surface; and each is there twice, shifted
+    /// and turned a quarter turn about `z` before the same shift.
     #[test]
     fn a_corner_moved_exactly_on_a_surface_that_was_not_keeps_its_box() {
         let far_on_its_axis = Surface::Cylinder(
@@ -545,11 +681,23 @@ mod tests {
                 shift(1.0, 1.0, 0.0),
             ),
         ];
-        for (corner, surface, rounds, whole) in rows {
+        let a_quarter_about_z = Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z");
+        let turned_first = rows.map(|(corner, surface, rounds, whole)| {
+            (
+                corner,
+                surface,
+                rounds.compose(&a_quarter_about_z),
+                whole.compose(&a_quarter_about_z),
+            )
+        });
+        for (corner, surface, rounds, whole) in rows.into_iter().chain(turned_first) {
+            let turn = TurnOfACube::the_one_sending_the_axes_where(&rounds)
+                .expect("a shift, or a quarter turn and a shift");
             assert!(
-                is_exactly_shifted(
+                is_exactly_moved(
                     corner,
                     rounds.apply_to_point(corner),
+                    turn,
                     rounds.translation_part()
                 ),
                 "the corner itself moves exactly, so only the surface can round"

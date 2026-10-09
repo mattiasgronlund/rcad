@@ -1,6 +1,7 @@
 //! A round bar turned three quarter turns about its own axis, then halved
-//! through that axis by a block's face, is refused where the same bar unturned
-//! answers. Q1504 pins what each fuse does today (`docs/decisions.md` §352.3).
+//! through that axis by a block's face, answers every fuse the way the same bar
+//! unturned does. Q1504 found it refused and pinned the refusal; Q1522 made it
+//! answer (`docs/decisions.md` §352.3).
 //!
 //! **The shape** is the one a probe in Q1305's relay found and did not keep.
 //! The bar has radius `11/2` and height `5/2`, and is placed with
@@ -15,37 +16,35 @@
 //! `288 − 605π/16`. A measured volume is right when it is within the mesh's own
 //! `volume_error` of that.
 //!
-//! **What happens.** Unturned, or turned half a turn, every fuse answers under
-//! both policies. Turned one or three quarter turns, every certified fuse is
-//! refused *order along a crossing* round a cap circle, and every tolerant one
-//! is refused as two curves touching on the bar's wall. Only the certified
-//! refusal is traced below. The control further down answers under a tolerant
-//! policy too, which points at the same box, but no run has changed the box
-//! alone and watched the tolerant refusal go.
+//! **What happens.** Turned by any number of quarter turns, every fuse answers
+//! under both policies.
 //!
-//! **Where the refusal comes from.** A quarter turn rounds nothing: the turned
-//! seam corner `(0, −11/2, −2)` and the turned cap and wall come out exact (see
-//! [`the_turned_bars_seam_corner_is_a_box_round_where_its_cap_circle_starts`]).
-//! But the fuse reads that corner through
-//! `rcad_geom::where_a_corner_lands_after_moving`, which hands back an exact
-//! point only for a move that is a shift, and boxes every other one
+//! **What was wrong before Q1522.** Turned one or three quarter turns, every
+//! certified fuse was refused *order along a crossing* round a cap circle, and
+//! every tolerant one as two curves touching on the bar's wall. A quarter turn
+//! rounds nothing: the turned seam corner `(0, −11/2, −2)` and the turned cap
+//! and wall come out exact. But the fuse reads that corner through
+//! `rcad_geom::where_a_corner_lands_after_moving`, which then handed back an
+//! exact point only for a move that was a shift, and boxed every other one
 //! `± CORNER_AFTER_MOVING_ROUNDOFF · 11/2 = ± 1.56e-13`. The cap circle starts
-//! at exactly that corner, so the start is inside the corner's box, and the
-//! order round the circle cannot be read from a sweep that starts in a box.
-//! That is Q885's case, with the box made by a move that did not need one.
+//! at exactly that corner, so the start was inside the corner's box, and the
+//! order round the circle cannot be read from a sweep that starts in a box:
+//! Q885's case, with the box made by a move that did not need one. Now a turn
+//! of a cube, then a shift, that round nothing hand the corner back exact
+//! ([`the_turned_bars_seam_corner_is_read_exactly_where_its_cap_circle_starts`]),
+//! and both refusals went with the box.
 //!
-//! **A gap and not a limit** (§16.10). A bar built in place, with the same
-//! three surfaces bit for bit and its seam corner where the turn puts it, is
-//! read exactly and answers every fuse
+//! **Why it was a gap and not a limit** (§16.10). A bar built in place, with
+//! the same three surfaces bit for bit and its seam corner where the turn puts
+//! it, was read exactly and answered every fuse while the turned bar was
+//! refused
 //! ([`a_bar_built_with_its_seam_where_the_turn_puts_it_answers_every_fuse_under_both_policies`]).
-//! Its corner is the turned bar's corner, read as the point where the turned
-//! one is read as a box round it.
 
 use core::f64::consts::PI;
 
 use rcad_geom::{
-    Axis, CORNER_AFTER_MOVING_ROUNDOFF, Cylinder, Deflection, EdgeRun, Isometry, Orientation,
-    Plane, Point, Scale, Surface, SurfaceMeet, Vector, intersect, where_a_closed_crossing_starts,
+    Axis, Cylinder, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface,
+    SurfaceMeet, Vector, intersect, where_a_closed_crossing_starts,
     where_a_corner_lands_after_moving,
 };
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
@@ -67,9 +66,6 @@ struct ACapCircle {
     outward: f64,
     /// Where the placed bar's corner is, and where the circle starts.
     lands: [f64; 3],
-    /// Where the block's face `y = 0` crosses the circle on the side away from
-    /// the seam.
-    crossed_at: [f64; 3],
 }
 
 const THE_BOTTOM_CIRCLE_TURNED_THREE_QUARTERS: ACapCircle = ACapCircle {
@@ -77,7 +73,6 @@ const THE_BOTTOM_CIRCLE_TURNED_THREE_QUARTERS: ACapCircle = ACapCircle {
     stored_corner: [RADIUS, 0.0, 0.0],
     outward: -1.0,
     lands: [0.0, -RADIUS, LIFT],
-    crossed_at: [-RADIUS, 0.0, LIFT],
 };
 
 const THE_TOP_CIRCLE_TURNED_ONE_QUARTER: ACapCircle = ACapCircle {
@@ -85,7 +80,6 @@ const THE_TOP_CIRCLE_TURNED_ONE_QUARTER: ACapCircle = ACapCircle {
     stored_corner: [RADIUS, 0.0, HEIGHT],
     outward: 1.0,
     lands: [0.0, RADIUS, LIFT + HEIGHT],
-    crossed_at: [-RADIUS, 0.0, LIFT + HEIGHT],
 };
 
 const BOTH_CIRCLES: [ACapCircle; 2] = [
@@ -93,9 +87,11 @@ const BOTH_CIRCLES: [ACapCircle; 2] = [
     THE_TOP_CIRCLE_TURNED_ONE_QUARTER,
 ];
 
+/// One and three quarter turns were refused under both policies before Q1522;
+/// none and two answered.
 #[test]
-fn a_bar_unturned_or_turned_half_a_turn_and_halved_answers_every_fuse_under_both_policies() {
-    for quarters in [0, 2] {
+fn a_bar_turned_any_number_of_quarter_turns_and_halved_answers_every_fuse_under_both_policies() {
+    for quarters in 0..4 {
         every_fuse_answers_with_what_it_holds_by_hand(
             |model| a_bar_turned(model, quarters),
             &format!("{quarters} quarter turns"),
@@ -103,84 +99,11 @@ fn a_bar_unturned_or_turned_half_a_turn_and_halved_answers_every_fuse_under_both
     }
 }
 
-/// Every certified fuse, either way round, gives up on one decision: the order
-/// along the cap circle the turn put the seam on, between where the block's
-/// face crosses it and the seam corner's box.
+/// The turn rounds nothing: the corner and both surfaces round it land exactly
+/// where they belong, `where_a_corner_lands_after_moving` hands the corner back
+/// as that exact point, and the cap circle starts on it.
 #[test]
-fn a_bar_turned_an_odd_number_of_quarter_turns_and_halved_is_refused_on_the_order_round_a_cap_circle()
- {
-    for circle in BOTH_CIRCLES {
-        let (seam_corner, _) = where_its_seam_corner_lands(circle);
-        for rule in RULES {
-            for bar_first in [true, false] {
-                let mut model = a_model();
-                let bar = a_bar_turned(&mut model, circle.quarters);
-                let block = the_block(&mut model);
-                let (fused, _) = fuse(
-                    &mut model,
-                    bar,
-                    block,
-                    rule,
-                    bar_first,
-                    &Policy::certified(),
-                );
-                let why = fused.expect_err("the turned bar is refused");
-                let Error::Undecidable { records } = &why else {
-                    panic!("{circle:?}, {rule:?}, bar first {bar_first}: {why:?}");
-                };
-                let [record] = records.records() else {
-                    panic!("{circle:?}, {rule:?}, bar first {bar_first}: {records:?}");
-                };
-                assert_eq!(record.predicate(), "order along a crossing");
-                assert_eq!(
-                    record.inputs(),
-                    [PredicatePoint::from(circle.crossed_at), seam_corner].as_slice(),
-                    "{circle:?}, {rule:?}, bar first {bar_first}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn under_a_tolerant_policy_a_bar_turned_an_odd_number_of_quarter_turns_and_halved_is_refused_as_two_curves_touching_on_its_wall()
- {
-    for circle in BOTH_CIRCLES {
-        for rule in RULES {
-            for bar_first in [true, false] {
-                let mut model = a_model();
-                let policy = Policy::tolerant(model.scale().nominal_size());
-                let bar = a_bar_turned(&mut model, circle.quarters);
-                let block = the_block(&mut model);
-                let (fused, _) = fuse(&mut model, bar, block, rule, bar_first, &policy);
-                let why = fused.expect_err("the turned bar is refused");
-                let Error::TwoCurvesTouchWithoutCrossing { face } = why else {
-                    panic!("{circle:?}, {rule:?}, bar first {bar_first}: {why:?}");
-                };
-                let named = model
-                    .solid(bar)
-                    .expect("this model made the key")
-                    .faces()
-                    .find(|its| its.key() == face)
-                    .unwrap_or_else(|| {
-                        panic!("{circle:?}, {rule:?}, bar first {bar_first}: not the bar's face")
-                    });
-                assert_eq!(
-                    named.surface(),
-                    the_wall_where_the_turn_puts_it(),
-                    "{circle:?}, {rule:?}, bar first {bar_first}"
-                );
-            }
-        }
-    }
-}
-
-/// The turn itself rounds nothing: the corner and both surfaces round it land
-/// exactly where they belong. The box is `where_a_corner_lands_after_moving`'s,
-/// which keeps an exact point for a shift alone, and the cap circle starts
-/// strictly inside it.
-#[test]
-fn the_turned_bars_seam_corner_is_a_box_round_where_its_cap_circle_starts() {
+fn the_turned_bars_seam_corner_is_read_exactly_where_its_cap_circle_starts() {
     let wall = Surface::Cylinder(Cylinder::new(Axis::z(), RADIUS).expect("a positive radius"));
     let moved_wall = the_wall_where_the_turn_puts_it();
     for circle in BOTH_CIRCLES {
@@ -196,10 +119,12 @@ fn the_turned_bars_seam_corner_is_a_box_round_where_its_cap_circle_starts() {
         assert_eq!(wall.transformed(&placement), moved_wall);
 
         let (seam_corner, wobble) = where_its_seam_corner_lands(circle);
-        assert_eq!(wobble, CORNER_AFTER_MOVING_ROUNDOFF * RADIUS);
-        let PredicatePoint::Constructed(seam_corner) = seam_corner else {
-            panic!("{circle:?}: the turned seam corner came back {seam_corner:?}");
-        };
+        assert_eq!(wobble, 0.0, "{circle:?}");
+        assert_eq!(
+            seam_corner,
+            PredicatePoint::from(circle.lands),
+            "{circle:?}"
+        );
 
         let SurfaceMeet::Curves(runs) = intersect(
             &moved_cap,
@@ -220,20 +145,15 @@ fn the_turned_bars_seam_corner_is_a_box_round_where_its_cap_circle_starts() {
         )
         .expect("a circle has a start")
         .coordinates();
-        assert_eq!(start, circle.lands);
-        for axis in 0..3 {
-            assert!(
-                seam_corner[axis].lo() < start[axis] && start[axis] < seam_corner[axis].hi(),
-                "{circle:?}: the start {start:?} is not strictly inside the box {seam_corner:?}"
-            );
-        }
+        assert_eq!(start, circle.lands, "{circle:?}");
     }
 }
 
 /// The control. This bar has the turned bar's three surfaces, bit for bit and
 /// in the same order, and its seam corner where the turn puts it; it is built
-/// there rather than moved there, so the fuse reads its corner exactly. It
-/// answers every fuse, so the answer the turned bar is refused exists.
+/// there rather than moved there, so the fuse reads its corner exactly however
+/// it reads a moved one. It answered every fuse while the turned bar was
+/// refused, which showed the answer existed.
 #[test]
 fn a_bar_built_with_its_seam_where_the_turn_puts_it_answers_every_fuse_under_both_policies() {
     let mut model = a_model();

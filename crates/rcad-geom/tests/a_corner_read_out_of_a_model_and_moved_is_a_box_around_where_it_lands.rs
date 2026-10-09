@@ -26,6 +26,7 @@ use rcad_geom::{
     Axis, Cone, Cylinder, Isometry, Plane, Point, Sphere, Surface, Torus, Vector,
     where_a_corner_lands_after_moving,
 };
+use rcad_predicates::expansion::two_sum;
 use rcad_predicates::{Decision, Point as PredicatePoint, SideOfSurface};
 
 /// How far a surface is moved to make a control that must be decided.
@@ -50,10 +51,10 @@ const NO_CORNER_MAY_USE_ALL_OF_ITS_BOUND: f64 = 1.0;
 
 /// The bound holds, and the box is not so wide that holding it means nothing.
 ///
-/// Since a shift that rounds nothing hands the corner back exact (§34.6's
-/// `where_a_corner_lands_after_moving`), a wobble of zero shows up here too —
-/// the identity and every whole-number shift among [`every_way_of_placing_it`]
-/// give one. Dividing by that zero would be `0.0 / 0.0`, which is `NaN`, and
+/// Since a turn of a cube and a shift that round nothing hand the corner back
+/// exact (§34.6's `where_a_corner_lands_after_moving`), a wobble of zero shows
+/// up here too — the identity and every whole-number shift among
+/// [`every_way_of_placing_it`] give one. Dividing by that zero would be `0.0 / 0.0`, which is `NaN`, and
 /// `f64::max` drops a `NaN` silently rather than counting it: the ratio would
 /// still measure something, just not every reading. So the two kinds are kept
 /// apart — an exact reading is asserted off its surface by exactly nothing,
@@ -76,7 +77,7 @@ fn a_moved_corner_stays_inside_the_box_published_for_it() {
                     assert_eq!(
                         how_far_off(&placed, moved),
                         0.0,
-                        "a shift that rounds nothing left {placed:?} off by something"
+                        "a move that rounds nothing left {placed:?} off by something"
                     );
                 } else {
                     inexact_readings += 1;
@@ -182,6 +183,105 @@ fn a_corner_that_is_not_a_place_gets_no_box_at_all() {
             .is_err()
     );
     assert!(where_a_corner_lands_after_moving(corner, on, &Isometry::identity()).is_ok());
+}
+
+/// A turn of a cube moves each coordinate onto another and negates some, so a
+/// corner turned by one, and lifted by whole numbers after, lands exactly where
+/// it is turned to, still exactly on every surface it was on, and gets no box.
+///
+/// Every quarter turn about `x`, `y` and `z`, through the origin, and each
+/// lifted the way `a_bar_turned_three_quarter_turns_and_halved.rs` places its
+/// bar. The lift is kept to the corners made of whole numbers, whose sums it
+/// cannot round.
+#[test]
+fn a_corner_turned_by_quarter_turns_lands_exactly_where_it_is_turned_to() {
+    let lift = Isometry::translation(Vector::new(0.0, 0.0, -2.0)).expect("a finite shift");
+    let mut readings = 0usize;
+    for (corner, surfaces) in every_corner_with_two_surfaces_round_it() {
+        let whole = corner.coordinates().iter().all(|it| it.fract() == 0.0);
+        for axis in [Axis::x(), Axis::y(), Axis::z()] {
+            for quarters in 1..4 {
+                let turn =
+                    Isometry::quarter_turns(&axis, quarters).expect("an axis along x, y or z");
+                let lifted = lift.compose(&turn);
+                for movement in [Some(turn), whole.then_some(lifted)].into_iter().flatten() {
+                    let on = [&surfaces[0], &surfaces[1]];
+                    let (landed, wobble) = where_a_corner_lands_after_moving(corner, on, &movement)
+                        .expect("these corners and turns are all finite");
+                    let what = format!("{corner:?} turned {quarters} quarters by {movement:?}");
+                    assert_eq!(wobble.magnitude(), 0.0, "{what}");
+                    assert_eq!(
+                        landed,
+                        PredicatePoint::from(movement.apply_to_point(corner).coordinates()),
+                        "{what}"
+                    );
+                    for surface in on {
+                        assert_eq!(
+                            which_side_of(&surface.transformed(&movement), landed),
+                            Decision::Zero,
+                            "{what} is off {surface:?} turned with it"
+                        );
+                    }
+                    readings += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(
+        readings,
+        8 * 9 + 6 * 9,
+        "eight corners turned nine ways, and the six whole ones lifted too"
+    );
+}
+
+/// A quarter turn about an axis that misses the origin carries a shift, and
+/// where adding that shift to the turned corner rounds, the corner keeps its
+/// box and is certified off neither surface it is a rounding from.
+///
+/// About the axis through `(1/10, 0, 0)` the bar's cap corner `(2, 0, 3)`
+/// lands at `2 − 1/10` along `y`, which rounds. About the parallel axis through
+/// `(1, 0, 0)` it lands at `(1, 1, 3)`, which does not, so what keeps the box is
+/// the rounding and not the axis being somewhere else.
+#[test]
+fn a_corner_turned_about_an_axis_whose_shift_rounds_when_added_keeps_its_box() {
+    let corner = Point::new(2.0, 0.0, 3.0);
+    let wall = Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a radius"));
+    let cap = Surface::Plane(
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("the z axis is a unit normal"),
+    );
+    let on = [&cap, &wall];
+    let a_quarter_about_z_through = |x: f64| {
+        let axis =
+            Axis::new(Point::new(x, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("a direction");
+        Isometry::quarter_turns(&axis, 1).expect("an axis along z")
+    };
+
+    let rounds = a_quarter_about_z_through(0.1);
+    assert_ne!(
+        two_sum(2.0, -0.1).1,
+        0.0,
+        "2 − 1/10 rounds, so the corner's sum does"
+    );
+    let (boxed, wobble) =
+        where_a_corner_lands_after_moving(corner, on, &rounds).expect("finite numbers");
+    assert!(
+        boxed.uncertainty() > 0.0 && wobble.magnitude() > 0.0,
+        "{boxed:?}"
+    );
+    for surface in on {
+        let placed = surface.transformed(&rounds);
+        assert!(
+            !matches!(which_side_of(&placed, boxed), Decision::Pos | Decision::Neg),
+            "the turned corner was certified off {placed:?}: {boxed:?}"
+        );
+    }
+
+    let whole = a_quarter_about_z_through(1.0);
+    let (exact, wobble) =
+        where_a_corner_lands_after_moving(corner, on, &whole).expect("finite numbers");
+    assert_eq!(exact, PredicatePoint::from([1.0, 1.0, 3.0]));
+    assert_eq!(wobble.magnitude(), 0.0);
 }
 
 /// A round bar's cap corner and a ball's pole, at sizes across sixteen orders of
