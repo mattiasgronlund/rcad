@@ -362,6 +362,6 @@ can produce, limit or gap by name (§16.10):
 | `Predicate(PlanesDoNotMeetInAPoint)` | three planes meet at a point neither Cramer's rule nor the line route can bound | **gap** | inherited from `meet_of_three_planes`, and now reached far less often, because the line route divides by a determinant known to full relative accuracy rather than by an interval one |
 | `Undecidable` out of `meet_of_three_planes`'s own `Ok` | three planes meet past the top of `f64`'s range, and Cramer's rule says `Ok` holding a box with an infinite side | **gap** | `three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere`; the same three written lower down are placed |
 | `TheseTwoSurfacesDoNotCrossInAConic` | two planes, or a plane down a pipe's own axis | **limit** | the question is a different one and the arrangement's dominant-axis rule answers it |
-| `TheseTwoSurfacesDoNotCrossInAConic` | a ball against a pipe, or two pipes | **gap** | the curve is there and ordering points along it takes the marcher |
+| `TheseTwoSurfacesDoNotCrossInAConic` | a ball against a pipe, or two pipes | **gap** | the curve is there and ordering points along it takes the marcher. **2026-10-09, Q1483:** closed for two pipes where the fat one swallows the thin one whole, with no marcher (§421) |
 | `TheCrossingOfTheseTwoSurfacesIsNotClosed` | a crossing that runs on for ever | **limit** | the vertex does not exist: such an edge is cut by corners at both ends rather than closing on itself |
 

@@ -5579,8 +5579,12 @@ impl<'f> Arrangement<'f> {
     /// cone's axis, and the axis is the cone's: `intersect` names no other cone
     /// against a ball. A pipe through the ball's centre is the same, about the
     /// pipe's axis; a pipe off the centre cuts it in quartic loops, which
-    /// [`how_a_crossing_runs`] refuses before anything asks this. Each curve
-    /// then splits the surface in two, and so does
+    /// [`how_a_crossing_runs`] refuses before anything asks this. Two pipes
+    /// are the one pair read another way: a fat pipe cuts a thin one it
+    /// swallows in two loops round the thin pipe's axis, the half-space's flat
+    /// surface holds the fat pipe's axis rather than facing along either, and
+    /// [`Arrangement::whether_past_the_plane_between_two_loops`] answers there
+    /// (Q1483). Each curve then splits the surface in two, and so does
     /// the surface's own curve on the half-space's flat surface, where there is
     /// one. The curve lies inside the half-space and the other curve outside it,
     /// so every point of the surface past the flat surface is on the curve's
@@ -5612,6 +5616,9 @@ impl<'f> Arrangement<'f> {
     /// in puts the cap's circle on the ball exactly there.
     fn whether_past_the_picker(&self, crossing: usize, at: PredicatePoint) -> PastThePicker {
         let partner = self.crossings[crossing].partner;
+        if let (Surface::Cylinder(this), Surface::Cylinder(other)) = (self.surface, partner) {
+            return self.whether_past_the_plane_between_two_loops(crossing, &this, &other, at);
+        }
         let axis = match (self.surface, partner) {
             (Surface::Cylinder(pipe), _) | (Surface::Sphere(_), Surface::Cylinder(pipe)) => {
                 pipe.axis()
@@ -5678,6 +5685,61 @@ impl<'f> Arrangement<'f> {
                 PastThePicker::Yes(found)
             }
             Some(_) | None => PastThePicker::CannotTell,
+        }
+    }
+
+    /// On a pipe another pipe cuts in two loops: whether a point is past the
+    /// flat half-space that picks one loop out, and if it is, which side of the
+    /// partner that loop has towards it.
+    ///
+    /// The half-space is the one `rcad_geom`'s `two_loops_either_side_of_a_pipe`
+    /// builds: its flat surface holds the fat pipe's axis, and it is only built
+    /// where neither loop reaches it. Past it, every point of either wall is on
+    /// one side of the loop in front of it, and which side depends only on
+    /// which wall this is.
+    ///
+    /// - **On the fat pipe's wall** the loop bounds a patch inside the thin pipe.
+    ///   The flat surface meets the fat wall in two straight lines, and a line
+    ///   that went into the thin pipe would come out again through a loop, which
+    ///   the flat surface misses; so the patch lies wholly in front, and every
+    ///   point past is outside the thin pipe's patch: the partner's positive side,
+    ///   even at a point of the other loop's patch, where the partner's sign is
+    ///   negative.
+    /// - **On the thin pipe's wall** the flat surface cuts one closed curve round
+    ///   the thin axis, between the two loops along every ruling and so inside
+    ///   the fat pipe. The part of the wall past it is one tube the loop in front
+    ///   never meets, so all of it is on the loop's side towards that curve: the
+    ///   partner's negative side, even beyond the other loop, where the partner's
+    ///   sign is positive.
+    ///
+    /// A point on the flat surface is outside the thin pipe on the fat wall and
+    /// inside the fat pipe on the thin wall, so the partner's sign there is the
+    /// side, and [`PastThePicker::No`] says so. A point whose box straddles it is
+    /// answered where the two readings agree.
+    fn whether_past_the_plane_between_two_loops(
+        &self,
+        crossing: usize,
+        this: &Cylinder,
+        other: &Cylinder,
+        at: PredicatePoint,
+    ) -> PastThePicker {
+        let [Picker::InFrontOf(picker)] = self.crossings[crossing].picked_by() else {
+            return PastThePicker::No;
+        };
+        let towards_the_flat_surface = match this.radius().partial_cmp(&other.radius()) {
+            Some(Ordering::Greater) => Decision::Pos,
+            Some(Ordering::Less) => Decision::Neg,
+            Some(Ordering::Equal) | None => return PastThePicker::CannotTell,
+        };
+        match picker.side_of_point(at) {
+            Decision::Pos | Decision::Zero => PastThePicker::No,
+            Decision::Neg => PastThePicker::Yes(towards_the_flat_surface),
+            Decision::Undecidable { .. } | _
+                if side_of_surface(&Surface::Cylinder(*other), at) == towards_the_flat_surface =>
+            {
+                PastThePicker::Yes(towards_the_flat_surface)
+            }
+            Decision::Undecidable { .. } | _ => PastThePicker::CannotTell,
         }
     }
 
@@ -7272,10 +7334,12 @@ fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
 /// # Errors
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a pair whose crossing is
-/// none of an endless straight line, one closed curve lying in a plane, or a
-/// plane's endless bend across a cone — a ball against a pipe off its axis, or
-/// two pipes. That is a **gap**: the curve is there and ordering points along it
-/// takes the marcher rather than a determinant (§34.10).
+/// none of an endless straight line, one closed curve lying in a plane, a
+/// plane's endless bend across a cone, or one of the two loops a fat pipe
+/// crosses a thin one in — a ball against a pipe off its axis, or two pipes
+/// whose crossing is one loop. That is a **gap**: the curve is there and
+/// ordering points along it takes the marcher rather than a determinant
+/// (§34.10).
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when the shape of the
 /// crossing itself cannot be told — two pipes whose axes cannot be shown to run
@@ -7361,7 +7425,9 @@ fn how_a_crossing_runs(
     {
         return how_a_circle_round_a_rings_axis_runs(surface, partner, level, run, log);
     }
-    if !a_pair_that_crosses_in_a_conic(surface, partner, log)? {
+    if !(a_pair_that_crosses_in_a_conic(surface, partner, log)?
+        || one_of_two_loops_round_a_thin_pipe(surface, partner, run))
+    {
         return Err(Error::ACrossingThisCannotBeOrderedAlong);
     }
     match where_a_closed_crossing_starts(run, [surface, partner], log) {
@@ -7372,6 +7438,31 @@ fn how_a_crossing_runs(
         }),
         Err(_) => Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
+}
+
+/// Whether `run` is one of the two loops a fat pipe crosses a thin one in,
+/// where it swallows the thin one's whole cross-section.
+///
+/// [`intersect`](rcad_geom::intersect) names two pipes' crossing as a part of
+/// it picked out by a half-space only there: one loop is the whole of the
+/// crossing, two pipes running the same way cross in lines, and two of one
+/// width on axes that meet are refused. Each of those two loops runs once
+/// round the thin pipe's axis, and [`which_comes_first_round_a_crossing`]
+/// orders it round that axis, asking again, exactly, whether the fat pipe
+/// swallows the thin one before it does (Q1483).
+fn one_of_two_loops_round_a_thin_pipe(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+) -> bool {
+    matches!(
+        (surface, partner, run.run()),
+        (
+            Surface::Cylinder(_),
+            Surface::Cylinder(_),
+            EdgeRun::PartOfWhereItCrosses { .. }
+        )
+    )
 }
 
 /// How points along a circle a ring shares with a ball, a pipe or a cone on
@@ -8152,7 +8243,9 @@ fn a_pair_that_crosses_in_a_conic(
         // two side-by-side pipes, which cut straight lines. `false` is right
         // for them here — a pair of endless lines is not a closed conic — and
         // they never reach here anyway: `a_pair_that_crosses_in_straight_lines`
-        // answers them one step up.
+        // answers them one step up. Two pipes whose crossing is two loops round
+        // the thinner one's axis are no conic either, and
+        // `one_of_two_loops_round_a_thin_pipe` lets them through beside this.
         | (Surface::Cylinder(_), Surface::Cylinder(_) | Surface::Torus(_))
         | (Surface::Cone(_), Surface::Torus(_))
         | (
