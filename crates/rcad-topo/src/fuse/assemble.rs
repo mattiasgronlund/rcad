@@ -2697,6 +2697,26 @@ impl Assembly {
                 .carried_by
                 .iter()
                 .all(|surface| surface.as_plane().is_some());
+            if ends[0] == ends[1] && flat {
+                let short = |s: &Surface| match s.as_plane() {
+                    Some(p) => format!("{:.4?}", p.coefficients()),
+                    None => "curved".to_owned(),
+                };
+                for (edge, along) in self.edges.iter().enumerate() {
+                    if renumbered.lump_of_edge[edge].is_none()
+                        || renumbered.runs.leader(edge) != leader
+                    {
+                        continue;
+                    }
+                    eprintln!(
+                        "RUN edge {edge} {} | {} from {:?} to {:?}",
+                        short(&along.carried_by[0]),
+                        short(&along.carried_by[1]),
+                        self.corners[along.ends[0]].point,
+                        self.corners[along.ends[1]].point
+                    );
+                }
+            }
             assert!(
                 ends[0] != ends[1] || !flat,
                 "a piece of a face has a straight side with no length"
