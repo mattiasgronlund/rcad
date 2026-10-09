@@ -92,7 +92,10 @@
 //! [`two_faces_provably_apart`] uses, and that the crossing meets nothing else
 //! is asked the way the arrangement places its nodes; both are proofs and
 //! neither is a box. A surface carried by two faces stays on wherever one of
-//! them does not say so.
+//! them does not say so. The band is asked of a plane leaning to its axis as
+//! well (Q1174): the same block with its top leaning, `4z = x + 96`, clear of
+//! the tube, was cut along the ellipses where the pipes cross it and refused
+//! the same way, because the band answered only for a plane square to it.
 //!
 //! # Two gaps, left open on purpose
 //!
@@ -593,19 +596,21 @@ fn band_a_face_is_inside(face: &BakedFace) -> Option<ABandRoundAnAxis> {
 
 /// Whether `surface` provably passes through no point of `band`.
 ///
-/// Only a surface about the band's own axis is asked: a pipe or a cone on that
-/// line, a ball centred on it, or a plane square to it. Each is then one
-/// expression in `up` and `out`, worked over the band in interval arithmetic
-/// on the numbers the surface stores (§17.1), and a sign proved for it is a
-/// sign of the surface itself. A ball is `out + (up − its centre's up)² =
-/// radius²·|w|²`, which is Lagrange's identity, and a plane square to the line
-/// is `(n·w)·(up + w·origin) + d·|w|² = 0`, its own equation scaled by `|w|²`.
+/// A surface about the band's own axis is asked as one expression: a pipe or a
+/// cone on that line, a ball centred on it, or a plane square to it. Each is
+/// one expression in `up` and `out`, worked over the band in interval
+/// arithmetic on the numbers the surface stores (§17.1), and a sign proved for
+/// it is a sign of the surface itself. A ball is `out + (up − its centre's
+/// up)² = radius²·|w|²`, which is Lagrange's identity, and a plane square to
+/// the line is `(n·w)·(up + w·origin) + d·|w|² = 0`, its own equation scaled
+/// by `|w|²`. A plane leaning to the line is asked by
+/// [`a_leaning_plane_misses_a_band`]; anything else is not asked.
 fn a_surface_misses_a_band(surface: &Surface, band: ABandRoundAnAxis) -> bool {
     let exactly = rcad_predicates::Interval::exactly;
     let over_the_band = match surface {
         Surface::Plane(flat) => {
             if !band.is_square_to(surface) {
-                return false;
+                return a_leaning_plane_misses_a_band(flat, band);
             }
             let [a, b, c, d] = flat.coefficients();
             let along = band.along.map(exactly);
@@ -639,6 +644,37 @@ fn a_surface_misses_a_band(surface: &Surface, band: ABandRoundAnAxis) -> bool {
     matches!(
         over_the_band.sign(),
         rcad_predicates::Decision::Pos | rcad_predicates::Decision::Neg
+    )
+}
+
+/// Whether the plane `flat`, leaning to the band's axis, provably passes
+/// through no point of `band` (Q1174).
+///
+/// Scaled by `|w|²`, the plane's equation at a point `p` of the band is
+/// `(n·origin + d)·|w|² + (n·w)·up + (n × w)·((p − origin) × w)`, by
+/// Lagrange's identity, and the last term is never farther from nought than
+/// `√(|n × w|²·out)`. So the plane misses the band where the rest, `near`,
+/// keeps one sign over the band and `near² > |n × w|²·out` everywhere in it.
+/// Both are worked in interval arithmetic on the numbers the plane stores, as
+/// the square case is.
+fn a_leaning_plane_misses_a_band(flat: &rcad_geom::Plane, band: ABandRoundAnAxis) -> bool {
+    let exactly = rcad_predicates::Interval::exactly;
+    let [a, b, c, d] = flat.coefficients();
+    let normal = [a, b, c].map(exactly);
+    let along = band.along.map(exactly);
+    let near = (dot(normal, band.origin.map(exactly)) + exactly(d)) * band.length()
+        + dot(normal, along) * band.up;
+    if !matches!(
+        near.sign(),
+        rcad_predicates::Decision::Pos | rcad_predicates::Decision::Neg
+    ) {
+        return false;
+    }
+    let [x, y, z] = cross(normal, along);
+    let leaning = squared(x) + squared(y) + squared(z);
+    matches!(
+        (squared(near) - leaning * band.out).sign(),
+        rcad_predicates::Decision::Pos
     )
 }
 
@@ -900,10 +936,10 @@ fn how_two_faces_meet(
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Isometry, Plane, Scale, Surface, Vector};
+    use rcad_geom::{Isometry, Plane, Point, Scale, Surface, Vector};
     use rcad_predicates::{Policy, ProvenanceLog};
 
-    use super::{gather, no_face_of_one_meets_the_other};
+    use super::{a_face_misses_a_surface_by_its_band, gather, no_face_of_one_meets_the_other};
     use crate::fuse::bake::{BakedFace, BakedSolid, bake};
     use crate::{Error, Model, SolidKey};
 
@@ -1076,6 +1112,46 @@ mod tests {
     fn a_bar_poking_out_of_a_ball_is_not_proved_apart_from_it() {
         let solids = a_ball_round_a_bar(4.5);
         assert!(!no_face_of_one_meets_the_other(&solids[0], &solids[1]));
+    }
+
+    /// The plane `4z = x + 12` leans to the bar's axis and is at `z = 2.25` or
+    /// higher over the bar's wall, which ends at `z = 2` (Q1174).
+    #[test]
+    fn a_leaning_plane_clear_of_a_bars_rim_is_proved_to_miss_its_wall() {
+        let solids = a_ball_round_a_bar(2.0);
+        let clear = leaning_plane_through(Point::new(0.0, 0.0, 3.0));
+        assert!(a_face_misses_a_surface_by_its_band(
+            the_wall(&solids[1]),
+            &clear
+        ));
+    }
+
+    /// `4z = x + 11` is at `z = 2` over `(−3, 0)`, so it shares that one point
+    /// of the rim with the wall; `4z = x` runs across the wall.
+    #[test]
+    fn a_leaning_plane_through_a_bars_rim_or_across_its_wall_is_not_proved_to_miss_it() {
+        let solids = a_ball_round_a_bar(2.0);
+        for through in [Point::new(-3.0, 0.0, 2.0), Point::new(0.0, 0.0, 0.0)] {
+            let plane = leaning_plane_through(through);
+            assert!(
+                !a_face_misses_a_surface_by_its_band(the_wall(&solids[1]), &plane),
+                "{plane:?}"
+            );
+        }
+    }
+
+    fn leaning_plane_through(point: Point) -> Surface {
+        Surface::Plane(
+            Plane::from_point_and_normal(point, Vector::new(-1.0, 0.0, 4.0))
+                .expect("a normal with a length"),
+        )
+    }
+
+    fn the_wall(bar: &BakedSolid) -> &BakedFace {
+        bar.faces
+            .iter()
+            .find(|face| matches!(face.surface, Surface::Cylinder(_)))
+            .expect("a bar has a wall")
     }
 
     /// Two cubes wired into one solid, overlapping. Nothing a profile can build
