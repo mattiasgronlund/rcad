@@ -74,16 +74,20 @@
 //! and one corner strictly behind each, inside it. Of the 199, the union under
 //! `Policy::tolerant(100.0)` with the block first answered 51 and was refused
 //! in 148 before: 74 `Undecidable` on the triangle, 58 a hole winding with its
-//! outline and 16 an outline winding against its face. It now answers 62, and
-//! the union and intersection of each hold 2000 between them; none is refused
-//! `Undecidable`, and the 137 left are refused by name once the answer is
-//! written with its corners rounded: 65 a hole winding with its outline, 16 an
-//! outline winding against its face, 34 a shell enclosing nothing and 22 an
-//! edge with four faces or none. The rule is exact, so it runs under
-//! `Policy::certified()` too, where the union of 10 of the 199 now answers
-//! either way round: each validates and holds, within `1e−6`, what the turned
-//! cube moved `2⁻³⁰` further in gives. How the tip is written in those 10 was
-//! not traced. 98 are refused for the range, and the rest by the names above.
+//! outline and 16 an outline winding against its face. It answered 62 after
+//! that, and answers 68 since Q1442 left out an edge only wires enclosing
+//! nothing walked; the union and intersection of each hold 2000 between them.
+//! None is refused `Undecidable`, and the 131 left are refused by name once
+//! the answer is written with its corners rounded: 65 a hole winding with its
+//! outline, 16 an outline winding against its face, 34 a shell enclosing
+//! nothing and 16 an edge with four faces. The rule is exact, so it runs under
+//! `Policy::certified()` too, where the union of 16 of the 199 now answers
+//! either way round. 10 answered after Q1353: each validates and holds, within
+//! `1e−6`, what the turned cube moved `2⁻³⁰` further in gives, and how the tip
+//! is written in those 10 was not traced. The other 6 are Q1442's, whose three
+//! crossings round to one point
+//! ([`six_random_turns_whose_crossings_round_to_one_corner_answer_every_fuse`]).
+//! 98 are refused for the range, and the rest by the names above.
 //! [`random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant`]
 //! keeps the first 60, 31 of which meet outside.
 //!
