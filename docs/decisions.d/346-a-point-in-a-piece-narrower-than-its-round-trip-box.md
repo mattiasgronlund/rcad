@@ -615,6 +615,21 @@ read as before. `mise exec -- just t -p rcad-topo --no-fail-fast`: 1474 run,
   (`a_square_beside_a_far_face_does_not_hold_a_point_read_over_their_edge`),
   and a throwaway probe over `just t -p rcad-topo` saw the box and the point
   wind differently only in that test, 2 of 132457 calls.
+- A corner itself, not a bulge's chord, can be a rounding off the plane the
+  rest of its face is stored on. *Q1251: run.* A pyramid `2^20` out, turned
+  `2.5` about `z`, has its face on `x + y = 0` put through the apex moved
+  `1e-8` sideways, inside validate's room of `1e-7` at 100 mm. `bake` solves
+  the apex from the three planes that leave that face out, so its box lies
+  `1e-8` off the face's plane, and `InPlane` read it about `1.5e-2` from
+  where the face meets its neighbours. `the_piece_holds` and
+  `a_face_of_the_input_holds` then missed 12 points inside the face and held
+  12 points off it, `1e-3` to `1e-2` from every edge (**`wrong/C`**; pin
+  `a_far_face_a_tolerance_off_its_apex_holds_no_point_its_neighbours_put_off_it`
+  in `select.rs`). `in_the_bulge_of`'s chord did the same on a hand-built
+  half disk with its corners `1e-8` off the plane
+  (`a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord`).
+  Each corner and chord end is now `stretched_to_the_plane` before it is
+  wound round.
 
 ### 346.7 A point in one face's sliver whose ray crosses the neighbour — 2026-10-06
 
