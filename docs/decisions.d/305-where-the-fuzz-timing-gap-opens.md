@@ -85,6 +85,11 @@ untracked file: sha256 `86834457…`, the same file the other two builds used.
 Every log named here is under `target/q236/` in this worktree, which is
 gitignored. The runs' corpus copies are under `target/q236/runs/<label>/`.
 
+**Those files are gone.** `target/q236/` was deleted on 2026-09-30 while the
+tree was locked, and the tree was removed on 2026-10-09 (§420). Every script
+named in this section has to be written again from its text here, and every
+binary rebuilt.
+
 ### 305.3 The arms, two runs each
 
 Each run used §267.2's method through `target/q236/run.sh`: a fresh `cp -r` of
