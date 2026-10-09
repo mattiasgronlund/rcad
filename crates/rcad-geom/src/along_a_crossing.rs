@@ -1724,4 +1724,113 @@ mod tests {
             Ok(Decision::Pos)
         );
     }
+
+    /// A pipe of radius 1 along `x` at `z = 5`, `off` along `y` from the axis
+    /// of a pipe of radius 4 about `z` that swallows it, and that fat pipe: a
+    /// cross-drilled shaft. They cross in two quartic loops, one each side of
+    /// `x = 0`.
+    fn a_thin_pipe_and_a_fat_one(off: f64) -> [Surface; 2] {
+        let thin = Cylinder::new(
+            Axis::new(Point::new(0.0, off, 5.0), Vector::new(1.0, 0.0, 0.0)).expect("an axis"),
+            1.0,
+        )
+        .expect("a radius");
+        let fat = Cylinder::new(Axis::z(), 4.0).expect("a radius");
+        [Surface::Cylinder(thin), Surface::Cylinder(fat)]
+    }
+
+    /// The point of [`a_thin_pipe_and_a_fat_one`]'s loop on the `side` of
+    /// `x = 0` that is `eighths` eighths of a turn round the thin pipe's axis
+    /// from `+y` towards `+z`.
+    fn round_the_thin_pipe(off: f64, side: f64, eighths: i32) -> [f64; 3] {
+        let angle = core::f64::consts::TAU * f64::from(eighths) / 8.0;
+        let [y, z] = [off + angle.cos(), 5.0 + angle.sin()];
+        [side * (16.0 - y * y).sqrt(), y, z]
+    }
+
+    /// Each loop a fat pipe crosses a thin one in runs once round the thin
+    /// pipe's axis, so three points of one come back in the order they run
+    /// round it, from wherever the ordering starts. The loop where the thin
+    /// pipe, running along `+x`, comes out of the fat one runs about `−x`, and
+    /// the one where it goes in about `+x`; each step is checked against
+    /// `∇S × ∇T` before the order is asked, so what this pins is the geometry.
+    #[test]
+    fn three_points_on_a_loop_where_two_pipes_cross_come_back_in_the_order_they_run_round_it() {
+        for off in [0.0, 0.5] {
+            let [thin, fat] = a_thin_pipe_and_a_fat_one(off);
+            for (side, forward) in [(1.0, -1), (-1.0, 1)] {
+                let round = |eighths: i32| round_the_thin_pipe(off, side, forward * eighths);
+                let at = |eighths| PredicatePoint::from(round(eighths));
+                for start in 0..8 {
+                    let [here, next] = [round(start), round(start + 1)];
+                    let runs = Vector::new(0.0, here[1] - off, here[2] - 5.0)
+                        .cross(Vector::new(here[0], here[1], 0.0));
+                    let step = Vector::new(next[0] - here[0], next[1] - here[1], next[2] - here[2]);
+                    assert!(
+                        runs.dot(step) > 0.0,
+                        "off {off}, side {side}: the crossing runs {runs:?} at {here:?} and the \
+                         step to {next:?} is {step:?}"
+                    );
+                    let [first, second, third] = [start, start + 1, start + 3].map(at);
+                    assert_eq!(
+                        which_comes_first_round_a_crossing([&thin, &fat], first, second, third),
+                        Ok(Decision::Pos),
+                        "off {off}, side {side}, from {start} eighths"
+                    );
+                    assert_eq!(
+                        which_comes_first_round_a_crossing([&thin, &fat], first, third, second),
+                        Ok(Decision::Neg),
+                        "off {off}, side {side}, from {start} eighths, asked the other way"
+                    );
+                    assert_eq!(
+                        which_comes_first_round_a_crossing([&fat, &thin], first, second, third),
+                        Ok(Decision::Neg),
+                        "off {off}, side {side}, from {start} eighths, the pipes swapped"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Two pipes of one radius, two running the same way, and a thin pipe the
+    /// fat one does not swallow whole, which crosses it in one loop that runs
+    /// back and forth round both axes, are refused rather than ordered.
+    #[test]
+    fn two_pipes_that_do_not_cross_in_two_loops_round_the_thinner_are_refused() {
+        let pipe = |at: Point, along: Vector, radius: f64| {
+            Surface::Cylinder(
+                Cylinder::new(Axis::new(at, along).expect("an axis"), radius).expect("a radius"),
+            )
+        };
+        let [along_x, along_z] = [Vector::new(1.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)];
+        let fat = pipe(Point::origin(), along_z, 4.0);
+        let pairs = [
+            (
+                "of one radius",
+                pipe(Point::new(0.0, 0.0, 5.0), along_x, 4.0),
+                [0.0, 4.0, 5.0],
+            ),
+            (
+                "running the same way",
+                pipe(Point::new(4.0, 0.0, 0.0), along_z, 1.0),
+                [3.875, 0.984_375_f64.sqrt(), 5.0],
+            ),
+            (
+                "not swallowed whole",
+                pipe(Point::new(0.0, 3.5, 5.0), along_x, 1.0),
+                [3.75_f64.sqrt(), 3.5, 6.0],
+            ),
+        ];
+        for (what, other, on_both) in pairs {
+            let [from, one, other_point] =
+                [on_both, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]].map(PredicatePoint::from);
+            for pair in [[&fat, &other], [&other, &fat]] {
+                assert_eq!(
+                    which_comes_first_round_a_crossing(pair, from, one, other_point),
+                    Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+                    "two pipes {what}"
+                );
+            }
+        }
+    }
 }
