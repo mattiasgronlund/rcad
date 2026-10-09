@@ -782,11 +782,7 @@ fn a_steep_pointed_cone_with_a_gentle_lean_answers_every_rule_right() {
     for lean in [0.25, 0.375] {
         for crossing in [0.0, 0.5, -0.5, 1.5] {
             for turn in [0.0, 1.0, 3.0] {
-                cases.push(Case {
-                    cone: THE_STEEP_CONE,
-                    block: a_leaning_block(lean, crossing, turn),
-                    solids: a_leaning_blocks_solids(THE_STEEP_CONE, lean, crossing),
-                });
+                cases.push(a_leaning_case(THE_STEEP_CONE, lean, crossing, turn));
             }
         }
     }
@@ -804,22 +800,20 @@ fn a_steep_pointed_cone_with_a_gentle_lean_answers_every_rule_right() {
 /// Leaned `1`, the block meets the cone at every crossing. Crossing `0`
 /// turned `0`, the union and the cone-less-block refuse `CannotMeshAFace`;
 /// every other lean-`1` fuse is right. Leaned `4`, crossing `0` puts the
-/// leaning face through the apex and nowhere else on the cone, a touch
-/// ([`APART`]), and refuses `CannotTellTheCellsOfAFaceApart` on every rule
-/// and every turn; crossing `−0.5` misses the cone ([`APART`]), the other two
-/// crossings meet it ([`OVERLAPPING`]), and every one of those twenty-four
-/// answers right.
+/// leaning face through the apex and nowhere else on the cone, a touch, and
+/// refuses `CannotTellTheCellsOfAFaceApart` on every rule and every turn. The
+/// turn rounds that touch either way ([`a_leaning_case`]): turned `3` the face
+/// misses the apex ([`APART`]), and turned `0` or `1` the block holds a tip of
+/// the cone about `1e−16` tall ([`OVERLAPPING`]). Crossing `−0.5` misses the
+/// cone ([`APART`]), the other two crossings meet it ([`OVERLAPPING`]), and
+/// every one of those twenty-four answers right.
 #[test]
 fn a_steep_pointed_cone_with_a_steep_or_steeper_lean_answers_right_or_refuses() {
     let mut cases = Vec::new();
     for lean in [1.0, 4.0] {
         for crossing in [0.0, 0.5, -0.5, 1.5] {
             for turn in [0.0, 1.0, 3.0] {
-                cases.push(Case {
-                    cone: THE_STEEP_CONE,
-                    block: a_leaning_block(lean, crossing, turn),
-                    solids: a_leaning_blocks_solids(THE_STEEP_CONE, lean, crossing),
-                });
+                cases.push(a_leaning_case(THE_STEEP_CONE, lean, crossing, turn));
             }
         }
     }
@@ -920,11 +914,7 @@ fn a_unit_pointed_cone_with_a_lean_up_to_one_answers_right_or_refuses() {
     for lean in [0.25, 0.375, 1.0] {
         for crossing in [0.0, 0.5, -0.5, 1.5] {
             for turn in [0.0, 1.0, 3.0] {
-                cases.push(Case {
-                    cone: THE_UNIT_CONE,
-                    block: a_leaning_block(lean, crossing, turn),
-                    solids: a_leaning_blocks_solids(THE_UNIT_CONE, lean, crossing),
-                });
+                cases.push(a_leaning_case(THE_UNIT_CONE, lean, crossing, turn));
             }
         }
     }
@@ -950,23 +940,16 @@ fn a_unit_pointed_cone_with_a_lean_up_to_one_answers_right_or_refuses() {
 /// eight fuses at crossing `0`, turns `0` and `1`, which are a known defect
 /// ([`a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate`]).
 /// Crossing `0` puts the leaning face through the apex and nowhere else on
-/// the cone, a touch ([`APART`]); turned `3` it refuses `ResultIsNotManifold`
-/// on every rule. Crossing `−0.5` misses the cone by `2` at the apex
+/// the cone, a touch; turned `3`, which rounds the face `1.6e−15` clear of the
+/// apex ([`APART`], [`a_leaning_case`]), it refuses `ResultIsNotManifold` on
+/// every rule. Crossing `−0.5` misses the cone by `2` at the apex
 /// ([`APART`]), the other two crossings meet it ([`OVERLAPPING`]), and all
 /// thirty-six of those answer right.
 fn a_unit_pointed_cones_lean_four_cases_away_from_the_defect() -> Vec<Case> {
-    let mut cases = vec![Case {
-        cone: THE_UNIT_CONE,
-        block: a_leaning_block(4.0, 0.0, 3.0),
-        solids: a_leaning_blocks_solids(THE_UNIT_CONE, 4.0, 0.0),
-    }];
+    let mut cases = vec![a_leaning_case(THE_UNIT_CONE, 4.0, 0.0, 3.0)];
     for crossing in [0.5, -0.5, 1.5] {
         for turn in [0.0, 1.0, 3.0] {
-            cases.push(Case {
-                cone: THE_UNIT_CONE,
-                block: a_leaning_block(4.0, crossing, turn),
-                solids: a_leaning_blocks_solids(THE_UNIT_CONE, 4.0, crossing),
-            });
+            cases.push(a_leaning_case(THE_UNIT_CONE, 4.0, crossing, turn));
         }
     }
     cases
@@ -1059,26 +1042,25 @@ fn a_slab_fourteen_deep_across_a_unit_pointed_cone_answers_right_or_refuses() {
 /// rather than through `tally`, which has no way to expect a validation
 /// failure from a fuse that answered.
 ///
-/// The leaning face touches the unit cone at its apex and nowhere else, so
-/// the right answer is the two solids [`APART`]; the model `fuse` hands back
-/// is not checked far enough to say whether it holds them.
+/// Before the turn the leaning face touches the unit cone at its apex and
+/// nowhere else. The face as the model stores it passes `2.2e−16` beyond the
+/// apex (`4.4e−16` turned `1`), so the shapes `fuse` is handed share a tip of
+/// the cone about `3e−16` tall ([`a_leaning_case`]), and the union is one
+/// solid. That is what `fuse` answers, with a corner where the face meets the
+/// cone `3.45e−16` from the apex (`6.9e−16` turned `1`), and `validate`
+/// refuses the model for it. So the defect is a fuse that answers with a model
+/// its own `validate` refuses, where it should refuse.
 ///
-/// Not traced to a cause. The ratio here and at turn `1` (measured at
-/// `5.364581909073752e16` and `2.6822909545368416e16`) match the `5.7e16` of
-/// the doc comment on
+/// The ratios, measured at `5.364581909073752e16` and
+/// `2.6822909545368416e16`, are both `18.5` over that corner's distance from
+/// the apex. They match the `5.7e16` of the doc comment on
 /// [`a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right`]
-/// in pattern only — that was a near-zero cancellation that lost a lean to
-/// rounding — but that cause is not demonstrated here. Queue row Q1562.
+/// in pattern only, and nothing past this is traced. Queue row Q1562.
 #[test]
 fn a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate() {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let case = Case {
-        cone: THE_UNIT_CONE,
-        block: a_leaning_block(4.0, 0.0, 0.0),
-        // Never read: validate fails before any count is checked.
-        solids: a_leaning_blocks_solids(THE_UNIT_CONE, 4.0, 0.0),
-    };
+    let case = a_leaning_case(THE_UNIT_CONE, 4.0, 0.0, 0.0);
     let (cone, block) = build(&mut model, &case);
     model
         .fuse(
@@ -1101,9 +1083,74 @@ fn a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate() {
     );
 }
 
+/// [`a_leaning_block`] round `cone`, counted by [`a_leaning_blocks_solids`]
+/// except where the turn has rounded a face that only touched the apex to
+/// pass beyond it.
+///
+/// At crossing `0` the leaning face goes through the apex, and at a lean of
+/// `4` on either cone, or `1` on the unit cone, it meets the cone nowhere else.
+/// Once the block is turned, the face the model stores goes through the apex
+/// only to within rounding: it falls short of it or passes beyond it by up to
+/// `1.6e−15`, as [`how_far_the_leaning_face_passes_the_apex`] reads it.
+///
+/// - **Beyond it**, the apex is inside the block, and so is a tip of the cone
+///   round it, so the two share volume and the count is [`OVERLAPPING`], as at
+///   any crossing that cuts the cone: the cone less the block is the cone cut
+///   by one plane, and the block less the cone the block less a tip at its
+///   face. Leaned `1` and turned `1`, that tip is a sliver along the ruling the
+///   face touched, from the apex to `z ≈ 2.66`, and at most `6e−8` across.
+/// - **Short of it**, a lean of `4` still misses the cone, its face being far
+///   shallower than the cone's side. A lean of `1` misses only if the stored
+///   face also leans away from the ruling it touched, and at turns `0` and `3`,
+///   the two that fall short, it does: decided exactly from the stored floats,
+///   `n_x² + n_y² − n_z²` of its outward normal is `−1.57e−16` and
+///   `−4.38e−16`. So those stay [`APART`].
+fn a_leaning_case(cone: ConeShape, lean: f64, crossing: f64, turn: f64) -> Case {
+    let block = a_leaning_block(lean, crossing, turn);
+    let by_hand = a_leaning_blocks_solids(cone, lean, crossing);
+    let solids = if by_hand == APART && how_far_the_leaning_face_passes_the_apex(block) > 0.0 {
+        OVERLAPPING
+    } else {
+        by_hand
+    };
+    Case {
+        cone,
+        block,
+        solids,
+    }
+}
+
+/// How far beyond the apex the leaning face of `block` is, as the model stores
+/// it once placed: above zero when the apex is inside the block. The leaning
+/// face is the block's face nearest the origin, each other one being at least
+/// `5` from it.
+fn how_far_the_leaning_face_passes_the_apex(block: BoxShape) -> f64 {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let key = a_block(&mut model, block);
+    let face = model
+        .solid(key)
+        .expect("this model made the key")
+        .faces()
+        .min_by(|one, other| {
+            one.plane()
+                .offset()
+                .abs()
+                .total_cmp(&other.plane().offset().abs())
+        })
+        .expect("a block has faces");
+    let plane = face.plane();
+    assert_eq!(
+        face.outward_normal(),
+        plane.normal(),
+        "a block's face used reversed"
+    );
+    plane.offset()
+}
+
 /// How many solids each rule leaves for [`a_leaning_block`] round a pointed
-/// cone up to `z = 3`, worked out by hand. Turning the block about the axis
-/// changes no count, since the cone is round.
+/// cone up to `z = 3`, worked out by hand for the shapes before rounding.
+/// Turning the block about the axis changes no count, since the cone is
+/// round; [`a_leaning_case`] says where the rounding of the turn does.
 ///
 /// In the plane through the axis that the block leans in, the cone reaches
 /// furthest into the block's side of the face `x = lean · (z − crossing)`
@@ -1438,17 +1485,19 @@ const REFUSALS: [&str; 11] = [
 ];
 
 /// Runs every rule over every case. Panics on a wrong answer; counts the
-/// right ones and the refusals by name.
+/// right ones and the refusals by name, and prints each refusal with the
+/// place of its case in `cases`.
 fn tally(cases: &[Case]) -> Tally {
     let mut tally = Tally {
         right: 0,
         refused: BTreeMap::new(),
     };
-    for case in cases {
+    for (place, case) in cases.iter().enumerate() {
         for (which, (rule, cone_first)) in RULES.into_iter().enumerate() {
             match fuse_and_check(case, rule, cone_first, case.solids[which]) {
                 None => tally.right += 1,
                 Some(name) => {
+                    println!("case {place}, {rule:?} (cone first: {cone_first}): {name}");
                     let known = REFUSALS
                         .into_iter()
                         .find(|it| *it == name)
@@ -1633,14 +1682,17 @@ fn build(model: &mut Model, case: &Case) -> (SolidKey, SolidKey) {
     } else {
         a_frustum(model, case.cone.slope, case.cone.near, case.cone.far)
     };
-    let [x, y, z] = case.block.size;
+    (cone, a_block(model, case.block))
+}
+
+fn a_block(model: &mut Model, block: BoxShape) -> SolidKey {
+    let [x, y, z] = block.size;
     let rectangle = ProfileBuilder::new(vec![[0.0, 0.0], [x, 0.0], [x, y], [0.0, y]])
         .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a rectangle is a profile");
-    let block = model
-        .add_extrusion(&rectangle, z, &case.block.placed)
-        .expect("a rectangle extrudes");
-    (cone, block)
+    model
+        .add_extrusion(&rectangle, z, &block.placed)
+        .expect("a rectangle extrudes")
 }
 
 /// Points half a unit apart over `|x|, |y| ≤ 6`, `|z| ≤ 12`, nudged off the
