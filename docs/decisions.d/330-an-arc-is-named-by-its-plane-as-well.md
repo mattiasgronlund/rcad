@@ -196,6 +196,24 @@ names anything; **Q1538** folds it. With the bars named first, all 12 are still
 refused `Undecidable` on `side of plane`, at a corner on a bar's round wall;
 Q1495 is re-filed for those alone as **Q1539**, and Q1497 waits on both.
 
+**2026-10-09 note (Q1496, fixed by `bced8a48`): the half bars get past the
+cap.** The refusal at a bar's bottom cap was raised in the fuse's arrangement,
+`which_way_an_edge_runs_round` in `fuse/arrange.rs`, and not in `holds.rs` where
+Q1496's lead put it. The cap's arc is half its circle, so its chord runs
+through the centre, and its picker is the plane through that chord. Turned, the
+fuse solves both ends into boxes that plane runs through, and the centre is on
+the plane and on the chord line, so none of the four ways `the_way_into_an_arc`
+had could say which half it is. A fifth way, which asks where the line through
+the centre square to the chord meets the circle, reads it (§427). One half bar
+turned by `0.3`, `π/4`, `0.7853`, `1` or either of Q555's pairs now answers all
+six fuses with the half bend
+(`a_half_bar_turned_about_a_half_bends_axis.rs`). Two half bars with the
+spellings mixed are refused by name as the quarter bars are, `Undecidable` on
+`side of plane` with the bars named first and `CannotTellTheCellsOfAFaceApart`
+with the bend named first. Whether by Q1539's and Q1538's causes is not
+traced, so they still cannot show the guess either way; §427.4 has what was
+run.
+
 ### 330.4 Whether a spelling can pair four faces crosswise
 
 §247.6 asked whether two spellings the fold leaves apart could pair the four
