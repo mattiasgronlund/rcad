@@ -7,11 +7,12 @@ verb that writes, and so does `ff-main`, so the page stays current as a side
 effect of the queue work rather than needing its own trigger. It reads
 **main's** copy of `docs/queue.md` — never this worktree's own, which may sit
 on a lane branch — plus the claims file `tooling/queue/queue.py` also reads,
-and writes a self-contained page: two SVG charts of the queue's shape over
-every commit of `docs/queue.md` on main's first-parent line, then the current
-ready, running and lately-closed rows, rows added against rows closed per
-day, and what the overnight fuzz job did night by night — that last section
-is `fuzz_section.py`'s, read from the fuzz log root the caller names.
+and writes a self-contained page: rows added against rows closed per day, two
+SVG charts of the queue's shape over every commit of `docs/queue.md` on main's
+first-parent line, a table of both by day, then the current ready, running and
+lately-closed rows, and what the overnight fuzz job did night by night — that
+last section is `fuzz_section.py`'s, read from the fuzz log root the caller
+names.
 `docs/decisions.md` §230, §263.
 
 The state this keeps across runs is `<out>/.history-cache.json`, one entry
@@ -230,30 +231,36 @@ def closed_rows(tip):
     return closed[-CLOSED_ROWS_SHOWN:]
 
 
-def daily_deltas(points):
-    """Rows added and rows closed per day, from the same per-commit tallies as the charts.
+def by_day(points):
+    """Rows added and rows closed per day, and the day's last tally, from the same per-commit tallies as the charts.
 
     Both totals are monotonic — a row is never removed once added, and a
     closed row never reopens — so a day's count is just the last commit seen
-    that day, and the delta against the previous day is never negative.
+    that day, and the delta against the previous day is never negative. A day
+    no commit touched the queue on still gets an entry: nothing added, nothing
+    closed, and the day before's tally, so a quiet day shows as one.
     """
     latest_of_day = {}
     for point in points:
         latest_of_day[point.when[:10]] = point
     previous_total = 0
     previous_closed = 0
-    deltas = []
-    for day in sorted(latest_of_day):
-        counts = latest_of_day[day].counts
+    days = []
+    calendar = fuzz_section.calendar_days(min(latest_of_day), max(latest_of_day))
+    counts = latest_of_day[calendar[0]].counts
+    for day in calendar:
+        if day in latest_of_day:
+            counts = latest_of_day[day].counts
         total = sum(counts["by_tier"].values()) + counts["parked"] + counts["closed"]
-        deltas.append({
+        days.append({
             "day": day,
             "added": max(0, total - previous_total),
             "closed": max(0, counts["closed"] - previous_closed),
+            "counts": counts,
         })
         previous_total = total
         previous_closed = counts["closed"]
-    return deltas
+    return days
 
 
 def write_atomically(path, text):
@@ -301,14 +308,15 @@ def render_page(points, state, fuzz):
         chart_id="progress",
         caption="The open queue stacked on every row closed so far",
     )
-    deltas = daily_deltas(points)
-    added_closed_chart = grouped_bars(deltas, chart_id="added-closed", caption="Rows added against rows closed per day")
+    days = by_day(points)
+    added_closed_chart = grouped_bars(days, chart_id="added-closed", caption="Rows added against rows closed per day")
     return PAGE.format(
         generated_at=points[-1].when,
         commit_count=len(points),
         by_tier_chart=by_tier_chart,
         progress_chart=progress_chart,
         added_closed_chart=added_closed_chart,
+        statistics_table=statistics_table(days),
         ready_section=ready_section(state["ready"]),
         running_section=running_section(state["running"]),
         closed_section=closed_section(state["closed"]),
@@ -416,6 +424,34 @@ def grouped_bars(deltas, chart_id, caption):
 </figure>"""
 
 
+def statistics_table(days):
+    """Every number the three charts draw, one row per day, newest first.
+
+    A day's shape is its last commit's, the same point the Pace chart takes
+    its two counts from.
+    """
+    tier_heads = "".join(f'<th class="n">Tier {html.escape(tier)}</th>' for tier in TIERS_IN_ORDER)
+    rows = []
+    for day in reversed(days):
+        counts = day["counts"]
+        cells = [day["added"], day["closed"]]
+        cells += [counts["by_tier"][tier] for tier in TIERS_IN_ORDER]
+        cells += [counts["parked"], sum(counts["by_tier"].values()) + counts["parked"], counts["closed"]]
+        rows.append(
+            f'<tr><th>{html.escape(day["day"])}</th>' + "".join(f'<td class="n">{n}</td>' for n in cells) + "</tr>"
+        )
+    body = "\n".join(rows)
+    return f"""
+<table class="qp-stats">
+<thead><tr><th rowspan="2">Date</th><th colspan="2">Pace</th>
+<th colspan="{len(TIERS_IN_ORDER) + 2}">Open at the day's end</th><th rowspan="2" class="n">Closed so far</th></tr>
+<tr><th class="n">Added</th><th class="n">Closed</th>{tier_heads}<th class="n">Parked</th><th class="n">All open</th></tr></thead>
+<tbody>
+{body}
+</tbody>
+</table>"""
+
+
 def ready_section(by_tier):
     items = []
     for tier in TIERS_IN_ORDER:
@@ -492,6 +528,7 @@ body {{
 }}
 h1 {{ font-size: 18px; margin: 0 0 4px; }}
 h2 {{ font-size: 15px; margin: 28px 0 8px; }}
+h2:first-child {{ margin-top: 0; }}
 h3 {{ font-size: 13px; margin: 12px 0 4px; color: var(--qp-ink-2); }}
 p.qp-sub {{ color: var(--qp-muted); margin: 0 0 20px; }}
 ul {{ margin: 0 0 8px; padding-left: 20px; }}
@@ -541,14 +578,26 @@ table.qp-fuzz tbody th .qp-note {{ width: 11em; white-space: normal; }}
 table.qp-fuzz td.n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 table.qp-fuzz td.faults {{ white-space: nowrap; }}
 .qp-note {{ color: var(--qp-muted); font-size: 12px; font-weight: normal; max-width: 900px; }}
+table.qp-stats {{ border-collapse: collapse; font-size: 12px; margin: 0 0 8px; }}
+table.qp-stats th, table.qp-stats td {{ padding: 3px 8px; border-bottom: 1px solid var(--qp-grid); text-align: left; }}
+table.qp-stats thead th {{ color: var(--qp-ink-2); font-weight: 600; vertical-align: bottom; }}
+table.qp-stats thead th[colspan] {{ text-align: center; }}
+table.qp-stats tbody th {{ font-weight: 600; white-space: nowrap; }}
+table.qp-stats .n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 </style>
 </head>
 <body>
+<h2>Pace</h2>
+{added_closed_chart}
+
 <h1>rcad queue</h1>
 <p class="qp-sub">{commit_count} commits of docs/queue.md on main's first-parent line, through {generated_at}</p>
 
 {by_tier_chart}
 {progress_chart}
+
+<h2>Queue statistics</h2>
+{statistics_table}
 
 <div class="qp-grid2">
 <div>
@@ -563,9 +612,6 @@ table.qp-fuzz td.faults {{ white-space: nowrap; }}
 
 <h2>Lately closed</h2>
 {closed_section}
-
-<h2>Pace</h2>
-{added_closed_chart}
 
 <h2>Fuzzing, night by night</h2>
 {fuzz_section}

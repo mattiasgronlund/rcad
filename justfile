@@ -11258,6 +11258,11 @@ queue-page:
 # renderer's `.history-cache.json` holds one tally per commit sha verbatim, so
 # reading it back is reading the render's real output, not recomputing it.
 #
+# The first two commits share a day and the third skips one, so the Queue
+# statistics table is checked against hand counts for a day that must take its
+# last commit's shape, and for a day with no commit, which keeps the day
+# before's shape and adds and closes nothing.
+#
 # The fuzzing section reads a fixture log root with one night of each kind the
 # table tells apart: a finished night with its first artifacts (09-10), a build
 # that failed (09-11), no directory at all (09-12), a triaged night with new
@@ -11267,7 +11272,7 @@ queue-page:
 # cache both ways: a log left alone is served from it, a log that grew is read
 # again.
 [private]
-[doc("queue-page's two charts and fuzzing section, checked against hand counts of a scratch repository and fixture fuzz nights.")]
+[doc("queue-page's charts, statistics table and fuzzing section, checked against hand counts of a scratch repository and fixture fuzz nights.")]
 check-queue-page-selftest:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -11321,7 +11326,7 @@ check-queue-page-selftest:
     ```
     MD
     g add docs/queue.md
-    g commit -q -m "commit A: two open tier-1 rows"
+    GIT_COMMITTER_DATE='2026-09-01T10:00:00+00:00' g commit -q -m "commit A: two open tier-1 rows"
     sha_a=$(g rev-parse HEAD)
 
     cat > "$hub/docs/queue.md" <<'MD'
@@ -11361,7 +11366,7 @@ check-queue-page-selftest:
     ```
     MD
     g add docs/queue.md
-    g commit -q -m "commit B: Q1 closes, Q3 opens in tier 2"
+    GIT_COMMITTER_DATE='2026-09-01T18:00:00+00:00' g commit -q -m "commit B: Q1 closes, Q3 opens in tier 2"
     sha_b=$(g rev-parse HEAD)
 
     cat > "$hub/docs/queue.md" <<'MD'
@@ -11414,7 +11419,7 @@ check-queue-page-selftest:
     ```
     MD
     g add docs/queue.md
-    g commit -q -m "commit C: Q3 closes, Q4 parks in tier 1, Q5 and Q6 open in tiers 2.2 and 5"
+    GIT_COMMITTER_DATE='2026-09-03T10:00:00+00:00' g commit -q -m "commit C: Q3 closes, Q4 parks in tier 1, Q5 and Q6 open in tiers 2.2 and 5"
     sha_c=$(g rev-parse HEAD)
 
     mkdir -p "$out"
@@ -11477,6 +11482,20 @@ check-queue-page-selftest:
     grep -q '<h3>Tier 5</h3><ul><li><code>Q6</code>' "$out/index.html" || fail "the ready list leaves out tier 5's Q6"
 
     has() { grep -qF -- "$1" "$out/index.html" || fail "$2"; }
+    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Ready)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
+    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Ready</h2> ' ] \
+        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, then Ready: $order"
+    # Each row: added and closed that day, open by tier 1 2 2.2 2.5 3 4 5, parked, all open, closed so far.
+    # A and B share 09-01, so its row is B's shape, not A's; 09-02 has no commit, so it keeps B's shape.
+    has '<tr><th>2026-09-03</th><td class="n">3</td><td class="n">1</td><td class="n">1</td><td class="n">0</td><td class="n">1</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">1</td><td class="n">1</td><td class="n">4</td><td class="n">2</td></tr>' \
+        "09-03's statistics row: Q4, Q5 and Q6 added, Q3 closed, Q2, Q5 and Q6 open in tiers 1, 2.2 and 5, Q4 parked, Q1 and Q3 closed"
+    has '<tr><th>2026-09-02</th><td class="n">0</td><td class="n">0</td><td class="n">1</td><td class="n">1</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">2</td><td class="n">1</td></tr>' \
+        "09-02's statistics row: no commit, so nothing added or closed and 09-01's shape"
+    has '<tr><th>2026-09-01</th><td class="n">3</td><td class="n">1</td><td class="n">1</td><td class="n">1</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">2</td><td class="n">1</td></tr>' \
+        "09-01's statistics row: Q1 to Q3 added, Q1 closed, Q2 and Q3 open in tiers 1 and 2, at commit B and not A"
+    [ "$(grep -oE '<tr><th>2026-09-0[1-3]</th>' "$out/index.html" | tr '\n' ' ')" = '<tr><th>2026-09-03</th> <tr><th>2026-09-02</th> <tr><th>2026-09-01</th> ' ] \
+        || fail "the statistics table should hold each day once, newest first"
+    has '<title>2026-09-02: 0 added</title>' "the Pace chart should draw 09-02, the day with no commit, as a day that added nothing"
     has 'abc1234 (0 days old, 0 behind main)  2 targets, nothing found' "the latest line is not on the page"
     has '<tr><th rowspan="2">2026-09-14<div class="qp-note">not in <code>latest</code> yet: still running, or ended without writing it</div></th><td><code>demo_target</code></td><td class="n">0.0</td><td class="n" title="20">20</td><td class="n">1000</td><td class="n">1100</td><td class="n">1100</td><td class="n">0.0</td><td>no artifacts directory</td><td class="faults">not triaged</td></tr><tr><td><code>ghost_target</code></td><td colspan="8">launched, but no coverage line was ever printed</td></tr>' \
         "09-14 is newest and latest names 09-13, so it should be marked unfinished, with a covered target and one that never printed coverage"
@@ -11509,7 +11528,7 @@ check-queue-page-selftest:
     render || fail "queue-page failed to render a second time"
     has '<title>2026-09-10: 4242 at the end of the night</title>' "an unchanged log was read again rather than served from the cache"
     has '<title>2026-09-13: 1050 at the end of the night</title>' "a log that grew was served stale from the cache"
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits, the ready list holds every tier, and the fuzzing section matches its fixture nights"
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits, so do the statistics table's three days, Pace leads the page, the ready list holds every tier, and the fuzzing section matches its fixture nights"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
