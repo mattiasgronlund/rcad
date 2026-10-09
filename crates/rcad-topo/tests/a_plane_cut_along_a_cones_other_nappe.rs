@@ -1120,6 +1120,25 @@ fn distance_to_a_boundary(case: &Case, p: Point) -> f64 {
     to_side.min(to_caps).min(to_block)
 }
 
+/// DIAGNOSTIC PROBE FOR Q467, NOT A DELIVERABLE — remove before landing.
+///
+/// For every case of the three families round `steep` (slope 2, far 3) and
+/// `unit` (slope 1, far 3), and every rule, this calls `model.fuse` once to
+/// read off the solid count, then calls the real `fuse_and_check` with that
+/// count — so every `None` printed below is a right answer validated by
+/// volume and the grid of points, and every `Some(name)` is the exact string
+/// `tally()` would see, not the raw `{:?}` of `zz_probe_q467`'s first version.
+///
+/// **This is expensive**: a refusal returns before the grid/volume work and
+/// is cheap, but each right answer walks the full grid and meshes the
+/// pieces, so the cost is close to what the real pinned tests will cost to
+/// run. On an idle machine the steep cone's three families (368 fuses) ran
+/// in well under the 1206s this took on 2026-10-09 — that run shared the
+/// host with at least three other lanes' gates (`load average: 54` on 24
+/// cores, `uptime`), which is why it was killed partway through the unit
+/// cone. Run it again on a quiet machine, or in chunks (comment out two of
+/// the three `cone_name` entries, or two of the three families) and foreground-wait
+/// each with `timeout 540 tail --pid=<pid> -f /dev/null` per `.claude/agents/lane.md`.
 #[test]
 fn zz_probe_q467() {
     let steep: ConeShape = ConeShape {
@@ -1174,42 +1193,37 @@ fn zz_probe_q467() {
             ("slab", slab_cases),
         ] {
             for (name, block) in cases {
-                let case = Case {
-                    cone,
-                    block,
-                    solids: [1, 1, 1, 1],
-                };
                 for (which, (rule, cone_first)) in RULES.into_iter().enumerate() {
                     let policy = Policy::certified();
                     let mut model =
                         Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-                    let (cone_key, block_key) = build(&mut model, &case);
+                    let peek = Case {
+                        cone,
+                        block,
+                        solids: [0, 0, 0, 0],
+                    };
+                    let (cone_key, block_key) = build(&mut model, &peek);
                     let (arguments, tools) = if cone_first {
                         ([cone_key], [block_key])
                     } else {
                         ([block_key], [cone_key])
                     };
-                    match model.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
-                    {
-                        Ok(answer) => {
-                            eprintln!(
-                                "PROBE {cone_name} {family} [{name}] rule {which} ok {}",
-                                answer.solids().len()
-                            );
-                        }
-                        Err(Error::Undecidable { records }) => {
-                            let record = records.records().last().expect("a refusal names why");
-                            eprintln!(
-                                "PROBE {cone_name} {family} [{name}] rule {which} err {}",
-                                record.predicate()
-                            );
-                        }
-                        Err(other) => {
-                            eprintln!(
-                                "PROBE {cone_name} {family} [{name}] rule {which} err {other:?}"
-                            );
-                        }
-                    }
+                    let n = match model.fuse(
+                        &arguments,
+                        &tools,
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    ) {
+                        Ok(answer) => answer.solids().len(),
+                        Err(_) => 0,
+                    };
+                    let mut case = peek;
+                    case.solids[which] = n;
+                    let result = fuse_and_check(&case, rule, cone_first, n);
+                    eprintln!(
+                        "PROBE2 {cone_name} {family} [{name}] rule {which} n {n} -> {result:?}"
+                    );
                 }
             }
         }
