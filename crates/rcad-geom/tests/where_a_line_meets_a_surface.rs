@@ -340,3 +340,244 @@ fn a_torus_asked_about_a_line_that_is_a_box_is_refused_by_name() {
     );
     assert_eq!(answer, Err(Error::WhereALineMeetsARingNeedsTheLineExactly));
 }
+
+/// A line and a plane written `2⁻⁵²⁸` across meet where the same two do at size
+/// one, bit for bit.
+///
+/// A plane is the one surface here that answers without a slide: every product
+/// it takes is a length times a normal, near `2⁻⁵²⁸` and not near `2⁻¹⁰⁵⁶`, so
+/// nothing falls off the bottom. `docs/decisions.md` §349.8.
+#[test]
+fn a_line_and_a_plane_written_about_1e_159_across_meet_where_they_do_at_size_one() {
+    let floor = Surface::Plane(
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 2.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("a normal with a length"),
+    );
+    the_same_steps_at_both_sizes(&Question {
+        from: [1.0, 1.0, 7.0],
+        along: [1.0, 2.0, -3.0],
+        surface: floor,
+    });
+}
+
+/// A line and a ball written `2⁻⁵²⁸` across meet where the same two do at size
+/// one, bit for bit. Every product of two lengths there is near `2⁻¹⁰⁵⁶`.
+/// `docs/decisions.md` §349.8.
+#[test]
+fn a_line_and_a_ball_written_about_1e_159_across_meet_where_they_do_at_size_one() {
+    let ball = Surface::Sphere(Sphere::new(Point::new(1.0, 2.0, 3.0), 5.0).expect("a radius"));
+    the_same_steps_at_both_sizes(&Question {
+        from: [0.0, 0.0, 0.0],
+        along: [1.0, 1.0, 1.0],
+        surface: ball,
+    });
+}
+
+/// A line and a pipe written `2⁻⁵²⁸` across meet where the same two do at size
+/// one, bit for bit. `docs/decisions.md` §349.8.
+#[test]
+fn a_line_and_a_pipe_written_about_1e_159_across_meet_where_they_do_at_size_one() {
+    let pipe = Surface::Cylinder(
+        Cylinder::new(
+            Axis::z()
+                .moved_to(Point::new(1.0, 0.0, 0.0))
+                .expect("a finite origin"),
+            3.0,
+        )
+        .expect("a radius"),
+    );
+    the_same_steps_at_both_sizes(&Question {
+        from: [0.0, 1.0, 5.0],
+        along: [1.0, 1.0, 0.0],
+        surface: pipe,
+    });
+}
+
+/// A line and a cone written `2⁻⁵²⁸` across meet where the same two do at size
+/// one, bit for bit. `docs/decisions.md` §349.8.
+#[test]
+fn a_line_and_a_cone_written_about_1e_159_across_meet_where_they_do_at_size_one() {
+    let cone = Surface::Cone(
+        Cone::new(
+            Axis::z()
+                .moved_to(Point::new(0.0, 0.0, 1.0))
+                .expect("a finite apex"),
+            1.0,
+        )
+        .expect("a slope"),
+    );
+    the_same_steps_at_both_sizes(&Question {
+        from: [0.0, 0.0, 5.0],
+        along: [1.0, 1.0, 0.0],
+        surface: cone,
+    });
+}
+
+/// A line and a ring written `2⁻⁵²⁸` across meet where the same two do at size
+/// one, bit for bit, at all four places. A ring's quartic is a length to the
+/// fourth, so where they stand every coefficient is near `2⁻²¹¹²` and is
+/// nothing at all in `f64`. `docs/decisions.md` §349.8.
+#[test]
+fn a_line_and_a_ring_written_about_1e_159_across_meet_where_they_do_at_size_one() {
+    the_same_steps_at_both_sizes(&Question {
+        from: [0.0, 1.0, 0.0],
+        along: [1.0, 0.0, 0.0],
+        surface: Surface::Torus(a_ring()),
+    });
+}
+
+/// A line along the top of a ring's tube touches it twice, at `±√15`, where no
+/// `f64` lands — and written `2⁻⁵²⁸` across it still touches it there.
+///
+/// A touch no `f64` names comes back with how far the ring's quartic reaches
+/// over its box, and that is a length to the fourth. It is worked out where the
+/// question was slid to, so it is slid back down by four times the slide, and
+/// outward: what comes back still straddles zero, which is the whole of what it
+/// says. `docs/decisions.md` §349.8.
+#[test]
+fn a_line_touching_a_ring_written_about_1e_159_across_touches_it_where_it_does_at_size_one() {
+    the_same_steps_at_both_sizes(&Question {
+        from: [0.0, 1.0, 1.0],
+        along: [1.0, 0.0, 0.0],
+        surface: Surface::Torus(a_ring()),
+    });
+}
+
+/// One line and one surface, written at size one.
+struct Question {
+    from: [f64; 3],
+    along: [f64; 3],
+    surface: Surface,
+}
+
+/// `2⁻⁵²⁸`, the size §349's three surfaces `1e-159` across were written at. A
+/// product of two lengths that small is near `2⁻¹⁰⁵⁶`, among the subnormals.
+const TINY: i32 = -528;
+
+/// The question asked at size one and again slid down to `2⁻⁵²⁸`, where both
+/// must answer, the tiny one must hold what size one says, and the tiny one is
+/// measured for how much wider it is.
+///
+/// **A step along the line does not move when the question is slid**, because
+/// the line's direction is a length too and slides with its point: `2ᵏ·from +
+/// t·2ᵏ·along` is `2ᵏ` times the point at `t`. So the tiny answer scaled back
+/// up *is* the tiny answer, and the two are compared as they come.
+fn the_same_steps_at_both_sizes(question: &Question) {
+    let at_size_one = asked_certified(question, 0)
+        .unwrap_or_else(|refused| panic!("the question at size one is answered: {refused:?}"));
+    let mut log = ProvenanceLog::new();
+    let tiny = where_a_line_meets_a_surface(
+        exactly(question.from.map(|side| slid_exactly(side, TINY))),
+        exactly(question.along.map(|side| slid_exactly(side, TINY))),
+        &slid(&question.surface, TINY),
+        &Policy::certified(),
+        &mut log,
+    )
+    .unwrap_or_else(|refused| panic!("the same question 2^-528 across is answered: {refused:?}"));
+    assert!(log.is_empty(), "a certified answer logs nothing: {log:?}");
+
+    let (WhereALineMeetsIt::At(home), WhereALineMeetsIt::At(found)) = (&at_size_one, &tiny) else {
+        panic!("both sizes meet somewhere: {at_size_one:?} and {tiny:?}");
+    };
+    assert_eq!(found.len(), home.len(), "{tiny:?} against {at_size_one:?}");
+    for (step, step_at_home) in found.iter().zip(home) {
+        match (step, step_at_home) {
+            (MeetsAt::Here(step), MeetsAt::Here(step_at_home)) => {
+                assert_eq!(
+                    (step.lo().to_bits(), step.hi().to_bits()),
+                    (step_at_home.lo().to_bits(), step_at_home.hi().to_bits()),
+                    "the step 2^-528 across is the step at size one, bit for bit: \
+                     {step:?} against {step_at_home:?}"
+                );
+            }
+            (
+                MeetsAt::MaybeATouch {
+                    inside,
+                    how_far_it_reaches,
+                },
+                MeetsAt::MaybeATouch {
+                    inside: inside_at_home,
+                    how_far_it_reaches: reach_at_home,
+                },
+            ) => {
+                assert_eq!(
+                    (inside.lo().to_bits(), inside.hi().to_bits()),
+                    (inside_at_home.lo().to_bits(), inside_at_home.hi().to_bits()),
+                    "the touch 2^-528 across is in the box it is at size one"
+                );
+                assert!(
+                    how_far_it_reaches.contains_zero() && reach_at_home.contains_zero(),
+                    "a touch no f64 names reaches either side of zero at both sizes: \
+                     {how_far_it_reaches:?} and {reach_at_home:?}"
+                );
+            }
+            (step, step_at_home) => {
+                panic!("the two sizes read one step two ways: {step:?} and {step_at_home:?}")
+            }
+        }
+    }
+}
+
+fn asked_certified(question: &Question, exponent: i32) -> Result<WhereALineMeetsIt, Error> {
+    where_a_line_meets_a_surface(
+        exactly(question.from.map(|side| slid_exactly(side, exponent))),
+        exactly(question.along.map(|side| slid_exactly(side, exponent))),
+        &slid(&question.surface, exponent),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+}
+
+/// The same surface with space scaled by `2^exponent`: every length multiplied
+/// and every direction, normal and slope left as its bits are.
+fn slid(surface: &Surface, exponent: i32) -> Surface {
+    let by = |value: f64| slid_exactly(value, exponent);
+    let place = |at: Point| Point::from(at.coordinates().map(by));
+    match surface {
+        Surface::Plane(flat) => {
+            Surface::Plane(flat.moved_to(by(flat.offset())).expect("a finite offset"))
+        }
+        Surface::Sphere(ball) => {
+            Surface::Sphere(Sphere::new(place(ball.centre()), by(ball.radius())).expect("a radius"))
+        }
+        Surface::Cylinder(pipe) => Surface::Cylinder(
+            Cylinder::new(
+                pipe.axis()
+                    .moved_to(place(pipe.axis().origin()))
+                    .expect("a finite origin"),
+                by(pipe.radius()),
+            )
+            .expect("a radius"),
+        ),
+        Surface::Cone(cone) => Surface::Cone(
+            Cone::new(
+                cone.axis()
+                    .moved_to(place(cone.apex()))
+                    .expect("a finite apex"),
+                cone.slope(),
+            )
+            .expect("the same slope"),
+        ),
+        Surface::Torus(ring) => Surface::Torus(
+            Torus::new(
+                ring.axis()
+                    .moved_to(place(ring.centre()))
+                    .expect("a finite centre"),
+                by(ring.ring_radius()),
+                by(ring.tube_radius()),
+            )
+            .expect("the same two radii"),
+        ),
+        other => panic!("nothing here can slide {other:?}"),
+    }
+}
+
+/// `value * 2^exponent`, which has to be exactly that.
+fn slid_exactly(value: f64, exponent: i32) -> f64 {
+    let moved = value * 2f64.powi(exponent);
+    assert!(
+        value == 0.0 || moved.is_normal(),
+        "{value:e} does not slide by 2^{exponent} exactly"
+    );
+    moved
+}
