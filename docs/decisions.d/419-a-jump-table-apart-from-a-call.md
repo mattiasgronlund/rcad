@@ -125,6 +125,9 @@ $ echo $?
 `jmp`) exactly: the split moves the same 17 instructions from "unscanned"
 into their own line, and counts nothing new or fewer.
 
+This 4 is the count **before** Q1452's walk out of the crate; §419.5 gives
+the count after.
+
 **`q163-before.bin` (the `3319f838` build) was not re-measured here.** It
 lived only as a copy kept in the locked worktree `wf_aa4db869-30f-1`, and
 that worktree's `target/` is gone — Q321, the row Q1444 was re-filed from,
@@ -145,3 +148,130 @@ drop glue in `alloc`, `call_once_force` in `std::sync::Once`) that match
 §273.9's by-mnemonic reading. Q323 was filed with this split already in mind
 — it is `after:Q1444` for that reason — and needs no correction: its number
 was the can-leave bucket's all along, never the lumped one.
+
+### 419.5 Q1452: the count after the walk out of the crate, and the fifth offender on `3319f838` — 2026-10-09
+
+*Branch `lane-q1452-a-computed-call-through-a-helper-pinned`, off `c7760e33`,
+carrying forward `lane-q1452-the-scan-follows-calls-out-of-the-crate`'s one
+commit (`251cbadd`, off `602ee000`).*
+
+Built at this row's own tip with §419.3's own command, into a target
+directory of this lane's own:
+
+```
+$ cd fuzz && CI=1 RUSTC="<repo>/fuzz/rustc-stand-in.sh" \
+    RUSTFLAGS="-C target-cpu=x86-64-v3" \
+    cargo +nightly fuzz build --target-dir <repo>/target/q1452-fuzz-build
+    Finished `release` profile [optimized + debuginfo] target(s) in 1m 44s
+$ nm <repo>/target/q1452-fuzz-build/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/8472baab04ea5884/out/librcad_fuzz_timing-8472baab04ea5884.rlib \
+    | grep -ic sancov
+0
+```
+
+The script against all five binaries:
+
+```
+$ fuzz/timing-hooked-calls.py \
+    target/q1452-fuzz-build/.../where_two_surfaces_cross \
+    target/q1452-fuzz-build/.../where_a_cone_or_a_torus_crosses \
+    target/q1452-fuzz-build/.../no_step_file_makes_the_reader_panic \
+    target/q1452-fuzz-build/.../no_model_makes_the_writer_panic \
+    target/q1452-fuzz-build/.../two_solids_fused_by_a_stranger
+[every target:]
+  calls from rcad_fuzz_timing to a hooked function: 1 (0 outside SlowRun::is)
+  loads of a hooked slot in rcad_fuzz_timing with no call matched: 0
+  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function, unscanned: 71
+  tail jumps in rcad_fuzz_timing through a relative jump table, staying inside their own function: 17
+  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 0
+  clean
+$ echo $?
+0
+```
+
+**71 replaces §419.3's 4** on every target; the 17 is unchanged, since
+`timing_table_jumps` still filters on the function's own symbol rather than
+on `reachable_from`. The walk out of the crate (the merged commit above)
+widened `timing_computed`'s own filter from "the function's symbol names
+`rcad_fuzz_timing`" to "the function is reachable from one that does" — and
+every helper the crate calls directly has computed-pointer calls of its own
+(drop glue, iterator machinery, collection internals in `alloc` and `core`)
+that nothing ever counted before, because the old filter never looked past
+the crate's own functions. The script still exits 0 on all five targets:
+wider counting changes what two lines say, not whether anything already
+treated as an offender newly is one.
+
+**§273.3's fifth offender — `how_slow_the_name_says`'s `split_once("us-")`
+reaching `bcmp` through `core`'s `StrSearcher::new` — is still not found by
+this scan, but not for the reason this row's brief gave.** The brief said
+the floating nightly inlines the whole chain into `Watch::merge_out`, so no
+`StrSearcher::new` symbol would exist to reach. Checked, and false: building
+`3319f838`'s fuzz crate with the floating nightly and the same
+`-C target-cpu=x86-64-v3` `fuzz-overnight` uses finds the symbol, at the
+same address §273.3 read it at:
+
+```
+$ cd fuzz && RUSTFLAGS="-C target-cpu=x86-64-v3" \
+    cargo +nightly fuzz build --target-dir <repo>/target/q1452-3319f838-build
+    Finished `release` profile [optimized + debuginfo] target(s) in 2m 53s
+$ nm target/q1452-3319f838-build/x86_64-unknown-linux-gnu/release/where_two_surfaces_cross \
+    | grep -i StrSearcher
+00000000003847f0 T _RNvMsu_NtNtCsh61yYgEBR7J_4core3str7patternNtB5_11StrSearcher3new
+```
+
+The wall is one call earlier. `merge_out` reaches `StrSearcher::new` through
+a GOT slot, not a literal `call <name>`:
+
+```
+$ objdump -d --no-show-raw-insn target/q1452-3319f838-build/.../where_two_surfaces_cross | grep -n '2050e9:'
+  2050e9:	call   *0x192d51(%rip)        # 397e40 <_DYNAMIC+0x7c0>
+$ readelf -rW target/q1452-3319f838-build/.../where_two_surfaces_cross | grep 397e40
+0000000000397e40  0000000000000008 R_X86_64_RELATIVE                         3847f0
+```
+
+The relocation resolves slot `397e40` to `3847f0`, `StrSearcher::new`,
+confirming by hand what §273.3 read the same way with a different tool.
+`scan()` treats a `(%rip)` slot load as one of two things only: a hooked
+target (counted as a hit) or nothing — the branch that counts a "computed
+pointer, unscanned" call explicitly excludes anything with `"(%rip)" in
+rest and comment`, on the assumption that such a call is already decided
+one way or the other by the hooked-slot check. A slot that resolves to some
+*other* named function falls through both branches, and `calls_out` is only
+ever populated by the separate "direct `call <name>`" match a few lines
+above — so `merge_out`'s own edge to `StrSearcher::new` never exists for
+`reachable_from` to walk, and `StrSearcher::new`'s own `call bcmp` a few
+instructions later is never visited. Running the script on this build
+confirms it: the offender line still reads 4, and the new chain line reads
+0 — the fifth offender is not among them.
+
+```
+$ fuzz/timing-hooked-calls.py target/q1452-3319f838-build/.../where_two_surfaces_cross
+  calls from rcad_fuzz_timing to a hooked function: 5 (4 outside SlowRun::is)
+  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 0
+```
+
+This is a gap and not a limit: the relocation names the target exactly, the
+same table `hooked_slots` already reads for a hooked one, and nothing about
+the arithmetic refuses — the scan simply never asks that table about a slot
+that is not on the hooked list. It is a real finding and not today's
+callers' problem: every edge this crate's own code makes into a helper
+Q1452 added the walk for is a literal `call <name>`; this GOT-slot shape
+has only ever been met by building this one old commit and tracing the
+relocation by hand, the "found only by a probe" class. A follow-up row is
+queued for it.
+
+The second half of the brief's claim holds as stated. `nightly-2025-03-05`
+is rustc 1.87 and cannot build `3319f838`'s `Cargo.lock`:
+
+```
+$ cd <3319f838 worktree>/fuzz && rustup run nightly-2025-03-05 cargo fuzz build
+error: rustc 1.87.0-nightly is not supported by the following packages:
+  nalgebra@0.35.0 requires rustc 1.89.0
+  rcad-fuzz-timing@0.0.0 requires rustc 1.96
+  safe_arch@1.2.0 requires rustc 1.89
+  wide@1.7.0 requires rustc 1.89
+```
+
+So the demonstration the brief asked for is not there — same conclusion as
+the first lane reached, a different cause: not an unavailable symbol, but
+an edge this scan has never tracked, on a shape this row is the first to
+meet.
