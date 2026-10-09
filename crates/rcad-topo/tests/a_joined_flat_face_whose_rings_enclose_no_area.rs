@@ -279,9 +279,9 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 /// reads a picker whose plane holds both ends on any circle a plane cuts a
 /// ring in, and so reads every arc of both solids' floors, caps and walls.
 #[test]
-fn the_top_halves_of_two_half_bends_fuse_to_what_pappus_gives_but_for_their_union() {
+fn the_top_halves_of_two_half_bends_fuse_by_every_rule_to_what_pappus_gives() {
     for (rule, volume) in [
-        (Rule::Union, None),
+        (Rule::Union, Some(4.0 * PI * PI)),
         (Rule::Intersection, Some(0.0)),
         (Rule::Difference, Some(2.0 * PI * PI)),
     ] {
