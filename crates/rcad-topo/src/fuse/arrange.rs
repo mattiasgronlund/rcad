@@ -10760,7 +10760,7 @@ mod tests {
 #[cfg(test)]
 mod curved {
     use rcad_geom::{
-        Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
+        Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
     };
     use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 
@@ -11121,6 +11121,87 @@ mod curved {
         builder
             .build(model, &Policy::certified(), &mut ProvenanceLog::new())
             .expect("a pointed cone described this way is a solid")
+    }
+
+    /// The top half of a ring with nothing cutting it comes through whole: its
+    /// ring's face and the flat ring closing it underneath are each one piece,
+    /// bounded by both the outer and the inner circle `z = 0` cuts the ring in.
+    ///
+    /// Each face came back as two pieces of one wire each (Q1513). Every node
+    /// of a walk round one circle is on the surface that cuts the other circle
+    /// too, so the walk said nothing about which side of the other circle it
+    /// was on, and no walk round one circle was joined to a walk round the
+    /// other. The flat face is answered by
+    /// `whether_past_the_pipe_between_two_circles_of_a_ring` and the ring's face
+    /// by `side_off_the_other_circle_a_plane_cuts_a_ring_in`.
+    #[test]
+    fn each_face_of_a_half_ring_nothing_cuts_is_one_piece_with_both_circles() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let half_ring = the_top_half_of_a_ring_of_four_round_a_tube_of_one(&mut model);
+        let mut solids = bake(&model, &[half_ring], &policy, &mut log).expect("it bakes");
+        cuts::gather(&mut solids, &policy, &mut log).expect("nothing else is there to cut it");
+        let mut table: Vec<(&'static str, Vec<usize>)> = solids[0]
+            .faces
+            .iter()
+            .map(|face| {
+                let wires = split(face).iter().map(|piece| piece.wires.len()).collect();
+                (kind(&face.surface), wires)
+            })
+            .collect();
+        table.sort();
+        assert_eq!(table, [("plane", vec![2]), ("ring", vec![2])]);
+    }
+
+    /// The tube of radius one round the ring of radius four about `z`, cut by
+    /// `z = 0` and keeping `z ≥ 0`, as `tests/rings/mod.rs` builds it with no
+    /// seam: each face has one wire per circle.
+    fn the_top_half_of_a_ring_of_four_round_a_tube_of_one(model: &mut Model) -> crate::SolidKey {
+        let mut builder = SolidBuilder::new();
+        let [outer, inner] = [5.0, 3.0].map(|radius| {
+            let corner = builder
+                .add_vertex(Point::new(radius, 0.0, 0.0))
+                .expect("a finite point");
+            builder
+                .add_edge(corner, corner, EdgeRun::RightRoundWhereItsFacesCross)
+                .expect("z = 0 cuts the ring in this one closed curve")
+        });
+        let mut face = |surface: Surface, walks: [(_, Orientation); 2]| {
+            let wires = walks.map(|(edge, turn)| {
+                let coedge = builder
+                    .add_coedge(edge, turn)
+                    .expect("an edge of this build");
+                builder
+                    .add_wire(&[DraftStep::Along(coedge)])
+                    .expect("one closed edge is a wire")
+            });
+            builder
+                .add_face(surface, &wires)
+                .expect("a face between two circles")
+        };
+        let underneath = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+            .expect("the z axis is a unit normal");
+        let flat = face(
+            Surface::Plane(underneath),
+            [
+                (outer, Orientation::Forward),
+                (inner, Orientation::Reversed),
+            ],
+        );
+        let round = face(
+            Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower")),
+            [
+                (outer, Orientation::Reversed),
+                (inner, Orientation::Forward),
+            ],
+        );
+        builder
+            .add_shell(&[(round, Orientation::Forward), (flat, Orientation::Forward)])
+            .expect("two faces close");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("the top half of a ring described this way is a solid")
     }
 }
 
