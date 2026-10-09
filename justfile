@@ -8215,7 +8215,17 @@ check-fuzz-overnight-selftest:
 # function's own name, so it missed this the same way it missed
 # `how_slow_the_name_says`'s `split_once("us-")` reaching `bcmp` through
 # `core`'s `StrSearcher::new`.
-[doc("The jump-table split in timing-hooked-calls.py, pinned against a hand-assembled fixture.")]
+#
+# A third fixture pins the half the walk's own commit left untested
+# (docs/decisions.d/419 §419.N, Q1452): a function named
+# `rcad_fuzz_timing_computed_through_helper` whose only call is to a helper
+# outside the crate, and the helper's only instruction is `call *%rax` —
+# computed, and with nothing in front of it that could set `%rax` from a
+# hooked GOT slot. Before `reachable_from` existed, `timing_computed` kept
+# only the computed calls found inside a function whose own symbol named
+# `rcad_fuzz_timing`, so this one — found in a function the walk must first
+# reach through a direct call — was invisible to it.
+[doc("The jump-table split and the transitive walk in timing-hooked-calls.py, pinned against hand-assembled fixtures.")]
 check-timing-hooked-calls-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -8307,6 +8317,29 @@ check-timing-hooked-calls-selftest:
     printf '%s\n' "$offender_got" | grep -qxF "$chain_line" || {
         echo "$offender_got"
         echo "expected the chain line above"
+        exit 1
+    }
+
+    cat >"$dir/computed.s" <<'ASM'
+    .text
+    .globl rcad_fuzz_timing_computed_through_helper
+    .type rcad_fuzz_timing_computed_through_helper, @function
+    rcad_fuzz_timing_computed_through_helper:
+    call helper_with_a_computed_call
+
+    .globl helper_with_a_computed_call
+    .type helper_with_a_computed_call, @function
+    helper_with_a_computed_call:
+    call *%rax
+    ASM
+    as "$dir/computed.s" -o "$dir/computed.o"
+
+    computed_got=$(fuzz/timing-hooked-calls.py "$dir/computed.o") \
+        || { echo "$computed_got"; echo "timing-hooked-calls.py exited non-zero against a fixture where the only thing reached is a computed call, never a hook — a call this scan cannot see past is not itself an offender"; exit 1; }
+    computed_line="  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function, unscanned: 1"
+    printf '%s\n' "$computed_got" | grep -qxF "$computed_line" || {
+        echo "$computed_got"
+        echo "expected the line above (1: helper_with_a_computed_call's call *%rax, reached from rcad_fuzz_timing_computed_through_helper)"
         exit 1
     }
 
