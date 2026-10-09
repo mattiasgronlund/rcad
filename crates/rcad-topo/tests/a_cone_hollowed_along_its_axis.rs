@@ -1105,15 +1105,33 @@ fn a_frustum_from_below_the_plane_between_the_two_circles_answers_all_but_the_ba
 ///   every rule was refused `CannotFollowACrossingWhereItsSurfacesAreTangent`
 ///   while settling a point onto both surfaces. It takes such a trial's root
 ///   now, as it does a trial that cannot be settled;
-/// - **half off it**, the union `AWireWillNotLieFlatOnItsFace` with the fat bar
-///   first and `CannotMeshAFace`, its boundary crossing itself, with the thin
-///   bar first, the fat bar less the thin one the first of those and the thin
-///   less the fat the second, and the intersection `CannotMeshAFace`, two of
-///   its corners coinciding, both ways round.
+/// - **half off it**, the union `CurvedFaceWithAHoleGoesTooFarRound` with the
+///   fat bar first and `CannotMeshAFace`, its boundary crossing itself, with
+///   the thin bar first, the fat bar less the thin one the first of those and
+///   the thin less the fat the second, and the intersection `CannotMeshAFace`,
+///   two of its corners coinciding, both ways round. Until Q1494 the union with
+///   the fat bar first and the fat bar less the thin were
+///   `AWireWillNotLieFlatOnItsFace`: the fat bar's wall is then a ring with two
+///   windows in it, and `mesh.rs` cut no ring with islands in it across.
+///   `cut_a_ring_across` cuts one round its islands now.
 ///
-/// Whether the answer or the mesher is wrong is traced for neither. Each
-/// refusal comes from `mesh.rs`, and the walk the check asks for is given
-/// `1.7e307` of room, at which the marcher draws a loop in six points.
+/// Both halves are refused for two faults in `rcad-geom`'s `walk.rs`, traced
+/// by Q1494's second run with probes it has since taken out. Each loop is an
+/// edge that goes right round where its faces cross, with a corner, and
+/// nothing picks the seed it starts from. `the_seed_this_run_is_picked_up_at`
+/// takes the first of the two seeds, so the loop at `−x` is drawn with its own
+/// corner and then the points of the loop at `+x` (Q1262). And `begun_beside`
+/// keeps a start one ulp from its corner, or on it through the axis, and the
+/// triangulator refuses the two as corners that coincide (Q1508). Half off the
+/// axis, the union with the fat bar first and the fat bar less the thin meet
+/// the wrong `−x` window in `cut_a_ring_across`, which finds no cut round it;
+/// the union with the thin bar first and the thin bar less the fat meet the
+/// wrong loop on the thin bar's wall; the intersection with the fat bar first
+/// is Q1508's alone, and with the thin bar first both. That run changed the two
+/// by hand, taking the settled seed nearest the corner and handing the walk
+/// back as it was when its start is within `1e-9` of the corner, and every rule
+/// answered at both offsets and both seams, each within its error of the sums
+/// below by hand, with no assertion run.
 ///
 /// Where the fat bar's seam runs makes no difference: up `+x` it crosses the
 /// loop on that side twice and up `+y` neither loop, and each pair refuses the
@@ -1133,6 +1151,12 @@ fn a_thin_bar_through_a_fat_one_is_refused_by_the_check_after_the_arrangement() 
     };
     let a_wire_will_not_lie_flat = |answer: &Result<Vec<(f64, f64)>, Error>| {
         matches!(answer, Err(Error::AWireWillNotLieFlatOnItsFace { .. }))
+    };
+    let too_far_round = |answer: &Result<Vec<(f64, f64)>, Error>| {
+        matches!(
+            answer,
+            Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
+        )
     };
     let a_boundary_crosses_itself = |answer: &Result<Vec<(f64, f64)>, Error>| {
         matches!(
@@ -1161,11 +1185,11 @@ fn a_thin_bar_through_a_fat_one_is_refused_by_the_check_after_the_arrangement() 
         a_curved_face_has_no_seam,
     ];
     let off_refused_by = [
-        a_wire_will_not_lie_flat,
+        too_far_round,
         a_boundary_crosses_itself,
         two_corners_coincide,
         two_corners_coincide,
-        a_wire_will_not_lie_flat,
+        too_far_round,
         a_boundary_crosses_itself,
     ];
     let gives: Vec<_> = [0, 1]
