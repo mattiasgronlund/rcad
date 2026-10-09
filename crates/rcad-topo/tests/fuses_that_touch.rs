@@ -1054,17 +1054,15 @@ fn a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_p
         if rule == Rule::Difference {
             let policy = Policy::certified();
             let middle_of_the_thin_bar = Point::new(0.0, 0.0, 2.0);
-            match model
+            let containment = model
                 .solid(solids[0])
                 .expect("the difference's own key")
-                .classify_point(middle_of_the_thin_bar, &policy, &mut ProvenanceLog::new())
-            {
-                Containment::Outside => {}
-                said => panic!(
-                    "the difference should not hold the thin bar's middle, \
-                     {middle_of_the_thin_bar:?}, but it came back {said:?}"
-                ),
-            }
+                .classify_point(middle_of_the_thin_bar, &policy, &mut ProvenanceLog::new());
+            assert_eq!(
+                containment,
+                Containment::Outside,
+                "the difference should not hold the thin bar's middle, {middle_of_the_thin_bar:?}"
+            );
         }
     }
 }
