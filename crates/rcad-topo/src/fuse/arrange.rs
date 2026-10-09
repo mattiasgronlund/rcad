@@ -5761,7 +5761,12 @@ impl<'f> Arrangement<'f> {
     /// swallows in two loops round the thin pipe's axis, the half-space's flat
     /// surface holds the fat pipe's axis rather than facing along either, and
     /// [`Arrangement::whether_past_the_plane_between_two_loops`] answers there
-    /// (Q1483). Each curve then splits the surface in two, and so does
+    /// (Q1483). A flat face square to a ring's axis is the one pair picked by
+    /// something other than a half-space: the plane cuts the ring in two
+    /// circles round the axis, the pipe of the ring's own radius tells them
+    /// apart, and
+    /// [`Arrangement::whether_past_the_pipe_between_two_circles_of_a_ring`]
+    /// answers there (Q1513). Each curve then splits the surface in two, and so does
     /// the surface's own curve on the half-space's flat surface, where there is
     /// one. The curve lies inside the half-space and the other curve outside it,
     /// so every point of the surface past the flat surface is on the curve's
@@ -5793,6 +5798,12 @@ impl<'f> Arrangement<'f> {
     /// in puts the cap's circle on the ball exactly there.
     fn whether_past_the_picker(&self, crossing: usize, at: PredicatePoint) -> PastThePicker {
         let partner = self.crossings[crossing].partner;
+        if let (Surface::Plane(_), Surface::Torus(_)) = (self.surface, partner)
+            && let [picker @ (Picker::OutsideAPipe(_) | Picker::InsideAPipe(_))] =
+                self.crossings[crossing].picked_by()
+        {
+            return Self::whether_past_the_pipe_between_two_circles_of_a_ring(picker, &partner, at);
+        }
         if let (Surface::Cylinder(this), Surface::Cylinder(other)) = (self.surface, partner) {
             return self.whether_past_the_plane_between_two_loops(crossing, &this, &other, at);
         }
@@ -5915,6 +5926,42 @@ impl<'f> Arrangement<'f> {
                 if side_of_surface(&Surface::Cylinder(*other), at) == towards_the_flat_surface =>
             {
                 PastThePicker::Yes(towards_the_flat_surface)
+            }
+            Decision::Undecidable { .. } | _ => PastThePicker::CannotTell,
+        }
+    }
+
+    /// On a flat face square to a ring's axis: whether a point is past the pipe
+    /// that picks one of the two circles the face's plane cuts the ring in, and
+    /// if it is, the side of that circle it is on, which is always the ring's
+    /// negative side.
+    ///
+    /// The pipe is the ring's own radius about the ring's own axis
+    /// (`rcad_geom`'s `two_circles_round_the_axis`), so on the plane it is a
+    /// circle between the two, and the ring is negative only on the band between
+    /// them. Past the outer circle's picker, [`Picker::OutsideAPipe`], is the
+    /// disc inside the pipe, wholly inside the outer circle: the band's side of
+    /// it. Past the inner circle's picker, [`Picker::InsideAPipe`], is the plane
+    /// outside the pipe, wholly outside the inner circle: the band's side of
+    /// that one too. In front of either picker the ring cuts the plane in its
+    /// one circle and nothing else, so the ring's sign at the point is its side,
+    /// and [`PastThePicker::No`] says so.
+    ///
+    /// Read without this, a walk round one circle reads the ring's sign off
+    /// nodes that are all on the ring, and says nothing about the other circle:
+    /// the flat ring closing a half ring underneath came back in two pieces of
+    /// one wire each (Q1513). A point whose box straddles the pipe is answered
+    /// where the two readings agree.
+    fn whether_past_the_pipe_between_two_circles_of_a_ring(
+        picker: &Picker,
+        ring: &Surface,
+        at: PredicatePoint,
+    ) -> PastThePicker {
+        match picker.side_of_point(at) {
+            Decision::Pos | Decision::Zero => PastThePicker::No,
+            Decision::Neg => PastThePicker::Yes(Decision::Neg),
+            Decision::Undecidable { .. } | _ if side_of_surface(ring, at) == Decision::Neg => {
+                PastThePicker::Yes(Decision::Neg)
             }
             Decision::Undecidable { .. } | _ => PastThePicker::CannotTell,
         }
