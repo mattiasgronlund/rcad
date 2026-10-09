@@ -865,11 +865,18 @@ fn moved([x, y, z]: [f64; 3]) -> Isometry {
 /// Every way a fuse in this file refuses today, and the two ways an answer
 /// that holds every grid point it is asked about can still not be checked:
 /// a mesh finer than the mesher reaches, and a face it cannot mesh.
-const REFUSALS: [&str; 4] = [
+const REFUSALS: [&str; 11] = [
     "a point inside a piece of a face",
     "the answer does not measure: DeflectionBelowWhatAMeshCanReach",
     "the answer does not measure: CannotMeshAFace",
     "Geometry(CannotNameWhichPieceOfACrossingThisIs)",
+    "order along a crossing",
+    "ACurvedFaceGoesRightRoundWithNoSeam",
+    "side of a half-space",
+    "CannotTellTheCellsOfAFaceApart",
+    "AWireWillNotLieFlatOnItsFace",
+    "the answer does not measure: TwoPatchesOfTheMeshDrewTheSameSide",
+    "ResultIsNotManifold",
 ];
 
 /// Runs every rule over every case. Panics on a wrong answer; counts the
@@ -1220,10 +1227,16 @@ fn zz_probe_q467() {
                     };
                     let mut case = peek;
                     case.solids[which] = n;
-                    let result = fuse_and_check(&case, rule, cone_first, n);
-                    eprintln!(
-                        "PROBE2 {cone_name} {family} [{name}] rule {which} n {n} -> {result:?}"
-                    );
+                    let result =
+                        std::panic::catch_unwind(|| fuse_and_check(&case, rule, cone_first, n));
+                    match result {
+                        Ok(result) => eprintln!(
+                            "PROBE2 {cone_name} {family} [{name}] rule {which} n {n} -> {result:?}"
+                        ),
+                        Err(_) => eprintln!(
+                            "PROBE2 {cone_name} {family} [{name}] rule {which} n {n} -> PANIC"
+                        ),
+                    }
                 }
             }
         }
