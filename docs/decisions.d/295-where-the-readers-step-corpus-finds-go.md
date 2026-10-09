@@ -80,8 +80,14 @@ weighs if it needs to move with the corpus (backup, another machine, CI):
 | bytes | 215,292 | 499,607 | 61,354,396 |
 | bytes beyond the tracked corpus | 0 | 284,315 | 61,139,104 |
 
-A never grows past the tracked corpus. B grows by a few hundred KB per night
-that runs a merge (295.5 measures a second cycle). C already carries 61 MB
+A never grows past the tracked corpus. B grows by tens of KB per night that
+runs a merge: six real nights, 2026-10-03 through 2026-10-08, each chained
+onto the persistent corpus the night before left, added between **8.2 KB and
+108.0 KB** a night (8,221 to 108,028 bytes), **37.6 KB** on average. Those
+figures are §306.9's, copied from there and not measured again here. This
+sentence said "a few hundred KB" until 2026-10-09, read off 295.5's second
+cycle, which was seeded fresh from the tracked corpus rather than chained
+onto the first. C already carries 61 MB
 after one three-hour run and, per §291.3, keeps adding **≈18.5 MB/h** to it,
 averaged over three hours and front-loaded — more than half of that in the
 first hour alone.

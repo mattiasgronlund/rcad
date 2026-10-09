@@ -74,6 +74,18 @@ used the same way round, are one face.
 > tell that one apart, and would only bring back the refusal the split itself
 > caused.
 
+> **2026-10-09 (Q1385): the half frustum against the ball answers.** The
+> joined face holds the south pole, so the walk round its ring comes back a
+> whole turn on, and `mesh.rs`'s `WalkingAWire::may_come_back_a_whole_turn_on`
+> let a wire of more than one edge do that only if it never stood at a pole.
+> `5096fdb7`, merged as `5d7baff6` on 2026-10-08, drops that
+> `stood_at_a_pole` leg, so a wire of several edges
+> through one pole may come back a whole turn on. Both unions now give
+> `(620 + √2)π/6` and the ball less the half `(116 + √2)π/6`, and the pair
+> turned over, whose ring runs over the south pole, gives the same. Pinned by
+> `a_half_frustum_whose_wall_crosses_the_circle_it_meets_a_bar_or_a_ball_in_answers_every_rule`
+> in `a_cone_hollowed_along_its_axis.rs` (`527de955`).
+
 A band that goes right round the axis
 keeps one dissolved edge as its seam — the one with the lowest corners from ring
 to ring, so the choice does not depend on argument order — and a group with a

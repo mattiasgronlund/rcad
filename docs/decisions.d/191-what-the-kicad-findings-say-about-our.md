@@ -134,7 +134,7 @@ The leaning bar refuses 69.5%, so its laws compare little — 28 of 126
 commutativity comparisons reached — and the doc comments say so rather than
 count it as coverage (§14.7).
 
-**One wrong answer fixed, one parked:**
+**One wrong answer fixed, one parked; both are fixed now:**
 
 - `a_ball_and_block_united_and_then_turned_half_over_is_still_a_sound_model` —
   **fixed by Q648 (c1517c49).** A ball-and-block union that validates upright
@@ -149,10 +149,22 @@ count it as coverage (§14.7).
   (`a_ball_and_block_union_turned_about_any_of_26_axes_is_still_a_sound_model`,
   whose doc comment records that 430 of the 1638 were this refusal while
   `validate` still read the winding where the solid sits, before the fix).
-- `a_bar_leaning_through_a_block_unites_with_it_into_a_solid`. `LeaningBar{side:
-  15, radius: 1, at: [6,6], lean: [1,1], up: 2}`, `Union`, returns
-  `ResultIsNotManifold` ("an edge would have 8 faces along it"). Every crossing
-  is transversal, so no edge of the true union has more than two faces.
+- `a_bar_leaning_through_a_block_unites_with_it_into_a_solid` — **fixed by
+  Q114 (`d6c64ba4`, merged as `6febd69a`), and un-ignored by Q1449
+  (`8384c848`).** `LeaningBar{side: 15, radius: 1, at: [6,6], lean: [1,1],
+  up: 2}`, `Union`, returned `ResultIsNotManifold` ("an edge would have 8
+  faces along it"). Every crossing is transversal, so no edge of the true
+  union has more than two faces. The bar's wall below the block crosses the
+  planes `x = 0` and `y = 0` in two ellipses that meet, and an arc named
+  without its plane put arcs of both onto one edge; an arc of a closed
+  crossing is named by its plane as well since §330. The test, in
+  `fuses_that_must_agree.rs`, now demands one solid that validates, of volume
+  `15³ + π(34 − 15√6/2) ≈ 3424.0994` within the mesh's own error: the cube,
+  and the bar's length `34` less the `15·secθ` of it the floor and the roof
+  cut, `secθ = √6/2`. Over the whole family the leaning bar now refuses 63 of
+  450 fuses, 14.0%
+  (`how_often_a_certified_fuse_of_a_bar_leaning_through_a_block_refuses`, on
+  `7fddc415`), where the table above has 298 of 429.
 
 The suite's wall time went from 2.8 s to 5.4–6.5 s.
 
