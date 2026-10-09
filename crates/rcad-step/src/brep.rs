@@ -2902,12 +2902,12 @@ fn how_far_off_the_ellipse_can_be(surface: &Surface, ellipse: &Ellipse) -> Optio
 /// The half-space that picks the arc between `corners` lying the way `facing`
 /// points, in a shape a fuse reads, with `centre` the centre of the arc's curve.
 ///
-/// A fuse tells the two arcs between one pair of ends apart in exactly two ways
-/// (`a_picker_that_tells_the_two_arcs_apart` in `rcad-topo`): by a plane that
-/// holds **both ends exactly**, or by one with both ends on or in front and the
-/// **curve's centre on or behind**. [`a_half_space_holding_both`] stands its
-/// plane a few roundings below both ends, so it is the second kind exactly
-/// where the centre stays on or behind it.
+/// Two ways of telling the two arcs between one pair of ends apart read only the
+/// picker and the ends (`a_picker_that_tells_the_two_arcs_apart` in
+/// `rcad-topo`): a plane that holds **both ends exactly**, or one with both ends
+/// on or in front and the **curve's centre on or behind**.
+/// [`a_half_space_holding_both`] stands its plane a few roundings below both
+/// ends, so it is the second kind exactly where the centre stays on or behind it.
 ///
 /// **An arc longer than half its curve never has that.** Its centre is on the
 /// arc's own side of the chord, so in front of the plane through the chord and
@@ -2916,9 +2916,14 @@ fn how_far_off_the_ellipse_can_be(surface: &Surface, ellipse: &Ellipse) -> Optio
 /// ([`a_half_space_through_both`]); the side of it the arc is on is then the
 /// side `facing` points to, which is what the lowered plane said too, and
 /// nothing about how near the plane came to an end is read. Where no such plane
-/// can be found it keeps the lowered one, which names the arc for this model
-/// and the next `Model::validate` but which a fuse still does not read
+/// can be found it keeps the lowered one
 /// (`a_long_arc_with_no_plane_through_both_its_ends_keeps_the_lowered_one`).
+/// Neither of the two ways reads that, but a fuse reads it by a third, which asks
+/// whether the middle of the other arc is behind the picker
+/// (`into_the_arc_on_the_centres_side` in `rcad-topo`, since Q971): the long
+/// side of a bar sliced through two ends no plane holds comes back and cuts the
+/// same (`a_long_arc_whose_ends_no_plane_holds_comes_back_and_cuts_the_same`,
+/// Q939).
 ///
 /// **An arc whose centre is on or behind the lowered plane keeps it** even
 /// where a plane through both ends exists, so every arc that read back before
@@ -3941,8 +3946,10 @@ mod tests {
 
     /// A long arc whose ends no plane facing `facing`, or `facing` scaled to
     /// length one, holds exactly keeps the lowered plane, with its centre in
-    /// front — the picker a fuse refuses. This is the gap left after Q771, kept
-    /// here so that a fix for it starts from a shape that is known to reach it.
+    /// front, which neither way of `a_picker_that_tells_the_two_arcs_apart` in
+    /// `rcad-topo` reads. A fuse reads it by `into_the_arc_on_the_centres_side`
+    /// all the same, and `a_long_arc_whose_ends_no_plane_holds_comes_back_and_cuts_the_same`
+    /// in the round-trip tests is a whole solid that reaches it (Q939).
     #[test]
     fn a_long_arc_with_no_plane_through_both_its_ends_keeps_the_lowered_one() {
         let corners = [Point::new(0.1, 0.7, 0.0), Point::new(-0.3, 0.2, 0.0)];
