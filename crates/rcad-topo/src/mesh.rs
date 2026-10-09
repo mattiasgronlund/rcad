@@ -404,13 +404,6 @@ impl SolidView<'_> {
     ) -> Result<Mesh> {
         let along_each_edge = self.surfaces_along_each_edge();
         let deflection = self.room_a_mesh_has_to_work_in(deflection, policy, &along_each_edge)?;
-        let deflection = match std::env::var("RCAD_PROBE_CLAMP") {
-            Ok(most) => Deflection::of(deflection.length().min(most.parse().unwrap())).unwrap(),
-            Err(_) => deflection,
-        };
-        if std::env::var("RCAD_PROBE_Q1494").is_ok() {
-            eprintln!("PROBE mesh at {:e}", deflection.length());
-        }
         let mut building = BuildingAMesh::new(deflection, along_each_edge);
         for face in self.faces() {
             building.walk_the_edges_this_face_can_place(self, face, policy, log)?;
@@ -1020,36 +1013,11 @@ impl BuildingAMesh {
             self.deflection.length() - how_far_moving_this_face_rounds(face, &self.along_each_edge);
 
         let mut walked = Vec::with_capacity(face.wire_count());
-        let probe = std::env::var("RCAD_PROBE_Q1494").is_ok();
-        if probe {
-            eprintln!(
-                "PROBE face {:?} {:?} surface {:?}",
-                face.key(),
-                face.orientation(),
-                surface
-            );
-        }
         for wire in face.wires() {
-            let one = self.walk_a_wire_round(wire, face, &surface);
-            if probe {
-                let pts: Vec<_> = wire.points().map(|p| p.coordinates()).collect();
-                eprintln!(
-                    "PROBE   wire of {} coedges corners {:?}",
-                    wire.coedges().count(),
-                    pts
-                );
-                match &one {
-                    Some(w) => eprintln!(
-                        "PROBE   walked {} corners round {} climbed {} : {:?}",
-                        w.corners.len(),
-                        w.goes_right_round,
-                        w.climbed,
-                        w.corners
-                    ),
-                    None => eprintln!("PROBE   walk refused"),
-                }
-            }
-            walked.push(one.ok_or(Error::AWireWillNotLieFlatOnItsFace { face: face.key() })?);
+            walked.push(
+                self.walk_a_wire_round(wire, face, &surface)
+                    .ok_or(Error::AWireWillNotLieFlatOnItsFace { face: face.key() })?,
+            );
         }
         if let Some(whole) = how_far_the_second_coordinate_wraps(&surface)
             && let Some((first, later)) = walked.split_first_mut()
@@ -3364,21 +3332,7 @@ impl BuildingAMesh {
         }
         let cut = match triangulate(&domain) {
             Ok(cut) => cut,
-            Err(why) => {
-                if std::env::var("RCAD_PROBE_Q1494").is_ok() {
-                    eprintln!("PROBE hand_over refused {face:?} {why:?}");
-                    eprintln!("PROBE   outer {:?}", outer);
-                    for hole in holes {
-                        eprintln!("PROBE   hole {:?}", hole);
-                    }
-                    let pts: Vec<_> = corner_is
-                        .iter()
-                        .map(|&at| (at, self.points[at as usize].coordinates()))
-                        .collect();
-                    eprintln!("PROBE   points {:?}", pts);
-                }
-                return Err(refusal_for(face, why, &corner_is, &self.points, log));
-            }
+            Err(why) => return Err(refusal_for(face, why, &corner_is, &self.points, log)),
         };
 
         // Everything past the corners this patch handed over is a point the
