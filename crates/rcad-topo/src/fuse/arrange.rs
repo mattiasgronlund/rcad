@@ -96,36 +96,6 @@ use super::{
     must_decide, the_other_way,
 };
 
-mod probe {
-    use core::cell::Cell;
-    use std::io::Write;
-    thread_local! {
-        static ON: Cell<bool> = const { Cell::new(true) };
-        static HITS: Cell<u64> = const { Cell::new(0) };
-    }
-    pub(super) fn set_planes(on: bool) {
-        ON.with(|cell| cell.set(on));
-    }
-    pub(super) fn planes_on() -> bool {
-        ON.with(Cell::get)
-    }
-    pub(super) fn hit() {
-        HITS.with(|cell| cell.set(cell.get() + 1));
-    }
-    pub(super) fn hits() -> u64 {
-        HITS.with(Cell::get)
-    }
-    pub(super) fn log(line: &str) {
-        let args: Vec<String> = std::env::args().collect();
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad-worktrees-clean-up-dead-sessions/99341673-f80d-4d1e-bd63-fe0a14ac5f77/scratchpad/probe.log")
-            .unwrap();
-        writeln!(file, "{} | {line}", args.join(" ")).unwrap();
-    }
-}
-
 /// Cut one face into the pieces its cut surfaces leave behind.
 ///
 /// A face with nothing cutting it comes back as one piece: itself.
@@ -2676,23 +2646,7 @@ impl<'f> Arrangement<'f> {
     /// as `None` for a caller that has another route to try.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         let (decided, _) = self.as_the_boxes_say(crossing, first, second).ok()?;
-        match decided {
-            Decision::Pos | Decision::Neg | Decision::Zero => Some(decided),
-            Decision::Undecidable { .. } => {
-                let planes = self.as_the_planes_say(crossing, first, second);
-                if planes.is_some() {
-                    probe::hit();
-                    probe::log(&format!(
-                        "planes-decided {planes:?} on={:?} {:?} vs {:?}",
-                        self.crossings[crossing].partner,
-                        self.nodes[first].point,
-                        self.nodes[second].point
-                    ));
-                }
-                if probe::planes_on() { planes } else { None }
-            }
-            _ => None,
-        }
+        matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero).then_some(decided)
     }
 
     /// Which of two nodes on a crossing comes first along it: [`Decision::Pos`]
@@ -5356,44 +5310,16 @@ impl<'f> Arrangement<'f> {
         corners.dedup();
         assert!(!corners.is_empty(), "a lump has an arc in it");
 
-        let search = || {
-            for &from in &corners {
-                for crossing in self.nodes[from].crossings.clone() {
-                    for forward in [true, false] {
-                        let got = self.first_arc_met(
-                            from,
-                            Direction { crossing, forward },
-                            home,
-                            lump_of,
-                        );
-                        probe::log(&format!(
-                            "ray planes={} from={:?} along={:?} forward={forward} got={got:?}",
-                            probe::planes_on(),
-                            self.nodes[from].point,
-                            self.crossings[crossing].partner,
-                        ));
-                        if let Some(found) = got {
-                            return Some(found);
-                        }
+        for &from in &corners {
+            for crossing in self.nodes[from].crossings.clone() {
+                for forward in [true, false] {
+                    if let Some(found) =
+                        self.first_arc_met(from, Direction { crossing, forward }, home, lump_of)
+                    {
+                        return Ok(found);
                     }
                 }
             }
-            None
-        };
-        probe::set_planes(false);
-        let old = search();
-        probe::set_planes(true);
-        let hits_before = probe::hits();
-        let new = search();
-        let hits = probe::hits() - hits_before;
-        probe::log(&format!(
-            "piece_around old={old:?} new={new:?} planes-hits={hits}"
-        ));
-        if old != new {
-            probe::log("piece_around DIFFERS");
-        }
-        if let Some(found) = new {
-            return Ok(found);
         }
         Err(gave_up(
             AROUND_A_HOLE,
@@ -9430,8 +9356,25 @@ mod tests {
         }
     }
 
+    /// A plate with a square hole and a notch in each side, cut by two lines
+    /// that cross a rounding off the line of the hole's bottom edge. One ray
+    /// alone can say which piece the hole is in, and it needs the planes to
+    /// say it (Q992).
+    ///
+    /// Every other ray from a corner of the hole is given up, because each
+    /// notch has an edge on the line of one of the hole's edges: the ray along
+    /// that line runs along the notch's edge. The one left is the ray from
+    /// `(5, 3)` along `y = 3`, out of the plate's right side.
+    ///
+    /// The cuts are `x = 6.5` and `3y - x = 2.5`, which cross at `(6.5, 3)` in
+    /// exact arithmetic. The slanted plane is kept with its normal rounded to
+    /// length one, so it misses that point by a rounding, and `y = 3` meets
+    /// the two cuts at two nodes beside the node where the cuts cross, all
+    /// three with boxes that overlap. The boxes cannot say which of them the
+    /// ray meets first, or which end of the tiny arcs between them it passes,
+    /// and the three planes each node is the meet of can.
     #[test]
-    fn probe_q992_sweep() {
+    fn a_hole_whose_only_ray_out_meets_two_cuts_a_rounding_apart_is_placed_by_the_planes() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let plate = ProfileBuilder::new(vec![
             [0.0, 0.0],
@@ -9473,16 +9416,38 @@ mod tests {
         .into_iter()
         .find(facing_up)
         .expect("the plate has a top");
-        for k in -6..=6 {
-            let d = 2.5 + f64::from(k) * f64::powi(2.0, -51);
-            let cut = cut_by(&top, &[[-1.0, 3.0, 0.0, -d], [1.0, 0.0, 0.0, -6.5]]);
-            let mut log = ProvenanceLog::new();
-            let split = split_a_face(&cut, &Policy::certified(), &mut log);
-            super::probe::log(&format!(
-                "sweep k={k} split={:?} log-empty={}",
-                split.as_ref().map(|it| it.pieces.len()),
-                log.is_empty()
-            ));
+        let cut = cut_by(&top, &[[-1.0, 3.0, 0.0, -2.5], [1.0, 0.0, 0.0, -6.5]]);
+
+        let mut log = ProvenanceLog::new();
+        let pieces = split_a_face(&cut, &Policy::certified(), &mut log)
+            .expect("the ray from (5, 3) along y = 3 says which piece the hole is in")
+            .pieces;
+
+        assert!(
+            log.is_empty(),
+            "a ray given up leaves no record, and the planes decide exactly"
+        );
+        assert_eq!(pieces.len(), 4, "two cuts crossing inside the plate");
+        let holed = pieces
+            .iter()
+            .find(|piece| piece.wires.len() == 2)
+            .expect("the piece the hole is in keeps the hole");
+        assert_eq!(holed.wires[1].len(), 4, "the hole is still a square");
+        let corners: Vec<[f64; 3]> = holed.wires[0]
+            .iter()
+            .filter_map(|side| side.ends[0].point().exact_coordinates())
+            .collect();
+        assert!(
+            corners.contains(&[0.0, 8.0, 1.0]) && corners.contains(&[1.0, 3.0, 1.0]),
+            "the hole is in the piece above the slanted cut and left of x = 6.5"
+        );
+        assert_eq!(
+            pieces.iter().filter(|piece| piece.wires.len() == 1).count(),
+            3,
+            "the other three pieces have no hole"
+        );
+        for piece in &pieces {
+            every_wire_closes(piece);
         }
     }
 
