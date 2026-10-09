@@ -1239,6 +1239,18 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// (`a_point_a_rounding_off_a_far_half_disk_whose_foot_is_short_of_its_chord_is_not_held`).
 /// A turn settled over the box is the same for the point and for a point of
 /// the plane beside it, which the plane reads where it is.
+///
+/// **The corners are stretched to the plane too.** A corner is a box, and one
+/// the bake solved from three planes that leave this one out can lie wholly off
+/// it: a face put through a pyramid's apex `1e-8` beside where the other three
+/// planes there meet is one the model takes, and `2²⁰` out the formula above
+/// reads that apex about `1.5e-2` from where the face meets its two
+/// neighbours. Wound round the corners as they were, the fan held points off
+/// the face and missed points on it, `1e-3` and more from every edge
+/// (`a_far_face_a_tolerance_off_its_apex_holds_no_point_its_neighbours_put_off_it`,
+/// row Q1251). Stretched, a corner's box holds a point of the plane beside it
+/// as well, so a turn settled over it is the turn about where the corner is,
+/// and a point between the two readings is left undecided.
 fn the_piece_holds(
     piece: &Piece,
     in_plane: Option<&InPlane>,
@@ -1317,8 +1329,10 @@ fn the_piece_holds(
                 }
             }
             None => {
-                let corners: Vec<PredicatePoint> =
-                    wire.iter().map(|side| side.ends[0].point()).collect();
+                let corners = wire
+                    .iter()
+                    .map(|side| stretched_to_the_plane(flat, side.ends[0].point()))
+                    .collect::<Option<Vec<PredicatePoint>>>()?;
                 winding +=
                     in_plane.winding_around(core::slice::from_ref(&corners), reaching_the_plane)?;
                 for (index, side) in wire.iter().enumerate() {
@@ -2146,6 +2160,12 @@ fn of_two_curved_kinds(one: &Surface, other: &Surface) -> bool {
 /// the model answers both. A point on the plane stretches to itself and is
 /// wound as before.
 ///
+/// **So are its corners**, each stretched to the plane on its own, for the
+/// reason [`the_piece_holds`] gives: a corner the bake solved without this
+/// face's plane can lie off it, and is read far from where the face meets its
+/// neighbours. A corner that cannot be stretched leaves the point to the model,
+/// as an undecided fan does.
+///
 /// A **curved**
 /// one is [`SolidView::face_holds_the_point`], which is the one authority on that
 /// question (§35) and which the fuse can call here because what it is asked
@@ -2194,10 +2214,14 @@ fn a_face_of_the_input_holds(
             }
             return Ok(false);
         }
-        let corners: Vec<Vec<PredicatePoint>> = face
+        let corners: Option<Vec<Vec<PredicatePoint>>> = face
             .wires
             .iter()
-            .map(|wire| wire.iter().map(|edge| edge.start.point).collect())
+            .map(|wire| {
+                wire.iter()
+                    .map(|edge| stretched_to_the_plane(flat, edge.start.point))
+                    .collect()
+            })
             .collect();
         // Either sign means the point is in this face's material. Which one
         // comes out says only which way that face's outline runs round *this*
@@ -2206,7 +2230,8 @@ fn a_face_of_the_input_holds(
         // said. Zero is the only answer that puts the point outside it.
         let winding = InPlane::of(flat)
             .zip(stretched_to_the_plane(flat, point))
-            .and_then(|(in_plane, reaching_the_plane)| {
+            .zip(corners)
+            .and_then(|((in_plane, reaching_the_plane), corners)| {
                 in_plane.winding_around(&corners, reaching_the_plane)
             });
         if let Some(winding) = winding {
@@ -2227,7 +2252,8 @@ fn a_face_of_the_input_holds(
 /// Whether [`SolidView::face_holds_the_point`] says one of the model's faces
 /// that `face` was baked from holds `point`, for a flat face with straight
 /// sides whose corners [`InPlane::winding_around`] could not wind round the
-/// point's box stretched to the plane.
+/// point's box stretched to the plane, or whose point or corners could not be
+/// stretched to it.
 ///
 /// **A point a rounding off the plane beside the face's edge comes here**, as
 /// the fan over that box runs across the edge, and the model reads it beside
@@ -2334,7 +2360,9 @@ fn corners_of(piece: &Piece) -> Vec<Vec<PredicatePoint>> {
 /// `M` out on a plane through the origin, a point a rounding high is read about
 /// `M` times that height from its foot. A caller that needs the foot asks about
 /// a box that reaches the plane, as [`the_piece_holds`] and
-/// [`a_face_of_the_input_holds`] do.
+/// [`a_face_of_the_input_holds`] do. **A corner is read the same way**, and a
+/// corner's box can lie off the plane as well, so those two stretch each corner
+/// to the plane before they wind round it.
 pub(crate) struct InPlane {
     from: PredicatePoint,
     /// Whether [`InPlane::from`] came out above the plane rather than below it.
