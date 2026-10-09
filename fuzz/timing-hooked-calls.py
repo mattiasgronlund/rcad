@@ -86,6 +86,7 @@ call at all (the one case this script can tell you it might have missed a
 call, rather than merely one it cannot see, per the computed-pointer
 paragraph above).
 """
+import bisect
 import re
 import subprocess
 import sys
@@ -129,9 +130,10 @@ def main():
 
     failed = False
     for binary in binaries:
-        hits, unmatched, computed, table_jumps, calls_out, all_functions = scan(
-            binary
-        )
+        (
+            hits, unmatched, computed, table_jumps, calls_out, takes_address,
+            all_functions,
+        ) = scan(binary)
         timing_functions = {f for f in all_functions if "rcad_fuzz_timing" in f}
         timing_hits = [h for h in hits if "rcad_fuzz_timing" in h["function"]]
         timing_unmatched = [
@@ -164,6 +166,16 @@ def main():
                 hit, chain = found
                 chain_offenders.append((function, chain, hit))
 
+        already_reported = {function for function, _, _ in chain_offenders}
+        pointer_offenders, taken_in_reach, hooked_elsewhere = through_pointers(
+            binary,
+            timing_functions,
+            already_reported,
+            hits_by_function,
+            calls_out,
+            takes_address,
+        )
+
         print(f"{binary}:")
         print(
             f"  calls from rcad_fuzz_timing to a hooked function: {len(timing_hits)}"
@@ -187,12 +199,26 @@ def main():
             f"  calls from rcad_fuzz_timing reaching a hooked function "
             f"through another function outside the crate: {len(chain_offenders)}"
         )
+        print(
+            f"  functions whose address rcad_fuzz_timing or what it reaches "
+            f"takes, followed as if called: {len(taken_in_reach)}"
+        )
+        print(
+            f"  calls from rcad_fuzz_timing reaching a hooked function "
+            f"through a function pointer: {len(pointer_offenders)}"
+        )
+        print(
+            f"  functions whose address only code outside that reach takes, "
+            f"reaching a hooked function, not followed: {len(hooked_elsewhere)}"
+        )
+        for function in hooked_elsewhere:
+            print(f"    {demangle(function)}")
 
-        if offenders or timing_unmatched or chain_offenders:
+        if offenders or timing_unmatched or chain_offenders or pointer_offenders:
             failed = True
             for hit in offenders:
                 print_hit(binary, hit, "reaches a hook outside SlowRun::is")
-            for function, chain, hit in chain_offenders:
+            for function, chain, hit in chain_offenders + pointer_offenders:
                 print_chain_offender(function, chain, hit)
             for fn, load in [
                 (f, l) for f, l in unmatched if f and "rcad_fuzz_timing" in f
@@ -240,7 +266,9 @@ def scan(binary):
     computed_calls = []
     table_jumps = []
     calls_out = {}
+    references = []
     all_functions = set()
+    function_at = {}
     function = None
     regs = {}
     open_loads = {}
@@ -251,6 +279,7 @@ def scan(binary):
                 unmatched_loads.append((function, load))
             function, regs, open_loads = header.group(2), {}, {}
             all_functions.add(function)
+            function_at[int(header.group(1), 16)] = function
             continue
         insn = re.match(r"^\s+([0-9a-f]+):\s+(\S+)\s*(.*)$", line)
         if not insn:
@@ -333,6 +362,16 @@ def scan(binary):
                     regs[reg] = ("call", address)
             continue
 
+        if comment and "(%rip)" in rest:
+            referenced = int(comment.split()[0], 16)
+            rip_operand = next(
+                i for i, operand in enumerate(operands) if "(%rip)" in operand
+            )
+            stores_to_it = len(operands) > 1 and rip_operand == len(operands) - 1
+            is_hooked_slot_load = mnemonic == "mov" and referenced in hooked_slots
+            if not stores_to_it and not is_hooked_slot_load:
+                references.append((function, address, referenced))
+
         if not operands:
             continue
         destination = operands[-1]
@@ -370,7 +409,88 @@ def scan(binary):
     for load in open_loads.values():
         unmatched_loads.append((function, load))
 
-    return hits, unmatched_loads, computed_calls, table_jumps, calls_out, all_functions
+    takes_address = functions_whose_address_is_taken(
+        binary, references, slot_target, names_at, function_at
+    )
+    return (
+        hits, unmatched_loads, computed_calls, table_jumps, calls_out,
+        takes_address, all_functions,
+    )
+
+
+def functions_whose_address_is_taken(
+    binary, references, slot_target, names_at, function_at
+):
+    """For every function, the functions whose address it can put in a
+    register: `{function: [(address, taken function), ...]}`.
+
+    A reference into code takes the address of the function it lands in. A
+    reference into data — a `lea` of a vtable, a load of a GOT slot or of a
+    static holding a pointer — can hand the code any pointer the data object
+    there holds, and through any data object one of those points at in turn,
+    so it takes every function those relocations name. A data object runs
+    from the address referenced to the next address anything names: a
+    symbol, a section's start or end, a relocation's target, or another
+    reference. Where that runs past the real object's end, it takes more
+    functions than the code can reach, never fewer.
+    """
+    code, boundaries = [], set()
+    for line in run(["readelf", "-SW", binary]).splitlines():
+        section = re.match(r"^\s*\[\s*\d+\]\s+(.*)$", line)
+        if not section:
+            continue
+        fields = section.group(1).split()
+        if len(fields) not in (9, 10) or not re.fullmatch(r"[0-9a-f]{16}", fields[2]):
+            continue
+        start, size = int(fields[2], 16), int(fields[4], 16)
+        if start == 0:
+            continue
+        boundaries |= {start, start + size}
+        if len(fields) == 10 and "X" in fields[6]:
+            code.append((start, start + size))
+    boundaries |= set(names_at) | set(slot_target.values())
+    boundaries |= {referenced for _, _, referenced in references}
+    boundaries = sorted(boundaries)
+    slots = sorted(slot_target)
+    function_starts = sorted(function_at)
+
+    def in_code(address):
+        return any(start <= address < end for start, end in code)
+
+    def function_containing(address):
+        index = bisect.bisect_right(function_starts, address) - 1
+        return function_at[function_starts[index]] if index >= 0 else None
+
+    behind = {}
+
+    def functions_behind(referenced):
+        if referenced in behind:
+            return behind[referenced]
+        found, seen, pending = set(), {referenced}, [referenced]
+        while pending:
+            address = pending.pop()
+            if in_code(address):
+                function = function_containing(address)
+                if function is not None:
+                    found.add(function)
+                continue
+            end_index = bisect.bisect_right(boundaries, address)
+            end = boundaries[end_index] if end_index < len(boundaries) else address + 8
+            first = bisect.bisect_left(slots, address)
+            last = bisect.bisect_left(slots, end)
+            for slot in slots[first:last]:
+                pointer = slot_target[slot]
+                if pointer not in seen:
+                    seen.add(pointer)
+                    pending.append(pointer)
+        behind[referenced] = found
+        return found
+
+    takes_address = {}
+    for function, address, referenced in references:
+        for taken in sorted(functions_behind(referenced)):
+            takes_address.setdefault(function, []).append((address, taken))
+    return takes_address
 
 
 def reachable_from(starts, calls_out):
@@ -452,6 +572,112 @@ def reaches_hook(
     return result
 
 
+def through_pointers(
+    binary, timing_functions, already_reported, hits_by_function, calls_out,
+    takes_address,
+):
+    """The chains by which a `rcad_fuzz_timing` function reaches a hook
+    outside `SlowRun::is` once taking a function's address counts as
+    calling it; the functions whose address that reach takes; and the
+    functions that reach a hook whose address only code outside that reach
+    takes.
+
+    A call through a computed pointer can only land on a function whose
+    address some code took. Counting every address the reach takes as a
+    call from the function that took it follows each computed call in the
+    reach to everything it could land on, unless the pointer came into the
+    reach from outside it: a hook or callback another part of the program
+    stored in memory the reach reads. The third result names every such
+    function that reaches a hook, so that assumption is checked per binary
+    rather than taken on trust.
+
+    A timing function in `already_reported` reached a hook by direct calls
+    alone, and `main` already prints its chain.
+    """
+    edges = {}
+    for outgoing in (calls_out, takes_address):
+        for function, outs in outgoing.items():
+            edges.setdefault(function, set()).update(
+                callee for _, callee in outs
+            )
+    called = {
+        (function, callee) for function, outs in calls_out.items()
+        for _, callee in outs
+    }
+    reach = reachable_from(timing_functions, {
+        function: [(None, callee) for callee in callees]
+        for function, callees in edges.items()
+    })
+    taken_in_reach = {
+        taken for function in reach
+        for _, taken in takes_address.get(function, [])
+    }
+
+    def first_offending_hit(function):
+        if function in timing_functions:
+            return None
+        hits = hits_by_function.get(function, [])
+        if function in reach:
+            hits = [hit for hit in hits if not belongs_to_is(binary, hit)]
+        return hits[0] if hits else None
+
+    hooked = {
+        function for function in hits_by_function
+        if first_offending_hit(function) is not None
+    }
+    callers = {}
+    for function, callees in edges.items():
+        for callee in callees:
+            callers.setdefault(callee, set()).add(function)
+    reaches_a_hook = set(hooked)
+    pending = list(hooked)
+    while pending:
+        function = pending.pop()
+        for caller in callers.get(function, ()):
+            if caller not in reaches_a_hook:
+                reaches_a_hook.add(caller)
+                pending.append(caller)
+
+    offenders = []
+    for start in sorted(timing_functions - already_reported):
+        path = shortest_path_to_a_hook(start, edges, reaches_a_hook, hooked)
+        if path is None:
+            continue
+        marked = [
+            callee if (caller, callee) in called else "&" + callee
+            for caller, callee in zip(path, path[1:])
+        ]
+        offenders.append((start, marked, first_offending_hit(path[-1])))
+
+    taken_anywhere = {
+        taken for outs in takes_address.values() for _, taken in outs
+    }
+    hooked_elsewhere = sorted(
+        (taken_anywhere - taken_in_reach - reach) & reaches_a_hook
+    )
+    return offenders, taken_in_reach, hooked_elsewhere
+
+
+def shortest_path_to_a_hook(start, edges, reaches_a_hook, hooked):
+    """The shortest list of functions from `start` to one in `hooked`,
+    through `reaches_a_hook` only, `start` first; `None` when there is
+    none."""
+    parent = {start: None}
+    queue = [start]
+    for function in queue:
+        for callee in sorted(edges.get(function, ())):
+            if callee in parent or callee not in reaches_a_hook:
+                continue
+            parent[callee] = function
+            if callee in hooked:
+                path = [callee]
+                while parent[path[-1]] is not None:
+                    path.append(parent[path[-1]])
+                return path[::-1]
+            queue.append(callee)
+    return None
+
+
 def addr2line_chain(binary, address):
     text = run(["addr2line", "-i", "-f", "-C", "-e", binary, f"0x{address:x}"])
     return text.splitlines()
@@ -469,7 +695,15 @@ def print_chain_offender(function, chain, hit):
     print(f"  {hit['address']:x}  {hit['mnemonic']} -> {hit['target']}  "
           f"via {hit['kind']}  reaches a hook outside SlowRun::is through:")
     names = [function] + chain + list(hit["target"])
-    print(f"    {' -> '.join(demangle(name) for name in names)}")
+    print(f"    {' -> '.join(demangle_step(name) for name in names)}")
+
+
+def demangle_step(name):
+    """`demangle`, keeping the `&` a chain puts in front of a function whose
+    address was taken rather than called."""
+    if name.startswith("&"):
+        return "&" + demangle(name[1:])
+    return demangle(name)
 
 
 def paired_chain(binary, address):
