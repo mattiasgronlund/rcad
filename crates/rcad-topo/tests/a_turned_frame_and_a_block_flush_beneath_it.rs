@@ -63,6 +63,40 @@ fn the_block_taken_back_out_of_the_union_is_refused_where_the_two_fronts_are_par
 }
 
 #[test]
+fn probe_q1446() {
+    let (mut model, keys) = the_frame_and_the_block().build();
+    let union = fuse_and_validate(&mut model, &[keys[FRAME]], &[keys[BLOCK]], Rule::Union);
+    for &solid in &union {
+        let view = model.solid(solid).unwrap();
+        for face in view.faces() {
+            eprintln!("face {:?} {:?}", face.key(), face.surface());
+            for wire in face.wires() {
+                for coedge in wire.coedges() {
+                    eprintln!(
+                        "   edge {:?} from {:?} {:?}",
+                        coedge.edge().key(),
+                        coedge.start().key(),
+                        coedge.start().point()
+                    );
+                }
+            }
+        }
+    }
+    let refused = model.fuse(
+        &union,
+        &[keys[BLOCK]],
+        Rule::Difference,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    eprintln!("{:#?}", refused.map(|fused| fused.solids().len()));
+    let block = model.solid(keys[BLOCK]).unwrap();
+    for face in block.faces() {
+        eprintln!("block face {:?} {:?}", face.key(), face.surface());
+    }
+}
+
+#[test]
 fn a_turned_frame_and_the_block_flush_beneath_it_share_nothing() {
     both_ways_round_give(Rule::Intersection, 0, 0.0);
 }
