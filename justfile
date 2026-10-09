@@ -129,6 +129,7 @@ gate_steps := "check-plugins \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
     check-timing-hooked-calls-selftest \
+    check-timing-hooked-calls \
     check-fuzz-watermark-selftest \
     check-gate-fresh-selftest \
     check-gate-fresh-cleanup-selftest \
@@ -287,6 +288,7 @@ gate_reusable_steps := "check \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
     check-timing-hooked-calls-selftest \
+    check-timing-hooked-calls \
     check-fuzz-watermark-selftest \
     check-gate-fresh-selftest \
     check-gate-fresh-cleanup-selftest \
