@@ -1275,32 +1275,6 @@ impl<'f> Arrangement<'f> {
         let pickers = the_pickers_of_each_run(&runs);
         let mut wanted: Vec<(NamedRun, SmallVec<[Picker; 2]>)> =
             runs.into_iter().zip(pickers).collect();
-        if cuts
-            && matches!(
-                (&self.surface, &partner),
-                (Surface::Cylinder(_), Surface::Torus(_))
-                    | (Surface::Torus(_), Surface::Cylinder(_))
-            )
-            && std::env::var("PROBE_DROP_LOOP").is_ok()
-        {
-            wanted.retain(|(_, picked_by)| picked_by.is_empty());
-        }
-        if cuts
-            && std::env::var("PROBE_DROP_MERIDIAN").is_ok()
-            && matches!(
-                (&self.surface, &partner),
-                (Surface::Plane(_), Surface::Torus(_)) | (Surface::Torus(_), Surface::Plane(_))
-            )
-            && [&self.surface, &partner].iter().any(|s| {
-                s.as_plane().is_some_and(|p| {
-                    let [a, b, _, _] = p.coefficients();
-                    a != 0.0 && b != 0.0
-                })
-            })
-        {
-            eprintln!("PROBE dropping meridian on {:?}", self.surface);
-            wanted.clear();
-        }
         if let Some(at) = through {
             wanted.retain(|(_, picked_by)| nothing_rules_the_point_out(picked_by, at));
             if wanted.len() != 1 {
@@ -2403,31 +2377,8 @@ impl<'f> Arrangement<'f> {
             }
             let partner = self.crossings[crossing].partner;
             let run = self.crossings[crossing].run.clone();
-            let probe = how_a_crossing_runs(&self.surface, &partner, &run, at, log);
-            if probe.is_err() {
-                eprintln!(
-                    "PROBE refuse: face {:?}\n  partner {:?}\n  run {:?}\n  picked_by {:?}\n  cuts {}",
-                    self.surface,
-                    partner,
-                    run,
-                    self.crossings[crossing].picked_by,
-                    self.crossings[crossing].cuts
-                );
-                for node in self
-                    .nodes
-                    .iter()
-                    .filter(|n| n.crossings.contains(&crossing))
-                {
-                    eprintln!("  node {:?}", node.point);
-                }
-                for (i, c) in self.crossings.iter().enumerate() {
-                    eprintln!(
-                        "  crossing {i} partner {:?} run {:?} picked {:?} reaches {} also {:?}",
-                        c.partner, c.run, c.picked_by, c.reaches_the_face, c.also_cut_by
-                    );
-                }
-            }
-            self.crossings[crossing].order = probe?;
+            self.crossings[crossing].order =
+                how_a_crossing_runs(&self.surface, &partner, &run, at, log)?;
         }
         Ok(())
     }
