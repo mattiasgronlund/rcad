@@ -1471,14 +1471,19 @@ fn how_far_up_the_axis(cone: &Cone, point: PredicatePoint) -> Decision {
 /// inside the ball of `tests/a_cone_hollowed_along_its_axis.rs` held no point,
 /// and was placed only by a side it shares. A side between two corners where a
 /// third surface cuts its curve does not say which curve it is, so a piece with
-/// such a side along the partner asks nothing of it, as before.
+/// such a side along the partner asks nothing of it, as before. Measured on
+/// that file's ball cut in half by a wall through both circles (Q1248): against
+/// the pointed cone each cap of the half ball has only such sides along the
+/// cone, both caps are inside it, and every rule still answers.
 ///
 /// **A piece with a side along one curve only can still be part of the band**,
 /// where its face stops short of the other curve: the frustum from `z = 2` of
 /// that file holds only the upper circle, and its piece inside the ball runs
 /// from its own rim up to it. The picker then rules out the points of the piece
 /// beyond the half-space's plane, which costs candidates and keeps nothing it
-/// should not; there the plane is the frustum's rim, `z = 2`, and costs none.
+/// should not; there the plane is the frustum's rim, `z = 2`, and costs none. A
+/// frustum from `z = 1.5` reaches below that plane, and its band is still
+/// placed, by a point above it (Q1248).
 fn what_else_a_curved_side_asks<'a>(piece: &'a Piece, side: &'a FaceMeet) -> &'a [Picker] {
     let Some(mine) = which_curve_it_runs_along(side) else {
         return &[];

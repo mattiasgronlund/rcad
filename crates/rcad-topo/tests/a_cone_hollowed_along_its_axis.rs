@@ -46,6 +46,18 @@
 //! answer as well; `rcad-geom`'s `along_a_crossing.rs` orders points round
 //! them since Q1141, and a wall through the circle is what reaches it.
 //!
+//! A wall through a circle also leaves each arc of it between two corners of
+//! three surfaces, and such a side does not say which of a pair's two circles
+//! it runs along, so it asks nothing of what picks its circle out (Q1248). The
+//! ball cut in half by a wall through both its circles answers every rule
+//! against the frustum and the pointed cone all the same. A frustum from
+//! `z = 1.5`, which reaches below the plane that picks the upper circle out,
+//! answers five rules of six, and the ball less it is refused
+//! `VolumeIsNotPositive` after selection placed every piece right. The pointed
+//! cone cut in half against the whole ball is refused not knowing which curve
+//! a face runs along, and a thin bar through a fat one is refused before
+//! selection, ordering points along the two loops the pipes cross in.
+//!
 //! Every cone here is built by `tests/cones`, face by face through
 //! `SolidBuilder` with a power-of-two slope, and every ball by `Model::add_ball`.
 
@@ -53,7 +65,7 @@ use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 mod cones;
 
@@ -910,4 +922,237 @@ fn a_cone_less_a_whole_ball_pushing_out_through_its_side() {
             &[ball - frustum_shares],
         ],
     );
+}
+
+/// **A wall through both circles leaves each of the ball's caps a side between
+/// two corners, and every rule still answers** (Q1248). The ball of the test
+/// above cut down to `x ≥ 0` by a block from `z = 0` to `z = 10`, `18π`,
+/// against the frustum from `z = 2` and against the pointed cone, each of
+/// which turns about the axis.
+///
+/// The wall `x = 0` crosses each circle the ball's face holds at two corners
+/// where the wall, the ball and the cone meet, so every arc of a circle on the
+/// half ball runs between two corners of three surfaces, and
+/// `fuse/select.rs`'s `what_else_a_curved_side_asks` asks such a side nothing
+/// about what picks its circle out. Against the pointed cone that leaves the
+/// cap below `z₁` and the cap above `z₂`, both inside the cone, told apart by
+/// nothing the partner says, and the guess was that one of them would be
+/// placed by a point of the other. Neither is: every rule answers.
+///
+/// With `C` the cone's volume and `S` what it shares with the whole ball, the
+/// half ball shares `S/2`, so the answers are `C + 18π − S/2`, `S/2`,
+/// `C − S/2` and `18π − S/2`. For the pointed cone the last is half the ring
+/// round its side, `√2π/3`.
+#[test]
+fn a_half_ball_whose_wall_crosses_both_circles_it_meets_a_cone_in_answers_every_rule() {
+    let [low, high] = [-1.0, 1.0].map(|side| 2.0 + side * 2.0_f64.sqrt() / 2.0);
+    let slices = |z: f64| PI * (9.0 * (z - 4.0) - (z - 4.0).powi(3) / 3.0);
+    let half_a_ball = 18.0 * PI;
+    let cones: [fn(&mut Model) -> SolidKey; 2] = [
+        |model| a_frustum(model, 1.0, 2.0, 8.0),
+        |model| a_pointed_cone(model, 1.0, 8.0),
+    ];
+    let what_each_cone_holds_and_shares = [
+        (
+            a_frustum_holds(1.0, 2.0, 8.0),
+            (100.0 - 2.0_f64.sqrt()) * PI / 3.0,
+        ),
+        (
+            512.0 * PI / 3.0,
+            slices(low) - slices(1.0) + a_frustum_holds(1.0, low, high) + slices(7.0)
+                - slices(high),
+        ),
+    ];
+    for (cone, (holds, shares)) in cones.into_iter().zip(what_each_cone_holds_and_shares) {
+        let gives = what_each_rule_gives(|model| {
+            let ball = a_ball_four_up(model, 3.0);
+            let half = the_x_positive_half_between(model, ball, 0.0, 10.0);
+            [cone(model), half]
+        });
+        use Gives::Holds;
+        let wanted = [
+            Holds(holds + half_a_ball - shares / 2.0),
+            Holds(holds + half_a_ball - shares / 2.0),
+            Holds(shares / 2.0),
+            Holds(shares / 2.0),
+            Holds(holds - shares / 2.0),
+            Holds(half_a_ball - shares / 2.0),
+        ];
+        println!("{gives:?}");
+        assert!(
+            gives
+                .iter()
+                .zip(&wanted)
+                .all(|(answer, wanted)| wanted.is(answer)),
+            "{gives:?}"
+        );
+    }
+}
+
+/// **The pointed cone cut down to `x ≥ 0`, against the whole ball, is refused
+/// under every rule both ways**, `CannotTellWhichCurveOfACrossingAFaceRunsAlong`
+/// on one face (Q1248). The block runs from `z = −1` to `z = 10`, so it takes
+/// the whole of the cone's `x ≥ 0` half, `256π/3`, and its wall crosses both
+/// circles on the cone's side as it does on the half ball's above. Not traced.
+///
+/// The answers it is to reach, with `S` what the whole pointed cone shares with
+/// the ball: `256π/3 + 36π − S/2`, `S/2`, `256π/3 − S/2` and `36π − S/2`.
+#[test]
+fn a_half_pointed_cone_against_a_ball_pushing_out_through_its_side_is_refused_under_every_rule() {
+    let gives = what_each_rule_gives(|model| {
+        let cone = a_pointed_cone(model, 1.0, 8.0);
+        let half = the_x_positive_half_between(model, cone, -1.0, 10.0);
+        [half, a_ball_four_up(model, 3.0)]
+    });
+    println!("{gives:?}");
+    assert!(
+        gives.iter().all(|answer| matches!(
+            answer,
+            Err(Error::CannotTellWhichCurveOfACrossingAFaceRunsAlong { .. })
+        )),
+        "{gives:?}"
+    );
+}
+
+/// **A frustum from `z = 1.5` reaches below the plane that picks the upper
+/// circle out, and its band is still placed** (Q1248). The ball of radius 3
+/// four up crosses the cone at `z₁ = 2 − √2/2` and `z₂ = 2 + √2/2`, and
+/// `intersect` picks each circle out by a half-space whose plane is `z = 2`,
+/// between them. The frustum's face holds only the upper circle, so its band
+/// inside the ball has a side along that circle alone and asks the picker, and
+/// the picker rules out the band's points below `z = 2`. Its points above are
+/// still candidates, and every rule placed it right.
+///
+/// The frustum holds `π(8³ − 1.5³)/3`, and below `z₂` it is the narrower, so
+/// the two share its slices from `1.5` to `z₂` and the ball's above, `S`. The
+/// union, the intersection and the frustum less the ball answer `F + 36π − S`,
+/// `S` and `F − S`.
+///
+/// **The ball less the frustum, `36π − S = 5.016`, is refused
+/// `VolumeIsNotPositive { volume: -2.64 }`** after selection placed every one
+/// of the seven pieces right, as prints in `choose` and `place_the_piece`
+/// showed (commit `10bfada5`): the ball's cap above `z₂` dropped, its band and
+/// its cap below kept, and the frustum's floor and its band below `z₂` kept
+/// turned round. `fuse/assemble.rs`'s `nest_the_shells` gives that refusal for
+/// a shell of negative volume no other shell holds; which of its sites or
+/// `validate.rs`'s gave it here is not traced. The answer is a cup whose wall
+/// thins to nothing at `z₂` and is `√2.75 − 1.5 = 0.158` across at its floor.
+#[test]
+fn a_frustum_from_below_the_plane_between_the_two_circles_answers_all_but_the_ball_less_it() {
+    let high = 2.0 + 2.0_f64.sqrt() / 2.0;
+    let slices = |z: f64| PI * (9.0 * (z - 4.0) - (z - 4.0).powi(3) / 3.0);
+    let ball = 36.0 * PI;
+    let frustum = a_frustum_holds(1.0, 1.5, 8.0);
+    let shares = a_frustum_holds(1.0, 1.5, high) + slices(7.0) - slices(high);
+    let gives = what_each_rule_gives(|model| {
+        let ball = a_ball_four_up(model, 3.0);
+        [a_frustum(model, 1.0, 1.5, 8.0), ball]
+    });
+    use Gives::Holds;
+    let answered = [
+        Holds(frustum + ball - shares),
+        Holds(frustum + ball - shares),
+        Holds(shares),
+        Holds(shares),
+        Holds(frustum - shares),
+    ];
+    println!("{gives:?}");
+    assert!(
+        gives.len() == 6
+            && gives
+                .iter()
+                .zip(&answered)
+                .all(|(answer, wanted)| wanted.is(answer))
+            && matches!(
+                gives[5],
+                Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. }))
+            ),
+        "{gives:?}"
+    );
+}
+
+/// **A thin bar through a fat one is refused under every rule both ways**,
+/// `ACrossingThisCannotBeOrderedAlong`, before selection is reached (Q1248). A
+/// bar of radius 4 from `z = 0` to `z = 10`, and a bar of radius 1 along `x`
+/// from `x = −10` to `x = 10` at `z = 5`: through the fat bar's axis with the
+/// fat bar's seam up `+y`, and half off it with the seam up `+x`. The two pipes
+/// cross in two closed loops, one each side, and points along a loop of two
+/// pipes are a quartic `fuse/arrange.rs`'s `how_a_crossing_runs` does not put
+/// in order.
+///
+/// `intersect` picks each loop out by a half-space whose plane runs through
+/// the fat bar's axis square to the thin one, `x = 0`. It is ten from either
+/// end of the thin bar, so it misses them, but no fuse gets as far as asking.
+#[test]
+fn a_thin_bar_through_a_fat_one_is_refused_ordering_points_along_its_loops() {
+    let pairs: [fn(&mut Model) -> [SolidKey; 2]; 2] = [
+        |model| {
+            let fat = model
+                .add_round_bar(
+                    4.0,
+                    10.0,
+                    &Isometry::quarter_turns(&Axis::z(), 1).expect("z is an axis"),
+                )
+                .expect("a fat bar");
+            [fat, a_thin_bar_along_x(model, 0.0)]
+        },
+        |model| {
+            let fat = model
+                .add_round_bar(4.0, 10.0, &Isometry::identity())
+                .expect("a fat bar");
+            [fat, a_thin_bar_along_x(model, 0.5)]
+        },
+    ];
+    for pair in pairs {
+        let gives = what_each_rule_gives(pair);
+        println!("{gives:?}");
+        assert!(
+            gives
+                .iter()
+                .all(|answer| matches!(answer, Err(Error::ACrossingThisCannotBeOrderedAlong))),
+            "{gives:?}"
+        );
+    }
+}
+
+/// A bar of radius 1 along `x` from `x = −10` to `x = 10`, at `z = 5` and
+/// `off` along `y`.
+fn a_thin_bar_along_x(model: &mut Model, off: f64) -> SolidKey {
+    let placement = Isometry::translation(Vector::new(-10.0, off, 5.0))
+        .expect("a shift")
+        .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is an axis"));
+    model
+        .add_round_bar(1.0, 20.0, &placement)
+        .expect("a thin bar")
+}
+
+/// What of `solid` lies in `x ≥ 0`, cut by a block from `z = low` to
+/// `z = high`. [`the_x_positive_half_of`]'s block starts at `z = 1`, where the
+/// ball four up would only touch it.
+fn the_x_positive_half_between(
+    model: &mut Model,
+    solid: SolidKey,
+    low: f64,
+    high: f64,
+) -> SolidKey {
+    let profile = ProfileBuilder::new(vec![[0.0, -10.0], [10.0, -10.0], [10.0, 10.0], [0.0, 10.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+    let block = model
+        .add_extrusion(
+            &profile,
+            high - low,
+            &Isometry::translation(Vector::new(0.0, 0.0, low)).expect("a shift"),
+        )
+        .expect("a block");
+    model
+        .fuse(
+            &[solid],
+            &[block],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("half a solid")
+        .solids()[0]
 }
