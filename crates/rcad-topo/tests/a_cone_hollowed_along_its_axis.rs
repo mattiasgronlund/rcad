@@ -948,20 +948,22 @@ fn a_half_ball_whose_wall_crosses_both_circles_it_meets_a_cone_in_answers_every_
     let [low, high] = [-1.0, 1.0].map(|side| 2.0 + side * 2.0_f64.sqrt() / 2.0);
     let slices = |z: f64| PI * (9.0 * (z - 4.0) - (z - 4.0).powi(3) / 3.0);
     let half_a_ball = 18.0 * PI;
-    let cones: [(fn(&mut Model) -> SolidKey, f64, f64); 2] = [
+    let cones: [fn(&mut Model) -> SolidKey; 2] = [
+        |model| a_frustum(model, 1.0, 2.0, 8.0),
+        |model| a_pointed_cone(model, 1.0, 8.0),
+    ];
+    let what_each_cone_holds_and_shares = [
         (
-            |model| a_frustum(model, 1.0, 2.0, 8.0),
             a_frustum_holds(1.0, 2.0, 8.0),
             (100.0 - 2.0_f64.sqrt()) * PI / 3.0,
         ),
         (
-            |model| a_pointed_cone(model, 1.0, 8.0),
             512.0 * PI / 3.0,
             slices(low) - slices(1.0) + a_frustum_holds(1.0, low, high) + slices(7.0)
                 - slices(high),
         ),
     ];
-    for (cone, holds, shares) in cones {
+    for (cone, (holds, shares)) in cones.into_iter().zip(what_each_cone_holds_and_shares) {
         let gives = what_each_rule_gives(|model| {
             let ball = a_ball_four_up(model, 3.0);
             let half = the_x_positive_half_between(model, ball, 0.0, 10.0);
