@@ -1,0 +1,259 @@
+//! A cube tipped onto one of its edges, standing with that edge along another
+//! cube's floor.
+//!
+//! The block is `add_cube(10.0)`, `[0, 10]³`. The tipped cube is a second
+//! `add_cube(10.0)` placed by `Isometry::try_from(([5, 5, 0], [0, 0, s, c]))`
+//! with `s = sin t` and `c = cos t`: a half turn about the axis through the
+//! origin along `(0, s, c)`, which leans `t` from `z` towards `y`, then a move
+//! by `(5, 5, 0)`. That stands it on its edge `y = 5`, `z = 0`,
+//! `−5 ≤ x ≤ 5`, tipped by `2t` about `x`, so the edge lies along the block's
+//! floor `z = 0` from `x = 0` to `x = 5` and crosses the floor's own edge at
+//! `(0, 5, 0)`. Two tilts, `t = 0.038` and `t = 0.081`, as queue row Q1506
+//! found them among 400 tilts from `0.0005` to `0.2`.
+//!
+//! **The union panicked** in `edges_after_joining` (`fuse/assemble.rs`, "a
+//! piece of a face has a straight side with no length") under both policies,
+//! both ways round, at both tilts. The floor cuts the tipped cube's bottom
+//! face along a line one rounding off the cube's own edge, and the meet of the
+//! floor, the bottom face and the cube's side `x = 5` was not folded into the
+//! cube's corner beside it. The union kept a sliver triangle of the bottom
+//! face, `(0, 5, 0)`, `(4.999999999999999, 5, 0)` and
+//! `(5, 5.000000000000001, 0)`, each of whose three sides had the floor on its
+//! other side.
+//!
+//! What the two cubes share is the cube's square cross-section, clipped to
+//! the block, along the five of its ten that lie over the block:
+//! [`what_the_two_share`] works it out from the tilt.
+
+use rcad_geom::{Deflection, Isometry, Scale};
+use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
+
+/// The two tilts, as the quaternion `[w, i, j, k]` that `Isometry::try_from`
+/// reads: `t = 0.038` and `t = 0.081`, each written as Q1506 printed it.
+const TILTS: [[f64; 4]; 2] = [
+    [0.0, 0.0, 0.037_990_855_326_937_03, 0.999_278_086_876_484_9],
+    [0.0, 0.0, 0.080_911_455_551_998_05, 0.996_721_293_221_157_7],
+];
+
+#[test]
+fn the_union_is_both_cubes_less_what_they_share_tolerant() {
+    for tilt in TILTS {
+        for order in [Order::BlockFirst, Order::TippedFirst] {
+            let asked = format!("{tilt:?}, {order:?}");
+            let volume = volume_of_a_fuse(tilt, Rule::Union, order, &tolerant(), &asked);
+            assert_about(volume, 2000.0 - what_the_two_share(tilt), &asked);
+        }
+    }
+}
+
+#[test]
+fn the_union_is_both_cubes_less_what_they_share_certified() {
+    for tilt in TILTS {
+        for order in [Order::BlockFirst, Order::TippedFirst] {
+            let asked = format!("{tilt:?}, {order:?}");
+            let volume = volume_of_a_fuse(tilt, Rule::Union, order, &certified(), &asked);
+            assert_about(volume, 2000.0 - what_the_two_share(tilt), &asked);
+        }
+    }
+}
+
+#[test]
+fn the_intersection_is_what_they_share_tolerant() {
+    for tilt in TILTS {
+        for order in [Order::BlockFirst, Order::TippedFirst] {
+            let asked = format!("{tilt:?}, {order:?}");
+            let volume = volume_of_a_fuse(tilt, Rule::Intersection, order, &tolerant(), &asked);
+            assert_about(volume, what_the_two_share(tilt), &asked);
+        }
+    }
+}
+
+/// Not Q1506's: refused before and after it, for corners a rounding apart
+/// beside corners ten long.
+#[test]
+fn the_intersection_is_refused_for_the_range_certified() {
+    for tilt in TILTS {
+        for order in [Order::BlockFirst, Order::TippedFirst] {
+            let asked = format!("{tilt:?}, {order:?}");
+            let why = refusal(tilt, Rule::Intersection, order, &certified(), &asked);
+            assert!(
+                matches!(why, Error::Invalid(Invalid::DynamicRangeTooWide { .. })),
+                "{asked}: {why:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_block_less_the_tipped_cube_is_the_block_less_what_they_share_tolerant() {
+    for tilt in TILTS {
+        let asked = format!("{tilt:?}");
+        let volume = volume_of_a_fuse(
+            tilt,
+            Rule::Difference,
+            Order::BlockFirst,
+            &tolerant(),
+            &asked,
+        );
+        assert_about(volume, 1000.0 - what_the_two_share(tilt), &asked);
+    }
+}
+
+/// Not Q1506's, as the certified intersection.
+#[test]
+fn the_block_less_the_tipped_cube_is_refused_for_the_range_certified() {
+    for tilt in TILTS {
+        let asked = format!("{tilt:?}");
+        let why = refusal(
+            tilt,
+            Rule::Difference,
+            Order::BlockFirst,
+            &certified(),
+            &asked,
+        );
+        assert!(
+            matches!(why, Error::Invalid(Invalid::DynamicRangeTooWide { .. })),
+            "{asked}: {why:?}"
+        );
+    }
+}
+
+/// Not Q1506's: queue row Q1507's, which the same sweep of tilts found. The
+/// answer exists, the cube less what the two share, `1000 − ` that.
+#[test]
+fn the_tipped_cube_less_the_block_is_refused_with_no_volume_under_either_policy() {
+    for tilt in TILTS {
+        for policy in [certified(), tolerant()] {
+            let asked = format!("{tilt:?}, {policy:?}");
+            let why = refusal(tilt, Rule::Difference, Order::TippedFirst, &policy, &asked);
+            assert!(
+                matches!(
+                    why,
+                    Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume <= 0.0
+                ),
+                "{asked}: {why:?}"
+            );
+        }
+    }
+}
+
+/// The volume the block and the tipped cube share.
+///
+/// The tipped cube's square cross-section, in `(y, z)`, has its corner at
+/// `(5, 0)` and its sides leaning by `φ = 2t` from the axes: its bottom runs
+/// towards `−y` and rises, `(−cos φ, sin φ)`, and its side runs up and
+/// towards `+y`, `(sin φ, cos φ)`. Clipped to the block's `[0, 10]²` it is
+/// the five-cornered shape from `(5, 0)` up its bottom to `y = 0` at
+/// `z = 5 tan φ`, up `y = 0` to the block's top, along the top to where the
+/// cube's top face crosses it, and down to the cube's far corner of that side,
+/// `(5 + 10 sin φ, 10 cos φ)`. Its area by the shoelace formula, times the
+/// length `5` of the cube that lies over the block, `0 ≤ x ≤ 5`.
+fn what_the_two_share(tilt: [f64; 4]) -> f64 {
+    let [_, _, s, c] = tilt;
+    let (sin, cos) = (2.0 * s * c, c * c - s * s);
+    let along_the_top = 10.0 * (1.0 - cos) / sin;
+    let corners = [
+        [5.0, 0.0],
+        [0.0, 5.0 * sin / cos],
+        [0.0, 10.0],
+        [5.0 - along_the_top * cos + 10.0 * sin, 10.0],
+        [5.0 + 10.0 * sin, 10.0 * cos],
+    ];
+    let twice_the_area: f64 = (0..corners.len())
+        .map(|at| {
+            let ([y0, z0], [y1, z1]) = (corners[at], corners[(at + 1) % corners.len()]);
+            y0 * z1 - y1 * z0
+        })
+        .sum();
+    5.0 * twice_the_area.abs() / 2.0
+}
+
+fn assert_about(got: f64, worked: f64, asked: &str) {
+    assert!(
+        (got - worked).abs() <= 1e-9 * worked,
+        "{asked}: measured {got}, worked by hand {worked}"
+    );
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Order {
+    BlockFirst,
+    TippedFirst,
+}
+
+fn volume_of_a_fuse(tilt: [f64; 4], rule: Rule, order: Order, policy: &Policy, asked: &str) -> f64 {
+    let mut model = a_model();
+    let pair = the_block_and_the_tipped_cube(&mut model, tilt);
+    let answer = fuse(&mut model, pair, rule, order, policy)
+        .unwrap_or_else(|why| panic!("{asked}, {rule:?}: {why}"));
+    model
+        .validate(policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{asked}, {rule:?}: {why}"));
+    answer
+        .iter()
+        .map(|&solid| {
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(0.1).expect("a deflection"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{asked}, {rule:?} does not measure: {why}"))
+                .volume()
+        })
+        .sum()
+}
+
+fn refusal(tilt: [f64; 4], rule: Rule, order: Order, policy: &Policy, asked: &str) -> Error {
+    let mut model = a_model();
+    let pair = the_block_and_the_tipped_cube(&mut model, tilt);
+    match fuse(&mut model, pair, rule, order, policy) {
+        Ok(solids) => panic!("{asked}, {rule:?} answers {} solids", solids.len()),
+        Err(why) => why,
+    }
+}
+
+fn fuse(
+    model: &mut Model,
+    [block, tipped]: [SolidKey; 2],
+    rule: Rule,
+    order: Order,
+    policy: &Policy,
+) -> Result<Vec<SolidKey>, Error> {
+    let (one, other) = match order {
+        Order::BlockFirst => (block, tipped),
+        Order::TippedFirst => (tipped, block),
+    };
+    model
+        .fuse(&[one], &[other], rule, policy, &mut ProvenanceLog::new())
+        .map(|answer| answer.solids().to_vec())
+}
+
+fn certified() -> Policy {
+    Policy::certified()
+}
+
+fn tolerant() -> Policy {
+    Policy::tolerant(100.0)
+}
+
+fn a_model() -> Model {
+    Model::new(Scale::millimetres(100.0).expect("a scale"))
+}
+
+fn the_block_and_the_tipped_cube(model: &mut Model, tilt: [f64; 4]) -> [SolidKey; 2] {
+    let block = a_cube(model);
+    let tipped = a_cube(model);
+    let placement = Isometry::try_from(([5.0, 5.0, 0.0], tilt)).expect("a placement");
+    model.place_solid(tipped, &placement).expect("a placement");
+    [block, tipped]
+}
+
+fn a_cube(model: &mut Model) -> SolidKey {
+    model
+        .add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube")
+}
