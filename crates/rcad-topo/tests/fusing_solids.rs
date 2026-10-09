@@ -717,6 +717,143 @@ fn the_farthest_apart_two_points_of(one: PredicatePoint, other: PredicatePoint) 
     across(0).hypot(across(1)).hypot(across(2))
 }
 
+/// Two blocks two metres on a side, turned the same way and meeting corner to
+/// corner, on a model whose working size is 100 mm. A certified fuse unites
+/// them into two solids and decides everything it needs, and so do
+/// `Policy::tolerant(100.0)` and `Policy::tolerant(1e9)`. `Policy::tolerant`
+/// at `1e4` or `1e6` is refused `Undecidable`. **That refusal is a gap and not
+/// a limit** (`docs/decisions.md` §16.10). The answer exists, and the
+/// certified fuse just gave it.
+///
+/// This is the only refusal by criterion 7's judgment (§17.2) anyone has
+/// found. It is still not the refusing half that criterion asks for, because
+/// that half needs a fuse whose answer does not exist. The policy could not
+/// prove two `orient3d` decisions, each about `2.1e-4` wide.
+/// `resolve_under_policy` read each one as a wobble at the policy's working
+/// size, `1e4`. There it is within `Policy::max_wobble`, so the policy accepted
+/// it. The fuse's judgment reads the same log at the model's working size,
+/// `100`. A volume is divided by `100²` there instead of by `1e4²`, so it comes
+/// out ten thousand times bigger, and the judgment refuses a solid built only
+/// from decisions the policy had already accepted one at a time.
+/// `Policy::wobble_is_acceptable`'s own doc says its one budget is there to
+/// stop exactly that. §15.2 named the seam: the model's `Scale::nominal_size`
+/// is a second copy of the policy's working size.
+///
+/// Every record carries an `Approximation`, and that is what says the
+/// judgment refused and nothing earlier did. A decision the policy cannot
+/// accept is refused where it is taken, and its record carries none. Once the
+/// fuse judges the log at the same working size the policy accepted it at,
+/// this test fails. Then it is to be turned round to pin the union.
+#[test]
+fn a_tolerant_policy_bigger_than_the_model_refuses_two_turned_blocks_meeting_at_a_corner_that_a_certified_one_unites()
+ {
+    let (mut model, one, other) = two_turned_blocks_meeting_at_a_corner();
+    let mut log = ProvenanceLog::new();
+    let united = model
+        .fuse(
+            &[one],
+            &[other],
+            Rule::Union,
+            &Policy::certified(),
+            &mut log,
+        )
+        .expect("every decision this union needs is one f64 can prove");
+    assert_eq!(
+        united.solids().len(),
+        2,
+        "blocks meeting at a corner stay two"
+    );
+    assert!(log.is_empty(), "a certified union records nothing: {log:?}");
+
+    for policy in [Policy::tolerant(100.0), Policy::tolerant(1e9)] {
+        let (mut model, one, other) = two_turned_blocks_meeting_at_a_corner();
+        let united = model
+            .fuse(
+                &[one],
+                &[other],
+                Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{policy:?} unites the two blocks: {why}"));
+        assert_eq!(
+            united.solids().len(),
+            2,
+            "blocks meeting at a corner stay two"
+        );
+    }
+
+    for working_size in [1e4, 1e6] {
+        let policy = Policy::tolerant(working_size);
+        let (mut model, one, other) = two_turned_blocks_meeting_at_a_corner();
+        let refused = model.fuse(
+            &[one],
+            &[other],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        );
+        let Err(Error::Undecidable { records }) = refused else {
+            panic!("{policy:?} refuses the union over its own judgment: {refused:?}");
+        };
+        assert!(
+            !records.is_empty()
+                && records
+                    .records()
+                    .iter()
+                    .all(|record| record.approximation().is_some()),
+            "{policy:?} accepted every decision it took: {records:?}"
+        );
+        assert!(
+            policy.wobble_is_acceptable(records.worst_wobble(working_size)),
+            "read at the policy's own working size, the log is within budget: {records:?}"
+        );
+        assert!(
+            !policy.wobble_is_acceptable(records.worst_wobble(model.scale().nominal_size())),
+            "read at the model's working size, the log is past it: {records:?}"
+        );
+    }
+}
+
+/// [`a_tolerant_policy_bigger_than_the_model_refuses_two_turned_blocks_meeting_at_a_corner_that_a_certified_one_unites`]'s
+/// pair: two cubes of side `2000` on a 100 mm model, the second moved by
+/// `(2000, 2000, 2000)`, both turned by the same turn. The turn's axis and
+/// angle are one draw of Q1457's probe, written out to the last bit.
+fn two_turned_blocks_meeting_at_a_corner() -> (Model, SolidKey, SolidKey) {
+    let mut model = a_model();
+    let one = model
+        .add_cube(2000.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side 2000");
+    let other = model
+        .add_cube(2000.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube of side 2000");
+    let turn = Isometry::rotation(
+        &Axis::new(
+            Point::new(1000.0, 0.0, 0.0),
+            Vector::new(
+                0.225_943_046_113_692_2,
+                -0.047_950_555_307_198_495,
+                -0.297_768_573_555_231_8,
+            ),
+        )
+        .expect("a direction with length"),
+        1.374_160_163_811_960_3,
+    )
+    .expect("a rotation");
+    model
+        .place_solid(one, &turn)
+        .expect("this model made the key");
+    model
+        .place_solid(
+            other,
+            &turn.compose(
+                &Isometry::translation(Vector::new(2000.0, 2000.0, 2000.0)).expect("a shift"),
+            ),
+        )
+        .expect("this model made the key");
+    (model, one, other)
+}
+
 /// Two towers `1e308` tall, a certified fuse settles them, and nothing it
 /// decided is left in the log.
 ///
