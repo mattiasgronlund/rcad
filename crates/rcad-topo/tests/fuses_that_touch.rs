@@ -48,7 +48,7 @@
 //! | a ball resting on a block | 78 of 78 | 78 of 78 | — |
 //! | a ball against a block's wall | 78 of 78 | 78 of 78 | — |
 //! | two bars touching along a line | 60 of 60 | 96 of 96 | — |
-//! | a bar inside a bar, touching | panics on its control | — | see below |
+//! | a bar inside a bar, touching | 30 of 60 | 96 of 96 | `Undecidable` at *a point inside a piece of a face* 24, `Undecidable` at *one shell inside another* 6 |
 //! | two balls touching at a point | 60 of 60 | 96 of 96 | — |
 //! | a ball inside a ball, touching once | 60 of 60 | 96 of 96 | — |
 //! | the dome on a shaft of its radius | 66 of 66 | 90 of 90 | — |
@@ -59,14 +59,16 @@
 //! | a bend lying on a block | 0 of 66 | 0 of 90 | nothing: both rows refuse as a quartic |
 //! | a bend's cap flush against a block | 0 of 66 | 90 of 90 | `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` 66 |
 //!
-//! Every answer that came back passed every law above. The two failures are a
-//! **panic** on a bar standing inside a bar and touching nothing —
-//! [`a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_panic`]
-//! — which the property meets on its control row before its touching row, so
-//! that cell's table is not printed until the panic is fixed. By hand, before
-//! queue row Q649, the touching row (radius three, radius one at `(0, 2)`)
-//! refused every fuse on *which way a crossing runs*; it has not been asked
-//! again since.
+//! Every answer that came back passed every law above. A bar standing wholly
+//! inside a thicker bar, touching nothing, used to **panic** in
+//! `fuse/assemble.rs` with *"a ring of a joined face came back winding neither
+//! way: Zero"*, both in its control row and in the shrunk repro
+//! [`a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_panic`];
+//! fixed since `d12913d4` and `71feed66` (queue row Q28), and the table above
+//! is that cell's touching row, measured now that it no longer panics. By
+//! hand, before queue row Q649, the touching row (radius three, radius one at
+//! `(0, 2)`) refused every fuse on *which way a crossing runs*; it has not
+//! been asked again since.
 //!
 //! # Which refusals are gaps and which are limits
 //!
@@ -293,7 +295,6 @@ fn two_bars_touching_along_a_line() {
 }
 
 #[test]
-#[ignore = "open: §191, its control row is a bar wholly inside a bar, which panics in fuse/assemble.rs"]
 fn a_bar_inside_a_bar_touching_its_wall() {
     every_rule_over(
         "a bar inside a bar, touching",
@@ -998,25 +999,27 @@ fn a_bends_cap_flush_against_a_block() {
 }
 
 /// A thin bar standing wholly inside a thick one, touching nothing, is united
-/// and hollowed out without a panic.
+/// and hollowed out.
 ///
 /// Found by the control row of
 /// [`a_bar_inside_a_bar_touching_its_wall`] and shrunk to this: a bar of radius
 /// one and height two standing on the axis of a bar of radius two and height
 /// four, one unit up, so every face of the thin bar is clear of every face of
-/// the thick one. Off the axis it panics the same way — radius three with the
-/// thin bar at `(0, 1)`, `(1, 0)` or `(−1, 0)`. `A ∩ B` and `B \ A` answer;
-/// `A ∪ B` and `A \ B` panic in `fuse/assemble.rs` with *"a ring of a joined
-/// face came back winding neither way: Zero"*, both ways round for the union.
+/// the thick one. Off the axis it used to panic the same way — radius three
+/// with the thin bar at `(0, 1)`, `(1, 0)` or `(−1, 0)`. `A ∩ B` and `B \ A`
+/// always answered; `A ∪ B` and `A \ B` used to panic in `fuse/assemble.rs`
+/// with *"a ring of a joined face came back winding neither way: Zero"*, both
+/// ways round for the union, until `d12913d4` and `71feed66` (queue row Q28).
 ///
-/// The answer is plain: the union is the thick bar and the difference is the
-/// thick bar with a bar-shaped hole sealed inside it. A ball standing inside
-/// the same bar is answered under every rule, so it is the two pipes and not
-/// the hole.
+/// The answer is plain: the union is the thick bar, `16π`, and the difference
+/// is the thick bar with a bar-shaped hole sealed inside it, `14π`. A point in
+/// the middle of the thin bar is outside the difference. A ball standing
+/// inside the same bar is answered under every rule, so it is the two pipes
+/// and not the hole.
 #[test]
-#[ignore = "open: §191, a bar wholly inside a thicker bar panics under union and difference"]
 fn a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_panic() {
-    for rule in [Rule::Union, Rule::Difference] {
+    let pi = std::f64::consts::PI;
+    for (rule, holds) in [(Rule::Union, 16.0 * pi), (Rule::Difference, 14.0 * pi)] {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let thick = model
             .add_round_bar(2.0, 4.0, &Isometry::identity())
@@ -1037,10 +1040,30 @@ fn a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_p
                 &mut ProvenanceLog::new(),
             )
             .unwrap_or_else(|why| panic!("{rule:?} of a bar inside a bar refused: {why}"));
-        assert_eq!(answer.solids().len(), 1, "{rule:?} is one solid");
+        let solids = answer.solids().to_vec();
+        assert_eq!(solids.len(), 1, "{rule:?} is one solid");
         model
             .validate(&Policy::certified(), &mut ProvenanceLog::new())
             .unwrap_or_else(|why| panic!("{rule:?} left a model that does not validate: {why}"));
+        let (volume, error) = volume_and_error(&model, &solids);
+        assert!(
+            (volume - holds).abs() <= error,
+            "{rule:?} measures {volume} against {holds}, out by more than the {error} its \
+             measurements declare"
+        );
+        if rule == Rule::Difference {
+            let policy = Policy::certified();
+            let middle_of_the_thin_bar = Point::new(0.0, 0.0, 2.0);
+            let containment = model
+                .solid(solids[0])
+                .expect("the difference's own key")
+                .classify_point(middle_of_the_thin_bar, &policy, &mut ProvenanceLog::new());
+            assert_eq!(
+                containment,
+                Containment::Outside,
+                "the difference should not hold the thin bar's middle, {middle_of_the_thin_bar:?}"
+            );
+        }
     }
 }
 
