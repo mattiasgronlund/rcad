@@ -1214,6 +1214,42 @@ fn probe_q1494() {
     println!("{rule:?} swapped {swapped}: {answer:?}");
 }
 
+#[test]
+fn probe_ball_on_wall() {
+    let y: f64 = std::env::var("PROBE_OFF").map_or(0.3, |v| v.parse().unwrap());
+    let which: usize = std::env::var("PROBE_RULE").map_or(4, |v| v.parse().unwrap());
+    let (rule, swapped) = every_rule_both_ways().nth(which).unwrap();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let fat = model
+        .add_round_bar(
+            4.0,
+            10.0,
+            &Isometry::quarter_turns(
+                &Axis::z(),
+                std::env::var("PROBE_SEAM").map_or(1, |v| v.parse().unwrap()),
+            )
+            .expect("z is an axis"),
+        )
+        .expect("a fat bar");
+    let turn: f64 = std::env::var("PROBE_TURN").map_or(0.0, |v| v.parse().unwrap());
+    let placement = Isometry::rotation(&Axis::z(), turn)
+        .expect("a turn")
+        .compose(&Isometry::translation(Vector::new(2.0, y, 5.0)).expect("a shift"))
+        .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is an axis"));
+    let ball = model
+        .add_round_bar(1.0, 10.0, &placement)
+        .expect("a thin bar");
+    let [one, other] = if swapped { [ball, fat] } else { [fat, ball] };
+    let answer = model.fuse(
+        &[one],
+        &[other],
+        rule,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    println!("{rule:?} swapped {swapped}: {answer:?}");
+}
+
 /// The trapezium rule [`what_a_thin_bar_through_a_fat_one_shares`] works the
 /// shared volume out by has closed in on it by 32 points, and what it gives is
 /// less than all of the thin bar.
