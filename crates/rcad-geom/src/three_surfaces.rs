@@ -809,11 +809,13 @@ pub fn where_a_line_meets_a_surface(
                 return answered;
             }
         };
-    if let Some(answer) = where_a_line_meets_it_slid_into_range(from, along, surface) {
-        return Ok(answer);
+    match where_a_line_meets_it_slid_into_range(from, along, surface) {
+        None | Some(Err(Error::Undecidable { .. })) => {
+            records.drain_into(log);
+            Err(refused)
+        }
+        Some(slid) => slid,
     }
-    records.drain_into(log);
-    Err(refused)
 }
 
 /// Where a line meets one surface, worked out at the size they are written.
@@ -871,8 +873,12 @@ fn where_a_line_meets_it_where_they_stand(
 }
 
 /// Where the same line meets the same surface slid along the range by a power
-/// of two — or `None` where no slide moves anything, the slide is not exact,
-/// or the slid question refuses too.
+/// of two — or `None` where no slide moves anything or the slide is not exact.
+///
+/// A refusal of the slid question comes back as it is. One by name, such as a
+/// ring asked about a line that is a box, is the refusal the question has at
+/// any size, where the question as it stands may have fallen out of `f64`
+/// before reaching it.
 ///
 /// The slide centres the binades the lengths span on one, the line's two boxes
 /// among them, for the reason [`the_meet_slid_into_range`] gives, and it is
@@ -888,7 +894,7 @@ fn where_a_line_meets_it_slid_into_range(
     from: [Interval; 3],
     along: [Interval; 3],
     surface: &Surface,
-) -> Option<WhereALineMeetsIt> {
+) -> Option<Result<WhereALineMeetsIt>> {
     let binades: SmallVec<[i32; 17]> = from
         .iter()
         .chain(&along)
@@ -919,12 +925,11 @@ fn where_a_line_meets_it_slid_into_range(
         &the_same_surface_slid_by(surface, up)?,
         &Policy::certified(),
         &mut ProvenanceLog::new(),
-    )
-    .ok()?;
-    let WhereALineMeetsIt::At(steps) = found else {
+    );
+    let Ok(WhereALineMeetsIt::At(steps)) = found else {
         return Some(found);
     };
-    Some(WhereALineMeetsIt::At(
+    Some(Ok(WhereALineMeetsIt::At(
         steps
             .into_iter()
             .map(|step| match step {
@@ -938,7 +943,7 @@ fn where_a_line_meets_it_slid_into_range(
                 },
             })
             .collect(),
-    ))
+    )))
 }
 
 /// How far a ring's quartic reaches over a box, slid by `2^exponent` and
