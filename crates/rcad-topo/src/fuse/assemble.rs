@@ -5706,12 +5706,15 @@ fn closes_on_itself(meet: &FaceMeet) -> bool {
 /// circle.** It cuts the ring in an outer and an inner circle, and since Q1513
 /// each is named by the side of the pipe of the ring's own radius that keeps
 /// it. The argument above would carry over, but no fuse has been seen to reach
-/// such a join, so nothing would test it. The top half of a ring with no seam,
-/// on a bar of its own outer radius whose top rim is the half ring's outer
-/// equator, is the shape that would, and every fuse of the two, both ways round, is
-/// refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` before anything is
-/// named. So only a circle picked by a flat half-space, whose name has `0`
-/// ahead of its numbers ([`which_curve_of_the_pair`]), joins here.
+/// such a join, so nothing would test it. The top half of a ring on a bar of
+/// its own outer radius, whose top rim is the half ring's outer equator, is
+/// the shape that would, and every fuse of the two, both ways round, is
+/// refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, so no answer hangs on
+/// the join
+/// (`on_a_bar_of_its_outer_radius_every_fuse_is_refused_where_three_surfaces_meet`
+/// in `tests/a_half_ring_beside_a_bar_clear_of_it.rs`, §428.5). So only a
+/// circle picked by a flat half-space, whose name has `0` ahead of its numbers
+/// ([`which_curve_of_the_pair`]), joins here.
 ///
 /// **One plane, at any scale.** Each pair holds the plane as its own side was
 /// cut, and a third solid's face on the same plane can cut the ball first and
