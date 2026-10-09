@@ -845,6 +845,156 @@ fn the_long_side_of_a_bar_sliced_along_its_length_comes_back_the_same_and_cuts_t
     }
 }
 
+/// The long side of a bar of radius `5s`, `s = 1 + 2⁻³⁰`, sliced along its
+/// length through `(4s, 3s)` and `(−3s, −4s)`, comes back the same solid, and a
+/// block cuts the copy read back into the same pieces it cuts the bar as built.
+///
+/// **This is the long arc Q771 left (Q939): no plane holds both its ends.** The
+/// reader names the arc from `A` to `B` by a half-space facing `(B − A) × w`,
+/// here `±(−7s, 7s, 0)`, or that scaled to length one. Dotted with either end the
+/// first gives `−7s²`, which is 63 bits wide, and the second gives `∓c·s` with
+/// `c` the rounded `1/√2`, which is `c + c·2⁻³⁰` and wider than 53 bits; neither
+/// is an `f64`, so no offset puts an end on either plane. The test does not lean on
+/// that arithmetic: for each normal it asks the predicate whether the plane
+/// through one end at the nearest offset holds both, which any plane holding
+/// both would have to be. So the reader keeps its lowered plane, with the
+/// circle's centre in front (`a_half_space_naming_the_arc` in `brep.rs`), and
+/// the test checks that too — the picker that neither way of
+/// `a_picker_that_tells_the_two_arcs_apart` in `rcad-topo` reads. The model's own
+/// picker faces `(−1, 1, 0)`, which dots with both ends to `−s` exactly.
+///
+/// **And the copy read back cuts the same, so for this solid there is no
+/// defect.** A fuse reads an arc by `the_way_into_an_arc`, whose third way,
+/// `into_the_arc_on_the_centres_side` (Q971, asked from the fuse's arrangement
+/// since Q1033), reads the longer arc by the middle of the other arc being
+/// behind its picker — as true of a lowered plane as of one through the chord.
+/// The bar as built needs that third way here too, because the fuse solves each
+/// corner into a box its plane runs through: with it taken out, the cut of the
+/// bar as built is refused with "an edge of this face runs along part of a
+/// curve rather than the whole of one".
+#[test]
+fn a_long_arc_whose_ends_no_plane_holds_comes_back_and_cuts_the_same() {
+    use rcad_geom::{HalfSpace, Picker};
+    use rcad_predicates::{Decision, Point as PredicatePoint};
+
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let s = 1.0 + f64::from_bits((1023 - 30) << 52);
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 4.0 * s).expect("a working size"));
+    let built = a_bar_sliced_along_a_chord(
+        &mut model,
+        5.0 * s,
+        [[4.0 * s, 3.0 * s], [-3.0 * s, -4.0 * s]],
+        Vector::new(-1.0, 1.0, 0.0),
+        Side::Long,
+    );
+
+    let text = rcad_step::write(&model, "a bar sliced through two ends no plane holds")
+        .unwrap_or_else(|why| panic!("the bar is not written: {why}"));
+    let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
+    let import = Import::read(&file, &policy, &mut log)
+        .unwrap_or_else(|why| panic!("the bar is refused on the way back in: {why}"));
+    let [(_, came)] = import.solids() else {
+        panic!("one solid came back as {}", import.solids().len());
+    };
+    let came = *came;
+    let there = import.model();
+    there
+        .validate(&policy, &mut log)
+        .unwrap_or_else(|why| panic!("the bar comes back unsound: {why}"));
+    assert_eq!(there.scale(), model.scale(), "the scale moved");
+
+    let on =
+        |half: &HalfSpace, at: Point| half.side_of_point(PredicatePoint::from(at.coordinates()));
+    let the_long_arcs = |model: &Model, solid: SolidKey| {
+        let mut arcs = Vec::new();
+        for face in model.solid(solid).expect("this model made the key").faces() {
+            for wire in face.wires() {
+                for coedge in wire.coedges() {
+                    let edge = coedge.edge();
+                    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = edge.run() else {
+                        continue;
+                    };
+                    let [Picker::InFrontOf(half)] = picked_by.as_slice() else {
+                        panic!("a long arc picked by {picked_by:?}");
+                    };
+                    arcs.push((*half, [edge.start().point(), edge.end().point()]));
+                }
+            }
+        }
+        assert_eq!(arcs.len(), 4, "two arcs, each walked by two faces");
+        arcs
+    };
+    for (half, [start, end]) in the_long_arcs(&model, built) {
+        assert_eq!(
+            [on(&half, start), on(&half, end)],
+            [Decision::Zero; 2],
+            "the model's own picker holds both ends"
+        );
+    }
+    for (half, [start, end]) in the_long_arcs(there, came) {
+        let centre = Point::new(0.0, 0.0, start.z());
+        let sides = [start, end, centre].map(|at| on(&half, at));
+        assert!(
+            sides[..2]
+                .iter()
+                .all(|side| matches!(side, Decision::Zero | Decision::Pos))
+                && sides[..2] != [Decision::Zero; 2]
+                && sides[2] == Decision::Pos,
+            "the reader's picker is the lowered plane, both ends on or in front of it and \
+             the centre in front: {sides:?}"
+        );
+        let facing = half.normal();
+        for normal in [
+            facing,
+            facing.normalized().expect("a picker's normal has length"),
+        ] {
+            let through = HalfSpace::through_a_point_facing(start, normal)
+                .expect("a picker's normal has length");
+            assert_ne!(
+                [on(&through, start), on(&through, end)],
+                [Decision::Zero; 2],
+                "a plane facing {normal:?} holds both ends"
+            );
+        }
+    }
+
+    let [went_solid, came_solid] = [(&model, built), (there, came)]
+        .map(|(from, key)| from.solid(key).expect("this model made the key"));
+    assert_eq!(
+        where_its_corners_are(went_solid),
+        where_its_corners_are(came_solid),
+        "corners"
+    );
+    let deflection = the_same_mesh_on_both_sides();
+    let [here, back] = [went_solid, came_solid].map(|solid| {
+        solid
+            .measure(deflection, &policy, &mut log)
+            .unwrap_or_else(|why| panic!("the bar does not measure: {why}"))
+    });
+    assert_eq!(here.volume(), back.volume(), "volume");
+    assert_eq!(here.surface_area(), back.surface_area(), "area");
+    assert_eq!(here.centroid(), back.centroid(), "centroid");
+
+    let cutter = |model: &mut Model| a_block(model, [2.0, 3.0, 2.0], Vector::new(-1.0, 3.0, 3.0));
+    let cut_here = cut_by_a_third_solid(&model, built, &cutter, deflection)
+        .unwrap_or_else(|why| panic!("the bar is not cut: {why}"));
+    let left: f64 = cut_here.iter().map(|piece| piece.volume()).sum();
+    assert!(
+        !cut_here.is_empty() && left < here.volume(),
+        "the cut has to leave something and take something away: {left} of {}",
+        here.volume()
+    );
+    let cut_back = cut_by_a_third_solid(there, came, &cutter, deflection)
+        .unwrap_or_else(|why| panic!("the bar read back is not cut: {why}"));
+    assert_eq!(cut_here.len(), cut_back.len(), "pieces");
+    for (one, other) in cut_here.iter().zip(&cut_back) {
+        assert_eq!(one.volume(), other.volume(), "a piece's volume");
+        assert_eq!(one.surface_area(), other.surface_area(), "a piece's area");
+        assert_eq!(one.centroid(), other.centroid(), "a piece's centroid");
+    }
+}
+
 /// Which side of the slice [`a_bar_sliced_along_its_length`] keeps.
 #[derive(Clone, Copy)]
 enum Side {
@@ -858,37 +1008,66 @@ enum Side {
 /// plane `y = −3` and kept on `side`, built face by face: bottom cap, pipe, top
 /// cap, slice.
 fn a_bar_sliced_along_its_length(model: &mut Model, side: Side) -> SolidKey {
+    a_bar_sliced_along_a_chord(
+        model,
+        5.0,
+        [[4.0, -3.0], [-4.0, -3.0]],
+        Vector::new(0.0, 1.0, 0.0),
+        side,
+    )
+}
+
+/// A bar of `radius` about `z`, four tall, sliced along its length by the plane
+/// through `ends`, two points of its circle, and kept on `side`, built face by
+/// face: bottom cap, pipe, top cap, slice.
+///
+/// `towards_the_axis` is square to the chord and points from it to the bar's
+/// axis. Each cap's arc is picked by the half-space through the first end facing
+/// it, for the long side, or facing away, for the short; that plane holds both
+/// ends exactly where `towards_the_axis` dotted with each end gives one `f64`.
+fn a_bar_sliced_along_a_chord(
+    model: &mut Model,
+    radius: f64,
+    ends: [[f64; 2]; 2],
+    towards_the_axis: Vector,
+    side: Side,
+) -> SolidKey {
     use rcad_geom::{Axis, Cylinder, HalfSpace, Orientation, Picker};
     use rcad_topo::{DraftStep, SolidBuilder};
 
     let height = 4.0;
-    let over = match side {
-        Side::Long => 1.0,
-        Side::Short => -1.0,
+    let into_the_kept_side = match side {
+        Side::Long => towards_the_axis,
+        Side::Short => -towards_the_axis,
     };
+    let [[from_x, from_y], [to_x, to_y]] = ends;
+    let on_the_chord = Point::new(from_x, from_y, 0.0);
     let a_plane = |at: Point, facing: Vector| {
         Plane::from_point_and_normal(at, facing).expect("an axis direction has length")
     };
     let bottom = a_plane(Point::origin(), Vector::new(0.0, 0.0, -1.0));
     let top = a_plane(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, 1.0));
-    let slice = a_plane(Point::new(0.0, -3.0, 0.0), Vector::new(0.0, -over, 0.0));
-    let pipe = Cylinder::new(Axis::z(), 5.0).expect("a positive radius");
+    let slice = a_plane(on_the_chord, -into_the_kept_side);
+    let pipe = Cylinder::new(Axis::z(), radius).expect("a positive radius");
     let the_arc_on = |cap: Plane| EdgeRun::PartOfWhereItCrosses {
         and: Surface::Plane(cap),
         picked_by: [Picker::from(
-            HalfSpace::through_a_point_facing(
-                Point::new(0.0, -3.0, 0.0),
-                Vector::new(0.0, over, 0.0),
-            )
-            .expect("an axis direction has length"),
+            HalfSpace::through_a_point_facing(on_the_chord, into_the_kept_side)
+                .expect("a direction square to the chord has length"),
         )]
         .into(),
     };
 
     let mut builder = SolidBuilder::new();
-    let corners = [(4.0, 0.0), (-4.0, 0.0), (4.0, height), (-4.0, height)].map(|(x, z)| {
+    let corners = [
+        (from_x, from_y, 0.0),
+        (to_x, to_y, 0.0),
+        (from_x, from_y, height),
+        (to_x, to_y, height),
+    ]
+    .map(|(x, y, z)| {
         builder
-            .add_vertex(Point::new(x, -3.0, z))
+            .add_vertex(Point::new(x, y, z))
             .expect("a finite corner")
     });
     let edges = [
