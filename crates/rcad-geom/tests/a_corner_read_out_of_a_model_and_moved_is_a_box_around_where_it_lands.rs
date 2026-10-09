@@ -51,10 +51,10 @@ const NO_CORNER_MAY_USE_ALL_OF_ITS_BOUND: f64 = 1.0;
 
 /// The bound holds, and the box is not so wide that holding it means nothing.
 ///
-/// Since a shift that rounds nothing hands the corner back exact (§34.6's
-/// `where_a_corner_lands_after_moving`), a wobble of zero shows up here too —
-/// the identity and every whole-number shift among [`every_way_of_placing_it`]
-/// give one. Dividing by that zero would be `0.0 / 0.0`, which is `NaN`, and
+/// Since a turn of a cube and a shift that round nothing hand the corner back
+/// exact (§34.6's `where_a_corner_lands_after_moving`), a wobble of zero shows
+/// up here too — the identity and every whole-number shift among
+/// [`every_way_of_placing_it`] give one. Dividing by that zero would be `0.0 / 0.0`, which is `NaN`, and
 /// `f64::max` drops a `NaN` silently rather than counting it: the ratio would
 /// still measure something, just not every reading. So the two kinds are kept
 /// apart — an exact reading is asserted off its surface by exactly nothing,
@@ -77,7 +77,7 @@ fn a_moved_corner_stays_inside_the_box_published_for_it() {
                     assert_eq!(
                         how_far_off(&placed, moved),
                         0.0,
-                        "a shift that rounds nothing left {placed:?} off by something"
+                        "a move that rounds nothing left {placed:?} off by something"
                     );
                 } else {
                     inexact_readings += 1;
