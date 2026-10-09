@@ -4,8 +4,8 @@
 //! `select.rs`'s `settle_against_each` folds
 //! `Containment::CannotFireARayAtAFacesSurface` into the undecided points, and
 //! `Error::CannotFireARayAtAFacesSurface` exists to name it instead. Changing
-//! that needs a fuse which reaches it, and **none of these does**. Each test
-//! below is one family, with the step that stopped it pinned as it stands.
+//! that needs a fuse which is refused for it, and **none of these is**. Each
+//! test below is one family, with the step that stopped it pinned as it stands.
 //!
 //! What reaching it takes: a point proved inside a piece, put to a ray against
 //! a solid with a ring face, whose own ray has no exact line, **and** whose box
@@ -16,15 +16,21 @@
 //! it meets the solid's skin, so its points sit clear of that skin, and a
 //! piece on the same surface is caught as lying on the face, or shown off it.
 //! What is left is a piece a rounding from a face of the solid, and every such
-//! family here was refused while the pieces were cut, before a point was put
-//! to a ray.
+//! family here was refused before a point was put to a ray: while the pieces
+//! were cut, or when no point was found inside a piece.
 //!
-//! Run with `settle_against_each`'s arm made to print, all 1663 tests of this
-//! crate's suite and every fuse here: nothing printed.
+//! Run with `settle_against_each`'s arm made to print, all 1755 tests of this
+//! crate's suite, every fuse here among them: it printed nine times, all in
+//! `a_bend_placed_a_quarter_turn_round_from_another_is_refused_before_a_ray`,
+//! whose pieces are cut since Q1392. Each piece whose point it printed for was
+//! placed by some other point or rule, and every one of those fuses is refused
+//! at a later piece no point was found inside. One test of that run,
+//! `a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_an_ulp_apart_are_refused`,
+//! stopped at its first fuse, so its others were not run.
 
 use core::f64::consts::{FRAC_PI_2, PI};
 
-use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
+use rcad_geom::{Axis, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -82,19 +88,21 @@ fn two_bends_turned_by_whole_quarter_turns_answer_every_rule() {
 ///
 /// The hair never gets that thin with the fuse still running. At `1e-9` of a
 /// turn every rule answers. At `1e-12` the pieces are not cut,
-/// `Undecidable` at `side of torus`; at `1e-13` no point is found inside a
-/// piece at all, `a point inside a piece of a face`; at `3e-14` and `1e-14`
-/// the pieces are not cut, `side of plane`. A box round a point of a piece of
-/// the wall is about `256 ε · 5`, `3e-13` across, so the hair would have to
-/// be thinner than about `6e-14` of a turn.
+/// `Undecidable` at `side of torus`; at `1e-13`, `3e-14` and `1e-14` no
+/// point is found inside a piece at all, `a point inside a piece of a face`.
+/// At `3e-14` and `1e-14` the pieces were not cut, `side of plane`, until a
+/// point on the ring and on a plane through its axis was put on a side of
+/// another such plane by the planes' own numbers (Q1392). A box round a
+/// point of a piece of the wall is about `256 ε · 5`, `3e-13` across, so the
+/// hair would have to be thinner than about `6e-14` of a turn.
 #[test]
 fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() {
     for (turn, said) in [
         (1e-9, None),
         (1e-12, Some("side of torus")),
         (1e-13, Some("a point inside a piece of a face")),
-        (3e-14, Some("side of plane")),
-        (1e-14, Some("side of plane")),
+        (3e-14, Some("a point inside a piece of a face")),
+        (1e-14, Some("a point inside a piece of a face")),
     ] {
         for rule in EVERY_RULE {
             for the_first_first in [true, false] {
@@ -110,63 +118,23 @@ fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() 
     }
 }
 
-/// A quarter bend and a copy placed half a turn round by `place_solid` rather
-/// than written out: the copy's caps lie on planes through the ring's axis a
-/// rounding off the first bend's, `sin(π)` not being nought. The two bends are
-/// a quarter turn apart either way round, so every rule, both ways round,
-/// answers as the same two bends written out do
-/// (`two_bends_turned_by_whole_quarter_turns_answer_every_rule`), and each
-/// solid it answers with holds a quarter of the ring, `2π²`, within what
-/// `measure` says it can be out by.
-#[test]
-fn a_bend_placed_half_a_turn_round_from_another_answers_every_rule() {
-    for rule in EVERY_RULE {
-        for the_first_first in [true, false] {
-            let what = format!("half a turn round, {rule:?}, the first first {the_first_first}");
-            let mut model = a_model();
-            let first = a_quarter_bend(&mut model, 4.0, 1.0);
-            let placed = a_quarter_bend_placed_round_by(&mut model, PI);
-            let (arguments, tools) = if the_first_first {
-                ([first], [placed])
-            } else {
-                ([placed], [first])
-            };
-            let answer = model
-                .fuse(
-                    &arguments,
-                    &tools,
-                    rule,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                )
-                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-            model
-                .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-            let expected = match rule {
-                Rule::Union => 2,
-                Rule::Difference => 1,
-                Rule::Intersection => 0,
-                other => panic!("not a rule this tries: {other:?}"),
-            };
-            assert_eq!(answer.solids().len(), expected, "{what}");
-            for &solid in answer.solids() {
-                holds_a_quarter_of_the_ring(&model, solid, &what);
-            }
-        }
-    }
-}
-
-/// A quarter bend and a copy placed a quarter turn either way round by
-/// `place_solid` rather than written out: `cos(π/2)` is not nought, so the
-/// copy's cap is a rounding off the first bend's cap plane, the shape two
-/// cubes a rounding apart are (`tests/two_turned_cubes_a_rounding_apart.rs`).
-/// Every rule both ways round is refused while the pieces are cut,
-/// `Undecidable` at `side of plane`, though the same two bends written out
-/// answer (`two_bends_turned_by_whole_quarter_turns_answer_every_rule`).
+/// A quarter bend and a copy placed a quarter turn either way round, or half a
+/// turn, by `place_solid` rather than written out: `cos(π/2)` and `sin(π)` are
+/// not nought, so the copy's caps lie on planes through the ring's axis a
+/// rounding off the first bend's, the shape two cubes a rounding apart are
+/// (`tests/two_turned_cubes_a_rounding_apart.rs`).
+///
+/// The pieces are cut: a point of one bend's cap rim, a rounding off the
+/// other's cap plane, is put on its side of that plane by the two planes' own
+/// numbers (Q1392). But each such plane cuts the ring in a second circle too,
+/// a rounding round from the other bend's own cap rim, and the band of that
+/// bend's wall between the two holds no point the search offers. Every rule
+/// both ways round is refused `Undecidable` at `a point inside a piece of a
+/// face`, though the same two bends written out answer
+/// (`two_bends_turned_by_whole_quarter_turns_answer_every_rule`).
 #[test]
 fn a_bend_placed_a_quarter_turn_round_from_another_is_refused_before_a_ray() {
-    for turn in [FRAC_PI_2, -FRAC_PI_2] {
+    for turn in [FRAC_PI_2, -FRAC_PI_2, PI] {
         for rule in EVERY_RULE {
             for the_first_first in [true, false] {
                 let what = format!("{turn} round, {rule:?}, the first first {the_first_first}");
@@ -174,7 +142,7 @@ fn a_bend_placed_a_quarter_turn_round_from_another_is_refused_before_a_ray() {
                 let first = a_quarter_bend(&mut model, 4.0, 1.0);
                 let placed = a_quarter_bend_placed_round_by(&mut model, turn);
                 let refused = fused_or_refused(&mut model, first, placed, rule, the_first_first);
-                expect(refused, Some("side of plane"), &what);
+                expect(refused, Some("a point inside a piece of a face"), &what);
             }
         }
     }
@@ -275,27 +243,6 @@ fn a_wedge(model: &mut Model, hair: f64) -> Result<SolidKey, Error> {
 
 fn at_height(z: f64) -> Isometry {
     Isometry::translation(Vector::new(0.0, 0.0, z)).expect("a finite shift")
-}
-
-/// That `solid` measures a quarter of a ring of 4 and tube 1, `2π²` by Pappus,
-/// within what `measure` says it can be out by.
-fn holds_a_quarter_of_the_ring(model: &Model, solid: SolidKey, what: &str) {
-    let measured = model
-        .solid(solid)
-        .expect("this model made the key")
-        .measure(
-            Deflection::of(0.01).expect("a hundredth of the tube"),
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .unwrap_or_else(|why| panic!("{what}: the answer does not measure: {why:?}"));
-    let pappus = 2.0 * PI * PI;
-    assert!(
-        (measured.volume() - pappus).abs() <= measured.volume_error(),
-        "{what}: measures {} give or take {}, against {pappus}",
-        measured.volume(),
-        measured.volume_error()
-    );
 }
 
 /// How many solids the fuse answers with, once the model it leaves validates.
