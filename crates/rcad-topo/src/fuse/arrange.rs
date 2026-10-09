@@ -5731,7 +5731,11 @@ impl<'f> Arrangement<'f> {
                 }
             }
             if side.is_none() {
-                *side = self.side_off_a_curve_it_also_cuts(cycle, &partner);
+                *side = self
+                    .side_off_a_curve_it_also_cuts(cycle, &partner)
+                    .or_else(|| {
+                        self.side_off_the_other_circle_a_plane_cuts_a_ring_in(cycle, &partner)
+                    });
             }
         }
         Ok(sides)
@@ -5953,6 +5957,55 @@ impl<'f> Arrangement<'f> {
                 Decision::Neg => Some(the_other_way(of_its_own)),
                 Decision::Zero | Decision::Undecidable { .. } | _ => None,
             }
+        })
+    }
+
+    /// On a ring's face: which side of a plane a walk is on, read off a
+    /// half-edge of it along the other circle that same plane cuts the ring in,
+    /// or `None` where the face is not a ring's, `partner` is not a plane, or no
+    /// half-edge runs along such a circle.
+    ///
+    /// **Every node of such a walk is on the plane**, so the nodes say nothing
+    /// ([`Arrangement::is_on_the_partner_of_a_crossing_through`]), and the half
+    /// ring of `a_half_ring_beside_a_bar_clear_of_it.rs` is the walk: its ring's
+    /// face is bounded by the outer and the inner circle `z = 0` cuts it in, and
+    /// each wire is one of them. Read so, neither wire's walks agreed with the
+    /// other's about any curve, the face came back in two pieces of one wire
+    /// each, and no piece of a ring with one circle round its axis cut out of
+    /// it can be meshed (Q1513).
+    ///
+    /// **Here the plane's sign is the side of both circles.** A plane cuts a
+    /// ring in two circles only square to its axis or through it (`intersect`'s
+    /// `where_a_plane_and_a_torus_cross`), and either way the two together cut
+    /// the ring into two pieces, one each side of the plane: the band over it
+    /// and the band under it, or the half on each side. The plane's sign is the
+    /// one sign all over each piece, and it is what
+    /// [`Arrangement::which_side_of_everything`] reads off a node of a walk
+    /// that is not on the plane, for either circle, since
+    /// [`Arrangement::whether_past_the_picker`] says [`PastThePicker::No`] on a
+    /// ring. The region left of a forward half-edge along either circle is the
+    /// plane's negative side, so a half-edge along one says the side of both.
+    fn side_off_the_other_circle_a_plane_cuts_a_ring_in(
+        &self,
+        cycle: usize,
+        partner: &Surface,
+    ) -> Option<Decision> {
+        if !matches!(
+            (self.surface, partner),
+            (Surface::Torus(_), Surface::Plane(_))
+        ) {
+            return None;
+        }
+        self.cycles[cycle].iter().find_map(|&half_edge| {
+            let arc = &self.arcs[half_edge / 2];
+            if arc.against_its_gradients || self.crossings[arc.crossing].partner != *partner {
+                return None;
+            }
+            Some(if half_edge.is_multiple_of(2) {
+                Decision::Neg
+            } else {
+                Decision::Pos
+            })
         })
     }
 
