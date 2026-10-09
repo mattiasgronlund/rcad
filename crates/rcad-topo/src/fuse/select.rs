@@ -1526,7 +1526,8 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 
 /// One when `point` is between a curved side of a flat piece and the chord
 /// across it, where the corners alone wind nothing round it; zero when it is
-/// not; `None` when the chord cannot say.
+/// not; `None` when the chord cannot say. A side along a ring with its material
+/// outside the ring can count minus one ([`across_the_inner_disk`]).
 ///
 /// **A half disk has two corners**, so the polygon of its corners has no
 /// inside at all and every point of the half disk is between its arc and its
@@ -1624,8 +1625,9 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 /// `z = 0` with all four corners on the `x` axis, so the corners wind round
 /// nothing, and until the outer arc was counted no point was held and every
 /// fuse of the two was refused [`INSIDE_A_PIECE`] (row Q1268). A side whose
-/// material is outside the torus still counts nothing; whether that holds is
-/// row Q1305's.
+/// material is outside the torus does not count nothing: its bulge holds the
+/// part of the inner disk on its side of the chord, which the torus's sign
+/// lets through, and [`across_the_inner_disk`] counts it (row Q1305).
 ///
 /// **A torus is counted on a plane through its axis too, along either of the
 /// two meridian circles it cuts there, on the point's own side of the
