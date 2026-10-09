@@ -49,8 +49,8 @@ use crate::intersect::{
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
-    Cone, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Result,
-    Sphere, Surface, SurfaceMeet, Torus, Vector,
+    Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
+    Surface, SurfaceMeet, Torus, Vector,
 };
 
 /// How far a point [`walk`] hands back can sit off the curve it was worked out
@@ -1199,7 +1199,7 @@ fn the_seed_this_run_is_picked_up_at(
 ///
 /// **The surface asked is the true one, never the half-space the naming half
 /// stores**, and that is the whole of what this is right about. For two pipes
-/// [`HalfSpace::through_a_point_square_to`] stores a normal square to the fat
+/// [`crate::HalfSpace::through_a_point_square_to`] stores a normal square to the fat
 /// axis that leans off the thin pipe's way across it wherever that way cannot be
 /// stored square. Where the naming half proves that leaning surface holds the
 /// loops apart anyway, it names them; where the loops nearly touch it refuses,
