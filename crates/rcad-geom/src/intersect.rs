@@ -4282,8 +4282,10 @@ pub(crate) fn a_pipe_lies_along_a_rings_core(
 /// the touching point at the touching point, where `x = R − y²/4R ≤ R`. The
 /// circle meets all three only at the loop's two ends, the half the circle's
 /// outer arc lying past the third and its inner arc inside the second. A bar on
-/// a bend's cap has one half on each solid's curved face, and the fuse keeps
-/// each off the face the other solid's face does not reach.
+/// a bend's cap has one half on each solid's curved face, where the other
+/// solid's face does not reach it, so no edge of a fuse's answer runs along
+/// either. The fuse does not leave them off yet: it draws the half on the bar's
+/// pipe face and is refused putting points in order along it.
 ///
 /// **Nothing draws the loop**: it is a quartic, and the walk refuses it by name.
 ///

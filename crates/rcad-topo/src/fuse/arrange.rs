@@ -1577,6 +1577,16 @@ impl<'f> Arrangement<'f> {
     /// ([`side_of_a_plane_where_three_planes_meet`](rcad_predicates::side_of_a_plane_where_three_planes_meet)),
     /// and the box is asked first because it is cheaper and nearly always
     /// enough.
+    ///
+    /// **The pickers are asked before the side.** A corner they rule out is off
+    /// the crossing whatever side of the partner it is on, so the answer is the
+    /// same wherever the side can be told. Where it cannot, asking the side
+    /// first refused a corner the pickers had already settled: a bar of a
+    /// bend's tube radius on the bend's cap has a corner on the cap's rim at
+    /// `(R + r, 0, 0)`, on the ring to within a rounding, and every fuse with
+    /// the bar first was refused `Undecidable` for the side of the ring there,
+    /// although the half of the loop the pipe and the ring cross in that the
+    /// corner was asked about is picked by `x ≤ R` (Q1453).
     fn passes_through(
         &self,
         crossing: usize,
