@@ -5,7 +5,7 @@
 relay 1 `9132bc54`, relay 2 `f27b9e5b`, `96541407` and `e1c3c72a`, and relay 3
 this section. **The row is not closed.** The fuse gets past the arrangement
 now and is refused later, by the mesh it checks its answer with (421.4), in
-files outside the row's.*
+files outside the row's. Since `b9271d95` (Q1262, Q1508) every rule answers.*
 
 ### 421.1 The shape
 
@@ -103,14 +103,16 @@ this at `7b54d183`. Relay 2 could not re-run that (the auto-mode classifier
 refused checking out the old `arrange.rs`), and nor did relay 3. There is no
 unit test of this function on its own; the pin in 421.4 is what reaches it.
 
-### 421.4 Where the thin bar stops now
+### 421.4 Where the thin bar stopped
 
-Every rule gets past the arrangement and assembly, and the mesh the fuse
-checks its answer with refuses it. Each refusal names an edge or a face of the
-answer, so assembly ran. Pinned by
-`a_thin_bar_through_a_fat_one_is_refused_by_the_check_after_the_arrangement`
-in `tests/a_cone_hollowed_along_its_axis.rs`, with the fat bar's seam up `+x`
-and up `+y`:
+**Since Q1262 and Q1508 (`b9271d95`) every rule answers**, through the axis
+and half off it, with the fat bar's seam up `+x` and up `+y`, each within its
+error of the sums below. Pinned by
+`a_thin_bar_through_a_fat_one_answers_every_rule_through_the_axis_and_half_off_it`
+in `tests/a_cone_hollowed_along_its_axis.rs`. Before that, every rule got past
+the arrangement and assembly, and the mesh the fuse checks its answer with
+refused it. Each refusal named an edge or a face of the answer, so assembly
+ran:
 
 - **Through the axis.** This was all six rules refused
   `ACrossingAlongThisEdgeCouldNotBeFollowed`, from
@@ -138,12 +140,12 @@ and up `+y`:
   pin's doc comment says.
 
 So the refusal has moved from the arrangement, inside the row's files, to
-`march.rs` and the mesher, outside them. It is still `refuses/B`, now in two
-rows (421.7).
+`march.rs` and the mesher, outside them. It stayed `refuses/B`, in two rows
+(421.7), until `walk.rs` was fixed.
 
 The row asked for answers checked against volumes. The answer pin turned into
 this refusal pin; it could not stay as an `#[ignore]`d test, because the
-justfile pins `ignored_tests` at 5. Once past, each rule is to answer, with `S`
+justfile pins `ignored_tests` at 5. Since `b9271d95` each rule answers, with `S`
 what the two share (421.5): the union `180π − S`, the intersection `S`, the fat
 bar less the thin `160π − S`, and the thin less the fat its two ends,
 `(20π − S)/2` each.
@@ -197,20 +199,20 @@ Open row Q1394 builds a thin bar through a fat one, fuses it, then fuses the
 answer again with a far cube, to see whether `name_of_the_closed_crossing_through`
 in `fuse/assemble.rs` names the two loops apart. Q1248's lane noted that leg met
 this row's refusal before it reached naming. It now gets through assembly,
-naming included, on the first fuse, but that fuse is still refused by its check
-(421.4). So there is no answer to fuse with the cube yet, and Q1394's thin-bar
-leg cannot be built until rows @1 and @2 of 421.7 land. Q1394 is unchanged.
+naming included, on the first fuse, and since `b9271d95` that fuse answers
+(421.4), so Q1394's thin-bar leg can be built. Q1394 is unchanged.
 
 ### 421.7 What this leaves
 
 - **Row: the march through the axis** is done, by Q1493 (`39b42e54`): the
   walk now gets round both loops. What is left of the through-the-axis half —
-  the six refusals now coming from the mesher instead (421.4) — is row Q1502.
+  the six refusals then coming from the mesher instead (421.4) — was row
+  Q1502, closed with Q1262 and Q1508 at `b9271d95`.
 - **Row: the mesh half off the axis**, `refuses/B`: trace whether the answer's
   wires on the two pipe walls are wrong or `mesh.rs` cannot cut a pipe face
   holding a quartic loop, fix the side at fault, and turn the half-off half of
-  the pin into answers. Q1494 fixed the mesher's side; the rest waits on Q1262
-  and Q1508 in `walk.rs`.
+  the pin into answers. Q1494 fixed the mesher's side, and Q1262 and Q1508
+  the rest in `walk.rs` (`b9271d95`, closing Q1516).
 - Not rows: `whether_past_the_plane_between_two_loops` has no unit test of its
   own (421.3), and leaning pipes are argued in 421.2 but not built.
 - §39.4's and §36.8's rows for two pipes, and §34.10's, say so with a pointer
