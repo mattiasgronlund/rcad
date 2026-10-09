@@ -4068,11 +4068,15 @@ mod tests {
         assert_eq!(holds([7.5, 0.0, 0.0]), Some(false), "beyond the tube");
     }
 
+    /// One side of a piece of `z = 0`: its partner, its two ends in the plane,
+    /// and which side of the partner the piece's material is on.
+    type SideOnZ0 = (Surface, [f64; 2], [f64; 2], Decision);
+
     /// A piece of the plane `z = 0`, facing `+z`, walked wire by wire and side
     /// by side: each side's partner, its two ends in the plane, and which side
     /// of the partner the piece's material is on. A wire of one side whose two
     /// ends are the same goes right round a closed curve.
-    fn a_flat_piece_on_z_0(wires: &[&[(Surface, [f64; 2], [f64; 2], Decision)]]) -> Piece {
+    fn a_flat_piece_on_z_0(wires: &[&[SideOnZ0]]) -> Piece {
         let flat = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
         let corner = |[x, y]: [f64; 2], partner: Surface| MeetPoint::OfThreeSurfaces {
             surfaces: [Surface::Plane(flat), partner, the_plane_x_0()],
