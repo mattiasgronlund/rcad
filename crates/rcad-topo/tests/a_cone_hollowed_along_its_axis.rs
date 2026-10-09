@@ -57,7 +57,9 @@
 //! cone cut in half against the whole ball is refused not knowing which curve
 //! a face runs along. A thin bar through a fat one has its two loops ordered
 //! and its cells told apart since Q1483, and walked through the fat bar's axis
-//! since Q1493, and is refused by the mesh the fuse checks its answer with.
+//! since Q1493, and answers every rule since `rcad-geom`'s `walk.rs` started
+//! each loop's walk on that loop (Q1262) and kept its corner off the points it
+//! walked (Q1508).
 //!
 //! Every cone here is built by `tests/cones`, face by face through
 //! `SolidBuilder` with a power-of-two slope, and every ball by `Model::add_ball`.
@@ -65,7 +67,6 @@
 use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
-use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -1073,145 +1074,56 @@ fn a_frustum_from_below_the_plane_between_the_two_circles_answers_all_but_the_ba
     );
 }
 
-/// **A thin bar through a fat one gets past the arrangement under every rule
-/// both ways, and the mesh the fuse checks its answer with refuses it**, the
-/// shape of a cross-drilled shaft. A bar of radius 4 from `z = 0` to `z = 10`,
-/// `160π`, and a bar of radius 1 along `x` from `x = −10` to `x = 10` at
-/// `z = 5`, `20π`, through the fat bar's axis or half off it. The two pipes
-/// cross in two closed loops, one each side of `x = 0`, and `intersect` picks
-/// each loop out by a half-space whose plane runs through the fat bar's axis
-/// square to the thin one, `x = 0`, ten from either end of the thin bar, so each
-/// of the thin bar's caps is on one side of it.
-///
-/// Every rule was refused `ACrossingThisCannotBeOrderedAlong` before selection.
-/// Each loop is a quartic that runs once round the thin bar's axis, and
-/// `rcad-geom`'s `along_a_crossing.rs` puts points along one in order by that
-/// since Q1483. That left `CannotTellTheCellsOfAFaceApart` on the fat bar's
-/// wall: a walk along one loop learned nothing about which side of the other
-/// loop it was on, and `fuse/arrange.rs`'s
-/// `whether_past_the_plane_between_two_loops` tells it now. What refuses is the
-/// check, and both ways the walk along each loop gets round and the faces are
-/// refused:
-///
-/// - **through the axis**, the unions `AWireWillNotLieFlatOnItsFace` with the
-///   fat bar first and `CannotMeshAFace`, two of its corners coinciding, with
-///   the thin bar first, the intersection the second of those both ways round,
-///   the fat bar less the thin one the first, and the thin less the fat
-///   `ACurvedFaceGoesRightRoundWithNoSeam`. Until Q1493 the walk did not get
-///   round: from the seed `(4, 0, 6)` the coarse walk's first trial, `1.7e307`
-///   long, cannot be settled, every shorter one from `4.1e153` down settles
-///   back onto the seed with a chord of `0`, and `march.rs`'s `one_step` only
-///   halved such a trial, so its fifty shortenings never came near the loop and
-///   every rule was refused `CannotFollowACrossingWhereItsSurfacesAreTangent`
-///   while settling a point onto both surfaces. It takes such a trial's root
-///   now, as it does a trial that cannot be settled;
-/// - **half off it**, the union `CurvedFaceWithAHoleGoesTooFarRound` with the
-///   fat bar first and `CannotMeshAFace`, its boundary crossing itself, with
-///   the thin bar first, the fat bar less the thin one the first of those and
-///   the thin less the fat the second, and the intersection `CannotMeshAFace`,
-///   two of its corners coinciding, both ways round. Until Q1494 the union with
-///   the fat bar first and the fat bar less the thin were
-///   `AWireWillNotLieFlatOnItsFace`: the fat bar's wall is then a ring with two
-///   windows in it, and `mesh.rs` cut no ring with islands in it across.
-///   `cut_a_ring_across` cuts one round its islands now.
-///
-/// Both halves are refused for two faults in `rcad-geom`'s `walk.rs`, traced
-/// by Q1494's second run with probes it has since taken out. Each loop is an
-/// edge that goes right round where its faces cross, with a corner, and
-/// nothing picks the seed it starts from. `the_seed_this_run_is_picked_up_at`
-/// takes the first of the two seeds, so the loop at `−x` is drawn with its own
-/// corner and then the points of the loop at `+x` (Q1262). And `begun_beside`
-/// keeps a start one ulp from its corner, or on it through the axis, and the
-/// triangulator refuses the two as corners that coincide (Q1508). Half off the
-/// axis, the union with the fat bar first and the fat bar less the thin meet
-/// the wrong `−x` window in `cut_a_ring_across`, which finds no cut round it;
-/// the union with the thin bar first and the thin bar less the fat meet the
-/// wrong loop on the thin bar's wall; the intersection with the fat bar first
-/// is Q1508's alone, and with the thin bar first both. That run changed the two
-/// by hand, taking the settled seed nearest the corner and handing the walk
-/// back as it was when its start is within `1e-9` of the corner, and every rule
-/// answered at both offsets and both seams, each within its error of the sums
-/// below by hand, with no assertion run.
-///
-/// Where the fat bar's seam runs makes no difference: up `+x` it crosses the
-/// loop on that side twice and up `+y` neither loop, and each pair refuses the
-/// same way with either.
-///
-/// Once past, each rule is to answer, with `S` the volume the two share,
-/// [`what_a_thin_bar_through_a_fat_one_shares`]: the union `180π − S`, the
+/// **A thin bar through a fat one answers every rule both ways**, the shape of
+/// a cross-drilled shaft, through the fat bar's axis and half off it, with the
+/// fat bar's seam up `+x` or up `+y`. A bar of radius 4 from `z = 0` to
+/// `z = 10`, `160π`, and a bar of radius 1 along `x` from `x = −10` to `x = 10`
+/// at `z = 5`, `20π`. The two pipes cross in two closed loops, one each side of
+/// `x = 0`, and `intersect` picks each loop out by a half-space whose plane
+/// runs through the fat bar's axis square to the thin one, `x = 0`, ten from
+/// either end of the thin bar, so each of the thin bar's caps is on one side of
+/// it. With `S` the volume the two share,
+/// [`what_a_thin_bar_through_a_fat_one_shares`], the union is `180π − S`, the
 /// intersection `S`, the fat bar less the thin `160π − S`, and the thin less
 /// the fat its two ends, `(20π − S)/2` each.
+///
+/// Every rule was refused `ACrossingThisCannotBeOrderedAlong` before selection
+/// until Q1483 put points along each loop in order, round the thin bar's axis,
+/// and `fuse/arrange.rs`'s `whether_past_the_plane_between_two_loops` told the
+/// fat bar's wall apart into its cells. Then the mesh the fuse checks its
+/// answer with refused every rule. Through the axis, until Q1493, the walk did
+/// not get round at all: `march.rs`'s `one_step` only halved a trial that
+/// settled back onto the seed `(4, 0, 6)`, and fifty halvings of `4.1e153`
+/// never came near the loop. Half off it, until Q1494, `mesh.rs` cut no ring
+/// with islands in it across, and the fat bar's wall is such a ring.
+///
+/// Both halves were then refused for two faults in `rcad-geom`'s `walk.rs`.
+/// Each loop is an edge that goes right round where its faces cross, with a
+/// corner, and nothing picks the seed it starts from: the loop at `−x` was
+/// walked from the seed on the loop at `+x` (Q1262), and a start an ulp off its
+/// corner, or on it, was kept among the points walked, which the triangulator
+/// refused as two corners that coincide (Q1508). Through the axis that gave
+/// `AWireWillNotLieFlatOnItsFace`, `CannotMeshAFace` with two corners
+/// coinciding, and `ACurvedFaceGoesRightRoundWithNoSeam`; half off it
+/// `CurvedFaceWithAHoleGoesTooFarRound` and `CannotMeshAFace` with its
+/// boundary crossing itself or two corners coinciding.
 #[test]
-fn a_thin_bar_through_a_fat_one_is_refused_by_the_check_after_the_arrangement() {
-    let a_curved_face_has_no_seam = |answer: &Result<Vec<(f64, f64)>, Error>| {
-        matches!(
-            answer,
-            Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
-        )
-    };
-    let a_wire_will_not_lie_flat = |answer: &Result<Vec<(f64, f64)>, Error>| {
-        matches!(answer, Err(Error::AWireWillNotLieFlatOnItsFace { .. }))
-    };
-    let too_far_round = |answer: &Result<Vec<(f64, f64)>, Error>| {
-        matches!(
-            answer,
-            Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
-        )
-    };
-    let a_boundary_crosses_itself = |answer: &Result<Vec<(f64, f64)>, Error>| {
-        matches!(
-            answer,
-            Err(Error::CannotMeshAFace {
-                why: CannotTriangulate::BoundaryCrossesItself { .. },
-                ..
-            })
-        )
-    };
-    let two_corners_coincide = |answer: &Result<Vec<(f64, f64)>, Error>| {
-        matches!(
-            answer,
-            Err(Error::CannotMeshAFace {
-                why: CannotTriangulate::CornersCoincide { .. },
-                ..
-            })
-        )
-    };
-    let through_refused_by = [
-        a_wire_will_not_lie_flat,
-        two_corners_coincide,
-        two_corners_coincide,
-        two_corners_coincide,
-        a_wire_will_not_lie_flat,
-        a_curved_face_has_no_seam,
-    ];
-    let off_refused_by = [
-        too_far_round,
-        a_boundary_crosses_itself,
-        two_corners_coincide,
-        two_corners_coincide,
-        too_far_round,
-        a_boundary_crosses_itself,
-    ];
-    let gives: Vec<_> = [0, 1]
-        .into_iter()
-        .flat_map(|seam| {
-            [(0.0, through_refused_by), (0.5, off_refused_by)].map(|(off, refused_by)| {
-                let answers =
-                    what_each_rule_gives(|model| a_thin_bar_through_a_fat_one(model, off, seam));
-                println!("{off} off the axis, seam {seam}: {answers:?}");
-                (off, seam, answers, refused_by)
-            })
-        })
-        .collect();
-    for (off, seam, answers, refused_by) in gives {
-        assert!(
-            answers.len() == refused_by.len()
-                && answers
-                    .iter()
-                    .zip(refused_by)
-                    .all(|(answer, refused)| refused(answer)),
-            "{off} off the axis, seam {seam}: {answers:?}"
-        );
+fn a_thin_bar_through_a_fat_one_answers_every_rule_through_the_axis_and_half_off_it() {
+    for seam in [0, 1] {
+        for off in [0.0, 0.5] {
+            let shares = what_a_thin_bar_through_a_fat_one_shares(off, 32);
+            let an_end_of_the_thin_bar = (20.0 * PI - shares) / 2.0;
+            println!("{off} off the axis, seam {seam}, sharing {shares}");
+            fuses_hold(
+                |model| a_thin_bar_through_a_fat_one(model, off, seam),
+                [
+                    &[180.0 * PI - shares],
+                    &[shares],
+                    &[160.0 * PI - shares],
+                    &[an_end_of_the_thin_bar, an_end_of_the_thin_bar],
+                ],
+            );
+        }
     }
 }
 
