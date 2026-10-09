@@ -11,11 +11,13 @@ The claims file is shared by every worktree of this clone and carried by no
 branch. It is a log, one line per event, tab-separated:
 
     add      <id>  <time>  <worktree>  <row>
-    take     <id>  <time>  <worktree>  <branch>  <write set>
+    take     <id>  <time>  <worktree>  <branch>  <write set>  <tier>
     release  <id>  <time>  <worktree>  <how>
 
 A row is held from its `take` until the `release` that `done`, `drop` or `park`
-writes. Two worktrees taking one row is refused at the second `take`, before
+writes. The tier is the row's when it was taken, which the file cannot say once
+`tier` or `tag` has moved the held row; a `take` line of five fields after its
+verb records none. Two worktrees taking one row is refused at the second `take`, before
 either has committed the file, because the hold is written under the lock.
 
 `just queue apply <verb> <args...> + <verb> <args...> ...` runs several write
@@ -207,7 +209,8 @@ class Claims:
         held = {}
         for event in self.events():
             if event[0] == "take":
-                held[event[1]] = {"time": event[2], "tree": event[3], "branch": event[4], "write_set": event[5]}
+                held[event[1]] = {"time": event[2], "tree": event[3], "branch": event[4], "write_set": event[5],
+                                  "tier": event[6] if len(event) > 6 else None}
             elif event[0] == "release":
                 held.pop(event[1], None)
         return held
@@ -319,7 +322,7 @@ def take_step(queue, claims, here, args, batch):
         refuse_unless_ready(queue, row)
     queue.replace(row, row.with_state(f"lane:{branch}"))
     message = f"{row_id}: {row.state} -> lane:{branch}, held for {branch} until done, drop or park"
-    return queue, message, ("take", row_id, now(), here.top, branch, row.write_set)
+    return queue, message, ("take", row_id, now(), here.top, branch, row.write_set, row.tier)
 
 
 def refuse_unless_ready(queue, row):
