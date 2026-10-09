@@ -154,6 +154,36 @@ it, are still refused one way round with nobody having traced it
 (`two_blocks_overlapping_on_a_plane_spelled_an_ulp_apart_in_scale_are_refused_one_way_round`),
 filed by Q1084's lane as Q1221.
 
+**2026-10-09 note (Q1223, fixed by `27157509`): a rim's two names join at any
+scale too.** `the_name_each_closed_curve_goes_by` joined a rim's two halves
+only where `one_surface` called their planes one bit for bit; it now folds the
+scale there as well. A ball on the cap of a bar of its own radius, the cap
+turned about `x` onto `y = z`, and a block clear of both turned onto the other
+spelling, was refused `ResultIsNotManifold { count: 1 }` in every fuse with
+the bar spelling the plane `c′` before the fix — the rim's two names, the cap
+with the bar's wall and the plane with the ball, only joined where the two
+planes were spelled alike or negated
+(`a_ball_on_a_bars_cap_a_block_spells_an_ulp_apart_in_scale`). Every fuse
+answers now.
+
+§330.3 also guessed that `which_of_the_pairs_closed_crossings_it_is` could
+name one of a ring's two circles on such a plane twice. Three families were
+built against a half bend of ring four and tube one to reach it, and none did.
+Blocks turned onto `x = y` are refused `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`
+before the picker is ever asked, in every fuse, with the two spellings alike
+too, so this family cannot show the guess either way; no row follows it. Two
+bars cut back to `x ≥ 0` and turned onto `x + y = 0` are refused
+`AFaceTrimmedByACurveThisCannotFollow` at a bar's bottom cap before the picker
+is asked too, for the same reason, filed by Q1223's lane as **Q1496**. Two
+bars cut back to the quarter `x ≤ 0`, `y ≥ 0`, one holding the whole circle at
+`3π/4` round the ring on its face, answer every fuse with both spelling the
+plane alike, and are refused `Undecidable` on `side of plane` with the two
+spellings mixed — a sign that could not be settled, not a circle named twice,
+so this does not show the guess and does not show that no shape reaches it
+either — filed by Q1223's lane as **Q1495**. Once that answers,
+**Q1497** runs every fuse of both mixed pairings to see whether the circle is
+shown named twice there.
+
 ### 330.4 Whether a spelling can pair four faces crosswise
 
 §247.6 asked whether two spellings the fold leaves apart could pair the four
