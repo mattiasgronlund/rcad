@@ -23,9 +23,9 @@ mod pairs;
 
 use rcad_geom::Deflection;
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Model, Rule, SolidKey};
 
-use comparison::{answer_of, same_answer};
+use comparison::{Answer, Face, Step, WhatItSitsOn, answer_of, same_answer};
 use pairs::{Configuration, Elsewhere, Placed, Shape, Skew, Turn};
 
 const FRAME: usize = 0;
@@ -36,30 +36,105 @@ fn a_turned_frame_and_the_block_flush_beneath_it_unite_to_one_solid_of_fourteen(
     both_ways_round_give(Rule::Union, 1, 14.0);
 }
 
-/// **Taking the block back out of the union is refused today**, though the
-/// answer is the frame. The union keeps one edge from the block's front to the
-/// frame's front, where a strip `2.8e-17` wide was left out, and the two fronts
-/// are planes with the same normal bits and offsets `0.0` and
-/// `-2.7755575615628914e-17`: parallel, and apart. No third plane meets both,
-/// and the second fuse stops at "where three surfaces meet" with no bound at
-/// all. A gap and not a limit (§16.10), since the frame is in the model; the
-/// lane that answers it turns this test round.
+/// **Taking the block back out of the union gives the frame back.** Over the
+/// turned planes the block's front and the frame's front have the same normal
+/// bits and offsets `2.7755575615628914e-17` and `0.0`, so the union, with the
+/// strip between them left out, had one edge with a front on either side and
+/// no third face at its end at the turned `(5, 0, 0)`. No three planes placed
+/// that corner, and the second fuse was refused at "where three surfaces meet"
+/// with no bound at all (queue row Q1446). The union now makes the two fronts
+/// one face (§426), and the answer is checked against the frame as it stood
+/// before either fuse.
 #[test]
-fn the_block_taken_back_out_of_the_union_is_refused_where_the_two_fronts_are_parallel() {
+fn the_block_taken_back_out_of_the_union_is_the_frame() {
     let (mut model, keys) = the_frame_and_the_block().build();
     let union = fuse_and_validate(&mut model, &[keys[FRAME]], &[keys[BLOCK]], Rule::Union);
-    let refused = model.fuse(
-        &union,
-        &[keys[BLOCK]],
-        Rule::Difference,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
+    let less_the_block = fuse_and_validate(&mut model, &union, &[keys[BLOCK]], Rule::Difference);
+    assert_eq!(
+        less_the_block.len(),
+        1,
+        "the union less the block is one solid"
     );
+    let measured = volume_of(&model, &less_the_block);
     assert!(
-        matches!(refused, Err(Error::Undecidable { .. })),
-        "the union less the block was expected to be refused as undecidable, and gave {:?}",
-        refused.map(|fused| fused.solids().len())
+        (measured - 12.0).abs() < 1e-9,
+        "the union less the block takes up {measured}, not 12"
     );
+    if let Err(why) = the_same_flat_solid_to_within(
+        &answer_of(&model, &[keys[FRAME]]),
+        &answer_of(&model, &less_the_block),
+        1e-12,
+    ) {
+        panic!("the union less the block is not the frame: {why}");
+    }
+}
+
+/// Each face of `expected` matches exactly one face of `found`, and they have
+/// as many faces. Two faces match when their planes have the same normal bits
+/// and offsets at most `apart`, they are used the same way round, and each
+/// ring of one is the same ring of the other walked the same way from some
+/// corner, with each corner at most `apart` from the other's.
+///
+/// **Not bit for bit**, because a fuse writes each corner as the meet of three
+/// of its planes where the frame has its built corners turned: the corners
+/// round the frame's hole, which the block never comes near, come back an ulp
+/// or two from where the frame has them, and the joined front sits on the
+/// block's front, `2.8e-17` from the frame's.
+fn the_same_flat_solid_to_within(
+    expected: &Answer,
+    found: &Answer,
+    apart: f64,
+) -> Result<(), String> {
+    let (expected, found): (Vec<&Face>, Vec<&Face>) = (
+        expected.solids.iter().flatten().collect(),
+        found.solids.iter().flatten().collect(),
+    );
+    if expected.len() != found.len() {
+        return Err(format!(
+            "{} faces where {} were expected",
+            found.len(),
+            expected.len()
+        ));
+    }
+    for face in &expected {
+        let matching = found
+            .iter()
+            .filter(|other| faces_match(face, other, apart))
+            .count();
+        if matching != 1 {
+            return Err(format!("{matching} faces match the one on {:?}", face.sits));
+        }
+    }
+    Ok(())
+}
+
+fn faces_match(face: &Face, other: &Face, apart: f64) -> bool {
+    let (WhatItSitsOn::Flat(plane), WhatItSitsOn::Flat(other_plane)) = (&face.sits, &other.sits)
+    else {
+        panic!("the frame and the block are flat all over");
+    };
+    face.reversed == other.reversed
+        && plane[..3]
+            .iter()
+            .zip(&other_plane[..3])
+            .all(|(one, other)| one.to_bits() == other.to_bits())
+        && (plane[3] - other_plane[3]).abs() <= apart
+        && face.wires.len() == other.wires.len()
+        && face
+            .wires
+            .iter()
+            .zip(&other.wires)
+            .all(|(ring, other_ring)| rings_match(ring, other_ring, apart))
+}
+
+fn rings_match(ring: &[Step], other: &[Step], apart: f64) -> bool {
+    ring.len() == other.len()
+        && (0..other.len()).any(|start| {
+            ring.iter().enumerate().all(|(position, step)| {
+                let there = other[(start + position) % other.len()].at;
+                (0..3).all(|axis| (step.at[axis] - there[axis]).abs() <= apart)
+            })
+        })
 }
 
 #[test]

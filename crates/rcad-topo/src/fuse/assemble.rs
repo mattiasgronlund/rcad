@@ -39,7 +39,8 @@
 //! corners when it does. §17.4's amendment of 2026-08-30 says why, and the short
 //! of it is that anything else hands back a solid §17.1 cannot read: a corner in
 //! the middle of a straight edge has two planes round it, not three, so the next
-//! fuse cannot re-derive it.
+//! fuse cannot re-derive it. Two pieces on parallel planes facing the same way,
+//! a rounding apart, are one face for the same reason (§426).
 //!
 //! An *input* can arrive in that state too — `ProfileBuilder` accepts three
 //! profile points in a row and the extrusion of one has two side faces on a
@@ -1095,7 +1096,15 @@ impl Assembly {
         self.turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way(
             &joined, &along, &dissolved,
         )?;
-        self.rebuild_from(&joined, renumbered)?;
+        // **A ring of two straight sides left out sets two faces side by side**
+        // that were not before: the turned frame's front and the block's front
+        // under it, once the strip of the block's top between them goes
+        // (queue row Q1446). They are one flat region (§426), so the joining
+        // runs again. It runs again only after two or more edges were made
+        // one, so there are fewer edges each time and it ends.
+        if self.rebuild_from(&joined, renumbered)? {
+            self.join_up_what_is_one_face(policy, log)?;
+        }
         Ok(true)
     }
 
@@ -1136,9 +1145,14 @@ impl Assembly {
 
     /// Which edges have the same flat region on both sides of them.
     ///
-    /// [`Plane::agreement_with`] decides it exactly, with no tolerance anywhere
-    /// (§17.4). An edge whose two darts belong to one face stays: a face that
-    /// runs up against itself is still bounded there.
+    /// Two flat faces are one region when their planes have parallel normals
+    /// facing the same way, whatever their offsets, and [`Plane::agreement_with`]
+    /// decides both that and the same plane exactly, with no tolerance anywhere
+    /// (§17.4). **Two parallel planes apart from each other meet nowhere**, so an
+    /// edge between faces on them is one the rounding left between two pieces of
+    /// one flat region, and kept, its ends have two plane directions round them
+    /// where a corner needs three (§426). An edge whose two darts belong to one
+    /// face stays: a face that runs up against itself is still bounded there.
     fn edges_with_one_face_on_both_sides(
         &self,
         along: &[[Dart; 2]],
@@ -1154,13 +1168,29 @@ impl Assembly {
                 match (mine.surface.as_plane(), theirs.surface.as_plane()) {
                     (Some(mine), Some(theirs)) => {
                         let agreement = agreement_of_two_planes(mine, theirs, log)?;
-                        Ok(agreement == PlaneAgreement::SameWay)
+                        Ok(agreement == PlaneAgreement::SameWay
+                            || (agreement == PlaneAgreement::Different
+                                && Self::facing_the_same_way(mine, theirs, log)?))
                     }
                     (None, None) => Ok(one_cone_pipe_or_ball_the_same_way_round(mine, theirs)),
                     (Some(_), None) | (None, Some(_)) => Ok(false),
                 }
             })
             .collect()
+    }
+
+    /// Whether two planes have parallel normals facing the same way, wherever
+    /// each sits.
+    ///
+    /// Both are slid to the origin and asked whether they are then one plane.
+    /// [`Plane::moved_to`] keeps the normal's bits, so that is the exact
+    /// question of the normals alone.
+    fn facing_the_same_way(plane: &Plane, other: &Plane, log: &mut ProvenanceLog) -> Result<bool> {
+        let through_the_origin =
+            |plane: &Plane| plane.moved_to(0.0).expect("nought is a finite offset");
+        let agreement =
+            agreement_of_two_planes(&through_the_origin(plane), &through_the_origin(other), log)?;
+        Ok(agreement == PlaneAgreement::SameWay)
     }
 
     /// The rings bounding each face once the joined ones are one face.
@@ -2229,13 +2259,16 @@ impl Assembly {
     /// Everything keeps the order it was in, so an answer that joined nothing
     /// comes out of here byte for byte the answer that went in.
     ///
+    /// Answers whether a ring of two straight sides was left out, since that
+    /// can set two faces side by side that the joining has not seen together.
+    ///
     /// # Panics
     ///
     /// If a ring comes out bounding nothing, as
     /// [`Assembly::with_each_ring_of_two_straight_sides_left_out`] lists, or if
     /// a run of edges that became one edge does not have exactly two ends left.
     /// Both mean the joining above is wrong.
-    fn rebuild_from(&mut self, joined: &[JoinedFace], renumbered: Renumbered) -> Result<()> {
+    fn rebuild_from(&mut self, joined: &[JoinedFace], renumbered: Renumbered) -> Result<bool> {
         let edges = self.edges_after_joining(&renumbered);
 
         let faces = joined
@@ -2258,7 +2291,8 @@ impl Assembly {
                 })
             })
             .collect::<Result<_>>()?;
-        let (edges, faces) = Self::with_each_ring_of_two_straight_sides_left_out(edges, faces);
+        let (edges, faces, left_a_ring_out) =
+            Self::with_each_ring_of_two_straight_sides_left_out(edges, faces);
 
         self.corners = core::mem::take(&mut self.corners)
             .into_iter()
@@ -2267,11 +2301,12 @@ impl Assembly {
             .collect();
         self.edges = edges;
         self.faces = faces;
-        Ok(())
+        Ok(left_a_ring_out)
     }
 
     /// The joined faces with every ring of a flat face that is two straight
-    /// sides left out, and the two edges of each such ring made one.
+    /// sides left out, and the two edges of each such ring made one, then
+    /// whether there was any such ring.
     ///
     /// **Two straight sides between the same two corners are one segment** as
     /// the answer's corners are written, so a ring of them goes out along it
@@ -2293,7 +2328,8 @@ impl Assembly {
     /// each of its two edges once, one each way along the segment. So `k` edges
     /// made one by `k - 1` rings keep two uses between them, one each way: the
     /// block's front and the frame's front come out on either side of one edge
-    /// between the strip's two ends. More rings than that would leave the edge
+    /// between the strip's two ends, and the joining runs again to make them
+    /// one face (§426, queue row Q1446). More rings than that would leave the edge
     /// with no face along it, which [`Assembly::group_into_shells`] refuses as
     /// not a manifold. The edge still runs straight, since
     /// [`Edge::how_it_runs`] reads two flat surfaces and two different ends as
@@ -2314,9 +2350,10 @@ impl Assembly {
     fn with_each_ring_of_two_straight_sides_left_out(
         edges: Vec<Edge>,
         mut faces: Vec<Face>,
-    ) -> (Vec<Edge>, Vec<Face>) {
+    ) -> (Vec<Edge>, Vec<Face>, bool) {
         let one_segment = Self::leave_out_each_ring_of_two_straight_sides(&edges, &mut faces);
-        let (edges, faces) = if one_segment.joined_anything() {
+        let left_a_ring_out = one_segment.joined_anything();
+        let (edges, faces) = if left_a_ring_out {
             Self::each_segment_as_one_edge(edges, faces, &one_segment)
         } else {
             (edges, faces)
@@ -2333,7 +2370,7 @@ impl Assembly {
                 );
             }
         }
-        (edges, faces)
+        (edges, faces, left_a_ring_out)
     }
 
     /// Take each ring of two straight sides out of its flat face, and answer
@@ -4450,9 +4487,10 @@ fn across(dart: Dart, along: &[[Dart; 2]], edge: usize) -> Dart {
 /// The plane a joined face sits on: the smallest of its pieces' planes, read as
 /// four numbers.
 ///
-/// The pieces all sit on the same plane and face the same way, but two solids
+/// The pieces all sit on one flat region and face the same way, but two solids
 /// that are flush against each other worked their planes out separately and the
-/// last bits may differ. Picking the smallest depends on the set of planes and
+/// last bits may differ: in the normal, or in the offset of two parallel planes
+/// a rounding apart (§426). Picking the smallest depends on the set of planes and
 /// not on the order the pieces arrived in, which is what keeps the answer the
 /// same when the two sides of the fuse are swapped.
 fn plane_of_the_joined_face(members: &[usize], faces: &[Face]) -> Plane {
