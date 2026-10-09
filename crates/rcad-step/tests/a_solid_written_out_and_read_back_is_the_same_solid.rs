@@ -995,6 +995,279 @@ fn a_long_arc_whose_ends_no_plane_holds_comes_back_and_cuts_the_same() {
     }
 }
 
+/// The long side of a bar sliced a hair inside its rim, so that the short arc
+/// left on each cap stands `7.7e-16` off its chord, is refused as built and
+/// refused read back from a file, and by the same refusal (Q1460).
+///
+/// **The reader's plane would not tell this arc from the other one.** No plane
+/// holds both ends of the long arc, so the reader names it by a plane lowered
+/// below both ends by `8ε` times their spread (`a_half_space_naming_the_arc` in
+/// `brep.rs`, and Q939's test above), and here the short arc is about a tenth
+/// as thick as that lowering. So the lowered plane passes under the whole
+/// circle, and the test checks that exactly: the plane misses the circle and
+/// the centre is in front of it. The reader's rule is written out here, because
+/// the reader refuses this file before it hands a picker back; written out, it
+/// gives the very picker the reader gives a thicker bar it does read back.
+///
+/// **But the bar as built never gets that far.** `rcad_geom::walk` asks which
+/// of the two arcs a picker holds at the middle of each, inside a box `256ε`
+/// times the circle's size wide. The short arc's middle is inside that box from
+/// the builder's plane through the chord, so the walk reads both arcs as picked
+/// and refuses with `CannotNameWhichPieceOfACrossingThisIs`. The test calls the
+/// walk on the arc itself: it walks the short side's picker and refuses the long
+/// side's. The builder's plane holds both ends exactly, so which arc it picks
+/// has an answer, which `a_picker_that_tells_the_two_arcs_apart` in `rcad-topo`
+/// reads, and the walk not reaching it is a gap of its own.
+///
+/// **So the original and the copy refuse alike, and for this bar there is no
+/// read-back defect to fix.** The walk's refusal reaches thicker arcs than this
+/// one: a bar whose short arc is about three times as thick as the reader's
+/// lowering is refused as well, and one about a hundred times as thick builds
+/// and comes back. A file of the refused bar is the thick one's file with the
+/// numbers swapped, since the writer is never handed a model to write.
+///
+/// The ends are points of the circle `x² + y² = R²` one step apart each way,
+/// `(x + 1, −x)` and `(x, −(x + 1))`, whose radii solve `u² − 2R² = −1` with
+/// `u = 2x + 1`. Of those, `R = 38613965` is the first whose short arc is
+/// thinner than the lowering, `6625109` the one before and `1136689` the one
+/// before that. Each is scaled by `(1 + 2⁻²⁰)` and a power of two, which keeps
+/// every point exactly on its circle and leaves the reader no plane through
+/// both ends.
+#[test]
+fn a_bar_sliced_a_hair_inside_its_rim_is_refused_built_and_read_back_alike() {
+    use rcad_geom::{Axis, Cylinder, HalfSpace, NamedRun, Picker};
+    use rcad_predicates::{Decision, Point as PredicatePoint};
+    use rcad_step::Refusal;
+
+    let scaled = |[near, far, round]: [f64; 3], by: f64| {
+        assert_eq!(
+            near * near + far * far,
+            round * round,
+            "both ends on the circle"
+        );
+        let s = 1.0 + f64::from_bits((1023 - 20) << 52);
+        [near, far, round].map(|number| number * s * by)
+    };
+    let thin = scaled([27_304_196.0, 27_304_197.0, 38_613_965.0], 2f64.powi(-23));
+    let thicker = scaled([4_684_659.0, 4_684_660.0, 6_625_109.0], 2f64.powi(-21));
+    let thick = scaled([803_760.0, 803_761.0, 1_136_689.0], 2f64.powi(-18));
+    let ends =
+        |[near, far, _]: [f64; 3]| [Point::new(far, -near, 0.0), Point::new(near, -far, 0.0)];
+    let a_model = || Model::new(Scale::new(Unit::Millimetre, 8.0).expect("a working size"));
+    let a_bar = |numbers: [f64; 3], model: &mut Model| {
+        let [near, far, round] = numbers;
+        building_a_bar_sliced_along_a_chord(
+            model,
+            round,
+            [[far, -near], [near, -far]],
+            Vector::new(-1.0, 1.0, 0.0),
+            Side::Long,
+        )
+    };
+    let walk_refused = |why: &rcad_topo::Error| {
+        matches!(
+            why,
+            rcad_topo::Error::Geometry(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
+        )
+    };
+
+    for numbers in [thin, thicker] {
+        let built = a_bar(numbers, &mut a_model());
+        assert!(
+            built.as_ref().is_err_and(walk_refused),
+            "the bar of radius {} is refused as built by the walk: {built:?}",
+            numbers[2]
+        );
+    }
+
+    let [_, _, round] = thin;
+    let corners = ends(thin);
+    let bottom = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+        .expect("an axis direction has length");
+    let pipe = Cylinder::new(Axis::z(), round).expect("a positive radius");
+    let walked = |facing: Vector| {
+        let picker = HalfSpace::through_a_point_facing(corners[0], facing)
+            .expect("a direction square to the chord has length");
+        let run = NamedRun::new(
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(bottom),
+                picked_by: [Picker::from(picker)].into(),
+            },
+            corners.map(|corner| PredicatePoint::from(corner.coordinates())),
+        )
+        .expect("an arc with two ends");
+        rcad_geom::walk(
+            &run,
+            [&Surface::Plane(bottom), &Surface::Cylinder(pipe)],
+            the_same_mesh_on_both_sides(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .map(|along| along.points().len())
+    };
+    assert!(
+        walked(Vector::new(1.0, -1.0, 0.0)).is_ok(),
+        "the short arc is walked"
+    );
+    let long = walked(Vector::new(-1.0, 1.0, 0.0));
+    assert!(
+        matches!(
+            long,
+            Err(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
+        ),
+        "the walk cannot tell the long arc from the short: {long:?}"
+    );
+
+    let mut thick_model = a_model();
+    a_bar(thick, &mut thick_model)
+        .unwrap_or_else(|why| panic!("the thick bar is not sound: {why}"));
+    let thick_text = rcad_step::write(&thick_model, "a bar sliced a hair inside its rim")
+        .unwrap_or_else(|why| panic!("the thick bar is not written: {why}"));
+    let read = |text: &str| {
+        let file = StepFile::read(text.as_bytes()).expect("a file this writer wrote parses");
+        Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+    };
+    let import =
+        read(&thick_text).unwrap_or_else(|why| panic!("the thick bar is refused read back: {why}"));
+    let [(_, came)] = import.solids() else {
+        panic!("one solid came back as {}", import.solids().len());
+    };
+    let mut pickers = Vec::new();
+    for face in import
+        .model()
+        .solid(*came)
+        .expect("this model made the key")
+        .faces()
+    {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                if let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = coedge.edge().run() {
+                    pickers.push(picked_by.clone());
+                }
+            }
+        }
+    }
+    let readers_own = Picker::from(the_readers_lowered_plane(ends(thick)));
+    assert_eq!(pickers.len(), 4, "two arcs, each walked by two faces");
+    for picked_by in &pickers {
+        assert_eq!(
+            picked_by.as_slice(),
+            [readers_own],
+            "the reader's rule, written out"
+        );
+    }
+    assert!(
+        !the_whole_circle_is_in_front_of(&the_readers_lowered_plane(ends(thick)), thick[2]),
+        "the thick bar's short arc dips behind the reader's plane"
+    );
+
+    let lowered = the_readers_lowered_plane(corners);
+    assert!(
+        the_whole_circle_is_in_front_of(&lowered, round),
+        "the thin bar's whole circle is in front of the reader's plane: {lowered:?}"
+    );
+    let facing = lowered.normal();
+    for normal in [
+        facing,
+        facing.normalized().expect("a picker's normal has length"),
+    ] {
+        let through = HalfSpace::through_a_point_facing(corners[0], normal)
+            .expect("a picker's normal has length");
+        assert_ne!(
+            corners.map(|corner| through.side_of_point(PredicatePoint::from(corner.coordinates()))),
+            [Decision::Zero; 2],
+            "a plane facing {normal:?} holds both ends"
+        );
+    }
+
+    let thin_text = the_same_file_with_other_numbers(&thick_text, thick, thin);
+    let got = read(&thin_text).map(|import| import.solids().len());
+    assert!(
+        matches!(
+            &got,
+            Err(Refusal::TheSolidTheFileDescribesIsNotOne { why, .. }) if walk_refused(why)
+        ),
+        "the thin bar's file is refused by the walk, as the bar is: {got:?}"
+    );
+}
+
+/// The half-space the reader names a cap's long arc between `ends` by, where no
+/// plane holds both ends: facing `(B − A) × ẑ`, lowered below both ends by `8ε`
+/// times their spread, as `a_half_space_holding_both` in `brep.rs` works it out.
+fn the_readers_lowered_plane(ends: [Point; 2]) -> rcad_geom::HalfSpace {
+    let facing = (ends[1] - ends[0]).cross(Vector::new(0.0, 0.0, 1.0));
+    let below = |corner: Point| {
+        let terms = facing.components().into_iter().zip(corner.coordinates());
+        let spread: f64 = terms.clone().map(|(n, p)| (n * p).abs()).sum();
+        let dot: f64 = terms.map(|(n, p)| n * p).sum();
+        dot - 8.0 * f64::EPSILON * spread
+    };
+    rcad_geom::HalfSpace::new(facing, below(ends[0]).min(below(ends[1])))
+        .expect("a direction square to the chord has length")
+}
+
+/// Whether every point of the circle of `radius` round the origin in the plane
+/// `z = 0` is in front of `half`, worked out exactly: its centre is in front,
+/// and its plane misses the circle, `R²(fx² + fy²) < e²`.
+fn the_whole_circle_is_in_front_of(half: &rcad_geom::HalfSpace, radius: f64) -> bool {
+    use rcad_predicates::Decision;
+    use rcad_predicates::expansion::{expansion_sign, expansion_sum, scale_expansion};
+
+    let normal = half.normal();
+    let offset = half.offset();
+    let [mut x_squared, mut y_squared] = [[0.0; 2]; 2];
+    let x_length = scale_expansion(&[normal.x()], normal.x(), &mut x_squared);
+    let y_length = scale_expansion(&[normal.y()], normal.y(), &mut y_squared);
+    let mut flat_squared = [0.0; 4];
+    let flat_length = expansion_sum(
+        &x_squared[..x_length],
+        &y_squared[..y_length],
+        &mut flat_squared,
+    );
+    let mut times_radius = [0.0; 8];
+    let once = scale_expansion(&flat_squared[..flat_length], radius, &mut times_radius);
+    let mut times_radius_squared = [0.0; 16];
+    let twice = scale_expansion(&times_radius[..once], radius, &mut times_radius_squared);
+    let mut less_offset_squared = [0.0; 2];
+    let offset_length = scale_expansion(&[-offset], offset, &mut less_offset_squared);
+    let mut difference = [0.0; 18];
+    let difference_length = expansion_sum(
+        &times_radius_squared[..twice],
+        &less_offset_squared[..offset_length],
+        &mut difference,
+    );
+    assert_eq!(normal.z(), 0.0, "a plane square to the caps");
+    let centre_in_front =
+        half.side_of_point(rcad_predicates::Point::from([0.0; 3])) == Decision::Pos;
+    centre_in_front && expansion_sign(&difference[..difference_length]) == Decision::Neg
+}
+
+/// `text`, a file of the bar [`a_bar_sliced_along_a_chord`] builds through the
+/// ends and radius in `from`, with every number of those changed to the ones in
+/// `to`, and the point the slice's plane is written through moved onto the
+/// first end of `to`.
+fn the_same_file_with_other_numbers(text: &str, from: [f64; 3], to: [f64; 3]) -> String {
+    let mut swapped = text.to_owned();
+    for (old, new) in from.into_iter().zip(to) {
+        let [old, new] = [old, new].map(|number| format!("{number:?}"));
+        assert!(swapped.contains(&old), "{old} is written");
+        swapped = swapped.replace(&old, &new);
+    }
+    let mut lines: Vec<String> = swapped.lines().map(str::to_owned).collect();
+    let slice_facing = lines
+        .iter()
+        .position(|line| {
+            line.ends_with("DIRECTION('',(0.7071067811865476,-0.7071067811865476,0.0));")
+        })
+        .expect("the slice's facing is written");
+    let (entity, _) = lines[slice_facing - 1]
+        .split_once('=')
+        .expect("an entity before it");
+    let [near, far, _] = to;
+    lines[slice_facing - 1] = format!("{entity}=CARTESIAN_POINT('',({far:?},{:?},0.0));", -near);
+    lines.join("\n")
+}
+
 /// Which side of the slice [`a_bar_sliced_along_its_length`] keeps.
 #[derive(Clone, Copy)]
 enum Side {
@@ -1032,6 +1305,18 @@ fn a_bar_sliced_along_a_chord(
     towards_the_axis: Vector,
     side: Side,
 ) -> SolidKey {
+    building_a_bar_sliced_along_a_chord(model, radius, ends, towards_the_axis, side)
+        .unwrap_or_else(|why| panic!("the bar sliced along its length is not sound: {why}"))
+}
+
+/// [`a_bar_sliced_along_a_chord`], with what the builder said when it refuses.
+fn building_a_bar_sliced_along_a_chord(
+    model: &mut Model,
+    radius: f64,
+    ends: [[f64; 2]; 2],
+    towards_the_axis: Vector,
+    side: Side,
+) -> Result<SolidKey, rcad_topo::Error> {
     use rcad_geom::{Axis, Cylinder, HalfSpace, Orientation, Picker};
     use rcad_topo::{DraftStep, SolidBuilder};
 
@@ -1120,9 +1405,7 @@ fn a_bar_sliced_along_a_chord(
         ));
     }
     builder.add_shell(&skin).expect("a shell");
-    builder
-        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
-        .unwrap_or_else(|why| panic!("the bar sliced along its length is not sound: {why}"))
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
 /// A slab with a round scoop out of its top, whose curved face is a pipe used
