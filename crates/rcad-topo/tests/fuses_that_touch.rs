@@ -163,9 +163,15 @@
 //! clear of the bend, answers all 90. The 45 that keep the bend were refused
 //! writing it back, `TheFuseWroteABrokenAnswer` with `CoedgesRunTheSameWay`,
 //! the stop §243.5 and §323.5 record, until the bend's wall was used forwards
-//! (§361). A torus against any other curved surface is refused by name, so a
-//! bar butted onto a bend's cap never reaches the rim the two share;
-//! [`a_bar_on_a_bends_cap_is_refused_before_its_rim_is_named`] pins that.
+//! (§361). A bar of the tube's radius butted onto a bend's cap with a flat far
+//! end is refused as a quartic for that end's plane;
+//! [`a_flat_ended_bar_on_a_bends_cap_is_refused_as_a_quartic`] pins that. Cut
+//! through the ring's axis instead, its pipe meets the ring in the cap's rim
+//! and in a loop crossing it, and every rule is refused putting points in order
+//! along the half of the loop on the bar's pipe face, which no edge of the
+//! answer runs along;
+//! [`a_bar_cut_through_the_rings_axis_on_a_bends_cap_is_refused_ordering_the_loop`]
+//! pins that.
 //!
 //! # What is not built, and why
 //!
@@ -510,39 +516,83 @@ fn a_dome_lying_on_its_side_by_every_rule_against_the_closed_forms() {
     }
 }
 
-/// A bar of a bend's tube radius butted onto the bend's `+x` cap, so the cap's
-/// plane, the bend's ring and the bar's pipe all hold the cap's rim — pinned at
-/// **every rule both ways round refused before the rim is reached**.
+/// A bar of a bend's tube radius butted onto the bend's `+x` cap, its far end
+/// flat — pinned at **every rule both ways round refused as a quartic**.
 ///
 /// A fuse with a ring in it crosses every surface of the other solid with the
 /// ring, wherever the two faces are. So a bar with a flat far end is refused
 /// `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` for that end's plane, which
 /// lies square to the cap and off the ring's axis however far from the bend it
-/// is. A bar whose far end is cut by a plane through the ring's axis gets past
-/// that, and is refused `ACrossingBetweenATorusAndAnotherCurvedSurface` for its
-/// pipe against the ring, which touch along the rim. Neither reaches
-/// `fuse/assemble.rs`, so whether the rim would come out under one name is not
-/// measured here. Queue row Q1143 built both; this fails the day either moves.
+/// is. Queue row Q1143 built it; this fails the day it moves.
 #[test]
-fn a_bar_on_a_bends_cap_is_refused_before_its_rim_is_named() {
+fn a_flat_ended_bar_on_a_bends_cap_is_refused_as_a_quartic() {
     let policy = Policy::certified();
     for (ring, tube) in [(3, 1), (5, 2)] {
-        // The control row of the bend's cap against a block: the quarter bend
-        // of `touching`, with a block clear of it that nothing here fuses.
-        let built = Drawn {
-            shape: Shape::ABendsCapAgainstABlock { ring, tube },
-            apart: Apart::ClearByOne,
-        }
-        .build();
-        let (mut model, bend) = (built.model, built.second);
+        let (mut model, bend, along_minus_y) = a_bend_and_where_its_cap_faces(ring, tube);
         let (ring, tube) = (f64::from(ring), f64::from(tube));
-        let along_minus_y = Isometry::translation(Vector::new(ring, 0.0, 0.0))
-            .expect("a whole-number shift")
-            .compose(&Isometry::quarter_turns(&Axis::x(), 1).expect("x is an axis"));
-        let flat_ended = model
+        let bar = model
             .add_round_bar(tube, 2.0, &along_minus_y)
             .expect("a whole-number bar");
-        let cut_through_the_axis = model
+        let wanted = rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic;
+        for (one, other) in [(bar, bend), (bend, bar)] {
+            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                let refused = model
+                    .clone()
+                    .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                    .map(|answer| answer.solids().len());
+                assert!(
+                    matches!(&refused, Err(Error::Geometry(why)) if *why == wanted),
+                    "{rule:?} of ring {ring}, tube {tube} (bar first: {}) came back \
+                     {refused:?}, not {wanted:?}",
+                    one == bar
+                );
+            }
+        }
+    }
+}
+
+/// A bar of a bend's tube radius butted onto the bend's `+x` cap, its far end
+/// cut by the plane `x + y = 0` through the ring's axis: pinned at **every rule
+/// both ways round, certified and tolerant, refused ordering the loop**.
+///
+/// **The bar's pipe meets the ring in more than the cap's rim.** On the pipe,
+/// `(x − R)² + z² = r²`, and on the ring `(√(x² + y²) − R)² + z² = r²`, so
+/// `√(x² + y²) − R = ±(x − R)`. The `+` sign is the plane `y = 0`, where the two
+/// are tangent along the rim. The `−` sign is a loop, `x = R − y²/4R` and
+/// `z² = r² − y⁴/16R²`, which crosses the rim at `(R, 0, ±r)`: `(9, 12, 4)` is
+/// on both ring 12/5 and the radius-5 pipe through `(12, 0, 0)` along `y`. Its
+/// half with `y > 0` is on the bend's ring face, past the bar's cap, and its
+/// half with `y < 0` on the bar's pipe face, past the bend's cap, so no edge of
+/// an answer runs along it. Until queue row Q1453 the pipe and the ring were
+/// refused `ACrossingBetweenATorusAndAnotherCurvedSurface` under every rule.
+///
+/// **Now the half with `y < 0` is drawn on the bar's pipe face, and refused
+/// there.** The far end crosses it at `x = −y = 2R(√2 − 1)`, so it has two
+/// points on the face, and points along a quartic cannot be put in order:
+/// `ACrossingThisCannotBeOrderedAlong`. A face is arranged knowing the
+/// surfaces that cut it and not the faces, so nothing there says that the
+/// bend's ring face, which puts the ring there, lies on `y ≥ 0` and never
+/// reaches the half. And the circle the plane `x + y = 0` cuts the ring in runs
+/// through the same two points on the far cap's rim, so leaving the half off
+/// the pipe asks for that circle to be left off the far cap too, or the rim
+/// is split on one side of it only.
+///
+/// The answers it is to reach: the bend of ring `R` and tube `r` runs round
+/// `z` from its `+x` cap on `y = 0` to its `+y` cap, and holds `π²Rr²/2`. The
+/// bar's axis runs along `−y` through `(R, 0, 0)`, the middle of the cap, and
+/// the bar holds `−x ≤ y ≤ 0` over the disk `(x − R)² + z² ≤ r²`, so
+/// `∫∫ x dA = πr²R`. The two meet only on the cap. So `A ∪ B` is one solid of
+/// `πr²R + π²Rr²/2`, `A ∩ B` is no solid, `bar \ bend` is the bar and
+/// `bend \ bar` is the bend: for ring 3/1, `3π = 9.425` and `1.5π² = 14.80`;
+/// for ring 5/2, `20π = 62.83` and `10π² = 98.70`. Commit `2caf1cf7` holds this
+/// test checking every rule against them.
+#[test]
+fn a_bar_cut_through_the_rings_axis_on_a_bends_cap_is_refused_ordering_the_loop() {
+    let mut came_back = Vec::new();
+    for (ring, tube) in [(3, 1), (5, 2)] {
+        let (mut model, bend, along_minus_y) = a_bend_and_where_its_cap_faces(ring, tube);
+        let (ring, tube) = (f64::from(ring), f64::from(tube));
+        let bar = model
             .add_bar_cut_off_by(
                 tube,
                 [
@@ -555,19 +605,13 @@ fn a_bar_on_a_bends_cap_is_refused_before_its_rim_is_named() {
                     .expect("a normal with a length"),
                 ],
                 &along_minus_y,
-                &policy,
+                &Policy::certified(),
                 &mut ProvenanceLog::new(),
             )
             .expect("a bar whose far end lies on the plane x + y = 0");
-        for (bar, wanted) in [
-            (
-                flat_ended,
-                rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic,
-            ),
-            (
-                cut_through_the_axis,
-                rcad_geom::Error::ACrossingBetweenATorusAndAnotherCurvedSurface,
-            ),
+        for (name, policy) in [
+            ("certified", Policy::certified()),
+            ("tolerant", Policy::tolerant(model.scale().nominal_size())),
         ] {
             for (one, other) in [(bar, bend), (bend, bar)] {
                 for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
@@ -575,16 +619,37 @@ fn a_bar_on_a_bends_cap_is_refused_before_its_rim_is_named() {
                         .clone()
                         .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
                         .map(|answer| answer.solids().len());
-                    assert!(
-                        matches!(&refused, Err(Error::Geometry(why)) if *why == wanted),
-                        "{rule:?} of ring {ring}, tube {tube} (bar first: {}) came back \
-                         {refused:?}, not {wanted:?}",
-                        one == bar
-                    );
+                    if !matches!(refused, Err(Error::ACrossingThisCannotBeOrderedAlong)) {
+                        came_back.push(format!(
+                            "{rule:?} of ring {ring}, tube {tube}, {name} (bar first: {}): \
+                             {refused:?}",
+                            one == bar
+                        ));
+                    }
                 }
             }
         }
     }
+    assert!(
+        came_back.is_empty(),
+        "not refused ACrossingThisCannotBeOrderedAlong:\n{}",
+        came_back.join("\n")
+    );
+}
+
+/// The quarter bend of `touching`'s cap-against-a-block control row, with the
+/// block clear of it that nothing here fuses, and the placing that stands a bar
+/// on the middle of the bend's `+x` cap running along `−y`.
+fn a_bend_and_where_its_cap_faces(ring: u32, tube: u32) -> (Model, SolidKey, Isometry) {
+    let built = Drawn {
+        shape: Shape::ABendsCapAgainstABlock { ring, tube },
+        apart: Apart::ClearByOne,
+    }
+    .build();
+    let along_minus_y = Isometry::translation(Vector::new(f64::from(ring), 0.0, 0.0))
+        .expect("a whole-number shift")
+        .compose(&Isometry::quarter_turns(&Axis::x(), 1).expect("x is an axis"));
+    (built.model, built.second, along_minus_y)
 }
 
 #[test]

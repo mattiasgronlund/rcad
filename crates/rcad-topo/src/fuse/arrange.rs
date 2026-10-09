@@ -1577,6 +1577,16 @@ impl<'f> Arrangement<'f> {
     /// ([`side_of_a_plane_where_three_planes_meet`](rcad_predicates::side_of_a_plane_where_three_planes_meet)),
     /// and the box is asked first because it is cheaper and nearly always
     /// enough.
+    ///
+    /// **The pickers are asked before the side.** A corner they rule out is off
+    /// the crossing whatever side of the partner it is on, so the answer is the
+    /// same wherever the side can be told. Where it cannot, asking the side
+    /// first refused a corner the pickers had already settled: a bar of a
+    /// bend's tube radius on the bend's cap has a corner on the cap's rim at
+    /// `(R + r, 0, 0)`, on the ring to within a rounding, and every fuse with
+    /// the bar first was refused `Undecidable` for the side of the ring there,
+    /// although the half of the loop the pipe and the ring cross in that the
+    /// corner was asked about is picked by `x ≤ R` (Q1453).
     fn passes_through(
         &self,
         crossing: usize,
@@ -1585,7 +1595,13 @@ impl<'f> Arrangement<'f> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
-        let partner = self.crossings[crossing].partner;
+        let (partner, picked_by) = (
+            self.crossings[crossing].partner,
+            self.crossings[crossing].picked_by(),
+        );
+        if !nothing_rules_the_point_out(picked_by, point) {
+            return Ok(false);
+        }
         let side = match (side_of_surface(&partner, point), partner.as_plane()) {
             (undecided @ Decision::Undecidable { .. }, Some(plane)) => {
                 Self::the_three_planes_a_point_is_the_meet_of(around).map_or(undecided, |three| {
@@ -1606,8 +1622,7 @@ impl<'f> Arrangement<'f> {
             policy,
             log,
         )?;
-        Ok(settled == Decision::Zero
-            && nothing_rules_the_point_out(self.crossings[crossing].picked_by(), point))
+        Ok(settled == Decision::Zero)
     }
 
     /// The three planes a point of the arrangement is the one meeting point of,

@@ -135,9 +135,13 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// shapes** — see [`where_a_plane_and_a_torus_cross`] for the table. A torus
 /// against a ball, a pipe or a cone **on its axis** is circles square to that
 /// axis, each named by the plane it lies in — up to two for a pipe or a ball and
-/// up to four for a cone, see [`where_a_ring_and_a_round_surface_cross`]. Off
-/// the axis, and against another torus, it is not named at all: the crossing
-/// runs to degree eight and none of the machinery for that exists. Two
+/// up to four for a cone, see [`where_a_ring_and_a_round_surface_cross`]. A
+/// pipe of the tube's radius lying along the ring's core circle, the pipe of a
+/// bar butted onto a bend's cap, is the circle the two touch in and the two
+/// halves of a loop, see [`where_a_ring_and_a_pipe_along_its_core_cross`]. Any
+/// other pipe off the axis, and anything else off it or another torus, is not
+/// named at all: the crossing runs to degree eight and none of the machinery
+/// for that exists. Two
 /// tori with one centre, one pair of radii and their axes along one line are the
 /// same surface and come back as one, **whichever way each axis points** — see
 /// [`one_ring_either_way_round`].
@@ -180,7 +184,8 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// [`Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic`] for every plane
 /// against a torus but the two families that cut circles, and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a torus against
-/// anything curved but a ball, a pipe or a cone on its axis.
+/// anything curved but a ball, a pipe or a cone on its axis and a pipe of its
+/// tube's radius along its core circle.
 ///
 /// **A partly undecidable answer refuses whole.** A caller handed one of two
 /// curves has no way to know a second existed, and a fuse classifying against
@@ -4157,11 +4162,15 @@ fn two_circles_round_the_axis(ring: &Torus) -> Result<SurfaceMeet> {
 
 /// A ring and a ball, a pipe or a cone: circles square to the ring's axis
 /// where the two share it, each named by the plane it lies in
-/// ([`circles_round_a_rings_axis`]), and refused where they do not.
+/// ([`circles_round_a_rings_axis`]), a circle and a loop for a pipe of the
+/// tube's radius along the ring's core circle
+/// ([`where_a_ring_and_a_pipe_along_its_core_cross`]), and refused otherwise.
 ///
 /// # Errors
 ///
-/// Those of [`the_heights_a_ring_crosses_a_round_surface_at`], and
+/// Those of [`a_pipe_lies_along_a_rings_core`],
+/// [`where_a_ring_and_a_pipe_along_its_core_cross`] and
+/// [`the_heights_a_ring_crosses_a_round_surface_at`], and
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where
 /// [`circles_round_a_rings_axis`] cannot write a plane down for each circle.
 fn where_a_ring_and_a_round_surface_cross(
@@ -4170,11 +4179,154 @@ fn where_a_ring_and_a_round_surface_cross(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<SurfaceMeet> {
+    if let Surface::Cylinder(pipe) = partner
+        && a_pipe_lies_along_a_rings_core(ring, pipe, policy, log)?
+    {
+        return where_a_ring_and_a_pipe_along_its_core_cross(ring, pipe);
+    }
     let heights = the_heights_a_ring_crosses_a_round_surface_at(ring, partner, policy, log)?;
     if heights.is_empty() {
         return Ok(SurfaceMeet::Nothing);
     }
     circles_round_a_rings_axis(ring, &heights)
+}
+
+/// Whether a pipe has the tube's radius and its axis lies along the ring's
+/// core circle, touching it at one point: the pipe a bar butted square onto a
+/// bend's cap is cut on.
+///
+/// Four questions, each zero exactly when it holds: the two radii are the same
+/// number; the pipe's direction `d` is square to the ring's axis direction `w`,
+/// `d·w`; the pipe's origin `o` is level with the ring's centre `c`, `(o − c)·w`;
+/// and the pipe's axis is the ring radius `R` from the centre,
+/// `‖(o − c) × d‖² − R²(d·d)`, degree two in `d` on both terms for the reason
+/// the module doc gives.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] where a sign could not be settled, which takes a
+/// product leaving `f64`'s range.
+pub(crate) fn a_pipe_lies_along_a_rings_core(
+    ring: &Torus,
+    pipe: &Cylinder,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    if pipe.radius() != ring.tube_radius() {
+        return Ok(false);
+    }
+    let centre = ring.centre().coordinates();
+    let up = ring.axis().direction().components();
+    let origin = pipe.axis().origin().coordinates();
+    let along = pipe.axis().direction().components();
+    let core = ring.ring_radius();
+    let at = [centre, origin].map(PredicatePoint::from);
+
+    let square = Question {
+        named: WHERE_A_TORUS_AND_A_PIPE_CROSS,
+        enclosing: || dot_enclosing(exactly(along), exactly(up)),
+        exactly: || Exact::dot_of(along, up),
+    };
+    let level = Question {
+        named: WHERE_A_TORUS_AND_A_PIPE_CROSS,
+        enclosing: || dot_enclosing(gap_enclosing(centre, origin), exactly(up)),
+        exactly: || {
+            Exact::dot_of_two_exact(&Exact::gap_between(centre, origin), &Exact::of_each(up))
+        },
+    };
+    let on_the_core = Question {
+        named: WHERE_A_TORUS_AND_A_PIPE_CROSS,
+        enclosing: || {
+            how_far_off_an_axis_enclosing(centre, origin, along)
+                - squared_enclosing(core) * squared_length_enclosing(exactly(along))
+        },
+        exactly: || {
+            Some(
+                how_far_off_an_axis_exactly(centre, origin, along)?
+                    .minus(&Exact::product_of(core, core)?.times(&Exact::dot_of(along, along)?)?),
+            )
+        },
+    };
+    // Two directions dotted is dimensionless, and filed as a length for the
+    // reason `where_a_plane_and_a_pipe_cross` gives.
+    Ok(
+        ask(&square, Measures::Length, &at, policy, log)? == Decision::Zero
+            && ask(&level, Measures::Length, &at, policy, log)? == Decision::Zero
+            && ask(&on_the_core, Measures::Area, &at, policy, log)? == Decision::Zero,
+    )
+}
+
+/// A ring and a pipe of its tube's radius lying along its core circle: **the
+/// circle where the two touch, and a loop where they cross**, the loop named in
+/// two halves.
+///
+/// Put the ring's centre at the origin, its axis along `z`, and the pipe's axis
+/// along `y` through `(R, 0, 0)`. On the pipe `(x − R)² + z² = r²`, and on the
+/// ring `(√(x² + y²) − R)² + z² = r²`, so `√(x² + y²) − R = ±(x − R)`:
+///
+/// - the `+` sign is the plane `y = 0`, square to the pipe through the ring's
+///   centre, and the pipe and the ring are tangent along the circle it cuts the
+///   pipe in. That circle is a meridian of the ring and the rim of a bend's cap
+///   a bar is butted onto, named here by the plane, which crosses the pipe in it
+///   alone: [`EdgeRun::RightRoundWhereItCrosses`].
+/// - the `−` sign is the loop `x = R − y²/4R`, `z² = r² − y⁴/16R²`, which
+///   crosses the circle at `(R, 0, ±r)` and reaches `y = ±2√(Rr)` on the ring's
+///   outer equator. `(9, 12, 4)` is on ring 12/5 and on the radius-5 pipe
+///   through `(12, 0, 0)` along `y`.
+///
+/// Every picker is closed, so no set of them parts two curves that cross, and
+/// the loop is named as **the half on each side of the circle's plane**: each
+/// half lies on or in front of that plane, on or outside the pipe of the ring
+/// radius round the ring's axis, where the loop is, since `x² + y² = R² + y²/2 +
+/// y⁴/16R²`, and on or behind the plane square to the line from the centre to
+/// the touching point at the touching point, where `x = R − y²/4R ≤ R`. The
+/// circle meets all three only at the loop's two ends, the half the circle's
+/// outer arc lying past the third and its inner arc inside the second. A bar on
+/// a bend's cap has one half on each solid's curved face, where the other
+/// solid's face does not reach it, so no edge of a fuse's answer runs along
+/// either. The fuse does not leave them off yet: it draws the half on the bar's
+/// pipe face and is refused putting points in order along it.
+///
+/// **Nothing draws the loop**: it is a quartic, and the walk refuses it by name.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where the pipe's direction
+/// would not be kept as written as the circle plane's normal. Those of
+/// [`HalfSpace::new`] where a picker's numbers are not finite.
+fn where_a_ring_and_a_pipe_along_its_core_cross(
+    ring: &Torus,
+    pipe: &Cylinder,
+) -> Result<SurfaceMeet> {
+    let along = pipe.axis().direction();
+    let across = Plane::from_point_and_normal_as_written(ring.centre(), along)?;
+    if across.normal() != along {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    }
+    let centre = ring.centre();
+    let off_the_centre = pipe.axis().origin() - centre;
+    let squared = along.dot(along);
+    let out_to_the_touch = off_the_centre * squared - along * off_the_centre.dot(along);
+    let towards_the_axis = HalfSpace::new(
+        -out_to_the_touch,
+        -out_to_the_touch.dot(centre - Point::origin())
+            - ring.ring_radius() * ring.ring_radius() * squared,
+    )?;
+    let outside_the_core = Cylinder::new(ring.axis(), ring.ring_radius())?;
+    let mut runs = vec![NamedRun::the_whole_of(EdgeRun::RightRoundWhereItCrosses {
+        and: Surface::Plane(across),
+    })?];
+    for facing in [along, -along] {
+        runs.push(NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Torus(*ring),
+            picked_by: smallvec![
+                Picker::InFrontOf(HalfSpace::through_a_point_facing(centre, facing)?),
+                Picker::OutsideAPipe(outside_the_core),
+                Picker::InFrontOf(towards_the_axis),
+            ],
+        })?);
+    }
+    Ok(SurfaceMeet::Curves(runs))
 }
 
 /// Where a ring and a ball, a pipe or a cone on its axis share circles: how
@@ -5061,6 +5213,66 @@ mod tests {
             )
             .expect("a radius"),
         )
+    }
+
+    /// Ring 12/5 about `z` and the radius-5 pipe along `y` through `(12, 0, 0)`:
+    /// the circle on `y = 0` they touch in, and a loop through `(9, ±12, ±4)`,
+    /// which is on both, crossing it at `(12, 0, ±5)`. Each half of the loop is
+    /// picked out of the crossing by its pickers, and the circle's other points
+    /// by none. A pipe a unit narrower, or a unit further out, is still refused.
+    #[test]
+    fn a_pipe_of_the_tube_radius_along_a_rings_core_is_a_circle_and_a_loop_in_two_halves() {
+        let ring =
+            Surface::Torus(Torus::new(Axis::z(), 12.0, 5.0).expect("a ring wider than its tube"));
+        let pipe = a_pipe([0.0, 1.0, 0.0], [12.0, 0.0, 0.0], 5.0);
+        let policy = Policy::certified();
+        for (one, other) in [(&ring, &pipe), (&pipe, &ring)] {
+            let SurfaceMeet::Curves(runs) =
+                intersect(one, other, &policy, &mut ProvenanceLog::new()).expect("named")
+            else {
+                panic!("a ring and a pipe along its core cross in curves");
+            };
+            assert_eq!(runs.len(), 3, "{runs:?}");
+            assert_eq!(
+                runs[0].run(),
+                &EdgeRun::RightRoundWhereItCrosses {
+                    and: a_plane([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]),
+                },
+            );
+            let picks = |run: &NamedRun, point: [f64; 3]| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                    panic!("a half of the loop is part of where the two cross: {run:?}");
+                };
+                picked_by.iter().all(|picker| {
+                    matches!(
+                        picker.side_of_point(PredicatePoint::from(point)),
+                        Decision::Pos | Decision::Zero
+                    )
+                })
+            };
+            let (ahead, behind) = (&runs[1], &runs[2]);
+            for point in [[9.0, 12.0, 4.0], [9.0, 12.0, -4.0]] {
+                assert!(picks(ahead, point) && !picks(behind, point), "{point:?}");
+            }
+            for point in [[9.0, -12.0, 4.0], [9.0, -12.0, -4.0]] {
+                assert!(!picks(ahead, point) && picks(behind, point), "{point:?}");
+            }
+            for point in [[17.0, 0.0, 0.0], [7.0, 0.0, 0.0], [15.0, 0.0, 4.0]] {
+                assert!(!picks(ahead, point) && !picks(behind, point), "{point:?}");
+            }
+            for point in [[12.0, 0.0, 5.0], [12.0, 0.0, -5.0]] {
+                assert!(picks(ahead, point) && picks(behind, point), "{point:?}");
+            }
+        }
+        for pipe in [
+            a_pipe([0.0, 1.0, 0.0], [12.0, 0.0, 0.0], 4.0),
+            a_pipe([0.0, 1.0, 0.0], [13.0, 0.0, 0.0], 5.0),
+        ] {
+            assert_eq!(
+                intersect(&ring, &pipe, &policy, &mut ProvenanceLog::new()),
+                Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface)
+            );
+        }
     }
 
     /// Both ways round, because a caller has no reason to put them in one
