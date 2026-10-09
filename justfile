@@ -12630,6 +12630,89 @@ check-queue-selftest:
         "skip Q2 (tier 2): its docs/a.md meets Q1's docs/a.md, held by lane:lane-q1")" ] \
         || fail "blocked is not exactly the skip line of each ready row the running lane holds back, in the fill's order"
 
+    # `take` and `add` run `queue-page` afterward (§397.8); point it and the
+    # fuzz-log count it reads at scratch directories, never at a real clone's.
+    export RCAD_QUEUE_PAGE_DIR="$dir/queue-page"
+    export RCAD_FUZZ_LOGS="$dir/no-fuzz-logs"
+
+    # Q1505: `add` refuses a description whose first word is a class (§352)
+    # with punctuation stuck on after it, and still tags a row whose first
+    # word is exactly a class, with nothing after it, as today.
+    cp "$dir/good.md" "$dir/addfix.md"
+    qf() { "$j" --justfile '{{ justfile() }}' --working-directory "$repo" --set queue_file "$dir/addfix.md" queue "$@"; }
+
+    got=$(qf add 1 opus - 'wrong/B: a wrong answer with a colon stuck on §230' 2>&1) \
+        && fail "add accepted 'wrong/B:' as a class with punctuation after it"
+    grep -qF "'wrong/B:' is a class with punctuation after it; write exactly 'wrong/B', with nothing after it" <<<"$got" \
+        || fail "add did not explain the colon refusal"
+
+    got=$(qf add 5 opus - 'refuses/C, a refusal with a comma stuck on §230' 2>&1) \
+        && fail "add accepted 'refuses/C,' as a class with punctuation after it"
+    grep -qF "'refuses/C,' is a class with punctuation after it; write exactly 'refuses/C', with nothing after it" <<<"$got" \
+        || fail "add did not explain the comma refusal"
+
+    got=$(qf add 1 opus - 'wrong/B a tier one row with its class exactly §230' 2>&1) \
+        || fail "add refused a class with nothing stuck after it"
+    grep -q "^$got .*wrong/B a tier one row with its class exactly §230\$" "$dir/addfix.md" \
+        || fail "add did not write the row with its class still tagging it"
+
+    # Q1436: `take` lets a stale `lane:` state in another worktree's copy
+    # through when main's own history of the queue file already held that
+    # exact state for the row, and refuses one main's history never showed
+    # for it, which looks like a take racing this one.
+    hub="$dir/q1436-hub"
+    g() { git -C "$1" -c user.name=selftest -c user.email=selftest@invalid "${@:2}"; }
+    mkdir -p "$hub/docs/decisions.d"
+    printf '## 230. One queue\n' > "$hub/docs/decisions.d/sections.md"
+    cat > "$hub/docs/queue.md" <<'MD'
+    # Queue
+
+    ## Tier 1
+
+    ```
+    Q1  1  todo  opus  docs/a.md  a row to take §230
+    ```
+
+    ## Closed
+
+    ```
+    ```
+    MD
+    touch "$hub/docs/a.md"
+    g "$hub" init -q -b main
+    g "$hub" add -A
+    g "$hub" commit -q -m root
+    sed -i 's/^Q1  1  todo /Q1  1  lane:lane-old /' "$hub/docs/queue.md"
+    g "$hub" add -A
+    g "$hub" commit -q -m take
+    sed -i 's/^Q1  1  lane:lane-old /Q1  1  todo /' "$hub/docs/queue.md"
+    g "$hub" add -A
+    g "$hub" commit -q -m release
+
+    a="$dir/q1436-a"
+    b="$dir/q1436-b"
+    stale="$dir/q1436-stale"
+    racer="$dir/q1436-racer"
+    g "$hub" worktree add -q -b q1436-a "$a" main
+    g "$hub" worktree add -q -b q1436-b "$b" main
+    g "$hub" worktree add -q -b q1436-stale "$stale" main
+    g "$hub" worktree add -q -b q1436-racer "$racer" main
+    sed -i 's/^Q1  1  todo /Q1  1  lane:lane-old /' "$stale/docs/queue.md"
+    sed -i 's/^Q1  1  todo /Q1  1  lane:lane-racer /' "$racer/docs/queue.md"
+
+    got=$("$j" --justfile '{{ justfile() }}' --working-directory "$b" queue take Q1 lane-new-b 2>&1) \
+        && fail "take let through lane:lane-racer, a state main's history never held for Q1"
+    grep -qF "Q1 is lane:lane-racer in $racer's copy, a branch main has never shown for it, so this looks like a take racing this one" <<<"$got" \
+        || fail "take did not name the racing copy and the state main never showed"
+    grep -q '^Q1  1  todo ' "$b/docs/queue.md" || fail "a refused take wrote Q1's file anyway"
+
+    g "$hub" worktree remove --force "$racer"
+
+    got=$("$j" --justfile '{{ justfile() }}' --working-directory "$a" queue take Q1 lane-new-a 2>&1) \
+        || fail "take refused a stale copy showing lane:lane-old, a state main's history already held for Q1"
+    grep -q '^Q1  1  lane:lane-new-a ' "$a/docs/queue.md" \
+        || fail "take did not write lane:lane-new-a once the only other lane: state left was one main's history held"
+
     exit 0
 
 # The merge driver `.gitattributes` names for `docs/queue.md`, spelt as this
