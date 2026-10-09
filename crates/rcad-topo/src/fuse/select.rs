@@ -1541,6 +1541,13 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 /// whose material is outside its ball bites into the piece instead, and that
 /// bite is what the ball's own sign already took out.
 ///
+/// **The chord's two ends are stretched to the plane first**, as
+/// [`the_piece_holds`] stretches the corners it winds round, and for its
+/// reason: a corner whose box lies off the plane is read far along it. A half
+/// disk's two corners wind round nothing, so its chord decides alone, and `2²⁰`
+/// out with both corners `1e-8` off the plane it missed points `1e-3` inside it
+/// (`a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord`).
+///
 /// **A pipe is counted the same way, where the plane crosses it**, which is
 /// [`Cylinder::is_cut_in_a_closed_curve_by`](rcad_geom::Cylinder::is_cut_in_a_closed_curve_by)
 /// — the sign of `n·a`, and the only thing a pipe can leave on a plane that is
@@ -1659,7 +1666,11 @@ fn in_the_bulge_of(
     }
     // Compared rather than matched, so that `Decision`'s wildcard arm is not
     // written once more (§40): a zero or an undecided turn is `None` either way.
-    let turn = in_plane.turn(side.ends[0].point(), side.ends[1].point(), point);
+    let [from, to] = side
+        .ends
+        .each_ref()
+        .map(|end| stretched_to_the_plane(flat, end.point()));
+    let turn = in_plane.turn(from?, to?, point);
     if turn == Decision::Neg {
         Some(1)
     } else if turn == Decision::Pos {
