@@ -117,6 +117,23 @@ caching mechanism does not exist yet; building it is real, separate work,
 not a one-line fix, and is left to a follow-up row rather than built here
 on the strength of one lead.
 
+**2026-10-09 note (the dispatcher, on reading this back): the check above
+cannot show what it is cited for.** An unused `pub fn` changes no code that
+anything reaches, so the scan's answer could not have moved for it, whatever
+the answer depends on. Two things point the other way:
+- `rcad_fuzz_timing::timed<T>` takes `run: impl FnOnce() -> T`, and all five
+  fuzz targets call it with a closure into the kernel (read from
+  `crates/rcad-fuzz-timing/src/lib.rs` and the targets' `use` lines). So each
+  target's instantiation of `timed` is a function whose symbol names
+  `rcad_fuzz_timing`, and the closure can be inlined into it.
+- The scan counts every hooked call inside a function whose symbol names
+  `rcad_fuzz_timing`. It also follows direct calls out of the crate into
+  other crates' code, however many hops (read from
+  `fuzz/timing-hooked-calls.py`'s doc comment, not run).
+
+Whether a kernel change can in fact move the answer was not run either way.
+The row that builds the narrow cache shows it before keying on it.
+
 ### 425.6 What was reverted
 
 `b698c062`'s wiring, reverted in `bb366863`: the recipe body in `justfile`
