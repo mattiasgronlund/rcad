@@ -443,57 +443,76 @@ impl Tally {
 
 /// What each arm was measured at, and the floor under it.
 ///
-/// Measured on this tree, on 2026-09-28, by
+/// Measured on this tree, on 2026-10-09, at the fixed seed and at
+/// `RCAD_SOAK_SEED` 1 through 12 — thirteen runs in all — by
 ///
 /// ```text
 /// mise exec -- just t a_surface_written_twice_a_few_ulps_apart --no-capture
+/// RCAD_SOAK_SEED=<n> mise exec -- just t a_surface_written_twice_a_few_ulps_apart --no-capture
 /// ```
 ///
-/// | arm | reached | the control named a start |
-/// |---|---|---|
-/// | a closed run carries its second surface | 4048 | 915 |
-/// | two flat faces and a curved second | 606 | 293 |
-/// | a curved face and a plane | 591 | 256 |
-/// | two curved faces and a third curved one | 2706 | 125 |
-/// | no arm catches it | 132 | 0 |
+/// | arm | the control named a start, min .. max over the 13 runs |
+/// |---|---|
+/// | a closed run carries its second surface | 838 .. 964 |
+/// | two flat faces and a curved second | 274 .. 327 |
+/// | a curved face and a plane | 252 .. 330 |
+/// | two curved faces and a third curved one | 123 .. 149 |
 ///
-/// The third row was a ball and a plane, at 131 and 41, until §220.4 widened
-/// the arm to every curved face; the 460 draws it gained are the ones the last
-/// row lost, which fell through before.
+/// The fixed seed's own run sits inside each range (915, 293, 256, 125) and
+/// reached each arm 4048, 606, 591 and 2706 times, with 132 draws falling
+/// through every arm; those are the single-run figures the floors used to be
+/// pinned to.
 ///
-/// The second column moved from 899, 250 and 128 on 2026-09-24 when §336 made
-/// the control the spelling the answer is read with: for curved faces that is
-/// sometimes the second spelling, a few ulps from the first, and whether a
-/// crossing has a start to name can turn on those ulps. The draws did not move.
+/// The third row was a ball and a plane, at 131 and 41 on the fixed seed, until
+/// §220.4 widened the arm to every curved face; the draws it gained there are
+/// the ones the fourth row lost, which fell through before.
 ///
-/// Each floor is roughly three quarters of the second column, so it catches a
-/// family that stopped drawing an arm without failing on ordinary drift — the
-/// same rule `every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs`
-/// sets its three floors by.
+/// §336 restated the control for curved arms — for a curved face the spelling
+/// read is sometimes the second, a few ulps from the first, and whether a
+/// crossing has a start to name can turn on those ulps — which moved the fixed
+/// seed's own counts for the first, third and fourth arms from 899, 250, 128 to
+/// 915, 256, 125 on 2026-09-24. The draws did not move.
 ///
-/// **The gap between the two columns is mostly a refusal by name**, and that is
-/// why the floor is on the second. A cone or a torus against another curved
-/// surface is [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] or
+/// Each floor here is roughly three quarters of the **lowest** of the 13
+/// counts, not of the fixed seed's own count: a family that stopped reaching an
+/// arm has to fail on an ordinary soak seed, not only on the one the shipped
+/// corpus pins — the same rule
+/// `every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly.rs` sets its three
+/// floors by. The four floors below replace ones that were still three quarters
+/// of the pre-§336 fixed-seed counts, 899, 293, 250 and 128.
+///
+/// **The gap between a reached count and a start count is mostly a refusal by
+/// name**, and that is why the floor is on the second. A cone or a torus
+/// against another curved surface is
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] or
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] before any
 /// arithmetic happens, so a draw that answers in the third-surface arm has a
 /// ball or a pipe on both sides — which is §219.1's own case and the family it
 /// asked for.
 const EVERY_ARM_AND_ITS_FLOOR: [(Arm, usize); 4] = [
-    (Arm::AClosedRunCarriesItsSecondSurface, 675),
-    (Arm::TwoFlatFacesAndACurvedSecond, 220),
-    (Arm::ACurvedFaceAndAPlane, 187),
-    (Arm::TwoCurvedFacesAndAThirdCurvedOne, 96),
+    (Arm::AClosedRunCarriesItsSecondSurface, 628),
+    (Arm::TwoFlatFacesAndACurvedSecond, 205),
+    (Arm::ACurvedFaceAndAPlane, 189),
+    (Arm::TwoCurvedFacesAndAThirdCurvedOne, 92),
 ];
 
 /// How many draws have to walk a crossing that has points on it, across the four
 /// arms that are closed.
 ///
-/// Measured at 789 + 323 + 280 + 125 = 1517, floored at three quarters. Without
-/// it the walking half of every comparison could fall to nothing behind the
-/// naming half, which answers for a conic the walk then refuses to step along.
-const A_WALK_WITH_POINTS_IN_IT: usize = 1136;
+/// The sum was 789 + 323 + 280 + 125 = 1517 at the fixed seed, and ranged
+/// 1492 .. 1637 over the fixed seed and `RCAD_SOAK_SEED` 1 through 12 (measured
+/// 2026-10-09, same command as `EVERY_ARM_AND_ITS_FLOOR`); floored at three
+/// quarters of the lowest, 1492. Without it the walking half of every
+/// comparison could fall to nothing behind the naming half, which answers for a
+/// conic the walk then refuses to step along.
+const A_WALK_WITH_POINTS_IN_IT: usize = 1119;
 
-/// How many draws have to fall through every arm. Measured at 132.
+/// How many draws have to fall through every arm.
+///
+/// Measured at 132 at the fixed seed, which over the same 13 runs
+/// `EVERY_ARM_AND_ITS_FLOOR` measured was also the lowest (range 132 .. 174);
+/// the floor stays at three quarters of that, 99, because the fixed seed was
+/// already the worst case rather than the easiest.
 const A_DRAW_NO_ARM_CATCHES: usize = 99;
 
 /// What both public doors say about a run between these two surfaces.
