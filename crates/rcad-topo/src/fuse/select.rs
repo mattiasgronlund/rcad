@@ -1213,12 +1213,22 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// is `holds.rs`'s rule read the same way round.
 ///
 /// A round wire's partner's inside is the region it bounds only where the
-/// partner leaves one region on the plane. A torus leaves two, so
-/// `also_picked_by` — one entry per wire, from [`what_else_each_round_wire_asks`]
-/// — says what else must hold the point, or `None` where nothing can say. An
-/// arc of one of those two circles is read the same way: `meridians`, one
-/// entry per side of every wire, from [`the_meridian_circle_each_side_runs_round`],
-/// says which disk its bulge is in ([`in_the_bulge_of`]).
+/// partner leaves one region on the plane. A torus leaves two. On a plane
+/// through its axis they are the two meridian disks, and `also_picked_by` — one
+/// entry per wire, from [`what_else_each_round_wire_asks`] — says what else
+/// must hold the point, or `None` where nothing can say. An arc of one of
+/// those two circles is read the same way: `meridians`, one entry per side of
+/// every wire, from [`the_meridian_circle_each_side_runs_round`], says which
+/// disk its bulge is in ([`in_the_bulge_of`]).
+///
+/// **On a plane square to a ring's axis what a whole circle bounds is read
+/// from which of the two circles it is.** A point inside the ring is in the
+/// band between them, so inside what the outer circle bounds and outside what
+/// the inner one does ([`runs_round_the_outer_circle`]); no picker says that,
+/// and asked for one the band could not say what it held
+/// (`a_band_on_a_plane_square_to_a_bends_axis_holds_its_own_points`). A point
+/// outside the ring can still be inside what either bounds, since both go
+/// round the inner disk, which is outside the ring ([`in_the_inner_disk_of`]).
 ///
 /// **A flat piece's curved partners are asked about the point and a point of
 /// the plane beside it at once**, through [`side_of_a_partner_by_its_plane`]. A
@@ -1319,12 +1329,23 @@ fn the_piece_holds(
             Some(partner) => {
                 match side_of_a_partner_by_its_plane(flat, &partner, point, reaching_the_plane) {
                     Decision::Neg => {
-                        let pickers = also_picked_by[position].as_deref()?;
-                        if every_picker_keeps(pickers, reaching_the_plane)? {
+                        let in_its_disk = if let Surface::Torus(ring) = partner
+                            && is_square_to_the_axis(flat, &ring)
+                        {
+                            runs_round_the_outer_circle(flat, &ring, &wire[0])?
+                        } else {
+                            let pickers = also_picked_by[position].as_deref()?;
+                            every_picker_keeps(pickers, reaching_the_plane)?
+                        };
+                        if in_its_disk {
                             winding += inwards;
                         }
                     }
-                    Decision::Pos => (),
+                    Decision::Pos => {
+                        if in_the_inner_disk_of(flat, &partner, reaching_the_plane)? {
+                            winding += inwards;
+                        }
+                    }
                     Decision::Zero | Decision::Undecidable { .. } | _ => return None,
                 }
             }
@@ -1721,6 +1742,40 @@ fn across_the_inner_disk(
     Some(if turn == where_the_arc_is { counts } else { 0 })
 }
 
+/// Whether `point`, which [`the_piece_holds`] has already found outside the
+/// partner of a whole round wire, is inside what the wire bounds all the same:
+/// where the partner is a ring, `flat` is square to its axis, and `point` is in
+/// the inner disk. `None` where the pipe of the ring's own radius cannot say.
+///
+/// **Both circles such a plane cuts a ring in go round the inner disk**, and
+/// the inner disk is all outside the ring, so the ring's sign alone says
+/// nothing about which side of either circle a point outside it is on. A point
+/// outside the ring is in the inner disk exactly when it is inside the pipe of
+/// the ring's own radius, which runs between the two circles
+/// ([`across_the_inner_disk`] asks the same of an arc). Asked of the ring's
+/// sign alone, a square less the disk inside a ring's whole outer circle held
+/// a point of the inner disk
+/// (`a_square_less_a_rings_whole_outer_circle_holds_no_point_of_the_inner_disk`),
+/// and the disk inside its whole inner circle none of its own
+/// (`a_disk_inside_a_rings_whole_inner_circle_holds_its_own_points`, row Q1501).
+///
+/// Every other partner leaves nothing outside it inside what it bounds: a ball,
+/// a pipe or a cone leaves one region on a plane, and so does each meridian
+/// circle of a ring on a plane through its axis.
+fn in_the_inner_disk_of(flat: &Plane, partner: &Surface, point: PredicatePoint) -> Option<bool> {
+    let Surface::Torus(ring) = partner else {
+        return Some(false);
+    };
+    if !is_square_to_the_axis(flat, ring) {
+        return Some(false);
+    }
+    match the_pipe_of_the_rings_own_radius(ring).side_of(point) {
+        Decision::Neg => Some(true),
+        Decision::Pos => Some(false),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
+    }
+}
+
 /// Which side of the chord between `side`'s two ends, stretched to the plane,
 /// `point` is on: `Neg` on the right, `Pos` on the left, and `None` on the
 /// chord's line or where that could not be shown.
@@ -1838,7 +1893,9 @@ fn round_wire_of(wire: &[FaceMeet]) -> Option<Surface> {
 /// says which side is this wire's. A plane square to the axis cuts two
 /// concentric circles, named by pipes, and neither circle's disk is the tube's
 /// inside on one side of a pipe — so that family, and any wire whose corner no
-/// picker certainly keeps, is `None`.
+/// picker certainly keeps, is `None`. [`the_piece_holds`] does not ask this
+/// for that family: which circle the wire is says it all
+/// ([`runs_round_the_outer_circle`]).
 ///
 /// Asked once per piece rather than once per candidate, because the answer is
 /// about the wire and not about the point.
@@ -3814,23 +3871,31 @@ mod tests {
         assert_eq!(first_held, PredicatePoint::from([4.0, 0.0, 0.0]));
     }
 
-    /// A plane square to the axis cuts the tube in a ring-shaped piece, and
-    /// what the torus's sign holds on it is not the piece on either side of a
-    /// pipe, so nothing here can say.
+    /// `z = 0.5` cuts the tube in a band between two whole circles round the
+    /// axis. A point the torus's sign holds there is inside the outer circle
+    /// and outside the inner one, whichever it is, so the band holds it. No
+    /// picker says that, and until the wire's own circle was asked the band
+    /// could not say what it held (Q1501).
     #[test]
-    fn a_piece_on_a_plane_square_to_a_bends_axis_cannot_say_what_it_holds() {
+    fn a_band_on_a_plane_square_to_a_bends_axis_holds_its_own_points() {
         let (ring, _) = a_bend_and_its_end_cap_plane();
-        let across = Plane::from_coefficients([0.0, 0.0, 1.0, 0.5]).expect("a normal");
+        let across = Plane::from_coefficients([0.0, 0.0, 1.0, -0.5]).expect("a normal");
         let reach = 0.75_f64.sqrt();
-        let piece = a_flat_piece_inside_the_ring(
+        let band = a_flat_piece_inside_the_ring(
             ring,
             across,
             &[[4.0 + reach, 0.0, 0.5], [4.0 - reach, 0.0, 0.5]],
         );
+        let holds =
+            |at: [f64; 3]| the_piece_holds_asked_as_selection_asks(&band, PredicatePoint::from(at));
+        assert_eq!(holds([4.0, 0.0, 0.5]), Some(true), "in the band");
         assert_eq!(
-            the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from([4.0, 0.0, 0.5])),
-            None
+            holds([0.0, -4.0, 0.5]),
+            Some(true),
+            "in the band, a quarter turn on"
         );
+        assert_eq!(holds([2.0, 0.0, 0.5]), Some(false), "in the inner disk");
+        assert_eq!(holds([6.0, 0.0, 0.5]), Some(false), "beyond the band");
     }
 
     /// A bend's start cap on `y = 0`: its chord along the floor `z = 0` from
@@ -3893,7 +3958,7 @@ mod tests {
     /// held (Q1305).
     #[test]
     fn a_plate_beyond_a_rings_outer_circle_holds_no_point_of_the_inner_disk() {
-        let plate = a_flat_piece_on_z_0(&[
+        let plate = a_flat_piece_on_z_0(&[&[
             (
                 a_pipe_about_z(10.0),
                 [0.0, -10.0],
@@ -3903,7 +3968,7 @@ mod tests {
             (the_plane_x_0(), [0.0, 10.0], [0.0, 5.0], Decision::Neg),
             (a_ring_of_four(), [0.0, 5.0], [0.0, -5.0], Decision::Pos),
             (the_plane_x_0(), [0.0, -5.0], [0.0, -10.0], Decision::Neg),
-        ]);
+        ]]);
         let holds = |at: [f64; 3]| {
             the_piece_holds_asked_as_selection_asks(&plate, PredicatePoint::from(at))
         };
@@ -3919,10 +3984,10 @@ mod tests {
     /// until that was counted it held none (Q1305).
     #[test]
     fn a_half_disk_inside_a_rings_inner_circle_holds_its_own_points() {
-        let half_disk = a_flat_piece_on_z_0(&[
+        let half_disk = a_flat_piece_on_z_0(&[&[
             (a_ring_of_four(), [0.0, -3.0], [0.0, 3.0], Decision::Pos),
             (the_plane_x_0(), [0.0, 3.0], [0.0, -3.0], Decision::Neg),
-        ]);
+        ]]);
         let holds = |at: [f64; 3]| {
             the_piece_holds_asked_as_selection_asks(&half_disk, PredicatePoint::from(at))
         };
@@ -3932,31 +3997,112 @@ mod tests {
         assert_eq!(holds([7.5, 0.0, 0.0]), Some(false), "beyond the tube");
     }
 
-    /// A piece of the plane `z = 0`, facing `+z`, walked side by side: each
-    /// side's partner, its two ends in the plane, and which side of the partner
-    /// the piece's material is on.
-    fn a_flat_piece_on_z_0(sides: &[(Surface, [f64; 2], [f64; 2], Decision)]) -> Piece {
+    /// The square of 20 round the axis on `z = 0`, less the disk inside the
+    /// whole outer circle, of 5, that the ring of four round a tube of one cuts
+    /// it in. The ring's sign takes the tube out of that disk and not the inner
+    /// disk inside it, so read by that sign alone the circle took nothing out
+    /// of the square there, and a point of the inner disk was held (Q1501).
+    #[test]
+    fn a_square_less_a_rings_whole_outer_circle_holds_no_point_of_the_inner_disk() {
+        let side_of_the_square = |normal: [f64; 2]| {
+            Surface::Plane(
+                Plane::from_coefficients([normal[0], normal[1], 0.0, -10.0]).expect("a normal"),
+            )
+        };
+        let plate = a_flat_piece_on_z_0(&[
+            &[
+                (
+                    side_of_the_square([1.0, 0.0]),
+                    [10.0, -10.0],
+                    [10.0, 10.0],
+                    Decision::Neg,
+                ),
+                (
+                    side_of_the_square([0.0, 1.0]),
+                    [10.0, 10.0],
+                    [-10.0, 10.0],
+                    Decision::Neg,
+                ),
+                (
+                    side_of_the_square([-1.0, 0.0]),
+                    [-10.0, 10.0],
+                    [-10.0, -10.0],
+                    Decision::Neg,
+                ),
+                (
+                    side_of_the_square([0.0, -1.0]),
+                    [-10.0, -10.0],
+                    [10.0, -10.0],
+                    Decision::Neg,
+                ),
+            ],
+            &[(a_ring_of_four(), [5.0, 0.0], [5.0, 0.0], Decision::Pos)],
+        ]);
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&plate, PredicatePoint::from(at))
+        };
+        assert_eq!(holds([7.5, 0.0, 0.0]), Some(true), "on the plate");
+        assert_eq!(holds([4.0, 0.0, 0.0]), Some(false), "in the tube");
+        assert_eq!(holds([2.5, 0.0, 0.0]), Some(false), "in the inner disk");
+        assert_eq!(
+            holds([-1.0, 2.0, 0.0]),
+            Some(false),
+            "in the inner disk, across the axis"
+        );
+        assert_eq!(holds([12.5, 0.0, 0.0]), Some(false), "past the square");
+    }
+
+    /// The disk inside the whole inner circle, of 3, that the ring of four
+    /// round a tube of one cuts `z = 0` in. Its material is outside the ring,
+    /// and so is every point of the disk, so read by the ring's sign alone the
+    /// circle bounded nothing and the disk held none of its own points (Q1501).
+    #[test]
+    fn a_disk_inside_a_rings_whole_inner_circle_holds_its_own_points() {
+        let disk =
+            a_flat_piece_on_z_0(&[&[(a_ring_of_four(), [3.0, 0.0], [3.0, 0.0], Decision::Pos)]]);
+        let holds =
+            |at: [f64; 3]| the_piece_holds_asked_as_selection_asks(&disk, PredicatePoint::from(at));
+        assert_eq!(holds([0.0, 0.0, 0.0]), Some(true), "on the axis");
+        assert_eq!(holds([-1.5, 1.5, 0.0]), Some(true), "in the disk");
+        assert_eq!(holds([4.0, 0.0, 0.0]), Some(false), "in the tube");
+        assert_eq!(holds([7.5, 0.0, 0.0]), Some(false), "beyond the tube");
+    }
+
+    /// One side of a piece of `z = 0`: its partner, its two ends in the plane,
+    /// and which side of the partner the piece's material is on.
+    type SideOnZ0 = (Surface, [f64; 2], [f64; 2], Decision);
+
+    /// A piece of the plane `z = 0`, facing `+z`, walked wire by wire and side
+    /// by side: each side's partner, its two ends in the plane, and which side
+    /// of the partner the piece's material is on. A wire of one side whose two
+    /// ends are the same goes right round a closed curve.
+    fn a_flat_piece_on_z_0(wires: &[&[SideOnZ0]]) -> Piece {
         let flat = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
         let corner = |[x, y]: [f64; 2], partner: Surface| MeetPoint::OfThreeSurfaces {
             surfaces: [Surface::Plane(flat), partner, the_plane_x_0()],
             which: 0,
             point: PredicatePoint::from([x, y, 0.0]),
         };
-        let wire = sides
+        let wires = wires
             .iter()
-            .map(|&(partner, from, to, material_side)| FaceMeet {
-                carried_by: [Surface::Plane(flat), partner],
-                ends: [corner(from, partner), corner(to, partner)],
-                material_side,
-                along: SmallVec::new(),
-                approximation: None,
+            .map(|sides| {
+                sides
+                    .iter()
+                    .map(|&(partner, from, to, material_side)| FaceMeet {
+                        carried_by: [Surface::Plane(flat), partner],
+                        ends: [corner(from, partner), corner(to, partner)],
+                        material_side,
+                        along: SmallVec::new(),
+                        approximation: None,
+                    })
+                    .collect()
             })
             .collect();
         Piece {
             ancestors: Vec::new(),
             surface: Surface::Plane(flat),
             orientation: Orientation::Forward,
-            wires: vec![wire],
+            wires,
             is_the_whole_surface: false,
         }
     }
