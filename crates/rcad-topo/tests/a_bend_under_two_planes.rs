@@ -27,6 +27,10 @@
 //! tube into two halves between the same two corners, so the fuse meets both
 //! and has to keep the right one. Until Q1387 it kept the wrong one.
 //!
+//! Both tests here failed on the code before Q1387, each on its first fuse,
+//! and both pass with only Q1387's arm for a plane and a ring in
+//! `which_arc_of_a_circle_this_is` added.
+//!
 //! Every answer is checked against Pappus: a flat piece turned round the
 //! ring's axis holds its area times the length its centroid travels.
 
@@ -48,7 +52,10 @@ mod rings;
 /// at one of those two points or running between them.
 ///
 /// The bar is cut at `x = 0` and not at `y = 0` because a round bar's seam lies
-/// on `y = 0`, and a cut along it is another shape.
+/// on `y = 0`, and a cut along it would test the seam as well.
+///
+/// Until Q1387 the union, bend first, was refused `ResultIsNotManifold {
+/// count: 4 }`, as Q1327 guessed; the other fuses were not run then.
 ///
 /// What they share is the piece of the tube's cross-section over
 /// `z = 0.75`, a segment of a disk of radius 1.25 cut 0.75 from its centre,

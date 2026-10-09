@@ -6679,6 +6679,19 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// refused `ResultIsNotManifold { count: 4 }` (queue row Q1387,
 /// `tests/a_joined_flat_face_whose_rings_enclose_no_area.rs`).
 ///
+/// **And where an answer keeps one half, the fuse still meets both.** A
+/// quarter bend and the round bar of the ring's own radius on its axis: the
+/// bar's wall cuts each cap's circle at the top and the bottom of the tube,
+/// and the two halves between them run along the same plane and ring. With
+/// them named alike, every rule both ways round was refused
+/// `ACurvedFaceGoesRightRoundWithNoSeam`, a piece of the bend's wall built
+/// with one cap's inner half and the other cap's outer half (Q1402). A half
+/// bend under the corner of a half bar, two planes meeting across its tube,
+/// united, bend first, was refused `ResultIsNotManifold { count: 4 }` (Q1327;
+/// the other fuses were not run). This arm alone
+/// answers both, under every rule (`tests/a_bend_under_two_planes.rs`, run
+/// with nothing else of Q1387 added).
+///
 /// **The sign rule holds on every circle named here.** `intersect` cuts a ring
 /// with a plane only where the plane is square to the ring's axis or holds it,
 /// and refuses every other plane as a quartic. At a point of a circle round
