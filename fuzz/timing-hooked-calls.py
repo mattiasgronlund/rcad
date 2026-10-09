@@ -105,6 +105,17 @@ for base in HOOKED_BASE:
         "__interceptor_trampoline_" + base,
     }
 
+# Functions neither walk enters, each with the reason a hooked call made
+# past it cannot steer libFuzzer's mutator. docs/decisions.d/419 §419.7
+# shows each reason in the five fuzz targets' own disassembly.
+NOT_ENTERED = [
+    (
+        re.compile(r"_ZN6__asanL16AsanInitInternalEv"),
+        "ASan's set-up, which .preinit_array runs to the end before main; "
+        "every later call returns at its first branch",
+    ),
+]
+
 CALLER_SAVED = {"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
 
 REG64 = {}
@@ -134,6 +145,17 @@ def main():
             hits, unmatched, computed, table_jumps, calls_out, takes_address,
             all_functions,
         ) = scan(binary)
+        not_entered = {
+            f for f in all_functions
+            if any(pattern.fullmatch(f) for pattern, _ in NOT_ENTERED)
+        }
+        hits = [h for h in hits if h["function"] not in not_entered]
+        calls_out = {
+            f: outs for f, outs in calls_out.items() if f not in not_entered
+        }
+        takes_address = {
+            f: outs for f, outs in takes_address.items() if f not in not_entered
+        }
         timing_functions = {f for f in all_functions if "rcad_fuzz_timing" in f}
         timing_hits = [h for h in hits if "rcad_fuzz_timing" in h["function"]]
         timing_unmatched = [
@@ -145,7 +167,8 @@ def main():
             c for c in table_jumps if "rcad_fuzz_timing" in c[0]
         ]
 
-        offenders = [h for h in timing_hits if not belongs_to_is(binary, h)]
+        chains = inline_chains(binary, [hit["address"] for hit in hits])
+        offenders = [h for h in timing_hits if not belongs_to_is(chains, h)]
 
         hits_by_function = {}
         for hit in hits:
@@ -158,7 +181,7 @@ def main():
                 timing_functions,
                 hits_by_function,
                 calls_out,
-                binary,
+                chains,
                 memo,
                 set(),
             )
@@ -168,7 +191,7 @@ def main():
 
         already_reported = {function for function, _, _ in chain_offenders}
         pointer_offenders, taken_in_reach, hooked_elsewhere = through_pointers(
-            binary,
+            chains,
             timing_functions,
             already_reported,
             hits_by_function,
@@ -217,7 +240,7 @@ def main():
         if offenders or timing_unmatched or chain_offenders or pointer_offenders:
             failed = True
             for hit in offenders:
-                print_hit(binary, hit, "reaches a hook outside SlowRun::is")
+                print_hit(chains, hit, "reaches a hook outside SlowRun::is")
             for function, chain, hit in chain_offenders + pointer_offenders:
                 print_chain_offender(function, chain, hit)
             for fn, load in [
@@ -433,8 +456,16 @@ def functions_whose_address_is_taken(
     symbol, a section's start or end, a relocation's target, or another
     reference. Where that runs past the real object's end, it takes more
     functions than the code can reach, never fewer.
+
+    A GOT entry is the exception: each is one pointer of its own, so a load
+    of one takes the function it names and nothing after it. Running it on
+    to the next reference took every slot the code only ever calls through
+    (a `call *SLOT(%rip)` is not a reference), and that is how
+    `std::sys::io::error::unix::format_error`'s load of one slot came to take
+    `core`'s `StrSearcher::new` eight slots further on (docs/decisions.d/419
+    §419.7).
     """
-    code, boundaries = [], set()
+    code, got, boundaries = [], [], set()
     for line in run(["readelf", "-SW", binary]).splitlines():
         section = re.match(r"^\s*\[\s*\d+\]\s+(.*)$", line)
         if not section:
@@ -448,6 +479,8 @@ def functions_whose_address_is_taken(
         boundaries |= {start, start + size}
         if len(fields) == 10 and "X" in fields[6]:
             code.append((start, start + size))
+        if fields[0] in (".got", ".got.plt"):
+            got.append((start, start + size))
     boundaries |= set(names_at) | set(slot_target.values())
     boundaries |= {referenced for _, _, referenced in references}
     boundaries = sorted(boundaries)
@@ -456,6 +489,9 @@ def functions_whose_address_is_taken(
 
     def in_code(address):
         return any(start <= address < end for start, end in code)
+
+    def in_got(address):
+        return any(start <= address < end for start, end in got)
 
     def function_containing(address):
         index = bisect.bisect_right(function_starts, address) - 1
@@ -476,6 +512,8 @@ def functions_whose_address_is_taken(
                 continue
             end_index = bisect.bisect_right(boundaries, address)
             end = boundaries[end_index] if end_index < len(boundaries) else address + 8
+            if in_got(address):
+                end = address + 8
             first = bisect.bisect_left(slots, address)
             last = bisect.bisect_left(slots, end)
             for slot in slots[first:last]:
@@ -507,7 +545,30 @@ def reachable_from(starts, calls_out):
     return seen
 
 
-def belongs_to_is(binary, hit):
+def inline_chains(binary, addresses):
+    """`addr2line -f -i`'s lines for every address in `addresses`, keyed by
+    address, from one `addr2line` run: one run per address costs a quarter
+    of a second on a fuzz target, nearly all of it reading the debug info
+    again, and was most of this script's wall time (docs/decisions.d/419
+    §419.7)."""
+    wanted = sorted(set(addresses))
+    if not wanted:
+        return {}
+    text = run(
+        ["addr2line", "-a", "-i", "-f", "-C", "-e", binary],
+        "".join(f"0x{address:x}\n" for address in wanted),
+    )
+    chains, current = {}, None
+    for line in text.splitlines():
+        if re.fullmatch(r"0x[0-9a-f]{16}", line):
+            current = chains.setdefault(int(line, 16), [])
+        else:
+            current.append(line)
+    assert sorted(chains) == wanted, "addr2line skipped an address"
+    return chains
+
+
+def belongs_to_is(chains, hit):
     """True when `hit`'s inline chain passes through `SlowRun::is` itself.
 
     `addr2line -f -i` lists one (function, call-site file:line) pair per
@@ -521,12 +582,11 @@ def belongs_to_is(binary, hit):
     this checks every function name the chain names, not the symbol the
     disassembly found the instruction under.
     """
-    chain = addr2line_chain(binary, hit["address"])
-    return "is" in chain[0::2]
+    return "is" in chains[hit["address"]][0::2]
 
 
 def reaches_hook(
-    function, timing_functions, hits_by_function, calls_out, binary, memo, on_stack
+    function, timing_functions, hits_by_function, calls_out, chains, memo, on_stack
 ):
     """`None`, or the `(hit, chain)` by which `function` reaches a hook
     outside `timing_functions` — every function whose symbol names
@@ -549,7 +609,7 @@ def reaches_hook(
     result = None
     if function not in timing_functions:
         for hit in hits_by_function.get(function, []):
-            if not belongs_to_is(binary, hit):
+            if not belongs_to_is(chains, hit):
                 result = (hit, [])
                 break
     if result is None:
@@ -559,7 +619,7 @@ def reaches_hook(
                 timing_functions,
                 hits_by_function,
                 calls_out,
-                binary,
+                chains,
                 memo,
                 on_stack,
             )
@@ -573,7 +633,7 @@ def reaches_hook(
 
 
 def through_pointers(
-    binary, timing_functions, already_reported, hits_by_function, calls_out,
+    chains, timing_functions, already_reported, hits_by_function, calls_out,
     takes_address,
 ):
     """The chains by which a `rcad_fuzz_timing` function reaches a hook
@@ -618,7 +678,7 @@ def through_pointers(
             return None
         hits = hits_by_function.get(function, [])
         if function in reach:
-            hits = [hit for hit in hits if not belongs_to_is(binary, hit)]
+            hits = [hit for hit in hits if not belongs_to_is(chains, hit)]
         return hits[0] if hits else None
 
     hooked = {
@@ -678,17 +738,13 @@ def shortest_path_to_a_hook(start, edges, reaches_a_hook, hooked):
     return None
 
 
-def addr2line_chain(binary, address):
-    text = run(["addr2line", "-i", "-f", "-C", "-e", binary, f"0x{address:x}"])
-    return text.splitlines()
-
-
-def print_hit(binary, hit, why):
+def print_hit(chains, hit, why):
     print(f"  {hit['address']:x}  {hit['mnemonic']} -> {hit['target']}  "
           f"via {hit['kind']}  {why}")
     print(f"    in {demangle(hit['function'])}")
-    for frame in paired_chain(binary, hit["address"]):
-        print(f"      {frame}")
+    lines = chains[hit["address"]]
+    for i in range(0, len(lines) - 1, 2):
+        print(f"      {lines[i + 1]}  ({lines[i]})")
 
 
 def print_chain_offender(function, chain, hit):
@@ -704,13 +760,6 @@ def demangle_step(name):
     if name.startswith("&"):
         return "&" + demangle(name[1:])
     return demangle(name)
-
-
-def paired_chain(binary, address):
-    lines = addr2line_chain(binary, address)
-    return [
-        f"{lines[i + 1]}  ({lines[i]})" for i in range(0, len(lines) - 1, 2)
-    ]
 
 
 def split_operands(text):
@@ -744,8 +793,10 @@ def demangle(name):
     return text if text else name
 
 
-def run(argv):
-    return subprocess.run(argv, check=True, capture_output=True, text=True).stdout
+def run(argv, stdin=None):
+    return subprocess.run(
+        argv, input=stdin, check=True, capture_output=True, text=True
+    ).stdout
 
 
 if __name__ == "__main__":
