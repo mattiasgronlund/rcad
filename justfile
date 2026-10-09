@@ -8238,6 +8238,14 @@ check-fuzz-overnight-selftest:
 # nor `reachable_from` ever saw this edge, the same wall §419.5 met building
 # `3319f838`: `merge_out` reaches `core`'s `StrSearcher::new` through a GOT
 # slot, not a literal `call <name>`.
+#
+# A fifth fixture pins the function-pointer walk (docs/decisions.d/419
+# §419.7, Q323): `rcad_fuzz_timing_fn_pointer` takes the address of a
+# function that calls `bcmp` with a `lea` and calls it through `%rax`, and
+# `rcad_fuzz_timing_dyn_call` takes the address of a vtable-shaped object
+# whose fourth word names another such function, and calls through
+# `0x18(%rax)`. Before the walk, both calls were counted as "computed,
+# unscanned" and the scan exited 0.
 [doc("The jump-table split and the transitive walk in timing-hooked-calls.py, pinned against hand-assembled fixtures.")]
 check-timing-hooked-calls-selftest:
     #!/usr/bin/env bash
@@ -8405,6 +8413,71 @@ check-timing-hooked-calls-selftest:
         echo "expected the chain line above"
         exit 1
     }
+
+    cat >"$dir/pointer.s" <<'ASM'
+    .text
+    .globl rcad_fuzz_timing_fn_pointer
+    .type rcad_fuzz_timing_fn_pointer, @function
+    rcad_fuzz_timing_fn_pointer:
+    lea taken_by_a_pointer(%rip), %rax
+    call *%rax
+
+    .globl taken_by_a_pointer
+    .type taken_by_a_pointer, @function
+    taken_by_a_pointer:
+    call bcmp
+
+    .globl rcad_fuzz_timing_dyn_call
+    .type rcad_fuzz_timing_dyn_call, @function
+    rcad_fuzz_timing_dyn_call:
+    lea a_vtable(%rip), %rax
+    call *0x18(%rax)
+
+    .globl behind_a_vtable
+    .type behind_a_vtable, @function
+    behind_a_vtable:
+    call bcmp
+
+    .globl bcmp
+    .type bcmp, @function
+    bcmp:
+    ret
+
+    .section .data.rel.ro, "aw"
+    .align 8
+    a_vtable:
+    .quad 0
+    .quad 8
+    .quad 8
+    .quad behind_a_vtable
+    ASM
+    as "$dir/pointer.s" -o "$dir/pointer.o"
+    # Linked for the same reason as the GOT-slot fixture: an unlinked `.o`
+    # leaves `lea taken_by_a_pointer(%rip)` as a zero displacement and a
+    # relocation, so `objdump` names no target, and `.quad behind_a_vtable`
+    # becomes a real `R_X86_64_RELATIVE` only in a linked PIE.
+    ld -pie -e rcad_fuzz_timing_fn_pointer -o "$dir/pointer" "$dir/pointer.o"
+
+    if pointer_got=$(fuzz/timing-hooked-calls.py "$dir/pointer"); then
+        echo "$pointer_got"
+        echo "timing-hooked-calls.py exited 0 against a fixture where rcad_fuzz_timing calls through a function pointer, and through a vtable, to functions that call bcmp — both must count as offenders"
+        exit 1
+    fi
+    pointer_line="  calls from rcad_fuzz_timing reaching a hooked function through a function pointer: 2"
+    printf '%s\n' "$pointer_got" | grep -qxF "$pointer_line" || {
+        echo "$pointer_got"
+        echo "expected the line above (2: the plain function pointer and the vtable slot)"
+        exit 1
+    }
+    for chain in \
+        "    rcad_fuzz_timing_fn_pointer -> &taken_by_a_pointer -> bcmp" \
+        "    rcad_fuzz_timing_dyn_call -> &behind_a_vtable -> bcmp"; do
+        printf '%s\n' "$pointer_got" | grep -qxF "$chain" || {
+            echo "$pointer_got"
+            echo "expected the chain line: $chain"
+            exit 1
+        }
+    done
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and
