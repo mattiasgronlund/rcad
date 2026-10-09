@@ -74,16 +74,20 @@
 //! and one corner strictly behind each, inside it. Of the 199, the union under
 //! `Policy::tolerant(100.0)` with the block first answered 51 and was refused
 //! in 148 before: 74 `Undecidable` on the triangle, 58 a hole winding with its
-//! outline and 16 an outline winding against its face. It now answers 62, and
-//! the union and intersection of each hold 2000 between them; none is refused
-//! `Undecidable`, and the 137 left are refused by name once the answer is
-//! written with its corners rounded: 65 a hole winding with its outline, 16 an
-//! outline winding against its face, 34 a shell enclosing nothing and 22 an
-//! edge with four faces or none. The rule is exact, so it runs under
-//! `Policy::certified()` too, where the union of 10 of the 199 now answers
-//! either way round: each validates and holds, within `1e−6`, what the turned
-//! cube moved `2⁻³⁰` further in gives. How the tip is written in those 10 was
-//! not traced. 98 are refused for the range, and the rest by the names above.
+//! outline and 16 an outline winding against its face. It answered 62 after
+//! that, and answers 68 since Q1442 left out an edge only wires enclosing
+//! nothing walked; the union and intersection of each hold 2000 between them.
+//! None is refused `Undecidable`, and the 131 left are refused by name once
+//! the answer is written with its corners rounded: 65 a hole winding with its
+//! outline, 16 an outline winding against its face, 34 a shell enclosing
+//! nothing and 16 an edge with four faces. The rule is exact, so it runs under
+//! `Policy::certified()` too, where the union of 16 of the 199 now answers
+//! either way round. 10 answered after Q1353: each validates and holds, within
+//! `1e−6`, what the turned cube moved `2⁻³⁰` further in gives, and how the tip
+//! is written in those 10 was not traced. The other 6 are Q1442's, whose three
+//! crossings round to one point
+//! ([`six_random_turns_whose_crossings_round_to_one_corner_answer_every_fuse`]).
+//! 98 are refused for the range, and the rest by the names above.
 //! [`random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant`]
 //! keeps the first 60, 31 of which meet outside.
 //!
@@ -265,14 +269,22 @@ fn with_the_corner_a_thousandth_inside_the_union_and_intersection_hold_both_cube
 /// triangle the crossings cut out of the block's face.
 #[test]
 fn with_its_planes_meeting_a_rounding_inside_every_fuse_answers_certified() {
-    every_fuse_answers_and_the_volumes_agree(WHERE_ITS_PLANES_MEET_INSIDE, &certified());
+    every_fuse_answers_and_the_volumes_agree(
+        &the_turn(),
+        WHERE_ITS_PLANES_MEET_INSIDE,
+        &certified(),
+    );
 }
 
 /// [`with_its_planes_meeting_a_rounding_inside_every_fuse_answers_certified`]
 /// under `Policy::tolerant(100.0)`.
 #[test]
 fn with_its_planes_meeting_a_rounding_inside_every_fuse_answers_tolerant() {
-    every_fuse_answers_and_the_volumes_agree(WHERE_ITS_PLANES_MEET_INSIDE, &tolerant());
+    every_fuse_answers_and_the_volumes_agree(
+        &the_turn(),
+        WHERE_ITS_PLANES_MEET_INSIDE,
+        &tolerant(),
+    );
 }
 
 /// The same turn with its corner at `(0, 2, 5)`, where its planes meet
@@ -280,7 +292,44 @@ fn with_its_planes_meeting_a_rounding_inside_every_fuse_answers_tolerant() {
 #[test]
 fn with_its_planes_meeting_exactly_on_the_face_every_fuse_answers() {
     for policy in [certified(), tolerant()] {
-        every_fuse_answers_and_the_volumes_agree(WHERE_ITS_PLANES_MEET_ON_THE_FACE, &policy);
+        every_fuse_answers_and_the_volumes_agree(
+            &the_turn(),
+            WHERE_ITS_PLANES_MEET_ON_THE_FACE,
+            &policy,
+        );
+    }
+}
+
+/// Six of Q1208's 400 random turns whose planes meet outside the block, and
+/// whose three crossings of `x = 0` all round to one `f64` triple, with the
+/// tip, where the three planes meet, a rounding outside the face: turns 190,
+/// 228, 273, 283, 294 and 329. Every fuse answers under both policies, and the
+/// volumes agree as [`every_fuse_answers_and_the_volumes_agree`] asks.
+///
+/// **The union either way round and the turned cube less the block were
+/// refused** `ResultIsNotManifold { count: 0 }` until queue row Q1442. Each
+/// of the cube's three faces at the corner keeps a triangle of the tip, from
+/// the tip to two crossings. With the crossings one corner, its side between
+/// them has no length and is left out, and what is left walks from the tip to
+/// that corner and back, which encloses nothing and is left out too
+/// (`docs/decisions.md` §365.7). The block's face keeps no hole, since every
+/// side of the hole has no length. The edge from the tip to the crossings was
+/// still made, though only those left-out wires walked it, and it was an edge
+/// with no face along it. It is now left out with them, and the tip with it,
+/// so the answer is written as if the tip were on the face.
+#[test]
+fn six_random_turns_whose_crossings_round_to_one_corner_answer_every_fuse() {
+    let turns = q1208s_random_turns(400);
+    for number in [190, 228, 273, 283, 294, 329] {
+        let (turn, at) = turns[number - 1];
+        assert_eq!(
+            where_the_planes_at_the_corner_meet(&turn, at),
+            Decision::Neg,
+            "turn {number} has its planes meet outside the block"
+        );
+        for policy in [certified(), tolerant()] {
+            every_fuse_answers_and_the_volumes_agree(&turn, at, &policy);
+        }
     }
 }
 
@@ -416,10 +465,11 @@ fn random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_nam
 /// changes what it shares with another by at most `δ` times its shadow, and a
 /// cube of side 10 casts at most `100·√3`. The rounding allowed is
 /// [`with_the_corner_a_thousandth_inside_the_union_and_intersection_hold_both_cubes`]'s.
-fn every_fuse_answers_and_the_volumes_agree(at: [f64; 3], policy: &Policy) {
+fn every_fuse_answers_and_the_volumes_agree(turn: &Isometry, at: [f64; 3], policy: &Policy) {
     let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
     let further_in = 2.0_f64.powi(-30);
-    let reference = volume_of_the_answer(
+    let reference = volume_of_a_fuse(
+        turn,
         [at[0] + further_in, at[1], at[2]],
         Rule::Intersection,
         Order::BlockFirst,
@@ -428,9 +478,9 @@ fn every_fuse_answers_and_the_volumes_agree(at: [f64; 3], policy: &Policy) {
     );
     for order in [Order::BlockFirst, Order::TurnedFirst] {
         let asked = format!("{at:?}, {order:?}, {policy:?}");
-        let union = volume_of_the_answer(at, Rule::Union, order, policy, &asked);
-        let intersection = volume_of_the_answer(at, Rule::Intersection, order, policy, &asked);
-        let difference = volume_of_the_answer(at, Rule::Difference, order, policy, &asked);
+        let union = volume_of_a_fuse(turn, at, Rule::Union, order, policy, &asked);
+        let intersection = volume_of_a_fuse(turn, at, Rule::Intersection, order, policy, &asked);
+        let difference = volume_of_a_fuse(turn, at, Rule::Difference, order, policy, &asked);
         assert!(
             (union + intersection - 2000.0).abs() <= allowed,
             "{asked}: the union {union} and the intersection {intersection} hold {} between \

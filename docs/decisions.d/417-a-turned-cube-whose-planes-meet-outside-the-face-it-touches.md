@@ -5,7 +5,10 @@ off `7d8ed30e`, in three relays (§416): `5c91b4ed` built the rule, `852579c8`
 moved the pins inside its write set, and `b2a7cceb` pinned the turned cube.
 Each count says which relay ran it and with what. `probe_q1353_split` is in
 `a_turned_cube_with_its_corner_on_a_face.rs` at `852579c8` and was taken out
-after; the certified count was a scratch copy of it, never committed.*
+after; the certified count was a scratch copy of it, never committed.
+Queue row Q1442 (lane `lane-q1442-edges-only-dropped-wires-walked`, off
+`7fddc415`, in two relays) added to 417.3, 417.4 and 417.6 and corrected
+417.5 (c); its counts are `q1442_the_count`, a probe likewise taken out.*
 
 ### 417.1 The shape
 
@@ -74,6 +77,22 @@ faces or none. `random_turns_whose_planes_meet_outside_the_block_answer_or_are_r
 pins the first 60, of which 31 meet outside: 15 answer, turns 47 and 48 among
 them, which relay 0 found `Undecidable` on the base, and 16 are pinned by name.
 
+**Since queue row Q1442 the 6 `count: 0` answer too**, 68 in all, and the 131
+left are the 65, 16, 34 and 16 above (Q1442's lane on `4a7dec01`, `mise exec
+-- just t -p rcad-topo --test a_turned_cube_with_its_corner_on_a_face
+--no-capture q1442_the_count`, a probe pasted into that file and taken out
+after). Each of the 6 was an edge only left-out wires walked: the three
+crossings round to one triple and the tip, where the three planes meet, to
+another a rounding off the face, each of the cube's three faces at the corner
+keeps a wire that walks out from that triple to the tip and back, and every
+such wire is left out (417.4). The edge between the two had been made and had
+no face along it. `Assembly::leave_out_what_no_wire_walks` in
+`fuse/assemble.rs` now leaves out every edge no kept wire walks, and every
+corner no edge left ends at, so the tip goes and the answer is written as if
+it were on the face. `six_random_turns_whose_crossings_round_to_one_corner_answer_every_fuse`
+pins turns 190, 228, 273, 283, 294 and 329, every rule both ways round under
+both policies, against volumes.
+
 **The turned cube's 199, certified** (this relay, a scratch copy of the probe
 on `852579c8`). The union answers 10 either way round, the intersection 8, the
 block less the cube 8 and the cube less the block 2. Every one validates and
@@ -83,7 +102,15 @@ measures within `1e−6` of what the same fuse gives with the turned cube moved
 refused: the union 98 `DynamicRangeTooWide`, 35 holes winding with the
 outline, 34 shells enclosing nothing, 16 and 6 edges with four faces or none;
 the intersection 191 `DynamicRangeTooWide`. How the tip is written in the ones
-that answer was not traced; 417.4 says why they are taken as right.
+that answer was not traced; 417.4 says why they are taken as right. Since
+Q1442 the 6 edges with no face are gone: the union answers 16 either way round,
+the 6 of 417.3's tolerant paragraph among them, and is refused 98
+`DynamicRangeTooWide`, 35 holes winding with the outline, 34 shells enclosing
+nothing and 16 edges with four faces; the cube less the block answers 16 (14
+one solid, one two and one three) and is refused 65 `DynamicRangeTooWide` and
+118 `VolumeIsNotPositive` (Q1442's lane on `4a7dec01`, the same probe). None
+of the fuses that probe asked, these three and the tolerant union with the
+block first, is refused `count: 0` for any of the 199.
 
 **The twelve fuses at `(0, 3, 3)`** (`ON_THE_FACE`) give what they gave on the
 base: each pin there passed unchanged on `852579c8` and `b2a7cceb`. None of the
@@ -101,8 +128,12 @@ at `7.453e16`, `a ∩ b` at `3.924e16`, `a − b` at `4.166e16`. The limit
 into the block's top, certified. All six fuses were `Undecidable`. The union
 either way round now answers two solids, 240 and 24, the block less the prism
 the block and the prism less the block the prism, each validating; the
-intersection is refused `ResultIsNotManifold { count: 0 }` both ways round
-(relay 1). 417.4 is the judgment.
+intersection was refused `ResultIsNotManifold { count: 0 }` both ways round
+(relay 1), and since Q1442 answers no solid both ways round, as at `x = 0`:
+every wire of the sliver walks out and back along the prism's edge and is left
+out, and the edge and its two corners go with them
+(`the_prism_with_its_edge_a_rounding_into_the_blocks_top_answers_as_if_on_it`).
+417.4 is the judgment.
 
 **Outside the first lane's write set, two failed on its branch** (relay 1,
 `mise exec -- just t -p rcad-topo --no-fail-fast`); a second lane repinned
@@ -142,10 +173,19 @@ rounding a constructed corner is what writing any answer does. A reviewer who ho
 many solids there are should file it as `wrong/C`, against §365.7's rule and
 not against this one.
 
+Queue row Q1442 adds a third rule that follows from the two: an edge only
+left-out wires walked has no face along it and is left out, and so is every
+corner no edge left ends at (`Assembly::leave_out_what_no_wire_walks` in
+`fuse/assemble.rs`). It writes the prism's intersection as no solid, and 6 more
+certified turned-cube unions with the tip left out, as if it were on the face.
+The same judgment covers them. It changes no answer: a fuse that answered had
+no edge with no face, and a corner with no edge was dropped by the joining or
+refused as an orphan.
+
 ### 417.5 The other half: the three crossings as one, not built
 
-At `(0, 3, 3)`, and in the 137 of the 199 still refused under the tolerant
-policy, the answer meant is the block with its `x = 0` face whole, with the
+At `(0, 3, 3)`, and in the 131 of the 199 still refused under the tolerant
+policy (137 before Q1442), the answer meant is the block with its `x = 0` face whole, with the
 tip a rounding tall left out. It exists, so under `Policy::tolerant(100.0)` the
 refusal is a gap. Under `Policy::certified()` it is a limit:
 `a_turned_cube_with_its_corner_on_a_face.rs`'s doc shows every rounding of the
@@ -170,14 +210,37 @@ Families weighed, none built:
   whose rounded corners wind right would be let through. It answers with a
   spike `1e−16` tall that the designer did not mean, and the 78 of 256
   roundings that wind right are a search, not a construction.
-- **(c) Rely on the roundings meeting.** The 62 tolerant and 10 certified
-  answers suggest that where the four tip points round to one `f64` triple,
-  §365.7's rules close the face; where only some do, a shell enclosing nothing
-  (34) or an edge with four faces (16) is left. **Unverified**: no print in
-  `Corners::of` has shown which of the four were joined in any turn. A print
-  there for turn 8 (`VolumeIsNotPositive { volume: 0.0 }`) is the next step,
-  and if it holds, (a) reduces to joining the four under the policy where
-  rounding joined only some.
+- **(c) Rely on the roundings meeting.** This first read the 62 tolerant and
+  10 certified answers as saying that where the four tip points round to one
+  `f64` triple, §365.7's rules close the face, and where only some do, a shell
+  enclosing nothing (34) or an edge with four faces (16) is left. **The count
+  says otherwise.** Queue rows Q1439 and Q1442 rounded each of the four points
+  to the middle of the box `Plane::meet_of_three` gives for its three planes
+  and sorted the 199 by how many triples the three crossings make and whether
+  the tip is on one, against the tolerant union with the block first (Q1442's
+  lane, `q1442_the_count`, on `7fddc415` and again on `4a7dec01`):
+
+  | crossings     | tip    | turns | union                                     |
+  |---------------|--------|------:|-------------------------------------------|
+  | one triple    | on it  |     2 | answers                                   |
+  | one triple    | apart  |     6 | `count: 0`, answers since Q1442           |
+  | two triples   | on one |     8 | answers                                   |
+  | two triples   | apart  |    34 | `VolumeIsNotPositive { volume: 0.0 }`     |
+  | two triples   | apart  |    16 | `ResultIsNotManifold { count: 4 }`        |
+  | three triples | on one |     1 | answers                                   |
+  | three triples | on one |     7 | `HoleWindsWithTheOuterWire`               |
+  | three triples | apart  |    51 | answers                                   |
+  | three triples | apart  |    58 | `HoleWindsWithTheOuterWire`               |
+  | three triples | apart  |    16 | `OuterWireWindsAgainstTheNormal`          |
+
+  So of the 62 that answered, only 2 have all four points on one triple and 51
+  have all four apart, and every one of the 34 shells enclosing nothing has
+  the crossings on two triples with the tip apart. The same rounding answers
+  in some turns and is refused in others, so it is not what decides, and the
+  reduction of (a) this hoped for is not shown. These are the probe's
+  roundings, not a print in `Corners::of`; a print there for turn 8
+  (`VolumeIsNotPositive { volume: 0.0 }`) is still what would show which
+  points it joined.
 
 (a) is the family the row names and the only one that reaches the answer meant
 without a search; it is left to a row of its own because it changes
@@ -189,5 +252,6 @@ without a search; it is left to a row of its own because it changes
 - The two tests of 417.3 outside the first lane's write set: repinned by a
   second lane in 8228a212, before this branch landed. Nothing left.
 - `ResultIsNotManifold { count: 0 }`, the prism's intersection and 6 of the
-  turned-cube unions, names an edge with no face along it, which says nothing
-  of the sliver it was refused for. Not traced.
+  turned-cube unions: done by queue row Q1442. It was an edge only left-out
+  wires walked, and it is now left out with the corners no edge left ends at
+  (417.3, 417.4).

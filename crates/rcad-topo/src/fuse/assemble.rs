@@ -591,6 +591,7 @@ impl Assembly {
             shells: Vec::new(),
             solids: Vec::new(),
         };
+        assembly.leave_out_what_no_wire_walks();
         assembly.part_each_line_two_faces_rest_against_each_other_along(model);
         every_closed_edge_read_off_one_spelling(
             &assembly.edges,
@@ -598,6 +599,82 @@ impl Assembly {
             &mut assembly.faces,
         )?;
         Ok(assembly)
+    }
+
+    /// Leave out every edge no wire walks, and every corner no edge left ends
+    /// at.
+    ///
+    /// **A flat wire that encloses nothing is left out after its sides are
+    /// made** ([`encloses_something`]), and making a side makes its edge and
+    /// its two corners. An edge only such wires walked has no face along it,
+    /// and [`Assembly::darts_along_each_edge`] refused it as an edge with no
+    /// faces. A prism lying on one of its edges on a block's top, with that
+    /// edge a rounding into the top, is one: every corner of the sliver the
+    /// two share rounds onto the prism's edge, every piece of the intersection
+    /// is left out, and the prism's edge was all that was left
+    /// (`a_prism_lying_on_one_edge.rs`). A cube turned so that three crossings
+    /// of its planes with a face round onto one point and its corner rounds
+    /// just beside it is another (`a_turned_cube_with_its_corner_on_a_face.rs`,
+    /// queue row Q1442).
+    ///
+    /// **The corners go with the edges.** Where no face is joined there is no
+    /// [`Assembly::rebuild_from`] to drop them, and a vertex with no edge is
+    /// refused as an orphan when the answer is checked.
+    ///
+    /// Only a refusal can change. A fuse that answers passed
+    /// [`Assembly::darts_along_each_edge`], so no edge of it had no face, and
+    /// a corner with no edge was either dropped by the joining or refused.
+    /// What stays keeps its order.
+    fn leave_out_what_no_wire_walks(&mut self) {
+        let mut walked = vec![false; self.edges.len()];
+        for side in self
+            .faces
+            .iter()
+            .flat_map(|face| face.wires.iter().flatten())
+        {
+            walked[side.edge] = true;
+        }
+        let mut an_end = vec![false; self.corners.len()];
+        for (edge, &walked) in self.edges.iter().zip(&walked) {
+            if walked {
+                for end in edge.ends {
+                    an_end[end] = true;
+                }
+            }
+        }
+        let edge_now = numbered(walked.iter().copied());
+        let corner_now = numbered(an_end.iter().copied());
+        let corner_now_of =
+            |corner: usize| corner_now[corner].expect("an end of a walked edge stays a corner");
+
+        for side in self
+            .faces
+            .iter_mut()
+            .flat_map(|face| face.wires.iter_mut().flatten())
+        {
+            side.edge = edge_now[side.edge].expect("an edge a side walks stays an edge");
+        }
+        self.edges = core::mem::take(&mut self.edges)
+            .into_iter()
+            .zip(walked)
+            .filter_map(|(edge, walked)| walked.then_some(edge))
+            .map(|edge| Edge {
+                ends: edge.ends.map(corner_now_of),
+                arc: match edge.arc {
+                    WhichArc::TheOnlyOne => WhichArc::TheOnlyOne,
+                    WhichArc::LeavingACorner { corner, towards } => WhichArc::LeavingACorner {
+                        corner: corner_now_of(corner),
+                        towards,
+                    },
+                },
+                ..edge
+            })
+            .collect();
+        self.corners = core::mem::take(&mut self.corners)
+            .into_iter()
+            .zip(an_end)
+            .filter_map(|(corner, an_end)| an_end.then_some(corner))
+            .collect();
     }
 
     /// One face per face of an input solid, ready to be joined.
@@ -6782,7 +6859,10 @@ fn sides_of(
 ///
 /// **Leaving such a wire out keeps every edge's faces paired.** It walks each
 /// of its edges once each way, so it takes one face's use off each side of every
-/// one of them and leaves the uses the other faces make as they were.
+/// one of them and leaves the uses the other faces make as they were. An edge
+/// only such wires walked is left with no face at all, and
+/// [`Assembly::leave_out_what_no_wire_walks`] leaves it out, with every corner
+/// no edge left ends at.
 fn encloses_something(sides: &[Side]) -> bool {
     let mut how_often: BTreeMap<usize, i64> = BTreeMap::new();
     for side in sides {
