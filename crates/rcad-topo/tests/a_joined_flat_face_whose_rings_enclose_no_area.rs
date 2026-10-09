@@ -287,9 +287,9 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 #[test]
 fn the_top_halves_of_two_half_bends_fuse_by_every_rule_to_what_pappus_gives() {
     for (rule, volume) in [
-        (Rule::Union, Some(4.0 * PI * PI)),
-        (Rule::Intersection, Some(0.0)),
-        (Rule::Difference, Some(2.0 * PI * PI)),
+        (Rule::Union, 4.0 * PI * PI),
+        (Rule::Intersection, 0.0),
+        (Rule::Difference, 2.0 * PI * PI),
     ] {
         for turned_first in [false, true] {
             let mut model =
@@ -312,22 +312,7 @@ fn the_top_halves_of_two_half_bends_fuse_by_every_rule_to_what_pappus_gives() {
                 );
             }
             let what = format!("{rule:?}, turned first {turned_first}");
-            match volume {
-                Some(volume) => assert_fuses_to(&mut model, one, other, rule, volume, &what),
-                None => {
-                    let refused = model.fuse(
-                        &[one],
-                        &[other],
-                        rule,
-                        &Policy::certified(),
-                        &mut ProvenanceLog::new(),
-                    );
-                    assert!(
-                        matches!(refused, Err(Error::ResultIsNotManifold { count: 4 })),
-                        "{what}: {refused:?}"
-                    );
-                }
-            }
+            assert_fuses_to(&mut model, one, other, rule, volume, &what);
         }
     }
 }
