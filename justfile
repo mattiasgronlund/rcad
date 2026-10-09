@@ -8329,8 +8329,14 @@ check-timing-hooked-calls-selftest:
     ret
     ASM
     as "$dir/offender.s" -o "$dir/offender.o"
+    # Linked for the same reason as the fixtures below: an unlinked `.o`
+    # leaves `call outside_the_crate_helper` as a zero displacement and a
+    # relocation, so `objdump` names whatever instruction follows the call —
+    # which happens to be `outside_the_crate_helper` only because it sits
+    # right after `rcad_fuzz_timing_reaches_out` in this file.
+    ld -pie -e rcad_fuzz_timing_reaches_out -o "$dir/offender" "$dir/offender.o"
 
-    if offender_got=$(fuzz/timing-hooked-calls.py "$dir/offender.o"); then
+    if offender_got=$(fuzz/timing-hooked-calls.py "$dir/offender"); then
         echo "$offender_got"
         echo "timing-hooked-calls.py exited 0 against a fixture where rcad_fuzz_timing calls out to a function that calls bcmp — it must count as an offender"
         exit 1
@@ -8361,8 +8367,13 @@ check-timing-hooked-calls-selftest:
     call *%rax
     ASM
     as "$dir/computed.s" -o "$dir/computed.o"
+    # Linked for the same reason: an unlinked `call helper_with_a_computed_call`
+    # would also be a zero displacement and a relocation, naming whatever
+    # instruction follows it rather than the function this fixture means to
+    # reach.
+    ld -pie -e rcad_fuzz_timing_computed_through_helper -o "$dir/computed" "$dir/computed.o"
 
-    computed_got=$(fuzz/timing-hooked-calls.py "$dir/computed.o") \
+    computed_got=$(fuzz/timing-hooked-calls.py "$dir/computed") \
         || { echo "$computed_got"; echo "timing-hooked-calls.py exited non-zero against a fixture where the only thing reached is a computed call, never a hook — a call this scan cannot see past is not itself an offender"; exit 1; }
     computed_line="  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function: 1"
     printf '%s\n' "$computed_got" | grep -qxF "$computed_line" || {
