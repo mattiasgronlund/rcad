@@ -498,6 +498,21 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 /// chord is the one thing the trial did measure about the curve, so the next ask
 /// comes from that instead.
 ///
+/// **Unless the chord is exactly nothing**: a trial that settled back onto
+/// `here` itself has measured nothing about the curve, as a trial that could
+/// not be settled has not, so it is retried at the square root of the ask the
+/// way that one is, below. Halving it was not enough. A pipe of radius 1 through
+/// the axis of one of radius 4, walked from `(4, 0, 6)` with `f64::MAX / 4` of
+/// room, settles every trial from `6.7e153` down back onto that seed exactly, so
+/// fifty halvings ran out at `2.4e139` and the walk was refused as the two pipes
+/// being tangent, which they are nowhere; rooted, the seventh trial, `6.4e4`,
+/// lands on the loop (`a_trial_that_settles_back_onto_its_start_is_shortened_by_its_root`,
+/// `docs/decisions.md` §421). Below an ask of four the root is the longer of the
+/// two, so there a chord of nothing is halved as it always was, and that is the
+/// only place a fine walk meets one: measured over `rcad-geom`'s 1 120 tests,
+/// 718 trials came back with a chord of nothing, and the 155 of them asked four
+/// or more were all in coarse walks, with `2.2e307` and `4.5e307` of room.
+///
 /// **The two cases are kept apart rather than merged into `min`** because the
 /// merged form also shortens steps in the ordinary fine walk, where the trial
 /// came back a little short for honest reasons, and that moved the marcher's
@@ -567,7 +582,7 @@ fn one_step(
                 Ok(measured) => measured,
                 Err(why) => {
                     why_the_last_trial_could_not_be_measured = Some(why);
-                    step = step.sqrt().min(step * 0.5);
+                    step = shortened_by_its_exponent(step);
                     continue;
                 }
             };
@@ -583,10 +598,14 @@ fn one_step(
         // along the curve: the settling pulled it back, and it will land in the
         // same place however far the ask is halved, so the halvings run out with
         // the chord where it started. There the chord is the one thing the trial
-        // did measure about the curve, so the next ask comes from that. A trial
-        // that did step along the curve and only bent too far is halved as
-        // before, which is what the published bound was measured under.
-        step = if chord > 0.0 && chord * 2.0 < step {
+        // did measure about the curve, so the next ask comes from that — unless
+        // it is no chord at all, which says no more than a trial that could not
+        // be settled. A trial that did step along the curve and only bent too far
+        // is halved as before, which is what the published bound was measured
+        // under.
+        step = if chord == 0.0 {
+            shortened_by_its_exponent(step)
+        } else if chord * 2.0 < step {
             chord * 0.5
         } else {
             step * 0.5
@@ -621,6 +640,13 @@ fn what_a_trial_of_this_length_measures(
     let sagitta = (settled(surfaces, middle)? - middle).length();
     let turned = which_way_the_crossing_runs(surfaces, next)?.dot(tangent);
     Ok((next, straight_on.length(), sagitta, turned))
+}
+
+/// The next ask after a trial that measured nothing about how long a step
+/// should be: its square root, or half of it below four, where half is the
+/// shorter of the two.
+fn shortened_by_its_exponent(step: f64) -> f64 {
+    step.sqrt().min(step * 0.5)
 }
 
 /// The refusal the four questions that read the two normals raise, carrying the
@@ -896,6 +922,48 @@ mod tests {
         assert!(
             (last - first).length() < 1.0,
             "a closed loop comes back to where it started, not to {last:?} from {first:?}"
+        );
+    }
+
+    /// **A trial that settles back onto the point it set out from is shortened
+    /// by its exponent, as one that could not be settled is.** A pipe of radius
+    /// 4 about `z` and one of radius 1 along `x` at `z = 5` cross through the
+    /// fat one's axis in two loops, and the coarse walk's room is `f64::MAX / 4`.
+    /// From `(4, 0, 6)` along `−y` the first trial, `4.5e307`, cannot be
+    /// settled, and every trial from its root `6.7e153` down settles back onto
+    /// `(4, 0, 6)` exactly, a chord of `0`. Halved, the fifty shortenings ran
+    /// out at `2.4e139` and the walk was refused as the two pipes being tangent
+    /// while settling, which they are nowhere. Rooted, the trials from `6.7e153`
+    /// to `1.7e19` settle onto the seed, `4.1e9` cannot be settled, `6.4e4`
+    /// lands on the loop `1.8` away, and half that chord is taken.
+    #[test]
+    fn a_trial_that_settles_back_onto_its_start_is_shortened_by_its_root() {
+        let fat = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 4.0);
+        let thin = a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 5.0], 1.0);
+
+        let walked = march(
+            [&fat, &thin],
+            Point::new(4.0, 0.0, 6.0),
+            f64::MAX / 4.0,
+            1 << 20,
+        )
+        .expect("a thin pipe through a fat one's axis crosses it in two loops");
+
+        println!("{walked:?}");
+        for point in &walked.points {
+            assert!(
+                (f64::hypot(point.x(), point.y()) - 4.0).abs() <= walked.deviation
+                    && (f64::hypot(point.y(), point.z() - 5.0) - 1.0).abs() <= walked.deviation,
+                "a point on both pipes, not {point:?} give or take {}",
+                walked.deviation
+            );
+        }
+        assert!(
+            walked.points.iter().any(|point| point.z() < 5.0)
+                && walked.points.iter().any(|point| point.y() < 0.0)
+                && walked.points.iter().any(|point| point.y() > 0.0),
+            "the walk goes right round the thin pipe from above it: {:?}",
+            walked.points
         );
     }
 
