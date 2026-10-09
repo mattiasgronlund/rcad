@@ -56,15 +56,15 @@
 //! `VolumeIsNotPositive` after selection placed every piece right. The pointed
 //! cone cut in half against the whole ball is refused not knowing which curve
 //! a face runs along. A thin bar through a fat one has its two loops ordered
-//! and its cells told apart since Q1483, and is refused by the mesh the fuse
-//! checks its answer with.
+//! and its cells told apart since Q1483, and walked through the fat bar's axis
+//! since Q1493, and is refused by the mesh the fuse checks its answer with.
 //!
 //! Every cone here is built by `tests/cones`, face by face through
 //! `SolidBuilder` with a power-of-two slope, and every ball by `Model::add_ball`.
 
 use std::f64::consts::PI;
 
-use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector, WhereFollowingACrossingGaveUp};
+use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
@@ -1090,22 +1090,30 @@ fn a_frustum_from_below_the_plane_between_the_two_circles_answers_all_but_the_ba
 /// wall: a walk along one loop learned nothing about which side of the other
 /// loop it was on, and `fuse/arrange.rs`'s
 /// `whether_past_the_plane_between_two_loops` tells it now. What refuses is the
-/// check:
+/// check, and both ways the walk along each loop gets round and the faces are
+/// refused:
 ///
-/// - **through the axis**, following a loop,
-///   `CannotFollowACrossingWhereItsSurfacesAreTangent` while settling a point
-///   onto both surfaces. Measured with prints in `march.rs`'s `one_step`: from
-///   the seed `(4, 0, 6)` the coarse walk's first trial, `1.7e307` long, cannot
-///   be settled, and every shorter one from `4.1e153` down settles back onto
-///   the seed with a chord of `0`. `one_step` only halves such a trial, so its
-///   fifty shortenings never come near the loop;
-/// - **half off it**, the walk gets round and the faces are refused: the union
-///   `AWireWillNotLieFlatOnItsFace` with the fat bar first and
-///   `CannotMeshAFace`, its boundary crossing itself, with the thin bar first,
-///   the fat bar less the thin one the first of those and the thin less the fat
-///   the second, and the intersection `CannotMeshAFace`, two of its corners
-///   coinciding, both ways round. Whether the answer or the mesher is wrong
-///   there is not traced.
+/// - **through the axis**, the unions `AWireWillNotLieFlatOnItsFace` with the
+///   fat bar first and `CannotMeshAFace`, two of its corners coinciding, with
+///   the thin bar first, the intersection the second of those both ways round,
+///   the fat bar less the thin one the first, and the thin less the fat
+///   `ACurvedFaceGoesRightRoundWithNoSeam`. Until Q1493 the walk did not get
+///   round: from the seed `(4, 0, 6)` the coarse walk's first trial, `1.7e307`
+///   long, cannot be settled, every shorter one from `4.1e153` down settles
+///   back onto the seed with a chord of `0`, and `march.rs`'s `one_step` only
+///   halved such a trial, so its fifty shortenings never came near the loop and
+///   every rule was refused `CannotFollowACrossingWhereItsSurfacesAreTangent`
+///   while settling a point onto both surfaces. It takes such a trial's root
+///   now, as it does a trial that cannot be settled;
+/// - **half off it**, the union `AWireWillNotLieFlatOnItsFace` with the fat bar
+///   first and `CannotMeshAFace`, its boundary crossing itself, with the thin
+///   bar first, the fat bar less the thin one the first of those and the thin
+///   less the fat the second, and the intersection `CannotMeshAFace`, two of
+///   its corners coinciding, both ways round.
+///
+/// Whether the answer or the mesher is wrong is traced for neither. Each
+/// refusal comes from `mesh.rs`, and the walk the check asks for is given
+/// `1.7e307` of room, at which the marcher draws a loop in six points.
 ///
 /// Where the fat bar's seam runs makes no difference: up `+x` it crosses the
 /// loop on that side twice and up `+y` neither loop, and each pair refuses the
@@ -1117,17 +1125,10 @@ fn a_frustum_from_below_the_plane_between_the_two_circles_answers_all_but_the_ba
 /// the fat its two ends, `(20π − S)/2` each.
 #[test]
 fn a_thin_bar_through_a_fat_one_is_refused_by_the_check_after_the_arrangement() {
-    let a_loop_cannot_be_followed = |answer: &Result<Vec<(f64, f64)>, Error>| {
+    let a_curved_face_has_no_seam = |answer: &Result<Vec<(f64, f64)>, Error>| {
         matches!(
             answer,
-            Err(Error::ACrossingAlongThisEdgeCouldNotBeFollowed { why, .. })
-                if matches!(
-                    **why,
-                    rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
-                        at: WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
-                        ..
-                    }
-                )
+            Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
         )
     };
     let a_wire_will_not_lie_flat = |answer: &Result<Vec<(f64, f64)>, Error>| {
@@ -1151,31 +1152,41 @@ fn a_thin_bar_through_a_fat_one_is_refused_by_the_check_after_the_arrangement() 
             })
         )
     };
-    for seam in [0, 1] {
-        let through = what_each_rule_gives(|model| a_thin_bar_through_a_fat_one(model, 0.0, seam));
-        println!("through the axis, seam {seam}: {through:?}");
+    let through_refused_by = [
+        a_wire_will_not_lie_flat,
+        two_corners_coincide,
+        two_corners_coincide,
+        two_corners_coincide,
+        a_wire_will_not_lie_flat,
+        a_curved_face_has_no_seam,
+    ];
+    let off_refused_by = [
+        a_wire_will_not_lie_flat,
+        a_boundary_crosses_itself,
+        two_corners_coincide,
+        two_corners_coincide,
+        a_wire_will_not_lie_flat,
+        a_boundary_crosses_itself,
+    ];
+    let gives: Vec<_> = [0, 1]
+        .into_iter()
+        .flat_map(|seam| {
+            [(0.0, through_refused_by), (0.5, off_refused_by)].map(|(off, refused_by)| {
+                let answers =
+                    what_each_rule_gives(|model| a_thin_bar_through_a_fat_one(model, off, seam));
+                println!("{off} off the axis, seam {seam}: {answers:?}");
+                (off, seam, answers, refused_by)
+            })
+        })
+        .collect();
+    for (off, seam, answers, refused_by) in gives {
         assert!(
-            through.iter().all(a_loop_cannot_be_followed),
-            "through the axis, seam {seam}: {through:?}"
-        );
-
-        let off = what_each_rule_gives(|model| a_thin_bar_through_a_fat_one(model, 0.5, seam));
-        println!("half off the axis, seam {seam}: {off:?}");
-        let refused_by = [
-            a_wire_will_not_lie_flat,
-            a_boundary_crosses_itself,
-            two_corners_coincide,
-            two_corners_coincide,
-            a_wire_will_not_lie_flat,
-            a_boundary_crosses_itself,
-        ];
-        assert!(
-            off.len() == refused_by.len()
-                && off
+            answers.len() == refused_by.len()
+                && answers
                     .iter()
                     .zip(refused_by)
                     .all(|(answer, refused)| refused(answer)),
-            "half off the axis, seam {seam}: {off:?}"
+            "{off} off the axis, seam {seam}: {answers:?}"
         );
     }
 }
