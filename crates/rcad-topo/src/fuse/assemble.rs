@@ -4763,7 +4763,7 @@ fn with_the_halves_of_each_whole_curve_joined<'a>(
     {
         return Ok(wires);
     }
-    let mut named: Vec<(&[Surface; 2], CurveName, bool)> = Vec::new();
+    let mut named: Vec<(&FaceMeet, CurveName, bool)> = Vec::new();
     for side in wires.iter().flatten().flat_map(|wire| wire.iter()) {
         let closes = closes_on_itself(side);
         if closes || a_half(side) {
@@ -4773,13 +4773,13 @@ fn with_the_halves_of_each_whole_curve_joined<'a>(
                 policy,
                 log,
             )?;
-            named.push((&side.carried_by, curve, closes));
+            named.push((side, curve, closes));
         }
     }
     let goes_by = the_name_each_closed_curve_goes_by(
         named
             .iter()
-            .map(|&(carried_by, curve, _)| (carried_by, curve)),
+            .map(|&(side, curve, _)| (&side.carried_by, curve, side.ends[0].point())),
         policy,
     );
     let one_name = |curve: CurveName| goes_by.get(&curve).copied().unwrap_or(curve);
@@ -5047,9 +5047,9 @@ impl Corners {
         let mut corners = Self {
             on_three_planes,
             curves: the_name_each_closed_curve_goes_by(
-                sides
-                    .iter()
-                    .filter_map(|&(meet, curve)| Some((&meet.carried_by, curve?))),
+                sides.iter().filter_map(|&(meet, curve)| {
+                    Some((&meet.carried_by, curve?, meet.ends[0].point()))
+                }),
                 policy,
             ),
             ..Self::default()
@@ -5480,9 +5480,21 @@ fn closes_on_itself(meet: &FaceMeet) -> bool {
 /// ([`which_of_them_a_closed_crossing_runs_round`]), and either curve is a
 /// conic in the plane. Two different conics in one plane share at most four
 /// points, so where the three share more than a point
-/// ([`MeetOfThree::MoreThanAPoint`]) the two are one conic. A ring is left
-/// out: a plane can cut it in two circles, and its pair's name tells only a
-/// plane through its axis's two apart (§378.4).
+/// ([`MeetOfThree::MoreThanAPoint`]) the two are one conic.
+///
+/// **A plane through a ring's axis joins the ball, pipe or cone whose conic is
+/// the circle its name picks.** That plane cuts the ring in two circles, one
+/// either side of the axis, and its name says which
+/// ([`which_of_the_pairs_closed_crossings_it_is`]). Where the plane and the two
+/// curved surfaces share more than a point, the other's conic shares more than
+/// four points with the two circles, so it is one of them; and it is the named
+/// one exactly where a point of it, the start its own side brings, is in the
+/// half-space that picks the named circle. A bar of a bend's tube radius
+/// butted onto the bend's cap is this: the bend's side of the cap's rim is the
+/// cap plane and the ring, and the bar's the cap plane and its pipe. Left
+/// apart, the union had two rims with one face along each and was refused as
+/// not a manifold (Q1470). A plane square to a ring's axis also cuts it in two
+/// circles, but its name does not say which (§378.4), so it is still left out.
 ///
 /// **One plane, at any scale.** Each pair holds the plane as its own side was
 /// cut, and a third solid's face on the same plane can cut the ball first and
@@ -5504,13 +5516,21 @@ fn closes_on_itself(meet: &FaceMeet) -> bool {
 /// the same three: the answer is then refused as not a manifold, as it was
 /// before anything was asked.
 fn the_name_each_closed_curve_goes_by<'a>(
-    closed: impl Iterator<Item = (&'a [Surface; 2], CurveName)>,
+    closed: impl Iterator<Item = (&'a [Surface; 2], CurveName, PredicatePoint)>,
     policy: &Policy,
 ) -> BTreeMap<CurveName, CurveName> {
-    let mut cut_out_of: BTreeMap<CurveName, (Plane, Surface)> = BTreeMap::new();
-    for (carried_by, curve) in closed {
-        if let Some(pair) = the_plane_and_the_ball_pipe_or_cone_of(carried_by) {
-            cut_out_of.entry(curve).or_insert(pair);
+    let mut cut_out_of: BTreeMap<CurveName, (Plane, Surface, PredicatePoint)> = BTreeMap::new();
+    let mut cut_out_of_a_ring: BTreeMap<CurveName, (&[Surface; 2], Plane, Surface)> =
+        BTreeMap::new();
+    for (carried_by, curve, start) in closed {
+        if let Some((flat, round)) = the_plane_and_the_ball_pipe_or_cone_of(carried_by) {
+            cut_out_of.entry(curve).or_insert((flat, round, start));
+        } else if curve.1.is_some()
+            && let Some((flat, ring)) = the_plane_and_the_ring_of(carried_by)
+        {
+            cut_out_of_a_ring
+                .entry(curve)
+                .or_insert((carried_by, flat, ring));
         }
     }
     let mut leads_to: BTreeMap<CurveName, CurveName> = BTreeMap::new();
@@ -5520,28 +5540,53 @@ fn the_name_each_closed_curve_goes_by<'a>(
         }
         name
     };
-    let named: Vec<(&CurveName, &(Plane, Surface))> = cut_out_of.iter().collect();
-    for (at, &(&one, (flat, mine))) in named.iter().enumerate() {
-        for &(&other, (other_flat, theirs)) in &named[at + 1..] {
-            if name_of_the_plane_at_any_scale(&Surface::Plane(*flat))
-                != name_of_the_plane_at_any_scale(&Surface::Plane(*other_flat))
-                || !matches!(
-                    meet_of_three_surfaces(
-                        [&Surface::Plane(*flat), mine, theirs],
-                        policy,
-                        &mut ProvenanceLog::new(),
-                    ),
-                    Ok(MeetOfThree::MoreThanAPoint)
-                )
-            {
-                continue;
+    let join = |leads_to: &mut BTreeMap<CurveName, CurveName>, one, other| {
+        let (one, other) = (leader(leads_to, one), leader(leads_to, other));
+        match one.cmp(&other) {
+            Ordering::Less => leads_to.insert(other, one),
+            Ordering::Greater => leads_to.insert(one, other),
+            Ordering::Equal => None,
+        };
+    };
+    let share_more_than_a_point = |flat: Plane, one: &Surface, other: &Surface| {
+        matches!(
+            meet_of_three_surfaces(
+                [&Surface::Plane(flat), one, other],
+                policy,
+                &mut ProvenanceLog::new(),
+            ),
+            Ok(MeetOfThree::MoreThanAPoint)
+        )
+    };
+    let one_plane = |flat: Plane, other: Plane| {
+        name_of_the_plane_at_any_scale(&Surface::Plane(flat))
+            == name_of_the_plane_at_any_scale(&Surface::Plane(other))
+    };
+    let named: Vec<(&CurveName, &(Plane, Surface, PredicatePoint))> = cut_out_of.iter().collect();
+    for (at, &(&one, &(flat, mine, _))) in named.iter().enumerate() {
+        for &(&other, &(other_flat, theirs, _)) in &named[at + 1..] {
+            if one_plane(flat, other_flat) && share_more_than_a_point(flat, &mine, &theirs) {
+                join(&mut leads_to, one, other);
             }
-            let (one, other) = (leader(&leads_to, one), leader(&leads_to, other));
-            match one.cmp(&other) {
-                Ordering::Less => leads_to.insert(other, one),
-                Ordering::Greater => leads_to.insert(one, other),
-                Ordering::Equal => None,
-            };
+        }
+    }
+    for (&on_the_ring, &(carried_by, flat, ring)) in &cut_out_of_a_ring {
+        for &(&other, &(other_flat, round, start)) in &named {
+            let the_named_circle_keeps_it = matches!(
+                which_of_the_pairs_closed_crossings_it_is(
+                    carried_by,
+                    start,
+                    policy,
+                    &mut ProvenanceLog::new(),
+                ),
+                Ok(which) if which == on_the_ring.1
+            );
+            if one_plane(flat, other_flat)
+                && the_named_circle_keeps_it
+                && share_more_than_a_point(flat, &round, &ring)
+            {
+                join(&mut leads_to, on_the_ring, other);
+            }
         }
     }
     let mut goes_by = BTreeMap::new();
@@ -5565,6 +5610,15 @@ fn the_plane_and_the_ball_pipe_or_cone_of(carried_by: &[Surface; 2]) -> Option<(
         // A kind added to `rcad-geom` after this has not been shown to cross a
         // plane in at most one closed curve.
         _ => None,
+    }
+}
+
+/// The plane and the ring of a pair, or `None` for any other pair.
+fn the_plane_and_the_ring_of(carried_by: &[Surface; 2]) -> Option<(Plane, Surface)> {
+    match carried_by {
+        [Surface::Plane(flat), ring @ Surface::Torus(_)]
+        | [ring @ Surface::Torus(_), Surface::Plane(flat)] => Some((*flat, *ring)),
+        [_, _] => None,
     }
 }
 
