@@ -502,7 +502,7 @@ fn the_face_through_the_origin(model: &Model, solid: SolidKey) -> rcad_geom::Pla
         .solid(solid)
         .expect("this model made the key")
         .faces()
-        .map(|face| face.plane())
+        .filter_map(|face| face.surface().as_plane().copied())
         .find(|plane| plane.coefficients()[3] == 0.0)
         .expect("each solid turned here has a face through the turns' axis")
 }
@@ -741,41 +741,49 @@ fn measures(found: f64, closed_form: f64, wall: Wall) {
 
 mod rings;
 
-/// Probe only: the half bend of ring 4 and tube 1 turned a quarter turn, so it
-/// is on `x ≤ 0` with both caps on `x = 0` facing `+x`, then turned about `z` by
-/// `bend_turns`; and a round bar of radius 10 about `z` from `z = −2` to `2`
-/// cut back to `x ≥ 0`, turned about `z` by `bar_turns`. Every plane of the bar
-/// is square to the ring's axis or through it, and its wall is a pipe about the
-/// ring's axis, so nothing of it is a plane parallel to the axis off it.
-fn probe_pair(
+/// Probe only: a round bar of radius `radius` about `z` from `low` to `high`,
+/// cut back to `x ≥ 0`, given `quarters` exact quarter turns about `z` and then
+/// turned about `z` by `turns`.
+fn probe_half_bar(
     model: &mut Model,
-    bend_turns: [f64; 2],
-    bar_turns: [f64; 2],
-) -> (SolidKey, SolidKey) {
-    let bend = rings::a_bend_turned_and_written_out(model, 4.0, 1.0, 2, 1).unwrap();
-    turned(model, bend, &Axis::z(), bend_turns);
+    radius: f64,
+    [low, high]: [f64; 2],
+    quarters: i32,
+    turns: [f64; 2],
+) -> SolidKey {
     let bar = model
         .add_round_bar(
-            10.0,
-            4.0,
-            &Isometry::translation(Vector::new(0.0, 0.0, -2.0)).unwrap(),
+            radius,
+            high - low,
+            &Isometry::translation(Vector::new(0.0, 0.0, low)).unwrap(),
         )
         .unwrap();
-    let square = ProfileBuilder::new(vec![
-        [-20.0, -20.0],
-        [0.0, -20.0],
-        [0.0, 20.0],
-        [-20.0, 20.0],
-    ])
-    .build(&Policy::certified(), &mut ProvenanceLog::new())
-    .unwrap();
+    let outline = if std::env::var("PROBE_QUADRANT").is_ok() {
+        vec![
+            [-20.0, -20.0],
+            [20.0, -20.0],
+            [20.0, 20.0],
+            [0.0, 20.0],
+            [0.0, 0.0],
+            [-20.0, 0.0],
+        ]
+    } else {
+        vec![[-20.0, -20.0], [0.0, -20.0], [0.0, 20.0], [-20.0, 20.0]]
+    };
+    let square = ProfileBuilder::new(outline)
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap();
     let cut = model
         .add_extrusion(
             &square,
-            7.0,
-            &Isometry::translation(Vector::new(0.0, 0.0, -3.5)).unwrap(),
+            40.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, -20.0)).unwrap(),
         )
         .unwrap();
+    let cut_turned = std::env::var("PROBE_CUT_TURNED").is_ok();
+    if cut_turned {
+        turned(model, cut, &Axis::z(), turns);
+    }
     let half = model
         .fuse(
             &[bar],
@@ -786,41 +794,75 @@ fn probe_pair(
         )
         .unwrap()
         .solids()[0];
-    turned(model, half, &Axis::z(), bar_turns);
-    (bend, half)
+    if quarters != 0 {
+        model
+            .place_solid(
+                half,
+                &Isometry::quarter_turns(&Axis::z(), quarters).unwrap(),
+            )
+            .unwrap();
+    }
+    if !cut_turned {
+        turned(model, half, &Axis::z(), turns);
+    }
+    half
 }
 
 #[test]
 fn probe_q1223_leg_1() {
     let rules = [Rule::Intersection, Rule::Union, Rule::Difference];
-    for far in [30.0] {
-        for half_width in [12.0] {
-            for (bend_turns, block_turns) in [
-                (TO_THE_LONGER_SPELLING, TO_THE_SHORTER_SPELLING),
-                (TO_THE_SHORTER_SPELLING, TO_THE_LONGER_SPELLING),
-                (TO_THE_SHORTER_SPELLING, TO_THE_SHORTER_SPELLING),
-                (TO_THE_LONGER_SPELLING, TO_THE_LONGER_SPELLING),
-            ] {
-                {
-                    let mut model = a_model();
-                    let (bend, slab) = probe_pair(&mut model, bend_turns, block_turns);
-                    let _ = (far, half_width);
-                    for (what, solid) in [("bend", bend), ("slab", slab)] {
-                        for face in model.solid(solid).unwrap().faces() {
-                            if let rcad_geom::Surface::Plane(_) = face.surface() {
-                                eprintln!("{what} plane {:?}", face.plane().coefficients());
-                            }
-                        }
-                    }
+    let quarters = std::env::var("PROBE_QUARTERS")
+        .ok()
+        .map_or(0, |text| text.parse::<i32>().unwrap());
+    for (near_turns, far_turns) in [
+        (TO_THE_SHORTER_SPELLING, TO_THE_LONGER_SPELLING),
+        (TO_THE_LONGER_SPELLING, TO_THE_SHORTER_SPELLING),
+        (TO_THE_SHORTER_SPELLING, TO_THE_SHORTER_SPELLING),
+        (TO_THE_LONGER_SPELLING, TO_THE_LONGER_SPELLING),
+    ] {
+        let unturned = std::env::var("PROBE_UNTURNED").is_ok();
+        let single = std::env::var("PROBE_SINGLE").is_ok();
+        let (near_turns, far_turns) = if unturned {
+            ([0.0, 0.0], [0.0, 0.0])
+        } else {
+            (near_turns, far_turns)
+        };
+        let make = |model: &mut Model, near_first: bool| {
+            let bend = rings::a_bend_turned_and_written_out(model, 4.0, 1.0, 2, 0).unwrap();
+            let near = probe_half_bar(model, 6.0, [-2.0, 2.0], quarters, near_turns);
+            let far = probe_half_bar(model, 6.0, [4.0, 6.0], quarters, far_turns);
+            let others = if single {
+                vec![near]
+            } else if near_first {
+                vec![near, far]
+            } else {
+                vec![far, near]
+            };
+            (bend, others)
+        };
+        {
+            let mut model = a_model();
+            let (bend, others) = make(&mut model, true);
+            for (what, solid) in [("bend", bend), ("near", others[0])] {
+                for face in model.solid(solid).unwrap().faces() {
+                    eprintln!(
+                        "{what} face {:?} {:?}",
+                        face.key(),
+                        face.surface().as_plane().map(|plane| plane.coefficients())
+                    );
                 }
-                for bend_first in [true, false] {
-                    for rule in rules {
+            }
+        }
+        for near_first in [true, false] {
+            for bend_first in [true, false] {
+                for rule in rules {
+                    {
                         let mut model = a_model();
-                        let (bend, slab) = probe_pair(&mut model, bend_turns, block_turns);
+                        let (bend, others) = make(&mut model, near_first);
                         let (arguments, tools) = if bend_first {
-                            (vec![bend], vec![slab])
+                            (vec![bend], others.to_vec())
                         } else {
-                            (vec![slab], vec![bend])
+                            (others.to_vec(), vec![bend])
                         };
                         let answer = model.fuse(
                             &arguments,
@@ -830,7 +872,7 @@ fn probe_q1223_leg_1() {
                             &mut ProvenanceLog::new(),
                         );
                         let what = format!(
-                            "far {far} hw {half_width} bend {bend_turns:?} slab {block_turns:?} bend_first {bend_first} {rule:?}"
+                            "near {near_turns:?} far {far_turns:?} near_first {near_first} bend_first {bend_first} {rule:?}"
                         );
                         match answer {
                             Ok(done) => {
