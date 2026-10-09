@@ -1555,6 +1555,185 @@ fn a_tube_and_a_narrower_block_whose_top_clears_it_are_answered_under_every_rule
     }
 }
 
+/// **The same tube and a block whose top leans and clears it**, under every
+/// rule, both ways round, certified and tolerant: the block `[−14, 14] × [−14,
+/// 14]` from `z = 0` up to the plane `4z = x + 96`. Over the tube, `|x| ≤ 12`,
+/// that top is at `z = 21` or higher, one or more above the tube's.
+///
+/// The two pipes cross the top's plane in ellipses that meet nothing else on
+/// it, as the circles on the square top of
+/// `a_tube_cut_by_a_block_whose_top_clears_it_is_the_tube_from_the_blocks_floor_up`
+/// do. Until Q1174 `cuts::gather` could prove a pipe face clear only of a plane
+/// square to its axis, so it left them on, and every rule was refused the way
+/// Q1090's was, under either policy: no point found inside the ring between
+/// the ellipses, `(0, −4, 24)` to `(0, −12, 24)`.
+///
+/// Nothing of the tube reaches the top, so the answers are the square-topped
+/// block's with the block's volume changed: `28² · 24 = 18816`, the area of its
+/// floor times its height over the floor's middle. They share `2560π`, the
+/// ring stood from `z = 0` to `20`, and the tube is `128π · 30 = 3840π`. The
+/// faces are the square-topped block's too: the top is left whole, the floor
+/// is cut by both pipes, and each pipe is one face.
+#[test]
+fn a_tube_cut_by_a_block_whose_leaning_top_clears_it_is_answered_under_every_rule() {
+    let (tube_alone, block_alone, shared) = (3840.0 * PI, 18816.0, 2560.0 * PI);
+    for (name, policy) in [
+        ("certified", Policy::certified()),
+        ("tolerant", Policy::tolerant(100.0)),
+    ] {
+        for (rule, swapped) in every_rule_both_ways() {
+            let (volume, flat_and_pipe) = match (rule, swapped) {
+                (Rule::Union, _) => (tube_alone + block_alone - shared, [8, 2]),
+                (Rule::Intersection, _) => (shared, [2, 2]),
+                (Rule::Difference, false) => (tube_alone - shared, [2, 2]),
+                (Rule::Difference, true) => (block_alone - shared, [8, 2]),
+                (other, _) => panic!("not a rule this probes: {other:?}"),
+            };
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let outer = model
+                .add_round_bar(12.0, 30.0, &at(0.0, 0.0, -10.0))
+                .expect("a bar of radius twelve");
+            let through = model
+                .add_round_bar(4.0, 34.0, &at(0.0, 0.0, -12.0))
+                .expect("a bar of radius four");
+            let tube = the_one_solid(&mut model, outer, through, Rule::Difference);
+            let block = the_block_under_a_leaning_top(&mut model)
+                .unwrap_or_else(|why| panic!("the block: {why:?}"));
+            let [one, other] = if swapped {
+                [block, tube]
+            } else {
+                [tube, block]
+            };
+            let what = format!("{name}, {rule:?}, swapped {swapped}");
+            let answer = model
+                .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let [solid] = answer.solids() else {
+                panic!("{what}: {:?}", answer.solids());
+            };
+            assert_holds(&model, *solid, volume, &what);
+            let faces: Vec<Surface> = model
+                .solid(*solid)
+                .expect("this model made the key")
+                .faces()
+                .map(|face| face.surface())
+                .collect();
+            let on_pipes = faces
+                .iter()
+                .filter(|surface| matches!(surface, Surface::Cylinder(_)))
+                .count();
+            assert_eq!(
+                [faces.len() - on_pipes, on_pipes],
+                flat_and_pipe,
+                "{what}: {faces:?}"
+            );
+        }
+    }
+}
+
+/// The block `[−14, 14] × [−14, 14]` from `z = 0` up to the leaning plane
+/// `4z = x + 96`, which is at `z = 20.5` over `x = −14` and `27.5` over `x = 14`.
+fn the_block_under_a_leaning_top(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    use Orientation::{Forward, Reversed};
+    let mut builder = SolidBuilder::new();
+    let mut corner = |x: f64, y: f64| {
+        let top = 24.0 + x / 4.0;
+        Ok::<_, rcad_topo::Error>([
+            builder.add_vertex(Point::new(x, y, 0.0))?,
+            builder.add_vertex(Point::new(x, y, top))?,
+        ])
+    };
+    let [left_front_low, left_front_high] = corner(-14.0, -14.0)?;
+    let [left_back_low, left_back_high] = corner(-14.0, 14.0)?;
+    let [right_front_low, right_front_high] = corner(14.0, -14.0)?;
+    let [right_back_low, right_back_high] = corner(14.0, 14.0)?;
+    let mut straight = |start, end| builder.add_edge(start, end, EdgeRun::Straight);
+    let bottom_front = straight(left_front_low, right_front_low)?;
+    let bottom_right = straight(right_front_low, right_back_low)?;
+    let bottom_back = straight(right_back_low, left_back_low)?;
+    let bottom_left = straight(left_back_low, left_front_low)?;
+    let top_front = straight(left_front_high, right_front_high)?;
+    let top_right = straight(right_front_high, right_back_high)?;
+    let top_back = straight(right_back_high, left_back_high)?;
+    let top_left = straight(left_back_high, left_front_high)?;
+    let up_left_front = straight(left_front_low, left_front_high)?;
+    let up_right_front = straight(right_front_low, right_front_high)?;
+    let up_right_back = straight(right_back_low, right_back_high)?;
+    let up_left_back = straight(left_back_low, left_back_high)?;
+
+    let faces = [
+        a_flat_face(
+            &mut builder,
+            Point::new(0.0, 0.0, 24.0),
+            Vector::new(-1.0, 0.0, 4.0),
+            &[
+                (top_front, Forward),
+                (top_right, Forward),
+                (top_back, Forward),
+                (top_left, Forward),
+            ],
+        )?,
+        a_flat_face(
+            &mut builder,
+            Point::new(0.0, 0.0, 0.0),
+            Vector::new(0.0, 0.0, -1.0),
+            &[
+                (bottom_left, Reversed),
+                (bottom_back, Reversed),
+                (bottom_right, Reversed),
+                (bottom_front, Reversed),
+            ],
+        )?,
+        a_flat_face(
+            &mut builder,
+            Point::new(0.0, -14.0, 0.0),
+            Vector::new(0.0, -1.0, 0.0),
+            &[
+                (bottom_front, Forward),
+                (up_right_front, Forward),
+                (top_front, Reversed),
+                (up_left_front, Reversed),
+            ],
+        )?,
+        a_flat_face(
+            &mut builder,
+            Point::new(0.0, 14.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            &[
+                (bottom_back, Forward),
+                (up_left_back, Forward),
+                (top_back, Reversed),
+                (up_right_back, Reversed),
+            ],
+        )?,
+        a_flat_face(
+            &mut builder,
+            Point::new(14.0, 0.0, 0.0),
+            Vector::new(1.0, 0.0, 0.0),
+            &[
+                (bottom_right, Forward),
+                (up_right_back, Forward),
+                (top_right, Reversed),
+                (up_right_front, Reversed),
+            ],
+        )?,
+        a_flat_face(
+            &mut builder,
+            Point::new(-14.0, 0.0, 0.0),
+            Vector::new(-1.0, 0.0, 0.0),
+            &[
+                (bottom_left, Forward),
+                (up_left_front, Forward),
+                (top_left, Reversed),
+                (up_left_back, Reversed),
+            ],
+        )?,
+    ];
+    builder.add_shell(&faces.map(|face| (face, Forward)))?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
 /// **Corners that sweep no area and are not on one line.** A bar of radius 10
 /// cut to the region above three sides: `(6, −8)` to `(2, −9)`, on to
 /// `(−2, −7)`, on to `(−6, −8)`. The cap that is left runs the long way round
