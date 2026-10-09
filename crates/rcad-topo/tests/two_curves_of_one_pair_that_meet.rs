@@ -87,8 +87,8 @@ fn a_ball_on_a_bars_axis_crosses_it_in_two_circles_and_every_fuse_answers() {
 
 /// A pointed cone of slope 1 up to `z = 4` and a bar of radius 1 down its axis
 /// from `z = −2` to 6. The pipe crosses the cone in circles at `z = ±1`, and
-/// the two come together only for a pipe of no width, which cannot be made
-/// (`a_pipe_of_no_width_and_a_cone_of_no_slope_cannot_be_made`).
+/// the two come together only for a pipe of no width or a flat cone, neither of
+/// which can be made (`a_pipe_of_no_width_and_a_flat_cone_cannot_be_made`).
 ///
 /// The bar holds the cone's tip below `z = 1`, `π/3`, and three of the bar
 /// above it. The bar less the cone is the bar below the apex and above the
@@ -333,10 +333,10 @@ fn a_plane_cuts_a_cones_two_nappes_apart_unless_it_runs_through_the_apex() {
 }
 
 /// A pipe on a cone's axis crosses it in two circles at `±r/s` from the apex,
-/// which would meet only for `r = 0` or for `s` without end. `Cylinder::new`
-/// refuses the first and `Cone::new` the second.
+/// which would meet only for `r = 0` or for `s` without end, a cone flattened
+/// into a plane. `Cylinder::new` refuses the first and `Cone::new` the second.
 #[test]
-fn a_pipe_of_no_width_and_a_cone_of_no_slope_cannot_be_made() {
+fn a_pipe_of_no_width_and_a_flat_cone_cannot_be_made() {
     assert!(matches!(
         Cylinder::new(Axis::z(), 0.0),
         Err(rcad_geom::Error::RadiusNotPositive { .. })
@@ -349,9 +349,11 @@ fn a_pipe_of_no_width_and_a_cone_of_no_slope_cannot_be_made() {
     assert_eq!(curves(&cone, &a_pipe([0.0, 0.0], f64::MIN_POSITIVE)), Ok(2));
 }
 
-/// The coaxial pairs §347.5's table leaves out give circles round one axis at
-/// heights apart, and the heights come together only at a tangency, where
-/// `intersect` names one circle, or at a cone's apex.
+/// The coaxial pairs §347.5's table leaves out, a ring with a pipe, a ball or a
+/// cone on its axis, a cone and a ball, and two cones, give circles round one
+/// axis at heights apart. The heights come together only at a tangency, where
+/// `intersect` names one circle, or at a cone's apex, where two cones with one
+/// apex touch at that point and nowhere else.
 #[test]
 fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
     let ring = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a ring"));
@@ -384,6 +386,16 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
         curves(&ring, &a_ball([0.0, 0.0, 0.0], 3.0)),
         Ok(1),
         "a ball in the hole"
+    );
+    assert_eq!(
+        curves(&ring, &a_cone(-6.0, 0.75)),
+        Ok(2),
+        "a cone through the tube"
+    );
+    assert_eq!(
+        curves(&ring, &a_cone(-7.0, 0.75)),
+        Ok(1),
+        "a cone resting on the tube"
     );
     let cone = Surface::Cone(Cone::new(Axis::z(), 0.75).expect("a cone"));
     assert_eq!(
@@ -540,6 +552,13 @@ fn a_ball(centre: [f64; 3], radius: f64) -> Surface {
     Surface::Sphere(
         Sphere::new(Point::new(centre[0], centre[1], centre[2]), radius).expect("a ball"),
     )
+}
+
+/// The cone up `z` with its apex at height `apex`, widening by `slope`.
+fn a_cone(apex: f64, slope: f64) -> Surface {
+    let axis =
+        Axis::new(Point::new(0.0, 0.0, apex), Vector::new(0.0, 0.0, 1.0)).expect("an axis up z");
+    Surface::Cone(Cone::new(axis, slope).expect("a cone"))
 }
 
 fn a_block_along_a_bar(model: &mut Model) -> [SolidKey; 2] {
