@@ -5590,7 +5590,7 @@ impl Edges {
         let key = (
             [from.min(to), from.max(to)],
             named,
-            which_arc_of_a_circle_this_is(meet, from, to),
+            which_arc_of_a_circle_this_is(meet, from, to, policy, log)?,
             which_open_crossing_of_a_cone_this_is(meet, from, to),
             carried_by
                 .iter()
@@ -6512,15 +6512,50 @@ fn which_arc_of_a_circle_this_is(
     meet: &FaceMeet,
     from: usize,
     to: usize,
-) -> Option<([[u64; 9]; 2], bool)> {
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<([[u64; 9]; 2], bool)>> {
+    // A whole ball's seam is walked down and back up by the one face, with a
+    // material side that names the half of the meridian it is and not a side
+    // (`Arrangement::the_whole_surface`), so the rule below would read its two
+    // walks as two arcs. It is one edge, and it has only the one arc to be.
+    let a_seam = meet
+        .ends
+        .iter()
+        .any(|end| matches!(end, MeetPoint::APoleOfAClosedSurface { .. }));
+    if from == to || a_seam {
+        return Ok(None);
+    }
     let (named, mine_is_the_first, spelled_the_other_way_round) = match meet.carried_by {
         [ball @ Surface::Sphere(_), other @ Surface::Sphere(_)] => {
             let named = [name_of_surface_bits(&ball), name_of_surface_bits(&other)];
             match named[0].cmp(&named[1]) {
                 Ordering::Less => (named, true, false),
                 Ordering::Greater => ([named[1], named[0]], false, false),
-                Ordering::Equal => return None,
+                Ordering::Equal => return Ok(None),
             }
+        }
+        [flat @ Surface::Plane(_), ring @ Surface::Torus(_)]
+        | [ring @ Surface::Torus(_), flat @ Surface::Plane(_)] => {
+            let one_of_two_circles = the_picker_naming_the_circle_through(
+                &flat,
+                &ring,
+                meet.ends[0].point(),
+                policy,
+                log,
+            )?
+            .is_some();
+            if !one_of_two_circles {
+                return Ok(None);
+            }
+            (
+                [
+                    name_of_the_surface_either_way_round(&ring),
+                    name_of_the_plane_at_any_scale(&flat),
+                ],
+                matches!(meet.carried_by[0], Surface::Torus(_)),
+                is_written_the_other_way_round(&flat),
+            )
         }
         [
             one @ Surface::Cone(_),
@@ -6537,11 +6572,14 @@ fn which_arc_of_a_circle_this_is(
             match named[0].cmp(&named[1]) {
                 Ordering::Less => (named, true, false),
                 Ordering::Greater => ([named[1], named[0]], false, false),
-                Ordering::Equal => return None,
+                Ordering::Equal => return Ok(None),
             }
         }
         [_, _] => {
-            let round_one = which_of_them_a_closed_crossing_runs_round(&meet.carried_by)?;
+            let Some(round_one) = which_of_them_a_closed_crossing_runs_round(&meet.carried_by)
+            else {
+                return Ok(None);
+            };
             let flat = &meet.carried_by[1 - round_one];
             (
                 [
@@ -6553,17 +6591,6 @@ fn which_arc_of_a_circle_this_is(
             )
         }
     };
-    // A whole ball's seam is walked down and back up by the one face, with a
-    // material side that names the half of the meridian it is and not a side
-    // (`Arrangement::the_whole_surface`), so the rule below would read its two
-    // walks as two arcs. It is one edge, and it has only the one arc to be.
-    let a_seam = meet
-        .ends
-        .iter()
-        .any(|end| matches!(end, MeetPoint::APoleOfAClosedSurface { .. }));
-    if from == to || a_seam {
-        return None;
-    }
     let walked_from_the_far_corner = from > to;
     let along_mine_then_partner = match meet.material_side {
         Decision::Neg => true,
@@ -6571,11 +6598,11 @@ fn which_arc_of_a_circle_this_is(
         other => panic!("a side of a face was walked with no material side: {other:?}"),
     };
     let along_the_first_then_the_second = along_mine_then_partner == mine_is_the_first;
-    Some((
+    Ok(Some((
         named,
         (along_the_first_then_the_second != walked_from_the_far_corner)
             != spelled_the_other_way_round,
-    ))
+    )))
 }
 
 /// Which crossing of a plane and a cone a side is on, when that crossing is a
