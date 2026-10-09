@@ -793,6 +793,11 @@ pub enum MeetsAt {
 /// it does not move: `2ᵏ·from + t·2ᵏ·along` is `2ᵏ` times the point at `t`. What
 /// does move is how far a ring's quartic reaches over a touch, a length to the
 /// fourth, and it is slid back down. `docs/decisions.md` §349.8.
+///
+/// **The slide is not kept for tiny numbers.** Any refusal is asked again once
+/// the binades are off centre. A quarter bend of ring one and tube `1 − 2⁻³⁰`,
+/// cast at from its cap's corner `(2⁻³⁰, 0, 0)`, is answered slid by `2¹⁴`,
+/// where [`real_roots`](crate::real_roots) gives up on the quartic as written.
 pub fn where_a_line_meets_a_surface(
     from: [Interval; 3],
     along: [Interval; 3],
