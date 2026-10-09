@@ -122,49 +122,10 @@ pub(crate) fn split_a_face(
 ) -> Result<Split> {
     let cuts = canonical_cut_surfaces(face);
     let arrangement = Arrangement::of(face, &cuts, policy, log)?;
-    let split = Split {
+    Ok(Split {
         pieces: arrangement.pieces()?,
         names_of_one_point: arrangement.names_of_one_point(),
-    };
-    if std::env::var("RCAD_TRACE").is_ok() {
-        let short = |s: &Surface| match s.as_plane() {
-            Some(p) => format!("{:.4?}", p.coefficients()),
-            None => "curved".to_owned(),
-        };
-        let at = |p: &MeetPoint| match p {
-            MeetPoint::Existing { vertex, point } => {
-                format!("V{vertex:?}@{:?}", middle_of(*point))
-            }
-            MeetPoint::OfThreeSurfaces {
-                surfaces, point, ..
-            } => format!(
-                "M[{}|{}|{}]@{:?}",
-                short(&surfaces[0]),
-                short(&surfaces[1]),
-                short(&surfaces[2]),
-                middle_of(*point)
-            ),
-            other => format!("{other:?}"),
-        };
-        eprintln!("FACE {} cuts {}", short(&face.surface), cuts.len());
-        for piece in &split.pieces {
-            eprintln!("  PIECE");
-            for wire in &piece.wires {
-                for side in wire {
-                    eprintln!(
-                        "    side along {} from {} to {}",
-                        short(&side.carried_by[1]),
-                        at(&side.ends[0]),
-                        at(&side.ends[1])
-                    );
-                }
-            }
-        }
-        for one in &split.names_of_one_point {
-            eprintln!("  ONE POINT {} folds {}", at(&one.kept), one.folded.len());
-        }
-    }
-    Ok(split)
+    })
 }
 
 /// What cutting one face leaves.
