@@ -36,6 +36,8 @@
 //! | any of those the other way round | the same answer negated |
 //! | two balls | the second centre minus the first |
 //! | two cones of one slope on one axis | the first apex minus the second |
+//! | a thin pipe and a fat one swallowing it, the loop where the thin one comes out | the thin pipe's stored axis direction negated |
+//! | the same, the loop where it goes in | the thin pipe's stored axis direction |
 //!
 //! The pipe row takes a line of work to see and is worth having written down.
 //! Its crossing lies in the cutting plane, its tangent is `n × ρ` for the
@@ -82,6 +84,19 @@
 //! `the_way_a_circle_round_a_cones_axis_winds` has the product. Two cones of
 //! one slope cross in one circle halfway between their apexes and need no
 //! picker.
+//!
+//! # Two pipes, where one swallows the other, are not a conic and still order
+//!
+//! A fat pipe crosses a thin one whose whole cross-section it swallows in two
+//! quartic loops, neither flat. Each runs once round the thin pipe's axis, so
+//! looked at down that axis three points of one are three points of the thin
+//! pipe's circle in the same order, and the determinant reads them down it:
+//! the circle is what is convex. The loop where the thin pipe comes out of the
+//! fat one winds about the thin axis negated, and which loop a run is on is
+//! read off the point it starts from, against the plane through the fat axis
+//! that `intersect`'s picker puts between them (Q1483).
+//! `the_way_a_loop_round_a_thin_pipe_winds` has the product. Two pipes that
+//! cross in one loop run back and forth round both axes, and are refused.
 
 use core::cmp::Ordering;
 
@@ -123,8 +138,10 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair whose crossing is
-/// not one closed curve lying in a plane: two planes, a plane along a pipe's
-/// axis, two pipes, a ball against a pipe whose axis misses its centre, a plane
+/// not one closed curve lying in a plane, nor one of the two loops a fat pipe
+/// crosses a thin one it swallows whole in: two planes, a plane along a pipe's
+/// axis, two pipes of one radius, two running the same way, two whose
+/// crossing is one loop, a ball against a pipe whose axis misses its centre, a plane
 /// cutting a torus in a quartic, every pair with a torus on it but a plane, a
 /// cone against a pipe, a second cone or a ball off its axis, two cones of one
 /// apex, and a ball on a cone's axis that misses it or runs through its apex.
@@ -195,15 +212,17 @@ impl WhichWayItWinds {
 
 /// The normal the crossing of these two surfaces runs anticlockwise about.
 ///
-/// `from` is a point on the crossing, and only the rows with two circles read
+/// `from` is a point on the crossing, and only the rows with two curves read
 /// it: a plane square to a torus's axis, a ball on a pipe's axis, and a cone on
 /// one axis with a pipe, a cone or a ball each cut two circles that wind
-/// opposite ways, and which one this is is not a fact about the pair.
+/// opposite ways, and a fat pipe cuts a thin one it swallows in two loops that
+/// do, and which one this is is not a fact about the pair.
 ///
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair that does not cross
-/// in one closed curve lying in a plane, and
+/// in one closed curve lying in a plane, or in one of the two loops round a
+/// thin pipe's axis a fat pipe swallowing it crosses it in, and
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
 /// resting on a torus's tube and a ball inscribed in a pipe or a cone.
 ///

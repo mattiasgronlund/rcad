@@ -5579,8 +5579,12 @@ impl<'f> Arrangement<'f> {
     /// cone's axis, and the axis is the cone's: `intersect` names no other cone
     /// against a ball. A pipe through the ball's centre is the same, about the
     /// pipe's axis; a pipe off the centre cuts it in quartic loops, which
-    /// [`how_a_crossing_runs`] refuses before anything asks this. Each curve
-    /// then splits the surface in two, and so does
+    /// [`how_a_crossing_runs`] refuses before anything asks this. Two pipes
+    /// are the one pair read another way: a fat pipe cuts a thin one it
+    /// swallows in two loops round the thin pipe's axis, the half-space's flat
+    /// surface holds the fat pipe's axis rather than facing along either, and
+    /// [`Arrangement::whether_past_the_plane_between_two_loops`] answers there
+    /// (Q1483). Each curve then splits the surface in two, and so does
     /// the surface's own curve on the half-space's flat surface, where there is
     /// one. The curve lies inside the half-space and the other curve outside it,
     /// so every point of the surface past the flat surface is on the curve's
@@ -7330,10 +7334,12 @@ fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
 /// # Errors
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a pair whose crossing is
-/// none of an endless straight line, one closed curve lying in a plane, or a
-/// plane's endless bend across a cone — a ball against a pipe off its axis, or
-/// two pipes. That is a **gap**: the curve is there and ordering points along it
-/// takes the marcher rather than a determinant (§34.10).
+/// none of an endless straight line, one closed curve lying in a plane, a
+/// plane's endless bend across a cone, or one of the two loops a fat pipe
+/// crosses a thin one in — a ball against a pipe off its axis, or two pipes
+/// whose crossing is one loop. That is a **gap**: the curve is there and
+/// ordering points along it takes the marcher rather than a determinant
+/// (§34.10).
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when the shape of the
 /// crossing itself cannot be told — two pipes whose axes cannot be shown to run
@@ -8237,7 +8243,9 @@ fn a_pair_that_crosses_in_a_conic(
         // two side-by-side pipes, which cut straight lines. `false` is right
         // for them here — a pair of endless lines is not a closed conic — and
         // they never reach here anyway: `a_pair_that_crosses_in_straight_lines`
-        // answers them one step up.
+        // answers them one step up. Two pipes whose crossing is two loops round
+        // the thinner one's axis are no conic either, and
+        // `one_of_two_loops_round_a_thin_pipe` lets them through beside this.
         | (Surface::Cylinder(_), Surface::Cylinder(_) | Surface::Torus(_))
         | (Surface::Cone(_), Surface::Torus(_))
         | (
