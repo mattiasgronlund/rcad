@@ -97,6 +97,19 @@
 //! the tube, was cut along the ellipses where the pipes cross it and refused
 //! the same way, because the band answered only for a plane square to it.
 //!
+//! **A cut whose faces meet the face only on its boundary is marked too**
+//! (Q1470, `docs/decisions.md` §422). Where every face carrying a surface
+//! lies on one closed side of a plane and the face it cuts lies on the other,
+//! or the box round the face it cuts is strictly past that plane, the two
+//! share no point inside that face ([`meets_it_only_on_its_boundary`]). Inside
+//! it the crossing is then no edge of the answer, even where it meets other
+//! crossings. A bar butted onto a bend's cap is the shape: its pipe meets the
+//! ring in a loop whose halves lie past each other's cap. Such a crossing can
+//! still split an edge where it meets one, so it is not dropped here: each face
+//! carries the list ([`BakedFace::cuts_that_reach_only_its_boundary`]), each
+//! edge learns its neighbour's, and the arrangement leaves the crossing out
+//! only where no node of it splits a crossing that is kept.
+//!
 //! # Two gaps, left open on purpose
 //!
 //! A solid is only refused for running through itself when the overlap is
@@ -112,10 +125,14 @@
 //! §7.4's catalogue of degenerate inputs, which is where the cases that would
 //! close them get written.
 
-use rcad_geom::{MeetOfThree, Surface, SurfaceMeet, intersect, meet_of_three_surfaces};
+use std::collections::HashMap;
+
+use rcad_geom::{
+    MeetOfThree, PlaneAgreement, Surface, SurfaceMeet, intersect, meet_of_three_surfaces,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
 
-use crate::{Error, Result};
+use crate::{EdgeKey, Error, Result};
 
 use super::Sameness;
 use super::arrange::stretches_of_a_line_inside;
@@ -125,8 +142,10 @@ use super::bake::{BakedFace, BakedSolid};
 ///
 /// Every face is cut against every other face, in its own solid and in every
 /// other, whichever group each came from. The header says why the solid's own
-/// planes are in there, and why a crossing that splits nothing and lies where
-/// its face never reaches is then left off.
+/// planes are in there, why a crossing that splits nothing and lies where
+/// its face never reaches is then left off, and why each face is told which
+/// cuts meet it only on its boundary, and each edge what the face across it
+/// was told.
 ///
 /// # Errors
 ///
@@ -171,7 +190,12 @@ pub(crate) fn gather(
         for (face, cuts) in faces.into_iter().enumerate() {
             let kept = the_cuts_left_on(&solids[solid].faces[face], &cuts);
             solids[solid].faces[face].cuts.extend(kept);
+            solids[solid].faces[face].cuts_that_reach_only_its_boundary =
+                the_cuts_that_reach_only_its_boundary(&cuts);
         }
+    }
+    for solid in solids.iter_mut() {
+        tell_each_edge_what_its_neighbour_leaves_out(solid);
     }
     Ok(())
 }
@@ -184,17 +208,108 @@ struct ACutFound {
     /// whole surface of the face it cuts, so that no point of their crossing is
     /// on that face.
     its_face_misses_this_surface: bool,
+    /// Whether `cut` is the surface of the face that carries it and that face
+    /// provably meets the face it cuts on that face's boundary alone
+    /// ([`meets_it_only_on_its_boundary`]).
+    reaches_only_its_boundary: bool,
 }
 
 fn found_on(face: &BakedFace, against: &BakedFace, cuts: Vec<Surface>) -> Vec<ACutFound> {
     let its_face_misses_this_surface =
         !cuts.is_empty() && a_face_misses_a_surface_by_its_band(against, &face.surface);
+    let reaches_only_its_boundary =
+        !cuts.is_empty() && meets_it_only_on_its_boundary(face, against);
     cuts.into_iter()
         .map(|cut| ACutFound {
             cut,
             its_face_misses_this_surface,
+            reaches_only_its_boundary: reaches_only_its_boundary && cut == against.surface,
         })
         .collect()
+}
+
+/// Whether every point `against` shares with `face` is on `face`'s boundary,
+/// by a plane `against` lies on one side of: `face` lies on the other side,
+/// so the two share points of the plane alone and `face`'s inside misses the
+/// plane ([`BakedFace::lies_in`]); or the box round `face` is strictly on the
+/// other side, so the two share nothing.
+fn meets_it_only_on_its_boundary(face: &BakedFace, against: &BakedFace) -> bool {
+    let anywhere_on_the_face = face.bounds.as_a_point_anywhere_inside();
+    against.lies_in.iter().any(|theirs| {
+        let on_the_other_side = face.lies_in.iter().any(|mine| {
+            let agreement = mine.plane.agreement_with(&theirs.plane);
+            (agreement == PlaneAgreement::SameWay && mine.behind != theirs.behind)
+                || (agreement == PlaneAgreement::OppositeWay && mine.behind == theirs.behind)
+        });
+        on_the_other_side
+            || anywhere_on_the_face
+                .is_some_and(|anywhere| theirs.plane.side_of_point(anywhere) == theirs.past_it())
+    })
+}
+
+/// Each surface every finding of which reaches only the face's boundary.
+fn the_cuts_that_reach_only_its_boundary(found: &[ACutFound]) -> Vec<Surface> {
+    let mut left_out: Vec<Surface> = Vec::new();
+    for one in found.iter().filter(|one| one.reaches_only_its_boundary) {
+        if !left_out.contains(&one.cut)
+            && found
+                .iter()
+                .filter(|other| other.cut == one.cut)
+                .all(|other| other.reaches_only_its_boundary)
+        {
+            left_out.push(one.cut);
+        }
+    }
+    left_out
+}
+
+/// Fill in [`BakedEdge::its_neighbour_leaves_out`](super::bake::BakedEdge::its_neighbour_leaves_out)
+/// on every edge of `solid`: the cuts every other face of the solid along one
+/// of the edge's input edges leaves out.
+fn tell_each_edge_what_its_neighbour_leaves_out(solid: &mut BakedSolid) {
+    if solid
+        .faces
+        .iter()
+        .all(|face| face.cuts_that_reach_only_its_boundary.is_empty())
+    {
+        return;
+    }
+    let mut faces_along: HashMap<EdgeKey, Vec<usize>> = HashMap::new();
+    for (index, face) in solid.faces.iter().enumerate() {
+        for edge in face.wires.iter().flatten() {
+            for key in &edge.keys {
+                faces_along.entry(*key).or_default().push(index);
+            }
+        }
+    }
+    for index in 0..solid.faces.len() {
+        for wire in 0..solid.faces[index].wires.len() {
+            for position in 0..solid.faces[index].wires[wire].len() {
+                let neighbours: Vec<usize> = solid.faces[index].wires[wire][position]
+                    .keys
+                    .iter()
+                    .flat_map(|key| faces_along[key].iter().copied())
+                    .filter(|&other| other != index)
+                    .collect();
+                let Some((&first, rest)) = neighbours.split_first() else {
+                    continue;
+                };
+                let left_out: Vec<Surface> = solid.faces[first]
+                    .cuts_that_reach_only_its_boundary
+                    .iter()
+                    .copied()
+                    .filter(|cut| {
+                        rest.iter().all(|&other| {
+                            solid.faces[other]
+                                .cuts_that_reach_only_its_boundary
+                                .contains(cut)
+                        })
+                    })
+                    .collect();
+                solid.faces[index].wires[wire][position].its_neighbour_leaves_out = left_out;
+            }
+        }
+    }
 }
 
 /// The cuts to hang on `face`: every one found, but a crossing that splits
