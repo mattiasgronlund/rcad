@@ -418,3 +418,17 @@ Pappus gives every answer, the shared part being a quarter of
 
 **Open as Q1402** (tier 1): the piece is built from the wrong pair of halves,
 and a lead is named there but not run — not traced here.
+
+### 378.11 Q1402 closed: all twelve now answer, within error of Pappus
+
+Row Q1387 (merged `0315d17e`, second lane `d5a2cbc7`) gave
+`which_arc_of_a_circle_this_is` in `assemble.rs` a plane-and-ring arm: a
+section naming the two circles a plane cuts a ring in, and why the sign rule
+holds on each. All twelve fuses §378.10 found refusing
+`ACurvedFaceGoesRightRoundWithNoSeam` now answer instead, validated and
+within error of Pappus's shared part. The old pin,
+`a_bend_and_a_bar_through_its_tube_on_its_axis_are_refused_where_a_piece_of_the_bend_is_meshed`,
+is gone; the new one,
+`a_quarter_bend_and_the_bar_of_its_own_radius_fuse_by_every_rule_to_what_pappus_gives`
+in `tests/a_bend_under_two_planes.rs`, pins the twelve answers. Q1402 is
+closed, `done:d5a2cbc7`.

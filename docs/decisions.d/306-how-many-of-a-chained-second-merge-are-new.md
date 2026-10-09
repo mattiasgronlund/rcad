@@ -498,7 +498,7 @@ since nothing has touched the directory since that night's 08:15 merge:
 
 Six real nights, chained onto the persistent corpus by construction exactly
 as §295.7 designed and Q237 built — not a lab reproduction of one or two
-cycles — add between **8.2 KB and 108.0 KB a night** (21,927-108,028 bytes;
+cycles — add between **8.2 KB and 108.0 KB a night** (8,221-108,028 bytes;
 decimal KB, the same unit §291.3's MB/h figures use), averaging 37.6 KB/night
 (225,725 bytes ÷ 6). **Neither estimate holds.** Every one of the six nights
 sits below §306.6's 150-280 KB/night band, including the single biggest

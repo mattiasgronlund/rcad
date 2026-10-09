@@ -445,7 +445,7 @@ const THE_WIDER_GRID_COMPARES_THIS_MANY: usize = 168;
 /// `mise exec -- just t swapping_the_two_sides_of_a_bar_leaning_through_a_block_changes_not_one_bit --no-capture`
 /// and `mise exec -- just t what_a_block_and_a_leaning_bar_take_up_adds_up_inside_a_stated_share_of_what_they_declare --no-capture`.
 ///
-/// **Q114 (92da92b6) fixed the fuse this family exercises most** — the wrong
+/// **Q114 (d6c64ba4) fixed the fuse this family exercises most** — the wrong
 /// `ResultIsNotManifold` §191 found — so both laws now reach the same share:
 /// commutativity **118 of 140** and inclusion and exclusion **59 of 70**,
 /// both 84.29%, up from the 44.78% and 26.87% the old quarter floor was sized
@@ -480,7 +480,7 @@ const TURNED_ROUND_REFUSALS_MUST_STAY_BELOW: f64 = 0.03;
 ///
 /// Measured at **63 of 450, 14.0%**, over the shipped corpus
 /// (`mise exec -- just t how_often_a_certified_fuse_of_a_bar_leaning_through_a_block_refuses --no-capture`),
-/// down from 298 of 429, 69.5%, before Q114 (92da92b6) fixed the wrong
+/// down from 298 of 429, 69.5%, before Q114 (d6c64ba4) fixed the wrong
 /// `ResultIsNotManifold` §191 found. Seventy-five per cent is 61 points above
 /// the measured rate. It is a ceiling on a family that still refuses more
 /// than most, so its job is only to say out loud when that gets worse;
@@ -3762,7 +3762,7 @@ fn a_ball_and_block_union_turned_about_any_of_26_axes_is_still_a_sound_model() {
 /// transversal — the floor and the roof cut the bar in ellipses whose nearest
 /// point to a side wall is more than a unit off it, and the caps stand more
 /// than a unit clear of the block — so no edge of the true union can have more
-/// than two faces along it. **Fixed by Q114 (92da92b6)**: the wall below the
+/// than two faces along it. **Fixed by Q114 (d6c64ba4)**: the wall below the
 /// block crosses the planes `x = 0` and `y = 0` in two ellipses meeting at
 /// `(0, 0, -6.23)` and `(0, 0, -2.77)`, and an arc named without its plane put
 /// arcs of both ellipses onto one edge.
