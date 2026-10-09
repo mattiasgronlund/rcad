@@ -203,13 +203,27 @@ A non-finite value out of whole-number input, reported as a geometry error, is
 worth its own look. The cone apex's `CannotNameWhichPieceOfACrossingThisIs` has
 no demonstration yet.
 
-**One wrong answer, parked:** a bar standing wholly inside a thicker bar,
-touching nothing, **panics** at `fuse/assemble.rs:750` ("a ring of a joined face
-came back winding neither way: Zero") under `Union` both ways round and under
-thick∖thin. Pinned as
-`a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_panic`;
-the property cell `a_bar_inside_a_bar_touching_its_wall` is parked with it,
-because its control row is that bar.
+**The panic is fixed; both shapes answer now.** A bar standing wholly inside a
+thicker bar, touching nothing, used to panic at `fuse/assemble.rs:750` ("a ring
+of a joined face came back winding neither way: Zero") under `Union` both ways
+round and under thick∖thin, until `d12913d4` stopped the panic and `71feed66`
+made the fuse answer. `a_bar_standing_wholly_inside_a_thicker_bar_is_united_and_hollowed_without_a_panic`
+now answers the union as the thick bar, `16π`, and the difference as the thick
+bar with a bar-shaped hole sealed inside it, `14π`; Q368 (`fuses_that_touch.rs`)
+took the ignore off that pin, and the property cell
+`a_bar_inside_a_bar_touching_its_wall` runs un-ignored with it, because its
+control row is that bar.
+
+A bar standing wholly inside the wall of a tube panicked the same family's way,
+in `rings_round`, with *"2 rings enclose no area to say which it is"*: the
+bar's pipe crosses a cap's plane in a circle, so the joined cap's outline and
+its hole are each a whole circle with one corner, and a corner that encloses no
+area cannot say which circle is which. It answers since Q359
+(`a_bar_inside_a_tubes_wall.rs`):
+`a_bar_inside_a_tubes_wall_united_with_it_is_the_tube` answers the union as the
+tube as it stood, `32π`, whichever solid goes first, and
+`a_tube_less_a_bar_inside_its_wall_is_hollowed_by_the_bar` answers the tube less
+the bar as the tube with a bar-shaped hole sealed inside its wall, `32π − π/2`.
 
 The torus cells never reach their touch — the control refuses on the
 plane–torus quartic as `how_often_a_fuse_with_a_torus_refuses.rs` proves — and
@@ -243,3 +257,6 @@ arm). In order of harm:
    (§191.5), which is every fillet.
 
 Each is a lane of its own that writes `src/`. None is dispatched here.
+
+**Done (Q568): item 1 above is fixed.** §191.5 says what the panic's two
+configurations answer now.

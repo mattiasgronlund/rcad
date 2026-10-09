@@ -6643,6 +6643,12 @@ fuzz-cones-and-tori duration="60" corpus_root="" fork="0": (fuzz-target "where_a
 # With one, that directory becomes the *second* argument and libFuzzer treats it
 # as a read-only seed, writing only to the first (§81).
 #
+# `corpus_root`, when given, must be absolute, or already relative to this
+# `fuzz/` directory, because this recipe `cd`'s there before using it: a path
+# relative to the repository root silently resolves to an empty directory
+# here, and the run then merges only the tracked corpus. Q271's first attempt
+# passed one that way before catching it, §297.3.
+#
 # `fork` is how many jobs libFuzzer runs at once, and **0 means don't fork at
 # all**, which is what a hand-run `just fuzz 60` wants: one crash, one report, and
 # the run stops so you can read it. Only the night asks for a number, because only
@@ -8329,8 +8335,14 @@ check-timing-hooked-calls-selftest:
     ret
     ASM
     as "$dir/offender.s" -o "$dir/offender.o"
+    # Linked for the same reason as the fixtures below: an unlinked `.o`
+    # leaves `call outside_the_crate_helper` as a zero displacement and a
+    # relocation, so `objdump` names whatever instruction follows the call —
+    # which happens to be `outside_the_crate_helper` only because it sits
+    # right after `rcad_fuzz_timing_reaches_out` in this file.
+    ld -pie -e rcad_fuzz_timing_reaches_out -o "$dir/offender" "$dir/offender.o"
 
-    if offender_got=$(fuzz/timing-hooked-calls.py "$dir/offender.o"); then
+    if offender_got=$(fuzz/timing-hooked-calls.py "$dir/offender"); then
         echo "$offender_got"
         echo "timing-hooked-calls.py exited 0 against a fixture where rcad_fuzz_timing calls out to a function that calls bcmp — it must count as an offender"
         exit 1
@@ -8361,8 +8373,13 @@ check-timing-hooked-calls-selftest:
     call *%rax
     ASM
     as "$dir/computed.s" -o "$dir/computed.o"
+    # Linked for the same reason: an unlinked `call helper_with_a_computed_call`
+    # would also be a zero displacement and a relocation, naming whatever
+    # instruction follows it rather than the function this fixture means to
+    # reach.
+    ld -pie -e rcad_fuzz_timing_computed_through_helper -o "$dir/computed" "$dir/computed.o"
 
-    computed_got=$(fuzz/timing-hooked-calls.py "$dir/computed.o") \
+    computed_got=$(fuzz/timing-hooked-calls.py "$dir/computed") \
         || { echo "$computed_got"; echo "timing-hooked-calls.py exited non-zero against a fixture where the only thing reached is a computed call, never a hook — a call this scan cannot see past is not itself an offender"; exit 1; }
     computed_line="  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function: 1"
     printf '%s\n' "$computed_got" | grep -qxF "$computed_line" || {
@@ -12612,6 +12629,89 @@ check-queue-selftest:
         "skip T7 (tier 1): its docs/ meets Q1's docs/a.md, held by lane:lane-q1" \
         "skip Q2 (tier 2): its docs/a.md meets Q1's docs/a.md, held by lane:lane-q1")" ] \
         || fail "blocked is not exactly the skip line of each ready row the running lane holds back, in the fill's order"
+
+    # `take` and `add` run `queue-page` afterward (§397.8); point it and the
+    # fuzz-log count it reads at scratch directories, never at a real clone's.
+    export RCAD_QUEUE_PAGE_DIR="$dir/queue-page"
+    export RCAD_FUZZ_LOGS="$dir/no-fuzz-logs"
+
+    # Q1505: `add` refuses a description whose first word is a class (§352)
+    # with punctuation stuck on after it, and still tags a row whose first
+    # word is exactly a class, with nothing after it, as today.
+    cp "$dir/good.md" "$dir/addfix.md"
+    qf() { "$j" --justfile '{{ justfile() }}' --working-directory "$repo" --set queue_file "$dir/addfix.md" queue "$@"; }
+
+    got=$(qf add 1 opus - 'wrong/B: a wrong answer with a colon stuck on §230' 2>&1) \
+        && fail "add accepted 'wrong/B:' as a class with punctuation after it"
+    grep -qF "'wrong/B:' is a class with punctuation after it; write exactly 'wrong/B', with nothing after it" <<<"$got" \
+        || fail "add did not explain the colon refusal"
+
+    got=$(qf add 5 opus - 'refuses/C, a refusal with a comma stuck on §230' 2>&1) \
+        && fail "add accepted 'refuses/C,' as a class with punctuation after it"
+    grep -qF "'refuses/C,' is a class with punctuation after it; write exactly 'refuses/C', with nothing after it" <<<"$got" \
+        || fail "add did not explain the comma refusal"
+
+    got=$(qf add 1 opus - 'wrong/B a tier one row with its class exactly §230' 2>&1) \
+        || fail "add refused a class with nothing stuck after it"
+    grep -q "^$got .*wrong/B a tier one row with its class exactly §230\$" "$dir/addfix.md" \
+        || fail "add did not write the row with its class still tagging it"
+
+    # Q1436: `take` lets a stale `lane:` state in another worktree's copy
+    # through when main's own history of the queue file already held that
+    # exact state for the row, and refuses one main's history never showed
+    # for it, which looks like a take racing this one.
+    hub="$dir/q1436-hub"
+    g() { git -C "$1" -c user.name=selftest -c user.email=selftest@invalid "${@:2}"; }
+    mkdir -p "$hub/docs/decisions.d"
+    printf '## 230. One queue\n' > "$hub/docs/decisions.d/sections.md"
+    cat > "$hub/docs/queue.md" <<'MD'
+    # Queue
+
+    ## Tier 1
+
+    ```
+    Q1  1  todo  opus  docs/a.md  a row to take §230
+    ```
+
+    ## Closed
+
+    ```
+    ```
+    MD
+    touch "$hub/docs/a.md"
+    g "$hub" init -q -b main
+    g "$hub" add -A
+    g "$hub" commit -q -m root
+    sed -i 's/^Q1  1  todo /Q1  1  lane:lane-old /' "$hub/docs/queue.md"
+    g "$hub" add -A
+    g "$hub" commit -q -m take
+    sed -i 's/^Q1  1  lane:lane-old /Q1  1  todo /' "$hub/docs/queue.md"
+    g "$hub" add -A
+    g "$hub" commit -q -m release
+
+    a="$dir/q1436-a"
+    b="$dir/q1436-b"
+    stale="$dir/q1436-stale"
+    racer="$dir/q1436-racer"
+    g "$hub" worktree add -q -b q1436-a "$a" main
+    g "$hub" worktree add -q -b q1436-b "$b" main
+    g "$hub" worktree add -q -b q1436-stale "$stale" main
+    g "$hub" worktree add -q -b q1436-racer "$racer" main
+    sed -i 's/^Q1  1  todo /Q1  1  lane:lane-old /' "$stale/docs/queue.md"
+    sed -i 's/^Q1  1  todo /Q1  1  lane:lane-racer /' "$racer/docs/queue.md"
+
+    got=$("$j" --justfile '{{ justfile() }}' --working-directory "$b" queue take Q1 lane-new-b 2>&1) \
+        && fail "take let through lane:lane-racer, a state main's history never held for Q1"
+    grep -qF "Q1 is lane:lane-racer in $racer's copy, a branch main has never shown for it, so this looks like a take racing this one" <<<"$got" \
+        || fail "take did not name the racing copy and the state main never showed"
+    grep -q '^Q1  1  todo ' "$b/docs/queue.md" || fail "a refused take wrote Q1's file anyway"
+
+    g "$hub" worktree remove --force "$racer"
+
+    got=$("$j" --justfile '{{ justfile() }}' --working-directory "$a" queue take Q1 lane-new-a 2>&1) \
+        || fail "take refused a stale copy showing lane:lane-old, a state main's history already held for Q1"
+    grep -q '^Q1  1  lane:lane-new-a ' "$a/docs/queue.md" \
+        || fail "take did not write lane:lane-new-a once the only other lane: state left was one main's history held"
 
     exit 0
 

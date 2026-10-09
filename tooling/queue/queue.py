@@ -313,10 +313,17 @@ def take_step(queue, claims, here, args, batch):
     hold = claims.holds().get(row_id)
     if hold and hold["tree"] != here.top:
         raise Refused(f"{row_id} is held by {hold['branch']} from {hold['tree']} since {hold['time']}")
+    history = None
     for tree, text in here.other_copies(lanes_too=False):
         theirs = Queue(text).find(row_id) if row_id in text else None
         if theirs and theirs.state.startswith("lane:") and theirs.state != row.state:
-            raise Refused(f"{row_id} is {theirs.state} in {tree.path}'s copy, which has not reached this one")
+            if history is None:
+                history = row_states_in_main_history(here, row_id)
+            if theirs.state not in history:
+                raise Refused(
+                    f"{row_id} is {theirs.state} in {tree.path}'s copy, a branch main has never shown "
+                    f"for it, so this looks like a take racing this one"
+                )
     # A lane: row this worktree holds, or dispatched by hand here, may be
     # taken again for a new branch: that is a failed lane re-dispatched.
     if not row.state.startswith("lane:"):
@@ -341,12 +348,44 @@ def refuse_unless_ready(queue, row):
     raise Refused(f"{row.id} is not ready: its state is {row.state}")
 
 
+def main_ref():
+    """`origin/main` when this clone has one, else `main`, or `None` with neither."""
+    for candidate in ("origin/main", "main"):
+        found = subprocess.run(["git", "rev-parse", "--verify", "--quiet", candidate], capture_output=True)
+        if found.returncode == 0:
+            return candidate
+    return None
+
+
+def row_states_in_main_history(here, row_id):
+    """Every state `row_id` has held across main's own history of this queue file (§230.2).
+
+    A `lane:<branch>` another copy still shows for this row is a stale copy
+    catching up, not a racing take, when main's history already carried that
+    exact state for this row at some commit — `take_step` lets the take go
+    then, and refuses only a branch main has never shown (Q1436).
+    """
+    ref = main_ref()
+    if ref is None:
+        return set()
+    shas = git("log", "--format=%H", ref, "--", here.relative, cwd=here.top).split()
+    states = set()
+    for sha in shas:
+        text = git("show", f"{sha}:{here.relative}", cwd=here.top, check=False)
+        if row_id in text:
+            found = Queue(text).find(row_id)
+            if found:
+                states.add(found.state)
+    return states
+
+
 def add_step(queue, claims, here, args, batch):
     if len(args) < 4:
         raise Refused("usage: add <tier> <model> <write set> <what, ending in §N>")
     tier, model, write_set = args[:3]
     what = " ".join(args[3:])
     refuse_unless_a_tier(tier)
+    refuse_class_with_punctuation(what)
     refuse_conflicted(here, queue)
     block = queue.block_for_tier(tier)
     if block is None:
@@ -363,6 +402,29 @@ def add_step(queue, claims, here, args, batch):
     queue.append_to_block(block, text)
     batch.added_ids.append(row_id)
     return queue, row_id, ("add", row_id, now(), here.top, text)
+
+
+CLASS_PREFIX = re.compile(CLASS.pattern[:-1])
+
+
+def refuse_class_with_punctuation(what):
+    """Refuse a description whose first word is a class (§352) with
+    punctuation stuck on after it, such as `refuses/C:` or `wrong/B,`.
+
+    `Row.tag` only ever reads a first word that matches `CLASS` exactly, so a
+    first word like `refuses/C:` goes in with no tag at all: Q1305's lane
+    wrote two rows that way, check-queue refused them, and `just land` stopped
+    at its queue apply (§352.3). A first word that is exactly a class, with
+    nothing after it, is not refused: it tags the row, as today.
+    """
+    first = what.split(None, 1)[0] if what else ""
+    if CLASS.match(first):
+        return
+    stuck = CLASS_PREFIX.match(first)
+    if stuck and not re.search(r"[A-Za-z0-9]", first[stuck.end():]):
+        raise Refused(
+            f"'{first}' is a class with punctuation after it; write exactly '{stuck.group(0)}', with nothing after it"
+        )
 
 
 def branch_copies(relative):
