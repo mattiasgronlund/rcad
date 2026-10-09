@@ -6586,7 +6586,7 @@ fn which_curve_it_is(
 ///
 /// One curve can come under two of these, cut by two pairs, and then goes by
 /// the least of them ([`the_name_each_closed_curve_goes_by`]).
-type CurveName = ([[u64; 9]; 2], Option<[u64; 4]>);
+type CurveName = ([[u64; 9]; 2], WhichCurveOfThePair);
 
 /// The name of the closed crossing of `carried_by` through `point`, the same
 /// from both faces along it and in both argument orders.
@@ -6698,7 +6698,7 @@ fn which_of_the_pairs_closed_crossings_it_is(
     point: PredicatePoint,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Option<[u64; 4]>> {
+) -> Result<WhichCurveOfThePair> {
     match carried_by {
         [Surface::Plane(_), Surface::Torus(_)]
         | [Surface::Torus(_), Surface::Plane(_)]
@@ -6709,15 +6709,12 @@ fn which_of_the_pairs_closed_crossings_it_is(
         | [Surface::Cylinder(_) | Surface::Sphere(_), Surface::Cone(_)] => (),
         [_, _] => return Ok(None),
     }
-    let Some(Picker::InFrontOf(this_circle)) =
+    let Some(this_circle) =
         the_picker_naming_the_circle_through(&carried_by[0], &carried_by[1], point, policy, log)?
     else {
         return Ok(None);
     };
-    let [x, y, z] = this_circle.normal().components();
-    Ok(Some(
-        [x, y, z, this_circle.offset()].map(|number| (number + 0.0).to_bits()),
-    ))
+    Ok(which_curve_of_the_pair(&[this_circle]))
 }
 
 /// Which curve of its pair a closed crossing's corner is on: what picks the
