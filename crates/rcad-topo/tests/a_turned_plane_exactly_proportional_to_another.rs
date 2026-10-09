@@ -44,6 +44,34 @@
 //! planes were spelled alike or negated
 //! (`a_ball_on_a_bars_cap_a_block_spells_an_ulp_apart_in_scale`).
 //!
+//! **A ring's circle on such a plane is not seen either way.** §330.3 guessed a
+//! second place too: `which_of_the_pairs_closed_crossings_it_is` names each of
+//! the two circles a plane through a ring's axis cuts by the half-space
+//! `intersect` picks it with, whose normal is the ring's axis crossed with the
+//! plane's normal as stored and not scaled to length one, so a circle on
+//! `(c, c, 0, 0)` and on `(c′, c′, 0, 0)` could be given two names. Three
+//! families were built against a half bend of ring four and tube one to reach
+//! it, and none did:
+//!
+//! - Blocks turned onto `x = y`, as above, were refused
+//!   `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` in every fuse with the two
+//!   spellings alike too, since faces of the blocks off the ring's axis reach
+//!   the ring's box (a probe at `27aaea79`).
+//! - Two bars of radius six about the ring's axis cut back to `x ≥ 0` answered
+//!   every fuse unturned. Turned onto `x + y = 0` by either pair of turns, every
+//!   fuse with the two spellings alike was refused
+//!   `AFaceTrimmedByACurveThisCannotFollow` at a bar's bottom cap, and so were
+//!   the mixed spellings with the bars first; the bend first, those were refused
+//!   as below (a probe at `941790ef`).
+//! - Two bars cut back to the quarter `x ≤ 0`, `y ≥ 0` and turned onto
+//!   `x + y = 0` and `x = y`, one holding the whole circle at `3π/4` round the
+//!   ring on its face, answer every fuse with both spelling the plane alike, and
+//!   are refused `Undecidable` on `side of plane` in every fuse with the two
+//!   spellings mixed
+//!   (`a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_an_ulp_apart_are_refused`).
+//!   A sign that could not be settled is not a circle named twice, so this does
+//!   not show the guess, and it does not show that no shape reaches it.
+//!
 //! # What each volume is held to
 //!
 //! Each block takes half of the cap of height two, `26π/3`, and half of its
@@ -54,9 +82,11 @@
 
 use core::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI};
 
-use rcad_geom::{Axis, Deflection, Isometry, PlaneAgreement, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, PlaneAgreement, SIDE_OF_PLANE, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+
+mod rings;
 
 const RADIUS: f64 = 5.0;
 
@@ -437,6 +467,132 @@ fn a_ball_on_a_bars_cap_a_block_spells_an_ulp_apart_in_scale() {
     }
 }
 
+/// **A ring's circle on a plane through its axis, every face on that plane
+/// spelled alike.** A half bend of ring four and tube one, from `+x` round
+/// through `+y` to `−x`, and two bars of radius six about its axis, each cut
+/// back to the quarter `x ≤ 0`, `y ≥ 0` and turned about `z` by one pair of
+/// turns, which puts its two flat faces on `x + y = 0` and `x = y`. The near
+/// bar, from `z = −2` to `z = 2`, holds the bend's eighth from `3π/4` to `π`
+/// round the ring, with the whole circle at `3π/4` on its face on `x + y = 0`;
+/// the far bar, from `z = 4` to `z = 6`, touches nothing. With both bars turned
+/// by the same pair, either pair, every fuse answers its closed form whichever
+/// bar is named first and whichever side the bend is on.
+///
+/// The bend holds `4π²` and its eighth `π²`; the bars hold `36π` and `18π`.
+/// Each volume is held to the error its measurement gives, since a ring's
+/// wall is not a chord-for-chord wall the way [`Wall`] counts one.
+#[test]
+fn a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_alike_answer() {
+    let c = f64::from_bits(FRAC_1_SQRT_2.to_bits() - 1);
+    let the_bend = 4.0 * PI * PI;
+    let its_eighth = PI * PI;
+    let the_bars = [36.0 * PI, 18.0 * PI];
+    for (turns, spelled) in [
+        (TO_THE_SHORTER_SPELLING, c),
+        (TO_THE_LONGER_SPELLING, FRAC_1_SQRT_2),
+    ] {
+        let mut model = a_model();
+        let (_, bars) = the_half_bend_and_two_quarter_bars(&mut model, [turns, turns], true);
+        for bar in bars {
+            the_faces_through_the_axis_are(&model, bar, spelled);
+        }
+
+        for near_first in [true, false] {
+            for bend_first in [true, false] {
+                let what = format!("near bar first {near_first}, bend first {bend_first}");
+                let fuse = |rule| {
+                    let mut model = a_model();
+                    let (bend, bars) =
+                        the_half_bend_and_two_quarter_bars(&mut model, [turns, turns], near_first);
+                    let answer = fused(&mut model, bend_first, bend, bars, rule);
+                    (answer.len(), volume_and_error_of(&model, &answer))
+                };
+
+                let (count, measured) = fuse(Rule::Intersection);
+                assert_eq!(count, 1, "only the near bar holds any of the bend: {what}");
+                within_its_error(measured, its_eighth, &what);
+
+                let (count, measured) = fuse(Rule::Union);
+                assert_eq!(count, 2, "the far bar stands apart: {what}");
+                within_its_error(
+                    measured,
+                    the_bars[0] + the_bend - its_eighth + the_bars[1],
+                    &what,
+                );
+
+                let (count, measured) = fuse(Rule::Difference);
+                if bend_first {
+                    assert_eq!(count, 1, "the bend less its eighth is one solid: {what}");
+                    within_its_error(measured, the_bend - its_eighth, &what);
+                } else {
+                    assert_eq!(count, 2, "the two bars do not touch: {what}");
+                    within_its_error(measured, the_bars[0] - its_eighth + the_bars[1], &what);
+                }
+            }
+        }
+    }
+}
+
+/// **The same with the two bars spelling the plane an ulp apart in scale is
+/// refused, and not as a circle named twice.** The near bar turned to spell
+/// its faces with `c` and the far bar with `c′`, or the other way round, every
+/// fuse is refused [`Error::Undecidable`] with its last record on `side of
+/// plane`, whichever bar is named first and whichever side the bend is on. A
+/// circle given two names would have been refused `ResultIsNotManifold`, as the
+/// ball's and the bar's were before the closed edge's name folded the plane at
+/// any scale; this refusal is a sign that could not be settled, so whether
+/// `which_of_the_pairs_closed_crossings_it_is` gives the circle at `3π/4` one
+/// name or two is not seen here.
+#[test]
+fn a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_an_ulp_apart_are_refused() {
+    let c = f64::from_bits(FRAC_1_SQRT_2.to_bits() - 1);
+    for (turns, [near_spelled, far_spelled]) in [
+        (
+            [TO_THE_SHORTER_SPELLING, TO_THE_LONGER_SPELLING],
+            [c, FRAC_1_SQRT_2],
+        ),
+        (
+            [TO_THE_LONGER_SPELLING, TO_THE_SHORTER_SPELLING],
+            [FRAC_1_SQRT_2, c],
+        ),
+    ] {
+        let mut model = a_model();
+        let (_, [near, far]) = the_half_bend_and_two_quarter_bars(&mut model, turns, true);
+        the_faces_through_the_axis_are(&model, near, near_spelled);
+        the_faces_through_the_axis_are(&model, far, far_spelled);
+
+        for near_first in [true, false] {
+            for bend_first in [true, false] {
+                for rule in [Rule::Intersection, Rule::Union, Rule::Difference] {
+                    let mut model = a_model();
+                    let (bend, bars) =
+                        the_half_bend_and_two_quarter_bars(&mut model, turns, near_first);
+                    let (arguments, tools) = if bend_first {
+                        (vec![bend], bars.to_vec())
+                    } else {
+                        (bars.to_vec(), vec![bend])
+                    };
+                    let refused = model.fuse(
+                        &arguments,
+                        &tools,
+                        rule,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    );
+                    let what = format!(
+                        "{rule:?}, near bar first {near_first}, bend first {bend_first}: {refused:?}"
+                    );
+                    let Err(Error::Undecidable { records }) = refused else {
+                        panic!("{what}");
+                    };
+                    let last = records.records().last().expect("a refusal names why");
+                    assert_eq!(last.predicate(), SIDE_OF_PLANE, "{what}");
+                }
+            }
+        }
+    }
+}
+
 /// Which way a round wall of this area bounds the solid being measured.
 enum Wall {
     /// The solid is on the ball's side of it, so its mesh measures under.
@@ -663,6 +819,85 @@ fn the_bar_and_the_block_on_y_equals_z(
     }
 }
 
+/// The half bend of ring four and tube one about `z`, written out where it
+/// sits, and the near and the far quarter bar, the near one turned by
+/// `turns[0]` and the far one by `turns[1]`; the near one first when
+/// `near_first`.
+fn the_half_bend_and_two_quarter_bars(
+    model: &mut Model,
+    turns: [[f64; 2]; 2],
+    near_first: bool,
+) -> (SolidKey, [SolidKey; 2]) {
+    let bend = rings::a_bend_turned_and_written_out(model, 4.0, 1.0, 2, 0)
+        .expect("a half bend described this way is a solid");
+    let near = a_quarter_bar(model, [-2.0, 2.0], turns[0]);
+    let far = a_quarter_bar(model, [4.0, 6.0], turns[1]);
+    (bend, if near_first { [near, far] } else { [far, near] })
+}
+
+/// A bar of radius six about `z` from `low` to `high`, cut back to the quarter
+/// `x ≤ 0`, `y ≥ 0` by taking an L-shaped block away, and then turned about
+/// `z` by each of `turns`, which come to an eighth of a turn and put its two
+/// flat faces on `x + y = 0` and `x = y`.
+fn a_quarter_bar(model: &mut Model, [low, high]: [f64; 2], turns: [f64; 2]) -> SolidKey {
+    let bar = model
+        .add_round_bar(
+            6.0,
+            high - low,
+            &Isometry::translation(Vector::new(0.0, 0.0, low)).expect("a finite placement"),
+        )
+        .expect("a bar of radius six");
+    let all_but_the_quarter = ProfileBuilder::new(vec![
+        [-20.0, -20.0],
+        [20.0, -20.0],
+        [20.0, 20.0],
+        [0.0, 20.0],
+        [0.0, 0.0],
+        [-20.0, 0.0],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("an L");
+    let cut = model
+        .add_extrusion(
+            &all_but_the_quarter,
+            40.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, -20.0)).expect("a finite placement"),
+        )
+        .expect("building a prism needs no decision");
+    let answer = model
+        .fuse(
+            &[bar],
+            &[cut],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar less a block cut square about its axis is answered");
+    let &[quarter] = answer.solids() else {
+        panic!("a quarter of a bar is one solid, not {:?}", answer.solids());
+    };
+    turned(model, quarter, &Axis::z(), turns);
+    quarter
+}
+
+/// That `solid`'s two flat faces through the axis are spelled
+/// `(spelled, spelled, 0, 0)` and `(spelled, −spelled, 0, 0)`: `x + y = 0` and
+/// `x = y`, each facing out of a quarter bar turned an eighth of a turn.
+fn the_faces_through_the_axis_are(model: &Model, solid: SolidKey, spelled: f64) {
+    let mut found: Vec<[f64; 4]> = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .filter_map(|face| face.surface().as_plane().map(|plane| plane.coefficients()))
+        .filter(|numbers| numbers[3] == 0.0)
+        .collect();
+    found.sort_by(|one, other| other[1].total_cmp(&one[1]));
+    assert_eq!(
+        found,
+        [[spelled, spelled, 0.0, 0.0], [spelled, -spelled, 0.0, 0.0]]
+    );
+}
+
 /// Turn `solid` about `axis` by each of `turns` in order.
 fn turned(model: &mut Model, solid: SolidKey, axis: &Axis, turns: [f64; 2]) {
     for angle in turns {
@@ -707,10 +942,16 @@ fn fused(
 }
 
 fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
+    volume_and_error_of(model, solids).0
+}
+
+/// What `solids` hold together at [`DEFLECTION`], and how far off their
+/// measurements say that can be.
+fn volume_and_error_of(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
     solids
         .iter()
         .map(|&solid| {
-            model
+            let measured = model
                 .solid(solid)
                 .expect("this model made the key")
                 .measure(
@@ -718,10 +959,12 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
                     &Policy::certified(),
                     &mut ProvenanceLog::new(),
                 )
-                .expect("the answer measures")
-                .volume()
+                .expect("the answer measures");
+            (measured.volume(), measured.volume_error())
         })
-        .sum()
+        .fold((0.0, 0.0), |(volume, error), (one, its)| {
+            (volume + one, error + its)
+        })
 }
 
 /// Insist a volume is off its closed form on the side `wall` says, by no more
@@ -739,172 +982,11 @@ fn measures(found: f64, closed_form: f64, wall: Wall) {
     );
 }
 
-mod rings;
-
-/// Probe only: a round bar of radius `radius` about `z` from `low` to `high`,
-/// cut back to `x ≥ 0`, given `quarters` exact quarter turns about `z` and then
-/// turned about `z` by `turns`.
-fn probe_half_bar(
-    model: &mut Model,
-    radius: f64,
-    [low, high]: [f64; 2],
-    quarters: i32,
-    turns: [f64; 2],
-) -> SolidKey {
-    let bar = model
-        .add_round_bar(
-            radius,
-            high - low,
-            &Isometry::translation(Vector::new(0.0, 0.0, low)).unwrap(),
-        )
-        .unwrap();
-    let outline = if std::env::var("PROBE_QUADRANT").is_ok() {
-        vec![
-            [-20.0, -20.0],
-            [20.0, -20.0],
-            [20.0, 20.0],
-            [0.0, 20.0],
-            [0.0, 0.0],
-            [-20.0, 0.0],
-        ]
-    } else {
-        vec![[-20.0, -20.0], [0.0, -20.0], [0.0, 20.0], [-20.0, 20.0]]
-    };
-    let square = ProfileBuilder::new(outline)
-        .build(&Policy::certified(), &mut ProvenanceLog::new())
-        .unwrap();
-    let cut = model
-        .add_extrusion(
-            &square,
-            40.0,
-            &Isometry::translation(Vector::new(0.0, 0.0, -20.0)).unwrap(),
-        )
-        .unwrap();
-    let cut_turned = std::env::var("PROBE_CUT_TURNED").is_ok();
-    if cut_turned {
-        turned(model, cut, &Axis::z(), turns);
-    }
-    let half = model
-        .fuse(
-            &[bar],
-            &[cut],
-            Rule::Difference,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .unwrap()
-        .solids()[0];
-    if quarters != 0 {
-        model
-            .place_solid(
-                half,
-                &Isometry::quarter_turns(&Axis::z(), quarters).unwrap(),
-            )
-            .unwrap();
-    }
-    if !cut_turned {
-        turned(model, half, &Axis::z(), turns);
-    }
-    half
-}
-
-#[test]
-fn probe_q1223_leg_1() {
-    let rules = [Rule::Intersection, Rule::Union, Rule::Difference];
-    let quarters = std::env::var("PROBE_QUARTERS")
-        .ok()
-        .map_or(0, |text| text.parse::<i32>().unwrap());
-    for (near_turns, far_turns) in [
-        (TO_THE_SHORTER_SPELLING, TO_THE_LONGER_SPELLING),
-        (TO_THE_LONGER_SPELLING, TO_THE_SHORTER_SPELLING),
-        (TO_THE_SHORTER_SPELLING, TO_THE_SHORTER_SPELLING),
-        (TO_THE_LONGER_SPELLING, TO_THE_LONGER_SPELLING),
-    ] {
-        let unturned = std::env::var("PROBE_UNTURNED").is_ok();
-        let single = std::env::var("PROBE_SINGLE").is_ok();
-        let (near_turns, far_turns) = if unturned {
-            ([0.0, 0.0], [0.0, 0.0])
-        } else {
-            (near_turns, far_turns)
-        };
-        let make = |model: &mut Model, near_first: bool| {
-            let bend = rings::a_bend_turned_and_written_out(model, 4.0, 1.0, 2, 0).unwrap();
-            let near = probe_half_bar(model, 6.0, [-2.0, 2.0], quarters, near_turns);
-            let far = probe_half_bar(model, 6.0, [4.0, 6.0], quarters, far_turns);
-            let others = if single {
-                vec![near]
-            } else if near_first {
-                vec![near, far]
-            } else {
-                vec![far, near]
-            };
-            (bend, others)
-        };
-        {
-            let mut model = a_model();
-            let (bend, others) = make(&mut model, true);
-            for (what, solid) in [("bend", bend), ("near", others[0])] {
-                for face in model.solid(solid).unwrap().faces() {
-                    eprintln!(
-                        "{what} face {:?} {:?}",
-                        face.key(),
-                        face.surface().as_plane().map(|plane| plane.coefficients())
-                    );
-                }
-            }
-        }
-        for near_first in [true, false] {
-            for bend_first in [true, false] {
-                for rule in rules {
-                    {
-                        let mut model = a_model();
-                        let (bend, others) = make(&mut model, near_first);
-                        let (arguments, tools) = if bend_first {
-                            (vec![bend], others.to_vec())
-                        } else {
-                            (others.to_vec(), vec![bend])
-                        };
-                        let answer = model.fuse(
-                            &arguments,
-                            &tools,
-                            rule,
-                            &Policy::certified(),
-                            &mut ProvenanceLog::new(),
-                        );
-                        let what = format!(
-                            "near {near_turns:?} far {far_turns:?} near_first {near_first} bend_first {bend_first} {rule:?}"
-                        );
-                        match answer {
-                            Ok(done) => {
-                                let solids = done.solids().to_vec();
-                                let valid = model
-                                    .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                                    .is_ok();
-                                let measured: Vec<(f64, f64)> = solids
-                                    .iter()
-                                    .map(|&solid| {
-                                        model
-                                            .solid(solid)
-                                            .unwrap()
-                                            .measure(
-                                                Deflection::of(DEFLECTION).unwrap(),
-                                                &Policy::certified(),
-                                                &mut ProvenanceLog::new(),
-                                            )
-                                            .map(|m| (m.volume(), m.volume_error()))
-                                            .unwrap_or((f64::NAN, f64::NAN))
-                                    })
-                                    .collect();
-                                eprintln!(
-                                    "{what}: {} solids, {measured:?}, valid {valid}",
-                                    solids.len()
-                                );
-                            }
-                            Err(why) => eprintln!("{what}: refused {why:?}"),
-                        }
-                    }
-                }
-            }
-        }
-    }
+/// Insist a volume is off its closed form by no more than the error its
+/// measurement gives.
+fn within_its_error((found, error): (f64, f64), closed_form: f64, what: &str) {
+    assert!(
+        (found - closed_form).abs() <= error,
+        "{what}: measured {found} give or take {error}, closed form {closed_form}"
+    );
 }
