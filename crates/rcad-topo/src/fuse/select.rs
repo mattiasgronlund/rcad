@@ -3893,7 +3893,7 @@ mod tests {
     /// held (Q1305).
     #[test]
     fn a_plate_beyond_a_rings_outer_circle_holds_no_point_of_the_inner_disk() {
-        let plate = a_flat_piece_on_z_0(&[
+        let plate = a_flat_piece_on_z_0(&[&[
             (
                 a_pipe_about_z(10.0),
                 [0.0, -10.0],
@@ -3903,7 +3903,7 @@ mod tests {
             (the_plane_x_0(), [0.0, 10.0], [0.0, 5.0], Decision::Neg),
             (a_ring_of_four(), [0.0, 5.0], [0.0, -5.0], Decision::Pos),
             (the_plane_x_0(), [0.0, -5.0], [0.0, -10.0], Decision::Neg),
-        ]);
+        ]]);
         let holds = |at: [f64; 3]| {
             the_piece_holds_asked_as_selection_asks(&plate, PredicatePoint::from(at))
         };
@@ -3919,10 +3919,10 @@ mod tests {
     /// until that was counted it held none (Q1305).
     #[test]
     fn a_half_disk_inside_a_rings_inner_circle_holds_its_own_points() {
-        let half_disk = a_flat_piece_on_z_0(&[
+        let half_disk = a_flat_piece_on_z_0(&[&[
             (a_ring_of_four(), [0.0, -3.0], [0.0, 3.0], Decision::Pos),
             (the_plane_x_0(), [0.0, 3.0], [0.0, -3.0], Decision::Neg),
-        ]);
+        ]]);
         let holds = |at: [f64; 3]| {
             the_piece_holds_asked_as_selection_asks(&half_disk, PredicatePoint::from(at))
         };
@@ -3932,31 +3932,104 @@ mod tests {
         assert_eq!(holds([7.5, 0.0, 0.0]), Some(false), "beyond the tube");
     }
 
-    /// A piece of the plane `z = 0`, facing `+z`, walked side by side: each
-    /// side's partner, its two ends in the plane, and which side of the partner
-    /// the piece's material is on.
-    fn a_flat_piece_on_z_0(sides: &[(Surface, [f64; 2], [f64; 2], Decision)]) -> Piece {
+    /// The square of 20 round the axis on `z = 0`, less the disk inside the
+    /// whole outer circle, of 5, that the ring of four round a tube of one cuts
+    /// it in. The ring's sign takes the tube out of that disk and not the inner
+    /// disk inside it, so read by that sign alone the circle took nothing out
+    /// of the square there, and a point of the inner disk was held (Q1501).
+    #[test]
+    fn a_square_less_a_rings_whole_outer_circle_holds_no_point_of_the_inner_disk() {
+        let side_of_the_square = |normal: [f64; 2]| {
+            Surface::Plane(
+                Plane::from_coefficients([normal[0], normal[1], 0.0, -10.0]).expect("a normal"),
+            )
+        };
+        let plate = a_flat_piece_on_z_0(&[
+            &[
+                (
+                    side_of_the_square([1.0, 0.0]),
+                    [10.0, -10.0],
+                    [10.0, 10.0],
+                    Decision::Neg,
+                ),
+                (
+                    side_of_the_square([0.0, 1.0]),
+                    [10.0, 10.0],
+                    [-10.0, 10.0],
+                    Decision::Neg,
+                ),
+                (
+                    side_of_the_square([-1.0, 0.0]),
+                    [-10.0, 10.0],
+                    [-10.0, -10.0],
+                    Decision::Neg,
+                ),
+                (
+                    side_of_the_square([0.0, -1.0]),
+                    [-10.0, -10.0],
+                    [10.0, -10.0],
+                    Decision::Neg,
+                ),
+            ],
+            &[(a_ring_of_four(), [5.0, 0.0], [5.0, 0.0], Decision::Pos)],
+        ]);
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&plate, PredicatePoint::from(at))
+        };
+        assert_eq!(holds([7.5, 0.0, 0.0]), Some(true), "on the plate");
+        assert_eq!(holds([4.0, 0.0, 0.0]), Some(false), "in the tube");
+        assert_eq!(holds([2.5, 0.0, 0.0]), Some(false), "in the inner disk");
+        assert_eq!(holds([0.0, 0.0, 0.0]), Some(false), "on the axis");
+        assert_eq!(holds([12.5, 0.0, 0.0]), Some(false), "past the square");
+    }
+
+    /// The disk inside the whole inner circle, of 3, that the ring of four
+    /// round a tube of one cuts `z = 0` in. Its material is outside the ring,
+    /// and so is every point of the disk, so read by the ring's sign alone the
+    /// circle bounded nothing and the disk held none of its own points (Q1501).
+    #[test]
+    fn a_disk_inside_a_rings_whole_inner_circle_holds_its_own_points() {
+        let disk =
+            a_flat_piece_on_z_0(&[&[(a_ring_of_four(), [3.0, 0.0], [3.0, 0.0], Decision::Pos)]]);
+        let holds =
+            |at: [f64; 3]| the_piece_holds_asked_as_selection_asks(&disk, PredicatePoint::from(at));
+        assert_eq!(holds([0.0, 0.0, 0.0]), Some(true), "on the axis");
+        assert_eq!(holds([-1.5, 1.5, 0.0]), Some(true), "in the disk");
+        assert_eq!(holds([4.0, 0.0, 0.0]), Some(false), "in the tube");
+        assert_eq!(holds([7.5, 0.0, 0.0]), Some(false), "beyond the tube");
+    }
+
+    /// A piece of the plane `z = 0`, facing `+z`, walked wire by wire and side
+    /// by side: each side's partner, its two ends in the plane, and which side
+    /// of the partner the piece's material is on. A wire of one side whose two
+    /// ends are the same goes right round a closed curve.
+    fn a_flat_piece_on_z_0(wires: &[&[(Surface, [f64; 2], [f64; 2], Decision)]]) -> Piece {
         let flat = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
         let corner = |[x, y]: [f64; 2], partner: Surface| MeetPoint::OfThreeSurfaces {
             surfaces: [Surface::Plane(flat), partner, the_plane_x_0()],
             which: 0,
             point: PredicatePoint::from([x, y, 0.0]),
         };
-        let wire = sides
+        let wires = wires
             .iter()
-            .map(|&(partner, from, to, material_side)| FaceMeet {
-                carried_by: [Surface::Plane(flat), partner],
-                ends: [corner(from, partner), corner(to, partner)],
-                material_side,
-                along: SmallVec::new(),
-                approximation: None,
+            .map(|sides| {
+                sides
+                    .iter()
+                    .map(|&(partner, from, to, material_side)| FaceMeet {
+                        carried_by: [Surface::Plane(flat), partner],
+                        ends: [corner(from, partner), corner(to, partner)],
+                        material_side,
+                        along: SmallVec::new(),
+                        approximation: None,
+                    })
+                    .collect()
             })
             .collect();
         Piece {
             ancestors: Vec::new(),
             surface: Surface::Plane(flat),
             orientation: Orientation::Forward,
-            wires: vec![wire],
+            wires,
             is_the_whole_surface: false,
         }
     }
