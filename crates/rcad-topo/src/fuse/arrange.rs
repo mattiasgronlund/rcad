@@ -1043,6 +1043,7 @@ impl<'f> Arrangement<'f> {
         arrangement.leave_out_the_cuts_clear_of_the_face();
         arrangement.place_the_meets(policy, log)?;
         arrangement.place_the_touches();
+        arrangement.leave_out_the_cuts_that_reach_only_the_boundary();
         arrangement.start_every_closed_crossing_that_has_no_node(log)?;
         arrangement.work_out_how_each_crossing_runs(log)?;
         arrangement.merge_points_that_are_one_point(policy, log)?;
@@ -1690,16 +1691,7 @@ impl<'f> Arrangement<'f> {
         let Some(anywhere_on_the_face) = self.face.bounds.as_a_point_anywhere_inside() else {
             return;
         };
-        let mut kept = vec![false; self.crossings.len()];
-        for &crossing in self.crossing_of_edge.iter().flatten() {
-            kept[crossing] = true;
-        }
-        for &corner in self.node_of_corner.iter().flatten() {
-            for &crossing in &self.nodes[corner].crossings {
-                kept[crossing] = true;
-            }
-        }
-        for (crossing, kept) in kept.into_iter().enumerate() {
+        for (crossing, kept) in self.crossings_never_left_out().into_iter().enumerate() {
             if kept {
                 continue;
             }
@@ -1709,6 +1701,21 @@ impl<'f> Arrangement<'f> {
                 other => panic!("a decision nothing here knows: {other:?}"),
             }
         }
+    }
+
+    /// Whether each crossing is one a boundary edge runs along or a corner of
+    /// the face is on, which no rule here leaves out.
+    fn crossings_never_left_out(&self) -> Vec<bool> {
+        let mut kept = vec![false; self.crossings.len()];
+        for &crossing in self.crossing_of_edge.iter().flatten() {
+            kept[crossing] = true;
+        }
+        for &corner in self.node_of_corner.iter().flatten() {
+            for &crossing in &self.nodes[corner].crossings {
+                kept[crossing] = true;
+            }
+        }
+        kept
     }
 
     /// One node per place two crossings meet, unless a corner already is that
@@ -2230,6 +2237,116 @@ impl<'f> Arrangement<'f> {
             Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => false,
             other => panic!("a decision nothing here knows: {other:?}"),
         }
+    }
+
+    /// Leave out each cut whose surfaces are all in
+    /// [`BakedFace::cuts_that_reach_only_its_boundary`], wherever that leaves
+    /// every edge split as the face across splits it (`docs/decisions.md`
+    /// §422).
+    ///
+    /// **Inside the face such a crossing is no edge of the answer.** Every face
+    /// carrying its surface meets this face on the boundary alone, so a point
+    /// of it inside the face is on none of them, and the face either side of it
+    /// is inside or outside each solid alike.
+    ///
+    /// **But a node of it splits every crossing through that node**, and an
+    /// edge of the answer along one of those is split by the face across too,
+    /// which knows nothing of this rule. So a node keeps the crossing unless
+    /// it is no corner of the face and either is clear of the box round the
+    /// face, or has no other crossing through it that is drawn and kept, bar
+    /// boundary crossings the face across splits there no more than this face
+    /// will ([`Arrangement::the_faces_across_split_it_no_more`]). Two bars end
+    /// to end on offset axes are why: the lines the second bar's pipe draws on
+    /// the first's end on its top rim at two corners of the answer, and the
+    /// top cap splits the rim there.
+    ///
+    /// Run after the meets are placed, since they are what this reads, and
+    /// to a fixed point, since a crossing kept makes its nodes count against
+    /// the others through them.
+    fn leave_out_the_cuts_that_reach_only_the_boundary(&mut self) {
+        let leaves_out = &self.face.cuts_that_reach_only_its_boundary;
+        if leaves_out.is_empty() {
+            return;
+        }
+        let never_left_out = self.crossings_never_left_out();
+        let mut left_out: Vec<bool> = self
+            .crossings
+            .iter()
+            .zip(never_left_out)
+            .map(|(it, never)| {
+                !never
+                    && it.cuts
+                    && it.reaches_the_face
+                    && leaves_out.contains(&it.partner)
+                    && it.also_cut_by.iter().all(|also| leaves_out.contains(also))
+            })
+            .collect();
+        loop {
+            let still: Vec<bool> = (0..self.crossings.len())
+                .map(|crossing| left_out[crossing] && self.splits_nothing_kept(crossing, &left_out))
+                .collect();
+            if still == left_out {
+                break;
+            }
+            left_out = still;
+        }
+        for (crossing, left_out) in left_out.into_iter().enumerate() {
+            if left_out {
+                self.crossings[crossing].reaches_the_face = false;
+            }
+        }
+    }
+
+    /// Whether leaving `crossing` out, with every other crossing `left_out`
+    /// says, leaves no node of it that splits a crossing kept: see
+    /// [`Arrangement::leave_out_the_cuts_that_reach_only_the_boundary`].
+    fn splits_nothing_kept(&self, crossing: usize, left_out: &[bool]) -> bool {
+        self.nodes
+            .iter()
+            .filter(|node| node.crossings.contains(&crossing))
+            .all(|node| {
+                node.vertex.is_none()
+                    && (self.face.bounds.provably_misses(node.point)
+                        || node.crossings.iter().all(|&other| {
+                            other == crossing
+                                || left_out[other]
+                                || !self.crossings[other].reaches_the_face
+                                || self.the_faces_across_split_it_no_more(other, crossing)
+                        }))
+            })
+    }
+
+    /// Whether `along` is a crossing boundary edges run along, which the faces
+    /// across those edges split at a node of `crossing` no more than leaving
+    /// `crossing` out splits it here. For each surface `crossing` lies on,
+    /// either `along` lies on it too, so the face across meets it in a curve
+    /// there and places no node; or the face across every edge along `along`
+    /// leaves it out as well.
+    fn the_faces_across_split_it_no_more(&self, along: usize, crossing: usize) -> bool {
+        let edges: Vec<(usize, usize)> = self
+            .crossing_of_edge
+            .iter()
+            .enumerate()
+            .flat_map(|(wire, on)| {
+                on.iter()
+                    .enumerate()
+                    .filter(|&(_, &on)| on == along)
+                    .map(move |(position, _)| (wire, position))
+            })
+            .collect();
+        let surfaces_of = |index: usize| {
+            core::iter::once(self.crossings[index].partner)
+                .chain(self.crossings[index].also_cut_by.iter().copied())
+        };
+        !edges.is_empty()
+            && surfaces_of(crossing).all(|surface| {
+                surfaces_of(along).any(|on| on == surface)
+                    || edges.iter().all(|&(wire, position)| {
+                        self.face.wires[wire][position]
+                            .its_neighbour_leaves_out
+                            .contains(&surface)
+                    })
+            })
     }
 
     /// A closed crossing with no node on it still needs one.
