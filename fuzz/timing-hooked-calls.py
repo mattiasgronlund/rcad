@@ -36,9 +36,24 @@ filter — "the symbol names `rcad_fuzz_timing`" — could never have caught:
 `how_slow_the_name_says`'s `split_once("us-")` reaching `bcmp` through
 `core`'s `StrSearcher::new`.
 
+A `call *SLOT(%rip)` whose slot is not on the hooked list is followed the
+same way, through the same relocation table `hooked_slots` already reads
+(`R_X86_64_RELATIVE`, from `readelf -rW`): resolved to an address, and when a
+function symbol starts there, recorded as a `calls_out` edge exactly like a
+direct `call <name>`, so the walk above carries on through it.
+`docs/decisions.d/419` §419.5 found the wall this closes: `merge_out` reaches
+`core`'s `StrSearcher::new` — which itself calls `bcmp`, `docs/decisions.d/273`
+§273.3's fifth offender — through a GOT slot that *names* `StrSearcher::new`
+by relocation rather than by a `call <name>` instruction, so the old scan had
+no `calls_out` edge there for the walk to follow. A slot whose relocation
+resolves to an address with no function symbol at all is not a call this scan
+can name a target for either, the same as a `call *%reg` it never traced to a
+slot: it falls into the "can leave" bucket below rather than being dropped.
+
 **What this cannot see**: a call through a computed pointer — one where the
 register a `call *%reg` uses was not last set by a direct, in-function load
-of a hooked GOT slot. Most `jmp *%reg` of this kind is not that: it is the
+of a hooked GOT slot, or a `call *SLOT(%rip)` whose relocation names no
+function symbol at all. Most `jmp *%reg` of this kind is not that: it is the
 tail of a relative jump table, the lowering of a match under `-fPIE` — `lea
 table(%rip),%base; movslq (%base,%idx,4),%off; add %base,%off; jmp *%off` —
 whose table holds offsets from its own base, so the jump can only land
@@ -260,6 +275,19 @@ def scan(binary):
                 slot = int(comment.split()[0], 16)
                 if slot in hooked_slots:
                     target, kind = hooked_slots[slot], f"GOT slot {slot:x}"
+                else:
+                    resolved = slot_target.get(slot)
+                    callees = (
+                        names_at.get(resolved, set())
+                        if resolved is not None else set()
+                    )
+                    if callees:
+                        for callee in sorted(callees):
+                            calls_out.setdefault(function, []).append(
+                                (address, callee)
+                            )
+                    else:
+                        computed_calls.append((function, address, rest))
             elif re.match(r"^\*%\w+$", rest):
                 reg = REG64.get(rest[2:])
                 state = regs.get(reg)
