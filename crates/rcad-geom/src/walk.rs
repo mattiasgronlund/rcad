@@ -4874,6 +4874,84 @@ mod tests {
         }
     }
 
+    /// A thin pipe of radius one slanting through a fat one of radius four,
+    /// its axis `2.9` from the fat one's, leaves two loops that nearly touch,
+    /// and a closed run whose corner is on either is walked round that one,
+    /// whichever face is listed first.
+    ///
+    /// The naming half refuses to name these two loops apart: of the flat
+    /// surfaces it can store square to the fat pipe's axis, none leans far
+    /// enough towards the thin pipe's way across it. The walk asked which side
+    /// of that stored surface the corner was on, and the surface cuts through
+    /// the loop on the `−` side, so a run with its corner on that loop was
+    /// walked round the other one with none of its points on its own (Q1520).
+    /// The loops are either side of `â·p = 0`, `â` the thin pipe's way across
+    /// the fat one's axis, and the corner is where the thin pipe's line
+    /// furthest from that axis meets the fat wall.
+    #[test]
+    fn a_closed_run_round_either_of_two_nearly_touching_loops_of_slanted_pipes_is_walked_round_that_one()
+     {
+        let fat_way = Vector::new(1.0, 1.0, 0.0);
+        let thin_way = Vector::new(0.3, -0.2, 0.9);
+        let [thin_radius, fat_radius, apart] = [1.0, 4.0, 2.9];
+        let w1 = thin_way.normalized().expect("a direction");
+        let w2 = fat_way.normalized().expect("a direction");
+        let off_the_fat_axis = w1.cross(w2).normalized().expect("axes that cross");
+        let leaning = w1.dot(w2);
+        let across = (w1 - w2 * leaning).normalized().expect("axes that cross");
+        let thin_origin = Point::origin() + off_the_fat_axis * apart;
+        let fat = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::origin(), fat_way).expect("a direction"),
+                fat_radius,
+            )
+            .expect("a radius"),
+        );
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(thin_origin, thin_way).expect("a direction"),
+                thin_radius,
+            )
+            .expect("a radius"),
+        );
+        assert_eq!(
+            crate::intersect(&fat, &thin, &Policy::certified(), &mut ProvenanceLog::new()),
+            Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+            "the naming half tells these two loops apart, so they do not test the walk's guess"
+        );
+        let furthest_out = apart + thin_radius;
+        let along = (fat_radius * fat_radius - furthest_out * furthest_out).sqrt()
+            / (1.0 - leaning * leaning).sqrt();
+        for side in [1.0, -1.0] {
+            let corner = thin_origin + off_the_fat_axis * thin_radius + w1 * (side * along);
+            let run = NamedRun::new(
+                EdgeRun::RightRoundWhereItsFacesCross,
+                [corner, corner].map(|end| PredicatePoint::from(end.coordinates())),
+            )
+            .expect("a closed run with one corner");
+            for pair in [[&fat, &thin], [&thin, &fat]] {
+                let walked = walk(
+                    &run,
+                    pair,
+                    Deflection::of(0.01).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a loop of two slanted pipes is walked");
+                let on_its_own_loop = walked
+                    .points()
+                    .iter()
+                    .filter(|point| (**point - Point::origin()).dot(across) * side > 0.0)
+                    .count();
+                assert!(
+                    walked.points().len() > 2 && on_its_own_loop == walked.points().len(),
+                    "the run round the loop on the {side} side has {on_its_own_loop} of its {} points on that loop",
+                    walked.points().len()
+                );
+            }
+        }
+    }
+
     #[test]
     fn probe_q1520() {
         let certified = Policy::certified();
