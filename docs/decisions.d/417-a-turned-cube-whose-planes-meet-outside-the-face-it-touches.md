@@ -8,7 +8,10 @@ Each count says which relay ran it and with what. `probe_q1353_split` is in
 after; the certified count was a scratch copy of it, never committed.
 Queue row Q1442 (lane `lane-q1442-edges-only-dropped-wires-walked`, off
 `7fddc415`, in two relays) added to 417.3, 417.4 and 417.6 and corrected
-417.5 (c); its counts are `q1442_the_count`, a probe likewise taken out.*
+417.5 (c); its counts are `q1442_the_count`, a probe likewise taken out.
+Queue row Q1506 (its second lane, `lane-q1506-the-turn-13-pin-repinned`, off
+`602ee000`) added to 417.3 and 417.5; its counts are `probe_q1506_split` and
+`probe_q1506_certified`, probes likewise taken out.*
 
 ### 417.1 The shape
 
@@ -76,9 +79,15 @@ winding with the outline, 34 shells enclosing nothing and 22 edges with four
 faces or none. `random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant`
 pins the first 60, of which 31 meet outside: 15 answer, turns 47 and 48 among
 them, which relay 0 found `Undecidable` on the base, and 16 are pinned by name.
-Since queue row Q1506, 18 answer and 13 are pinned: turns 8, 21 and 49, which
-were shells enclosing nothing, answer once Q1506's rule leaves out the flat
-ring another plane walks back. The 199's split above was not measured again.
+Since queue row Q1506, 18 answer both rules, 1 answers its union and not its
+intersection, and 12 are pinned by their union's refusal. Turns 8, 21 and 49,
+which were shells enclosing nothing, answer once Q1506's rule leaves out the
+flat ring another plane walks back. Turn 13, which was a hole winding with its
+outline, answers its union, `1383.97`, and its intersection is still refused
+`OuterWireWindsAgainstTheNormal`; with no intersection to hold it to, the pin
+holds its union to `1000` more than the turned cube less the block, which
+answers `383.97`, within the rounding the other checks allow. The 199 are
+counted again below.
 
 **Since queue row Q1442 the 6 `count: 0` answer too**, 68 in all, and the 131
 left are the 65, 16, 34 and 16 above (Q1442's lane on `4a7dec01`, `mise exec
@@ -114,6 +123,25 @@ one solid, one two and one three) and is refused 65 `DynamicRangeTooWide` and
 118 `VolumeIsNotPositive` (Q1442's lane on `4a7dec01`, the same probe). None
 of the fuses that probe asked, these three and the tolerant union with the
 block first, is refused `count: 0` for any of the 199.
+
+**Since queue row Q1506 the 34 shells enclosing nothing are gone**, under
+both policies (Q1506's second lane, on `5bb2301f`, `mise exec -- just t
+probe_q1506_split --no-capture` and `probe_q1506_certified`, probes pasted
+into the turned cube's file and taken out after). Tolerant, the union with the
+block first answers 104 of the 199 and is refused 63
+`HoleWindsWithTheOuterWire`, 16 `OuterWireWindsAgainstTheNormal` and 16
+`ResultIsNotManifold { count: 4 }`. The intersection of 102 of the 104
+answers, and each pair validates and holds 2000 between them; the
+intersection of turns 13 and 314 is refused `OuterWireWindsAgainstTheNormal`,
+and their union validates and is `1000` more than the turned cube less the
+block. The worst of those 104 checks is `1.14e−12`. Certified, the union
+answers 53 either way round and is refused 95 `DynamicRangeTooWide`, 35
+`HoleWindsWithTheOuterWire` and 16 `count: 4`; with the block first each of
+the 53 validates and measures exactly what the tolerant union does. The cube
+less the block answers 74 (66 one solid, 6 two and 2 three) and is refused 65
+`DynamicRangeTooWide` and 60 `VolumeIsNotPositive`; the intersection still
+answers 8 and is refused 191 `DynamicRangeTooWide`. The cube less the block's
+74 were counted, not measured.
 
 **The twelve fuses at `(0, 3, 3)`** (`ON_THE_FACE`) give what they gave on the
 base: each pin there passed unchanged on `852579c8` and `b2a7cceb`. None of the
@@ -187,8 +215,8 @@ refused as an orphan.
 
 ### 417.5 The other half: the three crossings as one, not built
 
-At `(0, 3, 3)`, and in the 131 of the 199 still refused under the tolerant
-policy (137 before Q1442), the answer meant is the block with its `x = 0` face whole, with the
+At `(0, 3, 3)`, and in the 95 of the 199 still refused under the tolerant
+policy (137 before Q1442, 131 before Q1506), the answer meant is the block with its `x = 0` face whole, with the
 tip a rounding tall left out. It exists, so under `Policy::tolerant(100.0)` the
 refusal is a gap. Under `Policy::certified()` it is a limit:
 `a_turned_cube_with_its_corner_on_a_face.rs`'s doc shows every rounding of the
