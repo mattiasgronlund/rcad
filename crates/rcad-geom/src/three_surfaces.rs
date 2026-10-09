@@ -501,10 +501,20 @@ fn the_meet_slid_into_range(surfaces: [&Surface; 3]) -> Option<MeetOfThree> {
     let (Some(lowest), Some(highest)) = (binades.iter().min(), binades.iter().max()) else {
         return None;
     };
-    let up = -(lowest + highest) / 2;
-    if up == 0 {
-        return None;
-    }
+    [
+        -(lowest + highest) / 2,
+        HIGHEST_BINADE_A_SLIDE_LIFTS_TO - highest,
+    ]
+    .into_iter()
+    .filter(|up| *up != 0)
+    .find_map(|up| the_meet_slid_by(surfaces, up))
+}
+
+/// PROBE: where the second slide puts the largest length.
+const HIGHEST_BINADE_A_SLIDE_LIFTS_TO: i32 = 500;
+
+/// The meet of the same three surfaces slid by `2^up`, slid back.
+fn the_meet_slid_by(surfaces: [&Surface; 3], up: i32) -> Option<MeetOfThree> {
     let [first, second, third] = surfaces.map(|surface| the_same_surface_slid_by(surface, up));
     let (first, second, third) = (first?, second?, third?);
     match the_meet_where_they_stand(
