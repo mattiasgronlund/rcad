@@ -1179,27 +1179,29 @@ fn the_seed_this_run_is_picked_up_at(
 }
 
 /// Of the two settled seeds, each with how far off the crossing it may be, the
-/// first that is not across the flat surface between the two loops from
-/// `corner`.
+/// first on `corner`'s side of the flat surface between the two loops, or on
+/// that surface.
 ///
-/// **Why that answers which loop the corner is on.** Where the crossing leaves
-/// two loops, the naming half has proved this very flat surface holds them
-/// apart — every point of each strictly on its own side — and the two seeds
-/// are the places furthest from it, one on each loop. So the corner's side
-/// names its loop, and exactly one seed is on that side. Where the crossing
-/// leaves one loop, both seeds are on it and either will do, and the seeds sit
-/// either side of the flat surface or on it, so one of them is never across it
-/// from the corner.
+/// **Why that answers which loop the corner is on.** Where the naming half
+/// names a crossing's two loops apart, it has proved this very flat surface
+/// holds them apart — every point of each strictly on its own side — and there
+/// is one seed on each loop. So the corner's side names its loop, and exactly
+/// one seed is on that side. Where the crossing leaves one loop, both seeds
+/// are on it and either will do, and the two seeds sit one each side of the
+/// flat surface or both on it, so one of them is on the corner's side or on
+/// the surface. Where the naming half refuses to name two loops
+/// apart, the flat surface is only the best it had, and the corner's side of
+/// it is only as good.
 ///
-/// A corner **on** the flat surface is on no loop of two, so the crossing is a
-/// single loop and the first seed is taken. A corner whose side cannot be told
-/// is refused rather than guessed at: that takes a corner given as a box wide
-/// enough to straddle the flat surface, since an exact corner always has a side.
+/// A corner or a seed **on** the flat surface is on no loop of two, so the
+/// crossing is a single loop and the first seed, or that seed, is taken. A
+/// corner or a seed whose side cannot be told is refused rather than guessed
+/// at.
 ///
 /// # Errors
 ///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the corner's side
-/// cannot be told, or both seeds are across from it.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the corner's side or
+/// a seed's cannot be told, or both seeds are across from the corner.
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when the flat surface cannot be
 /// written down — its offset overflows — or a seed has no box round it.
@@ -1214,9 +1216,8 @@ fn the_seed_on_the_loop_a_corner_is_on(
         the_flat_surface_between_two_loops(held_apart_by)
             .map_err(|_| Error::CannotWorkOutHowBigACrossingIs)?,
     );
-    let across_from_the_corner = match which_side_of(&between, corner, policy, log) {
-        Decision::Pos => Decision::Neg,
-        Decision::Neg => Decision::Pos,
+    let the_corners_side = match which_side_of(&between, corner, policy, log) {
+        side @ (Decision::Pos | Decision::Neg) => side,
         Decision::Zero => return Ok(seeds[0].0),
         Decision::Undecidable { .. } => {
             return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
@@ -1227,8 +1228,16 @@ fn the_seed_on_the_loop_a_corner_is_on(
         let Some(at) = somewhere_within(seed, off) else {
             return Err(Error::CannotWorkOutHowBigACrossingIs);
         };
-        if which_side_of(&between, at, policy, log) != across_from_the_corner {
-            return Ok(seed);
+        match which_side_of(&between, at, policy, log) {
+            Decision::Zero => return Ok(seed),
+            side @ (Decision::Pos | Decision::Neg) if side == the_corners_side => {
+                return Ok(seed);
+            }
+            Decision::Pos | Decision::Neg => {}
+            Decision::Undecidable { .. } => {
+                return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+            }
+            other => panic!("a half-space came back with a decision nothing knows: {other:?}"),
         }
     }
     Err(Error::CannotNameWhichPieceOfACrossingThisIs)
