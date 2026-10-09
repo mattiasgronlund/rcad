@@ -352,8 +352,10 @@ fn a_pipe_of_no_width_and_a_flat_cone_cannot_be_made() {
 /// The coaxial pairs §347.5's table leaves out, a ring with a pipe, a ball or a
 /// cone on its axis, a cone and a ball, and two cones, give circles round one
 /// axis at heights apart. The heights come together only at a tangency, where
-/// `intersect` names one circle, or at a cone's apex, where two cones with one
-/// apex touch at that point and nowhere else.
+/// `intersect` names one circle, or at a cone's apex: two cones of slopes `s₁ ≠
+/// s₂` with their apexes `d` apart cross at `s₂·d/(s₂ ± s₁)` along the axis
+/// from the first apex, one height only for `d = 0`, where they touch at the
+/// apex and nowhere else.
 #[test]
 fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
     let ring = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a ring"));
@@ -408,8 +410,16 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
         Ok(1),
         "a ball resting in the cone"
     );
-    let steeper = Surface::Cone(Cone::new(Axis::z(), 2.0).expect("a cone"));
-    assert_eq!(curves(&cone, &steeper), Ok(0), "two cones with one apex");
+    assert_eq!(
+        curves(&cone, &a_cone(1.0, 2.0)),
+        Ok(2),
+        "two cones with their apexes apart"
+    );
+    assert_eq!(
+        curves(&cone, &a_cone(0.0, 2.0)),
+        Ok(0),
+        "two cones with one apex"
+    );
 }
 
 fn every_fuse_answers(build: Pair, [first, second, shared]: [f64; 3], faces: [&[usize]; 4]) {
