@@ -6643,6 +6643,12 @@ fuzz-cones-and-tori duration="60" corpus_root="" fork="0": (fuzz-target "where_a
 # With one, that directory becomes the *second* argument and libFuzzer treats it
 # as a read-only seed, writing only to the first (§81).
 #
+# `corpus_root`, when given, must be absolute, or already relative to this
+# `fuzz/` directory, because this recipe `cd`'s there before using it: a path
+# relative to the repository root silently resolves to an empty directory
+# here, and the run then merges only the tracked corpus. Q271's first attempt
+# passed one that way before catching it, §297.3.
+#
 # `fork` is how many jobs libFuzzer runs at once, and **0 means don't fork at
 # all**, which is what a hand-run `just fuzz 60` wants: one crash, one report, and
 # the run stops so you can read it. Only the night asks for a number, because only
