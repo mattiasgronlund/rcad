@@ -25,19 +25,47 @@ Both were locked at the time. The first tree's lock file was last written
 clean (§371) lists both trees as `kept (locked, an agent is using it)` at
 06:00:34Z and again at 07:00:34Z that day.
 
-### 420.2 What deleted them is not known
+### 420.2 Who deleted them
+
+Mattias did, by hand in a terminal, while clearing disk space on the morning
+of 2026-09-30. His shell history (`~/.bash_history`, lines 1901 and 1907) has:
+
+    cd ~
+    find . -name target -print0 | xargs -0 rm -rf
+
+Run from the home folder, that removes every directory named `target` under
+it, locked tree or not. Bash wrote no times, so the time comes from what the
+command left behind. Directories in six other repos under `~/git` (probe-rs,
+inari, three garagerobotics checkouts and one Tietoevry checkout) were last
+changed between 06:26:38Z and 06:26:47Z, along with the two rcad trees at
+06:26:41Z and 06:26:43Z. It also took a tracked source directory that happens
+to be called `target`, `probe-rs/src/gdb_server/target/`, 13 files. The same
+history removes rscene's `target/` folders twenty-six lines earlier (line
+1881), and rscene's worktree directories were last changed at 06:16:02Z. The
+order matches.
+
+What did not do it:
 
 - **Not `rcad-clean-targets`.** Its runs on either side of 06:26Z kept both
   trees, and each run finished in the same second it started (`journalctl
   --user -u rcad-clean-targets --since '2026-09-30 07:59' --until '2026-09-30
   10:05'`, local time). The recipe has skipped locked trees since before the
   timer existed.
-- **Not a Claude session, as far as the transcripts show.** No file under
-  `~/.claude/projects/` holds a record stamped between 2026-09-30T06:24Z and
-  06:27Z, and none holds an `rm -rf` naming either tree.
+- **No Claude session ran or suggested it.** No transcript holds a record
+  between 2026-09-29T23:01Z and 2026-09-30T06:37Z. No assistant message or
+  tool call before the deletion holds a `find -name target` that removes
+  anything, except `clean-targets`'s own code, which skips locked trees. The
+  commands sessions did hand Mattias around then also keep locked trees:
+  `just clean-targets` on 2026-09-29 at 20:07Z, and on 2026-09-28
+  `remove-unused-trees.sh`, which checks each tree's lock again before it
+  removes it.
 
-That leaves a command typed outside any Claude session. Nothing here shows
-which one, or why.
+**The disk was not measured to be full that morning.** It was full the
+evening before: "No space left on device" in five runs from 20:05Z to 20:24Z,
+until `just clean-targets` brought `/` to 77%, 203 GB free. Nothing measured
+it again until 06:38Z. That was after the delete, and after the kache store
+had gone from 151 GB to 554 MB the same morning. At that point `/` was at
+32%, 596 GB free.
 
 ### 420.3 What it cost
 
@@ -54,8 +82,9 @@ which one, or why.
 **Lock a tree to keep people out of it, never to keep files in it.** §92.8
 said where a fuzz input's bytes belong: in two places, neither of them a lock.
 The same holds for a measuring lane's scripts and logs. A lock only stops
-`git worktree remove` and the cleaners that choose to honour it. A plain `rm`
-ignores it, and so does a full disk that someone has to clear in a hurry.
+`git worktree remove` and the cleaners that choose to honour it. A `find` from
+the home folder that removes every `target` ignores it, and 420.2 is that
+happening.
 
 - **A script a section cites by path is committed.** It goes into the section
   as a code block, or into a tracked file the section names, in the same
