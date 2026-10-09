@@ -84,7 +84,7 @@ use rcad_predicates::{
 
 use smallvec::SmallVec;
 
-use crate::holds::the_way_into_an_arc;
+use crate::holds::{how_the_axis_lies_on, the_way_into_an_arc};
 use crate::mesh::the_surface_pinches_at;
 use crate::validate::{name_of_surface, side_of_surface};
 use crate::{Error, FaceKey, Invalid, Result, VertexKey};
@@ -1624,13 +1624,20 @@ impl<'f> Arrangement<'f> {
         }
         let side = match (side_of_surface(&partner, point), partner.as_plane()) {
             (undecided @ Decision::Undecidable { .. }, Some(plane)) => {
-                Self::the_three_planes_a_point_is_the_meet_of(around).map_or(undecided, |three| {
-                    rcad_predicates::side_of_a_plane_where_three_planes_meet(
+                match Self::the_three_planes_a_point_is_the_meet_of(around) {
+                    Some(three) => rcad_predicates::side_of_a_plane_where_three_planes_meet(
                         three.map(|flat| flat.coefficients()),
                         plane.coefficients(),
                     )
-                    .expect("bake solved this corner as the one point where its three planes meet")
-                })
+                    .expect("bake solved this corner as the one point where its three planes meet"),
+                    None => {
+                        let on: SmallVec<[Surface; 4]> = core::iter::once(self.surface)
+                            .chain(around.iter().copied())
+                            .collect();
+                        Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
+                            .unwrap_or(undecided)
+                    }
+                }
             }
             (side, _) => side,
         };
@@ -5700,8 +5707,18 @@ impl<'f> Arrangement<'f> {
                     continue;
                 }
                 let at = node.point;
+                let read = match (side_of_surface(&partner, at), partner.as_plane()) {
+                    (undecided @ Decision::Undecidable { .. }, Some(plane)) => {
+                        let on: SmallVec<[Surface; 4]> = core::iter::once(self.surface)
+                            .chain(node.crossings.iter().map(|&on| self.crossings[on].partner))
+                            .collect();
+                        Self::side_of_a_plane_holding_a_rings_axis(&on, at, plane)
+                            .unwrap_or(undecided)
+                    }
+                    (side, _) => side,
+                };
                 let found = must_decide(
-                    side_of_surface(&partner, at),
+                    read,
                     name_of_surface(&partner),
                     &[at],
                     Measures::Length,
@@ -5973,6 +5990,81 @@ impl<'f> Arrangement<'f> {
         node.crossings
             .iter()
             .any(|&through| self.crossings[through].partner == *partner)
+    }
+
+    /// Which side of `partner` a point lies that is on a ring and on a plane
+    /// through the ring's axis, both among the surfaces it is `on`, where
+    /// `partner` holds that axis too: read off the numbers the planes store,
+    /// and off the point's box only for which of two circles it is on. `None`
+    /// where it is not that shape, and the caller keeps the box's answer.
+    ///
+    /// A bend placed half a turn round by a float turn has its caps on planes
+    /// through the axis a rounding off the other bend's, so a point of the
+    /// rim of one cap sits a rounding off the other bend's cap plane, well
+    /// inside its own box (Q1392).
+    ///
+    /// **The side is one circle's, and the circle is far from the axis.** Both
+    /// planes hold the axis exactly — `intersect` names two circles for a plane
+    /// and a ring only where its normal is square to the axis and it holds the
+    /// centre, and [`how_the_axis_lies_on`] asks each plane here the same. So
+    /// a point of the cutting plane `P` is `c + a·u + b·w` for the ring's
+    /// centre `c`, its axis `w` and `u` along `w × n_P`, and `partner`'s sign
+    /// there is the sign of `a·(n_Q·u)` for its normal `n_Q`: `n_Q·w` is nought
+    /// and `n_Q·c` is its offset. `P` cuts the ring in two circles centred at
+    /// `c ± R·u` with radius `r`, so on each `a` is `±R + r·cos φ`, which has
+    /// the sign of `±R`, a ring's tube being narrower than the ring. That puts
+    /// `a` at least `R − r` from nought, so the box tells it.
+    ///
+    /// Each of `a` and `n_Q·u` is `det[v, w, n_P]` for `v` the point less the
+    /// centre or `n_Q`, and `orient3d` with one point at the origin gives that
+    /// sign turned round one way for both, so the product is the side. Where
+    /// `n_Q·u` is nought, `n_Q` is along `n_P` and the two planes are one, so
+    /// the point is on `partner`.
+    fn side_of_a_plane_holding_a_rings_axis(
+        on: &[Surface],
+        at: PredicatePoint,
+        partner: &Plane,
+    ) -> Option<Decision> {
+        let origin = PredicatePoint::from([0.0; 3]);
+        on.iter().find_map(|ring| {
+            let Surface::Torus(ring) = ring else {
+                return None;
+            };
+            if how_the_axis_lies_on(partner, ring) != Decision::Zero {
+                return None;
+            }
+            let axis = PredicatePoint::from(ring.axis().direction().components());
+            let (centre, box_) = (ring.centre().coordinates(), at.enclosure());
+            let from_the_centre = PredicatePoint::Constructed(core::array::from_fn(|index| {
+                box_[index] - Interval::exactly(centre[index])
+            }));
+            on.iter().find_map(|cut| {
+                let Surface::Plane(cut) = cut else {
+                    return None;
+                };
+                if how_the_axis_lies_on(cut, ring) != Decision::Zero {
+                    return None;
+                }
+                let across =
+                    |of| orient3d_of_points(origin, of, axis, cut.normal().components().into());
+                match (
+                    across(from_the_centre),
+                    across(partner.normal().components().into()),
+                ) {
+                    (_, Decision::Zero) => Some(Decision::Zero),
+                    (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => {
+                        Some(Decision::Pos)
+                    }
+                    (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => {
+                        Some(Decision::Neg)
+                    }
+                    (
+                        Decision::Zero | Decision::Undecidable { .. } | _,
+                        Decision::Pos | Decision::Neg | Decision::Undecidable { .. } | _,
+                    ) => None,
+                }
+            })
+        })
     }
 
     /// How many times the face's boundary winds round each walk, counting only
