@@ -10364,14 +10364,15 @@ mod tests {
             (low_arc, Reversed),
             (up_from, Forward),
         ];
+        let wires = if window_first {
+            [window, top_rim, bottom_rim]
+        } else {
+            [bottom_rim, top_rim, window]
+        };
         let wall = face(
             model,
             Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe")),
-            if window_first {
-                &[window, top_rim, bottom_rim]
-            } else {
-                &[bottom_rim, top_rim, window]
-            },
+            &wires,
         );
         let floor = face(
             model,
