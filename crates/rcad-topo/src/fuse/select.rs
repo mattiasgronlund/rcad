@@ -1239,6 +1239,18 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// (`a_point_a_rounding_off_a_far_half_disk_whose_foot_is_short_of_its_chord_is_not_held`).
 /// A turn settled over the box is the same for the point and for a point of
 /// the plane beside it, which the plane reads where it is.
+///
+/// **The corners are stretched to the plane too.** A corner is a box, and one
+/// the bake solved from three planes that leave this one out can lie wholly off
+/// it: a face put through a pyramid's apex `1e-8` beside where the other three
+/// planes there meet is one the model takes, and `2²⁰` out the formula above
+/// reads that apex about `1.5e-2` from where the face meets its two
+/// neighbours. Wound round the corners as they were, the fan held points off
+/// the face and missed points on it, `1e-3` and more from every edge
+/// (`a_far_face_a_tolerance_off_its_apex_holds_no_point_its_neighbours_put_off_it`,
+/// row Q1251). Stretched, a corner's box holds a point of the plane beside it
+/// as well, so a turn settled over it is the turn about where the corner is,
+/// and a point between the two readings is left undecided.
 fn the_piece_holds(
     piece: &Piece,
     in_plane: Option<&InPlane>,
@@ -1317,8 +1329,10 @@ fn the_piece_holds(
                 }
             }
             None => {
-                let corners: Vec<PredicatePoint> =
-                    wire.iter().map(|side| side.ends[0].point()).collect();
+                let corners = wire
+                    .iter()
+                    .map(|side| stretched_to_the_plane(flat, side.ends[0].point()))
+                    .collect::<Option<Vec<PredicatePoint>>>()?;
                 winding +=
                     in_plane.winding_around(core::slice::from_ref(&corners), reaching_the_plane)?;
                 for (index, side) in wire.iter().enumerate() {
@@ -1527,6 +1541,13 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 /// whose material is outside its ball bites into the piece instead, and that
 /// bite is what the ball's own sign already took out.
 ///
+/// **The chord's two ends are stretched to the plane first**, as
+/// [`the_piece_holds`] stretches the corners it winds round, and for its
+/// reason: a corner whose box lies off the plane is read far along it. A half
+/// disk's two corners wind round nothing, so its chord decides alone, and `2²⁰`
+/// out with both corners `1e-8` off the plane it missed points `1e-3` inside it
+/// (`a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord`).
+///
 /// **A pipe is counted the same way, where the plane crosses it**, which is
 /// [`Cylinder::is_cut_in_a_closed_curve_by`](rcad_geom::Cylinder::is_cut_in_a_closed_curve_by)
 /// — the sign of `n·a`, and the only thing a pipe can leave on a plane that is
@@ -1645,7 +1666,11 @@ fn in_the_bulge_of(
     }
     // Compared rather than matched, so that `Decision`'s wildcard arm is not
     // written once more (§40): a zero or an undecided turn is `None` either way.
-    let turn = in_plane.turn(side.ends[0].point(), side.ends[1].point(), point);
+    let [from, to] = side
+        .ends
+        .each_ref()
+        .map(|end| stretched_to_the_plane(flat, end.point()));
+    let turn = in_plane.turn(from?, to?, point);
     if turn == Decision::Neg {
         Some(1)
     } else if turn == Decision::Pos {
@@ -2146,6 +2171,12 @@ fn of_two_curved_kinds(one: &Surface, other: &Surface) -> bool {
 /// the model answers both. A point on the plane stretches to itself and is
 /// wound as before.
 ///
+/// **So are its corners**, each stretched to the plane on its own, for the
+/// reason [`the_piece_holds`] gives: a corner the bake solved without this
+/// face's plane can lie off it, and is read far from where the face meets its
+/// neighbours. A corner that cannot be stretched leaves the point to the model,
+/// as an undecided fan does.
+///
 /// A **curved**
 /// one is [`SolidView::face_holds_the_point`], which is the one authority on that
 /// question (§35) and which the fuse can call here because what it is asked
@@ -2194,10 +2225,14 @@ fn a_face_of_the_input_holds(
             }
             return Ok(false);
         }
-        let corners: Vec<Vec<PredicatePoint>> = face
+        let corners: Option<Vec<Vec<PredicatePoint>>> = face
             .wires
             .iter()
-            .map(|wire| wire.iter().map(|edge| edge.start.point).collect())
+            .map(|wire| {
+                wire.iter()
+                    .map(|edge| stretched_to_the_plane(flat, edge.start.point))
+                    .collect()
+            })
             .collect();
         // Either sign means the point is in this face's material. Which one
         // comes out says only which way that face's outline runs round *this*
@@ -2206,7 +2241,8 @@ fn a_face_of_the_input_holds(
         // said. Zero is the only answer that puts the point outside it.
         let winding = InPlane::of(flat)
             .zip(stretched_to_the_plane(flat, point))
-            .and_then(|(in_plane, reaching_the_plane)| {
+            .zip(corners)
+            .and_then(|((in_plane, reaching_the_plane), corners)| {
                 in_plane.winding_around(&corners, reaching_the_plane)
             });
         if let Some(winding) = winding {
@@ -2227,7 +2263,8 @@ fn a_face_of_the_input_holds(
 /// Whether [`SolidView::face_holds_the_point`] says one of the model's faces
 /// that `face` was baked from holds `point`, for a flat face with straight
 /// sides whose corners [`InPlane::winding_around`] could not wind round the
-/// point's box stretched to the plane.
+/// point's box stretched to the plane, or whose point or corners could not be
+/// stretched to it.
 ///
 /// **A point a rounding off the plane beside the face's edge comes here**, as
 /// the fan over that box runs across the edge, and the model reads it beside
@@ -2334,7 +2371,9 @@ fn corners_of(piece: &Piece) -> Vec<Vec<PredicatePoint>> {
 /// `M` out on a plane through the origin, a point a rounding high is read about
 /// `M` times that height from its foot. A caller that needs the foot asks about
 /// a box that reaches the plane, as [`the_piece_holds`] and
-/// [`a_face_of_the_input_holds`] do.
+/// [`a_face_of_the_input_holds`] do. **A corner is read the same way**, and a
+/// corner's box can lie off the plane as well, so those two stretch each corner
+/// to the plane before they wind round it.
 pub(crate) struct InPlane {
     from: PredicatePoint,
     /// Whether [`InPlane::from`] came out above the plane rather than below it.
@@ -3514,7 +3553,7 @@ mod tests {
         the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
-    use crate::fuse::bake::{BakedFace, BakedSolid, bake};
+    use crate::fuse::bake::{BakedEdge, BakedFace, BakedSolid, bake};
     use crate::fuse::{FaceMeet, MeetPoint, Scratch};
     use crate::{Model, ProfileBuilder};
 
@@ -4534,6 +4573,338 @@ mod tests {
             orientation: Orientation::Forward,
             wires,
             is_the_whole_surface: false,
+        }
+    }
+
+    /// A face a tolerance off its apex, `2²⁰` out, holds no point its
+    /// neighbours' planes put off it, and misses none they put on it.
+    ///
+    /// The face near the origin of
+    /// [`a_far_pyramid_whose_near_face_misses_its_apex`] meets its two
+    /// neighbours beside the apex the model stores, and the bake solves the
+    /// apex from the three planes that leave this face out, so the apex's box
+    /// is off this face's plane. [`InPlane`] reads a box off its plane where the
+    /// line from its reference point through it meets the plane, which `1.5e6`
+    /// out is about `1e-2` from where the face meets its neighbours. Wound round
+    /// that box, the fan certified points in the sliver between the two the
+    /// wrong way round, millimetres from any edge: the piece held points off
+    /// it, and so did the face.
+    ///
+    /// The points run from each base corner towards a point beside where the
+    /// face meets its neighbours, either way along the base. A point within
+    /// `1e-6` of a neighbour's plane is passed over, as the face's edges are
+    /// only known to a rounding or so.
+    #[test]
+    fn a_far_face_a_tolerance_off_its_apex_holds_no_point_its_neighbours_put_off_it() {
+        let (model, solid) = a_far_pyramid_whose_near_face_misses_its_apex(1e-8);
+        let face = solid
+            .faces
+            .iter()
+            .find(|face| {
+                face.surface
+                    .as_plane()
+                    .is_some_and(|flat| flat.offset().abs() < 0.5)
+            })
+            .expect("the face near the origin");
+        let flat = *face.surface.as_plane().expect("a flat face");
+        let wire = &face.wires[0];
+        let middle_of = |point: PredicatePoint| {
+            point
+                .enclosure()
+                .map(|side| side.lo() + (side.hi() - side.lo()) / 2.0)
+        };
+        let apex = wire
+            .iter()
+            .position(|edge| middle_of(edge.start.point)[2] > 0.5)
+            .expect("an apex");
+        assert!(
+            matches!(
+                flat.side_of_point(wire[apex].start.point),
+                Decision::Pos | Decision::Neg
+            ),
+            "the apex's box is off the face's plane"
+        );
+        let neighbour = |edge: &BakedEdge| *edge.across.as_plane().expect("a flat neighbour");
+        let where_the_neighbours_meet = middle_of(
+            Plane::meet_of_three(
+                &flat,
+                &neighbour(&wire[(apex + wire.len() - 1) % wire.len()]),
+                &neighbour(&wire[apex]),
+            )
+            .expect("three planes meet"),
+        );
+        let [first, second] = <[[f64; 3]; 2]>::try_from(
+            wire.iter()
+                .map(|edge| middle_of(edge.start.point))
+                .filter(|corner| corner[2] < 0.5)
+                .collect::<Vec<_>>(),
+        )
+        .expect("two base corners");
+        let length = (0..3)
+            .map(|axis| (second[axis] - first[axis]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let along_the_base = [0, 1, 2].map(|axis| (second[axis] - first[axis]) / length);
+        let centre = [0, 1, 2]
+            .map(|axis| (first[axis] + second[axis] + where_the_neighbours_meet[axis]) / 3.0);
+        let is_above = |edge: &BakedEdge, point: [f64; 3]| match neighbour(edge)
+            .side_of_point(PredicatePoint::from(point))
+        {
+            Decision::Pos => true,
+            Decision::Neg => false,
+            Decision::Zero | Decision::Undecidable { .. } | _ => {
+                panic!("{point:?} is more than 1e-6 from every neighbour's plane")
+            }
+        };
+        let is_off_it = |point: [f64; 3]| {
+            wire.iter()
+                .any(|edge| is_above(edge, point) != is_above(edge, centre))
+        };
+        let mut piece = Piece {
+            ancestors: Vec::new(),
+            surface: face.surface,
+            orientation: face.orientation,
+            wires: vec![
+                wire.iter()
+                    .map(|edge| FaceMeet {
+                        carried_by: [face.surface, edge.across],
+                        ends: [&edge.start, &edge.end].map(|end| MeetPoint::Existing {
+                            vertex: end.vertex,
+                            point: end.point,
+                        }),
+                        material_side: Decision::Neg,
+                        along: SmallVec::new(),
+                        approximation: None,
+                    })
+                    .collect(),
+            ],
+            is_the_whole_surface: false,
+        };
+        if the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from(centre))
+            != Some(true)
+        {
+            piece.wires[0].reverse();
+            for side in &mut piece.wires[0] {
+                side.ends.swap(0, 1);
+            }
+        }
+        assert_eq!(
+            the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from(centre)),
+            Some(true),
+            "the piece holds its middle"
+        );
+        let mut asked = 0;
+        let mut wrong = Vec::new();
+        for (which, corner) in [first, second].into_iter().enumerate() {
+            for beside in [1e-3, 3e-3, 1e-2, -1e-3, -3e-3, -1e-2] {
+                let towards = [0, 1, 2]
+                    .map(|axis| where_the_neighbours_meet[axis] + beside * along_the_base[axis]);
+                for part in [0.3, 0.5, 0.7, 0.9] {
+                    let point =
+                        [0, 1, 2].map(|axis| corner[axis] + part * (towards[axis] - corner[axis]));
+                    let nearest = wire
+                        .iter()
+                        .map(|edge| neighbour(edge).signed_distance_to(Point::from(point)).abs())
+                        .fold(f64::INFINITY, f64::min);
+                    if nearest <= 1e-6 {
+                        continue;
+                    }
+                    asked += 1;
+                    let is_off = is_off_it(point);
+                    let piece_holds = the_piece_holds_asked_as_selection_asks(
+                        &piece,
+                        PredicatePoint::from(point),
+                    );
+                    let face_holds = a_face_of_the_input_holds(
+                        &model,
+                        &solid,
+                        face,
+                        &piece,
+                        PredicatePoint::from(point),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect("a flat face with straight sides answers");
+                    if piece_holds == Some(is_off) || face_holds == is_off {
+                        wrong.push(format!(
+                            "from base corner {which}, {beside:e} along the base, {part} of the way: off {is_off}, piece {piece_holds:?}, face {face_holds}"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(asked >= 40, "only {asked} points are clear of every edge");
+        assert!(
+            wrong.is_empty(),
+            "{} of {asked} points answered against the neighbours' planes: {wrong:#?}",
+            wrong.len()
+        );
+    }
+
+    /// A pyramid on a square base `2²⁰` out, turned `2.5` about the `z` axis,
+    /// whose face on `x + y = 0` (before the turn) passes through its two base
+    /// corners and `miss` beside its apex: the plane is put through the apex
+    /// moved sideways by `miss`, and the apex stored is not moved. The model's
+    /// room at 100 mm is `1e-7`, so it takes a `miss` below that.
+    fn a_far_pyramid_whose_near_face_misses_its_apex(miss: f64) -> (Model, BakedSolid) {
+        let out = f64::powi(2.0, 20);
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let turned = Isometry::rotation(
+            &Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
+            2.5,
+        )
+        .expect("a turn");
+        let sideways = miss / f64::sqrt(2.0);
+        let apex_the_near_face_passes =
+            turned.apply_to_point(Point::new(out + 0.5 + sideways, -out - 0.5 + sideways, 1.0));
+        let points = [
+            [out + 0.5, -out - 0.5, 1.0],
+            [out, -out, 0.0],
+            [out + 1.0, -out - 1.0, 0.0],
+            [out + 2.0, -out, 0.0],
+            [out + 1.0, -out + 1.0, 0.0],
+        ]
+        .map(|[x, y, z]| turned.apply_to_point(Point::new(x, y, z)));
+        let faces: [&[usize]; 5] = [
+            &[0, 1, 2],
+            &[0, 2, 3],
+            &[0, 3, 4],
+            &[0, 4, 1],
+            &[1, 4, 3, 2],
+        ];
+        let mut builder = crate::SolidBuilder::new();
+        let vertices = points.map(|point| builder.add_vertex(point).expect("a finite corner"));
+        let mut edges: Vec<([usize; 2], crate::DraftEdge)> = Vec::new();
+        let drafted = faces.map(|face| {
+            let steps: Vec<crate::DraftStep> = (0..face.len())
+                .map(|position| {
+                    let (from, to) = (face[position], face[(position + 1) % face.len()]);
+                    let (edge, orientation) =
+                        match edges.iter().find(|(ends, _)| *ends == [to, from]) {
+                            Some(&(_, edge)) => (edge, Orientation::Reversed),
+                            None => {
+                                let edge = builder
+                                    .add_edge(vertices[from], vertices[to], EdgeRun::Straight)
+                                    .expect("a side");
+                                edges.push(([from, to], edge));
+                                (edge, Orientation::Forward)
+                            }
+                        };
+                    crate::DraftStep::Along(builder.add_coedge(edge, orientation).expect("a use"))
+                })
+                .collect();
+            let wire = builder.add_wire(&steps).expect("a closed boundary");
+            let [first, second, third] = if face.len() == 4 {
+                [face[0], face[1], face[2]]
+            } else {
+                [face[1], face[2], face[0]]
+            };
+            let at = |index: usize| {
+                if face[..] == [0, 1, 2] && index == 0 {
+                    apex_the_near_face_passes
+                } else {
+                    points[index]
+                }
+            };
+            let plane = Plane::through_three_points(at(first), at(second), at(third))
+                .expect("three corners");
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a face")
+        });
+        builder
+            .add_shell(&drafted.map(|face| (face, Orientation::Forward)))
+            .expect("five faces");
+        let pyramid = builder
+            .build(&mut model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a face less than the room off its apex is taken");
+        let [solid] = <[BakedSolid; 1]>::try_from(
+            bake(
+                &model,
+                &[pyramid],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the pyramid bakes"),
+        )
+        .expect("one solid");
+        (model, solid)
+    }
+
+    /// A half disk `2²⁰` out on `x + y = 0`, cut from it by a ball round
+    /// `(2²⁰, −2²⁰, 0)` and the plane square to it through that centre, holds
+    /// no point across its chord when its two corners are points `1e-8` off its
+    /// plane, either side.
+    ///
+    /// Two corners wind round nothing, so what holds a point is the bulge:
+    /// which side of the chord between the corners it is on. [`InPlane`] reads
+    /// a corner `1e-8` off the plane about `1.5e-2` along it, out there, and
+    /// both corners the same way across the chord, so the chord as read held
+    /// points short of it or missed points past it. The bulge stretches the
+    /// chord's ends to the plane, as [`the_piece_holds`] stretches the corners
+    /// it winds round.
+    #[test]
+    fn a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord() {
+        let out = f64::powi(2.0, 20);
+        let flat = Plane::from_coefficients([1.0, 1.0, 0.0, 0.0]).expect("a normal");
+        let ball = Surface::Sphere(
+            Sphere::new(Point::from([out, -out, 0.0]), 1.0).expect("a positive radius"),
+        );
+        let across = Surface::Plane(
+            Plane::from_coefficients([1.0, -1.0, 0.0, -2.0 * out]).expect("a normal"),
+        );
+        for off in [1e-8, -1e-8] {
+            let aside = off / f64::sqrt(2.0);
+            let corner = |z: f64| MeetPoint::OfThreeSurfaces {
+                surfaces: [Surface::Plane(flat), ball, across],
+                which: 0,
+                point: PredicatePoint::from([out + aside, -out + aside, z]),
+            };
+            let side = |partner: Surface, ends: [MeetPoint; 2], material_side: Decision| FaceMeet {
+                carried_by: [Surface::Plane(flat), partner],
+                ends,
+                material_side,
+                along: SmallVec::new(),
+                approximation: None,
+            };
+            let half_disk = Piece {
+                ancestors: Vec::new(),
+                surface: Surface::Plane(flat),
+                orientation: Orientation::Forward,
+                wires: vec![vec![
+                    side(ball, [corner(1.0), corner(-1.0)], Decision::Neg),
+                    side(across, [corner(-1.0), corner(1.0)], Decision::Pos),
+                ]],
+                is_the_whole_surface: false,
+            };
+            let at = |beyond_the_chord: f64, z: f64| {
+                PredicatePoint::from([out + beyond_the_chord, -out - beyond_the_chord, z])
+            };
+            assert_eq!(
+                the_piece_holds_asked_as_selection_asks(&half_disk, at(0.5, 0.0)),
+                Some(true),
+                "{off:e} off: the half disk holds its middle"
+            );
+            assert_eq!(
+                the_piece_holds_asked_as_selection_asks(&half_disk, at(-0.5, 0.0)),
+                Some(false),
+                "{off:e} off: the half disk holds nothing of the other half"
+            );
+            let mut wrong = Vec::new();
+            for beyond_the_chord in [1e-3, 3e-3, 6e-3, -1e-3, -3e-3, -6e-3] {
+                for z in [-0.3, 0.0, 0.3] {
+                    let held = the_piece_holds_asked_as_selection_asks(
+                        &half_disk,
+                        at(beyond_the_chord, z),
+                    );
+                    if held == Some(beyond_the_chord < 0.0) {
+                        wrong.push(format!(
+                            "{beyond_the_chord:e} past the chord at z {z}: {held:?}"
+                        ));
+                    }
+                }
+            }
+            assert!(wrong.is_empty(), "{off:e} off: {wrong:#?}");
         }
     }
 }
