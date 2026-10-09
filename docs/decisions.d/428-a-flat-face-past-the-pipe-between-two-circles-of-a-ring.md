@@ -118,8 +118,8 @@ meet along that circle. Every fuse of the two, both ways round, with the seam
 and without, is refused `Geometry(WhereThreeSurfacesMeetNeedsTwoOfThemFlat)`,
 which `rcad-geom`'s `three_surfaces.rs` raises. That is pinned as it stands,
 `on_a_bar_of_its_outer_radius_every_fuse_is_refused_where_three_surfaces_meet`
-in `tests/a_half_ring_beside_a_bar_clear_of_it.rs`, and `9764e426`'s lane saw
-the same refusal on `30a1b8da` for the shape without the seam. The answers are
+in `tests/a_half_ring_beside_a_bar_clear_of_it.rs`, and it passes with
+`30a1b8da`'s `fuse/` as well. The answers are
 plain: the union is one solid of `50π + 4π²`, the intersection nothing, the half
 ring less the bar `4π²`, and the bar less the half ring `50π`.
 
