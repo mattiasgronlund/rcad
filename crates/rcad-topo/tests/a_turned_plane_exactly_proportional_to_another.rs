@@ -569,6 +569,176 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
         .sum()
 }
 
+mod rings;
+
+#[test]
+fn probe_q1223() {
+    let rules = [Rule::Intersection, Rule::Union, Rule::Difference];
+    let say = |what: &str, model: &Model, answer: &rcad_topo::Result<rcad_topo::Fused>| match answer
+    {
+        Ok(done) => {
+            let solids = done.solids().to_vec();
+            let valid = model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .is_ok();
+            let volume: f64 = solids
+                .iter()
+                .map(|&solid| {
+                    model
+                        .solid(solid)
+                        .unwrap()
+                        .measure(
+                            Deflection::of(DEFLECTION).unwrap(),
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        )
+                        .map(|m| m.volume())
+                        .unwrap_or(f64::NAN)
+                })
+                .sum();
+            eprintln!(
+                "{what}: {} solids, volume {volume}, valid {valid}",
+                solids.len()
+            );
+        }
+        Err(why) => eprintln!("{what}: refused {why:?}"),
+    };
+    // Shape B: the half bend unturned, the near block and the far block.
+    for near_first in [true, false] {
+        for bend_first in [true, false] {
+            for rule in rules {
+                let mut model = a_model();
+                let bend =
+                    rings::a_bend_turned_and_written_out(&mut model, 4.0, 1.0, 2, 0).unwrap();
+                let blocks = the_near_and_the_far_block(&mut model, near_first);
+                let (arguments, tools) = if bend_first {
+                    (vec![bend], blocks.to_vec())
+                } else {
+                    (blocks.to_vec(), vec![bend])
+                };
+                let answer = model.fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                say(
+                    &format!("B near_first {near_first} bend_first {bend_first} {rule:?}"),
+                    &model,
+                    &answer,
+                );
+            }
+        }
+    }
+    // Shape A: the half bend turned onto x = y, the near block flush against its caps.
+    for (bend_turns, block_turns) in [
+        (TO_THE_LONGER_SPELLING, TO_THE_SHORTER_SPELLING),
+        (TO_THE_SHORTER_SPELLING, TO_THE_LONGER_SPELLING),
+        (TO_THE_SHORTER_SPELLING, TO_THE_SHORTER_SPELLING),
+    ] {
+        for bend_first in [true, false] {
+            for rule in rules {
+                let mut model = a_model();
+                let bend =
+                    rings::a_bend_turned_and_written_out(&mut model, 4.0, 1.0, 2, 0).unwrap();
+                for angle in bend_turns {
+                    model
+                        .place_solid(bend, &Isometry::rotation(&Axis::z(), angle).unwrap())
+                        .unwrap();
+                }
+                let near = block(&mut model, THE_NEAR_BLOCK, block_turns);
+                let (arguments, tools) = if bend_first {
+                    (vec![bend], vec![near])
+                } else {
+                    (vec![near], vec![bend])
+                };
+                let answer = model.fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                say(
+                    &format!("A bend {bend_turns:?} bend_first {bend_first} {rule:?}"),
+                    &model,
+                    &answer,
+                );
+            }
+        }
+    }
+    // Leg 2: a bar of the ball's radius whose cap is on x = y, the ball, the far block.
+    for (bar_turns, block_turns) in [
+        (TO_THE_SHORTER_SPELLING, TO_THE_LONGER_SPELLING),
+        (TO_THE_LONGER_SPELLING, TO_THE_SHORTER_SPELLING),
+    ] {
+        let mut model = a_model();
+        let bar = model
+            .add_round_bar(
+                RADIUS,
+                8.0,
+                &Isometry::quarter_turns(&Axis::x(), 1).unwrap(),
+            )
+            .unwrap();
+        for angle in bar_turns {
+            model
+                .place_solid(bar, &Isometry::rotation(&Axis::z(), angle).unwrap())
+                .unwrap();
+        }
+        for face in model.solid(bar).unwrap().faces() {
+            if let rcad_geom::Surface::Plane(_) = face.surface() {
+                eprintln!("bar {bar_turns:?} cap {:?}", face.plane().coefficients());
+            }
+        }
+        for ball_first in [true, false] {
+            for bar_first in [true, false] {
+                for rule in rules {
+                    let mut model = a_model();
+                    let ball = model.add_ball(RADIUS, &Isometry::identity()).unwrap();
+                    let bar = model
+                        .add_round_bar(
+                            RADIUS,
+                            8.0,
+                            &Isometry::quarter_turns(&Axis::x(), 1).unwrap(),
+                        )
+                        .unwrap();
+                    for angle in bar_turns {
+                        model
+                            .place_solid(bar, &Isometry::rotation(&Axis::z(), angle).unwrap())
+                            .unwrap();
+                    }
+                    let far = block(&mut model, THE_FAR_BLOCK, block_turns);
+                    let others = if bar_first {
+                        vec![bar, far]
+                    } else {
+                        vec![far, bar]
+                    };
+                    let (arguments, tools) = if ball_first {
+                        (vec![ball], others)
+                    } else {
+                        (others, vec![ball])
+                    };
+                    let answer = model.fuse(
+                        &arguments,
+                        &tools,
+                        rule,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    );
+                    say(
+                        &format!(
+                            "2 bar {bar_turns:?} ball_first {ball_first} bar_first {bar_first} {rule:?}"
+                        ),
+                        &model,
+                        &answer,
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Insist a volume is off its closed form on the side `wall` says, by no more
 /// than the wall's area times [`DEFLECTION`].
 fn measures(found: f64, closed_form: f64, wall: Wall) {
