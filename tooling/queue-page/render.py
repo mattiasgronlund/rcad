@@ -10,7 +10,8 @@ on a lane branch — plus the claims file `tooling/queue/queue.py` also reads,
 and writes a self-contained page: rows added against rows closed per day, two
 SVG charts of the queue's shape over every commit of `docs/queue.md` on main's
 first-parent line, a table of both by day, a table of the rows running now with
-the tier each was taken from and the agent it runs under, then the current
+the tier each was taken from and the agent it runs under, a table of the open
+rows a fill would not take now and why, then the current
 ready, running and lately-closed rows, and what the overnight fuzz job did
 night by night — that last section is `fuzz_section.py`'s, read from the fuzz log root the caller
 names.
@@ -33,6 +34,7 @@ stderr and returned as a nonzero exit, never raised past `main`: the caller
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -47,6 +49,7 @@ import fuzz_section  # noqa: E402
 
 QUEUE_PATH = "docs/queue.md"
 CLOSED_ROWS_SHOWN = 12
+SKIP_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) meets (\S+)'s (\S+), held (by|elsewhere by) (\S+)$")
 
 
 def main(argv):
@@ -66,12 +69,12 @@ def main(argv):
     cache = load_cache(cache_path)
     points = [tallied(git, sha, when, cache) for sha, when in history]
     save_cache(cache_path, cache)
-    tip = Queue(git.show(history[-1][0], QUEUE_PATH))
+    tip_text = git.show(history[-1][0], QUEUE_PATH)
     fuzz_cache_path = os.path.join(out_dir, ".fuzz-cache.json")
     fuzz, fuzz_cache = fuzz_section.section(fuzz_root, read_json(fuzz_cache_path))
     write_atomically(fuzz_cache_path, json.dumps(fuzz_cache, sort_keys=True))
     rendered_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    page = render_page(points, current_state(tip), fuzz, rendered_at)
+    page = render_page(points, current_state(tip_text), fuzz, rendered_at)
     write_atomically(os.path.join(out_dir, "index.html"), page)
     return 0
 
@@ -159,12 +162,14 @@ def tally(text):
     return {"by_tier": by_tier, "parked": parked, "closed": closed}
 
 
-def current_state(tip):
+def current_state(tip_text):
+    tip = Queue(tip_text)
     verbs = load_queue_verbs()
     here = verbs.Here(QUEUE_PATH)
     return {
         "ready": ready_rows(tip),
         "running": running_rows(verbs, here, tip),
+        "not_taken": rows_not_taken(tip, tip_text, here.trees()),
         "closed": closed_rows(tip),
     }
 
@@ -179,15 +184,9 @@ def load_queue_verbs():
 
 
 def ready_rows(tip):
-    done_ids = {row.id for row in tip.rows if row.is_closed()}
     by_tier = {tier: [] for tier in TIERS_IN_ORDER}
     for row in tip.rows:
-        if row.state == "todo":
-            ready = True
-        elif row.state.startswith("after:"):
-            ready = all(other in done_ids for other in row.state[len("after:"):].split(","))
-        else:
-            ready = False
+        ready = row.state == "todo" or (row.state.startswith("after:") and not not_yet_done(tip, row))
         if ready and row.tier in by_tier:
             by_tier[row.tier].append(row)
     return by_tier
@@ -254,6 +253,81 @@ def tier_taken_from(hold, row):
     if hold["tier"] is not None:
         return hold["tier"]
     return row.tier if row else None
+
+
+def rows_not_taken(tip, tip_text, trees):
+    """Every open row a fill would not take now, even with every slot free, grouped by why (Q1510).
+
+    A row waits on rows not yet done, or is parked, or is ready and its write
+    set meets a running lane's. The first two are read from main's copy here,
+    in tier order as `just queue` lists its waiting rows. The third is the
+    `queue` recipe's `blocked` mode, since the rule for when two write sets meet
+    lives in its awk alone (§230.3, §230.6). A row that meets only a row the
+    same fill would take above it is held back by nothing, and `blocked` leaves
+    it out.
+    """
+    waiting = []
+    parked = []
+    for tier in TIERS_IN_ORDER:
+        for row in tip.rows:
+            if row.tier != tier:
+                continue
+            if row.state.startswith("after:"):
+                unfinished = not_yet_done(tip, row)
+                if unfinished:
+                    waiting.append((row, unfinished))
+            elif row.state.startswith("parked:"):
+                parked.append(row)
+    return {"waiting": waiting, "parked": parked, "meeting": meeting_a_running_lane(tip_text, trees)}
+
+
+def not_yet_done(tip, row):
+    """The rows an `after:` row waits on that are not `done:`, each with its state.
+
+    A dropped row is not done, as `just queue` and `take` read it.
+    """
+    unfinished = []
+    for other in row.state[len("after:"):].split(","):
+        found = tip.find(other)
+        if found is None or not found.state.startswith("done:"):
+            unfinished.append((other, found.state if found else "not a row"))
+    return unfinished
+
+
+def meeting_a_running_lane(tip_text, trees):
+    """`just queue blocked` run in the tree holding main, or None when no tree holding main has main's own copy.
+
+    It runs there, on that tree's copy, because the holds it steers round are
+    read relative to the tree it runs in (§263.4): so its lines are the ones
+    `just queue next` there would pass rows over with. A copy that is not
+    main's commit, as during a merge in that tree, describes a queue the rest
+    of the page does not show, so it is not run on one.
+    """
+    for tree in trees:
+        if tree.branch == "main" and queue_copy_in(tree) == tip_text:
+            return blocked_lines(tree)
+    return None
+
+
+def queue_copy_in(tree):
+    with open(os.path.join(tree.path, QUEUE_PATH), encoding="utf-8") as f:
+        return f.read()
+
+
+def blocked_lines(tree):
+    result = subprocess.run(
+        [os.environ["QUEUE_JUST"], "--justfile", os.environ["QUEUE_JUSTFILE"],
+         "--working-directory", tree.path, "queue", "blocked"],
+        capture_output=True, text=True)
+    assert result.returncode == 0, f"`just queue blocked` failed on main's own copy in {tree.path}: {result.stderr.strip()}"
+    lines = []
+    for line in result.stdout.splitlines():
+        match = SKIP_LINE.match(line)
+        assert match, f"`just queue blocked` printed a line this cannot read: {line!r}"
+        row_id, tier, mine, other, theirs, how, holder = match.groups()
+        lines.append({"id": row_id, "tier": tier, "mine": mine, "other": other, "theirs": theirs,
+                      "how": how, "holder": holder})
+    return lines
 
 
 def closed_rows(tip):
@@ -348,6 +422,7 @@ def render_page(points, state, fuzz, rendered_at):
         added_closed_chart=added_closed_chart,
         statistics_table=statistics_table(days),
         running_table=running_table(state["running"], rendered_at),
+        not_taken_table=not_taken_table(state["not_taken"]),
         ready_section=ready_section(state["ready"]),
         running_section=running_section(state["running"]),
         closed_section=closed_section(state["closed"]),
@@ -512,6 +587,48 @@ def running_table(rows, rendered_at):
 </table>"""
 
 
+def not_taken_table(groups):
+    """One group per reason a fill passes an open row over, each headed by how many rows it holds.
+
+    The third group names the entry, the row and the lane as `just queue next`
+    does, since it is that recipe's own line taken apart.
+    """
+    waiting = [
+        (row.id, row.tier, "waits on " + ", ".join(
+            f"<code>{html.escape(other)}</code> ({html.escape(state)})" for other, state in unfinished))
+        for row, unfinished in groups["waiting"]
+    ]
+    parked = [(row.id, row.tier, f"parked for {html.escape(row.state[len('parked:'):])}") for row in groups["parked"]]
+    bodies = [not_taken_group("Waits on rows not yet done", waiting), not_taken_group("Parked", parked)]
+    title = "Meets a running lane's write set"
+    if groups["meeting"] is None:
+        bodies.append(
+            f'<tbody>\n<tr><th colspan="3">{title} (not worked out)</th></tr>\n'
+            f"<tr><td colspan=\"3\">no tree that holds main has main's own {QUEUE_PATH}, "
+            f"and <code>just queue blocked</code> is run only there</td></tr>\n</tbody>")
+    else:
+        meeting = [
+            (line["id"], line["tier"],
+             f'its <code>{html.escape(line["mine"])}</code> meets <code>{html.escape(line["other"])}</code>\'s '
+             f'<code>{html.escape(line["theirs"])}</code>, held {line["how"]} <code>{html.escape(line["holder"])}</code>')
+            for line in groups["meeting"]
+        ]
+        bodies.append(not_taken_group(title, meeting))
+    body = "\n".join(bodies)
+    return f"""<p class="qp-sub">open rows a fill would pass over even with every slot free, by why</p>
+<table class="qp-stats">
+<thead><tr><th>Row</th><th>Tier</th><th>Why</th></tr></thead>
+{body}
+</table>"""
+
+
+def not_taken_group(title, lines):
+    head = f'<tr><th colspan="3">{title} ({len(lines)})</th></tr>'
+    rows = [f"<tr><th><code>{html.escape(row_id)}</code></th><td>{html.escape(tier)}</td><td>{why}</td></tr>"
+            for row_id, tier, why in lines]
+    return "<tbody>\n" + "\n".join([head, *rows]) + "\n</tbody>"
+
+
 def ready_section(by_tier):
     items = []
     for tier in TIERS_IN_ORDER:
@@ -661,6 +778,9 @@ table.qp-stats .n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 
 <h2>Running rows</h2>
 {running_table}
+
+<h2>Rows the fill will not take now</h2>
+{not_taken_table}
 
 <div class="qp-grid2">
 <div>

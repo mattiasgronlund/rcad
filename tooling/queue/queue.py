@@ -51,6 +51,7 @@ AT_ID = re.compile(r"^@([0-9]+)$")
 USAGE = """\
 just queue                                 ready rows by tier, then running, waiting, parked
 just queue ready                           the ready rows alone
+just queue blocked                         each ready row whose write set meets a running lane's, as next skips it
 just queue next [N]                        what N free slots take; N defaults to the free slots on this machine
 just queue running                         what holds a slot on this machine, one line each
 just queue show <id>                       one row, its hold, and its state in other worktrees

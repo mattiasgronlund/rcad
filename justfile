@@ -11039,6 +11039,10 @@ _queue-rows file:
 # [N]` is §230.3's fill: each slot takes the first ready row of the highest tier
 # that meets no running lane and no row taken above it, and every row it passes
 # over says which of its entries met which. N defaults to the free slots.
+# `blocked` prints the line `next` passes a row over with, for every ready row
+# whose write set meets a running lane's, as if nothing were taken above it:
+# the rows a fill holds back however many slots are free. The queue page reads
+# it (Q1510), so the rule for when two write sets meet stays here alone.
 #
 # **The order comes from the tier field, not from where a row sits.**
 # `check-queue` makes the two agree, but the fill does not lean on that having
@@ -11118,8 +11122,8 @@ queue mode="" *args:
         show|running)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
-        ""|ready|next) ;;
-        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, next [N], or one of take, add, done, drop, park, after, rank, tier, tag, pick, apply, show, running" >&2; exit 1 ;;
+        ""|ready|blocked|next) ;;
+        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, blocked, next [N], or one of take, add, done, drop, park, after, rank, tier, tag, pick, apply, show, running" >&2; exit 1 ;;
     esac
     n="${2:-}"
     if [ $# -gt 2 ]; then echo "queue: $mode takes at most one count" >&2; exit 1; fi
@@ -11191,6 +11195,11 @@ queue mode="" *args:
 
             if (mode == "ready") {
                 for (x = 1; x <= w; x++) print raw[walk[x]]
+                exit 0
+            }
+
+            if (mode == "blocked") {
+                for (x = 1; x <= w; x++) blocked(walk[x], 1)
                 exit 0
             }
 
@@ -11335,13 +11344,15 @@ queue mode="" *args:
 # directory to write and `{{ fuzz_log_root }}`, which the page's fuzzing
 # section reads the overnight fuzz job's nights from. The renderer writes
 # through a temporary file and a rename on its own — see `write_atomically`
-# there — so this recipe does not repeat that.
+# there — so this recipe does not repeat that. It also hands it this `just` and
+# this justfile, for the `queue blocked` it runs in the tree holding main.
 #
 # The fuzzing section is only as fresh as the last render: the page re-renders
 # on a queue write, `ff-main` or this recipe, not when a fuzz night ends.
 [doc("Render docs/queue.md's history, current state and fuzz nights as one page, to RCAD_QUEUE_PAGE_DIR or ~/rcad-queue-page.")]
 queue-page:
-    @python3 '{{ justfile_directory() }}/tooling/queue-page/render.py' '{{ queue_page_dir }}' '{{ fuzz_log_root }}'
+    @QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
+        python3 '{{ justfile_directory() }}/tooling/queue-page/render.py' '{{ queue_page_dir }}' '{{ fuzz_log_root }}'
 
 # Renders a scratch repository's `docs/queue.md` history into a scratch
 # directory and checks both charts' counts, by commit, against a count taken
@@ -11351,8 +11362,8 @@ queue-page:
 #
 # Three commits are enough to move every count `tally()` tracks at least once:
 # an open row closing, a row parking, and a tier gaining and losing a row. The
-# last also opens a row in tiers 2.2 and 5, and the render starts from a cache
-# holding the last commit's tally as a five-tier renderer wrote it, as the real
+# third also opens a row in tiers 2.2 and 5, and the render starts from a cache
+# holding the third commit's tally as a five-tier renderer wrote it, as the real
 # page's cache did when tiers 2.2 and 5 reached the page (§403.8). The
 # renderer's `.history-cache.json` holds one tally per commit sha verbatim, so
 # reading it back is reading the render's real output, not recomputing it.
@@ -11368,6 +11379,16 @@ queue-page:
 # `tier` move; one that records no tier, so the row's tier in main's copy
 # stands in; one for a row main's copy does not hold; one with neither; and one
 # released, which must not show.
+#
+# A fourth commit, on a day of its own, adds the rows the table of rows the fill
+# will not take reads (Q1510): one waiting on a running row, a done one and an id
+# that is no row, which names the first and last; one waiting on a dropped row,
+# which is not done, so the row is not ready either; a second parked row; and
+# three ready rows, one meeting a `lane:` row in main's copy, one meeting a row
+# another dispatcher holds in the claims file, and one meeting nothing, which
+# must not show. The table is checked against that hand count, and again with
+# the copy in the tree holding main left different from main's commit, when its
+# third group is not worked out.
 #
 # The fuzzing section reads a fixture log root with one night of each kind the
 # table tells apart: a finished night with its first artifacts (09-10), a build
@@ -11528,6 +11549,66 @@ check-queue-page-selftest:
     GIT_COMMITTER_DATE='2026-09-03T10:00:00+00:00' g commit -q -m "commit C: Q3 closes, Q4 parks in tier 1, Q5 and Q6 open in tiers 2.2 and 5"
     sha_c=$(g rev-parse HEAD)
 
+    cat > "$hub/docs/queue.md" <<'MD'
+    # Queue
+
+    ## Tier 1
+
+    ```
+    Q2  1  todo  opus  docs/b.md  the second row §230
+    Q4  1  parked:§230  opus  -  a parked row §230
+    ```
+
+    ## Tier 2
+
+    ```
+    Q10  2  lane:lane-q10  opus  docs/g.md  a lane in main's copy, with no take in the claims file §230
+    Q11  2  todo  opus  docs/g.md  meets Q10's lane §230
+    ```
+
+    ## Tier 2.2
+
+    ```
+    Q5  2.2  todo  opus  docs/e.md  a tier 2.2 row §307
+    ```
+
+    ## Tier 2.5
+
+    ```
+    Q16  2.5  parked:§13  opus  -  parked for want of a consumer §13
+    ```
+
+    ## Tier 3
+
+    ```
+    Q12  3  todo  opus  docs/b.md  meets Q2, which another dispatcher holds §230
+    Q13  3  todo  opus  docs/h.md  meets nothing running, so a fill takes it §230
+    Q14  3  after:Q10,Q1,Q99  opus  -  waits on a running row, a done one and an id that is no row §230
+    ```
+
+    ## Tier 4
+
+    ```
+    Q15  4  after:D1  opus  -  waits on a dropped row, which is not done §230
+    ```
+
+    ## Tier 5
+
+    ```
+    Q6  5  todo  opus  docs/f.md  wrong/C a tier 5 row §403
+    ```
+
+    ## Closed
+
+    ```
+    Q1  1  done:abcdef0  -  -  a closed row §230
+    Q3  2  done:abcdef1  -  -  the third row §230
+    D1  2  dropped:§230  opus  -  a dropped row §230
+    ```
+    MD
+    g add docs/queue.md
+    GIT_COMMITTER_DATE='2026-09-04T10:00:00+00:00' g commit -q -m "commit D: rows waiting, parked and meeting a running lane, for the table of rows the fill will not take"
+
     mkdir -p "$out"
     jq -n --arg sha "$sha_c" '{($sha): {"by_tier":{"1":1,"2":0,"2.5":0,"3":0,"4":0},"parked":3,"closed":2}}' \
         > "$out/.history-cache.json" || fail "could not write the five-tier cache"
@@ -11601,16 +11682,16 @@ check-queue-page-selftest:
     expect_tally "$sha_b" '{"by_tier":{"1":1,"2":1,"2.2":0,"2.5":0,"3":0,"4":0,"5":0},"parked":0,"closed":1}'
     expect_tally "$sha_c" '{"by_tier":{"1":1,"2":0,"2.2":1,"2.5":0,"3":0,"4":0,"5":1},"parked":1,"closed":2}'
 
-    grep -q '3 commits' "$out/index.html" || fail "the page does not say 3 commits, so it did not walk all three"
+    grep -q '4 commits' "$out/index.html" || fail "the page does not say 4 commits, so it did not walk all four"
     grep -q 'id="qp-by-tier"' "$out/index.html" || fail "the by-tier chart is missing from the page"
     grep -q 'id="qp-progress"' "$out/index.html" || fail "the progress chart is missing from the page"
     grep -q '<h3>Tier 2.2</h3><ul><li><code>Q5</code>' "$out/index.html" || fail "the ready list leaves out tier 2.2's Q5"
     grep -q '<h3>Tier 5</h3><ul><li><code>Q6</code>' "$out/index.html" || fail "the ready list leaves out tier 5's Q6"
 
     has() { grep -qF -- "$1" "$out/index.html" || fail "$2"; }
-    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Running rows|Ready)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
-    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Ready</h2> ' ] \
-        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, then Running rows, then Ready: $order"
+    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Running rows|Rows the fill will not take now|Ready)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
+    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Rows the fill will not take now</h2> <h2>Ready</h2> ' ] \
+        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, Running rows, Rows the fill will not take now, then Ready: $order"
     # Each line: the row, the tier its take was taken from, the agent whose tree it runs in, the dispatcher's tree.
     has '<tr><th><code>Q2</code></th><td>2</td><td><code>wf_page-1</code></td><td><code>dispatch-a</code></td></tr>' \
         "Q2's running line: taken from tier 2 though main's copy has it in tier 1 now, running in wf_page-1's tree on lane-q2"
@@ -11622,8 +11703,26 @@ check-queue-page-selftest:
         "Q8's running line: in no copy of main, so the tier comes from its take alone"
     has '<tr><th><code>Q9</code></th><td>not recorded</td><td>no tree yet</td><td><code>dispatch-b</code></td></tr>' \
         "Q9's running line: in no copy of main and its take records no tier, so the page should say so"
-    [ "$(grep -oE '<tr><th><code>Q[0-9]+</code></th>' "$out/index.html" | tr '\n' ' ')" = '<tr><th><code>Q2</code></th> <tr><th><code>Q5</code></th> <tr><th><code>Q6</code></th> <tr><th><code>Q8</code></th> <tr><th><code>Q9</code></th> ' ] \
+    between() { sed -n "/<h2>$1<\/h2>/,/<h2>$2<\/h2>/p" "$out/index.html"; }
+    [ "$(between 'Running rows' 'Rows the fill will not take now' | grep -oE '<tr><th><code>Q[0-9]+</code></th>' | tr '\n' ' ')" = '<tr><th><code>Q2</code></th> <tr><th><code>Q5</code></th> <tr><th><code>Q6</code></th> <tr><th><code>Q8</code></th> <tr><th><code>Q9</code></th> ' ] \
         || fail "the running table should hold each held row once, and not Q7, which was released"
+    # Each line: the row, its tier, and why a fill would pass it over, grouped by why.
+    has '<tr><th colspan="3">Waits on rows not yet done (2)</th></tr>' "two rows wait: Q14 and Q15"
+    has '<tr><th><code>Q14</code></th><td>3</td><td>waits on <code>Q10</code> (lane:lane-q10), <code>Q99</code> (not a row)</td></tr>' \
+        "Q14 waits on Q10, which is running, and Q99, which is no row; Q1 is done and should not be named"
+    has '<tr><th><code>Q15</code></th><td>4</td><td>waits on <code>D1</code> (dropped:§230)</td></tr>' \
+        "Q15 waits on D1, which was dropped, and a dropped row is not done"
+    ! grep -qF '<li><code>Q15</code>' "$out/index.html" || fail "the ready list counts Q15 ready, as if its dropped D1 were done"
+    has '<tr><th colspan="3">Parked (2)</th></tr>' "two rows are parked: Q4 and Q16"
+    has '<tr><th><code>Q4</code></th><td>1</td><td>parked for §230</td></tr>' "Q4 is parked in tier 1, for §230"
+    has '<tr><th><code>Q16</code></th><td>2.5</td><td>parked for §13</td></tr>' "Q16 is parked in tier 2.5, for §13"
+    has "<tr><th colspan=\"3\">Meets a running lane's write set (2)</th></tr>" "two ready rows meet a running lane: Q11 and Q12"
+    has "<tr><th><code>Q11</code></th><td>2</td><td>its <code>docs/g.md</code> meets <code>Q10</code>'s <code>docs/g.md</code>, held by <code>lane:lane-q10</code></td></tr>" \
+        "Q11 meets Q10, a lane in main's copy"
+    has "<tr><th><code>Q12</code></th><td>3</td><td>its <code>docs/b.md</code> meets <code>Q2</code>'s <code>docs/b.md</code>, held elsewhere by <code>lane:lane-q2</code></td></tr>" \
+        "Q12 meets Q2, which the claims file says another dispatcher holds"
+    [ "$(between 'Rows the fill will not take now' 'Ready' | grep -oE '<tr><th><code>Q[0-9]+</code></th>' | tr '\n' ' ')" = '<tr><th><code>Q14</code></th> <tr><th><code>Q15</code></th> <tr><th><code>Q4</code></th> <tr><th><code>Q16</code></th> <tr><th><code>Q11</code></th> <tr><th><code>Q12</code></th> ' ] \
+        || fail "the table should hold Q14 and Q15 waiting, Q4 and Q16 parked, then Q11 and Q12 meeting a lane, each in tier order, and not Q13, which meets nothing"
     grep -qE '<p class="qp-sub">as of [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z, when this page was last rendered</p>' "$out/index.html" \
         || fail "the running table does not say when the page was rendered"
     # Each row: added and closed that day, open by tier 1 2 2.2 2.5 3 4 5, parked, all open, closed so far.
@@ -11669,7 +11768,14 @@ check-queue-page-selftest:
     render || fail "queue-page failed to render a second time"
     has '<title>2026-09-10: 4242 at the end of the night</title>' "an unchanged log was read again rather than served from the cache"
     has '<title>2026-09-13: 1050 at the end of the night</title>' "a log that grew was served stale from the cache"
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all three commits, so do the statistics table's three days, the running table names each held row's tier, agent and dispatcher, Pace leads the page, the ready list holds every tier, and the fuzzing section matches its fixture nights"
+
+    printf '\n' >> "$hub/docs/queue.md"
+    render || fail "queue-page failed to render with the copy in the tree holding main not main's commit"
+    has "<tr><th colspan=\"3\">Meets a running lane's write set (not worked out)</th></tr>" \
+        "with the copy in the tree holding main not main's commit, the page should say the third group is not worked out"
+    ! grep -qF '<tr><th><code>Q11</code></th>' "$out/index.html" || fail "Q11's line was read from a copy that is not main's commit"
+    has '<tr><th colspan="3">Waits on rows not yet done (2)</th></tr>' "the waiting rows come from main's commit, and should still show"
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the table of rows the fill will not take names each by why, Pace leads the page, the ready list holds every tier, and the fuzzing section matches its fixture nights"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
@@ -11888,7 +11994,10 @@ _queue-check file decisions:
 # of tier 1, and a lone small row
 # still printed as a bundle; a partial bundle waiting for its tier and pulling the
 # later small rows forward, one overlapping its leader; and a small row a running
-# lane blocks, which neither joins nor completes a bundle.
+# lane blocks, which neither joins nor completes a bundle. `blocked` prints the
+# skip line of each ready row a running lane holds back, in the fill's order, and
+# none for a row only a row taken above holds back, nor for a waiting or a parked
+# row (Q1510).
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -12184,6 +12293,24 @@ check-queue-selftest:
     drive after
     grep -qxF '      waits on Q1 (lane:lane-y)' <<<"$got" \
         || fail "a waiting row does not say what it waits on and that row's state"
+
+    fence blocked <<'MD'
+    Q1  1  lane:lane-q1  opus  docs/a.md  running §230
+    Q2  2  todo  opus  docs/a.md  meets the running lane §230
+    Q3  2  todo  opus  docs/b.md  meets nothing, so a fill takes it §230
+    Q4  3  todo  opus  docs/b.md  meets only Q3, which a fill takes above it §230
+    Q5  3  after:Q1  opus  docs/a.md  waits, so it is not ready §230
+    Q6  3  parked:§230  opus  docs/a.md  parked, so not ready either §230
+    T7  1  todo  opus  docs/  the directory of the running lane's file §230
+    MD
+    drive blocked next 4
+    grep -qxF "skip Q4 (tier 3): its docs/b.md meets Q3's docs/b.md, taken above" <<<"$got" \
+        || fail "next does not pass Q4 over as taken above, so blocked leaving it out would prove nothing"
+    drive blocked blocked
+    [ "$got" = "$(printf '%s\n' \
+        "skip T7 (tier 1): its docs/ meets Q1's docs/a.md, held by lane:lane-q1" \
+        "skip Q2 (tier 2): its docs/a.md meets Q1's docs/a.md, held by lane:lane-q1")" ] \
+        || fail "blocked is not exactly the skip line of each ready row the running lane holds back, in the fill's order"
 
     exit 0
 
