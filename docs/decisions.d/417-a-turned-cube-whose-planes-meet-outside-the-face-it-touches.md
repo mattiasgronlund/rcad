@@ -213,6 +213,8 @@ The same judgment covers them. It changes no answer: a fuse that answered had
 no edge with no face, and a corner with no edge was dropped by the joining or
 refused as an orphan.
 
+§423 is the family's fourth rule, a flat ring another plane walks back.
+
 ### 417.5 The other half: the three crossings as one, not built
 
 At `(0, 3, 3)`, and in the 95 of the 199 still refused under the tolerant
