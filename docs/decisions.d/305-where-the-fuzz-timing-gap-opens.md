@@ -410,3 +410,85 @@ Q277's seed-only runs were this command with `-runs=835` in place of
 the run directory, and no `env -u`, so whether `RCAD_FUZZ_TIMINGS` was set
 in its shell is not recorded. Each lane's logs stayed in its tree's `target/` and go at the next
 `clean-targets`.
+
+### 305.9 Without counters nothing parts, and use-after-return moves the seed pass
+
+*Queue row Q279, read-only, 2026-10-09. Its lane built 305.2's compiled-out
+arm of `where_two_surfaces_cross` at `012d3163`, with 305.8's build script, in
+`clean-up-dead-sessions-worktrees/wf_4d21279a-961-1`, whose path is 99
+characters long like Q278's build A (sha256 `a6dbcc1b…`, 2 m 30 s). This is
+written by its dispatcher from the lane's report and from its 42 logs, which
+were read again for every number here. The source is not 305.8's `f85f926d`,
+so these numbers compare with one another and not with 305.4's or 305.8's.*
+
+**Without counters, nothing parts.** Q279 asked what still moved with the
+stack under `-use_counters=0`, since 305.4's two pads parted at `#1265 NEW`
+even then. On this build nothing does. 305.8's pads script with
+`-use_counters=0`, at 15 pads (every 8 bytes from 0 to 64, then every 32 from
+96 to 256), two passes each: 29 of the 30 runs print the same `INITED`,
+`NEW` and `DONE` lines, leaving out `exec/s` and `rss`. They read `INITED cov:
+3271 ft: 3277 corp: 265/12397b` and `#1500 DONE cov: 3282 ft: 3288 corp:
+270/12712b`. So the question has no live case on this build, and
+`sphere.rs:371`, the edge 305.4 saw part first, cannot be tested on it.
+
+**The 30th run moved with something other than the stack.** Pass a at pad 56
+printed the same lines up to `#1151`, then ran 1719 units rather than 1500,
+and its last unit came in by `RELOAD` at `#1719` rather than as `#1497 NEW`.
+Pass b at pad 56 matched the other 28. The lane put this down to the slow-unit
+report. That does not hold: four runs without counters that matched reported
+a slow unit too, pass b at pad 56 among them. libFuzzer rereads its corpus on a
+timer (`-reload`), which would fit a run that differs from its own repeat, but
+that was not measured.
+
+**With counters, the seed pass parts.** 305.8's pads script as printed, at
+pads 0, 16, 32 and 48, two passes each:
+
+| Pads | `INITED` cov / ft / corp | `DONE` cov / ft / corp |
+|---|---|---|
+| 0 and 32 | 3271 / 9203 / 498 | 3276 / 9297 / 513 |
+| 16 and 48 | 3271 / 9204 / 499 | 3273 / 9274 / 517 |
+
+At each pad the two passes printed the same trace line for line. The flip
+comes every 16 bytes, as in 305.8. Unlike either of 305.8's trees, it is
+already there at `INITED`, at the end of the seed pass. That is the case
+305.7's first item needs and 305.8 could not find.
+
+**With use-after-return off, the four pads agree.** The same runs with
+`ASAN_OPTIONS=detect_stack_use_after_return=0`, one pass per pad, print one
+trace at all four pads: `INITED cov: 3271 ft: 9204 corp: 498/25Kb` and `DONE
+cov: 3275 ft: 9298 corp: 513/26Kb`. That is a third outcome, neither group's.
+So on this build ASan's fake stack is all that moves with the stack when
+counters are on, which is where 305.4 and 305.8 saw it move the seed pass.
+libFuzzer's value profile and CMP tracing were not turned off one at a time.
+With nothing left to explain on this build, they were not needed here; that
+says nothing about another build.
+
+**Replay.** A run replays from `-seed` when ASLR is off (`setarch -R`) and
+the stack starts at the same place: the same pad, in an environment of the
+same size. Every pair of passes at one pad agreed, with counters on and with
+counters off, except pass a at pad 56 above. `-seed` alone does not replay
+with counters on and ASan's default options, because the outcome moves with
+the stack start. Runs with ASLR on were not made.
+
+**For comparing two arms** (305.7's third item): on this build, either
+`-use_counters=0` or `detect_stack_use_after_return=0` takes the stack out
+of the comparison, shown at 15 pads and at 4 pads respectively. Each changes
+what is measured, so a comparison made with one says nothing about a night
+run without it.
+
+**What is left.** 305.7's first item can now be reached: rebuild this arm at
+`012d3163` in a tree of its own, check that two pads part at `INITED`, dump
+`__sancov_cntrs` at the end of the seed pass at each, and diff them. Q277 and
+Q278 had paths of the same length and still saw different seed passes
+(305.8), so the rebuild must find its own parting pads and not assume 0 and
+16. Filed as Q1525. The lane's tree is removed (§420.4), with its logs; the
+lines that matter are above.
+
+**The scripts.** The build is 305.8's script, unchanged. The runs without
+counters are 305.8's pads script with `-use_counters=0` after
+`-runs=1500`. The second batch is the same script with the pad list
+`8 24 40 56 64 96 128 160 192 224 256`. The runs with counters are 305.8's
+script exactly. The use-after-return runs are 305.8's script with one pass
+per pad and `ASAN_OPTIONS=detect_stack_use_after_return=0` after
+`Q236_PAD="$pad_str"`. Each run used the tree's own
+`fuzz/corpus/where_two_surfaces_cross`, copied into a fresh directory.
