@@ -542,9 +542,17 @@ fn a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_
     );
 }
 
-/// Exit criterion 7, the refusing half (§17.2). Two turned cubes overlap by
-/// less than a double can see, a certified fuse refuses what they share, and
-/// it is right to: **no solid a `Model` can hold is the answer**.
+/// Two turned cubes overlap by less than a double can see. A certified fuse
+/// refuses what they share as `Invalid::DynamicRangeTooWide`, and it is right
+/// to: **no solid a `Model` can hold is the answer**. That makes it §3.5's
+/// limit, reached by name (`docs/decisions.md` §417.3).
+///
+/// **It is not exit criterion 7's refusing half** (§17.2), though it stood as
+/// that half from 2026-10-05 until Q1353. Criterion 7 is the judgment of
+/// `Policy::max_wobble` against `ProvenanceLog::worst_wobble`, and it refuses
+/// `Error::Undecidable`. The fuse asks the range check only after that
+/// judgment has passed, so a refusal by the range check says nothing about
+/// the judgment (§353.5).
 ///
 /// The pair is the one `two_turned_cubes_a_rounding_apart.rs` turns by `0.3`.
 /// Two cubes of side two, the second moved by `(2, 0.5, 0.25)`, both turned
@@ -566,13 +574,13 @@ fn a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_
 /// `1e11` (`docs/decisions.md` §3.5). The fuse asks its own answer the same
 /// before it writes it, because its inputs are inside that range, which the
 /// first lines check. So this refusal is not a gap the arithmetic failed to
-/// reach (§16.10). There is no answer to reach. §17's exit table says which
-/// other kinds of refusal were tried for this half and why each had an answer.
+/// reach (§16.10). There is no answer to reach. §17's exit table says what was
+/// tried for criterion 7's refusing half, and that none is known.
 ///
 /// **Where the fuse stops is now the range check, not selection.** The
 /// slab's face on the second cube's bottom used to be a strip `2^-52` wide
-/// that no candidate point could be shown to lie inside, so the fuse stopped
-/// refused `Undecidable` at *a point inside a piece of a face*. Q1353's
+/// that no candidate point could be shown to lie inside, so the fuse refused
+/// it `Undecidable` at *a point inside a piece of a face*. Q1353's
 /// `by_a_plane` places a piece inside a solid when every plane of the solid
 /// has every corner of the piece on or behind it and one strictly behind
 /// (`docs/decisions.md` §417), which that strip has, so selection now writes
@@ -866,10 +874,9 @@ fn two_turned_blocks_meeting_at_a_corner() -> (Model, SolidKey, SolidKey) {
 /// candidate there is half way between two corners at `z = 1e308`, and adding
 /// the two first came to `2e308`, so each candidate was a box reaching from
 /// `9e307` to infinity and no winding could place one. The middle is `1e308`,
-/// a double, and halving first reaches it (`docs/decisions.md` §353). The half
-/// is now
-/// [`what_two_turned_cubes_a_rounding_deep_in_each_other_share_is_too_thin_to_hold_and_is_refused`],
-/// whose answer does not exist.
+/// a double, and halving first reaches it (`docs/decisions.md` §353). No
+/// refusal by criterion 7's judgment whose answer does not exist is known
+/// since. §17's exit table names what was tried.
 ///
 /// An answer at all also says `InPlane::of`'s second reach ran: the first,
 /// `1e308` further out along the top's normal, overflows, and without the
