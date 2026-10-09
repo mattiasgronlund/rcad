@@ -373,6 +373,24 @@ eight. On this base it does not.
   refuses the ring wall walked to keep the near side of both planes, Q1154's
   wall
   (`a_bands_wall_walking_both_circles_the_same_way_round_the_tube_is_refused`).*
+  *2026-10-09, recording Q1335 (`54109536`, merged as `0383d43c` on
+  2026-10-08): one circle in front of the other plane and one behind, Q1155's
+  shape, is answered for two planes square to the axis with one outer circle
+  and one inner, as where the cone `r = 9 − z` on the ring's axis cuts it at
+  `z = −4` and `z = 3`. Round the tube's cross-section the face runs from the
+  outer circle to the inner one, over the top or under the bottom: the part on
+  each circle's side of the pipe of radius `R` in front of that circle's own
+  plane. A point on that pipe is the top or bottom of the tube, on one side of
+  both planes, so both parts give it the same answer. Pinned by
+  `a_ring_face_from_an_outer_circle_of_one_plane_to_an_inner_of_another_runs_over_the_top_or_under`
+  in `holds.rs` and
+  `the_ring_face_of_each_piece_cut_by_the_cone_holds_its_side_of_the_cone` in
+  `a_ring_face_bounded_by_a_circle_on_a_coaxial_surface.rs`. The test that
+  pinned the refusal, `holds.rs`'s
+  `a_ring_face_along_an_outer_circle_of_one_plane_and_an_inner_of_another_is_refused`
+  (`e43dbc55`), asserted every walk refused; it is narrowed to the walks no
+  piece keeps, with a wall along both outer circles added, as
+  `a_ring_face_along_two_circles_keeping_sides_no_piece_keeps_is_refused`.*
 - A wall whose two edges are one circle walked twice the same way round would
   pass the side check here as it would for a plane through the axis. That is
   Q790's question, not run for a plane square to the axis either.
