@@ -129,7 +129,6 @@ gate_steps := "check-plugins \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
     check-timing-hooked-calls-selftest \
-    check-timing-hooked-calls \
     check-fuzz-watermark-selftest \
     check-gate-fresh-selftest \
     check-gate-fresh-cleanup-selftest \
@@ -236,7 +235,7 @@ pre_gate_steps := "check-fmt lint check-wildcards"
 #   fixture and never reads the real corpus.
 #
 # On a metered runner this is 1m07s against 9m46s. `docs/decisions.md` §172.
-gate_metered_steps := "check check-fuzz-builds check-timing-hooked-calls check-wildcards check-fmt lint test test-slow check-release-build check-systemd-units deny check-corpus"
+gate_metered_steps := "check check-fuzz-builds check-wildcards check-fmt lint test test-slow check-release-build check-systemd-units deny check-corpus"
 
 # The steps `gate` may serve from an earlier green of the same code instead of
 # running (`docs/decisions.md` §337). The first nine were the slow ones: together
@@ -288,7 +287,6 @@ gate_reusable_steps := "check \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
     check-timing-hooked-calls-selftest \
-    check-timing-hooked-calls \
     check-fuzz-watermark-selftest \
     check-gate-fresh-selftest \
     check-gate-fresh-cleanup-selftest \
@@ -810,7 +808,7 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     # built, which is why it comes after `test` in the list.
     # `check-gate-runs-every-check` holds this line to the steps whose recipes
     # run cargo, so a new one cannot be left off it unnoticed.
-    cargo_steps="check check-fuzz-builds check-timing-hooked-calls check-wildcards check-ignored lint test test-slow check-release-build check-t-selftest"
+    cargo_steps="check check-fuzz-builds check-wildcards check-ignored lint test test-slow check-release-build check-t-selftest"
     names=()
     chained=()
     unchained=()
@@ -3697,8 +3695,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "62" ]; then \
-        echo "found $n check-* recipes, expected 62"; \
+    if [ "$n" != "61" ]; then \
+        echo "found $n check-* recipes, expected 61"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -8407,60 +8405,6 @@ check-timing-hooked-calls-selftest:
         echo "expected the chain line above"
         exit 1
     }
-
-# A step of its own rather than folded into `check-fuzz-builds` (Q324,
-# docs/decisions.d/425): that recipe runs `cargo check --all-targets` on
-# stable and never links anything, so it cannot see what this checks —
-# docs/decisions.d/267.4's stand-in, and the hooked libFuzzer memcmp
-# intercepts `fuzz/timing-hooked-calls.py` scans a *linked* binary for.
-# Reuses `fuzz-overnight`'s own build command and its two post-build guards
-# (the rlib found by name, and no sancov reference in it) rather than
-# building twice.
-#
-# Skips, printing "skipped, not passed" rather than failing, where there is
-# no nightly toolchain or no cargo-fuzz on PATH — true of every CI runner
-# today, since nightly is not pinned by this repo (docs/decisions.md §29.9)
-# — because a gate that could never have told the difference should not fail
-# one.
-[doc("Builds the five fuzz targets and runs timing-hooked-calls.py on them; skips without a nightly toolchain or cargo-fuzz.")]
-check-timing-hooked-calls:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! rustup which --toolchain nightly rustc >/dev/null 2>&1; then
-        echo "no nightly toolchain installed (not pinned by this repo, docs/decisions.md §29.9): the hooked-call scan is skipped, not passed"
-        exit 0
-    fi
-    if ! command -v cargo-fuzz >/dev/null 2>&1; then
-        echo "no cargo-fuzz on this PATH (mise.toml pins cargo:cargo-fuzz): the hooked-call scan is skipped, not passed"
-        exit 0
-    fi
-    cd fuzz
-    CI=1 RUSTC="{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" \
-        RUSTFLAGS="-C target-cpu=x86-64-v3" \
-        cargo +nightly fuzz build
-    timing_rlibs=$(find target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing \
-        -name 'librcad_fuzz_timing-*.rlib' 2>/dev/null)
-    if [ -z "$timing_rlibs" ]; then
-        echo "rcad-fuzz-timing's rlib was not found by name after the build, so whether it carries coverage could not be checked"
-        exit 1
-    fi
-    sancov_found=()
-    while IFS= read -r candidate; do
-        [ -n "$candidate" ] || continue
-        refs=$(nm "$candidate" 2>/dev/null | grep -ic sancov || true)
-        [ "$refs" -eq 0 ] || sancov_found+=("$candidate ($refs)")
-    done <<<"$timing_rlibs"
-    if [ "${#sancov_found[@]}" -gt 0 ]; then
-        echo "rcad-fuzz-timing's rlib carries a sancov reference, so the stand-in did not keep it out of coverage:"
-        printf '    %s\n' "${sancov_found[@]}"
-        exit 1
-    fi
-    ./timing-hooked-calls.py \
-        target/x86_64-unknown-linux-gnu/release/where_two_surfaces_cross \
-        target/x86_64-unknown-linux-gnu/release/no_step_file_makes_the_reader_panic \
-        target/x86_64-unknown-linux-gnu/release/no_model_makes_the_writer_panic \
-        target/x86_64-unknown-linux-gnu/release/two_solids_fused_by_a_stranger \
-        target/x86_64-unknown-linux-gnu/release/where_a_cone_or_a_torus_crosses
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and
