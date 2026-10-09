@@ -1212,6 +1212,12 @@ mod tests {
     /// 3's answer from the whole cascade, and that answer is the whole-number
     /// one — while level 1's bound and level 2's interval run off the top on
     /// some of them.
+    ///
+    /// `orient3d` on the turn unscaled gets checked against the same
+    /// `exactly`, so this fails if `orient3d` ever stops trying the third
+    /// exponent at its own call site. Scaling the points by hand and calling
+    /// `decide` on the result, as the rest of this test does, would not
+    /// notice that at all.
     #[test]
     fn levels_one_and_two_overflowing_at_the_third_exponent_still_agree_with_level_three() {
         let corners = a_spike_at_the_origin_under_a_unit_cube();
@@ -1231,6 +1237,12 @@ mod tests {
                 assert_eq!(
                     exactly,
                     the_sign_at_a_tiny_t(turn.map(|corner| corners[corner]))
+                );
+                let [unscaled_a, unscaled_b, unscaled_c, unscaled_d] = points;
+                assert_eq!(
+                    orient3d(unscaled_a, unscaled_b, unscaled_c, unscaled_d),
+                    exactly,
+                    "corners {turn:?}, t = {t:e}"
                 );
                 let predicate = Orient3d {
                     a: a.into(),
