@@ -50,42 +50,62 @@ resolves to an address with no function symbol at all is not a call this scan
 can name a target for either, the same as a `call *%reg` it never traced to a
 slot: it falls into the "can leave" bucket below rather than being dropped.
 
-**What this cannot see**: a call through a computed pointer — one where the
-register a `call *%reg` uses was not last set by a direct, in-function load
-of a hooked GOT slot, or a `call *SLOT(%rip)` whose relocation names no
-function symbol at all. Most `jmp *%reg` of this kind is not that: it is the
-tail of a relative jump table, the lowering of a match under `-fPIE` — `lea
-table(%rip),%base; movslq (%base,%idx,4),%off; add %base,%off; jmp *%off` —
-whose table holds offsets from its own base, so the jump can only land
-inside the function it is in, never at an imported symbol. This scan
-recognises that whole sequence, the load and the add of the same base
-register and the jump through the result, and reports it apart, as a jump
-that stays inside its own function. Everything else indirect that this scan
-could not trace to a hooked-slot load — a bare `jmp *%reg` the sequence does
-not match, every `call *%reg`, or a call through a memory operand (a vtable
-slot, a stored function pointer) — stays in the "can leave" bucket, since it
-might reach a target this scan did not name. `merge_out` alone made 12 such
-calls before docs/decisions.d/273's fix (counted below, `--computed`), and
-none of them can be ruled in or out by this scan; a `possibly reaches an
-unrecorded target` line says how many a given binary has. Closing that would
-need either a real points-to analysis of the binary or a runtime interposer
-that walks the caller's stack on every ASan memcmp hook — both bigger than
-this row. docs/decisions.d/273 says so and names the count for each target
-this script has been run on; docs/decisions.d/419 names the two buckets'
-counts for the five targets after the split added here (Q1444). The walk
-out of the crate stops at the same wall: a computed call met in a function
-it reaches, same as one met inside the crate, is counted in that bucket and
-not followed either — nothing past it is silently dropped, but nothing past
-it is named.
+A call through a computed pointer has no target this scan can read off the
+instruction: a `call *%reg` whose register was not last set by an
+in-function load of a hooked GOT slot, a call through a memory operand (a
+vtable slot, a stored function pointer), or a `call *SLOT(%rip)` whose
+relocation names no function symbol. Most `jmp *%reg` of this kind is not
+that: it is the tail of a relative jump table, the lowering of a match
+under `-fPIE` — `lea table(%rip),%base; movslq (%base,%idx,4),%off; add
+%base,%off; jmp *%off` — whose table holds offsets from its own base, so
+the jump can only land inside the function it is in. This scan recognises
+that whole sequence, the load and the add of the same base register and
+the jump through the result, and counts it apart, as a jump that stays
+inside its own function (Q1444). Everything else indirect is counted on
+the `can leave the function` line.
+
+Those calls are followed anyway, to everything they could land on
+(docs/decisions.d/419 §419.7). A computed call can only land on a function
+whose address some code made. The binary is position-independent, with no
+text relocations, so no instruction holds a function's address: code makes
+one with a rip-relative `lea` or load, and every pointer into the binary's
+own code that the loader writes into data is an `R_X86_64_RELATIVE`. A
+rip-relative reference that lands in code takes the function there. One
+that lands in data takes every function the relocations in that data object
+name, and every function named by the objects those point at, in turn. A
+data object runs from the address
+referenced to the next address anything names, which can take more
+functions than the code reaches but never fewer; a GOT entry is one 8-byte
+pointer of its own. So each address a function takes counts as a call it
+makes, and a second walk runs over direct calls and taken addresses
+together. A path from a `rcad_fuzz_timing` function to a hook outside
+`SlowRun::is` fails the scan and prints as a chain, with `&` in front of
+each function reached by its address rather than by a call.
+
+Neither walk enters a function `NOT_ENTERED` lists, each with the reason a
+hooked call past it cannot steer the mutator: ASan's set-up, which has
+finished before `main`, and the panic and failed-allocation paths, which
+end the process before libFuzzer draws another input. §419.7 shows each
+reason in the fuzz targets' own disassembly.
+
+**What this cannot see**: a pointer that code outside the reach stored and
+code inside it calls. The second walk follows only the addresses the reach
+itself takes. The `not followed` line counts the functions that reach a
+hook and whose address only code outside the reach takes. On the five fuzz
+targets those are the fuzz body and the harness around it, the kernel code
+the fuzz body takes the address of, ASan's interceptors, libFuzzer's own
+mutator, and std's backtrace printers behind the two cut paths. Telling
+whether one of them is ever called from inside the reach would need a
+runtime interposer that walks the caller's stack on every ASan memcmp hook
+(docs/decisions.d/273 §273.8).
 
 usage: timing-hooked-calls.py <binary> [<binary> ...]
 exit 0 and a `clean` line per binary if none reaches a hook outside `is`;
-exit 1 and the offending call(s) — address, kind, and inline chain — if any
-binary has one, or if a load of a hooked slot could not be matched to any
-call at all (the one case this script can tell you it might have missed a
-call, rather than merely one it cannot see, per the computed-pointer
-paragraph above).
+exit 1 and the offending call(s) — address, kind, and inline chain or the
+chain of functions — if any binary has one, or if a load of a hooked slot
+could not be matched to any call at all.
 """
+import bisect
 import re
 import subprocess
 import sys
@@ -103,6 +123,28 @@ for base in HOOKED_BASE:
         "___interceptor_" + base,
         "__interceptor_trampoline_" + base,
     }
+
+# Functions neither walk enters, each with the reason a hooked call made
+# past it cannot steer libFuzzer's mutator. docs/decisions.d/419 §419.7
+# shows each reason in the five fuzz targets' own disassembly. The Rust
+# names are matched with any crate hash, which changes between toolchains.
+NOT_ENTERED = [
+    (
+        re.compile(r"_ZN6__asanL16AsanInitInternalEv"),
+        "ASan's set-up, which .preinit_array runs to the end before main; "
+        "every later call returns at its first branch",
+    ),
+    (
+        re.compile(r"_RNvNtC(?:s[0-9A-Za-z]*_)?3std9panicking15panic_with_hook"),
+        "a panic: the only hook ever set is libfuzzer-sys's, which runs the "
+        "default hook and then aborts",
+    ),
+    (
+        re.compile(r"_RNvNtC(?:s[0-9A-Za-z]*_)?3std5alloc8rust_oom"),
+        "a failed allocation: the alloc error hook is never set, and the "
+        "default one is followed by an abort",
+    ),
+]
 
 CALLER_SAVED = {"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
 
@@ -124,14 +166,29 @@ for n in range(8, 16):
 def main():
     binaries = sys.argv[1:]
     if not binaries:
-        print(__doc__.strip().splitlines()[-4], file=sys.stderr)
+        usage = next(
+            line for line in __doc__.splitlines() if line.startswith("usage:")
+        )
+        print(usage, file=sys.stderr)
         return 2
 
     failed = False
     for binary in binaries:
-        hits, unmatched, computed, table_jumps, calls_out, all_functions = scan(
-            binary
-        )
+        (
+            hits, unmatched, computed, table_jumps, calls_out, takes_address,
+            all_functions,
+        ) = scan(binary)
+        not_entered = {
+            f for f in all_functions
+            if any(pattern.fullmatch(f) for pattern, _ in NOT_ENTERED)
+        }
+        hits = [h for h in hits if h["function"] not in not_entered]
+        calls_out = {
+            f: outs for f, outs in calls_out.items() if f not in not_entered
+        }
+        takes_address = {
+            f: outs for f, outs in takes_address.items() if f not in not_entered
+        }
         timing_functions = {f for f in all_functions if "rcad_fuzz_timing" in f}
         timing_hits = [h for h in hits if "rcad_fuzz_timing" in h["function"]]
         timing_unmatched = [
@@ -143,7 +200,8 @@ def main():
             c for c in table_jumps if "rcad_fuzz_timing" in c[0]
         ]
 
-        offenders = [h for h in timing_hits if not belongs_to_is(binary, h)]
+        chains = inline_chains(binary, [hit["address"] for hit in hits])
+        offenders = [h for h in timing_hits if not belongs_to_is(chains, h)]
 
         hits_by_function = {}
         for hit in hits:
@@ -156,13 +214,23 @@ def main():
                 timing_functions,
                 hits_by_function,
                 calls_out,
-                binary,
+                chains,
                 memo,
                 set(),
             )
             if found is not None and found[1]:
                 hit, chain = found
                 chain_offenders.append((function, chain, hit))
+
+        already_reported = {function for function, _, _ in chain_offenders}
+        pointer_offenders, taken_in_reach, hooked_elsewhere = through_pointers(
+            chains,
+            timing_functions,
+            already_reported,
+            hits_by_function,
+            calls_out,
+            takes_address,
+        )
 
         print(f"{binary}:")
         print(
@@ -175,8 +243,7 @@ def main():
         )
         print(
             f"  calls or tail jumps in rcad_fuzz_timing through a computed "
-            f"pointer that can leave the function, unscanned: "
-            f"{len(timing_computed)}"
+            f"pointer that can leave the function: {len(timing_computed)}"
         )
         print(
             f"  tail jumps in rcad_fuzz_timing through a relative jump "
@@ -187,12 +254,24 @@ def main():
             f"  calls from rcad_fuzz_timing reaching a hooked function "
             f"through another function outside the crate: {len(chain_offenders)}"
         )
+        print(
+            f"  functions whose address rcad_fuzz_timing or what it reaches "
+            f"takes, followed as if called: {len(taken_in_reach)}"
+        )
+        print(
+            f"  calls from rcad_fuzz_timing reaching a hooked function "
+            f"through a function pointer: {len(pointer_offenders)}"
+        )
+        print(
+            f"  functions whose address only code outside that reach takes, "
+            f"reaching a hooked function, not followed: {len(hooked_elsewhere)}"
+        )
 
-        if offenders or timing_unmatched or chain_offenders:
+        if offenders or timing_unmatched or chain_offenders or pointer_offenders:
             failed = True
             for hit in offenders:
-                print_hit(binary, hit, "reaches a hook outside SlowRun::is")
-            for function, chain, hit in chain_offenders:
+                print_hit(chains, hit, "reaches a hook outside SlowRun::is")
+            for function, chain, hit in chain_offenders + pointer_offenders:
                 print_chain_offender(function, chain, hit)
             for fn, load in [
                 (f, l) for f, l in unmatched if f and "rcad_fuzz_timing" in f
@@ -240,7 +319,9 @@ def scan(binary):
     computed_calls = []
     table_jumps = []
     calls_out = {}
+    references = []
     all_functions = set()
+    function_at = {}
     function = None
     regs = {}
     open_loads = {}
@@ -251,6 +332,7 @@ def scan(binary):
                 unmatched_loads.append((function, load))
             function, regs, open_loads = header.group(2), {}, {}
             all_functions.add(function)
+            function_at[int(header.group(1), 16)] = function
             continue
         insn = re.match(r"^\s+([0-9a-f]+):\s+(\S+)\s*(.*)$", line)
         if not insn:
@@ -310,11 +392,9 @@ def scan(binary):
             # Anything else indirect — a register this scan could not trace
             # back to a hooked-slot load or a relative jump table, or a call
             # through a memory operand (a vtable slot, a stored function
-            # pointer) — is a target this scan cannot name at all, not one
-            # it named and found harmless. `merge_out` alone had 12 of
-            # these before §273's fix (docs/decisions.d/273 §273.3, using a
-            # different scan that also counts this way); see the module
-            # docstring.
+            # pointer) — has no target this instruction names. It is
+            # counted here and followed by the addresses the code takes;
+            # see the module docstring.
             if target is None and not table_jump and rest.startswith("*") and not (
                     "(%rip)" in rest and comment):
                 computed_calls.append((function, address, rest))
@@ -332,6 +412,16 @@ def scan(binary):
                         unmatched_loads.append((function, open_loads.pop(reg)))
                     regs[reg] = ("call", address)
             continue
+
+        if comment and "(%rip)" in rest:
+            referenced = int(comment.split()[0], 16)
+            rip_operand = next(
+                i for i, operand in enumerate(operands) if "(%rip)" in operand
+            )
+            stores_to_it = len(operands) > 1 and rip_operand == len(operands) - 1
+            is_hooked_slot_load = mnemonic == "mov" and referenced in hooked_slots
+            if not stores_to_it and not is_hooked_slot_load:
+                references.append((function, address, referenced))
 
         if not operands:
             continue
@@ -370,7 +460,103 @@ def scan(binary):
     for load in open_loads.values():
         unmatched_loads.append((function, load))
 
-    return hits, unmatched_loads, computed_calls, table_jumps, calls_out, all_functions
+    takes_address = functions_whose_address_is_taken(
+        binary, references, slot_target, names_at, function_at
+    )
+    return (
+        hits, unmatched_loads, computed_calls, table_jumps, calls_out,
+        takes_address, all_functions,
+    )
+
+
+def functions_whose_address_is_taken(
+    binary, references, slot_target, names_at, function_at
+):
+    """For every function, the functions whose address it can put in a
+    register: `{function: [(address, taken function), ...]}`.
+
+    A reference into code takes the address of the function it lands in. A
+    reference into data — a `lea` of a vtable, a load of a GOT slot or of a
+    static holding a pointer — can hand the code any pointer the data object
+    there holds, and through any data object one of those points at in turn,
+    so it takes every function those relocations name. A data object runs
+    from the address referenced to the next address anything names: a
+    symbol, a section's start or end, a relocation's target, or another
+    reference. Where that runs past the real object's end, it takes more
+    functions than the code can reach, never fewer.
+
+    A GOT entry is the exception: each is one pointer of its own, so a load
+    of one takes the function it names and nothing after it. Running it on
+    to the next reference took every slot the code only ever calls through
+    (a `call *SLOT(%rip)` is not a reference), and that is how
+    `std::sys::io::error::unix::format_error`'s load of one slot came to take
+    `core`'s `StrSearcher::new` eight slots further on (docs/decisions.d/419
+    §419.7).
+    """
+    code, got, boundaries = [], [], set()
+    for line in run(["readelf", "-SW", binary]).splitlines():
+        section = re.match(r"^\s*\[\s*\d+\]\s+(.*)$", line)
+        if not section:
+            continue
+        fields = section.group(1).split()
+        if len(fields) not in (9, 10) or not re.fullmatch(r"[0-9a-f]{16}", fields[2]):
+            continue
+        start, size = int(fields[2], 16), int(fields[4], 16)
+        if start == 0:
+            continue
+        boundaries |= {start, start + size}
+        if len(fields) == 10 and "X" in fields[6]:
+            code.append((start, start + size))
+        if fields[0] in (".got", ".got.plt"):
+            got.append((start, start + size))
+    boundaries |= set(names_at) | set(slot_target.values())
+    boundaries |= {referenced for _, _, referenced in references}
+    boundaries = sorted(boundaries)
+    slots = sorted(slot_target)
+    function_starts = sorted(function_at)
+
+    def in_code(address):
+        return any(start <= address < end for start, end in code)
+
+    def in_got(address):
+        return any(start <= address < end for start, end in got)
+
+    def function_containing(address):
+        index = bisect.bisect_right(function_starts, address) - 1
+        return function_at[function_starts[index]] if index >= 0 else None
+
+    behind = {}
+
+    def functions_behind(referenced):
+        if referenced in behind:
+            return behind[referenced]
+        found, seen, pending = set(), {referenced}, [referenced]
+        while pending:
+            address = pending.pop()
+            if in_code(address):
+                function = function_containing(address)
+                if function is not None:
+                    found.add(function)
+                continue
+            end_index = bisect.bisect_right(boundaries, address)
+            end = boundaries[end_index] if end_index < len(boundaries) else address + 8
+            if in_got(address):
+                end = address + 8
+            first = bisect.bisect_left(slots, address)
+            last = bisect.bisect_left(slots, end)
+            for slot in slots[first:last]:
+                pointer = slot_target[slot]
+                if pointer not in seen:
+                    seen.add(pointer)
+                    pending.append(pointer)
+        behind[referenced] = found
+        return found
+
+    takes_address = {}
+    for function, address, referenced in references:
+        for taken in sorted(functions_behind(referenced)):
+            takes_address.setdefault(function, []).append((address, taken))
+    return takes_address
 
 
 def reachable_from(starts, calls_out):
@@ -387,7 +573,30 @@ def reachable_from(starts, calls_out):
     return seen
 
 
-def belongs_to_is(binary, hit):
+def inline_chains(binary, addresses):
+    """`addr2line -f -i`'s lines for every address in `addresses`, keyed by
+    address, from one `addr2line` run: one run per address costs a quarter
+    of a second on a fuzz target, nearly all of it reading the debug info
+    again, and was most of this script's wall time (docs/decisions.d/419
+    §419.7)."""
+    wanted = sorted(set(addresses))
+    if not wanted:
+        return {}
+    text = run(
+        ["addr2line", "-a", "-i", "-f", "-C", "-e", binary],
+        "".join(f"0x{address:x}\n" for address in wanted),
+    )
+    chains, current = {}, None
+    for line in text.splitlines():
+        if re.fullmatch(r"0x[0-9a-f]{16}", line):
+            current = chains.setdefault(int(line, 16), [])
+        else:
+            current.append(line)
+    assert sorted(chains) == wanted, "addr2line skipped an address"
+    return chains
+
+
+def belongs_to_is(chains, hit):
     """True when `hit`'s inline chain passes through `SlowRun::is` itself.
 
     `addr2line -f -i` lists one (function, call-site file:line) pair per
@@ -401,12 +610,11 @@ def belongs_to_is(binary, hit):
     this checks every function name the chain names, not the symbol the
     disassembly found the instruction under.
     """
-    chain = addr2line_chain(binary, hit["address"])
-    return "is" in chain[0::2]
+    return "is" in chains[hit["address"]][0::2]
 
 
 def reaches_hook(
-    function, timing_functions, hits_by_function, calls_out, binary, memo, on_stack
+    function, timing_functions, hits_by_function, calls_out, chains, memo, on_stack
 ):
     """`None`, or the `(hit, chain)` by which `function` reaches a hook
     outside `timing_functions` — every function whose symbol names
@@ -417,9 +625,8 @@ def reaches_hook(
     hit inside `timing_functions` itself is never this call's to report:
     `main`'s own `offenders` already covers every one of those, on every
     function in `timing_functions` in turn, so a chain that merely lands in
-    a second crate function would double it rather than add to it. A
-    computed call cannot be followed past, so a hook reachable only
-    through one stays unseen here, same as it always has inside the crate.
+    a second crate function would double it rather than add to it. A hook
+    reachable only through a computed call is `through_pointers`'s to find.
     """
     if function in memo:
         return memo[function]
@@ -429,7 +636,7 @@ def reaches_hook(
     result = None
     if function not in timing_functions:
         for hit in hits_by_function.get(function, []):
-            if not belongs_to_is(binary, hit):
+            if not belongs_to_is(chains, hit):
                 result = (hit, [])
                 break
     if result is None:
@@ -439,7 +646,7 @@ def reaches_hook(
                 timing_functions,
                 hits_by_function,
                 calls_out,
-                binary,
+                chains,
                 memo,
                 on_stack,
             )
@@ -452,31 +659,134 @@ def reaches_hook(
     return result
 
 
-def addr2line_chain(binary, address):
-    text = run(["addr2line", "-i", "-f", "-C", "-e", binary, f"0x{address:x}"])
-    return text.splitlines()
+def through_pointers(
+    chains, timing_functions, already_reported, hits_by_function, calls_out,
+    takes_address,
+):
+    """The chains by which a `rcad_fuzz_timing` function reaches a hook
+    outside `SlowRun::is` once taking a function's address counts as
+    calling it; the functions whose address that reach takes; and the
+    functions that reach a hook whose address only code outside that reach
+    takes.
+
+    A call through a computed pointer can only land on a function whose
+    address some code took. Counting every address the reach takes as a
+    call from the function that took it follows each computed call in the
+    reach to everything it could land on, unless the pointer came into the
+    reach from outside it: a hook or callback another part of the program
+    stored in memory the reach reads. The third result is every function
+    that could be such a pointer and reaches a hook. `main` prints only how
+    many there are; on the five fuzz targets they are the fuzz body's own
+    code, the harness, ASan's and libFuzzer's, and std's backtrace printers
+    (docs/decisions.d/419 §419.7).
+
+    A timing function in `already_reported` reached a hook by direct calls
+    alone, and `main` already prints its chain.
+    """
+    edges = {}
+    for outgoing in (calls_out, takes_address):
+        for function, outs in outgoing.items():
+            edges.setdefault(function, set()).update(
+                callee for _, callee in outs
+            )
+    called = {
+        (function, callee) for function, outs in calls_out.items()
+        for _, callee in outs
+    }
+    reach = reachable_from(timing_functions, {
+        function: [(None, callee) for callee in callees]
+        for function, callees in edges.items()
+    })
+    taken_in_reach = {
+        taken for function in reach
+        for _, taken in takes_address.get(function, [])
+    }
+
+    def first_offending_hit(function):
+        if function in timing_functions:
+            return None
+        hits = hits_by_function.get(function, [])
+        if function in reach:
+            hits = [hit for hit in hits if not belongs_to_is(chains, hit)]
+        return hits[0] if hits else None
+
+    hooked = {
+        function for function in hits_by_function
+        if first_offending_hit(function) is not None
+    }
+    callers = {}
+    for function, callees in edges.items():
+        for callee in callees:
+            callers.setdefault(callee, set()).add(function)
+    reaches_a_hook = set(hooked)
+    pending = list(hooked)
+    while pending:
+        function = pending.pop()
+        for caller in callers.get(function, ()):
+            if caller not in reaches_a_hook:
+                reaches_a_hook.add(caller)
+                pending.append(caller)
+
+    offenders = []
+    for start in sorted(timing_functions - already_reported):
+        path = shortest_path_to_a_hook(start, edges, reaches_a_hook, hooked)
+        if path is None:
+            continue
+        marked = [
+            callee if (caller, callee) in called else "&" + callee
+            for caller, callee in zip(path, path[1:])
+        ]
+        offenders.append((start, marked, first_offending_hit(path[-1])))
+
+    taken_anywhere = {
+        taken for outs in takes_address.values() for _, taken in outs
+    }
+    hooked_elsewhere = (taken_anywhere - taken_in_reach - reach) & reaches_a_hook
+    return offenders, taken_in_reach, hooked_elsewhere
 
 
-def print_hit(binary, hit, why):
+def shortest_path_to_a_hook(start, edges, reaches_a_hook, hooked):
+    """The shortest list of functions from `start` to one in `hooked`,
+    through `reaches_a_hook` only, `start` first; `None` when there is
+    none."""
+    parent = {start: None}
+    queue = [start]
+    for function in queue:
+        for callee in sorted(edges.get(function, ())):
+            if callee in parent or callee not in reaches_a_hook:
+                continue
+            parent[callee] = function
+            if callee in hooked:
+                path = [callee]
+                while parent[path[-1]] is not None:
+                    path.append(parent[path[-1]])
+                return path[::-1]
+            queue.append(callee)
+    return None
+
+
+def print_hit(chains, hit, why):
     print(f"  {hit['address']:x}  {hit['mnemonic']} -> {hit['target']}  "
           f"via {hit['kind']}  {why}")
     print(f"    in {demangle(hit['function'])}")
-    for frame in paired_chain(binary, hit["address"]):
-        print(f"      {frame}")
+    lines = chains[hit["address"]]
+    for i in range(0, len(lines) - 1, 2):
+        print(f"      {lines[i + 1]}  ({lines[i]})")
 
 
 def print_chain_offender(function, chain, hit):
     print(f"  {hit['address']:x}  {hit['mnemonic']} -> {hit['target']}  "
           f"via {hit['kind']}  reaches a hook outside SlowRun::is through:")
     names = [function] + chain + list(hit["target"])
-    print(f"    {' -> '.join(demangle(name) for name in names)}")
+    print(f"    {' -> '.join(demangle_step(name) for name in names)}")
 
 
-def paired_chain(binary, address):
-    lines = addr2line_chain(binary, address)
-    return [
-        f"{lines[i + 1]}  ({lines[i]})" for i in range(0, len(lines) - 1, 2)
-    ]
+def demangle_step(name):
+    """`demangle`, keeping the `&` a chain puts in front of a function whose
+    address was taken rather than called."""
+    if name.startswith("&"):
+        return "&" + demangle(name[1:])
+    return demangle(name)
 
 
 def split_operands(text):
@@ -510,8 +820,10 @@ def demangle(name):
     return text if text else name
 
 
-def run(argv):
-    return subprocess.run(argv, check=True, capture_output=True, text=True).stdout
+def run(argv, stdin=None):
+    return subprocess.run(
+        argv, input=stdin, check=True, capture_output=True, text=True
+    ).stdout
 
 
 if __name__ == "__main__":
