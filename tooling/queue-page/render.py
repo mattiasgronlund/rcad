@@ -201,12 +201,14 @@ def running_rows(verbs, here, tip):
     """
     trees = here.trees()
     branches = {tree.branch for tree in trees if tree.is_lane}
-    claimed = set()
+    holds = sorted(verbs.Claims(here.claims).holds().items())
+    left = verbs.branches_left(trees, {hold["branch"] for _, hold in holds})
+    claimed = set(left.values())
     rows = []
-    for row_id, hold in sorted(verbs.Claims(here.claims).holds().items()):
+    for row_id, hold in holds:
         before = set(claimed)
-        found = verbs.has_a_tree(hold["branch"], branches, trees, claimed)
-        tree = tree_for(hold, trees, found, claimed - before)
+        found = verbs.has_a_tree(hold["branch"], branches, trees, claimed, left)
+        tree = tree_for(hold, trees, found, claimed - before, left)
         row = tip.find(row_id)
         rows.append({
             "id": row_id,
@@ -220,16 +222,19 @@ def running_rows(verbs, here, tip):
     return rows
 
 
-def tree_for(hold, trees, found, newly_claimed):
+def tree_for(hold, trees, found, newly_claimed, left):
     """The lane tree `has_a_tree` matched this hold to, or None when it matched none.
 
     Only a tree an agent holds counts, as in the `branches` `has_a_tree` was
     given: a lane's own tree left standing unlocked beside its merger's is not
-    where the row runs.
+    where the row runs. A tree that left the hold's branch (§299.6) was
+    claimed before any row was matched, so it is never among `newly_claimed`.
     """
     if newly_claimed:
         (path,) = newly_claimed
         return next(tree for tree in trees if tree.path == path)
+    if hold["branch"] in left:
+        return next(tree for tree in trees if tree.path == left[hold["branch"]])
     if not found:
         return None
     for tree in trees:

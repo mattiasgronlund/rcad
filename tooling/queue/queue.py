@@ -660,10 +660,12 @@ def already_landed(sha):
     return False
 
 
-def has_a_tree(branch, branches, trees, claimed):
+def has_a_tree(branch, branches, trees, claimed, left):
     """Whether some currently locked tree is this row's, once its own branch's tree is gone (§263.4, §299).
 
-    A verifier's tree is detached (§266.2), so it carries no branch to match; a
+    A detached tree whose own reflog says it left this branch is this row's,
+    whether or not the branch's tip is on main (`left`, §299.6). A verifier's
+    tree is detached (§266.2), so it carries no branch to match; a
     merger's carries `merge-<label>` instead of `lane-<label>` (§266.3). The
     verifier's tree is checked out from the lane branch's tip and only ever
     gains commits on top of it, so that tip stays an ancestor of its HEAD for as
@@ -685,6 +687,8 @@ def has_a_tree(branch, branches, trees, claimed):
     if branch in branches:
         return True
     if branch.startswith("lane-") and f"merge-{branch[len('lane-'):]}" in branches:
+        return True
+    if branch in left:
         return True
     tip = branch_tip(branch)
     if tip is None:
@@ -717,14 +721,15 @@ def running(here, args):
     trees = here.trees()
     counted = [(tree.branch, tree.path) for tree in trees if tree.is_lane]
     branches = {branch for branch, _ in counted}
-    claimed = set()
-    branch_gone = []
     by_branch = {}
     for row_id, hold in sorted(Claims(here.claims).holds().items()):
         by_branch.setdefault(hold["branch"], ([], hold))[0].append(row_id)
+    left = branches_left(trees, by_branch)
+    claimed = set(left.values())
+    branch_gone = []
     for branch, (row_ids, hold) in by_branch.items():
         ids = ",".join(row_ids)
-        found = has_a_tree(branch, branches, trees, claimed)
+        found = has_a_tree(branch, branches, trees, claimed, left)
         if found is None:
             branch_gone.append((ids, hold))
         elif not found:
@@ -739,6 +744,35 @@ def running(here, args):
     for branch, where in counted:
         print(f"{branch}  {where}")
     print(f"{len(counted)} running")
+
+
+def branches_left(trees, held):
+    """Each held branch a detached lane tree was last on, with that tree's path (§299.6).
+
+    A read-only lane that builds an old commit leaves its branch for a detached
+    HEAD, and its branch tip stays at its base, already on main, so
+    `has_a_tree` reads the hold as stale and its tree as some other row's. The
+    tree's own HEAD reflog still names the branch: `git switch --detach` writes
+    `checkout: moving from <branch> to <commit>`, and a move between two
+    detached commits names the commit it left by its full hash. That is the
+    tree's own record, not a guess from ancestry, so it is no unrelated tree
+    (§299.2). The trees it names are claimed before any ancestry match runs. A
+    reflog that cannot be read names nothing, and the row is counted twice: the
+    cheaper mistake of §263.4.
+    """
+    left = {}
+    for tree in trees:
+        if not (tree.is_lane and tree.branch == "(detached)"):
+            continue
+        log = subprocess.run(["git", "-C", tree.path, "reflog", "show", "--format=%gs", "HEAD"],
+                             capture_output=True, text=True)
+        for subject in log.stdout.splitlines() if log.returncode == 0 else []:
+            moved = re.match(r"checkout: moving from (\S+) to ", subject)
+            if moved and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", moved.group(1)):
+                if moved.group(1) in held:
+                    left[moved.group(1)] = tree.path
+                break
+    return left
 
 
 def elsewhere(here, args):

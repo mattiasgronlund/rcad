@@ -11622,6 +11622,11 @@ check-queue-page-selftest:
     git -C "$verify_tree" -c user.name=selftest -c user.email=selftest@invalid commit -q --allow-empty -m "Q6's lane commit"
     g branch lane-q6 "$(git -C "$verify_tree" rev-parse HEAD)"
     g worktree lock --reason "agent wf_page-2 since 2026-09-03T10:00:00Z" "$verify_tree"
+    left_tree="$sessions/dispatch-b-worktrees/wf_page-3"
+    g worktree add -q -b worktree-wf_page-3 "$left_tree" main || fail "could not add Q17's lane tree"
+    git -C "$left_tree" switch -q -c lane-q17 main
+    git -C "$left_tree" switch -q --detach "$(g rev-list --max-parents=0 main)"
+    g worktree lock --reason "agent wf_page-3 since 2026-09-03T10:00:00Z" "$left_tree"
     claims="$(g rev-parse --path-format=absolute --git-common-dir)/rcad-queue-claims"
     {
         printf 'take\tQ2\t2026-09-03T10:00:00Z\t%s\tlane-q2\tdocs/b.md\t2\n' "$sessions/dispatch-a"
@@ -11631,6 +11636,7 @@ check-queue-page-selftest:
         printf 'release\tQ7\t2026-09-03T10:04:00Z\t%s\tdone\n' "$sessions/dispatch-b"
         printf 'take\tQ8\t2026-09-03T10:05:00Z\t%s\tlane-q8\t-\t3\n' "$sessions/dispatch-b"
         printf 'take\tQ9\t2026-09-03T10:06:00Z\t%s\tlane-q9\t-\n' "$sessions/dispatch-b"
+        printf 'take\tQ17\t2026-09-03T10:07:00Z\t%s\tlane-q17\t-\t3\n' "$sessions/dispatch-b"
     } > "$claims"
 
     fuzz="$root/fuzz-logs"
@@ -11703,8 +11709,10 @@ check-queue-page-selftest:
         "Q8's running line: in no copy of main, so the tier comes from its take alone"
     has '<tr><th><code>Q9</code></th><td>not recorded</td><td>no tree yet</td><td><code>dispatch-b</code></td></tr>' \
         "Q9's running line: in no copy of main and its take records no tier, so the page should say so"
+    has '<tr><th><code>Q17</code></th><td>3</td><td><code>wf_page-3</code></td><td><code>dispatch-b</code></td></tr>' \
+        "Q17's running line: wf_page-3 left lane-q17, whose tip is on main, for an old commit, and its reflog says so (§299.6)"
     between() { sed -n "/<h2>$1<\/h2>/,/<h2>$2<\/h2>/p" "$out/index.html"; }
-    [ "$(between 'Running rows' 'Rows the fill will not take now' | grep -oE '<tr><th><code>Q[0-9]+</code></th>' | tr '\n' ' ')" = '<tr><th><code>Q2</code></th> <tr><th><code>Q5</code></th> <tr><th><code>Q6</code></th> <tr><th><code>Q8</code></th> <tr><th><code>Q9</code></th> ' ] \
+    [ "$(between 'Running rows' 'Rows the fill will not take now' | grep -oE '<tr><th><code>Q[0-9]+</code></th>' | tr '\n' ' ')" = '<tr><th><code>Q17</code></th> <tr><th><code>Q2</code></th> <tr><th><code>Q5</code></th> <tr><th><code>Q6</code></th> <tr><th><code>Q8</code></th> <tr><th><code>Q9</code></th> ' ] \
         || fail "the running table should hold each held row once, and not Q7, which was released"
     # Each line: the row, its tier, and why a fill would pass it over, grouped by why.
     has '<tr><th colspan="3">Waits on rows not yet done (2)</th></tr>' "two rows wait: Q14 and Q15"
@@ -12655,6 +12663,31 @@ check-queue-api-selftest:
     grep -qxF "(detached)  $verify_gone4" <<<"$got" || fail "the second deleted-branch row's verifier tree dropped out of running"
     grep -q "^lane-gone-3  .*no tree yet" <<<"$got" && fail "the first deleted-branch row was still counted as treeless beside its verifier"
     grep -q "^lane-gone-4  .*no tree yet" <<<"$got" && fail "two deleted-branch rows collapsed onto one slot"
+
+    # §299.6 (Q1511): a read-only lane that leaves its branch to build an old
+    # commit. Its branch tip stays at its base, already on main, so the tip reads
+    # as a stale hold, and the tree is detached at a commit the tip is not an
+    # ancestor of. The tree's own reflog names the branch it left, so `running`
+    # must count the row once, as that tree, and not again as "no tree yet".
+    left="$lanes/left-its-branch"
+    g "$hub" worktree add -q -b worktree-left-its-branch "$left" main && lock "$left"
+    g "$left" switch -q -c lane-left main
+    g "$left" switch -q --detach "$(g "$hub" rev-list --max-parents=0 main)"
+    got=$(q "$hub" add 3 opus - "a read-only row whose lane left its branch §230" 2>&1) || fail "add for the read-only row failed"
+    q_left=$got
+    got=$(q "$hub" take "$q_left" lane-left 2>&1) || fail "take could not hold $q_left on lane-left"
+    got=$(q "$hub" running 2>&1) || fail "running failed with a read-only lane off its branch"
+    grep -qxF "(detached)  $left" <<<"$got" || fail "the tree that left lane-left was not counted"
+    grep -q "^lane-left  .*no tree yet" <<<"$got" && fail "a read-only lane that left its branch was counted again as treeless"
+
+    # The other side of §299.2: a held branch already on main that no tree
+    # left is still a stale hold, with a tree that left another branch beside it.
+    g "$hub" branch lane-stale main
+    got=$(q "$hub" add 3 opus - "a row held on a branch already on main §230" 2>&1) || fail "add for the stale row failed"
+    q_stale=$got
+    got=$(q "$hub" take "$q_stale" lane-stale 2>&1) || fail "take could not hold $q_stale on lane-stale"
+    got=$(q "$hub" running 2>&1) || fail "running failed with a stale hold"
+    grep -q "^lane-stale  .*no tree yet" <<<"$got" || fail "a hold on a branch already on main, which no tree left, was not counted"
 
     # §309.4: `apply`, all or nothing, and its own tests, last and in a fresh
     # worktree off the script's own main -- everything above has already taken,

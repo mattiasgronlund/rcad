@@ -129,3 +129,77 @@ tree, the spare count can absorb the branch-gone row against a tree that is
 not its own, and its fallback line is wrongly dropped — undercounting
 `running` by one. This was read out of the code at merge time, not reproduced
 with a test, so it is named here as a reasoned gap rather than a measured one.
+
+### 299.6 Q1511: a read-only lane that leaves its branch is found by its reflog
+
+**The bug.** On 2026-10-09, from Q278's take at 06:47:15Z to its done at
+07:09:24Z, `just queue running` counted Q278 twice: once as the detached
+locked tree `wf_5b5d60fe-c73-1`, with no row, and once as "Q278 taken from
+clean-up-dead-sessions, no tree yet". It printed 6 against 4 slots. The lane
+ran `git switch -c lane-q278-the-path-in-the-binary 6d970f8b`, then `git
+switch --detach f85f926d` to build an old commit. Q278 writes nothing, so its
+branch tip stayed at its base, which is on main. `has_a_tree` reads a held
+branch whose tip is on main as a stale hold (`already_landed`, §299.2), and the
+tree is detached at a commit the tip is not an ancestor of, so neither the
+branch name nor ancestry finds it. Any read-only lane that leaves its branch
+is counted twice for the whole of its run.
+
+**The rule.** A detached lane tree whose own HEAD reflog says it left a held
+branch is that row's tree. `branches_left` in `tooling/queue/queue.py` reads
+each detached lane tree's reflog, newest first, and takes the first
+`checkout: moving from <name> to ...` whose `<name>` is not a full hash; if
+that name is a held branch, the tree is the row's. `running` claims those
+trees before it matches any row, so neither another row's ancestry match nor
+§299.5's spare count can take one. `has_a_tree` answers yes for such a branch
+before it reads the tip, so a tip on main does not matter.
+
+This does not undo §299.2. §299.2 refuses to give a landed tip an *unrelated*
+tree by ancestry. The reflog is the tree's own record that it stood on that
+branch, so the tree it names is the row's own. A stale hold whose own lane
+tree still stands, detached off the branch, is now counted once, as that tree.
+That tree holds a slot until someone unlocks it, so once is right.
+
+**What the reflog says, measured.** In a scratch repository, `git switch -c
+lane-q278 main` then `git switch --detach <old>` then `git switch --detach
+main` left, newest first: `checkout: moving from <40 hex digits> to main`,
+`checkout: moving from lane-q278 to <40 hex digits>`, `checkout: moving from
+worktree-wf-1 to lane-q278`. A move between two detached commits names the one
+it left by its full hash, which is why the walk skips hashes. The live
+verifier trees `wf_9ac233ed-029-2` and `wf_cddff73b-695-2` read `checkout:
+moving from worktree-wf_9ac233ed-029-2 to lane-q103-three-quarter-bend-validates`
+and the same shape for Q345: the hook's own branch is on the left, which is no
+held branch, so a verifier's tree still goes to ancestry as before. A tree made
+with `git worktree add --detach` has an empty reflog and names nothing.
+
+**The page makes the same match.** `running_rows` in
+`tooling/queue-page/render.py` calls `has_a_tree` row by row and asks
+`tree_for` which tree matched. It now passes `left` too, and `tree_for` answers
+with the tree the reflog named, which is never among the newly claimed ones.
+Without that, `tree_for` raises its `AssertionError` on any such row.
+
+**The tests.** `check-queue-api-selftest` makes a locked tree on its own
+`worktree-…` branch, switches it to `lane-left` at main and then detached to
+the root commit, takes a row with write set `-` onto `lane-left`, and checks
+that `running` lists the tree and no "no tree yet" line for `lane-left`. A
+second case holds `lane-stale`, a branch on main that no tree left, and checks
+that it still gets its "no tree yet" line. `check-queue-page-selftest` adds
+Q17, whose tree `wf_page-3` left `lane-q17` the same way, and checks that its
+running line names `wf_page-3`. Against HEAD's `tooling/` with the new
+justfile, the first fails with "a read-only lane that left its branch was
+counted again as treeless" and the page case with "Q17's running line"; the
+stale case passes there too, as it should.
+
+**What it does not cover.** A reflog that cannot be read, because the tree's
+directory is gone or reflogs are off, names nothing, and the row is counted
+twice: the cheaper mistake of §263.4. It narrows §299.5's gap only for
+leftover trees whose reflog names their branch. The two verifier trees
+measured above name the hook's branch instead, so a landed-but-held row's
+leftover verifier tree still counts as spare.
+
+**Q692's gap, seen on the way.** A first draft of the test compared
+`running --count` before and after the take, and the count rose by one (8
+after). After the take, `lane-q2`, a hold whose branch was never made, printed
+"no tree yet". Before it, the new tree belonged to no held branch, so it
+counted as spare, and the count was one lower. That fits §299.5's gap: a
+branch-gone row absorbed by a tree that is not its own. Only the two totals
+were measured, not the line, so this is a lead for Q692, not a reproduction.
