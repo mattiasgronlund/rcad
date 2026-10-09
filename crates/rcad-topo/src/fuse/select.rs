@@ -1220,6 +1220,11 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// entry per side of every wire, from [`the_meridian_circle_each_side_runs_round`],
 /// says which disk its bulge is in ([`in_the_bulge_of`]).
 ///
+/// **A point outside a round wire's partner can still be inside what the wire
+/// bounds**, where the partner is a ring and the plane is square to its axis:
+/// both circles it cuts there go round the inner disk, which is outside the
+/// ring ([`in_the_inner_disk_of`]).
+///
 /// **A flat piece's curved partners are asked about the point and a point of
 /// the plane beside it at once**, through [`side_of_a_partner_by_its_plane`]. A
 /// candidate can be a rounding off the plane, and where a ball only just cuts
@@ -1324,7 +1329,11 @@ fn the_piece_holds(
                             winding += inwards;
                         }
                     }
-                    Decision::Pos => (),
+                    Decision::Pos => {
+                        if in_the_inner_disk_of(flat, &partner, reaching_the_plane)? {
+                            winding += inwards;
+                        }
+                    }
                     Decision::Zero | Decision::Undecidable { .. } | _ => return None,
                 }
             }
@@ -1719,6 +1728,40 @@ fn across_the_inner_disk(
     };
     let turn = which_side_of_the_chord(flat, side, in_plane, point)?;
     Some(if turn == where_the_arc_is { counts } else { 0 })
+}
+
+/// Whether `point`, which [`the_piece_holds`] has already found outside the
+/// partner of a whole round wire, is inside what the wire bounds all the same:
+/// where the partner is a ring, `flat` is square to its axis, and `point` is in
+/// the inner disk. `None` where the pipe of the ring's own radius cannot say.
+///
+/// **Both circles such a plane cuts a ring in go round the inner disk**, and
+/// the inner disk is all outside the ring, so the ring's sign alone says
+/// nothing about which side of either circle a point outside it is on. A point
+/// outside the ring is in the inner disk exactly when it is inside the pipe of
+/// the ring's own radius, which runs between the two circles
+/// ([`across_the_inner_disk`] asks the same of an arc). Asked of the ring's
+/// sign alone, a square less the disk inside a ring's whole outer circle held
+/// a point of the inner disk
+/// (`a_square_less_a_rings_whole_outer_circle_holds_no_point_of_the_inner_disk`),
+/// and the disk inside its whole inner circle none of its own
+/// (`a_disk_inside_a_rings_whole_inner_circle_holds_its_own_points`, row Q1501).
+///
+/// Every other partner leaves nothing outside it inside what it bounds: a ball,
+/// a pipe or a cone leaves one region on a plane, and so does each meridian
+/// circle of a ring on a plane through its axis.
+fn in_the_inner_disk_of(flat: &Plane, partner: &Surface, point: PredicatePoint) -> Option<bool> {
+    let Surface::Torus(ring) = partner else {
+        return Some(false);
+    };
+    if !is_square_to_the_axis(flat, ring) {
+        return Some(false);
+    }
+    match the_pipe_of_the_rings_own_radius(ring).side_of(point) {
+        Decision::Neg => Some(true),
+        Decision::Pos => Some(false),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
+    }
 }
 
 /// Which side of the chord between `side`'s two ends, stretched to the plane,
@@ -3979,7 +4022,11 @@ mod tests {
         assert_eq!(holds([7.5, 0.0, 0.0]), Some(true), "on the plate");
         assert_eq!(holds([4.0, 0.0, 0.0]), Some(false), "in the tube");
         assert_eq!(holds([2.5, 0.0, 0.0]), Some(false), "in the inner disk");
-        assert_eq!(holds([0.0, 0.0, 0.0]), Some(false), "on the axis");
+        assert_eq!(
+            holds([-1.0, 2.0, 0.0]),
+            Some(false),
+            "in the inner disk, across the axis"
+        );
         assert_eq!(holds([12.5, 0.0, 0.0]), Some(false), "past the square");
     }
 
