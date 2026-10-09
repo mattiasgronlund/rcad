@@ -235,6 +235,14 @@ jobs:
       # `gate` and `check-gate-runs-every-check` still pins it there, because a
       # skip is not a reason to stop asking first.
       #
+      # `check-timing-hooked-calls` joins that skip list here for a different
+      # reason than any of the three above: this runner has no nightly
+      # toolchain, and nightly is not pinned by this repo at all (§29.9), so
+      # there is nothing CI-specific about the gap — a human machine without
+      # `rustup toolchain install nightly` skips it too. The recipe's own
+      # predicate is "no nightly rustc, no cargo-fuzz", never `CI`, the same
+      # shape as the three above.
+      #
       # What is genuinely lost is this repo's three overlay patching cases in
       # `.claude/patching-cases.local.json`, which now run when a human runs the
       # gate and nowhere else. Named rather than replaced: no runner-side
