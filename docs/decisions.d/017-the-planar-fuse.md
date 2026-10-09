@@ -860,7 +860,7 @@ oracles.** One at a time, against the shipped code:
 | 4. History maps returned per operation | `the_input_keys_still_work_and_a_face_nothing_reaches_comes_through_once`, `a_face_that_is_swallowed_whole_has_no_image`, `every_face_of_the_answer_has_exactly_one_input_face_behind_it` |
 | 5. The catalogue as hand-written cases, each passing or refusing with a reason | `the_nine_planar_entries_as_a_table` and the eighteen per-entry tests beside it in `degenerate_fuses.rs`; `a_solid_that_runs_through_itself_cannot_be_fused` for the ninth entry, which no public API can build |
 | 6. The §11.2 metamorphic properties as a `proptest` suite | `what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up`, `uniting_the_first_two_and_then_the_third_is_uniting_the_last_two_and_then_the_first`, `taking_away_what_is_left_after_taking_the_other_away_leaves_what_the_two_share`, and transform invariance in both halves — `turning_a_pair_a_quarter_turn_and_moving_it_a_whole_number_changes_not_one_bit` exactly, `turning_the_answer_to_a_fuse_agrees_with_fusing_the_turned_inputs` within the bound |
-| 7. `Policy::max_wobble` has a caller, judged against `ProvenanceLog::worst_wobble` | `Model::fuse` judges it after assembly and before the commit; `a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_prove` is the answering half, and `a_certified_fuse_over_a_tagged_input_succeeds_and_the_answer_keeps_the_tag` is §17.2's guard against reading the wrong quantity. **The refusing half has no test.** No fuse is known that the judgment refuses and whose answer does not exist. The one refusal by the judgment anybody has found was a gap, closed by Q1467 and pinned answering as `a_tolerant_policy_bigger_than_the_model_fuses_two_turned_blocks_meeting_at_a_corner_as_a_certified_one_does`. The refusing half was `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` until 2026-10-05 and `what_two_turned_cubes_a_rounding_deep_in_each_other_share_is_too_thin_to_hold_and_is_refused` until Q1353, and the two paragraphs after these tables say why each was dropped and what was tried since |
+| 7. `Policy::max_wobble` has a caller, judged against `ProvenanceLog::worst_wobble` | `Model::fuse` judges it after assembly and before the commit; `a_turned_pair_is_certified_because_a_box_is_not_a_decision_anybody_failed_to_prove` is the answering half, and `a_certified_fuse_over_a_tagged_input_succeeds_and_the_answer_keeps_the_tag` is §17.2's guard against reading the wrong quantity. **The refusing half has no test.** No fuse is known that the judgment refuses and whose answer does not exist. Two refusals by the judgment have been found, and both are gaps: one closed by Q1467 and pinned answering as `a_tolerant_policy_bigger_than_the_model_fuses_two_turned_blocks_meeting_at_a_corner_as_a_certified_one_does`, and one still open, found by Q1469 and pinned refusing as `a_certified_union_is_refused_over_the_records_of_a_ray_it_threw_away`. The refusing half was `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` until 2026-10-05 and `what_two_turned_cubes_a_rounding_deep_in_each_other_share_is_too_thin_to_hold_and_is_refused` until Q1353, and the two paragraphs after these tables say why each was dropped and what was tried since |
 | 8. A measured refusal rate under `Policy::certified()`, recorded in this file | §17.7, asserted by `how_often_a_certified_fuse_of_a_turned_pair_refuses` with `every_certified_fuse_of_a_lattice_pair_is_decided_and_records_nothing` and `every_certified_fuse_of_a_pair_sharing_coordinates_is_decided` as its controls |
 
 | §14.8 oracle | The test that discharges it |
@@ -917,9 +917,12 @@ could not prove goes through `must_decide` or `gave_up`, and both return
 stay in the log from a decision nothing was built on:
 `classify_uncertain_point` keeps whatever a ray that grazed something left in
 the log and tries the next ray, and selection drains that log into the fuse's
-once the point is placed. Nobody has checked whether a grazed ray leaves a
-record there under a certified policy. So the judgment sees records the policy
-accepted one at a time, and may see records like those. Whatever it refuses,
+once the point is placed. A grazed ray does leave records there under a
+certified policy: `orient3d_tolerantly` hands every decision it cannot prove
+to `resolve_under_policy`, which writes it into the log whatever the policy,
+and Q1469 built a fuse that the judgment refuses over two of them (below). So
+the judgment sees records the policy accepted one at a time, and records of
+rays nothing was built on. Whatever it refuses,
 it refuses after an answer was built. That is the order the code runs in. It
 is not a claim that this half cannot be met.
 
@@ -976,11 +979,55 @@ every working size it tried was at least the model's, dividing by a bigger
 size gives a wobble no bigger, so the judgment passes every log it passed
 before, and nothing before the judgment changed.
 
+*Found 2026-10-09 (Q1469).* A certified fuse can be refused by the judgment
+over the records of a ray it threw away, and its answer exists. The pair, on
+a 100 mm model, is a block `[0.3, 1] × [0, 1]` extruded `1` high and a wedge
+whose floor runs through the block's edge from `(1, 1, 0)` to `(1, 1, 1)` and
+on through the first point `ray_targets` aims at from the block. Selection
+asks the block where a point on that floor is. The point is a box, the box
+straddles the plane through the edge and the target, and so the first ray
+grazes the edge. Its two `orient3d` calls cannot be proved and go into the
+log; `classify_uncertain_point` keeps them, tries the second ray, and that
+one places the point inside; selection drains the two records into the
+fuse's log. The certified union, both ways round, is then refused
+`Error::Undecidable` over those two records, each about `1.7e-15` wide and
+accepted by nothing. `tolerant(100)` unites the same pair into one valid
+solid of the volume the closed form gives, so the refusal is a gap. It is
+pinned refusing as
+`a_certified_union_is_refused_over_the_records_of_a_ray_it_threw_away`, which
+also places the ray's box against the block alone and gets *inside* with the
+same two records left behind. Q1469's probe, not kept, saw the intersection
+and the block less the wedge refused the same way, and a floor of slope `0.5`,
+aimed at no target, answer every rule with an empty log.
+
+The same pair shows what Q1467's lane guessed and nobody had run. Under a
+certified policy the judgment reads the log at the model's
+`Scale::nominal_size`, and a record of a volume is divided by that size twice
+(§15.2). On a model declared `1e160` across, the two records' wobble rounds to
+zero, a budget of zero accepts zero, and the certified union is taken with
+both unproved records still in its log:
+`a_model_declared_1e160_across_takes_the_same_union_with_the_rays_records_still_in_its_log`.
+For these records the wobble is still above zero read at `2.5e154` and zero
+at `2.7e154`; `Scale` accepts both sizes. The comment above the judgment in
+`Model::fused_under` names this exception, a wobble below the smallest double,
+as though nothing reached it. A model this size does.
+
+Two more things the probe saw on the same pair, neither traced: the wedge
+less the block is refused `ResultIsNotManifold { count: 4 }` under
+`certified()` and `tolerant(100)`, and on the `1e160` model the intersection
+and the block less the wedge are refused `Invalid::DynamicRangeTooWide`.
+
+Three rows are filed. The first gives each ray a log of its own in
+`classify_uncertain_point` and keeps only the log of the ray that decided,
+which moves the refusing pin to the answer. The second judges a certified
+log without the model's size, in a function a test can hand a log to, since
+after the first row this pair no longer reaches the judgment with a record.
+The third traces the wedge less the block.
+
 *What this leaves.* Criterion 7's refusing half has no demonstration. No fuse
-is known that the judgment refuses and whose answer does not exist. Whether a
-certified fuse can be refused over the record of a ray it threw away is filed
-as a row too, and nobody has run it; if one is found, its answer was built, so
-it is a gap as well.
+is known that the judgment refuses and whose answer does not exist. Every
+refusal by the judgment found so far has been a gap: Q1467's, now closed, and
+Q1469's, still open.
 
 Two things §17.6 promised that did **not** ship, recorded rather than claimed.
 Its ninth piece names "Euler characteristic and shell counts on the assembled
