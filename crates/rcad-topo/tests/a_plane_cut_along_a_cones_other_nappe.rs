@@ -1120,6 +1120,102 @@ fn distance_to_a_boundary(case: &Case, p: Point) -> f64 {
     to_side.min(to_caps).min(to_block)
 }
 
+#[test]
+fn zz_probe_q467() {
+    let steep: ConeShape = ConeShape {
+        slope: 2.0,
+        near: 0.0,
+        far: 3.0,
+    };
+    let unit: ConeShape = ConeShape {
+        slope: 1.0,
+        near: 0.0,
+        far: 3.0,
+    };
+    for (cone_name, cone) in [("steep", steep), ("unit", unit)] {
+        let mut lean_cases = Vec::new();
+        for lean in [0.25, 0.375, 1.0, 4.0] {
+            for crossing in [0.0, 0.5, -0.5, 1.5] {
+                for turn in [0.0, 1.0, 3.0] {
+                    lean_cases.push((
+                        format!("lean {lean} crossing {crossing} turn {turn}"),
+                        a_leaning_block(lean, crossing, turn),
+                    ));
+                }
+            }
+        }
+        let mut cube_cases = Vec::new();
+        for side in [2.0, 4.0, 6.0] {
+            for middle in [0.0, 1.0, 2.5, 3.5] {
+                for turn in [0.0, 0.7] {
+                    cube_cases.push((
+                        format!("cube side {side} middle {middle} turn {turn}"),
+                        a_corner_up_cube(side, middle, turn),
+                    ));
+                }
+            }
+        }
+        let mut slab_cases = Vec::new();
+        for low in [-14.0, -8.0, -3.0, 0.0, 2.0] {
+            for turn in [0.0, 0.5, 1.0, 1.5] {
+                let placed = about_z(turn).compose(&moved([-1.0, -6.0, low]));
+                slab_cases.push((
+                    format!("slab low {low} turn {turn}"),
+                    BoxShape {
+                        size: [2.0, 12.0, 14.0],
+                        placed,
+                    },
+                ));
+            }
+        }
+        for (family, cases) in [
+            ("lean", lean_cases),
+            ("cube", cube_cases),
+            ("slab", slab_cases),
+        ] {
+            for (name, block) in cases {
+                let case = Case {
+                    cone,
+                    block,
+                    solids: [1, 1, 1, 1],
+                };
+                for (which, (rule, cone_first)) in RULES.into_iter().enumerate() {
+                    let policy = Policy::certified();
+                    let mut model =
+                        Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                    let (cone_key, block_key) = build(&mut model, &case);
+                    let (arguments, tools) = if cone_first {
+                        ([cone_key], [block_key])
+                    } else {
+                        ([block_key], [cone_key])
+                    };
+                    match model.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+                    {
+                        Ok(answer) => {
+                            eprintln!(
+                                "PROBE {cone_name} {family} [{name}] rule {which} ok {}",
+                                answer.solids().len()
+                            );
+                        }
+                        Err(Error::Undecidable { records }) => {
+                            let record = records.records().last().expect("a refusal names why");
+                            eprintln!(
+                                "PROBE {cone_name} {family} [{name}] rule {which} err {}",
+                                record.predicate()
+                            );
+                        }
+                        Err(other) => {
+                            eprintln!(
+                                "PROBE {cone_name} {family} [{name}] rule {which} err {other:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The volume the cone and the box share, summed over 800 × 800 vertical
 /// columns across the cone's widest circle: along each column the cone is one
 /// interval in `z`, and the box, being convex, is another.
