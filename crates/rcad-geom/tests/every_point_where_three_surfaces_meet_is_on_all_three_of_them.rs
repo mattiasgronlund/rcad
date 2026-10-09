@@ -388,7 +388,6 @@ fn three_surfaces_each_written_at_a_size_of_its_own_meet_until_they_span_1200_bi
                     ..corner
                 }
                 .surfaces()[which]
-                    .clone()
             })
             .collect::<Vec<_>>();
         let surfaces: [Surface; 3] = surfaces.try_into().expect("three");
