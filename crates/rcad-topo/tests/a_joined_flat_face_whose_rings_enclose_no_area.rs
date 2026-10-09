@@ -227,22 +227,28 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 ///
 /// Pappus gives the whole ring `2π²·4·1² = 8π²` and each top half of a half
 /// bend a quarter of it, `2π²`, so the union is `4π²`, the intersection is
-/// nothing, and each difference is the first half, `2π²`. United, the two
-/// floors would join into the whole flat ring between the circles of radius 3
-/// and 5, each a ring along the torus alone, which is the case
-/// `holds_the_other_rings` answers `None` for, and Q597 predicted the panic in
-/// `rings_round` there. **The intersection and the difference, both ways round,
-/// give the volumes above and leave a model that validates.**
+/// nothing, and each difference is the first half, `2π²`. **Every rule, both
+/// ways round, gives that, and leaves a model that validates.**
 ///
-/// **The union, both ways round, is refused `ResultIsNotManifold { count: 4 }`
-/// before `rings_round`,** at `darts_along_each_edge` in `fuse/assemble.rs`. It
-/// keeps both floors and both walls, so both halves of the circle `z = 0` cuts
-/// the ring in, of radius 5 and of radius 3, run between the same two corners,
-/// `(±5, 0, 0)` and `(±3, 0, 0)`, and `which_arc_of_a_circle_this_is` tells the
+/// United, the two floors join into the whole flat ring between the circles of
+/// radius 3 and 5, an outline and a hole each along the torus alone, two
+/// corners each. `holds_the_other_rings` places them by the disk of the circle
+/// each runs along, named by the picker `intersect` names it by: the outer
+/// circle's disk holds the inner circle's corners and the inner's does not
+/// hold the outer's (`Some(true)` and `Some(false)` both ways round, a
+/// temporary print, Q1387).
+///
+/// Until Q1387 the union, both ways round, was refused `ResultIsNotManifold {
+/// count: 4 }` at `darts_along_each_edge` in `fuse/assemble.rs`. It keeps both
+/// floors and both walls, so both halves of the circle `z = 0` cuts the ring
+/// in, of radius 5 and of radius 3, run between the same two corners,
+/// `(±5, 0, 0)` and `(±3, 0, 0)`, and `which_arc_of_a_circle_this_is` told the
 /// two arcs of a closed crossing apart for a plane against a ball, a cone or a
 /// pipe and not a ring: one edge, carried by `z = 0` and the ring and made from
-/// one input edge of each solid, is claimed four times (a temporary print,
-/// Q1373). A gap: the answer is the top half of the whole ring, `4π²`.
+/// one input edge of each solid, was claimed four times (a temporary print,
+/// Q1373). With the arcs told apart it panicked in `rings_round`, because
+/// `holds_the_other_rings` answered `None` for a ring along a torus, as Q597
+/// had predicted (Q1387).
 ///
 /// Until Q1373 every one was refused `Undecidable` on `a point inside a piece
 /// of a face`, its record naming the two corners of the first solid's start
@@ -279,9 +285,9 @@ fn a_block_square_to_a_bends_axis_is_refused_before_anything_is_cut() {
 /// reads a picker whose plane holds both ends on any circle a plane cuts a
 /// ring in, and so reads every arc of both solids' floors, caps and walls.
 #[test]
-fn the_top_halves_of_two_half_bends_fuse_to_what_pappus_gives_but_for_their_union() {
+fn the_top_halves_of_two_half_bends_fuse_by_every_rule_to_what_pappus_gives() {
     for (rule, volume) in [
-        (Rule::Union, None),
+        (Rule::Union, Some(4.0 * PI * PI)),
         (Rule::Intersection, Some(0.0)),
         (Rule::Difference, Some(2.0 * PI * PI)),
     ] {
