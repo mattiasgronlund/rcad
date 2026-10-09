@@ -7361,7 +7361,9 @@ fn how_a_crossing_runs(
     {
         return how_a_circle_round_a_rings_axis_runs(surface, partner, level, run, log);
     }
-    if !a_pair_that_crosses_in_a_conic(surface, partner, log)? {
+    if !(a_pair_that_crosses_in_a_conic(surface, partner, log)?
+        || one_of_two_loops_round_a_thin_pipe(surface, partner, run))
+    {
         return Err(Error::ACrossingThisCannotBeOrderedAlong);
     }
     match where_a_closed_crossing_starts(run, [surface, partner], log) {
@@ -7372,6 +7374,31 @@ fn how_a_crossing_runs(
         }),
         Err(_) => Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
+}
+
+/// Whether `run` is one of the two loops a fat pipe crosses a thin one in,
+/// where it swallows the thin one's whole cross-section.
+///
+/// [`intersect`](rcad_geom::intersect) names two pipes' crossing as a part of
+/// it picked out by a half-space only there: one loop is the whole of the
+/// crossing, two pipes running the same way cross in lines, and two of one
+/// width on axes that meet are refused. Each of those two loops runs once
+/// round the thin pipe's axis, and [`which_comes_first_round_a_crossing`]
+/// orders it round that axis, asking again, exactly, whether the fat pipe
+/// swallows the thin one before it does (Q1483).
+fn one_of_two_loops_round_a_thin_pipe(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+) -> bool {
+    matches!(
+        (surface, partner, run.run()),
+        (
+            Surface::Cylinder(_),
+            Surface::Cylinder(_),
+            EdgeRun::PartOfWhereItCrosses { .. }
+        )
+    )
 }
 
 /// How points along a circle a ring shares with a ball, a pipe or a cone on

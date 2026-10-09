@@ -277,9 +277,17 @@ fn the_way_this_crossing_winds(
             );
         }
         // Two pipes cross in a degree-four space curve that is neither flat nor
-        // convex, so neither the determinant nor the argument behind it applies.
-        [Surface::Cylinder(_), Surface::Cylinder(_)] => {
-            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        // convex. Where one swallows the other's whole cross-section, each of
+        // its two loops runs once round the thin pipe's axis, and that is what
+        // orders it; every other pair of pipes is refused inside.
+        [Surface::Cylinder(one), Surface::Cylinder(other)] => {
+            return match one.radius().total_cmp(&other.radius()) {
+                Ordering::Less => the_way_a_loop_round_a_thin_pipe_winds(one, other, from),
+                Ordering::Greater => {
+                    Ok(the_way_a_loop_round_a_thin_pipe_winds(other, one, from)?.the_other_way())
+                }
+                Ordering::Equal => Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+            };
         }
         // The two flat families a plane cuts a torus in are circles, and only
         // those two reach a normal — everything else a plane and a torus make is
@@ -669,6 +677,139 @@ fn the_way_a_circle_round_a_cones_axis_winds(
         Decision::Zero | Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
         other => unreachable!("which side of a half-space a point is on is a sign: {other:?}"),
     }
+}
+
+/// Which way the loop `from` is on runs, of the two a fat pipe crosses a thin
+/// one in, for the pair taken thin pipe first.
+///
+/// # Each loop runs once round the thin pipe's axis
+///
+/// Look down the fat pipe's axis. It is a circle of radius `R`, and each line
+/// of the thin pipe's wall along its own axis is a line across that circle, a
+/// distance from its centre between `δ − r` and `δ + r`, for `δ` how far apart
+/// the two axes are and `r` the thin pipe's radius. Where `R > δ + r` every
+/// one of those lines crosses the circle twice and touches it nowhere, once
+/// going in and once coming out. So each loop meets each line of the wall
+/// once, and going round a loop goes once round the thin pipe's axis `w`.
+///
+/// So three points of a loop, looked at down `w`, are three points of the
+/// thin pipe's circle in the same order round it, and the sweep
+/// `((one − from) × (other − from)) · w` only reads them down `w`: a circle is
+/// convex, and the module's determinant orders it.
+///
+/// # Which way round
+///
+/// Write `ρ_t` and `ρ_f` for the steps out from each axis to a point of the
+/// loop, which are the two gradients up to factors above nothing. The loop
+/// runs along `ρ_t × ρ_f`, and against `w × ρ_t`, which is anticlockwise about
+/// `w`, that is `(ρ_t × ρ_f) · (w × ρ_t) = −r² (ρ_f · w)`. So the loop where
+/// the thin pipe comes out of the fat one, `ρ_f · w > 0`, winds about `−w`,
+/// and the loop where it goes in winds about `w`. Each loop crosses every line
+/// of the wall the same way, so the sign holds all the way round it, and
+/// `ρ_f · w` has the sign of `((from − o_f) × w_f) · (w × w_f)`, which is
+/// what is asked at `from`. [`intersect`](crate::intersect)'s picker on these
+/// two runs is a plane through the fat axis that `w`'s part across that axis
+/// is square to, so the loop it keeps in front is the one coming out.
+///
+/// # Errors
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the fat pipe is proved
+/// not to swallow the thin one, `R − r ≤ δ`, asked exactly as `(R − r)² K ≤
+/// T²` with `K = ‖w × w_f‖²` and `T = (o_f − o_t) · (w × w_f)`: two pipes
+/// running the same way cross in lines, and two whose crossing is one loop
+/// run back and forth round both axes.
+fn the_way_a_loop_round_a_thin_pipe_winds(
+    thin: &Cylinder,
+    fat: &Cylinder,
+    from: PredicatePoint,
+) -> Result<WhichWayItWinds> {
+    let [thin_at, fat_at] = [thin, fat].map(|pipe| pipe.axis().origin().coordinates());
+    let [thin_way, fat_way] = [thin, fat].map(|pipe| pipe.axis().direction().components());
+    if !(are_real_numbers(thin_at)
+        && are_real_numbers(fat_at)
+        && are_real_numbers(thin_way)
+        && are_real_numbers(fat_way))
+    {
+        return Ok(WhichWayItWinds::CannotTell);
+    }
+    match whether_a_fat_pipe_swallows_a_thin_one(thin, fat) {
+        Some(Decision::Pos) => {}
+        Some(Decision::Zero | Decision::Neg) => {
+            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        }
+        Some(Decision::Undecidable { .. }) | None => return Ok(WhichWayItWinds::CannotTell),
+        Some(other) => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+    }
+    match whether_a_thin_pipe_comes_out_of_a_fat_one_at(from, thin_way, fat_at, fat_way) {
+        Decision::Pos => Ok(WhichWayItWinds::About(-thin.axis().direction())),
+        Decision::Neg => Ok(WhichWayItWinds::About(thin.axis().direction())),
+        // On the plane through the fat axis that the thin one's direction is
+        // square to there is no point of either loop, so which loop `from` is
+        // on cannot be told, and the answer is the one a box straddling it
+        // gets.
+        Decision::Zero | Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
+        other => unreachable!("unhandled decision: {other:?}"),
+    }
+}
+
+/// The sign of `(R − r)² K − T²` for the fat pipe's radius `R` above the thin
+/// one's `r`, which is `K (R − r − δ)(R − r + δ)` and so the sign of
+/// `R − r − δ`: above nothing where the fat pipe swallows the thin one's whole
+/// cross-section. `None` where a product leaves what [`Exact`] can hold.
+fn whether_a_fat_pipe_swallows_a_thin_one(thin: &Cylinder, fat: &Cylinder) -> Option<Decision> {
+    let wider = Exact::of(fat.radius()).minus(&Exact::of(thin.radius()));
+    if wider.sign() != Decision::Pos {
+        return Some(Decision::Neg);
+    }
+    let across = Exact::cross_of(
+        &Exact::of_each(thin.axis().direction().components()),
+        fat.axis().direction().components(),
+    )?;
+    let squared_across = Exact::squared_length_of(&across)?;
+    let gap = Exact::gap_between(
+        thin.axis().origin().coordinates(),
+        fat.axis().origin().coordinates(),
+    );
+    let reach = Exact::dot_of_two_exact(&gap, &across)?;
+    Some(
+        wider
+            .times(&wider)?
+            .times(&squared_across)?
+            .minus(&reach.times(&reach)?)
+            .sign(),
+    )
+}
+
+/// The sign of `((at − o_f) × w_f) · (w × w_f)`, which is `‖w_f‖²` times
+/// `ρ_f · w`: above nothing where the thin pipe, running along `w`, is on its
+/// way out of the fat one at `at`. Over `at`'s box first, and exactly where
+/// that straddles nothing and `at` is a point.
+fn whether_a_thin_pipe_comes_out_of_a_fat_one_at(
+    at: PredicatePoint,
+    thin_way: [f64; 3],
+    fat_at: [f64; 3],
+    fat_way: [f64; 3],
+) -> Decision {
+    let out = at.enclosure();
+    let from_the_axis: [Interval; 3] =
+        core::array::from_fn(|axis| out[axis] - Interval::exactly(fat_at[axis]));
+    let boxed = dot_enclosing(
+        cross_enclosing(from_the_axis, exactly(fat_way)),
+        cross_enclosing(exactly(thin_way), exactly(fat_way)),
+    )
+    .sign();
+    if !matches!(boxed, Decision::Undecidable { .. }) {
+        return boxed;
+    }
+    let Some(point) = at.exact_coordinates() else {
+        return boxed;
+    };
+    let exactly_out =
+        Exact::cross_of(&Exact::gap_between(fat_at, point), fat_way).and_then(|out| {
+            let across = Exact::cross_of(&Exact::of_each(thin_way), fat_way)?;
+            Exact::dot_of_two_exact(&out, &across)
+        });
+    exactly_out.map_or(boxed, |out| out.sign())
 }
 
 /// `((one − from) × (other − from)) · anticlockwise_about`, evaluated the two
