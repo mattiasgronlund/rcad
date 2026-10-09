@@ -1585,7 +1585,13 @@ impl<'f> Arrangement<'f> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
-        let partner = self.crossings[crossing].partner;
+        let (partner, picked_by) = (
+            self.crossings[crossing].partner,
+            self.crossings[crossing].picked_by(),
+        );
+        if !nothing_rules_the_point_out(picked_by, point) {
+            return Ok(false);
+        }
         let side = match (side_of_surface(&partner, point), partner.as_plane()) {
             (undecided @ Decision::Undecidable { .. }, Some(plane)) => {
                 Self::the_three_planes_a_point_is_the_meet_of(around).map_or(undecided, |three| {
@@ -1606,8 +1612,7 @@ impl<'f> Arrangement<'f> {
             policy,
             log,
         )?;
-        Ok(settled == Decision::Zero
-            && nothing_rules_the_point_out(self.crossings[crossing].picked_by(), point))
+        Ok(settled == Decision::Zero)
     }
 
     /// The three planes a point of the arrangement is the one meeting point of,

@@ -4206,7 +4206,7 @@ fn where_a_ring_and_a_round_surface_cross(
 ///
 /// [`Error::Undecidable`] where a sign could not be settled, which takes a
 /// product leaving `f64`'s range.
-fn a_pipe_lies_along_a_rings_core(
+pub(crate) fn a_pipe_lies_along_a_rings_core(
     ring: &Torus,
     pipe: &Cylinder,
     policy: &Policy,

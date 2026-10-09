@@ -52,7 +52,10 @@
 //!   it.** The two share circles square to the axis, at the heights
 //!   [`intersect`](crate::intersect) names them by, and the plane cuts each
 //!   in two points — a bend's end cap across the circles a bar of the bend's
-//!   own radius crosses its tube in.
+//!   own radius crosses its tube in. A pipe of the tube's radius along the
+//!   ring's core circle instead shares a circle and a loop with it: the plane
+//!   square to the pipe holds the circle, and any other cuts the loop in up to
+//!   four points.
 //!   [`what_a_plane_through_a_rings_axis_leaves`].
 //!
 //! **Three curved surfaces, two of which bend the same way, are one plane and
@@ -110,7 +113,7 @@ use crate::enclosure::{
 };
 use crate::exact::{Exact, Nearly, binary_exponent, multiplied_by_a_power_of_two, slid_exactly};
 use crate::intersect::{
-    Question, ask, intersect, squared_length_of_a_cross_product,
+    Question, a_pipe_lies_along_a_rings_core, ask, intersect, squared_length_of_a_cross_product,
     the_heights_a_ring_crosses_a_round_surface_at,
 };
 use crate::plane::which_side_of_a_flat_surface;
@@ -2467,7 +2470,9 @@ fn the_point_a_box_names(boxed: [Interval; 3]) -> PredicatePoint {
 /// [`it_holds_the_axis`], and the other surface by the questions
 /// [`intersect`] asks before it names a circle. A ball, a pipe or a cone that
 /// is not on the ring's axis is not this road and is handed on, as is a second
-/// ring.
+/// ring, but for a pipe of the tube's radius along the ring's core circle,
+/// which [`what_a_plane_through_a_rings_axis_leaves_of_a_pipe_along_its_core`]
+/// answers.
 fn what_a_plane_through_a_rings_axis_leaves(
     flat: &Plane,
     one: &Surface,
@@ -2495,6 +2500,14 @@ fn what_a_plane_through_a_rings_axis_leaves(
     };
     if !it_holds_the_axis(flat, &axis) {
         return Ok(None);
+    }
+    if let Surface::Cylinder(pipe) = round
+        && a_pipe_lies_along_a_rings_core(ring, pipe, policy, log)?
+    {
+        return what_a_plane_through_a_rings_axis_leaves_of_a_pipe_along_its_core(
+            flat, ring, pipe, at, policy, log,
+        )
+        .map(Some);
     }
     let mut heights = match the_heights_a_ring_crosses_a_round_surface_at(ring, round, policy, log)
     {
@@ -2528,6 +2541,202 @@ fn what_a_plane_through_a_rings_axis_leaves(
         return Err(refused());
     }
     Ok(Some(MeetOfThree::At(places)))
+}
+
+/// What a plane holding a ring's axis leaves of the ring and a pipe of its
+/// tube's radius along its core circle ([`a_pipe_lies_along_a_rings_core`]):
+/// **more than a point where the plane is square to the pipe, and up to four
+/// points where it is not.**
+///
+/// The ring and the pipe share a meridian circle and a loop ([`intersect`]).
+/// The circle lies in the plane through the ring's centre square to the pipe,
+/// and that plane cuts the pipe in the circle alone, so a bend's cap, the
+/// bend's ring and the pipe of a bar butted onto the cap share the cap's whole
+/// rim. The plane holds the ring's centre already ([`it_holds_the_axis`]).
+///
+/// **Any other plane holding the axis cuts the loop and misses the circle**,
+/// since it meets the square plane only along the axis and the circle stays
+/// `R − r` clear of that. In [`intersect`]'s frame the loop is where the pipe
+/// meets `y² = 4R² − 4Rx`, a parabola swept along the axis, so the plane cuts
+/// that in two lines along the axis, and each line meets the pipe in up to two
+/// points. With `c` the ring's centre, `o` and `d` the pipe's point and
+/// direction, `M = (d·d)(o − c) − ((o − c)·d)d` the way out to where the pipe
+/// touches the core circle times `d·d`, and `n` the plane's normal, the line
+/// through `c + M/(d·d) − s²M/4R² + s·d` is one of them where
+///
+/// `(n·M)(d·d)·s² − 4R²(n·d)(d·d)·s − 4R²(n·M) = 0`.
+///
+/// `n·M` is zero exactly where the plane is square to the pipe, so that one
+/// sign tells the two cases apart, and otherwise the discriminant is a sum of
+/// two squares with the second above zero: always two lines. A bar of ring 3/1
+/// with its far end on `x + y = 0` is that plane, `s = 6(√2 − 1)`, and the
+/// loop crosses it at `x = −y = s`, `z = ±√(1 − s⁴/144)`
+/// (`where_a_plane_through_a_rings_axis_cuts_the_loop_a_pipe_along_its_core_makes`).
+///
+/// Each line is a box, so whether it meets the pipe is settled on intervals
+/// ([`where_a_line_meets_a_quadric`]): the loop's tip exactly on the plane is
+/// a touch no box tells from a near miss, refused under a certified policy.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] where a sign could not be settled, where a product
+/// falls out of `f64`'s range, or where two of the points could not be told
+/// apart.
+fn what_a_plane_through_a_rings_axis_leaves_of_a_pipe_along_its_core(
+    flat: &Plane,
+    ring: &Torus,
+    pipe: &Cylinder,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    let refused = || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at);
+    let loop_in_the_plane = how_a_plane_cuts_a_rings_loop(flat, ring, pipe).ok_or_else(refused)?;
+    let square = &loop_in_the_plane.lines.squared;
+    let sign = match ask(
+        &the_sign_of(WHERE_THREE_SURFACES_MEET, square),
+        Measures::Length,
+        at,
+        policy,
+        log,
+    )? {
+        Decision::Zero => return Ok(MeetOfThree::MoreThanAPoint),
+        sign @ (Decision::Pos | Decision::Neg) => sign,
+        other => unreachable!("a sign question answers with a sign: {other:?}"),
+    };
+    let mut places: SmallVec<[PredicatePoint; 2]> = SmallVec::new();
+    for step in the_two_places_along_it(&loop_in_the_plane.lines, sign) {
+        let line = loop_in_the_plane.the_line_along_the_axis_at(ring, pipe, step);
+        let across_the_pipe =
+            how_a_quadric_cuts_the_line(&line, &Surface::Cylinder(*pipe)).ok_or_else(refused)?;
+        let found = where_a_line_meets_a_quadric(
+            WHERE_THREE_SURFACES_MEET,
+            &across_the_pipe,
+            at,
+            policy,
+            log,
+        )?;
+        match the_points_those_steps_name(
+            WHERE_THREE_SURFACES_MEET,
+            &line,
+            found,
+            at,
+            policy,
+            log,
+            refused,
+        )? {
+            MeetOfThree::At(more) => places.extend(more),
+            MeetOfThree::Nowhere => (),
+            MeetOfThree::MoreThanAPoint => unreachable!(
+                "a line along the ring's axis runs square to the pipe, so never down its wall"
+            ),
+        }
+    }
+    let apart = places.iter().enumerate().all(|(index, one)| {
+        places[index + 1..]
+            .iter()
+            .all(|other| two_boxes_are_apart(one.enclosure(), other.enclosure()))
+    });
+    if !apart {
+        return Err(refused());
+    }
+    if places.is_empty() {
+        return Ok(MeetOfThree::Nowhere);
+    }
+    Ok(MeetOfThree::At(places))
+}
+
+/// The numbers [`what_a_plane_through_a_rings_axis_leaves_of_a_pipe_along_its_core`]
+/// reads the two lines off.
+struct ALoopInAPlane {
+    /// `(n·M)(d·d)·s² − 4R²(n·d)(d·d)·s − 4R²(n·M)`, zero at each line.
+    lines: Quadratic,
+    /// `M`, the way out to where the pipe touches the core circle, times `d·d`.
+    out_to_the_touch: [Term; 3],
+    /// `d·d`.
+    squared_along: Term,
+    /// `R²`.
+    squared_ring: Term,
+}
+
+impl ALoopInAPlane {
+    /// The line along the ring's axis through `c + M/(d·d) − s²M/4R² + s·d`,
+    /// with `s` the box `step`.
+    fn the_line_along_the_axis_at(&self, ring: &Torus, pipe: &Cylinder, step: Interval) -> ALine {
+        let centre = ring.centre().coordinates();
+        let along = pipe.axis().direction().components();
+        let squared_along = self.squared_along.enclosure();
+        let four_squared_ring = Interval::exactly(4.0) * self.squared_ring.enclosure();
+        let through = core::array::from_fn(|axis| {
+            let touch = self.out_to_the_touch[axis].enclosure();
+            Term::from_a_box(
+                Interval::exactly(centre[axis]) + quotient_or_everything(touch, squared_along)
+                    - quotient_or_everything(step * step * touch, four_squared_ring)
+                    + step * Interval::exactly(along[axis]),
+            )
+        });
+        ALine {
+            through,
+            direction: ring.axis().direction().components().map(Term::of),
+            divided_by: Term::of(1.0),
+        }
+    }
+}
+
+/// The quadratic whose roots are the two lines along a ring's axis where a
+/// plane holding the axis cuts the parabola the loop of a pipe along the
+/// core circle lies on, or `None` where a product it needs falls out of
+/// `f64`'s range.
+fn how_a_plane_cuts_a_rings_loop(
+    flat: &Plane,
+    ring: &Torus,
+    pipe: &Cylinder,
+) -> Option<ALoopInAPlane> {
+    let centre = ring.centre().coordinates();
+    let origin = pipe.axis().origin().coordinates();
+    let along = pipe.axis().direction().components();
+    let normal = flat.normal().components();
+    let off_the_centre: [Term; 3] =
+        core::array::from_fn(|axis| Term::of(origin[axis]).minus(&Term::of(centre[axis])));
+    let direction = along.map(Term::of);
+    let squared_along = Term::Stored(Nearly::dot_of(along, along)?);
+    let reach_along = dot_of(&off_the_centre, &direction)?;
+    let mut out_to_the_touch = [Term::of(0.0), Term::of(0.0), Term::of(0.0)];
+    for (axis, touch) in out_to_the_touch.iter_mut().enumerate() {
+        *touch = squared_along
+            .times(&off_the_centre[axis])?
+            .minus(&reach_along.times(&direction[axis])?);
+    }
+    let normal_out = dot_of(&normal.map(Term::of), &out_to_the_touch)?;
+    let normal_along = Term::Stored(Nearly::dot_of(normal, along)?);
+    let squared_ring = Term::Stored(Nearly::product_of(ring.ring_radius(), ring.ring_radius())?);
+    let four_squared_ring = Term::of(4.0).times(&squared_ring)?;
+    let lines = Quadratic {
+        squared: normal_out.times(&squared_along)?,
+        half_linear: Term::of(-2.0)
+            .times(&squared_ring)?
+            .times(&normal_along)?
+            .times(&squared_along)?,
+        constant: Term::of(0.0).minus(&four_squared_ring.times(&normal_out)?),
+    };
+    let coefficients = [&lines.squared, &lines.half_linear, &lines.constant];
+    if coefficients
+        .iter()
+        .any(|term| term.lost_more_than_a_rounding())
+    {
+        return None;
+    }
+    Some(ALoopInAPlane {
+        lines,
+        out_to_the_touch,
+        squared_along,
+        squared_ring,
+    })
+}
+
+/// Whether two boxes share no point: apart along at least one axis.
+fn two_boxes_are_apart(one: [Interval; 3], other: [Interval; 3]) -> bool {
+    (0..3).any(|axis| one[axis].hi() < other[axis].lo() || other[axis].hi() < one[axis].lo())
 }
 
 /// What a plane that misses one of the two curved surfaces, or touches it at a
@@ -3959,6 +4168,76 @@ mod tests {
             .iter()
             .map(|point| point.enclosure().map(|side| (side.lo() + side.hi()) / 2.0))
             .collect()
+    }
+
+    /// Ring 12/5 about `z` and the radius-5 pipe through `(12, 0, 0)` along
+    /// `y`, which share the circle in `y = 0` and a loop through `(9, 12, ±4)`.
+    /// The plane `y = 0` holds the circle; `4x = 3y` holds the axis and cuts
+    /// the loop's parabola `x = 12 − y²/48` at `y = 12` and `y = −48`, and only
+    /// the first is close enough to the pipe. Ring 3/1 against the bar a bend's
+    /// cap is butted on, with its far end on `x + y = 0`, meets that end at
+    /// `x = −y = 6(√2 − 1)`, `z = ±√(1 − y⁴/144)`.
+    #[test]
+    fn where_a_plane_through_a_rings_axis_cuts_the_loop_a_pipe_along_its_core_makes() {
+        let ring = |core: f64, tube: f64| {
+            Surface::Torus(Torus::new(Axis::z(), core, tube).expect("a ring thicker than nothing"))
+        };
+        let pipe = |through: f64, along: f64, radius: f64| {
+            Surface::Cylinder(
+                Cylinder::new(
+                    Axis::new(Point::new(through, 0.0, 0.0), Vector::new(0.0, along, 0.0))
+                        .expect("an axis"),
+                    radius,
+                )
+                .expect("a radius"),
+            )
+        };
+        let (big, along_y) = (ring(12.0, 5.0), pipe(12.0, 1.0, 5.0));
+        let cap = flat([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]);
+        assert_eq!(
+            meet([&cap, &big, &along_y]),
+            Ok(MeetOfThree::MoreThanAPoint)
+        );
+
+        let leaning = flat([12.0, -9.0, 0.0], [0.0, 0.0, 0.0]);
+        for order in [[&leaning, &big, &along_y], [&along_y, &leaning, &big]] {
+            let MeetOfThree::At(places) = meet(order).expect("a plane holding the axis") else {
+                panic!("two points on the loop");
+            };
+            let held: Vec<bool> = places
+                .iter()
+                .zip([[9.0, 12.0, -4.0], [9.0, 12.0, 4.0]])
+                .map(|(place, point)| {
+                    place
+                        .enclosure()
+                        .iter()
+                        .zip(point)
+                        .all(|(side, coordinate)| {
+                            side.lo() <= coordinate && coordinate <= side.hi()
+                        })
+                })
+                .collect();
+            assert_eq!(held, vec![true, true], "{places:?}");
+        }
+
+        let (small, bar) = (ring(3.0, 1.0), pipe(3.0, -1.0, 1.0));
+        let far_end = flat([1.0, 1.0, 0.0], [0.0, 0.0, 0.0]);
+        let answer = meet([&far_end, &small, &bar]).expect("the bar's far end crosses the loop");
+        let out = 6.0 * (2.0_f64.sqrt() - 1.0);
+        let up = (1.0 - out.powi(4) / 144.0).sqrt();
+        let missed: Vec<f64> = middles(&answer)
+            .iter()
+            .zip([[out, -out, -up], [out, -out, up]])
+            .map(|(found, point)| {
+                (0..3)
+                    .map(|axis| (found[axis] - point[axis]).abs())
+                    .fold(0.0, f64::max)
+            })
+            .collect();
+        assert!(
+            missed.len() == 2 && missed.iter().all(|by| *by < 1e-12),
+            "{answer:?} missed by {missed:?}"
+        );
     }
 
     #[test]
