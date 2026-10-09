@@ -432,15 +432,41 @@ fn a_line_and_a_ring_written_about_1e_159_across_meet_where_they_do_at_size_one(
 /// A touch no `f64` names comes back with how far the ring's quartic reaches
 /// over its box, and that is a length to the fourth. It is worked out where the
 /// question was slid to, so it is slid back down by four times the slide, and
-/// outward: what comes back still straddles zero, which is the whole of what it
-/// says. `docs/decisions.md` §349.8.
+/// outward. At `2⁻⁵²⁸` a length to the fourth is near `2⁻²¹¹²`, under the
+/// smallest subnormal, so what comes back is one subnormal either side of zero
+/// and no wider. Left at the size it was worked out at, it would be as wide as
+/// the reach at size one. `docs/decisions.md` §349.8.
 #[test]
 fn a_line_touching_a_ring_written_about_1e_159_across_touches_it_where_it_does_at_size_one() {
-    the_same_steps_at_both_sizes(&Question {
+    let tiny = the_same_steps_at_both_sizes(&Question {
         from: [0.0, 1.0, 1.0],
         along: [1.0, 0.0, 0.0],
         surface: Surface::Torus(a_ring()),
     });
+    let WhereALineMeetsIt::At(found) = &tiny else {
+        panic!("a line along the top of the tube touches it, not {tiny:?}");
+    };
+    let smallest = f64::from_bits(1);
+    let reaches: Vec<Interval> = found
+        .iter()
+        .map(|step| {
+            let MeetsAt::MaybeATouch {
+                how_far_it_reaches, ..
+            } = step
+            else {
+                panic!("a touch at ±√15 is a touch no f64 names, not {step:?}");
+            };
+            *how_far_it_reaches
+        })
+        .collect();
+    assert_eq!(reaches.len(), 2, "two touches, at ±√15: {tiny:?}");
+    for reach in reaches {
+        assert_eq!(
+            (reach.lo(), reach.hi()),
+            (-smallest, smallest),
+            "a length to the fourth 2^-528 across is under one subnormal, slid back outward"
+        );
+    }
 }
 
 /// One line and one surface, written at size one.
@@ -455,14 +481,15 @@ struct Question {
 const TINY: i32 = -528;
 
 /// The question asked at size one and again slid down to `2⁻⁵²⁸`, where both
-/// must answer, the tiny one must hold what size one says, and the tiny one is
-/// measured for how much wider it is.
+/// must answer and the tiny one must name the very steps size one does. The
+/// tiny answer comes back for a test to read further.
 ///
 /// **A step along the line does not move when the question is slid**, because
 /// the line's direction is a length too and slides with its point: `2ᵏ·from +
 /// t·2ᵏ·along` is `2ᵏ` times the point at `t`. So the tiny answer scaled back
-/// up *is* the tiny answer, and the two are compared as they come.
-fn the_same_steps_at_both_sizes(question: &Question) {
+/// up *is* the tiny answer, and the two are compared as they come. Bit for bit
+/// is as tight as a comparison gets: the tiny box is not one ulp wider.
+fn the_same_steps_at_both_sizes(question: &Question) -> WhereALineMeetsIt {
     let at_size_one = asked_certified(question, 0)
         .unwrap_or_else(|refused| panic!("the question at size one is answered: {refused:?}"));
     let mut log = ProvenanceLog::new();
@@ -516,6 +543,7 @@ fn the_same_steps_at_both_sizes(question: &Question) {
             }
         }
     }
+    tiny
 }
 
 fn asked_certified(question: &Question, exponent: i32) -> Result<WhereALineMeetsIt, Error> {
