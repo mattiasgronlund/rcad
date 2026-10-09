@@ -7569,6 +7569,49 @@ mod tests {
         assert_ne!(round_plus_x, round_minus_x, "two circles named as one");
     }
 
+    /// The outer and the inner circle a plane square to a ring's axis cuts it
+    /// in are two names, and each is one name with the plane facing up or down
+    /// and the ring's axis written either way round, in either order (Q1513).
+    ///
+    /// Named by the plane and the ring alone, the top half of a ring had its
+    /// two equators made one curve, and every fuse that kept its faces was
+    /// refused `ResultIsNotManifold { count: 4 }`.
+    #[test]
+    fn each_circle_a_plane_square_to_a_rings_axis_cuts_is_one_name_however_the_two_are_spelled() {
+        let flats = [1.0, -1.0].map(|facing| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, facing))
+                    .expect("a coordinate direction is a unit normal"),
+            )
+        });
+        let rings = [Axis::z(), Axis::z().reversed()].map(|axis| {
+            Surface::Torus(Torus::new(axis, 4.0, 1.0).expect("a tube narrower than its ring"))
+        });
+        let names_through = |x: f64| -> BTreeSet<_> {
+            let mut names = BTreeSet::new();
+            for flat in flats {
+                for ring in rings {
+                    for carried_by in [[flat, ring], [ring, flat]] {
+                        names.insert(
+                            name_of_the_closed_crossing_through(
+                                &carried_by,
+                                PredicatePoint::from([x, 0.0, 0.0]),
+                                &Policy::certified(),
+                                &mut ProvenanceLog::new(),
+                            )
+                            .expect("a plane through the ring's middle cuts two circles"),
+                        );
+                    }
+                }
+            }
+            names
+        };
+        let (outer, inner) = (names_through(5.0), names_through(3.0));
+        assert_eq!(outer.len(), 1, "{outer:?}");
+        assert_eq!(inner.len(), 1, "{inner:?}");
+        assert_ne!(outer, inner, "two circles named as one");
+    }
+
     /// The two circles a cone crosses a pipe, a ball or a steeper cone on its
     /// axis in are two names, and each is one name with every axis written
     /// either way round, in either order.
