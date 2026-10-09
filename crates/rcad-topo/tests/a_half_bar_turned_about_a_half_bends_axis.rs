@@ -34,6 +34,21 @@
 //!
 //! Every volume is held to the error its measurement gives, since a ring's wall
 //! is not a chord-for-chord wall.
+//!
+//! # Why a turned half bar was refused, and what answers it
+//!
+//! Unturned, every fuse here answered already. Turned, every one was refused
+//! `AFaceTrimmedByACurveThisCannotFollow` on the bar's cap until Q1496: the
+//! fuse's arrangement could not say which half of the cap's circle the cap's
+//! arc is (`which_way_an_edge_runs_round` in `fuse/arrange.rs`). The arc is
+//! picked by the plane of the bar's flat face, and that plane runs through the
+//! circle's centre and through the boxes the fuse solves both ends of the arc
+//! into. Each of the first four ways `the_way_into_an_arc` in `holds.rs` reads
+//! an arc needs an end clearly on or in front of that plane, or the centre
+//! clearly off the chord or clearly behind the plane. The fifth asks where the
+//! line through the centre, square to the chord, meets the circle instead: one
+//! of the two points is clearly behind the plane, so the arc is the half on the
+//! other side (§330.3).
 
 use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
