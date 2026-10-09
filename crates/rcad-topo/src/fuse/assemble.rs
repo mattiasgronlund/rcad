@@ -119,7 +119,7 @@ pub(crate) fn assemble(
     log: &mut ProvenanceLog,
 ) -> Result<Assembly> {
     let mut assembly = Assembly::from_the_pieces(model, scratch, chosen, policy, log)?;
-    assembly.join_up_what_is_one_face(Some(policy), log)?;
+    assembly.join_up_what_is_one_face(policy, log)?;
     assembly.runs = assembly.how_each_edge_runs()?;
     assembly.shells = assembly.group_into_shells()?;
     assembly.solids = assembly.nest_the_shells(model, policy, log)?;
@@ -136,11 +136,6 @@ pub(crate) fn assemble(
 /// profile points in a row and the extrusion of one has two side faces on a
 /// single plane — so the same joining runs on the way in, done by the same code.
 ///
-/// **It takes no policy, because `bake.rs` asks it only of a wholly flat
-/// solid**, and the one thing the joining needs a policy for is naming the
-/// circle a plane cuts a ring in, for a ring of a joined face that runs along a
-/// torus ([`Assembly::holds_the_other_rings`]). A flat solid has no such ring.
-///
 /// # Errors
 ///
 /// [`Error::Undecidable`] when two of the input's planes cannot be told apart at
@@ -148,21 +143,14 @@ pub(crate) fn assemble(
 /// other than two faces, which means the input was already broken, and
 /// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
 /// its coplanar faces both wind as its outline.
-///
-/// # Panics
-///
-/// If `solid` is not wholly flat.
 pub(crate) fn joined_faces_of_an_input(
     model: &Model,
     solid: SolidView<'_>,
+    policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<Vec<InputFace>>> {
-    assert!(
-        solid.is_wholly_flat(),
-        "bake.rs joins the faces of an input only when it is wholly flat"
-    );
     let mut assembly = Assembly::from_one_input_solid(model, solid);
-    if !assembly.join_up_what_is_one_face(None, log)? {
+    if !assembly.join_up_what_is_one_face(policy, log)? {
         return Ok(None);
     }
     Ok(Some(assembly.as_input_faces()?))
@@ -1055,10 +1043,6 @@ impl Assembly {
     /// Answers `true` when it joined something, which is what lets
     /// [`joined_faces_of_an_input`] leave an input that needs nothing alone.
     ///
-    /// `policy` is `None` for an input that is wholly flat, which is the one
-    /// input [`joined_faces_of_an_input`] is asked of: only a ring along a
-    /// torus needs it ([`Assembly::holds_the_other_rings`]).
-    ///
     /// # Errors
     ///
     /// [`Error::ResultIsNotManifold`] when an edge is claimed by other than two
@@ -1077,11 +1061,10 @@ impl Assembly {
     /// different sides not both straight, or a ring of a whole closed surface
     /// ([`Assembly::with_each_ring_of_two_straight_sides_left_out`]). Both are
     /// broken internal invariants and a corrupt solid is worse than a crash
-    /// (§4.1). And with no `policy`, where a ring of a joined face runs along a
-    /// torus.
+    /// (§4.1).
     fn join_up_what_is_one_face(
         &mut self,
-        policy: Option<&Policy>,
+        policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
         let along = self.darts_along_each_edge()?;
@@ -1188,7 +1171,7 @@ impl Assembly {
         same: &Sameness,
         along: &[[Dart; 2]],
         dissolved: &[bool],
-        policy: Option<&Policy>,
+        policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Vec<JoinedFace>> {
         let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
@@ -1710,9 +1693,6 @@ impl Assembly {
     ///   and a shape reached it: united with a cone closed by a ball, a cut
     ///   cone's wall has an outline and a hole of two corners each, each with a
     ///   side along a hyperbola. Such a side is placed now (Q1289).
-    /// - **A ring along a torus with no `policy`**, which only a wholly flat
-    ///   input is joined with, so no such ring is there
-    ///   ([`joined_faces_of_an_input`]).
     /// - **Two or more rings each holding the others**, which would mean the
     ///   answer's rings cross. Nobody has traced whether any shape reaches it.
     fn rings_round(
@@ -1721,7 +1701,7 @@ impl Assembly {
         along: &[[Dart; 2]],
         dissolved: &[bool],
         plane: Plane,
-        policy: Option<&Policy>,
+        policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Vec<Vec<Dart>>> {
         let corners_of = |ring: &[Dart]| -> Vec<[f64; 3]> {
@@ -1891,14 +1871,13 @@ impl Assembly {
     /// # Panics
     ///
     /// On a [`Decision`] this crate has not been taught, for the reason
-    /// [`winding_round`] gives, and for a ring along a torus with no `policy`,
-    /// which only a wholly flat input is joined with.
+    /// [`winding_round`] gives.
     fn holds_the_other_rings<'a>(
         &self,
         ring: &[Dart],
         mut others: impl Iterator<Item = &'a Vec<Dart>>,
         plane: &Plane,
-        policy: Option<&Policy>,
+        policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Option<bool>> {
         let the_curved_one = |dart: Dart| {
@@ -1920,10 +1899,6 @@ impl Assembly {
             match surface {
                 Surface::Cylinder(_) | Surface::Sphere(_) | Surface::Cone(_) => (),
                 Surface::Torus(_) => {
-                    let policy = policy.expect(
-                        "a ring along a torus is on a face of a fuse's answer, and the fuse \
-                         hands its policy over",
-                    );
                     return self.what_the_disk_of_a_rings_circle_holds(
                         ring, others, plane, &surface, policy, log,
                     );
