@@ -17,6 +17,7 @@ rebuilt its three arms and got three different results.*
   305.5   The two legs of the hypothesis
   305.6   9e72d414, built the same way
   305.7   What is left
+  305.8   Two more trees: the path moves the flip, and the seed pass holds still
 
 ### 305.1 The answer
 
@@ -292,3 +293,120 @@ mise.toml mise.lock rust-toolchain.toml` lists no file under `rcad-geom`,
 - **The first pass's figures.** It reported `INITED ... ft: 8772 corp: 504`
   and `DONE ... 3102 / 8863 / 523` for all six runs, across all three arms. No
   run here reached `corp: 504`, so none of that is explained.
+
+### 305.8 Two more trees: the path moves the flip, and the seed pass holds still
+
+*Queue rows Q277 and Q278, read-only, 2026-10-09. Each built `f85f926d` with
+305.2's build line in a worktree of its own, on the same compiler. Neither lane
+wrote rows; this is written by their dispatcher from their reports and from
+the logs they left, which were read again for every number here.*
+
+**The path is in the binary, and it moves the layout (Q278).** Q278 built the
+present arm twice: in its own tree,
+`clean-up-dead-sessions-worktrees/wf_5b5d60fe-c73-1`, whose full path is 99
+characters long (build A), and in a second detached worktree under that tree's
+`target/`, 190 characters long (build B). `strings -a` finds the tree's path 27
+times in each binary. Every section from `.text` on, and every symbol in them,
+sits 0x500 bytes later in B: `.text` starts at `0x104a10` against `0x104f10`,
+and `main` is at `0x2d3f60` against `0x2d4460` (`readelf -S`, `nm`). §305's own
+tree, `dispatch-next-worktrees/wf_39298cae-c5a-1`, was 90 characters long.
+
+**The run's end flips with the stack in both builds, and the path decides which
+way (Q278).** The compiled-out arm (305.2's edit) of each build, run with the
+pad script below: `RCAD_FUZZ_TIMINGS` unset, `setarch -R`, two passes per pad.
+The two passes agreed at every pad. Each cell is the `DONE` line's cov / ft /
+corp:
+
+| Pad | A, path 99 | B, path 190 |
+|---|---|---|
+| 0 | 3101 / 8836 / 519 | 3101 / 8859 / 521 |
+| 16 | 3101 / 8859 / 521 | 3101 / 8836 / 519 |
+| 32 | 3101 / 8836 / 519 | 3101 / 8859 / 521 |
+| 48 | 3101 / 8859 / 521 | 3101 / 8836 / 519 |
+
+The flip still comes every 16 bytes, and the longer path puts each pad on the
+other side. The present arm, run in A only, ended 3101 / 8836 / 519 at all four
+pads in both passes, as §305's present build never flipped (305.4).
+
+**The seed pass did not flip on either tree.** All 24 of Q278's runs read
+`INITED cov: 3100 ft: 8772 corp: 503/26Kb`. Q277 ran 305.4's seed-only command
+(`-runs=835`) on the compiled-out arm in its own tree,
+`clean-up-dead-sessions-worktrees/wf_64f4aec9-1b3-1`, also 99 characters long.
+It tried every pad from 1 to 16, then 32, 40, 44, 46, 48, 56 and 64, then 80,
+96, 112, 128, 160, 192, 224 and 256, and repeated some of them. Its 51 logs that kept the default ASan options all read `ft:
+8771`. (Its "pad 0" runs carried one byte, because `printf 'x%.0s' $(seq 1 0)`
+prints one `x`; the other pads are as named.) So on these two trees the seed
+pass gives one answer at every pad, and not the same answer: 8771 on Q277's and
+8772 on Q278's, from the same source with paths of the same length. What
+separates them was not measured. Candidates are the run length in `argv`
+(`-runs=835` against `-runs=1500`), the bytes of the tree's name, and the
+environment.
+
+**ASan's use-after-return moved it, as in 305.4.** Q277's run with
+`ASAN_OPTIONS=detect_stack_use_after_return=0` and an empty pad read `ft:
+8772`, where 305.4's tree read 8773. The lane reports a second such run, and
+one seed-only run at pad 46 that read 8772 and then 8771 in 7 exact repeats.
+Later runs of the same name overwrote both logs, so neither can be checked.
+
+**No counters were dumped.** No pair of pads gave two answers, so there was
+nothing to diff, and the first item of 305.7 is still open. Whoever takes it
+needs a tree whose seed pass flips with the pad, and §305's tree is gone
+(§420).
+
+**`corp: 504` is still unexplained.** No run on either tree reached it at
+`INITED`. So the second item of 305.7 is narrower but not closed: the path
+moves which pads give which ending, but none of these builds gives §292.5's or
+Q236's first-pass figures.
+
+**For Q279.** The run's end parts with the pad in both of Q278's builds, so
+305.4's last finding reproduces off §305's tree, with counters on. Q279 asks
+the same with `-use_counters=0`. It can start from the scripts below in any
+tree, but it should first check that its pads part there.
+
+**The scripts** (§420.4). Q278's build, run from the tree that becomes the
+binary:
+
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "$(dirname "$0")/../.."
+    pwd
+    cd fuzz
+    rustc +nightly -V
+    env | grep RCAD_ || true
+    CI=1 RUSTC="$(pwd)/rustc-stand-in.sh" RUSTFLAGS="-C target-cpu=x86-64-v3" taskset -c 16-19 cargo +nightly fuzz build where_two_surfaces_cross
+    sha256sum target/x86_64-unknown-linux-gnu/release/where_two_surfaces_cross
+
+Q278's pads, called as `pads.sh <binary> <label> <corpus> <out-dir>`:
+
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BIN="$1"
+    LABEL="$2"
+    CORPUS_SRC="$3"
+    OUT="$4"
+    mkdir -p "$OUT"
+    for pad in 0 16 32 48; do
+      pad_str=""
+      i=0
+      while [ "$i" -lt "$pad" ]; do
+        pad_str="${pad_str}x"
+        i=$((i + 1))
+      done
+      for pass in a b; do
+        run_dir=$(mktemp -d)
+        cp -r "$CORPUS_SRC" "$run_dir/corpus"
+        log="$OUT/full-aslroff-${LABEL}-${pass}-pad$(printf '%03d' "$pad").log"
+        {
+          echo "pad=$pad pass=$pass bin=$BIN"
+          env -u RCAD_FUZZ_TIMINGS Q236_PAD="$pad_str" setarch x86_64 -R taskset -c 16-19 "$BIN" "$run_dir/corpus" -seed=42 -runs=1500 -print_final_stats=1
+        } > "$log" 2>&1 || true
+        grep -E "INITED|DONE" "$log" || true
+        rm -rf "$run_dir"
+      done
+    done
+
+Q277's seed-only runs were this command with `-runs=835` in place of
+`-runs=1500`, `Q277_PAD` in place of `Q236_PAD`, the seed corpus copied into
+the run directory, and no `env -u`, so whether `RCAD_FUZZ_TIMINGS` was set
+in its shell is not recorded. Each lane's logs stayed in its tree's `target/` and go at the next
+`clean-targets`.
