@@ -19,7 +19,9 @@
 //! cube's corner beside it. The union kept a sliver triangle of the bottom
 //! face, `(0, 5, 0)`, `(4.999999999999999, 5, 0)` and
 //! `(5, 5.000000000000001, 0)`, each of whose three sides had the floor on its
-//! other side.
+//! other side. The floor, joined, walks the same three corners back, and the
+//! fuse now leaves both out (`leave_out_each_flat_ring_another_plane_walks_back`
+//! in `fuse/assemble.rs`).
 //!
 //! What the two cubes share is the cube's square cross-section, clipped to
 //! the block, along the five of its ten that lie over the block:
@@ -119,21 +121,16 @@ fn the_block_less_the_tipped_cube_is_refused_for_the_range_certified() {
     }
 }
 
-/// Not Q1506's: queue row Q1507's, which the same sweep of tilts found. The
-/// answer exists, the cube less what the two share, `1000 − ` that.
+/// Refused `VolumeIsNotPositive` with a volume of `0.0` under both policies,
+/// both tilts, until the sliver the union kept was left out of every answer.
 #[test]
-fn the_tipped_cube_less_the_block_is_refused_with_no_volume_under_either_policy() {
+fn the_tipped_cube_less_the_block_is_the_cube_less_what_they_share() {
     for tilt in TILTS {
         for policy in [certified(), tolerant()] {
             let asked = format!("{tilt:?}, {policy:?}");
-            let why = refusal(tilt, Rule::Difference, Order::TippedFirst, &policy, &asked);
-            assert!(
-                matches!(
-                    why,
-                    Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume <= 0.0
-                ),
-                "{asked}: {why:?}"
-            );
+            let volume =
+                volume_of_a_fuse(tilt, Rule::Difference, Order::TippedFirst, &policy, &asked);
+            assert_about(volume, 1000.0 - what_the_two_share(tilt), &asked);
         }
     }
 }
