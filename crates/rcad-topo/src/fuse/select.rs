@@ -4539,14 +4539,47 @@ mod tests {
 
     #[test]
     fn q1251_probe() {
-        for apex_first in [true, false] {
-            for turn in [0.0, 0.1, 0.3, 0.7, 1.1, 1.9, 2.5, 3.0] {
-                q1251_probe_one(turn, apex_first);
+        for miss in [0.0, 1e-9, -1e-9, 1e-8, -1e-8, 5e-8, -5e-8] {
+            for apex_first in [true, false] {
+                for turn in [0.0, 0.1, 0.3, 0.7, 1.1, 1.9, 2.5, 3.0] {
+                    q1251_probe_one(turn, apex_first, miss);
+                }
             }
         }
     }
 
-    fn q1251_probe_one(turn: f64, apex_first: bool) {
+    fn q1251_signs_over_the_box(plane: &Plane, point: PredicatePoint) -> String {
+        let sides = point.enclosure();
+        let (mut pos, mut neg, mut zero, mut undecided) = (0, 0, 0, 0);
+        let mut lowest = f64::INFINITY;
+        let mut highest = f64::NEG_INFINITY;
+        for mask in 0..8_u32 {
+            let corner = [0, 1, 2].map(|axis| {
+                if (mask >> axis) & 1 == 0 {
+                    sides[axis].lo()
+                } else {
+                    sides[axis].hi()
+                }
+            });
+            let distance = plane.signed_distance_to(Point::from(corner));
+            lowest = lowest.min(distance);
+            highest = highest.max(distance);
+            match plane.side_of_point(PredicatePoint::from(corner)) {
+                Decision::Pos => pos += 1,
+                Decision::Neg => neg += 1,
+                Decision::Zero => zero += 1,
+                _ => undecided += 1,
+            }
+        }
+        let verdict = if (pos == 8 || neg == 8) && undecided == 0 {
+            "MISSES"
+        } else {
+            "straddles"
+        };
+        format!("{verdict} +{pos} -{neg} 0{zero} ?{undecided} [{lowest:.2e}, {highest:.2e}]")
+    }
+
+    fn q1251_probe_one(turn: f64, apex_first: bool, miss: f64) {
         let out = f64::powi(2.0, 20);
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let turned = Isometry::rotation(
@@ -4554,6 +4587,9 @@ mod tests {
             turn,
         )
         .expect("a turn");
+        let sideways = miss / f64::sqrt(2.0);
+        let apex_for_the_face_near_the_origin =
+            turned.apply_to_point(Point::new(out + 0.5 + sideways, -out - 0.5 + sideways, 1.0));
         let points = [
             [out + 0.5, -out - 0.5, 1.0],
             [out, -out, 0.0],
@@ -4596,7 +4632,14 @@ mod tests {
             } else {
                 [face[1], face[2], face[0]]
             };
-            let plane = Plane::through_three_points(points[first], points[second], points[third])
+            let at = |index: usize| {
+                if face[..] == [0, 1, 2] && index == 0 {
+                    apex_for_the_face_near_the_origin
+                } else {
+                    points[index]
+                }
+            };
+            let plane = Plane::through_three_points(at(first), at(second), at(third))
                 .expect("three corners");
             builder
                 .add_face(Surface::Plane(plane), &[wire])
@@ -4605,19 +4648,31 @@ mod tests {
         builder
             .add_shell(&drafted.map(|face| (face, Orientation::Forward)))
             .expect("five faces");
-        let pyramid = builder
-            .build(&mut model, &Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a sound pyramid");
-        let [solid] = <[BakedSolid; 1]>::try_from(
-            bake(
-                &model,
-                &[pyramid],
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("bakes"),
-        )
-        .expect("one solid");
+        let pyramid =
+            match builder.build(&mut model, &Policy::certified(), &mut ProvenanceLog::new()) {
+                Ok(pyramid) => pyramid,
+                Err(error) => {
+                    eprintln!(
+                        "Q1251 miss {miss:e} turn {turn} apex_first {apex_first} REFUSED {error:?}"
+                    );
+                    return;
+                }
+            };
+        let baked = match bake(
+            &model,
+            &[pyramid],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
+            Ok(baked) => baked,
+            Err(error) => {
+                eprintln!(
+                    "Q1251 miss {miss:e} turn {turn} apex_first {apex_first} BAKE REFUSED {error:?}"
+                );
+                return;
+            }
+        };
+        let [solid] = <[BakedSolid; 1]>::try_from(baked).expect("one solid");
         for (index, face) in solid.faces.iter().enumerate() {
             let flat = face.surface.as_plane().expect("flat");
             let offs: Vec<String> = face.wires[0]
@@ -4641,9 +4696,68 @@ mod tests {
                 })
                 .collect();
             eprintln!(
-                "Q1251 turn {turn} apex_first {apex_first} face {index} offset {:.3e} corners {offs:?}",
+                "Q1251 miss {miss:e} turn {turn} apex_first {apex_first} face {index} offset {:.3e} corners {offs:?}",
                 flat.offset()
             );
+            if flat.offset().abs() < 1.0 {
+                let wire = &face.wires[0];
+                let in_plane = InPlane::of(flat).expect("a reference point");
+                let reference = in_plane.from.enclosure().map(|side| side.lo());
+                for (position, edge) in wire.iter().enumerate() {
+                    let before = &wire[(position + wire.len() - 1) % wire.len()];
+                    let truly = Plane::meet_of_three(
+                        flat,
+                        before.across.as_plane().expect("flat"),
+                        edge.across.as_plane().expect("flat"),
+                    )
+                    .expect("three planes meet");
+                    let [box_sides, true_sides] =
+                        [edge.start.point, truly].map(|point| point.enclosure());
+                    let overlaps = (0..3).all(|axis| {
+                        box_sides[axis].lo().max(true_sides[axis].lo())
+                            <= box_sides[axis].hi().min(true_sides[axis].hi())
+                    });
+                    let true_middle =
+                        true_sides.map(|side| side.lo() + (side.hi() - side.lo()) / 2.0);
+                    let mut nearest = f64::INFINITY;
+                    let mut furthest: f64 = 0.0;
+                    for mask in 0..8_u32 {
+                        let corner = [0, 1, 2].map(|axis| {
+                            if (mask >> axis) & 1 == 0 {
+                                box_sides[axis].lo()
+                            } else {
+                                box_sides[axis].hi()
+                            }
+                        });
+                        let height = flat.signed_distance_to(Point::from(corner));
+                        let reference_height = flat.signed_distance_to(Point::from(reference));
+                        let along = height / (height - reference_height);
+                        let read: [f64; 3] = [0, 1, 2]
+                            .map(|axis| corner[axis] + (reference[axis] - corner[axis]) * along);
+                        let off: f64 = (0..3)
+                            .map(|axis| (read[axis] - true_middle[axis]).powi(2))
+                            .sum::<f64>()
+                            .sqrt();
+                        nearest = nearest.min(off);
+                        furthest = furthest.max(off);
+                    }
+                    let others: Vec<String> = edge
+                        .start
+                        .around
+                        .iter()
+                        .map(|surface| {
+                            q1251_signs_over_the_box(
+                                surface.as_plane().expect("flat"),
+                                edge.start.point,
+                            )
+                        })
+                        .collect();
+                    eprintln!(
+                        "Q1251   corner {position} own plane {} true corner in box {overlaps} read {nearest:.2e}..{furthest:.2e} from the true corner; around {others:?}",
+                        q1251_signs_over_the_box(flat, edge.start.point)
+                    );
+                }
+            }
         }
         let face = solid
             .faces
@@ -4715,6 +4829,117 @@ mod tests {
             the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from(centre)),
             piece_sign
         );
+        let truly_outside = |point: PredicatePoint| {
+            let verdicts: Vec<Option<bool>> = face.wires[0]
+                .iter()
+                .map(|other| {
+                    let plane = other.across.as_plane().expect("flat");
+                    match (
+                        plane.side_of_point(point),
+                        plane.side_of_point(PredicatePoint::from(centre)),
+                    ) {
+                        (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => {
+                            Some(true)
+                        }
+                        (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => {
+                            Some(false)
+                        }
+                        _ => None,
+                    }
+                })
+                .collect();
+            if verdicts.contains(&Some(true)) {
+                Some(true)
+            } else if verdicts.iter().all(|v| *v == Some(false)) {
+                Some(false)
+            } else {
+                None
+            }
+        };
+        let reference = InPlane::of(&flat)
+            .expect("a reference point")
+            .from
+            .enclosure()
+            .map(|side| side.lo());
+        let wire = &face.wires[0];
+        for (position, edge) in wire.iter().enumerate() {
+            let before = &wire[(position + wire.len() - 1) % wire.len()];
+            let truly = middle_of(
+                Plane::meet_of_three(
+                    &flat,
+                    before.across.as_plane().expect("flat"),
+                    edge.across.as_plane().expect("flat"),
+                )
+                .expect("three planes meet"),
+            );
+            let sides = edge.start.point.enclosure();
+            let mut read = [0.0; 3];
+            for mask in 0..8_u32 {
+                let corner = [0, 1, 2].map(|axis| {
+                    if (mask >> axis) & 1 == 0 {
+                        sides[axis].lo()
+                    } else {
+                        sides[axis].hi()
+                    }
+                });
+                let height = flat.signed_distance_to(Point::from(corner));
+                let along = height / (height - flat.signed_distance_to(Point::from(reference)));
+                for axis in 0..3 {
+                    read[axis] += (corner[axis] + (reference[axis] - corner[axis]) * along) / 8.0;
+                }
+            }
+            let apart = (0..3)
+                .map(|axis| (read[axis] - truly[axis]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            if apart < 1e-6 {
+                continue;
+            }
+            let halfway = [0, 1, 2].map(|axis| (read[axis] + truly[axis]) / 2.0);
+            for neighbour in [middle_of(before.start.point), middle_of(edge.end.point)] {
+                for tau in [0.1, 0.3, 0.5, 0.7, 0.9, 0.99] {
+                    let point = PredicatePoint::from(
+                        [0, 1, 2]
+                            .map(|axis| neighbour[axis] + tau * (halfway[axis] - neighbour[axis])),
+                    );
+                    let outside = truly_outside(point);
+                    let face_holds = a_face_of_the_input_holds(
+                        &model,
+                        &solid,
+                        face,
+                        &piece,
+                        point,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .ok();
+                    let piece_holds = the_piece_holds_asked_as_selection_asks(&piece, point);
+                    let fan = InPlane::of(&flat)
+                        .zip(crate::classify::stretched_to_the_plane(&flat, point))
+                        .and_then(|(in_plane, reaching)| {
+                            in_plane.winding_around(&super::corners_of(&piece), reaching)
+                        });
+                    let margin = wire
+                        .iter()
+                        .map(|other| {
+                            other
+                                .across
+                                .as_plane()
+                                .expect("flat")
+                                .signed_distance_to(Point::from(middle_of(point)))
+                                .abs()
+                        })
+                        .fold(f64::INFINITY, f64::min);
+                    let wrong = margin > 1e-6
+                        && outside
+                            .is_some_and(|out| face_holds == Some(out) || piece_holds == Some(out));
+                    eprintln!(
+                        "Q1251 SLIVER{} miss {miss:e} turn {turn} apex_first {apex_first} corner {position} apart {apart:.2e} tau {tau} margin {margin:.2e} outside {outside:?} fan {fan:?} piece {piece_holds:?} face {face_holds:?}",
+                        if wrong { " WRONG" } else { "" }
+                    );
+                }
+            }
+        }
         for edge in &face.wires[0] {
             let across = edge.across.as_plane().expect("flat across");
             let [from, to] = [middle_of(edge.start.point), middle_of(edge.end.point)];
@@ -4734,10 +4959,12 @@ mod tests {
             }
             let inside_sign = across.side_of_point(PredicatePoint::from(centre));
             let mut tally = std::collections::BTreeMap::<String, usize>::new();
-            for t in [0.0001, 0.001, 0.01, 0.1, 0.5, 0.9, 0.99, 0.999] {
+            for t in [
+                0.0001, 0.001, 0.01, 0.03, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99, 0.999,
+            ] {
                 for s in [
-                    1e-2, 3e-3, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5, 3e-6, 1e-6, -1e-6, -1e-5, -1e-4,
-                    -1e-3, -1e-2,
+                    6e-2, 4e-2, 2e-2, 1e-2, 3e-3, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5, 3e-6, 1e-6, -1e-6,
+                    -1e-5, -1e-4, -1e-3, -1e-2, -2e-2, -4e-2, -6e-2,
                 ] {
                     let at =
                         [0, 1, 2].map(|axis| from[axis] + t * along[axis] + s * sideways[axis]);
@@ -4789,11 +5016,17 @@ mod tests {
                             fan.is_some()
                         ))
                         .or_default() += 1;
+                    if miss == 5e-8 && turn == 2.5 && !apex_first {
+                        eprintln!(
+                            "Q1251 MAP edge {:?} t {t} s {s} outside {outside:?} fan {fan:?} piece {piece_holds:?} face {face_holds:?}",
+                            edge.start.vertex
+                        );
+                    }
                     let wrong_face = outside.is_some_and(|out| face_holds == Some(out));
                     let wrong_piece = outside.is_some_and(|out| piece_holds == Some(out));
                     if wrong_face || wrong_piece {
                         eprintln!(
-                            "Q1251 WRONG turn {turn} apex_first {apex_first} edge {:?}->{:?} t {t} s {s} outside {outside:?} face {face_holds:?} piece {piece_holds:?} side {:?}",
+                            "Q1251 WRONG miss {miss:e} turn {turn} apex_first {apex_first} edge {:?}->{:?} t {t} s {s} outside {outside:?} face {face_holds:?} piece {piece_holds:?} side {:?}",
                             edge.start.vertex,
                             edge.end.vertex,
                             flat.side_of_point(point)
