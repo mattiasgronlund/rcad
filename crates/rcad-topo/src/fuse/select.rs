@@ -4536,4 +4536,272 @@ mod tests {
             is_the_whole_surface: false,
         }
     }
+
+    #[test]
+    fn q1251_probe() {
+        for apex_first in [true, false] {
+            for turn in [0.0, 0.1, 0.3, 0.7, 1.1, 1.9, 2.5, 3.0] {
+                q1251_probe_one(turn, apex_first);
+            }
+        }
+    }
+
+    fn q1251_probe_one(turn: f64, apex_first: bool) {
+        let out = f64::powi(2.0, 20);
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let turned = Isometry::rotation(
+            &Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::new(0.0, 0.0, 1.0)).expect("axis"),
+            turn,
+        )
+        .expect("a turn");
+        let points = [
+            [out + 0.5, -out - 0.5, 1.0],
+            [out, -out, 0.0],
+            [out + 1.0, -out - 1.0, 0.0],
+            [out + 2.0, -out, 0.0],
+            [out + 1.0, -out + 1.0, 0.0],
+        ]
+        .map(|[x, y, z]| turned.apply_to_point(Point::new(x, y, z)));
+        let faces: [&[usize]; 5] = [
+            &[0, 1, 2],
+            &[0, 2, 3],
+            &[0, 3, 4],
+            &[0, 4, 1],
+            &[1, 4, 3, 2],
+        ];
+        let mut builder = crate::SolidBuilder::new();
+        let vertices = points.map(|point| builder.add_vertex(point).expect("a finite corner"));
+        let mut edges: Vec<([usize; 2], crate::DraftEdge)> = Vec::new();
+        let drafted = faces.map(|face| {
+            let steps: Vec<crate::DraftStep> = (0..face.len())
+                .map(|position| {
+                    let (from, to) = (face[position], face[(position + 1) % face.len()]);
+                    let (edge, orientation) =
+                        match edges.iter().find(|(ends, _)| *ends == [to, from]) {
+                            Some(&(_, edge)) => (edge, Orientation::Reversed),
+                            None => {
+                                let edge = builder
+                                    .add_edge(vertices[from], vertices[to], EdgeRun::Straight)
+                                    .expect("a side");
+                                edges.push(([from, to], edge));
+                                (edge, Orientation::Forward)
+                            }
+                        };
+                    crate::DraftStep::Along(builder.add_coedge(edge, orientation).expect("a use"))
+                })
+                .collect();
+            let wire = builder.add_wire(&steps).expect("a closed boundary");
+            let [first, second, third] = if apex_first || face.len() == 4 {
+                [face[0], face[1], face[2]]
+            } else {
+                [face[1], face[2], face[0]]
+            };
+            let plane = Plane::through_three_points(points[first], points[second], points[third])
+                .expect("three corners");
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a face")
+        });
+        builder
+            .add_shell(&drafted.map(|face| (face, Orientation::Forward)))
+            .expect("five faces");
+        let pyramid = builder
+            .build(&mut model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a sound pyramid");
+        let [solid] = <[BakedSolid; 1]>::try_from(
+            bake(
+                &model,
+                &[pyramid],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("bakes"),
+        )
+        .expect("one solid");
+        for (index, face) in solid.faces.iter().enumerate() {
+            let flat = face.surface.as_plane().expect("flat");
+            let offs: Vec<String> = face.wires[0]
+                .iter()
+                .map(|edge| {
+                    let stretched = crate::classify::stretched_to_the_plane(flat, edge.start.point);
+                    format!(
+                        "{}/{:.1e}/{}",
+                        match flat.side_of_point(edge.start.point) {
+                            Decision::Zero => "on",
+                            Decision::Undecidable { .. } => "und",
+                            _ => "OFF",
+                        },
+                        edge.start.point.uncertainty(),
+                        match stretched {
+                            Some(s) if s == edge.start.point => "same".to_owned(),
+                            Some(s) => format!("STRETCHED {:.2e}", s.uncertainty()),
+                            None => "NONE".to_owned(),
+                        }
+                    )
+                })
+                .collect();
+            eprintln!(
+                "Q1251 turn {turn} apex_first {apex_first} face {index} offset {:.3e} corners {offs:?}",
+                flat.offset()
+            );
+        }
+        let face = solid
+            .faces
+            .iter()
+            .find(|face| {
+                face.surface
+                    .as_plane()
+                    .is_some_and(|flat| flat.offset().abs() < 1.0)
+            })
+            .expect("the face near the origin");
+        let flat = *face.surface.as_plane().expect("flat");
+        let piece = Piece {
+            ancestors: Vec::new(),
+            surface: face.surface,
+            orientation: face.orientation,
+            wires: vec![
+                face.wires[0]
+                    .iter()
+                    .map(|edge| FaceMeet {
+                        carried_by: [face.surface, edge.across],
+                        ends: [
+                            MeetPoint::Existing {
+                                vertex: edge.start.vertex,
+                                point: edge.start.point,
+                            },
+                            MeetPoint::Existing {
+                                vertex: edge.end.vertex,
+                                point: edge.end.point,
+                            },
+                        ],
+                        material_side: Decision::Neg,
+                        along: SmallVec::new(),
+                        approximation: None,
+                    })
+                    .collect(),
+            ],
+            is_the_whole_surface: false,
+        };
+        let middle_of = |point: PredicatePoint| {
+            point
+                .enclosure()
+                .map(|side| side.lo() + (side.hi() - side.lo()) / 2.0)
+        };
+        let corners: Vec<[f64; 3]> = face.wires[0]
+            .iter()
+            .map(|edge| middle_of(edge.start.point))
+            .collect();
+        let centre = [0, 1, 2].map(|axis| corners.iter().map(|c| c[axis]).sum::<f64>() / 3.0);
+        let normal = flat.normal().components();
+        let piece_sign = {
+            let p = the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from(centre));
+            p
+        };
+        let reversed_piece = {
+            let mut reversed = piece.clone();
+            reversed.wires[0].reverse();
+            for side in &mut reversed.wires[0] {
+                side.ends.swap(0, 1);
+            }
+            reversed
+        };
+        let piece = if piece_sign == Some(true) {
+            piece
+        } else {
+            reversed_piece
+        };
+        eprintln!(
+            "Q1251   centre held {:?} {:?}",
+            the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from(centre)),
+            piece_sign
+        );
+        for edge in &face.wires[0] {
+            let across = edge.across.as_plane().expect("flat across");
+            let [from, to] = [middle_of(edge.start.point), middle_of(edge.end.point)];
+            let along = [0, 1, 2].map(|axis| to[axis] - from[axis]);
+            let mut sideways = [
+                normal[1] * along[2] - normal[2] * along[1],
+                normal[2] * along[0] - normal[0] * along[2],
+                normal[0] * along[1] - normal[1] * along[0],
+            ];
+            let length = sideways.iter().map(|x| x * x).sum::<f64>().sqrt();
+            sideways = sideways.map(|x| x / length);
+            let towards_centre: f64 = (0..3)
+                .map(|axis| (centre[axis] - from[axis]) * sideways[axis])
+                .sum();
+            if towards_centre > 0.0 {
+                sideways = sideways.map(|x| -x);
+            }
+            let inside_sign = across.side_of_point(PredicatePoint::from(centre));
+            let mut tally = std::collections::BTreeMap::<String, usize>::new();
+            for t in [0.0001, 0.001, 0.01, 0.1, 0.5, 0.9, 0.99, 0.999] {
+                for s in [
+                    1e-2, 3e-3, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5, 3e-6, 1e-6, -1e-6, -1e-5, -1e-4,
+                    -1e-3, -1e-2,
+                ] {
+                    let at =
+                        [0, 1, 2].map(|axis| from[axis] + t * along[axis] + s * sideways[axis]);
+                    let point = PredicatePoint::from(at);
+                    let _ = (across, inside_sign);
+                    let verdicts: Vec<Option<bool>> =
+                        face.wires[0]
+                            .iter()
+                            .map(|other| {
+                                let plane = other.across.as_plane().expect("flat");
+                                match (
+                                    plane.side_of_point(point),
+                                    plane.side_of_point(PredicatePoint::from(centre)),
+                                ) {
+                                    (Decision::Pos, Decision::Neg)
+                                    | (Decision::Neg, Decision::Pos) => Some(true),
+                                    (Decision::Pos, Decision::Pos)
+                                    | (Decision::Neg, Decision::Neg) => Some(false),
+                                    _ => None,
+                                }
+                            })
+                            .collect();
+                    let outside = if verdicts.contains(&Some(true)) {
+                        Some(true)
+                    } else if verdicts.iter().all(|v| *v == Some(false)) {
+                        Some(false)
+                    } else {
+                        None
+                    };
+                    let face_holds = a_face_of_the_input_holds(
+                        &model,
+                        &solid,
+                        face,
+                        &piece,
+                        point,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .ok();
+                    let piece_holds = the_piece_holds_asked_as_selection_asks(&piece, point);
+                    let fan = InPlane::of(&flat)
+                        .zip(crate::classify::stretched_to_the_plane(&flat, point))
+                        .and_then(|(in_plane, reaching)| {
+                            in_plane.winding_around(&super::corners_of(&piece), reaching)
+                        });
+                    *tally
+                        .entry(format!(
+                            "out {outside:?} fan {} piece {piece_holds:?}",
+                            fan.is_some()
+                        ))
+                        .or_default() += 1;
+                    let wrong_face = outside.is_some_and(|out| face_holds == Some(out));
+                    let wrong_piece = outside.is_some_and(|out| piece_holds == Some(out));
+                    if wrong_face || wrong_piece {
+                        eprintln!(
+                            "Q1251 WRONG turn {turn} apex_first {apex_first} edge {:?}->{:?} t {t} s {s} outside {outside:?} face {face_holds:?} piece {piece_holds:?} side {:?}",
+                            edge.start.vertex,
+                            edge.end.vertex,
+                            flat.side_of_point(point)
+                        );
+                    }
+                }
+            }
+            eprintln!("Q1251   edge tally {tally:?}");
+        }
+    }
 }
