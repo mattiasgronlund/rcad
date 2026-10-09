@@ -377,28 +377,26 @@ fn random_turns_whose_planes_meet_inside_the_block_answer() {
 /// inside a piece of a face any more (Q1353). The triangle the crossings cut
 /// out of the block's face is inside the turned cube, and `select.rs`'s
 /// `by_a_plane` now places it there: every corner of it is on or behind every
-/// plane of the turned cube, and strictly behind one. 15 answer the union and
+/// plane of the turned cube, and strictly behind one. 18 answer the union and
 /// the intersection, and the two hold both cubes between them; turns 47 and 48
-/// were refused `Undecidable` on the triangle before. The other 16 are refused
-/// by name, as `REFUSED` says, once the answer is written with its corners
-/// rounded; what is left to reach them is the second half of
-/// `docs/decisions.md` §417.
+/// were refused `Undecidable` on the triangle before, and turns 8, 21 and 49
+/// `NoSpaceInside` until Q1506's rule left out the flat ring another plane
+/// walks back. The other 13 are refused by name, as `REFUSED` says, once the
+/// answer is written with its corners rounded; what is left to reach them is
+/// the second half of `docs/decisions.md` §417.
 #[test]
 fn random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant() {
-    const REFUSED: [(usize, Refused); 16] = [
+    const REFUSED: [(usize, Refused); 13] = [
         (1, Refused::AHoleWindingWithItsOutline),
         (5, Refused::AHoleWindingWithItsOutline),
-        (8, Refused::NoSpaceInside),
         (9, Refused::AnEdgeWithFourFaces),
         (13, Refused::AHoleWindingWithItsOutline),
         (14, Refused::AnOutlineWindingAgainstItsFace),
         (18, Refused::AnOutlineWindingAgainstItsFace),
-        (21, Refused::NoSpaceInside),
         (25, Refused::AHoleWindingWithItsOutline),
         (29, Refused::AHoleWindingWithItsOutline),
         (34, Refused::AHoleWindingWithItsOutline),
         (39, Refused::AnOutlineWindingAgainstItsFace),
-        (49, Refused::NoSpaceInside),
         (51, Refused::AHoleWindingWithItsOutline),
         (55, Refused::AnEdgeWithFourFaces),
         (57, Refused::AHoleWindingWithItsOutline),
@@ -685,7 +683,7 @@ enum Refused {
     TooWideARange,
     /// A shell of the answer is the tip outside the face, which encloses
     /// nothing, or less than nothing, once its corners are rounded: all of the
-    /// turned cube less the block, and a shell of some unions.
+    /// turned cube less the block.
     NoSpaceInside,
     /// An edge of the answer has four faces along it, where the tip's sides
     /// meet the block's face.

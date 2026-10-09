@@ -76,6 +76,9 @@ winding with the outline, 34 shells enclosing nothing and 22 edges with four
 faces or none. `random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant`
 pins the first 60, of which 31 meet outside: 15 answer, turns 47 and 48 among
 them, which relay 0 found `Undecidable` on the base, and 16 are pinned by name.
+Since queue row Q1506, 18 answer and 13 are pinned: turns 8, 21 and 49, which
+were shells enclosing nothing, answer once Q1506's rule leaves out the flat
+ring another plane walks back. The 199's split above was not measured again.
 
 **Since queue row Q1442 the 6 `count: 0` answer too**, 68 in all, and the 131
 left are the 65, 16, 34 and 16 above (Q1442's lane on `4a7dec01`, `mise exec
