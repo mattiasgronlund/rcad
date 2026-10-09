@@ -169,8 +169,10 @@
 //! through the ring's axis instead, its pipe meets the ring in the cap's rim
 //! and in a loop crossing it, which no edge of the answer runs along. Every
 //! rule was refused putting points in order along the half of the loop on the
-//! bar's pipe face until Q1470 left each half off the face across the cap from
-//! the one carrying it;
+//! bar's pipe face until Q1470. Since then a cut every face carrying which
+//! meets a face only on that face's boundary is left off it
+//! (`docs/decisions.md` §422), and each half of the loop is such a cut on the
+//! face it would be drawn on;
 //! [`a_bar_cut_through_the_rings_axis_on_a_bends_cap_by_every_rule_against_the_closed_forms`]
 //! checks every rule against the closed forms.
 //!
@@ -575,7 +577,12 @@ fn a_flat_ended_bar_on_a_bends_cap_is_refused_as_a_quartic() {
 /// half with `y < 0` on the bar's pipe face, past the bend's cap, so no edge of
 /// an answer runs along it. Until queue row Q1453 the pipe and the ring were
 /// refused `ACrossingBetweenATorusAndAnotherCurvedSurface` under every rule,
-/// and until Q1470 `ACrossingThisCannotBeOrderedAlong` along that loop.
+/// and until Q1470 `ACrossingThisCannotBeOrderedAlong` along that loop. Since
+/// Q1470 a cut every face carrying which meets a face only on that face's
+/// boundary is left off it (`docs/decisions.md` §422): the bend's ring face
+/// and the bar's pipe face lie on opposite sides of the cap's plane, so each
+/// half of the loop is left off the face across the cap from the one that
+/// carries it.
 #[test]
 fn a_bar_cut_through_the_rings_axis_on_a_bends_cap_by_every_rule_against_the_closed_forms() {
     for (ring, tube) in [(3, 1), (5, 2)] {

@@ -97,6 +97,19 @@
 //! the tube, was cut along the ellipses where the pipes cross it and refused
 //! the same way, because the band answered only for a plane square to it.
 //!
+//! **A cut whose faces meet the face only on its boundary is marked too**
+//! (Q1470, `docs/decisions.md` §422). Where every face carrying a surface
+//! lies on one closed side of a plane and the face it cuts lies on the other,
+//! or the box round the face it cuts is strictly past that plane, the two
+//! share no point inside that face ([`meets_it_only_on_its_boundary`]). Inside
+//! it the crossing is then no edge of the answer, even where it meets other
+//! crossings. A bar butted onto a bend's cap is the shape: its pipe meets the
+//! ring in a loop whose halves lie past each other's cap. Such a crossing can
+//! still split an edge where it meets one, so it is not dropped here: each face
+//! carries the list ([`BakedFace::cuts_that_reach_only_its_boundary`]), each
+//! edge learns its neighbour's, and the arrangement leaves the crossing out
+//! only where no node of it splits a crossing that is kept.
+//!
 //! # Two gaps, left open on purpose
 //!
 //! A solid is only refused for running through itself when the overlap is
@@ -129,8 +142,10 @@ use super::bake::{BakedFace, BakedSolid};
 ///
 /// Every face is cut against every other face, in its own solid and in every
 /// other, whichever group each came from. The header says why the solid's own
-/// planes are in there, and why a crossing that splits nothing and lies where
-/// its face never reaches is then left off.
+/// planes are in there, why a crossing that splits nothing and lies where
+/// its face never reaches is then left off, and why each face is told which
+/// cuts meet it only on its boundary, and each edge what the face across it
+/// was told.
 ///
 /// # Errors
 ///

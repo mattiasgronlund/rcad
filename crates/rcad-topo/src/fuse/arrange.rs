@@ -2258,7 +2258,8 @@ impl<'f> Arrangement<'f> {
         }
     }
 
-    /// Leave out each cut whose surfaces are all in
+    /// Leave out each cut for which every surface that draws the crossing
+    /// ([`Crossing::every_surface_that_draws_it`]) is in
     /// [`BakedFace::cuts_that_reach_only_its_boundary`], wherever that leaves
     /// every edge split as the face across splits it (`docs/decisions.md`
     /// §422).
@@ -2269,15 +2270,21 @@ impl<'f> Arrangement<'f> {
     /// is inside or outside each solid alike.
     ///
     /// **But a node of it splits every crossing through that node**, and an
-    /// edge of the answer along one of those is split by the face across too,
-    /// which knows nothing of this rule. So a node keeps the crossing unless
-    /// it is no corner of the face and either is clear of the box round the
-    /// face, or has no other crossing through it that is drawn and kept, bar
-    /// boundary crossings the face across splits there no more than this face
-    /// will ([`Arrangement::the_faces_across_split_it_no_more`]). Two bars end
-    /// to end on offset axes are why: the lines the second bar's pipe draws on
-    /// the first's end on its top rim at two corners of the answer, and the
-    /// top cap splits the rim there.
+    /// edge of the answer along one of those is split there by the face across
+    /// too, unless that face leaves the same cut out. So a node keeps the
+    /// crossing unless it is no input corner and either is provably off the
+    /// face ([`Arrangement::is_provably_off_the_face`]), or has no other
+    /// crossing through it that is drawn and kept, bar boundary crossings the
+    /// face across splits there no more than this face will
+    /// ([`Arrangement::the_faces_across_split_it_no_more`]). A bar of radius 1
+    /// standing from `z = 1` to `z = 3` against a cube's wall `x = 4`, touching
+    /// it along `(4, 2, z)`, is why: the cube's floor is strictly below the
+    /// bar's wall, but the bar's pipe still cuts the floor in a circle that
+    /// reaches it at `(4, 2, 0)`, on its edge along the wall. The wall keeps
+    /// the touching line through that point and splits the edge there, so the
+    /// floor must too. With the node test cut down to the corner alone, 26 of
+    /// `rcad-topo`'s tests failed on refusals, and none on a wrong answer
+    /// (§422.4).
     ///
     /// Run after the meets are placed, since they are what this reads, and
     /// to a fixed point, since a crossing kept makes its nodes count against
