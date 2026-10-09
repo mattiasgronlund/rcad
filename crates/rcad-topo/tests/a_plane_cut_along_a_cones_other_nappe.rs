@@ -38,7 +38,7 @@ use std::collections::BTreeMap;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Model, OnAFace, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Invalid, Model, OnAFace, ProfileBuilder, Rule, SolidKey};
 
 mod cones;
 
@@ -760,6 +760,401 @@ fn a_cone_whose_radius_is_twice_its_height_inside_a_block_answers_every_rule_rig
     );
 }
 
+/// Q467: the sweep of §350.4's three families round a pointed cone that
+/// stops well short of its box, where the candidate half way to the apex
+/// (§350.3) is a much bigger step relative to the face than it is on
+/// §350.4's own cone (`far = 8`). Turns `0`, `1` and `3` for the leaning
+/// block and `0` and `0.7` for the corner-up cube are the same turns
+/// `zz_probe_q467` swept this row with; neither is written down in §350.4,
+/// so this is where that choice is made. The slab is `a_slab`'s own 2 by 12
+/// by 14 box, turned `0`, `0.5`, `1` and `1.5` about the axis — the same
+/// sweep as the frustum and pointed-cone families above, with `low` in
+/// place of their fixed placement.
+///
+/// **Every family is split so that no one test sets the slow tier's wall**
+/// (`docs/decisions.md` §397.4): two tests for the leaning block (one lean
+/// that never refuses and one that does), one each for the corner-up cube
+/// and the slab. §350.5 gives each family's wall time.
+#[test]
+fn a_steep_pointed_cone_with_a_gentle_lean_answers_every_rule_right() {
+    let mut cases = Vec::new();
+    for lean in [0.25, 0.375] {
+        for crossing in [0.0, 0.5, -0.5, 1.5] {
+            for turn in [0.0, 1.0, 3.0] {
+                cases.push(Case {
+                    cone: THE_STEEP_CONE,
+                    block: a_leaning_block(lean, crossing, turn),
+                    solids: OVERLAPPING,
+                });
+            }
+        }
+    }
+    assert_eq!(
+        tally(&cases),
+        Tally {
+            right: 96,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+/// The same block leaned as steeply as the cone or four times steeper.
+///
+/// Leaned `1`, crossing `0` and turned `0`, the union and the cone-less-block
+/// refuse `CannotMeshAFace`; every other lean-`1` fuse is right. Leaned `4`,
+/// crossing `0` refuses `CannotTellTheCellsOfAFaceApart` on every rule and
+/// every turn; crossing `−0.5` leans the block clear of the cone
+/// ([`APART`]), the other two crossings overlap it ([`OVERLAPPING`]), and
+/// every one of those twenty-four answers right.
+#[test]
+fn a_steep_pointed_cone_with_a_steep_or_steeper_lean_answers_right_or_refuses() {
+    let mut cases = Vec::new();
+    for crossing in [0.0, 0.5, -0.5, 1.5] {
+        for turn in [0.0, 1.0, 3.0] {
+            cases.push(Case {
+                cone: THE_STEEP_CONE,
+                block: a_leaning_block(1.0, crossing, turn),
+                solids: OVERLAPPING,
+            });
+        }
+    }
+    for crossing in [0.0, 0.5, -0.5, 1.5] {
+        let solids = if crossing == -0.5 { APART } else { OVERLAPPING };
+        for turn in [0.0, 1.0, 3.0] {
+            cases.push(Case {
+                cone: THE_STEEP_CONE,
+                block: a_leaning_block(4.0, crossing, turn),
+                solids,
+            });
+        }
+    }
+    assert_eq!(
+        tally(&cases),
+        Tally {
+            right: 82,
+            refused: [
+                ("the answer does not measure: CannotMeshAFace", 2),
+                ("CannotTellTheCellsOfAFaceApart", 12),
+            ]
+            .into()
+        }
+    );
+}
+
+/// A cube stood on its corner round the steep cone's apex, at every side and
+/// middle `zz_probe_q467` swept. Side `6`, middle `0` refuses `order along a
+/// crossing` on every rule and both turns; every other side and middle
+/// answers right, some of them with the cone taking two solids from the
+/// block (the top corner pokes out past the cap, which is the count §350.4's
+/// lane got wrong by hand).
+fn a_steep_pointed_cones_corner_up_cubes() -> Vec<Case> {
+    let mut cases = Vec::new();
+    for (side, middle, solids) in [
+        (2.0, 0.0, OVERLAPPING),
+        (2.0, 1.0, OVERLAPPING),
+        (2.0, 2.5, OVERLAPPING),
+        (2.0, 3.5, OVERLAPPING),
+        (4.0, 0.0, [1, 1, 1, 2]),
+        (4.0, 1.0, [1, 1, 1, 2]),
+        (4.0, 2.5, [1, 1, 1, 2]),
+        (4.0, 3.5, OVERLAPPING),
+        (6.0, 0.0, OVERLAPPING), // unused: every rule refuses here
+        (6.0, 1.0, [1, 1, 1, 2]),
+        (6.0, 2.5, [1, 1, 1, 2]),
+        (6.0, 3.5, [1, 1, 1, 2]),
+    ] {
+        for turn in [0.0, 0.7] {
+            cases.push(Case {
+                cone: THE_STEEP_CONE,
+                block: a_corner_up_cube(side, middle, turn),
+                solids,
+            });
+        }
+    }
+    cases
+}
+
+#[test]
+fn a_corner_up_cube_round_a_steep_pointed_cones_apex_answers_right_or_refuses() {
+    assert_eq!(
+        tally(&a_steep_pointed_cones_corner_up_cubes()),
+        Tally {
+            right: 88,
+            refused: [("order along a crossing", 8)].into()
+        }
+    );
+}
+
+/// Twenty slabs `14` deep across the steep cone's axis, each `a_slab`'s own
+/// 2 by 12 box turned `0`, `0.5`, `1` or `1.5` about it. `low = −14` answers
+/// right only turned `0` ([`APART`]) and finds no point in a piece of a face
+/// every other turn; `low` from `−8` to `0` answers right turned `0` (the
+/// cone takes two solids from the block) and splits between two more
+/// refusals the other three turns; `low = 2` answers right turned `0` and
+/// splits the same way turned `0.5` and `1`.
+fn a_steep_pointed_cones_slabs() -> Vec<Case> {
+    let mut cases = Vec::new();
+    for turn in [0.0, 0.5, 1.0, 1.5] {
+        cases.push(Case {
+            cone: THE_STEEP_CONE,
+            block: a_slab(-14.0, turn),
+            solids: APART,
+        });
+    }
+    for low in [-8.0, -3.0, 0.0] {
+        for turn in [0.0, 0.5, 1.0, 1.5] {
+            cases.push(Case {
+                cone: THE_STEEP_CONE,
+                block: a_slab(low, turn),
+                solids: [1, 1, 2, 1],
+            });
+        }
+    }
+    for turn in [0.0, 0.5, 1.0, 1.5] {
+        cases.push(Case {
+            cone: THE_STEEP_CONE,
+            block: a_slab(2.0, turn),
+            solids: OVERLAPPING,
+        });
+    }
+    cases
+}
+
+#[test]
+fn a_slab_fourteen_deep_across_a_steep_pointed_cone_answers_right_or_refuses() {
+    assert_eq!(
+        tally(&a_steep_pointed_cones_slabs()),
+        Tally {
+            right: 38,
+            refused: [
+                ("a point inside a piece of a face", 24),
+                ("ACurvedFaceGoesRightRoundWithNoSeam", 12),
+                ("side of a half-space", 6),
+            ]
+            .into()
+        }
+    );
+}
+
+/// The same leaning block round a cone of slope `1` instead of `2` — §350.1
+/// and §350.3's cone, run for the first time. Leans `0.25` and `0.375` each
+/// refuse `CannotMeshAFace` on the intersection and the block-less-cone at
+/// crossing `0`, turn `1`; leaned `1`, the same crossing and turn instead
+/// refuses `AWireWillNotLieFlatOnItsFace` on the union and the cone-less-block
+/// and `TwoPatchesOfTheMeshDrewTheSameSide` on the intersection, and every
+/// crossing but `0` turned `1` refuses `order along a crossing`.
+#[test]
+fn a_unit_pointed_cone_with_a_lean_up_to_one_answers_right_or_refuses() {
+    let mut cases = Vec::new();
+    for lean in [0.25, 0.375, 1.0] {
+        for crossing in [0.0, 0.5, -0.5, 1.5] {
+            for turn in [0.0, 1.0, 3.0] {
+                cases.push(Case {
+                    cone: THE_UNIT_CONE,
+                    block: a_leaning_block(lean, crossing, turn),
+                    solids: OVERLAPPING,
+                });
+            }
+        }
+    }
+    assert_eq!(
+        tally(&cases),
+        Tally {
+            right: 125,
+            refused: [
+                ("the answer does not measure: CannotMeshAFace", 4),
+                ("AWireWillNotLieFlatOnItsFace", 2),
+                (
+                    "the answer does not measure: TwoPatchesOfTheMeshDrewTheSameSide",
+                    1
+                ),
+                ("order along a crossing", 12),
+            ]
+            .into()
+        }
+    );
+}
+
+/// The same block leaned four times the cone's own slope, apart from the
+/// eight fuses at crossing `0`, turns `0` and `1`, which are a known defect
+/// ([`a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate`]).
+/// Crossing `0`, turn `3` refuses `ResultIsNotManifold` on every rule, and
+/// every other crossing answers right.
+fn a_unit_pointed_cones_lean_four_cases_away_from_the_defect() -> Vec<Case> {
+    let mut cases = vec![Case {
+        cone: THE_UNIT_CONE,
+        block: a_leaning_block(4.0, 0.0, 3.0),
+        solids: OVERLAPPING, // unused: every rule refuses here
+    }];
+    for crossing in [0.5, -0.5, 1.5] {
+        for turn in [0.0, 1.0, 3.0] {
+            cases.push(Case {
+                cone: THE_UNIT_CONE,
+                block: a_leaning_block(4.0, crossing, turn),
+                solids: OVERLAPPING,
+            });
+        }
+    }
+    cases
+}
+
+#[test]
+fn a_unit_pointed_cone_with_a_lean_of_four_answers_right_or_refuses_away_from_the_known_defect() {
+    assert_eq!(
+        tally(&a_unit_pointed_cones_lean_four_cases_away_from_the_defect()),
+        Tally {
+            right: 36,
+            refused: [("ResultIsNotManifold", 4)].into()
+        }
+    );
+}
+
+/// The corner-up cube round the unit cone. Side `2`, middle `1` refuses `a
+/// point inside a piece of a face` on every rule and both turns; every other
+/// side and middle answers right, several of them with one rule leaving more
+/// than one solid where the simple cases leave one.
+fn a_unit_pointed_cones_corner_up_cubes() -> Vec<Case> {
+    let mut cases = Vec::new();
+    for (side, middle, solids) in [
+        (2.0, 0.0, OVERLAPPING),
+        (2.0, 1.0, OVERLAPPING), // unused: every rule refuses here
+        (2.0, 2.5, OVERLAPPING),
+        (2.0, 3.5, OVERLAPPING),
+        (4.0, 0.0, [1, 1, 1, 2]),
+        (4.0, 1.0, [1, 1, 1, 2]),
+        (4.0, 2.5, [1, 1, 1, 2]),
+        (4.0, 3.5, [1, 1, 1, 4]),
+        (6.0, 0.0, [1, 1, 3, 1]),
+        (6.0, 1.0, [1, 1, 3, 1]),
+        (6.0, 2.5, [1, 1, 0, 1]),
+        (6.0, 3.5, [1, 1, 0, 1]),
+    ] {
+        for turn in [0.0, 0.7] {
+            cases.push(Case {
+                cone: THE_UNIT_CONE,
+                block: a_corner_up_cube(side, middle, turn),
+                solids,
+            });
+        }
+    }
+    cases
+}
+
+#[test]
+fn a_corner_up_cube_round_a_unit_pointed_cones_apex_answers_right_or_refuses() {
+    assert_eq!(
+        tally(&a_unit_pointed_cones_corner_up_cubes()),
+        Tally {
+            right: 88,
+            refused: [("a point inside a piece of a face", 8)].into()
+        }
+    );
+}
+
+/// Twenty slabs across the unit cone's axis, the same sweep as
+/// [`a_steep_pointed_cones_slabs`]. `low = −14` answers right every turn
+/// ([`APART`]); `low = −8` answers right only turned `0` and finds no point
+/// in a piece of a face the other three turns; `low` of `−3`, `0` and `2`
+/// answer right every turn.
+fn a_unit_pointed_cones_slabs() -> Vec<Case> {
+    let mut cases = Vec::new();
+    for turn in [0.0, 0.5, 1.0, 1.5] {
+        cases.push(Case {
+            cone: THE_UNIT_CONE,
+            block: a_slab(-14.0, turn),
+            solids: APART,
+        });
+    }
+    cases.push(Case {
+        cone: THE_UNIT_CONE,
+        block: a_slab(-8.0, 0.0),
+        solids: [1, 1, 2, 1],
+    });
+    for turn in [0.5, 1.0, 1.5] {
+        cases.push(Case {
+            cone: THE_UNIT_CONE,
+            block: a_slab(-8.0, turn),
+            solids: [1, 1, 2, 1], // unused: every rule refuses here
+        });
+    }
+    for low in [-3.0, 0.0] {
+        for turn in [0.0, 0.5, 1.0, 1.5] {
+            cases.push(Case {
+                cone: THE_UNIT_CONE,
+                block: a_slab(low, turn),
+                solids: [1, 1, 2, 1],
+            });
+        }
+    }
+    for turn in [0.0, 0.5, 1.0, 1.5] {
+        cases.push(Case {
+            cone: THE_UNIT_CONE,
+            block: a_slab(2.0, turn),
+            solids: OVERLAPPING,
+        });
+    }
+    cases
+}
+
+#[test]
+fn a_slab_fourteen_deep_across_a_unit_pointed_cone_answers_right_or_refuses() {
+    assert_eq!(
+        tally(&a_unit_pointed_cones_slabs()),
+        Tally {
+            right: 68,
+            refused: [("a point inside a piece of a face", 12)].into()
+        }
+    );
+}
+
+/// The one case of the sweep above that comes back wrong rather than
+/// refused: `model.fuse` answers `Ok`, but the model it hands back fails
+/// [`Model::validate`]. Eight of the unit lean family's 192 fuses hit this —
+/// crossing `0`, turns `0` and `1`, all four rules — and this pins the union,
+/// turned `0`, directly against the two halves of `Invalid::DynamicRangeTooWide`
+/// rather than through `tally`, which has no way to expect a validation
+/// failure from a fuse that answered.
+///
+/// Not traced to a cause. The ratio here and at turn `1` (measured at
+/// `5.364581909073752e16` and `2.6822909545368416e16`) match this file's own
+/// two prior `DynamicRangeTooWide` bugs (see the comment on `fuse_and_check`
+/// above, and lines 278-282) in pattern only — both of those were eventually
+/// a near-zero cancellation that lost a lean or a slope to rounding — but
+/// that cause is not demonstrated here. Filed as a queue row, class wrong/B
+/// (`docs/queue.md`).
+#[test]
+fn a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate() {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let case = Case {
+        cone: THE_UNIT_CONE,
+        block: a_leaning_block(4.0, 0.0, 0.0),
+        solids: OVERLAPPING, // never read: validate fails before any count is checked
+    };
+    let (cone, block) = build(&mut model, &case);
+    model
+        .fuse(
+            &[cone],
+            &[block],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("model.fuse answers Ok here, which is the bug");
+    let error = model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .expect_err("the answer is corrupt: a known, unfixed defect (class wrong/B)");
+    match error {
+        Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) => {
+            assert!(
+                ratio > 1.0e15,
+                "ratio {ratio} is far smaller than the ~2.7e16-5.4e16 this defect gives"
+            );
+        }
+        other => panic!("expected Invalid(DynamicRangeTooWide), got {other:?}"),
+    }
+}
+
 /// How many solids each rule leaves, in the order [`RULES`] runs them.
 type Solids = [usize; 4];
 
@@ -789,6 +1184,22 @@ const THE_POINTED_CONE: ConeShape = ConeShape {
     slope: 0.5,
     near: 0.0,
     far: 8.0,
+};
+
+/// Slope two about `+z`, from the apex at the origin to `z = 3` — §350.4's
+/// cone, which stopped at `z = 8` there and never ran the sweep below.
+const THE_STEEP_CONE: ConeShape = ConeShape {
+    slope: 2.0,
+    near: 0.0,
+    far: 3.0,
+};
+
+/// Slope one about `+z`, from the apex at the origin to `z = 3` — the cone
+/// §350.1 and §350.3 wrote about and never ran.
+const THE_UNIT_CONE: ConeShape = ConeShape {
+    slope: 1.0,
+    near: 0.0,
+    far: 3.0,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -845,6 +1256,16 @@ fn a_corner_up_cube(side: f64, middle: f64, turn: f64) -> BoxShape {
         .compose(&stood);
     BoxShape {
         size: [side; 3],
+        placed,
+    }
+}
+
+/// A slab 2 wide, 12 long and 14 deep, standing across the axis from
+/// `z = low` to `z = low + 14`, turned about the axis.
+fn a_slab(low: f64, turn: f64) -> BoxShape {
+    let placed = about_z(turn).compose(&moved([-1.0, -6.0, low]));
+    BoxShape {
+        size: [2.0, 12.0, 14.0],
         placed,
     }
 }
@@ -1125,122 +1546,6 @@ fn distance_to_a_boundary(case: &Case, p: Point) -> f64 {
         .map(|i| local[i].abs().min((local[i] - case.block.size[i]).abs()))
         .fold(f64::INFINITY, f64::min);
     to_side.min(to_caps).min(to_block)
-}
-
-/// DIAGNOSTIC PROBE FOR Q467, NOT A DELIVERABLE — remove before landing.
-///
-/// For every case of the three families round `steep` (slope 2, far 3) and
-/// `unit` (slope 1, far 3), and every rule, this calls `model.fuse` once to
-/// read off the solid count, then calls the real `fuse_and_check` with that
-/// count — so every `None` printed below is a right answer validated by
-/// volume and the grid of points, and every `Some(name)` is the exact string
-/// `tally()` would see, not the raw `{:?}` of `zz_probe_q467`'s first version.
-///
-/// **This is expensive**: a refusal returns before the grid/volume work and
-/// is cheap, but each right answer walks the full grid and meshes the
-/// pieces, so the cost is close to what the real pinned tests will cost to
-/// run. On an idle machine the steep cone's three families (368 fuses) ran
-/// in well under the 1206s this took on 2026-10-09 — that run shared the
-/// host with at least three other lanes' gates (`load average: 54` on 24
-/// cores, `uptime`), which is why it was killed partway through the unit
-/// cone. Run it again on a quiet machine, or in chunks (comment out two of
-/// the three `cone_name` entries, or two of the three families) and foreground-wait
-/// each with `timeout 540 tail --pid=<pid> -f /dev/null` per `.claude/agents/lane.md`.
-#[test]
-fn zz_probe_q467() {
-    let steep: ConeShape = ConeShape {
-        slope: 2.0,
-        near: 0.0,
-        far: 3.0,
-    };
-    let unit: ConeShape = ConeShape {
-        slope: 1.0,
-        near: 0.0,
-        far: 3.0,
-    };
-    for (cone_name, cone) in [("steep", steep), ("unit", unit)] {
-        let mut lean_cases = Vec::new();
-        for lean in [0.25, 0.375, 1.0, 4.0] {
-            for crossing in [0.0, 0.5, -0.5, 1.5] {
-                for turn in [0.0, 1.0, 3.0] {
-                    lean_cases.push((
-                        format!("lean {lean} crossing {crossing} turn {turn}"),
-                        a_leaning_block(lean, crossing, turn),
-                    ));
-                }
-            }
-        }
-        let mut cube_cases = Vec::new();
-        for side in [2.0, 4.0, 6.0] {
-            for middle in [0.0, 1.0, 2.5, 3.5] {
-                for turn in [0.0, 0.7] {
-                    cube_cases.push((
-                        format!("cube side {side} middle {middle} turn {turn}"),
-                        a_corner_up_cube(side, middle, turn),
-                    ));
-                }
-            }
-        }
-        let mut slab_cases = Vec::new();
-        for low in [-14.0, -8.0, -3.0, 0.0, 2.0] {
-            for turn in [0.0, 0.5, 1.0, 1.5] {
-                let placed = about_z(turn).compose(&moved([-1.0, -6.0, low]));
-                slab_cases.push((
-                    format!("slab low {low} turn {turn}"),
-                    BoxShape {
-                        size: [2.0, 12.0, 14.0],
-                        placed,
-                    },
-                ));
-            }
-        }
-        for (family, cases) in [
-            ("lean", lean_cases),
-            ("cube", cube_cases),
-            ("slab", slab_cases),
-        ] {
-            for (name, block) in cases {
-                for (which, (rule, cone_first)) in RULES.into_iter().enumerate() {
-                    let policy = Policy::certified();
-                    let mut model =
-                        Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-                    let peek = Case {
-                        cone,
-                        block,
-                        solids: [0, 0, 0, 0],
-                    };
-                    let (cone_key, block_key) = build(&mut model, &peek);
-                    let (arguments, tools) = if cone_first {
-                        ([cone_key], [block_key])
-                    } else {
-                        ([block_key], [cone_key])
-                    };
-                    let n = match model.fuse(
-                        &arguments,
-                        &tools,
-                        rule,
-                        &policy,
-                        &mut ProvenanceLog::new(),
-                    ) {
-                        Ok(answer) => answer.solids().len(),
-                        Err(_) => 0,
-                    };
-                    let mut case = peek;
-                    case.solids[which] = n;
-                    let result =
-                        std::panic::catch_unwind(|| fuse_and_check(&case, rule, cone_first, n));
-                    match result {
-                        Ok(result) => eprintln!(
-                            "PROBE2 {cone_name} {family} [{name}] rule {which} n {n} -> {result:?}"
-                        ),
-                        Err(_) => eprintln!(
-                            "PROBE2 {cone_name} {family} [{name}] rule {which} n {n} -> PANIC"
-                        ),
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// The volume the cone and the box share, summed over 800 × 800 vertical
