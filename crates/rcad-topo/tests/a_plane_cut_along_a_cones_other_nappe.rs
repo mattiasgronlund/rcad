@@ -836,34 +836,23 @@ fn a_steep_pointed_cone_with_a_steep_or_steeper_lean_answers_right_or_refuses() 
     );
 }
 
-/// A cube stood on its corner round the steep cone's apex, at every side and
-/// middle `zz_probe_q467` swept. Side `6`, middle `0` refuses `order along a
-/// crossing` on every rule and both turns; every other side and middle
-/// answers right, some of them with the cone taking two solids from the
-/// block (the top corner pokes out past the cap, which is the count §350.4's
-/// lane got wrong by hand).
+/// A cube stood on its corner round the steep cone's apex, of side `2`, `4`
+/// and `6` with its middle at `0`, `1`, `2.5` and `3.5`, as §350.4 swept it.
+/// Every one shares volume with the cone. Side `6`, middle `0` refuses `order
+/// along a crossing` on every rule and both turns; the other eleven answer
+/// right, six of them with the block less the cone in two solids, its top cut
+/// off by the cap.
 fn a_steep_pointed_cones_corner_up_cubes() -> Vec<Case> {
     let mut cases = Vec::new();
-    for (side, middle, solids) in [
-        (2.0, 0.0, OVERLAPPING),
-        (2.0, 1.0, OVERLAPPING),
-        (2.0, 2.5, OVERLAPPING),
-        (2.0, 3.5, OVERLAPPING),
-        (4.0, 0.0, [1, 1, 1, 2]),
-        (4.0, 1.0, [1, 1, 1, 2]),
-        (4.0, 2.5, [1, 1, 1, 2]),
-        (4.0, 3.5, OVERLAPPING),
-        (6.0, 0.0, OVERLAPPING), // unused: every rule refuses here
-        (6.0, 1.0, [1, 1, 1, 2]),
-        (6.0, 2.5, [1, 1, 1, 2]),
-        (6.0, 3.5, [1, 1, 1, 2]),
-    ] {
-        for turn in [0.0, 0.7] {
-            cases.push(Case {
-                cone: THE_STEEP_CONE,
-                block: a_corner_up_cube(side, middle, turn),
-                solids,
-            });
+    for side in [2.0, 4.0, 6.0] {
+        for middle in [0.0, 1.0, 2.5, 3.5] {
+            for turn in [0.0, 0.7] {
+                cases.push(Case {
+                    cone: THE_STEEP_CONE,
+                    block: a_corner_up_cube(side, middle, turn),
+                    solids: a_corner_up_cubes_solids(THE_STEEP_CONE, side, middle),
+                });
+            }
         }
     }
     cases
@@ -881,36 +870,23 @@ fn a_corner_up_cube_round_a_steep_pointed_cones_apex_answers_right_or_refuses() 
 }
 
 /// Twenty slabs `14` deep across the steep cone's axis, each `a_slab`'s own
-/// 2 by 12 box turned `0`, `0.5`, `1` or `1.5` about it. `low = −14` answers
-/// right only turned `0` ([`APART`]) and finds no point in a piece of a face
-/// every other turn; `low` from `−8` to `0` answers right turned `0` (the
-/// cone takes two solids from the block) and splits between two more
-/// refusals the other three turns; `low = 2` answers right turned `0` and
-/// splits the same way turned `0.5` and `1`.
+/// 2 by 12 box turned `0`, `0.5`, `1` or `1.5` about it. At `low = −14` the
+/// slab's top runs through the apex, a touch ([`APART`]); it answers right
+/// only turned `0` and finds no point in a piece of a face every other turn.
+/// `low` from `−8` to `0` answers right turned `0`, the cone in two solids
+/// either side of the slab, and splits between two more refusals the other
+/// three turns; `low = 2` answers right turned `0` and splits the same way
+/// turned `0.5` and `1`.
 fn a_steep_pointed_cones_slabs() -> Vec<Case> {
     let mut cases = Vec::new();
-    for turn in [0.0, 0.5, 1.0, 1.5] {
-        cases.push(Case {
-            cone: THE_STEEP_CONE,
-            block: a_slab(-14.0, turn),
-            solids: APART,
-        });
-    }
-    for low in [-8.0, -3.0, 0.0] {
+    for low in [-14.0, -8.0, -3.0, 0.0, 2.0] {
         for turn in [0.0, 0.5, 1.0, 1.5] {
             cases.push(Case {
                 cone: THE_STEEP_CONE,
                 block: a_slab(low, turn),
-                solids: [1, 1, 2, 1],
+                solids: a_slabs_solids(THE_STEEP_CONE, low),
             });
         }
-    }
-    for turn in [0.0, 0.5, 1.0, 1.5] {
-        cases.push(Case {
-            cone: THE_STEEP_CONE,
-            block: a_slab(2.0, turn),
-            solids: OVERLAPPING,
-        });
     }
     cases
 }
@@ -947,7 +923,7 @@ fn a_unit_pointed_cone_with_a_lean_up_to_one_answers_right_or_refuses() {
                 cases.push(Case {
                     cone: THE_UNIT_CONE,
                     block: a_leaning_block(lean, crossing, turn),
-                    solids: OVERLAPPING,
+                    solids: a_leaning_blocks_solids(THE_UNIT_CONE, lean, crossing),
                 });
             }
         }
@@ -979,14 +955,14 @@ fn a_unit_pointed_cones_lean_four_cases_away_from_the_defect() -> Vec<Case> {
     let mut cases = vec![Case {
         cone: THE_UNIT_CONE,
         block: a_leaning_block(4.0, 0.0, 3.0),
-        solids: OVERLAPPING, // unused: every rule refuses here
+        solids: a_leaning_blocks_solids(THE_UNIT_CONE, 4.0, 0.0),
     }];
     for crossing in [0.5, -0.5, 1.5] {
         for turn in [0.0, 1.0, 3.0] {
             cases.push(Case {
                 cone: THE_UNIT_CONE,
                 block: a_leaning_block(4.0, crossing, turn),
-                solids: OVERLAPPING,
+                solids: a_leaning_blocks_solids(THE_UNIT_CONE, 4.0, crossing),
             });
         }
     }
@@ -1004,32 +980,27 @@ fn a_unit_pointed_cone_with_a_lean_of_four_answers_right_or_refuses_away_from_th
     );
 }
 
-/// The corner-up cube round the unit cone. Side `2`, middle `1` refuses `a
-/// point inside a piece of a face` on every rule and both turns; every other
-/// side and middle answers right, several of them with one rule leaving more
-/// than one solid where the simple cases leave one.
+/// The corner-up cube round the unit cone, the same sides and middles as
+/// [`a_steep_pointed_cones_corner_up_cubes`]. Every one shares volume with the
+/// cone. Side `2`, middle `1` refuses `a point inside a piece of a face` on
+/// every rule and both turns; the other eleven answer right. Three counts
+/// turn up here that the steep cone has none of: side `4`, middle `3.5`
+/// leaves the block less the cone in four, three tips round its lower side
+/// corners and its top above the cap; side `6`, middles `0` and `1` leave the
+/// cone less the block in three, one past each face through the cube's top
+/// corner; and side `6`, middles `2.5` and `3.5` hold the whole cone and leave
+/// none.
 fn a_unit_pointed_cones_corner_up_cubes() -> Vec<Case> {
     let mut cases = Vec::new();
-    for (side, middle, solids) in [
-        (2.0, 0.0, OVERLAPPING),
-        (2.0, 1.0, OVERLAPPING), // unused: every rule refuses here
-        (2.0, 2.5, OVERLAPPING),
-        (2.0, 3.5, OVERLAPPING),
-        (4.0, 0.0, [1, 1, 1, 2]),
-        (4.0, 1.0, [1, 1, 1, 2]),
-        (4.0, 2.5, [1, 1, 1, 2]),
-        (4.0, 3.5, [1, 1, 1, 4]),
-        (6.0, 0.0, [1, 1, 3, 1]),
-        (6.0, 1.0, [1, 1, 3, 1]),
-        (6.0, 2.5, [1, 1, 0, 1]),
-        (6.0, 3.5, [1, 1, 0, 1]),
-    ] {
-        for turn in [0.0, 0.7] {
-            cases.push(Case {
-                cone: THE_UNIT_CONE,
-                block: a_corner_up_cube(side, middle, turn),
-                solids,
-            });
+    for side in [2.0, 4.0, 6.0] {
+        for middle in [0.0, 1.0, 2.5, 3.5] {
+            for turn in [0.0, 0.7] {
+                cases.push(Case {
+                    cone: THE_UNIT_CONE,
+                    block: a_corner_up_cube(side, middle, turn),
+                    solids: a_corner_up_cubes_solids(THE_UNIT_CONE, side, middle),
+                });
+            }
         }
     }
     cases
@@ -1047,46 +1018,21 @@ fn a_corner_up_cube_round_a_unit_pointed_cones_apex_answers_right_or_refuses() {
 }
 
 /// Twenty slabs across the unit cone's axis, the same sweep as
-/// [`a_steep_pointed_cones_slabs`]. `low = −14` answers right every turn
-/// ([`APART`]); `low = −8` answers right only turned `0` and finds no point
+/// [`a_steep_pointed_cones_slabs`]. `low = −14` touches the apex
+/// ([`APART`]) and answers right every turn; `low = −8` answers right only
+/// turned `0` and finds no point
 /// in a piece of a face the other three turns; `low` of `−3`, `0` and `2`
 /// answer right every turn.
 fn a_unit_pointed_cones_slabs() -> Vec<Case> {
     let mut cases = Vec::new();
-    for turn in [0.0, 0.5, 1.0, 1.5] {
-        cases.push(Case {
-            cone: THE_UNIT_CONE,
-            block: a_slab(-14.0, turn),
-            solids: APART,
-        });
-    }
-    cases.push(Case {
-        cone: THE_UNIT_CONE,
-        block: a_slab(-8.0, 0.0),
-        solids: [1, 1, 2, 1],
-    });
-    for turn in [0.5, 1.0, 1.5] {
-        cases.push(Case {
-            cone: THE_UNIT_CONE,
-            block: a_slab(-8.0, turn),
-            solids: [1, 1, 2, 1], // unused: every rule refuses here
-        });
-    }
-    for low in [-3.0, 0.0] {
+    for low in [-14.0, -8.0, -3.0, 0.0, 2.0] {
         for turn in [0.0, 0.5, 1.0, 1.5] {
             cases.push(Case {
                 cone: THE_UNIT_CONE,
                 block: a_slab(low, turn),
-                solids: [1, 1, 2, 1],
+                solids: a_slabs_solids(THE_UNIT_CONE, low),
             });
         }
-    }
-    for turn in [0.0, 0.5, 1.0, 1.5] {
-        cases.push(Case {
-            cone: THE_UNIT_CONE,
-            block: a_slab(2.0, turn),
-            solids: OVERLAPPING,
-        });
     }
     cases
 }
@@ -1110,13 +1056,16 @@ fn a_slab_fourteen_deep_across_a_unit_pointed_cone_answers_right_or_refuses() {
 /// rather than through `tally`, which has no way to expect a validation
 /// failure from a fuse that answered.
 ///
+/// The leaning face touches the unit cone at its apex and nowhere else, so
+/// the right answer is the two solids [`APART`]; the model `fuse` hands back
+/// is not checked far enough to say whether it holds them.
+///
 /// Not traced to a cause. The ratio here and at turn `1` (measured at
-/// `5.364581909073752e16` and `2.6822909545368416e16`) match this file's own
-/// two prior `DynamicRangeTooWide` bugs (see the comment on `fuse_and_check`
-/// above, and lines 278-282) in pattern only — both of those were eventually
-/// a near-zero cancellation that lost a lean or a slope to rounding — but
-/// that cause is not demonstrated here. Filed as a queue row, class wrong/B
-/// (`docs/queue.md`).
+/// `5.364581909073752e16` and `2.6822909545368416e16`) match the `5.7e16` of
+/// the doc comment on
+/// [`a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right`]
+/// in pattern only — that was a near-zero cancellation that lost a lean to
+/// rounding — but that cause is not demonstrated here. Queue row Q1562.
 #[test]
 fn a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate() {
     let policy = Policy::certified();
@@ -1124,7 +1073,8 @@ fn a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate() {
     let case = Case {
         cone: THE_UNIT_CONE,
         block: a_leaning_block(4.0, 0.0, 0.0),
-        solids: OVERLAPPING, // never read: validate fails before any count is checked
+        // Never read: validate fails before any count is checked.
+        solids: a_leaning_blocks_solids(THE_UNIT_CONE, 4.0, 0.0),
     };
     let (cone, block) = build(&mut model, &case);
     model
@@ -1147,6 +1097,196 @@ fn a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate() {
             );
         }
         other => panic!("expected Invalid(DynamicRangeTooWide), got {other:?}"),
+    }
+}
+
+/// How many solids each rule leaves for [`a_leaning_block`] round a pointed
+/// cone up to `z = 3`, worked out by hand. Turning the block about the axis
+/// changes no count, since the cone is round.
+///
+/// In the plane through the axis that the block leans in, the cone reaches
+/// furthest into the block's side of the face `x = lean · (z − crossing)`
+/// either at the apex, by `lean · crossing`, or at the rim, by
+/// `(slope − lean) · far + lean · crossing`. When neither is above zero the two
+/// share no volume: below zero they miss, and at zero the face touches the
+/// cone at the apex or along a ruling. Either way that is [`APART`].
+///
+/// Otherwise every rule leaves one solid, [`OVERLAPPING`]:
+/// - the union and the intersection, since both shapes are convex;
+/// - the block less the cone, since the block holds `(0, 0, −1)`, under the
+///   apex. A straight line from there to a point of the block outside the cone
+///   and not above the cap stays in the block, which is convex, and outside
+///   the cone: in the half-plane through the axis that holds it,
+///   `r − slope · z` is above zero at both ends and changes linearly. At lean
+///   `4` the block's top is at `z ≈ 2.18`, below the cap, and at a lean up to
+///   `1` its section at the cap reaches past the rim, so what is above the cap
+///   joins the rest there;
+/// - the cone less the block: the block meets each ruling in one stretch, so a
+///   point of the cone outside the block runs along its ruling either down to
+///   the apex, which is outside the block when the crossing is not above zero,
+///   or up to the cap. What the block leaves of the cap is one piece holding
+///   its centre, since the centre is on the far side of the face. Past the
+///   block's walls square to `y`, at `|y| > 5`, only the steep cone's cap
+///   reaches, and only at `|x| < 3.4`, which takes in the far side of the face
+///   too.
+fn a_leaning_blocks_solids(cone: ConeShape, lean: f64, crossing: f64) -> Solids {
+    assert!(
+        cone.near == 0.0
+            && cone.far == 3.0
+            && [1.0, 2.0].contains(&cone.slope)
+            && [0.25, 0.375, 1.0, 4.0].contains(&lean)
+            && [0.0, 0.5, -0.5, 1.5].contains(&crossing),
+        "a cone, lean or crossing this rule was not worked out for"
+    );
+    let into_the_block_at_the_apex = lean * crossing;
+    let into_the_block_at_the_rim = (cone.slope - lean) * cone.far + lean * crossing;
+    if into_the_block_at_the_apex.max(into_the_block_at_the_rim) <= 0.0 {
+        return APART;
+    }
+    assert!(
+        in_block(
+            a_leaning_block(lean, crossing, 0.0),
+            Point::new(0.0, 0.0, -1.0)
+        ),
+        "the block holds no point under the apex"
+    );
+    OVERLAPPING
+}
+
+/// How many solids each rule leaves for [`a_corner_up_cube`] round a pointed
+/// cone, worked out by hand. The union and the intersection are one solid
+/// each, both shapes being convex, and turning the cube about the axis changes
+/// no count, since the cone is round.
+///
+/// The cube's bottom and top corners are on the axis at
+/// `middle ∓ side · √3 / 2`. Its six other corners are `side · √(2/3)` from
+/// the axis, three at `middle − side / (2√3)` and three at
+/// `middle + side / (2√3)`. At height `z` a face through the bottom corner is
+/// `(z − bottom) / √2` from the axis and a face through the top corner
+/// `(top − z) / √2`, the nearest point of each being the middle of its edge of
+/// the section, by the mirror through the axis.
+///
+/// **When the cube holds the apex** (`bottom < 0`):
+/// - the cone less the cube is one solid for each piece of the cap outside
+///   the cube. A point of the cone outside the cube runs up its ruling to the
+///   cap without meeting the cube, which is convex and holds the apex, and
+///   two pieces of the cap cannot join below it, since that path run up the
+///   rulings would join them on the cap. So it is one when the cube's section
+///   at the cap is empty or inside the rim. When the section's corners poke
+///   past the rim, each of its faces nearer the axis than the rim leaves one
+///   piece of the cap beyond it, three faces of each kind, and none leaves
+///   nothing: the cube holds the whole cone;
+/// - the cube less the cone is one solid below the cap, every point of it
+///   joined to the bottom corner by a straight line outside the cone, as for
+///   [`a_leaning_blocks_solids`], and one more when the cube's top pokes out
+///   of the cap with the section there inside the rim, which cuts it off. That
+///   is the count §350.4's lane got wrong.
+///
+/// **When it does not** (`bottom > 0`):
+/// - the cone less the cube is one solid: a point of it moved straight out from
+///   the axis stays outside the cube, whose section holds the axis, and the
+///   cube comes through the cone's side, if at all, in three holes that touch
+///   neither the apex nor the rim;
+/// - the cube less the cone is the part above the cap, if any, and three tips
+///   round the lower side corners when those poke out of the cone. The faces
+///   through the bottom corner come inside the cone at every height when the
+///   slope is over `1 / √2`, which keeps the tips apart; the upper side corners
+///   inside the cone and the section at the cap inside the rim keep them off
+///   the part above the cap.
+fn a_corner_up_cubes_solids(cone: ConeShape, side: f64, middle: f64) -> Solids {
+    assert_eq!(cone.near, 0.0, "a rule for a pointed cone");
+    let rim = cone.slope * cone.far;
+    let bottom = middle - side * 3.0f64.sqrt() / 2.0;
+    let top = middle + side * 3.0f64.sqrt() / 2.0;
+    let side_corners_below = middle - side / (2.0 * 3.0f64.sqrt());
+    let side_corners_above = middle + side / (2.0 * 3.0f64.sqrt());
+    assert!(
+        bottom != 0.0 && bottom < cone.far && top != cone.far,
+        "a cube with a corner on the apex or the cap, or wholly above the cap"
+    );
+    let inside_the_rim = how_far_a_corner_up_cubes_section_reaches(side, cone.far - middle)
+        .is_none_or(|reach| {
+            assert!(reach != rim, "a corner of the section on the rim");
+            reach < rim
+        });
+    if bottom < 0.0 {
+        let cone_less_cube = if inside_the_rim {
+            1
+        } else {
+            let lower_faces_cut_the_rim =
+                cone.far < side_corners_above && (cone.far - bottom) / 2.0f64.sqrt() < rim;
+            let upper_faces_cut_the_rim =
+                cone.far > side_corners_below && (top - cone.far) / 2.0f64.sqrt() < rim;
+            3 * (usize::from(lower_faces_cut_the_rim) + usize::from(upper_faces_cut_the_rim))
+        };
+        [
+            1,
+            1,
+            cone_less_cube,
+            1 + usize::from(top > cone.far && inside_the_rim),
+        ]
+    } else {
+        let corner_reach = side * (2.0f64 / 3.0).sqrt();
+        let tips = corner_reach > cone.slope * side_corners_below;
+        assert!(inside_the_rim, "a cube above the apex out past the rim");
+        if tips {
+            assert!(
+                cone.slope > core::f64::consts::FRAC_1_SQRT_2
+                    && corner_reach < cone.slope * side_corners_above,
+                "tips that may join, or poke out higher up"
+            );
+        }
+        [1, 1, 1, 3 * usize::from(tips) + usize::from(top > cone.far)]
+    }
+}
+
+/// How far from the axis the corners of a corner-up cube's section reach,
+/// `zeta` above its middle, or `None` past its top or bottom corner. Every
+/// corner of the section is the same distance out: on the six middle edges in
+/// the hexagon, and on the three edges from the end corner in the triangle.
+fn how_far_a_corner_up_cubes_section_reaches(side: f64, zeta: f64) -> Option<f64> {
+    let half = side * 3.0f64.sqrt() / 2.0;
+    let side_corners = side / (2.0 * 3.0f64.sqrt());
+    if zeta.abs() >= half {
+        None
+    } else if zeta.abs() <= side_corners {
+        Some((side * side / 2.0 + 2.0 * zeta * zeta).sqrt())
+    } else {
+        Some(2.0f64.sqrt() * (half - zeta.abs()))
+    }
+}
+
+/// How many solids each rule leaves for [`a_slab`] round a pointed cone,
+/// worked out by hand.
+///
+/// A slab whose top is not above the apex shares no volume with the cone: at
+/// `low = −14` its top runs through the apex, a touch, [`APART`].
+///
+/// Otherwise the union and the intersection are one solid each, both shapes
+/// being convex, and so is the slab less the cone: the slab runs past the cap,
+/// and a point of it outside the cone moved along `y` reaches an end of the
+/// slab, which no rim up to `6` comes inside, and the two ends meet above the
+/// cap. The cone less the slab is the cone either side of it, two solids
+/// unless the tip below the slab joins them, when `low` is above zero. The
+/// steep cone's rim of radius `6` touches the slab's ends and joins nothing.
+fn a_slabs_solids(cone: ConeShape, low: f64) -> Solids {
+    assert_eq!(cone.near, 0.0, "a rule for a pointed cone");
+    let top = low + 14.0;
+    if top <= 0.0 {
+        return APART;
+    }
+    assert!(
+        low < cone.far && top > cone.far && cone.slope * cone.far <= 6.0,
+        "a slab that stops short of the cap, or a rim past the slab's ends"
+    );
+    if low > 0.0 {
+        assert!(
+            cone.slope * low > 1.0,
+            "a tip below the slab that does not reach past both its sides"
+        );
+        OVERLAPPING
+    } else {
+        [1, 1, 2, 1]
     }
 }
 
@@ -1182,7 +1322,8 @@ const THE_POINTED_CONE: ConeShape = ConeShape {
 };
 
 /// Slope two about `+z`, from the apex at the origin to `z = 3` — §350.4's
-/// cone, which stopped at `z = 8` there and never ran the sweep below.
+/// cone, whose sweep there was a throwaway test. §350.2's cone of slope two
+/// runs up to `z = 8` and is swallowed by its block.
 const THE_STEEP_CONE: ConeShape = ConeShape {
     slope: 2.0,
     near: 0.0,
