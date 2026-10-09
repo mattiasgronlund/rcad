@@ -1071,48 +1071,84 @@ fn a_frustum_from_below_the_plane_between_the_two_circles_answers_all_but_the_ba
     );
 }
 
-/// **A thin bar through a fat one is refused under every rule both ways**,
-/// `ACrossingThisCannotBeOrderedAlong`, before selection is reached (Q1248). A
-/// bar of radius 4 from `z = 0` to `z = 10`, and a bar of radius 1 along `x`
-/// from `x = −10` to `x = 10` at `z = 5`: through the fat bar's axis with the
-/// fat bar's seam up `+y`, and half off it with the seam up `+x`. The two pipes
-/// cross in two closed loops, one each side, and points along a loop of two
-/// pipes are a quartic `fuse/arrange.rs`'s `how_a_crossing_runs` does not put
-/// in order.
+/// **A thin bar through a fat one answers every rule both ways**, the shape of
+/// a cross-drilled shaft. A bar of radius 4 from `z = 0` to `z = 10`, `160π`,
+/// and a bar of radius 1 along `x` from `x = −10` to `x = 10` at `z = 5`,
+/// `20π`: through the fat bar's axis with the fat bar's seam up `+y`, and half
+/// off it with the seam up `+x`. The two pipes cross in two closed loops, one
+/// each side of `x = 0`, and the thin bar less the fat one is the two ends
+/// either side, each half of what the thin bar keeps.
 ///
-/// `intersect` picks each loop out by a half-space whose plane runs through
-/// the fat bar's axis square to the thin one, `x = 0`. It is ten from either
-/// end of the thin bar, so it misses them, but no fuse gets as far as asking.
+/// What the two share is [`what_a_thin_bar_through_a_fat_one_shares`]. The
+/// loops are quartics, and each runs once round the thin bar's axis, which is
+/// what puts points along one in order (Q1483). `intersect` picks each loop out
+/// by a half-space whose plane runs through the fat bar's axis square to the
+/// thin one, `x = 0`, ten from either end of the thin bar, so the bar's caps
+/// are on one side of it each.
 #[test]
-fn a_thin_bar_through_a_fat_one_is_refused_ordering_points_along_its_loops() {
-    let pairs: [fn(&mut Model) -> [SolidKey; 2]; 2] = [
-        |model| {
-            let fat = model
-                .add_round_bar(
-                    4.0,
-                    10.0,
-                    &Isometry::quarter_turns(&Axis::z(), 1).expect("z is an axis"),
-                )
-                .expect("a fat bar");
-            [fat, a_thin_bar_along_x(model, 0.0)]
-        },
-        |model| {
-            let fat = model
-                .add_round_bar(4.0, 10.0, &Isometry::identity())
-                .expect("a fat bar");
-            [fat, a_thin_bar_along_x(model, 0.5)]
-        },
+fn a_thin_bar_through_a_fat_one_answers_every_rule() {
+    let pairs: [(fn(&mut Model) -> [SolidKey; 2], f64); 2] = [
+        (
+            |model| {
+                let fat = model
+                    .add_round_bar(
+                        4.0,
+                        10.0,
+                        &Isometry::quarter_turns(&Axis::z(), 1).expect("z is an axis"),
+                    )
+                    .expect("a fat bar");
+                [fat, a_thin_bar_along_x(model, 0.0)]
+            },
+            0.0,
+        ),
+        (
+            |model| {
+                let fat = model
+                    .add_round_bar(4.0, 10.0, &Isometry::identity())
+                    .expect("a fat bar");
+                [fat, a_thin_bar_along_x(model, 0.5)]
+            },
+            0.5,
+        ),
     ];
-    for pair in pairs {
-        let gives = what_each_rule_gives(pair);
-        println!("{gives:?}");
-        assert!(
-            gives
-                .iter()
-                .all(|answer| matches!(answer, Err(Error::ACrossingThisCannotBeOrderedAlong))),
-            "{gives:?}"
+    let [fat, thin] = [160.0 * PI, 20.0 * PI];
+    for (pair, off) in pairs {
+        let shared = what_a_thin_bar_through_a_fat_one_shares(off);
+        let end = (thin - shared) / 2.0;
+        fuses_hold(
+            pair,
+            [
+                &[fat + thin - shared],
+                &[shared],
+                &[fat - shared],
+                &[end, end],
+            ],
         );
     }
+}
+
+/// What a bar of radius 4 about `z` shares with a bar of radius 1 along `x`
+/// that it swallows, `off` along `y` from its axis: at `y` the fat bar is
+/// `2√(16 − y²)` across along `x` and the thin one `2√(1 − (y − off)²)` along
+/// `z`, so the two share `∫ 4 √(16 − (s + off)²) √(1 − s²) ds` over
+/// `−1 ≤ s ≤ 1`. Through the axis that is `8 ∫₀¹ √((1 − y²)(16 − y²)) dy`.
+///
+/// Put `s = sin t` and the integral is `2 ∫ cos² t √(16 − (sin t + off)²) dt`
+/// over a whole turn, since the half turn from `π/2` to `3π/2` runs over the
+/// same `s` again. That integrand is smooth and periodic, so the trapezium
+/// rule over a whole turn closes in on it geometrically: 32 points and 256
+/// agree to `4e-15` for both `off` here (`24.9348268993723` and
+/// `24.73281320654972`), far inside the `0.001` mesh's own error on the volume.
+fn what_a_thin_bar_through_a_fat_one_shares(off: f64) -> f64 {
+    let points = 256_u32;
+    let step = 2.0 * PI / f64::from(points);
+    let sum: f64 = (0..points)
+        .map(|at| {
+            let t = step * f64::from(at);
+            t.cos().powi(2) * (16.0 - (t.sin() + off).powi(2)).sqrt()
+        })
+        .sum();
+    2.0 * step * sum
 }
 
 /// A bar of radius 1 along `x` from `x = −10` to `x = 10`, at `z = 5` and
