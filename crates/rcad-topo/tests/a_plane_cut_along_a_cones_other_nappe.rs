@@ -902,12 +902,19 @@ fn a_slab_fourteen_deep_across_a_steep_pointed_cone_answers_right_or_refuses() {
 }
 
 /// The same leaning block round a cone of slope `1` instead of `2` — §350.1
-/// and §350.3's cone, run for the first time. Leans `0.25` and `0.375` each
-/// refuse `CannotMeshAFace` on the intersection and the block-less-cone at
-/// crossing `0`, turn `1`; leaned `1`, the same crossing and turn instead
-/// refuses `AWireWillNotLieFlatOnItsFace` on the union and the cone-less-block
-/// and `TwoPatchesOfTheMeshDrewTheSameSide` on the intersection, and every
-/// crossing but `0` turned `1` refuses `order along a crossing`.
+/// and §350.3's cone, run for the first time. Leans `0.25` and `0.375` meet
+/// the cone at every crossing, and so does a lean of `1` but at two. Leaned
+/// `1`, crossing `−0.5` misses the cone ([`APART`]), and crossing `0` touches
+/// it along the ruling `x = z`: turned `0` and `3` the face misses it
+/// ([`APART`]), and turned `1` the rounding of the turn cuts a sliver from it
+/// ([`OVERLAPPING`], [`a_leaning_case`]).
+///
+/// Leans `0.25` and `0.375` each refuse `CannotMeshAFace` on the intersection
+/// and the block-less-cone at crossing `0`, turn `1`. Leaned `1`, the same
+/// crossing and turn refuses `AWireWillNotLieFlatOnItsFace` on the union and
+/// the cone-less-block, and the sliver the intersection answers does not
+/// measure (`TwoPatchesOfTheMeshDrewTheSameSide`). Every lean-`1` crossing
+/// but `0`, turned `1`, refuses `order along a crossing` on every rule.
 #[test]
 fn a_unit_pointed_cone_with_a_lean_up_to_one_answers_right_or_refuses() {
     let mut cases = Vec::new();
