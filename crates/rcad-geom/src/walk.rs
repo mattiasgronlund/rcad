@@ -47,8 +47,8 @@ use crate::intersect::{
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
-    Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
-    Surface, SurfaceMeet, Torus, Vector,
+    Cone, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Result,
+    Sphere, Surface, SurfaceMeet, Torus, Vector,
 };
 
 /// How far a point [`walk`] hands back can sit off the curve it was worked out
@@ -440,8 +440,8 @@ pub fn walk(
     let pair = which_two_surfaces_a_run_is_between(run.run(), along);
     let conic = match what_a_run_between_these_two_lies_on(pair, run, policy, log)? {
         WhatARunLiesOn::StraightLine => return Ok(nothing_between_the_ends()),
-        WhatARunLiesOn::QuarticPickedUpAt(seeds) => {
-            return follow_the_quartic(run, pair, seeds, deflection, policy, log);
+        WhatARunLiesOn::QuarticPickedUpAt(seeds, held_apart_by) => {
+            return follow_the_quartic(run, pair, seeds, held_apart_by, deflection, policy, log);
         }
         WhatARunLiesOn::Parabola(bend) => {
             return walk_an_endless_bend(&bend, run, deflection, policy, log);
@@ -590,8 +590,8 @@ pub fn where_a_closed_crossing_starts(
     let pair = which_two_surfaces_a_run_is_between(run.run(), along);
     match what_a_run_between_these_two_lies_on(pair, run, &certified, log)? {
         WhatARunLiesOn::StraightLine => Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
-        WhatARunLiesOn::QuarticPickedUpAt(seeds) => {
-            the_seed_this_run_is_picked_up_at(run, &pair, seeds, &certified, log)
+        WhatARunLiesOn::QuarticPickedUpAt(seeds, held_apart_by) => {
+            the_seed_this_run_is_picked_up_at(run, &pair, seeds, held_apart_by, &certified, log)
         }
         WhatARunLiesOn::Parabola(_) | WhatARunLiesOn::OneBranchOfAHyperbola(_) => {
             Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed)
@@ -654,8 +654,9 @@ enum WhatARunLiesOn {
     /// A conic in a plane, walked round in an angle.
     Conic(Conic),
     /// A degree-four loop, with one point near each piece it can come in for
-    /// the marcher to start from.
-    QuarticPickedUpAt([Point; 2]),
+    /// the marcher to start from, and what holds those two pieces apart when
+    /// there are two.
+    QuarticPickedUpAt([Point; 2], TwoLoopsHeldApartBy),
     /// A parabola: one curve that runs on for ever both ways and bends.
     Parabola(Parabola),
     /// One of a hyperbola's two branches, which runs on for ever both ways and
@@ -663,6 +664,23 @@ enum WhatARunLiesOn {
     /// this is was settled by the run's ends, or by its half-spaces when it
     /// has none.
     OneBranchOfAHyperbola(HyperbolaBranch),
+}
+
+/// The flat surface the naming half holds a degree-four crossing's two loops
+/// apart with, kept as the two surfaces it is built from so that only a run
+/// that needs it builds it.
+///
+/// **Exhaustive on purpose.** These are the two pairs that are marched, and a
+/// third would need its own flat surface worked out before it could be.
+#[derive(Clone, Copy)]
+enum TwoLoopsHeldApartBy {
+    /// The one through the ball's centre square to the pipe's axis, which is
+    /// what [`intersect`](crate::intersect)'s `two_loops_either_side_of_a_ball`
+    /// picks with.
+    ABallsCentre { ball: Sphere, pipe: Cylinder },
+    /// The one through the fat pipe's axis square to the thin pipe's way across
+    /// it, which is what `two_loops_either_side_of_a_pipe` picks with.
+    AFatPipesAxis { thin: Cylinder, fat: Cylinder },
 }
 
 /// Which of those three the crossing of these two surfaces is, and the thing
@@ -807,7 +825,10 @@ fn what_a_run_between_these_two_lies_on(
                 where_a_ball_on_a_pipes_axis_cuts_it(&ball, &pipe, ball_first, run, policy, log)
                     .map(WhatARunLiesOn::Conic)
             } else {
-                a_quartic_picked_up_at(where_a_ball_reaches_across_a_pipe(&ball, &pipe))
+                a_quartic_picked_up_at(
+                    where_a_ball_reaches_across_a_pipe(&ball, &pipe),
+                    TwoLoopsHeldApartBy::ABallsCentre { ball, pipe },
+                )
             }
         }
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
@@ -844,7 +865,10 @@ fn what_a_run_between_these_two_lies_on(
             } else {
                 (other, one)
             };
-            a_quartic_picked_up_at(where_one_pipe_reaches_across_another(&thin, &fat))
+            a_quartic_picked_up_at(
+                where_one_pipe_reaches_across_another(&thin, &fat),
+                TwoLoopsHeldApartBy::AFatPipesAxis { thin, fat },
+            )
         }
         // A cone and a pipe on one axis cross in two circles and everything
         // else in that row is refused, so this arm reads the run: which of the
@@ -937,11 +961,14 @@ fn what_a_run_between_these_two_lies_on(
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when either comes out as something
 /// that is not a point.
-fn a_quartic_picked_up_at(seeds: [Point; 2]) -> Result<WhatARunLiesOn> {
+fn a_quartic_picked_up_at(
+    seeds: [Point; 2],
+    held_apart_by: TwoLoopsHeldApartBy,
+) -> Result<WhatARunLiesOn> {
     if seeds.iter().any(|seed| !seed.is_finite()) {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     }
-    Ok(WhatARunLiesOn::QuarticPickedUpAt(seeds))
+    Ok(WhatARunLiesOn::QuarticPickedUpAt(seeds, held_apart_by))
 }
 
 /// A run of a degree-four crossing, followed by the marcher.
@@ -959,23 +986,30 @@ fn a_quartic_picked_up_at(seeds: [Point; 2]) -> Result<WhatARunLiesOn> {
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on the
-/// run pick both of the loops the crossing leaves, or neither.
+/// run pick both of the loops the crossing leaves, or neither, and when a
+/// closed run's corner cannot be put on one side of what holds the two loops
+/// apart, or is across it from both seeds.
 ///
 /// [`Error::CannotPlaceAPointThatCloseToACrossing`] when the marcher's own bound
 /// takes more than its half of the deflection and the policy will not accept it.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when the flat surface that holds
+/// the two loops apart cannot be written down, or a settled point has no box
+/// round it.
 ///
 /// The marcher's two refusals.
 fn follow_the_quartic(
     run: &NamedRun,
     pair: [Surface; 2],
     seeds: [Point; 2],
+    held_apart_by: TwoLoopsHeldApartBy,
     deflection: Deflection,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<PointsAlongACrossing> {
     let half_the_budget = deflection.length() / 2.0;
     let surfaces = [&pair[0], &pair[1]];
-    let seed = the_seed_this_run_is_picked_up_at(run, &pair, seeds, policy, log)?;
+    let seed = the_seed_this_run_is_picked_up_at(run, &pair, seeds, held_apart_by, policy, log)?;
 
     let walked = march(
         surfaces,
@@ -992,8 +1026,8 @@ fn follow_the_quartic(
     }
     let points = match the_corner_a_closed_run_starts_at(run) {
         Some(corner) => {
-            let (start, _) = settled_with_a_bound(surfaces, seed)?;
-            begun_beside(corner, start, walked.points)
+            let (start, off) = settled_with_a_bound(surfaces, seed)?;
+            begun_beside(corner, start, off, walked.points)?
         }
         None => walked.points,
     };
@@ -1006,17 +1040,48 @@ fn follow_the_quartic(
 /// A closed loop the marcher walked from `start`, turned round so that it
 /// begins and ends beside `corner`.
 ///
-/// `start` is put back among the points, because it is not an end any more.
-/// The corner goes between the two points it sits between — the nearest and
-/// whichever of its two neighbours is nearer — so splitting that one step at a
-/// point on the curve is all that changes, and a step split at a point on the
-/// curve strays from it less than the step did.
+/// **Handed back as it was walked when `corner` is `start`**, to within what
+/// the arithmetic knows of either: the corner's own box and the box `off` round
+/// `start` share a point. A march already begins and ends one step from its
+/// start, and the caller puts the corner at both ends, so putting `start` back
+/// would put the corner among the points a second time. A fuse puts the corner
+/// at the seed ([`where_a_closed_crossing_starts`]), and a mesh shifts it into
+/// its own frame and settles the seed again there, so the two can land an ulp
+/// apart, and a loop that held both was refused by the mesh as two corners in
+/// one place (Q1508).
+///
+/// Anywhere else `start` is put back among the points, because it is not an
+/// end any more. The corner goes between the two points it sits between — the
+/// nearest and whichever of its two neighbours is nearer — so splitting that
+/// one step at a point on the curve is all that changes, and a step split at a
+/// point on the curve strays from it less than the step did.
 ///
 /// **Turned and never re-marched from the corner**, and that is measured: the
 /// LED's corner sits where its two surfaces touch, and a march begun there
 /// bounds its first point `1.58` off the crossing against a deflection of `1.30`
 /// asked, where the march begun at the seed is walked (§189.3).
-fn begun_beside(corner: Point, start: Point, walked: Vec<Point>) -> Vec<Point> {
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when `start` has no box round it.
+fn begun_beside(
+    corner: PredicatePoint,
+    start: Point,
+    off: f64,
+    walked: Vec<Point>,
+) -> Result<Vec<Point>> {
+    let Some(round_the_start) = somewhere_within(start, off) else {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    };
+    let the_corner_is_the_start = corner
+        .enclosure()
+        .into_iter()
+        .zip(round_the_start.enclosure())
+        .all(|(mine, theirs)| mine.lo() <= theirs.hi() && theirs.lo() <= mine.hi());
+    if the_corner_is_the_start {
+        return Ok(walked);
+    }
+    let corner = Point::from(corner.enclosure().map(middle_of));
     let mut round = Vec::with_capacity(walked.len() + 1);
     round.push(start);
     round.extend(walked);
@@ -1031,7 +1096,7 @@ fn begun_beside(corner: Point, start: Point, walked: Vec<Point>) -> Vec<Point> {
         nearest + 1
     };
     round.rotate_left(first % count);
-    round
+    Ok(round)
 }
 
 /// The corner a closed run starts and ends at, when it names one.
@@ -1047,35 +1112,36 @@ fn begun_beside(corner: Point, start: Point, walked: Vec<Point>) -> Vec<Point> {
 ///
 /// `None` for a run whose ends are not one named place, which is an open run
 /// or a whole curve nothing has put a corner on yet.
-fn the_corner_a_closed_run_starts_at(run: &NamedRun) -> Option<Point> {
+fn the_corner_a_closed_run_starts_at(run: &NamedRun) -> Option<PredicatePoint> {
     let [from, to] = run.ends();
-    (from == to && from != nowhere_in_particular())
-        .then(|| Point::from(from.enclosure().map(middle_of)))
+    (from == to && from != nowhere_in_particular()).then_some(from)
 }
 
 /// The place on the loop this run names that the marcher starts from, settled
 /// onto both surfaces.
 ///
-/// A run that nothing picks is taken to be the whole of a single loop, and the
-/// two seeds two places on it — either will do. A run that *is* picked is one of
-/// two loops, and then exactly one of the seeds may pass: both or neither and the
-/// half-spaces have not told them apart after all.
+/// A run that *is* picked is one of two loops, and then exactly one of the
+/// seeds may pass: both or neither and the half-spaces have not told them apart
+/// after all.
 ///
-/// **That first reading is wrong for a closed run with its corner on the second
-/// of two loops**, which nothing picks because its corner names it. A ball
-/// `0.1` off a pipe's axis has two such loops, and the run with its corner at
-/// `z = −3.9` is walked round the loop at `z = +3.9`. A ball centred on the axis
-/// no longer comes here: its circles are drawn in closed form and told apart by
-/// the corner (Q1241).
+/// A run that nothing picks is either the whole of a single loop or a closed
+/// run whose corner names which loop it is. The first may start at either
+/// seed, since both are on it. The second starts at the seed on its corner's
+/// loop, and the naming half's own flat surface between the two loops says
+/// which that is ([`the_seed_on_the_loop_a_corner_is_on`]). Starting it at the
+/// first seed walked a ball `0.1` off a pipe's axis with its corner at
+/// `z = −3.9` round the loop at `z = +3.9` (Q1262).
 ///
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces pick
-/// both loops or neither.
+/// both loops or neither, and whatever
+/// [`the_seed_on_the_loop_a_corner_is_on`] refuses.
 fn the_seed_this_run_is_picked_up_at(
     run: &NamedRun,
     pair: &[Surface; 2],
     seeds: [Point; 2],
+    held_apart_by: TwoLoopsHeldApartBy,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Point> {
@@ -1087,17 +1153,105 @@ fn the_seed_this_run_is_picked_up_at(
         | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
     };
 
-    let mut settled_seeds = Vec::new();
+    if picked_by.is_empty() {
+        let settled = [
+            settled_with_a_bound(surfaces, seeds[0])?,
+            settled_with_a_bound(surfaces, seeds[1])?,
+        ];
+        return match the_corner_a_closed_run_starts_at(run) {
+            Some(corner) => {
+                the_seed_on_the_loop_a_corner_is_on(corner, held_apart_by, settled, policy, log)
+            }
+            None => Ok(settled[0].0),
+        };
+    }
+    let mut picked = SmallVec::<[Point; 2]>::new();
     for seed in seeds {
         let (settled, off) = settled_with_a_bound(surfaces, seed)?;
-        if picked_by.is_empty() || every_half_space_holds(picked_by, settled, off, policy, log)? {
-            settled_seeds.push(settled);
+        if every_half_space_holds(picked_by, settled, off, policy, log)? {
+            picked.push(settled);
         }
     }
-    match (picked_by.is_empty(), settled_seeds.as_slice()) {
-        (true, [first, ..]) => Ok(*first),
-        (false, [only]) => Ok(*only),
+    match picked.as_slice() {
+        [only] => Ok(*only),
         _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    }
+}
+
+/// Of the two settled seeds, each with how far off the crossing it may be, the
+/// first that is not across the flat surface between the two loops from
+/// `corner`.
+///
+/// **Why that answers which loop the corner is on.** Where the crossing leaves
+/// two loops, the naming half has proved this very flat surface holds them
+/// apart — every point of each strictly on its own side — and the two seeds
+/// are the places furthest from it, one on each loop. So the corner's side
+/// names its loop, and exactly one seed is on that side. Where the crossing
+/// leaves one loop, both seeds are on it and either will do, and the seeds sit
+/// either side of the flat surface or on it, so one of them is never across it
+/// from the corner.
+///
+/// A corner **on** the flat surface is on no loop of two, so the crossing is a
+/// single loop and the first seed is taken. A corner whose side cannot be told
+/// is refused rather than guessed at: that takes a corner given as a box wide
+/// enough to straddle the flat surface, since an exact corner always has a side.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the corner's side
+/// cannot be told, or both seeds are across from it.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when the flat surface cannot be
+/// written down — its offset overflows — or a seed has no box round it.
+fn the_seed_on_the_loop_a_corner_is_on(
+    corner: PredicatePoint,
+    held_apart_by: TwoLoopsHeldApartBy,
+    seeds: [(Point, f64); 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Point> {
+    let between = Picker::from(
+        the_flat_surface_between_two_loops(held_apart_by)
+            .map_err(|_| Error::CannotWorkOutHowBigACrossingIs)?,
+    );
+    let across_from_the_corner = match which_side_of(&between, corner, policy, log) {
+        Decision::Pos => Decision::Neg,
+        Decision::Neg => Decision::Pos,
+        Decision::Zero => return Ok(seeds[0].0),
+        Decision::Undecidable { .. } => {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        }
+        other => panic!("a half-space came back with a decision nothing knows: {other:?}"),
+    };
+    for (seed, off) in seeds {
+        let Some(at) = somewhere_within(seed, off) else {
+            return Err(Error::CannotWorkOutHowBigACrossingIs);
+        };
+        if which_side_of(&between, at, policy, log) != across_from_the_corner {
+            return Ok(seed);
+        }
+    }
+    Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+}
+
+/// The flat surface the naming half picks a degree-four crossing's two loops
+/// apart with, built exactly as it builds it, so that what it proved about that
+/// surface holds here too.
+///
+/// # Errors
+///
+/// Whatever [`HalfSpace::through_a_point_facing`] and
+/// [`HalfSpace::through_a_point_square_to`] refuse.
+fn the_flat_surface_between_two_loops(held_apart_by: TwoLoopsHeldApartBy) -> Result<HalfSpace> {
+    match held_apart_by {
+        TwoLoopsHeldApartBy::ABallsCentre { ball, pipe } => {
+            HalfSpace::through_a_point_facing(ball.centre(), pipe.axis().direction())
+        }
+        TwoLoopsHeldApartBy::AFatPipesAxis { thin, fat } => {
+            let [thin_way, fat_way] = [thin, fat].map(|pipe| pipe.axis().direction());
+            let across = thin_way * fat_way.length_squared() - fat_way * thin_way.dot(fat_way);
+            HalfSpace::through_a_point_square_to(fat.axis().origin(), fat_way, across)
+        }
     }
 }
 
@@ -4337,7 +4491,7 @@ mod tests {
                     &Policy::certified(),
                     &mut ProvenanceLog::new()
                 ),
-                Ok(WhatARunLiesOn::QuarticPickedUpAt(_))
+                Ok(WhatARunLiesOn::QuarticPickedUpAt(..))
             );
             if marched {
                 let seed = where_a_closed_crossing_starts(
