@@ -731,6 +731,13 @@ struct Crossing {
     /// it by [`Arrangement::one_curve_two_partners_cut`]. Empty for nearly
     /// every crossing.
     also_cut_by: Vec<Surface>,
+    /// Every other surface, as written, whose crossing with the face
+    /// [`Arrangement::crossing_like`] folded into this one as the same curve
+    /// and `also_cut_by` does not name: `partner` written with other numbers,
+    /// such as a pipe's axis slid along itself or turned round, or on a flat
+    /// face another plane through the same line. Empty for nearly every
+    /// crossing.
+    also_drawn_by: Vec<Surface>,
 }
 
 /// One straight line a plane or a pipe rests along a pipe on, the fillet's
@@ -795,6 +802,13 @@ impl Crossing {
     /// pair names one curve and there is nothing to pick.
     fn picked_by(&self) -> &[Picker] {
         &self.picked_by
+    }
+
+    /// Each surface, as written, that cuts the face in this curve.
+    fn every_surface_that_draws_it(&self) -> impl Iterator<Item = &Surface> {
+        core::iter::once(&self.partner)
+            .chain(&self.also_cut_by)
+            .chain(&self.also_drawn_by)
     }
 }
 
@@ -1319,6 +1333,7 @@ impl<'f> Arrangement<'f> {
                         cuts,
                         reaches_the_face: true,
                         also_cut_by: Vec::new(),
+                        also_drawn_by: Vec::new(),
                     });
                     let index = self.crossings.len() - 1;
                     drawn.add(index, sorts_at);
@@ -1378,6 +1393,10 @@ impl<'f> Arrangement<'f> {
                 }
             };
             if same && self.crossings[index].picked_by() == picked_by {
+                let also = &mut self.crossings[index].also_drawn_by;
+                if mine != *partner && !also.contains(partner) {
+                    also.push(*partner);
+                }
                 return Ok(Some(index));
             }
             if !same && self.one_curve_two_partners_cut(index, partner, run, picked_by, policy) {
@@ -2277,8 +2296,9 @@ impl<'f> Arrangement<'f> {
                 !never
                     && it.cuts
                     && it.reaches_the_face
-                    && leaves_out.contains(&it.partner)
-                    && it.also_cut_by.iter().all(|also| leaves_out.contains(also))
+                    && it
+                        .every_surface_that_draws_it()
+                        .all(|surface| leaves_out.contains(surface))
             })
             .collect();
         loop {
@@ -2346,19 +2366,19 @@ impl<'f> Arrangement<'f> {
                     .map(move |(position, _)| (wire, position))
             })
             .collect();
-        let surfaces_of = |index: usize| {
-            core::iter::once(self.crossings[index].partner)
-                .chain(self.crossings[index].also_cut_by.iter().copied())
-        };
         !edges.is_empty()
-            && surfaces_of(crossing).all(|surface| {
-                surfaces_of(along).any(|on| on == surface)
-                    || edges.iter().all(|&(wire, position)| {
-                        self.face.wires[wire][position]
-                            .its_neighbour_leaves_out
-                            .contains(&surface)
-                    })
-            })
+            && self.crossings[crossing]
+                .every_surface_that_draws_it()
+                .all(|surface| {
+                    self.crossings[along]
+                        .every_surface_that_draws_it()
+                        .any(|on| on == surface)
+                        || edges.iter().all(|&(wire, position)| {
+                            self.face.wires[wire][position]
+                                .its_neighbour_leaves_out
+                                .contains(surface)
+                        })
+                })
     }
 
     /// A closed crossing with no node on it still needs one.
