@@ -9989,8 +9989,9 @@ mod tests {
         model: &mut Model,
         [from, to]: [[f64; 2]; 2],
     ) -> crate::SolidKey {
+        use Orientation::{Forward, Reversed};
         let flat = |at: Point, facing: Vector| {
-            Plane::from_point_and_normal(at, facing).expect("a normal of length five")
+            Plane::from_point_and_normal(at, facing).expect("a normal with a length")
         };
         let bottom_corner = model.add_vertex(Point::new(5.0, 0.0, 0.0));
         let top_corner = model.add_vertex(Point::new(5.0, 0.0, 10.0));
@@ -10003,7 +10004,7 @@ mod tests {
         let [low_middle, high_middle] =
             [4.0, 6.0].map(|z| model.add_vertex(Point::new(0.0, 0.0, z)));
         let half_way = Vector::new(from[0] + to[0], from[1] + to[1], 0.0);
-        let mut arc = |model: &mut Model, start, end, z: f64| {
+        let arc = |model: &mut Model, start, end, z: f64| {
             let picker = rcad_geom::HalfSpace::through_a_point_facing(Point::origin(), half_way)
                 .expect("a direction");
             model.add_edge_running(
@@ -10025,7 +10026,7 @@ mod tests {
         let high_out_to_to = model.add_edge(high_middle, high_to);
         let axis = model.add_edge(low_middle, high_middle);
 
-        let mut face = |model: &mut Model, surface, wires: &[&[(_, Orientation)]]| {
+        let face = |model: &mut Model, surface, wires: &[&[(_, Orientation)]]| {
             let wires = wires
                 .iter()
                 .map(|uses| {
@@ -10038,7 +10039,6 @@ mod tests {
                 .collect();
             model.add_face(surface, wires)
         };
-        use Orientation::{Forward, Reversed};
         let bottom = face(
             model,
             Surface::Plane(flat(Point::origin(), Vector::new(0.0, 0.0, -1.0))),
