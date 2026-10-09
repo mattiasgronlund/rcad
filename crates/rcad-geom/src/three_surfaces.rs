@@ -2602,6 +2602,9 @@ fn what_a_plane_through_a_rings_axis_leaves_of_a_pipe_along_its_core(
     )? {
         Decision::Zero => return Ok(MeetOfThree::MoreThanAPoint),
         sign @ (Decision::Pos | Decision::Neg) => sign,
+        Decision::Undecidable { .. } => {
+            unreachable!("`ask` hands an undecided sign back as an error")
+        }
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     };
     let mut places: SmallVec<[PredicatePoint; 2]> = SmallVec::new();
