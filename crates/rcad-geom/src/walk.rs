@@ -36,7 +36,9 @@ use rcad_predicates::{
 };
 use smallvec::SmallVec;
 
-use crate::enclosure::{cross_enclosing, exactly, gap_enclosing, squared_length_enclosing};
+use crate::enclosure::{
+    cross_enclosing, dot_enclosing, exactly, gap_enclosing, squared_length_enclosing,
+};
 use crate::exact::Exact;
 use crate::intersect::{
     Question, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_TWO_PIPES_CROSS, ask,
@@ -47,8 +49,8 @@ use crate::intersect::{
 use crate::march::{march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
-    Cone, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Result,
-    Sphere, Surface, SurfaceMeet, Torus, Vector,
+    Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
+    Surface, SurfaceMeet, Torus, Vector,
 };
 
 /// How far a point [`walk`] hands back can sit off the curve it was worked out
@@ -666,20 +668,21 @@ enum WhatARunLiesOn {
     OneBranchOfAHyperbola(HyperbolaBranch),
 }
 
-/// The flat surface the naming half holds a degree-four crossing's two loops
-/// apart with, kept as the two surfaces it is built from so that only a run
-/// that needs it builds it.
+/// The flat surface that holds a degree-four crossing's two loops apart, kept
+/// as the two surfaces it comes from, so that which side of it a point is on is
+/// asked of the numbers they store and of nothing rounded from them.
 ///
 /// **Exhaustive on purpose.** These are the two pairs that are marched, and a
 /// third would need its own flat surface worked out before it could be.
 #[derive(Clone, Copy)]
 enum TwoLoopsHeldApartBy {
-    /// The one through the ball's centre square to the pipe's axis, which is
-    /// what [`intersect`](crate::intersect)'s `two_loops_either_side_of_a_ball`
-    /// picks with.
+    /// The one through the ball's centre square to the pipe's axis, which
+    /// [`intersect`](crate::intersect)'s `two_loops_either_side_of_a_ball`
+    /// picks with a rounding of.
     ABallsCentre { ball: Sphere, pipe: Cylinder },
     /// The one through the fat pipe's axis square to the thin pipe's way across
-    /// it, which is what `two_loops_either_side_of_a_pipe` picks with.
+    /// it. `two_loops_either_side_of_a_pipe` picks with one that leans off it
+    /// wherever that way cannot be stored square.
     AFatPipesAxis { thin: Cylinder, fat: Cylinder },
 }
 
@@ -993,8 +996,7 @@ fn a_quartic_picked_up_at(
 /// [`Error::CannotPlaceAPointThatCloseToACrossing`] when the marcher's own bound
 /// takes more than its half of the deflection and the policy will not accept it.
 ///
-/// [`Error::CannotWorkOutHowBigACrossingIs`] when the flat surface that holds
-/// the two loops apart cannot be written down, or a settled point has no box
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a settled point has no box
 /// round it.
 ///
 /// The marcher's two refusals.
@@ -1127,8 +1129,8 @@ fn the_corner_a_closed_run_starts_at(run: &NamedRun) -> Option<PredicatePoint> {
 /// A run that nothing picks is either the whole of a single loop or a closed
 /// run whose corner names which loop it is. The first may start at either
 /// seed, since both are on it. The second starts at the seed on its corner's
-/// loop, and the naming half's own flat surface between the two loops says
-/// which that is ([`the_seed_on_the_loop_a_corner_is_on`]). Starting it at the
+/// loop, and the flat surface between the two loops says which that is
+/// ([`the_seed_on_the_loop_a_corner_is_on`]). Starting it at the
 /// first seed walked a ball `0.1` off a pipe's axis with its corner at
 /// `z = −3.9` round the loop at `z = +3.9` (Q1262).
 ///
@@ -1182,29 +1184,42 @@ fn the_seed_this_run_is_picked_up_at(
 /// first on `corner`'s side of the flat surface between the two loops, or on
 /// that surface.
 ///
-/// **Why that answers which loop the corner is on.** Where the naming half
-/// names a crossing's two loops apart, it has proved this very flat surface
-/// holds them apart — every point of each strictly on its own side — and there
-/// is one seed on each loop. So the corner's side names its loop, and exactly
-/// one seed is on that side. Where the crossing leaves one loop, both seeds
-/// are on it and either will do, and the two seeds sit one each side of the
-/// flat surface or both on it, so one of them is on the corner's side or on
-/// the surface. Where the naming half refuses to name two loops
-/// apart, the flat surface is only the best it had, and the corner's side of
-/// it is only as good.
+/// **Why that answers which loop the corner is on.** Where the crossing leaves
+/// two loops, every point of each is on its own side of that surface and well
+/// clear of it: for a ball at least `√(R² − (r + d)²)` along the pipe's axis
+/// from its centre, `d` how far the centre is off that axis, and for two pipes
+/// at least `√(r₂² − (δ + r₁)²)` across the fat one's axis, as `intersect`'s
+/// `two_loops_either_side_of_a_pipe` says. The two seeds are the two ends of
+/// one reach along a line, either side of the point of that line on the
+/// surface, so there is one on each loop. So the corner's side names its loop,
+/// and exactly one seed is on that side. Where the crossing leaves one loop,
+/// both seeds are on it and either will do, and they sit one each side of the
+/// surface or both on it, so one of them is on the corner's side or on the
+/// surface.
+///
+/// **The surface asked is the true one, never the half-space the naming half
+/// stores**, and that is the whole of what this is right about. For two pipes
+/// [`crate::HalfSpace::through_a_point_square_to`] stores a normal square to the fat
+/// axis that leans off the thin pipe's way across it wherever that way cannot be
+/// stored square. Where the naming half proves that leaning surface holds the
+/// loops apart anyway, it names them; where the loops nearly touch it refuses,
+/// and the leaning surface cuts through a loop. Asked of it, a corner on the
+/// loop it cut was walked round the other one with none of its points on its
+/// own (Q1520).
 ///
 /// A corner or a seed **on** the flat surface is on no loop of two, so the
 /// crossing is a single loop and the first seed, or that seed, is taken. A
 /// corner or a seed whose side cannot be told is refused rather than guessed
-/// at.
+/// at. An exact corner's side is told unless a product leaves the range exact
+/// arithmetic holds, so a corner refused for its own side is in practice a box
+/// that reaches across the surface.
 ///
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the corner's side or
 /// a seed's cannot be told, or both seeds are across from the corner.
 ///
-/// [`Error::CannotWorkOutHowBigACrossingIs`] when the flat surface cannot be
-/// written down — its offset overflows — or a seed has no box round it.
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed has no box round it.
 fn the_seed_on_the_loop_a_corner_is_on(
     corner: PredicatePoint,
     held_apart_by: TwoLoopsHeldApartBy,
@@ -1212,24 +1227,21 @@ fn the_seed_on_the_loop_a_corner_is_on(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Point> {
-    let between = Picker::from(
-        the_flat_surface_between_two_loops(held_apart_by)
-            .map_err(|_| Error::CannotWorkOutHowBigACrossingIs)?,
-    );
-    let the_corners_side = match which_side_of(&between, corner, policy, log) {
-        Decision::Pos => Decision::Pos,
-        Decision::Neg => Decision::Neg,
-        Decision::Zero => return Ok(seeds[0].0),
-        Decision::Undecidable { .. } => {
-            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-        }
-        other => panic!("a half-space came back with a decision nothing knows: {other:?}"),
-    };
+    let the_corners_side =
+        match which_side_of_what_holds_two_loops_apart(held_apart_by, corner, policy, log) {
+            Decision::Pos => Decision::Pos,
+            Decision::Neg => Decision::Neg,
+            Decision::Zero => return Ok(seeds[0].0),
+            Decision::Undecidable { .. } => {
+                return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+            }
+            other => panic!("a side of a flat surface came back as {other:?}"),
+        };
     for (seed, off) in seeds {
         let Some(at) = somewhere_within(seed, off) else {
             return Err(Error::CannotWorkOutHowBigACrossingIs);
         };
-        match which_side_of(&between, at, policy, log) {
+        match which_side_of_what_holds_two_loops_apart(held_apart_by, at, policy, log) {
             Decision::Zero => return Ok(seed),
             side @ (Decision::Pos | Decision::Neg) if side == the_corners_side => {
                 return Ok(seed);
@@ -1238,30 +1250,89 @@ fn the_seed_on_the_loop_a_corner_is_on(
             Decision::Undecidable { .. } => {
                 return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
             }
-            other => panic!("a half-space came back with a decision nothing knows: {other:?}"),
+            other => panic!("a side of a flat surface came back as {other:?}"),
         }
     }
     Err(Error::CannotNameWhichPieceOfACrossingThisIs)
 }
 
-/// The flat surface the naming half picks a degree-four crossing's two loops
-/// apart with, built exactly as it builds it, so that what it proved about that
-/// surface holds here too.
+/// Which side of the flat surface that holds a degree-four crossing's two
+/// loops apart the box `at` is on, spending the policy's budget on the answer
+/// when nothing could tell and recording it, as [`which_side_of`] does.
 ///
-/// # Errors
-///
-/// Whatever [`HalfSpace::through_a_point_facing`] and
-/// [`HalfSpace::through_a_point_square_to`] refuse.
-fn the_flat_surface_between_two_loops(held_apart_by: TwoLoopsHeldApartBy) -> Result<HalfSpace> {
-    match held_apart_by {
+/// The sign of `w·(p − c)` for a ball centred at `c` and a pipe along `w`, and
+/// of `a·(p − o₂)` for two pipes, with `a = w₁(w₂·w₂) − w₂(w₁·w₂)` the thin
+/// pipe's way across the fat one's axis and `o₂` the fat axis's origin. Both
+/// are asked of the numbers the surfaces store, so nothing rounded stands
+/// between the surface and the answer, and exactly where `at` is exact.
+fn which_side_of_what_holds_two_loops_apart(
+    held_apart_by: TwoLoopsHeldApartBy,
+    at: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Decision {
+    let near = at.enclosure();
+    let exact_at = at.exact_coordinates();
+    let from = |here: [f64; 3]| -> [Interval; 3] {
+        core::array::from_fn(|axis| near[axis] - Interval::exactly(here[axis]))
+    };
+    let (named, (decision, level)) = match held_apart_by {
         TwoLoopsHeldApartBy::ABallsCentre { ball, pipe } => {
-            HalfSpace::through_a_point_facing(ball.centre(), pipe.axis().direction())
+            let centre = ball.centre().coordinates();
+            let along = pipe.axis().direction().components();
+            let question = Question {
+                named: WHERE_A_BALL_AND_A_PIPE_CROSS,
+                enclosing: || dot_enclosing(exactly(along), from(centre)),
+                exactly: || {
+                    Exact::dot_of_two_exact(
+                        &Exact::of_each(along),
+                        &Exact::gap_between(centre, exact_at?),
+                    )
+                },
+            };
+            (question.named, decide(&question))
         }
         TwoLoopsHeldApartBy::AFatPipesAxis { thin, fat } => {
-            let [thin_way, fat_way] = [thin, fat].map(|pipe| pipe.axis().direction());
-            let across = thin_way * fat_way.length_squared() - fat_way * thin_way.dot(fat_way);
-            HalfSpace::through_a_point_square_to(fat.axis().origin(), fat_way, across)
+            let origin = fat.axis().origin().coordinates();
+            let [thin_way, fat_way] = [thin, fat].map(|pipe| pipe.axis().direction().components());
+            let question = Question {
+                named: WHERE_TWO_PIPES_CROSS,
+                enclosing: || {
+                    let squared_fat = squared_length_enclosing(exactly(fat_way));
+                    let leaning = dot_enclosing(exactly(thin_way), exactly(fat_way));
+                    let across = core::array::from_fn(|axis| {
+                        Interval::exactly(thin_way[axis]) * squared_fat
+                            - Interval::exactly(fat_way[axis]) * leaning
+                    });
+                    dot_enclosing(across, from(origin))
+                },
+                exactly: || {
+                    let squared_fat = Exact::dot_of(fat_way, fat_way)?;
+                    let leaning = Exact::dot_of(thin_way, fat_way)?;
+                    let across = |axis: usize| {
+                        Some(
+                            Exact::of(thin_way[axis])
+                                .times(&squared_fat)?
+                                .minus(&Exact::of(fat_way[axis]).times(&leaning)?),
+                        )
+                    };
+                    Exact::dot_of_two_exact(
+                        &[across(0)?, across(1)?, across(2)?],
+                        &Exact::gap_between(origin, exact_at?),
+                    )
+                },
+            };
+            (question.named, decide(&question))
         }
+    };
+    match decision {
+        Decision::Pos | Decision::Zero | Decision::Neg => decision,
+        Decision::Undecidable { enclosure } => resolve_under_policy(
+            Record::new(named, &[at], level, enclosure, Measures::Length),
+            policy,
+            log,
+        ),
+        other => panic!("a side of a flat surface came back as {other:?}"),
     }
 }
 
@@ -4871,6 +4942,170 @@ mod tests {
                     "at {deflection} a point walked is {nearest} from the corner {corner:?}"
                 );
             }
+        }
+    }
+
+    /// A thin pipe of radius one slanting through a fat one of radius four,
+    /// its axis `2.9` or `2.99` from the fat one's, leaves two loops that
+    /// nearly touch, and a closed run whose corner is on either is walked round
+    /// that one, whichever face is listed first.
+    ///
+    /// The naming half refuses to name these two loops apart: of the flat
+    /// surfaces it can store square to the fat pipe's axis, none leans far
+    /// enough towards the thin pipe's way across it. The walk asked which side
+    /// of that stored surface the corner was on, and the surface cuts through
+    /// the loop on the `−` side, so a run with its corner on that loop was
+    /// walked round the other one with none of its points on its own (Q1520).
+    /// The loops are either side of `â·p = 0`, `â` the thin pipe's way across
+    /// the fat one's axis, and the corner is where the thin pipe's line
+    /// furthest from that axis meets the fat wall.
+    #[test]
+    fn a_closed_run_round_either_of_two_nearly_touching_loops_of_slanted_pipes_is_walked_round_that_one()
+     {
+        for (thin_way, apart) in [
+            (Vector::new(0.3, -0.2, 0.9), 2.9),
+            (Vector::new(0.3, -0.2, 0.9), 2.99),
+            (Vector::new(0.7, 0.1, 0.7), 2.99),
+            (Vector::new(0.1, 0.5, -0.8), 2.99),
+        ] {
+            either_nearly_touching_loop_is_walked_round_that_one(thin_way, apart);
+        }
+    }
+
+    fn either_nearly_touching_loop_is_walked_round_that_one(thin_way: Vector, apart: f64) {
+        let fat_way = Vector::new(1.0, 1.0, 0.0);
+        let [thin_radius, fat_radius] = [1.0, 4.0];
+        let w1 = thin_way.normalized().expect("a direction");
+        let w2 = fat_way.normalized().expect("a direction");
+        let off_the_fat_axis = w1.cross(w2).normalized().expect("axes that cross");
+        let leaning = w1.dot(w2);
+        let across = (w1 - w2 * leaning).normalized().expect("axes that cross");
+        let thin_origin = Point::origin() + off_the_fat_axis * apart;
+        let fat = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::origin(), fat_way).expect("a direction"),
+                fat_radius,
+            )
+            .expect("a radius"),
+        );
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(thin_origin, thin_way).expect("a direction"),
+                thin_radius,
+            )
+            .expect("a radius"),
+        );
+        assert_eq!(
+            crate::intersect(&fat, &thin, &Policy::certified(), &mut ProvenanceLog::new()),
+            Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+            "the naming half tells the loops of a pipe along {thin_way:?} {apart} off apart, \
+             so they do not test the walk"
+        );
+        let furthest_out = apart + thin_radius;
+        let along = (fat_radius * fat_radius - furthest_out * furthest_out).sqrt()
+            / (1.0 - leaning * leaning).sqrt();
+        for side in [1.0, -1.0] {
+            let corner = thin_origin + off_the_fat_axis * thin_radius + w1 * (side * along);
+            let run = NamedRun::new(
+                EdgeRun::RightRoundWhereItsFacesCross,
+                [corner, corner].map(|end| PredicatePoint::from(end.coordinates())),
+            )
+            .expect("a closed run with one corner");
+            for pair in [[&fat, &thin], [&thin, &fat]] {
+                let walked = walk(
+                    &run,
+                    pair,
+                    Deflection::of(0.01).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a loop of two slanted pipes is walked");
+                let on_its_own_loop = walked
+                    .points()
+                    .iter()
+                    .filter(|point| (**point - Point::origin()).dot(across) * side > 0.0)
+                    .count();
+                assert!(
+                    walked.points().len() > 2 && on_its_own_loop == walked.points().len(),
+                    "for a pipe along {thin_way:?} {apart} off, the run round the loop on the \
+                     {side} side has {on_its_own_loop} of its {} points on that loop",
+                    walked.points().len()
+                );
+            }
+        }
+    }
+
+    /// A closed run whose corner is known only as a box reaching across the
+    /// flat surface between a crossing's loops is refused, even where the
+    /// crossing is one loop and either seed would do. A box that stops short of
+    /// that surface, and an exact corner a hair either side of it, are walked.
+    ///
+    /// Nothing in the kernel builds such a corner: a mesh and `validate` hand
+    /// [`walk`] a closed run's corner as the exact point its vertex stores, and
+    /// a fuse puts that vertex at the seed ([`where_a_closed_crossing_starts`]).
+    /// [`NamedRun::new`] takes a box all the same, and this is what a box gets
+    /// (Q1520).
+    #[test]
+    fn a_closed_run_whose_corner_is_a_box_across_the_surface_between_its_loops_is_refused() {
+        let walk_round = |corner: PredicatePoint, pair: [&Surface; 2]| {
+            let run = NamedRun::new(EdgeRun::RightRoundWhereItsFacesCross, [corner, corner])
+                .expect("a closed run with one corner");
+            walk(
+                &run,
+                pair,
+                Deflection::of(0.01).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+        };
+
+        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 2.0).expect("a radius"));
+        let ball = Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 0.0), 2.0).expect("a radius"));
+        let on_the_one_loop = |z: f64| [0.5, 3.75_f64.sqrt(), z];
+        let round_where_it_crosses =
+            on_the_one_loop(0.0).map(|middle| Interval::around(middle, 1e-12).expect("a box"));
+        assert_eq!(
+            walk_round(
+                PredicatePoint::Constructed(round_where_it_crosses),
+                [&ball, &pipe]
+            )
+            .map(|walked| walked.points().len()),
+            Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+            "a box round where the one loop crosses the surface through the ball's centre"
+        );
+        for z in [1e-300, -1e-300] {
+            let walked = walk_round(PredicatePoint::from(on_the_one_loop(z)), [&ball, &pipe])
+                .expect("an exact corner on the one loop is walked");
+            assert!(
+                walked.points().len() > 2,
+                "the loop from the corner at z = {z} has points"
+            );
+        }
+
+        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 1.0).expect("a radius"));
+        let ball = Surface::Sphere(Sphere::new(Point::new(0.1, 0.0, 0.0), 4.0).expect("a radius"));
+        let on_the_loop_below = -(14.79_f64.sqrt());
+        let reaching_up_to = |top: f64| {
+            PredicatePoint::Constructed([
+                Interval::exactly(-1.0),
+                Interval::exactly(0.0),
+                Interval::new(on_the_loop_below, top).expect("a box"),
+            ])
+        };
+        assert_eq!(
+            walk_round(reaching_up_to(0.5), [&ball, &pipe]).map(|walked| walked.points().len()),
+            Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+            "a box from the loop below up past the surface between the two loops"
+        );
+        let walked = walk_round(reaching_up_to(-1e-9), [&ball, &pipe])
+            .expect("a box that stops short of the surface between the loops is walked");
+        assert!(walked.points().len() > 2, "the loop below has points");
+        for point in walked.points() {
+            let [x, y, z] = point.coordinates();
+            assert!(
+                z < 0.0,
+                "the run from a box below the surface was walked through ({x}, {y}, {z})"
+            );
         }
     }
 }
