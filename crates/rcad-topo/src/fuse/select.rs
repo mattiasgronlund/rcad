@@ -3857,23 +3857,31 @@ mod tests {
         assert_eq!(first_held, PredicatePoint::from([4.0, 0.0, 0.0]));
     }
 
-    /// A plane square to the axis cuts the tube in a ring-shaped piece, and
-    /// what the torus's sign holds on it is not the piece on either side of a
-    /// pipe, so nothing here can say.
+    /// `z = 0.5` cuts the tube in a band between two whole circles round the
+    /// axis. A point the torus's sign holds there is inside the outer circle
+    /// and outside the inner one, whichever it is, so the band holds it. No
+    /// picker says that, and until the wire's own circle was asked the band
+    /// could not say what it held (Q1501).
     #[test]
-    fn a_piece_on_a_plane_square_to_a_bends_axis_cannot_say_what_it_holds() {
+    fn a_band_on_a_plane_square_to_a_bends_axis_holds_its_own_points() {
         let (ring, _) = a_bend_and_its_end_cap_plane();
-        let across = Plane::from_coefficients([0.0, 0.0, 1.0, 0.5]).expect("a normal");
+        let across = Plane::from_coefficients([0.0, 0.0, 1.0, -0.5]).expect("a normal");
         let reach = 0.75_f64.sqrt();
-        let piece = a_flat_piece_inside_the_ring(
+        let band = a_flat_piece_inside_the_ring(
             ring,
             across,
             &[[4.0 + reach, 0.0, 0.5], [4.0 - reach, 0.0, 0.5]],
         );
+        let holds =
+            |at: [f64; 3]| the_piece_holds_asked_as_selection_asks(&band, PredicatePoint::from(at));
+        assert_eq!(holds([4.0, 0.0, 0.5]), Some(true), "in the band");
         assert_eq!(
-            the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from([4.0, 0.0, 0.5])),
-            None
+            holds([0.0, -4.0, 0.5]),
+            Some(true),
+            "in the band, a quarter turn on"
         );
+        assert_eq!(holds([2.0, 0.0, 0.5]), Some(false), "in the inner disk");
+        assert_eq!(holds([6.0, 0.0, 0.5]), Some(false), "beyond the band");
     }
 
     /// A bend's start cap on `y = 0`: its chord along the floor `z = 0` from
