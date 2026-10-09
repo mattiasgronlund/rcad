@@ -59,10 +59,10 @@
 //! the curves are all there and none of them can be named with the runs this
 //! kernel has. So the first two rows are the theorem above, and the last two
 //! are §36.20's quartic-and-worse, still weighed and still left. A bar on the
-//! axis that does reach the tube is still refused, now where a piece of the
-//! answer is meshed, and
-//! `a_bend_and_a_bar_through_its_tube_on_its_axis_are_refused_where_a_piece_of_the_bend_is_meshed`
-//! says why. Neither
+//! axis that does reach the tube, the bar of the ring's own radius, answers
+//! since row Q1387 by every rule both ways round, and
+//! `a_quarter_bend_and_the_bar_of_its_own_radius_fuse_by_every_rule_to_what_pappus_gives`
+//! in `a_bend_under_two_planes.rs` checks each answer against Pappus. Neither
 //! refusal touches `a_bend_fused_with_a_copy_of_itself_is_the_bend_or_nothing`
 //! below — the one test in this file that does reach the arrangement,
 //! `select::choose` and `assemble`'s `join_up_what_is_one_face`, under all
@@ -426,56 +426,6 @@ fn a_bend_and_a_bar_through_its_hole_on_its_axis_fuse_into_what_pappus_gives() {
                 assert!(
                     (measured - volume).abs() <= allowed,
                     "{named}: measured {measured} where Pappus gives {volume}, allowed {allowed}"
-                );
-            }
-        }
-    }
-}
-
-/// A bar on a bend's axis that does reach its tube, the bar of the ring's own
-/// radius, which crosses the tube at its top and its bottom, is still refused
-/// by name under every rule, and now where a piece of the bend's wall is
-/// meshed.
-///
-/// `intersect` names the two circles by their planes (rows Q1334 and Q1376,
-/// §378), the arrangement picks each out by the plane halfway to the other and
-/// orders points round it as round its plane's circle, and the corner where a
-/// cap of the bend crosses a circle is `three_surfaces`'s sixth road. So every
-/// face is split. `assemble` names an arc of such a circle by the ring and the
-/// bar with a half-space through its chord, and since row Q1396 `walk` draws
-/// it, round the circle the bar and that circle's plane cross in.
-///
-/// What refuses now is `assemble` measuring the answer while it nests the
-/// shells: the mesher's `cut_a_cap_up_to_its_pole` finds no pole on a piece of
-/// the bend's wall whose one wire goes right round the tube. Measured on ring
-/// four and tube one, in the torus's chart of (round the tube, round the
-/// ring), that wire's corners are `(π/2, 0)`, `(3π/2, 0)`, `(3π/2, π/4)`,
-/// `(3π/2, π/2)`, `(5π/2, π/2)`, `(5π/2, π/4)`: it takes the start cap's inner
-/// half, through `π`, and the end cap's outer half, through `2π`, so it climbs
-/// a whole turn. Each half of a cap walks as its half-space says, so the
-/// mismatch is in which two halves the piece was built with. A **gap**
-/// (§16.10): Pappus gives every answer, the shared part being a quarter of
-/// `π²Rr² − 4πr³/3`.
-#[test]
-fn a_bend_and_a_bar_through_its_tube_on_its_axis_are_refused_where_a_piece_of_the_bend_is_meshed() {
-    let policy = Policy::certified();
-    for (ring, tube) in [(4.0, 1.0), (6.0, 2.0)] {
-        let (model, bend, bar) = a_bend_and_a_bar_on_its_axis(ring, tube, ring);
-        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-            for (arguments, tools) in [(bend, bar), (bar, bend)] {
-                let fused = model.clone().fuse(
-                    &[arguments],
-                    &[tools],
-                    rule,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                );
-                assert!(
-                    matches!(
-                        fused,
-                        Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
-                    ),
-                    "ring {ring}, tube {tube}, {rule:?}: {fused:?}"
                 );
             }
         }
