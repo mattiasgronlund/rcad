@@ -2593,20 +2593,21 @@ fn what_a_plane_through_a_rings_axis_leaves_of_a_pipe_along_its_core(
     let refused = || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at);
     let loop_in_the_plane = how_a_plane_cuts_a_rings_loop(flat, ring, pipe).ok_or_else(refused)?;
     let square = &loop_in_the_plane.lines.squared;
-    let sign = match ask(
+    let sign = ask(
         &the_sign_of(WHERE_THREE_SURFACES_MEET, square),
         Measures::Length,
         at,
         policy,
         log,
-    )? {
+    )?;
+    match sign {
         Decision::Zero => return Ok(MeetOfThree::MoreThanAPoint),
-        sign @ Decision::Pos | sign @ Decision::Neg => sign,
+        Decision::Pos | Decision::Neg => {}
         Decision::Undecidable { .. } => {
             unreachable!("`ask` hands an undecided sign back as an error")
         }
         other => unreachable!("a sign question answers with a sign: {other:?}"),
-    };
+    }
     let mut places: SmallVec<[PredicatePoint; 2]> = SmallVec::new();
     for step in the_two_places_along_it(&loop_in_the_plane.lines, sign) {
         let line = loop_in_the_plane.the_line_along_the_axis_at(ring, pipe, step);
