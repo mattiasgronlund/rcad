@@ -91,7 +91,7 @@
 //! tried after the sides, the corners and the plane, so a piece any of them
 //! placed is placed as before.
 //!
-//! # And last, by an edge of a face it lies on
+//! # Then by an edge of a face it lies on
 //!
 //! A flat piece that lies on the plane of a flat face `G` of a solid, with a
 //! straight side along an edge `e` of `G`, both ends exactly on `e`, is placed
@@ -101,8 +101,20 @@
 //! on `G`'s side the piece lies on `G`, and on the other it is inside or
 //! outside by the outward plane across `e`. This is the one side the piece
 //! across passes over, since the plane across `e` holds both its ends. It is
-//! tried after every other rule, so a piece any of them placed is placed as
+//! tried after every rule above, so a piece any of them placed is placed as
 //! before.
+//!
+//! # And last, by a side that starts inside an edge
+//!
+//! A flat piece with a straight side along the plane of a flat face `G` of a
+//! solid, starting strictly inside an edge `e` of `G`, is placed against that
+//! solid from where that side runs ([`by_a_side_from_an_edge_it_starts_on`],
+//! §365.8, Q1608, Q1609). Near the start the solid's skin is `G` and the face
+//! across `e`: where the side runs along `G`, the piece is inside when its
+//! material is on `G`'s inner side, and where it runs on beyond `e`, off the
+//! skin, the piece is inside when the side runs behind the outward plane
+//! across `e`. It is tried after every other rule, so a piece any of them
+//! placed is placed as before.
 
 use rcad_geom::{
     Cone, Cylinder, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
@@ -164,10 +176,12 @@ pub(crate) struct Chosen {
 /// it has to be placed against, and neither a side it shares, nor a corner, nor
 /// a plane ([`by_a_plane`]), nor the piece of its own face across a side
 /// ([`by_the_piece_across_a_side`]), nor an edge of a face it lies on
-/// ([`by_an_edge_of_a_face_it_lies_on`]) placed it: under [`INSIDE_A_PIECE`] when no
-/// point inside it was found, and under [`PLACED_AGAINST_EVERY_SOLID`] when a
-/// point was found and could not be placed, or only a rung of
-/// [`rungs_towards_each_crossing`], [`shorter_steps_across_a_curved_piece`] or
+/// ([`by_an_edge_of_a_face_it_lies_on`]), nor a side that starts inside an edge
+/// ([`by_a_side_from_an_edge_it_starts_on`]) placed it: under
+/// [`INSIDE_A_PIECE`] when no point inside it was found, and under
+/// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be
+/// placed, or only a rung of [`rungs_towards_each_crossing`],
+/// [`shorter_steps_across_a_curved_piece`] or
 /// [`between_the_middles_of_a_cone_pieces_sides`] was found.
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
 /// a point offered before the rungs was found inside the piece and the ray
@@ -243,7 +257,8 @@ pub(crate) fn choose(
             };
             let placed = placed
                 .or_else(|| in_plane.as_ref().and_then(by_the_piece_across))
-                .or_else(|| by_an_edge_of_a_face_it_lies_on(&solids, against, mine, piece));
+                .or_else(|| by_an_edge_of_a_face_it_lies_on(&solids, against, mine, piece))
+                .or_else(|| by_a_side_from_an_edge_it_starts_on(&solids, against, mine, piece));
             placed.ok_or_else(|| match unfollowed {
                 Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
                 None => gave_up(unplaced, &corners.concat(), Measures::Length, log),
