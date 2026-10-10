@@ -280,7 +280,8 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// Q1279 it was 30 of 447, 6.71%, and since Q1279 it is 16 of 447, 3.58%;
 /// the threshold was not moved then either. Since Q1357 it was 13 of 447,
 /// 2.91%. Just before Q1034 and Q1606 it was 14 of 450, 3.11%, and since them
-/// it is 8 of 450, 1.78%, and the threshold stays where it is.
+/// it is 8 of 450, 1.78%, and the threshold stays where it is. Since Q1608 and
+/// Q1609 it is 2 of 450, 0.44%, and it still stays.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
 /// drift — 6.1 points is twenty-six fuses, nearly four times the headroom
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
@@ -670,6 +671,12 @@ const A_DRAW_STRAYS_THIS_MANY_SPREADS: f64 = 3.0;
 /// touching along a line with four faces along it, which is this row's
 /// configuration (`tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`). Five
 /// is inside one to twelve.
+///
+/// **Since Q1608 and Q1609 it is 7 of 450, 1.6%, from 5.** The two new ones were
+/// refused before too, for want of a point inside a sliver: two combs' union and
+/// first less second, now refused with four faces along an edge. Whether their
+/// stored planes draw four faces there was not run; the same file pins them
+/// with the reasoning against it. Seven is inside one to twelve.
 ///
 /// **So the floor is a count, [`A_SKEW_PAIR_IS_NOT_A_SOLID_AT_LEAST`], and not
 /// a share.** It was written `0.0023`, one fuse in 429, and the number of fuses
@@ -1798,6 +1805,17 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
 /// not a solid, from 2 to 5 in all: each is two solids that touch along a line
 /// (`tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs` pins four pairs of
 /// this corpus, both orders).
+///
+/// **Since Q1608 and Q1609 it is 2 of 450, from 8, and both are the edge too
+/// short**, so that is the name this row now insists on. It is reached where
+/// this family was built to reach: three cut lines through one corner, which
+/// leave an edge `2^-51` long beside a coordinate of 5. The six that named the
+/// point were every rule of two pairs, a frame and an ell, and two combs, each
+/// stopped on a triangle a rounding across on one solid's floor with a side
+/// starting inside an upright edge of the other, and a flat piece is now placed
+/// by where such a side runs. The frame and ell's three answer and so does the
+/// combs' intersection; the combs' union and first less second come back not a
+/// solid, from 5 to 7 in all (§365.8's note on Q1608 and Q1609).
 #[test]
 fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
     let tally = measured(a_skew_pair(), |configuration, tally| {
@@ -1821,7 +1839,7 @@ fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
             tally.fuses.get(),
             SKEW_REFUSALS_MUST_STAY_BELOW * 100.0
         );
-        tally.the_cause_named_most_often_is(A_POINT_INSIDE_A_PIECE);
+        tally.the_cause_named_most_often_is(AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES);
     }
 }
 
@@ -1871,6 +1889,13 @@ fn how_often_a_certified_fuse_of_a_pair_leaning_the_same_way_refuses() {
 /// With Q1034 and Q1606 it is 4 of 280, and 20 refused in all: 12 name a point
 /// inside a piece of a face, and 4 a point in a piece that every solid could
 /// place. Which fuses moved since the 276 was not traced.
+///
+/// Since Q1608 and Q1609 it is 12 refused, 4 under each of those three names,
+/// and 2 of the comparisons disagree about whether the answer is a solid. Both
+/// are one pair drawn twice, two combs leaning opposite ways: their
+/// intersection answers two parts with the bigger comb first and is refused
+/// with four faces along an edge the other way round, where before both ways
+/// were refused for a point inside a piece (§365.8's note on Q1608 and Q1609).
 #[test]
 fn swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit() {
     let tally = over(CASES, a_skew_pair(), |configuration, tally| {
@@ -4065,21 +4090,18 @@ fn the_same_wall_built_from_a_longer_edge_is_the_same_plane() {
     );
 }
 
-/// The search for a point inside a piece of a face, which the skew family's
-/// refusals name since Q901.
-///
-/// Named here because [`how_often_a_certified_fuse_of_a_skew_pair_refuses`]
-/// asserts on it rather than only printing it, and a bare string in an
-/// assertion is a thing that goes stale silently.
-///
-/// It was `"order along a crossing"`, the predicate that settles which of two
-/// points on a crossing comes first, until Q901 had that order asked of the
-/// planes two points a rounding apart are the meets of.
-const A_POINT_INSIDE_A_PIECE: &str = "a point inside a piece of a face";
-
 /// What a flat fuse refuses when its answer keeps an edge too short to stand
 /// beside its own coordinates: [`Invalid::DynamicRangeTooWide`], as
 /// [`a_flat_refusal`] names it.
+///
+/// It is also what [`how_often_a_certified_fuse_of_a_skew_pair_refuses`]
+/// insists the skew family's refusals mostly name, and named here so that a
+/// bare string in that assertion cannot go stale silently. That name was
+/// `"order along a crossing"`, the predicate that settles which of two points
+/// on a crossing comes first, until Q901 had that order asked of the planes two
+/// points a rounding apart are the meets of, and then `"a point inside a piece
+/// of a face"` until Q1608 and Q1609 placed the last two slivers that search
+/// found no point in.
 const AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES: &str =
     "an answer with an edge too short beside its coordinates";
 
