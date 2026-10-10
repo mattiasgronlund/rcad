@@ -48,8 +48,8 @@ const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference
 /// crossing. Under `Policy::tolerant(25.0)` each is refused
 /// `CannotNameWhichPieceOfACrossingThisIs`, with one `side of a half-space`
 /// record. Under `Policy::certified()` each is refused for the range,
-/// `DynamicRangeTooWide` at `2⁵¹`, the two places' `2⁻⁵⁰` beside the block's
-/// corners at 2, with no record at all.
+/// `DynamicRangeTooWide` at `2⁵¹ + 2²⁵`, the block's bottom corners at
+/// `z = −2 − 2⁻²⁵` over the two places' `2⁻⁵⁰`, with no record at all.
 ///
 /// **Q1614 moved the certified six.** The tolerant refusal and its record both
 /// come out of nesting the answer's shells, and since Q1614 the fuse asks the
@@ -82,7 +82,11 @@ fn the_order_of_the_two_places_is_decided_and_the_slivers_between_them_are_place
                 let mut log = ProvenanceLog::new();
                 match fuse_a_block_edge_grazing_a_ball(rule, ball_first, &policy, &mut log) {
                     Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) if certified => {
-                        assert_eq!(ratio, f64::powi(2.0, 51), "{case}");
+                        assert_eq!(
+                            ratio,
+                            (2.0 + f64::powi(2.0, -25)) * f64::powi(2.0, 50),
+                            "{case}"
+                        );
                     }
                     Err(Error::Geometry(GeometryError::CannotNameWhichPieceOfACrossingThisIs))
                         if !certified => {}
