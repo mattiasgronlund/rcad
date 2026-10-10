@@ -18,26 +18,39 @@
 //! crosses the skin is cut along it, so its points sit clear of it; a piece on
 //! the same surface is caught as lying on the face, or shown off it; and a
 //! sliver thinner than a box has no point found inside it at all. What is
-//! left is a piece a rounding off a face of the ring solid, on a surface the
-//! ring is crossed with, since any other is refused when the two are crossed
-//! (`rcad_geom::Error`'s two torus refusals). Q1393 tried the three ways a
-//! face can be that, and pins each below:
+//! left is a piece a rounding off a face of the ring solid.
 //!
-//! - a plane through the ring's axis a rounding off a cap, placed there by a
-//!   turn whose cosine or sine rounds: two bends, and a quarter of a bar over
-//!   a bend;
+//! Every surface in the fuse is one the ring is crossed with: a plane through
+//! the ring's axis or square to it, a ball, a pipe or a cone on the axis, or
+//! the ring itself. Any other is refused when the two are crossed
+//! (`rcad_geom::Error`'s two torus refusals), and that holds for the ring
+//! solid's own planes too: a block a bend grows out of is refused for its
+//! sides, under a quarter of a tube whose every surface the ring is crossed
+//! with. So the piece, and the face it is a rounding off, lie on such
+//! surfaces, and Q1393 tried each kind it could build:
+//!
+//! - a plane through the axis a rounding off a cap, placed there by a turn
+//!   whose cosine or sine rounds: two bends, and a quarter of a bar over a
+//!   bend;
 //! - a plane square to the axis a hair off a flat face: a quarter of a tube
-//!   under half a ring;
+//!   under half a ring, and over the block a bend grows out of;
+//! - a pipe on the axis a hair off a pipe face: a bar on the wall of half a
+//!   ring joined to a quarter of a tube. That solid is refused with any bar in
+//!   its hole, one touching nothing too, so this kind is not reached;
 //! - a torus a rounding off a torus: a bend and a copy of it moved a hair.
 //!
-//! Run with `settle_against_each`'s arm made to print, only the placed bends
-//! reached it: 3 of their 54 fuses, ring 4 and tube 1 turned `−π/2`, the first
-//! bend named first, one fuse per rule. Each time the piece was the placed
-//! bend's cap on the plane whose normal is `(−2.2e-16, 1, 0)`, and its three
-//! points, at `(4, 8.9e-16, 0)`, `(4, 6.3e-16, 0)` and `(4, 8.9e-16, 0)`, could
-//! not be fired at the first bend's ring. Each of those pieces was then placed
-//! inside by a side, a corner, a plane or a piece across, and each fuse was
-//! refused at a later piece no point was found inside.
+//! A ball or a cone on the axis a hair off a face of its own kind was not
+//! tried.
+//!
+//! Run with `settle_against_each`'s arm made to print, every fuse here, only
+//! the placed bends reached it: 3 of their 54 fuses, ring 4 and tube 1 turned
+//! `−π/2`, the first bend named first, one fuse per rule. Each time the piece
+//! was the placed bend's cap on the plane whose normal is `(−2.2e-16, 1, 0)`,
+//! and its three points, at `(4, 8.9e-16, 0)`, `(4, 6.3e-16, 0)` and
+//! `(4, 8.9e-16, 0)`, could not be fired at the first bend's ring. Each of
+//! those pieces was then placed inside by a side, a corner, a plane or a piece
+//! across, and each fuse was refused at a later piece no point was found
+//! inside.
 //!
 //! Q1125's run, of all 1755 tests of this crate's suite with the arm made to
 //! print, printed nine times, all in the placed bends' test, and each piece it
@@ -540,6 +553,314 @@ fn fused_or_refused(
             &mut ProvenanceLog::new(),
         )
         .map(|answer| answer.solids().len())
+}
+
+#[test]
+fn q1393_probe_f5() {
+    for (label, lo, hi, z, up) in [
+        ("far exact", 5.25, 5.75, 1.5, 0.0),
+        ("far gap 1e-15", 5.25, 5.75, 1.5, -1e-15),
+        ("far overlap 1e-15", 5.25, 5.75, 1.5, 1e-15),
+        ("far gap 1e-13", 5.25, 5.75, 1.5, -1e-13),
+        ("far overlap 1e-13", 5.25, 5.75, 1.5, 1e-13),
+        (
+            "far gap 4.4e-16",
+            5.25,
+            5.75,
+            1.5,
+            -4.440_892_098_500_626e-16,
+        ),
+    ] {
+        for rule in EVERY_RULE {
+            for block_first in [true, false] {
+                let what = format!("F5 {label} {rule:?} block first {block_first}");
+                let mut model = a_model();
+                let block = probe_block::a_bend_out_of_a_block(&mut model).expect("block");
+                let policy = Policy::certified();
+                let rectangle =
+                    ProfileBuilder::new(vec![[lo, -4.0], [hi, -4.0], [hi, -2.0], [lo, -2.0]])
+                        .build(&policy, &mut ProvenanceLog::new())
+                        .expect("a rectangle");
+                let other = model
+                    .add_extrusion(&rectangle, 2.0 * z, &at_height(-z))
+                    .expect("a box");
+                if up != 0.0 {
+                    model
+                        .place_solid(
+                            other,
+                            &Isometry::translation(Vector::new(0.0, up, 0.0)).unwrap(),
+                        )
+                        .unwrap();
+                }
+                let got = fused_or_refused(&mut model, block, other, rule, block_first);
+                let said = match &got {
+                    Ok(n) => format!("Ok({n})"),
+                    Err(Error::Undecidable { records }) => format!(
+                        "Undecidable at {:?}",
+                        records.records().last().map(|record| record.predicate())
+                    ),
+                    Err(other) => format!("{other:?}"),
+                };
+                eprintln!("PROBE-RESULT {what}: {said}");
+            }
+        }
+    }
+}
+
+#[test]
+fn q1393_probe_f6() {
+    for (label, up) in [
+        ("exact", 0.0),
+        ("gap 1e-15", 1e-15),
+        ("overlap 1e-15", -1e-15),
+        ("gap 4.4e-16", 4.440_892_098_500_626e-16),
+        ("overlap 4.4e-16", -4.440_892_098_500_626e-16),
+        ("gap 1e-13", 1e-13),
+        ("overlap 1e-13", -1e-13),
+    ] {
+        for rule in EVERY_RULE {
+            for block_first in [true, false] {
+                let what = format!("F6 {label} {rule:?} block first {block_first}");
+                let mut model = a_model();
+                let block = probe_block::a_bend_out_of_a_block(&mut model).expect("block");
+                let policy = Policy::certified();
+                let triangle = ProfileBuilder::new(vec![[0.0, 0.0], [0.0, -10.0], [10.0, 0.0]])
+                    .build(&policy, &mut ProvenanceLog::new())
+                    .expect("a triangle");
+                let prism = model
+                    .add_extrusion(&triangle, 1.5, &at_height(2.0))
+                    .expect("a prism");
+                let outer = model
+                    .add_round_bar(7.0, 8.0, &at_height(-1.0))
+                    .expect("a round bar");
+                let inner = model
+                    .add_round_bar(1.5, 8.0, &at_height(-1.0))
+                    .expect("a round bar");
+                let answer = model
+                    .fuse(
+                        &[prism],
+                        &[outer],
+                        Rule::Intersection,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{what}: outer {why:?}"));
+                let &[quarter] = answer.solids() else {
+                    panic!("{what}: one, got {:?}", answer.solids());
+                };
+                let answer = model
+                    .fuse(
+                        &[quarter],
+                        &[inner],
+                        Rule::Difference,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{what}: inner {why:?}"));
+                let &[quarter] = answer.solids() else {
+                    panic!("{what}: one, got {:?}", answer.solids());
+                };
+                if up != 0.0 {
+                    model.place_solid(quarter, &at_height(up)).unwrap();
+                }
+                let got = fused_or_refused(&mut model, block, quarter, rule, block_first);
+                let said = match &got {
+                    Ok(n) => format!("Ok({n})"),
+                    Err(Error::Undecidable { records }) => format!(
+                        "Undecidable at {:?}",
+                        records.records().last().map(|record| record.predicate())
+                    ),
+                    Err(other) => format!("{other:?}"),
+                };
+                eprintln!("PROBE-RESULT {what}: {said}");
+            }
+        }
+    }
+}
+
+#[test]
+fn q1393_probe_f7() {
+    let ulp_at_2 = 4.440_892_098_500_626e-16;
+    let ulp_at_6 = 8.881_784_197_001_252e-16;
+    for (label, radius) in [("inner far", 0.5), ("inner past", 2.5)] {
+        let _ = (ulp_at_2, ulp_at_6);
+        for rule in EVERY_RULE {
+            for ring_first in [true, false] {
+                let what = format!("F7 {label} r {radius:e} {rule:?} ring first {ring_first}");
+                let mut model = a_model();
+                let policy = Policy::certified();
+                let half =
+                    the_top_half_of_a_ring(&mut model, 4.0, 1.0, false).expect("a half ring");
+                let quarter = a_quarter_of_a_tube_moved_by(&mut model, &[]);
+                let answer = model
+                    .fuse(
+                        &[half],
+                        &[quarter],
+                        Rule::Union,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{what}: union {why:?}"));
+                let &[ring] = answer.solids() else {
+                    panic!("{what}: one, got {:?}", answer.solids());
+                };
+                let bar = if label.starts_with("inner") {
+                    model
+                        .add_round_bar(radius, 0.2, &at_height(-1.4))
+                        .expect("a round bar")
+                } else {
+                    let big = model
+                        .add_round_bar(9.0, 0.2, &at_height(-1.4))
+                        .expect("a round bar");
+                    let hole = model
+                        .add_round_bar(radius, 1.0, &at_height(-2.0))
+                        .expect("a round bar");
+                    let answer = model
+                        .fuse(
+                            &[big],
+                            &[hole],
+                            Rule::Difference,
+                            &policy,
+                            &mut ProvenanceLog::new(),
+                        )
+                        .unwrap_or_else(|why| panic!("{what}: tube {why:?}"));
+                    let &[tube] = answer.solids() else {
+                        panic!("{what}: one, got {:?}", answer.solids());
+                    };
+                    tube
+                };
+                let got = fused_or_refused(&mut model, ring, bar, rule, ring_first);
+                let said = match &got {
+                    Ok(n) => format!("Ok({n})"),
+                    Err(Error::Undecidable { records }) => format!(
+                        "Undecidable at {:?}",
+                        records.records().last().map(|record| record.predicate())
+                    ),
+                    Err(other) => format!("{other:?}"),
+                };
+                eprintln!("PROBE-RESULT {what}: {said}");
+            }
+        }
+    }
+}
+
+mod probe_block {
+    use std::collections::BTreeMap;
+
+    use rcad_geom::{
+        Axis, Cylinder, EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Surface, Torus,
+        Vector,
+    };
+    use rcad_predicates::{Policy, ProvenanceLog};
+    use rcad_topo::{DraftStep, Model, Result, SolidBuilder, SolidKey};
+    use smallvec::smallvec;
+
+    pub fn a_bend_out_of_a_block(model: &mut Model) -> Result<SolidKey> {
+        let mut builder = SolidBuilder::new();
+        let mut corners = BTreeMap::new();
+        for x in [2, 6] {
+            for y in [-2, 0] {
+                for z in [-2, 2] {
+                    let at = Point::new(f64::from(x), f64::from(y), f64::from(z));
+                    corners.insert([x, y, z], builder.add_vertex(at)?);
+                }
+            }
+        }
+        let start_corner = builder.add_vertex(Point::new(3.0, 0.0, 0.0))?;
+        let end_corner = builder.add_vertex(Point::new(0.0, 3.0, 0.0))?;
+        let flat_through_the_middle =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0)).unwrap();
+        let seam = builder.add_edge(
+            start_corner,
+            end_corner,
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(flat_through_the_middle),
+                picked_by: smallvec![
+                    Picker::InsideAPipe(Cylinder::new(Axis::z(), 4.0).unwrap()),
+                    Picker::from(HalfSpace::new(Vector::new(1.0, 1.0, 0.0), 0.0).unwrap()),
+                ],
+            },
+        )?;
+        let cap_circle = builder.add_edge(
+            start_corner,
+            start_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )?;
+        let end_circle = builder.add_edge(
+            end_corner,
+            end_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )?;
+        let mut straight = BTreeMap::new();
+        let mut shell = Vec::with_capacity(8);
+        for (normal, round) in [
+            ([0, 1, 0], [[2, 0, -2], [2, 0, 2], [6, 0, 2], [6, 0, -2]]),
+            (
+                [0, -1, 0],
+                [[2, -2, -2], [6, -2, -2], [6, -2, 2], [2, -2, 2]],
+            ),
+            ([1, 0, 0], [[6, -2, -2], [6, 0, -2], [6, 0, 2], [6, -2, 2]]),
+            ([-1, 0, 0], [[2, -2, -2], [2, -2, 2], [2, 0, 2], [2, 0, -2]]),
+            ([0, 0, 1], [[2, -2, 2], [6, -2, 2], [6, 0, 2], [2, 0, 2]]),
+            (
+                [0, 0, -1],
+                [[2, -2, -2], [2, 0, -2], [6, 0, -2], [6, -2, -2]],
+            ),
+        ] {
+            let mut steps = Vec::with_capacity(4);
+            for position in 0..4 {
+                let from = round[position];
+                let to = round[(position + 1) % 4];
+                let (edge, turn) = if let Some(&edge) = straight.get(&(to, from)) {
+                    (edge, Orientation::Reversed)
+                } else {
+                    let edge = builder.add_edge(corners[&from], corners[&to], EdgeRun::Straight)?;
+                    straight.insert((from, to), edge);
+                    (edge, Orientation::Forward)
+                };
+                steps.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
+            }
+            let mut wires = vec![builder.add_wire(&steps)?];
+            if normal == [0, 1, 0] {
+                let round_the_cap = builder.add_coedge(cap_circle, Orientation::Forward)?;
+                wires.push(builder.add_wire(&[DraftStep::Along(round_the_cap)])?);
+            }
+            let [x, y, z] = normal.map(f64::from);
+            let on_it = round[0].map(f64::from);
+            let plane = Plane::from_point_and_normal(
+                Point::new(on_it[0], on_it[1], on_it[2]),
+                Vector::new(x, y, z),
+            )
+            .unwrap();
+            shell.push((
+                builder.add_face(Surface::Plane(plane), &wires)?,
+                Orientation::Forward,
+            ));
+        }
+        let end_cap = {
+            let plane =
+                Plane::from_point_and_normal(Point::origin(), Vector::new(-1.0, 0.0, 0.0)).unwrap();
+            let coedge = builder.add_coedge(end_circle, Orientation::Reversed)?;
+            let wire = builder.add_wire(&[DraftStep::Along(coedge)])?;
+            builder.add_face(Surface::Plane(plane), &[wire])?
+        };
+        let mut round_the_wall = Vec::with_capacity(4);
+        for (edge, turn) in [
+            (cap_circle, Orientation::Reversed),
+            (seam, Orientation::Forward),
+            (end_circle, Orientation::Forward),
+            (seam, Orientation::Reversed),
+        ] {
+            round_the_wall.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
+        }
+        let wire = builder.add_wire(&round_the_wall)?;
+        let ring = Torus::new(Axis::z(), 4.0, 1.0).unwrap();
+        let wall = builder.add_face(Surface::Torus(ring), &[wire])?;
+        shell.push((end_cap, Orientation::Forward));
+        shell.push((wall, Orientation::Forward));
+        builder.add_shell(&shell)?;
+        builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+    }
 }
 
 /// That the fuse answered when `said` is `None`, and was refused `Undecidable`
