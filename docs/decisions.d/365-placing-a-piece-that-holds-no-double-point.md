@@ -724,6 +724,69 @@ and §417 places its triangle inside the cube. Q1280
 traces the four skew pairs Q1146's probe of this rule left refused, each on a
 sliver in the plane of a face of the non-convex solid.
 
+> **2026-10-10 note (Q1034, Q1606): a flat piece is placed by an edge of a
+> face it lies on, and the naming of every piece's sides leaves out a side of
+> no length.** Lane `lane-q1034-q1606-a-sliver-along-an-edge-placed-by-its-side`,
+> off `dcd8ed35`. Every count here was run, the two changes alone on the base
+> as well as together.
+>
+> **Q1034.** `the_edge_each_side_of_every_piece_is` in `fuse/assemble.rs`,
+> which 365.3's rule reads, now leaves out a straight side whose two ends come
+> out one corner and names the rest, as `sides_of` has done since 365.7,
+> rather than giving up the whole naming; with no give-up left, the `Option`
+> is off its return type. It is sound for `sides_of`'s reason: every piece
+> names its ends through the one table of corners, so every piece with that
+> side leaves it out, and sides are compared by edge number alone, so the side
+> just stops being one a piece can be placed across. This closes what 365.7
+> left. Alone it moved nothing measured: the skew row refused 14 of 450 fuses
+> on the base and 14 with it.
+>
+> **Q1606.** `by_an_edge_of_a_face_it_lies_on` in `fuse/select.rs` places a
+> flat piece `P` lying on the plane of a flat face `G` of a solid `S`, with a
+> straight side `s` carried by `G`'s plane and the plane `H` across an edge `e`
+> of `G`, and both ends of `s` on `e` and not one point. Near the middle of
+> `s`, `S`'s skin is `G` and the face across `e` and nothing else, and `P` was
+> cut by every surface of `S` (§17.4), so where `P` is near there is where it
+> is. On `G`'s side of `H`'s plane `P` lies on `G`, facing `G`'s way or the
+> other; on the other side it is inside `S` behind `H`'s outward plane and
+> outside in front of it, whether `e` is convex or reflex. Every question is
+> `which_meet_comes_first_along_a_line` along the line of `e`, each point the
+> meet of three stored planes, so every answer is exact and nothing goes into
+> the log. `s` is the one side 365.9's rule passes over, since `H` holds both
+> its ends, and the new rule is tried after every other, 365.9's included, so
+> 365.9's "it is tried last" no longer holds and a piece any older rule placed
+> is placed as before.
+>
+> **What the two moved.** `how_often_a_certified_fuse_of_a_skew_pair_refuses`
+> refused 14 of 450 on the base, 12 for a point inside a piece and 2 the edge
+> too short above, with 2 not a solid; the doc's 13 of 447 had drifted. With
+> Q1606 alone it is 11, 9 for the point, 3 not a solid, and with both it is
+> 8, 6 for the point, 5 not a solid, so three fuses need both. Which ones was
+> not run fuse by fuse; Q1280's probe needed both for Frame 4x3's
+> intersection. Frame 4x3 /
+> Comb 3 meets in two unit cubes, in either order, and the comb less the frame
+> holds 9; the union, either order, and the frame less the comb have two parts
+> touching along a line, refused `ResultIsNotManifold { count: 4 }`, the true
+> answer, checked by hand. Comb 2 / Ell 5x4 touch only across `z = 1`: the
+> intersection is empty, each less the other is itself, 9 and 51, and the
+> union, either order, is not a solid. `a_sliver_along_an_edge_of_a_face_it_lies_on.rs`
+> pins them; with Q1034 alone, five of its six tests fail.
+> `swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit` refuses 20 of
+> 280 with both. The fuse corpus, the fused draw,
+> `three_cut_lines_through_one_corner_of_a_skew_pair.rs` and
+> `a_sliver_on_the_plane_of_a_face_it_misses.rs` pass as they stood.
+>
+> **What this leaves: two of the four pairs.** Frame 3x3 / Ell 4x4 stops at
+> `(3, 2, 1)` and Comb 3 / Comb 2 at `(4, 1, 1)`, every rule, either order,
+> `a point inside a piece of a face`, pinned there. Each is a triangle a
+> rounding across on the floor `z = 1` of one solid, cut by two walls of the
+> other that meet at an upright edge and by the first solid's own leaning
+> wall, stored rounded, through that edge. No face of the other solid is on
+> `z = 1`, so the edge rule cannot reach it, and 365.3's rule got no named
+> side for it, with the naming not refused; that every side of it comes out
+> one corner is a lead, not run. By its sides' material it lies inside the
+> other solid. Each is a row of its own, `refuses/A`.
+
 ### 365.9 A piece placed by the piece of its own face across a side
 
 *Queue row Q1357. Lane `lane-q1357-a-triangle-on-the-plane-of-a-face-it-misses`,

@@ -192,15 +192,19 @@ pub(crate) struct InputSide {
 /// read through as they are for the kept pieces. A second matcher would be a
 /// second answer to which sides are one, and the two could disagree.
 ///
-/// **`None` where a straight side's two ends come out one corner.** Two
-/// corners of two names that land on one `f64` triple are one corner
-/// ([`Corners::of`]), and a piece can have a straight side between two such.
-/// Two fuses in the suite reach one in a piece no rule keeps, a seed of the
-/// fuse fuzzer's corpus and the draw of
-/// `a_fused_draw_hands_its_provenance_back_through_the_door.rs`, and asserting
-/// it panicked both; a KiCad pin header reaches one in pieces the rule keeps,
-/// where [`sides_of`] now leaves the side out (§365.7). Here nothing is named
-/// then, and no piece is placed by a side.
+/// **A straight side whose two ends come out one corner is left out**, as
+/// [`sides_of`] leaves it out of a kept piece (§365.7). Two corners of two
+/// names that land on one `f64` triple are one corner ([`Corners::of`]), and a
+/// piece can have a straight side between two such: a seed of the fuse
+/// fuzzer's corpus and the draw of
+/// `a_fused_draw_hands_its_provenance_back_through_the_door.rs` reach one in a
+/// piece no rule keeps, and a KiCad pin header in pieces the rule keeps.
+/// Leaving it out is sound for the reason it is in [`sides_of`]: every piece
+/// names its ends through the one [`Corners`] here, so every piece that has
+/// the side leaves it out, and a side is only ever compared by its `edge`
+/// number. A side left out is one no piece can be placed across; the other
+/// sides of its piece are still named. Until Q1034 the whole naming gave up
+/// here, and no piece of the fuse could be placed by a side.
 ///
 /// # Errors
 ///
@@ -211,7 +215,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
     scratch: &Scratch,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Option<Vec<Vec<NamedSide>>>> {
+) -> Result<Vec<Vec<NamedSide>>> {
     let on_three_planes = input_corners_on_exactly_three_planes(model, scratch);
     let no_corner_of_the_answer = vertices_read_through(
         model,
@@ -256,7 +260,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
                     .iter()
                     .all(|surface| surface.as_plane().is_some())
             {
-                return Ok(None);
+                continue;
             }
             let seam = the_seam_a_side_runs_along(model, &piece.ancestors, meet);
             let side = edges.of(
@@ -277,7 +281,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
         }
         named.push(of_this_piece);
     }
-    Ok(Some(named))
+    Ok(named)
 }
 
 /// One side of a piece, and the edge of an answer it would be.
@@ -6077,8 +6081,8 @@ impl Edges {
     /// # Panics
     ///
     /// If a straight side has no length. Every caller leaves such a side out
-    /// before asking — [`sides_of`] drops it and
-    /// [`the_edge_each_side_of_every_piece_is`] gives up at it — so one
+    /// before asking — [`sides_of`] and
+    /// [`the_edge_each_side_of_every_piece_is`] both drop it — so one
     /// reaching here means a caller stopped doing that. A *closed* side is not
     /// one, which is why the two ends being the same corner is checked against
     /// what carries it.
