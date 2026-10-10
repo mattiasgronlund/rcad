@@ -1123,8 +1123,10 @@ fn a_block_leaned_one_across_a_unit_pointed_cone_answers_right_or_refuses() {
 }
 
 /// The same block leaned four times the cone's own slope, apart from the
-/// eight fuses at crossing `0`, turns `0` and `1`, which are a known defect
-/// ([`a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate`]).
+/// eight fuses at crossing `0`, turns `0` and `1`, where the stored face passes
+/// a rounding beyond the apex and cuts off a tip of the cone too small to
+/// resolve beside the block, and which are refused for it by name and ratio
+/// ([`a_unit_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range`]).
 /// Crossing `0` puts the leaning face through the apex and nowhere else on
 /// the cone, a touch; turned `3`, which rounds the face `1.6e−15` clear of the
 /// apex ([`APART`], [`a_leaning_case`]), it answers right on every rule. Until
@@ -1133,7 +1135,7 @@ fn a_block_leaned_one_across_a_unit_pointed_cone_answers_right_or_refuses() {
 /// steps moved them is not traced. Crossing `−0.5` misses the cone by `2` at
 /// the apex ([`APART`]), the other two crossings meet it ([`OVERLAPPING`]),
 /// and all thirty-six of those answer right.
-fn a_unit_pointed_cones_lean_four_cases_away_from_the_defect() -> Vec<Case> {
+fn a_unit_pointed_cones_lean_four_cases_away_from_the_range_refusals() -> Vec<Case> {
     let mut cases = vec![a_leaning_case(THE_UNIT_CONE, 4.0, 0.0, 3.0)];
     for crossing in [0.5, -0.5, 1.5] {
         for turn in [0.0, 1.0, 3.0] {
@@ -1146,7 +1148,9 @@ fn a_unit_pointed_cones_lean_four_cases_away_from_the_defect() -> Vec<Case> {
 #[test]
 fn a_unit_pointed_cone_with_a_lean_of_four_answers_right_or_refuses_away_from_the_known_defect() {
     assert_eq!(
-        tally_on_every_second_point(&a_unit_pointed_cones_lean_four_cases_away_from_the_defect()),
+        tally_on_every_second_point(
+            &a_unit_pointed_cones_lean_four_cases_away_from_the_range_refusals()
+        ),
         Tally {
             right: 40,
             refused: BTreeMap::new()
@@ -1324,53 +1328,102 @@ fn slabs(cone: ConeShape, lows: &[f64]) -> Vec<Case> {
     cases
 }
 
-/// The one case of the sweep above that comes back wrong rather than
-/// refused: `model.fuse` answers `Ok`, but the model it hands back fails
-/// [`Model::validate`]. Eight of the unit lean family's 192 fuses hit this —
-/// crossing `0`, turns `0` and `1`, all four rules — and this pins the union,
-/// turned `0`, directly against the two halves of `Invalid::DynamicRangeTooWide`
-/// rather than through `tally`, which has no way to expect a validation
-/// failure from a fuse that answered.
+/// The eight fuses of the unit lean family the tally leaves out — lean `4`,
+/// crossing `0`, turns `0` and `1`, all four rules — are each refused
+/// `DynamicRangeTooWide`, by name and ratio. They used to answer `Ok` with a
+/// model [`Model::validate`] then refused for that range, so they were the
+/// one wrong answer of the sweep (Q1562).
 ///
 /// Before the turn the leaning face touches the unit cone at its apex and
 /// nowhere else. The face as the model stores it passes `2.2e−16` beyond the
 /// apex (`4.4e−16` turned `1`), so the shapes `fuse` is handed share a tip of
-/// the cone about `3e−16` tall ([`a_leaning_case`]), and the union is one
-/// solid. That is what `fuse` answers, with a corner where the face meets the
-/// cone `3.45e−16` from the apex (`6.9e−16` turned `1`), and `validate`
-/// refuses the model for it. So the defect is a fuse that answers with a model
-/// its own `validate` refuses, where it should refuse.
+/// the cone about `3e−16` tall ([`a_leaning_case`]). The tip's rim is an
+/// ellipse on the cone, a closed edge with one corner, where the cone is
+/// `2.44e−16` across (`4.88e−16` turned `1`), and the block's corners reach
+/// `13.1`. Every answer has that ellipse: the union and the cone less the block
+/// as the lower edge of what is left of the cone's side, the intersection as
+/// the tip's only edge, and the block less the cone round the dimple the tip
+/// leaves. `13.1` over `2.44e−16` is `5.4e16`, past what `f64` carries.
 ///
-/// The ratios, measured at `5.364581909073752e16` and
-/// `2.6822909545368416e16`, are both `18.5` over that corner's distance from
-/// the apex. They match the `5.7e16` of the doc comment on
-/// [`a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right`]
-/// in pattern only, and nothing past this is traced. Queue row Q1562.
+/// **It is a limit.** The ratio is a length over a length, so no scaling of
+/// the shapes helps, and no move of the origin either, since the block spans
+/// `13` wherever it is. Leaving the tip out answers a different shape: the
+/// union would touch the cone at one point and not be manifold. The ellipse
+/// is really where the stored floats put the two shapes.
+///
+/// The intersection is the tip alone, whose own corners and size are all about
+/// `2.4e−16`, so the answer by itself fits. It is refused because the two
+/// inputs stay in the model beside it, and `validate` measures them together.
+///
+/// Both inputs validate before the fuse, and the model still validates after
+/// each refusal, since a refusal leaves it as it was.
 #[test]
-fn a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate() {
+fn a_unit_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range() {
+    let mut got = Vec::new();
+    for turn in [0.0, 1.0] {
+        let case = a_leaning_case(THE_UNIT_CONE, 4.0, 0.0, turn);
+        for (rule, cone_first) in RULES {
+            got.push((
+                turn,
+                which_fuse(rule, cone_first),
+                the_ratio_it_is_refused_at(&case, rule, cone_first),
+            ));
+        }
+    }
+    assert_eq!(
+        got,
+        [
+            (0.0, "the union", Ok(5.364581909073752e16)),
+            (0.0, "the intersection", Ok(5.364581909073751e16)),
+            (0.0, "the cone less the block", Ok(5.364581909073751e16)),
+            (0.0, "the block less the cone", Ok(5.364581909073752e16)),
+            (1.0, "the union", Ok(2.6822909545368416e16)),
+            (1.0, "the intersection", Ok(2.6822909545368416e16)),
+            (1.0, "the cone less the block", Ok(2.6822909545368416e16)),
+            (1.0, "the block less the cone", Ok(2.6822909545368416e16)),
+        ]
+    );
+}
+
+fn which_fuse(rule: Rule, cone_first: bool) -> &'static str {
+    match (rule, cone_first) {
+        (Rule::Union, _) => "the union",
+        (Rule::Intersection, _) => "the intersection",
+        (Rule::Difference, true) => "the cone less the block",
+        (Rule::Difference, false) => "the block less the cone",
+        _ => panic!("a rule this file does not run"),
+    }
+}
+
+/// The ratio `fuse` refuses `case` at as `DynamicRangeTooWide`, or what it did
+/// instead.
+fn the_ratio_it_is_refused_at(case: &Case, rule: Rule, cone_first: bool) -> Result<f64, String> {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let case = a_leaning_case(THE_UNIT_CONE, 4.0, 0.0, 0.0);
-    let (cone, block) = build(&mut model, &case);
+    let (cone, block) = build(&mut model, case);
     model
-        .fuse(
-            &[cone],
-            &[block],
-            Rule::Union,
-            &policy,
-            &mut ProvenanceLog::new(),
-        )
-        .expect("model.fuse answers Ok here, which is the bug");
-    let error = model
         .validate(&policy, &mut ProvenanceLog::new())
-        .expect_err("the answer is corrupt: a known, unfixed defect, Q1562");
-    let Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) = error else {
-        panic!("expected Invalid(DynamicRangeTooWide), got {error:?}");
+        .expect("both inputs validate");
+    let (arguments, tools) = if cone_first {
+        ([cone], [block])
+    } else {
+        ([block], [cone])
     };
-    assert!(
-        ratio > 1.0e15,
-        "ratio {ratio} is far smaller than the ~2.7e16-5.4e16 this defect gives"
-    );
+    let refused = match model.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new()) {
+        Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => Ok(ratio),
+        Err(other) => Err(format!("refused {other:?}")),
+        Ok(answer) => Err(format!(
+            "answered {} solids, and validate says {:?}",
+            answer.solids().len(),
+            model.validate(&policy, &mut ProvenanceLog::new())
+        )),
+    };
+    if refused.is_ok() {
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .expect("a refusal leaves the model as it was");
+    }
+    refused
 }
 
 /// [`a_leaning_block`] round `cone`, counted by [`a_leaning_blocks_solids`]

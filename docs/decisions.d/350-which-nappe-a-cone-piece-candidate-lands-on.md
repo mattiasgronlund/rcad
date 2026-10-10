@@ -217,8 +217,9 @@ count in the table was the same on all three runs.
   union of one solid holding a tip of the cone about `3e−16` tall is the right
   shape. The defect is that `fuse` answers `Ok` with a model its own `validate`
   refuses (`DynamicRangeTooWide`), where it should refuse.
-  `a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate` pins it,
-  and Q1562's text still holds.
+  `a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate` pinned
+  it until Q1562 made the fuse refuse it; the note at the end of this section
+  says how.
 - **The pins check every second point of the grid, and are cut into pieces of
   about 20 s.** On the whole grid they cost too much for either tier, and the
   cost was the check, not the fuse. The corner-up cube round the steep cone,
@@ -269,3 +270,72 @@ count in the table was the same on all three runs.
   still the frustum's families of up to 181 s; the 36 run beside them. The
   tests are new, so they have caught nothing yet, and their score for
   `slow_tests` is cost alone.
+
+> **2026-10-10 note (Q1562): the eight fuses are refused now, by name, and it
+> is a limit.** Each of them, lean `4`, crossing `0`, turns `0` and `1`, every
+> rule, answered `Ok` with one solid, and `Model::validate` then refused the
+> model `DynamicRangeTooWide`: `5.364581909073752e16` for the union and the
+> block less the cone turned `0`, `5.364581909073751e16` for the other two,
+> and `2.6822909545368416e16` for all four turned `1`. It was the same on
+> `cde12ea7`, Q1288's parent, so it is not Q1288's doing and not Q1560's
+> cause (the pin's body as a scratch test in a worktree there, `just
+> --working-directory target/q1562-parent --justfile
+> target/q1562-parent/justfile t -p rcad-topo --test scratch_q1562
+> --no-capture`).
+>
+> **Why the fuse let it out**, read with prints since removed:
+> `the_inputs_fit_in_f64` said the inputs fit, for all eight, so
+> `Assembly::check_dynamic_range` ran. It measured chords only: `13.097` over
+> a chord of `10` for the union and the block less the cone, and nothing at
+> all for the intersection and the cone less the block, whose answers have no
+> open edge. `Model::check_dynamic_range` also takes, on each cone face, the
+> cone's radius at each corner that is not a pole at the apex, and a fuse
+> writes no pole on a cone face. Every answer has a cone face bounded by an
+> ellipse, a closed edge with one corner, at `(6.1e−17, −2.4e−16, 2.4e−16)`
+> turned `0` and `(4.6e−16, −1.5e−16, 4.9e−16)` turned `1`: where the block's
+> leaning face, stored a rounding past the apex, cuts the cone. The radius
+> there is `2.44e−16` (`4.88e−16`), and `13.097` over it is validate's ratio.
+> The fuse's doc said every radius in its answer is one an input already
+> carried. That holds for a ball, a pipe and a ring, whose radius is a number
+> of the surface, and not for a cone, whose radius at a corner depends on
+> where the corner is. Q1560's corner was far out, which the chord measure
+> catches; this one is a closed edge, whose chord of zero is skipped.
+>
+> **It is a limit.** The answer the stored floats describe has that ellipse:
+> the face passes the apex by `2.2e−16` (`4.4e−16`), so a tip of the cone is
+> inside the block. Leaving it out answers a different shape, a union that
+> touches the cone at one point and is not manifold. The ratio is the largest
+> coordinate over the smallest feature, so a fix has to change one of the two:
+> scaling changes both alike; moving the origin leaves the block `13` long, so
+> some corner at least `6.5` from it and the ratio above `1e16`; and only
+> another shape changes the feature. None of the three makes it fit.
+>
+> **The fix is two parts** (`fuse/assemble.rs`, `fuse/mod.rs`). (a)
+> `Assembly::check_dynamic_range` takes the cone's radius at every corner of
+> each cone face, above zero, as validate does. (b) It measures the answer's
+> smallest feature against the larger of the answer's largest coordinate and
+> the inputs', which `the_inputs_fit_in_f64` now hands it when the inputs fit.
+> The intersection is the tip alone, about `2.4e−16` across and from the
+> origin, so its own range fits; validate refuses the model because the inputs
+> stay in it beside the answer, and `Model` has no way to take them out. With
+> (a) alone, the fold started at zero, both intersections still answered `Ok`
+> and the cone less the block was refused at its own `1.2288187693549286e16`
+> and `6144093846774564.0`. With both, all eight are refused at exactly
+> validate's ratios above, both inputs validate before each fuse, and the
+> model validates after each refusal:
+> `a_unit_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range`
+> pins it, in place of the pin named in the bullet above (`just t -p rcad-topo
+> --test a_plane_cut_along_a_cones_other_nappe
+> a_unit_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range`).
+> Behind the guard, (b) refuses only a feature finer than any the inputs could
+> carry, and it asks of the inputs and the answer together what validate asks
+> of the model the caller holds after the fuse. The check still runs where it
+> did; Q1614 moves it ahead of `nest_the_shells`.
+>
+> **Q1630's wedge on this fix**: `a_pointed_cone(0.5, 8)` and the wedge from
+> `[0,0], [6,0], [6,0.1]`, `z` from `−2` to `10`. Both inputs validate, and
+> all six fuses (the union and the intersection both ways round, both
+> differences) are now refused `DynamicRangeTooWide { ratio:
+> 6.002298719014579e16 }`, the ratio validate gave its `Ok` models (a scratch
+> test since removed, `just t -p rcad-topo --test scratch_q1630
+> --no-capture`). Whether that refusal is a limit or a gap is Q1630's.
