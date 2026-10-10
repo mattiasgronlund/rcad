@@ -14,6 +14,7 @@ mod cones;
 mod pairs;
 
 use rcad_geom::Deflection;
+use rcad_predicates::expansion::{compress, expansion_sum, product_is_exact, scale_expansion};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
@@ -142,13 +143,18 @@ fn a_leaning_frame_and_a_leaning_ell_meet_in_two_parts() {
 /// what lies left of the frame and behind it, what lies in the hole, and a
 /// triangle `(4, 1)`, `(5, 1)`, `(13/3, 4/3)` right of it, `13 − 5/3` in all.
 ///
-/// That one is not held to `13 − 5/3`, since its triangles do not tile the
-/// ell with the intersection's. It measures `11.33333333333333` give or take
-/// `2.4e-15`, `3.0e-15` under `13 − 5/3`, and the ell's `13` less the
+/// That one is not held to `13 − 5/3`. It measures `11.33333333333333` give
+/// or take `2.4e-15`, `3.0e-15` under `13 − 5/3`, and the ell's `13` less the
 /// intersection's `1.6666666666666667`, each measured exactly, is `2.9e-15`
-/// more than that, worked out exactly. Why is not traced (§365.8's note on
-/// Q1608 and Q1609), so the volume is pinned bit for bit, so that a move is
-/// seen.
+/// more than that, worked out exactly. No piece is lost
+/// ([`no_answer_of_a_leaning_frame_and_a_leaning_ell_loses_a_piece`]), and a
+/// throwaway probe found every part of all six answers within its own error
+/// of its own triangles (§365.8's note on Q1608 and Q1609). Two things take
+/// it past its error. Its largest part measures `2.4e-15` under its own
+/// triangles, nearly all the error it owns up to. And it moves the ell's
+/// corner `(−1, 4)` by two roundings, so its triangles and the
+/// intersection's hold `2.6e-16` less than the ell's. So the volume is pinned
+/// bit for bit, so that a move is seen.
 #[test]
 fn a_leaning_ell_and_a_leaning_frame_meet_in_two_parts() {
     let (model, keys) = frame_and_ell().build();
@@ -168,6 +174,62 @@ fn a_leaning_ell_and_a_leaning_frame_meet_in_two_parts() {
         11.333_333_333_333_33_f64.to_bits(),
         "the ell less the frame holds {left}"
     );
+}
+
+/// No answer of the frame and the ell loses a piece, however their corners
+/// round. Over the triangles the answers hand out, the union is the skin of
+/// each solid outside the other, the intersection the skin of each inside the
+/// other, and each difference the skin of one outside the other with the
+/// other's skin inside it turned round. So six times the union's volume less
+/// the intersection's and both differences' is nothing, worked out exactly,
+/// when all four are made of the same pieces, and a piece one of them lost
+/// would show as what that piece closed off.
+///
+/// What the triangles hold is not what the solids drawn in whole numbers
+/// hold. The ell less the frame and the union write the ell's corner
+/// `(−1, 4)`, where its wall `x + 2y = 7` meets `y = 4`, at
+/// `(−0.9999999999999998, 4)`, though the frame does not reach `y = 4`. Its
+/// stored wall crosses `y = 4` at `−1 + 1.24e-16`, worked out exactly from
+/// its stored coefficients, which rounds to `−0.9999999999999999`.
+#[test]
+fn no_answer_of_a_leaning_frame_and_a_leaning_ell_loses_a_piece() {
+    let (model, keys) = frame_and_ell().build();
+    let (frame, ell) = (keys[0], keys[1]);
+    let six_times = |rule: Rule, arguments: SolidKey, tools: SolidKey| {
+        let (answer, solids) = fused(&model, arguments, tools, rule);
+        solids.iter().fold(Vec::new(), |total, &solid| {
+            plus(&total, &six_times_the_volume(&answer, solid))
+        })
+    };
+    let ell_less_the_frame = six_times(Rule::Difference, ell, frame);
+    let frame_less_the_ell = six_times(Rule::Difference, frame, ell);
+    for (first, second) in [(ell, frame), (frame, ell)] {
+        let left = plus(
+            &six_times(Rule::Union, first, second),
+            &negated(&plus(
+                &six_times(Rule::Intersection, first, second),
+                &plus(&ell_less_the_frame, &frame_less_the_ell),
+            )),
+        );
+        assert!(
+            left.iter().all(|&entry| entry == 0.0),
+            "the union less the rest, {first:?} first, leaves {left:?}"
+        );
+    }
+
+    let (less, solids) = fused(&model, ell, frame, Rule::Difference);
+    let drawn = [-1.0, 4.0, 1.0];
+    let written = [-0.999_999_999_999_999_8, 4.0, 1.0];
+    assert!(has_a_corner_at(&model, ell, drawn), "the ell's own corner");
+    for (at, held) in [(drawn, false), (written, true)] {
+        assert_eq!(
+            solids
+                .iter()
+                .any(|&solid| has_a_corner_at(&less, solid, at)),
+            held,
+            "the ell less the frame and a corner at {at:?}"
+        );
+    }
 }
 
 /// A comb of three teeth two high, leaning forward two, two high at the
@@ -198,7 +260,9 @@ fn a_leaning_ell_and_a_leaning_frame_meet_in_two_parts() {
 /// `3 + 3.7e-16` lies on the second comb's gap floor, and §365.3's rule read
 /// its side on `x + 2y = 5` against a piece of that wall cut along the
 /// upright line through the meet above, whose ends were named the same
-/// corners, and put the strip outside.
+/// corners, and put the strip outside. Now that rule does not place it, and
+/// Q1606's rule places it by an edge of the second comb's gap floor, on that
+/// floor and facing its way, in all three fuses.
 ///
 /// The union and the first less the second are still refused with four faces
 /// along an edge. Stored, each has a part a rounding across at `(3, 1)`: the
@@ -425,4 +489,75 @@ fn measured(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
         error += measure.volume_error();
     }
     (measured, error)
+}
+
+fn has_a_corner_at(model: &Model, solid: SolidKey, at: [f64; 3]) -> bool {
+    model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .any(|face| {
+            face.outer_wire()
+                .points()
+                .any(|corner| corner.coordinates() == at)
+        })
+}
+
+/// Six times the volume the solid's triangles enclose, exactly: the sum over
+/// every triangle of `a · (b × c)`, hung from the world origin, as
+/// `a_flat_solid_publishes_the_rounding_of_its_measure.rs` works it out.
+fn six_times_the_volume(model: &Model, solid: SolidKey) -> Vec<f64> {
+    let mut total = Vec::new();
+    for face in model.solid(solid).expect("this model made the key").faces() {
+        face.for_each_triangle(|corners| {
+            total = plus(
+                &total,
+                &six_times_the_volume_under(corners.map(|corner| corner.coordinates())),
+            );
+        });
+    }
+    total
+}
+
+/// `a · (b × c)`, exactly.
+fn six_times_the_volume_under([a, b, c]: [[f64; 3]; 3]) -> Vec<f64> {
+    let mut total = Vec::new();
+    for (first, second, third) in [(0, 1, 2), (1, 2, 0), (2, 0, 1)] {
+        let across = plus(
+            &times(b[second], c[third]),
+            &negated(&times(b[third], c[second])),
+        );
+        total = plus(&total, &times_expansion(&across, a[first]));
+    }
+    total
+}
+
+fn times(left: f64, right: f64) -> Vec<f64> {
+    times_expansion(&[left], right)
+}
+
+fn times_expansion(expansion: &[f64], factor: f64) -> Vec<f64> {
+    assert!(
+        expansion
+            .iter()
+            .all(|&entry| product_is_exact(entry, factor)),
+        "corners this size lose nothing below the subnormals"
+    );
+    let mut product = vec![0.0; 2 * expansion.len()];
+    let used = scale_expansion(expansion, factor, &mut product);
+    product.truncate(used);
+    product
+}
+
+fn plus(left: &[f64], right: &[f64]) -> Vec<f64> {
+    let mut sum = vec![0.0; left.len() + right.len()];
+    let used = expansion_sum(left, right, &mut sum);
+    let mut packed = vec![0.0; used];
+    let kept = compress(&sum[..used], &mut packed);
+    packed.truncate(kept);
+    packed
+}
+
+fn negated(expansion: &[f64]) -> Vec<f64> {
+    expansion.iter().map(|entry| -entry).collect()
 }
