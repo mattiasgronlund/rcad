@@ -4111,6 +4111,49 @@ mod tests {
         assert_eq!(holds([7.5, 0.0, 0.0]), Some(false), "beyond the tube");
     }
 
+    /// The band of `z = 0` between a pipe of `23/8` about the axis and the
+    /// inner circle, of 3, that the ring of four round a tube of one cuts it
+    /// in, its material outside both. The arrangement handed row Q1580's plate
+    /// over with the pipe's circle first, and read as the outer wire for coming
+    /// first, that circle wound every point of the band zero times, so the band
+    /// held none of its own points.
+    #[test]
+    fn a_band_inside_a_rings_inner_circle_holds_its_points_with_either_circle_first() {
+        let the_pipe: SideOnZ0 = (
+            a_pipe_about_z(23.0 / 8.0),
+            [23.0 / 8.0, 0.0],
+            [23.0 / 8.0, 0.0],
+            Decision::Pos,
+        );
+        let the_ring: SideOnZ0 = (a_ring_of_four(), [3.0, 0.0], [3.0, 0.0], Decision::Pos);
+        for (band, first) in [
+            (
+                a_flat_piece_on_z_0(&[&[the_pipe], &[the_ring]]),
+                "pipe first",
+            ),
+            (
+                a_flat_piece_on_z_0(&[&[the_ring], &[the_pipe]]),
+                "ring first",
+            ),
+        ] {
+            let holds = |at: [f64; 3]| {
+                the_piece_holds_asked_as_selection_asks(&band, PredicatePoint::from(at))
+            };
+            assert_eq!(
+                holds([0.0, 47.0 / 16.0, 0.0]),
+                Some(true),
+                "in the band, {first}"
+            );
+            assert_eq!(holds([1.0, 0.0, 0.0]), Some(false), "in the pipe, {first}");
+            assert_eq!(holds([4.0, 0.0, 0.0]), Some(false), "in the tube, {first}");
+            assert_eq!(
+                holds([7.5, 0.0, 0.0]),
+                Some(false),
+                "beyond the tube, {first}"
+            );
+        }
+    }
+
     /// One side of a piece of `z = 0`: its partner, its two ends in the plane,
     /// and which side of the partner the piece's material is on.
     type SideOnZ0 = (Surface, [f64; 2], [f64; 2], Decision);
