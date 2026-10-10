@@ -4,7 +4,7 @@
 //! names the **points** a third surface cuts out of that curve, which is what a
 //! corner of an arrangement is (`docs/decisions.md` §31.2 rows 4 and 5).
 //!
-//! # Two planes and a quadric is the road, and six ways round it
+//! # Two planes and a quadric is the road, and eight ways round it
 //!
 //! Two planes cross in a line, and a line cut by a quadric is a quadratic in one
 //! unknown whose discriminant is a polynomial in the stored numbers. That is the
@@ -14,8 +14,8 @@
 //! One plane and two quadrics is a quartic in general — the plane crosses each
 //! quadric in a conic and two conics in one plane meet where a quartic is zero —
 //! and reaching *that* takes an algebraic solver rather than a discriminant. But
-//! **five families of it are not a quartic at all**, and all five are
-//! ordinary mechanical CAD rather than curiosities. A sixth takes a ring in
+//! **seven families of it are not a quartic at all**, and all seven are
+//! ordinary mechanical CAD rather than curiosities. An eighth takes a ring in
 //! place of one quadric:
 //!
 //! - **Two quadrics that bend the same way.** Write a quadric out as
@@ -48,6 +48,17 @@
 //!   axis and off it, as a sign at a root of that quadratic says — a D-flat on
 //!   a shaft across the circle a chamfer cone crosses it in.
 //!   [`what_a_plane_beside_their_one_axis_leaves`].
+//! - **A plane that cuts both in circles, about two centres.** A plane cuts a
+//!   ball in a circle wherever it is, and a pipe or a cone square to it, and
+//!   two circles in one plane differ by a line, as two quadrics of one bend
+//!   differ by a plane — a bar's cap across a ball off its axis, or a floor a
+//!   bar and a cone stand on side by side.
+//!   [`what_a_plane_that_cuts_both_in_circles_leaves`].
+//! - **A plane along a pipe.** A plane parallel to a pipe's axis cuts it in
+//!   two lines along it, touches it along one or misses it, and each line meets
+//!   the other surface where a quadratic is zero — a wall through a bar's axis
+//!   and a ball off it, or through the axes of two bars that cross.
+//!   [`what_a_plane_along_a_pipe_leaves`].
 //! - **A ring and a ball, a pipe or a cone on its axis, and a plane that holds
 //!   it.** The two share circles square to the axis, at the heights
 //!   [`intersect`](crate::intersect) names them by, and the plane cuts each
@@ -62,17 +73,20 @@
 //! two curved surfaces** by the first family's own argument: every point the
 //! two share is on the plane they differ by, and every point on that plane and
 //! one of them is on the other. So the plane takes the place of one of the
-//! two, and the six roads answer the triple — two cones of one slope about one
+//! two, and the eight roads answer the triple — two cones of one slope about one
 //! axis and a ball, or two bars running the same way and a third.
 //! [`where_three_curved_surfaces_meet`].
 //!
 //! What is left over is refused by name (§16.10, §31.2): one plane and two
-//! quadrics that bend differently, cross the plane in curves, and neither
-//! share an axis the plane is square or parallel to — a pipe and a ball off
-//! its axis, two pipes leaning against each other, or a plane leaning to the
-//! axis a ball and a pipe share — three curved surfaces no two of which
-//! differ by a plane a stored [`Plane`] is exactly, and any triple with a
-//! torus and fewer than two planes but the sixth family.
+//! quadrics that bend differently, cross the plane in curves, share no axis
+//! the plane is square or parallel to, are not both cut by it in circles, and
+//! neither of which is a pipe it runs along — a plane leaning to a pipe's
+//! axis, which cuts it in an ellipse, against a ball off that axis or the axis
+//! a ball and the pipe share, or a cap of one bar across a second bar leaning
+//! to it — a plane along a pipe and a cone one of whose rulings runs along the
+//! pipe, three curved surfaces no two of which differ by a plane a stored
+//! [`Plane`] is exactly, and any triple with a torus and fewer than two planes
+//! but the eighth family.
 //! [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] says which of the two
 //! kinds of refusal it is in its own doc.
 //!
@@ -151,7 +165,13 @@ pub enum MeetOfThree {
     /// [`what_a_plane_through_their_one_axis_leaves`] gives: two circles, two
     /// points on each, or a cone's apex and one circle. A plane beside that
     /// axis gives them in the same order, two on a circle it cuts and one on a
-    /// circle it touches ([`what_a_plane_beside_their_one_axis_leaves`]).
+    /// circle it touches ([`what_a_plane_beside_their_one_axis_leaves`]). A
+    /// plane that cuts both curved surfaces in circles gives them along the
+    /// line it crosses the line the two circles differ by in, as two planes do
+    /// ([`what_a_plane_that_cuts_both_in_circles_leaves`]). A plane along a
+    /// pipe gives up to two on each line it cuts the pipe in, the line on one
+    /// side of the axis first and the lower point first along each, in the
+    /// order [`what_a_plane_along_a_pipe_leaves`] names.
     ///
     /// Most are a box the true meeting point is somewhere inside, because
     /// solving a quadratic divides and a quotient of two ranges almost never
@@ -1602,7 +1622,7 @@ fn where_three_curved_surfaces_meet(
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
 }
 
-/// One plane and two curved surfaces, by the six roads the module doc names.
+/// One plane and two curved surfaces, by the eight roads the module doc names.
 ///
 /// **Nothing here guesses.** Each road either reaches an answer it has earned or
 /// hands the question on, and what nothing reaches is the refusal that was here
@@ -1656,6 +1676,14 @@ fn where_one_plane_and_two_curved_surfaces_meet(
     {
         return Ok(answer);
     }
+    if let Some(answer) =
+        what_a_plane_that_cuts_both_in_circles_leaves(flat, one, other, at, policy, log)?
+    {
+        return Ok(answer);
+    }
+    if let Some(answer) = what_a_plane_along_a_pipe_leaves(flat, one, other, at)? {
+        return Ok(answer);
+    }
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
 }
 
@@ -1675,8 +1703,9 @@ fn where_one_plane_and_two_curved_surfaces_meet(
 /// the other, and a direction with no length is not a pipe. Two pipes match when
 /// their stored directions are the same or opposite and at no other time, which
 /// `two_bars_whose_axes_are_written_pointing_opposite_ways_still_meet_a_cap`
-/// walks and `two_bars_leaning_across_each_other_and_a_plane_are_still_refused`
-/// holds the other side of.
+/// walks. Two that cross are left to the roads below, and
+/// `a_wall_through_the_axes_of_two_bars_that_cross_meets_them_where_their_lines_cross`
+/// holds that side: a wall through both axes is [`what_a_plane_along_a_pipe_leaves`]'s.
 ///
 /// **The flat surface it builds is not a [`Plane`]**, and could not be: its
 /// numbers are differences of products of the stored ones and an `f64` almost
@@ -1704,7 +1733,31 @@ fn where_a_plane_and_two_quadrics_of_one_bend_meet(
     // Past here the family is settled, so arithmetic that runs out is a
     // refusal about *this* triple and not a reason to try the next road.
     let (leaning, reach) = the_flat_surface_two_quadrics_differ_by(&mine, &theirs);
-    let Some(shared) = what_a_stored_plane_and_an_exact_one_share(flat, &leaning, &reach) else {
+    where_a_stored_plane_an_exact_one_and_a_quadric_meet(
+        flat, &leaning, &reach, one, at, policy, log,
+    )
+    .map(Some)
+}
+
+/// What the stored plane, the flat surface `leaning·p = reach` and `quadric`
+/// share, for a flat surface that holds every point the stored plane, `quadric`
+/// and a second curved surface share, and on the stored plane holds nothing of
+/// `quadric` the second surface does not.
+///
+/// Where the two planes are one, the three share what the stored plane and
+/// `quadric` share; where they never meet, nothing; and where they cross in a
+/// line, the points that line meets `quadric` at. Arithmetic that runs out is a
+/// refusal about this triple.
+fn where_a_stored_plane_an_exact_one_and_a_quadric_meet(
+    flat: &Plane,
+    leaning: &[Exact; 3],
+    reach: &Exact,
+    quadric: &Surface,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    let Some(shared) = what_a_stored_plane_and_an_exact_one_share(flat, leaning, reach) else {
         return Err(an_exact_step_could_not_be_taken(
             WHERE_THREE_SURFACES_MEET,
             at,
@@ -1712,13 +1765,13 @@ fn where_a_plane_and_two_quadrics_of_one_bend_meet(
     };
 
     let line = match shared {
-        WhatTwoPlanesShare::Nothing => return Ok(Some(MeetOfThree::Nowhere)),
+        WhatTwoPlanesShare::Nothing => return Ok(MeetOfThree::Nowhere),
         WhatTwoPlanesShare::TheWholeOfTheStoredOne => {
-            return what_one_plane_and_one_curved_surface_share(flat, one, policy, log).map(Some);
+            return what_one_plane_and_one_curved_surface_share(flat, quadric, policy, log);
         }
         WhatTwoPlanesShare::ALine(line) => line,
     };
-    let quadratic = how_a_quadric_cuts_the_line(&line, one)
+    let quadratic = how_a_quadric_cuts_the_line(&line, quadric)
         .ok_or_else(|| an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at))?;
     let found =
         where_a_line_meets_a_quadric(WHERE_THREE_SURFACES_MEET, &quadratic, at, policy, log)?;
@@ -1731,7 +1784,6 @@ fn where_a_plane_and_two_quadrics_of_one_bend_meet(
         log,
         || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at),
     )
-    .map(Some)
 }
 
 /// What two curved surfaces differ by, as [`where_three_curved_surfaces_meet`]
@@ -3347,6 +3399,475 @@ fn the_ends_of_the_chord_at(
             }))
         })
         .collect()
+}
+
+/// What a plane leaves of the three where it cuts each of the two curved
+/// surfaces in a circle — a ball anywhere, and a pipe or a cone whose axis the
+/// plane is square to, each about an axis of its own — or `None` where the
+/// three are not that.
+///
+/// A bar's flat end across a ball off its axis is one, and so is a floor that
+/// a bar and a cone stand on side by side. A ball resting on that floor only
+/// touches it, and [`what_a_plane_that_grazes_one_of_them_leaves`] answers
+/// that first.
+///
+/// **Each surface is a circle on the plane.** Write the plane `n·p = d` and
+/// `N = n·n`. A ball is `p·p + 2b·p + c` everywhere. A pipe or a cone about `w`
+/// is `(w·w)(p·p) − σ(p·w)² + 2b·p + c`, with `σ` one for a pipe and
+/// `1 + slope²` for a cone ([`how_a_ruled_surface_is_written`]). Where `w` is a
+/// multiple of `n`, every point of the plane has `p·w = (w·n)d/N`, so there
+/// `σ(p·w)²` is `σ(w·n)d(w·p)/N`, which is linear in `p`, and `N` times the
+/// surface is `s(p·p) + l·p + k` with `s = N(w·w)`, `l = 2Nb − σ(w·n)d·w` and
+/// `k = Nc`. A ball's is its own three numbers, with `s` one.
+///
+/// **Two circles in one plane differ by a line.** `s` is above zero for each,
+/// so `s₂C₁ − s₁C₂` has no `p·p` in it: it is the flat surface
+/// `(s₂l₁ − s₁l₂)·p = s₁k₂ − s₂k₁`, and on the plane a point of it and of the
+/// first surface is a point of the second as well. That is the first family's
+/// argument with circles in place of quadrics, and
+/// [`where_a_stored_plane_an_exact_one_and_a_quadric_meet`] answers the two
+/// planes and the first surface as it does there. The bar of radius two up `z`
+/// and the ball of radius three at `(0, 3, 5)` differ on the cap `z = 5` by
+/// `6y + 5z = 29`, so the three meet at `(±4√2/3, 2/3, 5)`.
+///
+/// **What it leaves to the refusal.** A plane that leans to a pipe's or a
+/// cone's axis cuts it in an ellipse, a parabola or a hyperbola, whose `p·p`
+/// part is not a multiple of a circle's, so no `s₂C₁ − s₁C₂` takes the squares
+/// away and what is left is the quartic the module doc names. Two such conics
+/// of one shape would differ by a line again — a mitre between two pipes of one
+/// radius cuts both in one ellipse — and this road does not look for them.
+///
+/// It is asked after every road that takes two surfaces turned about one axis,
+/// which answer a circle about one centre against another, and after the road
+/// for a plane that grazes, so it takes only circles about two centres or
+/// planes that cut both. [`what_a_plane_along_a_pipe_leaves`] shares no triple
+/// with it: a pipe square to the plane is not a pipe along it.
+///
+/// Arithmetic that runs out after the family is settled is
+/// [`an_exact_step_could_not_be_taken`], a **gap**: the points are there.
+fn what_a_plane_that_cuts_both_in_circles_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<MeetOfThree>> {
+    if !(a_plane_cuts_it_in_a_circle(flat, one) && a_plane_cuts_it_in_a_circle(flat, other)) {
+        return Ok(None);
+    }
+
+    // Past here the family is settled, so arithmetic that runs out is a
+    // refusal about *this* triple and not a reason to try the next road.
+    let refused = || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at);
+    let (Some(mine), Some(theirs)) = (
+        the_circle_a_plane_cuts(flat, one),
+        the_circle_a_plane_cuts(flat, other),
+    ) else {
+        return Err(refused());
+    };
+    let Some((leaning, reach)) = the_line_two_circles_differ_by(&mine, &theirs) else {
+        return Err(refused());
+    };
+    where_a_stored_plane_an_exact_one_and_a_quadric_meet(
+        flat, &leaning, &reach, one, at, policy, log,
+    )
+    .map(|answer| Some(with_no_negative_zero(answer)))
+}
+
+/// `answer` with every `-0.0` in an exact corner made `+0.0`, which is the
+/// same number.
+///
+/// Corners compare by value, where the two zeros are one, but a corner keyed
+/// on its bits gets two keys for one point; `exactly_at` in `rcad-topo`'s
+/// `fuse/assemble.rs` folds them for that reason. The line two circles differ
+/// by hands `x = 0` back as `-0.0` for the floor across a bar and a ball off
+/// its axis, so this road folds them before any key is taken. Adding `0.0`
+/// turns `-0.0` into `+0.0` under round-to-nearest and leaves every other
+/// number as it is. A box is left alone: `inari` hands the lower end of any
+/// box that starts at zero back as `-0.0` whatever it was built from.
+fn with_no_negative_zero(answer: MeetOfThree) -> MeetOfThree {
+    let MeetOfThree::At(places) = answer else {
+        return answer;
+    };
+    MeetOfThree::At(
+        places
+            .into_iter()
+            .map(|place| match place.exact_coordinates() {
+                Some(at) => PredicatePoint::Exact(at.map(|value| value + 0.0)),
+                None => place,
+            })
+            .collect(),
+    )
+}
+
+/// Whether `flat` cuts `surface` in a circle, or in nothing, about the point
+/// an axis of it crosses the plane at: every plane cuts a ball so, and only a
+/// plane square to its axis cuts a pipe or a cone so. A product that falls out
+/// of range says no, and hands the triple on.
+fn a_plane_cuts_it_in_a_circle(flat: &Plane, surface: &Surface) -> bool {
+    let along = match surface {
+        Surface::Sphere(_) => return true,
+        Surface::Cylinder(pipe) => pipe.axis().direction().components(),
+        Surface::Cone(cone) => cone.axis().direction().components(),
+        Surface::Plane(_) | Surface::Torus(_) => return false,
+    };
+    exact_cross_of(flat.normal().components(), along).is_some_and(|across| {
+        across
+            .iter()
+            .all(|component| component.sign() == Decision::Zero)
+    })
+}
+
+/// `squared·(p·p) + linear·p + constant`, exactly: a surface on a plane that
+/// cuts it in a circle, times a number above zero.
+struct ACircle {
+    squared: Exact,
+    linear: [Exact; 3],
+    constant: Exact,
+}
+
+/// The circle `flat` cuts `surface` in, as
+/// [`what_a_plane_that_cuts_both_in_circles_leaves`] writes it, or `None`
+/// where a product falls out of range.
+///
+/// # Panics
+///
+/// If `surface` is a plane or a ring: [`a_plane_cuts_it_in_a_circle`] said
+/// no to both before this was asked.
+fn the_circle_a_plane_cuts(flat: &Plane, surface: &Surface) -> Option<ACircle> {
+    let (along, squeeze, written) = match surface {
+        Surface::Sphere(ball) => {
+            let written = how_a_ball_is_written(ball)?;
+            return Some(ACircle {
+                squared: Exact::of(1.0),
+                linear: written.half_linear.map(|half| half.plus(&half)),
+                constant: written.constant,
+            });
+        }
+        Surface::Cylinder(pipe) => (
+            pipe.axis().direction().components(),
+            Exact::of(1.0),
+            how_a_pipe_is_written(pipe)?,
+        ),
+        Surface::Cone(cone) => (
+            cone.axis().direction().components(),
+            Exact::of(1.0).plus(&Exact::product_of(cone.slope(), cone.slope())?),
+            how_a_cone_is_written(cone)?,
+        ),
+        Surface::Plane(_) | Surface::Torus(_) => {
+            unreachable!("only a ball, a pipe or a cone is cut in a circle: {surface:?}")
+        }
+    };
+    let normal = flat.normal().components();
+    let squared_normal = Exact::dot_of(normal, normal)?;
+    let pulled = squeeze
+        .times(&Exact::dot_of(along, normal)?)?
+        .times(&Exact::of(flat.offset()))?;
+    let mut linear = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+    for (axis, entry) in linear.iter_mut().enumerate() {
+        let half = &written.half_linear[axis];
+        *entry = squared_normal
+            .times(&half.plus(half))?
+            .minus(&pulled.times(&Exact::of(along[axis]))?);
+    }
+    Some(ACircle {
+        squared: squared_normal.times(&Exact::dot_of(along, along)?)?,
+        linear,
+        constant: squared_normal.times(&written.constant)?,
+    })
+}
+
+/// `s₂C₁ − s₁C₂ = 0` for two circles in one plane, as `leaning·p = reach`, or
+/// `None` where a product falls out of range.
+fn the_line_two_circles_differ_by(mine: &ACircle, theirs: &ACircle) -> Option<([Exact; 3], Exact)> {
+    let mut leaning = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+    for (axis, entry) in leaning.iter_mut().enumerate() {
+        *entry = theirs
+            .squared
+            .times(&mine.linear[axis])?
+            .minus(&mine.squared.times(&theirs.linear[axis])?);
+    }
+    let reach = mine
+        .squared
+        .times(&theirs.constant)?
+        .minus(&theirs.squared.times(&mine.constant)?);
+    Some((leaning, reach))
+}
+
+/// What a plane that runs along a pipe — parallel to its axis, through it or
+/// beside it — leaves of the three, where the other curved surface is a ball,
+/// a second pipe or a cone, or `None` where the three are not that.
+///
+/// A wall that halves a bar, through a ball off the bar's axis, is one, and
+/// so is the wall through the axes of two bars that cross.
+///
+/// **The plane cuts the pipe in lines along it.** For a pipe through `o`
+/// along `w` of radius `r`, with `n·w = 0`, take `N = n·n`, `W = w·w`,
+/// `E = N·W`, `e = n × w` and `δ = n·o − d`. Every point
+/// `p = (V + u·e)/E + γ·w`, with `V = E·o − δW·n`, is on the plane, since
+/// `n·V = E(n·o) − δE` and `n·e = 0`, and its squared distance from the axis
+/// is `(δ²W + u²)/E`, since `e·e = E`. So it is on the pipe where `u² = K` for
+/// `K = W(r²N − δ²)`: the plane misses the pipe, touches it along the one line
+/// `u = 0`, or cuts it in the two lines `u = ∓√K`, as `K` is below, at or
+/// above zero.
+///
+/// **Each line meets the other surface where a quadratic is zero.** Write the
+/// other as `p·(Mp) + 2b·p + c`. `E²` times it along a line is
+/// `E²A·γ² + 2Eβ·γ + Γ`, for `A = w·Mw`, `β = β₀ + β₁u` with
+/// `β₀ = (Mw)·V + E(w·b)` and `β₁ = (Mw)·e`, and `Γ = γ₀ + 2γ₁u + γ₂u²` with
+/// `γ₀ = V·(MV) + 2E(b·V) + E²c`, `γ₁ = e·(MV) + E(b·e)` and `γ₂ = e·(Me)`.
+/// Its discriminant over `E²` is `β² − AΓ`, and with `u²` put back as `K` that
+/// is `plain + lean·u`, for `plain = (β₁² − Aγ₂)K + β₀² − Aγ₀` and
+/// `lean = 2(β₀β₁ − Aγ₁)`. [`the_sign_with_a_root_in_it`] decides its sign at
+/// `u = ±√K` exactly, so whether a line misses the other surface, touches it
+/// at `γ = −β/(EA)` or crosses it at `γ = (−β ∓ √(β² − AΓ))/(EA)` is never
+/// read off a box. The bar of radius two up `z` meets the wall `x = 0` in
+/// `y = ±2`, and the ball of radius three at `(0, 3, 5)` in `y = 2` at
+/// `z = 5 ± 2√2` and in `y = −2` nowhere.
+///
+/// The line `u = −√K` comes first, and the lower `γ` first on each line.
+///
+/// **What it leaves to the refusal.** Where `A` is zero the pipe runs along
+/// the other surface — a second pipe the same way, which the first family
+/// answers, or a cone one of whose rulings runs along `w` — and the quadratic
+/// on a line is a line's: this road hands that on. A plane that leans to the
+/// pipe's axis is not along it and cuts it in an ellipse.
+///
+/// It is asked last, so every triple an earlier road answers keeps its
+/// answer. Arithmetic that runs out after the family is settled is
+/// [`an_exact_step_could_not_be_taken`], a **gap**: the points are there.
+fn what_a_plane_along_a_pipe_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
+) -> Result<Option<MeetOfThree>> {
+    let normal = flat.normal().components();
+    let runs_along = |pipe: &Cylinder| {
+        Exact::dot_of(normal, pipe.axis().direction().components())
+            .is_some_and(|leaning| leaning.sign() == Decision::Zero)
+    };
+    let Some((pipe, rest)) = [(one, other), (other, one)]
+        .into_iter()
+        .find_map(|(this, that)| match this {
+            Surface::Cylinder(pipe) if runs_along(pipe) => Some((pipe, that)),
+            Surface::Plane(_)
+            | Surface::Sphere(_)
+            | Surface::Cylinder(_)
+            | Surface::Cone(_)
+            | Surface::Torus(_) => None,
+        })
+    else {
+        return Ok(None);
+    };
+    let Some(written) = how_a_surface_is_written(rest) else {
+        return Ok(None);
+    };
+    let along = Exact::of_each(pipe.axis().direction().components());
+    let Some(bend) = rows_times(&written.squared, &along)
+        .and_then(|towards| Exact::dot_of_two_exact(&along, &towards))
+    else {
+        return Ok(None);
+    };
+    if !matches!(bend.sign(), Decision::Pos | Decision::Neg) {
+        return Ok(None);
+    }
+
+    // Past here the family is settled, so arithmetic that runs out is a
+    // refusal about *this* triple, which a slide along the range can retry.
+    let refused = || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at);
+    let Some(lines) = the_lines_a_plane_along_a_pipe_cuts(flat, pipe, &written, bend) else {
+        return Err(refused());
+    };
+    let Some((plain, lean)) = lines.the_discriminant() else {
+        return Err(refused());
+    };
+    let sides: SmallVec<[f64; 2]> = match lines.reach.sign() {
+        Decision::Neg => return Ok(Some(MeetOfThree::Nowhere)),
+        Decision::Zero => smallvec![0.0],
+        Decision::Pos => smallvec![-1.0, 1.0],
+        Decision::Undecidable { .. } => return Err(refused()),
+        other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
+    };
+    let mut places: SmallVec<[PredicatePoint; 2]> = SmallVec::new();
+    for side in sides {
+        let rooted = if side < 0.0 {
+            Exact::of(0.0).minus(&lean)
+        } else {
+            lean.clone()
+        };
+        let Some(crossing) = the_sign_with_a_root_in_it(&plain, &rooted, &lines.reach) else {
+            return Err(refused());
+        };
+        match crossing {
+            Decision::Neg => {}
+            Decision::Zero => places.extend(lines.where_one_meets_it(side, &plain, &lean, true)),
+            Decision::Pos => places.extend(lines.where_one_meets_it(side, &plain, &lean, false)),
+            Decision::Undecidable { .. } => return Err(refused()),
+            other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
+        }
+    }
+    if places.iter().any(|place| !place.uncertainty().is_finite()) {
+        return Err(refused());
+    }
+    if places.is_empty() {
+        return Ok(Some(MeetOfThree::Nowhere));
+    }
+    Ok(Some(MeetOfThree::At(places)))
+}
+
+/// `M v` for a square of exact numbers and an exact triple, exactly.
+fn rows_times(rows: &[[Exact; 3]; 3], value: &[Exact; 3]) -> Option<[Exact; 3]> {
+    Some([
+        Exact::dot_of_two_exact(&rows[0], value)?,
+        Exact::dot_of_two_exact(&rows[1], value)?,
+        Exact::dot_of_two_exact(&rows[2], value)?,
+    ])
+}
+
+/// The lines a plane along a pipe cuts it in, `p = (V + u·e)/E + γ·w` for
+/// `u² = K`, and `E²` times a second curved surface along them,
+/// `E²A·γ² + 2E(β₀ + β₁u)·γ + (γ₀ + 2γ₁u + γ₂u²)`, every number exactly, in
+/// [`what_a_plane_along_a_pipe_leaves`]'s names.
+struct TheLinesAlongAPipe {
+    /// `w`.
+    along: [f64; 3],
+    /// `E`.
+    scale: Exact,
+    /// `e`.
+    sideways: [Exact; 3],
+    /// `V`.
+    through: [Exact; 3],
+    /// `K`.
+    reach: Exact,
+    /// `A`.
+    bend: Exact,
+    /// `β₀` and `β₁`.
+    half_linear: [Exact; 2],
+    /// `γ₀`, `γ₁` and `γ₂`.
+    constant: [Exact; 3],
+}
+
+/// The lines `flat` cuts `pipe` in, and `written` along them, or `None` where
+/// a product falls out of range.
+fn the_lines_a_plane_along_a_pipe_cuts(
+    flat: &Plane,
+    pipe: &Cylinder,
+    written: &HowASurfaceIsWritten,
+    bend: Exact,
+) -> Option<TheLinesAlongAPipe> {
+    let normal = flat.normal().components();
+    let along = pipe.axis().direction().components();
+    let origin = pipe.axis().origin().coordinates();
+    let squared_normal = Exact::dot_of(normal, normal)?;
+    let squared_axis = Exact::dot_of(along, along)?;
+    let scale = squared_normal.times(&squared_axis)?;
+    let sideways = exact_cross_of(normal, along)?;
+    let off = how_far_a_plane_is_from(flat, origin)?;
+    let reach = squared_axis.times(
+        &Exact::product_of(pipe.radius(), pipe.radius())?
+            .times(&squared_normal)?
+            .minus(&off.times(&off)?),
+    )?;
+    let pulled = off.times(&squared_axis)?;
+    let mut through = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+    for (axis, entry) in through.iter_mut().enumerate() {
+        *entry = scale
+            .times(&Exact::of(origin[axis]))?
+            .minus(&pulled.times(&Exact::of(normal[axis]))?);
+    }
+
+    let w = Exact::of_each(along);
+    let b = &written.half_linear;
+    let dot = Exact::dot_of_two_exact;
+    let towards = rows_times(&written.squared, &w)?;
+    let from_through = rows_times(&written.squared, &through)?;
+    let from_sideways = rows_times(&written.squared, &sideways)?;
+    let b_through = dot(b, &through)?;
+    let half_linear = [
+        dot(&towards, &through)?.plus(&scale.times(&dot(&w, b)?)?),
+        dot(&towards, &sideways)?,
+    ];
+    let constant = [
+        dot(&through, &from_through)?
+            .plus(&scale.times(&b_through.plus(&b_through))?)
+            .plus(&scale.times(&scale)?.times(&written.constant)?),
+        dot(&sideways, &from_through)?.plus(&scale.times(&dot(b, &sideways)?)?),
+        dot(&sideways, &from_sideways)?,
+    ];
+    Some(TheLinesAlongAPipe {
+        along,
+        scale,
+        sideways,
+        through,
+        reach,
+        bend,
+        half_linear,
+        constant,
+    })
+}
+
+impl TheLinesAlongAPipe {
+    /// `β² − AΓ` with `u²` put back as `K`, as `(plain, lean)` for
+    /// `plain + lean·u`, or `None` where a product falls out of range.
+    fn the_discriminant(&self) -> Option<(Exact, Exact)> {
+        let [plain_half, leaning_half] = &self.half_linear;
+        let [plain_constant, leaning_constant, squared_constant] = &self.constant;
+        let bend = &self.bend;
+        let plain = leaning_half
+            .times(leaning_half)?
+            .minus(&bend.times(squared_constant)?)
+            .times(&self.reach)?
+            .plus(&plain_half.times(plain_half)?)
+            .minus(&bend.times(plain_constant)?);
+        let half_lean = plain_half
+            .times(leaning_half)?
+            .minus(&bend.times(leaning_constant)?);
+        Some((plain, half_lean.plus(&half_lean)))
+    }
+
+    /// Where the line on `side` of the axis — `u = side·√K` — meets the other
+    /// surface: once, at `−β/(EA)`, where it only touches it, and otherwise at
+    /// `(−β ∓ √(β² − AΓ))/(EA)`, the lower `γ` first.
+    fn where_one_meets_it(
+        &self,
+        side: f64,
+        plain: &Exact,
+        lean: &Exact,
+        it_only_touches: bool,
+    ) -> SmallVec<[PredicatePoint; 2]> {
+        let across = Interval::exactly(side) * root_enclosing(self.reach.enclosure());
+        let scale = self.scale.enclosure();
+        let [plain_half, leaning_half] = self.half_linear.each_ref().map(Exact::enclosure);
+        let half = plain_half + leaning_half * across;
+        let under = scale * self.bend.enclosure();
+        let steps: SmallVec<[Interval; 2]> = if it_only_touches {
+            smallvec![quotient_or_everything(-half, under)]
+        } else {
+            let root = root_enclosing(plain.enclosure() + lean.enclosure() * across);
+            let [taking, adding] =
+                [-half - root, -half + root].map(|top| quotient_or_everything(top, under));
+            // `E` is above zero, so a negative `A` is what turns
+            // `(−β − √Δ)/(EA)` above `(−β + √Δ)/(EA)`.
+            if self.bend.sign() == Decision::Neg {
+                smallvec![adding, taking]
+            } else {
+                smallvec![taking, adding]
+            }
+        };
+        steps
+            .into_iter()
+            .map(|step| {
+                the_point_a_box_names(core::array::from_fn(|axis| {
+                    quotient_or_everything(
+                        self.through[axis].enclosure() + across * self.sideways[axis].enclosure(),
+                        scale,
+                    ) + step * Interval::exactly(self.along[axis])
+                }))
+            })
+            .collect()
+    }
 }
 
 /// A line, written as `(through + s · direction) / divided_by`.
@@ -5066,17 +5587,231 @@ mod tests {
     }
 
     /// The ball sits off the bar's axis, so the floor cuts the two in circles
-    /// about two different centres, which cross at `(0, ±3, 0)`. About one
-    /// centre they would be a circle of radius five and one of three, and
-    /// [`what_a_plane_square_to_their_one_axis_leaves`] answers that.
+    /// about two different centres, `x² + y² = 9` and `(x − 4)² + y² = 25`.
+    /// Those differ by the line `x = 0`, which meets the first at `(0, ±3, 0)`,
+    /// each an `f64`. About one centre they would be a circle of radius five
+    /// and one of three, and [`what_a_plane_square_to_their_one_axis_leaves`]
+    /// answers that.
     #[test]
-    fn three_surfaces_with_only_one_flat_one_are_refused_by_name() {
+    fn a_floor_across_a_bar_and_a_ball_off_its_axis_meets_them_where_their_circles_cross() {
+        let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
         let ball = Surface::Sphere(Sphere::new(Point::new(4.0, 0.0, 0.0), 5.0).expect("a radius"));
         let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 3.0).expect("a radius"));
+        let answer = meet([&floor, &ball, &pipe]).expect("two circles in one plane are answered");
+        on_all_three([&floor, &ball, &pipe], &answer);
         assert_eq!(
-            meet([&flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]), &ball, &pipe]),
+            answer,
+            MeetOfThree::At(smallvec![
+                PredicatePoint::Exact([0.0, -3.0, 0.0]),
+                PredicatePoint::Exact([0.0, 3.0, 0.0])
+            ])
+        );
+        assert_eq!(meet([&pipe, &floor, &ball]), Ok(answer), "in any order");
+    }
+
+    /// The bar of radius 2 up `z` and the ball of radius 3 at `(0, 3, 5)`, and
+    /// the bar's cap `z = 5`. The cap cuts them in `x² + y² = 4` and
+    /// `x² + (y − 3)² = 9`, which differ by the line `y = 2/3`, so the three
+    /// meet at `(±4√2/3, 2/3, 5)`, neither of them an `f64`.
+    #[test]
+    fn a_bars_cap_across_a_ball_off_its_axis_meets_them_where_their_circles_cross() {
+        let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 5.0]);
+        let bar = a_bar_up_z_of_radius(2.0);
+        let ball = the_ball_of_radius_at_0_3_5(3.0);
+        let answer = meet([&cap, &bar, &ball]).expect("two circles in one plane are answered");
+        on_all_three([&cap, &bar, &ball], &answer);
+        let across = 4.0 * 2f64.sqrt() / 3.0;
+        narrow_boxes_round(
+            &answer,
+            &[[-across, 2.0 / 3.0, 5.0], [across, 2.0 / 3.0, 5.0]],
+        );
+        assert_eq!(meet([&ball, &bar, &cap]), Ok(answer), "in any order");
+    }
+
+    /// The wall `x = 0` holds the bar's axis, so it cuts the bar in the lines
+    /// `y = ±2`. `y = 2` meets the ball where `1 + (z − 5)² = 9`, at
+    /// `(0, 2, 5 ± 2√2)`, the lower first, and `y = −2` misses it.
+    #[test]
+    fn a_wall_through_a_bars_axis_meets_a_ball_off_it_on_the_one_line_that_reaches_it() {
+        let wall = the_wall_through_the_axis();
+        let bar = a_bar_up_z_of_radius(2.0);
+        let ball = the_ball_of_radius_at_0_3_5(3.0);
+        let answer = meet([&wall, &bar, &ball]).expect("a wall along a bar is answered");
+        on_all_three([&wall, &bar, &ball], &answer);
+        let up = 2.0 * 2f64.sqrt();
+        narrow_boxes_round(&answer, &[[0.0, 2.0, 5.0 - up], [0.0, 2.0, 5.0 + up]]);
+        assert_eq!(meet([&ball, &wall, &bar]), Ok(answer), "in any order");
+    }
+
+    /// The ball of radius 1 at `(0, 3, 5)` only touches the line `y = 2` the
+    /// wall cuts the bar in, so the three meet at `(0, 2, 5)` alone.
+    #[test]
+    fn a_wall_through_a_bars_axis_meets_a_ball_that_touches_one_of_its_lines_once() {
+        let wall = the_wall_through_the_axis();
+        let bar = a_bar_up_z_of_radius(2.0);
+        let ball = the_ball_of_radius_at_0_3_5(1.0);
+        let answer = meet([&wall, &bar, &ball]).expect("a wall along a bar is answered");
+        on_all_three([&wall, &bar, &ball], &answer);
+        assert_eq!(
+            answer,
+            MeetOfThree::At(smallvec![PredicatePoint::Exact([0.0, 2.0, 5.0])])
+        );
+        assert_eq!(meet([&bar, &ball, &wall]), Ok(answer), "in any order");
+    }
+
+    /// The wall `y = 0` holds the axes of a bar of radius 4 up `z` and of one
+    /// of radius 1 along `x` at `z = 5`, so it cuts them in `x = ±4` and in
+    /// `z = 4` and `z = 6`, which cross at four points of the lattice.
+    #[test]
+    fn a_wall_through_the_axes_of_two_bars_that_cross_meets_them_where_their_lines_cross() {
+        let wall = flat([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]);
+        let upright = a_bar_up_z_of_radius(4.0);
+        let across = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(0.0, 0.0, 5.0), Vector::new(1.0, 0.0, 0.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let answer = meet([&wall, &upright, &across]).expect("a wall along a bar is answered");
+        on_all_three([&wall, &upright, &across], &answer);
+        assert_eq!(
+            answer,
+            MeetOfThree::At(smallvec![
+                PredicatePoint::Exact([-4.0, 0.0, 4.0]),
+                PredicatePoint::Exact([-4.0, 0.0, 6.0]),
+                PredicatePoint::Exact([4.0, 0.0, 4.0]),
+                PredicatePoint::Exact([4.0, 0.0, 6.0])
+            ])
+        );
+        assert_eq!(meet([&across, &wall, &upright]), Ok(answer), "in any order");
+    }
+
+    /// A cone bends against the pipe's own direction, so `w·Mw` is below zero
+    /// there and the quadratic along each line opens downwards. The wall
+    /// `x = 0` cuts the bar of radius 1 up `z` through `(0, 3, 0)` in `y = 2`
+    /// and `y = 4`, and the cone of slope 1 at the origin in `y = ±z`, so the
+    /// three meet at `(0, 2, ±2)` and `(0, 4, ±4)`, the lower `z` first on
+    /// each line all the same.
+    #[test]
+    fn a_wall_through_a_bars_axis_meets_a_cone_beside_it_lower_point_first_on_each_line() {
+        let wall = the_wall_through_the_axis();
+        let cone = a_cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+        let bar = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(0.0, 3.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let answer = meet([&wall, &cone, &bar]).expect("a wall along a bar is answered");
+        on_all_three([&wall, &cone, &bar], &answer);
+        assert_eq!(
+            answer,
+            MeetOfThree::At(smallvec![
+                PredicatePoint::Exact([0.0, 2.0, -2.0]),
+                PredicatePoint::Exact([0.0, 2.0, 2.0]),
+                PredicatePoint::Exact([0.0, 4.0, -4.0]),
+                PredicatePoint::Exact([0.0, 4.0, 4.0])
+            ])
+        );
+        assert_eq!(meet([&bar, &cone, &wall]), Ok(answer), "in any order");
+    }
+
+    /// A plane that leans to the bar's axis cuts it in an ellipse, and an
+    /// ellipse and the ball's circle meet where a quartic is zero, so the
+    /// triple stays refused. The points are there: through `(0, 0, 5)` with
+    /// normal `(0, 0.6, 0.8)` the plane cuts the ball in a circle of radius
+    /// `√(9 − 1.8²) = 2.4` about `(0, 1.92, 3.56)`, which runs through
+    /// `(0, 0, 5)` on the bar's axis and out to `(0, 3.84, 2.12)` past the
+    /// bar, so it crosses the ellipse.
+    #[test]
+    fn a_plane_leaning_to_a_bars_axis_through_a_ball_off_it_is_refused_by_name() {
+        let leaning = flat([0.0, 0.6, 0.8], [0.0, 0.0, 5.0]);
+        let bar = a_bar_up_z_of_radius(2.0);
+        let ball = the_ball_of_radius_at_0_3_5(3.0);
+        assert_eq!(
+            meet([&leaning, &bar, &ball]),
             Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
         );
+        assert_eq!(
+            meet([&ball, &leaning, &bar]),
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+        );
+    }
+
+    /// `-0.0 == 0.0`, so no pin that compares corners sees which zero a corner
+    /// carries, but a corner keyed on its bits does: `(-0.0, 3, 0)` and
+    /// `(0, 3, 0)` are one point and two keys. The floor across a bar of
+    /// radius 3 up `z` and a ball of radius 5 at `(4, 0, 0)` came back at
+    /// `(-0.0, ±3, 0)` before the road added zero to what it hands back. With
+    /// the ball at `(0, 4, 0)` the circles differ by `y = 0` instead, and the
+    /// corners are `(±3, 0, 0)`.
+    ///
+    /// Only exact corners are asked about, since a box's lower end at zero is
+    /// `-0.0` whatever the box was built from, as the last line shows.
+    #[test]
+    fn no_corner_where_a_plane_cuts_two_curved_surfaces_in_circles_is_at_a_negative_zero() {
+        let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
+        let pipe = a_bar_up_z_of_radius(3.0);
+        let ball_at = |centre: Point| Surface::Sphere(Sphere::new(centre, 5.0).expect("a radius"));
+        let beside_on_x = ball_at(Point::new(4.0, 0.0, 0.0));
+        let beside_on_y = ball_at(Point::new(0.0, 4.0, 0.0));
+        let negative_zero = (-0.0f64).to_bits();
+        for ball in [&beside_on_x, &beside_on_y] {
+            for order in [
+                [&floor, ball, &pipe],
+                [&floor, &pipe, ball],
+                [ball, &floor, &pipe],
+                [ball, &pipe, &floor],
+                [&pipe, &floor, ball],
+                [&pipe, ball, &floor],
+            ] {
+                let answer = meet(order).expect("two circles in one plane are answered");
+                let MeetOfThree::At(points) = &answer else {
+                    panic!("expected points, got {answer:?}");
+                };
+                assert_eq!(points.len(), 2, "{answer:?}");
+                for point in points {
+                    let at = point
+                        .exact_coordinates()
+                        .unwrap_or_else(|| panic!("{point:?} is on the lattice"));
+                    assert!(
+                        at.iter().all(|value| value.to_bits() != negative_zero),
+                        "{point:?} from {order:?} has a negative zero in it"
+                    );
+                }
+            }
+        }
+        assert_eq!(Interval::exactly(0.0).lo().to_bits(), negative_zero);
+    }
+
+    fn a_bar_up_z_of_radius(radius: f64) -> Surface {
+        Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius"))
+    }
+
+    fn the_ball_of_radius_at_0_3_5(radius: f64) -> Surface {
+        Surface::Sphere(Sphere::new(Point::new(0.0, 3.0, 5.0), radius).expect("a radius"))
+    }
+
+    /// Each point of `answer` is a box no wider than `1e-14` round the point in
+    /// its own place in `wanted`.
+    fn narrow_boxes_round(answer: &MeetOfThree, wanted: &[[f64; 3]]) {
+        let MeetOfThree::At(points) = answer else {
+            panic!("expected points, got {answer:?}");
+        };
+        assert_eq!(points.len(), wanted.len(), "{answer:?}");
+        for (point, wanted) in points.iter().zip(wanted) {
+            let boxed = point.enclosure();
+            assert!(
+                (0..3).all(|axis| boxed[axis].lo() <= wanted[axis]
+                    && wanted[axis] <= boxed[axis].hi()
+                    && boxed[axis].width() < 1e-14),
+                "{point:?} is not a narrow box round {wanted:?}"
+            );
+        }
     }
 
     fn a_cone(apex: [f64; 3], up: [f64; 3], slope: f64) -> Surface {

@@ -5,7 +5,7 @@
 //! and two quadrics has no second plane to cross, and in general it is a quartic
 //! — two conics in one plane — which nothing in this milestone solves.
 //!
-//! **Three families of it are not a quartic**, and all three are ordinary
+//! **These families of it are not a quartic**, and all of them are ordinary
 //! mechanical CAD:
 //!
 //! - Two quadrics that square `p` the same way differ by something *linear*, so
@@ -21,16 +21,22 @@
 //! - Two surfaces turned about one axis share circles square to it, and a
 //!   plane parallel to the axis cuts each in a chord, touches it or misses it.
 //!   A D-flat on a shaft across a chamfer cone is it.
+//! - A plane that cuts each of the two in a circle, about two centres, cuts
+//!   them in two circles that differ by a line. A floor across a bar and a ball
+//!   off its axis is it.
+//! - A plane that runs along a pipe cuts it in lines, and each line meets the
+//!   other surface where a quadratic is zero. A floor along one of two bars
+//!   that cross is it.
 //!
 //! Every corner below is worked out by hand first and written in the test, and
 //! every one of them lands on a whole number — so a box round it has no width
 //! and the answer is checked against the arithmetic-free number and not against
 //! a second run of the same code.
 //!
-//! What is still refused is at the bottom, with the corner it refuses written
-//! out in whole numbers beside it. That is what makes it a **gap** rather than a
-//! limit (§16.10): the points are there, and no discriminant this file has
-//! reaches them.
+//! What is still refused is written with the corner it refuses in whole
+//! numbers beside it. That is what makes it a **gap** rather than a limit
+//! (§16.10): the points are there, and no discriminant this file has reaches
+//! them.
 
 #![forbid(unsafe_code)]
 
@@ -520,80 +526,55 @@ fn the_same_triple_in_every_order_gives_the_same_answer() {
     }
 }
 
-/// **What is still refused, with the corners it refuses written out in whole
-/// numbers.**
+/// **Two bars leaning across each other and a floor along one of them**, which
+/// was refused until a plane along a pipe became a road of its own.
 ///
-/// Two bars leaning across each other and a plane. A bar of radius five up `z`
-/// gives `x² + y² = 25`; a bar of radius five along `x` at height four gives
-/// `y² + (z − 4)² = 25`; and the floor `z = 0` turns the second into `y² = 9`.
-/// So the four corners are `(±4, ±3, 0)` and every number in them is whole.
+/// A bar of radius five up `z` gives `x² + y² = 25`; a bar of radius five
+/// along `x` at height four gives `y² + (z − 4)² = 25`; and the floor `z = 0`
+/// runs along the second and cuts it in the two lines `y² = 9`. Each line meets
+/// the first bar where `x² = 25 − 9`, so the four corners are `(±4, ±3, 0)`
+/// and every number in them is whole.
 ///
-/// The two bars do **not** square `p` the same way — one is
-/// `I − ẑẑᵀ` and the other `I − x̂x̂ᵀ` — so their difference still has `p·p` in
-/// it and there is no flat surface to fall back on. The floor cuts each of them
-/// in a real curve, so neither is missed and neither is touched. That leaves the
-/// quartic, and nothing here solves one.
-///
-/// A **gap** and not a limit (§16.10): the answer exists, it is exact, and what
-/// is missing is a solver.
+/// The two bars do **not** square `p` the same way, so their difference still
+/// has `p·p` in it and no flat surface holds what they share. The floor cuts
+/// the bar along `x` in lines and not a curve, and a line meets the bar up `z`
+/// where a quadratic is zero, so no quartic is asked. The line `y = −3` comes
+/// first and the lower `x` first on each line.
 #[test]
-fn two_bars_leaning_across_each_other_and_a_plane_are_still_refused() {
+fn two_bars_leaning_across_each_other_and_a_floor_meet_at_four_whole_corners() {
     let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
     let upright = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0);
     let across = pipe([0.0, 0.0, 4.0], [1.0, 0.0, 0.0], 5.0);
 
-    for corner in [
-        [4.0, 3.0, 0.0],
-        [4.0, -3.0, 0.0],
-        [-4.0, 3.0, 0.0],
-        [-4.0, -3.0, 0.0],
-    ] {
-        let point = PredicatePoint::from(corner);
-        for surface in [&floor, &upright, &across] {
-            assert_eq!(
-                which_side_of(surface, point),
-                Decision::Zero,
-                "{corner:?} is exactly on {surface:?}"
-            );
-        }
-    }
-
     assert_eq!(
-        meet([&floor, &upright, &across]),
-        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+        corners_of([&floor, &upright, &across]),
+        vec![
+            [-4.0, -3.0, 0.0],
+            [4.0, -3.0, 0.0],
+            [-4.0, 3.0, 0.0],
+            [4.0, 3.0, 0.0]
+        ]
     );
 }
 
-/// A ball and a bar that the plane cuts in curves rather than grazes, about two
-/// different axes, is the other half of what is left, and it is refused for the
-/// same reason.
+/// **A ball and a bar off its axis that a plane cuts right through**, about
+/// two different centres, which was refused until two circles in one plane
+/// became a road of their own.
 ///
 /// A pipe of radius three up `z` and a ball of radius five about `(4, 0, 0)`.
 /// The floor `z = 0` cuts the pipe in `x² + y² = 9` and the ball in
 /// `(x − 4)² + y² = 25`, and subtracting leaves `8x = 0` — so the corners are
-/// `(0, ±3, 0)`, in whole numbers. A ball squares `p` as `I` and a pipe as
-/// `I − ẑẑᵀ`, which is not the same way; the floor cuts each in a circle, so
-/// it grazes neither; and the two circles are about two different centres. All
-/// three roads are shut and the quartic is what is left.
+/// `(0, ±3, 0)`, in whole numbers, and `y = −3` comes first. Two circles in
+/// one plane differ by a line whatever their centres, so no quartic is asked.
 #[test]
-fn a_ball_and_a_bar_off_its_axis_that_a_plane_cuts_right_through_are_still_refused() {
+fn a_ball_and_a_bar_off_its_axis_that_a_plane_cuts_right_through_meet_at_two_whole_corners() {
     let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
     let upright = pipe([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 3.0);
     let round = ball([4.0, 0.0, 0.0], 5.0);
 
-    for corner in [[0.0, 3.0, 0.0], [0.0, -3.0, 0.0]] {
-        for surface in [&floor, &upright, &round] {
-            assert_eq!(
-                which_side_of(surface, PredicatePoint::from(corner)),
-                Decision::Zero,
-                "{corner:?} is exactly on {surface:?}"
-            );
-        }
-    }
-
     assert_eq!(
-        meet([&floor, &upright, &round]),
-        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+        corners_of([&floor, &upright, &round]),
+        vec![[0.0, -3.0, 0.0], [0.0, 3.0, 0.0]]
     );
 }
 

@@ -694,26 +694,32 @@ pub enum Error {
     /// quadrics is a degree-eight system.
     ///
     /// **"In general" is doing real work in that sentence**, and
-    /// `three_surfaces.rs`'s module doc names the five
-    /// families it excludes: two quadrics that square `p` the same way differ by
-    /// something flat; two surfaces turned about one axis are cut by a plane
-    /// square to it in two circles about one centre, which are one circle or
-    /// share nothing; the same two share circles square to the axis, which a
-    /// plane holding the axis cuts in two points each; a plane that misses or
-    /// barely touches one of the two settles the triple with a sign; and a
-    /// plane beside that axis, parallel to it, cuts each shared circle in a
-    /// chord, touches it or misses it, as an exact sign at its height says. Two
-    /// pipes running the same way and a cap plane — a union of two overlapping
-    /// parallel bars — is the first, a bar through a ball and a cap across both
-    /// is the second, a wall through the circle a frustum crosses a bar in is
-    /// the third, a ball and a bar both resting on a block's floor is the
-    /// fourth, and a D-flat on a shaft across the circle a chamfer cone crosses
-    /// it in is the fifth. All five are answered, and so are three curved
-    /// surfaces two of which square `p` the same way, since the plane those two
-    /// differ by takes one of their places (Q1284): two cones of one slope
-    /// about one axis and a ball. This is what is left over — among it a plane
-    /// leaning to the axis a ball and a pipe share, which cuts the pipe in an
-    /// ellipse (`a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses`
+    /// `three_surfaces.rs`'s module doc names the seven
+    /// families of quadrics it excludes: two quadrics that square `p` the same
+    /// way differ by something flat; two surfaces turned about one axis are cut
+    /// by a plane square to it in two circles about one centre, which are one
+    /// circle or share nothing; the same two share circles square to the axis,
+    /// which a plane holding the axis cuts in two points each; a plane that
+    /// misses or barely touches one of the two settles the triple with a sign;
+    /// a plane beside that axis, parallel to it, cuts each shared circle in a
+    /// chord, touches it or misses it, as an exact sign at its height says; a
+    /// plane that cuts both in circles about two centres — a ball anywhere, a
+    /// pipe or a cone square to it — cuts them in two circles that differ by a
+    /// line; and a plane along a pipe cuts it in lines, each of which meets the
+    /// other surface where a quadratic is zero. Two pipes running the same way
+    /// and a cap plane — a union of two overlapping parallel bars — is the
+    /// first, a bar through a ball and a cap across both is the second, a wall
+    /// through the circle a frustum crosses a bar in is the third, a ball and a
+    /// bar both resting on a block's floor is the fourth, a D-flat on a shaft
+    /// across the circle a chamfer cone crosses it in is the fifth, a bar's cap
+    /// across a ball off its axis is the sixth, and a wall through the axes of
+    /// two bars that cross is the seventh. All seven are answered, and so are
+    /// three curved surfaces two of which square `p` the same way, since the
+    /// plane those two differ by takes one of their places (Q1284): two cones of
+    /// one slope about one axis and a ball. This is what is left over — among it
+    /// a plane leaning to the axis of a pipe or a cone, which cuts it in an
+    /// ellipse or another conic, against anything but a surface it bends the
+    /// same way as (`a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses`
     /// in `rcad-topo`), and three curved surfaces two of which differ by a
     /// plane that no stored [`Plane`](crate::Plane) is exactly, such as two
     /// balls whose centres lie along a diagonal.
@@ -727,8 +733,8 @@ pub enum Error {
     /// the plane no stored plane is, the fix is smaller: roads that take the
     /// plane as the exact numbers it is, as the first family's road already
     /// does. `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved`,
-    /// `two_bars_leaning_across_each_other_and_a_plane_are_still_refused` and
-    /// `two_balls_whose_plane_no_stored_plane_is_and_a_bar_are_still_refused`
+    /// `a_plane_leaning_to_a_bars_axis_through_a_ball_off_it_is_refused_by_name`
+    /// and `two_balls_whose_plane_no_stored_plane_is_and_a_bar_are_still_refused`
     /// are the demonstrations that the points exist.
     #[error(
         "where three surfaces meet is only worked out when two of them are flat, and fewer than \
