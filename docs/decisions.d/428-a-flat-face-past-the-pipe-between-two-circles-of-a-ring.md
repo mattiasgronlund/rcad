@@ -100,6 +100,14 @@ way by every fuse, both ways round:
 `tests/a_block_with_a_whole_ring_through_its_middle.rs`. That this is the cause
 there has not been traced. No row is filed for it: Q1500 is the row.
 
+*Since Q1514 (2026-10-10) the general case answers.
+`the_bands_round_the_tube` in `fuse/arrange.rs` puts the bands in order round
+the tube where only planes square to the axis cut a ring's face, and its doc
+comment carries the argument. Both pins above are answer pins now, renamed
+`a_plate_holding_the_middle_of_the_ring_answers_every_fuse` and
+`a_bar_in_a_rings_hole_touching_nothing_fuses_to_the_two_apart`, and Q1500 is
+closed by the same merge.*
+
 ### 428.5 The join of a plane and a ring takes flat-picked circles only
 
 `the_name_each_closed_curve_goes_by` joins the curve a plane cuts a ring in with
@@ -155,5 +163,5 @@ round plate on the ring's own axis.
 - **The half ring on a bar of its own outer radius** (428.5), refused
   `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` by every fuse. Filed as a row.
 - **Two or more planes square to the axis on one ring's face** (428.4). Q1500
-  holds it; not filed again.
+  holds it; not filed again. *Answered by Q1514 since 2026-10-10.*
 - **A block with a ring through it** (428.6). Q618 holds it; not filed again.

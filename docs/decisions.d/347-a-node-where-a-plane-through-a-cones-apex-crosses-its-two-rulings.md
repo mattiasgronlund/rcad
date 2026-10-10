@@ -409,7 +409,7 @@ Faces are listed union, intersection, first less second, second less first;
 | two pipes side by side | bars r 2 up `z` at `(0, 0)` and `(2, 0)`: lines at `x = 1`, `y = ±√3` | all answer, faces 10, 4, 10, 4 | axes `r₁ + r₂` or `r₁ − r₂` apart: one line |
 | ball centred on a pipe's axis | ball r 2, bar r 1 down its axis from `z = −3` to 3: circles at `z = ±√3` | all answer, faces 5, 3, 2, 3+3 | a ball as wide as the pipe: one circle |
 | cone and pipe about one axis | pointed cone of slope 1 up to `z = 4`, bar r 1 from `z = −2` to 6: circles at `z = ±1` | all answer, faces 6, 3, 3, 3+3 | a pipe of no width or a flat cone: neither can be made |
-| plane square to a torus's axis | top half of a ring of 4 round a tube of 1, bar r 6 about its axis from `z = −2` to `1/2`: circles of radius `4 ± √3/2` | refused `CannotTellTheCellsOfAFaceApart`, 6 of 6 (Q1514) | the plane on top of the tube: one circle |
+| plane square to a torus's axis | top half of a ring of 4 round a tube of 1, bar r 6 about its axis from `z = −2` to `1/2`: circles of radius `4 ± √3/2` | all answer since Q1514, faces 5, 4, 2, 7; refused `CannotTellTheCellsOfAFaceApart`, 6 of 6, before it | the plane on top of the tube: one circle |
 | plane through a torus's axis | the same half ring, the `x ≥ 0` half of a bar r 10 from `z = −2` to 5: both meridian circles on its face `x = 0` | all answer, faces 6, 4, 4, 6 | a tube as wide as the ring: cannot be made |
 | plane and cone, apex off the plane | the same cone, block `[1, 6] × [−6, 6] × [−2, 6]`: a hyperbola branch on each nappe | all answer, faces 8, 3, 3, 8 | a plane through the apex: 347.1's rulings and node |
 | ball and pipe, off the axis | ball r 2, bar r 1 from `z = −3` to 3 at `x = 1/2`, and three more placements: two loops | refused `ACrossingThisCannotBeOrderedAlong`, 6 of 6 in each placement | the bar at `x = 1`, touching the ball from inside (Viviani): refused in `intersect`, `ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`, 6 of 6 |
@@ -436,7 +436,7 @@ The pins, pair by pair, the answer first and the limit after:
   `a_cone_and_a_bar_on_one_axis_cross_in_two_circles_and_every_fuse_answers`,
   `a_pipe_of_no_width_and_a_flat_cone_cannot_be_made`.
 - Plane square to a torus's axis:
-  `a_half_ring_cut_by_a_round_plate_is_refused_telling_the_cells_of_a_face_apart`,
+  `a_half_ring_cut_by_a_round_plate_crosses_it_in_two_circles_and_every_fuse_answers`,
   `a_plane_resting_on_top_of_a_ring_touches_it_round_one_circle`.
 - Plane through a torus's axis:
   `a_half_bar_on_a_rings_axis_cuts_the_tube_in_two_circles_and_every_fuse_answers`,
@@ -460,6 +460,8 @@ The pins, pair by pair, the answer first and the limit after:
   torus's axis by Q1514's `CannotTellTheCellsOfAFaceApart`, and the ball and
   pipe off the axis by `ACrossingThisCannotBeOrderedAlong`, the gap §39.4
   lists for a ball's loops, still open after Q1483 ordered two pipes' loops.
+  *Since Q1514 (2026-10-10) the plane square to a torus's axis answers too,
+  so eight pairs answer and only the ball and pipe off the axis is refused.*
 - Where the two curves would meet: for six pairs no shape the kernel can make
   gets there, since the limit is one curve or a surface that cannot be made.
   For the plane and cone it is the apex, 347.1's node. For the two loop pairs

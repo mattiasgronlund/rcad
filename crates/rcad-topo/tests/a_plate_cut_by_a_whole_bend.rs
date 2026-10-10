@@ -32,8 +32,8 @@
 //!
 //! # What the fuse does
 //!
-//! None of the three shapes that hold the ring reaches that question, under
-//! any rule either way round:
+//! None of the shapes that hold the plate and the ring reaches that question,
+//! under any rule either way round:
 //!
 //! - the plate and the ring are refused *"a point inside a piece of a face"*,
 //!   on the plate top's half annulus, corners `(0, ±3.134, 1/2)` and
@@ -41,11 +41,14 @@
 //!   tests holds three points offered for it, so the cause lies in something
 //!   the real piece has and that model does not, and is not traced;
 //! - the plate against the ring and the bar together is refused by the same
-//!   predicate, on a piece not traced;
-//! - the bar and the ring, which never touch, are refused
-//!   `CannotTellTheCellsOfAFaceApart`, cause not traced.
+//!   predicate, on a piece not traced.
 //!
-//! The plate and the bar, the control, answer, and their volumes are right.
+//! The bar and the ring, which never touch, were refused
+//! `CannotTellTheCellsOfAFaceApart`: the planes of the bar's caps cut each of
+//! the ring's faces into bands, and nothing told the outer band between them
+//! from the inner one. Since Q1514 puts those bands in order round the tube,
+//! they answer. The plate and the bar, the control, answer, and their volumes
+//! are right.
 //! Each refusal is pinned here, so the change that answers one fails its pin
 //! and has to check the answers against the volumes below. For the plate
 //! against the ring and the bar, with `S` the plate and ring plus the plate
@@ -115,13 +118,24 @@ fn a_half_disk_plate_against_a_ring_and_a_bar_in_its_hole_is_refused_on_the_half
     );
 }
 
+/// The bar and the ring touch nowhere, so the union is the two of them apart,
+/// the intersection nothing, and each difference its first argument.
 #[test]
-fn a_bar_in_a_rings_hole_touching_nothing_cannot_tell_the_cells_of_a_face_apart() {
-    every_way(the_bar, the_ring, |_, rule, bar_first, answer| {
-        assert!(
-            matches!(answer, Err(Error::CannotTellTheCellsOfAFaceApart { .. })),
-            "{rule:?}, bar first: {bar_first}: {answer:?}"
-        );
+fn a_bar_in_a_rings_hole_touching_nothing_fuses_to_the_two_apart() {
+    let bar = 529.0 * PI / 128.0;
+    let ring = 8.0 * PI * PI;
+    every_way(the_bar, the_ring, |model, rule, bar_first, answer| {
+        let what = format!("{rule:?}, bar first: {bar_first}");
+        let solids = answer.unwrap_or_else(|why| panic!("{what} refused: {why:?}"));
+        let (count, volume) = match (rule, bar_first) {
+            (Rule::Union, _) => (2, bar + ring),
+            (Rule::Intersection, _) => (0, 0.0),
+            (Rule::Difference, true) => (1, bar),
+            (Rule::Difference, false) => (1, ring),
+            (other, _) => panic!("a rule this file does not run: {other:?}"),
+        };
+        assert_eq!(solids.len(), count, "{what}: {solids:?}");
+        assert_measures(model, &solids, volume, &what);
     });
 }
 
