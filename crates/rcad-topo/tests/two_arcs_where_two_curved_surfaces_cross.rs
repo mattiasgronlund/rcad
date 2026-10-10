@@ -21,7 +21,10 @@
 //! The rest of what a ball and a pipe, or two pipes, cross in does not reach
 //! that function with two corners on one curve: a wall or a cap through a loop
 //! off the axis is refused where the three surfaces meet, and the circle a ball
-//! touches its bar round is refused before its arcs are named.
+//! touches its bar round is refused before its arcs are named. Neither does the
+//! cross-drilled shaft of `tests/a_cone_hollowed_along_its_axis.rs` (Q1483),
+//! whose fat bar's seam crosses a loop twice: run with a print in that
+//! function, it sends no side of two pipes there between two corners.
 //!
 //! A ball keeps its poles on the `z` line through its centre however it is
 //! placed, so the bars along `x` below keep them off the wall.
@@ -221,16 +224,12 @@ fn a_half_bar_on_a_balls_axis_through_its_poles_is_refused_meshing_the_balls_ski
 /// **The whole bar answers every rule**: its seam puts one corner on the
 /// circle, the bar holds the ball, so the union is the bar, `192π`, the
 /// intersection the ball, `256π/3`, the bar less the ball `320π/3`, and the
-/// ball less the bar nothing. **Its half `x ≥ 0`, whose wall puts two, is
-/// refused under every rule before an edge is named**, ordering the points on
-/// the circle along a touch.
+/// ball less the bar nothing. **A wall that puts two is refused under every
+/// rule both ways before an edge is named**, ordering the points on the circle
+/// along a touch: the bar's half `x ≥ 0`, the bar seamed up `−x` cut to
+/// `x ≥ 2`, off the axis, and the ball's half `x ≥ 0` against the whole bar.
 #[test]
 fn a_ball_a_bar_holds_round_one_circle_is_refused_where_a_wall_crosses_it() {
-    let snug = |model: &mut Model| {
-        model
-            .add_ball(4.0, &at(0.0, 0.0, 5.0))
-            .expect("a ball of radius four")
-    };
     let whole = what_each_rule_gives(|model| [bar(model, 0), snug(model)]);
     let wanted = [
         Gives::Holds(192.0 * PI),
@@ -247,18 +246,38 @@ fn a_ball_a_bar_holds_round_one_circle_is_refused_where_a_wall_crosses_it() {
             .all(|(answer, wanted)| wanted.is(answer)),
         "{whole:?}"
     );
-    let half = what_each_rule_gives(|model| {
-        let bar = bar(model, 0);
-        [
-            cut(model, bar, [0.0, -20.0, -20.0], [20.0, 20.0, 20.0]),
-            snug(model),
-        ]
-    });
-    assert!(
-        half.iter()
-            .all(|answer| matches!(answer, Err(Error::ACrossingThisCannotBeOrderedAlong))),
-        "{half:?}"
-    );
+    let walls: [fn(&mut Model) -> [SolidKey; 2]; 3] = [
+        |model| {
+            let bar = bar(model, 0);
+            [
+                cut(model, bar, [0.0, -20.0, -20.0], [20.0, 20.0, 20.0]),
+                snug(model),
+            ]
+        },
+        |model| {
+            let bar = bar(model, 2);
+            [
+                cut(model, bar, [2.0, -20.0, -20.0], [20.0, 20.0, 20.0]),
+                snug(model),
+            ]
+        },
+        |model| {
+            let ball = snug(model);
+            [
+                cut(model, ball, [0.0, -20.0, -20.0], [20.0, 20.0, 20.0]),
+                bar(model, 0),
+            ]
+        },
+    ];
+    for wall in walls {
+        let gives = what_each_rule_gives(wall);
+        assert!(
+            gives
+                .iter()
+                .all(|answer| matches!(answer, Err(Error::ACrossingThisCannotBeOrderedAlong))),
+            "{gives:?}"
+        );
+    }
 }
 
 /// A loop a ball off a pipe's axis or two pipes square to each other cross in,
@@ -483,6 +502,13 @@ fn ball(model: &mut Model, centre: [f64; 3]) -> SolidKey {
     model
         .add_ball(5.0, &at(centre[0], centre[1], centre[2]))
         .expect("a ball of radius five")
+}
+
+/// The ball of radius 4 at `(0, 0, 5)`, which [`bar`] holds.
+fn snug(model: &mut Model) -> SolidKey {
+    model
+        .add_ball(4.0, &at(0.0, 0.0, 5.0))
+        .expect("a ball of radius four")
 }
 
 fn at(x: f64, y: f64, z: f64) -> Isometry {
