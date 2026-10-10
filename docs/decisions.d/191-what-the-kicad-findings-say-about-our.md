@@ -265,6 +265,27 @@ the plate `4π²` and `529π/64` apart, and the plate less the group
 nothing, and each difference its first argument
 (`a_half_ring_standing_on_a_round_plate.rs`).
 
+Proving the bar clear left a whole ring with nothing cutting it, and that was
+refused in its turn: `a_plate_cut_by_a_whole_bend.rs`'s
+`a_bar_in_a_rings_hole_touching_nothing_fuses_to_the_two_apart` broke on the
+`cuts.rs` change alone. `bake` joins the two halves a whole ring is written as
+into one torus face with no boundary, so with no cut its arrangement draws
+nothing, and `Arrangement::the_whole_surface` answers
+`ACurvedFaceGoesRightRoundWithNoSeam` for every surface but a ball, which has a
+pole to open a seam up to. Before, the planes of the bar's caps cut the ring
+along the circles where they meet it, though the caps never reach it, and that
+hid the refusal. Where nothing comes near enough to cut, it was there at the
+base already: over the base's source, a whole ring with a bar twenty out from
+its axis is refused that way under every rule. What answers it now:
+`arrange.rs`'s `split_a_face` cuts a torus face its arrangement drew nothing on
+with the plane through the ring's middle, square to its axis, so the face
+splits into the two bands between its outer and inner equator, a shape the
+mesher fills. A whole ring with a bar far from it, and one with the bar in its
+hole level with the top and the bottom of the tube, now give the two solids
+apart, nothing, and each difference its first argument
+(`a_whole_ring_and_a_bar_far_from_it_fuse_to_the_two_apart`,
+`a_whole_ring_and_a_bar_in_its_hole_level_with_its_tube_fuse_to_the_two_apart`).
+
 ### 191.6 What is left
 
 `ignored_tests` goes 2 → 6 and `wildcard_arms` 87 → 88 (the justfile says which
