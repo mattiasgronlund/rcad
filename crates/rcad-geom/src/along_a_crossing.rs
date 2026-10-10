@@ -457,10 +457,15 @@ fn the_way_a_circle_round_the_axis_winds(
 /// That is the sign `intersect` splits this pair on, and the one the
 /// arrangement asks before it lets the pair through to be ordered.
 ///
+/// A centre off the axis, by however little, crosses the pipe in quartic loops
+/// and not circles, and [`the_way_a_loop_round_a_pipe_through_a_ball_winds`]
+/// orders those.
+///
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a ball whose centre is off
-/// the axis, by however little: it crosses the pipe in a quartic.
+/// the axis and that does not swallow the pipe's whole cross-section, from
+/// [`the_way_a_loop_round_a_pipe_through_a_ball_winds`].
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for `from` on the
 /// plane through the centre, which is on the crossing only where the ball is
@@ -485,7 +490,7 @@ fn the_way_a_circle_round_a_pipes_axis_winds(
         match part.sign() {
             Decision::Zero => {}
             Decision::Pos | Decision::Neg => {
-                return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+                return the_way_a_loop_round_a_pipe_through_a_ball_winds(ball, pipe, &across, from);
             }
             undecided @ Decision::Undecidable { .. } => off_the_axis = undecided,
             other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
@@ -506,6 +511,90 @@ fn the_way_a_circle_round_a_pipes_axis_winds(
         Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
         other => unreachable!("which side of a half-space a point is on is a sign: {other:?}"),
     }
+}
+
+/// Which way the loop `from` is on runs, of the two a ball crosses a pipe in
+/// whose axis misses its centre, for the pair taken ball first. `across` is
+/// `(c − o) × w`, already known not to be nothing.
+///
+/// # Each loop runs once round the pipe's axis
+///
+/// Write a point `p` of the crossing as `c + d + hŵ + ρ − d`, with `d` the step
+/// out from the axis to the centre, `a = ‖d‖`, `ρ` the step out from the axis
+/// to `p` and `h` how far along the axis `p` sits from the centre. On the ball,
+/// `h² = R² − ‖ρ − d‖²`, and `‖ρ − d‖ ≤ r + a`. Where `R > r + a` that is above
+/// nothing for every `ρ`, so each line of the pipe's wall along its axis
+/// crosses the ball twice, once either side of the plane through the centre
+/// square to the axis, and each loop meets each line once: going round a loop
+/// goes once round the axis. Three points of a loop, looked at down `w`, are
+/// three points of the pipe's circle in the same order, and the module's
+/// determinant reads them down `w`.
+///
+/// # Which way round
+///
+/// `∇S × ∇T` is `(hŵ + ρ − d) × ρ = h ŵ × ρ − d × ρ`. `d × ρ` lies along `ŵ`,
+/// since both are square to it, so against `ŵ × ρ`, which runs anticlockwise
+/// about `ŵ`, the crossing runs `h r²`: exactly the circles' reading, and the
+/// loop ahead of the centre winds about the axis direction and the one behind
+/// about its opposite. Which loop a run is on is read off `from` against the
+/// same half-space through the centre, which is the picker
+/// [`intersect`](crate::intersect) hands back on these two runs.
+///
+/// # Errors
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the ball is proved not
+/// to swallow the pipe's whole cross-section, `R − r ≤ a`: a ball that reaches
+/// into the pipe's side crosses it in one loop that runs back and forth round
+/// the axis, and one that touches it from inside in a figure of eight.
+fn the_way_a_loop_round_a_pipe_through_a_ball_winds(
+    ball: &Sphere,
+    pipe: &Cylinder,
+    across: &[Exact; 3],
+    from: PredicatePoint,
+) -> Result<WhichWayItWinds> {
+    match whether_a_ball_swallows_a_pipe(ball, pipe, across) {
+        Some(Decision::Pos) => {}
+        Some(Decision::Zero | Decision::Neg) => {
+            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        }
+        Some(Decision::Undecidable { .. }) | None => return Ok(WhichWayItWinds::CannotTell),
+        Some(other) => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+    }
+    let between = HalfSpace::through_a_point_facing(ball.centre(), pipe.axis().direction())?;
+    match between.side_of_point(from) {
+        Decision::Pos => Ok(WhichWayItWinds::About(between.normal())),
+        Decision::Neg => Ok(WhichWayItWinds::About(-between.normal())),
+        // No point of either loop is on the plane through the centre, so which
+        // loop `from` is on cannot be told, and the answer is the one a box
+        // straddling it gets.
+        Decision::Zero | Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
+        other => unreachable!("which side of a half-space a point is on is a sign: {other:?}"),
+    }
+}
+
+/// The sign of `(R − r)² W − A` for the ball's radius `R` above the pipe's
+/// `r`, with `W = w · w` and `A = ‖across‖² = ‖(c − o) × w‖²`. That is
+/// `W (R − r − a)(R − r + a)` for `a` how far the centre is off the axis, so
+/// its sign is the sign of `R − r − a`: above nothing where the ball swallows
+/// the pipe's whole cross-section. `None` where a product leaves what [`Exact`]
+/// can hold.
+fn whether_a_ball_swallows_a_pipe(
+    ball: &Sphere,
+    pipe: &Cylinder,
+    across: &[Exact; 3],
+) -> Option<Decision> {
+    let wider = Exact::of(ball.radius()).minus(&Exact::of(pipe.radius()));
+    if wider.sign() != Decision::Pos {
+        return Some(Decision::Neg);
+    }
+    let along = pipe.axis().direction().components();
+    Some(
+        wider
+            .times(&wider)?
+            .times(&Exact::dot_of(along, along)?)?
+            .minus(&Exact::squared_length_of(across)?)
+            .sign(),
+    )
 }
 
 /// Which way one of the two circles a cone and a pipe on its axis cross in
