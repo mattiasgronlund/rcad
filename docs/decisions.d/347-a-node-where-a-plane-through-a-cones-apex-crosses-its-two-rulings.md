@@ -239,6 +239,11 @@ Where two of those loops touch, `intersect` refuses by name,
 for the ball and the pipe
 (`a_ball_resting_on_the_far_inside_of_a_pipe_crosses_it_in_a_curve_with_no_name`)
 and for two pipes (`two_leaning_pipes_of_the_same_thickness_whose_axes_meet_cross_in_a_curve_with_no_name`).
+*Since 2026-10-10 (Q1603, landed with Q1607) two pipes of one width whose
+axes meet are named, as four half ellipses that meet where the walls touch,
+and that pin is
+`two_leaning_pipes_of_the_same_thickness_whose_axes_meet_cross_in_four_half_ellipses`;
+see the note at the end of 347.9.*
 The plane-and-torus row refuses the two bitangent planes' Villarceau circles,
 which do cross, as a quartic. The rest are two curves apart by what the pair
 is. **None of that was tried here** by building two curves of one pair that
@@ -451,7 +456,10 @@ The pins, pair by pair, the answer first and the limit after:
 - Two leaning pipes:
   `a_thin_bar_through_a_thick_one_crosses_it_in_two_loops_and_every_fuse_answers`,
   `a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_before_any_arrangement`,
-  `two_bars_of_one_radius_whose_axes_meet_are_refused_before_any_arrangement`.
+  `two_bars_of_one_radius_whose_axes_meet_are_refused_before_any_arrangement`,
+  since 2026-10-10
+  `two_bars_of_one_radius_whose_axes_meet_are_refused_telling_the_cells_of_a_pipe_apart`
+  (the note at the end of this section).
 
 **What it settles.**
 

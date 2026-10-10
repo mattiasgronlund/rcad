@@ -3786,7 +3786,7 @@ impl<'f> Arrangement<'f> {
     /// that can lie wholly inside the face, as a closed cut does. Two pipes of
     /// one width whose axes meet lost their whole crossing here, and every
     /// fuse of them came back with nothing cut on either pipe
-    /// (`two_bars_of_one_radius_whose_axes_meet_cross_in_two_ellipses_and_every_fuse_answers`).
+    /// (`two_bars_of_one_radius_whose_axes_meet_are_refused_telling_the_cells_of_a_pipe_apart`).
     fn drop_the_lumps_of_straight_cuts_alone(&mut self) {
         let mut same = Sameness::of(self.nodes.len());
         for arc in &self.arcs {
