@@ -1703,8 +1703,9 @@ fn where_one_plane_and_two_curved_surfaces_meet(
 /// the other, and a direction with no length is not a pipe. Two pipes match when
 /// their stored directions are the same or opposite and at no other time, which
 /// `two_bars_whose_axes_are_written_pointing_opposite_ways_still_meet_a_cap`
-/// walks and `two_bars_leaning_across_each_other_and_a_plane_are_still_refused`
-/// holds the other side of.
+/// walks. Two that cross are left to the roads below, and
+/// `a_wall_through_the_axes_of_two_bars_that_cross_meets_them_where_their_lines_cross`
+/// holds that side: a wall through both axes is [`what_a_plane_along_a_pipe_leaves`]'s.
 ///
 /// **The flat surface it builds is not a [`Plane`]**, and could not be: its
 /// numbers are differences of products of the stored ones and an `f64` almost
