@@ -19,8 +19,12 @@
 //! Q1590.
 //!
 //! The rest of what a ball and a pipe, or two pipes, cross in does not reach
-//! that function with two corners on one curve: a wall or a cap through a loop
-//! off the axis is refused where the three surfaces meet, and the circle a ball
+//! that function with two corners on one curve. A wall or a cap through a loop
+//! off the axis has its corners placed where the three surfaces meet since
+//! Q1591, and then the one loop a ball reaching into a bar's side leaves is
+//! refused before its arcs are named, as it is with no plane through it
+//! (Q1593), and the two loops a thin bar through a fat one leaves, cut by a
+//! wall through both axes, are refused as not a manifold. The circle a ball
 //! touches its bar round is refused before its arcs are named. Neither does the
 //! cross-drilled shaft of `tests/a_cone_hollowed_along_its_axis.rs` (Q1483),
 //! whose fat bar's seam crosses a loop twice: run with a print in that
@@ -277,16 +281,24 @@ fn a_ball_a_bar_holds_round_one_circle_is_refused_where_a_wall_crosses_it() {
     }
 }
 
-/// A loop a ball off a pipe's axis or two pipes square to each other cross in,
-/// with a plane through it, is refused where the plane and the two curved
-/// surfaces meet, under every rule both ways round, so no arc of it reaches
-/// `which_arc_of_a_circle_this_is` with two corners: a bar of radius 2 from
-/// `z = −1` to `z = 5`, whose cap runs through the centre of the ball of radius
-/// 3 at `(0, 3, 5)`; that bar to `z = 11`, cut to `x ≥ 0`, against the same
-/// ball; and a bar of radius 1 along `x` at `z = 5`, cut to `y ≥ 0`, through a
-/// bar of radius 4 up `z`.
+/// The ball of radius 3 at `(0, 3, 5)` reaches into the side of a bar of
+/// radius 2 up `z`, and the two cross in one loop. Three planes put two corners
+/// on it: the bar's cap `z = 5` where the bar runs from `z = −1` to `z = 5`,
+/// at `(±4√2/3, 2/3, 5)`; and the wall `x = 0` through the bar's axis and the
+/// ball's centre, at `(0, 2, 5 ± 2√2)`, with the bar to `z = 11` cut to `x ≥ 0`
+/// against the whole ball, or the ball cut to `x ≥ 0` against the whole bar.
+///
+/// Until Q1591 each was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`,
+/// before the fuse had a corner. `rcad-geom`'s `three_surfaces.rs` places those
+/// corners now, and every rule both ways round is refused one step further on,
+/// `ACrossingThisCannotBeOrderedAlong`, the refusal the same ball and bar get
+/// with no plane through the loop (Q1593). Of the places that refusal is
+/// raised, the one a loop of a ball and a pipe reaches is `fuse/arrange.rs`'s
+/// `how_a_crossing_runs`, which orders the two loops a ball crosses a pipe it
+/// holds in and not the one a ball reaching into a pipe's side leaves. So no
+/// arc of this loop reaches `which_arc_of_a_circle_this_is` yet.
 #[test]
-fn a_plane_through_a_loop_off_an_axis_is_refused_where_it_meets_both_curved_surfaces() {
+fn a_plane_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_is_refused_ordering_the_loop() {
     let pairs: [fn(&mut Model) -> [SolidKey; 2]; 3] = [
         |model| {
             let rod = model
@@ -307,35 +319,70 @@ fn a_plane_through_a_loop_off_an_axis_is_refused_where_it_meets_both_curved_surf
             ]
         },
         |model| {
-            let thin = model
-                .add_round_bar(
-                    1.0,
-                    20.0,
-                    &at(-10.0, 0.0, 5.0)
-                        .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is an axis")),
-                )
-                .expect("a bar of radius one");
-            let fat = model
-                .add_round_bar(4.0, 10.0, &Isometry::identity())
-                .expect("a bar of radius four");
+            let rod = model
+                .add_round_bar(2.0, 12.0, &at(0.0, 0.0, -1.0))
+                .expect("a bar of radius two");
+            let ball = model.add_ball(3.0, &at(0.0, 3.0, 5.0)).expect("a ball");
             [
-                fat,
-                cut(model, thin, [-20.0, 0.0, -20.0], [20.0, 20.0, 20.0]),
+                rod,
+                cut(model, ball, [0.0, -20.0, -20.0], [20.0, 20.0, 20.0]),
             ]
         },
     ];
     for pair in pairs {
         let gives = what_each_rule_gives(pair);
         assert!(
-            gives.iter().all(|answer| matches!(
-                answer,
-                Err(Error::Geometry(
-                    rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                ))
-            )),
+            gives
+                .iter()
+                .all(|answer| matches!(answer, Err(Error::ACrossingThisCannotBeOrderedAlong))),
             "{gives:?}"
         );
     }
+}
+
+/// A bar of radius 1 along `x` at `z = 5`, cut to `y ≥ 0`, through a bar of
+/// radius 4 up `z`: the fat bar swallows the thin one's whole section, so the
+/// two cross in two loops, and the wall `y = 0` through both axes puts two
+/// corners on each, at `(±4, 0, 4)` and `(±4, 0, 6)`.
+///
+/// Until Q1591 every rule was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
+/// before the fuse had a corner. `rcad-geom`'s `three_surfaces.rs` places the
+/// four on the lattice now, and every rule both ways round is refused in
+/// `fuse/assemble.rs`'s `darts_along_each_edge`: an edge with six faces along it
+/// for the unions and the fat bar less the half, and with four for the
+/// intersections and the half less the fat bar. Which edge that is has not been
+/// traced.
+#[test]
+fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_is_refused_as_not_a_manifold() {
+    let gives = what_each_rule_gives(|model| {
+        let thin = model
+            .add_round_bar(
+                1.0,
+                20.0,
+                &at(-10.0, 0.0, 5.0)
+                    .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is an axis")),
+            )
+            .expect("a bar of radius one");
+        let fat = model
+            .add_round_bar(4.0, 10.0, &Isometry::identity())
+            .expect("a bar of radius four");
+        [
+            fat,
+            cut(model, thin, [-20.0, 0.0, -20.0], [20.0, 20.0, 20.0]),
+        ]
+    });
+    let edges_with_this_many_faces = gives
+        .iter()
+        .map(|answer| match answer {
+            Err(Error::ResultIsNotManifold { count }) => Some(*count),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        edges_with_this_many_faces,
+        [6, 6, 4, 4, 6, 4].map(Some),
+        "{gives:?}"
+    );
 }
 
 /// What one fuse is pinned to give.
