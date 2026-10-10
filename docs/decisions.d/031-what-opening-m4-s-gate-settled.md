@@ -668,6 +668,14 @@ between "cannot" and "we chose not to", which §24.17 is about.
 > through `(11, 0, 0)`, whose stored direction does pass exactly through and
 > which was named before Q1625, is refused the same
 > `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` before and after.
+> *Since Q1646 (2026-10-10) `a_half_of_an_ellipse` knows a half by which pipe
+> each picker leans towards, asked exactly, and a far cap's circle is shown
+> clear of the other pipe. The bars through `(11, 0, 0)` at 50°–100° now stop
+> where the cross does, `CannotTellTheCellsOfAFaceApart` (Q1622); at 120° they
+> get past the arrangement and are refused meshing a face or building a wire
+> (Q1656). The bars starting at `(11, −3.25, 0.5)` are refused as before
+> (Q1655, and Q1645 at 120°). `two_equal_bars_leaning_at_each_other.rs` pins
+> all four.*
 
 ### 31.10 What this gate does not know
 
