@@ -1989,6 +1989,7 @@ impl<'f> Arrangement<'f> {
                 }
             }
         }
+        self.place_the_middle_of_each_half();
         Ok(())
     }
 
@@ -2208,6 +2209,94 @@ impl<'f> Arrangement<'f> {
             });
         }
         Ok(())
+    }
+
+    /// The node half way along each half ellipse ([`HalfAnEllipse`]): where the
+    /// plane holding both axes crosses it, at `c + r·m/‖ê × û‖` for `c` where
+    /// the axes meet, `ê` and `û` the normals of the two flat surfaces that
+    /// pick the half out, and `m = ê‖û‖ + û‖ê‖`.
+    ///
+    /// **Without it the four halves were one edge.** Every half runs between
+    /// the same two nodes ([`Arrangement::place_where_two_halves_meet`]) and
+    /// along the same two pipes, and `assemble` names an edge that does not
+    /// close by its two corners and the kind of crossing it is. So the four
+    /// halves of two bars of one radius crossing square were one edge with
+    /// eight faces along it, and every fuse of the two was refused
+    /// `ResultIsNotManifold { count: 8 }`. Cut half way along, each half is two
+    /// edges with a corner of their own between them, the way a circle from a
+    /// ball's pole is cut across from it (§194).
+    ///
+    /// **The place is on the half.** `m` lies in the plane holding both axes,
+    /// and the half's distance from the first axis is `r/‖ê × û‖` times
+    /// `‖m × ê‖/‖ê‖ = ‖û × ê‖`, which is `r`; the same for the second. Every
+    /// number is a stored one, worked in intervals.
+    ///
+    /// **Named `[a, b, b]`, as the two ends are** ([`where_two_halves_meet`]),
+    /// with `which` from 2 to 5: 2, and 2 more where the half lies ahead of `c`
+    /// along the lesser pipe's direction [`written_the_one_way`], and 1 more
+    /// where it lies ahead along the greater's. Each picker faces along its
+    /// pipe's stored direction or against it, exactly, so which way is a
+    /// comparison of stored numbers, no sign is asked, and both faces along
+    /// the half name it alike.
+    fn place_the_middle_of_each_half(&mut self) {
+        for crossing in 0..self.crossings.len() {
+            let Some(half) = self.crossings[crossing].half_an_ellipse else {
+                continue;
+            };
+            if !self.crossings[crossing].reaches_the_face {
+                continue;
+            }
+            let (Surface::Cylinder(face), Surface::Cylinder(other)) =
+                (self.surface, self.crossings[crossing].partner)
+            else {
+                unreachable!("a half ellipse is a crossing of two pipes")
+            };
+            let [Picker::InFrontOf(one), Picker::InFrontOf(two)] =
+                self.crossings[crossing].picked_by()[..]
+            else {
+                unreachable!("a half ellipse is picked out by two half-spaces")
+            };
+            let on_the_face = usize::from(half.forward_runs_with_the_bend);
+            let pickers = [one, two];
+            let mut pipes = [
+                (face, pickers[on_the_face]),
+                (other, pickers[1 - on_the_face]),
+            ];
+            pipes.sort_by_key(|(pipe, _)| name_of_surface_bits(&Surface::Cylinder(*pipe)));
+            let [(lesser, along_the_lesser), (greater, along_the_greater)] = pipes;
+
+            let middle = where_an_axis_crosses_a_flat_surface(&lesser, &along_the_lesser);
+            let [one, two] =
+                pickers.map(|picker| picker.normal().components().map(Interval::exactly));
+            let length = |normal: [Interval; 3]| root_enclosing(dot_of(normal, normal));
+            let into_the_corner =
+                [0, 1, 2].map(|axis| one[axis] * length(two) + two[axis] * length(one));
+            let up = cross_of_intervals(one, two);
+            let reach = quotient_of(
+                Interval::exactly(lesser.radius()),
+                root_enclosing(dot_of(up, up)),
+            );
+            let place = as_exact_as_it_is(PredicatePoint::Constructed(
+                [0, 1, 2].map(|axis| middle[axis] + reach * into_the_corner[axis]),
+            ));
+
+            let ahead_along = |pipe: &Cylinder, picker: &HalfSpace| {
+                picker.normal().components().map(|number| number + 0.0)
+                    == written_the_one_way(pipe.axis().direction().components())
+            };
+            let which = 2
+                + 2 * u8::from(ahead_along(&lesser, &along_the_lesser))
+                + u8::from(ahead_along(&greater, &along_the_greater));
+            let named = where_two_halves_meet(&self.surface, &self.crossings[crossing].partner);
+            self.nodes.push(Node {
+                point: place,
+                vertex: None,
+                made_of: Some((named, which)),
+                also: Vec::new(),
+                half_way_round: true,
+                crossings: vec![crossing],
+            });
+        }
     }
 
     /// Whether the two crossings can be shown to have no point in common.
@@ -4100,7 +4189,10 @@ impl<'f> Arrangement<'f> {
     /// for the reason an input corner is not: the face next door splits the
     /// edge there ([`Arrangement::place_the_touches`]).
     fn the_two_arcs_to_join_at(&self, node: usize, touching: &[usize]) -> Option<(usize, usize)> {
-        if self.nodes[node].vertex.is_some() || self.a_touch_is_at(node) {
+        if self.nodes[node].vertex.is_some()
+            || self.nodes[node].half_way_round
+            || self.a_touch_is_at(node)
+        {
             return None;
         }
         let &[one, other] = touching else {
@@ -4878,7 +4970,7 @@ impl<'f> Arrangement<'f> {
         made_of
             .iter()
             .chain(also)
-            .any(|(surfaces, _)| *surfaces == name)
+            .any(|(surfaces, which)| *surfaces == name && *which < 2)
     }
 
     /// Which cell of the surface each walk bounds.
@@ -5538,6 +5630,9 @@ impl<'f> Arrangement<'f> {
             [-1.0, 0.0, 0.0],
             [0.0, -1.0, 0.0],
             [0.0, 0.0, -1.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+            [1.0, 0.0, 1.0],
         ];
         for across in reference_planes {
             let reference = cross_of_intervals(up, across.map(Interval::exactly));
