@@ -1910,6 +1910,13 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
 /// the shortest whole-number triple along each line in the flat is slid along,
 /// since a multiple of it slides along the same line in coarser steps.
 ///
+/// **Last come sums of `own` and `other`**: two to four of `own` and fewer of
+/// `other`, either way. Such a sum lies in the flat when nothing rounds, and
+/// leans towards `own` as anything holding more of it does. A few of them come
+/// out short even from the rounded stored directions: four of `(3, −6, 2)/7` and
+/// one of `(2, 3, 6)/7` add to exactly `(2, −3, 2)`. They go after the slide so
+/// that a pair the slide names keeps the surfaces it had.
+///
 /// # Errors
 ///
 /// Whatever [`HalfSpace::through_a_point_facing`] refuses.
@@ -1941,9 +1948,15 @@ fn a_flat_surface_through_where_the_walls_touch(
                     * (f64::from(steps) * one_unit_in_the_last_place_of_what_it_moves(own, way))
             })
         });
+    let mostly_own = (2..=4).flat_map(|more| {
+        (1..more)
+            .flat_map(|less| [less, -less])
+            .map(move |less| own * f64::from(more) + other * f64::from(less))
+    });
     for facing in core::iter::once(own)
         .chain(whole_numbers_in_the_flat.iter().copied())
         .chain(slid)
+        .chain(mostly_own)
     {
         if !(it_lies_exactly_in_the_flat_of(facing, own, other)
             && it_leans_towards(facing, own, other))
@@ -1979,8 +1992,9 @@ fn a_flat_surface_through_where_the_walls_touch(
 /// uses, `(11, −3.25, 0.5)`: every component of that family's directions is
 /// above `¼`, so `u ≥ 2⁻⁵⁴`; `way·c` has nothing below `2⁻²`; so `δ` has nothing
 /// below `2⁻⁵⁶`. The dot is under `16`, so its grid is at most `2⁻⁴⁹`, and `k ≤ 7`.
-/// Measured there, `64` and `4096` both name 688 pairs of the 1224, and no
-/// facing is slid farther than `37·2⁻⁵³` in any component.
+/// Measured there, `64` and `4096` both name 704 pairs of the 1224, and no
+/// facing is slid farther than `37·2⁻⁵³` in any component; `4096` makes that
+/// test ten times as slow, all of it in searches that find nothing.
 ///
 /// **A short slide is not enough everywhere.** A middle whose coordinates are
 /// long binary fractions, like a decimal `1.85`, puts `k` near 52, and the step
@@ -2001,8 +2015,9 @@ const ONE_UNIT_OF_A_SLIDE: f64 = f64::EPSILON / 2.0;
 /// the middle has bits a step of `2⁻⁵³` cannot clear. A step finer than another
 /// moved component's grid rounds that component, and the facing it gives then
 /// leaves the flat and is passed over, so the finer step costs searches and
-/// never a wrong facing. A fixed `2⁻⁵³` named 596 of the 1224 pairs where this
-/// names 688.
+/// never a wrong facing. In
+/// `the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece`
+/// a fixed `2⁻⁵³` names 644 of the 1224 pairs, where this names 704.
 fn one_unit_in_the_last_place_of_what_it_moves(own: Vector, way: Vector) -> f64 {
     own.components()
         .into_iter()
