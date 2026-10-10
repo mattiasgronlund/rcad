@@ -190,7 +190,30 @@ pub(crate) struct InputSide {
 /// corners are [`Corners::of`], the edges [`Edges::of`] and so
 /// [`which_arc_this_is`], and the vertices that only start a closed edge are
 /// read through as they are for the kept pieces. A second matcher would be a
-/// second answer to which sides are one, and the two could disagree.
+/// second answer to which sides are one, and the two could disagree. The one
+/// place it parts from that naming is below, and it only splits a name.
+///
+/// **An arc between two places that came out one corner is named by the
+/// places**, and not by [`Edges::of`]. Two places a hair apart, such as the
+/// two at `16 ∓ 2⁻⁵¹` where a block's edge grazes a ball, can land on one
+/// `f64` triple and so be one corner, and then both arcs of the ball's circle
+/// through them run from that corner back to it. [`Edges::of`] reads that as
+/// one closed edge and gives both arcs one number, so the ball's sliver
+/// between the places matched the block's top along the long arc, read
+/// inside the block there, and outside it across its true side on the wall,
+/// and `select` refused it (Q1073,
+/// `tests/a_block_edge_grazing_a_ball_at_cx_16.rs`). Here such a side, whose
+/// two ends have two names ([`Corners::name_of`] read through
+/// [`Corners::goes_by`]), is named by those two names and
+/// [`which_arc_of_a_circle_walked_this_way`] with the names for the order, so
+/// the two arcs are two names. **This only splits what [`Edges::of`] joined**:
+/// the places and the sign tell apart sides it called one, and never join
+/// two it called apart, so the rule in `select` can lose a match it had and
+/// never gain one. A side the sign cannot name — a seam, or a pair it names
+/// nothing for — is left out, as the straight side below is. The answer's own
+/// naming stays [`Edges::of`]: an edge it builds from one corner to itself is
+/// meshed as a whole closed curve ([`WhichArc::TheOnlyOne`]), and splitting the
+/// name there would build a 2⁻⁵⁰ arc as a whole circle.
 ///
 /// **A straight side whose two ends come out one corner is left out**, as
 /// [`sides_of`] leaves it out of a kept piece (§365.7). Two corners of two
@@ -248,6 +271,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
         log,
     )?;
     let mut edges = Edges::default();
+    let mut arcs_at_one_corner = BTreeMap::new();
     let mut named = Vec::with_capacity(scratch.pieces.len());
     for (piece, wires) in scratch.pieces.iter().zip(&wires) {
         let mut of_this_piece = Vec::new();
@@ -261,6 +285,31 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
                     .all(|surface| surface.as_plane().is_some())
             {
                 continue;
+            }
+            if from == to {
+                let ends = [
+                    corners.goes_by(corners.name_of(model, &meet.ends[0], policy, log)?),
+                    corners.goes_by(corners.name_of(model, &meet.ends[1], policy, log)?),
+                ];
+                if ends[0] != ends[1] {
+                    let Some(arc) = which_arc_of_a_circle_walked_this_way(
+                        meet,
+                        ends[0] > ends[1],
+                        policy,
+                        log,
+                    )?
+                    else {
+                        continue;
+                    };
+                    let key = ([ends[0].min(ends[1]), ends[0].max(ends[1])], arc);
+                    let number = arcs_at_one_corner.len();
+                    let number = *arcs_at_one_corner.entry(key).or_insert(number);
+                    of_this_piece.push(NamedSide {
+                        side: meet.clone(),
+                        edge: SideName::AnArcBetweenTwoPlacesAtOneCorner(number),
+                    });
+                    continue;
+                }
             }
             let seam = the_seam_a_side_runs_along(model, &piece.ancestors, meet);
             let side = edges.of(
@@ -276,7 +325,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
             )?;
             of_this_piece.push(NamedSide {
                 side: meet.clone(),
-                edge: side.edge,
+                edge: SideName::Edge(side.edge),
             });
         }
         named.push(of_this_piece);
@@ -287,8 +336,21 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
 /// One side of a piece, and the edge of an answer it would be.
 pub(crate) struct NamedSide {
     pub(crate) side: FaceMeet,
-    /// Two sides of two pieces with the same number here are one side.
-    pub(crate) edge: usize,
+    /// Two sides of two pieces with the same name here are one side.
+    pub(crate) edge: SideName,
+}
+
+/// What [`the_edge_each_side_of_every_piece_is`] calls a side.
+///
+/// Exhaustive on purpose: it is private to this crate, and `select` only asks
+/// whether two are equal.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SideName {
+    /// The number of the edge [`Edges::of`] gives it.
+    Edge(usize),
+    /// An arc between two places whose corners came out one corner, numbered
+    /// apart from every edge.
+    AnArcBetweenTwoPlacesAtOneCorner(usize),
 }
 
 /// The whole result, in scratch.
@@ -7170,6 +7232,34 @@ fn which_arc_of_a_circle_this_is(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<([[u64; 9]; 2], bool)>> {
+    if from == to {
+        return Ok(None);
+    }
+    which_arc_of_a_circle_walked_this_way(meet, from > to, policy, log)
+}
+
+/// [`which_arc_of_a_circle_this_is`] for a side that is walked from the later
+/// of its two ends in some order every face along it shares, when
+/// `walked_from_the_far_end`.
+///
+/// That order is the corner numbers for an edge of the answer, and the names
+/// of the two places for an arc whose two ends came out one corner
+/// ([`the_edge_each_side_of_every_piece_is`]). The sign rule needs no more
+/// than that both faces along an arc read its two ends in one order.
+///
+/// # Errors
+///
+/// As [`which_arc_of_a_circle_this_is`].
+///
+/// # Panics
+///
+/// As [`which_arc_of_a_circle_this_is`].
+fn which_arc_of_a_circle_walked_this_way(
+    meet: &FaceMeet,
+    walked_from_the_far_end: bool,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<([[u64; 9]; 2], bool)>> {
     // A whole ball's seam is walked down and back up by the one face, with a
     // material side that names the half of the meridian it is and not a side
     // (`Arrangement::the_whole_surface`), so the rule below would read its two
@@ -7178,7 +7268,7 @@ fn which_arc_of_a_circle_this_is(
         .ends
         .iter()
         .any(|end| matches!(end, MeetPoint::APoleOfAClosedSurface { .. }));
-    if from == to || a_seam {
+    if a_seam {
         return Ok(None);
     }
     let (named, mine_is_the_first, spelled_the_other_way_round) = match meet.carried_by {
@@ -7248,7 +7338,6 @@ fn which_arc_of_a_circle_this_is(
             )
         }
     };
-    let walked_from_the_far_corner = from > to;
     let along_mine_then_partner = match meet.material_side {
         Decision::Neg => true,
         Decision::Pos => false,
@@ -7257,8 +7346,7 @@ fn which_arc_of_a_circle_this_is(
     let along_the_first_then_the_second = along_mine_then_partner == mine_is_the_first;
     Ok(Some((
         named,
-        (along_the_first_then_the_second != walked_from_the_far_corner)
-            != spelled_the_other_way_round,
+        (along_the_first_then_the_second != walked_from_the_far_end) != spelled_the_other_way_round,
     )))
 }
 

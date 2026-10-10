@@ -1,4 +1,4 @@
-//! §244.3's block edge along `x`, grazing a ball centred at `x = 16`: the three
+//! §244.3's block edge along `x`, grazing a ball centred at `x = 16`: the four
 //! questions a fuse of the two used to refuse on, each now decided, and what it
 //! refuses on after them.
 //!
@@ -44,64 +44,119 @@
 //! is at `16`, and the one whose box ends there comes first along the edge's
 //! `x` (`Arrangement::as_the_quadric_says`).
 //!
+//! # The sliver between the two places is placed
+//!
+//! Every fuse, with either solid first and under either policy, then refused on
+//! a point inside a piece of a face between the two places. The two places come
+//! out one corner, `(16, 1, −2⁻²⁵)`, and both arcs
+//! of the ball's circle through them run from that corner back to it.
+//! `Edges::of` named both arcs as one closed edge, so §365.3's side rule matched
+//! the ball's sliver to the block's top along the long arc, inside the block
+//! there, and to the block's wall across its true side, outside it, and
+//! `select` refused the sliver. Since Q1073 the side rule names such an arc by
+//! the names of its two places and which way it runs between them
+//! (`fuse/assemble.rs`, `the_edge_each_side_of_every_piece_is`), so the two arcs
+//! are two names and the sliver is placed by its side on the wall
+//! (`fuse/select.rs`,
+//! `the_sliver_of_a_ball_between_two_places_one_corner_apart_is_placed_by_its_side_on_the_wall`).
+//!
 //! # What it refuses on next
 //!
-//! Every fuse, with either solid first and under either policy, then refuses on
-//! a point inside a piece of a face between the two places, with those two
-//! places as the record's inputs. No fuse answers, so none is held to a volume.
-//! Why §365.3's rule, which places the slivers between the same two places on
-//! the edge along `z` at `h = 0` in `a_block_edge_grazing_a_ball.rs`, does not
-//! place these is not traced (§317.7).
+//! Every fuse then refuses while it puts the answer together, the same under
+//! either policy (the pin below):
+//!
+//! | rule         | ball first                    | block first                   |
+//! |--------------|-------------------------------|-------------------------------|
+//! | union        | an edge with 4 faces along it | an edge with 4 faces along it |
+//! | intersection | a corner twice in one loop    | a corner twice in one loop    |
+//! | difference   | an edge with 4 faces along it | a corner twice in one loop    |
+//!
+//! "An edge with 4 faces" is `ResultIsNotManifold { count: 4 }`: the answer's
+//! own naming makes the two arcs through the one corner one closed edge again,
+//! so the long arc's two faces and the short arc's two faces all lie along it.
+//! "A corner twice in one loop" is `CannotMeshAFace` with
+//! `CornersCoincide { position: 5 }`, from the mesh that measures each shell
+//! before the answer is committed: a face's loop runs into the one corner, round
+//! a closed edge, and out of it again, so its sixth corner is an earlier one.
+//!
+//! This is a limit, refused under the wrong name. The answer needs a corner at
+//! each place, `16 − 2⁻⁵¹` and `16 + 2⁻⁵¹`, and `f64` holds neither: its spacing
+//! at `16` is `2⁻⁴⁸`. The two would be an edge `2⁻⁵⁰` long in a shape whose
+//! coordinates run to `18`, a spread of about `2⁵⁴`, where the kernel supports
+//! `1e11` (`rcad-geom`'s `LARGEST_SUPPORTED_RATIO`), and scaling the whole
+//! shape by a power of two moves both lengths alike. The honest refusal is
+//! `Invalid::DynamicRangeTooWide`, and nothing gives it: the fuse's
+//! `check_dynamic_range` skips an edge whose two ends are one corner, and runs
+//! after both checks that refuse above (§317's Q1073 note). No fuse answers, so
+//! none is held to a volume.
 
 use rcad_geom::{
     Isometry, MeetOfThree, Plane, Point, Scale, Sphere, Surface, Vector, meet_of_three_surfaces,
 };
+use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{
-    Decision, Interval, Level, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_of_points,
+    Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_of_points,
 };
 use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule};
 
-/// The name a point search records a refusal under when nothing places a
-/// piece of a face.
-const A_POINT_INSIDE_A_PIECE: &str = "a point inside a piece of a face";
+/// Where each fuse stops, with the ball first or not.
+const WHERE_EACH_FUSE_STOPS: [(bool, Rule, Stop); 6] = [
+    (true, Rule::Union, Stop::AnEdgeWithFourFaces),
+    (true, Rule::Intersection, Stop::ACornerTwiceInOneLoop),
+    (true, Rule::Difference, Stop::AnEdgeWithFourFaces),
+    (false, Rule::Union, Stop::AnEdgeWithFourFaces),
+    (false, Rule::Intersection, Stop::ACornerTwiceInOneLoop),
+    (false, Rule::Difference, Stop::ACornerTwiceInOneLoop),
+];
 
-const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
-
-/// The pin: every fuse gets past the turn and both orders, and refuses on a
-/// point inside a piece between the two places, and on nothing else.
+/// The two refusals the fuses stop on.
 ///
-/// Until Q914 a certified fuse refused on the turn at the place below `16`
-/// with the ball first, and on the order of the two places along the edge
-/// with the block first; under `Policy::tolerant(25.0)` every one was
+/// Exhaustive on purpose: it is this file's own table, and the pin matches it
+/// whole.
+#[derive(Clone, Copy, Debug)]
+enum Stop {
+    /// `ResultIsNotManifold { count: 4 }`.
+    AnEdgeWithFourFaces,
+    /// `CannotMeshAFace` with `CornersCoincide { position: 5 }`.
+    ACornerTwiceInOneLoop,
+}
+
+/// The pin: every fuse places the sliver between the two places, and then
+/// refuses while it puts the answer together, as the table in the module doc
+/// has it, under either policy.
+///
+/// No fuse answers, so none is validated or held to its volume.
+///
+/// Until Q1073 every one refused on a point inside a piece of a face between
+/// the two places, with those two places as the record's inputs. Until Q914 a
+/// certified fuse refused on the turn at the place below `16` with the ball
+/// first, and on the order of the two places along the edge with the block
+/// first; under `Policy::tolerant(25.0)` every one was
 /// `ResultIsNotManifold { count: 3 }`.
 #[test]
-fn every_fuse_refuses_on_a_point_inside_a_piece_between_the_two_places() {
-    let places = where_the_edge_meets_a_ball_centred_at(16.0);
+fn every_fuse_refuses_on_the_two_places_f64_holds_as_one_corner() {
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
-        for ball_first in [true, false] {
-            for rule in EVERY_RULE {
-                let case = (policy.strictness(), ball_first, rule);
-                let mut log = ProvenanceLog::new();
-                let refused =
-                    match fuse_a_block_edge_grazing_a_ball(rule, &policy, ball_first, &mut log) {
-                        Err(Error::Undecidable { records }) => records.records().to_vec(),
-                        other => panic!("{case:?}: {other:?}"),
-                    };
-                let [refused] = &refused[..] else {
-                    panic!("{case:?}: one record, not {refused:#?}");
-                };
-                assert_eq!(
-                    refused.predicate(),
-                    A_POINT_INSIDE_A_PIECE,
-                    "{case:?}: {refused:#?}"
-                );
-                assert_eq!(refused.level(), Level::Interval, "{case:?}");
-                let named = refused.inputs();
-                assert!(
-                    named == [places[0], places[1]] || named == [places[1], places[0]],
-                    "{case:?}: the piece is not named by the two places: {refused:#?}"
-                );
-            }
+        for (ball_first, rule, stop) in WHERE_EACH_FUSE_STOPS {
+            let case = (policy.strictness(), ball_first, rule, stop);
+            let given = fuse_a_block_edge_grazing_a_ball(
+                rule,
+                &policy,
+                ball_first,
+                &mut ProvenanceLog::new(),
+            );
+            let as_pinned = match stop {
+                Stop::AnEdgeWithFourFaces => {
+                    matches!(given, Err(Error::ResultIsNotManifold { count: 4 }))
+                }
+                Stop::ACornerTwiceInOneLoop => matches!(
+                    given,
+                    Err(Error::CannotMeshAFace {
+                        why: CannotTriangulate::CornersCoincide { position: 5 },
+                        ..
+                    })
+                ),
+            };
+            assert!(as_pinned, "{case:?}: {given:?}");
         }
     }
 }
