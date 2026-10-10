@@ -215,8 +215,29 @@ struct ACutFound {
 }
 
 fn found_on(face: &BakedFace, against: &BakedFace, cuts: Vec<Surface>) -> Vec<ACutFound> {
-    let its_face_misses_this_surface =
-        !cuts.is_empty() && a_face_misses_a_surface_by_its_band(against, &face.surface);
+    let hack_band = std::env::var("HACK_BAND").is_ok()
+        && matches!(against.surface, Surface::Cone(_))
+        && face.surface.as_plane().is_some_and(|p| {
+            let [a, _, c, _] = p.coefficients();
+            a != 0.0 && c != 0.0
+        });
+    let its_face_misses_this_surface = !cuts.is_empty()
+        && (hack_band || a_face_misses_a_surface_by_its_band(against, &face.surface));
+    if matches!(against.surface, Surface::Cone(_))
+        && face.surface.as_plane().is_some_and(|p| {
+            let [a, _, c, _] = p.coefficients();
+            a != 0.0 && c != 0.0
+        })
+    {
+        eprintln!(
+            "PROBE1461 cuts {} leaning plane {:?} cut by cone {:?}: cone face misses it by band {} band {:?}",
+            cuts.len(),
+            face.surface.as_plane().map(|p| p.coefficients()),
+            against.surface,
+            its_face_misses_this_surface,
+            band_a_face_is_inside(against)
+        );
+    }
     let reaches_only_its_boundary =
         !cuts.is_empty() && meets_it_only_on_its_boundary(face, against);
     cuts.into_iter()
@@ -328,14 +349,32 @@ fn the_cuts_left_on(face: &BakedFace, found: &[ACutFound]) -> Vec<Surface> {
         .map(|edge| edge.across)
         .chain(found.iter().map(|one| one.cut))
         .collect();
-    found
+    let kept: Vec<Surface> = found
         .iter()
         .filter(|one| {
+            let meets_none = the_crossing_meets_none_of(&face.surface, &one.cut, &others);
+            if one.its_face_misses_this_surface && matches!(one.cut, Surface::Cone(_)) {
+                eprintln!("PROBE1461 crossing meets none {meets_none}");
+            }
             !(one.its_face_misses_this_surface
-                && the_crossing_meets_none_of(&face.surface, &one.cut, &others))
+                && (meets_none
+                    || (std::env::var("HACK_MEETS").is_ok()
+                        && matches!(one.cut, Surface::Cone(_)))))
         })
         .map(|one| one.cut)
-        .collect()
+        .collect();
+    if face.surface.as_plane().is_some_and(|p| {
+        let [a, _, c, _] = p.coefficients();
+        a != 0.0 && c != 0.0
+    }) {
+        eprintln!(
+            "PROBE1461 kept on the leaning top: cones {}",
+            kept.iter()
+                .filter(|cut| matches!(cut, Surface::Cone(_)))
+                .count()
+        );
+    }
+    kept
 }
 
 /// Whether the crossing of `surface` and `cut` provably shares no point with
