@@ -2252,17 +2252,27 @@ impl<'f> Arrangement<'f> {
     /// Whether the two crossings can be shown to have no point in common.
     ///
     /// A node of this pair would be a point of the face's own surface lying on
-    /// both partners, so a pair of partners with nothing in common has no node
-    /// between them anywhere — not on this face, not off it, not for any policy.
-    /// The face's surface is not asked about: it crosses each partner by
-    /// construction, which is why there is a crossing at all, so the partners are
-    /// the only pair of the three that can share nothing.
+    /// both partners. There are two proofs that there is none, and each holds
+    /// anywhere — not only on this face, and for every policy.
     ///
-    /// **The proof is [`SurfaceMeet::Nothing`] and nothing else.**
-    /// [`SurfaceMeet::TouchAtOnePoint`] is a point the third surface may well run
-    /// through, and every other answer names a whole curve. There is no distance
-    /// here and no threshold: a ball a millionth of a unit clear of a pipe is
-    /// skipped and a ball resting against one is not.
+    /// **The partners share nothing**: [`intersect`] says
+    /// [`SurfaceMeet::Nothing`]. The face's surface is not asked about here: it
+    /// crosses each partner by construction, which is why there is a crossing
+    /// at all. [`SurfaceMeet::TouchAtOnePoint`] is no proof, since the third
+    /// surface may well run through that point, and every other answer names a
+    /// whole curve.
+    ///
+    /// **Or a flat surface cuts a pipe, of the three, in a curve the third
+    /// surface is wholly to one side of**
+    /// ([`a_cut_of_a_pipe_is_clear_of_the_third`]). This is the cap of a bar,
+    /// square to its own pipe, and a second pipe at a slant to the first: the
+    /// cap and the second pipe cross in an ellipse, so the first proof fails,
+    /// and [`meet_of_three_surfaces`] has no road for a flat surface and two
+    /// pipes at a slant (Q1646). Every bar crossing another at a slant
+    /// anywhere but square was refused for it.
+    ///
+    /// Neither is a distance or a threshold: a ball a millionth of a unit clear
+    /// of a pipe is skipped, and a ball resting against one is not.
     ///
     /// An `Err` from [`intersect`] is *no proof* rather than a second failure.
     /// The caller has a refusal in its hand already and reports that one, so
@@ -2282,7 +2292,7 @@ impl<'f> Arrangement<'f> {
         matches!(
             intersect(&one, &other, policy, log),
             Ok(SurfaceMeet::Nothing)
-        )
+        ) || a_cut_of_a_pipe_is_clear_of_the_third([self.surface, one, other])
     }
 
     /// The node of the corner of the face that already is `place`, one of the
@@ -8601,6 +8611,73 @@ fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface; 3] {
         (other, one)
     };
     [*lesser, *greater, *greater]
+}
+
+/// Whether, of these three surfaces, a flat one cuts a pipe in a curve that
+/// the third is certainly wholly inside or wholly outside of, so that no point
+/// is on all three.
+///
+/// The curve is boxed by [`a_box_round_where_a_flat_surface_cuts_a_pipe`], and
+/// the third surface's side is asked of the whole box at once: a sign over the
+/// box is a sign at every point of the curve, so the answer is a proof and not
+/// a distance. A box the third surface runs through proves nothing, and the
+/// caller keeps the refusal it holds.
+fn a_cut_of_a_pipe_is_clear_of_the_third(surfaces: [Surface; 3]) -> bool {
+    (0..3).any(|third| {
+        let [one, other] = [(third + 1) % 3, (third + 2) % 3].map(|which| &surfaces[which]);
+        let ((Surface::Plane(flat), Surface::Cylinder(pipe))
+        | (Surface::Cylinder(pipe), Surface::Plane(flat))) = (one, other)
+        else {
+            return false;
+        };
+        let Some(boxed) = a_box_round_where_a_flat_surface_cuts_a_pipe(flat, pipe) else {
+            return false;
+        };
+        matches!(
+            side_of_surface(&surfaces[third], PredicatePoint::Constructed(boxed)),
+            Decision::Pos | Decision::Neg
+        )
+    })
+}
+
+/// A box holding the whole of the curve `flat` cuts `pipe` in, or `None` when
+/// the flat surface may lie along the axis, where the curve is not closed.
+///
+/// For the axis through `o` along `d` and the flat surface `n·x = k`, the curve
+/// is centred where the axis crosses it, `c = o + d·(k − n·o)/(n·d)`. A point
+/// of it is `c + p − d·(n·p)/(n·d)` for some `p` square to `d` with
+/// `‖p‖ = r`, so its offset from `c` along axis `i` is `p·g` with
+/// `g = eᵢ − n·dᵢ/(n·d)`. `g·d` is nought, so `p·g` is at most `r‖g‖`, and
+/// the box reaches `r‖g‖` either side of `c` along each axis. Nothing in it
+/// changes when `n` or `d` is scaled, so the stored numbers are used as they
+/// are, in intervals. A cap square to its pipe gets `‖g‖ = √(1 − dᵢ²)` for
+/// `d` of length one: the box round a circle.
+fn a_box_round_where_a_flat_surface_cuts_a_pipe(
+    flat: &Plane,
+    pipe: &Cylinder,
+) -> Option<[Interval; 3]> {
+    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+    let direction = pipe.axis().direction().components().map(Interval::exactly);
+    let normal = flat.normal().components().map(Interval::exactly);
+    let across = dot_of(normal, direction);
+    if across.contains_zero() {
+        return None;
+    }
+    let slide = quotient_of(
+        Interval::exactly(flat.offset()) - dot_of(normal, origin),
+        across,
+    );
+    Some([0, 1, 2].map(|axis| {
+        let lean = quotient_of(direction[axis], across);
+        let g = [0, 1, 2].map(|other| {
+            let unit = Interval::exactly(if other == axis { 1.0 } else { 0.0 });
+            unit - normal[other] * lean
+        });
+        let reach = (Interval::exactly(pipe.radius()) * root_enclosing(dot_of(g, g))).hi();
+        let either_side =
+            Interval::new(-reach, reach).expect("a reach is a length, never less than nought");
+        origin[axis] + direction[axis] * slide + either_side
+    }))
 }
 
 /// An enclosure of where `pipe`'s axis crosses the flat surface of `facing`,
