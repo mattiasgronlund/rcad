@@ -2100,13 +2100,7 @@ fn settle_against_each(
             // (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`). A fuse
             // refused for want of this ray is what changing this waits for
             // (§35.6).
-            Containment::CannotFireARayAtAFacesSurface { face } => {
-                eprintln!(
-                    "Q1581PROBE no ray: piece on {:?}, point {:?}, against solid {index}, face {face:?}",
-                    piece.surface, point
-                );
-                return Ok(Settled::Abandoned);
-            }
+            Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(Settled::Abandoned),
             // Coincidence was asked above and found no face the piece lies on.
             Containment::OnBoundary | Containment::Undecidable { .. } => {
                 return Ok(Settled::Abandoned);
