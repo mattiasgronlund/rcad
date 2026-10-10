@@ -263,7 +263,7 @@ impl Isometry {
         ) {
             outer.after(first).as_stored()
         } else {
-            self.0.rotation * inner.0.rotation
+            held_near_length_one(self.0.rotation * inner.0.rotation)
         };
         let shift =
             self.0.translation.vector + turned_by(&self.0.rotation, inner.0.translation.vector);
@@ -427,6 +427,21 @@ fn brought_into_the_range_its_squares_fit_in(coefficients: [f64; 4]) -> [f64; 4]
     );
     let exponent = -binary_exponent(largest);
     coefficients.map(|coefficient| multiplied_by_a_power_of_two(coefficient, exponent))
+}
+
+/// How far from one a composed turn's squared length `q·q` may sit, as `f64`
+/// works it out, before [`Isometry::compose`] scales the turn back to length
+/// one.
+const TURN_LENGTH_DRIFT: f64 = 4.0 * f64::EPSILON;
+
+/// `turn`, with its own bits while `q·q` is within [`TURN_LENGTH_DRIFT`] of
+/// one, and divided by its length past that.
+fn held_near_length_one(turn: na::UnitQuaternion<f64>) -> na::UnitQuaternion<f64> {
+    let stored = turn.into_inner();
+    if (stored.norm_squared() - 1.0).abs() <= TURN_LENGTH_DRIFT {
+        return turn;
+    }
+    na::UnitQuaternion::new_normalize(stored)
 }
 
 /// The movement that turns by `turn` and then shifts by `shift`, with a turn of
@@ -618,6 +633,7 @@ mod tests {
     use rcad_predicates::expansion::{expansion_sum, product_is_exact, scale_expansion};
 
     use super::*;
+    use crate::exact::Exact;
 
     fn quarter_turn_about_z() -> Isometry {
         Isometry::rotation(&Axis::z(), FRAC_PI_2).unwrap()
@@ -795,6 +811,71 @@ mod tests {
             .compose(&Isometry::translation(Vector::new(1.0, 2.0, 3.0)).unwrap());
         let stored: ([f64; 3], [f64; 4]) = movement.into();
         assert_eq!(Isometry::try_from(stored).unwrap(), movement);
+    }
+
+    /// §15.6 for [`held_near_length_one`]: the turn [`Isometry::compose`] hands
+    /// back has `|q·q − 1|` at most `6ε` however many turns went into it, and a
+    /// product that had not drifted past [`TURN_LENGTH_DRIFT`] keeps the bits
+    /// the quaternion product gave it.
+    ///
+    /// `6ε` is the drift plus what the `f64` sum of four squares can be off by,
+    /// about `2ε`, for a product that is kept; one that is divided by its
+    /// length comes out within about `4ε`. `|q·q − 1|` is worked out exactly
+    /// here, so the check does not share the rounding it checks.
+    ///
+    /// The floor on how many were divided is §14.7's: without it a change that
+    /// never divided would leave the second half tested on nothing.
+    #[test]
+    fn a_turn_composed_of_any_number_of_turns_stays_within_six_epsilon_of_length_one() {
+        let off_one_in_epsilons = |turn: [f64; 4]| {
+            let squared_length = turn.iter().fold(Exact::of(0.0), |sum, coefficient| {
+                sum.plus(
+                    &Exact::product_of(*coefficient, *coefficient)
+                        .expect("a coefficient of a turn squares exactly"),
+                )
+            });
+            squared_length.minus(&Exact::of(1.0)).nearest_f64() / f64::EPSILON
+        };
+
+        let mut numbers = Numbers::seeded();
+        let mut worst = 0.0_f64;
+        let mut divided_at_depth = [0_u32; 4];
+        let chains = 200;
+        for _ in 0..chains {
+            let mut placed = numbers.a_movement();
+            for depth in 2..=256 {
+                let turn = numbers.a_movement();
+                let product = turn.0.rotation * placed.0.rotation;
+                placed = turn.compose(&placed);
+
+                let drifted = (product.norm_squared() - 1.0).abs() > TURN_LENGTH_DRIFT;
+                let product = product.quaternion();
+                let kept =
+                    placed.rotation_quaternion() == [product.w, product.i, product.j, product.k];
+                assert!(
+                    drifted || kept,
+                    "composing changed the bits of {product:?}, which had not drifted"
+                );
+                if drifted {
+                    divided_at_depth[(depth - 2).min(3)] += 1;
+                }
+                let off_one = off_one_in_epsilons(placed.rotation_quaternion()).abs();
+                assert!(
+                    off_one <= 6.0,
+                    "a turn composed of {depth} turns sits {off_one}ε off length one"
+                );
+                worst = worst.max(off_one);
+            }
+        }
+        let [second, third, fourth, later] = divided_at_depth;
+        println!(
+            "of {chains} chains of 256 turns, divided by its length at the second turn {second}, \
+             the third {third}, the fourth {fourth}, later {later}; worst |q·q − 1| {worst:.2}ε"
+        );
+        assert!(
+            later > 1_000,
+            "only {later} composed turns were divided by their length, so that half is barely tested"
+        );
     }
 
     /// The test [`Isometry::POINT_ROUNDOFF`]'s derivation would otherwise be

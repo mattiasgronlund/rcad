@@ -1119,12 +1119,13 @@ mod tests {
                 / f64::EPSILON
         };
 
-        let mut worst = [0.0_f64; 3];
+        let depths = [1, 4, 16, 256];
+        let mut worst = [0.0_f64; 4];
         for _ in 0..20_000 {
             let written = a_turn().apply_to_vector(Vector::new(1.0, 2.0, 3.0));
             let plane = Plane::from_point_and_normal(Point::origin(), written)
                 .expect("a direction with a length");
-            for (slot, depth) in [1, 4, 16].into_iter().enumerate() {
+            for (slot, depth) in depths.into_iter().enumerate() {
                 let mut placed = a_turn();
                 for _ in 1..depth {
                     placed = placed.compose(&a_turn());
@@ -1133,17 +1134,19 @@ mod tests {
                 worst[slot] = worst[slot].max(off_one_in_epsilons(moved.normal()).abs());
             }
         }
-        let [once, four, sixteen] = worst;
+        let [once, four, sixteen, many] = worst;
         println!(
             "worst |n·n − 1|: {once:.2}ε turned once, {four:.2}ε through four composed turns, \
-             {sixteen:.2}ε through sixteen, against a bound of 64ε"
+             {sixteen:.2}ε through sixteen, {many:.2}ε through 256, against a bound of 64ε"
         );
         let bound = Plane::NORMAL_LENGTH_ROUNDOFF / f64::EPSILON;
-        assert!(
-            once.max(four) < bound / 2.0,
-            "a turned normal reached {once}ε or {four}ε, more than half the bound, so the share \
-             it leaves out may not fit"
-        );
+        for (depth, reached) in depths.into_iter().zip(worst) {
+            assert!(
+                reached < bound / 2.0,
+                "a normal turned through {depth} composed turns reached {reached}ε, more than \
+                 half the bound, so the share it leaves out may not fit"
+            );
+        }
     }
 
     /// **The half-space gap, at the one line of arithmetic it comes from.**
