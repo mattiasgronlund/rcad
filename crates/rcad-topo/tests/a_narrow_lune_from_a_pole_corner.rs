@@ -89,8 +89,15 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 /// was found in by a corner the other solid's ray puts strictly inside or
 /// outside it (`docs/decisions.md` §365.7). Each is one solid that validates
 /// and measures its closed form. The difference at radius 0.001 is refused
-/// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`, and at radius 1000
-/// `CannotNameWhichPieceOfACrossingThisIs`.
+/// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`, and at radius 1000 for the
+/// range.
+///
+/// **Q1614 moved two differences**, the 45 degree wedge's at radius 1000 and
+/// the 10 degree wedge's at radius 0.001, from
+/// `CannotNameWhichPieceOfACrossingThisIs` to `DynamicRangeTooWide`, by asking
+/// the range before nesting the answer's shells (`docs/decisions.md` §87.3).
+/// [`two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range`]
+/// pins both by ratio.
 #[test]
 fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name() {
     let answered = [
@@ -166,6 +173,47 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
         }
     }
     assert!(moved.is_empty(), "{}", moved.join("\n"));
+}
+
+/// Two of the differences [`a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name`]
+/// lets through as refused by name are refused for the range: the 45 degree
+/// wedge's at radius 1000, and the 10 degree wedge's at radius 0.001.
+///
+/// **Q1614 moved both.** Until then the fuse nested the answer's shells before
+/// it asked the range, and both were refused
+/// `CannotNameWhichPieceOfACrossingThisIs` there (`docs/decisions.md` §87.3).
+#[test]
+fn two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range() {
+    for (degrees, radius, ratio) in [
+        (45.0, 1000.0, 1.319_413_953_331_200_8e16),
+        (10.0, 0.001, 5_566_224_631_575_426.0),
+    ] {
+        let mut model = a_model(radius);
+        let ball = model
+            .add_ball(radius, &Isometry::identity())
+            .expect("a ball");
+        let first = a_knife_through_the_axis(&mut model, radius, 0.0);
+        let half = fused(&mut model, &[ball], &[first], Rule::Intersection);
+        let second = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
+        let mut log = ProvenanceLog::new();
+        let outcome = model.fuse(
+            &half,
+            &[second],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut log,
+        );
+        let Err(Error::Invalid(rcad_topo::Invalid::DynamicRangeTooWide { ratio: found })) = outcome
+        else {
+            panic!("{degrees} degrees, radius {radius}: {outcome:?}");
+        };
+        assert_eq!(found, ratio, "{degrees} degrees, radius {radius}");
+        assert!(
+            log.records().is_empty(),
+            "{degrees} degrees, radius {radius}: a certified fuse logs nothing: {:#?}",
+            log.records()
+        );
+    }
 }
 
 /// Why the 90 degree wedge was refused before it answered: the knife turned a
@@ -528,6 +576,7 @@ fn moved_from_its_pin(
                         | "CannotMeshAFace"
                         | "ACurvedEdgeThatIsPartOfACrossingCannotBeNamed"
                         | "CannotNameWhichPieceOfACrossingThisIs"
+                        | "DynamicRangeTooWide"
                 ),
                 "{why:?}"
             );
@@ -799,6 +848,9 @@ fn which_refusal(why: &Error) -> &str {
     }
     if let Error::AFaceTrimmedByACurveThisCannotFollow { .. } = why {
         return "AFaceTrimmedByACurveThisCannotFollow";
+    }
+    if let Error::Invalid(rcad_topo::Invalid::DynamicRangeTooWide { .. }) = why {
+        return "DynamicRangeTooWide";
     }
     panic!("expected a refusal by name, got {why:?}")
 }

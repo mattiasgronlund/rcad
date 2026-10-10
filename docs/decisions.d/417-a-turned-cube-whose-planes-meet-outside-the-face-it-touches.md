@@ -184,6 +184,33 @@ both to these answers in 8228a212:
 `fuses_that_must_agree.rs` and `three_cut_lines_through_one_corner_of_a_skew_pair.rs`
 did not move.
 
+> **2026-10-10 note (Q1614): the certified turned cube less the block is
+> refused for the range, not as a shell enclosing nothing.** The fuse now asks
+> the range before it nests the answer's shells (§87.3). Over the 199, the
+> turned cube less the block under `Policy::certified()` answers the same 74
+> (66 one solid, 6 two and 2 three) and is refused `DynamicRangeTooWide` in
+> the other 125, where it was 65 `DynamicRangeTooWide` and 60
+> `VolumeIsNotPositive`. Under `Policy::tolerant(100.0)`, where the range only
+> warns, it answers 124 (66, 47 and 11) and is refused 60
+> `VolumeIsNotPositive` and 15 `OuterWireWindsAgainstTheNormal`, in both
+> orders of the two checks.
+> `the_turned_cube_less_the_block_over_the_199_turns_whose_planes_meet_outside`
+> pins both splits (`mise exec -- just t -p rcad-topo --test
+> a_turned_cube_with_its_corner_on_a_face
+> the_turned_cube_less_the_block_over_the_199_turns_whose_planes_meet_outside`).
+>
+> Nothing else of the 199 moved: the certified union, either way round, still
+> answers 53 and is refused 95 for the range, 35 holes winding with the outline
+> and 16 `count: 4`; the certified intersection answers 8 and is refused 191
+> for the range; the tolerant union with the block first answers 104 and is
+> refused 63, 16 and 16, as in the Q1506 paragraph above. Q1614's second relay
+> counted these with a probe pasted into the turned cube's file and taken out
+> after, and its first relay ran the same probe in both orders, with a toggle
+> since taken out. The 34 tolerant shells enclosing nothing that the row
+> named are the union's from before Q1506, and there are none now. At
+> `ON_THE_FACE`, the certified turned cube less the block moved the same way,
+> and so did the same fuse of Q1208's crash cube. The tolerant ones did not.
+
 ### 417.4 An answer written as §365.7 writes a strip
 
 The prism at `x = −1.5` and the 10 certified turned-cube unions answer under

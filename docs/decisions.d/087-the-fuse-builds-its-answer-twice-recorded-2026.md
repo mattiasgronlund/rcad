@@ -193,6 +193,39 @@ broken" is not what that says. `Error::Geometry` from a range that could not be
 measured no longer comes out of the sweep at all — it was the range check's, and
 the range check is not run there.
 
+> **2026-10-10 note (Q1614): the range is asked before the shells are
+> nested.** `Model::fused_under` (`fuse/mod.rs`) now asks
+> `Assembly::check_dynamic_range` between `assemble`, which ends at
+> `group_into_shells`, and `Assembly::nest_the_shells`, which it calls itself.
+> The check is still behind the same `the_inputs_fit_in_f64` guard, and still
+> asked in that one place. It was moved, not copied: a copy would log a second
+> warning under a tolerant policy. The reason is that nesting measures each
+> shell's volume. A sliver a rounding thin, whose `f64` corners all round onto
+> one plane, measures as a shell enclosing nothing, or less than nothing, and
+> was refused `Invalid::VolumeIsNotPositive` before the range was asked. That
+> refusal hid the limit this section names behind one that reads as a
+> mistake. Q1612's two skewed combs were the case
+> (`two_skewed_combs_touching_along_one_line.rs`). Their certified
+> intersection, a prism of `3.08e−32`, was refused `VolumeIsNotPositive {
+> volume: 0.0 }`. It is now refused `DynamicRangeTooWide`, as their union and
+> differences already were.
+>
+> The check now also runs ahead of the wobble check. A tolerant policy's
+> warning is held in a log of its own and moved into the caller's only after
+> the wobble check. So that check judges the same records as before, and the
+> caller's log ends up with the same records, in the same order. Under a
+> certified policy, a fuse the wobble check would refuse `Undecidable` whose
+> answer is also too wide would now be refused for the range instead.
+> Q1614's first relay ran every fusing crate's tests in the old order beside
+> the new, with a toggle since taken out, and found no such fuse. Of the fuses
+> those tests ask, 24 moved, all in `rcad-topo`, all certified, and all
+> refused by nesting before. None moved in `rcad-step`, `rcad-fuzz-explain`,
+> `rcad`, `rcad-mesh` or `rcad-fuzz-timing`. The pins that moved say so:
+> the combs, the turned cube less the block (§417.3's note), both block edges
+> grazing a ball, and two wedge differences of the narrow lune.
+> `Assembly::commit` asserts that the shells were nested before it writes
+> anything.
+
 ### 87.4 What is still a panic, and why the operation is not wholly atomic
 
 Two things fire after the real write and both stay panics:

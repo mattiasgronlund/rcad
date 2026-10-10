@@ -30,9 +30,9 @@
 //! `2.1e16` against the `1e11` a certified fuse fails on
 //! (`DynamicRange::LARGEST_SUPPORTED_RATIO`). `Assembly::check_dynamic_range`
 //! says why that refusal is a limit — a length over a length is the same at
-//! every scale — and it is what the intersection here is refused for. The
-//! same count on Q1208's shape below: 160 of 512, every one with a range of
-//! at least `1.4e17`.
+//! every scale — and it is what the intersection here is refused for, and
+//! since Q1614 the turned cube less the block too. The same count on Q1208's
+//! shape below: 160 of 512, every one with a range of at least `1.4e17`.
 //!
 //! **Under `Policy::tolerant(100.0)` it is a gap.** The answer meant is the
 //! block with its `x = 0` face whole, with the turned cube touching it from
@@ -94,13 +94,19 @@
 //! Since Q1506 the certified union answers 53 either way round, and is refused
 //! 95 for the range, 35 a hole winding with its outline and 16 an edge with
 //! four faces; with the block first each of the 53 validates and measures what
-//! the tolerant union measures. `docs/decisions.md` §417.3 has the counts.
+//! the tolerant union measures. Since Q1614 the certified turned cube less the
+//! block answers the same 74 and is refused for the range in the other 125,
+//! where 60 of them were refused as a shell enclosing nothing
+//! ([`the_turned_cube_less_the_block_over_the_199_turns_whose_planes_meet_outside`]).
+//! `docs/decisions.md` §417.3 has the counts.
 //! [`random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant`]
 //! keeps the first 60, 31 of which meet outside.
 //!
 //! With the corner a thousandth inside the face, every fuse answers, and the
 //! union and the intersection hold both cubes between them:
 //! [`with_the_corner_a_thousandth_inside_the_union_and_intersection_hold_both_cubes`].
+
+use std::collections::BTreeMap;
 
 use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
@@ -179,13 +185,20 @@ fn the_block_less_the_turned_cube_is_refused_tolerant() {
     );
 }
 
+/// The answer is the tip outside the face, a rounding across beside corners at
+/// 10, and it is refused for the range.
+///
+/// **Q1614 moved it.** Until then the fuse nested the answer's shells before it
+/// asked the range, and the tip, its corners rounded, measured as a shell
+/// enclosing less than nothing, `VolumeIsNotPositive`, which is still what the
+/// tolerant fuse is refused for (`docs/decisions.md` §87.3).
 #[test]
 fn the_turned_cube_less_the_block_is_refused_certified() {
     assert_refused(
         Rule::Difference,
         Order::TurnedFirst,
         &certified(),
-        Refused::NoSpaceInside,
+        Refused::TooWideARange,
     );
 }
 
@@ -509,6 +522,83 @@ fn random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_nam
     );
 }
 
+/// The turned cube less the block, over the 199 of Q1208's 400 turns whose
+/// planes meet outside the block. Under `Policy::certified()` it answers 74
+/// and is refused for the range in the other 125. Under
+/// `Policy::tolerant(100.0)`, where the range only warns, it answers 124 and is
+/// refused 60 as a shell enclosing nothing and 15 as an outline winding against
+/// its face. The answers are counted, not measured.
+///
+/// **Q1614 moved the certified 125.** Until then the fuse nested the answer's
+/// shells before it asked the range, and 60 of them were refused as a shell
+/// enclosing nothing, as many as the tolerant fuse still is
+/// (`docs/decisions.md` §87.3, §417.3). The 74 answers did not move.
+#[test]
+fn the_turned_cube_less_the_block_over_the_199_turns_whose_planes_meet_outside() {
+    let outside: Vec<_> = q1208s_random_turns(400)
+        .into_iter()
+        .filter(|&(turn, at)| where_the_planes_at_the_corner_meet(&turn, at) == Decision::Neg)
+        .collect();
+    assert_eq!(outside.len(), 199, "how many of the 400 meet outside");
+    let certified_split = [
+        ("one solid", 66),
+        ("two solids", 6),
+        ("three solids", 2),
+        ("DynamicRangeTooWide", 125),
+    ];
+    let tolerant_split = [
+        ("one solid", 66),
+        ("two solids", 47),
+        ("three solids", 11),
+        ("OuterWireWindsAgainstTheNormal", 15),
+        ("VolumeIsNotPositive", 60),
+    ];
+    for (policy, expected) in [
+        (certified(), certified_split.as_slice()),
+        (tolerant(), tolerant_split.as_slice()),
+    ] {
+        let mut split: BTreeMap<String, usize> = BTreeMap::new();
+        for &(turn, at) in &outside {
+            let mut model = a_model();
+            let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
+            let answer = fuse(
+                &mut model,
+                pair,
+                Rule::Difference,
+                Order::TurnedFirst,
+                &policy,
+            );
+            *split.entry(what_a_fuse_gives(answer)).or_default() += 1;
+        }
+        let expected: BTreeMap<String, usize> = expected
+            .iter()
+            .map(|&(what, count)| (what.to_owned(), count))
+            .collect();
+        assert_eq!(split, expected, "{policy:?}");
+    }
+}
+
+fn what_a_fuse_gives(answer: Result<Vec<SolidKey>, Error>) -> String {
+    match answer {
+        Ok(solids) => match solids.len() {
+            1 => "one solid".to_owned(),
+            2 => "two solids".to_owned(),
+            3 => "three solids".to_owned(),
+            more => format!("{more} solids"),
+        },
+        Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. })) => {
+            "DynamicRangeTooWide".to_owned()
+        }
+        Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. })) => {
+            "VolumeIsNotPositive".to_owned()
+        }
+        Err(Error::TheFuseWroteABrokenAnswer {
+            broken: Invalid::OuterWireWindsAgainstTheNormal,
+        }) => "OuterWireWindsAgainstTheNormal".to_owned(),
+        Err(other) => format!("{other:?}"),
+    }
+}
+
 /// Every rule both ways round answers one or more solids that validate, and
 /// their volumes agree with each other and with the turned cube moved a
 /// little further in.
@@ -586,6 +676,10 @@ fn where_the_planes_at_the_corner_meet(turn: &Isometry, at: [f64; 3]) -> Decisio
 /// moves four of them by an ulp. Its three planes at that corner meet at
 /// `x = −6.8e−17`. Every fuse is refused just as the turned cube above is.
 ///
+/// **Q1614 moved the certified turned cube less the block** from a shell
+/// enclosing less than nothing to the range, as it moved the turned cube's
+/// above.
+///
 /// The same cube made by turning `add_cube(10.0)` with the turn its corners
 /// say, about `(0.0381, 0.0379, −1.098)` by 0.582, is not this shape: its
 /// planes differ in the last bits, and none of its fuses panicked.
@@ -632,7 +726,7 @@ fn the_cube_of_q1208s_crash_is_refused_by_name() {
             Rule::Difference,
             Order::TurnedFirst,
             true,
-            Refused::NoSpaceInside,
+            Refused::TooWideARange,
         ),
         (
             Rule::Difference,
@@ -741,7 +835,8 @@ enum Refused {
     TooWideARange,
     /// A shell of the answer is the tip outside the face, which encloses
     /// nothing, or less than nothing, once its corners are rounded: all of the
-    /// turned cube less the block.
+    /// turned cube less the block, under a tolerant policy only. A certified
+    /// one is refused for the range first (Q1614).
     NoSpaceInside,
     /// An edge of the answer has four faces along it, where the tip's sides
     /// meet the block's face.

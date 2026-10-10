@@ -36,7 +36,7 @@
 
 use rcad_geom::{Error as GeometryError, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Level, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Fused, Model, ProfileBuilder, Rule};
+use rcad_topo::{Containment, Error, Fused, Invalid, Model, ProfileBuilder, Rule};
 
 /// The name `order_along` records a refusal under.
 const ALONG_A_CROSSING: &str = "order along a crossing";
@@ -44,9 +44,17 @@ const ALONG_A_CROSSING: &str = "order along a crossing";
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
 /// The pin: under either policy, every rule with either solid first gets past
-/// placing the pieces and is refused `CannotNameWhichPieceOfACrossingThisIs`,
-/// with one `side of a half-space` record and nothing about the order along a
-/// crossing.
+/// placing the pieces, and nothing is recorded about the order along a
+/// crossing. Under `Policy::tolerant(25.0)` each is refused
+/// `CannotNameWhichPieceOfACrossingThisIs`, with one `side of a half-space`
+/// record. Under `Policy::certified()` each is refused for the range,
+/// `DynamicRangeTooWide` at `2⁵¹ + 2²⁵`, the block's bottom corners at
+/// `z = −2 − 2⁻²⁵` over the two places' `2⁻⁵⁰`, with no record at all.
+///
+/// **Q1614 moved the certified six.** The tolerant refusal and its record both
+/// come out of nesting the answer's shells, and since Q1614 the fuse asks the
+/// range before that (`docs/decisions.md` §87.3). Until then the certified six
+/// were refused as the tolerant six are, record and all.
 ///
 /// Here the two places fence off two slivers, not three: the ball's skin past
 /// `y = 1` below the top, which is outside the block, and the block's side
@@ -55,9 +63,10 @@ const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference
 /// both slivers placed by their sides in all twelve fuses, the ball's outside
 /// the block and the block's inside the ball, and `select` finishing.
 ///
-/// The intersection and the block less the ball are refused the same way here,
-/// where along `z` at `h = 0` they are refused `ACurvedFaceGoesRightRoundWithNoSeam`
-/// instead. Neither refusal has been traced.
+/// The tolerant intersection and block less the ball are refused the same way
+/// here, where along `z` at `h = 0` they are refused
+/// `ACurvedFaceGoesRightRoundWithNoSeam` instead. Neither refusal has been
+/// traced.
 ///
 /// Before Q449 a certified fuse refused on which of the two places comes
 /// first round a circle, and a tolerant one with `CannotTellTheCellsOfAFaceApart`.
@@ -66,12 +75,21 @@ const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference
 #[test]
 fn the_order_of_the_two_places_is_decided_and_the_slivers_between_them_are_placed_by_their_sides() {
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        let certified = policy == Policy::certified();
         for rule in EVERY_RULE {
             for ball_first in [true, false] {
                 let case = format!("{policy:?} {rule:?}, ball first {ball_first}");
                 let mut log = ProvenanceLog::new();
                 match fuse_a_block_edge_grazing_a_ball(rule, ball_first, &policy, &mut log) {
-                    Err(Error::Geometry(GeometryError::CannotNameWhichPieceOfACrossingThisIs)) => {}
+                    Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) if certified => {
+                        assert_eq!(
+                            ratio,
+                            (2.0 + f64::powi(2.0, -25)) * f64::powi(2.0, 50),
+                            "{case}"
+                        );
+                    }
+                    Err(Error::Geometry(GeometryError::CannotNameWhichPieceOfACrossingThisIs))
+                        if !certified => {}
                     Ok(fused) => panic!(
                         "{case}: the fuse answered with {} solids; check each against its \
                          volume and pin it",
@@ -86,12 +104,17 @@ fn the_order_of_the_two_places_is_decided_and_the_slivers_between_them_are_place
                         .all(|record| record.predicate() != ALONG_A_CROSSING),
                     "{case}: {records:#?}"
                 );
+                let expected: &[(&str, Level)] = if certified {
+                    &[]
+                } else {
+                    &[("side of a half-space", Level::Interval)]
+                };
                 assert_eq!(
                     records
                         .iter()
                         .map(|record| (record.predicate(), record.level()))
                         .collect::<Vec<_>>(),
-                    [("side of a half-space", Level::Interval)],
+                    expected,
                     "{case}: {records:#?}"
                 );
             }

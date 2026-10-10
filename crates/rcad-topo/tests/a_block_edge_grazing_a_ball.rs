@@ -35,7 +35,7 @@
 
 use rcad_geom::{Isometry, Point, Scale, Vector};
 use rcad_predicates::{Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog, Record};
-use rcad_topo::{Containment, Error, Fused, Model, ProfileBuilder, Rule};
+use rcad_topo::{Containment, Error, Fused, Invalid, Model, ProfileBuilder, Rule};
 
 /// The name `order_along` records a refusal under.
 const ALONG_A_CROSSING: &str = "order along a crossing";
@@ -123,7 +123,8 @@ fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
     }
 }
 
-/// At `h = 0` every fuse gets past `select`, and none of the six answers.
+/// At `h = 0` every fuse gets past `select`, and none of the six answers under
+/// either policy.
 ///
 /// The two places fence off three slivers that hold no point with `f64`
 /// coordinates (the next test), so no point search places them. Each is placed
@@ -134,13 +135,21 @@ fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
 /// places, under either policy.
 ///
 /// What each answer would be is a solid with a sliver `2⁻⁵⁰` long and `2⁻⁷⁸`
-/// wide in it or of it, and each is refused
-/// `ACurvedFaceGoesRightRoundWithNoSeam` out of meshing the ball's face — the
-/// refusal §346.2's small ball on a cube's corner is given too. The
-/// intersection is the three slivers alone and the block less the ball has
-/// the ball's sliver as its dent, so the ball's face there is the sliver; the
-/// union and the ball less the block keep the ball less the sliver, and the
-/// mesher finds no cut from a rim that small up to both poles.
+/// wide in it or of it. **Under `Policy::certified()` each is refused for the
+/// range**, `DynamicRangeTooWide` at `2⁵²`: that sliver's `2⁻⁵⁰` beside the
+/// block's corners at 4. Under `Policy::tolerant(25.0)`, which only warns on
+/// the range, each is refused `ACurvedFaceGoesRightRoundWithNoSeam` out of
+/// meshing the ball's face — the refusal §346.2's small ball on a cube's
+/// corner is given too. The intersection is the three slivers alone and the
+/// block less the ball has the ball's sliver as its dent, so the ball's face
+/// there is the sliver; the union and the ball less the block keep the ball
+/// less the sliver, and the mesher finds no cut from a rim that small up to
+/// both poles.
+///
+/// **Q1614 moved the certified six.** The fuse meshes the ball's face while
+/// it nests the answer's shells, and since Q1614 it asks the range before
+/// that (`docs/decisions.md` §87.3). Until then the certified six were refused
+/// as the tolerant six are, with the same two records.
 ///
 /// **The last two were refused earlier, while the answer was written**, by
 /// `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom`, until the
@@ -150,32 +159,45 @@ fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
 /// the sliver's two short arcs alone, and the refusal comes from the mesh.
 /// Neither ever answered.
 ///
-/// Each comes back with the same two records, `side of a half-space`, under
-/// either policy, and the two policies agree. Neither record has been traced.
+/// Each tolerant one comes back with two records, `side of a half-space`,
+/// which nesting the shells writes, and each certified one, stopped before
+/// that, with none. Neither record has been traced.
 #[test]
 fn the_slivers_no_point_is_inside_are_placed_by_their_sides_and_each_answer_is_refused_later() {
-    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
-        for rule in EVERY_RULE {
-            for ball_first in [true, false] {
-                let case = (policy.strictness(), rule, ball_first);
-                let (fused, records) = fused_and_recorded(rule, &policy, ball_first);
-                assert_eq!(
-                    records
-                        .iter()
-                        .map(|record| (record.predicate(), record.level()))
-                        .collect::<Vec<_>>(),
-                    [("side of a half-space", Level::Interval); 2],
-                    "{case:?}: {records:#?}"
-                );
-                match fused {
-                    Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }) => {}
-                    Ok(fused) => panic!(
-                        "{case:?}: the fuse answered with {} solids; check each against its \
-                         volume and pin it",
-                        fused.solids().len()
-                    ),
-                    Err(other) => panic!("{case:?}: {other:?}"),
+    for rule in EVERY_RULE {
+        for ball_first in [true, false] {
+            let case = (rule, ball_first);
+            let (fused, records) = fused_and_recorded(rule, &Policy::certified(), ball_first);
+            assert!(records.is_empty(), "certified, {case:?}: {records:#?}");
+            match fused {
+                Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+                    assert_eq!(ratio, f64::powi(2.0, 52), "certified, {case:?}");
                 }
+                Ok(fused) => panic!(
+                    "certified, {case:?}: the fuse answered with {} solids; check each \
+                     against its volume and pin it",
+                    fused.solids().len()
+                ),
+                Err(other) => panic!("certified, {case:?}: {other:?}"),
+            }
+
+            let (fused, records) = fused_and_recorded(rule, &Policy::tolerant(25.0), ball_first);
+            assert_eq!(
+                records
+                    .iter()
+                    .map(|record| (record.predicate(), record.level()))
+                    .collect::<Vec<_>>(),
+                [("side of a half-space", Level::Interval); 2],
+                "tolerant, {case:?}: {records:#?}"
+            );
+            match fused {
+                Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }) => {}
+                Ok(fused) => panic!(
+                    "tolerant, {case:?}: the fuse answered with {} solids; check each \
+                     against its volume and pin it",
+                    fused.solids().len()
+                ),
+                Err(other) => panic!("tolerant, {case:?}: {other:?}"),
             }
         }
     }
