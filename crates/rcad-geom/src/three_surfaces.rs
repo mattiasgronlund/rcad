@@ -3472,7 +3472,7 @@ fn what_a_plane_that_cuts_both_in_circles_leaves(
     where_a_stored_plane_an_exact_one_and_a_quadric_meet(
         flat, &leaning, &reach, one, at, policy, log,
     )
-    .map(Some)
+    .map(|answer| Some(with_no_negative_zero(answer)))
 }
 
 /// `answer` with every `-0.0` in an exact corner made `+0.0`, which is the
