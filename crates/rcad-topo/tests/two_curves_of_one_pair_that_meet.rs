@@ -231,8 +231,8 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_before_any_arrange
 /// points along a loop until Q1554 ordered them round the bar's axis.
 ///
 /// What they share is the ball inside the bar, [`ball_in_bar`]. With the bar
-/// first, every fuse is still refused meshing
-/// (`a_ball_with_a_bar_through_it_off_its_axis_is_refused_meshing_every_fuse_with_the_bar_first`).
+/// first every fuse answers too
+/// (`a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_bar_first_answers`).
 #[test]
 fn a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_ball_first_answers()
  {
@@ -254,30 +254,29 @@ fn a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_f
 
 /// The shapes of
 /// `a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_ball_first_answers`
-/// taken the other way round. Each loop is an edge with one corner, at its
-/// lowest or highest point. Traced for the union: with the bar first the mesh
-/// walks the loop on the bar's wall, in a frame that puts the corner at
-/// `(−1/2, 0, 0)`, and there the marcher's first trial settles back one
-/// rounding off the corner and is kept as a step of `5.9e-17`. The steps after
-/// it double from there, so two corners of the wall's chart coincide.
+/// taken the other way round, held to the same volumes. Each loop is an edge
+/// with one corner, at its lowest or highest point, and with the bar first the
+/// mesh walks the loop on the bar's wall in a frame that puts the corner at
+/// `(−1/2, 0, 0)`. Every fuse was refused `CannotMeshAFace { why:
+/// CornersCoincide }` there until Q1598: the marcher's first trial settled back
+/// one rounding off the corner and was kept as a step of `5.9e-17`, and the
+/// steps after it doubled from there, so two corners of the wall's chart
+/// coincided. A trial that comes back short to within its two ends' own bounds
+/// is now shortened and tried again rather than kept.
 #[test]
-fn a_ball_with_a_bar_through_it_off_its_axis_is_refused_meshing_every_fuse_with_the_bar_first() {
-    for (placement, (build, _, _)) in balls_with_a_bar_through_them_off_their_axis()
-        .into_iter()
-        .enumerate()
-    {
+fn a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_bar_first_answers()
+ {
+    for (build, radius, off) in balls_with_a_bar_through_them_off_their_axis() {
         for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-            let mut model = a_model();
-            let said = fuse(&mut model, build, rule, false);
-            assert!(
-                matches!(
-                    said,
-                    Err(rcad_topo::Error::CannotMeshAFace {
-                        why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
-                        ..
-                    })
-                ),
-                "placement {placement}, {rule:?} (bar first): {said:?}"
+            the_fuse_answers(
+                build,
+                (rule, false),
+                [
+                    32.0 * PI / 3.0,
+                    6.0 * PI * radius * radius,
+                    ball_in_bar(radius, off),
+                ],
+                [&[5], &[3], &[2], &[3, 3]],
             );
         }
     }
