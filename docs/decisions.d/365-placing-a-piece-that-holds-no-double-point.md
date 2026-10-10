@@ -787,6 +787,95 @@ sliver in the plane of a face of the non-convex solid.
 > one corner is a lead, not run. By its sides' material it lies inside the
 > other solid. Each is a row of its own, `refuses/A`.
 
+> **2026-10-10 note (Q1608, Q1609): a flat piece is placed by a side that
+> starts inside an edge of a face, and a shared side is read only off a piece
+> whose side names the piece's own plane.** The fix and its pins are on
+> `lane-q1608-q1609-a-sliver-under-a-rounded-wall` (`a6c7684c`); lane
+> `lane-q1608-q1609-finish-the-sliver-under-a-rounded-wall` merged it onto
+> `1bf7140b`, moved the pins it moves and ran every count here on its branch.
+> The base was not run.
+>
+> **The rule.** `by_a_side_from_an_edge_it_starts_on` in `fuse/select.rs`,
+> tried after every other rule, places a flat piece `P` against a solid `S`
+> by a side `s` carried by `P`'s plane and the plane of a flat face `G` of
+> `S`, one end of which is where `P`'s plane crosses the line of an edge `e`
+> of `G`, strictly between `e`'s ends. Near that end `S`'s skin is `G` and
+> `H`, the face across `e`, and nothing else. Where `s` runs to `G`'s side of
+> `H`'s plane, `P` is inside `S` when its material is on `G`'s inner side;
+> where it runs beyond `e`, `P` is inside when `s` there is behind `H`'s
+> outward plane, whether `e` is convex or reflex. Every question is the meet
+> of three stored planes, or two planes compared bit for bit, so every answer
+> is exact and nothing goes into the log. It places the two slivers 365.8's
+> last note left: the triangle on the ell's floor at `(3, 2, 1)` and the one
+> on the second comb's floor at `(4, 1, 1)`.
+>
+> **The partner check.** `SidesItShares::is_inside`, 365.3's rule, now reads
+> a side `P` shares with a piece cut from `G` only when that piece's side also
+> names `P`'s own surface as its partner, as well as `P`'s side naming `G`'s.
+> Two sides are one edge of the naming when their ends are named the same
+> corners, and a corner can take in two places a rounding apart. In the combs
+> the strip of the first comb's gap floor `y = 1`, from `x = 3` to where the
+> second comb's wall `x + 2y = 5` crosses it `3.7e-16` along, lies on the
+> second comb's gap floor. Its side on that wall was named one edge with the
+> cut of that wall by the first comb's `x − 2y = 1`, `9.3e-17` above, read off
+> that cut, and put outside the second comb, and the intersection kept neither
+> copy of it. Now 365.3's rule does not place it, and Q1606's
+> `by_an_edge_of_a_face_it_lies_on` places it on that floor, facing its way, in
+> each rule's fuse (a temporary print, since removed).
+>
+> **The twelve answers**, under `Policy::certified`, volume give or take its
+> error, pinned in `a_sliver_along_an_edge_of_a_face_it_lies_on.rs`:
+>
+> - Frame 3x3 / Ell 4x4, frame first: the intersection is two parts,
+>   `1.6666666666666667 ± 0.0`; the union `27.333333333333325 ± 1.1e-14`; the
+>   difference `14.333333333333337 ± 5.3e-15`.
+> - Ell first: the intersection the same; the union
+>   `27.333333333333332 ± 8.5e-16`; the difference three parts,
+>   `11.33333333333333 ± 2.4e-15`, pinned bit for bit.
+> - Comb 3 / Comb 2, comb 3 first: the intersection two parts,
+>   `3.0 ± 8.3e-17`; the union and the difference refused
+>   `ResultIsNotManifold { count: 4 }`. That the stored planes describe no four
+>   faces along an edge there was reasoned and not run.
+> - Comb 2 first: the intersection and the union refused the same way; the
+>   difference four parts, `4.0 ± 4.0e-16`.
+>
+> **The ell less the frame is short, and is no defect.** Its `11.33333333333333`
+> is `2.9e-15` under the ell's `13` less the intersection's
+> `1.6666666666666667`, past its error. A throwaway probe worked out the
+> triangles of all six frame and ell answers exactly. Every part of each
+> measures within its own error of its own triangles, so the measure keeps its
+> bound. Six times the union less the intersection and both differences is
+> exactly nothing, either order, so no piece is lost
+> (`no_answer_of_a_leaning_frame_and_a_leaning_ell_loses_a_piece` pins it).
+> What takes it past its error is two things: its largest part measures
+> `2.4e-15` under its own triangles, nearly all its error, and it and the union
+> write the ell's corner `(−1, 4)`, where its wall `x + 2y = 7` meets `y = 4`,
+> at `(−0.9999999999999998, 4)`, though the frame does not reach `y = 4`. That
+> costs the triangles `2.6e-16` against the ell's. The stored wall crosses
+> `y = 4` at `−1 + 1.24e-16`, worked out exactly from its stored coefficients,
+> which rounds to `−0.9999999999999999`, so the corner is written one rounding
+> past the stored planes' meet. The answer validates and every measure holds
+> its own triangles, so no row is filed; why the corner moves was not traced.
+>
+> **What moved in `fuses_that_must_agree.rs`.**
+> `how_often_a_certified_fuse_of_a_skew_pair_refuses` refuses 2 of 450, from
+> the 8 365.8's last note gave, both the edge too short above, so its check
+> that a point inside a piece is the most-named cause now names the edge too
+> short. Not a solid went from that note's 5 to 7: the comb pair's union and
+> difference with the first comb first, which stopped at the sliver before
+> and now get past it. `swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit`
+> refuses 12 of 280, from that note's 20, and 2 of its comparisons disagree
+> about whether the answer is a solid: both the comb pair's intersection,
+> answered with the first comb first and refused with the second first. That
+> count was not run on the base; the last note had this pair refused both ways
+> round there.
+>
+> **What this leaves.** Two rows, filed by this lane's merge: the comb pair's
+> intersection with the second comb first, refused with four faces along an
+> edge while the other order answers, `refuses/B`; and the comb pair's unions
+> and the first less the second, refused the same way, a row with no class
+> since its cause was not run, with `assemble.rs`'s corner naming a lead.
+
 ### 365.9 A piece placed by the piece of its own face across a side
 
 *Queue row Q1357. Lane `lane-q1357-a-triangle-on-the-plane-of-a-face-it-misses`,
