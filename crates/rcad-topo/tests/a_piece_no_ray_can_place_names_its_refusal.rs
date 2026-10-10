@@ -660,7 +660,7 @@ fn a_ball_joined_to_a_ring(model: &mut Model) -> Result<SolidKey, Error> {
     a_solid_of_revolution(
         model,
         &[(3.0, -4.0), (3.0, 4.0)],
-        &[ball.clone(), ring, ball],
+        &[ball, ring, ball],
         &[Orientation::Forward, Orientation::Forward],
     )
 }
@@ -674,13 +674,7 @@ fn a_frustum_joined_to_a_ring(model: &mut Model) -> Result<SolidKey, Error> {
     a_solid_of_revolution(
         model,
         &[(15.0, -6.0), (13.0, -4.0), (6.0, 3.0), (2.0, 7.0)],
-        &[
-            flat_at(-6.0, -1.0),
-            cone.clone(),
-            ring,
-            cone,
-            flat_at(7.0, 1.0),
-        ],
+        &[flat_at(-6.0, -1.0), cone, ring, cone, flat_at(7.0, 1.0)],
         &[Orientation::Reversed; 4],
     )
 }
@@ -758,7 +752,7 @@ fn a_solid_of_revolution(
         circles.push(builder.add_edge(corner, corner, run)?);
     }
     let mut shell = Vec::with_capacity(surfaces.len());
-    for (index, surface) in surfaces.iter().enumerate() {
+    for (index, &surface) in surfaces.iter().enumerate() {
         let mut wires = Vec::with_capacity(2);
         if index > 0 {
             let coedge = builder.add_coedge(circles[index - 1], turns[index - 1])?;
@@ -768,10 +762,7 @@ fn a_solid_of_revolution(
             let coedge = builder.add_coedge(circles[index], turns[index].reversed())?;
             wires.push(builder.add_wire(&[DraftStep::Along(coedge)])?);
         }
-        shell.push((
-            builder.add_face(surface.clone(), &wires)?,
-            Orientation::Forward,
-        ));
+        shell.push((builder.add_face(surface, &wires)?, Orientation::Forward));
     }
     builder.add_shell(&shell)?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
