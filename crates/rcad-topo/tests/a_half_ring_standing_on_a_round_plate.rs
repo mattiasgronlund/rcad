@@ -28,13 +28,13 @@
 //! either side of `z = 0`, and it holds `8π²`. Against a bar it touches
 //! nowhere, nothing cuts it, and a fuse has to hand it back whole (row Q1588).
 
-use core::f64::consts::PI;
+use core::f64::consts::{PI, TAU};
 
 use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Invalid, Model, Rule, SolidBuilder, SolidKey};
 
 mod rings;
 
@@ -238,14 +238,111 @@ fn a_whole_ring_and_a_bar_in_its_hole_level_with_its_tube_fuse_to_the_two_apart(
     a_whole_ring_and_a_bar_clear_of_it_fuse_to_the_two_apart("in its hole", 0.0);
 }
 
+/// The whole ring turned a quarter of a turn about `(1, 2, 3)`, and the bar
+/// twenty out. The plane a turned ring is cut along has to keep the bits of
+/// the ring's own axis. Scaled again, it sits an ulp off square to that axis,
+/// its crossing with the ring is a quartic, and the fuse was refused
+/// `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` (row Q1588).
+#[test]
+fn a_whole_ring_turned_a_quarter_about_a_slant_and_a_bar_far_from_it_fuse_to_the_two_apart() {
+    let slant = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
+    a_turned_whole_ring_and_a_bar_clear_of_it_fuse_to_the_two_apart(
+        "far from it, turned a quarter about (1, 2, 3)",
+        20.0,
+        &Isometry::rotation(&slant, TAU / 4.0).expect("a finite turn"),
+    );
+}
+
+/// The whole ring turned about six axes a fortieth of a turn at a time, and
+/// the bar twenty out, fused under every rule both ways round: 1404 fuses.
+/// Each one that answers gives the two apart, nothing, or its first argument,
+/// and validates. The rest are refused `VolumeIsNotPositive`, a ring of
+/// volume `8π²` read as enclosing about `−4·10⁻¹⁶`, and that is a defect
+/// pinned at its count: the answer exists (row Q1588).
+#[test]
+fn a_whole_ring_turned_any_way_and_a_bar_far_from_it_answer_or_are_refused_as_enclosing_nothing() {
+    let mut refused = Vec::new();
+    for direction in [
+        Vector::new(1.0, 2.0, 3.0),
+        Vector::new(1.0, 0.0, 0.0),
+        Vector::new(0.0, 1.0, 0.0),
+        Vector::new(1.0, 1.0, 0.0),
+        Vector::new(-3.0, 1.0, 7.0),
+        Vector::new(0.3, -0.7, 0.1),
+    ] {
+        let axis = Axis::new(Point::origin(), direction).expect("a direction");
+        for fortieths in 1..40 {
+            let turn = Isometry::rotation(&axis, f64::from(fortieths) * TAU / 40.0)
+                .expect("a finite turn");
+            for (rule, ring_first, solids) in [
+                (Rule::Union, true, 2),
+                (Rule::Union, false, 2),
+                (Rule::Intersection, true, 0),
+                (Rule::Intersection, false, 0),
+                (Rule::Difference, true, 1),
+                (Rule::Difference, false, 1),
+            ] {
+                let what = format!(
+                    "{rule:?}, ring first {ring_first}, {fortieths}/40 about {direction:?}"
+                );
+                let mut model = Model::new(Scale::millimetres(50.0).expect("a positive size"));
+                let ring = a_whole_ring(&mut model);
+                model
+                    .place_solid(ring, &turn)
+                    .expect("this model made the key");
+                let bar = a_bar_standing(&mut model, 20.0, 1.0);
+                let (arguments, tools) = if ring_first {
+                    ([ring], [bar])
+                } else {
+                    ([bar], [ring])
+                };
+                match model.fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                ) {
+                    Ok(answer) => {
+                        assert_eq!(answer.solids().len(), solids, "{what}");
+                        model
+                            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                    }
+                    Err(Error::Invalid(Invalid::VolumeIsNotPositive { volume }))
+                        if volume.abs() < 1e-12 =>
+                    {
+                        refused.push(what);
+                    }
+                    Err(why) => panic!("{what}: refused {why:?}"),
+                }
+            }
+        }
+    }
+    assert_eq!(refused.len(), 20, "{refused:#?}");
+}
+
 fn a_whole_ring_and_a_bar_clear_of_it_fuse_to_the_two_apart(shape: &str, out: f64) {
+    a_turned_whole_ring_and_a_bar_clear_of_it_fuse_to_the_two_apart(
+        shape,
+        out,
+        &Isometry::identity(),
+    );
+}
+
+fn a_turned_whole_ring_and_a_bar_clear_of_it_fuse_to_the_two_apart(
+    shape: &str,
+    out: f64,
+    turn: &Isometry,
+) {
     every_fuse_of_the_two_answers(
         &format!("the whole ring and a bar {shape}"),
         |model| {
-            (
-                vec![a_whole_ring(model)],
-                vec![a_bar_standing(model, out, 1.0)],
-            )
+            let ring = a_whole_ring(model);
+            model
+                .place_solid(ring, turn)
+                .expect("this model made the key");
+            (vec![ring], vec![a_bar_standing(model, out, 1.0)])
         },
         [THE_WHOLE_RING, 2.0 * A_UNIT_OF_THE_BAR],
         [
