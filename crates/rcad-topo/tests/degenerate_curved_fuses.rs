@@ -2404,12 +2404,22 @@ fn a_ball_with_a_bar_through_its_centre_is_answered_under_every_rule() {
 }
 
 /// A ball one rounding off a bar's axis crosses it in two quartic loops and
-/// not in two circles, so it is still refused before any order is asked, under
-/// every rule both ways. The bar's axis runs up `z` through `(1, 0, 0)` and the
+/// not in two circles, and every fuse is refused meshing a face, under every
+/// rule both ways and under a tolerant policy as under a certified one, so it
+/// is not a question of how much the arithmetic may assume. The bar's axis runs up `z` through `(1, 0, 0)` and the
 /// ball's centre is the next `f64` past it along `x`, `2⁻⁵²` out; centred on
 /// `(1, 0, 0)` itself, the same pair is answered, as the pair above is.
+///
+/// Until Q1554 it was refused before any order was asked,
+/// `ACrossingThisCannotBeOrderedAlong`. The two loops are ordered round the
+/// bar's axis now, and the mesh refuses instead: two corners of a face's chart
+/// coincide, or a side cuts off one corner of a curved patch
+/// ([`refused_meshing_a_ball_one_rounding_off_a_bars_axis`]). Not
+/// traced. A ball of 2 with a bar of 1 half a unit off its axis is refused
+/// `CornersCoincide` too, with the bar first only, in the marcher's first step
+/// (`two_curves_of_one_pair_that_meet.rs`).
 #[test]
-fn a_ball_one_rounding_off_a_bars_axis_is_refused_before_any_order() {
+fn a_ball_one_rounding_off_a_bars_axis_is_refused_meshing_every_fuse() {
     let one_past = f64::from_bits(1.0_f64.to_bits() + 1);
     for (centre, on_the_axis) in [(1.0, true), (one_past, false)] {
         for (rule, ball_first, pieces, closed_form, how_fine) in
@@ -2443,10 +2453,13 @@ fn a_ball_one_rounding_off_a_bars_axis_is_refused_before_any_order() {
                     Side::Under,
                 );
             } else {
-                assert_refused_for_want_of_an_order(
-                    refusal(&mut model, &pair, rule, &Policy::certified()),
-                    &format!("centred at x = {centre}, {rule:?}, the ball first {ball_first}"),
-                );
+                for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+                    let why = refusal(&mut model, &pair, rule, &policy);
+                    assert!(
+                        refused_meshing_a_ball_one_rounding_off_a_bars_axis(&why, rule, ball_first),
+                        "{policy:?}, {rule:?}, the ball first {ball_first}: refused with {why:?}"
+                    );
+                }
             }
         }
     }
@@ -2479,12 +2492,32 @@ fn what_a_ball_with_a_bar_through_its_centre_leaves() -> [(Rule, bool, usize, f6
     ]
 }
 
-/// What a ball off a bar's axis is refused with: no order along the two loops
-/// it crosses the bar in, and a panic naming any other refusal.
-fn assert_refused_for_want_of_an_order(why: Error, what: &str) {
-    match why {
-        Error::ACrossingThisCannotBeOrderedAlong => {}
-        other => panic!("{what}: refused with {other:?}"),
+/// Whether `why` is the mesh refusal each fuse of
+/// [`a_ball_one_rounding_off_a_bars_axis_is_refused_meshing_every_fuse`]'s ball
+/// off the axis gives: two corners of a face's chart in one place with the
+/// ball first, and with the bar first for the bar less the ball; a side
+/// cutting off one corner of a curved patch for the union and the intersection
+/// with the bar first. Only the kind is read, not the corner it names.
+fn refused_meshing_a_ball_one_rounding_off_a_bars_axis(
+    why: &Error,
+    rule: Rule,
+    ball_first: bool,
+) -> bool {
+    match (rule, ball_first) {
+        (Rule::Union | Rule::Intersection, false) => matches!(
+            why,
+            Error::CannotMeshAFace {
+                why: rcad_mesh::CannotTriangulate::ASideCutsOffOneCornerOfACurvedPatch { .. },
+                ..
+            }
+        ),
+        _ => matches!(
+            why,
+            Error::CannotMeshAFace {
+                why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
+                ..
+            }
+        ),
     }
 }
 
