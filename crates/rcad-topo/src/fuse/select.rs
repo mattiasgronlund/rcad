@@ -619,7 +619,7 @@ struct SidesItShares<'a> {
     scratch: &'a Scratch,
     solids: &'a [&'a BakedSolid],
     /// Every side of every piece with the edge it names: `None` until a piece
-    /// first needs it, and `Some(None)` when the naming gave up.
+    /// first needs it, and `Some(None)` when the naming refused.
     named: Option<Option<Vec<Vec<NamedSide>>>>,
     /// What naming the sides asked the policy, kept out of the log until a
     /// piece is placed by them.
@@ -641,7 +641,7 @@ impl<'a> SidesItShares<'a> {
     /// when some solid of them could not be placed this way and none had the
     /// piece inside it.
     ///
-    /// **Nothing here refuses.** A naming that gives up, a plane agreement
+    /// **Nothing here refuses.** A naming that refuses, a plane agreement
     /// that cannot be told, or two shared sides that disagree each leave the
     /// piece where the point search left it, and unless a corner, a plane or
     /// the piece across a side places it the caller refuses under the name that
@@ -662,8 +662,7 @@ impl<'a> SidesItShares<'a> {
                     policy,
                     &mut self.asked,
                 )
-                .ok()
-                .flatten(),
+                .ok(),
             );
         }
         let named = self.named.as_ref().and_then(Option::as_ref)?;
