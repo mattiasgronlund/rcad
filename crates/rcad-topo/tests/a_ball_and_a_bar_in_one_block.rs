@@ -40,7 +40,9 @@
 //! or rests against it. Where it rests against it, the floor's two round holes
 //! touch, and the floor's one inner wire is both circles closing at the touch
 //! point. Each circle is read against the round surface across it, so a ray
-//! that crosses the floor is answered there too.
+//! that crosses the floor is answered there too. A second bar notching the
+//! floor's edge gives the floor an arc among its sides, which sends it down
+//! another path, and that path reads the two touching circles the same way.
 
 use core::f64::consts::PI;
 
@@ -204,6 +206,113 @@ fn a_ball_resting_against_the_bar_makes_the_same_block_with_both_circles_in_its_
                 .expect("the floor follows two whole circles that touch"),
             held,
             "the floor at {at:?}, {what}"
+        );
+    }
+}
+
+/// A floor with a round notch in its edge follows the two touching circles too.
+///
+/// A second bar of radius 1 stands up `z` on the block's side `x = 0`, so the
+/// floor loses a half disk at its edge and has an arc among its sides. A flat
+/// face with an arc among its sides is read by its chords and arcs, a path of
+/// its own, and that path has to count the wire of the ball's circle and the
+/// first bar's circle, touching at `(4, 3.5, 0)`, as a round wire as well, or
+/// it refuses the floor everywhere.
+#[test]
+fn a_floor_notched_by_a_second_bar_still_follows_the_two_touching_circles() {
+    let (mut model, [block, ball, bar]) = a_block_a_ball_and_a_bar(3.0);
+    let second_bar = model
+        .add_round_bar(
+            RADIUS,
+            SIDE + 4.0,
+            &Isometry::translation(Vector::new(0.0, SIDE / 2.0, -2.0)).expect("a shift"),
+        )
+        .expect("a bar long enough to go right through");
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let solids = model
+        .fuse(
+            &[block],
+            &[ball, bar, second_bar],
+            Rule::Union,
+            &policy,
+            &mut log,
+        )
+        .expect("a block notched by a second bar unites with the ball and the bar")
+        .solids()
+        .to_vec();
+    assert_eq!(solids.len(), 1, "one block with three lumps on it");
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .expect("the answer is a valid solid");
+    let solid = model.solid(solids[0]).expect("this model made the key");
+    let floor = solid
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface::Plane(flat)
+                if flat.coefficients() == [0.0, 0.0, -1.0, 0.0])
+        })
+        .expect("the block's floor is still one face")
+        .key();
+    for (at, held, what) in [
+        ([1.0, 1.0, 0.0], OnAFace::Held, "far from every circle"),
+        (
+            [1.5, 3.5, 0.0],
+            OnAFace::Held,
+            "between the notch and the ball's circle",
+        ),
+        ([0.5, 3.5, 0.0], OnAFace::NotHeld, "in the notch"),
+        (
+            [3.0, 3.5, 0.0],
+            OnAFace::NotHeld,
+            "inside the ball's circle",
+        ),
+        ([5.0, 3.5, 0.0], OnAFace::NotHeld, "inside the bar's circle"),
+        (
+            [4.0, 3.5, 0.0],
+            OnAFace::OnItsBoundary,
+            "where the two circles touch",
+        ),
+    ] {
+        assert_eq!(
+            solid
+                .face_holds_the_point(floor, PredicatePoint::Exact(at), &policy, &mut log)
+                .expect("the floor follows its notch and two whole circles that touch"),
+            held,
+            "the floor at {at:?}, {what}"
+        );
+    }
+    for (at, where_it_is, what) in [
+        (
+            Point::new(3.0, 3.5, -0.5),
+            Containment::Inside,
+            "half a unit under the floor, inside the half ball",
+        ),
+        (
+            Point::new(5.0, 3.25, -1.5),
+            Containment::Inside,
+            "inside the bar stub under the floor",
+        ),
+        (
+            Point::new(0.25, 3.5, -1.5),
+            Containment::Inside,
+            "inside the second bar's stub under the floor",
+        ),
+        (
+            Point::new(1.5, 3.5, -0.5),
+            Containment::Outside,
+            "under the floor, between the second bar and the half ball",
+        ),
+        (
+            Point::new(1.5, 1.5, -1.5),
+            Containment::Outside,
+            "under the floor, clear of everything",
+        ),
+    ] {
+        assert_eq!(
+            solid.classify_point(at, &policy, &mut log),
+            where_it_is,
+            "{what}"
         );
     }
 }
