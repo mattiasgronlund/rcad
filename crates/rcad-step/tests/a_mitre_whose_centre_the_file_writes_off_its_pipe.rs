@@ -72,6 +72,10 @@ fn a_mitre_whose_centre_is_off_its_leaning_pipe_is_named_by_its_pipes() {
 /// centre is on both axes, so the ellipse is checked onto both pipes and the
 /// run is named by its own plane.
 #[test]
+#[expect(
+    clippy::approx_constant,
+    reason = "0.707106781187 is the file's own twelve-digit decimal, not a spelling of 1/√2"
+)]
 fn a_mitre_whose_centre_is_on_both_pipes_is_named_by_its_plane() {
     let text = an_elbow(&MITRE_1769);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
@@ -286,7 +290,15 @@ struct AMitre {
     end_corner_spacings_between: [f64; 2],
 }
 
+#[expect(
+    clippy::approx_constant,
+    reason = "0.707106781187 is the file's own twelve-digit decimal, not a spelling of 1/√2"
+)]
 const UP_AND_ON: [f64; 3] = [0.707106781187, 0.0, 0.707106781187];
+#[expect(
+    clippy::approx_constant,
+    reason = "0.707106781187 is the file's own twelve-digit decimal, not a spelling of 1/√2"
+)]
 const DOWN_AND_ON: [f64; 3] = [0.707106781187, 0.0, -0.707106781187];
 const OFF_BY_HALF_A_DIGIT_EACH_WAY: f64 = 5e-13 * SQRT_2;
 
