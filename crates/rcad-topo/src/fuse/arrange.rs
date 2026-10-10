@@ -5885,20 +5885,20 @@ impl<'f> Arrangement<'f> {
     ///
     /// **Only where both curves go right round one axis and the half-space
     /// faces along it.** On a pipe, that is the cone round a bar's axis cutting
-    /// it in a circle in each nappe, and a ball cutting it in two loops either
-    /// side of its centre, and the axis is the pipe's. On a cone it is a pipe, a
-    /// second cone or a ball on its axis cutting it in two circles square to
-    /// that axis, and the axis is the cone's. On a ball it is a cone whose axis
-    /// runs through the ball's centre, cutting it in two circles square to the
-    /// cone's axis, and the axis is the cone's: `intersect` names no other cone
-    /// against a ball. A pipe through the ball's centre is the same, about the
-    /// pipe's axis; a pipe off the centre cuts it in quartic loops, which
-    /// [`how_a_crossing_runs`] refuses before anything asks this. Two pipes
-    /// are the one pair read another way: a fat pipe cuts a thin one it
-    /// swallows in two loops round the thin pipe's axis, the half-space's flat
-    /// surface holds the fat pipe's axis rather than facing along either, and
+    /// it in a circle in each nappe, and the axis is the pipe's. On a cone it
+    /// is a pipe, a second cone or a ball on its axis cutting it in two circles
+    /// square to that axis, and the axis is the cone's. On a ball it is a cone
+    /// whose axis runs through the ball's centre, cutting it in two circles
+    /// square to the cone's axis, and the axis is the cone's: `intersect` names
+    /// no other cone against a ball. Two pipes are read another way: a fat pipe
+    /// cuts a thin one it swallows in two loops round the thin pipe's axis, the
+    /// half-space's flat surface holds the fat pipe's axis rather than facing
+    /// along either, and
     /// [`Arrangement::whether_past_the_plane_between_two_loops`] answers there
-    /// (Q1483). A flat face square to a ring's axis is the one pair picked by
+    /// (Q1483). So are a ball and a pipe, whose two loops round the pipe's axis
+    /// are circles only where the centre is on it, and
+    /// [`Arrangement::whether_past_the_plane_through_a_balls_centre`] answers
+    /// there (Q1554). A flat face square to a ring's axis is the one pair picked by
     /// something other than a half-space: the plane cuts the ring in two
     /// circles round the axis, the pipe of the ring's own radius tells them
     /// apart, and
@@ -5944,10 +5944,24 @@ impl<'f> Arrangement<'f> {
         if let (Surface::Cylinder(this), Surface::Cylinder(other)) = (self.surface, partner) {
             return self.whether_past_the_plane_between_two_loops(crossing, &this, &other, at);
         }
+        if let (Surface::Sphere(_), Surface::Cylinder(_)) = (self.surface, partner) {
+            return self.whether_past_the_plane_through_a_balls_centre(
+                crossing,
+                &partner,
+                Decision::Pos,
+                at,
+            );
+        }
+        if let (Surface::Cylinder(_), Surface::Sphere(_)) = (self.surface, partner) {
+            return self.whether_past_the_plane_through_a_balls_centre(
+                crossing,
+                &partner,
+                Decision::Neg,
+                at,
+            );
+        }
         let axis = match (self.surface, partner) {
-            (Surface::Cylinder(pipe), _) | (Surface::Sphere(_), Surface::Cylinder(pipe)) => {
-                pipe.axis()
-            }
+            (Surface::Cylinder(pipe), _) => pipe.axis(),
             (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) => cone.axis(),
             (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _) => {
                 return PastThePicker::No;
@@ -6061,6 +6075,71 @@ impl<'f> Arrangement<'f> {
             Decision::Neg => PastThePicker::Yes(towards_the_flat_surface),
             Decision::Undecidable { .. } | _
                 if side_of_surface(&Surface::Cylinder(*other), at) == towards_the_flat_surface =>
+            {
+                PastThePicker::Yes(towards_the_flat_surface)
+            }
+            Decision::Undecidable { .. } | _ => PastThePicker::CannotTell,
+        }
+    }
+
+    /// On a ball or a pipe the other cuts in two loops either side of the
+    /// ball's centre: whether a point is past the flat half-space that picks
+    /// one loop out, and if it is, which side of the partner that loop has
+    /// towards it.
+    ///
+    /// The half-space is the one `rcad_geom`'s `two_loops_either_side_of_a_ball`
+    /// builds: through the centre, facing along the pipe's axis, and only built
+    /// where it provably holds the two loops apart, which is only where the
+    /// ball swallows the pipe's whole cross-section. `towards_the_flat_surface`
+    /// is the side, positive on the ball and negative on the pipe. Past the
+    /// flat surface, every point of either is on one side of the loop in front
+    /// of it, and which side depends only on which surface this is.
+    ///
+    /// - **On the ball** the two loops bound two patches inside the pipe, and
+    ///   the band between them is outside it. The part of the ball past the
+    ///   flat surface is one cap the loop in front never meets, and it holds the
+    ///   other loop and so points of the band beside it: all of it is on the
+    ///   band's side of the loop in front, the partner's positive side, even
+    ///   inside the other loop's patch, where the partner's sign is negative.
+    /// - **On the pipe** the part of the wall between the two loops is inside
+    ///   the ball, and every line of the wall along the axis crosses the loop in
+    ///   front, the flat surface and the other loop in that order. The part of
+    ///   the wall past the flat surface is one tube the loop in front never
+    ///   meets, starting between the two: all of it is on the loop's side
+    ///   towards the ball's inside, the partner's negative side, even beyond the
+    ///   other loop, where the partner's sign is positive.
+    ///
+    /// **Not read off a step from the nodes**, the way
+    /// [`Arrangement::whether_past_the_picker`] reads a cone's two circles. On
+    /// the ball, a step from the loop down towards the flat surface runs along
+    /// the line of longitude, and where the centre is further off the axis than
+    /// the pipe is wide, `a > r`, that step goes into the pipe on the side of
+    /// the loop nearest the ball's pole: a node there read the side as negative
+    /// and every point past the flat surface was put inside the pipe (Q1554).
+    /// The step's sign against the pipe is `h(r² − ρ·d)` for `h` how far the
+    /// node sits along the axis from the centre, `ρ` the step out from the axis
+    /// to it and `d` the step out to the centre, which is above nothing all
+    /// round only where `a < r`.
+    ///
+    /// A point on the flat surface is on the band on the ball and between the
+    /// loops on the pipe, so the partner's sign there is the side, and
+    /// [`PastThePicker::No`] says so. A point whose box straddles it is
+    /// answered where the two readings agree.
+    fn whether_past_the_plane_through_a_balls_centre(
+        &self,
+        crossing: usize,
+        partner: &Surface,
+        towards_the_flat_surface: Decision,
+        at: PredicatePoint,
+    ) -> PastThePicker {
+        let [Picker::InFrontOf(picker)] = self.crossings[crossing].picked_by() else {
+            return PastThePicker::No;
+        };
+        match picker.side_of_point(at) {
+            Decision::Pos | Decision::Zero => PastThePicker::No,
+            Decision::Neg => PastThePicker::Yes(towards_the_flat_surface),
+            Decision::Undecidable { .. } | _
+                if side_of_surface(partner, at) == towards_the_flat_surface =>
             {
                 PastThePicker::Yes(towards_the_flat_surface)
             }
@@ -7879,8 +7958,8 @@ fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a pair whose crossing is
 /// none of an endless straight line, one closed curve lying in a plane, a
 /// plane's endless bend across a cone, or one of the two loops a fat pipe
-/// crosses a thin one in — a ball against a pipe off its axis, or two pipes
-/// whose crossing is one loop. That is a **gap**: the curve is there and
+/// crosses a thin one in or a ball crosses a pipe in — a ball or a pipe whose
+/// crossing with a pipe is one loop. That is a **gap**: the curve is there and
 /// ordering points along it takes the marcher rather than a determinant
 /// (§34.10).
 ///
@@ -7969,7 +8048,8 @@ fn how_a_crossing_runs(
         return how_a_circle_round_a_rings_axis_runs(surface, partner, level, run, log);
     }
     if !(a_pair_that_crosses_in_a_conic(surface, partner, log)?
-        || one_of_two_loops_round_a_thin_pipe(surface, partner, run))
+        || one_of_two_loops_round_a_thin_pipe(surface, partner, run)
+        || one_of_two_loops_round_a_pipe_through_a_ball(surface, partner, run))
     {
         return Err(Error::ACrossingThisCannotBeOrderedAlong);
     }
@@ -8003,6 +8083,36 @@ fn one_of_two_loops_round_a_thin_pipe(
         (
             Surface::Cylinder(_),
             Surface::Cylinder(_),
+            EdgeRun::PartOfWhereItCrosses { .. }
+        )
+    )
+}
+
+/// Whether `run` is one of the two loops a ball crosses a pipe in, either side
+/// of its centre, where it swallows the pipe's whole cross-section.
+///
+/// [`intersect`](rcad_geom::intersect) names a ball and a pipe's crossing as a
+/// part of it picked out by a half-space only there, whether the centre is on
+/// the pipe's axis, where the two are circles, or off it, where they are
+/// quartic loops: one loop is the whole of the crossing, and so is the one
+/// circle of a ball inscribed in the pipe. Each of the two runs once round the
+/// pipe's axis, and [`which_comes_first_round_a_crossing`] orders it round that
+/// axis, asking again, exactly, whether the ball swallows the pipe before it
+/// does (Q1554).
+fn one_of_two_loops_round_a_pipe_through_a_ball(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+) -> bool {
+    matches!(
+        (surface, partner, run.run()),
+        (
+            Surface::Sphere(_),
+            Surface::Cylinder(_),
+            EdgeRun::PartOfWhereItCrosses { .. }
+        ) | (
+            Surface::Cylinder(_),
+            Surface::Sphere(_),
             EdgeRun::PartOfWhereItCrosses { .. }
         )
     )
