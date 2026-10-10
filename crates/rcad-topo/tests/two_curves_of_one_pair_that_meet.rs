@@ -181,36 +181,81 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_before_any_arrange
     every_fuse_is_refused_where_two_loops_meet(a_thin_bar_resting_on_the_inside_of_a_thick_one);
 }
 
-/// A ball of radius 2 with a bar through it off its axis, so that the pipe
-/// crosses the ball in two loops apart. Every fuse is refused ordering points
-/// along a loop, §39.4's gap, before anything is asked about where two loops
-/// meet. Four placements: the bar of radius 1 at `x = 1/2` and at `y = 1/2`,
-/// the bar of radius 1/2 at `y = 1` clear of the ball's poles, and the ball
-/// turned a quarter round `z` with the bar at `x = 1/2`.
+/// A ball of radius 2 with a bar from `z = −3` to 3 through it off its axis,
+/// so that the pipe crosses the ball in two loops apart, one above `z = 0` and
+/// one below. They come together only where the bar touches the ball from
+/// inside
+/// (`a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement`).
+/// Four placements: the bar of radius 1 at `x = 1/2` and at `y = 1/2`, the bar
+/// of radius 1/2 at `y = 1` clear of the ball's poles, and the ball turned a
+/// quarter round `z` with the bar at `x = 1/2`. Every fuse was refused ordering
+/// points along a loop until Q1554 ordered them round the bar's axis.
+///
+/// What they share is the ball inside the bar, [`ball_in_bar`]. With the bar
+/// first, every fuse is still refused meshing
+/// (`a_ball_with_a_bar_through_it_off_its_axis_is_refused_meshing_every_fuse_with_the_bar_first`).
 #[test]
-fn a_ball_with_a_bar_through_it_off_its_axis_is_refused_ordering_the_loops() {
-    let placements: [Pair; 4] = [
-        |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.5, 0.0]),
-        |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.0, 0.5]),
-        |model| a_ball_and_a_bar(model, &Isometry::identity(), 0.5, [0.0, 1.0]),
-        |model| {
-            let turned = Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z");
-            a_ball_and_a_bar(model, &turned, 1.0, [0.5, 0.0])
-        },
-    ];
-    for (placement, build) in placements.into_iter().enumerate() {
-        for (rule, first_first) in six_fuses() {
-            let mut model = a_model();
-            let said = fuse(&mut model, build, rule, first_first);
-            assert!(
-                matches!(
-                    said,
-                    Err(rcad_topo::Error::ACrossingThisCannotBeOrderedAlong)
-                ),
-                "placement {placement}, {rule:?} (ball first: {first_first}): {said:?}"
+fn a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_ball_first_answers()
+ {
+    for (build, radius, off) in balls_with_a_bar_through_them_off_their_axis() {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            the_fuse_answers(
+                build,
+                (rule, true),
+                [
+                    32.0 * PI / 3.0,
+                    6.0 * PI * radius * radius,
+                    ball_in_bar(radius, off),
+                ],
+                [&[5], &[3], &[2], &[3, 3]],
             );
         }
     }
+}
+
+/// The shapes of
+/// `a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_ball_first_answers`
+/// taken the other way round. Each loop is an edge with one corner, at its
+/// lowest or highest point. Traced for the union: with the bar first the mesh
+/// walks the loop on the bar's wall, in a frame that puts the corner at
+/// `(−1/2, 0, 0)`, and there the marcher's first trial settles back one
+/// rounding off the corner and is kept as a step of `5.9e-17`. The steps after
+/// it double from there, so two corners of the wall's chart coincide.
+#[test]
+fn a_ball_with_a_bar_through_it_off_its_axis_is_refused_meshing_every_fuse_with_the_bar_first() {
+    for (placement, (build, _, _)) in balls_with_a_bar_through_them_off_their_axis()
+        .into_iter()
+        .enumerate()
+    {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let mut model = a_model();
+            let said = fuse(&mut model, build, rule, false);
+            assert!(
+                matches!(
+                    said,
+                    Err(rcad_topo::Error::CannotMeshAFace {
+                        why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
+                        ..
+                    })
+                ),
+                "placement {placement}, {rule:?} (bar first): {said:?}"
+            );
+        }
+    }
+}
+
+/// [`ball_in_bar`] on the ball's axis is the closed form
+/// `(4π/3)(2³ − (2² − 1)^(3/2))` of
+/// `a_ball_on_a_bars_axis_crosses_it_in_two_circles_and_every_fuse_answers`,
+/// to the `1e-6` its doc comment gives it.
+#[test]
+fn the_ball_in_a_bar_on_its_axis_is_the_closed_form() {
+    let closed = 4.0 * PI / 3.0 * (8.0 - 3f64.powf(1.5));
+    let ruled = ball_in_bar(1.0, 0.0);
+    assert!(
+        (ruled - closed).abs() < 1e-6,
+        "{ruled} by the rule, {closed} closed"
+    );
 }
 
 /// The top half of a ring of 4 round a tube of 1 about `z`, and a bar of
@@ -439,22 +484,33 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
     );
 }
 
-fn every_fuse_answers(build: Pair, [first, second, shared]: [f64; 3], faces: [&[usize]; 4]) {
-    for (rule, first_first) in six_fuses() {
-        let (volume, faces) = match (rule, first_first) {
-            (Rule::Union, _) => (first + second - shared, faces[0]),
-            (Rule::Intersection, _) => (shared, faces[1]),
-            (Rule::Difference, true) => (first - shared, faces[2]),
-            (Rule::Difference, false) => (second - shared, faces[3]),
-            (other, _) => panic!("{other:?} is not one of the six"),
-        };
-        let mut model = a_model();
-        let said = fuse(&mut model, build, rule, first_first);
-        let what = format!(
-            "{rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}"
-        );
-        answers(&mut model, said, volume, faces, &what);
+fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
+    for one in six_fuses() {
+        the_fuse_answers(build, one, volumes, faces);
     }
+}
+
+/// The fuse `rule` of `build`'s two solids, the first first or not, answers
+/// with the volume and faces `every_fuse_answers` reads for it.
+fn the_fuse_answers(
+    build: Pair,
+    (rule, first_first): (Rule, bool),
+    [first, second, shared]: [f64; 3],
+    faces: [&[usize]; 4],
+) {
+    let (volume, faces) = match (rule, first_first) {
+        (Rule::Union, _) => (first + second - shared, faces[0]),
+        (Rule::Intersection, _) => (shared, faces[1]),
+        (Rule::Difference, true) => (first - shared, faces[2]),
+        (Rule::Difference, false) => (second - shared, faces[3]),
+        (other, _) => panic!("{other:?} is not one of the six"),
+    };
+    let mut model = a_model();
+    let said = fuse(&mut model, build, rule, first_first);
+    let what = format!(
+        "{rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}"
+    );
+    answers(&mut model, said, volume, faces, &what);
 }
 
 fn every_fuse_is_refused_where_two_loops_meet(build: Pair) {
@@ -671,6 +727,36 @@ fn a_half_ring_cut_by_a_round_plate(model: &mut Model) -> [SolidKey; 2] {
     [ring, a_bar(model, 6.0, [0.0, 0.0, -2.0], 2.5)]
 }
 
+/// The four balls with a bar through them off their axis, each with the bar's
+/// radius and how far its axis is off the ball's centre.
+fn balls_with_a_bar_through_them_off_their_axis() -> [(Pair, f64, f64); 4] {
+    [
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.5, 0.0]),
+            1.0,
+            0.5,
+        ),
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.0, 0.5]),
+            1.0,
+            0.5,
+        ),
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 0.5, [0.0, 1.0]),
+            0.5,
+            1.0,
+        ),
+        (
+            |model| {
+                let turned = Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z");
+                a_ball_and_a_bar(model, &turned, 1.0, [0.5, 0.0])
+            },
+            1.0,
+            0.5,
+        ),
+    ]
+}
+
 /// A ball of radius 2, placed by `ball`, and a bar of `radius` up `z` from −3
 /// to 3 at `at`.
 fn a_ball_and_a_bar(
@@ -736,4 +822,33 @@ fn bar_through_bar(big: f64, small: f64, off: f64) -> f64 {
         sum += across * small * theta.cos() * PI / f64::from(steps);
     }
     sum
+}
+
+/// Volume the ball of radius 2 at the origin shares with a bar up `z` of
+/// `radius` whose axis is `off` from the ball's, long enough to go right
+/// through it: `∫∫ 2√(4 − ρ² − off² − 2·off·ρ·cos θ) ρ dρ dθ` over the bar's
+/// section, `ρ` out from the bar's axis.
+///
+/// A midpoint rule of 1000 steps out from the axis by 64 round it. The
+/// integrand is smooth and periodic round the axis, so 64 steps there already
+/// agree with 16 to `1e-12`; out from the axis the error falls as the square
+/// of the step, and on the axis 1000 steps leave it `4.4e-7` above the closed
+/// form ([`the_ball_in_a_bar_on_its_axis_is_the_closed_form`]). Off the axis,
+/// read as `4/3` of how far 1000 steps are from 2000, it is `4.9e-7` over for
+/// a bar of 1 at `1/2` and `3.6e-8` for a bar of `1/2` at 1: far below the
+/// `0.12` or more that a mesh of `0.01` may miss these volumes by. The bar
+/// must lie inside the ball's equator, `radius + off < 2`.
+fn ball_in_bar(radius: f64, off: f64) -> f64 {
+    let (out, round) = (1000, 64);
+    let (step_out, step_round) = (radius / f64::from(out), 2.0 * PI / f64::from(round));
+    let mut sum = 0.0;
+    for i in 0..out {
+        let rho = step_out * (f64::from(i) + 0.5);
+        for j in 0..round {
+            let theta = step_round * (f64::from(j) + 0.5);
+            let squared = 4.0 - rho * rho - off * off - 2.0 * off * rho * theta.cos();
+            sum += 2.0 * squared.sqrt() * rho;
+        }
+    }
+    sum * step_out * step_round
 }

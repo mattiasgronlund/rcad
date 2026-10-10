@@ -1180,35 +1180,106 @@ fn a_ball_against_a_square_rod_holed_down_its_axis_is_answered_under_every_rule(
     }
 }
 
-/// Two shapes built on the way that never reach the arrangement's cells: a
-/// ball against a pipe off its centre crosses in a quartic, which nothing
-/// orders (§34.10).
+/// The ball of radius 2 at the origin against the square rod
+/// `[−1, 1]² × [−5, 5]` holed off its axis, down `(0.4, 0.3)`, by a bar of
+/// radius `0.3`.
 ///
-/// - the ball of radius 2 against the square rod with a hole of radius `0.3`
-///   down `(0.4, 0.3)`;
-/// - a bar of radius 2, height 10, against a slab `|x| < 1` along it and a ball
-///   of radius `0.5` on its wall at `(2, 0, 5)`, which was to be a walk going
-///   round nothing on a pipe.
+/// The hole's axis is `0.5` off the ball's centre and the ball swallows the
+/// hole's whole cross-section, `2 > 0.3 + 0.5`, so the two cross in two quartic
+/// loops either side of the centre rather than in two circles. Each loop runs
+/// once round the hole's axis, and is ordered round it since Q1554; until then
+/// every fuse was refused `ACrossingThisCannotBeOrderedAlong` before any cell.
 ///
-/// The rod holed down its own axis reaches them since Q1140, and is answered
-/// since Q1242:
-/// [`a_ball_against_a_square_rod_holed_down_its_axis_is_answered_under_every_rule`].
+/// **The answer** is the one the rod holed down its own axis has, with the
+/// part of the ball inside the hole [`the_ball_inside_a_hole`] rather than
+/// `(4π/3)(8 − 3.91^(3/2))`: the hole lies inside the square, and the rod is
+/// alike either side of `z = 0`, so the rod less the ball is still two alike
+/// ends.
 #[test]
-fn a_ball_against_a_pipe_is_refused_before_any_cell() {
-    for (rule, first) in every_rule_both_ways() {
+fn a_ball_against_a_square_rod_holed_off_its_axis_is_answered_under_every_rule() {
+    use std::f64::consts::PI;
+    let (ball, square) = (32.0 * PI / 3.0, the_square_part_of_the_ball());
+    let hole = the_ball_inside_a_hole(0.3, 0.5);
+    let holed = 40.0 - 0.9 * PI;
+    let shared = square - hole;
+    for (rule, ball_first) in every_rule_both_ways() {
         let mut model = a_model();
-        let ball = model.add_ball(2.0, &Isometry::identity()).expect("a ball");
+        let sphere = model.add_ball(2.0, &Isometry::identity()).expect("a ball");
         let rod = block(&mut model, [-1.0, -1.0, -5.0], [1.0, 1.0, 5.0]);
         let bar = model
             .add_round_bar(0.3, 12.0, &shift(0.4, 0.3, -6.0))
             .expect("a bar");
-        let holed = fuse_one(&mut model, rod, bar, Rule::Difference);
-        let refused = fuse(&mut model, ball, holed, rule, first);
-        assert!(
-            matches!(refused, Err(Error::ACrossingThisCannotBeOrderedAlong)),
-            "the rod holed at (0.4, 0.3), {rule:?}, the ball first {first}: {refused:?}"
-        );
+        let rod = fuse_one(&mut model, rod, bar, Rule::Difference);
+        let what = format!("{rule:?}, the ball first {ball_first}");
+        let answer = fuse(&mut model, sphere, rod, rule, ball_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let volumes = match (rule, ball_first) {
+            (Rule::Union, _) => vec![ball + holed - shared],
+            (Rule::Intersection, _) => vec![shared],
+            (Rule::Difference, true) => vec![hole, ball - square],
+            (Rule::Difference, false) => vec![(holed - shared) / 2.0; 2],
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_each_holds(&model, &answer, &volumes, &what);
+    }
+}
 
+/// [`the_ball_inside_a_hole`] down the ball's own axis is the closed form
+/// `(4π/3)(8 − 3.91^(3/2))`, to the `1e-7` its doc gives it.
+#[test]
+fn the_ball_inside_a_hole_down_its_axis_is_the_closed_form() {
+    use std::f64::consts::PI;
+    let closed = 4.0 * PI / 3.0 * (8.0 - 3.91f64.powf(1.5));
+    let ruled = the_ball_inside_a_hole(0.3, 0.0);
+    assert!(
+        (ruled - closed).abs() < 1e-7,
+        "{ruled} by the rule, {closed} closed"
+    );
+}
+
+/// The part of the ball of radius 2 at the origin within `radius` of a line up
+/// `z` whose foot is `off` from the centre: `∫∫ 2√(4 − ρ² − off² − 2·off·ρ·cos
+/// θ) ρ dρ dθ` over the hole's section, `ρ` out from the hole's axis.
+///
+/// A midpoint rule of 1000 steps out from the axis by 64 round it, as
+/// `two_curves_of_one_pair_that_meet.rs`'s `ball_in_bar`: the integrand is
+/// smooth and goes round periodically, so the error is the step out's, and down
+/// the ball's axis it is within `1e-7` of the closed form
+/// ([`the_ball_inside_a_hole_down_its_axis_is_the_closed_form`]), far below the
+/// `0.0078` a mesh of `0.001` gives the smallest piece here, the part of the
+/// ball inside the hole, as its error. The hole must lie
+/// inside the ball's equator, `radius + off < 2`.
+fn the_ball_inside_a_hole(radius: f64, off: f64) -> f64 {
+    use std::f64::consts::PI;
+    let (out, round) = (1000, 64);
+    let (step_out, step_round) = (radius / f64::from(out), 2.0 * PI / f64::from(round));
+    let mut sum = 0.0;
+    for i in 0..out {
+        let rho = step_out * (f64::from(i) + 0.5);
+        for j in 0..round {
+            let theta = step_round * (f64::from(j) + 0.5);
+            let squared = 4.0 - rho * rho - off * off - 2.0 * off * rho * theta.cos();
+            sum += 2.0 * squared.sqrt() * rho;
+        }
+    }
+    sum * step_out * step_round
+}
+
+/// A bar of radius 2, height 10, against a slab `|x| < 1` along it and a ball
+/// of radius `0.5` on its wall at `(2, 0, 5)`, which was to be a walk going
+/// round nothing on a pipe. It never reaches the arrangement's cells, under
+/// every rule both ways round.
+///
+/// The ball's centre is on the bar's wall, so it reaches into the bar's side
+/// and crosses it in one quartic loop that runs back and forth round the axis,
+/// which nothing orders (§34.10). Q1554 ordered only the two loops of a ball
+/// that swallows a pipe's whole cross-section, which a ball of `0.5` against a
+/// bar of 2 cannot: the rod holed off its axis,
+/// [`a_ball_against_a_square_rod_holed_off_its_axis_is_answered_under_every_rule`],
+/// was pinned here beside it until then.
+#[test]
+fn a_small_ball_on_a_bars_wall_is_refused_before_any_cell() {
+    for (rule, first) in every_rule_both_ways() {
         let mut model = a_model();
         let bar = model
             .add_round_bar(2.0, 10.0, &Isometry::identity())
