@@ -187,6 +187,61 @@ The way round against the walk is refused `FacesDoNotAgreeWhichWayTheyFace` by
 `a_closed_edge_neither_direction_rule_answers.rs`. What it leaves: the
 cone-apex and torus-axis corners are unbuilt, and the lid-first spelling named
 by the lid's plane turned over is refused `AWireDoesNotFanIntoALoopToMesh
-{ TooFewCorners }` whichever way round.
+{ TooFewCorners }` whichever way round. (Q578, below, built the cone-apex
+corners. There is no torus-axis corner to build: `Torus::new` refuses a tube as
+wide as the ring or wider, so a torus never reaches its own axis.)
+
+*2026-10-10, Q578 (`69242c96`): no cone face reaches the second `None`.*
+`which_pole_this_cap_reaches` answers `None` for a rim with a corner at the
+pinch it would reach, and its doc said so with no run behind it. A scratch print
+there, on every call that answered `None` or saw a corner on a pinch, logged
+1355 lines over the workspace and 756 over the slow tier: every one a ball's rim
+with a corner on a pole, no `None`, no cone. Then each way this kernel has to
+put a corner of a cone's rim on its apex was built, in
+`a_cone_cap_whose_rim_runs_through_its_apex.rs`:
+
+- **A seam up one ruling**, through `SolidBuilder`, in four spellings: with
+  the wire standing still at the apex or not, the seam first or last. All four
+  build, mesh closed and measure under the closed form.
+- **Two planes through the apex**, a block's edge up the cone's axis: a quarter,
+  a quarter up to `z = 4`, and an eighth. Every fuse answers, validates, meshes
+  closed and measures. The block face through the apex of
+  `a_block_face_through_a_cones_apex.rs` is the same family, and none of its
+  fuses walks a cap with a corner at the apex either.
+- **A plane touching the cone along one ruling.** A touching plane can be
+  stored exactly: tangency reads the ratio of the normal's parts, and the
+  normal of `(1, −2, 0)` rounded part by part keeps the ratio two, so
+  `rcad_geom::intersect` answers one straight run. A block whose wall lies on
+  that plane, on either side of it, answers all twelve fuses with the cone and
+  the block as they stand, and the skin is never cut along the ruling; the
+  scratch print saw no call from it (its log held only the 24 lines of the
+  ball test run after it, which shows the print was live). The same touch
+  reached by turning a block into place is refused `Undecidable` under all six
+  fuses, since the turn's sine and cosine round apart and its floor lands a
+  rounding off the touching plane; that refusal is filed as its own row.
+- **A closed edge cornered at the apex.** A bar whose wall runs through it and
+  a ball through it are refused `ACrossingBetweenAConeAndAnotherCurvedSurface`
+  under every fuse, and the cone and the ball kept in common, described
+  through `SolidBuilder` with its one closed edge cornered at the apex, is
+  refused the same way.
+- On the way, a wedge of 1/60 up the cone's axis comes back from the fuse and
+  then fails `Model::validate` with `DynamicRangeTooWide`, under all six
+  fuses. Filed as its own row; it is not a pole case.
+
+With the two comparisons in `which_pole_this_cap_reaches` made `<=` and `>=`,
+all 44 builds and fuses of the probe came out the same. The reason none gets
+there: a corner on a pinch opens the pole side across the material
+(`WalkingAWire::turn_at_a_corner_on_a_pole`), so the loop the walk closes keeps
+the apex off the material. It climbs nothing and is no cap, or goes right round
+with the apex on its far side, which on a cone is the endless rest of the nappe:
+the first `None`, rightly refused. The family is the only one because a corner
+sits on the apex only where an edge runs through it, and a cone has no crossing
+through its apex but a plane's: the curved ones through it are refused by name,
+those on its axis are circles that miss it, and two cones of two slopes
+sharing one apex and one axis meet only there, which puts no edge on it (not
+built). **Verdict: nothing to fix.** The doc of
+`which_pole_this_cap_reaches` is narrowed to what ran, and the `None` stays a
+refusal rather than an assert, since a wire this kernel never wrote can still
+reach it (§67.2).
 
 Commands: `just decision 198.2`, `198.3`, `197.2`, `167`, `16.10`.
