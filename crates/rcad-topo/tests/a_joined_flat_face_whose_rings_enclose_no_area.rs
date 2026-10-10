@@ -1725,6 +1725,166 @@ fn the_block_under_a_leaning_top(model: &mut Model) -> rcad_topo::Result<SolidKe
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
+#[test]
+fn probe_q1461() {
+    // (name, slope, apex, opening, [bottom, top])
+    let shapes: [(&str, f64, f64, f64, [f64; 2]); 3] = [
+        ("down apex 22 under", 0.5, 22.0, -1.0, [-4.0, 20.0]),
+        ("down apex 26 over", 0.5, 26.0, -1.0, [-1.0, 20.0]),
+        ("up apex -8", 0.5, -8.0, 1.0, [-4.0, 18.0]),
+    ];
+    for (shape, slope, apex, opening, [bottom, top]) in shapes {
+        let cone = |from: f64, to: f64| {
+            let reach = |z: f64| (z - apex).abs();
+            PI * slope * slope * (reach(from).powi(3) - reach(to).powi(3)).abs() / 3.0
+        };
+        let bore = |from: f64, to: f64| {
+            if std::env::var("PROBE_HOLLOW").is_ok() && shape == "down apex 22 under" {
+                PI / 16.0 * ((23.0 - from).powi(3) - (23.0 - to).powi(3)) / 3.0
+            } else {
+                0.0
+            }
+        };
+        let (frustum_alone, block_alone, shared) = (
+            cone(bottom, top) - bore(bottom, top),
+            18816.0,
+            cone(0.0, top) - bore(0.0, top),
+        );
+        for (name, policy) in [
+            ("certified", Policy::certified()),
+            ("tolerant", Policy::tolerant(100.0)),
+        ] {
+            for (rule, swapped) in every_rule_both_ways() {
+                let volume = match (rule, swapped) {
+                    (Rule::Union, _) => frustum_alone + block_alone - shared,
+                    (Rule::Intersection, _) => shared,
+                    (Rule::Difference, false) => frustum_alone - shared,
+                    (Rule::Difference, true) => block_alone - shared,
+                    (other, _) => panic!("not a rule this probes: {other:?}"),
+                };
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let mut frustum =
+                    a_frustum_about_z(&mut model, slope, apex, opening, [bottom, top])
+                        .unwrap_or_else(|why| panic!("the frustum: {why:?}"));
+                if shape == "down apex 22 under" && std::env::var("PROBE_HOLLOW").is_ok() {
+                    let bore = a_frustum_about_z(&mut model, 0.25, 23.0, -1.0, [-6.0, 21.0])
+                        .unwrap_or_else(|why| panic!("the bore: {why:?}"));
+                    frustum = the_one_solid(&mut model, frustum, bore, Rule::Difference);
+                }
+                let block = the_block_under_a_leaning_top(&mut model)
+                    .unwrap_or_else(|why| panic!("the block: {why:?}"));
+                let [one, other] = if swapped {
+                    [block, frustum]
+                } else {
+                    [frustum, block]
+                };
+                let answer = model.fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new());
+                let said = match answer {
+                    Err(why) => format!("REFUSED {why:?}"),
+                    Ok(answer) => {
+                        let solids = answer.solids().to_vec();
+                        let measured: Vec<String> = solids
+                            .iter()
+                            .map(|solid| {
+                                let solid = model.solid(*solid).expect("a key");
+                                let faces = solid.faces().count();
+                                match solid.measure(
+                                    Deflection::of(0.001).expect("a fine mesh"),
+                                    &Policy::certified(),
+                                    &mut ProvenanceLog::new(),
+                                ) {
+                                    Ok(m) => format!(
+                                        "faces {faces} volume {} err {} want {volume} ok {}",
+                                        m.volume(),
+                                        m.volume_error(),
+                                        (m.volume() - volume).abs() <= m.volume_error()
+                                    ),
+                                    Err(why) => format!("faces {faces} no measure {why:?}"),
+                                }
+                            })
+                            .collect();
+                        let valid = model
+                            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                            .is_ok();
+                        format!("answered valid {valid} {measured:?}")
+                    }
+                };
+                eprintln!("Q1461 {shape} {name} {rule:?} swapped {swapped}: {said}");
+            }
+        }
+    }
+}
+
+/// A frustum of the cone about the `z` axis whose apex is at `(0, 0, apex)`
+/// and which opens up where `opening` is `1` and down where it is `−1`, with
+/// its caps at heights `bottom` and `top`. A circle runs right-handed about
+/// the cone's own axis, so about `−z` each one is used the other way round.
+fn a_frustum_about_z(
+    model: &mut Model,
+    slope: f64,
+    apex: f64,
+    opening: f64,
+    [bottom, top]: [f64; 2],
+) -> rcad_topo::Result<SolidKey> {
+    use Orientation::{Forward, Reversed};
+    let skin = Cone::new(
+        Axis::new(Point::new(0.0, 0.0, apex), Vector::new(0.0, 0.0, opening))
+            .expect("z is a direction"),
+        slope,
+    )
+    .expect("a positive slope");
+    let turned = |about_up: Orientation| {
+        if opening < 0.0 {
+            about_up.reversed()
+        } else {
+            about_up
+        }
+    };
+    let mut builder = SolidBuilder::new();
+    let at = |height: f64| Point::new(slope * (height - apex) * opening, 0.0, height);
+    let bottom_corner = builder.add_vertex(at(bottom))?;
+    let top_corner = builder.add_vertex(at(top))?;
+    let seam = builder.add_edge(bottom_corner, top_corner, EdgeRun::Straight)?;
+    let bottom_circle = builder.add_edge(
+        bottom_corner,
+        bottom_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
+    let top_circle = builder.add_edge(
+        top_corner,
+        top_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
+    let mut cap = |height: f64, outward: f64, edge, turn| {
+        let wire = a_wire(&mut builder, &[(edge, turn)])?;
+        builder.add_face(
+            Surface::Plane(
+                Plane::from_point_and_normal(
+                    Point::new(0.0, 0.0, height),
+                    Vector::new(0.0, 0.0, outward),
+                )
+                .expect("the z axis is a unit normal"),
+            ),
+            &[wire],
+        )
+    };
+    let lower = cap(bottom, -1.0, bottom_circle, turned(Reversed))?;
+    let upper = cap(top, 1.0, top_circle, turned(Forward))?;
+    let wire = a_wire(
+        &mut builder,
+        &[
+            (bottom_circle, turned(Forward)),
+            (seam, Forward),
+            (top_circle, turned(Reversed)),
+            (seam, Reversed),
+        ],
+    )?;
+    let wall = builder.add_face(Surface::Cone(skin), &[wire])?;
+    builder.add_shell(&[(lower, Forward), (upper, Forward), (wall, Forward)])?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
 /// **Corners that sweep no area and are not on one line.** A bar of radius 10
 /// cut to the region above three sides: `(6, −8)` to `(2, −9)`, on to
 /// `(−2, −7)`, on to `(−6, −8)`. The cap that is left runs the long way round
