@@ -127,6 +127,16 @@ the same lines both times.
   and `(s, 0, s)` one plane (§22.6); the new constructor keeps `(s, 0, s)`, so
   a file that writes one wall's normal two ways, both near length one, now
   gets two planes an ulp apart. Nothing in the corpus or the suite showed it.
+  *2026-10-10, Q498:* a block whose leaning wall is two triangles, one facing
+  `(s, 0, s)` and one `(s', 0, s')` for the `f64` either side of `1/√2`, on
+  `x + z = 2` (one plane spelled two ways) and on `x + z = 3` (two parallel
+  planes a rounding apart), is read with both normals kept, validates, and
+  fuses with a cube through both triangles under every rule both ways round
+  exactly as the block spelled `(s, 0, s)` alone does, to the bit of every
+  plane and corner and to the hand-worked face counts and volumes, because the
+  fuse joins the two triangles onto the smaller plane (§426); spelled
+  `(s', 0, s')` alone it has the same faces, and the overlap on `x + z = 3`
+  measures one ulp more (`one_wall_whose_normal_is_spelled_two_ways.rs`).
 - **`Model::what_writing_a_plane_down_costs` still needs the normal's share of
   its slack.** It is applied to every model, not only to one read back from
   this writer: every plane the kernel builds still goes through
