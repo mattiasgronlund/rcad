@@ -16,18 +16,23 @@
 //! names the run by the ball. A ball and a pipe that touch leave the walk two
 //! pieces it cannot tell apart, and the solid is refused.
 //!
+//! The file writes `#2708` as a quarter arc, and the pins cut their rims in
+//! two arcs for that reason. A rim written closed takes another road through
+//! the reader, which imports it, so it would not pin what the files meet.
+//!
 //! These are limits and not gaps (`docs/decisions.md` §16.10, §335.5). No
 //! circle lies on both faces: one on the pipe is centred on its axis, one on
 //! the ball and of its radius is centred on its centre, and those are
 //! `7.657e-14` apart. The plane the run would be named by is the same plane to
 //! the last bit wherever between the two the centre is taken, and its circle on
 //! the ball is `17.42` roundings off the pipe while its circle on the pipe is
-//! `20.98` off the ball. `how_far_the_file_puts_the_circle_off_its_pipe` holds
-//! those figures.
+//! `20.98` off the ball in `f64` (`21.03` in exact arithmetic).
+//! `how_far_the_file_puts_the_circle_off_its_pipe` holds those figures.
 //!
-//! The two pins hold each side: widening the reader's allowance far enough to
-//! keep `#2709` on its pipe fails the first, and the second shows that the same
-//! pin end, with a circle the reader does keep, imports named by its plane.
+//! The two pins hold each side: widening the reader's allowance to `18` lets
+//! the first pin end import and fails the first test, and the second shows
+//! that the same pin end, with a circle the reader does keep, imports with its
+//! arcs named by their plane.
 
 mod written_by_hand;
 
@@ -39,10 +44,10 @@ use written_by_hand::a_header;
 
 /// The end of the leaning pipe, rounded by its ball, with the file's circle
 /// `#2709` between them in the file's own decimals. The circle is on the ball
-/// and `17.42` roundings off the pipe, so the reader names the run by the ball,
-/// and the walk then cannot tell the two pieces of the ball's crossing with the
-/// pipe apart. Widening the reader's allowance to `18` roundings names the run
-/// by its plane, and fails this test.
+/// and `17.42` roundings off the pipe, so the reader names each arc by the
+/// ball, and the walk then cannot tell the two pieces of the ball's crossing
+/// with the pipe apart. Widening the reader's allowance to `18` roundings lets
+/// the pin end import, and fails this test.
 #[test]
 fn a_circle_centred_off_its_leaning_pipe_is_named_by_the_ball() {
     let text = a_rounded_pin_end(&ROUND_THE_LEANING_PIPE);
@@ -69,7 +74,8 @@ fn a_circle_centred_off_its_leaning_pipe_is_named_by_the_ball() {
 
 /// The same ball on the upright pipe, with the file's circle `#2692` between
 /// them. Its centre is on the pipe's axis, so the circle is checked onto both
-/// faces and the run is named by its own plane, and the pin end imports.
+/// faces and each arc is named by the circle's own plane, and the pin end
+/// imports.
 #[test]
 fn a_circle_centred_on_its_upright_pipe_is_named_by_its_plane() {
     let text = a_rounded_pin_end(&ROUND_THE_UPRIGHT_PIPE);
