@@ -1279,7 +1279,7 @@ fn how_two_faces_meet(
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Cone, Cylinder, Isometry, Plane, Point, Scale, Surface, Vector};
+    use rcad_geom::{Axis, Cone, Cylinder, Isometry, Plane, Point, Scale, Surface, Torus, Vector};
     use rcad_predicates::{Interval, Policy, ProvenanceLog};
 
     use super::{
@@ -1523,6 +1523,53 @@ mod tests {
         assert!(!a_surface_misses_a_band(&across, wall));
     }
 
+    /// The top of a bar of radius `23/8` about `z`, standing in the hole of a
+    /// ring of four round a tube of one, level with the top of the tube at
+    /// `z = 1` (Q1588). There the tube is the one circle of radius four, so a
+    /// disk reaching `23/8` out misses it and one reaching four out touches it.
+    #[test]
+    fn a_disk_in_a_rings_hole_level_with_the_top_of_its_tube_is_proved_to_miss_it() {
+        let disk = |reach: f64| ABandRoundAnAxis {
+            origin: [0.0, 0.0, -1.0],
+            along: [0.0, 0.0, 1.0],
+            up: Interval::exactly(2.0),
+            out: Interval::new(0.0, reach * reach).expect("a range"),
+            slope: None,
+        };
+        assert!(a_surface_misses_a_band(&ring_about_up(), disk(23.0 / 8.0)));
+        assert!(
+            !a_surface_misses_a_band(&ring_about_up(), disk(4.0)),
+            "the disk reaches the circle the top of the tube runs round"
+        );
+    }
+
+    /// The wall of that bar from `z = −1` to `1`, which is the tube's whole
+    /// height, is clear of the tube's inner side, three out at `z = 0`; a wall
+    /// three out touches it there; and a wall four out from `z = −1/2` to `1/2`
+    /// is inside the tube all the way.
+    #[test]
+    fn a_pipe_through_a_rings_tube_is_proved_to_miss_it_only_where_it_does() {
+        let wall = |radius: f64, low: f64, high: f64| ABandRoundAnAxis {
+            origin: [0.0, 0.0, -1.0],
+            along: [0.0, 0.0, 1.0],
+            up: Interval::new(low + 1.0, high + 1.0).expect("a range"),
+            out: Interval::exactly(radius * radius),
+            slope: None,
+        };
+        assert!(a_surface_misses_a_band(
+            &ring_about_up(),
+            wall(23.0 / 8.0, -1.0, 1.0)
+        ));
+        assert!(a_surface_misses_a_band(
+            &ring_about_up(),
+            wall(4.0, -0.5, 0.5)
+        ));
+        assert!(
+            !a_surface_misses_a_band(&ring_about_up(), wall(3.0, -1.0, 1.0)),
+            "the wall touches the inner side of the tube at z = 0"
+        );
+    }
+
     /// The top `4z = x + 96` crosses the cone of slope `1/2` about `−z` with
     /// its apex at `z = 22` in an ellipse on the nappe above the apex, from
     /// `z = 214/9` over `x < 0` up to `170/7` over `x > 0`: `16/9` to `16/7`
@@ -1702,6 +1749,11 @@ mod tests {
             )
             .expect("a positive slope"),
         )
+    }
+
+    /// The ring of four round a tube of one about the `z` axis.
+    fn ring_about_up() -> Surface {
+        Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring"))
     }
 
     fn leaning_plane_through(point: Point) -> Surface {
