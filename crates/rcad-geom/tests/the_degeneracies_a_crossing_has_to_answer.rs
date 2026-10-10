@@ -304,9 +304,10 @@ fn a_ball_tangent_to_a_pipe_answers_three_different_ways_and_refuses_only_the_th
     );
 }
 
-/// Roadmap §7.4's tangent cylinder–cylinder row, the same three ways.
+/// Roadmap §7.4's tangent cylinder–cylinder row, the same three ways, and all
+/// three answer since Q1603 named the third.
 #[test]
-fn a_pipe_tangent_to_a_pipe_answers_three_different_ways_and_refuses_only_the_third() {
+fn a_pipe_tangent_to_a_pipe_answers_all_three_ways() {
     let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
 
     // At a point: two skew pipes exactly `r₁ + r₂` apart.
@@ -326,16 +327,19 @@ fn a_pipe_tangent_to_a_pipe_answers_three_different_ways_and_refuses_only_the_th
     assert_eq!(runs[0].run(), &EdgeRun::Straight);
 
     // Through itself: two pipes of one thickness whose axes meet cross in two
-    // ellipses, and those two cross each other twice.
-    assert_eq!(
-        intersect(
-            &pipe,
-            &a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 2.0),
-            &Policy::certified(),
-            &mut ProvenanceLog::new()
-        ),
-        Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
-    );
+    // ellipses, and those two cross each other twice, where the walls touch.
+    // Each ellipse is cut there, so the crossing is four halves.
+    let through_itself = crossing(&pipe, &a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 2.0));
+    let SurfaceMeet::Curves(runs) = &through_itself else {
+        panic!("two equal pipes whose axes meet cross in curves: {through_itself:?}");
+    };
+    assert_eq!(runs.len(), 4, "two ellipses, each in two halves");
+    for run in runs {
+        assert!(
+            matches!(run.run(), EdgeRun::PartOfWhereItCrosses { picked_by, .. } if picked_by.len() == 2),
+            "each half is picked by a corner of two flat surfaces: {run:?}"
+        );
+    }
 }
 
 /// Two pipes side by side cut each other in straight lines, and a straight run

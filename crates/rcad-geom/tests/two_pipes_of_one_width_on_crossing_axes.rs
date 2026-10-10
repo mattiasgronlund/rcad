@@ -35,7 +35,8 @@
 //! the widths nor the gap and handed the pair to the marcher, which gave up
 //! with the wrong reason — that the two were too nearly parallel to follow.
 //! They were not nearly parallel; they were exactly degenerate. So every pair
-//! below is put to both halves and both have to recognise it.
+//! below is put to both halves and both have to recognise it. Since Q1603 the
+//! namer names the family too, as four half ellipses.
 
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Point, Surface,
@@ -312,19 +313,29 @@ fn every_point_walked_round_one_of_the_two_ellipses_is_on_both_pipes() {
     );
 }
 
-/// Both halves of the kernel recognise the family, each in its own way.
+/// Both halves of the kernel recognise the family, and the walker draws every
+/// piece the namer names.
 ///
-/// The namer refuses it as a crossing that touches itself, because two ellipses
-/// meeting at two points are neither one closed curve nor two separate ones and
-/// it has no way to say so. The walker draws it, because it is handed a piece
-/// that a file already named. What must never happen again is the walker not
-/// seeing the family at all and marching into the singularity — which came back
-/// as `Undecidable` under the marcher's nearly-parallel reason, a reason that
-/// was not true of the pair.
+/// The namer names the two ellipses as four halves, cut where the two cross each
+/// other, each picked by a corner of two flat surfaces through where the axes
+/// meet. It used to refuse the family as a crossing that touches itself, until
+/// Q1603 gave a fuse a node where two curves of one pair cross. The walker draws
+/// each of those halves, and each piece a file names lying in one of the two
+/// planes. What must never happen again is the walker not seeing the family at
+/// all and marching into the singularity, which came back as `Undecidable`
+/// under the marcher's nearly-parallel reason, a reason that was not true of
+/// the pair.
+///
+/// **The namer names a pair only where the two flat surfaces pass exactly
+/// through where the axes meet**, and refuses the rest as
+/// `CannotNameWhichPieceOfACrossingThisIs`, a gap. A direction scaled to length
+/// one is not a whole-number triple any more, so its dot with the middle here
+/// rounds unless the direction is along a coordinate axis.
 #[test]
-fn the_namer_and_the_walker_agree_this_family_is_exactly_degenerate() {
+fn the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece() {
     let middle = Point::new(11.0, -3.25, 0.5);
     let mut pairs_put_to_both = 0;
+    let mut named_in_four_halves = 0;
 
     for [mine, theirs] in pairs_of_directions() {
         for radius in [0.25, 3.0] {
@@ -337,19 +348,23 @@ fn the_namer_and_the_walker_agree_this_family_is_exactly_degenerate() {
                     &Policy::certified(),
                     &mut ProvenanceLog::new(),
                 );
-                assert!(
-                    matches!(
-                        named,
-                        Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
-                    ),
-                    "the namer sees two ellipses touching and says so: {named:?}"
-                );
+                let halves = match named {
+                    Ok(SurfaceMeet::Curves(halves)) => {
+                        assert_eq!(halves.len(), 4, "two ellipses, each in two halves");
+                        named_in_four_halves += 1;
+                        halves
+                    }
+                    Err(Error::CannotNameWhichPieceOfACrossingThisIs) => Vec::new(),
+                    other => panic!("the namer sees two ellipses crossing: {other:?}"),
+                };
 
                 let [this_way, that_way] =
                     pair.map(|pipe| pipe.axis().direction().normalized().expect("a direction"));
-                for bisector in [that_way + this_way, that_way - this_way] {
+                let pieces_in_a_plane = [that_way + this_way, that_way - this_way]
+                    .map(|bisector| the_piece_in_the_plane(middle, bisector, &pair[1]));
+                for piece in halves.iter().chain(&pieces_in_a_plane) {
                     let drawn = walk(
-                        &the_piece_in_the_plane(middle, bisector, &pair[1]),
+                        piece,
                         [&Surface::Cylinder(pair[0]), &Surface::Cylinder(pair[1])],
                         Deflection::of(radius * 1e-4).expect("a deflection above zero"),
                         &Policy::certified(),
@@ -357,7 +372,7 @@ fn the_namer_and_the_walker_agree_this_family_is_exactly_degenerate() {
                     );
                     assert!(
                         drawn.is_ok(),
-                        "the walker sees the same family and draws it: {drawn:?}"
+                        "the walker sees the same family and draws {piece:?}: {drawn:?}"
                     );
                 }
                 pairs_put_to_both += 1;
@@ -365,10 +380,15 @@ fn the_namer_and_the_walker_agree_this_family_is_exactly_degenerate() {
         }
     }
 
+    println!("{named_in_four_halves} of {pairs_put_to_both} pairs named in four halves");
     assert!(
         pairs_put_to_both >= 100,
         "the generator has to put the family to both halves and not a handful of it: \
          {pairs_put_to_both} pairs"
+    );
+    assert!(
+        named_in_four_halves > 0,
+        "the pairs on coordinate directions are named: {named_in_four_halves} were"
     );
 }
 

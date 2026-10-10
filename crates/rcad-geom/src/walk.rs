@@ -1933,7 +1933,9 @@ fn the_two_ellipses_equal_pipes_on_crossing_axes_cut(
 ///
 /// The foot of the common perpendicular on the first axis, which is the
 /// crossing point itself once the two are known to reach each other.
-fn where_two_axes_meet(first: &Cylinder, second: &Cylinder) -> Point {
+/// [`intersect`](crate::intersect) asks of the same point that it is exactly on
+/// both axes before it names the four halves.
+pub(crate) fn where_two_axes_meet(first: &Cylinder, second: &Cylinder) -> Point {
     let [mine, theirs] = [first, second].map(|pipe| pipe.axis().direction());
     let sideways = mine.cross(theirs);
     let between = second.axis().origin() - first.axis().origin();
@@ -4030,6 +4032,17 @@ fn where_a_ring_and_a_surface_on_its_axis_cut(
 /// than one candidate standing, which is every run that has no ends at all and
 /// so every run `intersect` builds.
 ///
+/// # The pickers are asked at two points of a candidate, half a turn apart
+///
+/// A candidate is held where its pickers hold its point at angle zero **or** at
+/// angle π. For every candidate that lies wholly on one side of each picker
+/// the two answers are the same. They differ only for a run that is half of a
+/// conic, cut where it crosses another candidate, and that is the four halves
+/// two pipes of one width on axes that meet are named as: each ellipse is cut
+/// at angles `±π/2`, where it crosses the other, so one half holds angle zero
+/// and the other angle π, and each of the four corners that pick them holds
+/// one of those two points of one ellipse and neither of the other.
+///
 /// # Errors
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a candidate's own numbers do
@@ -4078,6 +4091,13 @@ fn which_of_these_circles_this_run_is(
         let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * circle.the_size_it_was_worked_out_from();
         if picked_by.is_empty()
             || every_half_space_holds(picked_by, circle.at(0.0), deviation, policy, log)?
+            || every_half_space_holds(
+                picked_by,
+                circle.at(core::f64::consts::PI),
+                deviation,
+                policy,
+                log,
+            )?
         {
             held.push(circle);
         }
