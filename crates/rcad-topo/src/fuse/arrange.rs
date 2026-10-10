@@ -4522,6 +4522,11 @@ impl<'f> Arrangement<'f> {
     /// along and a bounded face to hit, and a closed curve has neither — which
     /// is why there are two and not one.
     ///
+    /// **A ring's face drawn on only by circles of planes square to its axis**
+    /// is placed by neither. No sign tells its bands apart (§428.4), so they
+    /// are put in order round the tube instead
+    /// ([`Arrangement::the_bands_round_the_tube`]).
+    ///
     /// # Errors
     ///
     /// [`Error::CannotTellTheCellsOfAFaceApart`] when a walk's signs match
@@ -4534,6 +4539,14 @@ impl<'f> Arrangement<'f> {
         log: &mut ProvenanceLog,
     ) -> Result<()> {
         let lump = self.lump_of_each_cycle();
+        let mut same = Sameness::of(self.cycles.len());
+        if let Some(bands) = self.the_bands_round_the_tube() {
+            self.say_whether_the_face_holds_each_lump_of_closed_cuts(&lump);
+            for [one, other] in bands {
+                same.join(one, other);
+            }
+            return self.make_the_cells(&same, &lump);
+        }
         let mut sides: Vec<Vec<Option<Decision>>> = Vec::with_capacity(self.cycles.len());
         for cycle in 0..self.cycles.len() {
             sides.push(self.which_side_of_everything(cycle, policy, log)?);
@@ -4542,7 +4555,6 @@ impl<'f> Arrangement<'f> {
         self.say_whether_the_face_holds_each_lump_of_closed_cuts(&lump);
 
         let facing = self.the_walk_of_each_other_lump_each_walk_faces(&lump, &sides)?;
-        let mut same = Sameness::of(self.cycles.len());
         let torus = matches!(self.surface, Surface::Torus(_));
         for (one, its) in facing.iter().enumerate() {
             for &other in its {
