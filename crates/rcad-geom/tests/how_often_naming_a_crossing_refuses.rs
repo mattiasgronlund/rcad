@@ -439,10 +439,11 @@ impl Tally {
             Ok(SurfaceMeet::TouchAtOnePoint { .. }) => "one point",
             Ok(SurfaceMeet::Curves(runs)) => {
                 self.crossed.set(self.crossed.get() + 1);
-                if runs.len() == 1 {
-                    "one curve"
-                } else {
-                    "two curves"
+                match runs.len() {
+                    1 => "one curve",
+                    2 => "two curves",
+                    4 => "four curves",
+                    _ => "three curves, or more than four",
                 }
             }
             Ok(SurfaceMeet::SameSurface) => "the same surface",
@@ -458,9 +459,12 @@ impl Tally {
                 self.no_half_space.set(self.no_half_space.get() + 1);
                 "refused: no half-space tells the two pieces apart"
             }
-            // A limit and not a gap, so it is counted apart from both of the
-            // above: what this refuses is a shape `EdgeRun` cannot say, not an
-            // answer the arithmetic could not reach.
+            // A gap (§31.9), counted apart from both of the above because what
+            // runs out is not the arithmetic but the marcher. The shapes still
+            // refused here, a ball reaching exactly across a pipe and a thin
+            // pipe resting on the inside of a wider one, cross in a quartic
+            // through a point where the two surfaces are tangent, and drawing
+            // it needs a marcher that stops there.
             Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo) => {
                 self.touches_itself.set(self.touches_itself.get() + 1);
                 "refused: the crossing runs through itself"
