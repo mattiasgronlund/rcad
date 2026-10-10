@@ -168,16 +168,15 @@ fn the_top_of_a_tilted_bar_rounds_when_moved_along_x_and_its_wall_does_not() {
     );
 }
 
-/// A tilted bar moved one along `x` and fused with a cube that bites its foot
-/// comes back with a box on the corner at its top, `(4, 1, 4)`, because its top
-/// rounded on the move. Moved along `y` instead, nothing rounds, and the corner
-/// comes back with no box.
+/// A tilted bar moved one along `x` comes back from a union with a box on the
+/// corner at its top, `(4, 1, 4)`, because its top rounded on the move. Moved
+/// along `y` instead, nothing rounds, and the corner comes back with no box.
 ///
-/// The cube is half a unit on a side, centred on the middle of the bar's foot,
-/// so the fuse bakes the bar and writes it again, and the corner is five away
-/// from anything the cube cuts. The foot's plane passes through the cube's
-/// centre and cuts it in two equal halves, so the union is the bar and half the
-/// cube, `5π + 0.5³ / 2`.
+/// The other solid is a unit cube at `(10, 10, 10)`, apart from the bar, so the
+/// union is the two solids as they stand, `1` and `5π`. The fuse still writes
+/// the bar again, and reads its moved corners as it does. A cube that cuts the
+/// bar's foot would be the stronger test, and is refused today on the first
+/// half pipe, `AFaceTrimmedByACurveThisCannotFollow`.
 ///
 /// Asked about the first and last face round the corner only, which are the
 /// two halves of the wall, the corner came back exact, and the fuse wrote it
