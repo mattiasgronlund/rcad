@@ -607,6 +607,137 @@ fn united(model: &mut Model, one: SolidKey, other: SolidKey) -> SolidKey {
     solid
 }
 
+#[test]
+fn probe_one() {
+    let r = 3.0_f64.sqrt();
+    let wedge = [[0.0, 0.0], [1.0, r], [0.0, r]];
+    let turn = 3.0 * 0.025;
+    let rotation = Isometry::rotation(&rcad_geom::Axis::x(), turn).expect("a finite turn");
+    let shift = Isometry::translation(Vector::new(0.0, 0.0, 2.0)).expect("a finite shift");
+    let placed = rotation.compose(&shift);
+    let (_, answer) = fuse(false, Rule::Union, |model| {
+        [
+            a_placed_prism(
+                model,
+                [[-4.0, -3.0], [4.0, -3.0], [4.0, 0.0], [-4.0, 0.0]],
+                &rotation,
+                10.0,
+            ),
+            a_placed_prism(model, wedge, &placed, 6.0),
+        ]
+    });
+    panic!("{answer:?}");
+}
+
+#[test]
+fn probe_turned_about_x() {
+    let r = 3.0_f64.sqrt();
+    let wedge = [[0.0, 0.0], [1.0, r], [0.0, r]];
+    let mut table: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut examples: Vec<String> = Vec::new();
+    for step in 1..=60 {
+        let turn = f64::from(step) * 0.025;
+        for (name, outline, volume) in [("wedge", wedge, 3.0 * r), ("resting", RESTING, 24.0)] {
+            let rotation = Isometry::rotation(&rcad_geom::Axis::x(), turn).expect("a finite turn");
+            let shift = Isometry::translation(Vector::new(0.0, 0.0, 2.0)).expect("a finite shift");
+            let placed = rotation.compose(&shift);
+            let sides = {
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let block = a_placed_prism(
+                    &mut model,
+                    [[-4.0, -3.0], [4.0, -3.0], [4.0, 0.0], [-4.0, 0.0]],
+                    &rotation,
+                    10.0,
+                );
+                let prism = a_placed_prism(&mut model, outline, &placed, 6.0);
+                let planes_of = |solid: SolidKey| -> Vec<[f64; 4]> {
+                    model
+                        .solid(solid)
+                        .expect("made")
+                        .faces()
+                        .map(|face| face.plane().coefficients())
+                        .collect()
+                };
+                let up = rotation
+                    .apply_to_vector(Vector::new(0.0, 1.0, 0.0))
+                    .components();
+                let along = rotation
+                    .apply_to_vector(Vector::new(0.0, 0.0, 1.0))
+                    .components();
+                let top: Vec<[f64; 4]> = planes_of(block)
+                    .into_iter()
+                    .filter(|p| p[..3] == up[..] && p[3] == 0.0)
+                    .collect();
+                let prism_planes = planes_of(prism);
+                let ends: Vec<[f64; 4]> = prism_planes
+                    .iter()
+                    .copied()
+                    .filter(|p| p[..3] == along[..] || p[..3] == along.map(|c| -c)[..])
+                    .collect();
+                let walls: Vec<[f64; 4]> = prism_planes
+                    .iter()
+                    .copied()
+                    .filter(|p| p[0] != 0.0)
+                    .collect();
+                if top.len() != 1 || ends.len() != 2 || walls.len() != 2 {
+                    format!("planes? top {top:?} ends {ends:?} walls {walls:?}")
+                } else {
+                    format!(
+                        "{:?}",
+                        [ends[0], ends[1]].map(|end| side_of_a_plane_where_three_planes_meet(
+                            [walls[0], walls[1], end],
+                            top[0]
+                        )
+                        .expect("meet"))
+                    )
+                }
+            };
+            for swapped in [false, true] {
+                let (model, answer) = fuse(swapped, Rule::Union, |model| {
+                    [
+                        a_placed_prism(
+                            model,
+                            [[-4.0, -3.0], [4.0, -3.0], [4.0, 0.0], [-4.0, 0.0]],
+                            &rotation,
+                            10.0,
+                        ),
+                        a_placed_prism(model, outline, &placed, 6.0),
+                    ]
+                });
+                let outcome = match &answer {
+                    Ok(_) => differs(&model, answer, &[volume, BLOCK])
+                        .map_or("answers".to_owned(), |why| why.chars().take(80).collect()),
+                    Err(why) => format!("{why:?}").chars().take(60).collect(),
+                };
+                let key = format!("{name} {sides} {outcome}");
+                if name == "wedge" && outcome.starts_with("Result") {
+                    examples.push(format!("REFUSED step {step} swapped {swapped}"));
+                }
+                if !table.contains_key(&key) {
+                    examples.push(format!("{key} at turn {turn} swapped {swapped}"));
+                }
+                *table.entry(key).or_default() += 1;
+            }
+        }
+    }
+    panic!("{table:#?}\n{}", examples.join("\n"));
+}
+
+fn a_placed_prism<const N: usize>(
+    model: &mut Model,
+    outline: [[f64; 2]; N],
+    placement: &Isometry,
+    length: f64,
+) -> SolidKey {
+    let outline = ProfileBuilder::new(outline.to_vec())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a simple outline");
+    model
+        .add_extrusion(&outline, length, placement)
+        .expect("a positive length")
+}
+
 /// An outline stood `length` long along `z`, moved by `at`.
 fn a_prism<const N: usize>(
     model: &mut Model,
