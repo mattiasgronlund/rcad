@@ -23,12 +23,18 @@
 //! `z = 2` it stands above the tube, and with its top at `z = 1` level with
 //! the top of the tube, where the tube's skin is one circle four out (row
 //! Q1588).
+//!
+//! **The whole ring** is the same tube right round, written as its two halves
+//! either side of `z = 0`, and it holds `8π²`. Against a bar it touches
+//! nowhere, nothing cuts it, and a fuse has to hand it back whole (row Q1588).
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_geom::{
+    Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, Rule, SolidKey};
+use rcad_topo::{DraftStep, Model, Rule, SolidBuilder, SolidKey};
 
 mod rings;
 
@@ -37,6 +43,9 @@ const DEFLECTION: f64 = 0.01;
 
 /// Half of a ring of four round a tube of one.
 const THE_HALF_RING: f64 = 4.0 * PI * PI;
+
+/// The whole of that ring.
+const THE_WHOLE_RING: f64 = 8.0 * PI * PI;
 
 /// The plate with its top at `z = 0`.
 const THE_LOW_PLATE: f64 = 72.0 * PI;
@@ -210,6 +219,44 @@ fn with_a_bar_level_with_the_top_of_the_tube_and_no_plate_every_fuse_answers(a_s
     );
 }
 
+/// The whole ring and the bar from `z = −1` to `1` standing twenty out from
+/// its axis, where no box of the one reaches the other. Nothing cuts the ring,
+/// so `bake` joins its two halves into one face with no boundary at all, and
+/// every fuse was refused `ACurvedFaceGoesRightRoundWithNoSeam`: a ring has no
+/// point to open a seam up to, as a ball does (row Q1588).
+#[test]
+fn a_whole_ring_and_a_bar_far_from_it_fuse_to_the_two_apart() {
+    a_whole_ring_and_a_bar_clear_of_it_fuse_to_the_two_apart("far from it", 20.0);
+}
+
+/// The whole ring and the bar in its hole from `z = −1` to `1`, level with
+/// the top and the bottom of the tube. The bar's caps reach `23/8` out and the
+/// tube's skin is one circle four out at `z = ±1`, so the two touch nowhere;
+/// once that is proved, nothing cuts the ring, as when the bar is far from it.
+#[test]
+fn a_whole_ring_and_a_bar_in_its_hole_level_with_its_tube_fuse_to_the_two_apart() {
+    a_whole_ring_and_a_bar_clear_of_it_fuse_to_the_two_apart("in its hole", 0.0);
+}
+
+fn a_whole_ring_and_a_bar_clear_of_it_fuse_to_the_two_apart(shape: &str, out: f64) {
+    every_fuse_of_the_two_answers(
+        &format!("the whole ring and a bar {shape}"),
+        |model| {
+            (
+                vec![a_whole_ring(model)],
+                vec![a_bar_standing(model, out, 1.0)],
+            )
+        },
+        [THE_WHOLE_RING, 2.0 * A_UNIT_OF_THE_BAR],
+        [
+            vec![THE_WHOLE_RING, 2.0 * A_UNIT_OF_THE_BAR],
+            Vec::new(),
+            vec![THE_WHOLE_RING],
+            vec![2.0 * A_UNIT_OF_THE_BAR],
+        ],
+    );
+}
+
 /// Every rule, with the half ring as the argument and as the tool, on a plate
 /// whose top is at `top`, and with the bar beside the half ring in one group
 /// where `bar` gives its top. `truths` are the union, the intersection, the
@@ -294,13 +341,65 @@ fn the_half_ring(model: &mut Model, a_seam: bool) -> SolidKey {
         .expect("the top half of a ring described this way is a solid")
 }
 
+/// The ring of four round a tube of one about `z`, right round, as two faces:
+/// the half below `z = 0` and the half above, meeting along the outer and the
+/// inner equator.
+fn a_whole_ring(model: &mut Model) -> SolidKey {
+    let middle = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+        .expect("the z axis is a unit normal");
+    let skin = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower"));
+    let mut builder = SolidBuilder::new();
+    let [outer, inner] = [-5.0, -3.0].map(|x| {
+        let corner = builder
+            .add_vertex(Point::new(x, 0.0, 0.0))
+            .expect("a corner on the ring and on the plane");
+        builder
+            .add_edge(
+                corner,
+                corner,
+                EdgeRun::RightRoundWhereItCrosses {
+                    and: Surface::Plane(middle),
+                },
+            )
+            .expect("an equator is a whole closed curve, so one corner twice is an edge")
+    });
+    let mut half = |turns: [Orientation; 2]| {
+        let wires = [outer, inner].into_iter().zip(turns).map(|(edge, turn)| {
+            let coedge = builder
+                .add_coedge(edge, turn)
+                .expect("an edge of this build");
+            builder
+                .add_wire(&[DraftStep::Along(coedge)])
+                .expect("one closed edge is a wire")
+        });
+        let wires: Vec<_> = wires.collect();
+        builder
+            .add_face(skin, &wires)
+            .expect("a band between two circles")
+    };
+    let one = half([Orientation::Reversed, Orientation::Forward]);
+    let other = half([Orientation::Forward, Orientation::Reversed]);
+    builder
+        .add_shell(&[(one, Orientation::Forward), (other, Orientation::Forward)])
+        .expect("two halves close");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a whole ring in two faces is a solid")
+}
+
 /// A round bar of radius `23/8` about `z`, from `z = −1` up to `top`.
 fn a_bar_in_the_hole(model: &mut Model, top: f64) -> SolidKey {
+    a_bar_standing(model, 0.0, top)
+}
+
+/// A round bar of radius `23/8` about the line parallel to `z` through
+/// `(out, 0)`, from `z = −1` up to `top`.
+fn a_bar_standing(model: &mut Model, out: f64, top: f64) -> SolidKey {
     model
         .add_round_bar(
             23.0 / 8.0,
             top + 1.0,
-            &Isometry::translation(Vector::new(0.0, 0.0, -1.0)).expect("a finite shift"),
+            &Isometry::translation(Vector::new(out, 0.0, -1.0)).expect("a finite shift"),
         )
         .expect("a bar of radius 23/8")
 }
