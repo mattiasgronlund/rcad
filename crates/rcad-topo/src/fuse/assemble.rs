@@ -1296,74 +1296,6 @@ impl Assembly {
     /// and relaxing that changes what a model *is* rather than what one boolean
     /// does (§17.4).
     fn darts_along_each_edge(&self) -> Result<Vec<[Dart; 2]>> {
-        let claimed = self.claimants_of_each_edge();
-        if std::env::var("PROBE_Q1633_ALL").is_ok() && claimed.iter().any(|by| by.len() != 2) {
-            for (index, face) in self.faces.iter().enumerate() {
-                let near = face.wires.iter().flatten().any(|side| {
-                    self.edges[side.edge].ends.iter().any(|&corner| {
-                        let [x, y, _] = self.corners[corner].point.coordinates();
-                        (x - 3.0).abs() < 1e-9 && (y - 1.0).abs() < 1e-9
-                    })
-                });
-                if !near {
-                    continue;
-                }
-                eprintln!(
-                    "PROBEALL face {index} ancestors {:?} surface {:?}",
-                    face.ancestors, face.surface
-                );
-                for ring in &face.wires {
-                    let sides: Vec<String> = ring
-                        .iter()
-                        .map(|side| {
-                            let [a, b] = self.edges[side.edge].ends;
-                            let (start, end) = if side.forward { (a, b) } else { (b, a) };
-                            format!(
-                                "{start}{:?}->{end} e{} x{}",
-                                self.corners[start].point.coordinates(),
-                                side.edge,
-                                claimed[side.edge].len()
-                            )
-                        })
-                        .collect();
-                    eprintln!("PROBEALL     {}", sides.join(" | "));
-                }
-            }
-        }
-        for (edge, by) in self.claimants_of_each_edge().iter().enumerate() {
-            if by.len() != 2 && std::env::var("PROBE_Q1633").is_ok() {
-                let ends = self.edges[edge].ends;
-                eprintln!(
-                    "PROBE edge {edge} claimed by {}: from corner {} {:?} to corner {} {:?}, carried by {:?}",
-                    by.len(),
-                    ends[0],
-                    self.corners[ends[0]].point.coordinates(),
-                    ends[1],
-                    self.corners[ends[1]].point.coordinates(),
-                    self.edges[edge].carried_by
-                );
-                for dart in by {
-                    let face = &self.faces[dart.face];
-                    eprintln!(
-                        "PROBE   face {} ancestors {:?} surface {:?} forward {}",
-                        dart.face,
-                        face.ancestors,
-                        face.surface,
-                        self.side_of(*dart).forward
-                    );
-                    for (wire, ring) in face.wires.iter().enumerate() {
-                        let corners: Vec<String> = ring
-                            .iter()
-                            .map(|side| {
-                                let start = self.edges[side.edge].ends[usize::from(!side.forward)];
-                                format!("{start}{:?}", self.corners[start].point.coordinates())
-                            })
-                            .collect();
-                        eprintln!("PROBE     wire {wire}: {}", corners.join(" "));
-                    }
-                }
-            }
-        }
         self.claimants_of_each_edge()
             .into_iter()
             .map(|by| {
@@ -5676,12 +5608,6 @@ impl Corners {
         };
         for one_point in names_of_one_point {
             let kept = self.name_of(model, &one_point.kept, policy, log)?;
-            if std::env::var("PROBE_Q1633_FOLD").is_ok() && !one_point.folded.is_empty() {
-                eprintln!(
-                    "PROBEFOLD kept {:?} folded {:?}",
-                    one_point.kept, one_point.folded
-                );
-            }
             for (surfaces, which) in &one_point.folded {
                 let folded = CornerName::Meet(names_of_the_three_surfaces(surfaces), *which);
                 let (one, other) = (leader(&leads_to, kept), leader(&leads_to, folded));
