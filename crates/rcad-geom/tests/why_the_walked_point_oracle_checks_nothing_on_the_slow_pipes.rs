@@ -12,28 +12,34 @@
 //! those is the quiet one — `checked += 1` sits after that `continue`, so a
 //! point whose box collapses is invisible to the counter.
 //!
-//! **It is the first exit, on every run of every one of the four, and it is
-//! never any of the other three.** `how_every_crossing_was_walked` says so per
-//! run instead of per pair, and the tests below pin what it says.
+//! **It was the first exit, on every run of every one of the four, and never
+//! any of the other three.** `how_every_crossing_was_walked` says so per run
+//! instead of per pair, and the tests below pin what it says. Since Q1598 that
+//! holds of the two hair-thin pairs only: the two tilted ones walk now, and
+//! every point they walk is checked.
 //!
 //! # What that makes the zero
 //!
 //! Two different things, and the refusal the sizing walk gives says which:
 //!
-//! **A defect in the walk, for `1bd43cf4` and `d8b562bb`.** Both refuse
-//! `TooManyPointsAlongOneCrossing { most: 1048576 }`, and both are the pair
-//! behind the seeded `7e62ebe6` with a y-component of `3.85e-122` or
-//! `1.15e-129` put on the thin pipe's axis. That is §16.10's *gap*: the answer
+//! **A defect in the walk, for `1bd43cf4` and `d8b562bb`, closed by Q1598.**
+//! Both refused `TooManyPointsAlongOneCrossing { most: 1048576 }`, and both are
+//! the pair behind the seeded `7e62ebe6` with a y-component of `3.85e-122` or
+//! `1.15e-129` put on the thin pipe's axis. That was §16.10's *gap*: the answer
 //! exists and the arithmetic reaches it. Every ordinary ask does —
 //! [`a_hair_of_tilt_does_not_stop_these_pipes_being_walked_at_an_ordinary_ask`]
 //! walks the very same runs at `0.01`, `1.0`, `1e10` and `1e16` and gets points
-//! back every time. What does not reach it is the harness's *sizing* ask of
-//! `f64::MAX / 4.0`, which is the gap
-//! `what_makes_a_huge_pipe_against_a_thin_one_slow_to_walk.rs` already names and
-//! gives the family of fixes for: the marcher's step needs a ceiling that does
-//! not come from the caller's ask. The tilt is not a second bug. It is what
-//! takes this pair from *just* surviving that ask to not surviving it, which the
-//! untilted `7e62ebe6` shows by walking ten points through the same code.
+//! back every time. What did not reach it was the harness's *sizing* ask of
+//! `f64::MAX / 4.0`, where the march kept a first trial that had settled back
+//! onto its start and then crawled from there to the point cap. The tilt was
+//! not a second bug. It is what took this pair from *just* surviving that ask
+//! to not surviving it, which the untilted `7e62ebe6` showed by walking ten
+//! points through the same code. Q1598 tries such a trial again shorter rather
+//! than keeping it (§347.9), and now both runs of both pairs walk at the
+//! harness's fine ask, every point they draw checked against both pipes in a
+//! box reaching `8.94e-8` each way, round a loop of radius `1.375`:
+//! [`the_pipe_tilted_by_a_hundred_and_twenty_two_orders_has_every_walked_point_checked`]
+//! and its sibling at a hundred and twenty-nine orders pin it.
 //!
 //! **A refusal the kernel is right to make, for `5dddf2a9` and `3a4a8231`.**
 //! Their loops are `4.34e-19` across where one step of the `f64` grid at those
@@ -61,9 +67,9 @@
 //! it does not assert is that any point sits on both pipes — and that is not an
 //! assertion anyone can make about this pair, because no such point exists. A
 //! seed that pins a refusal is pinning something; dropping it would lose the one
-//! corpus member that drives both the tangent refusal at a fine ask and the
-//! point cap at a coarse one, and §91 says an artifact not in the corpus is
-//! lost.
+//! corpus member that drives the tangent refusal at both a fine ask and a coarse
+//! one (until Q1598 the coarse one marched to the point cap instead), and §91
+//! says an artifact not in the corpus is lost.
 //!
 //! # How every number here was measured
 //!
@@ -76,7 +82,10 @@
 #![forbid(unsafe_code)]
 
 use fuzzing::{WhereARunWent, bytes_for, how_every_crossing_was_walked, two_surfaces_from};
-use rcad_geom::{Deflection, Error, NamedRun, Surface, SurfaceMeet, intersect, walk};
+use rcad_geom::{
+    Deflection, Error, NamedRun, POINT_ALONG_A_CROSSING_ROUNDOFF, Surface, SurfaceMeet, intersect,
+    walk,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 /// **The fourth exit never fires**, which is what clears the oracle itself.
@@ -163,9 +172,10 @@ fn the_hair_thin_pipes_are_refused_at_the_finest_ask_too() {
 
 /// **Every zero is the sizing walk refusing**, for the seeded hair-thin pair.
 ///
-/// One test per pair rather than a loop over the four, because each one marches
-/// to the million-point cap and takes seconds. Four in a row would be one
-/// twenty-second test; four apart are four that nextest runs at once.
+/// One test per pair rather than a loop over them, because until Q1598 each one
+/// marched to the million-point cap and took seconds. Since then the sizing
+/// walk is refused as tangent, at bounding how far off the crossing a point is,
+/// in hundredths of a second.
 #[test]
 fn the_zero_on_the_seeded_hair_thin_pair_is_the_sizing_walk_refusing() {
     only_the_sizing_walk_gives_up_on(the_huge_pipe_and_the_thread_through_it());
@@ -177,18 +187,6 @@ fn the_zero_on_the_moved_hair_thin_pair_is_the_sizing_walk_refusing() {
     only_the_sizing_walk_gives_up_on(the_same_thread_moved_and_the_huge_pipe_tilted_further());
 }
 
-/// The same, for `1bd43cf4`.
-#[test]
-fn the_zero_on_the_pipe_tilted_by_a_hundred_and_twenty_two_orders_is_the_sizing_walk() {
-    only_the_sizing_walk_gives_up_on(the_big_pipe_and_the_thin_one_tilted_by_3e_122());
-}
-
-/// The same, for `d8b562bb`.
-#[test]
-fn the_zero_on_the_pipe_tilted_by_a_hundred_and_twenty_nine_orders_is_the_sizing_walk() {
-    only_the_sizing_walk_gives_up_on(the_big_pipe_and_the_thin_one_tilted_by_1e_129());
-}
-
 /// Both runs of `pair` left the oracle at its first exit and at no other.
 fn only_the_sizing_walk_gives_up_on(pair: [Surface; 2]) {
     let went = how_every_crossing_was_walked(pair);
@@ -197,6 +195,63 @@ fn only_the_sizing_walk_gives_up_on(pair: [Surface; 2]) {
         assert!(
             matches!(run, WhereARunWent::TheSizingWalkRefused(_)),
             "this run left the oracle by {run:?} and not by the sizing walk"
+        );
+    }
+}
+
+/// **The pipe tilted by `3.85e-122` walks, and every point it walks is
+/// checked**, for `1bd43cf4`.
+///
+/// Until Q1598 its sizing walk crawled to the point cap and the oracle checked
+/// nothing. Now both runs walk at the harness's own asks.
+#[test]
+fn the_pipe_tilted_by_a_hundred_and_twenty_two_orders_has_every_walked_point_checked() {
+    every_walked_point_is_checked_in_a_box_far_smaller_than_the_loop(
+        the_big_pipe_and_the_thin_one_tilted_by_3e_122(),
+    );
+}
+
+/// The same, for `d8b562bb`, tilted by `1.15e-129`.
+#[test]
+fn the_pipe_tilted_by_a_hundred_and_twenty_nine_orders_has_every_walked_point_checked() {
+    every_walked_point_is_checked_in_a_box_far_smaller_than_the_loop(
+        the_big_pipe_and_the_thin_one_tilted_by_1e_129(),
+    );
+}
+
+/// Both runs of `pair` reached the oracle's last exit with points, and every one
+/// of them kept its box, so every one was asked about both pipes.
+///
+/// `how_every_crossing_was_walked` panics on a point whose box is certified off
+/// either pipe, so reaching the assertions here says each point is on both
+/// within that box. The box is the fine walk's own deviation, so this also
+/// walks each run at the asks the harness makes — the coarsest a walk can be
+/// asked for, then a hundredth of the size that gave back — and holds that box
+/// far under the thin pipe's radius of `1.375`. A box as wide as the loop would
+/// make the check say nothing.
+fn every_walked_point_is_checked_in_a_box_far_smaller_than_the_loop(pair: [Surface; 2]) {
+    let went = how_every_crossing_was_walked(pair);
+    assert_eq!(went.len(), 2, "each of these crosses in two runs");
+    for run in &went {
+        let WhereARunWent::Walked { drawn, checked } = run else {
+            panic!("this run left the oracle by {run:?} and walked no points");
+        };
+        assert!(*drawn > 0, "the walk drew no points at all");
+        assert_eq!(
+            drawn,
+            checked,
+            "{} of {drawn} walked points lost their box and went uncounted",
+            drawn - checked
+        );
+    }
+    for run in &the_runs_of(&pair) {
+        let (_, sized) = walk_it(&pair, run, f64::MAX / 4.0).expect("the sizing walk answers");
+        let how_big = sized / POINT_ALONG_A_CROSSING_ROUNDOFF;
+        let (_, box_size) = walk_it(&pair, run, how_big * 1e-2).expect("the fine walk answers");
+        println!("the oracle checked each point in a box reaching {box_size:e} each way");
+        assert!(
+            box_size < 1e-6,
+            "the oracle checked each point in a box reaching {box_size:e} each way, round a loop of radius 1.375"
         );
     }
 }

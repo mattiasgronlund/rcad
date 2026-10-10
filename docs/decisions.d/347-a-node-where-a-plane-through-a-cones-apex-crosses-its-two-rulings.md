@@ -584,3 +584,113 @@ test's doc comment. Relay 1's quartic probe is described here and not kept.
 > was before Q1607;
 > `two_bars_of_one_radius_whose_axes_meet_are_refused_telling_the_cells_of_a_pipe_apart`
 > holds the refusal.
+
+> **2026-10-10 note (Q1598): a trial that settles back to within its two
+> ends' own bounds is tried again shorter, and the ball and pipe off the axis
+> answer with the bar first too.** The trace in the Q1554 note holds. Measured
+> in the mesh's frame for the union, bar first, first placement, with prints in
+> `one_step` that are not kept: the first trial asks `4.105e153` and settles at
+> `(−0.49999999999999994, 0, 2.1e-17)`, a chord of `5.948e-17` and nothing at
+> all along the loop, between two ends that `how_far_off_the_crossing` puts
+> within `4.59e-16` and `6.88e-16` of the crossing. That trial had not moved
+> anywhere the walk could tell apart from its start, and it was kept because
+> its chord was not exactly nought.
+>
+> `what_a_trial_of_this_length_measures` in `march.rs` now calls a trial
+> settled back when its chord is nought, or when it covered less than half of
+> its ask and its chord is no longer than its two ends' bounds from
+> `how_far_off_the_crossing` added together. `one_step` takes the square root
+> of such a trial's ask, as it already did for a chord of nought, and never
+> keeps it. The bound is the walk's own enclosure of how far the settling's
+> roundings may have left each end off the crossing, and it is not a tolerance
+> on the answer: it decides only whether a trial is tried again shorter, and no
+> point the walk hands back moves for it. A walk whose steps really are that
+> short, asked and covered, never meets it, since it is asked only of a trial
+> that came back short of half its ask.
+>
+> With the bar first, all 12 fuses of the four placements now answer, each
+> validated, with the ball-first answers' faces and within the mesh's volume
+> error of `ball_in_bar`:
+> `a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_bar_first_answers`
+> replaces the Q1554 note's
+> `a_ball_with_a_bar_through_it_off_its_axis_is_refused_meshing_every_fuse_with_the_bar_first`.
+> So the ball and pipe off the axis answer every fuse both ways round, and the
+> Q1554 note's sentence that the bar-first fuses are refused no longer holds.
+> The march is pinned on its own in `march.rs`:
+> `a_trial_that_settles_a_rounding_off_its_start_is_shortened_and_not_kept`
+> walks the upper loop from its top with the coarse walk's room, and its first
+> kept step lands `0.78` along the loop; the walk closes in six points, each
+> known to `1.3e-15`, every step longer than twice that.
+>
+> How often the rule is met, over `rcad-geom`'s tests, counted by relay 1 with
+> a print in `one_step` that is not kept: 2702 trials settled back. 1391 had a
+> chord of nought, which were rooted before as well; the 263 of those asked 4
+> or more were all in coarse walks, with `2.2e307` or `4.5e307` of room. The
+> other 1311 were short trials within their ends' bounds, and the old rule kept
+> 900 of them: 440 in coarse walks, and 460 in walks of `0.5` of room or less
+> with each end known only to between `8e-9` and `3e-2`. Those 460 came from
+> six tests:
+> `a_surface_written_twice_a_few_ulps_apart_names_the_crossing_its_run_names`
+> (190), `every_seed_in_the_checked_in_corpus_names_its_crossing_honestly`
+> (148),
+> `every_point_along_a_quartic_turned_crossing_is_on_both_the_surfaces_that_named_it`
+> (51),
+> `every_point_along_a_crossing_a_hair_from_tangency_is_on_both_the_surfaces_that_named_it`
+> (35), `the_hair_thin_pipes_are_refused_at_the_finest_ask_too` (28) and
+> `a_crossing_thinner_than_one_step_of_the_grid_crawls_to_the_point_cap` (8).
+> Another 413 short trials, which the old code measured, now have an end whose
+> bound refuses; that makes each a trial that could not be measured, and it is
+> rooted too. A lazier rule, judging such a trial by the old rules, was tried
+> and dropped: it left the thin-pipe pin below refused all the same, by the
+> march's own bound on how far its points are off.
+>
+> Four pins outside this row's files move, and are left to a row that holds
+> them. Three are in `rcad-geom`.
+> `a_crossing_thinner_than_one_step_of_the_grid_crawls_to_the_point_cap`
+> (`what_makes_a_huge_pipe_against_a_thin_one_slow_to_walk.rs`) was refused
+> `TooManyPointsAlongOneCrossing` after a million points, and is now refused
+> at once `CannotFollowACrossingWhereItsSurfacesAreTangent { at:
+> BoundingHowFarOffTheCrossingAPointIs }`, the refusal
+> `the_hair_thin_pipes_are_refused_at_the_finest_ask_too` already pins.
+> `the_zero_on_the_pipe_tilted_by_a_hundred_and_twenty_two_orders_is_the_sizing_walk`
+> and its sibling at a hundred and twenty-nine orders
+> (`why_the_walked_point_oracle_checks_nothing_on_the_slow_pipes.rs`) say the
+> sizing walk refuses, and it now walks: `Walked { drawn: 5, checked: 5 }`.
+> The fourth is in `rcad-topo`: the ball of 4 one rounding off a bar's axis,
+> `a_ball_one_rounding_off_a_bars_axis_is_refused_meshing_every_fuse` in
+> `degenerate_curved_fuses.rs` and Q1599's row, now answers all six fuses both
+> ways round, under a certified and a tolerant policy alike. Each answer
+> validates, has faces 5, 3, 2 or 3+3, and measures within its volume error
+> and 0.07% to 0.11% under the closed form of
+> `what_a_ball_with_a_bar_through_its_centre_leaves`, by a probe that is not
+> kept. §39.4's and §322's notes on the two old refusals say what Q1554 left.
+>
+> The same row, its files widened, then moved all four, each after checking
+> it. The thread through the huge pipe is
+> `a_crossing_thinner_than_one_step_of_the_grid_is_refused_at_its_first_step`,
+> pinning the tangent refusal at `BoundingHowFarOffTheCrossingAPointIs`. That
+> is a limit by §16.10 and not a gap: the loop is `4.34e-19` across where one
+> step of the grid is `5.82e-11`, so no answer exists to reach, and the same
+> pair walks once its thin pipe spans a grid step. The two tilted pipes are
+> `the_pipe_tilted_by_a_hundred_and_twenty_two_orders_has_every_walked_point_checked`
+> and its sibling at a hundred and twenty-nine orders. Each pins that both runs
+> walk and every point they draw is checked against both pipes, in a box
+> reaching `8.94e-8` each way round a loop of radius `1.375`. Those two and
+> `the_zero_on_the_moved_hair_thin_pair_is_the_sizing_walk_refusing` leave the
+> slow tier, since each now runs in hundredths of a second. The ball of 4 is
+> `a_ball_one_rounding_off_a_bars_axis_answers_every_fuse_as_one_on_it_does`:
+> 24 fuses off the axis, with the 24 on it beside them. Each one validates and
+> has the centred ball's faces, and each measures within its volume error of
+> the closed form. The union and both differences add up against the ball and
+> the bar measured alone. So Q1599, that ball's row, is done by this row's
+> change alone, with the trial it kept not traced. §39.4 and §322 each carry a
+> Q1598 note saying so.
+>
+> **Where the numbers come from.** The trace: prints in `one_step`, run as
+> `mise exec -- cargo nextest run -p rcad-topo --test
+> two_curves_of_one_pair_that_meet` at `72cc2f6c`. The counts: an `eprintln`
+> in `one_step` on each trial that settled back, and one where an end's bound
+> refused, run as `mise exec -- just t -p rcad-geom --no-capture
+> --no-fail-fast` and tallied. The moved pins: `mise exec -- just t
+> --workspace --no-fail-fast`, which prints `3808 tests run: 3804 passed (19
+> slow), 4 failed, 3 skipped`, the four being those above.

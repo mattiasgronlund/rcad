@@ -2373,7 +2373,7 @@ fn a_bar_cut_by_one_plane_off_its_axis_is_answered() {
 #[test]
 fn a_ball_with_a_bar_through_its_centre_is_answered_under_every_rule() {
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        for (rule, ball_first, pieces, closed_form, how_fine) in
+        for (rule, ball_first, faces_of_each, closed_form, how_fine) in
             what_a_ball_with_a_bar_through_its_centre_leaves()
         {
             let mut model = a_model();
@@ -2393,7 +2393,11 @@ fn a_ball_with_a_bar_through_its_centre_is_answered_under_every_rule() {
                 Pair::of(bar, ball)
             };
             let answer = fused_under(&mut model, &pair, rule, &policy);
-            assert_eq!(answer.solids().len(), pieces, "{policy:?}, {rule:?}");
+            assert_eq!(
+                answer.solids().len(),
+                faces_of_each.len(),
+                "{policy:?}, {rule:?}"
+            );
             measures(
                 volume_of_at(&model, answer.solids(), how_fine),
                 closed_form,
@@ -2404,62 +2408,100 @@ fn a_ball_with_a_bar_through_its_centre_is_answered_under_every_rule() {
 }
 
 /// A ball one rounding off a bar's axis crosses it in two quartic loops and
-/// not in two circles, and every fuse is refused meshing a face, under every
-/// rule both ways and under a tolerant policy as under a certified one, so it
-/// is not a question of how much the arithmetic may assume. The bar's axis runs up `z` through `(1, 0, 0)` and the
-/// ball's centre is the next `f64` past it along `x`, `2⁻⁵²` out; centred on
-/// `(1, 0, 0)` itself, the same pair is answered, as the pair above is.
+/// not in two circles, and every fuse answers as the ball centred on the axis
+/// does: under every rule both ways round, and under a tolerant policy as under
+/// a certified one. The bar's axis runs up `z` through `(1, 0, 0)` and the
+/// ball's centre is the next `f64` past it along `x`, `2⁻⁵²` out. Each answer
+/// validates, has the centred ball's faces, and measures within its mesh's
+/// volume error of the closed form of
+/// [`what_a_ball_with_a_bar_through_its_centre_leaves`]. It also adds up
+/// against the ball and the bar measured alone: the union is the two less what
+/// they share, and each difference is its first solid less what they share.
 ///
 /// Until Q1554 it was refused before any order was asked,
-/// `ACrossingThisCannotBeOrderedAlong`. The two loops are ordered round the
-/// bar's axis now, and the mesh refuses instead: two corners of a face's chart
-/// coincide, or a side cuts off one corner of a curved patch
-/// ([`refused_meshing_a_ball_one_rounding_off_a_bars_axis`]). Not
-/// traced. A ball of 2 with a bar of 1 half a unit off its axis is refused
-/// `CornersCoincide` too, with the bar first only, in the marcher's first step
-/// (`two_curves_of_one_pair_that_meet.rs`).
+/// `ACrossingThisCannotBeOrderedAlong`. Q1554 ordered the two loops round the
+/// bar's axis, and the mesh refused instead, `CannotMeshAFace`: two corners of
+/// a face's chart coincided, or a side cut off one corner of a curved patch.
+/// Q1598 changed only the march, so that a trial which settles back onto its
+/// start is tried again shorter rather than kept (§347.9). With that change
+/// and no other in the kernel, every one of these fuses answers where each was
+/// refused before. Which trial had been kept here was not traced. The ball of 2
+/// with a bar of 1 half a unit off its axis, which was refused
+/// `CornersCoincide` with the bar first, now answers both ways round too:
+/// `a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_bar_first_answers`
+/// in `two_curves_of_one_pair_that_meet.rs`.
 #[test]
-fn a_ball_one_rounding_off_a_bars_axis_is_refused_meshing_every_fuse() {
+fn a_ball_one_rounding_off_a_bars_axis_answers_every_fuse_as_one_on_it_does() {
     let one_past = f64::from_bits(1.0_f64.to_bits() + 1);
-    for (centre, on_the_axis) in [(1.0, true), (one_past, false)] {
-        for (rule, ball_first, pieces, closed_form, how_fine) in
-            what_a_ball_with_a_bar_through_its_centre_leaves()
-        {
+    for centre in [1.0, one_past] {
+        let (the_ball, the_bar) = {
             let mut model = a_model();
-            let ball = model
-                .add_ball(
-                    4.0,
-                    &Isometry::translation(Vector::new(centre, 0.0, 0.0)).expect("a shift"),
-                )
-                .expect("a ball of radius four");
-            let bar = model
-                .add_round_bar(
-                    1.0,
-                    12.0,
-                    &Isometry::translation(Vector::new(1.0, 0.0, -6.0)).expect("a shift"),
-                )
-                .expect("a bar long enough to go right through");
-            let pair = if ball_first {
-                Pair::of(ball, bar)
-            } else {
-                Pair::of(bar, ball)
+            let [ball, bar] = a_ball_of_four_and_a_bar_of_one_through_it(&mut model, centre);
+            (
+                measured(&model, &[ball], A_DEFLECTION),
+                measured(&model, &[bar], A_DEFLECTION),
+            )
+        };
+        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            let mut answers = Vec::with_capacity(6);
+            for (rule, ball_first, faces_of_each, closed_form, how_fine) in
+                what_a_ball_with_a_bar_through_its_centre_leaves()
+            {
+                let what =
+                    format!("centre {centre}, {policy:?}, {rule:?}, ball first {ball_first}");
+                let mut model = a_model();
+                let [ball, bar] = a_ball_of_four_and_a_bar_of_one_through_it(&mut model, centre);
+                let pair = if ball_first {
+                    Pair::of(ball, bar)
+                } else {
+                    Pair::of(bar, ball)
+                };
+                let answer = fused_under(&mut model, &pair, rule, &policy);
+                let faces: Vec<usize> = answer
+                    .solids()
+                    .iter()
+                    .map(|&solid| {
+                        model
+                            .solid(solid)
+                            .expect("a solid the fuse made")
+                            .faces()
+                            .count()
+                    })
+                    .collect();
+                assert_eq!(faces, faces_of_each, "{what}: faces of each solid");
+                let found = measured(&model, answer.solids(), how_fine);
+                adds_up(found, &[], closed_form, &[], &what);
+                answers.push((rule, ball_first, found));
+            }
+            let answer_to = |rule: Rule, ball_first: bool| {
+                answers
+                    .iter()
+                    .find(|(r, b, _)| *r == rule && *b == ball_first)
+                    .map(|(_, _, found)| *found)
+                    .expect("every rule both ways round was fused")
             };
-            if on_the_axis {
-                let answer = fused(&mut model, &pair, rule);
-                assert_eq!(answer.solids().len(), pieces, "{rule:?}");
-                measures(
-                    volume_of_at(&model, answer.solids(), how_fine),
-                    closed_form,
-                    Side::Under,
+            for ball_first in [true, false] {
+                let what = format!("centre {centre}, {policy:?}, ball first {ball_first}");
+                let shared = answer_to(Rule::Intersection, ball_first);
+                adds_up(
+                    answer_to(Rule::Union, ball_first),
+                    &[the_ball, the_bar],
+                    0.0,
+                    &[shared],
+                    &format!("{what}: the union"),
                 );
-            } else {
-                for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-                    let why = refusal(&mut model, &pair, rule, &policy);
-                    assert!(
-                        refused_meshing_a_ball_one_rounding_off_a_bars_axis(&why, rule, ball_first),
-                        "{policy:?}, {rule:?}, the ball first {ball_first}: refused with {why:?}"
-                    );
-                }
+                let (first, left) = if ball_first {
+                    (the_ball, "the ball less the bar")
+                } else {
+                    (the_bar, "the bar less the ball")
+                };
+                adds_up(
+                    answer_to(Rule::Difference, ball_first),
+                    &[first],
+                    0.0,
+                    &[shared],
+                    &format!("{what}: {left}"),
+                );
             }
         }
     }
@@ -2467,8 +2509,8 @@ fn a_ball_one_rounding_off_a_bars_axis_is_refused_meshing_every_fuse() {
 
 /// Each rule, with `true` for the ball named first, and what a ball of radius
 /// four with a bar of radius one and length twelve through its centre leaves
-/// under it: how many solids, how much space they hold, and the deflection to
-/// measure that at.
+/// under it: how many faces each solid has, how much space they hold, and the
+/// deflection to measure that at.
 ///
 /// The bar reaches past the ball both ends, so the ball less the bar is
 /// `(4π/3)(R² − r²)^(3/2) = (4π/3)·15^(3/2)`, about 243.35; the two share the
@@ -2476,49 +2518,92 @@ fn a_ball_one_rounding_off_a_bars_axis_is_refused_meshing_every_fuse() {
 /// what they share; and the bar less the ball is `12π` less what they share, in
 /// two pieces. The two that are no wider than the bar are measured at a
 /// quarter of [`A_DEFLECTION`], which leaves what they share 0.52% short.
-fn what_a_ball_with_a_bar_through_its_centre_leaves() -> [(Rule, bool, usize, f64, f64); 6] {
+///
+/// The union is the ball's skin with a hole at each pole, and the bar's wall
+/// and end above and below it. What they share is the bar's wall between two
+/// caps of the ball. The ball less the bar is its skin and the bar's wall, and
+/// each piece of the bar less the ball is an end, a length of wall and a cap.
+fn what_a_ball_with_a_bar_through_its_centre_leaves()
+-> [(Rule, bool, &'static [usize], f64, f64); 6] {
     let left = 4.0 * PI / 3.0 * 15.0_f64.powf(1.5);
     let shared = A_BIG_BALL - left;
     let the_bar = 12.0 * PI;
     let union = A_BIG_BALL + the_bar - shared;
     let thin = A_DEFLECTION / 4.0;
     [
-        (Rule::Union, true, 1, union, A_DEFLECTION),
-        (Rule::Union, false, 1, union, A_DEFLECTION),
-        (Rule::Intersection, true, 1, shared, thin),
-        (Rule::Intersection, false, 1, shared, thin),
-        (Rule::Difference, true, 1, left, A_DEFLECTION),
-        (Rule::Difference, false, 2, the_bar - shared, thin),
+        (Rule::Union, true, &[5], union, A_DEFLECTION),
+        (Rule::Union, false, &[5], union, A_DEFLECTION),
+        (Rule::Intersection, true, &[3], shared, thin),
+        (Rule::Intersection, false, &[3], shared, thin),
+        (Rule::Difference, true, &[2], left, A_DEFLECTION),
+        (Rule::Difference, false, &[3, 3], the_bar - shared, thin),
     ]
 }
 
-/// Whether `why` is the mesh refusal each fuse of
-/// [`a_ball_one_rounding_off_a_bars_axis_is_refused_meshing_every_fuse`]'s ball
-/// off the axis gives: two corners of a face's chart in one place with the
-/// ball first, and with the bar first for the bar less the ball; a side
-/// cutting off one corner of a curved patch for the union and the intersection
-/// with the bar first. Only the kind is read, not the corner it names.
-fn refused_meshing_a_ball_one_rounding_off_a_bars_axis(
-    why: &Error,
-    rule: Rule,
-    ball_first: bool,
-) -> bool {
-    match (rule, ball_first) {
-        (Rule::Union | Rule::Intersection, false) => matches!(
-            why,
-            Error::CannotMeshAFace {
-                why: rcad_mesh::CannotTriangulate::ASideCutsOffOneCornerOfACurvedPatch { .. },
-                ..
-            }
-        ),
-        _ => matches!(
-            why,
-            Error::CannotMeshAFace {
-                why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
-                ..
-            }
-        ),
+/// A ball of radius four centred at `(centre, 0, 0)` and a bar of radius one
+/// and length twelve standing up `z` through `(1, 0, 0)`, reaching six past the
+/// ball's middle both ways.
+fn a_ball_of_four_and_a_bar_of_one_through_it(model: &mut Model, centre: f64) -> [SolidKey; 2] {
+    let ball = model
+        .add_ball(
+            4.0,
+            &Isometry::translation(Vector::new(centre, 0.0, 0.0)).expect("a shift"),
+        )
+        .expect("a ball of radius four");
+    let bar = model
+        .add_round_bar(
+            1.0,
+            12.0,
+            &Isometry::translation(Vector::new(1.0, 0.0, -6.0)).expect("a shift"),
+        )
+        .expect("a bar long enough to go right through");
+    [ball, bar]
+}
+
+/// How much space some solids take up, and how far the mesh it was read off
+/// may be from the true figure.
+#[derive(Clone, Copy, Debug)]
+struct Measured {
+    volume: f64,
+    error: f64,
+}
+
+/// The space `solids` take up together at `deflection`, with the mesh's own
+/// bound on how far that may be off.
+fn measured(model: &Model, solids: &[SolidKey], deflection: f64) -> Measured {
+    let mut total = Measured {
+        volume: 0.0,
+        error: 0.0,
+    };
+    for &solid in solids {
+        let measure = model
+            .solid(solid)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(deflection).expect("a positive length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a solid this size measures");
+        total.volume += measure.volume();
+        total.error += measure.volume_error();
     }
+    total
+}
+
+/// Insist that `found` is the measured `plus` and the exact `and_exactly`, less
+/// the measured `minus`, to within every measure's error added together.
+fn adds_up(found: Measured, plus: &[Measured], and_exactly: f64, minus: &[Measured], what: &str) {
+    let expected = plus.iter().map(|part| part.volume).sum::<f64>() + and_exactly
+        - minus.iter().map(|part| part.volume).sum::<f64>();
+    let error = found.error
+        + plus.iter().map(|part| part.error).sum::<f64>()
+        + minus.iter().map(|part| part.error).sum::<f64>();
+    assert!(
+        (found.volume - expected).abs() <= error,
+        "{what}: measured {}, expected {expected}, and the meshes may miss by {error}",
+        found.volume
+    );
 }
 
 /// A ball of radius four in a bar of radius four down its axis touches the

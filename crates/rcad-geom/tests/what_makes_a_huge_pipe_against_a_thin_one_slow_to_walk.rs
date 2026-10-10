@@ -1,5 +1,5 @@
-//! Why a huge pipe crossed by a thin one takes seconds, and which half of it is
-//! a gap.
+//! Why a huge pipe crossed by a thin one took seconds, and which half of it was
+//! a gap. Since Q1598 neither half crawls.
 //!
 //! The overnight fuzzer found four slow units on `where_two_surfaces_cross`
 //! across 2026-09-12 to 2026-09-14. All four decode to two pipes, one huge and
@@ -26,7 +26,7 @@
 //! for this pair:
 //! [`a_huge_pipe_and_a_thin_one_are_walked_even_when_asked_for_all_the_room_there_is`]
 //! walks both pairs, on both runs, at `f64::MAX / 4.0`, in **7ms together**. It
-//! is not gone for the thread below.
+//! was not gone for the thread below until Q1598.
 //!
 //! # The first case is the sizing ask, and it is a gap
 //!
@@ -52,8 +52,11 @@
 //! **That paragraph now describes a pair that survives the ask anyway.** Both
 //! ceilings are still the caller's ask in disguise; what `1f1da0bf` changed is
 //! how fast a refused trial shortens, which is a third knob and enough for this
-//! pair. It is not enough for the same pair with a hair of tilt on it, so the
-//! gap is still open and §125.2 carries it now, on `1bd43cf4` and `d8b562bb`.
+//! pair. It was not enough for the same pair with a hair of tilt on it, so
+//! §125.2 carried the gap on, on `1bd43cf4` and `d8b562bb`. Those two walk the
+//! sizing ask too since Q1598
+//! (`why_the_walked_point_oracle_checks_nothing_on_the_slow_pipes.rs`), but the
+//! ceilings are still the caller's ask, and §125.6 keeps that open.
 //!
 //! **It is the ask and not the pair.** Swept over the budget, the same run gives
 //! five points at `1e1`, `1e4`, `1e8`, `1e10` … `1e16`, crawls to the cap at
@@ -89,12 +92,19 @@
 //! `how_small_a_crossing_can_be_before_no_point_sits_on_it.rs`, and that is a
 //! limit and not a gap.
 //!
-//! What is a gap is how long saying so takes. §94's guard,
+//! What was a gap is how long saying so took. §94's guard,
 //! `the_settling_did_not_land_on_both`, turns `b9068e9e` away in **7.1µs**; it
-//! does not fire here, and this pair crawls to the point cap in **2.81s at
+//! does not fire here, and this pair crawled to the point cap in **2.81s at
 //! `f64::MAX / 4.0`, 2.76s at `1e10` and 2.89s at `1.0`** before refusing for
-//! the wrong reason. [`a_crossing_thinner_than_one_step_of_the_grid_crawls_to_the_point_cap`]
-//! pins that, and is the test a fix to the guard flips.
+//! the wrong reason. **Since Q1598 it does not crawl.** The marcher no longer
+//! keeps a trial that came back short and no further from its start than the
+//! two ends' own bounds, so the trials that settle back near the seed are tried
+//! again shorter, and the first step it keeps is one step of the grid, whose
+//! far end it cannot bound. The walk is refused there, after one step and in
+//! milliseconds, by the same name the finest ask already got
+//! (`why_the_walked_point_oracle_checks_nothing_on_the_slow_pipes.rs`).
+//! [`a_crossing_thinner_than_one_step_of_the_grid_is_refused_at_its_first_step`]
+//! pins that.
 //!
 //! [`the_same_pair_is_walked_as_soon_as_its_thin_pipe_spans_a_grid_step`] is the
 //! limit half: nothing changes but the thin radius, and at `1e-7` — about 1 718
@@ -110,8 +120,8 @@
 #![forbid(unsafe_code)]
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, Error, NamedRun, Point, Surface, SurfaceMeet, Vector, intersect,
-    walk,
+    Axis, Cylinder, Deflection, Error, NamedRun, Point, Surface, SurfaceMeet, Vector,
+    WhereFollowingACrossingGaveUp, intersect, walk,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 
@@ -194,23 +204,41 @@ fn a_huge_pipe_and_a_thin_one_are_walked_even_when_asked_for_all_the_room_there_
 }
 
 /// **A crossing narrower than one step of the grid it sits on is a limit, and
-/// this is what saying so costs today.**
+/// it is refused after one step.**
 ///
 /// The loop is `4.34e-19` across where one step of the grid is `5.82e-11`, so
 /// there is no answer to reach — the same sentence
 /// `how_small_a_crossing_can_be_before_no_point_sits_on_it.rs` makes about
-/// `b9068e9e`. §94's seed check turns that one away in microseconds and does not
-/// fire on this one, so the refusal arrives a million marched points later and
-/// costs seconds. **A fix to the guard flips this test**, and that is what it is
-/// here for: the refusal is right and the route to it is not.
+/// `b9068e9e`, and [`the_same_pair_is_walked_as_soon_as_its_thin_pipe_spans_a_grid_step`]
+/// demonstrates it (§16.10). §94's seed check turns that one away in
+/// microseconds and does not fire on this one.
+///
+/// Until Q1598 the refusal came a million marched points later, as
+/// `TooManyPointsAlongOneCrossing`, and cost seconds. Now the first step takes
+/// 33 trials, from `0.5` down. Eight of them settle `7.45e-9` from the seed,
+/// no further than the two ends' own bounds reach, and the marcher no longer
+/// keeps such a trial; the other 24 are refused where the far end cannot be
+/// bounded. The one it keeps is `1.16e-10`, a chord of `5.82e-11`, one step of
+/// the grid, and the angle between the two pipes at that far end cannot be told
+/// from nought, so the walk is refused there as tangent, while bounding how far
+/// off that point sits. The pipes are not tangent: at a point one grid step
+/// from a thread `4.34e-19` wide, the thread's normal is all rounding, and
+/// that is what the refusal reports. Measured with prints in `march.rs`'s
+/// `one_step`, not kept.
 #[test]
-fn a_crossing_thinner_than_one_step_of_the_grid_crawls_to_the_point_cap() {
+fn a_crossing_thinner_than_one_step_of_the_grid_is_refused_at_its_first_step() {
     let pair = the_huge_pipe_and_the_thread_through_it(4.336808689942018e-19);
     let runs = the_runs_of(&pair);
     let why = walk_it(&pair, &runs[0], 1.0).expect_err("nothing can be walked here");
     assert!(
-        matches!(why, Error::TooManyPointsAlongOneCrossing { .. }),
-        "the marcher stopped for {why:?} rather than running out of points"
+        matches!(
+            why,
+            Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                at: WhereFollowingACrossingGaveUp::BoundingHowFarOffTheCrossingAPointIs,
+                ..
+            }
+        ),
+        "the marcher stopped for {why:?} rather than failing to bound how far off a point sits"
     );
 }
 

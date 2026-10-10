@@ -60,6 +60,14 @@ oracle checking nothing is correct. Only the seconds it takes to say so are a
 gap, and that half is already pinned by
 `a_crossing_thinner_than_one_step_of_the_grid_crawls_to_the_point_cap`.
 
+> **2026-10-10 note (Q1598): the seconds are gone.** The thread through the
+> huge pipe no longer crawls to the point cap. It is refused at its first step,
+> `CannotFollowACrossingWhereItsSurfacesAreTangent` while bounding how far off
+> a point sits, in hundredths of a second, and
+> `a_crossing_thinner_than_one_step_of_the_grid_is_refused_at_its_first_step`
+> replaces the pin named above. It is still a limit, for the reason given here.
+> §347.9's Q1598 note says what changed in the march.
+
 ### 125.4 The seeded `5dddf2a9` stays, and "it asserts nothing" is false
 
 It is in the corpus with a walked-point oracle that checks nothing, which looks
@@ -207,4 +215,15 @@ and back, twice, once to measure and once to check the new test fails without it
 `mise exec -- just t
 a_huge_pipe_and_a_thin_one_are_walked_even_when_asked_for_all_the_room_there_is`;
 `mise exec -- just gate`.
+
+> **2026-10-10 note (Q1598): the tilted `1bd43cf4` and `d8b562bb` walk.** The
+> sentence above, that they still refuse, and §125.2's gap no longer hold. At
+> the `f64::MAX / 4.0` sizing ask the march kept a first trial that had settled
+> back onto its start, and crawled from there to the point cap. Q1598 tries
+> such a trial again shorter instead (§347.9's Q1598 note). Both runs of both
+> pairs now walk, and every point they draw is checked against both pipes:
+> `the_pipe_tilted_by_a_hundred_and_twenty_two_orders_has_every_walked_point_checked`
+> and its sibling at a hundred and twenty-nine orders. Q23, §125.6's step
+> ceiling, stays open. `MOST_A_STEP_MAY_GROW_TO` still comes from the caller's
+> ask, and these two pairs no longer show that it matters.
 

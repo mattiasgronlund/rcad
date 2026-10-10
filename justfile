@@ -222,8 +222,6 @@ slow_tests := "rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube
     rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses \
     rcad-topo::what_a_deflection_costs_a_measured_volume/the_volume_a_mesh_misses_falls_in_step_with_the_deflection \
     rcad-topo::fuses_that_must_agree/every_fuse_a_turned_curved_fixture_refuses_has_an_answer_turned_from_the_upright_one \
-    rcad-geom::why_the_walked_point_oracle_checks_nothing_on_the_slow_pipes/the_zero_on_the_pipe_tilted_by_a_hundred_and_twenty_two_orders_is_the_sizing_walk \
-    rcad-geom::why_the_walked_point_oracle_checks_nothing_on_the_slow_pipes/the_zero_on_the_pipe_tilted_by_a_hundred_and_twenty_nine_orders_is_the_sizing_walk \
     rcad-topo::a_ball_cut_through_its_pole/a_block_taken_out_of_a_ball_through_its_south_pole_leaves_the_same_cap \
     rcad-topo::a_ball_cut_through_its_pole/a_ball_cut_through_its_south_pole_by_a_block_keeps_a_cap_that_measures_right \
     rcad-topo::fuses_that_must_agree/what_a_block_and_a_leaning_bar_take_up_adds_up_inside_a_stated_share_of_what_they_declare \
@@ -233,7 +231,6 @@ slow_tests := "rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube
     rcad-topo::fuses_that_must_agree/how_often_a_certified_fuse_of_a_turned_frustum_and_block_refuses \
     rcad-topo::what_the_answered_block_fuses_actually_say/every_block_and_frustum_fuse_that_answers_adds_up \
     rcad-topo::whether_a_coarser_deflection_always_meshes/the_floor_refusal_needs_an_absolute_deflection_and_then_it_behaves \
-    rcad-geom::why_the_walked_point_oracle_checks_nothing_on_the_slow_pipes/the_zero_on_the_moved_hair_thin_pair_is_the_sizing_walk_refusing \
     rcad-topo::how_often_a_curved_fuse_refuses/every_answer_over_a_block_turned_against_a_bar_is_a_solid_that_validates \
     rcad-topo::fuses_that_must_agree/what_a_block_and_a_ball_take_up_adds_up_inside_a_stated_share_of_what_they_declare \
     rcad-topo::a_ball_cut_through_its_pole/the_sliver_that_holds_no_pole_is_answered_or_refused_by_name"
@@ -2266,7 +2263,14 @@ check-fuzz-builds:
 # One more. `the_two_places_along_it` in `three_surfaces.rs` takes `A`'s sign,
 # which its caller has already certified as `Pos` or `Neg`, and names those
 # two; the arm for every other `Decision` is `unreachable!`.
-wildcard_arms := "96"
+#
+#     Q1598's lane  96 -> 95
+#
+# One fewer. `degenerate_curved_fuses.rs`'s ball one rounding off a bar's axis
+# matched each fuse's `CannotMeshAFace` by its rule and sent every other pair
+# of rule and order to `CornersCoincide`; every fuse of it now answers, and the
+# test that replaced it reads each entry's faces off its table, with no match.
+wildcard_arms := "95"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
