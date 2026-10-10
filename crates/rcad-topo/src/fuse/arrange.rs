@@ -125,64 +125,10 @@ pub(crate) fn split_a_face(
 ) -> Result<Split> {
     let cuts = canonical_cut_surfaces(face);
     let arrangement = Arrangement::of(face, &cuts, policy, log)?;
-    let split = Split {
+    Ok(Split {
         pieces: arrangement.pieces()?,
         names_of_one_point: arrangement.names_of_one_point(),
-    };
-    if std::env::var("PROBE_SPLIT").is_ok() {
-        probe_split(face, &split);
-    }
-    Ok(split)
-}
-
-fn probe_split(face: &BakedFace, split: &Split) {
-    let short = |s: &Surface| {
-        let text = format!("{s:?}");
-        text.chars().take(70).collect::<String>()
-    };
-    let end = |p: &MeetPoint| match p {
-        MeetPoint::Existing { point, .. } => format!("V@{:?}", mid_of(*point)),
-        MeetPoint::OfThreeSurfaces { which, point, .. } => {
-            format!("T{which}@{:?}", mid_of(*point))
-        }
-        MeetPoint::WhereAClosedCurveStarts { point, .. } => {
-            format!("S@{:?}", mid_of(*point))
-        }
-        MeetPoint::HalfWayRoundAClosedCurve { point, .. } => {
-            format!("H@{:?}", mid_of(*point))
-        }
-        MeetPoint::APoleOfAClosedSurface { point, .. } => format!("P@{:?}", mid_of(*point)),
-    };
-    eprintln!(
-        "SPLIT face {} -> {} pieces, cuts {:?}",
-        short(&face.surface),
-        split.pieces.len(),
-        face.cuts.iter().map(short).collect::<Vec<_>>()
-    );
-    for (index, piece) in split.pieces.iter().enumerate() {
-        eprintln!(
-            "  piece {index} {:?} whole {}",
-            piece.orientation, piece.is_the_whole_surface
-        );
-        for wire in &piece.wires {
-            eprintln!("    wire");
-            for meet in wire {
-                eprintln!(
-                    "      {} -> {} by {} side {:?}",
-                    end(&meet.ends[0]),
-                    end(&meet.ends[1]),
-                    short(&meet.carried_by[1]),
-                    meet.material_side
-                );
-            }
-        }
-    }
-}
-
-fn mid_of(point: PredicatePoint) -> [f64; 3] {
-    let [x, y, z] = point.enclosure();
-    let round = |i: Interval| ((i.lo() + i.hi()) * 500.0).round() / 1000.0;
-    [round(x), round(y), round(z)]
+    })
 }
 
 /// What cutting one face leaves.
@@ -1136,64 +1082,19 @@ impl<'f> Arrangement<'f> {
             cells: Vec::new(),
             winding: Vec::new(),
         };
-        let probe = std::env::var("PROBE_SPLIT").is_ok();
-        let show = |a: &Self, stage: &str| {
-            if probe {
-                eprintln!(
-                    "STAGE {stage}: crossings {:?} nodes {:?}",
-                    a.crossings
-                        .iter()
-                        .map(|c| (
-                            c.partner.as_plane().is_none(),
-                            c.cuts,
-                            c.reaches_the_face,
-                            c.half_an_ellipse.is_some()
-                        ))
-                        .collect::<Vec<_>>(),
-                    a.nodes
-                        .iter()
-                        .map(|n| (
-                            n.made_of.map(|(_, which)| which),
-                            n.crossings.clone(),
-                            mid_of(n.point)
-                        ))
-                        .collect::<Vec<_>>()
-                );
-            }
-        };
         arrangement.draw_the_crossings(cuts, policy, log)?;
-        show(&arrangement, "drawn");
         arrangement.place_the_corners(policy, log)?;
         arrangement.leave_out_the_cuts_clear_of_the_face();
-        show(&arrangement, "clear");
         arrangement.place_the_meets(policy, log)?;
-        show(&arrangement, "meets");
         arrangement.place_the_touches();
         arrangement.leave_out_the_cuts_that_reach_only_the_boundary();
         arrangement.start_every_closed_crossing_that_has_no_node(log)?;
         arrangement.work_out_how_each_crossing_runs(log)?;
-        show(&arrangement, "runs");
         arrangement.merge_points_that_are_one_point(policy, log)?;
         arrangement.fold_the_straight_cuts_along_one_line();
         arrangement.cut_the_crossings_into_arcs(policy, log)?;
-        if probe {
-            eprintln!(
-                "ARCS {:?}",
-                arrangement
-                    .arcs
-                    .iter()
-                    .map(|a| (a.crossing, a.ends, a.boundary.is_some()))
-                    .collect::<Vec<_>>()
-            );
-        }
         arrangement.walk_the_cycles(policy, log)?;
         arrangement.count_the_windings_inside_each_lump();
-        if probe {
-            eprintln!(
-                "CYCLES {:?} windings {:?}",
-                arrangement.cycles, arrangement.winding_of_cycle
-            );
-        }
         arrangement.group_the_cycles_into_cells(policy, log)?;
         arrangement.count_the_windings()?;
         Ok(arrangement)
@@ -5266,7 +5167,6 @@ impl<'f> Arrangement<'f> {
                     Some(chosen) => facing[walk].push(chosen),
                     None if self.winding_of_cycle[walk] == Some(0) => (),
                     None => {
-                        eprintln!("CELLS A walk {walk} candidates {candidates:?}");
                         return Err(Error::CannotTellTheCellsOfAFaceApart {
                             face: self.face.keys[0],
                         });
@@ -5630,9 +5530,6 @@ impl<'f> Arrangement<'f> {
             [-1.0, 0.0, 0.0],
             [0.0, -1.0, 0.0],
             [0.0, 0.0, -1.0],
-            [1.0, 1.0, 0.0],
-            [0.0, 1.0, 1.0],
-            [1.0, 0.0, 1.0],
         ];
         for across in reference_planes {
             let reference = cross_of_intervals(up, across.map(Interval::exactly));
@@ -5772,7 +5669,6 @@ impl<'f> Arrangement<'f> {
             let before = lumps.len();
             lumps.dedup();
             if lumps.len() != before {
-                eprintln!("CELLS B cell {cell:?}");
                 return Err(Error::CannotTellTheCellsOfAFaceApart {
                     face: self.face.keys[0],
                 });
@@ -6970,7 +6866,6 @@ impl<'f> Arrangement<'f> {
                 None => self.winding[cell] = Some(known),
                 Some(already) if already == known => (),
                 Some(_) => {
-                    eprintln!("CELLS C");
                     return Err(Error::CannotTellTheCellsOfAFaceApart {
                         face: self.face.keys[0],
                     });
@@ -6995,7 +6890,6 @@ impl<'f> Arrangement<'f> {
                     let across = self.cell_of[self.cycle_of[half_edge ^ 1]];
                     let theirs = known + self.climb_across(half_edge);
                     if !(0..=1).contains(&theirs) {
-                        eprintln!("CELLS D");
                         return Err(Error::CannotTellTheCellsOfAFaceApart {
                             face: self.face.keys[0],
                         });
@@ -7007,7 +6901,6 @@ impl<'f> Arrangement<'f> {
                         }
                         Some(already) if already == theirs => (),
                         Some(_) => {
-                            eprintln!("CELLS E");
                             return Err(Error::CannotTellTheCellsOfAFaceApart {
                                 face: self.face.keys[0],
                             });

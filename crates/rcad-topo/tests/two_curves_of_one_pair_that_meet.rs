@@ -3,8 +3,9 @@
 //! `intersect` names two curves for some pairs of surfaces: two lines where a
 //! plane or a second pipe runs along a pipe, two circles round one axis, the
 //! two branches of a hyperbola, two loops. `place_the_meets` in
-//! `fuse/arrange.rs` puts a node where two of those curves meet for one pair
-//! only, a plane's two rulings through a cone's apex (§347.1). §347.5 listed
+//! `fuse/arrange.rs` puts a node where two of those curves meet for two pairs:
+//! a plane's two rulings through a cone's apex (§347.1), and the four half
+//! ellipses of two pipes of one radius whose axes meet (§347.9). §347.5 listed
 //! the other pairs and said no shape had been built that brought two of their
 //! curves together. This file builds each of them, as near to a meet as the
 //! kernel lets it go, and pins what happens. §347.9 has the table.
@@ -16,7 +17,10 @@
 //! what the kernel does there: `intersect` names one curve where there were
 //! two, refuses the shape by name before any arrangement, or cannot make the
 //! surface at all. The one surface with a point and no normal is a cone, at
-//! its apex, and that is the node §347.1 built.
+//! its apex, and that is the node §347.1 built. Two pipes of one radius whose
+//! axes meet are tangent at two points, and their crossing reaches them
+//! without being pushed there: that is the Steinmetz cross, which gets its
+//! nodes and is then refused by name inside the arrangement.
 //!
 //! The fuses run three rules both ways round, certified, in a model of 100 mm.
 
@@ -168,20 +172,43 @@ fn a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement() {
 /// axes meet at the origin. Their pipes cross in two ellipses, on the planes
 /// `x = z` and `x = −z`, which meet at `(0, ±1, 0)`: the Steinmetz cross.
 /// `place_the_meets` puts a node at each of the two points, with the four
-/// halves of the ellipses running into it.
+/// halves of the ellipses running into it, and one half way along each half,
+/// at `(±1, 0, ±1)`.
 ///
-/// Each bar is `4π`. What they share is the Steinmetz solid, `16r³/3`, which
-/// stays within `|x|, |z| ≤ 1`, inside both bars. The union keeps each pipe in
-/// two pieces, either side of the other bar, and the four caps; each bar less
-/// the other is two pieces, which touch at the two points.
+/// **Every fuse is refused telling the cells of a pipe apart.** Which cell
+/// a walk round a pipe is in is read off how often each walk crosses a
+/// half-plane through the axis, and every half-plane tried runs along an axis
+/// of the model: on each pipe the two meeting points and the four middles sit
+/// on all of them. Three diagonal half-planes got past it, and the union came
+/// to `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` in `assemble`, where
+/// the two pipes' gradients are parallel at `(0, ±1, 0)` and the way along an
+/// edge from there is nought; but the same three answered three fuses of a
+/// cone beside a block in `fuse_laws_over_a_cone.rs` wrongly, so they are not
+/// in.
+///
+/// The answer it should reach: each bar is `4π`. What they share is the
+/// Steinmetz solid, `16r³/3`, which stays within `|x|, |z| ≤ 1`, inside both
+/// bars. The union keeps each pipe in two pieces, either side of the other bar,
+/// and the four caps, 8 faces; what they share has 4; each bar less the other
+/// is two pieces of 3 faces, which touch at the two points.
 #[test]
-fn two_bars_of_one_radius_whose_axes_meet_cross_in_two_ellipses_and_every_fuse_answers() {
-    let shared = 16.0 / 3.0;
-    every_fuse_answers(
-        two_bars_of_one_radius_whose_axes_meet,
-        [4.0 * PI, 4.0 * PI, shared],
-        [&[8], &[4], &[3, 3], &[3, 3]],
-    );
+fn two_bars_of_one_radius_whose_axes_meet_are_refused_telling_the_cells_of_a_pipe_apart() {
+    for (rule, first_first) in six_fuses() {
+        let mut model = a_model();
+        let said = fuse(
+            &mut model,
+            two_bars_of_one_radius_whose_axes_meet,
+            rule,
+            first_first,
+        );
+        assert!(
+            matches!(
+                said,
+                Err(rcad_topo::Error::CannotTellTheCellsOfAFaceApart { .. })
+            ),
+            "{rule:?} (first first: {first_first}): {said:?}"
+        );
+    }
 }
 
 /// A bar of radius 2 up `z`, and a bar of radius 1 along `x` at `y = 1`, which
@@ -494,62 +521,6 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
         Ok(0),
         "two cones with one apex"
     );
-}
-
-#[test]
-fn probe_steinmetz_six() {
-    let up = Surface::Cylinder(
-        Cylinder::new(
-            Axis::new(Point::new(0.0, 0.0, -2.0), Vector::new(0.0, 0.0, 1.0)).expect("a"),
-            1.0,
-        )
-        .expect("p"),
-    );
-    let along = Surface::Cylinder(
-        Cylinder::new(
-            Axis::new(Point::new(-2.0, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0)).expect("a"),
-            1.0,
-        )
-        .expect("p"),
-    );
-    eprintln!(
-        "INTERSECT {:?}",
-        intersect(&up, &along, &Policy::certified(), &mut ProvenanceLog::new())
-    );
-    for (rule, first_first) in six_fuses() {
-        let mut model = a_model();
-        let said = fuse(
-            &mut model,
-            two_bars_of_one_radius_whose_axes_meet,
-            rule,
-            first_first,
-        );
-        match said {
-            Ok(solids) => {
-                let mut counted = vec![];
-                let mut measured = 0.0;
-                for solid in solids {
-                    let view = model.solid(solid).expect("s");
-                    counted.push(view.faces().count());
-                    let m = view.measure(
-                        Deflection::of(0.01).expect("d"),
-                        &Policy::certified(),
-                        &mut ProvenanceLog::new(),
-                    );
-                    match m {
-                        Ok(m) => measured += m.volume(),
-                        Err(e) => eprintln!("measure err {e:?}"),
-                    }
-                }
-                let v = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                eprintln!(
-                    "PROBE {rule:?} {first_first}: faces {counted:?} vol {measured} valid {:?}",
-                    v.err()
-                );
-            }
-            Err(e) => eprintln!("PROBE {rule:?} {first_first}: refused {e:?}"),
-        }
-    }
 }
 
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
