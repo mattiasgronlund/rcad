@@ -293,8 +293,8 @@ impl Model {
         // decides whether it is asked at all. Two of the fuse's own tests are
         // pairs whose inputs do not fit and whose answer this fuse reaches
         // exactly, and a sweep asking the question again refuses both (§87.3).
-        if the_inputs_fit_in_f64(self, arguments, tools)? {
-            assembly.check_dynamic_range(policy, log)?;
+        if let Some(inputs_reach) = the_inputs_fit_in_f64(self, arguments, tools)? {
+            assembly.check_dynamic_range(inputs_reach, policy, log)?;
         }
 
         let inherited = worst_tag_of_the_inputs(self, arguments, tools);
@@ -303,8 +303,12 @@ impl Model {
     }
 }
 
-/// Whether the inputs' own coordinates and their shortest edge fit in `f64`
-/// together.
+/// The inputs' largest coordinate, when the inputs' own coordinates and their
+/// shortest edge fit in `f64` together, and `None` when they do not.
+///
+/// [`Assembly::check_dynamic_range`] measures the answer's smallest feature
+/// against that coordinate as well as the answer's own, because the inputs
+/// stay in the caller's model beside the answer.
 ///
 /// **A fuse is answerable for what it builds, not for what it was handed.** A
 /// frame placed at `2^40` with millimetre walls is already outside
@@ -316,24 +320,27 @@ impl Model {
 /// operation touched (§4.3) — the same reason [`Assembly::commit`] sweeps a
 /// throwaway model holding only the answer rather than the caller's whole one.
 ///
-/// Chords only, on both sides, where `Model::validate` also takes the radii of
-/// curved faces. A face of the answer keeps its ancestor's surface bit for bit
-/// (§17.1), so the smallest radius in the answer is the smallest radius in the
-/// inputs: were it the smallest thing about either, both measures would come
-/// out the same and this would report the inputs as not fitting, which only
-/// ever makes the check below stand down. Leaving the radii out is therefore
-/// the stricter of the two, not a hole. A model whose radius is what puts it
-/// out of range fails `Model::validate` going in, and its caller's next
+/// Chords only, where `Model::validate` also takes the radii of curved faces.
+/// A ball, a pipe or a ring keeps its radius bit for bit in the answer (§17.1),
+/// so were one of those the smallest thing about the inputs, measuring it here
+/// would report the inputs as not fitting, which only ever makes the check
+/// stand down. Leaving those radii out is therefore the stricter of the two,
+/// not a hole. A cone's radius at a corner is not a number of its surface, and
+/// the fuse makes corners of its own: the check measures the answer's, and
+/// this leaves the inputs' out for the same reason as the others, so the
+/// stricter way round again. A model whose radius is what puts it out of
+/// range fails `Model::validate` going in, and its caller's next
 /// `Model::validate` says so again on the way out; the sweep of the throwaway
-/// answer does not, because that sweep leaves the range question to this one.
+/// answer does not, because that sweep leaves the range question to the
+/// check.
 ///
 /// # Errors
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] for an input edge whose run is a
-/// kind this crate has never seen. **This one answers `bool` and cannot say
-/// "skip me", which is why it refuses instead of guessing.** Read as an open
-/// edge, a closed run of a kind nothing here knows contributes a chord of
-/// nothing; that makes the ratio hopeless, which makes this `false`, which
+/// kind this crate has never seen. **This one answers fit or not and cannot
+/// say "skip me", which is why it refuses instead of guessing.** Read as an
+/// open edge, a closed run of a kind nothing here knows contributes a chord of
+/// nothing; that makes the ratio hopeless, which makes this `None`, which
 /// stands the *answer's* range check down and leaves [`Assembly::commit`]'s
 /// assert as the only thing between a bad answer and the model — a panic where
 /// there was a refusal to be had. Read the other way it would understate the
@@ -344,7 +351,7 @@ fn the_inputs_fit_in_f64(
     model: &Model,
     arguments: &[SolidKey],
     tools: &[SolidKey],
-) -> Result<bool> {
+) -> Result<Option<f64>> {
     let mut largest = 0.0_f64;
     let mut shortest = f64::INFINITY;
     for &solid in arguments.iter().chain(tools) {
@@ -363,10 +370,11 @@ fn the_inputs_fit_in_f64(
         }
     }
     if !shortest.is_finite() || largest == 0.0 {
-        return Ok(true);
+        return Ok(Some(largest));
     }
     Ok(DynamicRange::measure(largest, shortest)
-        .is_ok_and(|range| range.is_within_supported_range()))
+        .is_ok_and(|range| range.is_within_supported_range())
+        .then_some(largest))
 }
 
 /// The worst slop any entity of any input carries, if any of them carries one.

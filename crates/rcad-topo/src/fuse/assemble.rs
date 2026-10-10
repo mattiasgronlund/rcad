@@ -391,15 +391,17 @@ impl Assembly {
         self.corners.iter().map(|corner| corner.from)
     }
 
-    /// Refuse an answer whose own shortest edge is too small to resolve beside
-    /// its own coordinates.
+    /// Refuse an answer whose smallest feature is too small to resolve beside
+    /// its own coordinates or its inputs'.
     ///
     /// **A fuse can build a feature neither input had.** Two blocks whose faces
     /// nearly line up meet in a sliver as thin as the gap between the two
     /// planes, and that gap is whatever the two placements make it — a number
-    /// with no lower bound short of zero. Both inputs pass
-    /// `Model::check_dynamic_range` and the answer does not, so this is the one
-    /// thing the fuse writes that its inputs said nothing about.
+    /// with no lower bound short of zero. A plane that passes a rounding beyond
+    /// a cone's apex cuts the cone in an ellipse that rounding across. Both
+    /// inputs pass `Model::check_dynamic_range` and the answer does not, so
+    /// this is the one thing the fuse writes that its inputs said nothing
+    /// about.
     ///
     /// It is a **limit** and not a gap. The ratio is a length over a length, so
     /// scaling the whole answer by any power of two leaves it exactly where it
@@ -408,21 +410,39 @@ impl Assembly {
     /// by name. Nothing here can make the answer smaller, either — the sliver is
     /// where the two inputs really are.
     ///
-    /// Only the chords are measured, where `Model::check_dynamic_range` also
-    /// takes the radii of curved faces. A curved face of the answer sits on a
-    /// surface inherited from its ancestor bit for bit (§17.1), so every radius
-    /// in the answer is a radius an input already carried and was already
-    /// measured on.
+    /// **The smallest feature is the shortest chord, or the cone's radius at a
+    /// corner of a cone face**, the two `Model::check_dynamic_range` takes off
+    /// an answer. The radius of a ball, a pipe or a ring is left out: a curved
+    /// face of the answer sits on a surface inherited from its ancestor bit for
+    /// bit (§17.1), and those radii are numbers of the surface that an input
+    /// already carried. A cone's radius is not: it depends on how far up the
+    /// axis the corner sits, and the corner is the fuse's own. The ellipse
+    /// above is a closed edge, whose chord is zero, so only its radius says how
+    /// small it is (Q1562, `docs/decisions.md` §350.5). A fuse writes no pole
+    /// on a cone face, so a corner at the apex is an ordinary corner here and
+    /// in `Model::check_dynamic_range` alike, and its radius of zero is passed
+    /// over in both.
+    ///
+    /// **Measured against `inputs_reach`, the inputs' largest coordinate, as
+    /// well as the answer's own.** The inputs stay in the caller's model beside
+    /// the answer, and `Model::validate` folds over them together, so an answer
+    /// whose own range fits — the tip of that cone, cut off whole, is a rounding
+    /// across and sits a rounding from the origin — still leaves a model that
+    /// does not. This is only asked after `the_inputs_fit_in_f64` has said the
+    /// inputs fit on their own, so it refuses only a feature finer than any the
+    /// inputs could carry.
     ///
     /// # Errors
     ///
-    /// [`Invalid::DynamicRangeTooWide`] when the answer's largest coordinate
-    /// over its shortest edge is more than `f64` carries, under a policy that
-    /// fails on that. [`Error::Geometry`] when two corners of the answer with
-    /// different names landed on the very same `f64` triple, which leaves an
-    /// edge of no length at all.
+    /// [`Invalid::DynamicRangeTooWide`] when the larger of `inputs_reach` and
+    /// the answer's largest coordinate, over the answer's smallest feature, is
+    /// more than `f64` carries, under a policy that fails on that.
+    /// [`Error::Geometry`] when two corners of the answer with different names
+    /// landed on the very same `f64` triple, which leaves an edge of no length
+    /// at all.
     pub(crate) fn check_dynamic_range(
         &self,
+        inputs_reach: f64,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
@@ -430,11 +450,11 @@ impl Assembly {
             .corners
             .iter()
             .map(|corner| corner.point.largest_coordinate_magnitude())
-            .fold(0.0, f64::max);
+            .fold(inputs_reach, f64::max);
         // A closed edge has one corner and a chord of zero, and that is not how
         // small it is — the same reasoning, and the same skip, as
         // `Model::check_dynamic_range`.
-        let shortest = self
+        let shortest_chord = self
             .edges
             .iter()
             .filter(|edge| edge.ends[0] != edge.ends[1])
@@ -445,6 +465,7 @@ impl Assembly {
                 )
             })
             .fold(f64::INFINITY, f64::min);
+        let shortest = shortest_chord.min(self.narrowest_a_cone_face_is_at_a_corner());
         if !shortest.is_finite() || largest == 0.0 {
             return Ok(());
         }
@@ -461,6 +482,29 @@ impl Assembly {
             }
             Err(other) => Err(other.into()),
         }
+    }
+
+    /// The smallest radius above zero any cone face of the answer has at one
+    /// of its corners, read as `Model::check_dynamic_range` reads it: the
+    /// distance up the axis from the apex, times the slope. Infinite when no
+    /// cone face has a corner off the apex.
+    fn narrowest_a_cone_face_is_at_a_corner(&self) -> f64 {
+        self.faces
+            .iter()
+            .filter_map(|face| match face.surface {
+                Surface::Cone(cone) => Some((face, cone)),
+                _ => None,
+            })
+            .flat_map(|(face, cone)| {
+                face.wires.iter().flatten().flat_map(move |side| {
+                    self.edges[side.edge].ends.map(|corner| {
+                        let up = cone.axis().direction();
+                        cone.radius_at(up.dot(self.corners[corner].point - cone.apex()))
+                    })
+                })
+            })
+            .filter(|radius| *radius > 0.0)
+            .fold(f64::INFINITY, f64::min)
     }
 
     /// Build the answer twice: once in a throwaway model, to find out whether it
