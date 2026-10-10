@@ -1,35 +1,339 @@
 //! A mitre `ELLIPSE` whose centre the file writes off one of its two pipes
 //! is named by its pipes, and its sibling whose centre is on both keeps its
 //! plane.
+//!
+//! `Fuseholder_Cylinder-5x20mm_Schurter_0031_8201_Horizontal_Open.step` bends
+//! eight pipes of radius `0.4` through `45°`, each where an upright pipe meets
+//! a leaning one in a `22.5°` mitre written `0.432956880117, 0.4`. Four of the
+//! eight (`#338`, `#2313`, `#2331`, `#3043`) put the mitre's centre
+//! `(±5e-13, 0, −5e-13)` off the leaning pipe's axis, because the file writes
+//! the centre's two offsets from that axis's origin as `0.117157287526` and
+//! `0.117157287525` (or `1.168556998188` and `1.168556998189`), which a
+//! `45°` axis wants equal. That is `√2·5e-13` off, `193` or `284` roundings
+//! of the largest number, where the reader allows `16`, so the reader turns
+//! the ellipse away and names the run by its two pipes. The other four, whose
+//! centre has a short decimal for its `x` (`22.1` or `0.4`), are on both
+//! axes, and keep their ellipse.
+//!
+//! These are limits and not gaps (`docs/decisions.md` §16.10, §335.4): taking
+//! the plane another way, through where the two axes meet, gives an ellipse on
+//! both pipes, but the file ends each of the four edges at a corner it puts
+//! `1.68e-13` inside the leaning pipe, certified, and no curve on that pipe
+//! runs through it.
+//!
+//! The two pins hold each side: widening the reader's allowance far enough to
+//! keep `#338`'s ellipse fails the first, and narrowing it so `#1769` loses
+//! its own fails the second.
 
 mod written_by_hand;
 
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_step::{Import, StepFile};
+use std::f64::consts::SQRT_2;
+
+use rcad_geom::{Axis, Cylinder, Deflection, EdgeRun, Point, Surface, Vector};
+use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
+use rcad_step::{Import, Refusal, StepFile};
+use rcad_topo::{Error, Invalid};
 use written_by_hand::a_header;
 
+/// `#338`'s mitre, its two pipes and a disc closing each, in the file's own
+/// decimals. Its centre is `√2·5e-13` off the leaning pipe's axis, so the
+/// ellipse is not on that pipe to what `f64` can tell, and the run is named
+/// by the two pipes. Two pipes of one radius whose axes meet cross in two
+/// ellipses, and the loop the reader then walks round the mitre goes against
+/// the pipe it lies on.
 #[test]
-fn probe_338() {
+fn a_mitre_whose_centre_is_off_its_leaning_pipe_is_named_by_its_pipes() {
     let text = an_elbow(&MITRE_338);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
-    let got = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new());
-    match got {
-        Ok(import) => println!("338 imports: {:?}", import.solids().len()),
-        Err(refused) => println!("338 refused: {refused:?}"),
-    }
+    let refused = match Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) {
+        Ok(_) => panic!(
+            "#338's mitre is centred 193 roundings off its leaning pipe's axis, and was read \
+             as the curve its plane cuts"
+        ),
+        Err(refused) => refused,
+    };
+    assert!(
+        matches!(
+            &refused,
+            Refusal::TheSolidTheFileDescribesIsNotOne { why, .. }
+                if matches!(**why, Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface))
+        ),
+        "a mitre named by its two pipes is walked against the pipe it lies on, not {refused:?}"
+    );
 }
 
+/// `#1769`'s mitre, the same bend turned the other way at `x = 22.1`. Its
+/// centre is on both axes, so the ellipse is checked onto both pipes and the
+/// run is named by its own plane.
 #[test]
-fn probe_1769() {
+fn a_mitre_whose_centre_is_on_both_pipes_is_named_by_its_plane() {
     let text = an_elbow(&MITRE_1769);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
-    let got = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new());
-    match got {
-        Ok(import) => println!("1769 imports: {:?}", import.solids().len()),
-        Err(refused) => println!("1769 refused: {refused:?}"),
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let import = match Import::read(&file, &policy, &mut log) {
+        Ok(import) => import,
+        Err(refused) => {
+            panic!("#1769's elbow, its mitre centred on both pipes, is refused: {refused:?}")
+        }
+    };
+    let [(_, elbow)] = import.solids() else {
+        panic!("one MANIFOLD_SOLID_BREP is one solid");
+    };
+    let model = import.model();
+    let solid = model.solid(*elbow).expect("this model made the key");
+    let corner = [22.1, 4.8, 10.048600289336];
+    let normal = Vector::new(-0.382683432365, 0.0, 0.923879532511);
+    let upright =
+        Axis::as_written(Point::new(22.1, 4.4, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis");
+    let leaning = Axis::as_written(
+        Point::new(20.931443001811, 4.4, 11.217157287525),
+        Vector::new(0.707106781187, 0.0, -0.707106781187),
+    )
+    .expect("an axis");
+
+    let mut mitre = None;
+    for face in solid.faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                let edge = coedge.edge();
+                if edge.start().key() != edge.end().key()
+                    || edge.start().point().coordinates() != corner
+                {
+                    continue;
+                }
+                mitre = Some(edge.key());
+                let EdgeRun::RightRoundWhereItCrosses { and } = edge.run() else {
+                    panic!(
+                        "the mitre has been checked to lie on both pipes, so it is named by \
+                         the surface the file draws it on; it says {:?}",
+                        edge.run()
+                    );
+                };
+                let Surface::Plane(flat) = and else {
+                    panic!("a mitre between two pipes is named by its own plane, not {and:?}");
+                };
+                assert!(
+                    flat.normal().cross(normal).length() < 1e-14,
+                    "the plane is the mitre's own, not one square to {:?}",
+                    flat.normal()
+                );
+                assert!(
+                    flat.signed_distance_to(Point::new(22.1, 4.4, 10.048600289336))
+                        .abs()
+                        < 1e-14,
+                    "the plane runs through the mitre's centre"
+                );
+            }
+        }
+    }
+    let mitre = mitre.expect("the elbow has a closed mitre between its two pipes");
+
+    model
+        .validate(&policy, &mut log)
+        .expect("the model the reader built passes the full sweep");
+    let mesh = solid
+        .mesh(Deflection::of(0.001).expect("a length"), &policy, &mut log)
+        .expect("the elbow meshes");
+    let allowed = mesh.deviation().magnitude();
+    let along = mesh.points_along_edge(mitre);
+    assert!(
+        along.len() > 8,
+        "a whole mitre round a pipe of radius 0.4 at a thousandth came back with {} points",
+        along.len()
+    );
+    for &at in along {
+        let point = Point::from(mesh.points()[at as usize].coordinates());
+        let off_the_upright = (upright.distance_to_point(point) - 0.4).abs();
+        let off_the_leaning = (leaning.distance_to_point(point) - 0.4).abs();
+        assert!(
+            off_the_upright.max(off_the_leaning) <= allowed,
+            "{point:?} is {off_the_upright} off the upright pipe and {off_the_leaning} off the \
+             leaning one, past the published {allowed}"
+        );
     }
 }
 
+/// The figures `docs/decisions.md` §335.4 publishes for the eight mitres,
+/// worked out as the reader works them out: the leaning pipe built as
+/// `geometry.rs` builds a `CYLINDRICAL_SURFACE`, the centre's distance from
+/// its axis as `how_far_off_the_ellipse_can_be` takes it, in roundings of the
+/// largest coordinate of the centre and the axis's origin, and the end
+/// corner's side of the pipe and distance off it as
+/// `a_corner_provably_off_a_curved_face` takes them.
+///
+/// The four the file writes off the axis are `√2·5e-13` off it worked out
+/// exactly, and the kernel's `f64` lands within `0.4` roundings of that. The
+/// four on both axes are `0` off. Each band is the measured figure to its
+/// second decimal.
+#[test]
+fn how_far_the_file_writes_each_mitre_off_its_leaning_pipe() {
+    for mitre in &THE_EIGHT_MITRES {
+        let pipe = Axis::as_written(
+            Point::from(mitre.leaning_origin),
+            Vector::from(mitre.leaning_direction),
+        )
+        .and_then(|axis| Cylinder::new(axis, 0.4))
+        .expect("the file's leaning pipe is a pipe");
+        let centre = Point::from(mitre.centre);
+        let q = pipe.axis().distance_to_point(centre);
+        let rounding = f64::EPSILON
+            * centre
+                .largest_coordinate_magnitude()
+                .max(pipe.axis().origin().largest_coordinate_magnitude());
+        let roundings = q / rounding;
+        let from_exact = (q - mitre.q_exactly) / rounding;
+        let corner = Point::from(mitre.end_corner);
+        let side = pipe.side_of(corner.into());
+        let (round, along) = pipe.coordinates_of(corner);
+        let off = pipe.point_at(round, along).distance_to(corner);
+        let spacings = off / (corner.largest_coordinate_magnitude() * f64::EPSILON);
+        println!(
+            "{}: q {q:.4e}, {roundings:.2} roundings, {from_exact:+.2} from exact; end corner \
+             {side:?}, {off:.4e} off, {spacings:.2} spacings",
+            mitre.edge
+        );
+
+        let [low, high] = mitre.roundings_between;
+        assert!(
+            (low..=high).contains(&roundings),
+            "{}'s centre is {roundings} roundings off its leaning pipe's axis, not {low} to \
+             {high}",
+            mitre.edge
+        );
+        assert!(
+            from_exact.abs() <= 0.4,
+            "{}'s centre is {q} off its leaning pipe's axis in f64, {from_exact} roundings from \
+             the exact {}",
+            mitre.edge,
+            mitre.q_exactly
+        );
+        assert_eq!(
+            side, mitre.end_corner_side,
+            "{}'s end corner is not on the side of its leaning pipe it was measured on",
+            mitre.edge
+        );
+        let [low, high] = mitre.end_corner_spacings_between;
+        assert!(
+            (low..=high).contains(&spacings),
+            "{}'s end corner is {spacings} spacings off its leaning pipe, not {low} to {high}",
+            mitre.edge
+        );
+    }
+}
+
+/// A mitre as the file writes it: the ellipse's centre, the leaning pipe of
+/// radius `0.4` it is drawn on, and the corner at the edge's end across the
+/// pipe from where both seams meet; then what was measured of it.
+struct AMitre {
+    edge: &'static str,
+    centre: [f64; 3],
+    leaning_origin: [f64; 3],
+    leaning_direction: [f64; 3],
+    end_corner: [f64; 3],
+    q_exactly: f64,
+    roundings_between: [f64; 2],
+    end_corner_side: Decision,
+    end_corner_spacings_between: [f64; 2],
+}
+
+const UP_AND_ON: [f64; 3] = [0.707106781187, 0.0, 0.707106781187];
+const DOWN_AND_ON: [f64; 3] = [0.707106781187, 0.0, -0.707106781187];
+const OFF_BY_HALF_A_DIGIT_EACH_WAY: f64 = 5e-13 * SQRT_2;
+
+const THE_EIGHT_MITRES: [AMitre; 8] = [
+    AMitre {
+        edge: "#338",
+        centre: [16.471428571429, 4.4, 10.048600289336],
+        leaning_origin: [16.354271283903, 4.4, 9.931443001811],
+        leaning_direction: UP_AND_ON,
+        end_corner: [16.071428571429, 4.4, 10.214285714286],
+        q_exactly: OFF_BY_HALF_A_DIGIT_EACH_WAY,
+        roundings_between: [193.69, 193.71],
+        end_corner_side: Decision::Neg,
+        end_corner_spacings_between: [46.81, 46.82],
+    },
+    AMitre {
+        edge: "#2313",
+        centre: [16.471428571429, -4.4, 10.048600289336],
+        leaning_origin: [16.354271283903, -4.4, 9.931443001811],
+        leaning_direction: UP_AND_ON,
+        end_corner: [16.071428571429, -4.4, 10.214285714286],
+        q_exactly: OFF_BY_HALF_A_DIGIT_EACH_WAY,
+        roundings_between: [193.69, 193.71],
+        end_corner_side: Decision::Neg,
+        end_corner_spacings_between: [46.81, 46.82],
+    },
+    AMitre {
+        edge: "#2331",
+        centre: [6.028571428571, -4.4, 10.048600289336],
+        leaning_origin: [4.860014430383, -4.4, 11.217157287525],
+        leaning_direction: DOWN_AND_ON,
+        end_corner: [6.428571428571, -4.4, 10.214285714286],
+        q_exactly: OFF_BY_HALF_A_DIGIT_EACH_WAY,
+        roundings_between: [283.66, 283.68],
+        end_corner_side: Decision::Neg,
+        end_corner_spacings_between: [74.48, 74.49],
+    },
+    AMitre {
+        edge: "#3043",
+        centre: [6.028571428571, 4.4, 10.048600289336],
+        leaning_origin: [4.860014430383, 4.4, 11.217157287525],
+        leaning_direction: DOWN_AND_ON,
+        end_corner: [6.428571428571, 4.4, 10.214285714286],
+        q_exactly: OFF_BY_HALF_A_DIGIT_EACH_WAY,
+        roundings_between: [283.66, 283.68],
+        end_corner_side: Decision::Neg,
+        end_corner_spacings_between: [74.48, 74.49],
+    },
+    AMitre {
+        edge: "#1769",
+        centre: [22.1, 4.4, 10.048600289336],
+        leaning_origin: [20.931443001811, 4.4, 11.217157287525],
+        leaning_direction: DOWN_AND_ON,
+        end_corner: [22.5, 4.4, 10.214285714286],
+        q_exactly: 0.0,
+        roundings_between: [0.0, 0.0],
+        end_corner_side: Decision::Pos,
+        end_corner_spacings_between: [107.60, 107.61],
+    },
+    AMitre {
+        edge: "#2216",
+        centre: [22.1, -4.4, 10.048600289336],
+        leaning_origin: [20.931443001811, -4.4, 11.217157287525],
+        leaning_direction: DOWN_AND_ON,
+        end_corner: [22.5, -4.4, 10.214285714286],
+        q_exactly: 0.0,
+        roundings_between: [0.0, 0.0],
+        end_corner_side: Decision::Pos,
+        end_corner_spacings_between: [107.60, 107.61],
+    },
+    AMitre {
+        edge: "#2523",
+        centre: [0.4, -4.4, 10.048600289336],
+        leaning_origin: [0.282842712475, -4.4, 9.931443001811],
+        leaning_direction: UP_AND_ON,
+        end_corner: [0.0, -4.4, 10.214285714286],
+        q_exactly: 0.0,
+        roundings_between: [0.0, 0.0],
+        end_corner_side: Decision::Pos,
+        end_corner_spacings_between: [237.89, 237.90],
+    },
+    AMitre {
+        edge: "#2960",
+        centre: [0.4, 4.4, 10.048600289336],
+        leaning_origin: [0.282842712475, 4.4, 9.931443001811],
+        leaning_direction: UP_AND_ON,
+        end_corner: [0.0, 4.4, 10.214285714286],
+        q_exactly: 0.0,
+        roundings_between: [0.0, 0.0],
+        end_corner_side: Decision::Pos,
+        end_corner_spacings_between: [237.89, 237.90],
+    },
+];
+
+/// One bend as the file writes it, in the file's decimals but for the far
+/// disc, which is this test's own.
 struct ABend {
     upright_origin: &'static str,
     upright_reference: &'static str,
@@ -84,6 +388,11 @@ const MITRE_1769: ABend = ABend {
     far_centre: "(21.1,4.4,11.048600289336)",
 };
 
+/// An upright pipe closed by a disc at `z = 1`, a leaning pipe closed by a
+/// disc one unit on along its axis, and between them one closed `ELLIPSE`
+/// whose single corner is on the `y = 4.8` side, where both seams meet. That
+/// corner is on both pipes, so the centre is the one number in the elbow that
+/// can put the mitre off a pipe.
 fn an_elbow(bend: &ABend) -> String {
     let mut text = a_header(".MILLI.");
     text += "#20=DIRECTION('',(0.E+000,0.E+000,1.));\n";
