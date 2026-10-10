@@ -309,6 +309,78 @@ fn united(configuration: &Configuration) -> Totals {
     Totals::of(&model, &solids)
 }
 
+/// The pair Q478's soak found, pinned: a `2 x 2 x 1` block at the origin and a
+/// `1 x 1 x 3` one standing through its corner, `[0, 1] x [0, 1] x [-2, 1]`,
+/// turned together by `TAU * 19 / 64` about `(0, -2, -1)`.
+///
+/// Turning keeps volume, so each rule both ways round has a volume worked by
+/// hand: the union 6, the shared unit cube 1, the flat block less the tall one
+/// 3 and the tall one less the flat one 2. Every corner of either block is
+/// within 3 of the origin, and so is every corner of the answer, turned or not,
+/// which is the `largest` the bound is worked from.
+#[test]
+fn a_tall_block_through_the_corner_of_a_flat_one_turned_fuses_to_the_volumes_worked_by_hand() {
+    let configuration = a_tall_block_through_the_corner_of_a_flat_one(Some(Turn {
+        direction: [0, -2, -1],
+        steps: 19,
+    }));
+    let largest = 3.0;
+    for (rule, flat_first, tall_first) in [
+        (Rule::Union, 6.0, 6.0),
+        (Rule::Intersection, 1.0, 1.0),
+        (Rule::Difference, 3.0, 2.0),
+    ] {
+        for (first, second, worked_by_hand) in [(0, 1, flat_first), (1, 0, tall_first)] {
+            let (mut model, keys) = configuration.build();
+            let solids = model
+                .fuse(
+                    &[keys[first]],
+                    &[keys[second]],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{rule:?} with solid {first} first: {why}"))
+                .solids()
+                .to_vec();
+            let answer = Totals::of(&model, &solids);
+            let allowed = how_far_the_volume_may_move(
+                answer.triangles,
+                Isometry::POINT_ROUNDOFF * largest,
+                largest,
+            );
+            assert!(
+                (answer.volume - worked_by_hand).abs() <= allowed,
+                "{rule:?} with solid {first} first has volume {}, not {worked_by_hand} \
+                 to within {allowed}",
+                answer.volume
+            );
+        }
+    }
+}
+
+/// The two blocks of the case above, optionally turned.
+fn a_tall_block_through_the_corner_of_a_flat_one(turn: Option<Turn>) -> Configuration {
+    Configuration {
+        solids: vec![
+            Placed {
+                shape: Shape::Block { width: 2, depth: 2 },
+                skew: Skew::none(),
+                height: 1,
+                at: [0, 0, 0],
+            },
+            Placed {
+                shape: Shape::Block { width: 1, depth: 1 },
+                skew: Skew::none(),
+                height: 3,
+                at: [0, 0, -2],
+            },
+        ],
+        turn,
+        elsewhere: Elsewhere::here(),
+    }
+}
+
 /// [`CASES`], multiplied by whatever [`SOAK_FACTOR`] says.
 ///
 /// # Panics
