@@ -626,7 +626,10 @@ between "cannot" and "we chose not to", which §24.17 is about.
 > lies in the planes `p·(a − b) = 0` and `p·(a + b) = 0`, and each plane cuts
 > both pipes in the same ellipse. What they do need is a name for two curves of
 > one pair that cross each other, and a node where they do (§347.9). Q1603,
-> filed as Q1558 by §347.9, builds that and answers the Steinmetz cross. The
+> filed as Q1558 by §347.9, builds that and answers the Steinmetz cross.
+> *Since Q1611 (2026-10-10) the cross is named and gets its nodes, but every
+> fuse of it is still refused `CannotTellTheCellsOfAFaceApart`, inside the
+> arrangement; §347.9's last note says why.* The
 > other two shapes stay as this row has them: a ball reaching exactly across a
 > pipe (Q1559), and a pipe resting on the inside of a wider one. Each crosses
 > in a quartic through a point where the two surfaces are tangent, which needs

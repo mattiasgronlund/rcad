@@ -20,8 +20,9 @@
 //! printed. They are exactly the two configurations a rounding of the inputs can
 //! move across:
 //!
-//! - **a tangency** — a plane resting on a ball, or two balls resting on each
-//!   other — where the discriminant is exactly zero; and
+//! - **a tangency** — a plane resting on a ball, two balls resting on each
+//!   other, or two pipes of one width whose axes meet, whose walls touch at two
+//!   points — where the discriminant is exactly zero; and
 //! - **two directions exactly square or exactly parallel**: a plane along a
 //!   pipe's axis, or two parallel planes. The pipe one is the surprise. A plane
 //!   *not* parallel to an endless pipe always cuts it in an ellipse, however far
@@ -51,8 +52,9 @@
 //! ranges over rather than by reading the property — which is the whole of
 //! §16.10's method (§30).
 //!
-//! Measured: **1486 of 2048 planar pairs compared and 564 skipped, 1621 of 2048
-//! quartic pairs compared and 429 skipped.**
+//! Measured: **1486 of 2048 planar pairs compared and 564 skipped, 1612 of 2048
+//! quartic pairs compared and 438 skipped**, 10 of those 438 two pipes of one
+//! width whose axes meet (§347.9).
 
 #![forbid(unsafe_code)]
 
@@ -63,8 +65,11 @@ use std::cell::Cell;
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence, TestRunner};
-use rcad_geom::{Error, Surface, SurfaceMeet, intersect};
-use rcad_predicates::expansion::{expansion_sign, expansion_sum, two_product};
+use rcad_geom::{Cylinder, Error, Surface, SurfaceMeet, intersect};
+use rcad_predicates::expansion::{
+    difference_of_two_products, expansion_sign, expansion_sum, scale_expansion, two_diff,
+    two_product,
+};
 use rcad_predicates::{Decision, Policy, ProvenanceLog};
 
 use crossings::{Crossing, Elsewhere, Piece, Turn, a_lattice_crossing, a_quartic_lattice_crossing};
@@ -103,8 +108,8 @@ const MOST_PLANAR_PAIRS_MUST_BE_COMPARED: f64 = 0.6;
 /// Half. The generator draws radii up to five and places them up to six apart in
 /// whole numbers, so a lattice pipe pair is exactly tangent surprisingly often —
 /// five apart with radii of two and three is one — and every one of those is a
-/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1621 of
-/// 2048 compared, 429 skipped.
+/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1612 of
+/// 2048 compared, 438 skipped.
 const MOST_QUARTIC_PAIRS_MUST_BE_COMPARED: f64 = 0.5;
 
 /// The four pairs whose crossing lies in a plane.
@@ -128,14 +133,82 @@ fn turning_a_pair_of_surfaces_names_the_same_kind_of_crossing() {
 ///
 /// The quartic pairs have one knife edge the planar ones do not: a crossing that
 /// **runs through itself** is two surfaces tangent at a point of the curve, so a
-/// turn moves it off exactly as it moves a tangency off. It is refused by name
-/// rather than answered, so it is skipped by [`named`] alongside the other
-/// refusals.
+/// turn moves it off exactly as it moves a tangency off. Two pipes of one width
+/// whose axes meet are named, as four half ellipses, and skipped by
+/// [`is_on_a_knife_edge`] (see
+/// [`two_pipes_of_one_width_whose_axes_meet_cross_in_one_curve_once_a_turn_parts_the_axes`]).
+/// The rest — a ball and a pipe, or two pipes of two widths, tangent at a point
+/// of their crossing — are still refused by name rather than answered, so they
+/// are skipped by [`named`] alongside the other refusals.
 #[test]
 fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
     the_same_kind_before_and_after(
         a_quartic_lattice_crossing().boxed(),
         MOST_QUARTIC_PAIRS_MUST_BE_COMPARED,
+    );
+}
+
+/// Why the four half ellipses of two pipes of one width whose axes meet are a
+/// knife edge and the one curve the same pair turned is named is not a wrong
+/// answer.
+///
+/// The pair is the one the quartic property above first drew when the four
+/// halves were named: pipes of radius 3 along `y` through `(6, 0, 0)` and up
+/// `z` through `(6, 0, 1)`, whose axes meet at `(6, 0, 0)`, turned one step
+/// about `y`. The turn rounds both stored axes, and the turned axes miss each
+/// other. Two pipes of one width whose axes miss by any distance short of two
+/// radii each bite into the other, and neither takes the other's whole
+/// cross-section, so they cross in one closed curve; that is what is named.
+#[test]
+fn two_pipes_of_one_width_whose_axes_meet_cross_in_one_curve_once_a_turn_parts_the_axes() {
+    let meeting = Crossing {
+        first: Piece::Pipe {
+            along: [0, 1, 0],
+            through: [6, 0, 0],
+            radius: 3,
+        },
+        second: Piece::Pipe {
+            along: [0, 0, 1],
+            through: [6, 0, 1],
+            radius: 3,
+        },
+        turn: None,
+        elsewhere: Elsewhere::here(),
+        hair: None,
+    };
+    let turned = Crossing {
+        turn: Some(Turn {
+            direction: [0, 1, 0],
+            steps: 1,
+        }),
+        ..meeting
+    };
+
+    let still = meeting.surfaces();
+    assert_eq!(
+        kind_of(&named(&still).expect("two pipes of one width whose axes meet are named")),
+        ("curves", 4),
+        "two ellipses, each cut in two where the walls touch"
+    );
+    assert!(is_on_a_knife_edge(&still), "and that is a knife edge");
+
+    let moved = turned.surfaces();
+    let [Surface::Cylinder(one), Surface::Cylinder(other)] = moved else {
+        panic!("this pair is two pipes");
+    };
+    assert_eq!(
+        one.radius(),
+        other.radius(),
+        "a turn leaves both radii alone"
+    );
+    assert!(
+        !the_axes_meet_exactly(&one, &other),
+        "the turn rounds the two axes apart"
+    );
+    assert_eq!(
+        kind_of(&named(&moved).expect("the turned pair is named")),
+        ("curves", 1),
+        "two pipes of one width whose axes miss cross in one curve"
     );
 }
 
@@ -159,7 +232,7 @@ fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
 ///
 /// This counts that sign over the sixty-three turns below, in exact arithmetic
 /// because the answer is a handful of last bits from zero. **Measured: two
-/// circles 48 times, nothing at all 15 times, and the truthful answer not
+/// circles 24 times, nothing at all 39 times, and the truthful answer not
 /// once.** The two turns the old assertion named are pinned inside the loop, so
 /// what is counted is the rule that really ran and not a rule that resembles it.
 #[test]
@@ -388,13 +461,56 @@ fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
         // that into two closed loops, so this is the quartic family's version of
         // the plane-and-pipe surprise above.
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
-            one.axis()
+            let down_one_direction = one
+                .axis()
                 .direction()
                 .cross(other.axis().direction())
                 .length_squared()
-                == 0.0
+                == 0.0;
+            down_one_direction
+                || (one.radius() == other.radius() && the_axes_meet_exactly(one, other))
         }
         _ => false,
+    }
+}
+
+/// Whether the two stored axes meet, asked exactly: `(o₂ − o₁)·(d₁ × d₂)` is
+/// nothing.
+///
+/// **Two pipes of one width whose axes meet are a tangency**: their walls
+/// touch at the two places the four half ellipses meet. The distance between
+/// the axes is the whole of the difference between that and one curve, and a
+/// turn rounds both axes, so a turned pair's distance is a few last bits from
+/// nothing on one side or the other — and on either side it is one curve,
+/// because two pipes of one width whose axes miss each bite into the other
+/// and neither takes the other's whole cross-section. So this is asked
+/// exactly, and of nothing wider than the pair that names four halves.
+///
+/// # Panics
+///
+/// If a product leaves the range of `f64`, which no pair drawn here comes near.
+fn the_axes_meet_exactly(one: &Cylinder, other: &Cylinder) -> bool {
+    let [from, to] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
+    let [a, b] = [one, other].map(|pipe| pipe.axis().direction().components());
+    let mut total = Vec::new();
+    for axis in 0..3 {
+        let (next, last) = ((axis + 1) % 3, (axis + 2) % 3);
+        let (across, across_used) = difference_of_two_products(a[next], b[last], a[last], b[next])
+            .expect("a stored direction's products are exact");
+        let (gap, roundoff) = two_diff(to[axis], from[axis]);
+        for part in [roundoff, gap] {
+            let mut scaled = [0.0; 8];
+            let scaled_used = scale_expansion(&across[..across_used], part, &mut scaled);
+            let mut summed = vec![0.0; total.len() + scaled_used];
+            let summed_used = expansion_sum(&total, &scaled[..scaled_used], &mut summed);
+            summed.truncate(summed_used);
+            total = summed;
+        }
+    }
+    match expansion_sign(&total) {
+        Decision::Zero => true,
+        Decision::Pos | Decision::Neg => false,
+        Decision::Undecidable { .. } | _ => panic!("a sum of exact products has a sign"),
     }
 }
 

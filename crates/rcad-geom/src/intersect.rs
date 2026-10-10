@@ -1730,8 +1730,12 @@ fn where_two_leaning_pipes_cross(
 
     // r₂ − r₁ − δ. Above zero the second pipe takes the whole of the first's
     // cross-section and what is left is two loops.
+    // Zero with the two widths equal is `δ` zero: the axes meet.
     match ask(&reach(-1.0, 1.0, -1.0), Measures::Length, &at, policy, log)? {
         Decision::Pos => return two_loops_either_side_of_a_pipe(one, other),
+        Decision::Zero if one.radius() == other.radius() => {
+            return four_half_ellipses_where_two_pipes_of_one_width_meet(one, other);
+        }
         Decision::Zero => return Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo),
         Decision::Neg => (),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
@@ -1747,6 +1751,113 @@ fn where_two_leaning_pipes_cross(
         Decision::Neg => two_loops_either_side_of_a_pipe(other, one),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
+}
+
+/// Two pipes of one width whose axes meet: two ellipses that cross each other
+/// at two points, named as four halves.
+///
+/// # Why four halves and not two ellipses
+///
+/// With `ê` and `û` the two unit directions and `c` where the axes meet, a point
+/// on both pipes has `(p − c)·(û − ê) = 0` or `(p − c)·(û + ê) = 0`
+/// (`where_two_equal_pipes_on_crossing_axes_cut` in `walk.rs`), so the crossing
+/// is the two ellipses those planes cut. Both pass through `c ± r·n̂`, with `n̂`
+/// along `ê × û`, where the two walls touch. That is where the two curves cross,
+/// and it is where a fuse has to put a node: so each ellipse is cut there, and
+/// each half runs from one of the two points to the other.
+///
+/// # What picks a half
+///
+/// The flat surfaces through `c` facing `ê` and facing `û`. Along the ellipse in
+/// the plane square to `û − ê`, a point is `c + cos θ·a·(û + ê)/‖û + ê‖ + sin θ·r·n̂`,
+/// which reads `cos θ·a·(1 + û·ê)/‖û + ê‖` against both `ê` and `û`. Against the
+/// other ellipse, along `û − ê`, it reads `cos θ·a·(û·ê − 1)/‖û − ê‖` against
+/// `ê` and minus that against `û`. With the axes not parallel `|û·ê| < 1`, so
+/// each half is strictly inside one corner of the two surfaces but at its two
+/// ends, and the four halves are in four different corners: `(+, +)` and
+/// `(−, −)` for the first, `(−, +)` and `(+, −)` for the second. A picker is
+/// closed, so a corner holds its own half and the two points where they all
+/// meet. No sign is asked of a direction, because none is in doubt.
+///
+/// What has to be exact is that both surfaces pass **exactly** through the
+/// points where the halves meet, or a corner holds a stub of a second half. That
+/// is two things: `c` is where the two axes meet, asked exactly of each axis,
+/// and each surface passes exactly through `c`. Then `c ± r·n̂` is on both,
+/// because `n̂` is square to both stored directions.
+///
+/// **The pair is sorted first**, as the walk sorts it, so `c` is worked out the
+/// same way whichever way round the caller wrote the two.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when `c`, worked out in
+/// `f64`, is not exactly on both axes or either surface does not pass exactly
+/// through it, and whatever [`HalfSpace::through_a_point_facing`] refuses. A
+/// **gap** (§16.10): the four halves are there and four corners apart, and what
+/// runs out is a point in `f64` that is exactly where the axes meet.
+fn four_half_ellipses_where_two_pipes_of_one_width_meet(
+    one: &Cylinder,
+    other: &Cylinder,
+) -> Result<SurfaceMeet> {
+    let (first, second) = if Surface::Cylinder(*one)
+        .how_it_sorts_against(&Surface::Cylinder(*other))
+        == Ordering::Greater
+    {
+        (other, one)
+    } else {
+        (one, other)
+    };
+    let middle = crate::walk::where_two_axes_meet(first, second);
+    if !(middle.is_finite()
+        && [first, second]
+            .iter()
+            .all(|pipe| it_lies_exactly_on_the_axis(middle, pipe)))
+    {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    }
+    let surfaces = [
+        HalfSpace::through_a_point_facing(middle, first.axis().direction())?,
+        HalfSpace::through_a_point_facing(middle, second.axis().direction())?,
+    ];
+    if !surfaces
+        .iter()
+        .all(|surface| it_passes_exactly_through(surface, middle))
+    {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    }
+
+    let and = Surface::Cylinder(*other);
+    let corners = [[true, true], [false, false], [false, true], [true, false]];
+    Ok(SurfaceMeet::Curves(
+        corners
+            .into_iter()
+            .map(|corner| {
+                let [mine, theirs] = [0, 1].map(|which| {
+                    if corner[which] {
+                        surfaces[which]
+                    } else {
+                        surfaces[which].reversed()
+                    }
+                });
+                NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+                    and,
+                    picked_by: smallvec![Picker::from(mine), Picker::from(theirs)],
+                })
+                .expect("picked_by always holds the two half-spaces just built")
+            })
+            .collect(),
+    ))
+}
+
+/// Whether `point` is on the endless line of `pipe`'s axis, asked exactly:
+/// `(point − origin) × direction` is nothing in every component.
+fn it_lies_exactly_on_the_axis(point: Point, pipe: &Cylinder) -> bool {
+    let off = Exact::gap_between(pipe.axis().origin().coordinates(), point.coordinates());
+    Exact::cross_of(&off, pipe.axis().direction().components()).is_some_and(|sideways| {
+        sideways
+            .iter()
+            .all(|component| component.sign() == Decision::Zero)
+    })
 }
 
 /// Two closed loops of a leaning-pipe crossing, told apart by the plane through
@@ -6064,19 +6175,48 @@ mod tests {
     }
 
     /// Two pipes of the same thickness whose axes meet leave two ellipses that
-    /// cross each other twice, and that is the same curve-through-itself the
-    /// ball-and-pipe row refuses.
+    /// cross each other twice, and they are named as four halves, each held by
+    /// one corner of two flat surfaces through where the axes meet.
+    ///
+    /// Pipes of radius two up `z` and along `x` cross in the planes `x = z` and
+    /// `x = −z`. The middle of each half, `(±2, 0, ±2)`, is held by one run's
+    /// pickers and no other's, and the two points where the walls touch,
+    /// `(0, ±2, 0)`, by all four.
     #[test]
-    fn two_leaning_pipes_of_the_same_thickness_whose_axes_meet_cross_in_a_curve_with_no_name() {
-        assert_eq!(
-            intersect(
-                &a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0),
-                &a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 2.0),
-                &Policy::certified(),
-                &mut ProvenanceLog::new()
-            ),
-            Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
-        );
+    fn two_leaning_pipes_of_the_same_thickness_whose_axes_meet_cross_in_four_half_ellipses() {
+        let SurfaceMeet::Curves(runs) = crossing(
+            &a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0),
+            &a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 2.0),
+        ) else {
+            panic!("two equal pipes whose axes meet cross in curves");
+        };
+        assert_eq!(runs.len(), 4, "two ellipses, each in two halves: {runs:?}");
+        let holds = |run: &NamedRun, at: [f64; 3]| {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                panic!("a half is picked out of the crossing: {run:?}");
+            };
+            picked_by.iter().all(|picker| {
+                let Picker::InFrontOf(surface) = picker else {
+                    panic!("a half is picked by flat surfaces: {picker:?}");
+                };
+                surface.normal().dot(Vector::from(at)) - surface.offset() >= 0.0
+            })
+        };
+        for middle in [
+            [2.0, 0.0, 2.0],
+            [-2.0, 0.0, -2.0],
+            [2.0, 0.0, -2.0],
+            [-2.0, 0.0, 2.0],
+        ] {
+            let holding = runs.iter().filter(|run| holds(run, middle)).count();
+            assert_eq!(holding, 1, "one half holds {middle:?}");
+        }
+        for touching in [[0.0, 2.0, 0.0], [0.0, -2.0, 0.0]] {
+            assert!(
+                runs.iter().all(|run| holds(run, touching)),
+                "every half reaches {touching:?}, where the walls touch"
+            );
+        }
     }
 
     /// Where the two stored directions have different squared lengths the exact
