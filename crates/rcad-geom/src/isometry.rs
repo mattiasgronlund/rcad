@@ -255,6 +255,14 @@ impl Isometry {
     /// always stored. Multiplying the stored coefficients would round, and a
     /// product that came out with its coefficients no longer all of one size
     /// would no longer be turned exactly.
+    ///
+    /// Any other two turns are multiplied as quaternions, which rounds, and a
+    /// product whose squared length has drifted more than `4ε` from one is
+    /// divided by its length (`held_near_length_one`). Without that
+    /// a part turned again and again — `rcad-topo`'s `Model::place_solid`
+    /// composes each call's movement onto the one the part already has — was
+    /// turned by a quaternion a little longer or shorter each time, which
+    /// stretches what it turns.
     #[must_use]
     pub fn compose(&self, inner: &Isometry) -> Isometry {
         let turn = if let (Some(outer), Some(first)) = (
@@ -322,7 +330,7 @@ impl Isometry {
         self.0.translation.vector.into()
     }
 
-    /// The turn part, as `[w, i, j, k]`. Always has length one.
+    /// The turn part, as `[w, i, j, k]`. Of length one to within rounding.
     ///
     /// **`glam`'s `DQuat::from_xyzw` wants those four in exactly the opposite
     /// order.** Handing it this array as it stands compiles, runs, and builds
@@ -430,12 +438,54 @@ fn brought_into_the_range_its_squares_fit_in(coefficients: [f64; 4]) -> [f64; 4]
 }
 
 /// How far from one a composed turn's squared length `q·q` may sit, as `f64`
-/// works it out, before [`Isometry::compose`] scales the turn back to length
-/// one.
+/// works it out, before [`Isometry::compose`] divides the turn by its length.
+///
+/// **Not lower, so that a turn which has not drifted keeps its bits.** A turn
+/// straight from [`Isometry::rotation`] sits a few `ε` off by that sum — at
+/// most `2ε` over the 100 000 draws of
+/// `a_turn_straight_from_rotation_is_never_divided_though_dividing_would_move_one_in_five`,
+/// and `3ε` over the 100 000 of a probe (`docs/decisions.md` §355.7) — and
+/// dividing would move the last bit of about one in five of them.
+/// At `4ε` no product of two, three or four such turns is divided either, in
+/// the 200 chains
+/// `a_turn_composed_of_any_number_of_turns_stays_within_six_epsilon_of_length_one`
+/// draws, so a part placed a few times holds the very numbers it held before
+/// [`Isometry::compose`] divided anything.
+///
+/// **Not higher, so that a turned normal stays well inside
+/// [`Plane::NORMAL_LENGTH_ROUNDOFF`](crate::Plane::NORMAL_LENGTH_ROUNDOFF).**
+/// A kept turn is within `6ε` of length one and a divided one within about
+/// `4ε` ([`held_near_length_one`] says why), and the worst normal
+/// `every_normal_a_turn_leaves_sits_well_inside_the_bound` turns through 16
+/// or 256 composed turns sits about `22ε` off length one, under half of the
+/// `64ε` that bound allows.
 const TURN_LENGTH_DRIFT: f64 = 4.0 * f64::EPSILON;
 
-/// `turn`, with its own bits while `q·q` is within [`TURN_LENGTH_DRIFT`] of
-/// one, and divided by its length past that.
+/// `turn`, with its own bits while `q·q`, as `f64` works it out, is within
+/// [`TURN_LENGTH_DRIFT`] of one, and divided by its length past that.
+///
+/// **Why it divides at all.** Multiplying two quaternions rounds, and nothing
+/// else brings the product back to length one, so a turn composed of many
+/// turns walked further off with each one, and a plane's normal turned by it
+/// walked past [`Plane::NORMAL_LENGTH_ROUNDOFF`](crate::Plane::NORMAL_LENGTH_ROUNDOFF).
+/// Such a normal is scaled when it is read back, so a plane turned a degree at
+/// a time came back from its file an ulp moved, the first after 63 steps
+/// (`a_plane_turned_a_step_at_a_time_reads_back_with_the_normal_it_was_written_with`,
+/// `docs/decisions.md` §355.7).
+///
+/// **Why it does not always divide.** Dividing rounds too. It would move the
+/// last bit of turns that sat as near length one as a division leaves them —
+/// one in five turns straight from [`Isometry::rotation`], and with them every
+/// placement built as a shift after a turn — and so move answers far from here
+/// for nothing.
+///
+/// **What it holds a turn to: `|q·q − 1| ≤ 6ε`, worked out exactly.** A kept
+/// turn has its `f64` sum of four squares within `4ε` of one, and that sum is
+/// within `γ₄·q·q`, about `2ε`, of the exact one. A divided turn carries the
+/// sum's rounding, about `2ε`, then the square root's half ulp and the
+/// division's half ulp, each counted twice in a square: about `4ε` in all.
+/// `a_turn_composed_of_any_number_of_turns_stays_within_six_epsilon_of_length_one`
+/// works `q·q` out without rounding over 200 chains of 256 turns.
 fn held_near_length_one(turn: na::UnitQuaternion<f64>) -> na::UnitQuaternion<f64> {
     let stored = turn.into_inner();
     if (stored.norm_squared() - 1.0).abs() <= TURN_LENGTH_DRIFT {
@@ -875,6 +925,59 @@ mod tests {
         assert!(
             later > 1_000,
             "only {later} composed turns were divided by their length, so that half is barely tested"
+        );
+    }
+
+    /// The floor under [`TURN_LENGTH_DRIFT`]: a turn straight from
+    /// [`Isometry::rotation`], with a shift composed after it the way a
+    /// placement is built, keeps the turn's bits, where dividing every product
+    /// by its length would move about one in five.
+    ///
+    /// The floor on how many dividing would move is §14.7's: without it, the
+    /// keeping would be tested on turns that dividing leaves alone anyway.
+    #[test]
+    fn a_turn_straight_from_rotation_is_never_divided_though_dividing_would_move_one_in_five() {
+        let shift = Isometry::translation(Vector::new(1.0, 2.0, 3.0)).expect("a finite shift");
+        let mut numbers = Numbers::seeded();
+        let draws = 100_000;
+        let mut dividing_would_move = 0;
+        let mut worst = 0.0_f64;
+        for _ in 0..draws {
+            let direction = Vector::new(
+                numbers.between_minus_one_and_one(),
+                numbers.between_minus_one_and_one(),
+                numbers.between_minus_one_and_one(),
+            );
+            let axis = Axis::new(numbers.a_point(), direction)
+                .expect("three numbers from a fixed seed are not all exactly zero");
+            let turn = Isometry::rotation(
+                &axis,
+                core::f64::consts::TAU * numbers.between_minus_one_and_one(),
+            )
+            .expect("a finite angle about a finite axis");
+
+            let placed = shift.compose(&turn);
+            assert_eq!(
+                placed.rotation_quaternion().map(f64::to_bits),
+                turn.rotation_quaternion().map(f64::to_bits),
+                "composing a shift after {turn:?} changed the turn's bits"
+            );
+
+            let stored = turn.0.rotation.into_inner();
+            worst = worst.max((stored.norm_squared() - 1.0).abs() / f64::EPSILON);
+            let divided = na::UnitQuaternion::new_normalize(stored).into_inner();
+            if divided.coords.map(f64::to_bits) != stored.coords.map(f64::to_bits) {
+                dividing_would_move += 1;
+            }
+        }
+        println!(
+            "of {draws} turns straight from rotation, dividing would move {dividing_would_move}; \
+             worst |fl(q·q) − 1| {worst:.2}ε"
+        );
+        assert!(
+            dividing_would_move > draws / 10,
+            "dividing would move only {dividing_would_move} of {draws}, so keeping their bits is \
+             barely tested"
         );
     }
 

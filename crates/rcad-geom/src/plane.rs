@@ -138,14 +138,19 @@ impl Plane {
     /// turned normal is inside, and
     /// `every_normal_a_turn_leaves_sits_well_inside_the_bound` is the evidence
     /// that the share that was left out fits in the room the worst case
-    /// leaves. Over 20 000 normals the worst `|n·n − 1|` it finds is `10.8ε`
-    /// turned once and `17.7ε` through four composed turns.
+    /// leaves. Over 20 000 normals the worst `|n·n − 1|` it finds is `8.96ε`
+    /// turned once, `16.95ε` through four composed turns, `22.16ε` through
+    /// sixteen and `20.77ε` through 256, and it asserts every one is under
+    /// half the bound.
     ///
-    /// **A placement composed of many turns drifts further**, because
-    /// composing two quaternions rounds and nothing scales the product back:
-    /// through sixteen the same test finds `42.9ε`. A normal moved so far that
-    /// it leaves the bound is scaled, which is what every normal was before
-    /// the bound existed.
+    /// **That holds through any number of composed turns because
+    /// [`Isometry::compose`] keeps the turn near length one.** Composing two
+    /// quaternions rounds, and without compose dividing a product that has
+    /// drifted by its length the same test finds `43.51ε` through sixteen and
+    /// `240.64ε` through 256, and a plane turned a degree at a time leaves the
+    /// bound after 63 steps (`docs/decisions.md` §355.7). A normal moved so far that it leaves the
+    /// bound is scaled, which is what every normal was before the bound
+    /// existed.
     ///
     /// A normal outside it is not refused, only scaled; see
     /// [`Plane::from_point_and_normal_as_written`] for why.
@@ -1092,7 +1097,8 @@ mod tests {
 
     /// The evidence behind the share of [`Plane::NORMAL_LENGTH_ROUNDOFF`] that
     /// is measured rather than derived: every normal a turn leaves, turned
-    /// once or through four composed placements, sits well inside it.
+    /// once or through 4, 16 or 256 composed placements, sits under half of
+    /// it, and each of the four depths is asserted.
     #[test]
     fn every_normal_a_turn_leaves_sits_well_inside_the_bound() {
         let mut state: u64 = 0x2545_F491_4F6C_DD1D;
