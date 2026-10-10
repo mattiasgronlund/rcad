@@ -5983,8 +5983,9 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// ball's circle, a cone's rim circle, or one of the two circles a plane cuts a
 /// ring in — that curved surface and that plane,
 /// or for an arc of the circle two balls, or a cone and a second cone, a pipe
-/// or a ball on its axis, cross in, the two of them, and which of the
-/// crossing's two arcs between the same two corners it is; see
+/// or a ball on its axis, cross in, or of a circle or loop a ball and a pipe
+/// cross in, the two of them, and which of the crossing's two arcs between the
+/// same two corners it is; see
 /// [`which_arc_of_a_circle_this_is`]. The fourth is, for an arc of a
 /// hyperbola or a parabola a plane cuts on a cone, that cone and that plane;
 /// see [`which_open_crossing_of_a_cone_this_is`].
@@ -6869,8 +6870,8 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// cone's rim circle and the ellipse a steeper plane leaves, or one of the two
 /// circles a plane cuts a ring in — together with that curved surface and that
 /// plane, or of the circle two balls cross in, or a cone and a second cone, a
-/// pipe or a ball on its axis, together with the two; `None` for any other
-/// side.
+/// pipe or a ball on its axis, or of a circle or loop a ball and a pipe cross
+/// in, together with the two; `None` for any other side.
 ///
 /// **Both arcs run between the same two corners and along the same two
 /// surfaces**, so nothing [`which_curve_it_is`] reads tells them apart. Most
@@ -7064,10 +7065,70 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// the same gradient, so the ring is named either way round, and the plane is
 /// folded as for a ball.
 ///
-/// Other pairs of curved surfaces that cross in closed curves — a ball and a
-/// pipe, two pipes — are not named here. Their curves can touch the line where
-/// the two gradients line up, two equal pipes square to each other do at two
-/// points, and the sign rule says nothing there.
+/// # A ball and a pipe cross in a circle or a loop
+///
+/// **And a wall through the pipe's axis leaves both arcs between the same two
+/// corners.** The ball of radius 5 at `(0, 0, 5)` cut to `x ≥ 0` against the
+/// bar of radius 4 on its axis, or the bar of radius 4 along `x` cut to `z ≥ 0`
+/// or `y ≥ 0` against the ball of radius 5 at its centre: the wall puts two
+/// corners on each circle the pair crosses in, at `z = 2` and `z = 8` or at
+/// `x = ±3`, and the whole partner's skin holds the whole circle. Named by their
+/// corners alone the two arcs were one edge with four faces along it, and the
+/// unions both ways round and the whole less the half were refused
+/// `ResultIsNotManifold { count: 4 }` (queue row Q1329,
+/// `tests/two_arcs_where_two_curved_surfaces_cross.rs`). Where the half is the
+/// bar and the ball's poles are on its wall, those three now reach the mesh the
+/// fuse checks its answer with, which refuses the ball's skin.
+///
+/// **The sign rule holds on every curve named here.** Put the pipe's axis along
+/// `z` and the ball's centre at `(a, 0, h)`. Then `∇pipe` runs along
+/// `(x, y, 0)` and `∇ball` along `(x − a, y, z − h)`, and their cross product
+/// is `((z − h)y, −(z − h)x, a·y)`. On the pipe `x` and `y` are never both
+/// zero, so it vanishes only where `z = h` and `a·y = 0`:
+///
+/// - **On the axis**, `a = 0`, that is the circle `z = h`, which is on the
+///   crossing only where the ball has the pipe's radius and touches it all
+///   round. That circle does not reach here between two corners: a wall
+///   through it, the bar's half, the bar cut off the axis or the ball's half,
+///   is refused ordering the points along the touch before any edge is named
+///   (`a_ball_a_bar_holds_round_one_circle_is_refused_where_a_wall_crosses_it`
+///   in that test file), and the bar's seam alone puts one corner on it, so
+///   the edge closes and nothing is asked here.
+/// - **Off the axis** it is the points `(±r, 0, h)`, with `r` the pipe's
+///   radius, which are on a ball of radius `R` only where `a` is `R + r` or
+///   `|R − r|`. There `where_a_ball_and_a_pipe_cross` in `rcad-geom` finds
+///   `Δ = 0` with `V = 2r(R + r)` or `V = 2r(r − R)` for an axis of length
+///   one: above zero it answers
+///   that the ball rests on the pipe at one point, and below zero, where
+///   `R > r`, it refuses `ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`
+///   (`a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement` in
+///   `tests/two_curves_of_one_pair_that_meet.rs`).
+///
+/// So on every loop `intersect` names, and on both circles a ball on the axis
+/// cuts, the cross product runs along the curve and never vanishes. No loop
+/// off the axis has been brought here between two corners: a plane through
+/// one is refused where it meets both curved surfaces
+/// (`a_plane_through_a_loop_off_an_axis_is_refused_where_it_meets_both_curved_surfaces`),
+/// so that half of the argument has no test that fails without it. A pipe
+/// written with its axis turned round or slid along has the same gradient,
+/// and a ball has one spelling, so the two are named either way round and
+/// nothing is turned round for how a face spells them.
+///
+/// # Two pipes are not named here
+///
+/// **Their gradients can line up on a crossing.** Two bars of radius 1 whose
+/// axes meet square line up at `(0, ±1, 0)`, and `intersect` refuses that
+/// crossing before any edge exists
+/// (`two_bars_of_one_radius_whose_axes_meet_are_refused_before_any_arrangement`
+/// in `tests/two_curves_of_one_pair_that_meet.rs`, open row Q1558). No other
+/// loop two pipes cross in has reached here between two corners: a plane
+/// through one is refused where it meets both curved surfaces (the third shape
+/// of the test above), and the cross-drilled shaft of
+/// `tests/a_cone_hollowed_along_its_axis.rs`, whose fat bar's seam crosses a
+/// loop, sent no side of the two pipes here between two corners when run with
+/// a print in this function. So no test could fail for want of the pair. Two
+/// arcs of such a loop that did meet here would be one edge with four faces
+/// along it and refused `ResultIsNotManifold { count: 4 }`, not answered wrong.
 ///
 /// # Panics
 ///
