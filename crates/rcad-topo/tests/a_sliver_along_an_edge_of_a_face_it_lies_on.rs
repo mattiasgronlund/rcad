@@ -284,19 +284,31 @@ fn two_combs_leaning_opposite_ways_meet_in_two_parts_a_rounding_apart() {
     stops_at_four_faces_along_an_edge(&model, keys[0], keys[1], Rule::Difference);
 }
 
-/// The same two with the second comb first. The second less the first is four
-/// parts, `7 − 3` in all: its left tooth with the end of its base under it, the
-/// other end of its base, the top of its right tooth above where the first
-/// comb's tooth crosses it, and the triangle `(3, 1)`, `(4, 1)`, `(3.5, 1.25)`
-/// of that tooth in the first comb's gap.
+/// The same two with the second comb first. The intersection is the same two
+/// parts. The second less the first is four parts, `7 − 3` in all: its left
+/// tooth with the end of its base under it, the other end of its base, the top
+/// of its right tooth above where the first comb's tooth crosses it, and the
+/// triangle `(3, 1)`, `(4, 1)`, `(3.5, 1.25)` of that tooth in the first
+/// comb's gap.
 ///
-/// The union is refused as it is with the first comb first. So is the
-/// intersection, which the first comb first answers as two parts.
+/// Until Q1633 the intersection was refused with four faces along the upright
+/// line through `(3 + 3.7e-16, 1)`, where the two parts touch: on `y = 1`, the
+/// second comb's gap floor, which reaches that far past `x = 3`, and the first
+/// comb's gap floor beyond it, and resting on them the walls `x + 2y = 5` and
+/// `x − 2y = 1` of the four-sided part. Two flat faces on one plane facing one
+/// way, with the other two on its outer side, are two parts touching along a
+/// line, and the line is now parted into one edge per part, as it already was
+/// where the two faces on the plane were pieces of one input face.
+///
+/// The union is refused as it is with the first comb first.
 #[test]
 fn two_combs_leaning_opposite_ways_the_other_way_round_meet_in_two_parts_a_rounding_apart() {
     let (model, keys) = comb_and_comb().build();
 
-    stops_at_four_faces_along_an_edge(&model, keys[1], keys[0], Rule::Intersection);
+    let (met, solids) = fused(&model, keys[1], keys[0], Rule::Intersection);
+    assert_eq!(solids.len(), 2, "the intersection is two parts");
+    holds_exactly(&met, &solids, 3.0, "the intersection");
+
     stops_at_four_faces_along_an_edge(&model, keys[1], keys[0], Rule::Union);
 
     let (less, solids) = fused(&model, keys[1], keys[0], Rule::Difference);
