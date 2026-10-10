@@ -2480,11 +2480,29 @@ impl BuildingAMesh {
         // is the outer one (§31.3) — so it is turned to face the same way here
         // rather than assumed, and the two are brought into one longitude frame
         // before anything is measured against a longitude.
+        //
+        // **Each is walked from a corner off the poles**, as a cap is
+        // ([`starting_off_the_poles`]). A ring over a pole leaves the pole
+        // down a meridian, and a loop that starts on the pole has the corner at
+        // the foot of that meridian a whole turn on, at its far end, where
+        // [`nearest_longitude`] does not look for it. The ball less the blocks
+        // `x ≥ 0, z ≥ 8` and `x ≥ 0, z ≤ 2` has one round each pole, its
+        // first cut ran from `(0, 4, 2)` up the wall to the north pole through
+        // the corner `(0, 4, 8)` it should have ended at, and the mesh was
+        // refused `LoopsTouch` there (Q1590).
+        let pinch = match chart {
+            Chart::Upright => stored.where_it_pinches(),
+            Chart::OnItsSide => None,
+        };
         let facing_up = |around: &WalkedLoop| {
-            if runs_up(around) {
+            let facing = if runs_up(around) {
                 around.the_other_way().the_other_way()
             } else {
                 around.the_other_way()
+            };
+            match pinch {
+                Some(pinch) => starting_off_the_poles(&facing, pinch),
+                None => facing,
             }
         };
         let up = facing_up(outer);
@@ -2492,10 +2510,6 @@ impl BuildingAMesh {
 
         let from = up.corners[0][0];
         let quarters: [f64; 4] = [0, 1, 2, 3].map(|step| from + f64::from(step) * whole_turn / 4.0);
-        let pinch = match chart {
-            Chart::Upright => stored.where_it_pinches(),
-            Chart::OnItsSide => None,
-        };
         let (up, down) =
             with_a_corner_where_a_pole_side_of_either_passes(up, down, quarters, pinch, whole_turn);
         let along_the_top = quarters.map(|at| nearest_longitude(&up, at, pinch));
