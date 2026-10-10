@@ -181,36 +181,66 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_before_any_arrange
     every_fuse_is_refused_where_two_loops_meet(a_thin_bar_resting_on_the_inside_of_a_thick_one);
 }
 
-/// A ball of radius 2 with a bar through it off its axis, so that the pipe
-/// crosses the ball in two loops apart. Every fuse is refused ordering points
-/// along a loop, §39.4's gap, before anything is asked about where two loops
-/// meet. Four placements: the bar of radius 1 at `x = 1/2` and at `y = 1/2`,
-/// the bar of radius 1/2 at `y = 1` clear of the ball's poles, and the ball
-/// turned a quarter round `z` with the bar at `x = 1/2`.
+/// A ball of radius 2 with a bar from `z = −3` to 3 through it off its axis,
+/// so that the pipe crosses the ball in two loops apart, one above `z = 0` and
+/// one below. They come together only where the bar touches the ball from
+/// inside
+/// (`a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement`).
+/// Four placements: the bar of radius 1 at `x = 1/2` and at `y = 1/2`, the bar
+/// of radius 1/2 at `y = 1` clear of the ball's poles, and the ball turned a
+/// quarter round `z` with the bar at `x = 1/2`. Every fuse was refused ordering
+/// points along a loop until Q1554 ordered them round the bar's axis.
+///
+/// What they share is the ball inside the bar, [`ball_in_bar`].
 #[test]
-fn a_ball_with_a_bar_through_it_off_its_axis_is_refused_ordering_the_loops() {
-    let placements: [Pair; 4] = [
-        |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.5, 0.0]),
-        |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.0, 0.5]),
-        |model| a_ball_and_a_bar(model, &Isometry::identity(), 0.5, [0.0, 1.0]),
-        |model| {
-            let turned = Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z");
-            a_ball_and_a_bar(model, &turned, 1.0, [0.5, 0.0])
-        },
+fn a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_answers() {
+    let ball = 32.0 * PI / 3.0;
+    let placements: [(Pair, f64, f64); 4] = [
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.5, 0.0]),
+            1.0,
+            0.5,
+        ),
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.0, 0.5]),
+            1.0,
+            0.5,
+        ),
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 0.5, [0.0, 1.0]),
+            0.5,
+            1.0,
+        ),
+        (
+            |model| {
+                let turned = Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z");
+                a_ball_and_a_bar(model, &turned, 1.0, [0.5, 0.0])
+            },
+            1.0,
+            0.5,
+        ),
     ];
-    for (placement, build) in placements.into_iter().enumerate() {
-        for (rule, first_first) in six_fuses() {
-            let mut model = a_model();
-            let said = fuse(&mut model, build, rule, first_first);
-            assert!(
-                matches!(
-                    said,
-                    Err(rcad_topo::Error::ACrossingThisCannotBeOrderedAlong)
-                ),
-                "placement {placement}, {rule:?} (ball first: {first_first}): {said:?}"
-            );
-        }
+    for (build, radius, off) in placements {
+        every_fuse_answers(
+            build,
+            [ball, 6.0 * PI * radius * radius, ball_in_bar(radius, off)],
+            [&[5], &[3], &[2], &[3, 3]],
+        );
     }
+}
+
+/// [`ball_in_bar`] on the ball's axis is the closed form
+/// `(4π/3)(2³ − (2² − 1)^(3/2))` of
+/// `a_ball_on_a_bars_axis_crosses_it_in_two_circles_and_every_fuse_answers`,
+/// to the `1e-6` its doc comment gives it.
+#[test]
+fn the_ball_in_a_bar_on_its_axis_is_the_closed_form() {
+    let closed = 4.0 * PI / 3.0 * (8.0 - 3f64.powf(1.5));
+    let ruled = ball_in_bar(1.0, 0.0);
+    assert!(
+        (ruled - closed).abs() < 1e-6,
+        "{ruled} by the rule, {closed} closed"
+    );
 }
 
 /// The top half of a ring of 4 round a tube of 1 about `z`, and a bar of
@@ -736,4 +766,30 @@ fn bar_through_bar(big: f64, small: f64, off: f64) -> f64 {
         sum += across * small * theta.cos() * PI / f64::from(steps);
     }
     sum
+}
+
+/// Volume the ball of radius 2 at the origin shares with a bar up `z` of
+/// `radius` whose axis is `off` from the ball's, long enough to go right
+/// through it: `∫∫ 2√(4 − ρ² − off² − 2·off·ρ·cos θ) ρ dρ dθ` over the bar's
+/// section, `ρ` out from the bar's axis.
+///
+/// A midpoint rule of 1000 steps out from the axis by 64 round it. The
+/// integrand is smooth and periodic round the axis, so 64 steps there already
+/// agree with 16 to `1e-14`; out from the axis the error falls as the square
+/// of the step, and on the axis 1000 steps leave it `4.4e-7` above the closed
+/// form ([`the_ball_in_a_bar_on_its_axis_is_the_closed_form`]). The bar must lie
+/// inside the ball's equator, `radius + off < 2`.
+fn ball_in_bar(radius: f64, off: f64) -> f64 {
+    let (out, round) = (1000, 64);
+    let (step_out, step_round) = (radius / f64::from(out), 2.0 * PI / f64::from(round));
+    let mut sum = 0.0;
+    for i in 0..out {
+        let rho = step_out * (f64::from(i) + 0.5);
+        for j in 0..round {
+            let theta = step_round * (f64::from(j) + 0.5);
+            let squared = 4.0 - rho * rho - off * off - 2.0 * off * rho * theta.cos();
+            sum += 2.0 * squared.sqrt() * rho;
+        }
+    }
+    sum * step_out * step_round
 }
