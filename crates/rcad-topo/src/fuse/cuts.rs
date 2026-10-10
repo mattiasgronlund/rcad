@@ -112,6 +112,13 @@
 //! the top clear, the ellipses where the top crosses the pipe and the cone
 //! were both kept, and where the three meet could not be worked out.
 //!
+//! **A torus about the band's axis is asked too** (Q1588). A bar standing in
+//! a ring's hole, its top level with the top of the tube, cut the ring's skin
+//! along the circle where the top's plane touches it, though the top reaches
+//! nowhere near that circle. The piece of skin past the circle, on the side of
+//! the plane where the skin has no point, had no point inside to place, and
+//! every fuse of the two was refused.
+//!
 //! **A cut whose faces meet the face only on its boundary is marked too**
 //! (Q1470, `docs/decisions.md` §422). Where every face carrying a surface
 //! lies on one closed side of a plane and the face it cuts lies on the other,
@@ -898,7 +905,8 @@ fn band_a_face_is_inside(face: &BakedFace) -> Option<ABandRoundAnAxis> {
 /// up)² = radius²·|w|²`, which is Lagrange's identity, and a plane square to
 /// the line is `(n·w)·(up + w·origin) + d·|w|² = 0`, its own equation scaled
 /// by `|w|²`. A plane leaning to the line is asked by
-/// [`a_leaning_plane_misses_a_band`]; anything else is not asked.
+/// [`a_leaning_plane_misses_a_band`], and a torus about the line by
+/// [`a_torus_on_the_axis_misses_a_band`]; anything else is not asked.
 fn a_surface_misses_a_band(surface: &Surface, band: ABandRoundAnAxis) -> bool {
     let exactly = rcad_predicates::Interval::exactly;
     let over_the_band = match surface {
@@ -932,13 +940,61 @@ fn a_surface_misses_a_band(surface: &Surface, band: ABandRoundAnAxis) -> bool {
             band.out + squared(band.up - band.up_of(centre))
                 - squared(exactly(ball.radius())) * band.length()
         }
-        Surface::Torus(_) => return false,
+        Surface::Torus(ring) => {
+            return band.is_on_the_axis(ring.axis())
+                && a_torus_on_the_axis_misses_a_band(ring, band);
+        }
         _ => return false,
     };
     matches!(
         over_the_band.sign(),
         rcad_predicates::Decision::Pos | rcad_predicates::Decision::Neg
     )
+}
+
+/// Whether the torus `ring`, about the band's own axis, provably passes
+/// through no point of `band` (Q1588).
+///
+/// Its side-of predicate takes the sign of `(v·v)·(x·x + R² − r²)² −
+/// 4R²·|x × v|²`, with `v` its own direction and `x` the point less its
+/// centre. The band's `w` runs along `v`, so the same expression with `w` for
+/// `v` is a positive number times it; and the centre is on the band's line, so
+/// `x × w` is the band's `(p − origin) × w`. Times `|w|²` once more, and with
+/// `h = x·w`, which is `up` less the centre's `up`, Lagrange's identity
+/// `|x|²·|w|² = h² + out` turns it into an expression in `up` and `out` alone:
+///
+/// ```text
+/// F = (out + h² + (R² − r²)·|w|²)² − 4R²·|w|²·out
+///   = (out + h² − (R² + r²)·|w|²)² + 4R²·|w|²·(h² − r²·|w|²)
+/// ```
+///
+/// The two lines are one polynomial, so each worked over the band in interval
+/// arithmetic holds every value `F` takes there, and either one keeping a
+/// sign proves the band clear. Neither is enough alone. The first has `h`
+/// once and is tight over a band at one `out`, such as a pipe's; the second
+/// has `out` once and is tight over a band at one `up`, such as a flat face's.
+/// A disk in the hole level with the top of the tube, where `h² = r²·|w|²`, is
+/// proved clear only by the second: over `out` in `[0, (23/8)²]` the first is
+/// `(out + 16)² − 64·out`, which interval arithmetic puts between `−273` and
+/// `589`. A pipe through the tube's whole height is proved clear only by the
+/// first.
+fn a_torus_on_the_axis_misses_a_band(ring: &rcad_geom::Torus, band: ABandRoundAnAxis) -> bool {
+    let exactly = rcad_predicates::Interval::exactly;
+    let length = band.length();
+    let height = squared(band.up - band.up_of(ring.centre().coordinates().map(exactly)));
+    let ring_squared = squared(exactly(ring.ring_radius()));
+    let tube_squared = squared(exactly(ring.tube_radius()));
+    let four_r_squared_w = exactly(4.0) * ring_squared * length;
+    let one_way = squared(band.out + height + (ring_squared - tube_squared) * length)
+        - four_r_squared_w * band.out;
+    let other_way = squared(band.out + height - (ring_squared + tube_squared) * length)
+        + four_r_squared_w * (height - tube_squared * length);
+    [one_way, other_way].iter().any(|value| {
+        matches!(
+            value.sign(),
+            rcad_predicates::Decision::Pos | rcad_predicates::Decision::Neg
+        )
+    })
 }
 
 /// Whether the plane `flat`, leaning to the band's axis, provably passes
