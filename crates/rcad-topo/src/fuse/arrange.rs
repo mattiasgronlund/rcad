@@ -5731,7 +5731,11 @@ impl<'f> Arrangement<'f> {
                 }
             }
             if side.is_none() {
-                *side = self.side_off_a_curve_it_also_cuts(cycle, &partner);
+                *side = self
+                    .side_off_a_curve_it_also_cuts(cycle, &partner)
+                    .or_else(|| {
+                        self.side_off_the_other_circle_a_plane_cuts_a_ring_in(cycle, &partner)
+                    });
             }
         }
         Ok(sides)
@@ -5757,7 +5761,12 @@ impl<'f> Arrangement<'f> {
     /// swallows in two loops round the thin pipe's axis, the half-space's flat
     /// surface holds the fat pipe's axis rather than facing along either, and
     /// [`Arrangement::whether_past_the_plane_between_two_loops`] answers there
-    /// (Q1483). Each curve then splits the surface in two, and so does
+    /// (Q1483). A flat face square to a ring's axis is the one pair picked by
+    /// something other than a half-space: the plane cuts the ring in two
+    /// circles round the axis, the pipe of the ring's own radius tells them
+    /// apart, and
+    /// [`Arrangement::whether_past_the_pipe_between_two_circles_of_a_ring`]
+    /// answers there (Q1513). Each curve then splits the surface in two, and so does
     /// the surface's own curve on the half-space's flat surface, where there is
     /// one. The curve lies inside the half-space and the other curve outside it,
     /// so every point of the surface past the flat surface is on the curve's
@@ -5789,6 +5798,12 @@ impl<'f> Arrangement<'f> {
     /// in puts the cap's circle on the ball exactly there.
     fn whether_past_the_picker(&self, crossing: usize, at: PredicatePoint) -> PastThePicker {
         let partner = self.crossings[crossing].partner;
+        if let (Surface::Plane(_), Surface::Torus(_)) = (self.surface, partner)
+            && let [picker @ (Picker::OutsideAPipe(_) | Picker::InsideAPipe(_))] =
+                self.crossings[crossing].picked_by()
+        {
+            return Self::whether_past_the_pipe_between_two_circles_of_a_ring(picker, &partner, at);
+        }
         if let (Surface::Cylinder(this), Surface::Cylinder(other)) = (self.surface, partner) {
             return self.whether_past_the_plane_between_two_loops(crossing, &this, &other, at);
         }
@@ -5916,6 +5931,42 @@ impl<'f> Arrangement<'f> {
         }
     }
 
+    /// On a flat face square to a ring's axis: whether a point is past the pipe
+    /// that picks one of the two circles the face's plane cuts the ring in, and
+    /// if it is, the side of that circle it is on, which is always the ring's
+    /// negative side.
+    ///
+    /// The pipe is the ring's own radius about the ring's own axis
+    /// (`rcad_geom`'s `two_circles_round_the_axis`), so on the plane it is a
+    /// circle between the two, and the ring is negative only on the band between
+    /// them. Past the outer circle's picker, [`Picker::OutsideAPipe`], is the
+    /// disc inside the pipe, wholly inside the outer circle: the band's side of
+    /// it. Past the inner circle's picker, [`Picker::InsideAPipe`], is the plane
+    /// outside the pipe, wholly outside the inner circle: the band's side of
+    /// that one too. In front of either picker the ring cuts the plane in its
+    /// one circle and nothing else, so the ring's sign at the point is its side,
+    /// and [`PastThePicker::No`] says so.
+    ///
+    /// Read without this, a walk round one circle reads the ring's sign off
+    /// nodes that are all on the ring, and says nothing about the other circle:
+    /// the flat ring closing a half ring underneath came back in two pieces of
+    /// one wire each (Q1513). A point whose box straddles the pipe is answered
+    /// where the two readings agree.
+    fn whether_past_the_pipe_between_two_circles_of_a_ring(
+        picker: &Picker,
+        ring: &Surface,
+        at: PredicatePoint,
+    ) -> PastThePicker {
+        match picker.side_of_point(at) {
+            Decision::Pos | Decision::Zero => PastThePicker::No,
+            Decision::Neg => PastThePicker::Yes(Decision::Neg),
+            Decision::Undecidable { .. } | _ if side_of_surface(ring, at) == Decision::Neg => {
+                PastThePicker::Yes(Decision::Neg)
+            }
+            Decision::Undecidable { .. } | _ => PastThePicker::CannotTell,
+        }
+    }
+
     /// Which side of `partner` a walk is on, read off a half-edge of it along a
     /// crossing `partner` cuts the face in too ([`Crossing::also_cut_by`]), or
     /// `None` where no half-edge says.
@@ -5953,6 +6004,67 @@ impl<'f> Arrangement<'f> {
                 Decision::Neg => Some(the_other_way(of_its_own)),
                 Decision::Zero | Decision::Undecidable { .. } | _ => None,
             }
+        })
+    }
+
+    /// On a ring's face drawn on by one plane alone: which side of the plane a
+    /// walk is on, read off a half-edge of it along the other circle that plane
+    /// cuts the ring in, or `None` where the face is not a ring's, `partner` is
+    /// not a plane, some curve drawn on the face is not one of that plane's, or
+    /// no half-edge runs along such a circle.
+    ///
+    /// **Every node of such a walk is on the plane**, so the nodes say nothing
+    /// ([`Arrangement::is_on_the_partner_of_a_crossing_through`]), and the half
+    /// ring of `a_half_ring_beside_a_bar_clear_of_it.rs` is the walk: its ring's
+    /// face is bounded by the outer and the inner circle `z = 0` cuts it in, and
+    /// each wire is one of them. Read so, neither wire's walks agreed with the
+    /// other's about any curve, the face came back in two pieces of one wire
+    /// each, and no piece of a ring with one circle round its axis cut out of
+    /// it can be meshed (Q1513).
+    ///
+    /// **Where nothing else is drawn, the plane's sign is the side of both
+    /// circles.** A plane cuts a ring in two circles only square to its axis or
+    /// through it (`intersect`'s `where_a_plane_and_a_torus_cross`), and either
+    /// way the two together cut the ring into two pieces, one each side of the
+    /// plane: the band over it and the band under it, or the half on each side.
+    /// With no other curve drawn those two are the only regions, so the
+    /// plane's sign names the region a walk bounds. The region left of a
+    /// forward half-edge along either circle is the plane's negative side, so
+    /// a half-edge along one says the side of both.
+    ///
+    /// **With a second plane drawn the sign names no region**, and this says
+    /// nothing. Two planes square to the axis cut a ring into four bands, and
+    /// the band between them on the outside of the ring and the band between
+    /// them on the inside have the same sign against both planes. Read off the
+    /// other circle there, every walk round either band agreed with every
+    /// other, and the two bands were joined into one cell: a bar standing in a
+    /// whole ring's hole, in `a_plate_cut_by_a_whole_bend.rs`, whose two caps'
+    /// planes cut the ring between its equators.
+    fn side_off_the_other_circle_a_plane_cuts_a_ring_in(
+        &self,
+        cycle: usize,
+        partner: &Surface,
+    ) -> Option<Decision> {
+        if !matches!(
+            (self.surface, partner),
+            (Surface::Torus(_), Surface::Plane(_))
+        ) || self
+            .arcs
+            .iter()
+            .any(|arc| self.crossings[arc.crossing].partner != *partner)
+        {
+            return None;
+        }
+        self.cycles[cycle].iter().find_map(|&half_edge| {
+            let arc = &self.arcs[half_edge / 2];
+            if arc.against_its_gradients || self.crossings[arc.crossing].partner != *partner {
+                return None;
+            }
+            Some(if half_edge.is_multiple_of(2) {
+                Decision::Neg
+            } else {
+                Decision::Pos
+            })
         })
     }
 
@@ -10648,7 +10760,7 @@ mod tests {
 #[cfg(test)]
 mod curved {
     use rcad_geom::{
-        Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
+        Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
     };
     use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 
@@ -11009,6 +11121,87 @@ mod curved {
         builder
             .build(model, &Policy::certified(), &mut ProvenanceLog::new())
             .expect("a pointed cone described this way is a solid")
+    }
+
+    /// The top half of a ring with nothing cutting it comes through whole: its
+    /// ring's face and the flat ring closing it underneath are each one piece,
+    /// bounded by both the outer and the inner circle `z = 0` cuts the ring in.
+    ///
+    /// Each face came back as two pieces of one wire each (Q1513). Every node
+    /// of a walk round one circle is on the surface that cuts the other circle
+    /// too, so the walk said nothing about which side of the other circle it
+    /// was on, and no walk round one circle was joined to a walk round the
+    /// other. The flat face is answered by
+    /// `whether_past_the_pipe_between_two_circles_of_a_ring` and the ring's face
+    /// by `side_off_the_other_circle_a_plane_cuts_a_ring_in`.
+    #[test]
+    fn each_face_of_a_half_ring_nothing_cuts_is_one_piece_with_both_circles() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let half_ring = the_top_half_of_a_ring_of_four_round_a_tube_of_one(&mut model);
+        let mut solids = bake(&model, &[half_ring], &policy, &mut log).expect("it bakes");
+        cuts::gather(&mut solids, &policy, &mut log).expect("nothing else is there to cut it");
+        let mut table: Vec<(&'static str, Vec<usize>)> = solids[0]
+            .faces
+            .iter()
+            .map(|face| {
+                let wires = split(face).iter().map(|piece| piece.wires.len()).collect();
+                (kind(&face.surface), wires)
+            })
+            .collect();
+        table.sort();
+        assert_eq!(table, [("plane", vec![2]), ("ring", vec![2])]);
+    }
+
+    /// The tube of radius one round the ring of radius four about `z`, cut by
+    /// `z = 0` and keeping `z ≥ 0`, as `tests/rings/mod.rs` builds it with no
+    /// seam: each face has one wire per circle.
+    fn the_top_half_of_a_ring_of_four_round_a_tube_of_one(model: &mut Model) -> crate::SolidKey {
+        let mut builder = SolidBuilder::new();
+        let [outer, inner] = [5.0, 3.0].map(|radius| {
+            let corner = builder
+                .add_vertex(Point::new(radius, 0.0, 0.0))
+                .expect("a finite point");
+            builder
+                .add_edge(corner, corner, EdgeRun::RightRoundWhereItsFacesCross)
+                .expect("z = 0 cuts the ring in this one closed curve")
+        });
+        let mut face = |surface: Surface, walks: [(_, Orientation); 2]| {
+            let wires = walks.map(|(edge, turn)| {
+                let coedge = builder
+                    .add_coedge(edge, turn)
+                    .expect("an edge of this build");
+                builder
+                    .add_wire(&[DraftStep::Along(coedge)])
+                    .expect("one closed edge is a wire")
+            });
+            builder
+                .add_face(surface, &wires)
+                .expect("a face between two circles")
+        };
+        let underneath = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+            .expect("the z axis is a unit normal");
+        let flat = face(
+            Surface::Plane(underneath),
+            [
+                (outer, Orientation::Forward),
+                (inner, Orientation::Reversed),
+            ],
+        );
+        let round = face(
+            Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower")),
+            [
+                (outer, Orientation::Reversed),
+                (inner, Orientation::Forward),
+            ],
+        );
+        builder
+            .add_shell(&[(round, Orientation::Forward), (flat, Orientation::Forward)])
+            .expect("two faces close");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("the top half of a ring described this way is a solid")
     }
 }
 

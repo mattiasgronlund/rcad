@@ -217,9 +217,10 @@ fn a_ball_with_a_bar_through_it_off_its_axis_is_refused_ordering_the_loops() {
 /// radius 6 about `z` from −2 to 1/2. The bar's top cuts the ring in two
 /// circles round the axis, of radius `4 ± √3/2`; they come together only for a
 /// plane on top of the tube
-/// (`a_plane_resting_on_top_of_a_ring_touches_it_round_one_circle`). Every fuse
-/// is refused telling the cells of a face apart, on the ring when it is first
-/// and on the bar's top when the bar is: open row Q1514's shape.
+/// (`a_plane_resting_on_top_of_a_ring_touches_it_round_one_circle`). §428's
+/// pipe-picked naming lets the plane tell its own cells apart, so every fuse
+/// is refused telling the cells of a face apart on the ring's torus, both ways
+/// round: open row Q1514's shape.
 #[test]
 fn a_half_ring_cut_by_a_round_plate_is_refused_telling_the_cells_of_a_face_apart() {
     for (rule, first_first) in six_fuses() {
@@ -235,14 +236,8 @@ fn a_half_ring_cut_by_a_round_plate_is_refused_telling_the_cells_of_a_face_apart
             panic!("{what}: {said:?}")
         };
         let surface = model.face(face).expect("a face of the model").surface();
-        assert_eq!(
+        assert!(
             matches!(surface, Surface::Torus(_)),
-            first_first,
-            "{what}: refused on {surface:?}"
-        );
-        assert_eq!(
-            matches!(surface, Surface::Plane(_)),
-            !first_first,
             "{what}: refused on {surface:?}"
         );
     }

@@ -5700,8 +5700,21 @@ fn closes_on_itself(meet: &FaceMeet) -> bool {
 /// butted onto the bend's cap is this: the bend's side of the cap's rim is the
 /// cap plane and the ring, and the bar's the cap plane and its pipe. Left
 /// apart, the union had two rims with one face along each and was refused as
-/// not a manifold (Q1470). A plane square to a ring's axis also cuts it in two
-/// circles, but its name does not say which (§378.4), so it is still left out.
+/// not a manifold (Q1470).
+///
+/// **A plane square to a ring's axis is left out, though its name says which
+/// circle.** It cuts the ring in an outer and an inner circle, and since Q1513
+/// each is named by the side of the pipe of the ring's own radius that keeps
+/// it. The argument above would carry over, but no fuse has been seen to reach
+/// such a join, so nothing would test it. The top half of a ring on a bar of
+/// its own outer radius, whose top rim is the half ring's outer equator, is
+/// the shape that would, and every fuse of the two, both ways round, is
+/// refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, so no answer hangs on
+/// the join
+/// (`on_a_bar_of_its_outer_radius_every_fuse_is_refused_where_three_surfaces_meet`
+/// in `tests/a_half_ring_beside_a_bar_clear_of_it.rs`, §428.5). So only a
+/// circle picked by a flat half-space, whose name has `0` ahead of its numbers
+/// ([`which_curve_of_the_pair`]), joins here.
 ///
 /// **One plane, at any scale.** Each pair holds the plane as its own side was
 /// cut, and a third solid's face on the same plane can cut the ball first and
@@ -5732,7 +5745,7 @@ fn the_name_each_closed_curve_goes_by<'a>(
     for (carried_by, curve, start) in closed {
         if let Some((flat, round)) = the_plane_and_the_ball_pipe_or_cone_of(carried_by) {
             cut_out_of.entry(curve).or_insert((flat, round, start));
-        } else if curve.1.is_some()
+        } else if curve.1.is_some_and(|which| which[0] == 0)
             && let Some((flat, ring)) = the_plane_and_the_ring_of(carried_by)
         {
             cut_out_of_a_ring
@@ -6586,7 +6599,7 @@ fn which_curve_it_is(
 ///
 /// One curve can come under two of these, cut by two pairs, and then goes by
 /// the least of them ([`the_name_each_closed_curve_goes_by`]).
-type CurveName = ([[u64; 9]; 2], Option<[u64; 4]>);
+type CurveName = ([[u64; 9]; 2], WhichCurveOfThePair);
 
 /// The name of the closed crossing of `carried_by` through `point`, the same
 /// from both faces along it and in both argument orders.
@@ -6612,11 +6625,18 @@ type CurveName = ([[u64; 9]; 2], Option<[u64; 4]>);
 /// `ResultIsNotManifold { count: 4 }`
 /// (`tests/a_pointed_cone_drilled_along_its_axis.rs`).
 ///
+/// **A plane square to a ring's axis cuts it in an outer and an inner
+/// circle**, one either side of the pipe of the ring's own radius. The top
+/// half of a ring, closed underneath by a flat face on that plane, had both
+/// its equators named by the plane and the ring alone, so the two were one
+/// curve and one edge with four faces along it, and every fuse that kept the
+/// half ring's faces was refused `ResultIsNotManifold { count: 4 }`
+/// (`tests/a_half_ring_beside_a_bar_clear_of_it.rs`, Q1513).
+///
 /// Only those pairs are told apart here. Other pairs that cross in more than
-/// one closed curve — a plane square to a ring's axis, cutting an inner and an
-/// outer circle, two rings, a ball and a pipe, and a thin pipe through a fat
-/// one — are still named by their surfaces alone. No fuse of the first two
-/// reaches this name, because `intersect` refuses a part of each (§378.8).
+/// one closed curve — two rings, a ball and a pipe, and a thin pipe through a
+/// fat one — are still named by their surfaces alone. No fuse of two rings
+/// reaches this name, because `intersect` refuses a part of it (§378.8).
 /// Whether a fuse of the last two can hand one loop's start to an input corner
 /// on the other, as the cone's did, has not been asked.
 ///
@@ -6655,14 +6675,16 @@ fn name_of_the_closed_crossing_through(
 }
 
 /// Which of the two circles its two surfaces cross in passes through `point`,
-/// for a plane through a ring's axis and for a cone and a second cone, a pipe
-/// or a ball on its axis: the four numbers of the flat half-space `intersect`
-/// picks that circle by, as `holds.rs` looks it up
-/// ([`the_picker_naming_the_circle_through`]). `None` for any other pair of
-/// surfaces, for a plane square to a ring's axis, whose two circles are picked
-/// by a pipe and not by a half-space, and for a point that no one circle
-/// certainly keeps, which leaves the crossing named by its two surfaces alone,
-/// as it was before this was asked.
+/// for a plane and a ring and for a cone and a second cone, a pipe or a ball on
+/// its axis: what `intersect` picks that circle by, as `holds.rs` looks it up
+/// ([`the_picker_naming_the_circle_through`]), written out by
+/// [`which_curve_of_the_pair`]. A plane through a ring's axis and a cone's pair
+/// pick each circle by a flat half-space. A plane square to a ring's axis picks
+/// its outer circle by the outside of the pipe of the ring's own radius about
+/// the ring's own axis, and its inner circle by the inside (Q1513). `None` for
+/// any other pair of surfaces, and for a point that no one circle certainly
+/// keeps, which leaves the crossing named by its two surfaces alone, as it was
+/// before this was asked.
 ///
 /// **Every spelling of the two gives one circle the same four numbers, once
 /// each zero is turned the right way up.** The two faces along one circle can
@@ -6687,8 +6709,17 @@ fn name_of_the_closed_crossing_through(
 /// and `each_circle_round_a_cones_axis_is_one_name_however_the_two_are_spelled`
 /// ask every spelling.
 ///
-/// The two circles get two different half-spaces, because each one picks its
-/// own circle and leaves the other out.
+/// **A pipe picker is one name however the two are spelled.** The pipe is
+/// built from the ring alone, its axis and its ring radius, so the plane facing
+/// up or down never reaches it, and the ring's axis written either way round
+/// is folded by [`name_of_the_surface_either_way_round`].
+/// `each_circle_a_plane_square_to_a_rings_axis_cuts_is_one_name_however_the_two_are_spelled`
+/// asks every spelling.
+///
+/// The two circles get two different names: two half-spaces, each picking its
+/// own circle and leaving the other out, or the outside and the inside of one
+/// pipe, which [`which_curve_of_the_pair`] writes with two different numbers
+/// ahead of the pipe's.
 ///
 /// # Errors
 ///
@@ -6698,7 +6729,7 @@ fn which_of_the_pairs_closed_crossings_it_is(
     point: PredicatePoint,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Option<[u64; 4]>> {
+) -> Result<WhichCurveOfThePair> {
     match carried_by {
         [Surface::Plane(_), Surface::Torus(_)]
         | [Surface::Torus(_), Surface::Plane(_)]
@@ -6709,15 +6740,12 @@ fn which_of_the_pairs_closed_crossings_it_is(
         | [Surface::Cylinder(_) | Surface::Sphere(_), Surface::Cone(_)] => (),
         [_, _] => return Ok(None),
     }
-    let Some(Picker::InFrontOf(this_circle)) =
+    let Some(this_circle) =
         the_picker_naming_the_circle_through(&carried_by[0], &carried_by[1], point, policy, log)?
     else {
         return Ok(None);
     };
-    let [x, y, z] = this_circle.normal().components();
-    Ok(Some(
-        [x, y, z, this_circle.offset()].map(|number| (number + 0.0).to_bits()),
-    ))
+    Ok(which_curve_of_the_pair(&[this_circle]))
 }
 
 /// Which curve of its pair a closed crossing's corner is on: what picks the
@@ -7570,6 +7598,49 @@ mod tests {
         assert_eq!(round_plus_x.len(), 1, "{round_plus_x:?}");
         assert_eq!(round_minus_x.len(), 1, "{round_minus_x:?}");
         assert_ne!(round_plus_x, round_minus_x, "two circles named as one");
+    }
+
+    /// The outer and the inner circle a plane square to a ring's axis cuts it
+    /// in are two names, and each is one name with the plane facing up or down
+    /// and the ring's axis written either way round, in either order (Q1513).
+    ///
+    /// Named by the plane and the ring alone, the top half of a ring had its
+    /// two equators made one curve, and every fuse that kept its faces was
+    /// refused `ResultIsNotManifold { count: 4 }`.
+    #[test]
+    fn each_circle_a_plane_square_to_a_rings_axis_cuts_is_one_name_however_the_two_are_spelled() {
+        let flats = [1.0, -1.0].map(|facing| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, facing))
+                    .expect("a coordinate direction is a unit normal"),
+            )
+        });
+        let rings = [Axis::z(), Axis::z().reversed()].map(|axis| {
+            Surface::Torus(Torus::new(axis, 4.0, 1.0).expect("a tube narrower than its ring"))
+        });
+        let names_through = |x: f64| -> BTreeSet<_> {
+            let mut names = BTreeSet::new();
+            for flat in flats {
+                for ring in rings {
+                    for carried_by in [[flat, ring], [ring, flat]] {
+                        names.insert(
+                            name_of_the_closed_crossing_through(
+                                &carried_by,
+                                PredicatePoint::from([x, 0.0, 0.0]),
+                                &Policy::certified(),
+                                &mut ProvenanceLog::new(),
+                            )
+                            .expect("a plane through the ring's middle cuts two circles"),
+                        );
+                    }
+                }
+            }
+            names
+        };
+        let (outer, inner) = (names_through(5.0), names_through(3.0));
+        assert_eq!(outer.len(), 1, "{outer:?}");
+        assert_eq!(inner.len(), 1, "{inner:?}");
+        assert_ne!(outer, inner, "two circles named as one");
     }
 
     /// The two circles a cone crosses a pipe, a ball or a steeper cone on its
