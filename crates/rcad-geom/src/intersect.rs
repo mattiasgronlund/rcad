@@ -1953,13 +1953,20 @@ fn a_flat_surface_through_where_the_walls_touch(
             .flat_map(|less| [less, -less])
             .map(move |less| own * f64::from(more) + other * f64::from(less))
     });
-    let slid_as_far_as_solved = ways_to_slide
-        .iter()
-        .flat_map(|&way| slides_solved_for(middle, own, way));
+    let in_lowest_terms = own_in_lowest_terms(own);
+    let slid_as_far_as_solved = in_lowest_terms
+        .into_iter()
+        .chain(core::iter::once(own))
+        .flat_map(|start| {
+            ways_to_slide
+                .iter()
+                .flat_map(move |&way| slides_solved_for(middle, start, way))
+        });
     for facing in core::iter::once(own)
         .chain(whole_numbers_in_the_flat.iter().copied())
         .chain(slid)
         .chain(mostly_own)
+        .chain(in_lowest_terms)
         .chain(slid_as_far_as_solved)
     {
         if !(it_lies_exactly_in_the_flat_of(facing, own, other)
@@ -2044,6 +2051,61 @@ fn it_is_the_shortest_whole_number_step_along_its_line(way: Vector) -> bool {
             .is_some_and(|first| *first > 0.0)
 }
 
+/// `own` written in its lowest terms: the shortest whole-number triple it is a
+/// multiple of, times a power of two that keeps it about as long as `own` — or
+/// `None` when that triple is `own` itself up to a power of two.
+///
+/// A whole-number triple scaled to length one stays an exact multiple of the
+/// triple when its components all round by the same factor, and some do:
+/// `(2, 3, 6)/7` is stored as exactly `p·2⁻⁵⁴·(2, 3, 6)` with `p = (2⁵⁴ − 1)/7`,
+/// since `2/7`, `3/7` and `6/7` each lie the same fraction `1/7` of a unit in the
+/// last place above a grid point. Its dot with the middle is `p` times a short
+/// sum, and `p` has 52 bits, so that dot rounds where the short triple's does
+/// not. A positive multiple of `own` lies in the flat and leans as `own` does.
+fn own_in_lowest_terms(own: Vector) -> Option<Vector> {
+    let parts = own
+        .components()
+        .map(|component| a_product_in_whole_numbers(component, 1.0));
+    let unit = parts
+        .iter()
+        .filter(|(whole, _)| *whole != 0)
+        .map(|(_, power)| *power)
+        .min()?;
+    let [Some(x), Some(y), Some(z)] = parts.map(|(whole, power)| shifted_up(whole, power - unit))
+    else {
+        return None;
+    };
+    let shared = [x, y, z].into_iter().fold(0, |so_far, whole| {
+        greatest_common_factor(so_far, whole.unsigned_abs())
+    });
+    if shared == 1 {
+        return None;
+    }
+    let shared_bits = 128 - shared.leading_zeros();
+    let shared = i128::try_from(shared).expect("a factor of a component below 2¹²⁷");
+    let in_lowest_terms = [x, y, z].map(|whole| {
+        multiplied_by_a_power_of_two(
+            (whole / shared) as f64,
+            unit + shared_bits.cast_signed() - 1,
+        )
+    });
+    Some(Vector::new(
+        in_lowest_terms[0],
+        in_lowest_terms[1],
+        in_lowest_terms[2],
+    ))
+}
+
+/// The largest whole number both `one` and `other` are multiples of, and the
+/// other one when either is nothing.
+fn greatest_common_factor(one: u128, other: u128) -> u128 {
+    if other == 0 {
+        one
+    } else {
+        greatest_common_factor(other, one % other)
+    }
+}
+
 /// `own` slid along `way` by step counts solved for, one for each stretch of
 /// counts whose dot with `middle` lands on a number `f64` holds, and only
 /// where the facing's components are numbers `f64` holds too.
@@ -2107,7 +2169,7 @@ fn own_slid(own: Vector, way: Vector, step: i32, count: i128) -> Option<Vector> 
 ///
 /// A step of `2⁻⁵³⁻ʲ` only gives facings whose moved components are under
 /// `2⁻ʲ`, so each finer step is a narrower search.
-const FINEST_SOLVED_STEP: i32 = 4;
+const FINEST_SOLVED_STEP: i32 = 8;
 
 /// The step counts `n`, each nearest nothing in its stretch, for which
 /// `own + n·2^step·way` has components `f64` holds and a dot with the middle
