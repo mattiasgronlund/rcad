@@ -665,6 +665,27 @@ test's doc comment. Relay 1's quartic probe is described here and not kept.
 > `what_a_ball_with_a_bar_through_its_centre_leaves`, by a probe that is not
 > kept. §39.4's and §322's notes on the two old refusals say what Q1554 left.
 >
+> The same row, its files widened, then moved all four, each after checking
+> it. The thread through the huge pipe is
+> `a_crossing_thinner_than_one_step_of_the_grid_is_refused_at_its_first_step`,
+> pinning the tangent refusal at `BoundingHowFarOffTheCrossingAPointIs`. That
+> is a limit by §16.10 and not a gap: the loop is `4.34e-19` across where one
+> step of the grid is `5.82e-11`, so no answer exists to reach, and the same
+> pair walks once its thin pipe spans a grid step. The two tilted pipes are
+> `the_pipe_tilted_by_a_hundred_and_twenty_two_orders_has_every_walked_point_checked`
+> and its sibling at a hundred and twenty-nine orders. Each pins that both runs
+> walk and every point they draw is checked against both pipes, in a box
+> reaching `8.94e-8` each way round a loop of radius `1.375`. Those two and
+> `the_zero_on_the_moved_hair_thin_pair_is_the_sizing_walk_refusing` leave the
+> slow tier, since each now runs in hundredths of a second. The ball of 4 is
+> `a_ball_one_rounding_off_a_bars_axis_answers_every_fuse_as_one_on_it_does`:
+> 24 fuses off the axis, with the 24 on it beside them. Each one validates and
+> has the centred ball's faces, and each measures within its volume error of
+> the closed form. The union and both differences add up against the ball and
+> the bar measured alone. So Q1599, that ball's row, is done by this row's
+> change alone, with the trial it kept not traced. §39.4 and §322 each carry a
+> Q1598 note saying so.
+>
 > **Where the numbers come from.** The trace: prints in `one_step`, run as
 > `mise exec -- cargo nextest run -p rcad-topo --test
 > two_curves_of_one_pair_that_meet` at `72cc2f6c`. The counts: an `eprintln`
