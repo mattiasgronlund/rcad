@@ -5537,17 +5537,182 @@ mod tests {
     }
 
     /// The ball sits off the bar's axis, so the floor cuts the two in circles
-    /// about two different centres, which cross at `(0, ±3, 0)`. About one
-    /// centre they would be a circle of radius five and one of three, and
-    /// [`what_a_plane_square_to_their_one_axis_leaves`] answers that.
+    /// about two different centres, `x² + y² = 9` and `(x − 4)² + y² = 25`.
+    /// Those differ by the line `x = 0`, which meets the first at `(0, ±3, 0)`,
+    /// each an `f64`. About one centre they would be a circle of radius five
+    /// and one of three, and [`what_a_plane_square_to_their_one_axis_leaves`]
+    /// answers that.
     #[test]
-    fn three_surfaces_with_only_one_flat_one_are_refused_by_name() {
+    fn a_floor_across_a_bar_and_a_ball_off_its_axis_meets_them_where_their_circles_cross() {
+        let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
         let ball = Surface::Sphere(Sphere::new(Point::new(4.0, 0.0, 0.0), 5.0).expect("a radius"));
         let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 3.0).expect("a radius"));
+        let answer = meet([&floor, &ball, &pipe]).expect("two circles in one plane are answered");
+        on_all_three([&floor, &ball, &pipe], &answer);
         assert_eq!(
-            meet([&flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]), &ball, &pipe]),
+            answer,
+            MeetOfThree::At(smallvec![
+                PredicatePoint::Exact([0.0, -3.0, 0.0]),
+                PredicatePoint::Exact([0.0, 3.0, 0.0])
+            ])
+        );
+        assert_eq!(meet([&pipe, &floor, &ball]), Ok(answer), "in any order");
+    }
+
+    /// The bar of radius 2 up `z` and the ball of radius 3 at `(0, 3, 5)`, and
+    /// the bar's cap `z = 5`. The cap cuts them in `x² + y² = 4` and
+    /// `x² + (y − 3)² = 9`, which differ by the line `y = 2/3`, so the three
+    /// meet at `(±4√2/3, 2/3, 5)`, neither of them an `f64`.
+    #[test]
+    fn a_bars_cap_across_a_ball_off_its_axis_meets_them_where_their_circles_cross() {
+        let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 5.0]);
+        let bar = a_bar_up_z_of_radius(2.0);
+        let ball = the_ball_of_radius_at_0_3_5(3.0);
+        let answer = meet([&cap, &bar, &ball]).expect("two circles in one plane are answered");
+        on_all_three([&cap, &bar, &ball], &answer);
+        let across = 4.0 * 2f64.sqrt() / 3.0;
+        narrow_boxes_round(
+            &answer,
+            &[[-across, 2.0 / 3.0, 5.0], [across, 2.0 / 3.0, 5.0]],
+        );
+        assert_eq!(meet([&ball, &bar, &cap]), Ok(answer), "in any order");
+    }
+
+    /// The wall `x = 0` holds the bar's axis, so it cuts the bar in the lines
+    /// `y = ±2`. `y = 2` meets the ball where `1 + (z − 5)² = 9`, at
+    /// `(0, 2, 5 ± 2√2)`, the lower first, and `y = −2` misses it.
+    #[test]
+    fn a_wall_through_a_bars_axis_meets_a_ball_off_it_on_the_one_line_that_reaches_it() {
+        let wall = the_wall_through_the_axis();
+        let bar = a_bar_up_z_of_radius(2.0);
+        let ball = the_ball_of_radius_at_0_3_5(3.0);
+        let answer = meet([&wall, &bar, &ball]).expect("a wall along a bar is answered");
+        on_all_three([&wall, &bar, &ball], &answer);
+        let up = 2.0 * 2f64.sqrt();
+        narrow_boxes_round(&answer, &[[0.0, 2.0, 5.0 - up], [0.0, 2.0, 5.0 + up]]);
+        assert_eq!(meet([&ball, &wall, &bar]), Ok(answer), "in any order");
+    }
+
+    /// The ball of radius 1 at `(0, 3, 5)` only touches the line `y = 2` the
+    /// wall cuts the bar in, so the three meet at `(0, 2, 5)` alone.
+    #[test]
+    fn a_wall_through_a_bars_axis_meets_a_ball_that_touches_one_of_its_lines_once() {
+        let wall = the_wall_through_the_axis();
+        let bar = a_bar_up_z_of_radius(2.0);
+        let ball = the_ball_of_radius_at_0_3_5(1.0);
+        let answer = meet([&wall, &bar, &ball]).expect("a wall along a bar is answered");
+        on_all_three([&wall, &bar, &ball], &answer);
+        assert_eq!(
+            answer,
+            MeetOfThree::At(smallvec![PredicatePoint::Exact([0.0, 2.0, 5.0])])
+        );
+        assert_eq!(meet([&bar, &ball, &wall]), Ok(answer), "in any order");
+    }
+
+    /// The wall `y = 0` holds the axes of a bar of radius 4 up `z` and of one
+    /// of radius 1 along `x` at `z = 5`, so it cuts them in `x = ±4` and in
+    /// `z = 4` and `z = 6`, which cross at four points of the lattice.
+    #[test]
+    fn a_wall_through_the_axes_of_two_bars_that_cross_meets_them_where_their_lines_cross() {
+        let wall = flat([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]);
+        let upright = a_bar_up_z_of_radius(4.0);
+        let across = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(0.0, 0.0, 5.0), Vector::new(1.0, 0.0, 0.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let answer = meet([&wall, &upright, &across]).expect("a wall along a bar is answered");
+        on_all_three([&wall, &upright, &across], &answer);
+        assert_eq!(
+            answer,
+            MeetOfThree::At(smallvec![
+                PredicatePoint::Exact([-4.0, 0.0, 4.0]),
+                PredicatePoint::Exact([-4.0, 0.0, 6.0]),
+                PredicatePoint::Exact([4.0, 0.0, 4.0]),
+                PredicatePoint::Exact([4.0, 0.0, 6.0])
+            ])
+        );
+        assert_eq!(meet([&across, &wall, &upright]), Ok(answer), "in any order");
+    }
+
+    /// A cone bends against the pipe's own direction, so `w·Mw` is below zero
+    /// there and the quadratic along each line opens downwards. The wall
+    /// `x = 0` cuts the bar of radius 1 up `z` through `(0, 3, 0)` in `y = 2`
+    /// and `y = 4`, and the cone of slope 1 at the origin in `y = ±z`, so the
+    /// three meet at `(0, 2, ±2)` and `(0, 4, ±4)`, the lower `z` first on
+    /// each line all the same.
+    #[test]
+    fn a_wall_through_a_bars_axis_meets_a_cone_beside_it_lower_point_first_on_each_line() {
+        let wall = the_wall_through_the_axis();
+        let cone = a_cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+        let bar = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(0.0, 3.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let answer = meet([&wall, &cone, &bar]).expect("a wall along a bar is answered");
+        on_all_three([&wall, &cone, &bar], &answer);
+        assert_eq!(
+            answer,
+            MeetOfThree::At(smallvec![
+                PredicatePoint::Exact([0.0, 2.0, -2.0]),
+                PredicatePoint::Exact([0.0, 2.0, 2.0]),
+                PredicatePoint::Exact([0.0, 4.0, -4.0]),
+                PredicatePoint::Exact([0.0, 4.0, 4.0])
+            ])
+        );
+        assert_eq!(meet([&bar, &cone, &wall]), Ok(answer), "in any order");
+    }
+
+    /// A plane that leans to the bar's axis cuts it in an ellipse, and an
+    /// ellipse and the ball's circle meet where a quartic is zero, so the
+    /// triple stays refused. Through `(0, 0, 5)` with normal `(0, 0.6, 0.8)`
+    /// the plane cuts the ball, whose centre is `1.8` from it.
+    #[test]
+    fn a_plane_leaning_to_a_bars_axis_through_a_ball_off_it_is_refused_by_name() {
+        let leaning = flat([0.0, 0.6, 0.8], [0.0, 0.0, 5.0]);
+        let bar = a_bar_up_z_of_radius(2.0);
+        let ball = the_ball_of_radius_at_0_3_5(3.0);
+        assert_eq!(
+            meet([&leaning, &bar, &ball]),
             Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
         );
+        assert_eq!(
+            meet([&ball, &leaning, &bar]),
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+        );
+    }
+
+    fn a_bar_up_z_of_radius(radius: f64) -> Surface {
+        Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius"))
+    }
+
+    fn the_ball_of_radius_at_0_3_5(radius: f64) -> Surface {
+        Surface::Sphere(Sphere::new(Point::new(0.0, 3.0, 5.0), radius).expect("a radius"))
+    }
+
+    /// Each point of `answer` is a box no wider than `1e-14` round the point in
+    /// its own place in `wanted`.
+    fn narrow_boxes_round(answer: &MeetOfThree, wanted: &[[f64; 3]]) {
+        let MeetOfThree::At(points) = answer else {
+            panic!("expected points, got {answer:?}");
+        };
+        assert_eq!(points.len(), wanted.len(), "{answer:?}");
+        for (point, wanted) in points.iter().zip(wanted) {
+            let boxed = point.enclosure();
+            assert!(
+                (0..3).all(|axis| boxed[axis].lo() <= wanted[axis]
+                    && wanted[axis] <= boxed[axis].hi()
+                    && boxed[axis].width() < 1e-14),
+                "{point:?} is not a narrow box round {wanted:?}"
+            );
+        }
     }
 
     fn a_cone(apex: [f64; 3], up: [f64; 3], slope: f64) -> Surface {
