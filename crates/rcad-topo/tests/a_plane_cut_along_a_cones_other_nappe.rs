@@ -1073,9 +1073,14 @@ fn a_slab_fourteen_deep_from_the_apex_up_across_a_steep_pointed_cone_answers_rig
 /// and the block-less-cone at crossing `0`, turn `1`. Leaned `1`, the same
 /// crossing and turn refuses `AWireWillNotLieFlatOnItsFace` on the union and
 /// the cone-less-block, and the sliver the intersection answers does not
-/// measure (`TwoPatchesOfTheMeshDrewTheSameSide`). Every lean-`1` crossing
-/// but `0`, turned `1`, refuses `order along a crossing` on every rule. Each
-/// test here holds one lean at every crossing and turn.
+/// measure (`TwoPatchesOfTheMeshDrewTheSameSide`). Leaned `1` and turned `1`,
+/// crossings `0.5` and `1.5` refuse `order along a crossing` on every rule,
+/// and crossing `−0.5`, the miss, answers right on every rule. Until Q1461's
+/// cone bands in `fuse/cuts.rs` it refused `order along a crossing` on every
+/// rule too, so this lean was `33` right and `12` of those, as `e7271921`
+/// measured them by case on `2a3486d6`; which of Q1461's two steps moved the
+/// four is not traced. Each test here holds one lean at every crossing and
+/// turn.
 #[test]
 fn a_block_leaned_a_quarter_across_a_unit_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
@@ -1103,14 +1108,14 @@ fn a_block_leaned_one_across_a_unit_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
         tally_on_every_second_point(&leaning_blocks(THE_UNIT_CONE, 1.0, &[0.0, 1.0, 3.0])),
         Tally {
-            right: 33,
+            right: 37,
             refused: [
                 ("AWireWillNotLieFlatOnItsFace", 2),
                 (
                     "the answer does not measure: TwoPatchesOfTheMeshDrewTheSameSide",
                     1
                 ),
-                ("order along a crossing", 12),
+                ("order along a crossing", 8),
             ]
             .into()
         }

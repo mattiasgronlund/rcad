@@ -189,11 +189,15 @@ count in the table was the same on all three runs.
   pinned here, none of the leaning block's 56 `a point inside a piece of a
   face` of the bullet above is left, and the corner-up cube refuses no
   `ACurvedFaceGoesRightRoundWithNoSeam`.
-- **Round the unit cone**, the leaning block is 161 right of 192, the cube 88 of
-  96 and the slab 68 of 80. The leaning block refuses 12 `order along a
+- **Round the unit cone**, the leaning block is 165 right of 192, the cube 88 of
+  96 and the slab 68 of 80. The leaning block refuses 8 `order along a
   crossing`, 4 `ResultIsNotManifold` and 2 `AWireWillNotLieFlatOnItsFace`, 5
   answers do not measure (4 `CannotMeshAFace`, 1
-  `TwoPatchesOfTheMeshDrewTheSameSide`), and 8 more fuses are Q1562's, below. None of the unit cone's
+  `TwoPatchesOfTheMeshDrewTheSameSide`), and 8 more fuses are Q1562's, below.
+  Q1461's cone bands moved four: leaned `1`, crossing `−0.5`, turned `1`, the
+  block misses the cone, and all four rules refused `order along a crossing`
+  there and answer right since. Before Q1461 the leaning block was 161 right
+  and refused 12 of those. None of the unit cone's
   refusals names the apex. Nobody traced whether its step down the axis lands
   on the apex, as 350.1 works out, and is turned away there, as 350.3 says.
 - **The unit cone's 20 `a point inside a piece of a face`** are 8 in the cube
