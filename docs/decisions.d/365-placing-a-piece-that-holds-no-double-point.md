@@ -876,6 +876,42 @@ sliver in the plane of a face of the non-convex solid.
 > and the first less the second, refused the same way, a row with no class
 > since its cause was not run, with `assemble.rs`'s corner naming a lead.
 
+> **2026-10-10 note (Q1633, Q1634): the comb pair's intersection answers both
+> ways round, and its unions and comb 3 less comb 2 are a limit.** Lane
+> `lane-q1633-two-combs-four-faces-along-one-edge`, off `c6f45b25`, landed as
+> `7508da01`. This replaces the last note's two rows.
+>
+> **Q1633.** With comb 2 first, one edge of the intersection had four faces
+> along it: two pieces of the plane `y = 1`, facing `+y`, from the two combs'
+> gap floors, and the two walls `x + 2y = 5` and `x − 2y = 1` of the part where
+> the teeth cross. `Assembly::the_two_pairs_along` in `fuse/assemble.rs` parted
+> four faces only where one pair was pieces of one input face, so it refused
+> `ResultIsNotManifold { count: 4 }`. It now also parts them where one pair is
+> two flat faces whose stored planes are the same plane facing the same way
+> (`one_plane_facing_one_way`, asked through `Plane::agreement_with`) and the
+> other two rest on its outer side. The two on the plane are one floor that
+> changes owner along the line, and the part stands on it. The intersection
+> now answers two parts holding `3.0 ± 8.3e-17` in either order.
+> `swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit` refuses 12 of 280
+> with 6 not a solid, and no comparison disagrees, down from the last note's 2.
+>
+> **Q1634: a limit.** The unions in either order and comb 3 less comb 2 are
+> still refused `ResultIsNotManifold { count: 4 }`. From `z = 1` to `2` the true
+> answer needs a notch between three corners that are three different points
+> within `2e-15` of `(3, 1)`: `(3, 1)` itself, the crossing of `x + 2y = 5`
+> with `y = 1`, and the meet of `x + 2y = 5` with `x − 2y = 1`. Its edges
+> there are under `4e-15` long beside the corner `(5, 0, 0)`, a spread past
+> `1e15` against §3.5's `1e11`.
+> `where_the_two_combs_cross_three_corners_lie_a_rounding_apart` shows the
+> three points apart, exactly. The lane weighed three fixes. Naming the last
+> two apart still leaves the short edge, since their boxes share the middle
+> `(3.0000000000000004, 1)`. Scaling cannot help a length over a length. And
+> snapping one onto the other is a tolerance. The refusal is the limit's, but
+> it carries the wrong name: `Corners::of` joins the two points by that shared
+> middle, so the fuse stops at four faces along an edge before
+> `check_dynamic_range` sees the spread. That is Q1658, `refuses/D`.
+> `a_sliver_along_an_edge_of_a_face_it_lies_on.rs` pins the six comb fuses.
+
 ### 365.9 A piece placed by the piece of its own face across a side
 
 *Queue row Q1357. Lane `lane-q1357-a-triangle-on-the-plane-of-a-face-it-misses`,
