@@ -620,9 +620,21 @@ enum Search {
 ///
 /// A piece `P` and a solid `S`. If a side of `P` is also a side of a piece cut
 /// from a face `G` of `S`, the other piece's side runs along none of `G`'s own
-/// edges, `P`'s side names `G`'s surface bit for bit as its partner, and `P` is
-/// not on `G`'s surface, then **`P` is inside `S` when its material is on
-/// `S`'s inner side of `G`**, and outside it otherwise.
+/// edges, `P`'s side names `G`'s surface bit for bit as its partner and the
+/// other piece's side names `P`'s, and `P` is not on `G`'s surface, then **`P`
+/// is inside `S` when its material is on `S`'s inner side of `G`**, and
+/// outside it otherwise.
+///
+/// **Both partners are asked because one name does not make one line.** Two
+/// sides are one edge of the naming when their ends are named the same corners,
+/// and a corner can take in two places a rounding apart. Two combs of the skew
+/// family (Q1609) had the strip of one's gap floor `y = 1` between `x = 3` and
+/// the other's wall `x + 2y = 5`, `3.7e-16` along, lying on the other's gap
+/// floor. Its side on that wall, which is the other comb's own edge there, was
+/// named one edge with the cut of that wall by the first comb's `x − 2y = 1`,
+/// `9.3e-17` above it, whose ends were named the same two corners. Read off
+/// that cut, the strip came out outside the other comb, and the intersection
+/// kept neither copy of it. The cut's partner is `x − 2y = 1`, not `y = 1`.
 ///
 /// `P` was cut by every surface of `S`, so it is all inside `S` or all outside
 /// it, which is what one point already rests on (§17.4). Beside the middle of
@@ -732,6 +744,7 @@ impl<'a> SidesItShares<'a> {
         log: &mut ProvenanceLog,
     ) -> Option<bool> {
         let mine = &self.scratch.pieces[piece];
+        let my_surface = name_of_surface_bits(&mine.surface);
         let mut found = None;
         for shared in &named[piece] {
             let theirs = named
@@ -740,7 +753,11 @@ impl<'a> SidesItShares<'a> {
                 .enumerate()
                 .filter(|(_, (_, from))| **from == solid)
                 .flat_map(|(other, (sides, _))| sides.iter().map(move |side| (other, side)))
-                .filter(|(_, side)| side.edge == shared.edge && side.side.along.is_empty());
+                .filter(|(_, side)| {
+                    side.edge == shared.edge
+                        && side.side.along.is_empty()
+                        && name_of_surface_bits(&side.side.carried_by[1]) == my_surface
+                });
             for (other, _) in theirs {
                 let cut_from = &self.scratch.pieces[other];
                 let face = self.solids[solid]
