@@ -1058,11 +1058,12 @@ fn the_planes_meeting_at_each_corner_of_a_solid(solid: &BakedSolid) -> Option<Ve
         .collect()
 }
 
-/// The rule before the last: a flat piece that no point, side it shares, corner
-/// or plane placed takes the placement of the piece of its own face across one
-/// of its straight sides, where no plane of a solid it is placed against holds
-/// that side, unless that plane is the face's own. Where it places nothing,
-/// [`by_an_edge_of_a_face_it_lies_on`] is tried last.
+/// The third rule from the last: a flat piece that no point, side it shares,
+/// corner or plane placed takes the placement of the piece of its own face
+/// across one of its straight sides, where no plane of a solid it is placed
+/// against holds that side, unless that plane is the face's own. Where it
+/// places nothing, [`by_an_edge_of_a_face_it_lies_on`] is tried next, and
+/// [`by_a_side_from_an_edge_it_starts_on`] last.
 ///
 /// **Why a neighbour can place a piece.** `P` and `P′` are pieces of one flat
 /// face `F` that share a side `s`, and `S` is a solid with only flat faces.
@@ -1223,10 +1224,11 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
     Some([*first.as_plane()?, *second.as_plane()?, *third.as_plane()?])
 }
 
-/// The rule after every other: a flat piece that lies on the plane of a flat
+/// The rule before the last: a flat piece that lies on the plane of a flat
 /// face `G` of a solid, with a straight side along an edge `e` of `G`, placed
 /// against that solid by which side of the plane across `e` its material is on
-/// (`docs/decisions.md` §365.8, Q1606).
+/// (`docs/decisions.md` §365.8, Q1606). Where it places nothing,
+/// [`by_a_side_from_an_edge_it_starts_on`] is tried.
 ///
 /// **Why an edge can place a piece.** `P` is the piece, on `G`'s plane, `S` the
 /// solid, and `H` the flat face across `e`. `s` is a side of `P` carried by
@@ -1350,18 +1352,11 @@ fn beside_one_edge(
         return None;
     }
     let line = [g.coefficients(), across.coefficients()];
-    let the_third = |three: [Plane; 3]| {
-        let mut rest = three.into_iter().filter(|plane| {
-            !is_one_plane_either_way(*plane, g) && !is_one_plane_either_way(*plane, h)
-        });
-        let third = rest.next()?;
-        rest.next().is_none().then(|| third.coefficients())
-    };
-    let start = the_third(three_planes(&edge.start.around)?)?;
-    let end = the_third(three_planes(&edge.end.around)?)?;
+    let start = the_third(three_planes(&edge.start.around)?, g, h)?;
+    let end = the_third(three_planes(&edge.end.around)?, g, h)?;
     let [from, to] = &side.ends;
-    let from = the_third(the_planes_meeting_at(from, own, flat)?)?;
-    let to = the_third(the_planes_meeting_at(to, own, flat)?)?;
+    let from = the_third(the_planes_meeting_at(from, own, flat)?, g, h)?;
+    let to = the_third(the_planes_meeting_at(to, own, flat)?, g, h)?;
     let order = |first, second| which_meet_comes_first_along_a_line(line, first, second).ok();
     let along = order(start, end)?;
     let towards_g = match along {
@@ -1393,27 +1388,213 @@ fn beside_one_edge(
             same_way,
         });
     }
-    let face_across = solid.faces.iter().find(|other| {
+    let behind = the_inner_side_of(the_face_across(solid, edge, h)?, across)?;
+    Some(if side.material_side == behind {
+        Placement::Inside
+    } else {
+        Placement::Outside
+    })
+}
+
+/// The last rule: a flat piece with a straight side along the plane of a flat
+/// face `G` of a solid, one end of that side strictly inside an edge `e` of
+/// `G`, placed against that solid by where that side runs from that end
+/// (`docs/decisions.md` §365.8, Q1608, Q1609).
+///
+/// **Why the start of a side can place a piece.** `P` is the piece, on a plane
+/// that is neither `G`'s nor that of `H`, the flat face across `e`, and `S` is
+/// the solid. `s` is a side of `P` carried by `P`'s plane and `G`'s, and `c`,
+/// one end of it, is where `P`'s plane crosses the line of `e`, strictly
+/// between `e`'s two ends. So near `c` the skin of `S` is `G` and `H` and
+/// nothing else, `G` a half-plane on one side of `H`'s plane. `P` was cut by
+/// every surface of `S`, so its inside lies all inside `S`, all outside it, or
+/// all on its skin (§17.4), and it is enough to know where it is near one
+/// point. Take `m` on `s`, near `c`: it is on `G`'s plane, and off `H`'s,
+/// since the far end of `s` is off it.
+///
+/// - Where `s` runs to `G`'s side of `H`'s plane, `m` is on `G` and on no other
+///   face, so near `m` the skin is a disk of `G`'s plane with `S` behind it.
+///   The inside of `P` near `m` is a half-disk off that plane, on its material
+///   side of it, and so inside `S` when that is `G`'s inner side and outside
+///   it when it is not.
+/// - Where it runs to the other side, `m` is on `G`'s plane beyond `e`, off
+///   the skin, and the inside of `P` near `m` is where `m` is. That is in
+///   front of `H`'s outward plane where the solid's corner at `e` is convex
+///   and behind it where it is reflex: across a convex edge the solid is on
+///   `G`'s side of `H`'s plane, and across a reflex one `H` faces towards `G`.
+///   So `m` is inside when it is behind `H`'s outward plane, with no need to
+///   ask which kind of edge it is.
+///
+/// `P` is never on the skin of `S`, since near `m` it is off it.
+///
+/// `G`'s side of `H`'s plane is read off the way `G`'s wire walks `e`, as
+/// [`by_an_edge_of_a_face_it_lies_on`] reads it. Every question here is
+/// [`which_meet_comes_first_along_a_line`] along the line of `e`, or
+/// [`side_of_a_plane_where_three_planes_meet`] for the far end of `s`, each
+/// point asked as the meet of three planes, or two planes compared bit for
+/// bit, so every answer is exact and nothing goes into the log. An end of `s`
+/// or of `e` that is not such a meet, a question that comes back undecided or
+/// as a tie, or a plane that does not match leaves the side out.
+///
+/// Inside one solid of the group is inside, and outside every one is outside,
+/// as [`by_a_plane`] reads it. A solid no side of the piece starts inside an
+/// edge of leaves the piece unplaced, and the caller refuses under the name
+/// the point search ran out under.
+///
+/// The pieces this was built for are two slivers a rounding wide
+/// (`tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`). One is cut from a
+/// leaning ell's floor `z = 1` where the frame's hole corner `(3, 2)` is. The
+/// other is cut from a comb's floor `z = 1` by the other comb's gap floor
+/// `y = 1`, its tooth wall `x − 2y = 2` and the first comb's own wall
+/// `x + 2y = 6`, and its side along the tooth wall starts at `(4, 1, 1)`,
+/// inside the edge where that wall meets the gap floor, and runs up the wall.
+/// Every corner of each is on the plane of a face of the other solid, so no
+/// plane has it in front, and no side of it lies along an edge.
+fn by_a_side_from_an_edge_it_starts_on(
+    solids: &[&BakedSolid],
+    against: &[usize],
+    mine: usize,
+    piece: &Piece,
+) -> Option<Placement> {
+    let flat = *piece.surface.as_plane()?;
+    let mut outside_every_one = true;
+    for &index in against {
+        match from_an_edge_of(solids[index], solids[mine], piece, flat) {
+            Some(true) => return Some(Placement::Inside),
+            Some(false) => (),
+            None => outside_every_one = false,
+        }
+    }
+    outside_every_one.then_some(Placement::Outside)
+}
+
+/// Whether `piece`, on the plane `flat`, is inside `solid` (`Some(true)`) or
+/// outside it (`Some(false)`) by [`by_a_side_from_an_edge_it_starts_on`]'s
+/// rule, read off the first side of it that starts inside an edge of a face of
+/// `solid` and runs along that face's plane, or `None` where no side does.
+fn from_an_edge_of(
+    solid: &BakedSolid,
+    own: &BakedSolid,
+    piece: &Piece,
+    flat: Plane,
+) -> Option<bool> {
+    solid.faces.iter().find_map(|face| {
+        face.wires.iter().flatten().find_map(|edge| {
+            piece
+                .wires
+                .iter()
+                .flatten()
+                .find_map(|side| from_one_edge(solid, own, flat, face, edge, side))
+        })
+    })
+}
+
+/// Whether the piece with the side `side`, on the plane `flat`, is inside
+/// `solid` when that side runs along the plane of `face` from a point strictly
+/// inside its edge `edge`, or `None` where it does not, as
+/// [`by_a_side_from_an_edge_it_starts_on`] asks it.
+fn from_one_edge(
+    solid: &BakedSolid,
+    own: &BakedSolid,
+    flat: Plane,
+    face: &BakedFace,
+    edge: &BakedEdge,
+    side: &FaceMeet,
+) -> Option<bool> {
+    let g = *face.surface.as_plane()?;
+    let h = *edge.across.as_plane()?;
+    if !is_straight(side) || !is_one_plane_either_way(*side.carried_by[0].as_plane()?, flat) {
+        return None;
+    }
+    let cut_by = *side.carried_by[1].as_plane()?;
+    if !is_one_plane_either_way(cut_by, g) {
+        return None;
+    }
+    if [(flat, g), (flat, h), (g, h)]
+        .iter()
+        .any(|&(one, other)| is_one_plane_either_way(one, other))
+    {
+        return None;
+    }
+    let holds =
+        |three: &[Plane; 3], plane| three.iter().any(|one| is_one_plane_either_way(*one, plane));
+    let [first, second] = &side.ends;
+    let ends = [
+        the_planes_meeting_at(first, own, flat)?,
+        the_planes_meeting_at(second, own, flat)?,
+    ];
+    let far = match ends.map(|three| holds(&three, g) && holds(&three, h)) {
+        [true, false] => ends[1],
+        [false, true] => ends[0],
+        [true, true] | [false, false] => return None,
+    };
+    if !holds(&far, g) {
+        return None;
+    }
+    let start = the_third(three_planes(&edge.start.around)?, g, h)?;
+    let end = the_third(three_planes(&edge.end.around)?, g, h)?;
+    let line = [g.coefficients(), h.coefficients()];
+    let order = |first, second| which_meet_comes_first_along_a_line(line, first, second).ok();
+    let along = order(start, end)?;
+    let towards_g = match along {
+        Decision::Pos => Decision::Neg,
+        Decision::Neg => Decision::Pos,
+        Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+    };
+    let at = flat.coefficients();
+    if order(start, at)? != along || order(at, end)? != along {
+        return None;
+    }
+    let runs_to = side_of_a_plane_where_three_planes_meet(
+        far.map(|plane| plane.coefficients()),
+        h.coefficients(),
+    )
+    .ok()?;
+    match runs_to {
+        Decision::Pos | Decision::Neg => (),
+        Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+    }
+    if runs_to == towards_g {
+        Some(side.material_side == the_inner_side_of(face, cut_by)?)
+    } else {
+        Some(runs_to == the_inner_side_of(the_face_across(solid, edge, h)?, h)?)
+    }
+}
+
+/// The one plane of `three` that is neither `g` nor `h`, either way round, as
+/// coefficients, or `None` where there is not exactly one.
+fn the_third(three: [Plane; 3], g: Plane, h: Plane) -> Option<[f64; 4]> {
+    let mut rest = three
+        .into_iter()
+        .filter(|plane| !is_one_plane_either_way(*plane, g) && !is_one_plane_either_way(*plane, h));
+    let third = rest.next()?;
+    rest.next().is_none().then(|| third.coefficients())
+}
+
+/// The face of `solid` on the plane `h`, stored that way round, that shares an
+/// input edge with `edge`: the face across it.
+fn the_face_across<'a>(solid: &'a BakedSolid, edge: &BakedEdge, h: Plane) -> Option<&'a BakedFace> {
+    solid.faces.iter().find(|other| {
         other.surface.as_plane() == Some(&h)
             && other
                 .wires
                 .iter()
                 .flatten()
                 .any(|theirs| theirs.keys.iter().any(|key| edge.keys.contains(key)))
-    })?;
-    let outward = outward_plane_of_face(face_across)?;
-    let behind = if across == outward {
-        Decision::Neg
-    } else if across == outward.reversed() {
-        Decision::Pos
-    } else {
-        return None;
-    };
-    Some(if side.material_side == behind {
-        Placement::Inside
-    } else {
-        Placement::Outside
     })
+}
+
+/// Which side of `plane` is inside the solid next to `face`, when `plane` is
+/// that face's plane facing either way, or `None` when it is not.
+fn the_inner_side_of(face: &BakedFace, plane: Plane) -> Option<Decision> {
+    let outward = outward_plane_of_face(face)?;
+    if plane == outward {
+        Some(Decision::Neg)
+    } else if plane == outward.reversed() {
+        Some(Decision::Pos)
+    } else {
+        None
+    }
 }
 
 /// Whether `one` and `other` are one plane, bit for bit, facing either way.
