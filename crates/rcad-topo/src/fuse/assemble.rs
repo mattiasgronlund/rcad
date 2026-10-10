@@ -1066,9 +1066,12 @@ impl Assembly {
     /// [`Error::ResultIsNotManifold`] when an edge is claimed by other than two
     /// faces, [`Error::Undecidable`] when two planes cannot be told apart at
     /// all, [`Error::TheFuseWroteABrokenAnswer`] when two rings of a joined
-    /// flat face both wind as its outline ([`Assembly::rings_round`]), and
-    /// whatever [`intersect`](rcad_geom::intersect) gives for a plane and a
-    /// ring whose circle a ring of a joined face runs round.
+    /// flat face both wind as its outline,
+    /// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] when nothing could say
+    /// which of two or more rings that enclose nothing is its outline (both
+    /// [`Assembly::rings_round`]), and whatever
+    /// [`intersect`](rcad_geom::intersect) gives for a plane and a ring whose
+    /// circle a ring of a joined face runs round.
     ///
     /// # Panics
     ///
@@ -1700,6 +1703,23 @@ impl Assembly {
     /// (`a_turned_cube_with_its_corner_on_a_face.rs`, Q1287). Written, either
     /// face is one [`Model::validate`] refuses for that `broken`.
     ///
+    /// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] where two or more rings
+    /// enclose nothing and nothing could place them: the ones
+    /// [`Assembly::holds_the_other_rings`] answers `None` for, with no ring
+    /// winding with the plane and none shown to hold the others. A cap along
+    /// four pipes whose corners sweep exactly nothing, with its own shape an
+    /// eighth the size standing through it, reaches it: united, or less the
+    /// small one, its top is joined from nine pieces with two such rings,
+    /// neither along one surface and neither with its corners on one line
+    /// (`a_joined_flat_face_whose_rings_enclose_no_area.rs`, Q1253). It was a
+    /// panic, but a caller builds that cap through `SolidBuilder`, and the face
+    /// is a sound one whose rings this reading cannot place, so it is a gap and
+    /// not a broken invariant. Of a ring along one torus, the rings nothing
+    /// could place are one whose plane rests on the tube, which touches it
+    /// round one circle no picker names, and one where no corner of the other
+    /// rings is placed; no shape is known to reach those. The log gets a
+    /// record holding the corners of each ring left unplaced.
+    ///
     /// **A ring whose corners enclose nothing is placed by the rule above**,
     /// because its corners cannot place it. A half disk has two corners, so the
     /// hole a half ball pokes through a knife's face, joined across the axis
@@ -1735,17 +1755,6 @@ impl Assembly {
     ///   half bar whose corner is their lens's corner reach it, both ways round
     ///   (`a_half_bar_whose_corner_is_the_lens_corner_mostly_answers` in
     ///   `a_lens_whose_hole_is_half_a_disk.rs`, Q1290).
-    /// - **Two or more rings enclosing nothing that nothing could place**: the
-    ///   ones [`Assembly::holds_the_other_rings`] answers `None` for. Of a ring
-    ///   along one torus, that is one whose plane rests on the tube, which
-    ///   touches it round one circle no picker names, and one where no corner
-    ///   of the other rings is placed. No shape is known to reach it. Two rings
-    ///   along one torus did, on the joined floor of the top halves of two half
-    ///   bends united, until such a ring was placed by its circle's disk
-    ///   (Q1387). A ring with a side along a hyperbola was another (Q1253),
-    ///   and a shape reached it: united with a cone closed by a ball, a cut
-    ///   cone's wall has an outline and a hole of two corners each, each with a
-    ///   side along a hyperbola. Such a side is placed now (Q1289).
     /// - **Two or more rings each holding the others**, which would mean the
     ///   answer's rings cross. Nobody has traced whether any shape reaches it.
     fn rings_round(
@@ -1830,11 +1839,27 @@ impl Assembly {
                          takes edges away, so the joined face has one too, and none of its rings \
                          winds with the plane or bounds a region holding the others"
                     ),
-                    ([], _) => panic!(
-                        "{} rings of a joined face enclose no area between their corners, and the \
-                         regions they bound cannot say which of them is the outline",
-                        unplaced.len()
-                    ),
+                    ([], _) => {
+                        let corners: Vec<PredicatePoint> = unplaced
+                            .iter()
+                            .flat_map(|&ring| {
+                                let corners = corners_of(&enclosing_nothing[ring]);
+                                let first = corners[0];
+                                corners.into_iter().chain([first])
+                            })
+                            .map(PredicatePoint::from)
+                            .collect();
+                        log.push(Record::new(
+                            WHICH_RING_IS_THE_OUTLINE,
+                            &corners,
+                            Level::Interval,
+                            f64::INFINITY,
+                            Measures::Area,
+                        ));
+                        return Err(Error::CannotPlaceTheRingsOfAJoinedFlatFace {
+                            face: self.faces[members[0]].ancestors[0],
+                        });
+                    }
                     (_, _) => panic!(
                         "a face joined out of coplanar pieces has one outline, and {} of its rings \
                          each hold the others, so the answer's rings cross",

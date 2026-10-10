@@ -2657,7 +2657,8 @@ fn a_bar_touching_a_blocks_bore_at_its_seam_leaves_one_hole_through_that_corner_
 /// the big bar's circle and the radius-3 bar's, both closed at `(7, 0)`, and
 /// the bore's circle and the radius-1 bar's through `(−2, 0)`. Neither winds
 /// round any area and `holds_the_other_rings` answers `None` for both, so
-/// `rings_round` would panic with two rings unplaced.
+/// `rings_round` would refuse the fuse `CannotPlaceTheRingsOfAJoinedFlatFace`,
+/// as it does the cap along four pipes with its own small shape through it.
 ///
 /// **Every rule, both ways round, is refused before that**: `Undecidable`, on
 /// `a point inside a piece of a face` in `select.rs`, whose record names the
