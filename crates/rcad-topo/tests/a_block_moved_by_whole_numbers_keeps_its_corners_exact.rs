@@ -158,6 +158,52 @@ fn every_fuse_of_a_block_moved_by_whole_numbers_answers_as_the_unmoved_block_doe
     );
 }
 
+/// A box that shares the block's front bottom edge and nothing else fuses the
+/// same with the cube and with the block that has a corner halfway along that
+/// edge, under every rule and both ways round: the corner is a point on the
+/// edge and not a different solid.
+///
+/// The union is refused `ResultIsNotManifold`. Two solids that touch along an
+/// edge of both share a line that no single solid holds, and §80.1 and §80.9
+/// keep that refusal. The block with the corner halfway was answered as two
+/// solids, because its edge stopped at the corner and the partner's did not,
+/// so no edge had four faces round it (Q1568).
+#[test]
+fn a_box_sharing_one_edge_fuses_the_same_whether_the_edge_has_a_corner_halfway_or_not() {
+    let sharing_one_edge = PARTNERS[3];
+    assert_eq!(
+        sharing_one_edge.name,
+        "sharing the front bottom edge and nothing else"
+    );
+    let not_a_solid = discriminant(&Error::ResultIsNotManifold { count: 4 });
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for block_first in [true, false] {
+            let cube = fused(Block::Cube, sharing_one_edge, [0.0; 3], rule, block_first);
+            let halfway = fused(
+                Block::CornerHalfwayAlongAnEdge,
+                sharing_one_edge,
+                [0.0; 3],
+                rule,
+                block_first,
+            );
+            assert_eq!(
+                halfway.0, cube.0,
+                "{rule:?}, block first {block_first}: the block with a corner halfway {}, \
+                 the cube {}",
+                halfway.1, cube.1
+            );
+            if rule == Rule::Union {
+                assert_eq!(
+                    halfway.0,
+                    Err(not_a_solid),
+                    "block first {block_first}: {}",
+                    halfway.1
+                );
+            }
+        }
+    }
+}
+
 /// The block that is moved: a cube as a designer builds one, or the same cube
 /// described face by face with a corner halfway along its front bottom edge,
 /// where only the front face and the bottom face meet.
