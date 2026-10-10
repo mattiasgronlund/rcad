@@ -7310,9 +7310,8 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// a loop's two arcs were one edge with six faces along it or four, and every
 /// rule both ways round was refused `ResultIsNotManifold` (queue row Q1643,
 /// `tests/two_arcs_where_two_curved_surfaces_cross.rs`). Named here, every rule
-/// gets past that check and is refused one step on, where `rcad-geom`'s `walk`
-/// cannot yet draw an arc of such a loop between two corners. That test's pin
-/// is what fails without this pair.
+/// both ways round gets past that check, and that test's pin is what fails
+/// without this pair.
 ///
 /// **The sign rule holds on every curve named here.** Two pipes whose axes run
 /// the same way cross in straight lines, and they keep [`None`], as does a pair
