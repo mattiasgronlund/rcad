@@ -248,6 +248,7 @@ fn every_walked_point_is_checked_in_a_box_far_smaller_than_the_loop(pair: [Surfa
         let (_, sized) = walk_it(&pair, run, f64::MAX / 4.0).expect("the sizing walk answers");
         let how_big = sized / POINT_ALONG_A_CROSSING_ROUNDOFF;
         let (_, box_size) = walk_it(&pair, run, how_big * 1e-2).expect("the fine walk answers");
+        println!("the oracle checked each point in a box reaching {box_size:e} each way");
         assert!(
             box_size < 1e-6,
             "the oracle checked each point in a box reaching {box_size:e} each way, round a loop of radius 1.375"
