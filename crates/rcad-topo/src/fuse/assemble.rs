@@ -491,9 +491,11 @@ impl Assembly {
     fn narrowest_a_cone_face_is_at_a_corner(&self) -> f64 {
         self.faces
             .iter()
-            .filter_map(|face| match face.surface {
-                Surface::Cone(cone) => Some((face, cone)),
-                _ => None,
+            .filter_map(|face| {
+                let Surface::Cone(cone) = face.surface else {
+                    return None;
+                };
+                Some((face, cone))
             })
             .flat_map(|(face, cone)| {
                 face.wires.iter().flatten().flat_map(move |side| {
