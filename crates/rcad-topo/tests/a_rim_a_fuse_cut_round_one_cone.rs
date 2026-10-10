@@ -8,15 +8,24 @@
 //! [`EdgeRun::RightRoundWhereItsFacesCross`] for every closed run, and this file
 //! is the fuse half.
 //!
-//! # The draw, and why nothing has to touch
+//! # The draw, and why it still reaches this at all
 //!
 //! `a_frustum_and_a_block_that_do_not_touch.rs`'s draw, which is the smallest
 //! one that reaches this at all: a frustum and a block standing clear of each
-//! other. The fuse puts the block's lower cap plane to the cone face whether or
-//! not the two solids meet (`fuse/cuts.rs` keeps no box test, on purpose —
-//! §17.4), so the answer carries **the cone face cut in two**, with a circle
-//! between the halves and the one cone either side of it. That is the pair that
-//! names nothing, arriving out of a fuse rather than out of a builder.
+//! other — the block's nearest corner is `√2` from the axis and the cone never
+//! gets wider than `1`, so no face of the one ever shares a point with a face
+//! of the other. Since §400 the fuse cuts two solids against each other only
+//! where it cannot prove they do not meet
+//! (`fuse::cuts::solids_within_reach_of_each_other`, about line 552), and that
+//! proof still fails on this draw: the block's lower cap is a flat face with no
+//! side on a round one, so `two_faces_provably_apart`'s band check (about line
+//! 615) is not asked of it, and the two whole-solid boxes still touch at the
+//! block's near corner, which the box check alone cannot see past. So the pair
+//! is still joined for cutting, and the answer still carries **the cone face
+//! cut in two**, with a circle between the halves and the one cone either side
+//! of it — moving the block out to `1.5` on each axis instead of `1`, clear of
+//! the box as well as the cone, stops the cut. That is the pair that names
+//! nothing, arriving out of a fuse rather than out of a builder.
 //!
 //! The same draw round a round bar is what says the substitution is not
 //! unconditional: the bar's *cap* circles have a cylinder one side and a plane

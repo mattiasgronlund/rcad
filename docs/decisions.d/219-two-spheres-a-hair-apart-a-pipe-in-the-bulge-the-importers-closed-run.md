@@ -285,6 +285,50 @@ modules.
 naming the third variant and not the fourth. §40 asks a wildcard to name what
 exists; it now does.
 
+> **2026-10-10 note (Q377): item 1's chain does not run, and the gate it named
+> is gone.** `put_in_the_poles_a_closed_crossing_passes` does not appear in
+> `crates/rcad-topo/src/mesh.rs` any more — `git log -S` finds it last at
+> `1cff1006` (Q1270), which renamed it to `put_in_the_poles_a_crossing_passes`
+> and widened it to run along an open crossing as well as a closed one. The
+> `if *run.run() == EdgeRun::RightRoundWhereItsFacesCross { .. } else { 0.0 }`
+> gate this item named is gone with it: `mesh.rs` now matches
+> `EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. }`
+> in one arm (`mesh.rs:969`) and calls the renamed function for either, so a
+> closed rim written the new way gets its poles exactly as one written the old
+> way does. There is no live gap left to be silent about.
+>
+> §220.1 then asked whether `Model::fuse` ever reaches that shape at all, and
+> found the chain this item named does not run on `add_ball`: a plane through
+> the polar axis cuts the great circle into **two open arcs** through the two
+> poles, not one closed rim, so `EdgeRun::RightRoundWhereItCrosses` is never
+> written there in the first place. The only route §220.1 found to a genuinely
+> closed rim through a pole was through `SolidBuilder` directly (a ball split
+> into two lunes), and that shape meshes correctly — pole and all, at all seven
+> deflections tried — since the fix above.
+>
+> The Q171 draw (`a_rim_that_names_its_cutting_surface.rs`, §400) is the fuse
+> route that was found to a closed rim between two faces of one ball: a block
+> and a ball that touch at one point, cut by the block's plane `y = 0` outside
+> the block. That rim misses both poles — the plane crosses the ball a half
+> unit off its centre, nowhere near either pole — and
+> `a_ball_touching_a_block_cut_in_two_by_the_blocks_plane_names_that_plane`
+> pins the rim and `the_union_is_the_same_answer_both_ways_round_with_the_rim_written_down`
+> pins the mesh both ways round.
+>
+> Q871's draw (`a_ball_cut_through_both_poles_by_a_linked_blocks_plane.rs`,
+> §400.5) is the one that does cut a unit ball through both poles: a linked
+> block's plane `x = 0`, reached through a chain of three solids. Before
+> §229.2 that cut the great circle into two arcs that folded into one closed
+> run with no ends and panicked `fuse/assemble.rs`; `the_corners_each_closed_run_keeps`
+> fixed the panic and the union kept the ball in two faces either side of
+> `x = 0`, the two arcs still there as the seam between them. **Since §229.2
+> the ball joiner joins those two faces into one before the next fuse, and the
+> arcs are gone with the seam** — the test file's own header says so: "Now the
+> two arcs are gone (§229.2)." So neither of the two fuse routes tried leaves a
+> closed rim through a pole standing in an answer, and the one shape that does
+> reach one — `SolidBuilder`'s own lunes — already meshes it right. No silent
+> wrong mesh is shown; nothing is filed.
+
 ### 219.8 What this leaves
 
 `holds.rs`'s `is_a_family_this_follows` is a **gap** now rather than a limit, and
@@ -297,7 +341,9 @@ Newly open, none of it in the tree:
 
 - **`mesh.rs:738`'s pole** (219.7). A silent wrong mesh, reachable through
   `Model::fuse`, with the producing chain named end to end. A wrong answer
-  outranks a refusal.
+  outranks a refusal. *Closed by Q1270 (`1cff1006`), which folded the gate
+  this named into one arm for both run kinds; the chain through `Model::fuse`
+  was then shown not to run, by §220.1 and the dated note after 219.7 below.*
 - **`meet.rs:84`'s invariant and `walk.rs:2152`'s guard** (219.7), one gap in two
   places, both public-API reachable.
 - **`validate.rs`'s closed-edge check reading the faces and not the run** (219.6),
