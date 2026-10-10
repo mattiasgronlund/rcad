@@ -164,12 +164,24 @@ fn a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement() {
     every_fuse_is_refused_where_two_loops_meet(a_bar_touching_a_ball_from_inside);
 }
 
-/// Two bars of radius 1, one up `z` and one along `x`, whose axes meet. Their
-/// pipes cross in two ellipses that meet at `(0, ±1, 0)`, the Steinmetz
-/// cross, and `intersect` refuses it.
+/// Two bars of radius 1, one up `z` and one along `x`, each from −2 to 2, whose
+/// axes meet at the origin. Their pipes cross in two ellipses, on the planes
+/// `x = z` and `x = −z`, which meet at `(0, ±1, 0)`: the Steinmetz cross.
+/// `place_the_meets` puts a node at each of the two points, with the four
+/// halves of the ellipses running into it.
+///
+/// Each bar is `4π`. What they share is the Steinmetz solid, `16r³/3`, which
+/// stays within `|x|, |z| ≤ 1`, inside both bars. The union keeps each pipe in
+/// two pieces, either side of the other bar, and the four caps; each bar less
+/// the other is two pieces, which touch at the two points.
 #[test]
-fn two_bars_of_one_radius_whose_axes_meet_are_refused_before_any_arrangement() {
-    every_fuse_is_refused_where_two_loops_meet(two_bars_of_one_radius_whose_axes_meet);
+fn two_bars_of_one_radius_whose_axes_meet_cross_in_two_ellipses_and_every_fuse_answers() {
+    let shared = 16.0 / 3.0;
+    every_fuse_answers(
+        two_bars_of_one_radius_whose_axes_meet,
+        [4.0 * PI, 4.0 * PI, shared],
+        [&[8], &[4], &[3, 3], &[3, 3]],
+    );
 }
 
 /// A bar of radius 2 up `z`, and a bar of radius 1 along `x` at `y = 1`, which
