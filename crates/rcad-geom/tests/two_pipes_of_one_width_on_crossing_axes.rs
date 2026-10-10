@@ -351,7 +351,31 @@ fn every_point_walked_round_one_of_the_two_ellipses_is_on_both_pipes() {
 /// is a piece of this crossing and not merely something the walker returned.
 #[test]
 fn the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece() {
-    let middle = Point::new(11.0, -3.25, 0.5);
+    let [named_in_four_halves, pairs_put_to_both] =
+        how_many_pairs_are_named_in_four_halves_and_drawn(Point::new(11.0, -3.25, 0.5));
+    assert_eq!(
+        named_in_four_halves, 752,
+        "the pairs with a facing each, whole-number, slid a few units in the last place or \
+         mostly its own, that leans its own way and passes exactly through the middle are named \
+         of {pairs_put_to_both}"
+    );
+}
+
+#[test]
+fn the_namer_names_this_family_crossing_at_a_middle_in_decimal_millimetres() {
+    let [named_in_four_halves, pairs_put_to_both] =
+        how_many_pairs_are_named_in_four_halves_and_drawn(Point::new(11.85, -3.15, 0.45));
+    assert_eq!(
+        named_in_four_halves, 168,
+        "the pairs named through a middle in decimal millimetres, of {pairs_put_to_both}"
+    );
+}
+
+/// The family put to both halves of the kernel through `middle`, and how many
+/// of the pairs put the namer names in four halves: every half it names, and
+/// both pieces lying in a bisector plane, is drawn, and every point drawn is on
+/// both pipes.
+fn how_many_pairs_are_named_in_four_halves_and_drawn(middle: Point) -> [usize; 2] {
     let mut pairs_put_to_both = 0;
     let mut named_in_four_halves = 0;
 
@@ -415,11 +439,7 @@ fn the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece()
         "the generator has to put the family to both halves and not a handful of it: \
          {pairs_put_to_both} pairs"
     );
-    assert_eq!(
-        named_in_four_halves, 704,
-        "the pairs with a facing each, whole-number, slid a few units in the last place or \
-         mostly its own, that leans its own way and passes exactly through the middle are named"
-    );
+    [named_in_four_halves, pairs_put_to_both]
 }
 
 /// Bores on `(3, 4, 0)` and `(3, 0, 4)` through `(11, −3.25, 0.5)` are picked
