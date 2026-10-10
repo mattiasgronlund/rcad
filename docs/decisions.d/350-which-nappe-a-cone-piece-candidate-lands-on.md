@@ -167,5 +167,63 @@ count in the table was the same on all three runs.
   it in the corner-up and slab families. Not traced.
 - §282.7's last bullet says this was unmeasured. It is outside this lane's
   files, and this section is the answer to it.
-- No test pins the sweep. Pinning the corner-up and slab families needs their
-  solid counts worked out, which this lane got wrong once.
+- **Q467 pins the sweep**, in `a_plane_cut_along_a_cones_other_nappe.rs`,
+  round §350.4's cone (`THE_STEEP_CONE`) and round a cone of slope 1 up to
+  `z = 3` (`THE_UNIT_CONE`). §350.4 wrote down neither its turns nor its slabs'
+  heights, so the pins choose them: turns `0`, `1` and `3` for the leaning
+  block, `0` and `0.7` for the cube, and slabs from `−14`, `−8`, `−3`, `0` and
+  `2`, turned `0`, `0.5`, `1` and `1.5`. Every solid count is worked out by hand
+  (`a_leaning_blocks_solids`, `a_corner_up_cubes_solids`, `a_slabs_solids`),
+  none read off the kernel; the cube whose top pokes out of the cap is two
+  solids there. Round the steep cone:
+
+  | family | fuses | right in §350.4 | right in the pins | the others |
+  |---|---|---|---|---|
+  | leaning block | 192 | 98 | 178 | 12 `CannotTellTheCellsOfAFaceApart`, 2 `CannotMeshAFace` |
+  | corner-up cube | 96 | 72 | 88 | 8 `order along a crossing` |
+  | slab | 80 | 40 | 38 | 24 `a point inside a piece of a face`, 12 `ACurvedFaceGoesRightRoundWithNoSeam`, 6 `side of a half-space` |
+
+  The two columns are not known to hold the same cases, since the turns and
+  heights may not be §350.4's, and the base is ten days of fixes on from
+  `bd525f4e`. Which change moved which count was not traced. At the turns
+  pinned here, none of the leaning block's 56 `a point inside a piece of a
+  face` of the bullet above is left, and the corner-up cube refuses no
+  `ACurvedFaceGoesRightRoundWithNoSeam`.
+- **Round the unit cone**, the leaning block is 161 right of 192, the cube 88 of
+  96 and the slab 68 of 80. The leaning block refuses 12 `order along a
+  crossing`, 4 `ResultIsNotManifold` and 2 `AWireWillNotLieFlatOnItsFace`, 5
+  answers do not measure (4 `CannotMeshAFace`, 1
+  `TwoPatchesOfTheMeshDrewTheSameSide`), and 8 more fuses are Q1562's, below. None of the unit cone's
+  refusals names the apex. Nobody traced whether its step down the axis lands
+  on the apex, as 350.1 works out, and is turned away there, as 350.3 says.
+- **The unit cone's 20 `a point inside a piece of a face`** are 8 in the cube
+  (side `2`, middle `1`, both turns) and 12 in the slab (from `−8`, turned `0.5`,
+  `1` and `1.5`). An untraced lead.
+- **Leaned `1` at crossing `0`, the face touches the unit cone along the ruling
+  `x = z`.** Turned `1`, the face as the model stores it passes `4.4e−16` beyond
+  the apex, so it cuts a real sliver from the cone, at most `6e−8` across
+  (`2a3486d6`'s message has the exact arithmetic). The kernel's intersection is
+  that sliver, one solid, so it answers the shape the floats describe and is not
+  a defect. It does not measure, and the union and the cone less the block
+  refuse `AWireWillNotLieFlatOnItsFace`.
+- **Q1562, read again.** Leaned `4` at crossing `0`, the stored face puts the
+  apex inside the block turned `0` and `1`, by `2.2e−16` and `4.4e−16`, so a
+  union of one solid holding a tip of the cone about `3e−16` tall is the right
+  shape. The defect is that `fuse` answers `Ok` with a model its own `validate`
+  refuses (`DynamicRangeTooWide`), where it should refuse.
+  `a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate` pins it,
+  and Q1562's text still holds.
+- **The pins cost too much for either tier, and the cost is the check, not the
+  fuse.** The eight sweep tests are new, so they have caught nothing yet and
+  their score for `slow_tests` is cost alone. The corner-up cube round the steep cone,
+  run one fuse at a time with nothing else of the lane's running, at a load of
+  34 to 69 on 24 cores, took 953.6 s: 1.7 s in `model.fuse` and 944.5 s in
+  `fuse_and_check`'s grid, which asks `classify_point` of up to 30 625 points.
+  One case took 110.6 s alone, and its union 55.2 s, 54.7 s of it the grid. So
+  no cut by lean, turn, side or case brings a piece to §397.4's 20 s. The union
+  and the cone less the block took 772.7 s of the 953.6. Q850's cube families
+  round the frustum and the slope-½ pointed cone took 54.8 s and 51.2 s alone,
+  whole, under the same check (§397.4). Why one answer round the steep cone costs so
+  much more to ask about is not traced; until it is cheaper, or the grid is
+  thinner for these families, the eight cannot land in `test` or in
+  `slow_tests`.
