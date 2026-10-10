@@ -105,6 +105,15 @@ impl<'m> SolidView<'m> {
     /// surfaces of the faces around it and those are only reachable — already
     /// moved into place — from the solid they sit in.
     ///
+    /// **The wires it follows on a flat face with no arc of a crossing among its
+    /// sides**: a polygon whose sides are straight or pieces of a cone's ruling,
+    /// walked; and a whole closed curve, a circle walked as two arcs from pole to
+    /// pole, or several whole circles that all close at the wire's one corner —
+    /// the one wire two round holes that touch at a point leave — each read
+    /// circle by circle against the round surface across that circle's own
+    /// edge. A wire that is none of these is refused by name. A flat face with
+    /// an arc among its sides is wound by its chords and arcs instead.
+    ///
     /// # Errors
     ///
     /// [`Error::NoSuchFaceInThisSolid`] when `face` names a face this solid does
@@ -218,7 +227,9 @@ fn a_point_off_the_plane(face: FaceView<'_>, plane: &Plane) -> Option<Point> {
 /// **A wire that is one whole closed curve has no polygon to walk**, and it is
 /// counted rather than walked. A round bar's cap is one, and so is the round
 /// hole through a block — and so is a circle walked as two arcs from pole to
-/// pole ([`is_one_circle_cut_in_two`]). See [`what_a_round_wire_encloses`].
+/// pole ([`is_one_circle_cut_in_two`]), and a wire of several whole circles
+/// that all close at its one corner, which two round holes that touch leave
+/// ([`is_several_whole_circles`]). See [`how_often_a_round_wire_winds_round`].
 fn what_a_flat_face_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
@@ -229,7 +240,11 @@ fn what_a_flat_face_holds(
 ) -> Result<OnAFace> {
     let mut round = Vec::new();
     for wire in face.wires() {
-        round.push(wire.closes_on_one_edge() || is_one_circle_cut_in_two(solid, face, wire)?);
+        round.push(
+            wire.closes_on_one_edge()
+                || is_several_whole_circles(wire)
+                || is_one_circle_cut_in_two(solid, face, wire)?,
+        );
     }
     let aim = face
         .wires()
@@ -271,9 +286,25 @@ fn what_a_flat_face_holds(
 /// outside either. The first wire of a flat face is its outline and the rest
 /// are holes, which is what `Model::validate` holds every flat face to.
 ///
+/// **A wire of several whole circles winds round a point exactly when an odd
+/// number of its circles do** ([`is_several_whole_circles`]). Each circle is
+/// one closed loop of the wire, so the wire's count round a point is the sum of
+/// its circles', one each way round for each circle whose disk holds the point.
+/// That sum moves by one wherever a circle is crossed, and on a face's wire it
+/// is nothing or once — the face is on one side of each of its sides — so it is
+/// once exactly where the count of disks is odd. Two round holes that touch at
+/// a point have disks that never both hold one, so a point is in that hole when
+/// it is in either. Which way the wire goes round each circle is never asked:
+/// each disk is a sign, read against the surface across that circle's own edge.
+///
+/// The circles meet only at the corner they all close at, because sides of one
+/// face meet only at corners, so none runs through another's disk and the
+/// count is the same wherever a point is between them.
+///
 /// # Errors
 ///
-/// What [`what_a_round_wire_encloses`] gives.
+/// What [`the_circles_a_round_wire_is_made_of`] and
+/// [`what_a_round_wire_encloses`] give.
 fn how_often_a_round_wire_winds_round(
     solid: SolidView<'_>,
     face: FaceView<'_>,
@@ -284,45 +315,99 @@ fn how_often_a_round_wire_winds_round(
     log: &mut ProvenanceLog,
 ) -> Result<Option<i64>> {
     let inwards = if position == 0 { 1 } else { -1 };
-    Ok(
-        match what_a_round_wire_encloses(solid, face, wire, point, policy, log)? {
-            Decision::Neg => Some(inwards),
-            Decision::Pos => Some(0),
-            Decision::Zero => None,
+    let mut disks_holding_it = 0usize;
+    for circle in the_circles_a_round_wire_is_made_of(solid, face, wire)? {
+        match what_a_round_wire_encloses(solid, face, circle, point, policy, log)? {
+            Decision::Neg => disks_holding_it += 1,
+            Decision::Pos => {}
+            Decision::Zero => return Ok(None),
             // A side nobody could settle came back as a refusal a moment ago,
             // so what is left is a `Decision` variant a later milestone added,
             // and guessing what it means is worse than stopping.
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
-        },
-    )
+        }
+    }
+    Ok(Some(if disks_holding_it % 2 == 1 {
+        inwards
+    } else {
+        0
+    }))
 }
 
-/// Which side of the surface a round wire is cut from `point` is on:
-/// [`Decision::Neg`] inside the wire, [`Decision::Pos`] outside it,
-/// [`Decision::Zero`] exactly on it.
+/// Whether `wire` is several whole closed curves, each one edge: two round
+/// holes in a flat face that touch at a point leave one wire round both
+/// circles, closing at the corner where they touch.
 ///
-/// **The inside of such a wire is the inside of the ball or pipe that cut it**,
-/// and that is a fact rather than a convention: a closed curve cut on a plane by
-/// a ball or a pipe bounds the part of the plane inside that ball or pipe, which
-/// is the bounded one of the two. A plane cuts a plane in a straight line, which
-/// is not closed, so a round wire whose neighbour is flat is a face this cannot
-/// follow rather than a case with an answer.
+/// Each edge starts and ends at the same corner and the wire is one chain, so
+/// every circle of it closes at the one corner. A kind of run this crate has
+/// never seen is not a whole circle here, and [`walk_one_outline`] then refuses
+/// the wire by name.
+fn is_several_whole_circles(wire: WireView<'_>) -> bool {
+    wire.coedge_count() > 1
+        && wire
+            .coedges()
+            .all(|coedge| matches!(coedge.edge().is_closed(), Ok(true)))
+}
+
+/// The coedges whose circles make up a round wire, each to be read on its
+/// own by [`what_a_round_wire_encloses`]: the wire's every coedge when each is a
+/// whole closed edge, or the first of the two arcs of one circle cut in two
+/// ([`is_one_circle_cut_in_two`]), which stands for both.
+///
+/// # Errors
+///
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the wire is neither:
+/// not one or several whole closed crossings of two surfaces.
+fn the_circles_a_round_wire_is_made_of<'m>(
+    solid: SolidView<'m>,
+    face: FaceView<'m>,
+    wire: WireView<'m>,
+) -> Result<Vec<CoedgeView<'m>>> {
+    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
+    let coedges: Vec<CoedgeView<'m>> = wire.coedges().collect();
+    let first = *coedges.first().ok_or_else(cannot)?;
+    for coedge in &coedges {
+        match coedge.edge().is_closed() {
+            Ok(true) => {}
+            Ok(false) if is_one_circle_cut_in_two(solid, face, wire)? => return Ok(vec![first]),
+            // The only site of the six that keeps its own name for this. A run
+            // kind nothing here knows is not one whole closed crossing as far as
+            // this can tell, which is the very thing this refusal is for, and its
+            // refusal points at the *face* the caller has in its hand where
+            // `ACrossingThisCannotBeOrderedAlong` names no entity at all.
+            Ok(false) | Err(_) => return Err(cannot()),
+        }
+    }
+    Ok(coedges)
+}
+
+/// Which side of the surface one circle of a round wire is cut from `point` is
+/// on: [`Decision::Neg`] inside the circle, [`Decision::Pos`] outside it,
+/// [`Decision::Zero`] exactly on it. `circle` is the coedge along it, one of
+/// [`the_circles_a_round_wire_is_made_of`].
+///
+/// **The inside of such a circle is the inside of the ball or pipe that cut
+/// it**, and that is a fact rather than a convention: a closed curve cut on a
+/// plane by a ball or a pipe bounds the part of the plane inside that ball or
+/// pipe, which is the bounded one of the two. A plane cuts a plane in a
+/// straight line, which is not closed, so a circle whose neighbour is flat is a
+/// face this cannot follow rather than a case with an answer.
 ///
 /// **A ring leaves two regions on a plane through its axis**, the disks of the
 /// two meridian circles, so the ring's sign alone holds the other circle's disk
 /// as surely as this one's (§232.2). What tells them apart is the flat
 /// half-space [`intersect`] names each circle by, having proved it clears both:
 /// each disk is exactly the part of the tube on its own circle's side, and the
-/// wire's corner says which side that is.
+/// circle's corner says which side that is.
 ///
 /// **A plane square to the axis cuts two circles round it**, and neither
 /// circle's disk is the tube's inside there: the tube's inside is the band
 /// between them. The pipe of the ring's own radius [`intersect`] names each
-/// circle by says which circle the wire is and, with the ring's sign, which
-/// side of it a point is on ([`what_a_circle_round_the_axis_encloses`],
+/// circle by says which circle this is and, with the ring's sign, which side
+/// of it a point is on ([`what_a_circle_round_the_axis_encloses`],
 /// `docs/decisions.md` §250.9).
 ///
-/// **Which circle the wire is, is read where the face is stored**, for §168's
+/// **Which circle this is, is read where the face is stored**, for §168's
 /// reason. A turn rounds the face's plane and the ring each on its own, so a
 /// plane through the ring's axis as stored lands a rounding off the turned
 /// axis, and [`intersect`] then reads the two as stored once moved, rightly, as
@@ -334,12 +419,12 @@ fn how_often_a_round_wire_winds_round(
 ///
 /// # Errors
 ///
-/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the wire is not one
-/// whole closed crossing of two surfaces, or when its neighbour is a ring and
-/// [`intersect`] names no one circle through the wire's corner: a plane that
-/// rests on the tube and touches it in one circle has no picker to name it by.
-/// The same when the ring's face is placed apart from this one, so the two
-/// stored frames are not one.
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the circle is a seam,
+/// its neighbour is flat, or its neighbour is a ring and [`intersect`] names no
+/// one circle through the circle's corner: a plane that rests on the tube and
+/// touches it in one circle has no picker to name it by. The same when the
+/// ring's face is placed apart from this one, so the two stored frames are not
+/// one.
 ///
 /// [`Error::Undecidable`] when the half-space naming a meridian circle, or the
 /// pipe naming a circle round the axis, cannot say which side of it `point` is
@@ -349,24 +434,13 @@ fn how_often_a_round_wire_winds_round(
 fn what_a_round_wire_encloses(
     solid: SolidView<'_>,
     face: FaceView<'_>,
-    wire: WireView<'_>,
+    circle: CoedgeView<'_>,
     point: PredicatePoint,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Decision> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
-    let coedge = wire.coedges().next().ok_or_else(cannot)?;
-    let edge = coedge.edge();
-    match edge.is_closed() {
-        Ok(true) => {}
-        Ok(false) if is_one_circle_cut_in_two(solid, face, wire)? => {}
-        // The only site of the six that keeps its own name for this. A run kind
-        // nothing here knows is not one whole closed crossing as far as this can
-        // tell, which is the very thing this refusal is for, and its refusal
-        // points at the *face* the caller has in its hand where
-        // `ACrossingThisCannotBeOrderedAlong` names no entity at all.
-        Ok(false) | Err(_) => return Err(cannot()),
-    }
+    let edge = circle.edge();
     let Some(partner) = the_face_across(solid, face, edge)? else {
         return Err(cannot());
     };
@@ -384,7 +458,7 @@ fn what_a_round_wire_encloses(
     if partner.location() != face.location() {
         return Err(cannot());
     }
-    let corner = where_it_is_stored(solid, coedge.start().key());
+    let corner = where_it_is_stored(solid, circle.start().key());
     which_side_of_a_rings_circle(
         face,
         &partner.stored_surface(),
