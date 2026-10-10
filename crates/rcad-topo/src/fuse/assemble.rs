@@ -959,11 +959,21 @@ impl Assembly {
     ///   somewhere else is one solid that touches itself along the line, and a
     ///   shell that touches itself is what §17.4 refuses.
     ///
-    /// **Four darts from four input faces stay one edge and are refused**: a
-    /// line both solids have an edge along — two cubes touching along part of
-    /// an edge, or the frame and the comb of `degenerate_fuses.rs`. No `Model`
-    /// holds four faces along one edge, and §80.9 leaves two touching solids as
-    /// an answer for that relation unbuilt.
+    /// **Two flat faces of two input faces on one plane facing one way** are
+    /// parted the same way, with the other two resting on its outer side: two
+    /// combs whose teeth cross a rounding off where their bases meet, the
+    /// floors of their gaps either side of the line and a four-sided part
+    /// standing on them (queue row Q1633,
+    /// `a_sliver_along_an_edge_of_a_face_it_lies_on.rs`). The two on the plane
+    /// are one flat floor with an edge across it where it changes owner, and
+    /// the line is where the part touches it.
+    ///
+    /// **Four darts from four input faces stay one edge and are refused
+    /// otherwise**: a line both solids have an edge along — two cubes touching
+    /// along part of an edge, or the frame and the comb of
+    /// `degenerate_fuses.rs`. No `Model` holds four faces along one edge, and
+    /// §80.9 leaves two touching solids as an answer for that relation
+    /// unbuilt.
     ///
     /// Which pair keeps the edge is the one whose first dart comes first; the
     /// other is moved onto a copy. **Each takes the input edges of its own input
@@ -1031,9 +1041,11 @@ impl Assembly {
     /// The two pairs four darts along one edge part into, the pair holding the
     /// first dart first; `None` where they do not part.
     ///
-    /// Each pair walks the edge opposite ways and at least one is pieces of one
-    /// input face. Where both are, it is a bar's skin on a wall or on another
-    /// bar. Where only one is, the other two must rest on its outer side.
+    /// Each pair walks the edge opposite ways, and at least one is pieces of
+    /// one input face or two flat faces on one plane facing one way. Where both
+    /// are pieces of one input face, it is a bar's skin on a wall or on another
+    /// bar. Otherwise the other two must rest on the outer side of a pair that
+    /// is either.
     fn the_two_pairs_along(&self, by: &[Dart]) -> Option<[[Dart; 2]; 2]> {
         let &[first, second, third, fourth] = by else {
             return None;
@@ -1071,6 +1083,9 @@ impl Assembly {
         self.faces[one.face].ancestors == self.faces[other.face].ancestors
     }
 
+    /// Whether both faces are flat and their stored planes are the same plane
+    /// facing the same way, exactly. A pair the arithmetic cannot compare is
+    /// not, so its line stays one edge and is refused.
     fn one_plane_facing_one_way(&self, [one, other]: [Dart; 2]) -> bool {
         match (
             self.faces[one.face].surface.as_plane(),
