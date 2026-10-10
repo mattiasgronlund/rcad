@@ -1953,10 +1953,14 @@ fn a_flat_surface_through_where_the_walls_touch(
             .flat_map(|less| [less, -less])
             .map(move |less| own * f64::from(more) + other * f64::from(less))
     });
+    let slid_as_far_as_solved = ways_to_slide
+        .iter()
+        .flat_map(|&way| slides_solved_for(middle, own, way));
     for facing in core::iter::once(own)
         .chain(whole_numbers_in_the_flat.iter().copied())
         .chain(slid)
         .chain(mostly_own)
+        .chain(slid_as_far_as_solved)
     {
         if !(it_lies_exactly_in_the_flat_of(facing, own, other)
             && it_leans_towards(facing, own, other))
@@ -2038,6 +2042,294 @@ fn it_is_the_shortest_whole_number_step_along_its_line(way: Vector) -> bool {
             .iter()
             .find(|component| **component != 0.0)
             .is_some_and(|first| *first > 0.0)
+}
+
+/// `own` slid along `way` by step counts solved for, one for each stretch of
+/// counts whose dot with `middle` lands on a number `f64` holds, and only
+/// where the facing's components are numbers `f64` holds too.
+///
+/// A step is `2ˢ` for `s` from `−53` down to `−53 −` [`FINEST_SOLVED_STEP`].
+/// `n` steps give `own + n·2ˢ·way`, whose dot with `middle` is `X + n·Y` in
+/// units of the lowest bit either of `own·c` and `2ˢ·(way·c)` has, both worked
+/// out in whole numbers. A dot below `2⁵³` units is a number `f64` holds
+/// whatever its bits, so every count that puts it there will do. A dot from
+/// `2ᵇ` to `2ᵇ⁺¹` units with `b ≥ 53` has to be a whole multiple of `2ᵇ⁻⁵²`
+/// units, and when `Y` is odd that is `n ≡ −X·Y⁻¹` modulo `2ᵇ⁻⁵²`, `Y⁻¹` its
+/// inverse modulo that power of two. When `Y` is even `X` is odd, the dot has a
+/// bit below what one step moves, and only the counts that carry it under
+/// `2⁵³` units can do.
+///
+/// Within each such stretch the count nearest nothing either side is the one
+/// given: the facing leans towards `own` over an unbroken run of counts through
+/// nothing, so if any count of a stretch on one side leans, the nearest does.
+/// Every facing given still has to pass the three exact checks, so a count
+/// worked out wrong only costs a facing, and nothing here is a tolerance.
+fn slides_solved_for(middle: Point, own: Vector, way: Vector) -> Vec<Vector> {
+    let (Some(start), Some(moved)) = (
+        a_dot_in_whole_numbers(own.components(), middle.coordinates()),
+        a_dot_in_whole_numbers(way.components(), middle.coordinates()),
+    ) else {
+        return Vec::new();
+    };
+    if moved.0 == 0 {
+        return Vec::new();
+    }
+    (0..=FINEST_SOLVED_STEP)
+        .flat_map(|finer| {
+            let step = -53 - finer;
+            the_step_counts_that_dot_exactly(own, way, start, moved, step)
+                .into_iter()
+                .filter_map(move |count| own_slid(own, way, step, count))
+        })
+        .collect()
+}
+
+/// `own + count·2^step·way`, each component it moves worked out in whole
+/// numbers and so with nothing rounded, or `None` when one of them is not a
+/// number `f64` holds.
+fn own_slid(own: Vector, way: Vector, step: i32, count: i128) -> Option<Vector> {
+    let mut slid = own.components();
+    for (mine, along) in slid.iter_mut().zip(way.components()) {
+        if along == 0.0 {
+            continue;
+        }
+        let (from_nothing, per_step, unit) = a_slid_component_in_whole_numbers(*mine, along, step)?;
+        let whole = per_step
+            .checked_mul(count)
+            .and_then(|moved| moved.checked_add(from_nothing))
+            .filter(|whole| whole.unsigned_abs() < 1 << 53)?;
+        *mine = multiplied_by_a_power_of_two(whole as f64, unit);
+    }
+    Some(Vector::new(slid[0], slid[1], slid[2]))
+}
+
+/// How many halvings below `2⁻⁵³` [`slides_solved_for`] takes its step to.
+///
+/// A step of `2⁻⁵³⁻ʲ` only gives facings whose moved components are under
+/// `2⁻ʲ`, so each finer step is a narrower search.
+const FINEST_SOLVED_STEP: i32 = 4;
+
+/// The step counts `n`, each nearest nothing in its stretch, for which
+/// `own + n·2^step·way` has components `f64` holds and a dot with the middle
+/// `f64` holds, given that dot's two parts in whole numbers: `own·c` as
+/// `start` and `way·c` as `moved`, each a whole number and a power of two.
+fn the_step_counts_that_dot_exactly(
+    own: Vector,
+    way: Vector,
+    start: (i128, i32),
+    moved: (i128, i32),
+    step: i32,
+) -> Vec<i128> {
+    let Some((fewest, most)) = the_step_counts_that_keep_the_facing_in_f64(own, way, step) else {
+        return Vec::new();
+    };
+    let unit = if start.0 == 0 {
+        moved.1 + step
+    } else {
+        start.1.min(moved.1 + step)
+    };
+    let (Some(at_nothing), Some(per_step)) = (
+        shifted_up(start.0, start.1 - unit),
+        shifted_up(moved.0, moved.1 + step - unit),
+    ) else {
+        return Vec::new();
+    };
+    let within = |(from, to): (i128, i128)| {
+        let (from, to) = (from.max(fewest), to.min(most));
+        (from <= to).then_some((from, to))
+    };
+    let held = (1_i128 << 53) - 1;
+    let mut counts: Vec<i128> = the_counts_that_land_between(at_nothing, per_step, -held, held)
+        .and_then(within)
+        .map(|(from, to)| the_counts_nearest_nothing(from, to, 0, 1))
+        .unwrap_or_default();
+    if per_step % 2 == 0 {
+        return counts;
+    }
+    let (Some(at_fewest), Some(at_most)) = (
+        per_step
+            .checked_mul(fewest)
+            .and_then(|reach| reach.checked_add(at_nothing)),
+        per_step
+            .checked_mul(most)
+            .and_then(|reach| reach.checked_add(at_nothing)),
+    ) else {
+        return counts;
+    };
+    let farthest = at_fewest.unsigned_abs().max(at_most.unsigned_abs());
+    let highest_binade = (127 - farthest.leading_zeros()).min(125);
+    for binade in 53..=highest_binade {
+        let bits = binade - 52;
+        let remainder = the_count_that_clears_the_low_bits(at_nothing, per_step, bits);
+        let modulus = 1_i128 << bits;
+        let (bottom, top) = (1_i128 << binade, (1_i128 << (binade + 1)) - 1);
+        for (low, high) in [(bottom, top), (-top, -bottom)] {
+            if let Some((from, to)) =
+                the_counts_that_land_between(at_nothing, per_step, low, high).and_then(within)
+            {
+                counts.extend(the_counts_nearest_nothing(from, to, remainder, modulus));
+            }
+        }
+    }
+    counts
+}
+
+/// The step counts, from fewest to most, over which `own + n·2^step·way` has
+/// every component a number `f64` holds: each component it moves stays under
+/// `2⁵³` units of the finer of its own lowest bit and the step times the way's.
+///
+/// `n·2^step` itself need not be one: `(−2, 3, 6)/7` slid along `(0, 0, 1)`
+/// until its last component is under `⅛` has moved that component by about
+/// `−6/7` in steps of `2⁻⁵⁶`, more than `2⁵³` of them.
+fn the_step_counts_that_keep_the_facing_in_f64(
+    own: Vector,
+    way: Vector,
+    step: i32,
+) -> Option<(i128, i128)> {
+    let held = (1_i128 << 53) - 1;
+    let mut counts = (i128::MIN, i128::MAX);
+    for (mine, along) in own.components().into_iter().zip(way.components()) {
+        if along == 0.0 {
+            continue;
+        }
+        let (from_nothing, per_step, _) = a_slid_component_in_whole_numbers(mine, along, step)?;
+        let (from, to) = the_counts_that_land_between(from_nothing, per_step, -held, held)?;
+        counts = (counts.0.max(from), counts.1.min(to));
+    }
+    (counts.0 <= counts.1).then_some(counts)
+}
+
+/// A component `mine` of `own`, slid by `n·2^step·along`, as
+/// `(from_nothing + n·per_step)·2^unit`: `unit` the finer of `mine`'s lowest
+/// bit and `2^step·along`'s, so both parts are whole numbers of it. `None` when
+/// they do not fit in 128 bits.
+fn a_slid_component_in_whole_numbers(
+    mine: f64,
+    along: f64,
+    step: i32,
+) -> Option<(i128, i128, i32)> {
+    let (mine, mine_lowest) = a_product_in_whole_numbers(mine, 1.0);
+    let (along, along_lowest) = a_product_in_whole_numbers(along, 1.0);
+    let unit = if mine == 0 {
+        step + along_lowest
+    } else {
+        mine_lowest.min(step + along_lowest)
+    };
+    Some((
+        shifted_up(mine, mine_lowest - unit)?,
+        shifted_up(along, step + along_lowest - unit)?,
+        unit,
+    ))
+}
+
+/// The step counts `n`, from fewest to most, for which
+/// `low ≤ at_nothing + n·per_step ≤ high`, or `None` when there are none.
+fn the_counts_that_land_between(
+    at_nothing: i128,
+    per_step: i128,
+    low: i128,
+    high: i128,
+) -> Option<(i128, i128)> {
+    let (low, high) = (low.checked_sub(at_nothing)?, high.checked_sub(at_nothing)?);
+    let (from, to) = if per_step > 0 {
+        (rounded_up(low, per_step)?, rounded_down(high, per_step)?)
+    } else {
+        (rounded_up(high, per_step)?, rounded_down(low, per_step)?)
+    };
+    (from <= to).then_some((from, to))
+}
+
+/// `whole / by` rounded towards minus infinity, or `None` when it overflows or
+/// `by` is nothing.
+fn rounded_down(whole: i128, by: i128) -> Option<i128> {
+    let quotient = whole.checked_div(by)?;
+    let off_the_grid = whole % by != 0 && (whole < 0) != (by < 0);
+    Some(if off_the_grid { quotient - 1 } else { quotient })
+}
+
+/// `whole / by` rounded towards plus infinity, or `None` when it overflows or
+/// `by` is nothing.
+fn rounded_up(whole: i128, by: i128) -> Option<i128> {
+    let quotient = whole.checked_div(by)?;
+    let off_the_grid = whole % by != 0 && (whole < 0) == (by < 0);
+    Some(if off_the_grid { quotient + 1 } else { quotient })
+}
+
+/// The counts from `from` to `to` that are `remainder` modulo `modulus`, the
+/// one nearest nothing from above and the one nearest nothing from below.
+fn the_counts_nearest_nothing(from: i128, to: i128, remainder: i128, modulus: i128) -> Vec<i128> {
+    let upwards = from.max(0);
+    let first_up = upwards + (remainder - upwards).rem_euclid(modulus);
+    let downwards = to.min(-1);
+    let first_down = downwards - (downwards - remainder).rem_euclid(modulus);
+    [
+        (first_up <= to).then_some(first_up),
+        (first_down >= from).then_some(first_down),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// The count `n` from `0` to `2^bits − 1` with `at_nothing + n·per_step` a whole
+/// multiple of `2^bits`, for an odd `per_step`: `−at_nothing` times the
+/// inverse of `per_step` modulo `2^bits`.
+///
+/// # Panics
+///
+/// If `per_step` is even, or `bits` is not from 1 to 127: callers ask only
+/// with an odd step and at most 73 bits.
+fn the_count_that_clears_the_low_bits(at_nothing: i128, per_step: i128, bits: u32) -> i128 {
+    assert!(
+        per_step % 2 != 0 && (1..128).contains(&bits),
+        "a count is solved for only with an odd step: {per_step}, {bits} bits"
+    );
+    let per_step = per_step.cast_unsigned();
+    // Each round doubles the low bits the inverse is right in, from the three
+    // every odd number is its own inverse in modulo 8, so six rounds pass 128.
+    let inverse = (0..6).fold(per_step, |inverse, _| {
+        inverse.wrapping_mul(2_u128.wrapping_sub(per_step.wrapping_mul(inverse)))
+    });
+    assert_eq!(
+        per_step.wrapping_mul(inverse),
+        1,
+        "an odd number's inverse modulo 2¹²⁸"
+    );
+    let count = at_nothing
+        .cast_unsigned()
+        .wrapping_neg()
+        .wrapping_mul(inverse);
+    (count & ((1_u128 << bits) - 1)).cast_signed()
+}
+
+/// `whole · 2^by` for `by ≥ 0`, or `None` when `by` is negative or the answer
+/// does not fit.
+fn shifted_up(whole: i128, by: i32) -> Option<i128> {
+    if whole == 0 {
+        return Some(0);
+    }
+    let by = u32::try_from(by).ok()?;
+    whole.checked_mul(1_i128.checked_shl(by).filter(|power| *power > 0)?)
+}
+
+/// `Σ ones[i]·others[i]` with nothing rounded, as a whole number and the power
+/// of two it is in units of, or `None` when it does not fit in 128 bits.
+fn a_dot_in_whole_numbers(ones: [f64; 3], others: [f64; 3]) -> Option<(i128, i32)> {
+    let terms = [0, 1, 2].map(|i| a_product_in_whole_numbers(ones[i], others[i]));
+    let Some(unit) = terms
+        .iter()
+        .filter(|(whole, _)| *whole != 0)
+        .map(|(_, power)| *power)
+        .min()
+    else {
+        return Some((0, 0));
+    };
+    terms
+        .iter()
+        .try_fold((0_i128, unit), |(sum, unit), &(whole, power)| {
+            let term = shifted_up(whole, power - unit)?;
+            Some((sum.checked_add(term)?, unit))
+        })
 }
 
 /// Whether `facing` reads positive against `own` and more against `own` than
