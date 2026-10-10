@@ -79,7 +79,9 @@ use rcad_geom::{
     intersect, meet_of_three_surfaces, root_enclosing, where_a_closed_crossing_starts,
     where_a_cones_apex_stands_against_a_plane, which_comes_first_round_a_crossing,
 };
-use rcad_predicates::expansion::{difference_of_two_products, expansion_sign, expansion_sum};
+use rcad_predicates::expansion::{
+    difference_of_two_products, expansion_sign, expansion_sum, product_is_exact, scale_expansion,
+};
 use rcad_predicates::{
     Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
     ProvenanceLog, orient2d, orient3d, orient3d_of_points,
@@ -836,15 +838,17 @@ struct ThroughAnApex {
 /// **`∇S × ∇Q` is nothing at both ends**, because the two walls are tangent
 /// there. So the way a half leaves either end is read off the corner the two
 /// flat surfaces that pick it out hold it in: with `ê` and `û` the two
-/// directions those surfaces face, the half leaves both of its ends along
+/// directions of `facing`, the half leaves both of its ends along
 /// `ê/‖ê‖ + û/‖û‖`, which is the ellipse's tangent at the end pointing into
 /// the corner. Everywhere between, the gradients are not parallel and the
 /// cross product says which way it runs, as on every other crossing.
 #[derive(Clone, Copy)]
 struct HalfAnEllipse {
-    /// The two picking surfaces' normals, exactly as stored: the first faces
-    /// along the axis of the pipe `intersect` sorts first, the second along
-    /// the other's.
+    /// The stored directions of the two pipes, each turned round or not by
+    /// the way the picker leaning towards that pipe faces
+    /// ([`a_half_of_an_ellipse`]): the first is the pipe `intersect` sorts
+    /// first, the second the other. Not the pickers' normals, which are any
+    /// directions in the flat of the two axes that lean the right way.
     facing: [[f64; 3]; 2],
     /// Whether `∇S × ∇Q` points the way `facing[0] × facing[1]` does, which is
     /// whether the face is the pipe sorted second.
@@ -975,8 +979,9 @@ enum HowItRuns {
     /// ([`along_a_bend`] carries the derivation).
     ///
     /// A half ellipse of two pipes of one width whose axes meet
-    /// ([`HalfAnEllipse`]) is ordered this way too, with the normals of the
-    /// two flat surfaces that pick it out standing in for `n` and `w`; it
+    /// ([`HalfAnEllipse`]) is ordered this way too, with the two pipes'
+    /// directions, each turned by the corner the half is in
+    /// ([`HalfAnEllipse::facing`]), standing in for `n` and `w`; it
     /// bends and does not close, and runs from one end to the other once along
     /// their cross product.
     AlongABend {
@@ -2042,9 +2047,12 @@ impl<'f> Arrangement<'f> {
     /// because the picking surfaces are half-spaces, and a [`Plane`] built from
     /// one is scaled to length one, which rounds wherever the pipe's direction
     /// is slanted, and puts the solved place off the half. `c` is the point
-    /// of the lesser pipe's axis on the picking surface that faces along that
+    /// of the lesser pipe's axis on the picking surface that leans towards that
     /// axis, which passes exactly through `c` (`intersect` proves that before
-    /// it names the halves). The enclosure is then of the true places.
+    /// it names the halves) and is not along the axis, since it leans towards
+    /// it. `n̂` is along the two pickers' normals crossed, since both lie
+    /// exactly in the flat of the two axes. The enclosure is then of the true
+    /// places.
     ///
     /// **Each node is named by `[a, b, b]`** for the lesser pipe `a` and the
     /// greater `b`, by [`name_of_surface_bits`], so that the face on either
@@ -2163,8 +2171,18 @@ impl<'f> Arrangement<'f> {
 
     /// The node half way along each half ellipse ([`HalfAnEllipse`]): where the
     /// plane holding both axes crosses it, at `c + r·m/‖ê × û‖` for `c` where
-    /// the axes meet, `ê` and `û` the normals of the two flat surfaces that
-    /// pick the half out, and `m = ê‖û‖ + û‖ê‖`.
+    /// the axes meet, `ê` and `û` the two pipes' stored directions each turned
+    /// the way the picker leaning towards it faces ([`HalfAnEllipse::facing`]),
+    /// and `m = ê‖û‖ + û‖ê‖`. The pickers' own normals are not used: they are
+    /// any directions in the flat of the two axes that lean the right way, and
+    /// `m` built from `(0, 1, 0)` and `(1, 0, 0)` for two axes at 50 degrees
+    /// is not on the half.
+    ///
+    /// **`c` is where the lesser pipe's axis crosses the flat surface of the
+    /// picker leaning towards it**, and that is exactly `c` whichever way the
+    /// picker faces: `intersect` proves `c` on the axis and the surface
+    /// through `c`, both exactly, and a picker leaning towards the axis reads
+    /// more than nought against it, so the axis crosses the surface once.
     ///
     /// **Without it the four halves were one edge.** Every half runs between
     /// the same two nodes ([`Arrangement::place_where_two_halves_meet`]) and
@@ -2184,10 +2202,11 @@ impl<'f> Arrangement<'f> {
     /// **Named `[a, b, b]`, as the two ends are** ([`where_two_halves_meet`]),
     /// with `which` from 2 to 5: 2, and 2 more where the half lies ahead of `c`
     /// along the lesser pipe's direction [`written_the_one_way`], and 1 more
-    /// where it lies ahead along the greater's. Each picker faces along its
-    /// pipe's stored direction or against it, exactly, so which way is a
-    /// comparison of stored numbers, no sign is asked, and both faces along
-    /// the half name it alike.
+    /// where it lies ahead along the greater's. Each of `ê` and `û` is its
+    /// pipe's stored direction or that turned round, exactly, and which it is
+    /// was asked exactly of the picker ([`a_half_of_an_ellipse`]), so here
+    /// which way is a comparison of stored numbers, and both faces along the
+    /// half name it alike.
     fn place_the_middle_of_each_half(&mut self) {
         for crossing in 0..self.crossings.len() {
             let Some(half) = self.crossings[crossing].half_an_ellipse else {
@@ -2209,15 +2228,23 @@ impl<'f> Arrangement<'f> {
             let on_the_face = usize::from(half.forward_runs_with_the_bend);
             let pickers = [one, two];
             let mut pipes = [
-                (face, pickers[on_the_face]),
-                (other, pickers[1 - on_the_face]),
+                (face, pickers[on_the_face], half.facing[on_the_face]),
+                (
+                    other,
+                    pickers[1 - on_the_face],
+                    half.facing[1 - on_the_face],
+                ),
             ];
-            pipes.sort_by_key(|(pipe, _)| name_of_surface_bits(&Surface::Cylinder(*pipe)));
-            let [(lesser, along_the_lesser), (greater, along_the_greater)] = pipes;
+            pipes.sort_by_key(|(pipe, _, _)| name_of_surface_bits(&Surface::Cylinder(*pipe)));
+            let [
+                (lesser, picking_the_lesser, along_the_lesser),
+                (greater, _, along_the_greater),
+            ] = pipes;
 
-            let middle = where_an_axis_crosses_a_flat_surface(&lesser, &along_the_lesser);
-            let [one, two] =
-                pickers.map(|picker| picker.normal().components().map(Interval::exactly));
+            let middle = where_an_axis_crosses_a_flat_surface(&lesser, &picking_the_lesser);
+            let [one, two] = half
+                .facing
+                .map(|direction| direction.map(Interval::exactly));
             let length = |normal: [Interval; 3]| root_enclosing(dot_of(normal, normal));
             let into_the_corner =
                 [0, 1, 2].map(|axis| one[axis] * length(two) + two[axis] * length(one));
@@ -2230,8 +2257,8 @@ impl<'f> Arrangement<'f> {
                 [0, 1, 2].map(|axis| middle[axis] + reach * into_the_corner[axis]),
             ));
 
-            let ahead_along = |pipe: &Cylinder, picker: &HalfSpace| {
-                picker.normal().components().map(|number| number + 0.0)
+            let ahead_along = |pipe: &Cylinder, way: &[f64; 3]| {
+                way.map(|number| number + 0.0)
                     == written_the_one_way(pipe.axis().direction().components())
             };
             let which = 2
@@ -4875,8 +4902,8 @@ impl<'f> Arrangement<'f> {
     /// nothing, and `None` at every other node.
     ///
     /// The half leaves both of its ends along `m = ê/‖ê‖ + û/‖û‖` for the
-    /// normals `ê` and `û` of the two flat surfaces that pick it out
-    /// ([`HalfAnEllipse`]), and climbs along `k = ê × û` from one end to the
+    /// two pipes' directions `ê` and `û`, each turned by the corner the half
+    /// is in ([`HalfAnEllipse::facing`]), and climbs along `k = ê × û` from one end to the
     /// other ([`a_half_of_an_ellipse`]). So where the cross product runs with
     /// `k` it runs along `+m` out of the lower end and `−m` into the higher
     /// one, and the other way round where it runs against `k`.
@@ -8544,10 +8571,28 @@ fn one_of_two_loops_round_a_thin_pipe(
 /// named, and `None` for every other run.
 ///
 /// `intersect` picks each half by two flat surfaces through the point where
-/// the axes meet, one facing along each pipe's stored direction, turned round
-/// or not by the corner the half is in, with that direction stored exactly.
-/// So which picker faces along which pipe is a comparison of stored numbers,
-/// and no sign is asked.
+/// the axes meet, each facing a direction in the flat the two axes span, one
+/// leaning towards each pipe and turned round or not by the corner the half is
+/// in. The facings are not the axes in general: bars at 50 degrees through
+/// `(11, 0, 0)` are picked by `(0, 1, 0)` and `(1, 0, 0)` (Q1646).
+///
+/// # Which pipe a picker leans towards
+///
+/// A picker `n = aê + bû` in that flat, for unit `ê` and `û` at an angle `θ`
+/// strictly between nought and a half turn, reads `n·ê − n·û = (a − b)(1 − cos θ)`
+/// and `n·ê + n·û = (a + b)(1 + cos θ)`, so it picks the halves `ê` does
+/// exactly when `a > |b|`, which is `n·ê > |n·û|`, and those `−ê` does when
+/// `−n·ê > |n·û|`. With the stored directions `E` and `U`, not of length one,
+/// that is `(n·E)²‖U‖² > (n·U)²‖E‖²`, with the sign of `n·E` saying which way
+/// ([`the_way_a_picker_leans`]). These are signs of polynomials in stored
+/// numbers, and they are asked exactly. `intersect` takes a facing only after
+/// asking the same of it, and stores it as handed over, so each picker leans
+/// strictly towards one pipe and the two lean towards different pipes, and
+/// anything else here is that broken.
+///
+/// So `facing` is `s₀E` and `s₁U` for the pipes the two pickers lean towards,
+/// with `s₀` and `s₁` the ways they lean: the picker normals themselves where
+/// those are `±E` and `±U`, and always the same halves.
 ///
 /// # Which way it runs
 ///
@@ -8556,16 +8601,20 @@ fn one_of_two_loops_round_a_thin_pipe(
 /// square to `s₁û − s₀ê`. On the ellipse of `ê = z` and `û = x`, radius one,
 /// that is `p = (cos t, sin t, cos t)` with `cos t > 0` for the corner
 /// `(+, +)`, and `∇S × ∇Q` for the face on the first pipe is
-/// `4·(x, y, 0) × (0, y, z)`, whose part along `y` is `−4·cos² t`. The
-/// picking surfaces' normals are `s₀ê` and `s₁û`, so `facing[0] × facing[1]`
-/// is `s₀s₁·y`, and `s₀s₁` is `+1` on this ellipse and `−1` on the other,
-/// where the same working gives `+4·cos² t`. On both, then, the cross product
-/// runs against `facing[0] × facing[1]` on the first pipe's face, and with it
-/// on the second's, where the two gradients swap rows.
+/// `4·(x, y, 0) × (0, y, z)`, whose part along `y` is `−4·cos² t`.
+/// `facing` is `s₀ê` and `s₁û` scaled, so `facing[0] × facing[1]` runs along
+/// `s₀s₁·y`, and `s₀s₁` is `+1` on this ellipse and `−1` on the other, where
+/// the same working gives `+4·cos² t`. On both, then, the cross product runs
+/// against `facing[0] × facing[1]` on the first pipe's face, and with it on
+/// the second's, where the two gradients swap rows.
 ///
 /// That is the order [`along_a_bend`] puts points in, and it is a total one:
 /// a half's part along `ê × û` is `r·sin t` for `t` in an open half turn,
 /// which climbs strictly from one end to the other.
+///
+/// # Panics
+///
+/// If a picker leans towards neither pipe, or both towards the same one.
 fn a_half_of_an_ellipse(
     surface: &Surface,
     partner: &Surface,
@@ -8583,22 +8632,103 @@ fn a_half_of_an_ellipse(
     let [Picker::InFrontOf(first), Picker::InFrontOf(second)] = picked_by[..] else {
         return None;
     };
-    let facing = [first, second].map(|picker| picker.normal().components());
-    let along = |normal: [f64; 3], pipe: &Cylinder| {
-        let direction = pipe.axis().direction().components();
-        normal == direction || normal == direction.map(|component| -component)
-    };
-    let face_is_first = if along(facing[0], mine) && along(facing[1], theirs) {
-        true
-    } else if along(facing[0], theirs) && along(facing[1], mine) {
-        false
-    } else {
+    let ways = [mine, theirs].map(|pipe| pipe.axis().direction().components());
+    let [Some(one), Some(other)] =
+        [first, second].map(|picker| the_way_a_picker_leans(picker.normal().components(), ways))
+    else {
         return None;
     };
-    Some(HalfAnEllipse {
-        facing,
-        forward_runs_with_the_bend: !face_is_first,
+    Some(match (one, other) {
+        ([Some(towards_mine), None], [None, Some(towards_theirs)]) => HalfAnEllipse {
+            facing: [towards_mine, towards_theirs],
+            forward_runs_with_the_bend: false,
+        },
+        ([None, Some(towards_theirs)], [Some(towards_mine), None]) => HalfAnEllipse {
+            facing: [towards_theirs, towards_mine],
+            forward_runs_with_the_bend: true,
+        },
+        _ => panic!(
+            "each half ellipse is picked by one flat surface leaning towards each pipe: \
+             {one:?} and {other:?}"
+        ),
     })
+}
+
+/// Which of two pipes along `ways` a picker facing `normal` leans towards,
+/// and which way: that pipe's stored direction, turned round where `normal`
+/// reads negative against it, in its place, and `None` in the other's. `None`
+/// where the exact sums cannot be formed ([`product_is_exact`]).
+///
+/// It leans towards `E` rather than `U` when `(n·E)²‖U‖² > (n·U)²‖E‖²`
+/// ([`a_half_of_an_ellipse`] says why), and towards neither when the two are
+/// equal, which is a picker whose flat surface holds a whole ellipse.
+fn the_way_a_picker_leans(normal: [f64; 3], ways: [[f64; 3]; 2]) -> Option<[Option<[f64; 3]>; 2]> {
+    let dot = |one: [f64; 3], other: [f64; 3]| {
+        (0..3).try_fold(Vec::new(), |total, axis| {
+            Some(exactly_added(
+                &total,
+                &exactly_scaled(&[one[axis]], other[axis])?,
+            ))
+        })
+    };
+    let [on_mine, on_theirs] = ways.map(|way| dot(normal, way));
+    let [mine_squared, theirs_squared] = ways.map(|way| dot(way, way));
+    let towards_mine = exactly_multiplied(
+        &exactly_multiplied(on_mine.as_ref()?, on_mine.as_ref()?)?,
+        &theirs_squared?,
+    )?;
+    let towards_theirs = exactly_multiplied(
+        &exactly_multiplied(on_theirs.as_ref()?, on_theirs.as_ref()?)?,
+        &mine_squared?,
+    )?;
+    let against: Vec<f64> = towards_theirs.iter().map(|entry| -entry).collect();
+    let signed = |way: [f64; 3], along: &[f64]| match expansion_sign(along) {
+        Decision::Pos => way,
+        Decision::Neg => way.map(|component| -component),
+        Decision::Zero | Decision::Undecidable { .. } | _ => {
+            unreachable!("a picker leaning towards a pipe reads more than nought against it")
+        }
+    };
+    Some(
+        match expansion_sign(&exactly_added(&towards_mine, &against)) {
+            Decision::Pos => [Some(signed(ways[0], on_mine.as_ref()?)), None],
+            Decision::Neg => [None, Some(signed(ways[1], on_theirs.as_ref()?))],
+            Decision::Zero => [None, None],
+            Decision::Undecidable { .. } | _ => {
+                unreachable!("an exact sum has a sign: {towards_mine:?} against {towards_theirs:?}")
+            }
+        },
+    )
+}
+
+/// `expansion` times `factor`, exactly; `None` where one of the products would
+/// round ([`product_is_exact`]).
+fn exactly_scaled(expansion: &[f64], factor: f64) -> Option<Vec<f64>> {
+    if !expansion
+        .iter()
+        .all(|&entry| product_is_exact(entry, factor))
+    {
+        return None;
+    }
+    let mut out = vec![0.0; 2 * expansion.len()];
+    let used = scale_expansion(expansion, factor, &mut out);
+    out.truncate(used);
+    Some(out)
+}
+
+/// Two expansions multiplied out, exactly: every entry of one scaling the
+/// other, all added up. `None` where a product would round.
+fn exactly_multiplied(left: &[f64], right: &[f64]) -> Option<Vec<f64>> {
+    right.iter().try_fold(Vec::new(), |total, &factor| {
+        Some(exactly_added(&total, &exactly_scaled(left, factor)?))
+    })
+}
+
+fn exactly_added(left: &[f64], right: &[f64]) -> Vec<f64> {
+    let mut sum = vec![0.0; left.len() + right.len()];
+    let used = expansion_sum(left, right, &mut sum);
+    sum.truncate(used);
+    sum
 }
 
 /// The three surfaces the two nodes where four half ellipses meet are named
@@ -9357,8 +9487,8 @@ fn across_a_bend(plane_normal: [f64; 3], cone_axis: [f64; 3]) -> [Interval; 3] {
 /// # A half ellipse is ordered by the same determinant
 ///
 /// For a half ellipse of two pipes of radius `r` whose axes meet at `c`
-/// ([`HalfAnEllipse`]), `n` and `w` are the normals of its two pickers, each
-/// one pipe's stored direction or its reverse, so `n × w` runs along `n̂`, the
+/// ([`HalfAnEllipse`]), `n` and `w` are its `facing`, each one pipe's stored
+/// direction or its reverse, so `n × w` runs along `n̂`, the
 /// unit vector square to both axes, one way or the other. The whole ellipse
 /// is `c + a·cos t + r·n̂·sin t` with `a` square to `n̂`, and the half is
 /// `t` from `−π/2` to `π/2`, between the two places the walls touch,
