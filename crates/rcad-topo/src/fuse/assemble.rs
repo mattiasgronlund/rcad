@@ -7056,7 +7056,8 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// circles a plane cuts a ring in — together with that curved surface and that
 /// plane, or of the circle two balls cross in, or a cone and a second cone, a
 /// pipe or a ball on its axis, or of a circle or loop a ball and a pipe cross
-/// in, together with the two; `None` for any other side.
+/// in, or of a loop two pipes on axes that are not parallel cross in, together
+/// with the two; `None` for any other side.
 ///
 /// **Both arcs run between the same two corners and along the same two
 /// surfaces**, so nothing [`which_curve_it_is`] reads tells them apart. Most
@@ -7299,21 +7300,38 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// and a ball has one spelling, so the two are named either way round and
 /// nothing is turned round for how a face spells them.
 ///
-/// # Two pipes are not named here
+/// # Two pipes on axes that are not parallel cross in one loop or two
 ///
-/// **Their gradients can line up on a crossing.** Two bars of radius 1 whose
-/// axes meet square line up at `(0, ±1, 0)`, and `intersect` refuses that
-/// crossing before any edge exists
-/// (`two_bars_of_one_radius_whose_axes_meet_are_refused_before_any_arrangement`
-/// in `tests/two_curves_of_one_pair_that_meet.rs`, open row Q1558). No other
-/// loop two pipes cross in has reached here between two corners: a plane
-/// through one is refused where it meets both curved surfaces (the third shape
-/// of the test above), and the cross-drilled shaft of
-/// `tests/a_cone_hollowed_along_its_axis.rs`, whose fat bar's seam crosses a
-/// loop, sent no side of the two pipes here between two corners when run with
-/// a print in this function. So no test could fail for want of the pair. Two
-/// arcs of such a loop that did meet here would be one edge with four faces
-/// along it and refused `ResultIsNotManifold { count: 4 }`, not answered wrong.
+/// **And a wall through both axes leaves both arcs of a loop between the same
+/// two corners.** A bar of radius 1 along `x` at `z = 5`, cut to `y ≥ 0`,
+/// through a bar of radius 4 up `z`: the wall puts two corners on each of the
+/// two loops the pair crosses in, at `(±4, 0, 4)` and `(±4, 0, 6)`, and the fat
+/// bar's whole skin holds the arc under the wall. Named by their corners alone
+/// a loop's two arcs were one edge with six faces along it or four, and every
+/// rule both ways round was refused `ResultIsNotManifold` (queue row Q1643,
+/// `tests/two_arcs_where_two_curved_surfaces_cross.rs`). Named here, every rule
+/// both ways round gets past that check, and that test's pin is what fails
+/// without this pair.
+///
+/// **The sign rule holds on every curve named here.** Two pipes whose axes run
+/// the same way cross in straight lines, and they keep [`None`], as does a pair
+/// [`the_crossing_of_these_runs_straight`] cannot decide. Otherwise each
+/// gradient points straight out from its own axis, so where the two line up,
+/// the line through the point along them meets both axes square. Two axes that
+/// are not parallel have one such line, and the point is `r₁` from one axis and
+/// `r₂` from the other along it, so the axes are `r₁ + r₂` or `|r₁ − r₂|`
+/// apart. There `where_two_leaning_pipes_cross` in `rcad-geom` answers that the
+/// two rest against each other at one point, for `r₁ + r₂`; refuses
+/// `ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`, for `|r₁ − r₂|` with
+/// two widths; and for one width, where the axes meet, names four half
+/// ellipses, each running from one of the two points where the gradients line
+/// up to the other. That last pair is refused telling the cells of a pipe
+/// apart today
+/// (`two_bars_of_one_radius_whose_axes_meet_are_refused_telling_the_cells_of_a_pipe_apart`
+/// in `tests/two_curves_of_one_pair_that_meet.rs`). So the cross product never
+/// vanishes inside an arc named here, and every face along one arc reads the
+/// same sign. A pipe written with its axis turned round or slid along has the
+/// same gradient, so both are named either way round.
 ///
 /// # Panics
 ///
@@ -7396,6 +7414,11 @@ fn which_arc_of_a_circle_walked_this_way(
                 is_written_the_other_way_round(&flat),
             )
         }
+        [Surface::Cylinder(_), Surface::Cylinder(_)]
+            if the_crossing_of_these_runs_straight(&meet.carried_by) != Some(false) =>
+        {
+            return Ok(None);
+        }
         [
             one @ Surface::Cone(_),
             other @ (Surface::Cone(_) | Surface::Cylinder(_) | Surface::Sphere(_)),
@@ -7405,7 +7428,8 @@ fn which_arc_of_a_circle_walked_this_way(
             other @ Surface::Cone(_),
         ]
         | [one @ Surface::Sphere(_), other @ Surface::Cylinder(_)]
-        | [one @ Surface::Cylinder(_), other @ Surface::Sphere(_)] => {
+        | [one @ Surface::Cylinder(_), other @ Surface::Sphere(_)]
+        | [one @ Surface::Cylinder(_), other @ Surface::Cylinder(_)] => {
             let named = [
                 name_of_the_surface_either_way_round(&one),
                 name_of_the_surface_either_way_round(&other),

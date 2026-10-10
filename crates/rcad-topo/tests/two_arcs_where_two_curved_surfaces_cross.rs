@@ -18,17 +18,22 @@
 //! leaves too, and the mesh the fuse checks its answer with cuts it since
 //! Q1590.
 //!
-//! The rest of what a ball and a pipe, or two pipes, cross in does not reach
-//! that function with two corners on one curve. A wall or a cap through a loop
-//! off the axis has its corners placed where the three surfaces meet since
-//! Q1591, and then the one loop a ball reaching into a bar's side leaves is
-//! refused before its arcs are named, as it is with no plane through it
-//! (Q1593), and the two loops a thin bar through a fat one leaves, cut by a
-//! wall through both axes, are refused as not a manifold. The circle a ball
-//! touches its bar round is refused before its arcs are named. Neither does the
-//! cross-drilled shaft of `tests/a_cone_hollowed_along_its_axis.rs` (Q1483),
-//! whose fat bar's seam crosses a loop twice: run with a print in that
-//! function, it sends no side of two pipes there between two corners.
+//! The rest of what a ball and a pipe cross in does not reach that function
+//! with two corners on one curve. A wall or a cap through a loop off the axis
+//! has its corners placed where the three surfaces meet since Q1591, and then
+//! the one loop a ball reaching into a bar's side leaves is refused before its
+//! arcs are named, as it is with no plane through it (Q1593). The circle a ball
+//! touches its bar round is refused before its arcs are named.
+//!
+//! The two loops a thin bar through a fat one leaves, cut by a wall through
+//! both axes, do reach it. Named by their corners alone, a loop's two arcs were
+//! one edge with six faces along it or four, and every rule was refused as not
+//! a manifold. That function names two pipes' arcs apart since Q1643, and every
+//! rule is refused one step on, where `rcad-geom`'s `walk` cannot draw an arc
+//! of such a loop between two corners. The cross-drilled shaft of
+//! `tests/a_cone_hollowed_along_its_axis.rs` (Q1483), whose fat bar's seam
+//! crosses a loop twice, sent no side of two pipes to that function between
+//! two corners when run with a print in it before Q1643.
 //!
 //! A ball keeps its poles on the `z` line through its centre however it is
 //! placed, so the bars along `x` below keep them off the wall.
@@ -343,17 +348,29 @@ fn a_plane_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_is_refused_orde
 /// A bar of radius 1 along `x` at `z = 5`, cut to `y ≥ 0`, through a bar of
 /// radius 4 up `z`: the fat bar swallows the thin one's whole section, so the
 /// two cross in two loops, and the wall `y = 0` through both axes puts two
-/// corners on each, at `(±4, 0, 4)` and `(±4, 0, 6)`.
+/// corners on each, at `(±4, 0, 4)` and `(±4, 0, 6)`. Between each two corners
+/// run three curves: the loop's arc over the wall, its arc under the wall,
+/// which the fat bar's whole skin holds, and the line the wall cuts that skin
+/// along.
 ///
 /// Until Q1591 every rule was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
-/// before the fuse had a corner. `rcad-geom`'s `three_surfaces.rs` places the
-/// four on the lattice now, and every rule both ways round is refused in
-/// `fuse/assemble.rs`'s `darts_along_each_edge`: an edge with six faces along it
-/// for the unions and the fat bar less the half, and with four for the
-/// intersections and the half less the fat bar. Which edge that is has not been
-/// traced.
+/// before the fuse had a corner. With the corners placed, nothing named two
+/// pipes' arcs apart, so a loop's two arcs were one edge named by its corners:
+/// six faces along it for the unions and the fat bar less the half, four for
+/// the intersections and the half less the fat bar, and every rule both ways
+/// round was refused `ResultIsNotManifold` in `fuse/assemble.rs`'s
+/// `darts_along_each_edge`. `which_arc_of_a_circle_this_is` names the two arcs
+/// apart since Q1643, and every rule gets past that check.
+///
+/// **Every rule is then refused drawing an arc, and that is a gap** (§16.10):
+/// the union, the shared part and both differences are solids that exist.
+/// `rcad-geom`'s `walk` picks the loop an arc is on by the half-spaces on its
+/// run alone, and here that is the wall's `y ≥ 0`, which holds the place it
+/// starts from on each loop; and for a run whose two ends differ it hands back
+/// the points of the whole loop. So it cannot draw an open arc of a loop two
+/// pipes cross in, and the fix is there and not in the fuse.
 #[test]
-fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_is_refused_as_not_a_manifold() {
+fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_is_refused_drawing_an_arc() {
     let gives = what_each_rule_gives(|model| {
         let thin = model
             .add_round_bar(
@@ -371,16 +388,13 @@ fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_is_refused_as_not_a_m
             cut(model, thin, [-20.0, 0.0, -20.0], [20.0, 20.0, 20.0]),
         ]
     });
-    let edges_with_this_many_faces = gives
-        .iter()
-        .map(|answer| match answer {
-            Err(Error::ResultIsNotManifold { count }) => Some(*count),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        edges_with_this_many_faces,
-        [6, 6, 4, 4, 6, 4].map(Some),
+    assert!(
+        gives.iter().all(|answer| matches!(
+            answer,
+            Err(Error::Geometry(
+                rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+            ))
+        )),
         "{gives:?}"
     );
 }
