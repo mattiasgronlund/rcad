@@ -342,8 +342,17 @@ fn every_point_walked_round_one_of_the_two_ellipses_is_on_both_pipes() {
 /// unit in the last place at a time and at most 64 of them, until it dots with
 /// the middle exactly, which took the count from 408 to 688, and after that a
 /// sum of up to four of its own direction and fewer of the other's, which took
-/// it to 704. Of the 233 surfaces it still finds nothing for, 180 lie in a flat
-/// that holds no whole-number way from −2 to 2;
+/// it to 704. Of the 233 surfaces it then found nothing for, 180 lie in a flat
+/// that holds no whole-number way from −2 to 2.
+///
+/// Since Q1653 two more facings are tried after those. The first is the
+/// whole-number triple the stored direction is an exact multiple of, when it is
+/// one: `(2, 3, 6)/7` and `(1, 2, 2)/3` round to exactly that, and the triple
+/// dots with this middle to a short sum. The second is the stored direction, and
+/// that triple, slid along a way in the flat by a step count solved for rather
+/// than searched, so that the dot lands on a number `f64` holds. They took the
+/// count from 704 to 1096. Every surface left lies in a flat of two `(3, 4, 0)/5`
+/// directions that holds no whole-number way from −2 to 2;
 /// `no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3`
 /// shows for one of those that no flat surface `f64` holds would do.
 ///
@@ -354,19 +363,30 @@ fn the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece()
     let [named_in_four_halves, pairs_put_to_both] =
         how_many_pairs_are_named_in_four_halves_and_drawn(Point::new(11.0, -3.25, 0.5));
     assert_eq!(
-        named_in_four_halves, 752,
-        "the pairs with a facing each, whole-number, slid a few units in the last place or \
-         mostly its own, that leans its own way and passes exactly through the middle are named \
-         of {pairs_put_to_both}"
+        named_in_four_halves, 1096,
+        "the pairs with a facing each, whole-number, slid, mostly its own or in lowest terms, \
+         that leans its own way and passes exactly through the middle are named of \
+         {pairs_put_to_both}"
     );
 }
 
+/// The same family through a middle written in decimal millimetres,
+/// `(11.85, −3.15, 0.45)`, the way a STEP file states one.
+///
+/// None of those coordinates is a short binary fraction, so a facing's dot with
+/// the middle has bits all the way down to the last place of `0.45`, and a
+/// slide of 64 steps does not reach the one step count that clears them. With
+/// Q1645's search the namer named 100 of the 1224 pairs here. Since Q1653 it
+/// also tries the stored direction in lowest terms and slides solved for, and
+/// names 328. Of the 371 surfaces still refused, 358 lie in a flat of two
+/// `(3, 4, 0)/5` directions and 13 in a flat of two `(1, 1, 0)` directions.
+/// Whether a flat surface `f64` holds exists for them is not shown either way.
 #[test]
 fn the_namer_names_this_family_crossing_at_a_middle_in_decimal_millimetres() {
     let [named_in_four_halves, pairs_put_to_both] =
         how_many_pairs_are_named_in_four_halves_and_drawn(Point::new(11.85, -3.15, 0.45));
     assert_eq!(
-        named_in_four_halves, 168,
+        named_in_four_halves, 328,
         "the pairs named through a middle in decimal millimetres, of {pairs_put_to_both}"
     );
 }
@@ -556,6 +576,114 @@ fn bores_on_3_minus_6_2_and_2_3_6_are_picked_by_four_of_one_direction_and_one_of
                 )),
                 "one of each half's pickers faces (0.6, 2, 1.6) one way or the other: \
                  {picked_by:?}"
+            );
+        }
+    }
+}
+
+/// Bores on `(−2, 3, 6)` and `(−2, 6, 3)` through `(11, −3.25, 0.5)` are picked,
+/// on the first one's side, by `(−2, 3, 6)` itself, an eighth of it long.
+///
+/// The first stored direction is not `(−2, 3, 6)/7` rounded in any loose sense:
+/// it is exactly `p·2⁻⁵⁴·(−2, 3, 6)` with `p = (2⁵⁴ − 1)/7`, since `2/7`, `3/7`
+/// and `6/7` all sit the same seventh of a unit in the last place above their
+/// grid points. Its dot with the middle is `p` times `−28.75`, and `p` has 52
+/// bits, so that dot rounds. The flat of the two holds only `(0, 1, −1)` among
+/// the whole numbers from −2 to 2, and that reads as far along one axis as back
+/// along the other; no slide of the stored direction along it is in `f64` and
+/// dots exactly while it still leans. The triple the direction is a multiple of
+/// dots to `−28.75` with nothing rounded, and leans as the direction does. Until
+/// Q1653 the pair was refused.
+#[test]
+fn bores_on_2_3_6_and_2_6_3_are_picked_by_the_whole_number_triple_one_is_a_multiple_of() {
+    let middle = Point::new(11.0, -3.25, 0.5);
+    let [one, other] = two_pipes_crossing_at(
+        middle,
+        [Vector::new(-2.0, 3.0, 6.0), Vector::new(-2.0, 6.0, 3.0)],
+        0.25,
+    );
+    let whole = Vector::new(-2.0, 3.0, 6.0);
+    let p = (((1_u64 << 54) - 1) / 7) as f64;
+    assert_eq!(
+        one.axis().direction(),
+        whole * (p * 2f64.powi(-54)),
+        "the stored direction is (2⁵⁴ − 1)/7 · 2⁻⁵⁴ times (−2, 3, 6), exactly"
+    );
+    let in_lowest_terms = whole * 0.125;
+
+    for pair in [[one, other], [other, one]] {
+        let named = intersect(
+            &Surface::Cylinder(pair[0]),
+            &Surface::Cylinder(pair[1]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(halves)) = named else {
+            panic!("the whole-number triple a direction is a multiple of names the pair: {named:?}")
+        };
+        assert_eq!(halves.len(), 4, "two ellipses, each in two halves");
+        for half in &halves {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = half.run() else {
+                panic!("a half is a piece of where the two pipes cross: {half:?}")
+            };
+            assert!(
+                picked_by.iter().any(|picker| matches!(
+                    picker,
+                    Picker::InFrontOf(surface)
+                        if [(in_lowest_terms, -3.593_75), (-in_lowest_terms, 3.593_75)]
+                            .contains(&(surface.normal(), surface.offset()))
+                )),
+                "one of each half's pickers faces (−0.25, 0.375, 0.75) one way or the other, \
+                 through the middle exactly: {picked_by:?}"
+            );
+        }
+    }
+}
+
+/// Bores on `(0, 3, 4)` and `(4, 3, 0)` through `(11, −3.25, 0.5)` are picked,
+/// on the first one's side, by its stored direction slid along `(1, 0, −1)`
+/// until its dot with the middle is under a quarter.
+///
+/// Each step of `2⁻⁵³` along `(1, 0, −1)` moves the dot by `21·2⁻⁵⁴`, and the
+/// stored direction's own dot, about `−1.55`, has a bit at `2⁻⁵⁵`. No number of
+/// such steps clears that bit, so the dot has to come down to where `f64` holds
+/// numbers that fine, below `¼`, and that is about `0.15` along the way: far past
+/// the 64 steps Q1645 searched. Q1653 solves for the step count instead.
+#[test]
+fn bores_on_0_3_4_and_4_3_0_are_picked_by_a_slide_solved_for() {
+    let middle = Point::new(11.0, -3.25, 0.5);
+    let [one, other] = two_pipes_crossing_at(
+        middle,
+        [Vector::new(0.0, 3.0, 4.0), Vector::new(4.0, 3.0, 0.0)],
+        0.25,
+    );
+    let slid = Vector::new(0.123_809_523_809_523_81, 0.6, 0.676_190_476_190_476_2);
+    let through = -0.249_999_999_999_999_86;
+
+    for pair in [[one, other], [other, one]] {
+        let named = intersect(
+            &Surface::Cylinder(pair[0]),
+            &Surface::Cylinder(pair[1]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(halves)) = named else {
+            panic!("a slide solved for names the pair: {named:?}")
+        };
+        assert_eq!(halves.len(), 4, "two ellipses, each in two halves");
+        for half in &halves {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = half.run() else {
+                panic!("a half is a piece of where the two pipes cross: {half:?}")
+            };
+            assert!(
+                picked_by.iter().any(|picker| matches!(
+                    picker,
+                    Picker::InFrontOf(surface)
+                        if [(slid, through), (-slid, -through)]
+                            .contains(&(surface.normal(), surface.offset()))
+                )),
+                "one of each half's pickers faces (0, 0.6, 0.8) slid along (1, 0, −1), one \
+                 way or the other: {picked_by:?}"
             );
         }
     }
