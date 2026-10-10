@@ -7396,6 +7396,11 @@ fn which_arc_of_a_circle_walked_this_way(
                 is_written_the_other_way_round(&flat),
             )
         }
+        [Surface::Cylinder(_), Surface::Cylinder(_)]
+            if the_crossing_of_these_runs_straight(&meet.carried_by) != Some(false) =>
+        {
+            return Ok(None);
+        }
         [
             one @ Surface::Cone(_),
             other @ (Surface::Cone(_) | Surface::Cylinder(_) | Surface::Sphere(_)),
@@ -7405,7 +7410,8 @@ fn which_arc_of_a_circle_walked_this_way(
             other @ Surface::Cone(_),
         ]
         | [one @ Surface::Sphere(_), other @ Surface::Cylinder(_)]
-        | [one @ Surface::Cylinder(_), other @ Surface::Sphere(_)] => {
+        | [one @ Surface::Cylinder(_), other @ Surface::Sphere(_)]
+        | [one @ Surface::Cylinder(_), other @ Surface::Cylinder(_)] => {
             let named = [
                 name_of_the_surface_either_way_round(&one),
                 name_of_the_surface_either_way_round(&other),
