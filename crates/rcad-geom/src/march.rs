@@ -156,7 +156,9 @@ pub(crate) struct Marched {
 /// so a curve of finite length is walked in finitely many steps. **How far a step
 /// moves is measured and not decreed**: the trial point is settled onto both
 /// surfaces afterwards, so what the step actually covers is whatever the
-/// settling left, and all that is checked is that it is not nothing. That makes
+/// settling left, and all that is checked is that it is not nothing — nor, on a
+/// trial that came back short, so little that its two ends' own bounds could
+/// account for all of it ([`what_a_trial_of_this_length_measures`]). That makes
 /// the argument one about the curve rather than about the arithmetic, so it is
 /// not left to stand on its own: `most` caps the count outright, and reaching
 /// that cap is a refusal rather than a truncated answer.
@@ -498,20 +500,29 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 /// chord is the one thing the trial did measure about the curve, so the next ask
 /// comes from that instead.
 ///
-/// **Unless the chord is exactly nothing**: a trial that settled back onto
-/// `here` itself has measured nothing about the curve, as a trial that could
-/// not be settled has not, so it is retried at the square root of the ask the
-/// way that one is, below. Halving it was not enough. A pipe of radius 1 through
-/// the axis of one of radius 4, walked from `(4, 0, 6)` with `f64::MAX / 4` of
-/// room, settles every trial from `6.7e153` down back onto that seed exactly, so
-/// fifty halvings ran out at `2.4e139` and the walk was refused as the two pipes
-/// being tangent, which they are nowhere; rooted, the seventh trial, `6.4e4`,
-/// lands on the loop (`a_trial_that_settles_back_onto_its_start_is_shortened_by_its_root`,
-/// `docs/decisions.md` §421). Below an ask of four the root is the longer of the
-/// two, so there a chord of nothing is halved as it always was, and that is the
-/// only place a fine walk meets one: measured over `rcad-geom`'s 1 120 tests,
-/// 718 trials came back with a chord of nothing, and the 155 of them asked four
-/// or more were all in coarse walks, with `2.2e307` and `4.5e307` of room.
+/// **Unless the trial settled back onto `here`**: a chord of exactly nothing,
+/// or a short one no longer than its two ends' own bounds put together
+/// ([`what_a_trial_of_this_length_measures`]). Such a trial has measured nothing
+/// about the curve, as a trial that could not be settled has not, so it is
+/// retried at the square root of the ask the way that one is, below, and never
+/// kept. Halving it was not enough. A pipe of radius 1 through the axis of one
+/// of radius 4, walked from `(4, 0, 6)` with `f64::MAX / 4` of room, settles
+/// every trial from `6.7e153` down back onto that seed exactly, so fifty
+/// halvings ran out at `2.4e139` and the walk was refused as the two pipes being
+/// tangent, which they are nowhere; rooted, the seventh trial, `6.4e4`, lands on
+/// the loop (`a_trial_that_settles_back_onto_its_start_is_shortened_by_its_root`,
+/// `docs/decisions.md` §421). Keeping one that settled a rounding off was worse:
+/// the steps doubled from it, so the walk's first points sat closer together
+/// than it knew any of them to be
+/// (`a_trial_that_settles_a_rounding_off_its_start_is_shortened_and_not_kept`,
+/// §347.9). Below an ask of four the root is the longer of the two, so there a
+/// trial that settled back is halved, and that is the only place a fine walk
+/// meets a chord of nothing: measured over `rcad-geom`'s 1 147 tests, 1 391
+/// trials came back with a chord of nothing, and the 263 of them asked four or
+/// more were all in coarse walks, with `2.2e307` and `4.5e307` of room. A short
+/// chord within its ends' bounds is met in fine walks too: 1 311 trials, of
+/// which 460 the walk used to keep in walks of `0.5` of room or less, each end
+/// known only to between `8e-9` and `3e-2`.
 ///
 /// **The two cases are kept apart rather than merged into `min`** because the
 /// merged form also shortens steps in the ordinary fine walk, where the trial
@@ -523,9 +534,10 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 ///
 /// # A trial that cannot be measured at all is a trial, not an answer
 ///
-/// The three questions a trial asks — settle the far end, settle the middle,
-/// read the direction at the far end — can each refuse, and a refusal there is
-/// about the **trial point**, not about where the step started from. [`march`]
+/// The questions a trial asks — settle the far end, settle the middle, read the
+/// direction at the far end, and on a trial that came back short, bound how far
+/// the far end may sit off the crossing — can each refuse, and a refusal there
+/// is about the **trial point**, not about where the step started from. [`march`]
 /// takes `tangent` from [`which_way_the_crossing_runs`] at `here`, so the two
 /// surfaces are known to cross transversally at `here` before this is ever
 /// called; shortening walks the trial back towards that point, which is the same
@@ -565,8 +577,8 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 ///
 /// Whatever a trial refused with, when every trial refused. Today that is
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] or
-/// [`Error::CannotWorkOutHowBigACrossingIs`], from [`settled`] or
-/// [`which_way_the_crossing_runs`].
+/// [`Error::CannotWorkOutHowBigACrossingIs`], from [`settled`],
+/// [`which_way_the_crossing_runs`] or [`how_far_off_the_crossing`].
 fn one_step(
     surfaces: [&Surface; 2],
     here: Point,
@@ -1007,6 +1019,11 @@ mod tests {
     /// before than the walk knew any of its points to be. The mesh of a ball
     /// with a bar through it off its axis refused such a loop as two corners
     /// in one place (`docs/decisions.md` §347.9, Q1598).
+    ///
+    /// Now `8.2e76` and then `2.9e38` settle that same rounding off, both are
+    /// rooted, and the first step kept lands `0.78` along the loop. The walk
+    /// closes in six points, every step `0.78` to `1.12` long, each point known
+    /// to `1.3e-15`.
     #[test]
     fn a_trial_that_settles_a_rounding_off_its_start_is_shortened_and_not_kept() {
         let pipe = a_pipe([0.0, 0.0, 1.0], [0.5, 0.0, -3.0], 1.0);
@@ -1023,11 +1040,10 @@ mod tests {
             .map(|pair| (pair[1] - pair[0]).length())
             .collect();
         println!("each point known to {:e}, gaps {gaps:?}", walked.deviation);
-        let first = walked.points[0];
         assert!(
-            (first - top).length() > 2.0 * walked.deviation,
-            "the first step goes further than the two ends' own bounds account for: \
-             {first:?} from {top:?}, each known to {:e}",
+            gaps.iter().all(|&gap| gap > 2.0 * walked.deviation),
+            "every step goes further than the two ends' own bounds account for: \
+             gaps {gaps:?}, each point known to {:e}",
             walked.deviation
         );
     }
