@@ -29,8 +29,8 @@
 //! | a plane and a torus, cut in the two meridian circles | the plane's stored normal |
 //! | a plane square to a torus's axis, the circle outside the ring | the plane's stored normal |
 //! | a plane square to a torus's axis, the circle inside the ring | the same normal negated |
-//! | a ball centred on a pipe's axis, the circle ahead of the centre along it | the pipe's stored axis direction |
-//! | a ball centred on a pipe's axis, the circle behind the centre | the same direction negated |
+//! | a ball and a pipe whose whole cross-section it swallows, the circle or loop ahead of the centre along the axis | the pipe's stored axis direction |
+//! | the same, the circle or loop behind the centre | the same direction negated |
 //! | a cone and a pipe, a shallower cone or a ball on its axis, the circle ahead of the picker | the cone's stored axis direction negated |
 //! | the same, the circle behind the picker | the cone's stored axis direction |
 //! | any of those the other way round | the same answer negated |
@@ -63,15 +63,23 @@
 //! — the very pipe [`intersect`](crate::intersect) hands back as the picker that
 //! tells the two circles apart.
 //!
-//! # A ball on a pipe's axis is the same shape again
+//! # A ball and a pipe through it are the same shape again
 //!
-//! Its two circles sit either side of the ball's centre, square to the axis,
-//! and wind opposite ways: `∇S × ∇T` there is `h ŵ × ρ`, for `h` how far along
-//! the axis the circle sits from the centre. So which way a run winds is read
-//! off the point it starts from too, against the half-space through the centre
-//! facing along the axis, which is `intersect`'s picker on those two runs. A
-//! ball off the axis by any amount crosses the pipe in a quartic, and is
-//! refused; whether it is off is asked exactly.
+//! A ball on a pipe's axis crosses it in two circles either side of the
+//! ball's centre, square to the axis, and they wind opposite ways: `∇S × ∇T`
+//! there is `h ŵ × ρ`, for `h` how far along the axis the circle sits from the
+//! centre. So which way a run winds is read off the point it starts from too,
+//! against the half-space through the centre facing along the axis, which is
+//! `intersect`'s picker on those two runs. A ball off the axis that swallows
+//! the pipe's whole cross-section crosses it in two quartic loops instead, one
+//! either side of the same half-space. Each runs once round the pipe's axis,
+//! so the determinant reads three points of one down the axis, as it does for
+//! two pipes below, and `∇S × ∇T` there is `h ŵ × ρ` and a part along the axis
+//! that does not change which way it reads (Q1554).
+//! `the_way_a_loop_round_a_pipe_through_a_ball_winds` has the product. A ball
+//! that reaches into the pipe's side crosses it in one loop that runs back and
+//! forth round the axis, and is refused. Whether the ball is off the axis, and
+//! whether it swallows the pipe, are both asked exactly.
 //!
 //! # So is a cone on one axis with a pipe, a second cone or a ball
 //!
@@ -139,12 +147,14 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair whose crossing is
 /// not one closed curve lying in a plane, nor one of the two loops a fat pipe
-/// crosses a thin one it swallows whole in: two planes, a plane along a pipe's
-/// axis, two pipes of one radius, two running the same way, two whose
-/// crossing is one loop, a ball against a pipe whose axis misses its centre, a plane
-/// cutting a torus in a quartic, every pair with a torus on it but a plane, a
-/// cone against a pipe, a second cone or a ball off its axis, two cones of one
-/// apex, and a ball on a cone's axis that misses it or runs through its apex.
+/// crosses a thin one it swallows whole in, nor one of the two a ball crosses
+/// a pipe it swallows whole in: two planes, a plane along a pipe's axis, two
+/// pipes of one radius, two running the same way, two whose crossing is one
+/// loop, a ball off a pipe's axis that does not swallow its whole
+/// cross-section, a plane cutting a torus in a quartic, every pair with a torus
+/// on it but a plane, a cone against a pipe, a second cone or a ball off its
+/// axis, two cones of one apex, and a ball on a cone's axis that misses it or
+/// runs through its apex.
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
 /// resting on a torus's tube, which touches it all the way round one circle
@@ -215,14 +225,15 @@ impl WhichWayItWinds {
 /// `from` is a point on the crossing, and only the rows with two curves read
 /// it: a plane square to a torus's axis, a ball on a pipe's axis, and a cone on
 /// one axis with a pipe, a cone or a ball each cut two circles that wind
-/// opposite ways, and a fat pipe cuts a thin one it swallows in two loops that
-/// do, and which one this is is not a fact about the pair.
+/// opposite ways, and a fat pipe cuts a thin one it swallows, and a ball a pipe
+/// it swallows off its axis, in two loops that do, and which one this is is not
+/// a fact about the pair.
 ///
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair that does not cross
 /// in one closed curve lying in a plane, or in one of the two loops round a
-/// thin pipe's axis a fat pipe swallowing it crosses it in, and
+/// pipe's axis that a fat pipe or a ball swallowing it crosses it in, and
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
 /// resting on a torus's tube and a ball inscribed in a pipe or a cone.
 ///
@@ -266,7 +277,10 @@ fn the_way_this_crossing_winds(
             return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
         }
         // A ball centred on a pipe's axis crosses it in two circles square to
-        // the axis, and every other ball in a degree-four loop, refused inside.
+        // the axis, and a ball off it that swallows the pipe's whole
+        // cross-section in two loops round the axis. Every other ball off it
+        // that crosses it does so in one loop that runs back and forth round
+        // the axis, or in a figure of eight, refused inside.
         [Surface::Sphere(ball), Surface::Cylinder(pipe)] => {
             return the_way_a_circle_round_a_pipes_axis_winds(ball, pipe, from);
         }
@@ -519,7 +533,7 @@ fn the_way_a_circle_round_a_pipes_axis_winds(
 ///
 /// # Each loop runs once round the pipe's axis
 ///
-/// Write a point `p` of the crossing as `c + d + hŵ + ρ − d`, with `d` the step
+/// Write a point `p` of the crossing as `c + hŵ + ρ − d`, with `d` the step
 /// out from the axis to the centre, `a = ‖d‖`, `ρ` the step out from the axis
 /// to `p` and `h` how far along the axis `p` sits from the centre. On the ball,
 /// `h² = R² − ‖ρ − d‖²`, and `‖ρ − d‖ ≤ r + a`. Where `R > r + a` that is above
@@ -1326,14 +1340,15 @@ mod tests {
         }
     }
 
-    /// A ball one rounding off a pipe's axis crosses it in a quartic, and is
-    /// refused however close the quartic lies to the two circles, while the
-    /// same ball on the axis is ordered.
+    /// A ball one rounding off a pipe's axis crosses it in two quartic loops
+    /// and not two circles, and still swallows the pipe's whole cross-section,
+    /// so its loops are ordered round the axis the way the same ball's circles
+    /// are on it. Until Q1554 the one off the axis was refused.
     ///
     /// The pipe's axis runs up `z` through `(1, 0, 0)` and the ball's centre is
     /// the next `f64` past it along `x`, `2⁻⁵²` out.
     #[test]
-    fn a_ball_one_rounding_off_a_pipes_axis_is_refused_and_one_on_it_is_ordered() {
+    fn a_ball_one_rounding_off_a_pipes_axis_is_ordered_as_one_on_it_is() {
         let pipe = Surface::Cylinder(
             Cylinder::new(
                 Axis::new(Point::new(1.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
@@ -1347,19 +1362,19 @@ mod tests {
             let [x, y, z] = round_the_pipe(3.0, eighths);
             PredicatePoint::from([x + 1.0, y, z])
         };
-        for (centre, ordered) in [(1.0, true), (one_past, false)] {
+        for centre in [1.0, one_past] {
             let ball =
                 Surface::Sphere(Sphere::new(Point::new(centre, 0.0, 0.0), 5.0).expect("a radius"));
-            let said = which_comes_first_round_a_crossing([&ball, &pipe], at(0), at(1), at(3));
-            if ordered {
-                assert_eq!(said, Ok(Decision::Pos), "the ball centred at x = {centre}");
-            } else {
-                assert_eq!(
-                    said,
-                    Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
-                    "the ball centred at x = {centre}"
-                );
-            }
+            assert_eq!(
+                which_comes_first_round_a_crossing([&ball, &pipe], at(0), at(1), at(3)),
+                Ok(Decision::Pos),
+                "the ball centred at x = {centre}"
+            );
+            assert_eq!(
+                which_comes_first_round_a_crossing([&pipe, &ball], at(0), at(1), at(3)),
+                Ok(Decision::Neg),
+                "the ball centred at x = {centre}, the pair the other way round"
+            );
         }
     }
 
@@ -1576,8 +1591,10 @@ mod tests {
         );
         let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius"));
         let ball = a_ball(5.0);
-        // Off the pipe's axis, which crosses it in a quartic. A ball centred on
-        // it is ordered, below.
+        // One off the pipe's axis by exactly how much wider than the pipe it
+        // is, so it touches the pipe from inside at `(−4, 0, 0)` and crosses it
+        // in a figure of eight. A ball on the axis is ordered, and so is one off
+        // it that swallows the pipe whole, below.
         let ball_beside =
             Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 0.0), 5.0).expect("a radius"));
         let cone = Surface::Cone(crate::Cone::new(Axis::z(), 1.0).expect("a slope"));
@@ -1937,6 +1954,105 @@ mod tests {
                     which_comes_first_round_a_crossing(pair, from, one, other_point),
                     Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
                     "two pipes {what}"
+                );
+            }
+        }
+    }
+
+    /// A ball of `radius` centred `off` along `x`, and a pipe of radius 1 up
+    /// `z`: a ball drilled through off its centre.
+    fn a_ball_off_a_pipes_axis(radius: f64, off: f64) -> [Surface; 2] {
+        [
+            Surface::Sphere(Sphere::new(Point::new(off, 0.0, 0.0), radius).expect("a radius")),
+            Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a radius")),
+        ]
+    }
+
+    /// The point of [`a_ball_off_a_pipes_axis`]'s loop on the `side` of
+    /// `z = 0` that is `eighths` eighths of a turn round the pipe's axis from
+    /// `+x`, anticlockwise about `+z`.
+    fn round_the_drilled_pipe(radius: f64, off: f64, side: f64, eighths: i32) -> [f64; 3] {
+        let angle = core::f64::consts::TAU * f64::from(eighths) / 8.0;
+        let [x, y] = [angle.cos(), angle.sin()];
+        let across = (x - off) * (x - off) + y * y;
+        [x, y, side * (radius * radius - across).sqrt()]
+    }
+
+    /// Each loop a ball crosses a pipe in, where the ball swallows the pipe's
+    /// whole cross-section off its axis, runs once round the pipe's axis, so
+    /// three points of one come back in the order they run round it, from
+    /// wherever the ordering starts. The loop above the centre runs about `+z`
+    /// and the one below about `−z`; each step is checked against `∇S × ∇T`
+    /// before the order is asked, so what this pins is the geometry. The
+    /// centre is off the axis by less than the pipe's radius, so the axis runs
+    /// through the ball's equator inside the pipe, and by more, so it does not.
+    #[test]
+    fn three_points_on_a_loop_where_a_ball_crosses_a_pipe_off_its_axis_come_back_in_the_order_they_run_round_it()
+     {
+        for (radius, off) in [(3.0, 0.5), (4.0, 2.0)] {
+            let [ball, pipe] = a_ball_off_a_pipes_axis(radius, off);
+            for (side, forward) in [(1.0, 1), (-1.0, -1)] {
+                let round =
+                    |eighths: i32| round_the_drilled_pipe(radius, off, side, forward * eighths);
+                let at = |eighths| PredicatePoint::from(round(eighths));
+                for start in 0..8 {
+                    let [here, next] = [round(start), round(start + 1)];
+                    let runs = Vector::new(here[0] - off, here[1], here[2])
+                        .cross(Vector::new(here[0], here[1], 0.0));
+                    let step = Vector::new(next[0] - here[0], next[1] - here[1], next[2] - here[2]);
+                    assert!(
+                        runs.dot(step) > 0.0,
+                        "ball {radius} off {off}, side {side}: the crossing runs {runs:?} at \
+                         {here:?} and the step to {next:?} is {step:?}"
+                    );
+                    let [first, second, third] = [start, start + 1, start + 3].map(at);
+                    let what =
+                        format!("ball {radius} off {off}, side {side}, from {start} eighths");
+                    assert_eq!(
+                        which_comes_first_round_a_crossing([&ball, &pipe], first, second, third),
+                        Ok(Decision::Pos),
+                        "{what}"
+                    );
+                    assert_eq!(
+                        which_comes_first_round_a_crossing([&ball, &pipe], first, third, second),
+                        Ok(Decision::Neg),
+                        "{what}, asked the other way"
+                    );
+                    assert_eq!(
+                        which_comes_first_round_a_crossing([&pipe, &ball], first, second, third),
+                        Ok(Decision::Neg),
+                        "{what}, the pair swapped"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A ball off a pipe's axis that does not swallow the pipe's whole
+    /// cross-section crosses it in one loop that runs back and forth round the
+    /// axis, and is refused rather than ordered: one that reaches into the
+    /// pipe's side, and one no wider than the pipe. A ball that touches the
+    /// pipe from inside is in
+    /// [`a_crossing_that_is_not_a_conic_is_refused_rather_than_ordered`].
+    #[test]
+    fn a_ball_off_a_pipes_axis_that_does_not_swallow_it_is_refused() {
+        for (what, radius, off, on_both) in [
+            (
+                "reaching into its side",
+                2.0,
+                1.5,
+                [1.0, 0.0, 3.75_f64.sqrt()],
+            ),
+            ("no wider than it", 1.0, 1.0, [1.0, 0.0, 1.0]),
+        ] {
+            let [ball, pipe] = a_ball_off_a_pipes_axis(radius, off);
+            let [from, one, other] =
+                [on_both, [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]].map(PredicatePoint::from);
+            for pair in [[&ball, &pipe], [&pipe, &ball]] {
+                assert_eq!(
+                    which_comes_first_round_a_crossing(pair, from, one, other),
+                    Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+                    "a ball {what}"
                 );
             }
         }
