@@ -1324,9 +1324,14 @@ fn the_piece_holds(
     }
     let mut winding = 0;
     for (position, wire) in piece.wires.iter().enumerate() {
-        let inwards = if position == 0 { 1 } else { -1 };
         match round_wire_of(wire) {
             Some(partner) => {
+                let inwards = if what_a_round_wire_bounds_holds_the_material(flat, &partner, wire)?
+                {
+                    1
+                } else {
+                    -1
+                };
                 match side_of_a_partner_by_its_plane(flat, &partner, point, reaching_the_plane) {
                     Decision::Neg => {
                         let in_its_disk = if let Surface::Torus(ring) = partner
@@ -1369,6 +1374,40 @@ fn the_piece_holds(
         }
     }
     Some(winding == 1)
+}
+
+/// Whether a flat piece's material is inside what `wire`, one whole closed
+/// curve along `partner`, bounds: then the wire winds once round each point
+/// there, and otherwise it winds round each the other way. `None` where a ring
+/// square to `flat` cannot say which of its two circles the wire is.
+///
+/// **The wire's material side says it, and where the wire comes in the piece
+/// does not.** The arrangement puts a flat piece's outer wire first only where
+/// that wire is in the lump of the face's own outline. A piece of a round
+/// plate's top between a bar's circle and the inner circle of a half ring
+/// standing round it has neither in that lump, and came with the bar's circle
+/// first: read as the outer wire, it wound every point of the band zero times
+/// and none was found inside it
+/// (`tests/a_half_ring_standing_on_a_round_plate.rs`, row Q1580).
+///
+/// What a ball, a pipe or a cone bounds on a plane is the part inside it, and
+/// so is what each meridian circle of a ring bounds on a plane through its
+/// axis, so the material is in it where it is on the partner's negative side.
+/// On a plane square to a ring's axis each of the two circles bounds the disk
+/// inside it ([`in_the_inner_disk_of`]): the band inside the ring is in what
+/// the outer circle bounds, and outside what the inner one does.
+fn what_a_round_wire_bounds_holds_the_material(
+    flat: &Plane,
+    partner: &Surface,
+    wire: &[FaceMeet],
+) -> Option<bool> {
+    let in_the_partner = wire[0].material_side == Decision::Neg;
+    if let Surface::Torus(ring) = partner
+        && is_square_to_the_axis(flat, ring)
+    {
+        return Some(in_the_partner == runs_round_the_outer_circle(flat, ring, &wire[0])?);
+    }
+    Some(in_the_partner)
 }
 
 /// Which side of `partner` both `point` and a point of `flat` beside it are
