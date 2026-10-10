@@ -82,7 +82,7 @@ use proptest::test_runner::{
 };
 use rcad_geom::{Deflection, Isometry, Surface, SurfaceMeet, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 
 use pairs::{Configuration, Elsewhere, Placed, Shape, Skew, Turn, a_turned_pair};
 
@@ -672,14 +672,28 @@ fn on_one_surface(surface: &Surface, against: &Surface) -> bool {
 /// `side`.
 ///
 /// A copy, so each of the two paths starts from a model nothing else has
-/// touched. `None` means there was no answer to compare — refused, or not a
-/// solid this kernel can hold — and which of those it was has been counted.
+/// touched. `None` means there was no answer to compare — refused, an answer
+/// with an edge too short to hold beside its own coordinates, or not a solid
+/// this kernel can hold — and which of those it was has been counted.
 ///
-/// A refusal on the lattice side fails outright. §17.7's control row: every
-/// meet in a rectilinear configuration on the integer grid is exactly
-/// representable, so a certified policy must decide all of it, and that is what
-/// makes [`Tally::only_one_side`] unambiguous — it is always the turned side
-/// that went missing.
+/// **An edge too short is a limit on the turned side**, refused
+/// [`Invalid::DynamicRangeTooWide`]. Each solid carries its own placement and
+/// composing the turn rounds its offsets, so two walls that share a plane on
+/// the lattice come out a rounding apart, and an answer can have to keep the
+/// slab between them: an edge `1e-16` long beside corners of 3, a length over a
+/// length that no scaling moves (`Assembly::check_dynamic_range` in
+/// `fuse/assemble.rs`).
+/// [`a_tall_block_through_a_flat_one_turned_shares_a_cube_and_refuses_the_rules_that_keep_a_slab_a_rounding_thin`]
+/// is the pair that showed it, and `fuses_that_must_agree.rs` counts the same
+/// refusal by name for its turned family (`a_flat_refusal`).
+///
+/// A refusal of either kind on the lattice side fails outright. §17.7's
+/// control row: every meet in a rectilinear configuration on the integer grid
+/// is exactly representable, so a certified policy must decide all of it, and
+/// two of its walls share a plane exactly or lie a whole unit apart, so no
+/// answer keeps a slab thinner than that. That is what makes
+/// [`Tally::only_one_side`] unambiguous — it is always the turned side that
+/// went missing.
 fn fused(
     tally: &Tally,
     side: &Side,
@@ -701,6 +715,16 @@ fn fused(
                 return Err(TestCaseError::fail(format!(
                     "a {rule:?} over the lattice pair refused, with {} records",
                     records.len()
+                )));
+            }
+            Ok(None)
+        }
+        Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+            side.an_edge_too_short.set(side.an_edge_too_short.get() + 1);
+            if side.refusals_are_a_bug {
+                return Err(TestCaseError::fail(format!(
+                    "a {rule:?} over the lattice pair kept an edge too short beside its \
+                     coordinates, a spread of {ratio}"
                 )));
             }
             Ok(None)
@@ -750,7 +774,11 @@ struct Tally {
 /// What one of the two paths came back with.
 #[derive(Default)]
 struct Side {
+    /// Fuses refused `Undecidable`: the arithmetic gave up.
     refused: Cell<usize>,
+    /// Fuses refused because their answer keeps an edge too short to hold
+    /// beside its own coordinates: the answer exists and `f64` cannot carry it.
+    an_edge_too_short: Cell<usize>,
     not_a_solid: Cell<usize>,
     refusals_are_a_bug: bool,
 }
@@ -788,16 +816,14 @@ impl Tally {
             "fuse-then-turn against turn-then-fuse, {} fuses over turned pairs",
             self.fuses.get()
         );
-        println!(
-            "    lattice side: {} refused, {} not a solid",
-            self.still.refused.get(),
-            self.still.not_a_solid.get()
-        );
-        println!(
-            "    turned side: {} refused, {} not a solid",
-            self.turned.refused.get(),
-            self.turned.not_a_solid.get()
-        );
+        for (name, side) in [("lattice", &self.still), ("turned", &self.turned)] {
+            println!(
+                "    {name} side: {} refused, {} refused for an edge too short, {} not a solid",
+                side.refused.get(),
+                side.an_edge_too_short.get(),
+                side.not_a_solid.get()
+            );
+        }
         println!(
             "    {} pairings compared, {} only the lattice side answered, \
              {} only the turned side answered, {} split into a different number of solids",
