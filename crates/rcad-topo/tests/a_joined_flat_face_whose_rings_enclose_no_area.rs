@@ -20,7 +20,8 @@
 //! # The rings `holds_the_other_rings` still leaves unplaced
 //!
 //! Where it answers `None` for two rings of one joined face, `rings_round`
-//! panics with that same message. The rest of this file builds the families it
+//! panicked with that same message, and since Q1253 refuses the fuse
+//! `CannotPlaceTheRingsOfAJoinedFlatFace`. The rest of this file builds the families it
 //! answers `None` for and pins what the fuse does with each. Each one that is
 //! refused is refused before `rings_round`, and each test names the stage: that was
 //! read with a breakpoint on `select::choose`, on `rings_round` and on
@@ -55,9 +56,11 @@
 //! with an outline and a hole along two hyperbolas, and is answered under every
 //! rule since `holds_the_other_rings` reads such an arc (Q1233, Q1289). A cap whose sides all
 //! run along pipes reaches `rings_round` with corners that cancel exactly, the
-//! one ring there and the outline by that; a second such ring, as a hole, is
-//! refused before it, because nothing can say which side of that cap's wall on
-//! the bar a point is (Q1120). With one of those sides straight and leaning,
+//! one ring there and the outline by that (Q1120). A second such ring, as a
+//! hole, is the cap's own shape an eighth the size standing through it: the
+//! union and the big cap less the small one reach `rings_round` with two rings
+//! `holds_the_other_rings` places neither of, and are refused
+//! `CannotPlaceTheRingsOfAJoinedFlatFace` (Q1253). With one of those sides straight and leaning,
 //! the fuse puts a corner on the arc where the line along it leaves the cap,
 //! and the ring winds (Q1254).
 
@@ -3062,16 +3065,11 @@ fn a_cut_cone_and_a_cone_closed_by_a_ball(model: &mut Model) -> [SolidKey; 2] {
 /// of every cut the wall has, is not on it.
 #[test]
 fn a_cap_along_four_pipes_whose_corners_cancel_is_answered_with_a_bar_on_top_or_flush() {
-    let segment = |radius: f64, angle: f64| radius * radius / 2.0 * (angle - angle.sin());
-    let small_angle = (7.0_f64 / 25.0).acos();
-    let cap_volume = 4.0
-        * (segment(10.0, PI - 0.75_f64.atan())
-            - 2.0 * segment(5.0, small_angle)
-            - segment(6.0, PI / 2.0));
+    let cap_volume = what_the_cap_along_four_pipes_holds();
     let bar_wall = Surface::Cylinder(Cylinder::new(Axis::z(), 10.0).expect("a positive radius"));
     let as_written = PIPE_CAP.map(|[x, y]| [x, y, 4.0]);
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES)
+    let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, AS_WRITTEN)
         .unwrap_or_else(|why| panic!("the cap: {why:?}"));
     assert_holds(&model, cap, cap_volume, "the cap");
     let corners = the_outline_of_the_cap(&model, cap, as_written[0]);
@@ -3108,7 +3106,7 @@ fn a_cap_along_four_pipes_whose_corners_cancel_is_answered_with_a_bar_on_top_or_
         for (rule, swapped) in every_rule_both_ways() {
             let mut model =
                 Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES)
+            let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, AS_WRITTEN)
                 .unwrap_or_else(|why| panic!("the cap: {why:?}"));
             let bar = if flush {
                 model.add_round_bar(2.0, 4.0, &at(3.0, 7.0, 0.0))
@@ -3161,6 +3159,74 @@ fn a_cap_along_four_pipes_whose_corners_cancel_is_answered_with_a_bar_on_top_or_
                 }
                 (other, _) => panic!("not a rule this probes: {other:?}"),
             }
+        }
+    }
+}
+
+/// The cap along four pipes from `z = 0` to `4`: the arc's segment less the
+/// three pipes' segments, each read off its angle, four high.
+fn what_the_cap_along_four_pipes_holds() -> f64 {
+    let segment = |radius: f64, angle: f64| radius * radius / 2.0 * (angle - angle.sin());
+    let small_angle = (7.0_f64 / 25.0).acos();
+    4.0 * (segment(10.0, PI - 0.75_f64.atan())
+        - 2.0 * segment(5.0, small_angle)
+        - segment(6.0, PI / 2.0))
+}
+
+/// **The cap along four pipes with its own shape, an eighth the size, standing
+/// through it** (Q1253). The small cap's corners are `(−2, 8)` plus an eighth
+/// of the big one's, and so are its pipes, and it stands from `z = −1` to `5`.
+/// Every number is a sum of eighths, so its corners are where they are written
+/// and also sweep exactly 0. It is clear of every side of the big cap: its
+/// circle reaches `√68 + 5/4 < 10` from the big cap's axis, and stays `√45 −
+/// 5/4 > 5` and `8 − 5/4 > 6` from the axes of the two pipes nearest it.
+///
+/// So the intersection is the small cap from `z = 0` to `4`, a 64th of the big
+/// one, and the small cap less the big one is its two ends, `z = −1` to `0` and
+/// `4` to `5`, each a 256th of it. **The union and the big cap less the small
+/// one are refused `CannotPlaceTheRingsOfAJoinedFlatFace`**, both ways round:
+/// each joins the big cap's top out of pieces into a face with two rings, the
+/// big cap's outline and the small one's, and both wind round nothing. Neither
+/// runs along one surface and neither has its corners on one line, so
+/// `holds_the_other_rings` places neither, and nothing says which is the
+/// outline. That was a panic in `rings_round` until Q1253. The answers exist:
+/// the union holds the big cap and a 128th more, the difference the big cap
+/// less a 64th.
+#[test]
+fn a_cap_along_four_pipes_with_its_own_shape_an_eighth_the_size_through_it_is_refused_where_its_top_is_joined()
+ {
+    let cap_volume = what_the_cap_along_four_pipes_holds();
+    let small = Placed {
+        by: 0.125,
+        centre: [-2.0, 8.0],
+        bottom: -1.0,
+        top: 5.0,
+    };
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, AS_WRITTEN)
+            .unwrap_or_else(|why| panic!("the cap: {why:?}"));
+        let through = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, small)
+            .unwrap_or_else(|why| panic!("the small cap: {why:?}"));
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, [cap, through], rule, swapped);
+        match (rule, swapped) {
+            (Rule::Union, _) | (Rule::Difference, false) => assert!(
+                matches!(
+                    answer,
+                    Err(Error::CannotPlaceTheRingsOfAJoinedFlatFace { .. })
+                ),
+                "{what}: {answer:?}"
+            ),
+            (Rule::Intersection, _) => {
+                assert_holds(&model, the_only(answer, &what), cap_volume / 64.0, &what);
+            }
+            (Rule::Difference, true) => {
+                for end in the_two_smaller_first(&model, answer, &what) {
+                    assert_holds(&model, end, cap_volume / 256.0, &what);
+                }
+            }
+            (other, _) => panic!("not a rule this probes: {other:?}"),
         }
     }
 }
@@ -3221,7 +3287,7 @@ fn a_cap_along_three_pipes_and_a_leaning_line_is_answered_with_a_bar_on_top_or_f
     let cap_volume = 200.0 * PI - 400.0 * 0.75_f64.atan() - 24.0;
     let as_written = PIPE_CAP.map(|[x, y]| [x, y, 4.0]);
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &LEANING_CAP_SIDES)
+    let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &LEANING_CAP_SIDES, AS_WRITTEN)
         .unwrap_or_else(|why| panic!("the cap: {why:?}"));
     assert_holds(&model, cap, cap_volume, "the cap");
     let corners = the_outline_of_the_cap(&model, cap, as_written[0]);
@@ -3233,8 +3299,9 @@ fn a_cap_along_three_pipes_and_a_leaning_line_is_answered_with_a_bar_on_top_or_f
         for (rule, swapped) in every_rule_both_ways() {
             let mut model =
                 Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &LEANING_CAP_SIDES)
-                .unwrap_or_else(|why| panic!("the cap: {why:?}"));
+            let cap =
+                a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &LEANING_CAP_SIDES, AS_WRITTEN)
+                    .unwrap_or_else(|why| panic!("the cap: {why:?}"));
             let bar = if flush {
                 model.add_round_bar(2.0, 4.0, &at(3.0, 7.0, 0.0))
             } else {
@@ -3303,25 +3370,118 @@ enum Side {
     Straight,
 }
 
-/// [`a_bar_cut_to`], with side `i + 1` running as `sides[i]` says.
+/// Where a cap along pipes stands: shrunk `by` about the origin, moved to
+/// `centre`, and stood from `z = bottom` up to `top`.
+#[derive(Clone, Copy)]
+struct Placed {
+    by: f64,
+    centre: [f64; 2],
+    bottom: f64,
+    top: f64,
+}
+
+/// A cap along pipes where its corners and pipes are written, from `z = 0` to `4`.
+const AS_WRITTEN: Placed = Placed {
+    by: 1.0,
+    centre: [0.0, 0.0],
+    bottom: 0.0,
+    top: 4.0,
+};
+
+#[test]
+fn probe_q1253() {
+    let small = Placed {
+        by: 0.125,
+        centre: [-2.0, 8.0],
+        bottom: -1.0,
+        top: 5.0,
+    };
+    for (rule, swapped) in every_rule_both_ways() {
+        let outcome = std::panic::catch_unwind(|| {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, AS_WRITTEN)
+                .unwrap_or_else(|why| panic!("the cap: {why:?}"));
+            let through = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, small)
+                .unwrap_or_else(|why| panic!("the small cap: {why:?}"));
+            let answer = fused_in_order(&mut model, [cap, through], rule, swapped);
+            let volumes: Vec<f64> = answer
+                .iter()
+                .flatten()
+                .map(|&solid| {
+                    model
+                        .solid(solid)
+                        .expect("key")
+                        .measure(
+                            Deflection::of(0.001).expect("a fine mesh"),
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        )
+                        .map(|m| m.volume())
+                        .unwrap_or(f64::NAN)
+                })
+                .collect();
+            let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+            format!("{answer:?} volumes {volumes:?} valid {valid:?}")
+        });
+        eprintln!("PROBE first {rule:?} swapped {swapped}: {outcome:?}");
+    }
+    for (rule, swapped) in every_rule_both_ways() {
+        let outcome = std::panic::catch_unwind(|| {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, AS_WRITTEN)
+                .unwrap_or_else(|why| panic!("the cap: {why:?}"));
+            let through = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, small)
+                .unwrap_or_else(|why| panic!("the small cap: {why:?}"));
+            let holed = the_one_solid(&mut model, cap, through, Rule::Difference);
+            let bar = model
+                .add_round_bar(2.0, 2.0, &at(3.0, 7.0, 4.0))
+                .expect("a bar of radius two");
+            let answer = fused_in_order(&mut model, [holed, bar], rule, swapped);
+            format!("{answer:?}")
+        });
+        eprintln!("PROBE second {rule:?} swapped {swapped}: {outcome:?}");
+    }
+}
+
+/// [`a_bar_cut_to`], with side `i + 1` running as `sides[i]` says, `placed`
+/// where that says.
 fn a_bar_cut_to_pipes(
     model: &mut Model,
     radius: f64,
     corners: &[[f64; 2]],
     sides: &[Side],
+    placed: Placed,
 ) -> rcad_topo::Result<SolidKey> {
     use Orientation::{Forward, Reversed};
+    let Placed {
+        by,
+        centre: [centre_x, centre_y],
+        bottom: floor,
+        top: roof,
+    } = placed;
+    let moved = |[x, y]: [f64; 2]| [centre_x + by * x, centre_y + by * y];
+    let corners: Vec<[f64; 2]> = corners.iter().map(|&corner| moved(corner)).collect();
+    let sides: Vec<Side> = sides
+        .iter()
+        .map(|&side| match side {
+            Side::RoundAPipe(at, pipe) => Side::RoundAPipe(moved(at), by * pipe),
+            Side::Straight => Side::Straight,
+        })
+        .collect();
     let mut builder = SolidBuilder::new();
     let mut low = Vec::with_capacity(corners.len());
     let mut high = Vec::with_capacity(corners.len());
-    for &[x, y] in corners {
-        low.push(builder.add_vertex(Point::new(x, y, 0.0))?);
-        high.push(builder.add_vertex(Point::new(x, y, 4.0))?);
+    for &[x, y] in &corners {
+        low.push(builder.add_vertex(Point::new(x, y, floor))?);
+        high.push(builder.add_vertex(Point::new(x, y, roof))?);
     }
-    let top = Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+    let top = Plane::from_point_and_normal(Point::new(0.0, 0.0, roof), Vector::new(0.0, 0.0, 1.0))
         .expect("a unit normal");
-    let bottom = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
-        .expect("a unit normal");
+    let bottom =
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, floor), Vector::new(0.0, 0.0, -1.0))
+            .expect("a unit normal");
     let right_of = |[from_x, from_y]: [f64; 2], [to_x, to_y]: [f64; 2]| {
         Picker::InFrontOf(
             HalfSpace::new(
@@ -3380,10 +3540,17 @@ fn a_bar_cut_to_pipes(
             ],
         )?;
         let (surface, used) = match after_the_arc(index) {
-            None => (
-                Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a positive radius")),
-                Forward,
-            ),
+            None => {
+                let axis = Axis::new(
+                    Point::new(centre_x, centre_y, 0.0),
+                    Vector::new(0.0, 0.0, 1.0),
+                )
+                .expect("a finite axis");
+                (
+                    Surface::Cylinder(Cylinder::new(axis, by * radius).expect("a positive radius")),
+                    Forward,
+                )
+            }
             Some(Side::RoundAPipe([x, y], pipe)) => {
                 let axis = Axis::new(Point::new(x, y, 0.0), Vector::new(0.0, 0.0, 1.0))
                     .expect("a finite axis");
