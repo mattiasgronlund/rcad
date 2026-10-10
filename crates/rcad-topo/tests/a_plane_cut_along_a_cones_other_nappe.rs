@@ -696,7 +696,7 @@ fn the_closed_forms_agree_with_the_model_about_the_frustum_and_the_blocks() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let (cone, block) = build(&mut model, &case);
         let mut checked = 0;
-        for p in clear_grid_points(&case) {
+        for p in clear_grid_points(&case, 1) {
             for (solid, truth) in [
                 (cone, in_cone(case.cone, p)),
                 (block, in_block(case.block, p)),
@@ -770,26 +770,78 @@ fn a_cone_whose_radius_is_twice_its_height_inside_a_block_answers_every_rule_rig
 /// [`a_corner_up_cubes_solids`] or [`a_slabs_solids`], which work it out by
 /// hand; none was read off the kernel.
 ///
-/// **The leaning block is two tests and each other family one, and none of
-/// them is short.** Each takes minutes, where the slow tier's pieces take
-/// about twenty seconds (`docs/decisions.md` §397.4); §350.5 gives each
-/// test's wall.
+/// **Each family is cut into tests of about twenty seconds**, the slow tier's
+/// pieces (`docs/decisions.md` §397.4), and each test checks its answers on
+/// every second point of the grid ([`tally_on_every_second_point`]). The
+/// leaning block is one test per lean and turn, the corner-up cube one per
+/// middle and turn, and the slab one for the slabs that start below the apex
+/// and one for those that start at it or above. §350.5 gives each family's
+/// tally, which its tests add up to, and the tests' walls.
 ///
-/// Leaned `0.25` or `0.375`, the block meets the cone at every crossing.
+/// Leaned `0.25` or `0.375`, the block meets the cone at every crossing, and
+/// all ninety-six fuses answer right, sixteen in each test.
 #[test]
-fn a_steep_pointed_cone_with_a_gentle_lean_answers_every_rule_right() {
-    let mut cases = Vec::new();
-    for lean in [0.25, 0.375] {
-        for crossing in [0.0, 0.5, -0.5, 1.5] {
-            for turn in [0.0, 1.0, 3.0] {
-                cases.push(a_leaning_case(THE_STEEP_CONE, lean, crossing, turn));
-            }
-        }
-    }
+fn a_block_leaned_a_quarter_unturned_across_a_steep_pointed_cone_answers_every_rule_right() {
     assert_eq!(
-        tally(&cases),
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 0.25, &[0.0])),
         Tally {
-            right: 96,
+            right: 16,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_block_leaned_a_quarter_turned_one_across_a_steep_pointed_cone_answers_every_rule_right() {
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 0.25, &[1.0])),
+        Tally {
+            right: 16,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_block_leaned_a_quarter_turned_three_across_a_steep_pointed_cone_answers_every_rule_right() {
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 0.25, &[3.0])),
+        Tally {
+            right: 16,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_block_leaned_three_eighths_unturned_across_a_steep_pointed_cone_answers_every_rule_right() {
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 0.375, &[0.0])),
+        Tally {
+            right: 16,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_block_leaned_three_eighths_turned_one_across_a_steep_pointed_cone_answers_every_rule_right() {
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 0.375, &[1.0])),
+        Tally {
+            right: 16,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_block_leaned_three_eighths_turned_three_across_a_steep_pointed_cone_answers_every_rule_right()
+{
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 0.375, &[3.0])),
+        Tally {
+            right: 16,
             refused: BTreeMap::new()
         }
     );
@@ -808,26 +860,81 @@ fn a_steep_pointed_cone_with_a_gentle_lean_answers_every_rule_right() {
 /// cone ([`APART`]), the other two crossings meet it ([`OVERLAPPING`]), and
 /// every one of those twenty-four answers right.
 #[test]
-fn a_steep_pointed_cone_with_a_steep_or_steeper_lean_answers_right_or_refuses() {
-    let mut cases = Vec::new();
-    for lean in [1.0, 4.0] {
-        for crossing in [0.0, 0.5, -0.5, 1.5] {
-            for turn in [0.0, 1.0, 3.0] {
-                cases.push(a_leaning_case(THE_STEEP_CONE, lean, crossing, turn));
-            }
-        }
-    }
+fn a_block_leaned_one_unturned_across_a_steep_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
-        tally(&cases),
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 1.0, &[0.0])),
         Tally {
-            right: 82,
-            refused: [
-                ("the answer does not measure: CannotMeshAFace", 2),
-                ("CannotTellTheCellsOfAFaceApart", 12),
-            ]
-            .into()
+            right: 14,
+            refused: [("the answer does not measure: CannotMeshAFace", 2)].into()
         }
     );
+}
+
+#[test]
+fn a_block_leaned_one_turned_one_across_a_steep_pointed_cone_answers_every_rule_right() {
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 1.0, &[1.0])),
+        Tally {
+            right: 16,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_block_leaned_one_turned_three_across_a_steep_pointed_cone_answers_every_rule_right() {
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 1.0, &[3.0])),
+        Tally {
+            right: 16,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_block_leaned_four_unturned_across_a_steep_pointed_cone_answers_right_or_refuses() {
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 4.0, &[0.0])),
+        Tally {
+            right: 12,
+            refused: [("CannotTellTheCellsOfAFaceApart", 4)].into()
+        }
+    );
+}
+
+#[test]
+fn a_block_leaned_four_turned_one_across_a_steep_pointed_cone_answers_right_or_refuses() {
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 4.0, &[1.0])),
+        Tally {
+            right: 12,
+            refused: [("CannotTellTheCellsOfAFaceApart", 4)].into()
+        }
+    );
+}
+
+#[test]
+fn a_block_leaned_four_turned_three_across_a_steep_pointed_cone_answers_right_or_refuses() {
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 4.0, &[3.0])),
+        Tally {
+            right: 12,
+            refused: [("CannotTellTheCellsOfAFaceApart", 4)].into()
+        }
+    );
+}
+
+/// [`a_leaning_case`] round `cone` at a lean of `lean`, at crossings `0`,
+/// `0.5`, `−0.5` and `1.5`, each turned by every one of `turns`.
+fn leaning_blocks(cone: ConeShape, lean: f64, turns: &[f64]) -> Vec<Case> {
+    let mut cases = Vec::new();
+    for crossing in [0.0, 0.5, -0.5, 1.5] {
+        for &turn in turns {
+            cases.push(a_leaning_case(cone, lean, crossing, turn));
+        }
+    }
+    cases
 }
 
 /// A cube stood on its corner round the steep cone's apex, of side `2`, `4`
@@ -835,32 +942,109 @@ fn a_steep_pointed_cone_with_a_steep_or_steeper_lean_answers_right_or_refuses() 
 /// Every one shares volume with the cone. Side `6`, middle `0` refuses `order
 /// along a crossing` on every rule and both turns; the other eleven answer
 /// right, six of them with the block less the cone in two solids, its top cut
-/// off by the cap.
-fn a_steep_pointed_cones_corner_up_cubes() -> Vec<Case> {
-    let mut cases = Vec::new();
-    for side in [2.0, 4.0, 6.0] {
-        for middle in [0.0, 1.0, 2.5, 3.5] {
-            for turn in [0.0, 0.7] {
-                cases.push(Case {
-                    cone: THE_STEEP_CONE,
-                    block: a_corner_up_cube(side, middle, turn),
-                    solids: a_corner_up_cubes_solids(THE_STEEP_CONE, side, middle),
-                });
-            }
+/// off by the cap. Each test here holds the three sides at one middle and one
+/// turn.
+#[test]
+fn a_corner_up_cube_centred_on_a_steep_pointed_cones_apex_answers_right_or_refuses() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_STEEP_CONE, 0.0, 0.0)),
+        Tally {
+            right: 8,
+            refused: [("order along a crossing", 4)].into()
         }
-    }
-    cases
+    );
 }
 
 #[test]
-fn a_corner_up_cube_round_a_steep_pointed_cones_apex_answers_right_or_refuses() {
+fn a_turned_corner_up_cube_centred_on_a_steep_pointed_cones_apex_answers_right_or_refuses() {
     assert_eq!(
-        tally(&a_steep_pointed_cones_corner_up_cubes()),
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_STEEP_CONE, 0.0, 0.7)),
         Tally {
-            right: 88,
-            refused: [("order along a crossing", 8)].into()
+            right: 8,
+            refused: [("order along a crossing", 4)].into()
         }
     );
+}
+
+#[test]
+fn a_corner_up_cube_centred_one_above_a_steep_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_STEEP_CONE, 1.0, 0.0)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_turned_corner_up_cube_centred_one_above_a_steep_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_STEEP_CONE, 1.0, 0.7)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_corner_up_cube_centred_two_and_a_half_above_a_steep_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_STEEP_CONE, 2.5, 0.0)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_turned_corner_up_cube_centred_two_and_a_half_above_a_steep_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_STEEP_CONE, 2.5, 0.7)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_corner_up_cube_centred_three_and_a_half_above_a_steep_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_STEEP_CONE, 3.5, 0.0)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_turned_corner_up_cube_centred_three_and_a_half_above_a_steep_pointed_cones_apex_answers_right()
+{
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_STEEP_CONE, 3.5, 0.7)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+/// A corner-up cube of side `2`, `4` and `6` round `cone`, each with its
+/// middle on the axis at `z = middle` and turned `turn` about it, counted by
+/// [`a_corner_up_cubes_solids`].
+fn corner_up_cubes_of_every_side(cone: ConeShape, middle: f64, turn: f64) -> Vec<Case> {
+    [2.0, 4.0, 6.0]
+        .into_iter()
+        .map(|side| Case {
+            cone,
+            block: a_corner_up_cube(side, middle, turn),
+            solids: a_corner_up_cubes_solids(cone, side, middle),
+        })
+        .collect()
 }
 
 /// Twenty slabs `14` deep across the steep cone's axis, each `a_slab`'s own
@@ -870,35 +1054,53 @@ fn a_corner_up_cube_round_a_steep_pointed_cones_apex_answers_right_or_refuses() 
 /// `low` from `−8` to `0` answers right turned `0`, the cone in two solids
 /// either side of the slab, and splits between two more refusals the other
 /// three turns; `low = 2` answers right turned `0` and splits the same way
-/// turned `0.5` and `1`.
-fn a_steep_pointed_cones_slabs() -> Vec<Case> {
-    let mut cases = Vec::new();
-    for low in [-14.0, -8.0, -3.0, 0.0, 2.0] {
-        for turn in [0.0, 0.5, 1.0, 1.5] {
-            cases.push(Case {
-                cone: THE_STEEP_CONE,
-                block: a_slab(low, turn),
-                solids: a_slabs_solids(THE_STEEP_CONE, low),
-            });
-        }
-    }
-    cases
-}
-
+/// turned `0.5` and `1`. This test holds the slabs from `−14`, `−8` and `−3`,
+/// and the next those from `0` and `2`.
 #[test]
-fn a_slab_fourteen_deep_across_a_steep_pointed_cone_answers_right_or_refuses() {
+fn a_slab_fourteen_deep_from_below_the_apex_across_a_steep_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
-        tally(&a_steep_pointed_cones_slabs()),
+        tally_on_every_second_point(&slabs(THE_STEEP_CONE, &[-14.0, -8.0, -3.0])),
         Tally {
-            right: 38,
+            right: 18,
             refused: [
                 ("a point inside a piece of a face", 24),
-                ("ACurvedFaceGoesRightRoundWithNoSeam", 12),
-                ("side of a half-space", 6),
+                ("ACurvedFaceGoesRightRoundWithNoSeam", 4),
+                ("side of a half-space", 2),
             ]
             .into()
         }
     );
+}
+
+#[test]
+fn a_slab_fourteen_deep_from_the_apex_up_across_a_steep_pointed_cone_answers_right_or_refuses() {
+    assert_eq!(
+        tally_on_every_second_point(&slabs(THE_STEEP_CONE, &[0.0, 2.0])),
+        Tally {
+            right: 20,
+            refused: [
+                ("ACurvedFaceGoesRightRoundWithNoSeam", 8),
+                ("side of a half-space", 4),
+            ]
+            .into()
+        }
+    );
+}
+
+/// [`a_slab`] across `cone` from each of `lows`, turned `0`, `0.5`, `1` and
+/// `1.5`, counted by [`a_slabs_solids`].
+fn slabs(cone: ConeShape, lows: &[f64]) -> Vec<Case> {
+    let mut cases = Vec::new();
+    for &low in lows {
+        for turn in [0.0, 0.5, 1.0, 1.5] {
+            cases.push(Case {
+                cone,
+                block: a_slab(low, turn),
+                solids: a_slabs_solids(cone, low),
+            });
+        }
+    }
+    cases
 }
 
 /// The same leaning block round a cone of slope `1` instead of `2` — §350.1
@@ -926,7 +1128,7 @@ fn a_unit_pointed_cone_with_a_lean_up_to_one_answers_right_or_refuses() {
         }
     }
     assert_eq!(
-        tally(&cases),
+        tally_on_a_grid(&cases, 2),
         Tally {
             right: 125,
             refused: [
@@ -965,7 +1167,10 @@ fn a_unit_pointed_cones_lean_four_cases_away_from_the_defect() -> Vec<Case> {
 #[test]
 fn a_unit_pointed_cone_with_a_lean_of_four_answers_right_or_refuses_away_from_the_known_defect() {
     assert_eq!(
-        tally(&a_unit_pointed_cones_lean_four_cases_away_from_the_defect()),
+        tally_on_a_grid(
+            &a_unit_pointed_cones_lean_four_cases_away_from_the_defect(),
+            2
+        ),
         Tally {
             right: 36,
             refused: [("ResultIsNotManifold", 4)].into()
@@ -1002,7 +1207,7 @@ fn a_unit_pointed_cones_corner_up_cubes() -> Vec<Case> {
 #[test]
 fn a_corner_up_cube_round_a_unit_pointed_cones_apex_answers_right_or_refuses() {
     assert_eq!(
-        tally(&a_unit_pointed_cones_corner_up_cubes()),
+        tally_on_a_grid(&a_unit_pointed_cones_corner_up_cubes(), 2),
         Tally {
             right: 88,
             refused: [("a point inside a piece of a face", 8)].into()
@@ -1033,7 +1238,7 @@ fn a_unit_pointed_cones_slabs() -> Vec<Case> {
 #[test]
 fn a_slab_fourteen_deep_across_a_unit_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
-        tally(&a_unit_pointed_cones_slabs()),
+        tally_on_a_grid(&a_unit_pointed_cones_slabs(), 2),
         Tally {
             right: 68,
             refused: [("a point inside a piece of a face", 12)].into()
@@ -1495,13 +1700,30 @@ const REFUSALS: [&str; 11] = [
 /// right ones and the refusals by name, and prints each refusal with the
 /// place of its case in `cases`.
 fn tally(cases: &[Case]) -> Tally {
+    tally_on_a_grid(cases, 1)
+}
+
+/// [`tally`], checking the answers on every second point of
+/// [`clear_grid_points`]'s grid along each axis: 4225 points, a step of `1`,
+/// where the whole grid has 30 625 and a step of `0.5`.
+///
+/// Q467's families round [`THE_STEEP_CONE`] and [`THE_UNIT_CONE`] take this.
+/// On the whole grid the check of one fuse took up to 55 s, and of one
+/// union 26 s were `classify_point` on the 29 492 of its 30 222 points that
+/// lie outside both shapes. No cut of those families came near the slow tier's
+/// pieces of about 20 s (`docs/decisions.md` §350.5).
+fn tally_on_every_second_point(cases: &[Case]) -> Tally {
+    tally_on_a_grid(cases, 2)
+}
+
+fn tally_on_a_grid(cases: &[Case], stride: usize) -> Tally {
     let mut tally = Tally {
         right: 0,
         refused: BTreeMap::new(),
     };
     for (place, case) in cases.iter().enumerate() {
         for (which, (rule, cone_first)) in RULES.into_iter().enumerate() {
-            match fuse_and_check(case, rule, cone_first, case.solids[which]) {
+            match fuse_and_check(case, rule, cone_first, case.solids[which], stride) {
                 None => tally.right += 1,
                 Some(name) => {
                     println!("case {place}, {rule:?} (cone first: {cone_first}): {name}");
@@ -1524,7 +1746,13 @@ fn tally(cases: &[Case]) -> Tally {
 /// # Panics
 ///
 /// When the fuse answers wrongly, which is what this file is looking for.
-fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize) -> Option<String> {
+fn fuse_and_check(
+    case: &Case,
+    rule: Rule,
+    cone_first: bool,
+    want_solids: usize,
+    stride: usize,
+) -> Option<String> {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let (cone, block) = build(&mut model, case);
@@ -1590,7 +1818,7 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
     }
 
     let mut decided = 0;
-    for p in clear_grid_points(case) {
+    for p in clear_grid_points(case, stride) {
         let a = in_cone(case.cone, p);
         let b = in_block(case.block, p);
         let truth = match (rule, cone_first) {
@@ -1669,7 +1897,18 @@ fn fuse_and_check(case: &Case, rule: Rule, cone_first: bool, want_solids: usize)
     // that union, whose kept piece of the cone is bounded by an arc of the
     // parabola the block's top face cuts: the ray caster does not follow that
     // arc far enough for more.
-    let floor = if measured.is_ok() { 5_500 } else { 7_000 };
+    //
+    // **On every second point the floors are 1 500 and 4 000**, against the
+    // 1553 and 4159 the fewest of Q467's families decide there. The 1553 is
+    // the union of the steep cone and the block leaned a quarter, crossing
+    // `1.5`, turned `3`.
+    let floor = match (stride, measured.is_ok()) {
+        (1, true) => 5_500,
+        (1, false) => 7_000,
+        (2, true) => 1_500,
+        (2, false) => 4_000,
+        _ => panic!("no floor is set for a stride of {stride}"),
+    };
     assert!(
         decided > floor,
         "{what}: only {decided} grid points could be classified"
@@ -1705,10 +1944,10 @@ fn a_block(model: &mut Model, block: BoxShape) -> SolidKey {
 /// Points half a unit apart over `|x|, |y| ≤ 6`, `|z| ≤ 12`, nudged off the
 /// lattice so none lands on an axis or a cap, and keeping only those further
 /// than `0.02` from every face of either input.
-fn clear_grid_points(case: &Case) -> impl Iterator<Item = Point> + '_ {
-    (-12..=12).flat_map(move |i| {
-        (-12..=12).flat_map(move |j| {
-            (-24..=24).filter_map(move |k| {
+fn clear_grid_points(case: &Case, stride: usize) -> impl Iterator<Item = Point> + '_ {
+    (-12..=12).step_by(stride).flat_map(move |i| {
+        (-12..=12).step_by(stride).flat_map(move |j| {
+            (-24..=24).step_by(stride).filter_map(move |k| {
                 let p = Point::new(
                     f64::from(i) * 0.5 + 0.1,
                     f64::from(j) * 0.5 + 0.07,
