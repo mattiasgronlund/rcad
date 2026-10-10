@@ -331,7 +331,18 @@ fn every_point_walked_round_one_of_the_two_ellipses_is_on_both_pipes() {
 /// through where the axes meet**, and refuses the rest as
 /// `CannotNameWhichPieceOfACrossingThisIs`, a gap. A direction scaled to length
 /// one is not a whole-number triple any more, so its dot with the middle here
-/// rounds unless the direction is along a coordinate axis.
+/// rounds unless the direction is along a coordinate axis. Since Q1625 a surface
+/// that cannot face its own axis faces a direction with whole-number components
+/// from −2 to 2 instead, which dots with this middle to a short sum and so
+/// exactly. It has to lie exactly in the flat the two axes span, and the flat
+/// holds one for two axes in one coordinate plane and for two directions scaled
+/// down from one whole-number triple, like `(1, 2, 2)/3` and `(2, 1, 2)/3`. That
+/// took the count from 32 to 408 of the 1224;
+/// `bores_on_3_4_0_and_3_0_4_are_refused_though_their_four_halves_are_there`
+/// pins one of the rest by name.
+///
+/// Every point of every piece drawn is on both pipes, so a half the namer names
+/// is a piece of this crossing and not merely something the walker returned.
 #[test]
 fn the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece() {
     let middle = Point::new(11.0, -3.25, 0.5);
@@ -370,11 +381,22 @@ fn the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece()
                         Deflection::of(radius * 1e-4).expect("a deflection above zero"),
                         &Policy::certified(),
                         &mut ProvenanceLog::new(),
-                    );
-                    assert!(
-                        drawn.is_ok(),
-                        "the walker sees the same family and draws {piece:?}: {drawn:?}"
-                    );
+                    )
+                    .unwrap_or_else(|why| {
+                        panic!("the walker sees the same family and draws {piece:?}: {why:?}")
+                    });
+
+                    let allowed = drawn.deviation().magnitude();
+                    for point in drawn.points() {
+                        for pipe in &pair {
+                            let off = how_far_off_the_pipe(pipe, *point);
+                            assert!(
+                                off <= allowed,
+                                "a point of {piece:?} {off} off a pipe of radius {radius} is \
+                                 past the run's own bound of {allowed}"
+                            );
+                        }
+                    }
                 }
                 pairs_put_to_both += 1;
             }
@@ -387,45 +409,88 @@ fn the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece()
         "the generator has to put the family to both halves and not a handful of it: \
          {pairs_put_to_both} pairs"
     );
-    assert!(
-        named_in_four_halves > 0,
-        "the pairs on coordinate directions are named: {named_in_four_halves} were"
+    assert_eq!(
+        named_in_four_halves, 408,
+        "the pairs whose flat holds a short whole-number facing leaning each way are named"
     );
 }
 
+/// Bores on `(3, 4, 0)` and `(3, 0, 4)` through `(11, −3.25, 0.5)` are still
+/// refused, and it is a **gap** (§16.10): the four halves are there, and so are
+/// flat surfaces that pass exactly through where the axes meet.
+///
+/// Neither stored direction dots exactly with the middle, and the only
+/// directions with whole-number components from −2 to 2 in the flat the two
+/// span are `(0, 1, −1)` and its multiples. That one reads as far along one
+/// axis as back along the other, so its surface is the plane one ellipse lies
+/// in rather than a surface between its halves. The surfaces exist all the same: worked
+/// out in exact fractions, the first stored direction slid by `14·2⁻⁵³` along
+/// `(0, 1, −1)` still lies exactly in the flat, still leans towards its own
+/// axis, and dots with the middle to exactly `3.999999999999994`; the second,
+/// slid by `8·2⁻⁵³`, dots to exactly `6.9999999999999964`. The namer does not
+/// search for such a facing yet.
 #[test]
-fn probe_the_leaning_pair() {
-    for middle in [
-        Point::new(11.0, -3.25, 0.5),
-        Point::new(1.85, 5.85, -3.3),
-        Point::origin(),
-    ] {
-        let mut named_count = 0;
-        let mut all = 0;
-        let mut refused_ways = Vec::new();
-        for [mine, theirs] in pairs_of_directions() {
-            let [one, other] = two_pipes_crossing_at(middle, [mine, theirs], 0.25);
-            let named = intersect(
-                &Surface::Cylinder(one),
-                &Surface::Cylinder(other),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            );
-            all += 1;
-            match named {
-                Ok(SurfaceMeet::Curves(halves)) if halves.len() == 4 => named_count += 1,
-                _ => refused_ways.push([mine, theirs]),
-            }
-        }
-        eprintln!("PROBE {middle:?}: {named_count} of {all}");
-        for ways in refused_ways.iter().take(400) {
-            eprintln!(
-                "PROBE refused {:?} {:?}",
-                ways[0].components(),
-                ways[1].components()
-            );
-        }
+fn bores_on_3_4_0_and_3_0_4_are_refused_though_their_four_halves_are_there() {
+    let middle = Point::new(11.0, -3.25, 0.5);
+    let [one, other] = two_pipes_crossing_at(
+        middle,
+        [Vector::new(3.0, 4.0, 0.0), Vector::new(3.0, 0.0, 4.0)],
+        0.25,
+    );
+
+    for pair in [[one, other], [other, one]] {
+        let named = intersect(
+            &Surface::Cylinder(pair[0]),
+            &Surface::Cylinder(pair[1]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(named, Err(Error::CannotNameWhichPieceOfACrossingThisIs)),
+            "no whole-number facing from −2 to 2 leans towards either axis here: {named:?}"
+        );
     }
+}
+
+/// Bores leaning at `(3, 4, 0)` and `(4, 3, 0)` through `(11, −3.25, 0.5)` are
+/// picked by the same two flat surfaces as bores on `(1, 0, 0)` and `(0, 1, 0)`
+/// through the same point, though their halves are other curves.
+///
+/// Neither leaning direction dots exactly with that point, so since Q1625 the
+/// namer faces `(0, 1, 0)` and `(1, 0, 0)` instead. What this pins is that a
+/// picker's facing says nothing about which way its pipe runs: whatever takes
+/// the two axis directions off the pickers, rather than off the two pipes, puts
+/// the leaning pair's halves where the square pair's are.
+#[test]
+fn bores_leaning_at_3_4_0_and_4_3_0_are_picked_by_the_facings_bores_crossing_square_are() {
+    let middle = Point::new(11.0, -3.25, 0.5);
+    let pickers_of = |ways: [Vector; 2]| -> Vec<Vec<Picker>> {
+        let [one, other] = two_pipes_crossing_at(middle, ways, 0.25);
+        let named = intersect(
+            &Surface::Cylinder(one),
+            &Surface::Cylinder(other),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(halves)) = named else {
+            panic!("two bores of one width whose axes meet are named: {named:?}")
+        };
+        halves
+            .iter()
+            .map(|half| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = half.run() else {
+                    panic!("a half is a piece of where the two pipes cross: {half:?}")
+                };
+                picked_by.to_vec()
+            })
+            .collect()
+    };
+
+    assert_eq!(
+        pickers_of([Vector::new(3.0, 4.0, 0.0), Vector::new(4.0, 3.0, 0.0)]),
+        pickers_of([Vector::new(1.0, 0.0, 0.0), Vector::new(0.0, 1.0, 0.0)]),
+        "the leaning pair is picked by the coordinate facings the square pair is"
+    );
 }
 
 /// A pair a rounding away from the family is **not** the family.

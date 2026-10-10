@@ -1768,22 +1768,36 @@ fn where_two_leaning_pipes_cross(
 ///
 /// # What picks a half
 ///
-/// The flat surfaces through `c` facing `ê` and facing `û`. Along the ellipse in
-/// the plane square to `û − ê`, a point is `c + cos θ·a·(û + ê)/‖û + ê‖ + sin θ·r·n̂`,
-/// which reads `cos θ·a·(1 + û·ê)/‖û + ê‖` against both `ê` and `û`. Against the
-/// other ellipse, along `û − ê`, it reads `cos θ·a·(û·ê − 1)/‖û − ê‖` against
-/// `ê` and minus that against `û`. With the axes not parallel `|û·ê| < 1`, so
-/// each half is strictly inside one corner of the two surfaces but at its two
-/// ends, and the four halves are in four different corners: `(+, +)` and
-/// `(−, −)` for the first, `(−, +)` and `(+, −)` for the second. A picker is
-/// closed, so a corner holds its own half and the two points where they all
-/// meet. No sign is asked of a direction, because none is in doubt.
+/// Two flat surfaces through `c`, one leaning towards `ê` and one towards `û`,
+/// each facing a direction `f` that lies in the flat `ê` and `û` span; how each
+/// is found is [`a_flat_surface_through_where_the_walls_touch`]'s. Along the
+/// ellipse in the plane square to `û − ê`, a point is
+/// `c + cos θ·a·(û + ê)/‖û + ê‖ + sin θ·r·n̂`, and `f` reads nothing along `n̂`,
+/// so the point reads `cos θ·a·f·(û + ê)/‖û + ê‖`. Along the other ellipse, in
+/// the direction `û − ê`, it reads `cos θ·a·f·(û − ê)/‖û − ê‖`. A facing that
+/// leans towards `ê` — reading positive against it, and more against `ê` than
+/// against `û` — reads positive along `û + ê` and negative along `û − ê`, and
+/// one leaning towards `û` reads positive along both. So each half is strictly
+/// inside one corner of the two surfaces but at its two ends, and the four
+/// halves are in four different corners: `(+, +)` and `(−, −)` for the first,
+/// `(−, +)` and `(+, −)` for the second. A picker is closed, so a corner holds
+/// its own half and the two points where they all meet. The lean is asked of
+/// each facing exactly, before it is taken.
+///
+/// **The facings are not the axis directions in general**: bores on `(3, 4, 0)`
+/// and `(4, 3, 0)` through `(11, −3.25, 0.5)` are picked by `(0, 1, 0)` and
+/// `(1, 0, 0)`, the same two as bores on `(1, 0, 0)` and `(0, 1, 0)` through
+/// the same point
+/// (`bores_leaning_at_3_4_0_and_4_3_0_are_picked_by_the_facings_bores_crossing_square_are`).
+/// So a caller that needs `ê` and `û` reads them off the two pipes and never
+/// off the pickers.
 ///
 /// What has to be exact is that both surfaces pass **exactly** through the
 /// points where the halves meet, or a corner holds a stub of a second half. That
-/// is two things: `c` is where the two axes meet, asked exactly of each axis,
-/// and each surface passes exactly through `c`. Then `c ± r·n̂` is on both,
-/// because `n̂` is square to both stored directions.
+/// is three things: `c` is where the two axes meet, asked exactly of each axis;
+/// each surface passes exactly through `c`; and each facing lies exactly in the
+/// flat of the two stored directions. Then `c ± r·n̂` is on both, because `n̂` is
+/// square to that flat.
 ///
 /// **The pair is sorted first**, as the walk sorts it, so `c` is worked out the
 /// same way whichever way round the caller wrote the two.
@@ -1791,10 +1805,15 @@ fn where_two_leaning_pipes_cross(
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when `c`, worked out in
-/// `f64`, is not exactly on both axes or either surface does not pass exactly
-/// through it, and whatever [`HalfSpace::through_a_point_facing`] refuses. A
-/// **gap** (§16.10): the four halves are there and four corners apart, and what
-/// runs out is a point in `f64` that is exactly where the axes meet.
+/// `f64`, is not exactly on both axes or no facing tried for either surface
+/// passes exactly through it, and whatever [`HalfSpace::through_a_point_facing`]
+/// refuses. A **gap** (§16.10): the four halves are there and four corners
+/// apart, and what runs out is a point in `f64` that is exactly where the axes
+/// meet, or a facing short enough to dot with it exactly. Bores on `(3, 4, 0)`
+/// and `(3, 0, 4)` through `(11, −3.25, 0.5)` are refused for the second, and
+/// facings slid a few `2⁻⁵³` from the stored directions along `(0, 1, −1)` would
+/// have passed exactly through `c`
+/// (`bores_on_3_4_0_and_3_0_4_are_refused_though_their_four_halves_are_there`).
 fn four_half_ellipses_where_two_pipes_of_one_width_meet(
     one: &Cylinder,
     other: &Cylinder,
