@@ -25,6 +25,15 @@
 //!
 //! This is a gap and not a limit (§16.10): every corner here is a whole number,
 //! and only the box hid it.
+//!
+//! **The corner halfway is a point on the edge, not a different solid.** United
+//! with a box that shares the front bottom edge and nothing else, the cube is
+//! refused `ResultIsNotManifold`: the two touch along a line that no one solid
+//! holds, and §80.1 and §80.9 keep that refusal. The block with the corner
+//! halfway was answered as two solids instead, because its edge stopped at the
+//! corner and the other box's edge did not, so no edge had four faces round
+//! it. Now the fuse reads past a corner that every face round it walks
+//! straight past, and both blocks are refused (Q1568).
 
 #![forbid(unsafe_code)]
 
@@ -105,11 +114,17 @@ fn a_block_with_a_corner_halfway_along_an_edge_moved_by_whole_numbers_fuses_as_u
 /// unmoved fuse rather than a count, so a shift that changed any answer at all
 /// would show.
 ///
+/// The block with a corner halfway is refused only where the cube is: united
+/// with the box that shares its front bottom edge and nothing else, 12 fuses
+/// over six shifts and both ways round, refused `ResultIsNotManifold` as §80.1
+/// and §80.9 keep it (Q1568).
+///
 /// The shifts stop at `2^36`, because the model refuses a coordinate more than
 /// `1e11` times its shortest edge (`Error::Invalid` of `DynamicRangeTooWide`),
 /// and the block's shortest edge is 1.
 #[test]
 fn every_fuse_of_a_block_moved_by_whole_numbers_answers_as_the_unmoved_block_does() {
+    let sharing_one_edge = PARTNERS[3];
     let shifts = [
         [1.0, 0.0, 0.0],
         [-7.0, 11.0, 5.0],
@@ -120,7 +135,8 @@ fn every_fuse_of_a_block_moved_by_whole_numbers_answers_as_the_unmoved_block_doe
     ];
     let mut compared = 0;
     let mut differ = Vec::new();
-    let mut refused_with_a_corner_halfway = Vec::new();
+    let mut refused_sharing_one_edge = 0;
+    let mut refused_otherwise = Vec::new();
     for block in [Block::Cube, Block::CornerHalfwayAlongAnEdge] {
         for partner in PARTNERS {
             for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
@@ -138,7 +154,11 @@ fn every_fuse_of_a_block_moved_by_whole_numbers_answers_as_the_unmoved_block_doe
                             differ.push(format!("{case}: {} where unmoved {}", moved.1, unmoved.1));
                         }
                         if block == Block::CornerHalfwayAlongAnEdge && moved.0.is_err() {
-                            refused_with_a_corner_halfway.push(format!("{case}: {}", moved.1));
+                            if rule == Rule::Union && partner.name == sharing_one_edge.name {
+                                refused_sharing_one_edge += 1;
+                            } else {
+                                refused_otherwise.push(format!("{case}: {}", moved.1));
+                            }
                         }
                     }
                 }
@@ -152,10 +172,61 @@ fn every_fuse_of_a_block_moved_by_whole_numbers_answers_as_the_unmoved_block_doe
         differ.len()
     );
     assert!(
-        refused_with_a_corner_halfway.is_empty(),
-        "the block with a corner halfway along an edge is refused: \
-         {refused_with_a_corner_halfway:#?}"
+        refused_otherwise.is_empty(),
+        "the block with a corner halfway along an edge is refused where the cube is not: \
+         {refused_otherwise:#?}"
     );
+    assert_eq!(
+        refused_sharing_one_edge, 12,
+        "the union with {} is refused at every shift, both ways round",
+        sharing_one_edge.name
+    );
+}
+
+/// A box that shares the block's front bottom edge and nothing else fuses the
+/// same with the cube and with the block that has a corner halfway along that
+/// edge, under every rule and both ways round: the corner is a point on the
+/// edge and not a different solid.
+///
+/// The union is refused `ResultIsNotManifold`. Two solids that touch along an
+/// edge of both share a line that no single solid holds, and §80.1 and §80.9
+/// keep that refusal. The block with the corner halfway was answered as two
+/// solids, because its edge stopped at the corner and the partner's did not,
+/// so no edge had four faces round it (Q1568).
+#[test]
+fn a_box_sharing_one_edge_fuses_the_same_whether_the_edge_has_a_corner_halfway_or_not() {
+    let sharing_one_edge = PARTNERS[3];
+    assert_eq!(
+        sharing_one_edge.name,
+        "sharing the front bottom edge and nothing else"
+    );
+    let not_a_solid = discriminant(&Error::ResultIsNotManifold { count: 4 });
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for block_first in [true, false] {
+            let cube = fused(Block::Cube, sharing_one_edge, [0.0; 3], rule, block_first);
+            let halfway = fused(
+                Block::CornerHalfwayAlongAnEdge,
+                sharing_one_edge,
+                [0.0; 3],
+                rule,
+                block_first,
+            );
+            assert_eq!(
+                halfway.0, cube.0,
+                "{rule:?}, block first {block_first}: the block with a corner halfway {}, \
+                 the cube {}",
+                halfway.1, cube.1
+            );
+            if rule == Rule::Union {
+                assert_eq!(
+                    halfway.0,
+                    Err(not_a_solid),
+                    "block first {block_first}: {}",
+                    halfway.1
+                );
+            }
+        }
+    }
 }
 
 /// The block that is moved: a cube as a designer builds one, or the same cube
