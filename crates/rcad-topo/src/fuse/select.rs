@@ -1324,9 +1324,14 @@ fn the_piece_holds(
     }
     let mut winding = 0;
     for (position, wire) in piece.wires.iter().enumerate() {
-        let inwards = if position == 0 { 1 } else { -1 };
         match round_wire_of(wire) {
             Some(partner) => {
+                let inwards = if what_a_round_wire_bounds_holds_the_material(flat, &partner, wire)?
+                {
+                    1
+                } else {
+                    -1
+                };
                 match side_of_a_partner_by_its_plane(flat, &partner, point, reaching_the_plane) {
                     Decision::Neg => {
                         let in_its_disk = if let Surface::Torus(ring) = partner
@@ -1369,6 +1374,40 @@ fn the_piece_holds(
         }
     }
     Some(winding == 1)
+}
+
+/// Whether a flat piece's material is inside what `wire`, one whole closed
+/// curve along `partner`, bounds: then the wire winds once round each point
+/// there, and otherwise it winds round each the other way. `None` where a ring
+/// square to `flat` cannot say which of its two circles the wire is.
+///
+/// **The wire's material side says it, and where the wire comes in the piece
+/// does not.** The arrangement puts a flat piece's outer wire first only where
+/// that wire is in the lump of the face's own outline. A piece of a round
+/// plate's top between a bar's circle and the inner circle of a half ring
+/// standing round it has neither in that lump, and came with the bar's circle
+/// first: read as the outer wire, it wound every point of the band zero times
+/// and none was found inside it
+/// (`tests/a_half_ring_standing_on_a_round_plate.rs`, row Q1580).
+///
+/// What a ball, a pipe or a cone bounds on a plane is the part inside it, and
+/// so is what each meridian circle of a ring bounds on a plane through its
+/// axis, so the material is in it where it is on the partner's negative side.
+/// On a plane square to a ring's axis each of the two circles bounds the disk
+/// inside it ([`in_the_inner_disk_of`]): the band inside the ring is in what
+/// the outer circle bounds, and outside what the inner one does.
+fn what_a_round_wire_bounds_holds_the_material(
+    flat: &Plane,
+    partner: &Surface,
+    wire: &[FaceMeet],
+) -> Option<bool> {
+    let in_the_partner = wire[0].material_side == Decision::Neg;
+    if let Surface::Torus(ring) = partner
+        && is_square_to_the_axis(flat, ring)
+    {
+        return Some(in_the_partner == runs_round_the_outer_circle(flat, ring, &wire[0])?);
+    }
+    Some(in_the_partner)
 }
 
 /// Which side of `partner` both `point` and a point of `flat` beside it are
@@ -4070,6 +4109,49 @@ mod tests {
         assert_eq!(holds([-1.5, 1.5, 0.0]), Some(true), "in the disk");
         assert_eq!(holds([4.0, 0.0, 0.0]), Some(false), "in the tube");
         assert_eq!(holds([7.5, 0.0, 0.0]), Some(false), "beyond the tube");
+    }
+
+    /// The band of `z = 0` between a pipe of `23/8` about the axis and the
+    /// inner circle, of 3, that the ring of four round a tube of one cuts it
+    /// in, its material outside both. The arrangement handed row Q1580's plate
+    /// over with the pipe's circle first, and read as the outer wire for coming
+    /// first, that circle wound every point of the band zero times, so the band
+    /// held none of its own points.
+    #[test]
+    fn a_band_inside_a_rings_inner_circle_holds_its_points_with_either_circle_first() {
+        let the_pipe: SideOnZ0 = (
+            a_pipe_about_z(23.0 / 8.0),
+            [23.0 / 8.0, 0.0],
+            [23.0 / 8.0, 0.0],
+            Decision::Pos,
+        );
+        let the_ring: SideOnZ0 = (a_ring_of_four(), [3.0, 0.0], [3.0, 0.0], Decision::Pos);
+        for (band, first) in [
+            (
+                a_flat_piece_on_z_0(&[&[the_pipe], &[the_ring]]),
+                "pipe first",
+            ),
+            (
+                a_flat_piece_on_z_0(&[&[the_ring], &[the_pipe]]),
+                "ring first",
+            ),
+        ] {
+            let holds = |at: [f64; 3]| {
+                the_piece_holds_asked_as_selection_asks(&band, PredicatePoint::from(at))
+            };
+            assert_eq!(
+                holds([0.0, 47.0 / 16.0, 0.0]),
+                Some(true),
+                "in the band, {first}"
+            );
+            assert_eq!(holds([1.0, 0.0, 0.0]), Some(false), "in the pipe, {first}");
+            assert_eq!(holds([4.0, 0.0, 0.0]), Some(false), "in the tube, {first}");
+            assert_eq!(
+                holds([7.5, 0.0, 0.0]),
+                Some(false),
+                "beyond the tube, {first}"
+            );
+        }
     }
 
     /// One side of a piece of `z = 0`: its partner, its two ends in the plane,
