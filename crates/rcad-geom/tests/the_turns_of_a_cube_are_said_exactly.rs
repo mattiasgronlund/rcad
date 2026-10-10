@@ -4,9 +4,12 @@
 //!
 //! **Why it matters.** A bar turned onto `x` by `Isometry::rotation(&Axis::y(),
 //! FRAC_PI_2)` comes out pointing along `(1, 0, 2⁻⁵²)`, so it misses the centre
-//! of a ball it was meant to pass through by `20·2⁻⁵²`, and the two cross in a
-//! quartic the fuse cannot order (Q1245). `Isometry::quarter_turns` names the
-//! quarter turn exactly, and the bar lies along `x`.
+//! of a ball it was meant to pass through by `20·2⁻⁵²`, and the two cross in two
+//! loops that are not circles
+//! (`a_bar_turned_by_frac_pi_2_leans_off_the_balls_centre_and_is_answered_under_every_rule`).
+//! `Isometry::quarter_turns` names the quarter turn exactly, so the bar lies
+//! along `x` and passes through the centre, where the two cross in two circles
+//! instead.
 //!
 //! The oracle is the signed swap of coordinates itself, compared bit for bit.
 //! No tolerance appears here except in
