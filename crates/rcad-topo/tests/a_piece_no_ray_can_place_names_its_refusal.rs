@@ -491,82 +491,162 @@ fn a_wedge_a_hair_below_a_bends_cap_is_refused_before_a_ray() {
     }
 }
 
+/// A quarter bend of ring 4 round a tube of 1, and a ball about the origin of
+/// 3.5 or 4.5, or the frustum of the cone `ρ = (z + 8) / 2` from `z = −2` to
+/// `2`: a ball or a cone on the ring's axis, crossing its tube. Joined, they
+/// would be a ring solid with a ball or a cone face, for a piece of a ball or
+/// a cone a hair off that face to be put to a ray against.
+///
+/// They are never joined. Every rule both ways round is refused `Undecidable`
+/// at `order along a crossing` while the pieces are cut. For the ball of 3.5
+/// it is at the two points where the circle the ball crosses the ring in
+/// meets the bend's two caps, `(3.406, 0, −0.805)` and `(0, 3.406, −0.805)`.
+/// The ball and the frustum are turned `5π/4` round the axis, so the ball's
+/// seam and the frustum's straight edge are clear of the bend.
 #[test]
-fn q1581_probe() {
-    let ulp_35 = 4.440_892_098_500_626e-16;
-    for signed_ball in [3.5, 4.5, -4.5] {
-        let ring_ball = f64::abs(signed_ball);
-        for (label, radius, up) in [
-            ("same", ring_ball, 0.0),
-            ("+ulp", ring_ball + ulp_35, 0.0),
-            ("-ulp", ring_ball - ulp_35, 0.0),
-            ("+1e-13", ring_ball + 1e-13, 0.0),
-            ("-1e-13", ring_ball - 1e-13, 0.0),
-            ("up 1e-15", ring_ball, 1e-15),
-            ("up 1e-13", ring_ball, 1e-13),
-            ("down 1e-13", ring_ball, -1e-13),
-            ("off axis 1e-13", ring_ball, f64::NAN),
-        ] {
-            for rule in EVERY_RULE {
-                for ring_first in [true, false] {
-                    let what = format!(
-                        "Q1581 ball R {signed_ball} S {label} {rule:?} ring first {ring_first}"
-                    );
-                    let mut model = a_model();
-                    let ring = match a_bend_and_a_ball(&mut model, signed_ball) {
-                        Ok(key) => key,
-                        Err(why) => {
-                            eprintln!("{what}: R refused {}", said_of(&Err(why)));
-                            continue;
-                        }
-                    };
-                    let placement = if up.is_nan() {
-                        Isometry::translation(Vector::new(1e-13, 0.0, 0.0)).expect("a shift")
-                    } else {
-                        at_height(up)
-                    };
-                    let ball = model
-                        .add_ball(radius, &turned(3.0 * PI / 4.0))
-                        .expect("a ball");
-                    model.place_solid(ball, &placement).expect("this model");
-                    eprintln!("{what}: START");
-                    let got = fused_or_refused(&mut model, ring, ball, rule, ring_first);
-                    eprintln!("{what}: {}", said_of(&got));
+fn a_bend_and_a_ball_or_a_cone_on_its_axis_are_refused_while_they_are_cut() {
+    let a_ball_of_3_5: fn(&mut Model) -> SolidKey = |model| {
+        model
+            .add_ball(3.5, &turned(5.0 * PI / 4.0))
+            .expect("a ball")
+    };
+    let a_ball_of_4_5: fn(&mut Model) -> SolidKey = |model| {
+        model
+            .add_ball(4.5, &turned(5.0 * PI / 4.0))
+            .expect("a ball")
+    };
+    let a_frustum: fn(&mut Model) -> SolidKey =
+        |model| a_frustum_placed(model, 0.5, 6.0, 10.0, -8.0, 5.0 * PI / 4.0);
+    let mut not_as_pinned = Vec::new();
+    for (named, made) in [
+        ("a ball of 3.5", a_ball_of_3_5),
+        ("a ball of 4.5", a_ball_of_4_5),
+        ("a frustum", a_frustum),
+    ] {
+        for rule in EVERY_RULE {
+            for the_bend_first in [true, false] {
+                let mut model = a_model();
+                let bend = a_quarter_bend(&mut model, 4.0, 1.0);
+                let other = made(&mut model);
+                let fused = fused_or_refused(&mut model, bend, other, rule, the_bend_first);
+                let said = the_refusal(&fused);
+                if said != "Undecidable at order along a crossing" {
+                    not_as_pinned.push(format!(
+                        "{named}, {rule:?}, the bend first {the_bend_first}: {said}"
+                    ));
                 }
             }
         }
     }
-    let ulp_8 = 1.776_356_839_400_250_5e-15;
-    for (label, near, far, down) in [
-        ("same", 6.0, 10.0, -8.0),
-        ("longer same cone", 5.0, 11.0, -8.0),
-        ("longer up a rounding", 5.0, 11.0, -8.0 + ulp_8),
-        ("longer down a rounding", 5.0, 11.0, -8.0 - ulp_8),
-        ("longer up 1e-13", 5.0, 11.0, -8.0 + 1e-13),
-        ("longer down 1e-13", 5.0, 11.0, -8.0 - 1e-13),
-        ("same up 1e-13", 6.0, 10.0, -8.0 + 1e-13),
+    assert_eq!(not_as_pinned, Vec::<String>::new());
+}
+
+/// A ball of 5 joined to a ring round it, and a frustum of a cone joined to a
+/// ring, both about `z` and built face by face with no seam: every edge is a
+/// whole circle, so neither has a plane through its axis for a ball or a cone
+/// to be crossed with. Against each, a piece of its own kind on it: the ball of
+/// 5 above `z = 3`, whose cap lies on the ring solid's upper ball face, and the
+/// frustum of the same cone from `z = 2` to `5`, whose wall lies on the ring
+/// solid's upper cone face. Each piece's bottom rim is inside the ring's tube.
+///
+/// None reaches a ray. Where the piece sits, and moved up or down `z` by a
+/// rounding, every rule both ways round is refused
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Moved by `1e-13`, it is refused
+/// so with the ring solid named first, and `Undecidable` at `side of sphere`
+/// or `side of cone` with it named second, at the piece's bottom rim. Moved
+/// `1e-13` off the axis along `x`, the piece's ball is one the ring is not
+/// crossed with, and its cone one the ring solid's cone is not crossed with.
+///
+/// A whole ball about the origin, of 5 and a rounding or `5 ± 1e-13`, against
+/// the ball joined to a ring is refused `Undecidable` at `side of sphere` by
+/// every rule both ways round, at `(0, 3, −4)` on the lower circle the ball
+/// and the ring cross in.
+#[test]
+fn a_ball_or_a_cone_joined_to_a_ring_with_a_piece_of_its_own_kind_on_it_is_refused_before_a_ray() {
+    let a_rounding = 8.881_784_197_001_252e-16;
+    let three_surfaces = "WhereThreeSurfacesMeetNeedsTwoOfThemFlat";
+    let a_ball: fn(&mut Model) -> Result<SolidKey, Error> = a_ball_joined_to_a_ring;
+    let a_cone: fn(&mut Model) -> Result<SolidKey, Error> = a_frustum_joined_to_a_ring;
+    let mut not_as_pinned = Vec::new();
+    for (kind, ring_solid, piece, its_side, off_the_axis) in [
+        (
+            "ball",
+            a_ball,
+            a_ball_segment as fn(&mut Model) -> Result<SolidKey, Error>,
+            "Undecidable at side of sphere",
+            "ACrossingBetweenATorusAndAnotherCurvedSurface",
+        ),
+        (
+            "cone",
+            a_cone,
+            a_seamless_frustum,
+            "Undecidable at side of cone",
+            "ACrossingBetweenAConeAndAnotherCurvedSurface",
+        ),
     ] {
-        for rule in EVERY_RULE {
-            for ring_first in [true, false] {
-                let what = format!("Q1581 cone S {label} {rule:?} ring first {ring_first}");
-                let mut model = a_model();
-                let ring = match a_bend_and_a_frustum(&mut model) {
-                    Ok(key) => key,
-                    Err(why) => {
-                        eprintln!("{what}: R refused {}", said_of(&Err(why)));
-                        continue;
+        for (moved, by) in [
+            ("where it sits", Isometry::identity()),
+            ("up a rounding", at_height(a_rounding)),
+            ("down a rounding", at_height(-a_rounding)),
+            ("up 1e-13", at_height(1e-13)),
+            ("down 1e-13", at_height(-1e-13)),
+            (
+                "off the axis",
+                Isometry::translation(Vector::new(1e-13, 0.0, 0.0)).expect("a finite shift"),
+            ),
+        ] {
+            for rule in EVERY_RULE {
+                for the_ring_first in [true, false] {
+                    let mut model = a_model();
+                    let ring = ring_solid(&mut model).expect("a ring solid");
+                    let on_it = piece(&mut model).expect("a piece of its own kind");
+                    model
+                        .place_solid(on_it, &by)
+                        .expect("this model made the key");
+                    let fused = fused_or_refused(&mut model, ring, on_it, rule, the_ring_first);
+                    let said = the_refusal(&fused);
+                    let pinned = match moved {
+                        "off the axis" => off_the_axis,
+                        "up 1e-13" | "down 1e-13" if !the_ring_first => its_side,
+                        _ => three_surfaces,
+                    };
+                    if said != pinned {
+                        not_as_pinned.push(format!(
+                            "{kind} {moved}, {rule:?}, the ring first {the_ring_first}: {said}"
+                        ));
                     }
-                };
-                let cone = a_frustum_placed(&mut model, 0.5, near, far, down, 3.0 * PI / 4.0);
-                eprintln!("{what}: START");
-                let got = fused_or_refused(&mut model, ring, cone, rule, ring_first);
-                eprintln!("{what}: {}", said_of(&got));
+                }
             }
         }
     }
+    for radius in [
+        5.0 + a_rounding,
+        5.0 - a_rounding / 2.0,
+        5.0 + 1e-13,
+        5.0 - 1e-13,
+    ] {
+        for rule in EVERY_RULE {
+            for the_ring_first in [true, false] {
+                let mut model = a_model();
+                let ring = a_ball_joined_to_a_ring(&mut model).expect("a ring solid");
+                let ball = model
+                    .add_ball(radius, &Isometry::identity())
+                    .expect("a ball");
+                let fused = fused_or_refused(&mut model, ring, ball, rule, the_ring_first);
+                let said = the_refusal(&fused);
+                if said != "Undecidable at side of sphere" {
+                    not_as_pinned.push(format!(
+                        "a whole ball of {radius:e}, {rule:?}, the ring first {the_ring_first}: \
+                         {said}"
+                    ));
+                }
+            }
+        }
+    }
+    assert_eq!(not_as_pinned, Vec::<String>::new());
 }
 
-#[test]
+#[allow(dead_code)]
 fn q1581_seamless() {
     let a_rounding = 8.881_784_197_001_252e-16;
     let moves: [(&str, Isometry); 6] = [
@@ -580,78 +660,34 @@ fn q1581_seamless() {
             Isometry::translation(Vector::new(1e-13, 0.0, 0.0)).expect("a shift"),
         ),
     ];
-    for walk in [
-        [Orientation::Forward, Orientation::Forward],
-        [Orientation::Forward, Orientation::Reversed],
-        [Orientation::Reversed, Orientation::Forward],
-        [Orientation::Reversed, Orientation::Reversed],
-    ] {
-        let mut model = a_model();
-        match a_ball_joined_to_a_ring(&mut model, walk) {
-            Ok(key) => {
-                let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                eprintln!("Q1581 R ball walk {walk:?}: built {key:?}, validate {valid:?}");
-            }
-            Err(why) => eprintln!("Q1581 R ball walk {walk:?}: refused {why:?}"),
-        }
-        let mut model = a_model();
-        match a_frustum_joined_to_a_ring(&mut model, walk) {
-            Ok(key) => {
-                let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                eprintln!("Q1581 R cone walk {walk:?}: built {key:?}, validate {valid:?}");
-            }
-            Err(why) => eprintln!("Q1581 R cone walk {walk:?}: refused {why:?}"),
-        }
-    }
-    for flipped in [false] {
-        let mut model = a_model();
-        match a_ball_segment(&mut model, flipped) {
-            Ok(key) => {
-                let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                eprintln!("Q1581 S ball flipped {flipped}: built {key:?}, validate {valid:?}");
-            }
-            Err(why) => eprintln!("Q1581 S ball flipped {flipped}: refused {why:?}"),
-        }
-        let mut model = a_model();
-        match a_seamless_frustum(&mut model, flipped) {
-            Ok(key) => {
-                let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                eprintln!("Q1581 S cone flipped {flipped}: built {key:?}, validate {valid:?}");
-            }
-            Err(why) => eprintln!("Q1581 S cone flipped {flipped}: refused {why:?}"),
-        }
-    }
-    let flipped = false;
-    if std::env::var("Q1581_FUSE").is_err() {
-        return;
-    }
-    let ball_walk = [Orientation::Forward, Orientation::Reversed];
-    let cone_walk = [Orientation::Forward, Orientation::Reversed];
-    for (kind, walk, ring_solid, other) in [
-        (
-            "ball",
-            ball_walk,
-            a_ball_joined_to_a_ring as fn(&mut Model, [Orientation; 2]) -> Result<SolidKey, Error>,
-            a_ball_segment as fn(&mut Model, bool) -> Result<SolidKey, Error>,
-        ),
-        (
-            "cone",
-            cone_walk,
-            a_frustum_joined_to_a_ring,
-            a_seamless_frustum,
-        ),
+    type Made = fn(&mut Model) -> Result<SolidKey, Error>;
+    let ball_ff: Made =
+        |model| a_ball_joined_to_a_ring(model, [Orientation::Forward, Orientation::Forward]);
+    let ball_rr: Made =
+        |model| a_ball_joined_to_a_ring(model, [Orientation::Reversed, Orientation::Reversed]);
+    let cone_rr: Made =
+        |model| a_frustum_joined_to_a_ring(model, [Orientation::Reversed, Orientation::Reversed]);
+    let segment: Made = |model| a_ball_segment(model, false);
+    let frustum: Made = |model| a_seamless_frustum(model, false);
+    for (kind, ring_solid, other) in [
+        ("ball FF", ball_ff, segment),
+        ("ball RR", ball_rr, segment),
+        ("cone RR", cone_rr, frustum),
     ] {
         for (label, moved) in &moves {
             for rule in EVERY_RULE {
                 for ring_first in [true, false] {
                     let what = format!("Q1581 {kind} S {label} {rule:?} ring first {ring_first}");
                     let mut model = a_model();
-                    let ring = ring_solid(&mut model, walk).expect("R");
-                    let s = other(&mut model, flipped).expect("S");
+                    let ring = ring_solid(&mut model).expect("R");
+                    let s = other(&mut model).expect("S");
                     model.place_solid(s, moved).expect("this model");
                     eprintln!("{what}: START");
                     let got = fused_or_refused(&mut model, ring, s, rule, ring_first);
-                    eprintln!("{what}: {}", said_of(&got));
+                    let valid = got
+                        .as_ref()
+                        .map(|_| model.validate(&Policy::certified(), &mut ProvenanceLog::new()));
+                    eprintln!("{what}: {} validate {valid:?}", said_of(&got));
                 }
             }
         }
@@ -662,7 +698,7 @@ fn q1581_seamless() {
             for ring_first in [true, false] {
                 let what = format!("Q1581 whole ball {radius:e} {rule:?} ring first {ring_first}");
                 let mut model = a_model();
-                let ring = a_ball_joined_to_a_ring(&mut model, ball_walk).expect("R");
+                let ring = ball_ff(&mut model).expect("R");
                 let ball = model
                     .add_ball(radius, &Isometry::identity())
                     .expect("a ball");
@@ -705,7 +741,12 @@ fn a_frustum_joined_to_a_ring(
             cone,
             flat_at(7.0, 1.0),
         ],
-        &[Orientation::Forward, walk[0], walk[1], Orientation::Forward],
+        &[
+            Orientation::Reversed,
+            walk[0],
+            walk[1],
+            Orientation::Reversed,
+        ],
     )
 }
 
@@ -726,8 +767,8 @@ fn a_ball_segment(model: &mut Model, flipped: bool) -> Result<SolidKey, Error> {
 }
 
 /// The cone `ρ = 9 − z` from `z = 2` to `5`.
-fn a_seamless_frustum(model: &mut Model, flipped: bool) -> Result<SolidKey, Error> {
-    a_solid_of_revolution(
+fn a_seamless_frustum(model: &mut Model, _flipped: bool) -> Result<SolidKey, Error> {
+    a_solid_of_revolution_walked(
         model,
         &[(7.0, 2.0), (4.0, 5.0)],
         &[
@@ -735,7 +776,7 @@ fn a_seamless_frustum(model: &mut Model, flipped: bool) -> Result<SolidKey, Erro
             the_cone_down_from_9(),
             flat_at(5.0, 1.0),
         ],
-        flipped,
+        &[Orientation::Reversed, Orientation::Reversed],
     )
 }
 
@@ -810,6 +851,22 @@ fn a_solid_of_revolution_walked(
     }
     builder.add_shell(&shell)?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// What a fuse was refused: the last record's predicate for `Undecidable`, the
+/// refusal's own name for a geometry one.
+fn the_refusal(fused: &Result<usize, Error>) -> String {
+    match fused {
+        Err(Error::Undecidable { records }) => format!(
+            "Undecidable at {}",
+            records
+                .records()
+                .last()
+                .map_or("no record", |record| record.predicate())
+        ),
+        Err(Error::Geometry(why)) => format!("{why:?}"),
+        other => format!("{other:?}"),
+    }
 }
 
 fn said_of(got: &Result<usize, Error>) -> String {
