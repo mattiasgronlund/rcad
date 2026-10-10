@@ -793,3 +793,76 @@ fn ball_in_bar(radius: f64, off: f64) -> f64 {
     }
     sum * step_out * step_round
 }
+
+#[test]
+fn probe_q1554_every_answer() {
+    let ball = 32.0 * PI / 3.0;
+    let placements: [(Pair, f64, f64); 4] = [
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.5, 0.0]),
+            1.0,
+            0.5,
+        ),
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.0, 0.5]),
+            1.0,
+            0.5,
+        ),
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 0.5, [0.0, 1.0]),
+            0.5,
+            1.0,
+        ),
+        (
+            |model| {
+                let turned = Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z");
+                a_ball_and_a_bar(model, &turned, 1.0, [0.5, 0.0])
+            },
+            1.0,
+            0.5,
+        ),
+    ];
+    for (index, (build, radius, off)) in placements.into_iter().enumerate() {
+        let [first, second, shared] = [ball, 6.0 * PI * radius * radius, ball_in_bar(radius, off)];
+        for (rule, first_first) in six_fuses() {
+            let volume = match (rule, first_first) {
+                (Rule::Union, _) => first + second - shared,
+                (Rule::Intersection, _) => shared,
+                (Rule::Difference, true) => first - shared,
+                (Rule::Difference, false) => second - shared,
+                (other, _) => panic!("{other:?}"),
+            };
+            let mut model = a_model();
+            let said = fuse(&mut model, build, rule, first_first);
+            let policy = Policy::certified();
+            match said {
+                Err(why) => eprintln!("PROBE {index} {rule:?} {first_first}: refused {why:?}"),
+                Ok(solids) => {
+                    let valid = model.validate(&policy, &mut ProvenanceLog::new());
+                    let mut counted = Vec::new();
+                    let (mut measured, mut error) = (0.0, 0.0);
+                    for solid in solids {
+                        let view = model.solid(solid).expect("a solid");
+                        counted.push(view.faces().count());
+                        match view.measure(
+                            Deflection::of(0.01).expect("a length"),
+                            &policy,
+                            &mut ProvenanceLog::new(),
+                        ) {
+                            Ok(measure) => {
+                                measured += measure.volume();
+                                error += measure.volume_error();
+                            }
+                            Err(why) => eprintln!("PROBE {index} measure refused {why:?}"),
+                        }
+                    }
+                    eprintln!(
+                        "PROBE {index} {rule:?} {first_first}: faces {counted:?} valid {} measured {measured} want {volume} off {} error {error}",
+                        valid.is_ok(),
+                        (measured - volume).abs()
+                    );
+                }
+            }
+        }
+    }
+}
