@@ -117,6 +117,148 @@ fn a_bar_with_its_seam_on_a_blocks_wall_is_not_refused_on_which_side_of_the_wall
     );
 }
 
+#[test]
+fn probe_split_floor() {
+    let mut out = Vec::new();
+    for shift in [[0.0, 2.0, 1.0], [1.0, 2.0, 1.0], [4.0, 2.0, 1.0]] {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            for bar_first in [true, false] {
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let bar = a_bar_with_a_split_floor(&mut model);
+                model
+                    .place_solid(bar, &Isometry::translation(Vector::from(shift)).expect("s"))
+                    .expect("k");
+                let cube = a_cube(&mut model, 4.0);
+                model
+                    .place_solid(
+                        cube,
+                        &Isometry::translation(Vector::new(1.0 + shift[0], 0.0, 0.0)).expect("s"),
+                    )
+                    .expect("k");
+                let (a, b) = if bar_first { (bar, cube) } else { (cube, bar) };
+                let mut log = ProvenanceLog::new();
+                let answer = model.fuse(&[a], &[b], rule, &Policy::certified(), &mut log);
+                let said = match answer {
+                    Ok(fused) => {
+                        let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                        let volumes: Vec<f64> = fused
+                            .solids()
+                            .iter()
+                            .map(|&solid| volume_of(&model, solid))
+                            .collect();
+                        format!(
+                            "ok {volumes:?} valid {:?} log {}",
+                            valid.is_ok(),
+                            log.records().len()
+                        )
+                    }
+                    Err(why) => format!("err {why:?}"),
+                };
+                out.push(format!("{shift:?} {rule:?} bar_first {bar_first}: {said}"));
+            }
+        }
+    }
+    panic!("{}", out.join("\n"));
+}
+
+/// A bar of radius 0.4 standing on `z = 0` round the axis through `(0.6, 0)`,
+/// two tall, whose floor is two half disks split along `y = 0`.
+fn a_bar_with_a_split_floor(model: &mut Model) -> SolidKey {
+    use rcad_geom::{EdgeRun, HalfSpace, Orientation, Picker};
+    use rcad_topo::{DraftEdge, DraftStep, SolidBuilder};
+    let across = 0.6;
+    let radius = 1.0 - across;
+    let height = 2.0;
+    let pipe = Cylinder::new(
+        Axis::new(Point::new(across, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
+        radius,
+    )
+    .expect("a radius");
+    let ground = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+        .expect("a unit normal");
+    let lid =
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, height), Vector::new(0.0, 0.0, 1.0))
+            .expect("a unit normal");
+    let mut draft = SolidBuilder::new();
+    let a = draft
+        .add_vertex(Point::new(across + radius, 0.0, 0.0))
+        .expect("a");
+    let b = draft
+        .add_vertex(Point::new(across - radius, 0.0, 0.0))
+        .expect("b");
+    let t = draft
+        .add_vertex(Point::new(across - radius, 0.0, height))
+        .expect("t");
+    let arc = |side: f64| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(ground),
+        picked_by: smallvec::smallvec![Picker::from(
+            HalfSpace::through_a_point_facing(
+                Point::new(across, 0.0, 0.0),
+                Vector::new(0.0, side, 0.0)
+            )
+            .expect("a facing")
+        )],
+    };
+    let over = draft.add_edge(b, a, arc(1.0)).expect("over");
+    let under = draft.add_edge(a, b, arc(-1.0)).expect("under");
+    let chord = draft.add_edge(a, b, EdgeRun::Straight).expect("chord");
+    let seam = draft.add_edge(b, t, EdgeRun::Straight).expect("seam");
+    let top = draft
+        .add_edge(t, t, EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("top");
+    let mut wire = |draft: &mut SolidBuilder, steps: &[(DraftEdge, Orientation)]| {
+        let steps: Vec<DraftStep> = steps
+            .iter()
+            .map(|&(edge, way)| DraftStep::Along(draft.add_coedge(edge, way).expect("use")))
+            .collect();
+        draft.add_wire(&steps).expect("a wire")
+    };
+    let w_over = wire(
+        &mut draft,
+        &[(over, Orientation::Forward), (chord, Orientation::Forward)],
+    );
+    let w_wall = wire(
+        &mut draft,
+        &[
+            (under, Orientation::Reversed),
+            (over, Orientation::Reversed),
+            (seam, Orientation::Forward),
+            (top, Orientation::Reversed),
+            (seam, Orientation::Reversed),
+        ],
+    );
+    let w_under = wire(
+        &mut draft,
+        &[
+            (under, Orientation::Forward),
+            (chord, Orientation::Reversed),
+        ],
+    );
+    let w_lid = wire(&mut draft, &[(top, Orientation::Forward)]);
+    let floor_over = draft
+        .add_face(Surface::Plane(ground), &[w_over])
+        .expect("f");
+    let wall = draft
+        .add_face(Surface::Cylinder(pipe), &[w_wall])
+        .expect("f");
+    let floor_under = draft
+        .add_face(Surface::Plane(ground), &[w_under])
+        .expect("f");
+    let lid_face = draft.add_face(Surface::Plane(lid), &[w_lid]).expect("f");
+    draft
+        .add_shell(&[
+            (floor_over, Orientation::Forward),
+            (wall, Orientation::Forward),
+            (floor_under, Orientation::Forward),
+            (lid_face, Orientation::Forward),
+        ])
+        .expect("shell");
+    draft
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("the bar builds: {why:?}"))
+}
+
 /// The corner a bar's seam starts from, and the two surfaces round it, as a bar
 /// standing where it was built stores them.
 fn the_seam_corner_of_a_bar_and_its_surfaces() -> (Point, [Surface; 2]) {
