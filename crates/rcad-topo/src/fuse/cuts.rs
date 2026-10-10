@@ -1201,7 +1201,7 @@ fn how_two_faces_meet(
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Axis, Cone, Isometry, Plane, Point, Scale, Surface, Vector};
+    use rcad_geom::{Axis, Cone, Cylinder, Isometry, Plane, Point, Scale, Surface, Vector};
     use rcad_predicates::{Interval, Policy, ProvenanceLog};
 
     use super::{
@@ -1510,6 +1510,51 @@ mod tests {
                 "{plane:?}"
             );
         }
+    }
+
+    /// The top `4z = x + 96` crosses the pipe of radius `1/2` about `z` in an
+    /// ellipse from `z = 23.875` to `24.125`. The cones of slope `1/2` about
+    /// `−z` with their apex at `z = 22` and `26` are each `15/16` to `17/16`
+    /// out at those heights, so neither meets the ellipse, but each meets the
+    /// pipe in two circles, and with only the top flat where the three meet
+    /// cannot be worked out. So the crossing is proved clear of either cone
+    /// only by the band round the axis it lies in (Q1583), the top and the
+    /// pipe either way round.
+    #[test]
+    fn the_ellipse_a_leaning_top_crosses_a_pipe_in_meets_no_cone_on_its_axis() {
+        let top = leaning_plane_through(Point::new(0.0, 0.0, 24.0));
+        let pipe = pipe_about_up(0.5);
+        for apex in [22.0, 26.0] {
+            let cone = cone_about_down(apex, 0.5);
+            assert!(the_crossing_meets_none_of(&top, &pipe, &[cone]), "{apex}");
+            assert!(the_crossing_meets_none_of(&pipe, &top, &[cone]), "{apex}");
+        }
+    }
+
+    /// The cone of slope `1/2` about `−z` with its apex at `z = 23` is `1/2`
+    /// out at `z = 24`, where the top crosses the pipe at `(0, ±1/2, 24)`, so
+    /// the three meet there.
+    #[test]
+    fn the_ellipse_a_leaning_top_crosses_a_pipe_in_is_not_proved_clear_of_a_cone_through_it() {
+        let top = leaning_plane_through(Point::new(0.0, 0.0, 24.0));
+        let through = cone_about_down(23.0, 0.5);
+        assert!(!the_crossing_meets_none_of(
+            &top,
+            &pipe_about_up(0.5),
+            &[through]
+        ));
+    }
+
+    /// The pipe of radius `radius` about the `z` axis, through `(0, 0, −6)`.
+    fn pipe_about_up(radius: f64) -> Surface {
+        Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(0.0, 0.0, -6.0), Vector::new(0.0, 0.0, 1.0))
+                    .expect("z is a direction"),
+                radius,
+            )
+            .expect("a positive radius"),
+        )
     }
 
     fn cone_about_down(apex: f64, slope: f64) -> Surface {

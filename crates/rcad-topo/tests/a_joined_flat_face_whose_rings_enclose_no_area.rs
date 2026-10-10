@@ -1762,7 +1762,7 @@ fn a_hollow_frustum_under_a_leaning_top_that_clears_it_is_answered_under_every_r
             the_one_solid(model, frustum, bore, Rule::Difference)
         },
         [2109.0 * PI / 2.0, 2535.0 * PI / 4.0],
-        [[8, 2], [2, 2]],
+        [[8, 2, 0], [2, 2, 0]],
     );
 }
 
@@ -1793,7 +1793,54 @@ fn a_frustum_under_a_leaning_top_that_clears_it_is_answered_under_every_rule() {
                     .unwrap_or_else(|why| panic!("the frustum under {apex}: {why:?}"))
             },
             volumes,
-            [[7, 1], [2, 1]],
+            [[7, 1, 0], [2, 1, 0]],
+        );
+    }
+}
+
+/// **The two frustums above, each bored by a pipe, under the same top**
+/// (Q1583), under every rule, both ways round, certified and tolerant. Each
+/// bore is a round bar of radius `1/2` on the axis, from two below the
+/// frustum's wide end to one above its narrow end, which is `1` out on the
+/// first frustum and `3` on the second. So the bore runs out through both caps,
+/// and its pipe face, which ends at `z = 20`, is clear of the top.
+///
+/// The top crosses the pipe in an ellipse from `z = 23.875` to `24.125`, over
+/// the bore. The pipe meets the first cone in circles at `z = 21` and `23` and
+/// the second at `25` and `27`, all `1/2` out, where the top is `12`, `4`, `4`
+/// and `12` out from the axis, so the ellipse meets neither cone on the top.
+/// But with only the top flat, where the top, the pipe and a cone meet cannot
+/// be worked out, and the pipe and the cone do meet, so until Q1583 nothing
+/// proved the ellipse clear of the cone and it was kept on.
+///
+/// The first was answered all the same: its wall is proved clear of the top,
+/// so the ellipse where the top crosses its cone is left off (Q1461), and
+/// nothing on the top asks where the three meet. The second's wall is not, for
+/// the reason the test above gives, so both ellipses were kept, and every rule
+/// was refused under either policy, `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.
+/// The ellipse round the pipe is left off now, by the band round the axis that
+/// it lies in.
+///
+/// Each bore takes `π/4` for every unit of the frustum's height: `6π` of the
+/// first frustum's `1464π`, and `5π` of what it shares with the block, and
+/// `21π/4` of the second's `6489π/4`, and `5π` of what it shares.
+#[test]
+fn a_frustum_bored_by_a_pipe_under_a_leaning_top_that_clears_it_is_answered_under_every_rule() {
+    for (apex, [bottom, top], volumes) in [
+        (22.0, [-4.0, 20.0], [1458.0 * PI, 2645.0 * PI / 3.0]),
+        (26.0, [-1.0, 20.0], [1617.0 * PI, 4325.0 * PI / 3.0]),
+    ] {
+        a_frustum_and_the_block_under_a_leaning_top_answer_every_rule(
+            |model| {
+                let frustum = a_frustum_about_z(model, 0.5, apex, -1.0, [bottom, top])
+                    .unwrap_or_else(|why| panic!("the frustum under {apex}: {why:?}"));
+                let bore = model
+                    .add_round_bar(0.5, top - bottom + 3.0, &at(0.0, 0.0, bottom - 2.0))
+                    .unwrap_or_else(|why| panic!("the bore under {apex}: {why:?}"));
+                the_one_solid(model, frustum, bore, Rule::Difference)
+            },
+            volumes,
+            [[8, 1, 1], [2, 1, 1]],
         );
     }
 }
@@ -1801,12 +1848,13 @@ fn a_frustum_under_a_leaning_top_that_clears_it_is_answered_under_every_rule() {
 /// Fuse what `frustum` builds with `the_block_under_a_leaning_top` under every
 /// rule, both ways round, certified and tolerant, and check each answer is one
 /// solid holding what the frustum's `[alone, shared]` volumes say, with the
-/// faces flat and on a cone counted by `[with_the_block, without]`: the first
-/// for the union and the block less the frustum, the second for the other two.
+/// faces flat, on a cone and on a pipe counted by `[with_the_block, without]`:
+/// the first for the union and the block less the frustum, the second for the
+/// other two.
 fn a_frustum_and_the_block_under_a_leaning_top_answer_every_rule(
     frustum: impl Fn(&mut Model) -> SolidKey,
     [frustum_alone, shared]: [f64; 2],
-    [with_the_block, without]: [[usize; 2]; 2],
+    [with_the_block, without]: [[usize; 3]; 2],
 ) {
     let block_alone = 18816.0;
     for (name, policy) in [
@@ -1814,7 +1862,7 @@ fn a_frustum_and_the_block_under_a_leaning_top_answer_every_rule(
         ("tolerant", Policy::tolerant(100.0)),
     ] {
         for (rule, swapped) in every_rule_both_ways() {
-            let (volume, flat_and_cone) = match (rule, swapped) {
+            let (volume, flat_cone_and_pipe) = match (rule, swapped) {
                 (Rule::Union, _) => (frustum_alone + block_alone - shared, with_the_block),
                 (Rule::Intersection, _) => (shared, without),
                 (Rule::Difference, false) => (frustum_alone - shared, without),
@@ -1849,9 +1897,13 @@ fn a_frustum_and_the_block_under_a_leaning_top_answer_every_rule(
                 .iter()
                 .filter(|surface| matches!(surface, Surface::Cone(_)))
                 .count();
+            let on_pipes = faces
+                .iter()
+                .filter(|surface| matches!(surface, Surface::Cylinder(_)))
+                .count();
             assert_eq!(
-                [faces.len() - on_cones, on_cones],
-                flat_and_cone,
+                [faces.len() - on_cones - on_pipes, on_cones, on_pipes],
+                flat_cone_and_pipe,
                 "{what}: {faces:?}"
             );
         }
