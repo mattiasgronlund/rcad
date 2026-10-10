@@ -636,6 +636,39 @@ between "cannot" and "we chose not to", which §24.17 is about.
 > the marcher this row says is missing. Q1603 answers the second only if it can
 > do so without that marcher, and otherwise leaves it refused under this row.
 
+> **2026-10-10 note (Q1625): equal bores leaning at each other are named at
+> more angles, and every fuse of them is still refused.** The namer picks each
+> half by two flat surfaces through where the axes meet, and each has to pass
+> exactly through that point. Facing along a pipe's stored direction misses it
+> for every direction scaled to length one that does not run along a coordinate
+> axis, since that dot rounds. Since Q1625 a surface that cannot face its own
+> axis faces a direction with whole-number components from −2 to 2 instead,
+> lying exactly in the flat of the two axes and leaning towards its own, all
+> three asked exactly. That took the test's family from 32 to 408 of 1224 pairs
+> named in four halves (`mise exec -- just t -p rcad-geom --test
+> two_pipes_of_one_width_on_crossing_axes
+> the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece
+> --no-capture`). The other 816 are a gap: bores on `(3, 4, 0)` and `(3, 0, 4)`
+> are pinned refused, and a facing slid a few `2⁻⁵³` along `(0, 1, −1)` would
+> pass exactly through. Three families of fix were weighed: change which
+> direction a surface faces (this one), slide that direction until its offset
+> is exact (the row left for the 816), and a picker that holds a point and a
+> facing rather than a rounded offset, which reaches every pair but touches
+> `half_space.rs`, the walker and the fuse.
+>
+> A fuse gets no further yet. Two bars of radius 1/4, one along `x` and one
+> turned 50°, 60°, 70° or 100° about `z`, crossing at `(11, 0, 0)` or with the
+> second starting at `(11, −3.25, 0.5)`, were refused at `intersect` before
+> Q1625. Now they are refused in the arrangement instead, as
+> `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` or `Undecidable`, in all six fuses
+> of each; none answers and none panics (a scratch probe, not kept). One
+> reason is in `fuse/arrange.rs`: `a_half_of_an_ellipse` knows a half only by
+> pickers bit-equal to the pipes' stored directions, so these halves get no
+> node where they meet. It is not the only one: the bar turned 120° about `z`
+> through `(11, 0, 0)`, whose stored direction does pass exactly through and
+> which was named before Q1625, is refused the same
+> `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` before and after.
+
 ### 31.10 What this gate does not know
 
 §30.3's whole lesson is that a settling document written before anyone has read

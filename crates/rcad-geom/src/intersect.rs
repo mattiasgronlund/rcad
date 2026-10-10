@@ -1768,22 +1768,36 @@ fn where_two_leaning_pipes_cross(
 ///
 /// # What picks a half
 ///
-/// The flat surfaces through `c` facing `ê` and facing `û`. Along the ellipse in
-/// the plane square to `û − ê`, a point is `c + cos θ·a·(û + ê)/‖û + ê‖ + sin θ·r·n̂`,
-/// which reads `cos θ·a·(1 + û·ê)/‖û + ê‖` against both `ê` and `û`. Against the
-/// other ellipse, along `û − ê`, it reads `cos θ·a·(û·ê − 1)/‖û − ê‖` against
-/// `ê` and minus that against `û`. With the axes not parallel `|û·ê| < 1`, so
-/// each half is strictly inside one corner of the two surfaces but at its two
-/// ends, and the four halves are in four different corners: `(+, +)` and
-/// `(−, −)` for the first, `(−, +)` and `(+, −)` for the second. A picker is
-/// closed, so a corner holds its own half and the two points where they all
-/// meet. No sign is asked of a direction, because none is in doubt.
+/// Two flat surfaces through `c`, one leaning towards `ê` and one towards `û`,
+/// each facing a direction `f` that lies in the flat `ê` and `û` span; how each
+/// is found is [`a_flat_surface_through_where_the_walls_touch`]'s. Along the
+/// ellipse in the plane square to `û − ê`, a point is
+/// `c + cos θ·a·(û + ê)/‖û + ê‖ + sin θ·r·n̂`, and `f` reads nothing along `n̂`,
+/// so the point reads `cos θ·a·f·(û + ê)/‖û + ê‖`. Along the other ellipse, in
+/// the direction `û − ê`, it reads `cos θ·a·f·(û − ê)/‖û − ê‖`. A facing that
+/// leans towards `ê` — reading positive against it, and more against `ê` than
+/// against `û` — reads positive along `û + ê` and negative along `û − ê`, and
+/// one leaning towards `û` reads positive along both. So each half is strictly
+/// inside one corner of the two surfaces but at its two ends, and the four
+/// halves are in four different corners: `(+, +)` and `(−, −)` for the first,
+/// `(−, +)` and `(+, −)` for the second. A picker is closed, so a corner holds
+/// its own half and the two points where they all meet. The lean is asked of
+/// each facing exactly, before it is taken.
+///
+/// **The facings are not the axis directions in general**: bores on `(3, 4, 0)`
+/// and `(4, 3, 0)` through `(11, −3.25, 0.5)` are picked by `(0, 1, 0)` and
+/// `(1, 0, 0)`, the same two as bores on `(1, 0, 0)` and `(0, 1, 0)` through
+/// the same point
+/// (`bores_leaning_at_3_4_0_and_4_3_0_are_picked_by_the_facings_bores_crossing_square_are`).
+/// So a caller that needs `ê` and `û` reads them off the two pipes and never
+/// off the pickers.
 ///
 /// What has to be exact is that both surfaces pass **exactly** through the
 /// points where the halves meet, or a corner holds a stub of a second half. That
-/// is two things: `c` is where the two axes meet, asked exactly of each axis,
-/// and each surface passes exactly through `c`. Then `c ± r·n̂` is on both,
-/// because `n̂` is square to both stored directions.
+/// is three things: `c` is where the two axes meet, asked exactly of each axis;
+/// each surface passes exactly through `c`; and each facing lies exactly in the
+/// flat of the two stored directions. Then `c ± r·n̂` is on both, because `n̂` is
+/// square to that flat.
 ///
 /// **The pair is sorted first**, as the walk sorts it, so `c` is worked out the
 /// same way whichever way round the caller wrote the two.
@@ -1791,10 +1805,15 @@ fn where_two_leaning_pipes_cross(
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when `c`, worked out in
-/// `f64`, is not exactly on both axes or either surface does not pass exactly
-/// through it, and whatever [`HalfSpace::through_a_point_facing`] refuses. A
-/// **gap** (§16.10): the four halves are there and four corners apart, and what
-/// runs out is a point in `f64` that is exactly where the axes meet.
+/// `f64`, is not exactly on both axes or no facing tried for either surface
+/// passes exactly through it, and whatever [`HalfSpace::through_a_point_facing`]
+/// refuses. A **gap** (§16.10): the four halves are there and four corners
+/// apart, and what runs out is a point in `f64` that is exactly where the axes
+/// meet, or a facing short enough to dot with it exactly. Bores on `(3, 4, 0)`
+/// and `(3, 0, 4)` through `(11, −3.25, 0.5)` are refused for the second, and
+/// facings slid a few `2⁻⁵³` from the stored directions along `(0, 1, −1)` would
+/// have passed exactly through `c`
+/// (`bores_on_3_4_0_and_3_0_4_are_refused_though_their_four_halves_are_there`).
 fn four_half_ellipses_where_two_pipes_of_one_width_meet(
     one: &Cylinder,
     other: &Cylinder,
@@ -1815,16 +1834,14 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
     {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     }
-    let surfaces = [
-        HalfSpace::through_a_point_facing(middle, first.axis().direction())?,
-        HalfSpace::through_a_point_facing(middle, second.axis().direction())?,
-    ];
-    if !surfaces
-        .iter()
-        .all(|surface| it_passes_exactly_through(surface, middle))
-    {
+    let [first_way, second_way] = [first, second].map(|pipe| pipe.axis().direction());
+    let (Some(towards_first), Some(towards_second)) = (
+        a_flat_surface_through_where_the_walls_touch(middle, first_way, second_way)?,
+        a_flat_surface_through_where_the_walls_touch(middle, second_way, first_way)?,
+    ) else {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-    }
+    };
+    let surfaces = [towards_first, towards_second];
 
     let and = Surface::Cylinder(*other);
     let corners = [[true, true], [false, false], [false, true], [true, false]];
@@ -1847,6 +1864,98 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
             })
             .collect(),
     ))
+}
+
+/// A flat surface through `middle` that holds both points where the walls touch
+/// and leans towards `own` rather than `other`, with nothing rounded in where it
+/// sits — or `None` when no direction tried gives one.
+///
+/// # What the facing has to be
+///
+/// The surface holds `c ± r·n̂` when it passes exactly through `c` and faces a
+/// direction exactly square to `n̂`, which is any direction lying exactly in the
+/// flat `own` and `other` span. It puts the halves in the corners
+/// [`four_half_ellipses_where_two_pipes_of_one_width_meet`] lists when it reads
+/// positive against `own`, and more against `own` than against `other` with both
+/// taken to length one: then it reads positive along `û + ê` and on `own`'s side
+/// along `û − ê`, as `own` itself does. All three are asked exactly, and a
+/// direction an exact sum cannot be formed for is passed over.
+///
+/// # Why more than `own` is tried
+///
+/// `own` was scaled to length one, so unless it runs along a coordinate axis its
+/// components are long binary fractions and its dot with `c` rounds: the surface
+/// then misses `c` by about `1e-17` and is no good. A direction whose components
+/// are whole numbers from −2 to 2 dots with `c` to a few small multiples of
+/// `c`'s own coordinates, exact whenever those are short, and a coordinate
+/// direction dots to one coordinate, exact for every `c`. Such a direction lies
+/// in the flat only when the flat holds one, which it does for two axes in one
+/// coordinate plane and for two directions that are one whole-number triple
+/// scaled down, like `(1, 2, 2)/3` and `(2, 1, 2)/3`.
+///
+/// # Errors
+///
+/// Whatever [`HalfSpace::through_a_point_facing`] refuses.
+fn a_flat_surface_through_where_the_walls_touch(
+    middle: Point,
+    own: Vector,
+    other: Vector,
+) -> Result<Option<HalfSpace>> {
+    const WHOLE_NUMBERS: [f64; 5] = [0.0, 1.0, -1.0, 2.0, -2.0];
+    let whole_number_directions = WHOLE_NUMBERS.into_iter().flat_map(|x| {
+        WHOLE_NUMBERS
+            .into_iter()
+            .flat_map(move |y| WHOLE_NUMBERS.into_iter().map(move |z| Vector::new(x, y, z)))
+    });
+    for facing in core::iter::once(own).chain(whole_number_directions) {
+        if !(it_leans_towards(facing, own, other)
+            && it_lies_exactly_in_the_flat_of(facing, own, other))
+        {
+            continue;
+        }
+        let surface = HalfSpace::through_a_point_facing(middle, facing)?;
+        if it_passes_exactly_through(&surface, middle) {
+            return Ok(Some(surface));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether `facing` reads positive against `own` and more against `own` than
+/// against `other`, both taken to length one: `facing·own > 0` and
+/// `(facing·own)²·‖other‖² > (facing·other)²·‖own‖²`, asked exactly.
+///
+/// No direction with nothing in it passes, since it reads nothing against `own`.
+fn it_leans_towards(facing: Vector, own: Vector, other: Vector) -> bool {
+    let dot = |one: Vector, two: Vector| Exact::dot_of(one.components(), two.components());
+    let (Some(on_own), Some(on_other), Some(own_squared), Some(other_squared)) = (
+        dot(facing, own),
+        dot(facing, other),
+        dot(own, own),
+        dot(other, other),
+    ) else {
+        return false;
+    };
+    if on_own.sign() != Decision::Pos {
+        return false;
+    }
+    let towards_own = on_own
+        .times(&on_own)
+        .and_then(|square| square.times(&other_squared));
+    let towards_other = on_other
+        .times(&on_other)
+        .and_then(|square| square.times(&own_squared));
+    towards_own
+        .zip(towards_other)
+        .is_some_and(|(own_way, other_way)| own_way.minus(&other_way).sign() == Decision::Pos)
+}
+
+/// Whether `facing` lies exactly in the flat `one` and `other` span: its dot
+/// with `one × other` is nothing, asked exactly.
+fn it_lies_exactly_in_the_flat_of(facing: Vector, one: Vector, other: Vector) -> bool {
+    Exact::cross_of(&Exact::of_each(one.components()), other.components())
+        .and_then(|square| Exact::dot_of_two_exact(&Exact::of_each(facing.components()), &square))
+        .is_some_and(|reach| reach.sign() == Decision::Zero)
 }
 
 /// Whether `point` is on the endless line of `pipe`'s axis, asked exactly:
