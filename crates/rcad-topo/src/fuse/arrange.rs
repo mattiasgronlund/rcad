@@ -10136,10 +10136,10 @@ mod tests {
     };
 
     use super::{
-        Arc, Arrangement, Boundary, CrossingsDrawn, HowItRuns, Node, Piece, as_exact_as_it_is,
-        canonical_cut_surfaces, prove_the_hinted_order, split_a_face, the_other_way,
-        the_way_a_half_ruling_leaves_the_apex, three_planes_faced_the_one_way,
-        where_the_crossing_starts,
+        Arc, Arrangement, Boundary, CrossingsDrawn, Direction, HowItRuns, Node, Piece,
+        as_exact_as_it_is, canonical_cut_surfaces, cross_of_intervals, prove_the_hinted_order,
+        split_a_face, the_other_way, the_way_a_half_ruling_leaves_the_apex,
+        three_planes_faced_the_one_way, where_the_crossing_starts,
     };
     use crate::fuse::bake::{BakedFace, BakedSolid, bake, what_writing_the_corner_down_cost};
     use crate::fuse::{FaceMeet, MeetPoint};
@@ -11410,6 +11410,150 @@ mod tests {
             ],
             "each run is its lowest-numbered arc, and nothing else moved"
         );
+    }
+
+    /// **The four half ellipses of the Steinmetz cross meet at two nodes, each
+    /// has a node half way along, and each leaves an end into its own
+    /// corner.**
+    ///
+    /// Two bars of radius 1, one up `z` and one along `x`, each from −2 to 2,
+    /// cross in the ellipses `x = z` and `x = −z`, which `intersect` names as
+    /// four halves. On the upright bar's wall `place_the_meets` puts one node
+    /// at each of `(0, ±1, 0)`, with all four halves through it, and one half
+    /// way along each half, at `(±1, 0, ±1)`
+    /// ([`Arrangement::place_where_two_halves_meet`],
+    /// [`Arrangement::place_the_middle_of_each_half`]).
+    ///
+    /// `∇S × ∇Q` is nothing at `(0, ±1, 0)`, where the two walls are tangent,
+    /// so the way out of a half there is read off its corner
+    /// ([`Arrangement::the_way_a_half_ellipse_runs_at_its_end`]). Worked by
+    /// hand: on the upright wall `∇S × ∇Q = 4·(yz, −xz, xy)`, which at a
+    /// middle `(a, 0, b)` is `(0, −4ab, 0)`. So forward along a half on `x = z`
+    /// runs down `y`, out of `(0, 1, 0)` towards its middle, and forward along
+    /// a half on `x = −z` runs up `y`, into `(0, 1, 0)` from its middle.
+    /// Forward out of `(0, 1, 0)` is then `ab·(a, 0, b)` on all four.
+    ///
+    /// Before Q1607 two halves of one pair met nowhere in the arrangement, and
+    /// none of these nodes was there.
+    #[test]
+    fn the_halves_of_the_steinmetz_cross_meet_at_two_nodes_and_leave_each_into_its_own_corner() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let upright = model
+            .add_round_bar(
+                1.0,
+                4.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, -2.0)).expect("a shift"),
+            )
+            .expect("a bar up `z`");
+        let lying = model
+            .add_round_bar(
+                1.0,
+                4.0,
+                &Isometry::translation(Vector::new(-2.0, 0.0, 0.0))
+                    .expect("a shift")
+                    .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("a turn about y")),
+            )
+            .expect("a bar along `x`");
+        let mut solids = bake(&model, &[upright, lying], &policy, &mut log).expect("two bars bake");
+        crate::fuse::cuts::gather(&mut solids, &policy, &mut log)
+            .expect("each bar's wall is cut by the other's");
+        let wall = solids[0]
+            .faces
+            .iter()
+            .find(|face| matches!(face.surface, Surface::Cylinder(_)))
+            .expect("the upright bar has a wall");
+
+        let mut arrangement = drawn_up_to_its_corners(wall);
+        arrangement.leave_out_the_cuts_clear_of_the_face();
+        let placed = arrangement.place_the_meets(&policy, &mut log);
+        assert!(placed.is_ok(), "the meets are placed: {placed:?}");
+
+        let halves: Vec<usize> = (0..arrangement.crossings.len())
+            .filter(|&crossing| {
+                matches!(
+                    arrangement.crossings[crossing].partner,
+                    Surface::Cylinder(_)
+                )
+            })
+            .collect();
+        assert_eq!(halves.len(), 4, "two ellipses, each in two halves");
+        let nodes_at = |place: [f64; 3]| -> Vec<usize> {
+            (0..arrangement.nodes.len())
+                .filter(|&node| holds(arrangement.nodes[node].point, place))
+                .collect()
+        };
+        for end in [[0.0, 1.0, 0.0], [0.0, -1.0, 0.0]] {
+            let nodes = nodes_at(end);
+            assert_eq!(nodes.len(), 1, "one node at {end:?}");
+            assert_eq!(
+                arrangement.nodes[nodes[0]].crossings, halves,
+                "all four halves run through {end:?}"
+            );
+        }
+
+        let corners = [
+            [1.0, 0.0, 1.0],
+            [1.0, 0.0, -1.0],
+            [-1.0, 0.0, 1.0],
+            [-1.0, 0.0, -1.0],
+        ];
+        let top = nodes_at([0.0, 1.0, 0.0])[0];
+        let mut middles = Vec::new();
+        for &half in &halves {
+            let along_it: Vec<&Node> = arrangement
+                .nodes
+                .iter()
+                .filter(|node| node.half_way_round && node.crossings == [half])
+                .collect();
+            assert_eq!(along_it.len(), 1, "half {half} has one node half way along");
+            let [a, _, b] = *corners
+                .iter()
+                .find(|&&corner| holds(along_it[0].point, corner))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "half {half}'s middle {:?} is at one of {corners:?}",
+                        along_it[0].point
+                    )
+                });
+            middles.push([a, 0.0, b]);
+
+            let way = arrangement.way_out_of(
+                top,
+                Direction {
+                    crossing: half,
+                    forward: true,
+                },
+            );
+            let worked_by_hand = [a * b * a, 0.0, a * b * b];
+            assert_eq!(
+                way.map(Interval::sign),
+                worked_by_hand.map(|component| Interval::exactly(component).sign()),
+                "half {half}, with its middle at ({a}, 0, {b}), leaves (0, 1, 0) forward along {worked_by_hand:?}: {way:?}"
+            );
+            assert!(
+                cross_of_intervals(way, worked_by_hand.map(Interval::exactly))
+                    .iter()
+                    .all(|component| component.contains_zero()),
+                "half {half} leaves (0, 1, 0) along {worked_by_hand:?} and not just towards it: {way:?}"
+            );
+        }
+        middles.sort_by(|one, other| one.partial_cmp(other).expect("no NaN"));
+        let mut every_corner = corners.to_vec();
+        every_corner.sort_by(|one, other| one.partial_cmp(other).expect("no NaN"));
+        assert_eq!(middles, every_corner, "one half in each corner");
+    }
+
+    /// Whether `point`'s box holds `place` and is no wider than a rounding.
+    fn holds(point: PredicatePoint, place: [f64; 3]) -> bool {
+        point
+            .enclosure()
+            .iter()
+            .zip(place)
+            .all(|(range, coordinate)| {
+                range.lo() <= coordinate && coordinate <= range.hi() && range.width() < 1e-12
+            })
     }
 
     fn the_unit_cube_baked_and_the_plane_x_equals_y() -> (BakedSolid, [f64; 4]) {
