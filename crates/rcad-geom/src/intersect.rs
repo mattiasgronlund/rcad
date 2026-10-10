@@ -1902,23 +1902,87 @@ fn a_flat_surface_through_where_the_walls_touch(
     other: Vector,
 ) -> Result<Option<HalfSpace>> {
     const WHOLE_NUMBERS: [f64; 5] = [0.0, 1.0, -1.0, 2.0, -2.0];
-    let whole_number_directions = WHOLE_NUMBERS.into_iter().flat_map(|x| {
-        WHOLE_NUMBERS
-            .into_iter()
-            .flat_map(move |y| WHOLE_NUMBERS.into_iter().map(move |z| Vector::new(x, y, z)))
-    });
-    for facing in core::iter::once(own).chain(whole_number_directions) {
-        if !(it_leans_towards(facing, own, other)
-            && it_lies_exactly_in_the_flat_of(facing, own, other))
+    let whole_numbers_in_the_flat: Vec<Vector> = WHOLE_NUMBERS
+        .into_iter()
+        .flat_map(|x| {
+            WHOLE_NUMBERS
+                .into_iter()
+                .flat_map(move |y| WHOLE_NUMBERS.into_iter().map(move |z| Vector::new(x, y, z)))
+        })
+        .filter(|&way| it_lies_exactly_in_the_flat_of(way, own, other))
+        .collect();
+    let ways_to_slide: Vec<Vector> = whole_numbers_in_the_flat
+        .iter()
+        .copied()
+        .filter(|&way| it_is_the_shortest_whole_number_step_along_its_line(way))
+        .collect();
+    let slid = (1..=LONGEST_SLIDE)
+        .flat_map(|steps| [steps, -steps])
+        .flat_map(|steps| {
+            ways_to_slide.iter().map(move |&way| {
+                own + way
+                    * (f64::from(steps) * one_unit_in_the_last_place_of_what_it_moves(own, way))
+            })
+        });
+    for facing in core::iter::once(own)
+        .chain(whole_numbers_in_the_flat.iter().copied())
+        .chain(slid)
+    {
+        if !(it_lies_exactly_in_the_flat_of(facing, own, other)
+            && it_leans_towards(facing, own, other))
         {
             continue;
         }
         let surface = HalfSpace::through_a_point_facing(middle, facing)?;
         if it_passes_exactly_through(&surface, middle) {
+            if steps_probe::ON {
+                eprintln!(
+                    "slide-probe {:?}",
+                    ((facing - own) * (1.0 / ONE_UNIT_OF_A_SLIDE)).components()
+                );
+            }
             return Ok(Some(surface));
         }
     }
+    if steps_probe::ON {
+        eprintln!(
+            "slide-fail {:?} {:?} {:?} {:?}",
+            middle.coordinates(),
+            own.components(),
+            other.components(),
+            ways_to_slide
+                .iter()
+                .map(|way| way.components())
+                .collect::<Vec<_>>()
+        );
+    }
     Ok(None)
+}
+
+mod steps_probe {
+    pub(super) const ON: bool = true;
+}
+
+const LONGEST_SLIDE: i32 = 1 << 6;
+
+const ONE_UNIT_OF_A_SLIDE: f64 = f64::EPSILON / 2.0;
+
+fn one_unit_in_the_last_place_of_what_it_moves(own: Vector, way: Vector) -> f64 {
+    own.components()
+        .into_iter()
+        .zip(way.components())
+        .filter(|&(mine, step)| mine != 0.0 && step != 0.0)
+        .map(|(mine, _)| f64::from_bits(mine.abs().to_bits() + 1) - mine.abs())
+        .fold(ONE_UNIT_OF_A_SLIDE, f64::min)
+}
+
+fn it_is_the_shortest_whole_number_step_along_its_line(way: Vector) -> bool {
+    let components = way.components();
+    components.iter().any(|component| component.abs() == 1.0)
+        && components
+            .iter()
+            .find(|component| **component != 0.0)
+            .is_some_and(|first| *first > 0.0)
 }
 
 /// Whether `facing` reads positive against `own` and more against `own` than
