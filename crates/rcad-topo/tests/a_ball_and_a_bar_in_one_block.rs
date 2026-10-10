@@ -33,19 +33,20 @@
 //! the circle says, and [`the_same_three_one_pair_at_a_time_make_the_same_block`]
 //! is the answer that came of reading it (`docs/decisions.md` §340.5).
 //!
-//! # And what a point inside the block still cannot be asked
+//! # And where a point cannot be asked
 //!
-//! `SolidView::classify_point` answers about every point outside the block —
-//! inside the bar's stubs and outside everything else — and comes back
-//! `Undecidable` about a point in the middle of it, because every ray out of
-//! there has to be followed across the floor, and the floor is a plane with two
-//! round holes in it. That is the classifier's own gap and not this fuse's; the
-//! answer's volume and its face count are what pin the shape here.
+//! Where the ball stands clear of the bar, `SolidView::classify_point` answers
+//! a point in the middle of the block, in the bar's stubs and beside them.
+//! Where the ball rests against the bar, the floor's two round holes touch, and
+//! the floor's one inner wire is both circles closing at the touch point. A
+//! point under the floor is then refused `CannotFollowAFacesTrimming` naming
+//! the floor: that is the classifier's own gap and not this fuse's, and the
+//! answer's volume and its face count are what pin the shape there.
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_geom::{Deflection, Isometry, Point, Scale, Surface, Vector};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, Model, Rule, SolidKey};
 
 /// How fine the meshes every volume here is read off are.
@@ -156,44 +157,82 @@ fn a_ball_a_millionth_of_a_unit_clear_of_the_bar_still_fuses() {
 /// two circles that touch, and `three_surfaces.rs` places the corner where
 /// they do. A touch at one point adds no volume, so the closed form is the one
 /// a ball clear of the bar has.
+///
+/// What `SolidView::classify_point` cannot yet say is where a point under the
+/// floor is. The floor's one inner wire is both circles, each a whole closed
+/// edge, and both close at the touch point. `SolidView::face_holds_the_point`
+/// refuses that floor `AFaceTrimmedByACurveThisCannotFollow` even at a point of
+/// it far from both circles, so every ray that crosses the floor is refused
+/// `CannotFollowAFacesTrimming` naming the floor, the stub under the floor
+/// among them. A point above the floor is answered as when the ball stands
+/// clear. Q1591 filed the row that takes the floor, and these points are
+/// pinned refused until it lands.
 #[test]
 fn a_ball_resting_against_the_bar_fuses_into_the_same_block() {
     let (model, answer) = united_all_at_once(3.0);
     let solids = answer.expect("a ball resting against the bar unites with the block");
-    let solid = model.solid(solids[0]).expect("key");
-    for face in solid.faces() {
-        eprintln!("PROBE face {:?} {:?}", face.key(), face.surface());
-        for wire in face.wires() {
-            eprintln!(
-                "PROBE   wire {:?}",
-                wire.coedges()
-                    .map(|c| (c.start().point(), c.end().point()))
-                    .collect::<Vec<_>>()
-            );
-        }
-    }
+    it_measures_as_the_block_with_half_a_ball_and_two_stubs(&model, &solids);
+    let solid = model.solid(solids[0]).expect("this model made the key");
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
-    for at in [
-        Point::new(5.0, 3.25, -1.5),
-        Point::new(5.0, 3.25, SIDE + 1.5),
-        Point::new(3.25, 1.75, -1.5),
-        Point::new(3.25, 1.75, SIDE + 1.5),
-        Point::new(2.0, 3.25, -1.5),
-        Point::new(2.0, 3.25, SIDE + 1.5),
-        Point::new(3.5, 3.25, -1.5),
-        Point::new(3.5, 3.25, SIDE + 1.5),
-        Point::new(6.3, 5.7, -1.5),
-        Point::new(6.3, 5.7, SIDE + 1.5),
-        Point::new(3.0, 3.5, -0.5),
-        Point::new(3.5, 3.5, 3.5),
+    for (at, what) in [
+        (
+            Point::new(3.5, 3.5, 3.5),
+            "the middle of the block, clear of the ball and of the bar",
+        ),
+        (
+            Point::new(5.0, 3.25, SIDE + 1.5),
+            "the stub out of the top of the block",
+        ),
     ] {
-        eprintln!(
-            "PROBE {at:?} {:?}",
-            solid.classify_point(at, &policy, &mut log)
+        assert_eq!(
+            solid.classify_point(at, &policy, &mut log),
+            Containment::Inside,
+            "{what}"
         );
     }
-    it_is_the_block_with_half_a_ball_and_two_stubs(&model, &solids);
+    for (x, y) in BESIDE_THE_STUBS {
+        assert_eq!(
+            solid.classify_point(Point::new(x, y, SIDE + 1.5), &policy, &mut log),
+            Containment::Outside,
+            "nothing but the bar reaches past the top at ({x}, {y})"
+        );
+    }
+    let floor = solid
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface::Plane(flat)
+                if flat.coefficients() == [0.0, 0.0, -1.0, 0.0])
+        })
+        .expect("the block's floor is still one face")
+        .key();
+    assert!(
+        matches!(
+            solid.face_holds_the_point(
+                floor,
+                PredicatePoint::Exact([1.0, 1.0, 0.0]),
+                &policy,
+                &mut log
+            ),
+            Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == floor
+        ),
+        "the floor cannot say it holds a point of its own far from both circles"
+    );
+    for at in [
+        Point::new(5.0, 3.25, -1.5),
+        Point::new(3.25, 1.75, -1.5),
+        Point::new(2.0, 3.25, -1.5),
+        Point::new(3.5, 3.25, -1.5),
+        Point::new(6.3, 5.7, -1.5),
+        Point::new(3.0, 3.5, -0.5),
+    ] {
+        assert_eq!(
+            solid.classify_point(at, &policy, &mut log),
+            Containment::CannotFollowAFacesTrimming { face: floor },
+            "under the floor, at {at:?}, the floor's two touching circles are \
+             not followed"
+        );
+    }
 }
 
 /// Where they overlap outright, the fuse refuses to put in order the points on
@@ -238,8 +277,48 @@ fn the_same_three_one_pair_at_a_time_make_the_same_block() {
     it_is_the_block_with_half_a_ball_and_two_stubs(&model, &solids);
 }
 
+/// Where across the floor and how far past the block's floor and top a point
+/// stands beside the bar's stubs and touches nothing.
+const BESIDE_THE_STUBS: [(f64, f64); 4] = [(3.25, 1.75), (2.0, 3.25), (3.5, 3.25), (6.3, 5.7)];
+
 /// The answer is one valid solid, the block with the lower half of the ball and
-/// two stubs of the bar on it, and it measures as that.
+/// two stubs of the bar on it: it measures as that, a point in the middle of
+/// the block or in either stub is inside it, and a point beside the stubs is
+/// outside.
+fn it_is_the_block_with_half_a_ball_and_two_stubs(model: &Model, solids: &[SolidKey]) {
+    it_measures_as_the_block_with_half_a_ball_and_two_stubs(model, solids);
+
+    let solid = model.solid(solids[0]).expect("this model made the key");
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    assert_eq!(
+        solid.classify_point(Point::new(3.5, 3.5, 3.5), &policy, &mut log),
+        Containment::Inside,
+        "the middle of the block, clear of the ball and of the bar"
+    );
+    assert_eq!(
+        solid.classify_point(Point::new(5.0, 3.25, -1.5), &policy, &mut log),
+        Containment::Inside,
+        "a unit and a half under the floor, inside the bar stub"
+    );
+    assert_eq!(
+        solid.classify_point(Point::new(5.0, 3.25, SIDE + 1.5), &policy, &mut log),
+        Containment::Inside,
+        "the stub out of the top of the block"
+    );
+    for (x, y) in BESIDE_THE_STUBS {
+        for z in [-1.5, SIDE + 1.5] {
+            assert_eq!(
+                solid.classify_point(Point::new(x, y, z), &policy, &mut log),
+                Containment::Outside,
+                "nothing but the bar reaches past the block at ({x}, {y}, {z})"
+            );
+        }
+    }
+}
+
+/// The answer is one valid solid of eleven faces, and its volume is the block
+/// with the lower half of the ball and two stubs of the bar on it.
 ///
 /// The closed form, for a block of side 7 and two round solids of radius 1:
 /// the block is `7³ = 343`, the half ball below the floor is `½ · 4/3 · π · 1³
@@ -250,7 +329,7 @@ fn the_same_three_one_pair_at_a_time_make_the_same_block() {
 /// `volume_error` as well, which at [`A_DEFLECTION`] is about `0.61`: the
 /// smallest piece the answer could lose, the half ball's `2π/3 ≈ 2.09`, is
 /// more than three times that.
-fn it_is_the_block_with_half_a_ball_and_two_stubs(model: &Model, solids: &[SolidKey]) {
+fn it_measures_as_the_block_with_half_a_ball_and_two_stubs(model: &Model, solids: &[SolidKey]) {
     assert_eq!(solids.len(), 1, "one block with two lumps on it");
 
     model
@@ -295,26 +374,4 @@ fn it_is_the_block_with_half_a_ball_and_two_stubs(model: &Model, solids: &[Solid
         "the ball's own half is in the answer and not merely a hole in the floor: \
          {measured}"
     );
-
-    let policy = Policy::certified();
-    let mut log = ProvenanceLog::new();
-    assert_eq!(
-        solid.classify_point(Point::new(5.0, 3.25, -1.5), &policy, &mut log),
-        Containment::Inside,
-        "a unit and a half under the floor, inside the bar stub"
-    );
-    assert_eq!(
-        solid.classify_point(Point::new(5.0, 3.25, SIDE + 1.5), &policy, &mut log),
-        Containment::Inside,
-        "the stub out of the top of the block"
-    );
-    for (x, y) in [(3.25, 1.75), (2.0, 3.25), (3.5, 3.25), (6.3, 5.7)] {
-        for z in [-1.5, SIDE + 1.5] {
-            assert_eq!(
-                solid.classify_point(Point::new(x, y, z), &policy, &mut log),
-                Containment::Outside,
-                "nothing but the bar reaches past the block at ({x}, {y}, {z})"
-            );
-        }
-    }
 }
