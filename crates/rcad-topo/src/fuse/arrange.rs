@@ -103,6 +103,19 @@ use super::{
 ///
 /// A face with nothing cutting it comes back as one piece: itself.
 ///
+/// **A whole ring nothing draws on is cut along its two equators**, into the
+/// half above the plane through its middle and the half below it (Q1588). A
+/// ring is a closed surface like a ball, so `bake` joins the two halves a
+/// caller writes it as into one face with no boundary at all; but it pinches
+/// nowhere, so it has no seam of its own to be opened along
+/// ([`Arrangement::the_whole_surface`]). Two bands between two circles that go
+/// right round it are the shape the mesher fills, and the plane through the
+/// middle names the circles between them. A bar standing in the hole of a
+/// whole ring, clear of it, was refused
+/// [`Error::ACurvedFaceGoesRightRoundWithNoSeam`] once the planes of its caps
+/// stopped cutting the ring where they never meet it, and a bar nowhere near
+/// the ring always was.
+///
 /// # Errors
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when a decision the split
@@ -124,7 +137,18 @@ pub(crate) fn split_a_face(
     log: &mut ProvenanceLog,
 ) -> Result<Split> {
     let cuts = canonical_cut_surfaces(face);
-    let arrangement = Arrangement::of(face, &cuts, policy, log)?;
+    let mut arrangement = Arrangement::of(face, &cuts, policy, log)?;
+    // The plane keeps the axis's own bits: scaled again, a turned ring's axis
+    // comes out an ulp off square to it, and that crossing is a quartic. A
+    // plane this far out that its offset overflows is left to refuse as a
+    // whole surface with no seam.
+    if arrangement.arcs.is_empty()
+        && let Surface::Torus(ring) = face.surface
+        && let Ok(middle) =
+            Plane::from_point_and_normal_as_written(ring.centre(), ring.axis().direction())
+    {
+        arrangement = Arrangement::of(face, &[Surface::Plane(middle)], policy, log)?;
+    }
     Ok(Split {
         pieces: arrangement.pieces()?,
         names_of_one_point: arrangement.names_of_one_point(),
@@ -1173,9 +1197,11 @@ impl<'f> Arrangement<'f> {
     ///
     /// [`Error::ACurvedFaceGoesRightRoundWithNoSeam`] when the surface does not
     /// pinch to a point, so there is nowhere for a seam to end. Only a ball
-    /// does, and only a ball is a closed surface: a plane and a pipe both run on
-    /// for ever, so a face on one of them with nothing trimming it is unbounded
-    /// and no answer exists. Nothing in the public API builds one — a profile
+    /// does. A ring is closed too, but it is cut along its equators before it
+    /// gets here ([`split_a_face`]), and gets here only where the plane through
+    /// its middle sits too far out to be written down. A plane and a pipe both
+    /// run on for ever, so a face on one of them with nothing trimming it is
+    /// unbounded and no answer exists. Nothing in the public API builds one — a profile
     /// has an outline, a bar has two cap circles, and a face this fuse cuts is
     /// bounded by what cut it — but a model read from a file may, and §16.11
     /// says a caller's bytes may not panic.

@@ -240,6 +240,60 @@ where its fan of corners could not wind round a point on a spoke — the point i
 the middle of a flush square cap sits on both diagonals, so every apex's fan had
 it on a spoke and the winding read `None`.
 
+**2026-10-10 note (Q1588): a half ring with a bar in its hole, level with the
+top of its tube, answers every fuse.** The bar, radius `23/8` about `z` from
+`z = −1` to `1`, touches nothing of the ring of four round a tube of one, yet
+all 24 fuses — on a plate and alone, both seams, every rule both ways round —
+were refused 'a point inside a piece of a face' at `(4, 0, 1)`. What kept the
+cut: the bar's top plane meets the torus only in the circle `r = 4, z = 1`, and
+`cuts.rs`'s `the_cuts_left_on` drops such a crossing only where the face that
+carries it, the bar's top, is proved clear of the torus. That proof is
+`a_surface_misses_a_band(torus, the disk's band)`, reached through
+`a_face_misses_a_surface_by_its_band`, and it answered false for every torus,
+so the piece of skin past the circle, on the side of `z = 1` where the torus has
+no point, reached selection. The seam plays no part: `bake` leaves it out of the
+face's wires, and a trace gave the same cuts with it and without. What drops it
+now: `a_torus_on_the_axis_misses_a_band` asks a torus about the band's axis as
+one polynomial in `up` and `out`, written two ways, `(out + h² + (R² − r²)|w|²)² −
+4R²|w|²·out` and `(out + h² − (R² + r²)|w|²)² + 4R²|w|²(h² − r²|w|²)`. Either
+keeping a sign over the band proves it clear. The disk at the top of the tube,
+where `h² = r²|w|²`, is proved only by the second; the bar's wall through the
+tube's height only by the first. The 24 fuses now give, on the plate, the union
+`72π + 4π² + 529π/64` as one solid, the intersection `529π/64`, the group less
+the plate `4π²` and `529π/64` apart, and the plate less the group
+`72π − 529π/64`; alone, the union is the two solids apart, the intersection
+nothing, and each difference its first argument
+(`a_half_ring_standing_on_a_round_plate.rs`).
+
+Proving the bar clear left a whole ring with nothing cutting it, and that was
+refused in its turn: `a_plate_cut_by_a_whole_bend.rs`'s
+`a_bar_in_a_rings_hole_touching_nothing_fuses_to_the_two_apart` broke on the
+`cuts.rs` change alone. `bake` joins the two halves a whole ring is written as
+into one torus face with no boundary, so with no cut its arrangement draws
+nothing, and `Arrangement::the_whole_surface` answers
+`ACurvedFaceGoesRightRoundWithNoSeam` for every surface but a ball, which has a
+pole to open a seam up to. Before, the planes of the bar's caps cut the ring
+along the circles where they meet it, though the caps never reach it, and that
+hid the refusal. Where nothing comes near enough to cut, it was there at the
+base already: over the base's source, a whole ring with a bar twenty out from
+its axis is refused that way under every rule. What answers it now:
+`arrange.rs`'s `split_a_face` cuts a torus face its arrangement drew nothing on
+with the plane through the ring's middle, square to its axis, so the face
+splits into the two bands between its outer and inner equator, a shape the
+mesher fills. A whole ring with a bar far from it, and one with the bar in its
+hole level with the top and the bottom of the tube, now give the two solids
+apart, nothing, and each difference its first argument
+(`a_whole_ring_and_a_bar_far_from_it_fuse_to_the_two_apart`,
+`a_whole_ring_and_a_bar_in_its_hole_level_with_its_tube_fuse_to_the_two_apart`).
+The plane keeps the bits of the ring's own axis
+(`Plane::from_point_and_normal_as_written`): scaled again, a turned ring's
+axis comes out an ulp off square to it, and the crossing is a quartic nothing
+here follows. Turned about six axes a fortieth of a turn at a time, 21 of 1404
+fuses are still refused `VolumeIsNotPositive`, the three whose answer holds
+the ring at seven of the 234 turns. The ring alone measures `8π²` at those
+turns; what the fuse writes back for it encloses about `−4·10⁻¹⁶`
+(`a_whole_ring_turned_any_way_and_a_bar_far_from_it_answer_or_are_refused_as_enclosing_nothing`).
+
 ### 191.6 What is left
 
 `ignored_tests` goes 2 → 6 and `wildcard_arms` 87 → 88 (the justfile says which
