@@ -48,47 +48,9 @@ fn a_circle_centred_off_its_leaning_pipe_is_named_by_the_ball() {
     let text = a_rounded_pin_end(&ROUND_THE_LEANING_PIPE);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
     let refused = match Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) {
-        Ok(import) => {
-            let [(_, pin)] = import.solids() else {
-                panic!()
-            };
-            for face in import.model().solid(*pin).unwrap().faces() {
-                for wire in face.wires() {
-                    for coedge in wire.coedges() {
-                        let edge = coedge.edge();
-                        println!(
-                            "PROBE {:?} {:?} {:?}",
-                            edge.start().point().coordinates(),
-                            edge.end().point().coordinates(),
-                            edge.run()
-                        );
-                    }
-                }
-            }
-            let policy = Policy::certified();
-            let mut log = ProvenanceLog::new();
-            let solid = import.model().solid(*pin).unwrap();
-            println!(
-                "PROBE validate {:?}",
-                import.model().validate(&policy, &mut log)
-            );
-            match solid.measure(
-                rcad_geom::Deflection::of(0.0001).unwrap(),
-                &policy,
-                &mut log,
-            ) {
-                Ok(m) => println!(
-                    "PROBE volume {} +- {} expect {}",
-                    m.volume(),
-                    m.volume_error(),
-                    core::f64::consts::PI * 0.01 * (2.0 / 3.0 * 0.1 + 25.05)
-                ),
-                Err(e) => println!("PROBE measure {e:?}"),
-            }
-            panic!(
-                "#2709 is centred 17.42 roundings off its pipe's axis, and was read as on the pipe"
-            )
-        }
+        Ok(_) => panic!(
+            "#2709 is centred 17.42 roundings off its pipe's axis, and was read as on the pipe"
+        ),
         Err(refused) => refused,
     };
     assert!(
@@ -125,28 +87,21 @@ fn a_circle_centred_on_its_upright_pipe_is_named_by_its_plane() {
     };
     let model = import.model();
     let solid = model.solid(*pin).expect("this model made the key");
-    let corner = [10.05, 1.25, 16.4];
+    let rim_ends = [[10.05, 1.25, 16.4], [10.05, 1.05, 16.4]];
     let mut rims = 0;
     for face in solid.faces() {
         for wire in face.wires() {
             for coedge in wire.coedges() {
                 let edge = coedge.edge();
-                println!(
-                    "PROBE {:?} {:?} {:?}",
-                    edge.start().point().coordinates(),
-                    edge.end().point().coordinates(),
-                    edge.run()
-                );
-                if edge.start().key() != edge.end().key()
-                    || edge.start().point().coordinates() != corner
-                {
+                let ends = [edge.start(), edge.end()].map(|end| end.point().coordinates());
+                if !(ends == rim_ends || ends == [rim_ends[1], rim_ends[0]]) {
                     continue;
                 }
                 rims += 1;
-                let EdgeRun::RightRoundWhereItCrosses { and } = edge.run() else {
+                let EdgeRun::PartOfWhereItCrosses { and, .. } = edge.run() else {
                     panic!(
-                        "the circle has been checked to lie on the ball and the pipe, so it is \
-                         named by the surface the file draws it on; it says {:?}",
+                        "the circle has been checked to lie on the ball and the pipe, so each of \
+                         its arcs is named by the surface the file draws it on; it says {:?}",
                         edge.run()
                     );
                 };
@@ -167,8 +122,8 @@ fn a_circle_centred_on_its_upright_pipe_is_named_by_its_plane() {
         }
     }
     assert_eq!(
-        rims, 2,
-        "the ball's face and the pipe's each walk the rim once"
+        rims, 4,
+        "the ball's face and the pipe's each walk the rim's two arcs once"
     );
     model
         .validate(&policy, &mut log)
@@ -221,9 +176,8 @@ fn how_far_the_file_puts_the_circle_off_its_pipe() {
     );
     let moved_roundings = off_the_ball / of_the_ball;
 
-    let halfway = Point::from(
-        [0, 1, 2].map(|at| (centre.coordinates()[at] + on_the_axis.coordinates()[at]) / 2.0),
-    );
+    let [x, y, z] = centre.coordinates();
+    let halfway = Point::new((x + on_the_axis.coordinates()[0]) / 2.0, y, z);
     let [through_the_file, through_halfway] = [centre, halfway].map(|at| {
         Plane::from_point_and_normal_as_written(at, leaning).expect("the circle's plane")
     });
@@ -277,7 +231,7 @@ fn how_far_the_file_puts_the_circle_off_its_pipe() {
         "corner #1030 is {corner_spacings} spacings off the leaning pipe"
     );
     assert!(
-        (1.237e-7..=1.238e-7).contains(&spread),
+        (1.236e-7..=1.237e-7).contains(&spread),
         "a ball and a pipe {q} apart cross in a curve that runs {spread} along the axis"
     );
 }
@@ -292,6 +246,7 @@ struct APinEnd {
     rim_axis: &'static str,
     rim_reference: &'static str,
     rim_corner: &'static str,
+    rim_across: &'static str,
     pole: &'static str,
     seam_axis: &'static str,
     seam_reference: &'static str,
@@ -305,9 +260,11 @@ struct APinEnd {
     far_reference: &'static str,
 }
 
-/// `#2709` between ball `#3414` and the leaning pipe `#2723`, with its corner
-/// at the file's `#2404`, which is on both, and the far disc at the file's
-/// other end of that pipe, `y = −23.9`.
+/// `#2709` between ball `#3414` and the leaning pipe `#2723`, cut at the
+/// file's `#2404` and the point across from it, which are both on both faces
+/// because the pipe's axis misses the ball's centre in `x` only. The file's
+/// other corner, `#1030`, is not used: it is inside the pipe (§335.5). The far
+/// disc is at the file's other end of that pipe, `y = −23.9`.
 const ROUND_THE_LEANING_PIPE: APinEnd = APinEnd {
     centre: "(10.05,1.15,16.4)",
     ball_axis: "(0.E+000,1.,0.E+000)",
@@ -315,6 +272,7 @@ const ROUND_THE_LEANING_PIPE: APinEnd = APinEnd {
     rim_axis: "(3.663735981263E-015,1.,0.E+000)",
     rim_reference: "(1.,-3.663735981263E-015,0.E+000)",
     rim_corner: "(10.05,1.15,16.5)",
+    rim_across: "(10.05,1.15,16.3)",
     pole: "(10.05,1.25,16.4)",
     seam_axis: "(-1.,0.E+000,0.E+000)",
     seam_reference: "(0.E+000,-1.,0.E+000)",
@@ -328,8 +286,9 @@ const ROUND_THE_LEANING_PIPE: APinEnd = APinEnd {
     far_reference: "(0.E+000,0.E+000,1.)",
 };
 
-/// `#2692` between the same ball and the upright pipe `#2699`, with its corner
-/// at the file's `#2685`, and the far disc at that pipe's origin, `z = 8.25`.
+/// `#2692` between the same ball and the upright pipe `#2699`, cut at the
+/// file's `#2685` and the point across from it, and the far disc at that
+/// pipe's origin, `z = 8.25`.
 const ROUND_THE_UPRIGHT_PIPE: APinEnd = APinEnd {
     centre: "(10.05,1.15,16.4)",
     ball_axis: "(0.E+000,0.E+000,1.)",
@@ -337,6 +296,7 @@ const ROUND_THE_UPRIGHT_PIPE: APinEnd = APinEnd {
     rim_axis: "(0.E+000,-0.E+000,1.)",
     rim_reference: "(3.663735981263E-015,1.,0.E+000)",
     rim_corner: "(10.05,1.25,16.4)",
+    rim_across: "(10.05,1.05,16.4)",
     pole: "(10.05,1.15,16.5)",
     seam_axis: "(1.,0.E+000,0.E+000)",
     seam_reference: "(0.E+000,0.E+000,-1.)",
@@ -351,10 +311,12 @@ const ROUND_THE_UPRIGHT_PIPE: APinEnd = APinEnd {
 };
 
 /// A half ball of radius `0.1` on a pipe of the same radius, closed by a flat
-/// disc. The ball's face is bounded by the rim, its one corner, and a quarter
-/// circle across the ball from that corner to its pole and back, as the LED
-/// domes in `an_led_dome_seam_is_cut_once.rs` are. The rim, the pipe and the
-/// ball's centre are the file's.
+/// disc. The rim is cut in two arcs at its corner and the point across from
+/// it, as the file cuts `#2709` into arcs rather than writing it closed. The
+/// ball's face is bounded by the two arcs and a quarter circle across the ball
+/// from the corner to its pole and back, as the LED domes in
+/// `an_led_dome_seam_is_cut_once.rs` are. The rim, the pipe and the ball's
+/// centre are the file's.
 fn a_rounded_pin_end(end: &APinEnd) -> String {
     let mut text = a_header(".MILLI.");
     text += &format!(
@@ -378,16 +340,20 @@ fn a_rounded_pin_end(end: &APinEnd) -> String {
          #27=CARTESIAN_POINT('',{far_centre});\n\
          #28=DIRECTION('',{far_normal});\n\
          #29=DIRECTION('',{far_reference});\n\
+         #44=CARTESIAN_POINT('',{rim_across});\n\
+         #45=VERTEX_POINT('',#44);\n\
          #30=AXIS2_PLACEMENT_3D('',#10,#13,#14);\n\
          #31=CIRCLE('',#30,0.1);\n\
-         #32=EDGE_CURVE('',#21,#21,#31,.T.);\n\
+         #32=EDGE_CURVE('',#21,#45,#31,.T.);\n\
+         #39=EDGE_CURVE('',#45,#21,#31,.T.);\n\
          #40=AXIS2_PLACEMENT_3D('',#10,#15,#16);\n\
          #41=CIRCLE('',#40,0.1);\n\
          #42=EDGE_CURVE('',#21,#23,#41,.T.);\n\
          #50=ORIENTED_EDGE('',*,*,#32,.T.);\n\
+         #58=ORIENTED_EDGE('',*,*,#39,.T.);\n\
          #51=ORIENTED_EDGE('',*,*,#42,.T.);\n\
          #52=ORIENTED_EDGE('',*,*,#42,.F.);\n\
-         #53=EDGE_LOOP('',(#50,#51,#52));\n\
+         #53=EDGE_LOOP('',(#50,#58,#51,#52));\n\
          #54=FACE_BOUND('',#53,.T.);\n\
          #55=AXIS2_PLACEMENT_3D('',#10,#11,#12);\n\
          #56=SPHERICAL_SURFACE('',#55,0.1);\n\
@@ -398,11 +364,12 @@ fn a_rounded_pin_end(end: &APinEnd) -> String {
          #36=AXIS2_PLACEMENT_3D('',#27,#13,#14);\n\
          #37=CIRCLE('',#36,0.1);\n\
          #38=EDGE_CURVE('',#25,#25,#37,.T.);\n\
+         #59=ORIENTED_EDGE('',*,*,#39,.F.);\n\
          #60=ORIENTED_EDGE('',*,*,#32,.F.);\n\
          #61=ORIENTED_EDGE('',*,*,#35,.T.);\n\
          #62=ORIENTED_EDGE('',*,*,#38,.T.);\n\
          #63=ORIENTED_EDGE('',*,*,#35,.F.);\n\
-         #64=EDGE_LOOP('',(#60,#61,#62,#63));\n\
+         #64=EDGE_LOOP('',(#59,#60,#61,#62,#63));\n\
          #65=FACE_BOUND('',#64,.T.);\n\
          #66=AXIS2_PLACEMENT_3D('',#26,#17,#18);\n\
          #67=CYLINDRICAL_SURFACE('',#66,0.1);\n\
@@ -426,6 +393,7 @@ fn a_rounded_pin_end(end: &APinEnd) -> String {
         pipe_reference = end.pipe_reference,
         onward = end.onward,
         rim_corner = end.rim_corner,
+        rim_across = end.rim_across,
         pole = end.pole,
         far_corner = end.far_corner,
         pipe_origin = end.pipe_origin,
