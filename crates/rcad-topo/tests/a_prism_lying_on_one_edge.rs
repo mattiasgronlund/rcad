@@ -44,6 +44,17 @@
 //! point, and every answer is the two as they stand. That was a gap, refused
 //! for want of a point inside a piece of a face, until queue row Q1279 let a
 //! plane place a piece with corners on it (`docs/decisions.md` §365.8).
+//!
+//! **Turned, the edge can lie on the top exactly and the union still be
+//! refused** (queue row Q1281). A wedge, the triangle `(0, 0)`, `(1, √3)`,
+//! `(0, √3)`, its upright wall rising from its edge and its other wall leaning
+//! with a normal whose `y` is exactly a half, lies on the block's top, the two
+//! turned about `x` together. Turning rounds every plane but keeps the edge on
+//! the top. The union was refused `ResultIsNotManifold { count: 4 }` at 14 of
+//! 24 turns: the parting asked a corner at an end of the edge which side of the
+//! top it was on by the point it is written down as, the middle of a box, and
+//! on a tilted top that can sit a rounding inside. A corner of the top's own
+//! pieces is no longer asked.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
