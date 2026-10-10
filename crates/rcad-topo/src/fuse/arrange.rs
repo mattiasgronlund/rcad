@@ -949,6 +949,12 @@ enum HowItRuns {
     /// of a hyperbola. The order is how far along `n × w` a point sits, for the
     /// plane's normal `n` and the cone's axis direction `w`
     /// ([`along_a_bend`] carries the derivation).
+    ///
+    /// A half ellipse of two pipes of one width whose axes meet
+    /// ([`HalfAnEllipse`]) is ordered this way too, with the normals of the
+    /// two flat surfaces that pick it out standing in for `n` and `w`; it
+    /// bends and does not close, and runs from one end to the other once along
+    /// their cross product.
     AlongABend {
         plane_normal: [f64; 3],
         cone_axis: [f64; 3],
@@ -1001,9 +1007,14 @@ struct Node {
     /// here left one point two corners in the answer and an edge with one face
     /// along it (§284.7). [`Arrangement::names_of_one_point`] hands these on.
     also: Vec<([Surface; 3], u8)>,
-    /// Whether this is the second place a closed crossing is cut, across the
-    /// circle from where it starts, because it starts at a ball's pole — see
-    /// [`across_a_circle_that_starts_at_a_pole`].
+    /// Whether this is a place a crossing is cut only so that it is two edges
+    /// rather than one, and so must never be joined across
+    /// ([`Arrangement::the_two_arcs_to_join_at`]): the second place a closed
+    /// crossing is cut, across the circle from where it starts, because it
+    /// starts at a ball's pole ([`across_a_circle_that_starts_at_a_pole`]),
+    /// or the middle of a half ellipse
+    /// ([`Arrangement::place_the_middle_of_each_half`]), which, unlike the
+    /// first, is named by its surfaces in `made_of`.
     half_way_round: bool,
     /// The crossings running through it, in increasing order.
     crossings: Vec<usize>,
@@ -1777,7 +1788,16 @@ impl<'f> Arrangement<'f> {
     }
 
     /// One node per place two crossings meet, unless a corner already is that
-    /// place.
+    /// place, and then one in the middle of each half ellipse
+    /// ([`Arrangement::place_the_middle_of_each_half`]).
+    ///
+    /// **Two crossings of one pair meet with no third surface there**, so
+    /// [`meet_of_three_surfaces`] is not asked about them. Two rulings of a
+    /// plane through a cone's apex meet at the apex
+    /// ([`Arrangement::place_where_two_rulings_cross`]), and two half ellipses
+    /// of two pipes of one width whose axes meet meet at the two places their
+    /// walls touch ([`Arrangement::place_where_two_halves_meet`]); every other
+    /// two crossings of one pair get no node (§347.9).
     ///
     /// Three surfaces can meet at two points, and both are nodes.
     /// [`MeetOfThree::MoreThanAPoint`] is an answer and not a refusal (§34.9):
@@ -1903,15 +1923,18 @@ impl<'f> Arrangement<'f> {
         })
     }
 
-    /// The node where two curves of one pair cross, for the one pair here that
+    /// The node where two curves of one pair cross, for the pair here that
     /// names two curves crossing at a point it stores exactly: a plane through
     /// a cone's apex, whose two rulings cross there (§347).
     ///
     /// No third surface passes through that point, so
     /// [`meet_of_three_surfaces`] has nothing to solve, and none is needed: the
     /// apex is [`Cone::apex`], stored, and [`a_plane_cuts_a_cone_in_rulings`]
-    /// has proved it on the plane. Every other pair that names two curves is
-    /// left without a node here, and §347 says which of them can have two
+    /// has proved it on the plane. Two half ellipses of two pipes of one width
+    /// meet at places worked out in intervals and not stored, and
+    /// [`Arrangement::place_where_two_halves_meet`] places those. Every other
+    /// pair that names two curves is left without a node, and passes through
+    /// here only to be turned away; §347 says which of them can have two
     /// curves that cross.
     ///
     /// The node is named by the plane and the cone, whichever of the two the
@@ -9227,6 +9250,18 @@ fn across_a_bend(plane_normal: [f64; 3], cone_axis: [f64; 3]) -> [Interval; 3] {
 /// plane and square to `n × w`, which is a multiple of the axis; the two
 /// parametrisations above hold no such pair, because equal `s` and equal
 /// `sinh σ` each mean equal parameter.
+///
+/// # A half ellipse is ordered by the same determinant
+///
+/// For a half ellipse of two pipes of radius `r` whose axes meet at `c`
+/// ([`HalfAnEllipse`]), `n` and `w` are the normals of its two pickers, each
+/// one pipe's stored direction or its reverse, so `n × w` runs along `n̂`, the
+/// unit vector square to both axes, one way or the other. The whole ellipse
+/// is `c + a·cos t + r·n̂·sin t` with `a` square to `n̂`, and the half is
+/// `t` from `−π/2` to `π/2`, between the two places the walls touch,
+/// `c ± r·n̂`. Its part along `n̂` is `r·sin t`, strictly increasing over that
+/// span, so the order is total along the half and [`Decision::Zero`] means one
+/// point, as above.
 ///
 /// # It is a determinant and never a built vector
 ///
