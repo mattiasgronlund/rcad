@@ -110,20 +110,21 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
     }
 }
 
-/// The second bar starts where the axes meet, at 50°, 60°, 70° or 100°.
+/// The second bar starts where the axes meet, at 50°, 60°, 70°, 100° or 120°.
 ///
 /// **Every fuse is refused**: with the first bar first
 /// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, and with the second first
 /// `Undecidable`, asking which side of a pipe a box round `(11, −3.25, 0.25)`
 /// is on. Neither moved in Q1646, and neither is traced to the function that
-/// asks.
+/// asks. At 120° both stand since Q1645 named the crossing there; before it,
+/// `intersect` refused all six `CannotNameWhichPieceOfACrossingThisIs`.
 ///
 /// The second bar's near cap is square to its axis through the meeting point
 /// `c`, so it holds both points `c ± r·ẑ` where the two pipes touch, `(11,
 /// −3.25, 0.25)` and `(11, −3.25, 0.75)`: there the cap and both pipes meet,
-/// two of the three tangent to each other. The second pipe's stored direction
-/// lies in `z = 0` at each of these angles, so both points are exact in
-/// `f64`.
+/// two of the three tangent to each other. At 50° to 100° the second pipe's
+/// stored direction lies in `z = 0`, so both points are exact in `f64`; at 120°
+/// it is a hair off `z = 0`, as the test above says.
 ///
 /// **A gap, by §16.10**: the three surfaces meet exactly at two points known
 /// from stored numbers, as the node where the four halves meet is
@@ -132,7 +133,7 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
 /// pipes then meet the half-planes of the test above.
 #[test]
 fn a_bar_starting_where_it_crosses_another_at_a_slant_is_refused() {
-    for degrees in [50.0, 60.0, 70.0, 100.0] {
+    for degrees in [50.0, 60.0, 70.0, 100.0, 120.0] {
         for (rule, first_first) in six_fuses() {
             let said = fuse(degrees, [11.0, -3.25, 0.5], rule, first_first);
             let pinned = if first_first {
@@ -150,28 +151,6 @@ fn a_bar_starting_where_it_crosses_another_at_a_slant_is_refused() {
                 "{degrees}° {rule:?} (first first: {first_first}): {said:?}"
             );
         }
-    }
-}
-
-/// The second bar starts where the axes meet, at 120°: every fuse is refused
-/// `CannotNameWhichPieceOfACrossingThisIs` by `intersect`, before any
-/// arrangement. The flat surfaces that pick each half are to pass exactly
-/// through the meeting point `(11, −3.25, 0.5)`, and facing the stored
-/// directions they do not. That is Q1645's ground, in `rcad-geom`: a gap, by
-/// its own row.
-#[test]
-fn a_bar_starting_where_it_crosses_another_at_120_degrees_is_refused_naming_the_crossing() {
-    for (rule, first_first) in six_fuses() {
-        let said = fuse(120.0, [11.0, -3.25, 0.5], rule, first_first);
-        assert!(
-            matches!(
-                said,
-                Err(Error::Geometry(
-                    rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
-                ))
-            ),
-            "{rule:?} (first first: {first_first}): {said:?}"
-        );
     }
 }
 

@@ -674,8 +674,8 @@ between "cannot" and "we chose not to", which §24.17 is about.
 > where the cross does, `CannotTellTheCellsOfAFaceApart` (Q1622); at 120° they
 > get past the arrangement and are refused meshing a face or building a wire
 > (Q1656). The bars starting at `(11, −3.25, 0.5)` are refused as before
-> (Q1655, and Q1645 at 120°). `two_equal_bars_leaning_at_each_other.rs` pins
-> all four.*
+> (Q1655), and since Q1645 names the crossing at 120° that bar is refused the
+> same way. `two_equal_bars_leaning_at_each_other.rs` pins all of them.*
 
 > **2026-10-10 note (Q1645): a facing slid a few units in its last place names
 > 704 of the 1224, and the pair left pinned needs a picker that holds the exact
