@@ -2405,7 +2405,8 @@ fn a_ball_with_a_bar_through_its_centre_is_answered_under_every_rule() {
 
 /// A ball one rounding off a bar's axis crosses it in two quartic loops and
 /// not in two circles, and every fuse is refused meshing a face, under every
-/// rule both ways. The bar's axis runs up `z` through `(1, 0, 0)` and the
+/// rule both ways and under a tolerant policy as under a certified one, so it
+/// is not a question of how much the arithmetic may assume. The bar's axis runs up `z` through `(1, 0, 0)` and the
 /// ball's centre is the next `f64` past it along `x`, `2⁻⁵²` out; centred on
 /// `(1, 0, 0)` itself, the same pair is answered, as the pair above is.
 ///
@@ -2452,11 +2453,13 @@ fn a_ball_one_rounding_off_a_bars_axis_is_refused_meshing_every_fuse() {
                     Side::Under,
                 );
             } else {
-                let why = refusal(&mut model, &pair, rule, &Policy::certified());
-                assert!(
-                    refused_meshing_a_ball_one_rounding_off_a_bars_axis(&why, rule, ball_first),
-                    "{rule:?}, the ball first {ball_first}: refused with {why:?}"
-                );
+                for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+                    let why = refusal(&mut model, &pair, rule, &policy);
+                    assert!(
+                        refused_meshing_a_ball_one_rounding_off_a_bars_axis(&why, rule, ball_first),
+                        "{policy:?}, {rule:?}, the ball first {ball_first}: refused with {why:?}"
+                    );
+                }
             }
         }
     }
