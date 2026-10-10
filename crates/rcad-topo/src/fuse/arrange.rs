@@ -8034,13 +8034,15 @@ fn how_a_crossing_runs(
             }
         }
     }
-    // Everything left is either a conic or a quartic, and only the conic can be
-    // ordered: three points on a convex curve run round it in the order they
-    // wind, which is one determinant (§34.5). A quartic closes too — a ball
-    // crossing a pipe leaves loops — so *finding a place to start* on one says
-    // nothing about being able to order it, and reading the two as the same
-    // question is what gave a ball with a pipe through it four pieces where it
-    // has three.
+    // Everything left is either a conic or a quartic. A conic is ordered by one
+    // determinant: three points on a convex curve run round it in the order
+    // they wind (§34.5). A quartic is ordered only where it runs once round an
+    // axis, so that looked at down the axis it is a circle: the two loops a fat
+    // pipe crosses a thin one in, and the two a ball crosses a pipe in. The one
+    // loop a ball reaching into a pipe's side leaves closes too, so *finding a
+    // place to start* on a quartic says nothing about being able to order it,
+    // and reading the two as the same question is what gave a ball with a pipe
+    // through it four pieces where it has three.
     if let EdgeRun::RightRoundWhereItCrosses {
         and: level @ Surface::Plane(_),
     } = run.run()
@@ -8755,8 +8757,8 @@ fn along_a_bend(
 /// The same arms [`which_comes_first_round_a_crossing`] can answer about, asked
 /// before anything is built rather than after (§34.10's last two rows), and
 /// three arms more: a cone against a pipe, a second cone or a ball. A ball
-/// against a pipe is one of the arms the ordering answers, and only where the
-/// ball is centred on the pipe's axis.
+/// against a pipe is one of the arms the ordering answers, and this says `true`
+/// only where the ball is centred on the pipe's axis.
 ///
 /// # A cone against a pipe, a cone or a ball winds its circle about their shared axis
 ///
@@ -8788,10 +8790,18 @@ fn along_a_bend(
 /// unlike the cone rows, the kind of the run says nothing about which this is.
 /// So this asks: [`how_far_a_ball_sits_off_a_pipes_axis`], exactly, and only
 /// [`Decision::Zero`] is a circle. A centre off the axis by one rounding is a
-/// quartic and is refused, and a centre that cannot be placed either way is
+/// quartic and is no conic, and a centre that cannot be placed either way is
 /// refused as undecidable rather than read as either. The ordering asks the
 /// same exact question again, of the same stored numbers, before it winds the
 /// circle about the axis.
+///
+/// A quartic is not refused for being one. Where the ball swallows the pipe's
+/// whole cross-section, on the axis or off it, `intersect` names the two loops
+/// as parts of the crossing, and [`one_of_two_loops_round_a_pipe_through_a_ball`]
+/// lets those through beside this whatever it says (Q1554): each loop runs once
+/// round the pipe's axis, and the ordering reads it down that axis. A ball off
+/// the axis whose crossing is one loop is the whole of the crossing, passes
+/// neither gate, and is refused here.
 ///
 /// A ball inscribed in the pipe touches it round one circle rather than
 /// crossing it, and passes this gate as well. Nothing orders along a touch:
@@ -8831,8 +8841,11 @@ fn along_a_bend(
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when a ball's centre can
 /// be shown neither on a pipe's axis nor off it. Neither answer is the safe
-/// reading: `true` orders a quartic loop as a circle, and `false` refuses two
-/// circles under a name that says nothing ran out.
+/// reading: `true` calls the one loop of a ball reaching into the pipe's side a
+/// conic, and `false` refuses the one circle of a ball inscribed in the pipe
+/// under a name that says nothing ran out. The two loops either side of the
+/// centre would pass beside this either way, and are refused here too, since
+/// `how_a_crossing_runs` asks this first.
 fn a_pair_that_crosses_in_a_conic(
     one: &Surface,
     other: &Surface,
@@ -8841,7 +8854,9 @@ fn a_pair_that_crosses_in_a_conic(
     Ok(match (one, other) {
         // A ball centred on a pipe's axis crosses it in two circles square to
         // the axis, and a ball off it in quartic loops `intersect` names with
-        // the same runs, so only the placement can tell the two apart.
+        // the same runs, so only the placement can tell the two apart. The two
+        // loops are ordered all the same, through
+        // `one_of_two_loops_round_a_pipe_through_a_ball` beside this.
         (Surface::Sphere(ball), Surface::Cylinder(pipe))
         | (Surface::Cylinder(pipe), Surface::Sphere(ball)) => {
             match how_far_a_ball_sits_off_a_pipes_axis(ball, pipe) {
@@ -11834,17 +11849,22 @@ mod what_the_curved_arrangement_reaches {
         }
     }
 
-    /// A ball with a bar through its centre is cut in three — the cap above,
-    /// the band, the cap below — and a ball with a bar through it off its
-    /// centre is refused by name.
+    /// A ball with a bar through it is cut in three — the cap above, the band,
+    /// the cap below — and the bar's wall in three, whether the bar runs
+    /// through the ball's centre or half a unit off it.
     ///
     /// Through the centre the two cross in two circles square to the bar's
     /// axis, and off it in quartic loops, which `intersect` names with the
     /// same runs. A quartic closes, so a place to start on it can be found —
-    /// and reading that as "so it can be ordered" is the mistake worth naming:
-    /// it gave the ball four pieces where it has three, silently, until the
-    /// two questions were told apart. They are told apart by the placement,
-    /// asked exactly ([`how_far_a_ball_sits_off_a_pipes_axis`]).
+    /// and reading that as "so it can be ordered" was the mistake worth
+    /// naming: it gave the ball four pieces where it has three, silently,
+    /// until the two questions were told apart by the placement, asked
+    /// exactly ([`how_far_a_ball_sits_off_a_pipes_axis`]). Off the axis the
+    /// loops were then refused, "nothing can put points in order along this
+    /// curve", until Q1554 ordered them: each of the two a ball swallowing the
+    /// bar's whole cross-section crosses it in runs once round the bar's axis,
+    /// and `rcad_geom`'s `the_way_a_loop_round_a_pipe_through_a_ball_winds`
+    /// reads it down that axis.
     ///
     /// **The three is the half-space's as well.** Each circle's walk lies
     /// outside the pipe on the band's side and inside it on the cap's, and
@@ -11852,25 +11872,12 @@ mod what_the_curved_arrangement_reaches {
     /// side of a circle the other circle's walk is on. Until
     /// [`Arrangement::whether_past_the_picker`] read a ball's side of a circle
     /// off the half-space through its centre, as it already did against a
-    /// cone, the band came out as two pieces and the ball as four.
-    ///
-    /// The quartic is a **gap** (§16.10): the pieces are there. What closes it
-    /// is `which_comes_first_round_a_crossing` learning to order a marched
-    /// loop.
+    /// cone, the band came out as two pieces and the ball as four. Since Q1554
+    /// [`Arrangement::whether_past_the_plane_through_a_balls_centre`] reads
+    /// that side off the surface, on the axis and off it.
     #[test]
-    fn a_ball_with_a_bar_through_its_centre_is_cut_in_three_and_one_off_it_is_refused() {
-        for (off, said_of_the_ball, said_of_the_wall) in [
-            (
-                0.0,
-                "ball cut by 1 -> [1, 2, 1]",
-                "pipe cut by 3 -> [2, 2, 2]",
-            ),
-            (
-                0.5,
-                "ball refused nothing can put points in order along this curve",
-                "pipe refused nothing can put points in order along this curve",
-            ),
-        ] {
+    fn a_ball_with_a_bar_through_it_is_cut_in_three_on_its_centre_and_off_it() {
+        for off in [0.0, 0.5] {
             let mut model =
                 Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
             let ball = model
@@ -11884,14 +11891,15 @@ mod what_the_curved_arrangement_reaches {
                 )
                 .expect("a bar right through it");
 
-            let said = what_it_cuts(&model, ball, bar);
-            assert!(
-                said.iter().any(|row| row == said_of_the_ball),
-                "the bar {off} off the centre: expected {said_of_the_ball:?}, got {said:?}"
-            );
-            assert!(
-                said.iter().any(|row| row == said_of_the_wall),
-                "the bar {off} off the centre: expected {said_of_the_wall:?}, got {said:?}"
+            assert_eq!(
+                what_it_cuts(&model, ball, bar),
+                [
+                    "ball cut by 1 -> [1, 2, 1]",
+                    "pipe cut by 3 -> [2, 2, 2]",
+                    "plane cut by 1 -> [1]",
+                    "plane cut by 1 -> [1]",
+                ],
+                "the bar {off} off the centre"
             );
         }
     }
