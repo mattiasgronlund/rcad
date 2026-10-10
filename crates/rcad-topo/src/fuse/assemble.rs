@@ -1057,13 +1057,28 @@ impl Assembly {
                 }
                 (true, false) => self.rest_on_the_outer_side_of(moving, staying),
                 (false, true) => self.rest_on_the_outer_side_of(staying, moving),
-                (false, false) => false,
+                (false, false) => {
+                    (self.one_plane_facing_one_way(staying)
+                        && self.rest_on_the_outer_side_of(moving, staying))
+                        || (self.one_plane_facing_one_way(moving)
+                            && self.rest_on_the_outer_side_of(staying, moving))
+                }
             }
         })
     }
 
     fn pieces_of_one_input_face(&self, [one, other]: [Dart; 2]) -> bool {
         self.faces[one.face].ancestors == self.faces[other.face].ancestors
+    }
+
+    fn one_plane_facing_one_way(&self, [one, other]: [Dart; 2]) -> bool {
+        match (
+            self.faces[one.face].surface.as_plane(),
+            self.faces[other.face].surface.as_plane(),
+        ) {
+            (Some(mine), Some(theirs)) => mine.agreement_with(theirs) == PlaneAgreement::SameWay,
+            (Some(_) | None, None) | (None, Some(_)) => false,
+        }
     }
 
     /// Whether two faces resting along a line lie on the side the face they
@@ -5646,6 +5661,12 @@ impl Corners {
         };
         for one_point in names_of_one_point {
             let kept = self.name_of(model, &one_point.kept, policy, log)?;
+            if std::env::var("PROBE_Q1633_FOLD").is_ok() && !one_point.folded.is_empty() {
+                eprintln!(
+                    "PROBEFOLD kept {:?} folded {:?}",
+                    one_point.kept, one_point.folded
+                );
+            }
             for (surfaces, which) in &one_point.folded {
                 let folded = CornerName::Meet(names_of_the_three_surfaces(surfaces), *which);
                 let (one, other) = (leader(&leads_to, kept), leader(&leads_to, folded));
