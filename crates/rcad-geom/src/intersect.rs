@@ -1809,11 +1809,16 @@ fn where_two_leaning_pipes_cross(
 /// passes exactly through it, and whatever [`HalfSpace::through_a_point_facing`]
 /// refuses. A **gap** (§16.10): the four halves are there and four corners
 /// apart, and what runs out is a point in `f64` that is exactly where the axes
-/// meet, or a facing short enough to dot with it exactly. Bores on `(3, 4, 0)`
-/// and `(3, 0, 4)` through `(11, −3.25, 0.5)` are refused for the second, and
-/// facings slid a few `2⁻⁵³` from the stored directions along `(0, 1, −1)` would
-/// have passed exactly through `c`
-/// (`bores_on_3_4_0_and_3_0_4_are_refused_though_their_four_halves_are_there`).
+/// meet, or a flat surface in `f64` that passes exactly through it. Bores on
+/// `(3, 4, 0)` and `(3, 0, 4)` through `(11, −3.25, 0.5)` were refused for the
+/// second until Q1645 slid each facing a few `2⁻⁵³` along `(0, 1, −1)`
+/// (`bores_on_3_4_0_and_3_0_4_are_picked_by_their_directions_slid_until_they_pass_exactly`).
+/// Bores on `(3, 4, 0)` and `(4, 0, 3)` through the same point are refused, and
+/// no other facing would do: up to a power of two, `f64` holds twelve facings
+/// in their flat, and none of them passes exactly through `c`
+/// (`no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3`).
+/// Naming those takes a picker that holds the exact `c` and a facing, rather
+/// than a flat surface written in `f64`.
 fn four_half_ellipses_where_two_pipes_of_one_width_meet(
     one: &Cylinder,
     other: &Cylinder,
@@ -1893,6 +1898,25 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
 /// coordinate plane and for two directions that are one whole-number triple
 /// scaled down, like `(1, 2, 2)/3` and `(2, 1, 2)/3`.
 ///
+/// A whole-number direction in the flat can still fail the lean: `(0, 1, −1)`
+/// in the flat of `(3, 4, 0)/5` and `(3, 0, 4)/5` reads as far along one as back
+/// along the other. **Then `own` is slid along it**, a step at a time, each step
+/// [`one_unit_in_the_last_place_of_what_it_moves`] long, up to
+/// [`LONGEST_SLIDE`] steps either way. A whole-number step keeps the facing in
+/// the flat when nothing rounds, and a few units in the last place keep it
+/// leaning as `own` does, so what the slide searches for is the one step count
+/// whose dot with `c` lands on a number `f64` holds. The constant says why 64
+/// steps are enough for short middles and what they are not enough for. Only
+/// the shortest whole-number triple along each line in the flat is slid along,
+/// since a multiple of it slides along the same line in coarser steps.
+///
+/// **Last come sums of `own` and `other`**: two to four of `own` and fewer of
+/// `other`, either way. Such a sum lies in the flat when nothing rounds, and
+/// leans towards `own` as anything holding more of it does. A few of them come
+/// out short even from the rounded stored directions: four of `(3, −6, 2)/7` and
+/// one of `(2, 3, 6)/7` add to exactly `(2, −3, 2)`. They go after the slide so
+/// that a pair the slide names keeps the surfaces it had.
+///
 /// # Errors
 ///
 /// Whatever [`HalfSpace::through_a_point_facing`] refuses.
@@ -1902,14 +1926,40 @@ fn a_flat_surface_through_where_the_walls_touch(
     other: Vector,
 ) -> Result<Option<HalfSpace>> {
     const WHOLE_NUMBERS: [f64; 5] = [0.0, 1.0, -1.0, 2.0, -2.0];
-    let whole_number_directions = WHOLE_NUMBERS.into_iter().flat_map(|x| {
-        WHOLE_NUMBERS
-            .into_iter()
-            .flat_map(move |y| WHOLE_NUMBERS.into_iter().map(move |z| Vector::new(x, y, z)))
+    let whole_numbers_in_the_flat: Vec<Vector> = WHOLE_NUMBERS
+        .into_iter()
+        .flat_map(|x| {
+            WHOLE_NUMBERS
+                .into_iter()
+                .flat_map(move |y| WHOLE_NUMBERS.into_iter().map(move |z| Vector::new(x, y, z)))
+        })
+        .filter(|&way| it_lies_exactly_in_the_flat_of(way, own, other))
+        .collect();
+    let ways_to_slide: Vec<Vector> = whole_numbers_in_the_flat
+        .iter()
+        .copied()
+        .filter(|&way| it_is_the_shortest_whole_number_step_along_its_line(way))
+        .collect();
+    let slid = (1..=LONGEST_SLIDE)
+        .flat_map(|steps| [steps, -steps])
+        .flat_map(|steps| {
+            ways_to_slide.iter().map(move |&way| {
+                own + way
+                    * (f64::from(steps) * one_unit_in_the_last_place_of_what_it_moves(own, way))
+            })
+        });
+    let mostly_own = (2..=4).flat_map(|more| {
+        (1..more)
+            .flat_map(|less| [less, -less])
+            .map(move |less| own * f64::from(more) + other * f64::from(less))
     });
-    for facing in core::iter::once(own).chain(whole_number_directions) {
-        if !(it_leans_towards(facing, own, other)
-            && it_lies_exactly_in_the_flat_of(facing, own, other))
+    for facing in core::iter::once(own)
+        .chain(whole_numbers_in_the_flat.iter().copied())
+        .chain(slid)
+        .chain(mostly_own)
+    {
+        if !(it_lies_exactly_in_the_flat_of(facing, own, other)
+            && it_leans_towards(facing, own, other))
         {
             continue;
         }
@@ -1919,6 +1969,75 @@ fn a_flat_surface_through_where_the_walls_touch(
         }
     }
     Ok(None)
+}
+
+/// How many steps a facing is slid either way along a whole-number way before
+/// [`a_flat_surface_through_where_the_walls_touch`] gives up on that way.
+///
+/// One step moves the facing's dot with the middle `c` by `δ = u·(way·c)`, with
+/// `u` the step [`one_unit_in_the_last_place_of_what_it_moves`] gives. Write
+/// `δ` as an odd number times `2ᵉ`. The dot has to land on the grid `f64` holds
+/// at its size, and when the dot has nothing below `2ᵉ` what is left to clear
+/// is the `k` bits from `2ᵉ` up to that grid. An odd number has an inverse
+/// modulo `2ᵏ`, so `2ᵏ` steps in a row run through every pattern of those `k`
+/// bits once, and one of them clears all `k`. The steps from `−N` to `N`,
+/// with `0` the stored direction itself, are `2N + 1` in a row, so they reach
+/// it whenever `2ᵏ ≤ 2N + 1` — as long as the slide neither carries the dot
+/// past a power of two, which moves the grid, nor rounds a component the way
+/// moves. Either one only loses a facing: the three exact checks still pass
+/// over whatever it gives.
+///
+/// `N = 64` covers `k ≤ 7`. That is the middle
+/// `the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece`
+/// uses, `(11, −3.25, 0.5)`: every component of that family's directions is
+/// above `¼`, so `u ≥ 2⁻⁵⁴`; `way·c` has nothing below `2⁻²`; so `δ` has nothing
+/// below `2⁻⁵⁶`. The dot is under `16`, so its grid is at most `2⁻⁴⁹`, and `k ≤ 7`.
+/// Measured there, `64` and `4096` both name 704 pairs of the 1224, and no
+/// facing is slid farther than `37·2⁻⁵³` in any component; `4096` makes that
+/// test ten times as slow, all of it in searches that find nothing.
+///
+/// **A short slide is not enough everywhere.** A middle whose coordinates are
+/// long binary fractions, like a decimal `1.85`, puts `k` near 52, and the step
+/// count would have to be solved for rather than searched. And when the dot has
+/// a bit below `2ᵉ`, no number of steps clears it.
+const LONGEST_SLIDE: i32 = 1 << 6;
+
+/// The coarsest step a slide takes: the unit in the last place of a number from
+/// `½` to `1`, where the largest component of a direction of length one lies.
+const ONE_UNIT_OF_A_SLIDE: f64 = f64::EPSILON / 2.0;
+
+/// The step a slide of `own` along `way` takes: the smallest unit in the last
+/// place among the components of `own` that `way` moves and that are not
+/// nothing, and never more than [`ONE_UNIT_OF_A_SLIDE`].
+///
+/// **The smallest and not one fixed unit**, because a component from `¼` to
+/// `½`, like `2/7` in `(2, 3, 6)/7`, sits on a grid of `2⁻⁵⁴`, and its dot with
+/// the middle has bits a step of `2⁻⁵³` cannot clear. A step finer than another
+/// moved component's grid rounds that component, and the facing it gives then
+/// leaves the flat and is passed over, so the finer step costs searches and
+/// never a wrong facing. In
+/// `the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece`
+/// a fixed `2⁻⁵³` names 644 of the 1224 pairs, where this names 704.
+fn one_unit_in_the_last_place_of_what_it_moves(own: Vector, way: Vector) -> f64 {
+    own.components()
+        .into_iter()
+        .zip(way.components())
+        .filter(|&(mine, step)| mine != 0.0 && step != 0.0)
+        .map(|(mine, _)| f64::from_bits(mine.abs().to_bits() + 1) - mine.abs())
+        .fold(ONE_UNIT_OF_A_SLIDE, f64::min)
+}
+
+/// Whether `way`, a triple of whole numbers from −2 to 2, is the one kept for
+/// its line: it has a component of `±1`, so it is no multiple of a shorter
+/// triple, and its first component that is not nothing is positive, so the
+/// same line is not slid along twice, once each way.
+fn it_is_the_shortest_whole_number_step_along_its_line(way: Vector) -> bool {
+    let components = way.components();
+    components.iter().any(|component| component.abs() == 1.0)
+        && components
+            .iter()
+            .find(|component| **component != 0.0)
+            .is_some_and(|first| *first > 0.0)
 }
 
 /// Whether `facing` reads positive against `own` and more against `own` than
