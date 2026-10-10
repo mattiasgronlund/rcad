@@ -1,5 +1,6 @@
-//! The shapes row Q1125 tried, looking for a fuse with a piece that no point
-//! placed because no ray could be fired at a ring (`docs/decisions.md` §35.6).
+//! The shapes rows Q1125 and Q1393 tried, looking for a fuse with a piece that
+//! no point placed because no ray could be fired at a ring
+//! (`docs/decisions.md` §35.6).
 //!
 //! `select.rs`'s `settle_against_each` folds
 //! `Containment::CannotFireARayAtAFacesSurface` into the undecided points, and
@@ -11,33 +12,68 @@
 //! a solid with a ring face, whose own ray has no exact line, **and** whose box
 //! grown to take in the exact point beside it meets a face of that solid, for
 //! all three targets (`classify.rs`'s `what_a_point_beside_it_says`, §323) —
-//! and that for every point offered inside the piece, with no side, corner or
-//! plane placing it after. A piece of a different surface is cut along where
-//! it meets the solid's skin, so its points sit clear of that skin, and a
-//! piece on the same surface is caught as lying on the face, or shown off it.
-//! What is left is a piece a rounding from a face of the solid, and every such
-//! family here was refused before a point was put to a ray: while the pieces
-//! were cut, or when no point was found inside a piece.
+//! and that for every point offered inside the piece, with no side, corner,
+//! plane or piece across placing it after. So every point offered lies within
+//! about one box, `3e-13`, of that solid's skin. A piece of a surface that
+//! crosses the skin is cut along it, so its points sit clear of it; a piece on
+//! the same surface is caught as lying on the face, or shown off it; and a
+//! sliver thinner than a box has no point found inside it at all. What is
+//! left is a piece a rounding off a face of the ring solid.
 //!
-//! Run with `settle_against_each`'s arm made to print, all 1755 tests of this
-//! crate's suite, every fuse here among them: it printed nine times, all in
-//! `a_bend_placed_a_quarter_turn_round_from_another_is_refused_before_a_ray`,
-//! whose pieces are cut since Q1392. Each piece whose point it printed for was
-//! placed by some other point or rule, and every one of those fuses is refused
-//! at a later piece no point was found inside. One test of that run,
-//! `a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_an_ulp_apart_are_refused`,
+//! Every surface in the fuse is one the ring is crossed with: a plane through
+//! the ring's axis or square to it, a ball, a pipe or a cone on the axis, or
+//! the ring itself. Any other is refused when the two are crossed
+//! (`rcad_geom::Error`'s two torus refusals), and that holds for the ring
+//! solid's own planes too: a block a bend grows out of is refused for its
+//! sides, under a quarter of a tube whose every surface the ring is crossed
+//! with. So the piece, and the face it is a rounding off, lie on such
+//! surfaces, and Q1393 tried each kind it could build:
+//!
+//! - a plane through the axis a rounding off a cap, placed there by a turn
+//!   whose cosine or sine rounds: two bends, and a quarter of a bar over a
+//!   bend;
+//! - a plane square to the axis a hair off a flat face: a quarter of a tube
+//!   under half a ring, and over the block a bend grows out of;
+//! - a pipe on the axis a hair off a pipe face: a bar on the inner wall, or a
+//!   tube round the outer wall, of half a ring joined to a quarter of a tube.
+//!   That solid is refused with each of them, and with a bar in its hole
+//!   touching nothing too, so this kind is not reached;
+//! - a torus a rounding off a torus: a bend and a copy of it moved a hair.
+//!
+//! A ball or a cone on the axis a hair off a face of its own kind was not
+//! tried.
+//!
+//! Run with `settle_against_each`'s arm made to print, every fuse here, only
+//! the placed bends reached it: 3 of their 54 fuses, ring 4 and tube 1 turned
+//! `−π/2`, the first bend named first, one fuse per rule. Each time the piece
+//! was the placed bend's cap on the plane whose normal is `(−2.2e-16, 1, 0)`,
+//! and its three points, at `(4, 8.9e-16, 0)`, `(4, 6.3e-16, 0)` and
+//! `(4, 8.9e-16, 0)`, could not be fired at the first bend's ring. Each of
+//! those pieces was then placed inside by a side, a corner, a plane or a piece
+//! across, and each fuse was refused at a later piece no point was found
+//! inside.
+//!
+//! Q1125's run, of all 1755 tests of this crate's suite with the arm made to
+//! print, printed nine times, all in the placed bends' test, and each piece it
+//! printed for was placed by some other point or rule too. One test of that
+//! run, `a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_an_ulp_apart_are_refused`,
 //! stopped at its first fuse; run again with all 24 of its fuses let through,
 //! it printed none.
 
 use core::f64::consts::{FRAC_PI_2, PI};
+use std::collections::BTreeMap;
 
-use rcad_geom::{Axis, Isometry, Scale, Vector};
+use rcad_geom::{
+    Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
+    Surface, Torus, Vector,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use smallvec::smallvec;
 
 mod rings;
 
-use rings::{a_bend_turned_and_written_out, a_quarter_bend};
+use rings::{a_bend_turned_and_written_out, a_quarter_bend, the_top_half_of_a_ring};
 
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
@@ -96,6 +132,10 @@ fn two_bends_turned_by_whole_quarter_turns_answer_every_rule() {
 /// another such plane by the planes' own numbers (Q1392). A box round a
 /// point of a piece of the wall is about `256 ε · 5`, `3e-13` across, so the
 /// hair would have to be thinner than about `6e-14` of a turn.
+///
+/// A whole turn, `2π`, is such a hair: its sine rounds to `−2.4e-16`, so the
+/// copy sits that far back round the ring. It is refused the same way, before
+/// a ray.
 #[test]
 fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() {
     for (turn, said) in [
@@ -104,6 +144,7 @@ fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() 
         (1e-13, Some("a point inside a piece of a face")),
         (3e-14, Some("a point inside a piece of a face")),
         (1e-14, Some("a point inside a piece of a face")),
+        (2.0 * PI, Some("a point inside a piece of a face")),
     ] {
         for rule in EVERY_RULE {
             for the_first_first in [true, false] {
@@ -111,7 +152,7 @@ fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() 
                     format!("{turn:e} of a turn, {rule:?}, the first first {the_first_first}");
                 let mut model = a_model();
                 let first = a_quarter_bend(&mut model, 4.0, 1.0);
-                let placed = a_quarter_bend_placed_round_by(&mut model, turn);
+                let placed = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, turn);
                 let fused = fused_or_refused(&mut model, first, placed, rule, the_first_first);
                 expect(fused, said, &what);
             }
@@ -120,10 +161,10 @@ fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() 
 }
 
 /// A quarter bend and a copy placed a quarter turn either way round, or half a
-/// turn, by `place_solid` rather than written out: `cos(π/2)` and `sin(π)` are
-/// not nought, so the copy's caps lie on planes through the ring's axis a
-/// rounding off the first bend's, the shape two cubes a rounding apart are
-/// (`tests/two_turned_cubes_a_rounding_apart.rs`).
+/// turn, by `place_solid` rather than written out, for three rings:
+/// `cos(π/2)` and `sin(π)` are not nought, so the copy's caps lie on planes
+/// through the ring's axis a rounding off the first bend's, the shape two
+/// cubes a rounding apart are (`tests/two_turned_cubes_a_rounding_apart.rs`).
 ///
 /// The pieces are cut: a point of one bend's cap rim, a rounding off the
 /// other's cap plane, is put on its side of that plane by the two planes' own
@@ -132,18 +173,268 @@ fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() 
 /// bend's wall between the two holds no point the search offers. Every rule
 /// both ways round is refused `Undecidable` at `a point inside a piece of a
 /// face`, though the same two bends written out answer
-/// (`two_bends_turned_by_whole_quarter_turns_answer_every_rule`).
+/// (`two_bends_turned_by_whole_quarter_turns_answer_every_rule`). These are
+/// the only fuses here whose points reach the arm that folds the refusal; the
+/// header says which.
 #[test]
 fn a_bend_placed_a_quarter_turn_round_from_another_is_refused_before_a_ray() {
+    for (ring, tube) in [(4.0, 1.0), (1.0, 0.5), (2.0, 1.0)] {
+        for turn in [FRAC_PI_2, -FRAC_PI_2, PI] {
+            for rule in EVERY_RULE {
+                for the_first_first in [true, false] {
+                    let what = format!(
+                        "ring {ring}, tube {tube}, {turn} round, {rule:?}, \
+                         the first first {the_first_first}"
+                    );
+                    let mut model = a_model();
+                    let first = a_quarter_bend(&mut model, ring, tube);
+                    let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, turn);
+                    let refused =
+                        fused_or_refused(&mut model, first, placed, rule, the_first_first);
+                    expect(refused, Some("a point inside a piece of a face"), &what);
+                }
+            }
+        }
+    }
+}
+
+/// A quarter of a round bar of radius 6, `z` from −2 to 2, holds a quarter
+/// bend of ring 4 and tube 1 whole, its two flat faces on the planes of the
+/// bend's two caps. Where it sits, every rule both ways round answers and
+/// validates.
+///
+/// Placed round a quarter turn either way, or half a turn, its flat faces lie
+/// on planes through the ring's axis a rounding off the bend's caps, as the
+/// placed bend's caps do in
+/// `a_bend_placed_a_quarter_turn_round_from_another_is_refused_before_a_ray`.
+/// Every rule both ways round is then refused `Undecidable` at `order along a
+/// crossing` while the pieces are cut, before any point is put to a ray.
+#[test]
+fn a_quarter_of_a_bar_placed_round_from_a_bend_in_it_is_refused_before_a_ray() {
+    for rule in EVERY_RULE {
+        for the_bend_first in [true, false] {
+            let what = format!("where it sits, {rule:?}, the bend first {the_bend_first}");
+            let mut model = a_model();
+            let bend = a_quarter_bend(&mut model, 4.0, 1.0);
+            let quarter = a_quarter_of_a_bar(&mut model);
+            let solids = fused(&mut model, bend, quarter, rule, the_bend_first, &what);
+            let expected = match rule {
+                Rule::Union | Rule::Intersection => 1,
+                Rule::Difference if the_bend_first => 0,
+                Rule::Difference => 1,
+                other => panic!("not a rule this tries: {other:?}"),
+            };
+            assert_eq!(solids, expected, "{what}");
+        }
+    }
     for turn in [FRAC_PI_2, -FRAC_PI_2, PI] {
         for rule in EVERY_RULE {
+            for the_bend_first in [true, false] {
+                let what = format!("{turn} round, {rule:?}, the bend first {the_bend_first}");
+                let mut model = a_model();
+                let bend = a_quarter_bend(&mut model, 4.0, 1.0);
+                let quarter = a_quarter_of_a_bar(&mut model);
+                model
+                    .place_solid(
+                        quarter,
+                        &Isometry::rotation(&Axis::z(), turn).expect("a real angle"),
+                    )
+                    .expect("this model made the key");
+                let refused = fused_or_refused(&mut model, bend, quarter, rule, the_bend_first);
+                expect(refused, Some("order along a crossing"), &what);
+            }
+        }
+    }
+}
+
+/// A quarter of a thick tube about `z`, radii 2 to 6, `z` from −1.5 to 0, under
+/// the top half of a ring of 4 round a tube of 1: the quarter's top lies on the
+/// half ring's flat face. Where it sits, and moved down 1 and back up 1, every
+/// rule both ways round answers and validates.
+///
+/// Moved up or down by a hair, its top is a plane square to the ring's axis a
+/// hair off that flat face. Every rule both ways round is then refused
+/// `Undecidable` at `order along a crossing` while the pieces are cut, before
+/// any point is put to a ray: for hairs of a rounding, `1.1e-16` up and
+/// `5.6e-17` down, for `1e-12`, and for a quarter either way, which no rounding
+/// is in and which is a refusal of its own.
+#[test]
+fn a_quarter_of_a_tube_a_hair_under_half_a_ring_is_refused_before_a_ray() {
+    for moves in [&[][..], &[-1.0, 1.0]] {
+        for rule in EVERY_RULE {
+            for the_ring_first in [true, false] {
+                let what = format!("moved by {moves:?}, {rule:?}, the ring first {the_ring_first}");
+                let mut model = a_model();
+                let ring =
+                    the_top_half_of_a_ring(&mut model, 4.0, 1.0, false).expect("a half ring");
+                let quarter = a_quarter_of_a_tube_moved_by(&mut model, moves);
+                let solids = fused(&mut model, ring, quarter, rule, the_ring_first, &what);
+                let expected = match rule {
+                    Rule::Union | Rule::Difference => 1,
+                    Rule::Intersection => 0,
+                    other => panic!("not a rule this tries: {other:?}"),
+                };
+                assert_eq!(solids, expected, "{what}");
+            }
+        }
+    }
+    for hair in [
+        1.110_223_024_625_156_5e-16,
+        -5.551_115_123_125_783e-17,
+        1e-12,
+        0.25,
+        -0.25,
+    ] {
+        for rule in EVERY_RULE {
+            for the_ring_first in [true, false] {
+                let what = format!("moved by {hair:e}, {rule:?}, the ring first {the_ring_first}");
+                let mut model = a_model();
+                let ring =
+                    the_top_half_of_a_ring(&mut model, 4.0, 1.0, false).expect("a half ring");
+                let quarter = a_quarter_of_a_tube_moved_by(&mut model, &[hair]);
+                let refused = fused_or_refused(&mut model, ring, quarter, rule, the_ring_first);
+                expect(refused, Some("order along a crossing"), &what);
+            }
+        }
+    }
+}
+
+/// The block a bend grows out of in `tests/a_point_beside_a_turned_flat_face.rs`
+/// under a quarter of a thick tube about `z`, radii 1.5 to 7, in `x >= 0,
+/// y <= 0`, `z` from 2 to 3.5: the quarter's bottom lies on the block's top.
+/// The quarter's surfaces are two planes through the ring's axis, two square
+/// to it and two pipes on it, every one a surface the ring is crossed with.
+///
+/// Where it sits, and moved up or down `z` by a rounding at 2, by `1e-15` or
+/// by `1e-13`, every rule both ways round is refused
+/// `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`. No plane of the quarter is
+/// such a plane, so the plane refused is one of the block's own sides that are
+/// parallel to the ring's axis and not through it.
+#[test]
+fn a_quarter_of_a_tube_over_a_block_a_bend_grows_out_of_is_refused_for_the_blocks_sides() {
+    let a_rounding_at_2 = 4.440_892_098_500_626e-16;
+    for moves in [
+        &[][..],
+        &[a_rounding_at_2],
+        &[-a_rounding_at_2],
+        &[1e-15],
+        &[-1e-15],
+        &[1e-13],
+        &[-1e-13],
+    ] {
+        for rule in EVERY_RULE {
+            for the_block_first in [true, false] {
+                let what =
+                    format!("moved by {moves:?}, {rule:?}, the block first {the_block_first}");
+                let mut model = a_model();
+                let block = a_bend_out_of_a_block(&mut model)
+                    .expect("a bend growing out of a block's side");
+                let quarter = a_quarter_of_a_tube(
+                    &mut model,
+                    [[0.0, 0.0], [0.0, -10.0], [10.0, 0.0]],
+                    (1.5, 7.0),
+                    2.0,
+                    moves,
+                );
+                let refused = fused_or_refused(&mut model, block, quarter, rule, the_block_first);
+                assert!(
+                    matches!(
+                        refused,
+                        Err(Error::Geometry(
+                            rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic
+                        ))
+                    ),
+                    "{what}: {refused:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The top half of a ring of 4 round a tube of 1 joined to the quarter of a
+/// tube under it in
+/// `a_quarter_of_a_tube_a_hair_under_half_a_ring_is_refused_before_a_ray`,
+/// fused with something about `z` from −1.4 to −1.2, which reaches only the
+/// quarter: a round bar of radius 0.5, in the hole and touching nothing; one
+/// of 2, on the quarter's inner wall, or a rounding or `1e-13` off it; one of
+/// 2.5, through that wall; or a bar of 9 less one of 6, round the quarter's
+/// outer wall, or a rounding off it.
+///
+/// Every rule both ways round is refused `CannotTellTheCellsOfAFaceApart`, the
+/// bar touching nothing too, so a pipe a hair off a pipe face of this solid is
+/// refused before any piece is placed.
+#[test]
+fn half_a_ring_joined_to_a_quarter_of_a_tube_is_refused_with_a_bar_in_it_or_a_tube_round_it() {
+    let a_rounding_at_2 = 4.440_892_098_500_626e-16;
+    let a_rounding_at_6 = 8.881_784_197_001_252e-16;
+    let a_bar: fn(&mut Model, f64) -> SolidKey = a_thin_bar;
+    let a_tube: fn(&mut Model, f64) -> SolidKey = a_thin_tube_with_a_hole_of;
+    for (radius, made) in [
+        (0.5, a_bar),
+        (2.0, a_bar),
+        (2.0 + a_rounding_at_2, a_bar),
+        (2.0 - a_rounding_at_2 / 2.0, a_bar),
+        (2.0 + 1e-13, a_bar),
+        (2.5, a_bar),
+        (6.0, a_tube),
+        (6.0 - a_rounding_at_6, a_tube),
+        (6.0 + a_rounding_at_6, a_tube),
+    ] {
+        for rule in EVERY_RULE {
+            for the_ring_first in [true, false] {
+                let what = format!("radius {radius:e}, {rule:?}, the ring first {the_ring_first}");
+                let mut model = a_model();
+                let ring = half_a_ring_joined_to_a_quarter_of_a_tube(&mut model);
+                let round_it = made(&mut model, radius);
+                let refused = fused_or_refused(&mut model, ring, round_it, rule, the_ring_first);
+                assert!(
+                    matches!(refused, Err(Error::CannotTellTheCellsOfAFaceApart { .. })),
+                    "{what}: {refused:?}"
+                );
+            }
+        }
+    }
+}
+
+/// A quarter bend and a copy moved a rounding off it, so the copy's ring is a
+/// rounding off the first's: refused when the two are crossed, before anything
+/// is cut. Moved up the axis by `1e-15` or `1e-12`, the two rings are two
+/// curved surfaces nothing here crosses,
+/// `ACrossingBetweenATorusAndAnotherCurvedSurface`. Tipped round `x` by `2π`,
+/// the copy's axis leans a rounding off `z`, so neither bend's caps lie on a
+/// plane through the other's axis, `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`.
+/// Turned round `z` by `2π` is a hair round the ring, in
+/// `a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray`.
+#[test]
+fn a_bend_and_a_copy_moved_a_rounding_off_it_are_refused_when_crossed() {
+    for (moved, refusal) in [
+        (
+            at_height(1e-15),
+            rcad_geom::Error::ACrossingBetweenATorusAndAnotherCurvedSurface,
+        ),
+        (
+            at_height(1e-12),
+            rcad_geom::Error::ACrossingBetweenATorusAndAnotherCurvedSurface,
+        ),
+        (
+            Isometry::rotation(&Axis::x(), 2.0 * PI).expect("a real angle"),
+            rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic,
+        ),
+    ] {
+        for rule in EVERY_RULE {
             for the_first_first in [true, false] {
-                let what = format!("{turn} round, {rule:?}, the first first {the_first_first}");
+                let what = format!("{moved:?}, {rule:?}, the first first {the_first_first}");
                 let mut model = a_model();
                 let first = a_quarter_bend(&mut model, 4.0, 1.0);
-                let placed = a_quarter_bend_placed_round_by(&mut model, turn);
-                let refused = fused_or_refused(&mut model, first, placed, rule, the_first_first);
-                expect(refused, Some("a point inside a piece of a face"), &what);
+                let copy = a_quarter_bend(&mut model, 4.0, 1.0);
+                model
+                    .place_solid(copy, &moved)
+                    .expect("this model made the key");
+                let refused = fused_or_refused(&mut model, first, copy, rule, the_first_first);
+                assert!(
+                    matches!(&refused, Err(Error::Geometry(why)) if *why == refusal),
+                    "{what}: expected {refusal:?}, got {refused:?}"
+                );
             }
         }
     }
@@ -204,8 +495,8 @@ fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
 }
 
-fn a_quarter_bend_placed_round_by(model: &mut Model, turn: f64) -> SolidKey {
-    let bend = a_quarter_bend(model, 4.0, 1.0);
+fn a_quarter_bend_placed_round_by(model: &mut Model, ring: f64, tube: f64, turn: f64) -> SolidKey {
+    let bend = a_quarter_bend(model, ring, tube);
     model
         .place_solid(
             bend,
@@ -213,6 +504,274 @@ fn a_quarter_bend_placed_round_by(model: &mut Model, turn: f64) -> SolidKey {
         )
         .expect("this model made the key");
     bend
+}
+
+/// The quarter of a round bar of radius 6 about `z` in `x, y >= 0`, `z` from
+/// −2 to 2: the prism over the triangle `(0, 0)`, `(12, 0)`, `(0, 12)` less
+/// what is outside the bar.
+fn a_quarter_of_a_bar(model: &mut Model) -> SolidKey {
+    let policy = Policy::certified();
+    let triangle = ProfileBuilder::new(vec![[0.0, 0.0], [12.0, 0.0], [0.0, 12.0]])
+        .build(&policy, &mut ProvenanceLog::new())
+        .expect("a triangle");
+    let prism = model
+        .add_extrusion(&triangle, 4.0, &at_height(-2.0))
+        .expect("a prism");
+    let bar = model
+        .add_round_bar(6.0, 6.0, &at_height(-3.0))
+        .expect("a round bar");
+    let answer = model
+        .fuse(
+            &[prism],
+            &[bar],
+            Rule::Intersection,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a prism and a bar on its corner answer");
+    let &[quarter] = answer.solids() else {
+        panic!("one quarter, got {:?}", answer.solids());
+    };
+    quarter
+}
+
+/// The top half of a ring of 4 round a tube of 1, joined to the quarter of a
+/// tube under it whose top lies on the half ring's flat face.
+fn half_a_ring_joined_to_a_quarter_of_a_tube(model: &mut Model) -> SolidKey {
+    let half = the_top_half_of_a_ring(model, 4.0, 1.0, false).expect("a half ring");
+    let quarter = a_quarter_of_a_tube_moved_by(model, &[]);
+    let answer = model
+        .fuse(
+            &[half],
+            &[quarter],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a half ring and the quarter of a tube under it answer");
+    let &[ring] = answer.solids() else {
+        panic!("one solid, got {:?}", answer.solids());
+    };
+    ring
+}
+
+/// The quarter of a thick tube about `z`, radii 2 to 6, in `x, y >= 0`, `z`
+/// from −1.5 to 0, then placed up `z` by each of `moves` in turn.
+///
+/// The quarter is built where it sits and moved after: a prism built a hair
+/// off `z = 0`, with its bottom at −0.3 or −0.5, was refused `order along a
+/// crossing` while the quarter itself was cut.
+fn a_quarter_of_a_tube_moved_by(model: &mut Model, moves: &[f64]) -> SolidKey {
+    a_quarter_of_a_tube(
+        model,
+        [[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]],
+        (2.0, 6.0),
+        -1.5,
+        moves,
+    )
+}
+
+/// The prism over `triangle`, with its corner on the `z` axis, from `bottom`
+/// to 1.5 above it, less what is inside a round bar about `z` of radius
+/// `inside` and what is outside one of radius `outside`, then placed up `z` by
+/// each of `moves` in turn.
+fn a_quarter_of_a_tube(
+    model: &mut Model,
+    triangle: [[f64; 2]; 3],
+    (inside, outside): (f64, f64),
+    bottom: f64,
+    moves: &[f64],
+) -> SolidKey {
+    let policy = Policy::certified();
+    let triangle = ProfileBuilder::new(triangle.to_vec())
+        .build(&policy, &mut ProvenanceLog::new())
+        .expect("a triangle");
+    let prism = model
+        .add_extrusion(&triangle, 1.5, &at_height(bottom))
+        .expect("a prism");
+    let outer = model
+        .add_round_bar(outside, 6.0, &at_height(bottom - 1.5))
+        .expect("a round bar");
+    let inner = model
+        .add_round_bar(inside, 6.0, &at_height(bottom - 1.5))
+        .expect("a round bar");
+    let answer = model
+        .fuse(
+            &[prism],
+            &[outer],
+            Rule::Intersection,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a prism and a bar on its corner answer");
+    let &[quarter] = answer.solids() else {
+        panic!("one quarter of a bar, got {:?}", answer.solids());
+    };
+    let answer = model
+        .fuse(
+            &[quarter],
+            &[inner],
+            Rule::Difference,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a quarter of a bar less a thinner bar answers");
+    let &[quarter] = answer.solids() else {
+        panic!("one quarter of a tube, got {:?}", answer.solids());
+    };
+    for &up in moves {
+        model
+            .place_solid(quarter, &at_height(up))
+            .expect("this model made the key");
+    }
+    quarter
+}
+
+/// The block of `tests/a_point_beside_a_turned_flat_face.rs`, `[2, 6] × [−2, 0]
+/// × [−2, 2]`, with a quarter bend of ring four and tube one growing out of its
+/// side `y = 0`, unturned. That side holds the bend's first cap circle as a
+/// hole, walked the way round that builds; the bend's wall walks it the other
+/// way. The other five sides are rectangles.
+fn a_bend_out_of_a_block(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    let mut builder = SolidBuilder::new();
+    let mut corners = BTreeMap::new();
+    for x in [2, 6] {
+        for y in [-2, 0] {
+            for z in [-2, 2] {
+                let at = Point::new(f64::from(x), f64::from(y), f64::from(z));
+                corners.insert([x, y, z], builder.add_vertex(at)?);
+            }
+        }
+    }
+    let start_corner = builder.add_vertex(Point::new(3.0, 0.0, 0.0))?;
+    let end_corner = builder.add_vertex(Point::new(0.0, 3.0, 0.0))?;
+    let flat_through_the_middle =
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+            .expect("the z axis is a unit normal");
+    let seam = builder.add_edge(
+        start_corner,
+        end_corner,
+        EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(flat_through_the_middle),
+            picked_by: smallvec![
+                Picker::InsideAPipe(Cylinder::new(Axis::z(), 4.0).expect("the ring's radius")),
+                Picker::from(
+                    HalfSpace::new(Vector::new(1.0, 1.0, 0.0), 0.0)
+                        .expect("a normal with a length")
+                ),
+            ],
+        },
+    )?;
+    let cap_circle = builder.add_edge(
+        start_corner,
+        start_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
+    let end_circle = builder.add_edge(
+        end_corner,
+        end_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
+
+    let mut straight = BTreeMap::new();
+    let mut shell = Vec::with_capacity(8);
+    for (normal, round) in [
+        ([0, 1, 0], [[2, 0, -2], [2, 0, 2], [6, 0, 2], [6, 0, -2]]),
+        (
+            [0, -1, 0],
+            [[2, -2, -2], [6, -2, -2], [6, -2, 2], [2, -2, 2]],
+        ),
+        ([1, 0, 0], [[6, -2, -2], [6, 0, -2], [6, 0, 2], [6, -2, 2]]),
+        ([-1, 0, 0], [[2, -2, -2], [2, -2, 2], [2, 0, 2], [2, 0, -2]]),
+        ([0, 0, 1], [[2, -2, 2], [6, -2, 2], [6, 0, 2], [2, 0, 2]]),
+        (
+            [0, 0, -1],
+            [[2, -2, -2], [2, 0, -2], [6, 0, -2], [6, -2, -2]],
+        ),
+    ] {
+        let mut steps = Vec::with_capacity(4);
+        for position in 0..4 {
+            let from = round[position];
+            let to = round[(position + 1) % 4];
+            let (edge, turn) = if let Some(&edge) = straight.get(&(to, from)) {
+                (edge, Orientation::Reversed)
+            } else {
+                let edge = builder.add_edge(corners[&from], corners[&to], EdgeRun::Straight)?;
+                straight.insert((from, to), edge);
+                (edge, Orientation::Forward)
+            };
+            steps.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
+        }
+        let mut wires = vec![builder.add_wire(&steps)?];
+        if normal == [0, 1, 0] {
+            let round_the_cap = builder.add_coedge(cap_circle, Orientation::Forward)?;
+            wires.push(builder.add_wire(&[DraftStep::Along(round_the_cap)])?);
+        }
+        let [x, y, z] = normal.map(f64::from);
+        let on_it = round[0].map(f64::from);
+        let plane = Plane::from_point_and_normal(
+            Point::new(on_it[0], on_it[1], on_it[2]),
+            Vector::new(x, y, z),
+        )
+        .expect("a coordinate direction is a unit normal");
+        shell.push((
+            builder.add_face(Surface::Plane(plane), &wires)?,
+            Orientation::Forward,
+        ));
+    }
+
+    let end_cap = {
+        let plane = Plane::from_point_and_normal(Point::origin(), Vector::new(-1.0, 0.0, 0.0))
+            .expect("a coordinate direction is a unit normal");
+        let coedge = builder.add_coedge(end_circle, Orientation::Reversed)?;
+        let wire = builder.add_wire(&[DraftStep::Along(coedge)])?;
+        builder.add_face(Surface::Plane(plane), &[wire])?
+    };
+    let mut round_the_wall = Vec::with_capacity(4);
+    for (edge, turn) in [
+        (cap_circle, Orientation::Reversed),
+        (seam, Orientation::Forward),
+        (end_circle, Orientation::Forward),
+        (seam, Orientation::Reversed),
+    ] {
+        round_the_wall.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
+    }
+    let wire = builder.add_wire(&round_the_wall)?;
+    let ring = Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower than its ring");
+    let wall = builder.add_face(Surface::Torus(ring), &[wire])?;
+    shell.push((end_cap, Orientation::Forward));
+    shell.push((wall, Orientation::Forward));
+    builder.add_shell(&shell)?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// A round bar about `z` of radius 9, `z` from −1.4 to −1.2, less one of
+/// radius `hole`.
+fn a_thin_tube_with_a_hole_of(model: &mut Model, hole: f64) -> SolidKey {
+    let bar = a_thin_bar(model, 9.0);
+    let core = model
+        .add_round_bar(hole, 1.0, &at_height(-2.0))
+        .expect("a round bar");
+    let answer = model
+        .fuse(
+            &[bar],
+            &[core],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar less a thinner, taller bar answers");
+    let &[tube] = answer.solids() else {
+        panic!("one tube, got {:?}", answer.solids());
+    };
+    tube
+}
+
+/// A round bar about `z` of `radius`, `z` from −1.4 to −1.2.
+fn a_thin_bar(model: &mut Model, radius: f64) -> SolidKey {
+    model
+        .add_round_bar(radius, 0.2, &at_height(-1.4))
+        .expect("a round bar")
 }
 
 /// The prism over the triangle `(0, 0)`, `(10, −10)`, `(10, −hair)` from
