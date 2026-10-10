@@ -44,10 +44,21 @@
 //! point, and every answer is the two as they stand. That was a gap, refused
 //! for want of a point inside a piece of a face, until queue row Q1279 let a
 //! plane place a piece with corners on it (`docs/decisions.md` §365.8).
+//!
+//! **Turned, the edge can lie on the top exactly and the union still be
+//! refused** (queue row Q1281). A wedge, the triangle `(0, 0)`, `(1, √3)`,
+//! `(0, √3)`, its upright wall rising from its edge and its other wall leaning
+//! with a normal whose `y` is exactly minus a half, lies on the block's top, the two
+//! turned about `x` together. Turning rounds every plane but keeps the edge on
+//! the top. The union was refused `ResultIsNotManifold { count: 4 }` at 14 of
+//! 24 turns: the parting asked a corner at an end of the edge which side of the
+//! top it was on by the point it is written down as, the middle of a box, and
+//! on a tilted top that can sit a rounding inside. A corner of the top's own
+//! pieces is no longer asked.
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
-use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Fused, Measurement, Model, ProfileBuilder, Rule, SolidKey};
 
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
@@ -70,6 +81,21 @@ const LAID: [([f64; 3], f64); 5] = [
 /// Where a prism six long is moved to for its walls' rounding to leave its
 /// edge `3.1e-17` inside the block's top.
 const A_ROUNDING_INTO_THE_TOP: [f64; 3] = [-1.5, 0.0, 2.0];
+
+/// The block's outline, across `x` and down from `y = 0`.
+const THE_BLOCKS_OUTLINE: [[f64; 2]; 4] = [[-4.0, -3.0], [4.0, -3.0], [4.0, 0.0], [-4.0, 0.0]];
+
+/// `√3`, the double nearest it.
+const ROOT_THREE: f64 = 1.732_050_807_568_877_2;
+
+/// A wedge with its edge at the origin, an upright wall `x = 0` rising from
+/// it, and a wall leaning at sixty degrees whose normal has a `y` of exactly
+/// minus a half: its triangle is `(0, 0)`, `(1, √3)`, `(0, √3)`.
+const WEDGE: [[f64; 2]; 3] = [[0.0, 0.0], [1.0, ROOT_THREE], [0.0, ROOT_THREE]];
+
+/// How far the block and the wedge are turned about `x`, in fortieths of a
+/// radian: up to six tenths of one.
+const TURNS: std::ops::RangeInclusive<u8> = 1..=24;
 
 /// The regression: every rule both ways round, checked against volumes. The
 /// union is the block and the prism as they stood, two lumps; the
@@ -218,6 +244,97 @@ fn the_prism_with_its_edge_a_rounding_into_the_blocks_top_answers_as_if_on_it() 
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// **A wedge lying on its edge on a block's top, both turned about `x`**: every
+/// rule both ways round at every one of [`TURNS`], each solid of the answer
+/// checked against the turned solid it is, as it stood before the fuse
+/// ([`differs_from_as_they_stand`]). The edge lies on the turned top
+/// exactly (the test below), so the answers are those of the unturned prism:
+/// the union the two as they stand, the intersection no solid, and each
+/// difference its first solid whole.
+///
+/// **The union was refused `ResultIsNotManifold { count: 4 }`, both ways
+/// round, at 14 of the 24 turns** (queue row Q1281).
+/// `rest_on_the_outer_side_of` in `fuse/assemble.rs` asked each corner of the
+/// wedge's two walls which side of the top it was on, by the point the corner
+/// is written down as: the middle of the box round where three planes meet.
+/// On a tilted top that middle can be a rounding inside the top. At a turn of
+/// `0.075` the wedge's corner at the end `z = 2`, an end of its edge, was
+/// written down as `(0, −0.14985941454548474, 1.994377636224415)` and read as
+/// inside. A corner of the top's own pieces lies on the top by how it
+/// was made, and is no longer asked.
+#[test]
+fn a_wedge_lying_on_its_edge_on_a_turned_blocks_top_answers_every_rule_both_ways_round() {
+    let mut wrong = Vec::new();
+    for turn in TURNS.map(a_turn) {
+        let [block, wedge] = {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            a_turned_block_and_wedge(&mut model, turn).map(|solid| AsItStands::of(&model, solid))
+        };
+        for swapped in [false, true] {
+            for rule in EVERY_RULE {
+                let what = format!("turned {turn}, {rule:?}, wedge first {swapped}");
+                let (model, answer) =
+                    fuse(swapped, rule, |model| a_turned_block_and_wedge(model, turn));
+                let should: &[&AsItStands] = match (rule, swapped) {
+                    (Rule::Union, _) => &[&wedge, &block],
+                    (Rule::Intersection, _) => &[],
+                    (Rule::Difference, false) => &[&block],
+                    (Rule::Difference, true) => &[&wedge],
+                    _ => unreachable!("EVERY_RULE holds only these three"),
+                };
+                if let Some(why) = differs_from_as_they_stand(&model, answer, should) {
+                    wrong.push(format!("{what}: {why}"));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// **The turned wedge's edge lies on the turned top exactly**, at every one
+/// of [`TURNS`]: each end of it, the meet of its two walls and that end's
+/// plane, asked of the planes exactly.
+///
+/// The turn rounds every plane but keeps them meeting. The edge is where the
+/// upright wall `x = 0` meets the leaning wall, and the leaning wall's normal
+/// has a `y` of exactly minus a half, so turned, its `y` and `z` are exactly
+/// minus half the top's, which a turn about `x` leaves with no `x`. Both walls
+/// pass through the origin, as the top does, so on `x = 0` the leaning wall is
+/// the top turned round.
+#[test]
+fn the_turned_wedges_edge_is_on_the_turned_blocks_top_at_every_turn() {
+    assert_eq!(ROOT_THREE, 3.0_f64.sqrt());
+    let mut off = Vec::new();
+    for turn in TURNS.map(a_turn) {
+        let planes = planes_round_the_edge_turned(&turned_by(turn), |model| {
+            a_turned_block_and_wedge(model, turn)
+        });
+        let [x, y, z, offset] = planes.top;
+        let half_the_top_turned_round = |wall: &[f64; 4]| {
+            let [_, wall_y, wall_z, wall_offset] = *wall;
+            x == 0.0
+                && offset == 0.0
+                && wall_offset == 0.0
+                && [wall_y, wall_z] == [-y / 2.0, -z / 2.0]
+        };
+        let leaning = planes
+            .walls
+            .iter()
+            .filter(|wall| half_the_top_turned_round(wall))
+            .count();
+        let sides = sides_of_the_edge(&planes);
+        if leaning != 1 || sides != [Decision::Zero; 2] {
+            off.push(format!(
+                "turned {turn}: {leaning} walls half the top turned round, top {:?}, walls {:?}, \
+                 ends {sides:?}",
+                planes.top, planes.walls
+            ));
+        }
+    }
+    assert!(off.is_empty(), "{}", off.join("\n"));
+}
+
 /// The prism turned over and moved into the block, its edge on the top face
 /// from below: the triangle `(0, 0)`, `(−1, −2)`, `(3, −2)`, from `z = 2` to
 /// `z = 8`. The union is the block, the intersection the prism, and the prism
@@ -353,7 +470,8 @@ fn the_wall_that_turns_back_is_one_face_reaching_two_below_the_blocks_top() {
 /// **Queue row Q1117 guessed the union refused** `ResultIsNotManifold { count:
 /// 4 }`: `rest_on_the_outer_side_of` in `fuse/assemble.rs` parts the line only
 /// where every corner of the two faces resting along it is on the outer side
-/// of the top, and this wall has two corners at `y = −2`. It answers because
+/// of the top or a corner of the top's own pieces (queue row Q1281), and this
+/// wall has two corners at `y = −2`. It answers because
 /// what is asked is a piece of the wall, never the wall whole, and the fuse
 /// cuts each flat face along the line of every plane that crosses it, its own
 /// solid's and the other's (`fuse/cuts.rs`). That makes the piece along the
@@ -431,15 +549,7 @@ fn differs(model: &Model, answer: rcad_topo::Result<Fused>, should: &[f64]) -> O
         .solids()
         .iter()
         .map(|&solid| {
-            let measured = model
-                .solid(solid)
-                .expect("the fuse made it")
-                .measure(
-                    Deflection::of(0.01).expect("a positive length"),
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                )
-                .expect("a flat solid this size measures");
+            let measured = measured(model, solid);
             (measured.volume(), measured.volume_error())
         })
         .collect();
@@ -453,6 +563,108 @@ fn differs(model: &Model, answer: rcad_topo::Result<Fused>, should: &[f64]) -> O
             .all(|(&(volume, error), &should)| (volume - should).abs() <= error);
     (!agrees)
         .then(|| format!("solids of {found:?}, each with its error, and the answer is {should:?}"))
+}
+
+/// What is wrong with an answer that should be the solids in `should`, each as
+/// it stood before the fuse; `None` when nothing is.
+///
+/// Each solid of the answer must have the planes of one of them bit for bit,
+/// and its volume within what the two measures say they may be out by and what
+/// its corners' moves can add. **The corners move**: the fuse writes each one
+/// down again from the planes it is the meet of, a rounding or so from where
+/// the input had it, and moving the corners of a closed skin by at most `d`
+/// changes what it encloses by at most its area times `d`, near enough
+/// (`two_turned_cubes_a_rounding_apart.rs` has the argument). Turned by
+/// `0.175`, the block came back `8.5e-14` smaller where the two measures'
+/// errors add to `8.4e-15`.
+fn differs_from_as_they_stand(
+    model: &Model,
+    answer: rcad_topo::Result<Fused>,
+    should: &[&AsItStands],
+) -> Option<String> {
+    let fused = match answer {
+        Ok(fused) => fused,
+        Err(why) => return Some(format!("refused {why:?}")),
+    };
+    if let Err(why) = model.validate(&Policy::certified(), &mut ProvenanceLog::new()) {
+        return Some(format!("wrote a model that does not validate: {why}"));
+    }
+    let mut wanted = should.to_vec();
+    for &solid in fused.solids() {
+        let found = AsItStands::of(model, solid);
+        let Some(at) = wanted
+            .iter()
+            .position(|wanted| wanted.planes == found.planes)
+        else {
+            return Some(format!(
+                "a solid on {:?} is none of those still wanted",
+                found.planes
+            ));
+        };
+        let it = wanted.swap_remove(at);
+        let moved = found
+            .corners
+            .iter()
+            .map(|corner| {
+                it.corners
+                    .iter()
+                    .map(|theirs| corner.distance_to(*theirs))
+                    .fold(f64::INFINITY, f64::min)
+            })
+            .fold(0.0, f64::max);
+        let room = found.measured.volume_error()
+            + it.measured.volume_error()
+            + found.measured.surface_area() * moved;
+        if (found.measured.volume() - it.measured.volume()).abs() > room {
+            return Some(format!(
+                "volume {} against {}, corners moved {moved:e}",
+                found.measured.volume(),
+                it.measured.volume()
+            ));
+        }
+    }
+    (!wanted.is_empty()).then(|| format!("{} solids are missing", wanted.len()))
+}
+
+/// A solid as it stands: the plane of each face in one fixed order, each
+/// corner of each face, and its measure.
+struct AsItStands {
+    planes: Vec<[f64; 4]>,
+    corners: Vec<Point>,
+    measured: Measurement,
+}
+
+impl AsItStands {
+    fn of(model: &Model, solid: SolidKey) -> Self {
+        let faces = || model.solid(solid).expect("this model made the key").faces();
+        let mut planes: Vec<[f64; 4]> = faces().map(|face| face.plane().coefficients()).collect();
+        planes.sort_by(|one, other| {
+            one.iter()
+                .zip(other)
+                .map(|(one, other)| one.total_cmp(other))
+                .find(|order| order.is_ne())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        AsItStands {
+            planes,
+            corners: faces()
+                .flat_map(|face| face.wires().flat_map(|wire| wire.points()))
+                .collect(),
+            measured: measured(model, solid),
+        }
+    }
+}
+
+fn measured(model: &Model, solid: SolidKey) -> Measurement {
+    model
+        .solid(solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a flat solid this size measures")
 }
 
 fn refused_as_four_faces_along_one_edge(answer: rcad_topo::Result<Fused>) -> Option<String> {
@@ -470,7 +682,13 @@ fn refused_as_four_faces_along_one_edge(answer: rcad_topo::Result<Fused>) -> Opt
 /// prism moved by `at` and `length` long: the meet of its two walls and that
 /// end's plane, asked of the planes exactly. [`Decision::Pos`] is above.
 fn sides_of_the_prisms_edge_against_the_blocks_top(at: [f64; 3], length: f64) -> [Decision; 2] {
-    let planes = planes_round_the_edge(at, length);
+    sides_of_the_edge(&planes_round_the_edge(at, length))
+}
+
+/// Which side of the block's top each end of the edge lies on: the meet of the
+/// two walls and that end's plane, asked of the planes exactly.
+/// [`Decision::Pos`] is above.
+fn sides_of_the_edge(planes: &RoundTheEdge) -> [Decision; 2] {
     planes.ends.map(|end| {
         side_of_a_plane_where_three_planes_meet([planes.walls[0], planes.walls[1], end], planes.top)
             .expect("two walls and an end meet in a point")
@@ -496,20 +714,32 @@ fn where_each_wall_meets_the_blocks_top_against(across: f64) -> [[Decision; 2]; 
 
 /// The planes round the prism's edge, as coefficients.
 struct RoundTheEdge {
-    /// The block's top, `y = 0`, facing up.
+    /// The block's top, `y = 0` turned as the block is, facing up.
     top: [f64; 4],
-    /// The prism's two walls, which lean, in no particular order.
+    /// The prism's two walls, in no particular order: every plane of it with a
+    /// part along `x`.
     walls: [[f64; 4]; 2],
-    /// The prism's two ends, square to `z`.
+    /// The prism's two ends, square to `z` turned as the prism is.
     ends: [[f64; 4]; 2],
 }
 
 /// The block's top and the prism's walls and ends, the prism moved by `at` and
 /// `length` long, as the model stores them.
 fn planes_round_the_edge(at: [f64; 3], length: f64) -> RoundTheEdge {
+    planes_round_the_edge_turned(&Isometry::identity(), |model| {
+        [a_block(model), a_prism(model, RESTING, at, length)]
+    })
+}
+
+/// The block's top and the prism's walls and ends as the model stores them,
+/// the block and the prism as `build` makes them, both turned by `turning`
+/// and turned about `x` only.
+fn planes_round_the_edge_turned(
+    turning: &Isometry,
+    build: impl FnOnce(&mut Model) -> [SolidKey; 2],
+) -> RoundTheEdge {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let block = a_block(&mut model);
-    let prism = a_prism(&mut model, RESTING, at, length);
+    let [block, prism] = build(&mut model);
     let planes_of = |solid: SolidKey| -> Vec<[f64; 4]> {
         model
             .solid(solid)
@@ -518,32 +748,52 @@ fn planes_round_the_edge(at: [f64; 3], length: f64) -> RoundTheEdge {
             .map(|face| face.plane().coefficients())
             .collect()
     };
-    let top = [0.0, 1.0, 0.0, 0.0];
+    let [x, y, z] = turning
+        .apply_to_vector(Vector::new(0.0, 1.0, 0.0))
+        .components();
+    let top = [x, y, z, 0.0];
     assert!(
         planes_of(block).contains(&top),
-        "the block's top is y = 0, facing up"
+        "the block's top is y = 0 turned, facing up, through the origin"
     );
+    let along = turning
+        .apply_to_vector(Vector::new(0.0, 0.0, 1.0))
+        .components();
     let prism = planes_of(prism);
-    let two_of = |which: fn(&[f64; 4]) -> bool| -> [[f64; 4]; 2] {
-        let found: Vec<[f64; 4]> = prism.iter().copied().filter(which).collect();
+    let two_of = |which: &dyn Fn(&[f64; 4]) -> bool| -> [[f64; 4]; 2] {
+        let found: Vec<[f64; 4]> = prism.iter().copied().filter(|plane| which(plane)).collect();
         found
             .try_into()
             .unwrap_or_else(|found| panic!("a prism has two of these, not {found:?}"))
     };
     RoundTheEdge {
         top,
-        walls: two_of(|plane| plane[0] != 0.0),
-        ends: two_of(|plane| plane[2] != 0.0),
+        walls: two_of(&|plane| plane[0] != 0.0),
+        ends: two_of(&|plane| plane[..3] == along || plane[..3] == along.map(|part| -part)),
     }
 }
 
 fn a_block(model: &mut Model) -> SolidKey {
-    a_prism(
-        model,
-        [[-4.0, -3.0], [4.0, -3.0], [4.0, 0.0], [-4.0, 0.0]],
-        [0.0, 0.0, 0.0],
-        10.0,
-    )
+    a_prism(model, THE_BLOCKS_OUTLINE, [0.0, 0.0, 0.0], 10.0)
+}
+
+/// The block and the wedge, both turned about `x` by `turn`, the wedge moved
+/// to `z = 2` before it is turned.
+fn a_turned_block_and_wedge(model: &mut Model, turn: f64) -> [SolidKey; 2] {
+    let turning = turned_by(turn);
+    let shift = Isometry::translation(Vector::new(0.0, 0.0, 2.0)).expect("a finite shift");
+    [
+        a_placed_prism(model, THE_BLOCKS_OUTLINE, &turning, 10.0),
+        a_placed_prism(model, WEDGE, &turning.compose(&shift), 6.0),
+    ]
+}
+
+fn turned_by(turn: f64) -> Isometry {
+    Isometry::rotation(&Axis::x(), turn).expect("a finite turn")
+}
+
+fn a_turn(fortieths: u8) -> f64 {
+    f64::from(fortieths) * 0.025
 }
 
 fn a_hook(model: &mut Model) -> SolidKey {
@@ -614,14 +864,25 @@ fn a_prism<const N: usize>(
     [x, y, z]: [f64; 3],
     length: f64,
 ) -> SolidKey {
+    a_placed_prism(
+        model,
+        outline,
+        &Isometry::translation(Vector::new(x, y, z)).expect("a finite shift"),
+        length,
+    )
+}
+
+/// An outline stood `length` long along `z`, then moved by `placement`.
+fn a_placed_prism<const N: usize>(
+    model: &mut Model,
+    outline: [[f64; 2]; N],
+    placement: &Isometry,
+    length: f64,
+) -> SolidKey {
     let outline = ProfileBuilder::new(outline.to_vec())
         .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a simple outline");
     model
-        .add_extrusion(
-            &outline,
-            length,
-            &Isometry::translation(Vector::new(x, y, z)).expect("a finite shift"),
-        )
+        .add_extrusion(&outline, length, placement)
         .expect("a positive length")
 }

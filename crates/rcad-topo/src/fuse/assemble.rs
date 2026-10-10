@@ -953,10 +953,26 @@ impl Assembly {
     /// the line one edge and refused. A piece of the face rested on has every
     /// corner on its plane and none off it, so it is never taken for one
     /// resting there.
+    ///
+    /// **Except a corner of the two pieces rested on**, the ends of the line
+    /// among them: a corner of a piece of a face lies on that face's surface
+    /// by how it was made, and asking the plane again asks only of the point
+    /// it was written down as, the middle of a box round where three planes
+    /// meet for a corner made that way. On a tilted top that middle can sit a
+    /// rounding on the inner side, and `Plane::side_of_point` answers for the
+    /// point it is handed. A wedge lying
+    /// on its edge on a block's top, both turned about `x`, was refused united
+    /// at 14 of 24 turns for its corner at an end of the edge read that way
+    /// (queue row Q1281, `a_prism_lying_on_one_edge.rs`).
     fn rest_on_the_outer_side_of(&self, resting: [Dart; 2], on: [Dart; 2]) -> bool {
         let Some(plane) = self.faces[on[0].face].surface.as_plane() else {
             return false;
         };
+        let on_the_plane: BTreeSet<usize> = on
+            .iter()
+            .flat_map(|dart| self.faces[dart.face].wires.iter().flatten())
+            .flat_map(|side| self.edges[side.edge].ends)
+            .collect();
         resting.iter().all(|dart| {
             let face = &self.faces[dart.face];
             if face.surface.as_plane().is_none() {
@@ -968,6 +984,7 @@ impl Assembly {
                 .iter()
                 .flatten()
                 .flat_map(|side| self.edges[side.edge].ends)
+                .filter(|corner| !on_the_plane.contains(corner))
             {
                 match plane.side_of_point(PredicatePoint::from(
                     self.corners[corner].point.coordinates(),
