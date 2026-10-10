@@ -577,7 +577,7 @@ fn one_step(
     let mut step = from;
     let mut why_the_last_trial_could_not_be_measured = None;
     for _ in 0..SHORTENINGS_BEFORE_GIVING_UP {
-        let (next, chord, sagitta, turned) =
+        let (next, chord, sagitta, turned, settled_back) =
             match what_a_trial_of_this_length_measures(surfaces, here, tangent, step) {
                 Ok(measured) => measured,
                 Err(why) => {
@@ -589,7 +589,7 @@ fn one_step(
         if sagitta <= room * SAGITTA_MAY_TAKE
             && sagitta <= chord * SAGITTA_MAY_TAKE_OF_ITS_CHORD
             && turned >= 0.0
-            && chord > 0.0
+            && !settled_back
         {
             return Ok((next, chord));
         }
@@ -599,11 +599,11 @@ fn one_step(
         // same place however far the ask is halved, so the halvings run out with
         // the chord where it started. There the chord is the one thing the trial
         // did measure about the curve, so the next ask comes from that — unless
-        // it is no chord at all, which says no more than a trial that could not
-        // be settled. A trial that did step along the curve and only bent too far
-        // is halved as before, which is what the published bound was measured
+        // it settled back onto `here`, which says no more than a trial that could
+        // not be settled. A trial that did step along the curve and only bent too
+        // far is halved as before, which is what the published bound was measured
         // under.
-        step = if chord == 0.0 {
+        step = if settled_back {
             shortened_by_its_exponent(step)
         } else if chord * 2.0 < step {
             chord * 0.5
@@ -620,26 +620,53 @@ fn one_step(
 }
 
 /// Where a step of `step` lands, how long the straight piece it leaves behind
-/// is, how far that piece bows away from the crossing at its middle, and how
-/// much of the direction it was asked to go in it is still going in.
+/// is, how far that piece bows away from the crossing at its middle, how much
+/// of the direction it was asked to go in it is still going in, and whether it
+/// settled back onto `here`.
+///
+/// **Settled back is a chord of nothing, or a trial that came back short to
+/// no further from `here` than the two ends' own bounds reach.**
+/// [`how_far_off_the_crossing`] encloses how far each end may sit off the
+/// crossing, so a chord no longer than the two together can be the two ends
+/// sitting off the crossing on different sides and nothing else: the trial
+/// has not been shown to move along the curve at all. Measured, the one that
+/// made this rule settled one rounding off in `x` and in `z`, a chord of
+/// `2.3e-16` with nothing along the loop, between two ends each known to
+/// `6.9e-16`
+/// (`a_trial_that_settles_a_rounding_off_its_start_is_shortened_and_not_kept`).
+///
+/// That bound is the arithmetic's own: how far the settling's roundings may
+/// have left each end from the crossing. It is not a tolerance on the answer,
+/// because nothing it reads is kept or moved. A trial it catches is shortened
+/// and tried again, and no point the walk hands back is any nearer or further
+/// from the crossing for it. It is asked only of a trial that covered less than
+/// half of its ask, so a walk whose steps are honestly that small, asked and
+/// covered, is walked as it was.
 ///
 /// # Errors
 ///
 /// Whatever [`settled`] or [`which_way_the_crossing_runs`] refuse with at the
-/// trial point. [`one_step`] reads that as a trial to shorten rather than as an
-/// answer.
+/// trial point, and [`how_far_off_the_crossing`]'s refusal there on a trial
+/// that came back short. [`one_step`] reads that as a trial to shorten rather
+/// than as an answer.
 fn what_a_trial_of_this_length_measures(
     surfaces: [&Surface; 2],
     here: Point,
     tangent: Vector,
     step: f64,
-) -> Result<(Point, f64, f64, f64)> {
+) -> Result<(Point, f64, f64, f64, bool)> {
     let next = settled(surfaces, here + tangent * step)?;
     let straight_on = next - here;
+    let chord = straight_on.length();
     let middle = here + straight_on * 0.5;
     let sagitta = (settled(surfaces, middle)? - middle).length();
     let turned = which_way_the_crossing_runs(surfaces, next)?.dot(tangent);
-    Ok((next, straight_on.length(), sagitta, turned))
+    let settled_back = chord == 0.0
+        || (chord * 2.0 < step
+            && chord
+                <= how_far_off_the_crossing(surfaces, here)?
+                    + how_far_off_the_crossing(surfaces, next)?);
+    Ok((next, chord, sagitta, turned, settled_back))
 }
 
 /// The next ask after a trial that measured nothing about how long a step
