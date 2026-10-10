@@ -5034,6 +5034,90 @@ mod tests {
         assert!(log.is_empty(), "a certified fuse asked nothing: {log:?}");
     }
 
+    /// The grazing block of `tests/a_block_edge_grazing_a_ball_at_cx_16.rs`:
+    /// the ball's sliver above `y = 1` and below `z = −2⁻²⁵` is outside the
+    /// block, and its side on `y = 1` says so.
+    ///
+    /// Its two places are `16 ∓ 2⁻⁵¹` along the edge and come out one corner,
+    /// so both arcs of the ball's circle on `z = −2⁻²⁵` run from that corner to
+    /// itself. Named as one closed edge, the sliver's short arc, which lies
+    /// outside the block's top, took the top's pieces along the long arc as
+    /// pieces across it and read the sliver inside the block, against its side
+    /// on `y = 1`; the two disagreed and the fuse refused on the sliver (Q1073).
+    #[test]
+    fn the_sliver_of_a_ball_between_two_places_one_corner_apart_is_placed_by_its_side_on_the_wall()
+    {
+        let top = -f64::powi(2.0, -25);
+        for ball_first in [true, false] {
+            let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+            let ball = model
+                .add_ball(
+                    1.0 + f64::powi(2.0, -51),
+                    &Isometry::translation(Vector::new(16.0, 0.0, 0.0)).expect("a finite shift"),
+                )
+                .expect("a positive radius");
+            let square =
+                ProfileBuilder::new(vec![[14.0, -2.0], [18.0, -2.0], [18.0, 1.0], [14.0, 1.0]])
+                    .build(&Policy::certified(), &mut ProvenanceLog::new())
+                    .expect("a square");
+            let block = model
+                .add_extrusion(
+                    &square,
+                    2.0,
+                    &Isometry::translation(Vector::new(0.0, 0.0, top - 2.0))
+                        .expect("a finite shift"),
+                )
+                .expect("a positive height");
+            let (first, second) = if ball_first {
+                (ball, block)
+            } else {
+                (block, ball)
+            };
+            let policy = Policy::certified();
+            let mut log = ProvenanceLog::new();
+            let scratch =
+                Scratch::split_both_groups(&model, &[first], &[second], &policy, &mut log)
+                    .expect("the turn and both orders are decided (Q699, Q914)");
+            let mut kept = |rule: Rule| -> Vec<usize> {
+                choose(&model, &scratch, rule, &policy, &mut log)
+                    .unwrap_or_else(|refused| panic!("ball first {ball_first}: {refused:?}"))
+                    .iter()
+                    .map(|chosen| chosen.piece)
+                    .collect()
+            };
+            let inside_the_other = kept(Rule::Intersection);
+            let has_a_side = |piece: &Piece, normal: [f64; 3], material: Decision| {
+                piece.wires.iter().flatten().any(|side| {
+                    side.carried_by[1]
+                        .as_plane()
+                        .is_some_and(|flat| flat.normal().components() == normal)
+                        && side.material_side == material
+                })
+            };
+            let slivers_of_the_ball: Vec<usize> = (0..scratch.pieces.len())
+                .filter(|&index| {
+                    let piece = &scratch.pieces[index];
+                    matches!(piece.surface, Surface::Sphere(_))
+                        && has_a_side(piece, [0.0, 1.0, 0.0], Decision::Pos)
+                        && has_a_side(piece, [0.0, 0.0, 1.0], Decision::Neg)
+                })
+                .collect();
+            let [sliver] = slivers_of_the_ball[..] else {
+                panic!(
+                    "ball first {ball_first}: one sliver above y = 1 and below the top, not {slivers_of_the_ball:?}"
+                );
+            };
+            assert!(
+                !inside_the_other.contains(&sliver),
+                "ball first {ball_first}: the sliver is outside the block"
+            );
+            assert!(
+                kept(Rule::Union).contains(&sliver),
+                "ball first {ball_first}: a union keeps the sliver"
+            );
+        }
+    }
+
     /// The side of a three-cornered bar one unit tall standing on
     /// `(2²⁰, −2²⁰)`, `(2²⁰ + 1, −2²⁰ − 1)` and `(2²⁰ + 1, −2²⁰)`: the face on
     /// `x + y = 0` between the first two, with the model and the baked bar it

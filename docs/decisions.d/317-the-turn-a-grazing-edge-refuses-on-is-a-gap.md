@@ -246,3 +246,42 @@ asked round the circles, which the shared-end rule does not reach.
   walked start lies between them; here it does not. Refuses/B.
 - Q909 traces the tolerant results, which moved: at `cx = 16` every fuse is now
   the certified refusal above, not `ResultIsNotManifold { count: 3 }`.
+
+> **2026-10-10 note (Q1073): the sliver between the two places is placed, and
+> every fuse now refuses on a limit under the wrong name.** The first item
+> above is closed. The two places `16 ∓ 2⁻⁵¹` come out one corner,
+> `(16, 1, −2⁻²⁵)`, so both arcs of the ball's circle through them run from
+> that corner back to it, and `Edges::of` named both as one closed edge. §365.3's
+> side rule then matched the ball's sliver to the block's top along the long
+> arc, inside the block, and to its wall across its true side, outside it, and
+> `select` refused the sliver. `the_edge_each_side_of_every_piece_is`
+> (`fuse/assemble.rs`) now names such a side, whose two ends have two names but
+> one corner, by those two names and which way it runs between them
+> (`which_arc_of_a_circle_walked_this_way`), so the two arcs are two names. That
+> only splits names `Edges::of` joined, so the rule can lose a match and never
+> gain one. `fuse::select`'s
+> `the_sliver_of_a_ball_between_two_places_one_corner_apart_is_placed_by_its_side_on_the_wall`
+> fails without it.
+>
+> Every fuse then refuses while the answer is put together, the same under
+> `Policy::certified` and `Policy::tolerant(25.0)`. The union, either solid
+> first, and the ball less the block are `ResultIsNotManifold { count: 4 }`: the
+> answer's own naming makes the two arcs one closed edge again, with four faces
+> along it. The intersection, either solid first, and the block less the ball
+> are `CannotMeshAFace` with `CornersCoincide { position: 5 }`, from the mesh in
+> `nest_the_shells`: a face's loop runs into the one corner, round a closed edge,
+> and out again. No fuse answers, so nothing is held to a volume.
+> `every_fuse_refuses_on_the_two_places_f64_holds_as_one_corner` pins all
+> twelve, in place of
+> `every_fuse_refuses_on_a_point_inside_a_piece_between_the_two_places`.
+>
+> **This is a limit refused under the wrong name.** The answer needs a corner at
+> each place, and `f64`'s spacing at `16` is `2⁻⁴⁸`, so it holds neither. The two
+> would make an edge `2⁻⁵⁰` long in a shape whose coordinates run to `18`, a
+> spread near `2⁵⁴` against the supported `1e11`, and scaling the shape by a
+> power of two moves both lengths alike. The refusal it should give is
+> `Invalid::DynamicRangeTooWide`. The fuse's `check_dynamic_range` does not give
+> it: it skips an edge whose two ends are one corner, and it runs after
+> `group_into_shells` and `nest_the_shells`, where both refusals come from. A
+> row asks for the right name where a kept side's two ends have two names and
+> one corner, and for what a tolerant policy should give there.
