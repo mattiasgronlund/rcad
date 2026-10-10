@@ -308,6 +308,40 @@ fn two_combs_leaning_opposite_ways_the_other_way_round_meet_in_two_parts_a_round
     holds_exactly(&less, &solids, 4.0, "the difference");
 }
 
+#[test]
+fn probe_q1633() {
+    let (model, keys) = comb_and_comb().build();
+    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        for (arguments, tools, which) in [
+            (keys[0], keys[1], "comb 3 first"),
+            (keys[1], keys[0], "comb 2 first"),
+        ] {
+            for rule in [Rule::Intersection, Rule::Union, Rule::Difference] {
+                eprintln!("PROBE ==== {policy:?} {which} {rule:?}");
+                let mut fused = model.clone();
+                let mut log = ProvenanceLog::new();
+                match fused.fuse(&[arguments], &[tools], rule, &policy, &mut log) {
+                    Ok(answer) => {
+                        let solids = answer.solids().to_vec();
+                        let valid = fused.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                        let faces: Vec<usize> = solids
+                            .iter()
+                            .map(|&solid| fused.solid(solid).unwrap().faces().count())
+                            .collect();
+                        let (volume, error) = measured(&fused, &solids);
+                        eprintln!(
+                            "PROBE answer {} solids, faces {faces:?}, volume {volume} ± {error}, validate {valid:?}, log empty {}",
+                            solids.len(),
+                            log.is_empty()
+                        );
+                    }
+                    Err(why) => eprintln!("PROBE refused {why:?}"),
+                }
+            }
+        }
+    }
+}
+
 fn configuration(first: Placed, second: Placed) -> Configuration {
     Configuration {
         solids: vec![first, second],
