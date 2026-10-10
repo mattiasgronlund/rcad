@@ -112,7 +112,8 @@ impl<'m> SolidView<'m> {
     /// the one wire two round holes that touch at a point leave — each read
     /// circle by circle against the round surface across that circle's own
     /// edge. A wire that is none of these is refused by name. A flat face with
-    /// an arc among its sides is wound by its chords and arcs instead.
+    /// an arc among its sides is wound by its chords and arcs instead, and its
+    /// whole circles, one or several to a wire, are read the same way there.
     ///
     /// # Errors
     ///
@@ -3276,13 +3277,16 @@ fn a_whole_curve_round_a_cone(
     })
 }
 
-/// Whether `wire` is one whole closed curve on one edge of a flat face: a round
-/// hole through a plate, or a bar's round cap. Such a wire has no corner to
-/// walk between, so [`what_a_flat_face_holds`] counts it through
+/// Whether `wire` is one whole closed curve on one edge of a flat face, or
+/// several whole circles closing at one corner ([`is_several_whole_circles`]):
+/// a round hole through a plate, a bar's round cap, or two round holes that
+/// touch. Such a wire has no chord to walk between its corners, so
+/// [`what_a_flat_face_holds`] counts it through
 /// [`how_often_a_round_wire_winds_round`], and so does
 /// [`what_a_flat_face_of_chords_and_arcs_holds`] beside its other wires' arcs.
 fn is_a_round_wire_of_a_flat_face(face: FaceView<'_>, wire: WireView<'_>) -> bool {
-    face.stored_surface().as_plane().is_some() && wire.closes_on_one_edge()
+    face.stored_surface().as_plane().is_some()
+        && (wire.closes_on_one_edge() || is_several_whole_circles(wire))
 }
 
 /// What `edge`, a side of `face` between `ends` with `across` across it, runs
