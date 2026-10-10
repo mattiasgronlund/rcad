@@ -495,6 +495,34 @@ moved them.
 > re-run and stand as written. §322.8 has the figures, the command behind
 > each, and a line for each row the keep does not reach.
 
+> **2026-10-10 note (Q1554): a ball's two loops round a pipe are ordered,
+> and the quartic row moves to the mesh.** Q1554 orders the two loops a ball
+> crosses a pipe in when it swallows the pipe's whole cross-section, round the
+> pipe's axis (`the_way_a_loop_round_a_pipe_through_a_ball_winds` in
+> `along_a_crossing.rs`). What that moves:
+>
+> - The `ACrossingThisCannotBeOrderedAlong` row above, the ball of 4 one
+>   rounding off a bar's axis, is now refused `CannotMeshAFace` under every
+>   rule both ways, under a certified and a tolerant policy alike:
+>   `CornersCoincide` with the ball first and for the bar less the ball,
+>   `ASideCutsOffOneCornerOfACurvedPatch` for the union and the intersection
+>   with the bar first. Its test is now
+>   `a_ball_one_rounding_off_a_bars_axis_is_refused_meshing_every_fuse`. Why
+>   the mesh refuses is not traced; it is still a **gap**.
+> - A ball of 2 with a bar through it off its axis, four placements (§347.9's
+>   row): with the ball first, all 12 fuses answer
+>   (`a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_ball_first_answers`);
+>   with the bar first, all 12 are refused `CannotMeshAFace { why:
+>   CornersCoincide }`
+>   (`a_ball_with_a_bar_through_it_off_its_axis_is_refused_meshing_every_fuse_with_the_bar_first`),
+>   traced to the marcher's first step on the bar's wall in `march.rs`.
+> - The ball of 2 against a square rod holed off its axis now answers all six
+>   fuses (`a_ball_against_a_square_rod_holed_off_its_axis_is_answered_under_every_rule`).
+> - A ball of `0.5` on a bar of 2's wall crosses it in one loop that runs back
+>   and forth round the axis, which Q1554 does not order, and it is still
+>   refused `ACrossingThisCannotBeOrderedAlong` before any cell
+>   (`a_small_ball_on_a_bars_wall_is_refused_before_any_cell`), §34.10's gap.
+
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot
 assemble what it cut, before writing anything — `two_balls_that_really_cross_are_refused_by_name`
