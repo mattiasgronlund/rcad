@@ -3475,6 +3475,32 @@ fn what_a_plane_that_cuts_both_in_circles_leaves(
     .map(Some)
 }
 
+/// `answer` with every `-0.0` in an exact corner made `+0.0`, which is the
+/// same number.
+///
+/// Corners compare by value, where the two zeros are one, but a corner keyed
+/// on its bits gets two keys for one point; `exactly_at` in `rcad-topo`'s
+/// `fuse/assemble.rs` folds them for that reason. The line two circles differ
+/// by hands `x = 0` back as `-0.0` for the floor across a bar and a ball off
+/// its axis, so this road folds them before any key is taken. Adding `0.0`
+/// turns `-0.0` into `+0.0` under round-to-nearest and leaves every other
+/// number as it is. A box is left alone: `inari` hands the lower end of any
+/// box that starts at zero back as `-0.0` whatever it was built from.
+fn with_no_negative_zero(answer: MeetOfThree) -> MeetOfThree {
+    let MeetOfThree::At(places) = answer else {
+        return answer;
+    };
+    MeetOfThree::At(
+        places
+            .into_iter()
+            .map(|place| match place.exact_coordinates() {
+                Some(at) => PredicatePoint::Exact(at.map(|value| value + 0.0)),
+                None => place,
+            })
+            .collect(),
+    )
+}
+
 /// Whether `flat` cuts `surface` in a circle, or in nothing, about the point
 /// an axis of it crosses the plane at: every plane cuts a ball so, and only a
 /// plane square to its axis cuts a pipe or a cone so. A product that falls out
@@ -5718,47 +5744,48 @@ mod tests {
 
     /// `-0.0 == 0.0`, so no pin that compares corners sees which zero a corner
     /// carries, but a corner keyed on its bits does: `(-0.0, 3, 0)` and
-    /// `(0, 3, 0)` are one point and two keys. The floor across a bar and a
-    /// ball off its axis came back at `(-0.0, ±3, 0)` before the road added
-    /// zero to what it hands back.
+    /// `(0, 3, 0)` are one point and two keys. The floor across a bar of
+    /// radius 3 up `z` and a ball of radius 5 at `(4, 0, 0)` came back at
+    /// `(-0.0, ±3, 0)` before the road added zero to what it hands back. With
+    /// the ball at `(0, 4, 0)` the circles differ by `y = 0` instead, and the
+    /// corners are `(±3, 0, 0)`.
+    ///
+    /// Only exact corners are asked about, since a box's lower end at zero is
+    /// `-0.0` whatever the box was built from, as the last line shows.
     #[test]
     fn no_corner_where_a_plane_cuts_two_curved_surfaces_in_circles_is_at_a_negative_zero() {
         let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
-        let ball_beside =
-            Surface::Sphere(Sphere::new(Point::new(4.0, 0.0, 0.0), 5.0).expect("a radius"));
         let pipe = a_bar_up_z_of_radius(3.0);
-        let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 5.0]);
-        let bar = a_bar_up_z_of_radius(2.0);
-        let ball_above = the_ball_of_radius_at_0_3_5(3.0);
-        for [plane, one, other] in [[&floor, &ball_beside, &pipe], [&cap, &bar, &ball_above]] {
+        let ball_at = |centre: Point| Surface::Sphere(Sphere::new(centre, 5.0).expect("a radius"));
+        let beside_on_x = ball_at(Point::new(4.0, 0.0, 0.0));
+        let beside_on_y = ball_at(Point::new(0.0, 4.0, 0.0));
+        let negative_zero = (-0.0f64).to_bits();
+        for ball in [&beside_on_x, &beside_on_y] {
             for order in [
-                [plane, one, other],
-                [plane, other, one],
-                [one, plane, other],
-                [one, other, plane],
-                [other, plane, one],
-                [other, one, plane],
+                [&floor, ball, &pipe],
+                [&floor, &pipe, ball],
+                [ball, &floor, &pipe],
+                [ball, &pipe, &floor],
+                [&pipe, &floor, ball],
+                [&pipe, ball, &floor],
             ] {
                 let answer = meet(order).expect("two circles in one plane are answered");
                 let MeetOfThree::At(points) = &answer else {
                     panic!("expected points, got {answer:?}");
                 };
+                assert_eq!(points.len(), 2, "{answer:?}");
                 for point in points {
-                    let mut ends: Vec<f64> = point
-                        .enclosure()
-                        .iter()
-                        .flat_map(|side| [side.lo(), side.hi()])
-                        .collect();
-                    if let PredicatePoint::Exact(place) = point {
-                        ends.extend(place);
-                    }
+                    let at = point
+                        .exact_coordinates()
+                        .unwrap_or_else(|| panic!("{point:?} is on the lattice"));
                     assert!(
-                        ends.iter().all(|end| end.to_bits() != (-0.0f64).to_bits()),
+                        at.iter().all(|value| value.to_bits() != negative_zero),
                         "{point:?} from {order:?} has a negative zero in it"
                     );
                 }
             }
         }
+        assert_eq!(Interval::exactly(0.0).lo().to_bits(), negative_zero);
     }
 
     fn a_bar_up_z_of_radius(radius: f64) -> Surface {
