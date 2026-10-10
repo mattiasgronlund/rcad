@@ -1,5 +1,5 @@
-//! The shapes rows Q1125 and Q1393 tried, looking for a fuse with a piece that
-//! no point placed because no ray could be fired at a ring
+//! The shapes rows Q1125, Q1393 and Q1581 tried, looking for a fuse with a
+//! piece that no point placed because no ray could be fired at a ring
 //! (`docs/decisions.md` §35.6).
 //!
 //! `select.rs`'s `settle_against_each` folds
@@ -40,8 +40,14 @@
 //!   touching nothing too, so this kind is not reached;
 //! - a torus a rounding off a torus: a bend and a copy of it moved a hair.
 //!
-//! A ball or a cone on the axis a hair off a face of its own kind was not
-//! tried.
+//! Q1581 tried the two kinds left, a ball or a cone on the axis a hair off a
+//! face of its own kind. A quarter bend joined to a ball or a cone on its axis
+//! is refused at `order along a crossing` while the two are cut, so that ring
+//! solid is never built. A ball or a cone joined to a ring, built face by face
+//! with no seam, is built; but against a piece of its own kind on it, it is
+//! refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, or `Undecidable` at
+//! `side of sphere` or `side of cone`, and moved off the axis, the piece is
+//! refused when the two are crossed. So neither kind is reached.
 //!
 //! Run with `settle_against_each`'s arm made to print, every fuse here, only
 //! the placed bends reached it: 3 of their 54 fuses, ring 4 and tube 1 turned
@@ -51,7 +57,7 @@
 //! `(4, 8.9e-16, 0)`, could not be fired at the first bend's ring. Each of
 //! those pieces was then placed inside by a side, a corner, a plane or a piece
 //! across, and each fuse was refused at a later piece no point was found
-//! inside.
+//! inside. Q1581's fuses, run with the arm made to print, printed nothing.
 //!
 //! Q1125's run, of all 1755 tests of this crate's suite with the arm made to
 //! print, printed nine times, all in the placed bends' test, and each piece it
@@ -489,6 +495,377 @@ fn a_wedge_a_hair_below_a_bends_cap_is_refused_before_a_ray() {
             "a hair of {hair:e}: {refused:?}"
         );
     }
+}
+
+/// A quarter bend of ring 4 round a tube of 1, and a ball about the origin of
+/// 3.5 or 4.5, or the frustum of the cone `ρ = (z + 8) / 2` from `z = −2` to
+/// `2`: a ball or a cone on the ring's axis, crossing its tube. Joined, they
+/// would be a ring solid with a ball or a cone face, for a piece of a ball or
+/// a cone a hair off that face to be put to a ray against.
+///
+/// They are never joined. Every rule both ways round is refused `Undecidable`
+/// at `order along a crossing` while the pieces are cut. For the union with
+/// the ball of 3.5, the bend named first, it is at the two points where the
+/// circle the ball crosses the ring in
+/// meets the bend's two caps, `(3.406, 0, −0.805)` and `(0, 3.406, −0.805)`.
+/// The ball and the frustum are turned `5π/4` round the axis, so the ball's
+/// seam and the frustum's straight edge are clear of the bend.
+#[test]
+fn a_bend_and_a_ball_or_a_cone_on_its_axis_are_refused_while_they_are_cut() {
+    let a_ball_of_3_5: fn(&mut Model) -> SolidKey = |model| {
+        model
+            .add_ball(3.5, &turned(5.0 * PI / 4.0))
+            .expect("a ball")
+    };
+    let a_ball_of_4_5: fn(&mut Model) -> SolidKey = |model| {
+        model
+            .add_ball(4.5, &turned(5.0 * PI / 4.0))
+            .expect("a ball")
+    };
+    let a_frustum: fn(&mut Model) -> SolidKey =
+        |model| a_frustum_placed(model, 0.5, 6.0, 10.0, -8.0, 5.0 * PI / 4.0);
+    let mut not_as_pinned = Vec::new();
+    for (named, made) in [
+        ("a ball of 3.5", a_ball_of_3_5),
+        ("a ball of 4.5", a_ball_of_4_5),
+        ("a frustum", a_frustum),
+    ] {
+        for rule in EVERY_RULE {
+            for the_bend_first in [true, false] {
+                let mut model = a_model();
+                let bend = a_quarter_bend(&mut model, 4.0, 1.0);
+                let other = made(&mut model);
+                let fused = fused_or_refused(&mut model, bend, other, rule, the_bend_first);
+                let said = the_refusal(&fused);
+                if said != "Undecidable at order along a crossing" {
+                    not_as_pinned.push(format!(
+                        "{named}, {rule:?}, the bend first {the_bend_first}: {said}"
+                    ));
+                }
+            }
+        }
+    }
+    assert_eq!(not_as_pinned, Vec::<String>::new());
+}
+
+/// A ball of 5 joined to a ring round it, and a frustum of a cone joined to a
+/// ring, both about `z` and built face by face with no seam: every edge is a
+/// whole circle, so neither has a plane through its axis for a ball or a cone
+/// to be crossed with. Against each, a piece of its own kind on it: the ball of
+/// 5 above `z = 3`, whose cap lies on the ring solid's upper ball face, and the
+/// frustum of the same cone from `z = 2` to `5`, whose wall lies on the ring
+/// solid's upper cone face. Each piece's bottom rim is inside the ring's tube.
+///
+/// None reaches a ray. Where the piece sits, and moved up or down `z` by a
+/// rounding, every rule both ways round is refused
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Moved by `1e-13`, it is refused
+/// so with the ring solid named first, and `Undecidable` at `side of sphere`
+/// or `side of cone` with it named second, at the piece's bottom rim. Moved
+/// `1e-13` off the axis along `x`, the piece's ball is one the ring is not
+/// crossed with, and its cone one the ring solid's cone is not crossed with.
+///
+/// A whole ball about the origin, of 5 and a rounding or `5 ± 1e-13`, against
+/// the ball joined to a ring is refused `Undecidable` at `side of sphere` by
+/// every rule both ways round, at `(0, 3, −4)` on the lower circle the ball
+/// and the ring cross in.
+#[test]
+fn a_ball_or_a_cone_joined_to_a_ring_with_a_piece_of_its_own_kind_on_it_is_refused_before_a_ray() {
+    let a_rounding = 8.881_784_197_001_252e-16;
+    let three_surfaces = "WhereThreeSurfacesMeetNeedsTwoOfThemFlat";
+    let a_ball: fn(&mut Model) -> Result<SolidKey, Error> = a_ball_joined_to_a_ring;
+    let a_cone: fn(&mut Model) -> Result<SolidKey, Error> = a_frustum_joined_to_a_ring;
+    let mut not_as_pinned = Vec::new();
+    for (kind, ring_solid, piece, its_side, off_the_axis) in [
+        (
+            "ball",
+            a_ball,
+            a_ball_segment as fn(&mut Model) -> Result<SolidKey, Error>,
+            "Undecidable at side of sphere",
+            "ACrossingBetweenATorusAndAnotherCurvedSurface",
+        ),
+        (
+            "cone",
+            a_cone,
+            a_seamless_frustum,
+            "Undecidable at side of cone",
+            "ACrossingBetweenAConeAndAnotherCurvedSurface",
+        ),
+    ] {
+        for (moved, by) in [
+            ("where it sits", Isometry::identity()),
+            ("up a rounding", at_height(a_rounding)),
+            ("down a rounding", at_height(-a_rounding)),
+            ("up 1e-13", at_height(1e-13)),
+            ("down 1e-13", at_height(-1e-13)),
+            (
+                "off the axis",
+                Isometry::translation(Vector::new(1e-13, 0.0, 0.0)).expect("a finite shift"),
+            ),
+        ] {
+            for rule in EVERY_RULE {
+                for the_ring_first in [true, false] {
+                    let mut model = a_model();
+                    let ring = ring_solid(&mut model).expect("a ring solid");
+                    let on_it = piece(&mut model).expect("a piece of its own kind");
+                    model
+                        .place_solid(on_it, &by)
+                        .expect("this model made the key");
+                    let fused = fused_or_refused(&mut model, ring, on_it, rule, the_ring_first);
+                    let said = the_refusal(&fused);
+                    let pinned = match moved {
+                        "off the axis" => off_the_axis,
+                        "up 1e-13" | "down 1e-13" if !the_ring_first => its_side,
+                        _ => three_surfaces,
+                    };
+                    if said != pinned {
+                        not_as_pinned.push(format!(
+                            "{kind} {moved}, {rule:?}, the ring first {the_ring_first}: {said}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    for radius in [5.0 + a_rounding, 5.0 - a_rounding, 5.0 + 1e-13, 5.0 - 1e-13] {
+        for rule in EVERY_RULE {
+            for the_ring_first in [true, false] {
+                let mut model = a_model();
+                let ring = a_ball_joined_to_a_ring(&mut model).expect("a ring solid");
+                let ball = model
+                    .add_ball(radius, &Isometry::identity())
+                    .expect("a ball");
+                let fused = fused_or_refused(&mut model, ring, ball, rule, the_ring_first);
+                let said = the_refusal(&fused);
+                if said != "Undecidable at side of sphere" {
+                    not_as_pinned.push(format!(
+                        "a whole ball of {radius:e}, {rule:?}, the ring first {the_ring_first}: \
+                         {said}"
+                    ));
+                }
+            }
+        }
+    }
+    assert_eq!(not_as_pinned, Vec::<String>::new());
+}
+
+/// A ball of 5 about the origin joined to a ring of 6 round a tube of 5 about
+/// `z`: they cross in the circles through `(3, 0, ±4)`, both exact.
+///
+/// Its two circles are walked `Forward` by the face above them, and it
+/// measures `3060 ± 35` at `0.03` against the profile's `3063`. Walked
+/// `Reversed` it also builds and validates, but measures `941.6`.
+fn a_ball_joined_to_a_ring(model: &mut Model) -> Result<SolidKey, Error> {
+    let ball = Surface::Sphere(rcad_geom::Sphere::new(Point::origin(), 5.0).expect("a ball"));
+    let ring = Surface::Torus(Torus::new(Axis::z(), 6.0, 5.0).expect("a ring"));
+    a_solid_of_revolution(
+        model,
+        &[(3.0, -4.0), (3.0, 4.0)],
+        &[ball, ring, ball],
+        &[Orientation::Forward, Orientation::Forward],
+    )
+}
+
+/// The cone `ρ = 9 − z` from `z = −6` to `7`, closed by two flat faces, joined
+/// to a ring of 10 round a tube of 5 about `z`: the cone crosses the ring in
+/// the circles through `(13, 0, −4)` and `(6, 0, 3)`.
+fn a_frustum_joined_to_a_ring(model: &mut Model) -> Result<SolidKey, Error> {
+    let cone = the_cone_down_from_9();
+    let ring = Surface::Torus(Torus::new(Axis::z(), 10.0, 5.0).expect("a ring"));
+    a_solid_of_revolution(
+        model,
+        &[(15.0, -6.0), (13.0, -4.0), (6.0, 3.0), (2.0, 7.0)],
+        &[flat_at(-6.0, -1.0), cone, ring, cone, flat_at(7.0, 1.0)],
+        &[Orientation::Reversed; 4],
+    )
+}
+
+fn the_cone_down_from_9() -> Surface {
+    Surface::Cone(
+        rcad_geom::Cone::new(
+            Axis::new(Point::new(0.0, 0.0, 9.0), Vector::new(0.0, 0.0, -1.0)).expect("an axis"),
+            1.0,
+        )
+        .expect("a cone"),
+    )
+}
+
+/// The ball of 5 about the origin above `z = 3`.
+fn a_ball_segment(model: &mut Model) -> Result<SolidKey, Error> {
+    let ball = Surface::Sphere(rcad_geom::Sphere::new(Point::origin(), 5.0).expect("a ball"));
+    a_solid_of_revolution(
+        model,
+        &[(4.0, 3.0)],
+        &[flat_at(3.0, -1.0), ball],
+        &[Orientation::Forward],
+    )
+}
+
+/// The cone `ρ = 9 − z` from `z = 2` to `5`.
+fn a_seamless_frustum(model: &mut Model) -> Result<SolidKey, Error> {
+    a_solid_of_revolution(
+        model,
+        &[(7.0, 2.0), (4.0, 5.0)],
+        &[
+            flat_at(2.0, -1.0),
+            the_cone_down_from_9(),
+            flat_at(5.0, 1.0),
+        ],
+        &[Orientation::Reversed, Orientation::Reversed],
+    )
+}
+
+fn flat_at(z: f64, facing: f64) -> Surface {
+    Surface::Plane(
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, facing))
+            .expect("a unit normal"),
+    )
+}
+
+/// A solid of revolution about `z` with no seam: `corners` are its profile's
+/// corners `(ρ, z)` from the bottom of the axis to the top, each one circle,
+/// and `surfaces` the faces between them, one more than the corners. `turns`
+/// is how the face above each circle walks it, and the face below walks it the
+/// other way.
+///
+/// Which walk builds was found by trying each: the ball's circles beside the
+/// ring `Forward`, and every circle on the cone `ρ = 9 − z` `Reversed`, the
+/// cone's circles beside the ring as well as those beside its flat faces.
+fn a_solid_of_revolution(
+    model: &mut Model,
+    corners: &[(f64, f64)],
+    surfaces: &[Surface],
+    turns: &[Orientation],
+) -> Result<SolidKey, Error> {
+    let mut builder = SolidBuilder::new();
+    let mut circles = Vec::with_capacity(corners.len());
+    for (index, &(rho, z)) in corners.iter().enumerate() {
+        let corner = builder.add_vertex(Point::new(rho, 0.0, z))?;
+        let by_a_ring = matches!(surfaces[index], Surface::Torus(_))
+            || matches!(surfaces[index + 1], Surface::Torus(_));
+        let run = if by_a_ring {
+            EdgeRun::RightRoundWhereItCrosses {
+                and: flat_at(z, 1.0),
+            }
+        } else {
+            EdgeRun::RightRoundWhereItsFacesCross
+        };
+        circles.push(builder.add_edge(corner, corner, run)?);
+    }
+    let mut shell = Vec::with_capacity(surfaces.len());
+    for (index, &surface) in surfaces.iter().enumerate() {
+        let mut wires = Vec::with_capacity(2);
+        if index > 0 {
+            let coedge = builder.add_coedge(circles[index - 1], turns[index - 1])?;
+            wires.push(builder.add_wire(&[DraftStep::Along(coedge)])?);
+        }
+        if index < circles.len() {
+            let coedge = builder.add_coedge(circles[index], turns[index].reversed())?;
+            wires.push(builder.add_wire(&[DraftStep::Along(coedge)])?);
+        }
+        shell.push((builder.add_face(surface, &wires)?, Orientation::Forward));
+    }
+    builder.add_shell(&shell)?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// What a fuse was refused: the last record's predicate for `Undecidable`, the
+/// refusal's own name for a geometry one.
+fn the_refusal(fused: &Result<usize, Error>) -> String {
+    match fused {
+        Err(Error::Undecidable { records }) => format!(
+            "Undecidable at {}",
+            records
+                .records()
+                .last()
+                .map_or("no record", |record| record.predicate())
+        ),
+        Err(Error::Geometry(why)) => format!("{why:?}"),
+        other => format!("{other:?}"),
+    }
+}
+
+fn turned(turn: f64) -> Isometry {
+    Isometry::rotation(&Axis::z(), turn).expect("a real angle")
+}
+
+fn a_frustum_placed(
+    model: &mut Model,
+    slope: f64,
+    near: f64,
+    far: f64,
+    down: f64,
+    turn: f64,
+) -> SolidKey {
+    let skin = rcad_geom::Cone::new(Axis::z(), slope).expect("a positive slope");
+    let mut builder = SolidBuilder::new();
+    let at = |height: f64| Point::new(slope * height, 0.0, height);
+    let bottom_corner = builder.add_vertex(at(near)).expect("a finite point");
+    let top_corner = builder.add_vertex(at(far)).expect("a finite point");
+    let seam = builder
+        .add_edge(bottom_corner, top_corner, EdgeRun::Straight)
+        .expect("a ruling");
+    let bottom_circle = builder
+        .add_edge(
+            bottom_corner,
+            bottom_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
+        .expect("a circle");
+    let top_circle = builder
+        .add_edge(
+            top_corner,
+            top_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
+        .expect("a circle");
+    let cap = |builder: &mut SolidBuilder, at: f64, outward: f64, edge, turn| {
+        let plane =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, at), Vector::new(0.0, 0.0, outward))
+                .expect("a unit normal");
+        let coedge = builder.add_coedge(edge, turn).expect("an edge");
+        let wire = builder
+            .add_wire(&[DraftStep::Along(coedge)])
+            .expect("a wire");
+        builder
+            .add_face(Surface::Plane(plane), &[wire])
+            .expect("a cap")
+    };
+    let bottom = cap(
+        &mut builder,
+        near,
+        -1.0,
+        bottom_circle,
+        Orientation::Reversed,
+    );
+    let top = cap(&mut builder, far, 1.0, top_circle, Orientation::Forward);
+    let round_the_wall = [
+        (bottom_circle, Orientation::Forward),
+        (seam, Orientation::Forward),
+        (top_circle, Orientation::Reversed),
+        (seam, Orientation::Reversed),
+    ]
+    .map(|(edge, turn)| DraftStep::Along(builder.add_coedge(edge, turn).expect("an edge")));
+    let wire = builder.add_wire(&round_the_wall).expect("a wire");
+    let side = builder
+        .add_face(Surface::Cone(skin), &[wire])
+        .expect("a face on the cone");
+    builder
+        .add_shell(&[
+            (bottom, Orientation::Forward),
+            (top, Orientation::Forward),
+            (side, Orientation::Forward),
+        ])
+        .expect("three faces close");
+    let frustum = builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a frustum");
+    model
+        .place_solid(frustum, &turned(turn))
+        .expect("this model made the key");
+    model
+        .place_solid(frustum, &at_height(down))
+        .expect("this model made the key");
+    frustum
 }
 
 fn a_model() -> Model {
