@@ -2263,7 +2263,14 @@ check-fuzz-builds:
 # One more. `the_two_places_along_it` in `three_surfaces.rs` takes `A`'s sign,
 # which its caller has already certified as `Pos` or `Neg`, and names those
 # two; the arm for every other `Decision` is `unreachable!`.
-wildcard_arms := "96"
+#
+#     Q1598's lane  96 -> 95
+#
+# One fewer. `degenerate_curved_fuses.rs`'s ball one rounding off a bar's axis
+# matched each fuse's `CannotMeshAFace` by its rule and sent every other pair
+# of rule and order to `CornersCoincide`; every fuse of it now answers, and the
+# test that replaced it reads each entry's faces off its table, with no match.
+wildcard_arms := "95"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
