@@ -146,8 +146,8 @@ const TURNED_FUSE_SLACK: f64 = 16.0;
 ///
 /// §14.7's half of it. A property only ever looks at the fuses that came back,
 /// so a run where the turned side refused everything would assert nothing at all
-/// and pass. The shipped seed compares 65 of its 81 pairings and a soak runs
-/// between a half and three quarters, so a quarter is the floor that says this
+/// and pass. The shipped seed compares 75 of its 84 pairings, and a soak at
+/// [`SOAK_FACTOR`] ten 670 of 732, so a quarter is the floor that says this
 /// file has not gone quietly vacuous.
 ///
 /// **Not §17.7's criterion 8 threshold.** That number belongs in that section
