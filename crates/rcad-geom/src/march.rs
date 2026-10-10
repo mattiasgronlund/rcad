@@ -967,6 +967,44 @@ mod tests {
         );
     }
 
+    /// **A trial that settles back to within a rounding of its start is
+    /// shortened, as one that settles back onto it exactly is.** A ball of
+    /// radius 2 at the origin and a pipe of radius 1 up `z` at `x = 1/2` cross
+    /// in two loops, and the upper one's top is `(−1/2, 0, √15/2)`. From there
+    /// with the coarse walk's room of `f64::MAX / 4`, the trial `6.7e153`
+    /// settles back onto the top exactly and is rooted, and `8.2e76` settles
+    /// one rounding off in `x` and in `z` and not at all along the loop: a
+    /// chord of `2.3e-16`, between two ends each known to `6.9e-16` of the
+    /// crossing. That was kept as the walk's first step, and the steps after it
+    /// doubled from there, so the first four points sat closer to the one
+    /// before than the walk knew any of its points to be. The mesh of a ball
+    /// with a bar through it off its axis refused such a loop as two corners
+    /// in one place (`docs/decisions.md` §347.9, Q1598).
+    #[test]
+    fn a_trial_that_settles_a_rounding_off_its_start_is_shortened_and_not_kept() {
+        let pipe = a_pipe([0.0, 0.0, 1.0], [0.5, 0.0, -3.0], 1.0);
+        let ball = a_ball([0.0, 0.0, 0.0], 2.0);
+        let top = Point::new(-0.5, 0.0, 3.75_f64.sqrt());
+
+        let walked = march([&pipe, &ball], top, f64::MAX / 4.0, 1 << 20)
+            .expect("a pipe through a ball off its axis crosses it in two loops");
+
+        let gaps: Vec<f64> = core::iter::once(top)
+            .chain(walked.points.iter().copied())
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]).length())
+            .collect();
+        println!("each point known to {:e}, gaps {gaps:?}", walked.deviation);
+        let first = walked.points[0];
+        assert!(
+            (first - top).length() > 2.0 * walked.deviation,
+            "the first step goes further than the two ends' own bounds account for: \
+             {first:?} from {top:?}, each known to {:e}",
+            walked.deviation
+        );
+    }
+
     /// Two surfaces tangent along their crossing have no direction to follow,
     /// and saying so is the branch §24.1 built this to be able to watch.
     #[test]
