@@ -42,7 +42,7 @@ use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Point, Surface,
     SurfaceMeet, Vector, intersect, walk,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 
 /// The three magnitudes each generated pair of directions is built from.
 ///
@@ -337,9 +337,15 @@ fn every_point_walked_round_one_of_the_two_ellipses_is_on_both_pipes() {
 /// exactly. It has to lie exactly in the flat the two axes span, and the flat
 /// holds one for two axes in one coordinate plane and for two directions scaled
 /// down from one whole-number triple, like `(1, 2, 2)/3` and `(2, 1, 2)/3`. That
-/// took the count from 32 to 408 of the 1224;
-/// `bores_on_3_4_0_and_3_0_4_are_refused_though_their_four_halves_are_there`
-/// pins one of the rest by name.
+/// took the count from 32 to 408 of the 1224. Since Q1645 a facing that still
+/// fails is the stored direction slid along a whole-number way in the flat, a
+/// unit in the last place at a time and at most 64 of them, until it dots with
+/// the middle exactly, which took the count from 408 to 688, and after that a
+/// sum of up to four of its own direction and fewer of the other's, which took
+/// it to 704. Of the 233 surfaces it still finds nothing for, 180 lie in a flat
+/// that holds no whole-number way from −2 to 2;
+/// `no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3`
+/// shows for one of those that no flat surface `f64` holds would do.
 ///
 /// Every point of every piece drawn is on both pipes, so a half the namer names
 /// is a piece of this crossing and not merely something the walker returned.
@@ -410,32 +416,101 @@ fn the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece()
          {pairs_put_to_both} pairs"
     );
     assert_eq!(
-        named_in_four_halves, 408,
-        "the pairs whose flat holds a short whole-number facing leaning each way are named"
+        named_in_four_halves, 704,
+        "the pairs with a facing each, whole-number, slid a few units in the last place or \
+         mostly its own, that leans its own way and passes exactly through the middle are named"
     );
 }
 
-/// Bores on `(3, 4, 0)` and `(3, 0, 4)` through `(11, −3.25, 0.5)` are still
-/// refused, and it is a **gap** (§16.10): the four halves are there, and so are
-/// flat surfaces that pass exactly through where the axes meet.
+/// Bores on `(3, 4, 0)` and `(3, 0, 4)` through `(11, −3.25, 0.5)` are picked
+/// by the stored directions slid a few units in the last place along `(0, 1, −1)`.
 ///
 /// Neither stored direction dots exactly with the middle, and the only
 /// directions with whole-number components from −2 to 2 in the flat the two
 /// span are `(0, 1, −1)` and its multiples. That one reads as far along one
 /// axis as back along the other, so its surface is the plane one ellipse lies
-/// in rather than a surface between its halves. The surfaces exist all the same: worked
-/// out in exact fractions, the first stored direction slid by `14·2⁻⁵³` along
-/// `(0, 1, −1)` still lies exactly in the flat, still leans towards its own
-/// axis, and dots with the middle to exactly `3.999999999999994`; the second,
-/// slid by `8·2⁻⁵³`, dots to exactly `6.9999999999999964`. The namer does not
-/// search for such a facing yet.
+/// in rather than a surface between its halves, and until Q1645 the pair was
+/// refused. Sliding a stored direction along it keeps the facing in the flat,
+/// and each step moves its dot with the middle by `2⁻⁵³·(−3.75)`. Worked out in
+/// exact fractions, apart from the kernel: the first stored direction slid by
+/// `14·2⁻⁵³` still leans towards its own axis and dots with the middle to
+/// exactly `3.999999999999994`, and the second, slid by `8·2⁻⁵³`, to exactly
+/// `6.9999999999999964`. No smaller slide does either. So every picker here is
+/// one of those two surfaces, facing either way, and both pass exactly through
+/// where the axes meet.
 #[test]
-fn bores_on_3_4_0_and_3_0_4_are_refused_though_their_four_halves_are_there() {
+fn bores_on_3_4_0_and_3_0_4_are_picked_by_their_directions_slid_until_they_pass_exactly() {
     let middle = Point::new(11.0, -3.25, 0.5);
     let [one, other] = two_pipes_crossing_at(
         middle,
         [Vector::new(3.0, 4.0, 0.0), Vector::new(3.0, 0.0, 4.0)],
         0.25,
+    );
+    let one_unit = f64::EPSILON / 2.0;
+    let slid = |pipe: &Cylinder, steps: f64| {
+        pipe.axis().direction() + Vector::new(0.0, 1.0, -1.0) * (steps * one_unit)
+    };
+    let surfaces = [
+        (slid(&one, 14.0), 3.999_999_999_999_994),
+        (slid(&other, 8.0), 6.999_999_999_999_996_4),
+    ];
+
+    for pair in [[one, other], [other, one]] {
+        let named = intersect(
+            &Surface::Cylinder(pair[0]),
+            &Surface::Cylinder(pair[1]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(halves)) = named else {
+            panic!("a facing slid until it passes exactly through names the pair: {named:?}")
+        };
+        assert_eq!(halves.len(), 4, "two ellipses, each in two halves");
+        for half in &halves {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = half.run() else {
+                panic!("a half is a piece of where the two pipes cross: {half:?}")
+            };
+            for picker in picked_by {
+                let Picker::InFrontOf(surface) = picker else {
+                    panic!("a half is picked by flat surfaces: {picker:?}")
+                };
+                assert!(
+                    surfaces.iter().any(|&(facing, offset)| {
+                        [(facing, offset), (-facing, -offset)]
+                            .contains(&(surface.normal(), surface.offset()))
+                    }),
+                    "each picker is one of the two slid surfaces: {surface:?}"
+                );
+            }
+        }
+    }
+}
+
+/// Bores on `(3, −6, 2)` and `(2, 3, 6)` through `(11, −3.25, 0.5)` are
+/// picked, on the first one's side, by four times its direction plus the
+/// other's: `(2, −3, 2)`.
+///
+/// The flat of the two holds `(1, 0, 2)`, but no slide of the first direction
+/// along it dots with the middle exactly within the 64 steps tried. Four
+/// sevenths of `(3, −6, 2)` plus a seventh of `(2, 3, 6)` is `(2, −3, 2)`, and
+/// the stored directions, rounded as they are, add up to it with nothing
+/// rounded. It leans towards the first as anything with more of it than of the
+/// other does, and dots with the middle to a short sum. Since Q1645 such sums
+/// are tried last, after the slide, and they name four pairs of directions of
+/// the family the count test puts to the namer.
+#[test]
+fn bores_on_3_minus_6_2_and_2_3_6_are_picked_by_four_of_one_direction_and_one_of_the_other() {
+    let middle = Point::new(11.0, -3.25, 0.5);
+    let [one, other] = two_pipes_crossing_at(
+        middle,
+        [Vector::new(3.0, -6.0, 2.0), Vector::new(2.0, 3.0, 6.0)],
+        0.25,
+    );
+    let mostly_one = Vector::new(2.0, -3.0, 2.0);
+    assert_eq!(
+        one.axis().direction() * 4.0 + other.axis().direction(),
+        mostly_one,
+        "four of the one direction and one of the other round to nothing but (2, −3, 2)"
     );
 
     for pair in [[one, other], [other, one]] {
@@ -445,11 +520,162 @@ fn bores_on_3_4_0_and_3_0_4_are_refused_though_their_four_halves_are_there() {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         );
+        let Ok(SurfaceMeet::Curves(halves)) = named else {
+            panic!("a facing mostly along one direction names the pair: {named:?}")
+        };
+        assert_eq!(halves.len(), 4, "two ellipses, each in two halves");
+        for half in &halves {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = half.run() else {
+                panic!("a half is a piece of where the two pipes cross: {half:?}")
+            };
+            assert!(
+                picked_by.iter().any(|picker| matches!(
+                    picker,
+                    Picker::InFrontOf(surface)
+                        if [mostly_one, -mostly_one].contains(&surface.normal())
+                )),
+                "one of each half's pickers faces (0.6, 2, 1.6) one way or the other: \
+                 {picked_by:?}"
+            );
+        }
+    }
+}
+
+/// Bores on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)` are refused,
+/// and no flat surface written in `f64` could pick their halves: each one lying
+/// in their flat misses where the axes meet.
+///
+/// A picker has to face a direction `f` lying exactly in the flat of the two
+/// stored directions `a` and `b`, `(3, 4, 0)/5` and `(4, 0, 3)/5` rounded, and
+/// pass exactly through the middle `c`, so `f·c` has to be a number `f64` holds.
+/// Every triple `f64` holds is a power of two times a whole-number triple, so
+/// the facings in the flat are powers of two times the whole-number triples in
+/// it. `a` and `b` times `2⁵⁵` are whole, `A` and `B`, and when the components of
+/// `A × B` share no odd factor every whole-number triple in the flat is
+/// `(mA + kB)/2ʲ` for whole `m` and `k`. A component `f64` holds is an odd
+/// number below `2⁵³` times a power of two. `b` has no `y`, so the odd part of
+/// `m` times the odd part of `A`'s `y` is below `2⁵³`; `a` has no `z`, so the
+/// same goes for `k` and `B`'s `z`. Both bounds come out below 3. That leaves
+/// `m` a power of two or nothing and `k` one of −1, 0 and 1, up to one power of
+/// two over both: the `2ˢa + kb` tried below. `s` from −60 to 60 is more than
+/// enough, since outside it the `x` of `2ˢa ± b` spans more than 53 bits.
+///
+/// Twelve facings are left, and none passes exactly through `c`, whichever way
+/// it leans, so neither picker exists.
+/// [`HalfSpace::through_a_point_facing`] rounds the exact `f·c` once, so its
+/// surface has `c` on it exactly when `f64` holds `f·c`. Naming this pair takes
+/// a picker that holds the exact `c` and a facing.
+#[test]
+fn no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3() {
+    let middle = Point::new(11.0, -3.25, 0.5);
+    let [one, other] = two_pipes_crossing_at(
+        middle,
+        [Vector::new(3.0, 4.0, 0.0), Vector::new(4.0, 0.0, 3.0)],
+        0.25,
+    );
+    for pair in [[one, other], [other, one]] {
+        let named = intersect(
+            &Surface::Cylinder(pair[0]),
+            &Surface::Cylinder(pair[1]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
         assert!(
             matches!(named, Err(Error::CannotNameWhichPieceOfACrossingThisIs)),
-            "no whole-number facing from −2 to 2 leans towards either axis here: {named:?}"
+            "no flat surface in f64 picks the halves, so the pair is refused: {named:?}"
         );
     }
+
+    let [a, b] = [one, other].map(|pipe| pipe.axis().direction());
+    assert_eq!(
+        [a, b].map(|way| way.components()),
+        [[0.6, 0.8, 0.0], [0.8, 0.0, 0.6]],
+        "the stored directions are the fifths rounded"
+    );
+    let [whole_a, whole_b] = [a, b].map(|way| {
+        way.components().map(|component| {
+            let scaled = component * 2f64.powi(55);
+            assert_eq!(scaled.fract(), 0.0, "{component} times 2⁵⁵ is whole");
+            scaled as i128
+        })
+    });
+    let square = [
+        whole_a[1] * whole_b[2] - whole_a[2] * whole_b[1],
+        whole_a[2] * whole_b[0] - whole_a[0] * whole_b[2],
+        whole_a[0] * whole_b[1] - whole_a[1] * whole_b[0],
+    ];
+    let shared = square.into_iter().fold(0, |so_far, component| {
+        greatest_common_factor(so_far, component)
+    });
+    assert_eq!(
+        odd_part(shared),
+        1,
+        "A and B reach every whole-number triple in the flat, up to a power of two"
+    );
+    let below_2_to_the_53 = 1_i128 << 53;
+    assert_eq!(
+        [whole_a[1], whole_b[2]].map(|digits| below_2_to_the_53 / odd_part(digits)),
+        [2, 1],
+        "the odd parts of m and k are below 3, so both are one"
+    );
+
+    let mut facings = vec![a, -a];
+    for s in -60..=60 {
+        for m in [0.0, 2f64.powi(s), -(2f64.powi(s))] {
+            for k in [1.0, -1.0] {
+                let parts = [0, 1, 2].map(|i| (a.components()[i] * m, b.components()[i] * k));
+                if parts
+                    .iter()
+                    .all(|&(of_a, of_b)| it_adds_exactly(of_a, of_b))
+                {
+                    let facing = Vector::new(
+                        parts[0].0 + parts[0].1,
+                        parts[1].0 + parts[1].1,
+                        parts[2].0 + parts[2].1,
+                    );
+                    if !facings.contains(&facing) {
+                        facings.push(facing);
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        facings.len(),
+        12,
+        "f64 holds twelve facings in the flat: {facings:?}"
+    );
+    for facing in facings {
+        let surface = HalfSpace::through_a_point_facing(middle, facing).expect("a facing");
+        let side = surface.side_of_point(PredicatePoint::Exact(middle.coordinates()));
+        assert!(
+            matches!(side, Decision::Pos | Decision::Neg),
+            "the surface facing {facing:?} misses where the axes meet: {side:?}"
+        );
+    }
+}
+
+/// The largest whole number both `one` and `other` are multiples of.
+fn greatest_common_factor(one: i128, other: i128) -> i128 {
+    if other == 0 {
+        one.abs()
+    } else {
+        greatest_common_factor(other, one % other)
+    }
+}
+
+/// `whole` with every factor of two taken out.
+fn odd_part(whole: i128) -> i128 {
+    whole.abs() >> whole.abs().trailing_zeros()
+}
+
+/// Whether `one + other` is a number `f64` holds, so adding them rounds nothing:
+/// the error the sum would carry, worked out without rounding, is nothing.
+fn it_adds_exactly(one: f64, other: f64) -> bool {
+    let sum = one + other;
+    let other_as_added = sum - one;
+    let one_as_added = sum - other_as_added;
+    (one - one_as_added) + (other - other_as_added) == 0.0
 }
 
 /// Bores leaning at `(3, 4, 0)` and `(4, 3, 0)` through `(11, −3.25, 0.5)` are

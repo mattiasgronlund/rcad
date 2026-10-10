@@ -677,6 +677,61 @@ between "cannot" and "we chose not to", which §24.17 is about.
 > (Q1655, and Q1645 at 120°). `two_equal_bars_leaning_at_each_other.rs` pins
 > all four.*
 
+> **2026-10-10 note (Q1645): a facing slid a few units in its last place names
+> 704 of the 1224, and the pair left pinned needs a picker that holds the exact
+> middle.** Where neither the stored direction nor a whole-number one passes
+> exactly through the middle `c`, the namer now slides the stored direction
+> along each short whole-number way in the flat of the two axes, one step at a
+> time, and keeps the first facing that still lies exactly in the flat, still
+> leans towards its own axis and dots with `c` to a number `f64` holds. Those
+> are the three exact checks Q1625 asks, so nothing became a tolerance. After
+> the slide it tries two to four of the stored direction plus fewer of the
+> other one, so a pair named by the slide keeps its surfaces. That took the
+> family from 408 to 688 with the slide and to 704 with the sums (`mise exec --
+> just t -p rcad-geom --test two_pipes_of_one_width_on_crossing_axes
+> the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece
+> --no-capture`), and
+> `bores_on_3_4_0_and_3_0_4_are_picked_by_their_directions_slid_until_they_pass_exactly`
+> and
+> `bores_on_3_minus_6_2_and_2_3_6_are_picked_by_four_of_one_direction_and_one_of_the_other`
+> pin one pair of each. A step is the unit in the last place of the smallest
+> component the way moves, not a fixed `2⁻⁵³`: a component from ¼ to ½ sits on
+> a grid of `2⁻⁵⁴`, and a fixed `2⁻⁵³` names 644 rather than 704 (measured by a
+> temporary edit). The slide stops at 64 steps either way. One step moves the
+> dot by an odd number times `2ᵉ`, so `2ᵏ` steps in a row run through every
+> pattern of the `k` bits between `2ᵉ` and the dot's own grid and one of them
+> clears all `k`; at the test's middle `(11, −3.25, 0.5)` `k` is at most 7, and
+> 4096 steps name the same 704 in ten times the time (also a temporary edit).
+> `LONGEST_SLIDE` in `intersect.rs` carries the whole argument.
+>
+> The 520 pairs still refused miss 233 surfaces between them (scratch scripts
+> in exact fractions over the namer's failed searches, not kept). 180 lie in a
+> flat with no whole-number way from −2 to 2, and the sums miss them too. 53
+> have such a way, but no slide of up to 4096 steps of `2⁻⁵³` to `2⁻⁵⁶` along
+> it finds a facing: own `(0, 0.6, 0.8)` against `(0.8, 0.6, 0)` along
+> `(1, 0, −1)` moves the dot in steps of `21·2⁻⁵⁴`, and the dot has a bit at
+> `2⁻⁵⁵` that no number of them clears.
+>
+> One of the 180, bores on `(3, 4, 0)` and `(4, 0, 3)` through
+> `(11, −3.25, 0.5)`, has no flat surface at all, and
+> `no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3`
+> shows it. The two ellipses meet on the line through `c` square to the flat,
+> so a picker has to hold that line, which puts its facing in the flat; and
+> `HalfSpace::through_a_point_facing` rounds `f·c` once, so its surface holds
+> `c` only when `f64` holds `f·c`. The test lists every facing `f64` holds in
+> that flat, twelve up to a power of two, and none of them dots exactly with
+> `c`. Of Q1625's three families of fix, the first two, which direction a
+> surface faces and how far it is slid, can only ever give one of those twelve,
+> so both are used up for this pair. The four halves are there, since two pipes
+> of one width whose axes meet always cross in two ellipses, so this is a gap
+> and not a limit, and the third family is the fix: a picker that holds the
+> exact `c` and a facing rather than a rounded offset. Whether each of the
+> other 179 is the same was not worked out. A row is filed for that picker, and
+> one each, with no class since neither has been run, for the 53 and for a
+> middle whose coordinates are long binary fractions, like a decimal `1.85`,
+> which puts `k` near 52, where a searched slide cannot reach and the step
+> count would have to be solved for.
+
 ### 31.10 What this gate does not know
 
 §30.3's whole lesson is that a settling document written before anyone has read
