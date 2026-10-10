@@ -2396,7 +2396,7 @@ impl BuildingAMesh {
     /// pinch either climbs nothing and is no cap, or goes right round with
     /// that pinch on its far side (`a_cone_cap_whose_rim_runs_through_its_apex.rs`,
     /// `docs/decisions.md` §199.4). It stays a refusal and not an assert,
-    /// since a wire this kernel never wrote can still arrive here (§16.11).
+    /// since a wire this kernel never wrote can still arrive here (§67.2).
     fn which_pole_this_cap_reaches(
         &self,
         _: FaceView<'_>,

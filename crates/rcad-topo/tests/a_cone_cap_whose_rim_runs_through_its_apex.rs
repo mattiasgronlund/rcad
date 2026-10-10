@@ -8,9 +8,12 @@
 //! there and found none. Each way this kernel has to put a corner of a cone's
 //! rim on its apex is below, with what it gives. None of them hands
 //! `which_pole_this_cap_reaches` a rim with a corner at the apex. A scratch
-//! print there stayed silent through every fuse and build here, and through
-//! the whole workspace and the slow tier. With its two comparisons made
-//! `<=` and `>=` instead, every answer here came out the same.
+//! print there, on every call that answered `None` or saw a corner on a
+//! pinch, saw no cone through every fuse and build here, nor through the whole
+//! workspace and the slow tier: only balls' rims with a corner on a pole, and
+//! none of them answered `None`. With its two comparisons made
+//! `<=` and `>=` instead, the 44 builds and fuses of the probe the first four
+//! tests here came from all came out the same.
 //!
 //! **Why none gets there.** A corner on a pinch opens a pole side across the
 //! material there (`WalkingAWire::turn_at_a_corner_on_a_pole`), so the loop
