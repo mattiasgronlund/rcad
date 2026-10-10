@@ -4860,7 +4860,7 @@ fn nearest_longitude(around: &WalkedLoop, at: f64) -> Vec<usize> {
 }
 
 /// A longitude moved by whole turns into the turn a loop's own corners run in,
-/// so that [`nearest_longitude`] answers a corner of the stretch it names rather
+/// so that [`nearest_longitude`] answers corners of the stretch it names rather
 /// than whichever end of the loop is closest.
 ///
 /// A loop that goes right round spans one whole turn, so every longitude has
