@@ -32,13 +32,16 @@
 //! and its planes `z = 0` and `z = 2` at one point each outside the block.
 //!
 //! **A ball clear of the block is no longer cut at all** (`docs/decisions.md`
-//! §400). The fuzzer's balls stood clear of their blocks, and so did this draw
-//! until §400, half a unit off `y = 0` on the other side: the fuse used to cut
-//! two solids against each other whenever their whole-solid boxes touched, and
-//! now cuts them only where it cannot prove they do not meet. A ball that
-//! touches the block meets it, so the block's planes still cut it, and the rim
-//! is still written. That is the one kind of draw found where two solids meet
-//! and a rim between two faces of one ball survives into an answer; §400 says
+//! §400), pinned by
+//! `a_ball_resting_on_a_blocks_plane_beside_the_block_unites_whole` in
+//! `a_ball_clear_of_a_block_comes_back_whole.rs`. The fuzzer's balls stood
+//! clear of their blocks, and so did this draw until §400, half a unit off
+//! `y = 0` on the other side: the fuse used to cut two solids against each
+//! other whenever their whole-solid boxes touched, and now cuts them only
+//! where it cannot prove they do not meet. A ball that touches the block
+//! meets it, so the block's planes still cut it, and the rim is still
+//! written. That is the one kind of draw found where two solids meet and a
+//! rim between two faces of one ball survives into an answer; §400 says
 //! which others were tried and where each stops.
 
 #[path = "fuzzing/comparison.rs"]
