@@ -1656,6 +1656,14 @@ fn where_one_plane_and_two_curved_surfaces_meet(
     {
         return Ok(answer);
     }
+    if let Some(answer) =
+        what_a_plane_that_cuts_both_in_circles_leaves(flat, one, other, at, policy, log)?
+    {
+        return Ok(answer);
+    }
+    if let Some(answer) = what_a_plane_along_a_pipe_leaves(flat, one, other, at)? {
+        return Ok(answer);
+    }
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
 }
 
@@ -1704,7 +1712,31 @@ fn where_a_plane_and_two_quadrics_of_one_bend_meet(
     // Past here the family is settled, so arithmetic that runs out is a
     // refusal about *this* triple and not a reason to try the next road.
     let (leaning, reach) = the_flat_surface_two_quadrics_differ_by(&mine, &theirs);
-    let Some(shared) = what_a_stored_plane_and_an_exact_one_share(flat, &leaning, &reach) else {
+    where_a_stored_plane_an_exact_one_and_a_quadric_meet(
+        flat, &leaning, &reach, one, at, policy, log,
+    )
+    .map(Some)
+}
+
+/// What the stored plane, the flat surface `leaning·p = reach` and `quadric`
+/// share, for a flat surface that holds every point the stored plane, `quadric`
+/// and a second curved surface share, and on the stored plane holds nothing of
+/// `quadric` the second surface does not.
+///
+/// Where the two planes are one, the three share what the stored plane and
+/// `quadric` share; where they never meet, nothing; and where they cross in a
+/// line, the points that line meets `quadric` at. Arithmetic that runs out is a
+/// refusal about this triple.
+fn where_a_stored_plane_an_exact_one_and_a_quadric_meet(
+    flat: &Plane,
+    leaning: &[Exact; 3],
+    reach: &Exact,
+    quadric: &Surface,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    let Some(shared) = what_a_stored_plane_and_an_exact_one_share(flat, leaning, reach) else {
         return Err(an_exact_step_could_not_be_taken(
             WHERE_THREE_SURFACES_MEET,
             at,
@@ -1712,13 +1744,13 @@ fn where_a_plane_and_two_quadrics_of_one_bend_meet(
     };
 
     let line = match shared {
-        WhatTwoPlanesShare::Nothing => return Ok(Some(MeetOfThree::Nowhere)),
+        WhatTwoPlanesShare::Nothing => return Ok(MeetOfThree::Nowhere),
         WhatTwoPlanesShare::TheWholeOfTheStoredOne => {
-            return what_one_plane_and_one_curved_surface_share(flat, one, policy, log).map(Some);
+            return what_one_plane_and_one_curved_surface_share(flat, quadric, policy, log);
         }
         WhatTwoPlanesShare::ALine(line) => line,
     };
-    let quadratic = how_a_quadric_cuts_the_line(&line, one)
+    let quadratic = how_a_quadric_cuts_the_line(&line, quadric)
         .ok_or_else(|| an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at))?;
     let found =
         where_a_line_meets_a_quadric(WHERE_THREE_SURFACES_MEET, &quadratic, at, policy, log)?;
@@ -1731,7 +1763,6 @@ fn where_a_plane_and_two_quadrics_of_one_bend_meet(
         log,
         || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at),
     )
-    .map(Some)
 }
 
 /// What two curved surfaces differ by, as [`where_three_curved_surfaces_meet`]
