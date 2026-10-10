@@ -5716,6 +5716,51 @@ mod tests {
         );
     }
 
+    /// `-0.0 == 0.0`, so no pin that compares corners sees which zero a corner
+    /// carries, but a corner keyed on its bits does: `(-0.0, 3, 0)` and
+    /// `(0, 3, 0)` are one point and two keys. The floor across a bar and a
+    /// ball off its axis came back at `(-0.0, ±3, 0)` before the road added
+    /// zero to what it hands back.
+    #[test]
+    fn no_corner_where_a_plane_cuts_two_curved_surfaces_in_circles_is_at_a_negative_zero() {
+        let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
+        let ball_beside =
+            Surface::Sphere(Sphere::new(Point::new(4.0, 0.0, 0.0), 5.0).expect("a radius"));
+        let pipe = a_bar_up_z_of_radius(3.0);
+        let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 5.0]);
+        let bar = a_bar_up_z_of_radius(2.0);
+        let ball_above = the_ball_of_radius_at_0_3_5(3.0);
+        for [plane, one, other] in [[&floor, &ball_beside, &pipe], [&cap, &bar, &ball_above]] {
+            for order in [
+                [plane, one, other],
+                [plane, other, one],
+                [one, plane, other],
+                [one, other, plane],
+                [other, plane, one],
+                [other, one, plane],
+            ] {
+                let answer = meet(order).expect("two circles in one plane are answered");
+                let MeetOfThree::At(points) = &answer else {
+                    panic!("expected points, got {answer:?}");
+                };
+                for point in points {
+                    let mut ends: Vec<f64> = point
+                        .enclosure()
+                        .iter()
+                        .flat_map(|side| [side.lo(), side.hi()])
+                        .collect();
+                    if let PredicatePoint::Exact(place) = point {
+                        ends.extend(place);
+                    }
+                    assert!(
+                        ends.iter().all(|end| end.to_bits() != (-0.0f64).to_bits()),
+                        "{point:?} from {order:?} has a negative zero in it"
+                    );
+                }
+            }
+        }
+    }
+
     fn a_bar_up_z_of_radius(radius: f64) -> Surface {
         Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius"))
     }
