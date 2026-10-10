@@ -110,7 +110,8 @@ Two shapes were tried to make one, and neither got there:
   stays closed.
 
 Neither test was kept, because neither can fail for the reason it would be
-named for. So the fold rests on an argument, not a test. It is the same exact
+named for. So the fold rests on an argument, not a test. (Since Q350 and Q532,
+four tests fail without its pipe part: §247.6's note of 2026-10-10.) It is the same exact
 fold, with no tolerance, that `names_of_the_three_surfaces` and
 `names_of_the_two_surfaces` name an arc's corners and a closed crossing by.
 Naming the arc by the stored numbers would let two faces agree on both
@@ -230,3 +231,26 @@ that was not committed:
 - **Two half bars stacked on one pipe refuse before `assemble`** even with one
   spelling, as `AFaceTrimmedByACurveThisCannotFollow` and in some fuses
   `AFaceMeetsItsNeighbourOnItsOwnSurface`. That is 247.5's fourth item.
+
+*2026-10-10, Q115:* the pipe part of the fold now has tests that fail without
+it.
+
+- **Four tests fail without it.** With `name_of_surface_bits` in place of
+  `name_of_the_surface_either_way_round` in `which_arc_of_a_circle_this_is`,
+  four of 1797 rcad-topo tests fail, all `ResultIsNotManifold { count: 1 }`:
+  - `two_half_bars_fuse_directly_to_what_cutting_the_block_off_afterwards_gives`.
+    This is the union of two half bars stacked on one pipe, with the upper
+    wall's axis at z = 2, and it reaches `assemble` since Q350.
+  - the three tests of `two_bars_on_one_pipe_and_a_box_united_in_one_call.rs`
+    that run every wall, since Q532.
+- **What was reproduced.** The dispatcher reproduced the four failures, as one
+  line shadowing the fold in that function, over those two files: 10 run, 6
+  passed, 4 failed.
+- **What only the lane measured.** With only the axis origin left raw, all four
+  fail. With only the direction left raw, the three whose upper bar's axis is
+  turned round fail.
+- **The cone and ring parts of the fold are still reached by no test.** Half
+  frustums whose cone is spelled about −z cannot be cut today (Q654). The top
+  halves of two quarter bends with one ring spelled about −z refuse
+  `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in all six fuses (Q758). Q1564
+  and Q1565 wait on those two rows, to pin the unions once they answer.
