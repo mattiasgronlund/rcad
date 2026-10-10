@@ -1890,12 +1890,15 @@ fn how_often_a_certified_fuse_of_a_pair_leaning_the_same_way_refuses() {
 /// inside a piece of a face, and 4 a point in a piece that every solid could
 /// place. Which fuses moved since the 276 was not traced.
 ///
-/// Since Q1608 and Q1609 it is 12 refused, 4 under each of those three names,
-/// and 2 of the comparisons disagree about whether the answer is a solid. Both
-/// are one pair drawn twice, two combs leaning opposite ways: their
-/// intersection answers two parts with the bigger comb first and is refused
-/// with four faces along an edge the other way round, where before both ways
-/// were refused for a point inside a piece (§365.8's note on Q1608 and Q1609).
+/// Since Q1608 and Q1609 it is 12 refused, 4 under each of those three names.
+/// Between Q1608 and Q1633, 2 of the comparisons disagreed about whether the
+/// answer is a solid. Both were one pair drawn twice, two combs leaning
+/// opposite ways: their intersection answered two parts with the bigger comb
+/// first and was refused with four faces along an edge the other way round,
+/// where before both ways were refused for a point inside a piece (§365.8's
+/// note on Q1608 and Q1609). Since Q1633 the intersection answers the same two
+/// parts both ways round, and no comparison disagrees: 131 of the 140 are
+/// reached, 12 of the 280 fuses refused and 6 not a solid.
 #[test]
 fn swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit() {
     let tally = over(CASES, a_skew_pair(), |configuration, tally| {

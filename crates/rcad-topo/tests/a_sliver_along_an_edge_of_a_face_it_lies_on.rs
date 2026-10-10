@@ -15,7 +15,9 @@ mod pairs;
 
 use rcad_geom::Deflection;
 use rcad_predicates::expansion::{compress, expansion_sum, product_is_exact, scale_expansion};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{
+    Decision, Policy, ProvenanceLog, meet_of_three_planes, side_of_a_plane_where_three_planes_meet,
+};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use pairs::{Configuration, Elsewhere, Placed, Shape, Skew};
@@ -234,7 +236,10 @@ fn no_answer_of_a_leaning_frame_and_a_leaning_ell_loses_a_piece() {
 
 /// A comb of three teeth two high, leaning forward two, two high at the
 /// origin, and a comb of two teeth two high, leaning back two, one high at
-/// `(3, 0, 1)`. They hold 22 and 7.
+/// `(3, 0, 1)`. They hold 22 and 7: the first is a base five by one and three
+/// teeth one by two, eleven across, two high, and the second a base three by
+/// one and two teeth one by two, seven across, one high. Leaning keeps what a
+/// slice holds.
 ///
 /// The second comb's wall `x + 2y = 6` runs through the first comb's corner
 /// `(4, 1)`, where the floor `y = 1` of its gap meets its tooth's wall
@@ -264,12 +269,26 @@ fn no_answer_of_a_leaning_frame_and_a_leaning_ell_loses_a_piece() {
 /// Q1606's rule places it by an edge of the second comb's gap floor, on that
 /// floor and facing its way, in all three fuses.
 ///
-/// The union and the first less the second are still refused with four faces
-/// along an edge. Stored, each has a part a rounding across at `(3, 1)`: the
-/// union a three-sided notch between `(3, 1)`, `(3 + 3.7e-16, 1)` and the
-/// meet above, which neither comb fills, and the difference the side of the
-/// first comb's tooth from `(3, 1)` to that meet. The meet rounds to
-/// `(3, 1)`.
+/// **The union and the first less the second are a limit**, refused with
+/// four faces along an edge (queue row Q1634). They would hold `22 + 7 − 3`
+/// and `22 − 3`. Stored, each has a part a rounding across at `(3, 1)` from
+/// `z = 1` to `2`: the union a three-sided notch, which neither comb fills,
+/// between `(3, 1)`, the crossing of `x + 2y = 5` with `y = 1`, and the meet
+/// of `x + 2y = 5` with `x − 2y = 1`, and the difference the side of the first
+/// comb's tooth from `(3, 1)` to that meet. Those are three points, each
+/// within `2e-15` of `(3, 1)`
+/// ([`where_the_two_combs_cross_three_corners_lie_a_rounding_apart`]), so
+/// either answer has an edge under `4e-15` long beside the first comb's corner
+/// at `(5, 0, 0)`: a spread past `1e15`, against the `1e11` a model supports
+/// (`docs/decisions.md` §3.5). It is a length over a length, so no scaling
+/// fits the two together, and only a tolerance would close the notch.
+///
+/// The fuse stops before it measures that spread. The boxes of the crossing
+/// and of the meet have the same middle, `(3.0000000000000004, 1)`, and
+/// `Corners::of` in `fuse/assemble.rs` makes two names written to one point
+/// one corner. The strip of the first comb's floor `y = 1` from `(3, 1)` to
+/// the crossing and the strip of its tooth's wall from `(3, 1)` to the meet
+/// then have the same corners, and four faces meet along an edge of theirs.
 #[test]
 fn two_combs_leaning_opposite_ways_meet_in_two_parts_a_rounding_apart() {
     let (model, keys) = comb_and_comb().build();
@@ -278,25 +297,47 @@ fn two_combs_leaning_opposite_ways_meet_in_two_parts_a_rounding_apart() {
 
     let (met, solids) = fused(&model, keys[0], keys[1], Rule::Intersection);
     assert_eq!(solids.len(), 2, "the intersection is two parts");
+    assert_eq!(
+        face_counts(&met, &solids),
+        [8, 6],
+        "the intersection's faces"
+    );
     holds_exactly(&met, &solids, 3.0, "the intersection");
 
     stops_at_four_faces_along_an_edge(&model, keys[0], keys[1], Rule::Union);
     stops_at_four_faces_along_an_edge(&model, keys[0], keys[1], Rule::Difference);
 }
 
-/// The same two with the second comb first. The second less the first is four
-/// parts, `7 − 3` in all: its left tooth with the end of its base under it, the
-/// other end of its base, the top of its right tooth above where the first
-/// comb's tooth crosses it, and the triangle `(3, 1)`, `(4, 1)`, `(3.5, 1.25)`
-/// of that tooth in the first comb's gap.
+/// The same two with the second comb first. The intersection is the same two
+/// parts. The second less the first is four parts, `7 − 3` in all: its left
+/// tooth with the end of its base under it, the other end of its base, the top
+/// of its right tooth above where the first comb's tooth crosses it, and the
+/// triangle `(3, 1)`, `(4, 1)`, `(3.5, 1.25)` of that tooth in the first
+/// comb's gap.
 ///
-/// The union is refused as it is with the first comb first. So is the
-/// intersection, which the first comb first answers as two parts.
+/// Until Q1633 the intersection was refused with four faces along the upright
+/// line through `(3 + 3.7e-16, 1)`, where the two parts touch: on `y = 1`, the
+/// second comb's gap floor, which reaches that far past `x = 3`, and the first
+/// comb's gap floor beyond it, and resting on them the walls `x + 2y = 5` and
+/// `x − 2y = 1` of the four-sided part. Two flat faces on one plane facing one
+/// way, with the other two on its outer side, are two parts touching along a
+/// line, and the line is now parted into one edge per part, as it already was
+/// where the two faces on the plane were pieces of one input face.
+///
+/// The union is refused as it is with the first comb first, the same limit.
 #[test]
 fn two_combs_leaning_opposite_ways_the_other_way_round_meet_in_two_parts_a_rounding_apart() {
     let (model, keys) = comb_and_comb().build();
 
-    stops_at_four_faces_along_an_edge(&model, keys[1], keys[0], Rule::Intersection);
+    let (met, solids) = fused(&model, keys[1], keys[0], Rule::Intersection);
+    assert_eq!(solids.len(), 2, "the intersection is two parts");
+    assert_eq!(
+        face_counts(&met, &solids),
+        [8, 6],
+        "the intersection's faces"
+    );
+    holds_exactly(&met, &solids, 3.0, "the intersection");
+
     stops_at_four_faces_along_an_edge(&model, keys[1], keys[0], Rule::Union);
 
     let (less, solids) = fused(&model, keys[1], keys[0], Rule::Difference);
@@ -305,7 +346,70 @@ fn two_combs_leaning_opposite_ways_the_other_way_round_meet_in_two_parts_a_round
         4,
         "the second comb less the first is four parts"
     );
-    holds_exactly(&less, &solids, 4.0, "the difference");
+    assert_eq!(
+        face_counts(&less, &solids),
+        [6, 6, 5, 5],
+        "the difference's faces"
+    );
+    holds_exactly(&less, &solids, 7.0 - 3.0, "the difference");
+}
+
+/// **Where the two combs cross `(3, 1)`, three corners lie a rounding apart.**
+/// From `z = 1` to `2`, the planes of three faces through that line meet two at
+/// a time in three upright lines, asked exactly of the planes the model
+/// stores. The first comb's corner, where its gap floor `y = 1` meets its
+/// tooth's wall `x − 2y = 1`, is `(3, 1)`. The crossing of the second comb's
+/// wall `x + 2y = 5` with its gap floor, the same plane `y = 1`, is strictly
+/// in front of the tooth's wall, outside the first comb. The meet of the two
+/// walls is strictly in front of the floor, inside both gaps. So the three are
+/// three points, and the notch between them, and the side of the tooth from
+/// the corner to the meet, are a rounding across: the edges the union and the
+/// first comb less the second need, and the limit the test above pins.
+#[test]
+fn where_the_two_combs_cross_three_corners_lie_a_rounding_apart() {
+    let (model, keys) = comb_and_comb().build();
+    let first = planes_through_three_one_one(&model, keys[0]);
+    let second = planes_through_three_one_one(&model, keys[1]);
+    let one_of = |planes: &[[f64; 4]], which: &dyn Fn(&[f64; 4]) -> bool| -> [f64; 4] {
+        let found: Vec<[f64; 4]> = planes
+            .iter()
+            .copied()
+            .filter(|plane| which(plane))
+            .collect();
+        let [plane] = found[..] else {
+            panic!("one plane, not {found:?}");
+        };
+        plane
+    };
+    let tooth_wall = one_of(&first, &|&[a, b, _, _]| a > 0.0 && b < 0.0);
+    let first_floor = one_of(&first, &|&[a, b, _, _]| a == 0.0 && b > 0.0);
+    let floor = one_of(&second, &|&[a, b, _, _]| a == 0.0 && b > 0.0);
+    let wall = one_of(&second, &|&[a, b, _, _]| a < 0.0 && b < 0.0);
+    let bottom = one_of(&second, &|&[_, _, c, _]| c < 0.0);
+    assert_eq!(first_floor, floor, "the two gap floors are one plane");
+
+    let crossing = [bottom, floor, wall];
+    let meet = [bottom, wall, tooth_wall];
+    assert_eq!(
+        side_of_a_plane_where_three_planes_meet(crossing, tooth_wall),
+        Ok(Decision::Pos),
+        "the crossing against the tooth's wall"
+    );
+    assert_eq!(
+        side_of_a_plane_where_three_planes_meet(meet, floor),
+        Ok(Decision::Pos),
+        "the meet against the floor"
+    );
+    for [one, other, last] in [crossing, meet] {
+        let point =
+            meet_of_three_planes(one, other, last).expect("three planes meeting at a point");
+        for (along, at) in point.enclosure().into_iter().zip([3.0, 1.0, 1.0]) {
+            assert!(
+                (along.lo() - at).abs() < 2e-15 && (along.hi() - at).abs() < 2e-15,
+                "{along:?} is not within 2e-15 of {at}"
+            );
+        }
+    }
 }
 
 fn configuration(first: Placed, second: Placed) -> Configuration {
@@ -489,6 +593,36 @@ fn measured(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
         error += measure.volume_error();
     }
     (measured, error)
+}
+
+/// How many faces each solid has, most first.
+fn face_counts(model: &Model, solids: &[SolidKey]) -> Vec<usize> {
+    let mut counts: Vec<usize> = solids
+        .iter()
+        .map(|&solid| {
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .faces()
+                .count()
+        })
+        .collect();
+    counts.sort_unstable_by(|one, other| other.cmp(one));
+    counts
+}
+
+/// The planes of `solid`'s faces that pass within a rounding of `(3, 1, 1)`,
+/// each once, as `[a, b, c, d]`.
+fn planes_through_three_one_one(model: &Model, solid: SolidKey) -> Vec<[f64; 4]> {
+    let mut planes: Vec<[f64; 4]> = Vec::new();
+    for face in model.solid(solid).expect("this model made the key").faces() {
+        let plane = face.plane().coefficients();
+        let [a, b, c, d] = plane;
+        if (3.0 * a + b + c + d).abs() < 1e-12 && !planes.contains(&plane) {
+            planes.push(plane);
+        }
+    }
+    planes
 }
 
 fn has_a_corner_at(model: &Model, solid: SolidKey, at: [f64; 3]) -> bool {
