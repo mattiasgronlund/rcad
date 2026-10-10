@@ -27,6 +27,8 @@
 //! **The whole ring** is the same tube right round, written as its two halves
 //! either side of `z = 0`, and it holds `8π²`. Against a bar it touches
 //! nowhere, nothing cuts it, and a fuse has to hand it back whole (row Q1588).
+//! Turned about six axes a fortieth of a turn at a time, it is handed back at
+//! all but seven of the 234 turns.
 
 use core::f64::consts::{PI, TAU};
 
@@ -256,9 +258,10 @@ fn a_whole_ring_turned_a_quarter_about_a_slant_and_a_bar_far_from_it_fuse_to_the
 /// The whole ring turned about six axes a fortieth of a turn at a time, and
 /// the bar twenty out, fused under every rule both ways round: 1404 fuses.
 /// Each one that answers gives the two apart, nothing, or its first argument,
-/// and validates. The rest are refused `VolumeIsNotPositive`, a ring of
-/// volume `8π²` read as enclosing about `−4·10⁻¹⁶`, and that is a defect
-/// pinned at its count: the answer exists (row Q1588).
+/// and validates. The rest, 21, are refused `VolumeIsNotPositive`, a ring of
+/// volume `8π²` read as enclosing about `−4·10⁻¹⁶`. They are the three fuses
+/// whose answer holds the ring, at seven of the 234 turns, and that is a
+/// defect pinned at its count: the answer exists (row Q1588).
 #[test]
 fn a_whole_ring_turned_any_way_and_a_bar_far_from_it_answer_or_are_refused_as_enclosing_nothing() {
     let mut refused = Vec::new();
@@ -319,7 +322,7 @@ fn a_whole_ring_turned_any_way_and_a_bar_far_from_it_answer_or_are_refused_as_en
             }
         }
     }
-    assert_eq!(refused.len(), 20, "{refused:#?}");
+    assert_eq!(refused.len(), 21, "{refused:#?}");
 }
 
 fn a_whole_ring_and_a_bar_clear_of_it_fuse_to_the_two_apart(shape: &str, out: f64) {

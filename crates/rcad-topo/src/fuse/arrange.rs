@@ -138,11 +138,14 @@ pub(crate) fn split_a_face(
 ) -> Result<Split> {
     let cuts = canonical_cut_surfaces(face);
     let mut arrangement = Arrangement::of(face, &cuts, policy, log)?;
-    // A plane this far out that its offset overflows is left to refuse as a
+    // The plane keeps the axis's own bits: scaled again, a turned ring's axis
+    // comes out an ulp off square to it, and that crossing is a quartic. A
+    // plane this far out that its offset overflows is left to refuse as a
     // whole surface with no seam.
     if arrangement.arcs.is_empty()
         && let Surface::Torus(ring) = face.surface
-        && let Ok(middle) = Plane::from_point_and_normal(ring.centre(), ring.axis().direction())
+        && let Ok(middle) =
+            Plane::from_point_and_normal_as_written(ring.centre(), ring.axis().direction())
     {
         arrangement = Arrangement::of(face, &[Surface::Plane(middle)], policy, log)?;
     }
