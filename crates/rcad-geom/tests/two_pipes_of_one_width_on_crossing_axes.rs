@@ -319,7 +319,8 @@ fn every_point_walked_round_one_of_the_two_ellipses_is_on_both_pipes() {
 /// The namer names the two ellipses as four halves, cut where the two cross each
 /// other, each picked by a corner of two flat surfaces through where the axes
 /// meet. It used to refuse the family as a crossing that touches itself, until
-/// Q1603 gave a fuse a node where two curves of one pair cross. The walker draws
+/// Q1603 named it so; Q1607 gave a fuse a node where two of the halves cross,
+/// in `fuse/arrange.rs`. The walker draws
 /// each of those halves, and each piece a file names lying in one of the two
 /// planes. What must never happen again is the walker not seeing the family at
 /// all and marching into the singularity, which came back as `Undecidable`
