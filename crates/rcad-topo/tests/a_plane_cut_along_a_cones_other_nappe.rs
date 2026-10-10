@@ -2012,9 +2012,9 @@ fn a_block(model: &mut Model, block: BoxShape) -> SolidKey {
         .expect("a rectangle extrudes")
 }
 
-/// Points half a unit apart over `|x|, |y| ≤ 6`, `|z| ≤ 12`, nudged off the
-/// lattice so none lands on an axis or a cap, and keeping only those further
-/// than `0.02` from every face of either input.
+/// Points `stride` halves of a unit apart over `|x|, |y| ≤ 6`, `|z| ≤ 12`,
+/// nudged off the lattice so none lands on an axis or a cap, and keeping only
+/// those further than `0.02` from every face of either input.
 fn clear_grid_points(case: &Case, stride: usize) -> impl Iterator<Item = Point> + '_ {
     (-12..=12).step_by(stride).flat_map(move |i| {
         (-12..=12).step_by(stride).flat_map(move |j| {
