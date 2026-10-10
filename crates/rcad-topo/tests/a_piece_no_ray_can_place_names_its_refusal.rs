@@ -200,6 +200,207 @@ fn a_wedge_a_hair_below_a_bends_cap_is_refused_before_a_ray() {
     }
 }
 
+#[test]
+fn q1393_probe() {
+    let turns = [FRAC_PI_2, -FRAC_PI_2, PI];
+    for (ring, tube) in [(4.0, 1.0), (1.0, 0.5), (2.0, 1.0)] {
+        for turn in turns {
+            for rule in EVERY_RULE {
+                for first_first in [true, false] {
+                    let what = format!(
+                        "F1 bends ring {ring} tube {tube} turn {turn} {rule:?} first {first_first}"
+                    );
+                    eprintln!("PROBE {what}");
+                    let mut model = a_model();
+                    let first = a_quarter_bend(&mut model, ring, tube);
+                    let placed = a_quarter_bend(&mut model, ring, tube);
+                    model
+                        .place_solid(placed, &Isometry::rotation(&Axis::z(), turn).unwrap())
+                        .unwrap();
+                    let got = fused_or_refused(&mut model, first, placed, rule, first_first);
+                    eprintln!("PROBE-RESULT {what}: {}", short(&got));
+                }
+            }
+        }
+    }
+    for turn in [0.0, FRAC_PI_2, -FRAC_PI_2, PI] {
+        for rule in EVERY_RULE {
+            for first_first in [true, false] {
+                let what = format!("F2 sector turn {turn} {rule:?} bend first {first_first}");
+                eprintln!("PROBE {what}");
+                let mut model = a_model();
+                let bend = a_quarter_bend(&mut model, 4.0, 1.0);
+                let sector = match a_sector(&mut model, 6.0, turn) {
+                    Ok(sector) => sector,
+                    Err(why) => {
+                        eprintln!("PROBE-RESULT {what}: sector {why:?}");
+                        continue;
+                    }
+                };
+                let got = fused_or_refused(&mut model, bend, sector, rule, first_first);
+                eprintln!("PROBE-RESULT {what}: {}", short(&got));
+            }
+        }
+    }
+}
+
+#[test]
+fn q1393_probe_f3() {
+    for (label, bottom, height) in [
+        ("exact", -1.5, 0.0),
+        ("overlap", -1.5, 1.110_223_024_625_156_5e-16),
+        ("gap", -1.5, -5.551_115_123_125_783e-17),
+        ("overlap by 1e-12", -1.5, 1e-12),
+        ("overlap by a quarter", -1.5, 0.25),
+        ("gap of a quarter", -1.5, -0.25),
+        ("exact moved down and up", -1.5, 1e300),
+    ] {
+        for rule in EVERY_RULE {
+            for ring_first in [true, false] {
+                let what = format!("F3 {label} {rule:?} ring first {ring_first}");
+                eprintln!("PROBE {what}");
+                let mut model = a_model();
+                let ring = rings::the_top_half_of_a_ring(&mut model, 4.0, 1.0, false)
+                    .expect("a half ring");
+                let sector = match an_annulus_sector(&mut model, bottom, height) {
+                    Ok(sector) => sector,
+                    Err(why) => {
+                        eprintln!("PROBE-RESULT {what}: sector {why:?}");
+                        continue;
+                    }
+                };
+                let got = fused_or_refused(&mut model, ring, sector, rule, ring_first);
+                eprintln!("PROBE-RESULT {what}: {}", short(&got));
+            }
+        }
+    }
+}
+
+#[test]
+fn q1393_probe_f4() {
+    let moves = [
+        ("up 1e-15", at_height(1e-15)),
+        ("up 1e-12", at_height(1e-12)),
+        (
+            "round x by 2pi",
+            Isometry::rotation(&Axis::x(), 2.0 * PI).unwrap(),
+        ),
+        (
+            "round z by 2pi",
+            Isometry::rotation(&Axis::z(), 2.0 * PI).unwrap(),
+        ),
+    ];
+    for (label, movement) in &moves {
+        for rule in EVERY_RULE {
+            for first_first in [true, false] {
+                let what = format!("F4 bend {label} {rule:?} first {first_first}");
+                let mut model = a_model();
+                let first = a_quarter_bend(&mut model, 4.0, 1.0);
+                let moved = a_quarter_bend(&mut model, 4.0, 1.0);
+                model.place_solid(moved, movement).unwrap();
+                let got = fused_or_refused(&mut model, first, moved, rule, first_first);
+                eprintln!("PROBE-RESULT {what}: {}", short(&got));
+            }
+        }
+    }
+}
+
+/// The quarter of a thick tube about `z`, radii 3.5 to 4.5, in `x, y >= 0`,
+/// from `bottom` up by `height`.
+fn an_annulus_sector(model: &mut Model, bottom: f64, hair: f64) -> Result<SolidKey, Error> {
+    let policy = Policy::certified();
+    let triangle = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]])
+        .build(&policy, &mut ProvenanceLog::new())
+        .expect("a triangle");
+    let prism = model
+        .add_extrusion(&triangle, -bottom, &at_height(bottom))
+        .expect("a prism");
+    let outer = model
+        .add_round_bar(6.0, 6.0, &at_height(-3.0))
+        .expect("a round bar");
+    let inner = model
+        .add_round_bar(2.0, 6.0, &at_height(-3.0))
+        .expect("a round bar");
+    let answer = model.fuse(
+        &[prism],
+        &[outer],
+        Rule::Intersection,
+        &policy,
+        &mut ProvenanceLog::new(),
+    )?;
+    let &[sector] = answer.solids() else {
+        panic!("one sector, got {:?}", answer.solids());
+    };
+    let answer = model.fuse(
+        &[sector],
+        &[inner],
+        Rule::Difference,
+        &policy,
+        &mut ProvenanceLog::new(),
+    )?;
+    let &[sector] = answer.solids() else {
+        panic!("one sector, got {:?}", answer.solids());
+    };
+    if hair == 1e300 {
+        model.place_solid(sector, &at_height(-1.0)).unwrap();
+        model.place_solid(sector, &at_height(1.0)).unwrap();
+    } else if hair != 0.0 {
+        model.place_solid(sector, &at_height(hair)).unwrap();
+    }
+    let top = model
+        .solid(sector)
+        .unwrap()
+        .faces()
+        .filter_map(|face| face.surface().as_plane().map(|plane| format!("{plane:?}")))
+        .collect::<Vec<_>>();
+    eprintln!("PROBE sector planes {top:?}");
+    Ok(sector)
+}
+
+fn short(got: &Result<usize, Error>) -> String {
+    match got {
+        Ok(n) => format!("Ok({n})"),
+        Err(Error::Undecidable { records }) => format!(
+            "Undecidable at {:?} {:?}",
+            records.records().last().map(|record| record.predicate()),
+            records.records().last().map(|record| record.inputs())
+        ),
+        Err(other) => format!("{other:?}"),
+    }
+}
+
+/// The quarter of a round bar of radius `radius` about `z` in `x, y >= 0`,
+/// `z` in `[-2, 2]`, placed turned by `turn` about `z` when `turn` is not 0.
+fn a_sector(model: &mut Model, radius: f64, turn: f64) -> Result<SolidKey, Error> {
+    let policy = Policy::certified();
+    let far = 2.0 * radius;
+    let triangle = ProfileBuilder::new(vec![[0.0, 0.0], [far, 0.0], [0.0, far]])
+        .build(&policy, &mut ProvenanceLog::new())
+        .expect("a triangle");
+    let prism = model
+        .add_extrusion(&triangle, 4.0, &at_height(-2.0))
+        .expect("a prism");
+    let bar = model
+        .add_round_bar(radius, 6.0, &at_height(-3.0))
+        .expect("a round bar");
+    let answer = model.fuse(
+        &[prism],
+        &[bar],
+        Rule::Intersection,
+        &policy,
+        &mut ProvenanceLog::new(),
+    )?;
+    let &[sector] = answer.solids() else {
+        panic!("one sector, got {:?}", answer.solids());
+    };
+    if turn != 0.0 {
+        model
+            .place_solid(sector, &Isometry::rotation(&Axis::z(), turn).unwrap())
+            .unwrap();
+    }
+    Ok(sector)
+}
+
 fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
 }
