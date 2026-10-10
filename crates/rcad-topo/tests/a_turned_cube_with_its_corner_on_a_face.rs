@@ -1092,3 +1092,50 @@ fn the_cube_of_q1208s_crash(model: &mut Model) -> SolidKey {
         .build(model, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("Q1208's cube is a sound solid")
 }
+
+#[test]
+fn probe_q1614_split() {
+    use std::collections::BTreeMap;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut outside = 0;
+    for (turn, at) in q1208s_random_turns(400) {
+        if where_the_planes_at_the_corner_meet(&turn, at) != Decision::Neg {
+            continue;
+        }
+        outside += 1;
+        for (name, policy) in [("certified", certified()), ("tolerant", tolerant())] {
+            for (rule, order) in [
+                (Rule::Union, Order::BlockFirst),
+                (Rule::Union, Order::TurnedFirst),
+                (Rule::Intersection, Order::BlockFirst),
+                (Rule::Difference, Order::BlockFirst),
+                (Rule::Difference, Order::TurnedFirst),
+            ] {
+                let mut model = a_model();
+                let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
+                let said = match fuse(&mut model, pair, rule, order, &policy) {
+                    Ok(solids) => format!("answers {}", solids.len()),
+                    Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. })) => {
+                        "DynamicRangeTooWide".to_string()
+                    }
+                    Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. })) => {
+                        "VolumeIsNotPositive".to_string()
+                    }
+                    Err(Error::Undecidable { .. }) => "Undecidable".to_string(),
+                    Err(other) => {
+                        let mut said = format!("{other:?}");
+                        said.truncate(60);
+                        said
+                    }
+                };
+                *counts
+                    .entry(format!("{name} {rule:?} {order:?}: {said}"))
+                    .or_default() += 1;
+            }
+        }
+    }
+    println!("PROBE outside {outside}");
+    for (what, count) in counts {
+        println!("PROBE {what} = {count}");
+    }
+}
