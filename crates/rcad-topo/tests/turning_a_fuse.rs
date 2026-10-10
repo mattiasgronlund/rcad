@@ -80,9 +80,9 @@ use proptest::prelude::*;
 use proptest::test_runner::{
     Config, FileFailurePersistence, RngAlgorithm, TestCaseError, TestRng, TestRunner,
 };
-use rcad_geom::{Deflection, Isometry, Surface, SurfaceMeet, intersect};
+use rcad_geom::{DYNAMIC_RANGE_CHECK, Deflection, Isometry, Surface, SurfaceMeet, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 
 use pairs::{Configuration, Elsewhere, Placed, Shape, Skew, Turn, a_turned_pair};
 
@@ -146,8 +146,8 @@ const TURNED_FUSE_SLACK: f64 = 16.0;
 ///
 /// §14.7's half of it. A property only ever looks at the fuses that came back,
 /// so a run where the turned side refused everything would assert nothing at all
-/// and pass. The shipped seed compares 65 of its 81 pairings and a soak runs
-/// between a half and three quarters, so a quarter is the floor that says this
+/// and pass. The shipped seed compares 75 of its 84 pairings, and a soak at
+/// [`SOAK_FACTOR`] ten 670 of 732, so a quarter is the floor that says this
 /// file has not gone quietly vacuous.
 ///
 /// **Not §17.7's criterion 8 threshold.** That number belongs in that section
@@ -307,6 +307,231 @@ fn united(configuration: &Configuration) -> Totals {
         .solids()
         .to_vec();
     Totals::of(&model, &solids)
+}
+
+/// The pair Q478's soak found, pinned: a `2 x 2 x 1` block at the origin and a
+/// `1 x 1 x 3` one standing through its corner, `[0, 1] x [0, 1] x [-2, 1]`,
+/// turned together by `TAU * 19 / 64` about `(0, -2, -1)`.
+///
+/// On the lattice the two share three walls exactly — `x = 0`, `y = 0` and the
+/// top `z = 1` — and every rule both ways round answers the volume worked by
+/// hand. Turned, each block carries its own placement and composing the turn
+/// rounds its offsets, so those three walls come out a rounding apart
+/// ([`turning_a_tall_block_with_a_flat_one_leaves_three_of_its_walls_a_rounding_off_the_flat_ones`]).
+/// The shared cube does not care and the intersection still answers. The
+/// union and both differences have to keep the slab between two of those
+/// walls, an edge about `1e-16` long beside corners of nearly 3, and the fuse's
+/// own range check refuses it (`Assembly::check_dynamic_range` in
+/// `fuse/assemble.rs`).
+///
+/// **That refusal is a limit and not a gap.** The ratio is a length over a
+/// length, so no scaling of the answer moves it, and the slab is where the two
+/// turned inputs really are; the volumes the tolerant policy answers below are
+/// the ones worked by hand. Each ratio times its slab's thickness lands
+/// between 1 and 3: the largest coordinate is at most 3, and an edge across a
+/// slab is no shorter than the slab is thick, so a product in that window says
+/// it is that slab's edge the check measured and not some other.
+///
+/// With Q1288's rule undone by hand (`63a3cce8`, a piece with a corner on a
+/// separating plane is still outside, in `fuse/select.rs`), all six fuses come
+/// back `Undecidable` under either policy instead of reaching the check. That
+/// is why the property above passed on this pair before Q1288: it counted the
+/// `Undecidable`, and it had no arm for the range check until Q1560.
+#[test]
+fn a_tall_block_through_a_flat_one_turned_shares_a_cube_and_refuses_the_rules_that_keep_a_slab_a_rounding_thin()
+ {
+    let still = a_tall_block_through_the_corner_of_a_flat_one(None);
+    let turned = a_tall_block_through_the_corner_of_a_flat_one(Some(THE_TURN));
+    for (rule, first, worked_by_hand, slab) in A_TALL_BLOCK_THROUGH_A_FLAT_ONE {
+        let mut log = ProvenanceLog::new();
+        let answer = fused_on_its_own(&still, rule, first, &Policy::certified(), &mut log)
+            .unwrap_or_else(|why| panic!("{rule:?} with solid {first} first, unturned: {why}"));
+        has_the_volume(&answer, worked_by_hand, rule, first);
+
+        match (
+            fused_on_its_own(&turned, rule, first, &Policy::certified(), &mut log),
+            slab,
+        ) {
+            (Ok(answer), None) => has_the_volume(&answer, worked_by_hand, rule, first),
+            (Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })), Some(thickness)) => {
+                assert!(
+                    (1.0..=3.0).contains(&(ratio * thickness)),
+                    "{rule:?} with solid {first} first was refused at a spread of {ratio}, \
+                     which is not the slab {thickness} thick"
+                );
+            }
+            (other, slab) => panic!(
+                "{rule:?} with solid {first} first, turned, came back {:?} where the slab \
+                 it keeps is {slab:?}",
+                other.map(|answer| answer.volume)
+            ),
+        }
+        assert!(
+            log.is_empty(),
+            "{rule:?} with solid {first} first logged {:?} under a certified policy",
+            log.records()
+        );
+    }
+}
+
+/// The same turned pair under a tolerant policy answers every rule, and each
+/// answer is the volume worked by hand.
+///
+/// So the four refusals above are of answers that exist, which is what makes
+/// them a limit of `f64` rather than a wrong decision: the tolerant run keeps
+/// the slab, warns once that the answer is too wide to carry, and measures what
+/// the lattice measures.
+#[test]
+fn a_tall_block_through_a_flat_one_turned_answers_every_rule_under_a_tolerant_policy() {
+    let turned = a_tall_block_through_the_corner_of_a_flat_one(Some(THE_TURN));
+    for (rule, first, worked_by_hand, slab) in A_TALL_BLOCK_THROUGH_A_FLAT_ONE {
+        let mut log = ProvenanceLog::new();
+        let answer = fused_on_its_own(&turned, rule, first, &Policy::tolerant(3.0), &mut log)
+            .unwrap_or_else(|why| panic!("{rule:?} with solid {first} first, turned: {why}"));
+        has_the_volume(&answer, worked_by_hand, rule, first);
+
+        let warned: Vec<&str> = log
+            .records()
+            .iter()
+            .map(|record| record.predicate())
+            .collect();
+        let expected: &[&str] = if slab.is_some() {
+            &[DYNAMIC_RANGE_CHECK]
+        } else {
+            &[]
+        };
+        assert_eq!(warned, expected, "{rule:?} with solid {first} first");
+    }
+}
+
+/// Where the slabs come from: turning the pair rounds each block's offsets on
+/// its own.
+///
+/// The two blocks are turned by one turn, so each wall of the tall block keeps
+/// the very normal of the flat block's wall it shared on the lattice, bit for
+/// bit. The offsets do not agree. Of the three walls the two blocks shared, one
+/// of the tall block's lies [`POKES_OUT`] outside the flat block's, another
+/// [`STOPS_SHORT`] inside it, and its top [`STOPS_SHORT_AT_THE_TOP`] below. The
+/// other three pairs of walls are a whole one or two apart.
+#[test]
+fn turning_a_tall_block_with_a_flat_one_leaves_three_of_its_walls_a_rounding_off_the_flat_ones() {
+    let (model, keys) = a_tall_block_through_the_corner_of_a_flat_one(Some(THE_TURN)).build();
+    let planes = |solid: SolidKey| -> Vec<[f64; 4]> {
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .map(|face| face.plane().coefficients())
+            .collect()
+    };
+    let (flat, tall) = (planes(keys[0]), planes(keys[1]));
+
+    let mut gaps: Vec<f64> = tall
+        .iter()
+        .map(|tall| {
+            let beside: Vec<&[f64; 4]> = flat
+                .iter()
+                .filter(|flat| (0..3).all(|axis| flat[axis].to_bits() == tall[axis].to_bits()))
+                .collect();
+            let [flat] = beside.as_slice() else {
+                panic!("the tall block's wall {tall:?} faces the way {beside:?} do");
+            };
+            flat[3] - tall[3]
+        })
+        .filter(|gap| gap.abs() < 0.5)
+        .collect();
+    gaps.sort_by(f64::total_cmp);
+    assert_eq!(gaps, [-STOPS_SHORT_AT_THE_TOP, -STOPS_SHORT, POKES_OUT]);
+}
+
+/// The turn Q478's soak drew.
+const THE_TURN: Turn = Turn {
+    direction: [0, -2, -1],
+    steps: 19,
+};
+
+/// How far one of the tall block's turned walls lies outside the flat block's.
+const POKES_OUT: f64 = 1.0408340855860843e-16;
+
+/// How far another lies inside.
+const STOPS_SHORT: f64 = 7.216449660063518e-16;
+
+/// How far the tall block's top lies below the flat block's. Only the flat
+/// block less the tall one keeps the slab between them, and that answer keeps
+/// the thinner [`STOPS_SHORT`] one as well.
+const STOPS_SHORT_AT_THE_TOP: f64 = 1.3322676295501878e-15;
+
+/// Each rule with each block first: which goes first, the volume worked by
+/// hand, and how thin a slab the turned answer has to keep, or `None` where it
+/// keeps none.
+///
+/// The union keeps the sliver of tall block that pokes out through the flat
+/// one's wall, and so does the tall block less the flat one. The flat block
+/// less the tall one keeps the slivers of flat block that the tall one's walls
+/// stop short of, and the thinner of those is [`STOPS_SHORT`]. The shared cube
+/// keeps neither.
+const A_TALL_BLOCK_THROUGH_A_FLAT_ONE: [(Rule, usize, f64, Option<f64>); 6] = [
+    (Rule::Union, 0, 6.0, Some(POKES_OUT)),
+    (Rule::Union, 1, 6.0, Some(POKES_OUT)),
+    (Rule::Intersection, 0, 1.0, None),
+    (Rule::Intersection, 1, 1.0, None),
+    (Rule::Difference, 0, 3.0, Some(STOPS_SHORT)),
+    (Rule::Difference, 1, 2.0, Some(POKES_OUT)),
+];
+
+/// Fuse a fresh copy of the pair, solid `first` against the other, and measure
+/// the answer.
+fn fused_on_its_own(
+    configuration: &Configuration,
+    rule: Rule,
+    first: usize,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Totals, Error> {
+    let (mut model, keys) = configuration.build();
+    let solids = model
+        .fuse(&[keys[first]], &[keys[1 - first]], rule, policy, log)?
+        .solids()
+        .to_vec();
+    Ok(Totals::of(&model, &solids))
+}
+
+/// Insist an answer has the volume worked by hand, to within what turning its
+/// corners can move it by.
+fn has_the_volume(answer: &Totals, worked_by_hand: f64, rule: Rule, first: usize) {
+    let allowed = how_far_the_volume_may_move(
+        answer.triangles,
+        Isometry::POINT_ROUNDOFF * answer.largest_coordinate,
+        answer.largest_coordinate,
+    );
+    assert!(
+        (answer.volume - worked_by_hand).abs() <= allowed,
+        "{rule:?} with solid {first} first has volume {}, not {worked_by_hand} to within \
+         {allowed}",
+        answer.volume
+    );
+}
+
+/// The two blocks of the cases above, optionally turned.
+fn a_tall_block_through_the_corner_of_a_flat_one(turn: Option<Turn>) -> Configuration {
+    Configuration {
+        solids: vec![
+            Placed {
+                shape: Shape::Block { width: 2, depth: 2 },
+                skew: Skew::none(),
+                height: 1,
+                at: [0, 0, 0],
+            },
+            Placed {
+                shape: Shape::Block { width: 1, depth: 1 },
+                skew: Skew::none(),
+                height: 3,
+                at: [0, 0, -2],
+            },
+        ],
+        turn,
+        elsewhere: Elsewhere::here(),
+    }
 }
 
 /// [`CASES`], multiplied by whatever [`SOAK_FACTOR`] says.
@@ -600,14 +825,28 @@ fn on_one_surface(surface: &Surface, against: &Surface) -> bool {
 /// `side`.
 ///
 /// A copy, so each of the two paths starts from a model nothing else has
-/// touched. `None` means there was no answer to compare — refused, or not a
-/// solid this kernel can hold — and which of those it was has been counted.
+/// touched. `None` means there was no answer to compare — refused, an answer
+/// with an edge too short to hold beside its own coordinates, or not a solid
+/// this kernel can hold — and which of those it was has been counted.
 ///
-/// A refusal on the lattice side fails outright. §17.7's control row: every
-/// meet in a rectilinear configuration on the integer grid is exactly
-/// representable, so a certified policy must decide all of it, and that is what
-/// makes [`Tally::only_one_side`] unambiguous — it is always the turned side
-/// that went missing.
+/// **An edge too short is a limit on the turned side**, refused
+/// [`Invalid::DynamicRangeTooWide`]. Each solid carries its own placement and
+/// composing the turn rounds its offsets, so two walls that share a plane on
+/// the lattice come out a rounding apart, and an answer can have to keep the
+/// slab between them: an edge `1e-16` long beside corners of 3, a length over a
+/// length that no scaling moves (`Assembly::check_dynamic_range` in
+/// `fuse/assemble.rs`).
+/// [`a_tall_block_through_a_flat_one_turned_shares_a_cube_and_refuses_the_rules_that_keep_a_slab_a_rounding_thin`]
+/// is the pair that showed it, and `fuses_that_must_agree.rs` counts the same
+/// refusal by name for its turned family (`a_flat_refusal`).
+///
+/// A refusal of either kind on the lattice side fails outright. §17.7's
+/// control row: every meet in a rectilinear configuration on the integer grid
+/// is exactly representable, so a certified policy must decide all of it, and
+/// two of its walls share a plane exactly or lie a whole unit apart, so no
+/// answer keeps a slab thinner than that. That is what makes
+/// [`Tally::only_one_side`] unambiguous — it is always the turned side that
+/// went missing.
 fn fused(
     tally: &Tally,
     side: &Side,
@@ -629,6 +868,16 @@ fn fused(
                 return Err(TestCaseError::fail(format!(
                     "a {rule:?} over the lattice pair refused, with {} records",
                     records.len()
+                )));
+            }
+            Ok(None)
+        }
+        Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+            side.an_edge_too_short.set(side.an_edge_too_short.get() + 1);
+            if side.refusals_are_a_bug {
+                return Err(TestCaseError::fail(format!(
+                    "a {rule:?} over the lattice pair kept an edge too short beside its \
+                     coordinates, a spread of {ratio}"
                 )));
             }
             Ok(None)
@@ -678,7 +927,11 @@ struct Tally {
 /// What one of the two paths came back with.
 #[derive(Default)]
 struct Side {
+    /// Fuses refused `Undecidable`: the arithmetic gave up.
     refused: Cell<usize>,
+    /// Fuses refused because their answer keeps an edge too short to hold
+    /// beside its own coordinates: the answer exists and `f64` cannot carry it.
+    an_edge_too_short: Cell<usize>,
     not_a_solid: Cell<usize>,
     refusals_are_a_bug: bool,
 }
@@ -716,16 +969,14 @@ impl Tally {
             "fuse-then-turn against turn-then-fuse, {} fuses over turned pairs",
             self.fuses.get()
         );
-        println!(
-            "    lattice side: {} refused, {} not a solid",
-            self.still.refused.get(),
-            self.still.not_a_solid.get()
-        );
-        println!(
-            "    turned side: {} refused, {} not a solid",
-            self.turned.refused.get(),
-            self.turned.not_a_solid.get()
-        );
+        for (name, side) in [("lattice", &self.still), ("turned", &self.turned)] {
+            println!(
+                "    {name} side: {} refused, {} refused for an edge too short, {} not a solid",
+                side.refused.get(),
+                side.an_edge_too_short.get(),
+                side.not_a_solid.get()
+            );
+        }
         println!(
             "    {} pairings compared, {} only the lattice side answered, \
              {} only the turned side answered, {} split into a different number of solids",
