@@ -129,6 +129,84 @@ fn every_fuse_answers(a_seam: bool, top: f64, truths: [Vec<f64>; 4]) {
     }
 }
 
+#[test]
+fn probe_q1580() {
+    for (with_plate, bar_top) in [(true, 1.0), (false, 1.0), (true, 2.0), (false, 2.0)] {
+        for a_seam in [true, false] {
+            for (rule, ring_first) in [
+                (Rule::Union, true),
+                (Rule::Union, false),
+                (Rule::Intersection, true),
+                (Rule::Intersection, false),
+                (Rule::Difference, true),
+                (Rule::Difference, false),
+            ] {
+                let mut model = Model::new(Scale::millimetres(50.0).expect("a positive size"));
+                let ring = rings::the_top_half_of_a_ring(&mut model, 4.0, 1.0, a_seam)
+                    .expect("the top half of a ring described this way is a solid");
+                let bar = model
+                    .add_round_bar(
+                        23.0 / 8.0,
+                        bar_top + 1.0,
+                        &Isometry::translation(Vector::new(0.0, 0.0, -1.0))
+                            .expect("a finite shift"),
+                    )
+                    .expect("a bar");
+                let (arguments, tools): (Vec<SolidKey>, Vec<SolidKey>) = if with_plate {
+                    let plate = a_plate(&mut model, 0.0);
+                    if ring_first {
+                        (vec![ring, bar], vec![plate])
+                    } else {
+                        (vec![plate], vec![ring, bar])
+                    }
+                } else if ring_first {
+                    (vec![ring], vec![bar])
+                } else {
+                    (vec![bar], vec![ring])
+                };
+                let answer = model.fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                let said = match answer {
+                    Ok(fused) => {
+                        let volumes: Vec<f64> = fused
+                            .solids()
+                            .iter()
+                            .map(|&solid| {
+                                model
+                                    .solid(solid)
+                                    .expect("made here")
+                                    .measure(
+                                        Deflection::of(DEFLECTION).expect("positive"),
+                                        &Policy::certified(),
+                                        &mut ProvenanceLog::new(),
+                                    )
+                                    .map_or(f64::NAN, |measured| measured.volume())
+                            })
+                            .collect();
+                        format!("answers {volumes:?}")
+                    }
+                    Err(rcad_topo::Error::Undecidable { records }) => format!(
+                        "Undecidable {:?}",
+                        records.records().last().map(|record| format!("{record:?}"))
+                    ),
+                    Err(other) => format!("{other:?}"),
+                };
+                let valid = model
+                    .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    .map_or_else(|why| format!("{why:?}"), |()| "valid".to_owned());
+                eprintln!(
+                    "PROBE plate {with_plate} top {bar_top} seam {a_seam} {rule:?} ring first {ring_first}: {said} {valid}"
+                );
+            }
+        }
+    }
+}
+
 /// A round bar of radius six about `z`, from `z = −2` up to `top`.
 fn a_plate(model: &mut Model, top: f64) -> SolidKey {
     model
