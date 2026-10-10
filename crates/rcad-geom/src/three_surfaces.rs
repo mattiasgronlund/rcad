@@ -4,7 +4,7 @@
 //! names the **points** a third surface cuts out of that curve, which is what a
 //! corner of an arrangement is (`docs/decisions.md` §31.2 rows 4 and 5).
 //!
-//! # Two planes and a quadric is the road, and six ways round it
+//! # Two planes and a quadric is the road, and eight ways round it
 //!
 //! Two planes cross in a line, and a line cut by a quadric is a quadratic in one
 //! unknown whose discriminant is a polynomial in the stored numbers. That is the
@@ -14,8 +14,8 @@
 //! One plane and two quadrics is a quartic in general — the plane crosses each
 //! quadric in a conic and two conics in one plane meet where a quartic is zero —
 //! and reaching *that* takes an algebraic solver rather than a discriminant. But
-//! **five families of it are not a quartic at all**, and all five are
-//! ordinary mechanical CAD rather than curiosities. A sixth takes a ring in
+//! **seven families of it are not a quartic at all**, and all seven are
+//! ordinary mechanical CAD rather than curiosities. An eighth takes a ring in
 //! place of one quadric:
 //!
 //! - **Two quadrics that bend the same way.** Write a quadric out as
@@ -48,6 +48,17 @@
 //!   axis and off it, as a sign at a root of that quadratic says — a D-flat on
 //!   a shaft across the circle a chamfer cone crosses it in.
 //!   [`what_a_plane_beside_their_one_axis_leaves`].
+//! - **A plane that cuts both in circles, about two centres.** A plane cuts a
+//!   ball in a circle wherever it is, and a pipe or a cone square to it, and
+//!   two circles in one plane differ by a line, as two quadrics of one bend
+//!   differ by a plane — a bar's cap across a ball off its axis, or a floor a
+//!   bar and a cone stand on side by side.
+//!   [`what_a_plane_that_cuts_both_in_circles_leaves`].
+//! - **A plane along a pipe.** A plane parallel to a pipe's axis cuts it in
+//!   two lines along it, touches it along one or misses it, and each line meets
+//!   the other surface where a quadratic is zero — a wall through a bar's axis
+//!   and a ball off it, or through the axes of two bars that cross.
+//!   [`what_a_plane_along_a_pipe_leaves`].
 //! - **A ring and a ball, a pipe or a cone on its axis, and a plane that holds
 //!   it.** The two share circles square to the axis, at the heights
 //!   [`intersect`](crate::intersect) names them by, and the plane cuts each
@@ -62,17 +73,20 @@
 //! two curved surfaces** by the first family's own argument: every point the
 //! two share is on the plane they differ by, and every point on that plane and
 //! one of them is on the other. So the plane takes the place of one of the
-//! two, and the six roads answer the triple — two cones of one slope about one
+//! two, and the eight roads answer the triple — two cones of one slope about one
 //! axis and a ball, or two bars running the same way and a third.
 //! [`where_three_curved_surfaces_meet`].
 //!
 //! What is left over is refused by name (§16.10, §31.2): one plane and two
-//! quadrics that bend differently, cross the plane in curves, and neither
-//! share an axis the plane is square or parallel to — a pipe and a ball off
-//! its axis, two pipes leaning against each other, or a plane leaning to the
-//! axis a ball and a pipe share — three curved surfaces no two of which
-//! differ by a plane a stored [`Plane`] is exactly, and any triple with a
-//! torus and fewer than two planes but the sixth family.
+//! quadrics that bend differently, cross the plane in curves, share no axis
+//! the plane is square or parallel to, are not both cut by it in circles, and
+//! neither of which is a pipe it runs along — a plane leaning to a pipe's
+//! axis, which cuts it in an ellipse, against a ball off that axis or the axis
+//! a ball and the pipe share, or a cap of one bar across a second bar leaning
+//! to it — a plane along a pipe and a cone one of whose rulings runs along the
+//! pipe, three curved surfaces no two of which differ by a plane a stored
+//! [`Plane`] is exactly, and any triple with a torus and fewer than two planes
+//! but the eighth family.
 //! [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] says which of the two
 //! kinds of refusal it is in its own doc.
 //!
@@ -151,7 +165,13 @@ pub enum MeetOfThree {
     /// [`what_a_plane_through_their_one_axis_leaves`] gives: two circles, two
     /// points on each, or a cone's apex and one circle. A plane beside that
     /// axis gives them in the same order, two on a circle it cuts and one on a
-    /// circle it touches ([`what_a_plane_beside_their_one_axis_leaves`]).
+    /// circle it touches ([`what_a_plane_beside_their_one_axis_leaves`]). A
+    /// plane that cuts both curved surfaces in circles gives them along the
+    /// line it crosses the line the two circles differ by in, as two planes do
+    /// ([`what_a_plane_that_cuts_both_in_circles_leaves`]). A plane along a
+    /// pipe gives up to two on each line it cuts the pipe in, the line on one
+    /// side of the axis first and the lower point first along each, in the
+    /// order [`what_a_plane_along_a_pipe_leaves`] names.
     ///
     /// Most are a box the true meeting point is somewhere inside, because
     /// solving a quadratic divides and a quotient of two ranges almost never
@@ -1602,7 +1622,7 @@ fn where_three_curved_surfaces_meet(
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
 }
 
-/// One plane and two curved surfaces, by the six roads the module doc names.
+/// One plane and two curved surfaces, by the eight roads the module doc names.
 ///
 /// **Nothing here guesses.** Each road either reaches an answer it has earned or
 /// hands the question on, and what nothing reaches is the refusal that was here
@@ -3386,7 +3406,9 @@ fn the_ends_of_the_chord_at(
 /// three are not that.
 ///
 /// A bar's flat end across a ball off its axis is one, and so is a floor that
-/// a bar and a cone, or a ball, stand on side by side.
+/// a bar and a cone stand on side by side. A ball resting on that floor only
+/// touches it, and [`what_a_plane_that_grazes_one_of_them_leaves`] answers
+/// that first.
 ///
 /// **Each surface is a circle on the plane.** Write the plane `n·p = d` and
 /// `N = n·n`. A ball is `p·p + 2b·p + c` everywhere. A pipe or a cone about `w`
@@ -5672,8 +5694,11 @@ mod tests {
 
     /// A plane that leans to the bar's axis cuts it in an ellipse, and an
     /// ellipse and the ball's circle meet where a quartic is zero, so the
-    /// triple stays refused. Through `(0, 0, 5)` with normal `(0, 0.6, 0.8)`
-    /// the plane cuts the ball, whose centre is `1.8` from it.
+    /// triple stays refused. The points are there: through `(0, 0, 5)` with
+    /// normal `(0, 0.6, 0.8)` the plane cuts the ball in a circle of radius
+    /// `√(9 − 1.8²) = 2.4` about `(0, 1.92, 3.56)`, which runs through
+    /// `(0, 0, 5)` on the bar's axis and out to `(0, 3.84, 2.12)` past the
+    /// bar, so it crosses the ellipse.
     #[test]
     fn a_plane_leaning_to_a_bars_axis_through_a_ball_off_it_is_refused_by_name() {
         let leaning = flat([0.0, 0.6, 0.8], [0.0, 0.0, 5.0]);
