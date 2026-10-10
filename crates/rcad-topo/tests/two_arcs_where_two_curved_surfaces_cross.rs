@@ -1,7 +1,6 @@
 //! A ball and a bar on one axis, one of them cut in half by a wall through
-//! that axis, and a thin bar through a fat one, the thin one cut in half by a
-//! wall through both axes, fused through the public API under every rule both
-//! ways round, against closed-form volumes.
+//! that axis, fused through the public API under every rule both ways round,
+//! against closed-form volumes.
 //!
 //! A ball of radius 5 and a bar of radius 4 on one axis cross in two circles
 //! square to it, three either side of the ball's centre. The wall puts two
@@ -19,19 +18,22 @@
 //! leaves too, and the mesh the fuse checks its answer with cuts it since
 //! Q1590.
 //!
-//! The rest of what a ball and a pipe, or two pipes, cross in does not reach
-//! that function with two corners on one curve. A wall or a cap through a loop
-//! off the axis has its corners placed where the three surfaces meet since
-//! Q1591, and then the one loop a ball reaching into a bar's side leaves is
-//! refused before its arcs are named, as it is with no plane through it
-//! (Q1593). The circle a ball touches its bar round is refused before its arcs
-//! are named.
+//! The rest of what a ball and a pipe cross in does not reach that function
+//! with two corners on one curve. A wall or a cap through a loop off the axis
+//! has its corners placed where the three surfaces meet since Q1591, and then
+//! the one loop a ball reaching into a bar's side leaves is refused before its
+//! arcs are named, as it is with no plane through it (Q1593). The circle a ball
+//! touches its bar round is refused before its arcs are named.
 //!
 //! The two loops a thin bar through a fat one leaves, cut by a wall through
-//! both axes, do reach it, and that function names two pipes' arcs since Q1643:
-//! each loop's two arcs and the line the wall cuts the fat bar's skin along all
-//! run between the same two corners, and were one edge with six faces along it
-//! or four until then.
+//! both axes, do reach it. Named by their corners alone, a loop's two arcs were
+//! one edge with six faces along it or four, and every rule was refused as not
+//! a manifold. That function names two pipes' arcs apart since Q1643, and every
+//! rule is refused one step on, where `rcad-geom`'s `walk` cannot draw an arc
+//! of such a loop between two corners. The cross-drilled shaft of
+//! `tests/a_cone_hollowed_along_its_axis.rs` (Q1483), whose fat bar's seam
+//! crosses a loop twice, sent no side of two pipes to that function between
+//! two corners when run with a print in it before Q1643.
 //!
 //! A ball keeps its poles on the `z` line through its centre however it is
 //! placed, so the bars along `x` below keep them off the wall.
@@ -343,30 +345,32 @@ fn a_plane_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_is_refused_orde
     }
 }
 
-/// A bar of radius 1 along `x` at `z = 5`, 20 long and cut to `y ≥ 0`, `10π`,
-/// through a bar of radius 4 up `z` from `z = 0` to `z = 10`, `160π`: the fat
-/// bar swallows the thin one's whole section, so the two cross in two loops,
-/// and the wall `y = 0` through both axes puts two corners on each, at
-/// `(±4, 0, 4)` and `(±4, 0, 6)`. Between each two corners run three curves:
-/// the loop's arc over the wall, its arc under the wall, which the fat bar's
-/// whole skin holds, and the line the wall cuts that skin along.
+/// A bar of radius 1 along `x` at `z = 5`, cut to `y ≥ 0`, through a bar of
+/// radius 4 up `z`: the fat bar swallows the thin one's whole section, so the
+/// two cross in two loops, and the wall `y = 0` through both axes puts two
+/// corners on each, at `(±4, 0, 4)` and `(±4, 0, 6)`. Between each two corners
+/// run three curves: the loop's arc over the wall, its arc under the wall,
+/// which the fat bar's whole skin holds, and the line the wall cuts that skin
+/// along.
 ///
 /// Until Q1591 every rule was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
 /// before the fuse had a corner. With the corners placed, nothing named two
-/// pipes' arcs apart, so the three curves were one edge named by its corners:
+/// pipes' arcs apart, so a loop's two arcs were one edge named by its corners:
 /// six faces along it for the unions and the fat bar less the half, four for
 /// the intersections and the half less the fat bar, and every rule both ways
-/// round was refused `ResultIsNotManifold`. `fuse/assemble.rs`'s
-/// `which_arc_of_a_circle_this_is` names the arcs of two pipes since Q1643.
+/// round was refused `ResultIsNotManifold` in `fuse/assemble.rs`'s
+/// `darts_along_each_edge`. `which_arc_of_a_circle_this_is` names the two arcs
+/// apart since Q1643, and every rule gets past that check.
 ///
-/// **Every rule answers.** What the two share,
-/// `I = 4∫₀¹ √((16 − y²)(1 − y²)) dy`, has no closed form, so the intersection
-/// is held to [`what_a_half_thin_bar_shares_with_a_fat_one`] and every other
-/// answer to the intersection as measured: the union `10π + 160π − I`, one
-/// solid; the fat bar less the half `160π − I`, one solid with a channel
-/// through it; and the half less the fat bar two ends of `(10π − I)/2`.
+/// **Every rule is then refused drawing an arc, and that is a gap** (§16.10):
+/// the union, the shared part and both differences are solids that exist.
+/// `rcad-geom`'s `walk` picks the loop an arc is on by the half-spaces on its
+/// run alone, and here that is the wall's `y ≥ 0`, which holds the place it
+/// starts from on each loop; and for a run whose two ends differ it hands back
+/// the points of the whole loop. So it cannot draw an open arc of a loop two
+/// pipes cross in, and the fix is there and not in the fuse.
 #[test]
-fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_answers_every_rule() {
+fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_is_refused_drawing_an_arc() {
     let gives = what_each_rule_gives(|model| {
         let thin = model
             .add_round_bar(
@@ -384,61 +388,15 @@ fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_answers_every_rule() 
             cut(model, thin, [-20.0, 0.0, -20.0], [20.0, 20.0, 20.0]),
         ]
     });
-    let solids = |answer: &Result<Vec<Measured>, Error>| -> Vec<Measured> {
-        answer
-            .as_ref()
-            .unwrap_or_else(|why| panic!("every rule answers: {why:?} in {gives:?}"))
-            .clone()
-    };
-    let [shared] = solids(&gives[2])[..] else {
-        panic!("one solid shared: {gives:?}");
-    };
     assert!(
-        (shared.volume - what_a_half_thin_bar_shares_with_a_fat_one()).abs() <= shared.error,
+        gives.iter().all(|answer| matches!(
+            answer,
+            Err(Error::Geometry(
+                rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+            ))
+        )),
         "{gives:?}"
     );
-    let (half, fat) = (10.0 * PI, 160.0 * PI);
-    let one_end = (half - shared.volume) / 2.0;
-    let wanted: [&[(f64, usize)]; 6] = [
-        &[(half + fat - shared.volume, 9)],
-        &[(half + fat - shared.volume, 9)],
-        &[(shared.volume, 4)],
-        &[(shared.volume, 4)],
-        &[(fat - shared.volume, 5)],
-        &[(one_end, 4), (one_end, 4)],
-    ];
-    for (answer, wanted) in gives.iter().zip(wanted) {
-        let solids = solids(answer);
-        assert_eq!(
-            solids.iter().map(|solid| solid.faces).collect::<Vec<_>>(),
-            wanted.iter().map(|&(_, faces)| faces).collect::<Vec<_>>(),
-            "{gives:?}"
-        );
-        for (solid, &(volume, _)) in solids.iter().zip(wanted) {
-            assert!(
-                (solid.volume - volume).abs() <= solid.error + shared.error,
-                "{gives:?}"
-            );
-        }
-    }
-}
-
-/// `4∫₀¹ √((16 − y²)(1 − y²)) dy`, the part of the half bar of radius 1 above
-/// inside the bar of radius 4, worked by the midpoint rule in `t` with
-/// `y = sin t`. The integrand `4cos²t·√(16 − sin²t)` is smooth and even about
-/// both ends of `[0, π/2]`, so the rule settles fast: 2000 steps agree with
-/// 200 000 to `2e-15`, against a `volume_error` many orders wider.
-fn what_a_half_thin_bar_shares_with_a_fat_one() -> f64 {
-    let steps = 2000_u32;
-    let step = PI / 2.0 / f64::from(steps);
-    (0..steps)
-        .map(|at| {
-            let t = (f64::from(at) + 0.5) * step;
-            t.cos().powi(2) * (16.0 - t.sin().powi(2)).sqrt()
-        })
-        .sum::<f64>()
-        * step
-        * 4.0
 }
 
 /// What one fuse is pinned to give.
@@ -453,8 +411,8 @@ enum Gives {
 }
 
 impl Gives {
-    fn is(&self, answer: &Result<Vec<Measured>, Error>) -> bool {
-        let near = |solid: Measured, wanted: f64| (solid.volume - wanted).abs() <= solid.error;
+    fn is(&self, answer: &Result<Vec<(f64, f64)>, Error>) -> bool {
+        let near = |(volume, error): (f64, f64), wanted: f64| (volume - wanted).abs() <= error;
         match (self, answer) {
             (Gives::Holds(wanted), Ok(volumes)) => {
                 matches!(volumes[..], [one] if near(one, *wanted))
@@ -468,21 +426,12 @@ impl Gives {
     }
 }
 
-/// One solid of an answer.
-#[derive(Clone, Copy, Debug)]
-struct Measured {
-    volume: f64,
-    /// How far off [`Measured::volume`] may be.
-    error: f64,
-    faces: usize,
-}
-
 /// What every rule, both ways round, comes back with, in the order
-/// [`every_rule_both_ways`] gives them: `Ok` with each solid, the smallest
-/// first, or the refusal.
+/// [`every_rule_both_ways`] gives them: `Ok` with the volume of each solid and
+/// how far off it may be, the smallest first, or the refusal.
 fn what_each_rule_gives(
     build: impl Fn(&mut Model) -> [SolidKey; 2],
-) -> Vec<Result<Vec<Measured>, Error>> {
+) -> Vec<Result<Vec<(f64, f64)>, Error>> {
     every_rule_both_ways()
         .map(|(rule, swapped)| {
             let mut model =
@@ -498,14 +447,15 @@ fn what_each_rule_gives(
         .collect()
 }
 
-/// What `one` fused with `other` under `rule` comes back with: `Ok` with each
-/// solid, the smallest first, once the model validates, or the refusal.
+/// What `one` fused with `other` under `rule` comes back with: `Ok` with the
+/// volume of each solid and how far off it may be, the smallest first, once
+/// the model validates, or the refusal.
 fn what_one_fuse_gives(
     model: &mut Model,
     one: &[SolidKey],
     other: &[SolidKey],
     rule: Rule,
-) -> Result<Vec<Measured>, Error> {
+) -> Result<Vec<(f64, f64)>, Error> {
     let answer = model.fuse(
         one,
         other,
@@ -516,27 +466,24 @@ fn what_one_fuse_gives(
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("an answer validates");
-    let mut solids: Vec<Measured> = answer
+    let mut volumes: Vec<(f64, f64)> = answer
         .solids()
         .iter()
         .map(|&solid| {
-            let solid = model.solid(solid).expect("this model made the key");
-            let measured = solid
+            let measured = model
+                .solid(solid)
+                .expect("this model made the key")
                 .measure(
                     Deflection::of(0.01).expect("a fine mesh"),
                     &Policy::certified(),
                     &mut ProvenanceLog::new(),
                 )
                 .expect("an answer measures");
-            Measured {
-                volume: measured.volume(),
-                error: measured.volume_error(),
-                faces: solid.faces().count(),
-            }
+            (measured.volume(), measured.volume_error())
         })
         .collect();
-    solids.sort_by(|one, other| one.volume.total_cmp(&other.volume));
-    Ok(solids)
+    volumes.sort_by(|one, other| one.0.total_cmp(&other.0));
+    Ok(volumes)
 }
 
 fn every_rule_both_ways() -> impl Iterator<Item = (Rule, bool)> {
