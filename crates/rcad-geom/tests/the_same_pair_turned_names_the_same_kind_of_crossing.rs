@@ -510,7 +510,7 @@ fn the_axes_meet_exactly(one: &Cylinder, other: &Cylinder) -> bool {
     match expansion_sign(&total) {
         Decision::Zero => true,
         Decision::Pos | Decision::Neg => false,
-        other => panic!("a sum of exact products has a sign: {other:?}"),
+        Decision::Undecidable { .. } | _ => panic!("a sum of exact products has a sign"),
     }
 }
 
