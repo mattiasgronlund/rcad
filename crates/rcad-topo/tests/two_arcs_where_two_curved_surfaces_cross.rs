@@ -12,11 +12,11 @@
 //! and the whole less the half were refused `ResultIsNotManifold { count: 4 }`.
 //! `fuse/assemble.rs`'s `which_arc_of_a_circle_this_is` names them apart since
 //! Q1329, as it does for a ball or a pipe on a cone's axis (Q1269,
-//! `tests/a_cone_hollowed_along_its_axis.rs`), and every rule then answers but
-//! where the bar is the half and the ball's poles are on the wall: there the
-//! mesh the fuse checks its answer with refuses the ball's skin, which a ball
-//! less two blocks leaves with the same two rings and no two arcs of one
-//! crossing.
+//! `tests/a_cone_hollowed_along_its_axis.rs`), and every rule then answers.
+//! Where the bar is the half and the ball's poles are on the wall, the ball's
+//! skin is a band between a ring over each pole, which a ball less two blocks
+//! leaves too, and the mesh the fuse checks its answer with cuts it since
+//! Q1590.
 //!
 //! The rest of what a ball and a pipe, or two pipes, cross in does not reach
 //! that function with two corners on one curve: a wall or a cap through a loop
@@ -32,7 +32,6 @@
 use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
-use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -143,21 +142,23 @@ fn a_half_bar_or_a_half_ball_with_the_balls_poles_off_the_wall_answers_every_rul
 /// The bar of the first test cut to `x ≥ 0`, `96π`, against the whole ball of
 /// radius 5 at `(0, 0, 5)`, whose poles are on the wall.
 ///
-/// **The unions and the ball less the half are refused meshing the ball's
-/// skin.** They keep the ball less the two pieces of it inside the half, one
-/// face with two rings: the arc of `z = 8` at `x > 0` and the arc of the wall
-/// over the north pole, and the same round the south pole. The face holds
-/// neither pole. Before Q1329 the two arcs of each circle were one edge and
-/// these were refused `ResultIsNotManifold { count: 4 }`; named apart, the mesh
-/// the fuse checks its answer with refuses `LoopsTouch` at `(0, ±4, 8)`. The
-/// ball less the blocks `x ≥ 0, z ≥ 8` and `x ≥ 0, z ≤ 2` leaves the same face,
-/// with no two arcs of one crossing between one pair of corners, and is
-/// refused the same way, while the ball less the top block alone, one ring
-/// over the north pole round a face that holds the south one, answers. The
-/// intersections and the half less the ball answer, `196π/3` and two ends of
-/// `46π/3`.
+/// The unions and the ball less the half keep the ball less the two pieces of
+/// it inside the half, one face with two rings: the arc of `z = 8` at `x > 0`
+/// and the arc of the wall over the north pole, and the same round the south
+/// pole. The face holds neither pole: it is the band between the two rings.
+/// Before Q1329 the two arcs of each circle were one edge and these were
+/// refused `ResultIsNotManifold { count: 4 }`; named apart, the mesh the fuse
+/// checks its answer with refused `LoopsTouch` at `(0, 4, 8)` until Q1590,
+/// because the band's first cut ran from `(0, 4, 2)` straight up the wall to
+/// the north pole, through the corner `(0, 4, 8)` it should have ended at.
+///
+/// **Every rule answers**, on the same sums as the half bar along `x` against
+/// the ball at the origin: the union `96π + 500π/3 − 196π/3 = 592π/3`, the
+/// intersection half of the `392π/3` the ball and the bar share, the half less
+/// the ball two ends of `(96π − 196π/3)/2 = 46π/3`, and the ball less the half
+/// `500π/3 − 196π/3 = 304π/3`.
 #[test]
-fn a_half_bar_on_a_balls_axis_through_its_poles_is_refused_meshing_the_balls_skin() {
+fn a_half_bar_on_a_balls_axis_through_its_poles_answers_every_rule() {
     let gives = what_each_rule_gives(|model| {
         let bar = bar_up_z(model);
         [
@@ -166,12 +167,12 @@ fn a_half_bar_on_a_balls_axis_through_its_poles_is_refused_meshing_the_balls_ski
         ]
     });
     let wanted = [
-        Gives::RefusedMeshingTwoRingsOverThePoles,
-        Gives::RefusedMeshingTwoRingsOverThePoles,
+        Gives::Holds(592.0 * PI / 3.0),
+        Gives::Holds(592.0 * PI / 3.0),
         Gives::Holds(WHAT_A_HALF_SHARES),
         Gives::Holds(WHAT_A_HALF_SHARES),
         Gives::HoldsTwo(46.0 * PI / 3.0, 46.0 * PI / 3.0),
-        Gives::RefusedMeshingTwoRingsOverThePoles,
+        Gives::Holds(304.0 * PI / 3.0),
     ];
     assert!(
         gives
@@ -180,39 +181,35 @@ fn a_half_bar_on_a_balls_axis_through_its_poles_is_refused_meshing_the_balls_ski
             .all(|(answer, wanted)| wanted.is(answer)),
         "{gives:?}"
     );
+}
 
+/// The ball of radius 5 at `(0, 0, 5)`, `500π/3`, less the block `x ≥ 0,
+/// z ≥ 8`, and less that block and `x ≥ 0, z ≤ 2` in one fuse.
+///
+/// Each block takes half of a cap of height 2, and a cap of height `h` on a
+/// ball of radius `R` is `πh²(3R − h)/3`, `52π/3` here. The ball less the top
+/// block, one ring over the north pole round a face that holds the south one,
+/// is `500π/3 − 26π/3 = 474π/3`. The ball less both is `500π/3 − 52π/3 =
+/// 448π/3`, and its skin is the band of the half bar's test above with no two
+/// arcs of one crossing in it: refused `LoopsTouch` at `(0, 4, 8)` the same
+/// way until Q1590.
+#[test]
+fn a_ball_less_half_its_cap_at_each_pole_answers() {
     let top = ([0.0, -20.0, 8.0], [20.0, 20.0, 20.0]);
     let bottom = ([0.0, -20.0, -20.0], [20.0, 20.0, 2.0]);
-    let a_ball_less = |blocks: &[([f64; 3], [f64; 3])]| {
+    for (blocks, wanted) in [
+        (&[top][..], Gives::Holds(474.0 * PI / 3.0)),
+        (&[top, bottom][..], Gives::Holds(448.0 * PI / 3.0)),
+    ] {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let ball = ball(&mut model, [0.0, 0.0, 5.0]);
         let blocks: Vec<SolidKey> = blocks
             .iter()
             .map(|&(low, high)| block(&mut model, low, high))
             .collect();
-        model
-            .fuse(
-                &[ball],
-                &blocks,
-                Rule::Difference,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .map(|answer| answer.solids().len())
-    };
-    let one_ring = a_ball_less(&[top]);
-    assert!(matches!(one_ring, Ok(1)), "{one_ring:?}");
-    let two_rings = a_ball_less(&[top, bottom]);
-    assert!(
-        matches!(
-            two_rings,
-            Err(Error::CannotMeshAFace {
-                why: CannotTriangulate::LoopsTouch { .. },
-                ..
-            })
-        ),
-        "{two_rings:?}"
-    );
+        let gives = what_one_fuse_gives(&mut model, &[ball], &blocks, Rule::Difference);
+        assert!(wanted.is(&gives), "{gives:?}");
+    }
 }
 
 /// The bar of the first test, seamed up `+x`, holds the ball of radius 4 at
@@ -350,9 +347,6 @@ enum Gives {
     HoldsTwo(f64, f64),
     /// No solid at all.
     Nothing,
-    /// The ball's skin with one ring over each pole, refused by the mesh the
-    /// fuse checks its answer with.
-    RefusedMeshingTwoRingsOverThePoles,
 }
 
 impl Gives {
@@ -366,13 +360,6 @@ impl Gives {
                 matches!(volumes[..], [one, other] if near(one, *smaller) && near(other, *larger))
             }
             (Gives::Nothing, Ok(volumes)) => volumes.is_empty(),
-            (Gives::RefusedMeshingTwoRingsOverThePoles, Err(why)) => matches!(
-                why,
-                Error::CannotMeshAFace {
-                    why: CannotTriangulate::LoopsTouch { .. },
-                    ..
-                }
-            ),
             _ => false,
         }
     }
@@ -394,36 +381,48 @@ fn what_each_rule_gives(
             } else {
                 [first, second]
             };
-            let answer = model.fuse(
-                &[one],
-                &[other],
-                rule,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )?;
-            model
-                .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                .expect("an answer validates");
-            let mut volumes: Vec<(f64, f64)> = answer
-                .solids()
-                .iter()
-                .map(|&solid| {
-                    let measured = model
-                        .solid(solid)
-                        .expect("this model made the key")
-                        .measure(
-                            Deflection::of(0.01).expect("a fine mesh"),
-                            &Policy::certified(),
-                            &mut ProvenanceLog::new(),
-                        )
-                        .expect("an answer measures");
-                    (measured.volume(), measured.volume_error())
-                })
-                .collect();
-            volumes.sort_by(|one, other| one.0.total_cmp(&other.0));
-            Ok(volumes)
+            what_one_fuse_gives(&mut model, &[one], &[other], rule)
         })
         .collect()
+}
+
+/// What `one` fused with `other` under `rule` comes back with: `Ok` with the
+/// volume of each solid and how far off it may be, the smallest first, once
+/// the model validates, or the refusal.
+fn what_one_fuse_gives(
+    model: &mut Model,
+    one: &[SolidKey],
+    other: &[SolidKey],
+    rule: Rule,
+) -> Result<Vec<(f64, f64)>, Error> {
+    let answer = model.fuse(
+        one,
+        other,
+        rule,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )?;
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("an answer validates");
+    let mut volumes: Vec<(f64, f64)> = answer
+        .solids()
+        .iter()
+        .map(|&solid| {
+            let measured = model
+                .solid(solid)
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(0.01).expect("a fine mesh"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("an answer measures");
+            (measured.volume(), measured.volume_error())
+        })
+        .collect();
+    volumes.sort_by(|one, other| one.0.total_cmp(&other.0));
+    Ok(volumes)
 }
 
 fn every_rule_both_ways() -> impl Iterator<Item = (Rule, bool)> {
