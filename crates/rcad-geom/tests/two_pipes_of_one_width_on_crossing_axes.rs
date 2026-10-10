@@ -393,6 +393,41 @@ fn the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece()
     );
 }
 
+#[test]
+fn probe_the_leaning_pair() {
+    for middle in [
+        Point::new(11.0, -3.25, 0.5),
+        Point::new(1.85, 5.85, -3.3),
+        Point::origin(),
+    ] {
+        let mut named_count = 0;
+        let mut all = 0;
+        let mut refused_ways = Vec::new();
+        for [mine, theirs] in pairs_of_directions() {
+            let [one, other] = two_pipes_crossing_at(middle, [mine, theirs], 0.25);
+            let named = intersect(
+                &Surface::Cylinder(one),
+                &Surface::Cylinder(other),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            all += 1;
+            match named {
+                Ok(SurfaceMeet::Curves(halves)) if halves.len() == 4 => named_count += 1,
+                _ => refused_ways.push([mine, theirs]),
+            }
+        }
+        eprintln!("PROBE {middle:?}: {named_count} of {all}");
+        for ways in refused_ways.iter().take(400) {
+            eprintln!(
+                "PROBE refused {:?} {:?}",
+                ways[0].components(),
+                ways[1].components()
+            );
+        }
+    }
+}
+
 /// A pair a rounding away from the family is **not** the family.
 ///
 /// The two questions are asked exactly and this is what that buys: one ulp on
