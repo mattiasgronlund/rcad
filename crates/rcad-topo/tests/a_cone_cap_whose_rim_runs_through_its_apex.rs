@@ -405,6 +405,135 @@ fn meshes_closed(model: &Model, solid: SolidKey, what: &str) {
     );
 }
 
+#[test]
+fn q578_probe_exact_touch() {
+    for outline in [
+        vec![[-2.0, -1.0], [10.0, 5.0], [-2.0, 5.0]],
+        vec![[-2.0, -6.0], [10.0, -6.0], [10.0, 5.0], [-2.0, -1.0]],
+    ] {
+        for (rule, cone_first) in six_fuses() {
+            let mut model = a_model();
+            let cone = a_pointed_cone_along_x(&mut model);
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("cone validates");
+            let triangle = ProfileBuilder::new(outline.clone())
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a triangle");
+            let block = model
+                .add_extrusion(
+                    &triangle,
+                    12.0,
+                    &Isometry::translation(Vector::new(0.0, 0.0, -6.0)).expect("a move"),
+                )
+                .expect("extrudes");
+            let alone = measured(&model, cone, "cone alone");
+            if rule == Rule::Union && cone_first {
+                let skin = Surface::Cone(Cone::new(Axis::x(), 0.5).expect("slope"));
+                for face in model.solid(block).expect("key").faces() {
+                    let surface = face.surface();
+                    let meet = rcad_geom::intersect(
+                        &surface,
+                        &skin,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    );
+                    let wall =
+                        Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, -2.0, 0.0))
+                            .expect("p");
+                    eprintln!(
+                        "Q578FACE {} {surface:?} same={} turned={} meet={meet:?}",
+                        outline.len(),
+                        surface == Surface::Plane(wall),
+                        surface == Surface::Plane(wall.reversed()),
+                    );
+                }
+            }
+            let said = fuse(&mut model, cone, block, rule, cone_first);
+            let mut line =
+                format!("Q578EXACT {rule:?} cone_first={cone_first} alone={alone:?} said={said:?}");
+            if let Ok(solids) = &said {
+                let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                line += &format!(" validate={valid:?}");
+                for &solid in solids {
+                    let view = model.solid(solid).expect("key");
+                    let mesh = view.mesh(
+                        Deflection::of(0.01).expect("d"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    );
+                    let m = view.measure(
+                        Deflection::of(0.01).expect("d"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    );
+                    line += &format!(
+                        " [mesh ok {} measure {:?}]",
+                        mesh.is_ok(),
+                        m.map(|m| (m.volume(), m.volume_error()))
+                    );
+                    line += &format!(
+                        " shells {} faces {}",
+                        view.shells().count(),
+                        view.faces().count()
+                    );
+                    match mesh {
+                        Err(why) => line += &format!(" mesh err {why:?}"),
+                        Ok(mesh) => {
+                            let mut times_used: HashMap<(u32, u32), i32> = HashMap::new();
+                            for triangle in mesh.triangles() {
+                                let [a, b, c] = triangle.corners();
+                                for (from, to) in [(a, b), (b, c), (c, a)] {
+                                    *times_used.entry((from.min(to), from.max(to))).or_default() +=
+                                        if from < to { 1 } else { -1 };
+                                }
+                            }
+                            let unbalanced = times_used.values().filter(|b| **b != 0).count();
+                            let euler = mesh.points().len() as i64 - times_used.len() as i64
+                                + mesh.triangles().len() as i64;
+                            line += &format!(" unbalanced {unbalanced} euler {euler}");
+                        }
+                    }
+                }
+            }
+            eprintln!("{} {line}", outline.len());
+        }
+    }
+}
+
+fn a_pointed_cone_along_x(model: &mut Model) -> SolidKey {
+    let mut builder = SolidBuilder::new();
+    let rim = builder.add_vertex(Point::new(8.0, -4.0, 0.0)).expect("p");
+    let circle = builder
+        .add_edge(rim, rim, EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("e");
+    let lid = Plane::from_point_and_normal(Point::new(8.0, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+        .expect("plane");
+    let lid_step = DraftStep::Along(builder.add_coedge(circle, Orientation::Forward).expect("c"));
+    let lid_wire = builder.add_wire(&[lid_step]).expect("w");
+    let lid = builder
+        .add_face(Surface::Plane(lid), &[lid_wire])
+        .expect("f");
+    let skin_step = DraftStep::Along(
+        builder
+            .add_coedge(circle, Orientation::Reversed)
+            .expect("c"),
+    );
+    let skin_wire = builder.add_wire(&[skin_step]).expect("w");
+    let skin = builder
+        .add_face(
+            Surface::Cone(Cone::new(Axis::x(), 0.5).expect("slope")),
+            &[skin_wire],
+        )
+        .expect("f");
+    builder
+        .add_shell(&[(lid, Orientation::Forward), (skin, Orientation::Forward)])
+        .expect("s");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("builds")
+}
+
 /// The solid's volume and the error its measure publishes.
 fn measured(model: &Model, solid: SolidKey, what: &str) -> (f64, f64) {
     let measured = model
