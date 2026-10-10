@@ -285,6 +285,14 @@ hole level with the top and the bottom of the tube, now give the two solids
 apart, nothing, and each difference its first argument
 (`a_whole_ring_and_a_bar_far_from_it_fuse_to_the_two_apart`,
 `a_whole_ring_and_a_bar_in_its_hole_level_with_its_tube_fuse_to_the_two_apart`).
+The plane keeps the bits of the ring's own axis
+(`Plane::from_point_and_normal_as_written`): scaled again, a turned ring's
+axis comes out an ulp off square to it, and the crossing is a quartic nothing
+here follows. Turned about six axes a fortieth of a turn at a time, 21 of 1404
+fuses are still refused `VolumeIsNotPositive`, the three whose answer holds
+the ring at seven of the 234 turns. The ring alone measures `8π²` at those
+turns; what the fuse writes back for it encloses about `−4·10⁻¹⁶`
+(`a_whole_ring_turned_any_way_and_a_bar_far_from_it_answer_or_are_refused_as_enclosing_nothing`).
 
 ### 191.6 What is left
 
