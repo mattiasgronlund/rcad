@@ -491,6 +491,219 @@ fn a_wedge_a_hair_below_a_bends_cap_is_refused_before_a_ray() {
     }
 }
 
+#[test]
+fn q1581_probe() {
+    let ulp_35 = 4.440_892_098_500_626e-16;
+    for signed_ball in [3.5, 4.5, -4.5] {
+        let ring_ball = f64::abs(signed_ball);
+        for (label, radius, up) in [
+            ("same", ring_ball, 0.0),
+            ("+ulp", ring_ball + ulp_35, 0.0),
+            ("-ulp", ring_ball - ulp_35, 0.0),
+            ("+1e-13", ring_ball + 1e-13, 0.0),
+            ("-1e-13", ring_ball - 1e-13, 0.0),
+            ("up 1e-15", ring_ball, 1e-15),
+            ("up 1e-13", ring_ball, 1e-13),
+            ("down 1e-13", ring_ball, -1e-13),
+            ("off axis 1e-13", ring_ball, f64::NAN),
+        ] {
+            for rule in EVERY_RULE {
+                for ring_first in [true, false] {
+                    let what = format!(
+                        "Q1581 ball R {signed_ball} S {label} {rule:?} ring first {ring_first}"
+                    );
+                    let mut model = a_model();
+                    let ring = match a_bend_and_a_ball(&mut model, signed_ball) {
+                        Ok(key) => key,
+                        Err(why) => {
+                            eprintln!("{what}: R refused {}", said_of(&Err(why)));
+                            continue;
+                        }
+                    };
+                    let placement = if up.is_nan() {
+                        Isometry::translation(Vector::new(1e-13, 0.0, 0.0)).expect("a shift")
+                    } else {
+                        at_height(up)
+                    };
+                    let ball = model
+                        .add_ball(radius, &turned(3.0 * PI / 4.0))
+                        .expect("a ball");
+                    model.place_solid(ball, &placement).expect("this model");
+                    eprintln!("{what}: START");
+                    let got = fused_or_refused(&mut model, ring, ball, rule, ring_first);
+                    eprintln!("{what}: {}", said_of(&got));
+                }
+            }
+        }
+    }
+    let ulp_8 = 1.776_356_839_400_250_5e-15;
+    for (label, near, far, down) in [
+        ("same", 6.0, 10.0, -8.0),
+        ("longer same cone", 5.0, 11.0, -8.0),
+        ("longer up a rounding", 5.0, 11.0, -8.0 + ulp_8),
+        ("longer down a rounding", 5.0, 11.0, -8.0 - ulp_8),
+        ("longer up 1e-13", 5.0, 11.0, -8.0 + 1e-13),
+        ("longer down 1e-13", 5.0, 11.0, -8.0 - 1e-13),
+        ("same up 1e-13", 6.0, 10.0, -8.0 + 1e-13),
+    ] {
+        for rule in EVERY_RULE {
+            for ring_first in [true, false] {
+                let what = format!("Q1581 cone S {label} {rule:?} ring first {ring_first}");
+                let mut model = a_model();
+                let ring = match a_bend_and_a_frustum(&mut model) {
+                    Ok(key) => key,
+                    Err(why) => {
+                        eprintln!("{what}: R refused {}", said_of(&Err(why)));
+                        continue;
+                    }
+                };
+                let cone = a_frustum_placed(&mut model, 0.5, near, far, down, 3.0 * PI / 4.0);
+                eprintln!("{what}: START");
+                let got = fused_or_refused(&mut model, ring, cone, rule, ring_first);
+                eprintln!("{what}: {}", said_of(&got));
+            }
+        }
+    }
+}
+
+fn said_of(got: &Result<usize, Error>) -> String {
+    match got {
+        Ok(solids) => format!("answered {solids} solids"),
+        Err(Error::Undecidable { records }) => format!(
+            "Undecidable at {:?} FULL {:?}",
+            records.records().last().map(|record| record.predicate()),
+            records.records().last()
+        ),
+        Err(other) => format!("{other:?}"),
+    }
+}
+
+fn a_bend_and_a_ball(model: &mut Model, radius: f64) -> Result<SolidKey, Error> {
+    let (radius, rule) = if radius < 0.0 {
+        (-radius, Rule::Difference)
+    } else {
+        (radius, Rule::Union)
+    };
+    let bend = a_quarter_bend(model, 4.0, 1.0);
+    let ball = model.add_ball(radius, &turned(5.0 * PI / 4.0))?;
+    let (first, second) = if rule == Rule::Difference {
+        (ball, bend)
+    } else {
+        (bend, ball)
+    };
+    let answer = model.fuse(
+        &[first],
+        &[second],
+        rule,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )?;
+    let &[ring] = answer.solids() else {
+        panic!("one solid, got {:?}", answer.solids());
+    };
+    Ok(ring)
+}
+
+fn a_bend_and_a_frustum(model: &mut Model) -> Result<SolidKey, Error> {
+    let bend = a_quarter_bend(model, 4.0, 1.0);
+    let cone = a_frustum_placed(model, 0.5, 6.0, 10.0, -8.0, 5.0 * PI / 4.0);
+    let answer = model.fuse(
+        &[bend],
+        &[cone],
+        Rule::Union,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )?;
+    let &[ring] = answer.solids() else {
+        panic!("one solid, got {:?}", answer.solids());
+    };
+    Ok(ring)
+}
+
+fn turned(turn: f64) -> Isometry {
+    Isometry::rotation(&Axis::z(), turn).expect("a real angle")
+}
+
+fn a_frustum_placed(
+    model: &mut Model,
+    slope: f64,
+    near: f64,
+    far: f64,
+    down: f64,
+    turn: f64,
+) -> SolidKey {
+    let skin = rcad_geom::Cone::new(Axis::z(), slope).expect("a positive slope");
+    let mut builder = SolidBuilder::new();
+    let at = |height: f64| Point::new(slope * height, 0.0, height);
+    let bottom_corner = builder.add_vertex(at(near)).expect("a finite point");
+    let top_corner = builder.add_vertex(at(far)).expect("a finite point");
+    let seam = builder
+        .add_edge(bottom_corner, top_corner, EdgeRun::Straight)
+        .expect("a ruling");
+    let bottom_circle = builder
+        .add_edge(
+            bottom_corner,
+            bottom_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
+        .expect("a circle");
+    let top_circle = builder
+        .add_edge(
+            top_corner,
+            top_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
+        .expect("a circle");
+    let cap = |builder: &mut SolidBuilder, at: f64, outward: f64, edge, turn| {
+        let plane =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, at), Vector::new(0.0, 0.0, outward))
+                .expect("a unit normal");
+        let coedge = builder.add_coedge(edge, turn).expect("an edge");
+        let wire = builder
+            .add_wire(&[DraftStep::Along(coedge)])
+            .expect("a wire");
+        builder
+            .add_face(Surface::Plane(plane), &[wire])
+            .expect("a cap")
+    };
+    let bottom = cap(
+        &mut builder,
+        near,
+        -1.0,
+        bottom_circle,
+        Orientation::Reversed,
+    );
+    let top = cap(&mut builder, far, 1.0, top_circle, Orientation::Forward);
+    let round_the_wall = [
+        (bottom_circle, Orientation::Forward),
+        (seam, Orientation::Forward),
+        (top_circle, Orientation::Reversed),
+        (seam, Orientation::Reversed),
+    ]
+    .map(|(edge, turn)| DraftStep::Along(builder.add_coedge(edge, turn).expect("an edge")));
+    let wire = builder.add_wire(&round_the_wall).expect("a wire");
+    let side = builder
+        .add_face(Surface::Cone(skin), &[wire])
+        .expect("a face on the cone");
+    builder
+        .add_shell(&[
+            (bottom, Orientation::Forward),
+            (top, Orientation::Forward),
+            (side, Orientation::Forward),
+        ])
+        .expect("three faces close");
+    let frustum = builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a frustum");
+    model
+        .place_solid(frustum, &turned(turn))
+        .expect("this model made the key");
+    model
+        .place_solid(frustum, &at_height(down))
+        .expect("this model made the key");
+    frustum
+}
+
 fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
 }
