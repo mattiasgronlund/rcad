@@ -48,6 +48,9 @@ composed turns, 42.9ε through sixteen**, and asserts the first two are under
 half the bound. Composing quaternions rounds and nothing scales the product
 back, so a placement composed of more than about twenty turns can leave the
 bound; that normal is then scaled, which is what every normal was before this.
+*2026-10-10, Q499:* one did, through `Model::place_solid`, and
+`Isometry::compose` now divides a turn that has drifted by its length; the test
+runs four depths and asserts all of them (§355.7).
 
 `a_normal_is_kept_up_to_the_published_bound_and_scaled_past_it` is the edge,
 on both sides of one, between neighbouring `f64`: `1 + 31ε` is kept and
@@ -283,3 +286,93 @@ before each commit; `join` over the per-file lines; `mise exec -- just t -p
 rcad-geom --lib rebuilding_an_axis_from_its_own_direction_moves_it_and_moving_its_origin_does_not
 --no-capture`; the new tests run with each change put back by hand and
 restored.
+
+### 355.7 A turn composed of many turns stays near length one — 2026-10-10
+
+*Q499. §355.2 left a placement composed of many turns free to carry a plane's
+normal past `Plane::NORMAL_LENGTH_ROUNDOFF`. A public path does it, and
+`Isometry::compose` now divides a turn that has drifted by its length.*
+
+**A public path reaches the bound.** `Isometry::compose` is public and chains
+without limit, and `Model::place_solid` (`crates/rcad-topo/src/model.rs`) runs
+`movement.compose(&used.loc)` on every call, so a part turned a step at a time
+is turned by a product of as many quaternions as it took steps.
+`a_plane_turned_a_step_at_a_time_reads_back_with_the_normal_it_was_written_with`
+(`crates/rcad-geom/tests/`) turns a plane about three slanted axes by 1°, 5°
+and 7.5°, 360 steps each, composed the way `place_solid` composes, and reads
+each placement's normal back through `Plane::from_point_and_normal_as_written`.
+Without the division **867 of the 3240 come back moved, the first after 63
+steps**; with it none do. That was `wrong/B`: turning a part a degree at a time
+is a thing a designer does on purpose.
+
+The writer fuzzer does not reach it. Read, not run: `still_a_model`
+(`crates/rcad-step/tests/fuzzing/writer.rs`) decodes the model every
+generation, `Isometry`'s `try_from` divides each turn by its length on the way
+in, and a generation then places at most one solid once.
+
+**The fix.** A product of two turns that are not both turns of a cube goes
+through `held_near_length_one`, below `Isometry::compose` in
+`crates/rcad-geom/src/isometry.rs`. It keeps the product bit for bit while the
+`f64` sum of its four squares is within `TURN_LENGTH_DRIFT`, `4ε`, of one, and
+divides it by its length (`na::UnitQuaternion::new_normalize`) past that. A kept
+turn is then within `6ε` of length one, worked out exactly: `4ε`, and the `f64`
+sum of four squares is within about `2ε` of the exact one. A divided turn is
+within about `4ε`: the sum's rounding, then the square root's and the
+division's half ulps, each counted twice in a square. The doc comments of
+`TURN_LENGTH_DRIFT` and `held_near_length_one` carry the argument.
+
+**Why `4ε` and not less.** Dividing rounds too. A turn straight from
+`Isometry::rotation` sits at most `2ε` off by the `f64` sum over the 100 000
+draws of the new
+`a_turn_straight_from_rotation_is_never_divided_though_dividing_would_move_one_in_five`,
+and `3ε` over the 100 000 of a probe deleted before the commit; dividing would
+move the last bit of 19 820 of the test's draws and 19 999 of the probe's. Every
+placement built as a shift after a turn carries such a turn, so dividing every
+product would have moved answers across the whole suite for nothing. The test
+pins that a shift composed after a turn keeps the turn's bits, and that dividing
+would move more than a tenth.
+
+**Why `4ε` and not more.** A turn `6ε` off length one leaves a turned normal well
+inside the plane's bound, and further would spend room the derivation in
+`NORMAL_LENGTH_ROUNDOFF`'s doc does not have.
+`a_turn_composed_of_any_number_of_turns_stays_within_six_epsilon_of_length_one`
+composes 200 chains of 256 turns and works `|q·q − 1|` out exactly: no product
+of two, three or four turns is divided, 1 577 later ones are, the worst is
+`5.08ε`, and every product that was not divided kept its bits.
+
+**What moved.** `every_normal_a_turn_leaves_sits_well_inside_the_bound` now turns
+through 1, 4, 16 and 256 composed turns and asserts every depth under half the
+bound, where it asserted only the first two. Each loop draws one more turn per
+normal, so its figures moved at depth one too:
+
+| worst `n·n` off one, by composed turns | once | 4 | 16 | 256 |
+|---|---|---|---|---|
+| as published, base `5ee4e35c` (three depths) | 10.8ε | 17.7ε | 42.9ε | — |
+| the base's test on the base, run by the lane before | 10.76ε | 17.65ε | 42.85ε | — |
+| this test, the division switched off by hand | 8.96ε | 18.75ε | 43.51ε | 240.64ε |
+| this test, with the division | 8.96ε | 16.95ε | 22.16ε | 20.77ε |
+
+"Switched off by hand" is `TURN_LENGTH_DRIFT` set to `f64::INFINITY`, run and
+put back; the step-at-a-time test gives its 867 of 3240 the same way.
+
+**Tried and set aside.** The lane before this one rescaled by one Newton step,
+`q·(1 − η/2)` with `η` the `f64` sum less one, and measured the same figures;
+division was kept because it is right however far a turn has drifted, not only
+for a small drift. Not run again here.
+
+**What this leaves.** Nothing new. `Isometry::rotation_quaternion`'s doc said
+"always has length one"; it now says to within rounding, since a turn a caller
+hands in through `From<na::Isometry3<f64>>` is not checked.
+
+Commands: `git switch lane-q499-a-normal-turned-through-many-turns` (relay 1
+of Q499, from `0cc429ec`); `mise exec -- just t -p rcad-geom --lib
+every_normal_a_turn_leaves_sits_well_inside_the_bound --no-capture`, `mise exec
+-- just t -p rcad-geom --lib
+a_turn_composed_of_any_number_of_turns_stays_within_six_epsilon_of_length_one
+--no-capture`, `mise exec -- just t -p rcad-geom --lib
+a_turn_straight_from_rotation_is_never_divided_though_dividing_would_move_one_in_five
+--no-capture` and `mise exec -- just t -p rcad-geom --test
+a_plane_turned_a_step_at_a_time_keeps_the_normal_its_file_wrote --no-capture`,
+the first and last also with the division switched off; the probe was a
+throwaway test in `crates/rcad-geom/tests/` composing a shift after 100 000
+turns about the origin, deleted before the commit.

@@ -138,14 +138,19 @@ impl Plane {
     /// turned normal is inside, and
     /// `every_normal_a_turn_leaves_sits_well_inside_the_bound` is the evidence
     /// that the share that was left out fits in the room the worst case
-    /// leaves. Over 20 000 normals the worst `|n·n − 1|` it finds is `10.8ε`
-    /// turned once and `17.7ε` through four composed turns.
+    /// leaves. Over 20 000 normals the worst `|n·n − 1|` it finds is `8.96ε`
+    /// turned once, `16.95ε` through four composed turns, `22.16ε` through
+    /// sixteen and `20.77ε` through 256, and it asserts every one is under
+    /// half the bound.
     ///
-    /// **A placement composed of many turns drifts further**, because
-    /// composing two quaternions rounds and nothing scales the product back:
-    /// through sixteen the same test finds `42.9ε`. A normal moved so far that
-    /// it leaves the bound is scaled, which is what every normal was before
-    /// the bound existed.
+    /// **That holds through any number of composed turns because
+    /// [`Isometry::compose`] keeps the turn near length one.** Composing two
+    /// quaternions rounds, and without compose dividing a product that has
+    /// drifted by its length the same test finds `43.51ε` through sixteen and
+    /// `240.64ε` through 256, and a plane turned a degree at a time leaves the
+    /// bound after 63 steps (`docs/decisions.md` §355.7). A normal moved so far that it leaves the
+    /// bound is scaled, which is what every normal was before the bound
+    /// existed.
     ///
     /// A normal outside it is not refused, only scaled; see
     /// [`Plane::from_point_and_normal_as_written`] for why.
@@ -1092,7 +1097,8 @@ mod tests {
 
     /// The evidence behind the share of [`Plane::NORMAL_LENGTH_ROUNDOFF`] that
     /// is measured rather than derived: every normal a turn leaves, turned
-    /// once or through four composed placements, sits well inside it.
+    /// once or through 4, 16 or 256 composed placements, sits under half of
+    /// it, and each of the four depths is asserted.
     #[test]
     fn every_normal_a_turn_leaves_sits_well_inside_the_bound() {
         let mut state: u64 = 0x2545_F491_4F6C_DD1D;
@@ -1119,12 +1125,13 @@ mod tests {
                 / f64::EPSILON
         };
 
-        let mut worst = [0.0_f64; 3];
+        let depths = [1, 4, 16, 256];
+        let mut worst = [0.0_f64; 4];
         for _ in 0..20_000 {
             let written = a_turn().apply_to_vector(Vector::new(1.0, 2.0, 3.0));
             let plane = Plane::from_point_and_normal(Point::origin(), written)
                 .expect("a direction with a length");
-            for (slot, depth) in [1, 4, 16].into_iter().enumerate() {
+            for (slot, depth) in depths.into_iter().enumerate() {
                 let mut placed = a_turn();
                 for _ in 1..depth {
                     placed = placed.compose(&a_turn());
@@ -1133,17 +1140,19 @@ mod tests {
                 worst[slot] = worst[slot].max(off_one_in_epsilons(moved.normal()).abs());
             }
         }
-        let [once, four, sixteen] = worst;
+        let [once, four, sixteen, many] = worst;
         println!(
             "worst |n·n − 1|: {once:.2}ε turned once, {four:.2}ε through four composed turns, \
-             {sixteen:.2}ε through sixteen, against a bound of 64ε"
+             {sixteen:.2}ε through sixteen, {many:.2}ε through 256, against a bound of 64ε"
         );
         let bound = Plane::NORMAL_LENGTH_ROUNDOFF / f64::EPSILON;
-        assert!(
-            once.max(four) < bound / 2.0,
-            "a turned normal reached {once}ε or {four}ε, more than half the bound, so the share \
-             it leaves out may not fit"
-        );
+        for (depth, reached) in depths.into_iter().zip(worst) {
+            assert!(
+                reached < bound / 2.0,
+                "a normal turned through {depth} composed turns reached {reached}ε, more than \
+                 half the bound, so the share it leaves out may not fit"
+            );
+        }
     }
 
     /// **The half-space gap, at the one line of arithmetic it comes from.**
