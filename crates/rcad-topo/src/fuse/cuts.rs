@@ -618,12 +618,18 @@ fn a_surface_misses_a_box(surface: &Surface, room: [rcad_predicates::Interval; 3
 /// `out = r²·|w|²`, and a cone every point with `out = slope²·(up − its apex's
 /// up)²`, whatever the length of `w` — the expressions the two side-of
 /// predicates in `rcad-geom` take the sign of.
+///
+/// `out` is a range of its own, so the band is a box in `up` and `out`. Where
+/// every point of the face is on one cone with its apex at `origin`, `slope`
+/// says which, and `out` is then `slope²·up²` at every point of the face and
+/// not merely somewhere in its range (Q1461).
 #[derive(Clone, Copy, Debug)]
 struct ABandRoundAnAxis {
     origin: [f64; 3],
     along: [f64; 3],
     up: rcad_predicates::Interval,
     out: rcad_predicates::Interval,
+    slope: Option<f64>,
 }
 
 /// The band round an axis the face certainly lies in, worked in interval
@@ -666,6 +672,7 @@ fn band_a_face_is_inside(face: &BakedFace) -> Option<ABandRoundAnAxis> {
         along,
         up: rcad_predicates::Interval::exactly(0.0),
         out: rcad_predicates::Interval::exactly(0.0),
+        slope: None,
     };
     let up = corners
         .clone()
@@ -685,6 +692,7 @@ fn band_a_face_is_inside(face: &BakedFace) -> Option<ABandRoundAnAxis> {
             }
             band.up = hull(up, rcad_predicates::Interval::exactly(0.0));
             band.out = squared(rcad_predicates::Interval::exactly(cone.slope())) * squared(band.up);
+            band.slope = Some(cone.slope());
         }
         Surface::Plane(_) => {
             if !band.is_square_to(&face.surface)
@@ -772,24 +780,63 @@ fn a_surface_misses_a_band(surface: &Surface, band: ABandRoundAnAxis) -> bool {
 /// keeps one sign over the band and `near² > |n × w|²·out` everywhere in it.
 /// Both are worked in interval arithmetic on the numbers the plane stores, as
 /// the square case is.
+///
+/// **On a cone, `out` is asked at three heights and not over its range**
+/// (Q1461). There `out = slope²·up²` at every point, so the second test is
+/// `|near| > √|n × w|²·slope·|up|`. Where `near` keeps one sign, both sides
+/// are straight in `up` on either side of the apex, so the gap between them is
+/// least at an end of the band or at the apex, and those three heights are
+/// enough. Over the box `out` is as wide at the apex as at the far rim: a
+/// frustum standing on its wide end, its apex just under a leaning top, was
+/// not proved clear of it by that.
 fn a_leaning_plane_misses_a_band(flat: &rcad_geom::Plane, band: ABandRoundAnAxis) -> bool {
     let exactly = rcad_predicates::Interval::exactly;
-    let [a, b, c, d] = flat.coefficients();
-    let normal = [a, b, c].map(exactly);
-    let along = band.along.map(exactly);
-    let near = (dot(normal, band.origin.map(exactly)) + exactly(d)) * band.length()
-        + dot(normal, along) * band.up;
+    let (near, leaning) = a_leaning_plane_round_an_axis(flat, band.origin, band.along);
     if !matches!(
-        near.sign(),
+        near(band.up).sign(),
         rcad_predicates::Decision::Pos | rcad_predicates::Decision::Neg
     ) {
         return false;
     }
+    let clear = |up, out| {
+        matches!(
+            (squared(near(up)) - leaning * out).sign(),
+            rcad_predicates::Decision::Pos
+        )
+    };
+    let Some(slope) = band.slope else {
+        return clear(band.up, band.out);
+    };
+    [band.up.lo(), band.up.hi()]
+        .into_iter()
+        .chain(band.up.contains_zero().then_some(0.0))
+        .all(|up| {
+            let up = exactly(up);
+            clear(up, squared(exactly(slope)) * squared(up))
+        })
+}
+
+/// The plane `flat` round the axis through `origin` along `w`, as
+/// [`a_leaning_plane_misses_a_band`] reads it: `near` at a height `up`, and
+/// `|n × w|²`.
+fn a_leaning_plane_round_an_axis(
+    flat: &rcad_geom::Plane,
+    origin: [f64; 3],
+    along: [f64; 3],
+) -> (
+    impl Fn(rcad_predicates::Interval) -> rcad_predicates::Interval,
+    rcad_predicates::Interval,
+) {
+    let exactly = rcad_predicates::Interval::exactly;
+    let [a, b, c, d] = flat.coefficients();
+    let normal = [a, b, c].map(exactly);
+    let along = along.map(exactly);
+    let at_the_origin = (dot(normal, origin.map(exactly)) + exactly(d)) * dot(along, along);
+    let rising = dot(normal, along);
     let [x, y, z] = cross(normal, along);
-    let leaning = squared(x) + squared(y) + squared(z);
-    matches!(
-        (squared(near) - leaning * band.out).sign(),
-        rcad_predicates::Decision::Pos
+    (
+        move |up| at_the_origin + rising * up,
+        squared(x) + squared(y) + squared(z),
     )
 }
 
