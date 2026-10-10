@@ -617,6 +617,22 @@ surfaces are both gaps, both have answers, and both are deferred because the
 family of fixes is a milestone's worth of algebra. Saying so is the difference
 between "cannot" and "we chose not to", which §24.17 is about.
 
+> **2026-10-10 note (dispatch 66, Q1603): half of the self-crossing row came
+> due.** Two equal pipes whose axes meet are not a knife edge. They are the
+> equal tee and the cross, which a caller asks for exactly whenever two bores
+> share a drill size, so a fuse reaches them without anyone pushing a shape to
+> a limit. Nor do they need a marcher. With unit axes `a` and `b` through a
+> common point, a point on both pipes has `(p·a)² = (p·b)²`, so the crossing
+> lies in the planes `p·(a − b) = 0` and `p·(a + b) = 0`, and each plane cuts
+> both pipes in the same ellipse. What they do need is a name for two curves of
+> one pair that cross each other, and a node where they do (§347.9). Q1603,
+> filed as Q1558 by §347.9, builds that and answers the Steinmetz cross. The
+> other two shapes stay as this row has them: a ball reaching exactly across a
+> pipe (Q1559), and a pipe resting on the inside of a wider one. Each crosses
+> in a quartic through a point where the two surfaces are tangent, which needs
+> the marcher this row says is missing. Q1603 answers the second only if it can
+> do so without that marcher, and otherwise leaves it refused under this row.
+
 ### 31.10 What this gate does not know
 
 §30.3's whole lesson is that a settling document written before anyone has read
