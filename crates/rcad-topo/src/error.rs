@@ -857,6 +857,28 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
+    /// A fuse joined pieces of one plane into one face, and nothing could
+    /// place its rings: which one is the outline and which are holes.
+    ///
+    /// A ring's corners usually say, by the way they wind round the plane's
+    /// normal. Corners that sweep no area say nothing, and such a ring is
+    /// placed by the region it bounds instead — but that region is read only
+    /// for a ring along one pipe, ball, cone or ring, or one whose corners lie
+    /// on one line. Two or more rings of one face read neither way are this.
+    /// The cap along four pipes in `a_joined_flat_face_whose_rings_enclose_no_area.rs`,
+    /// whose corners sweep exactly nothing, with its own shape an eighth the
+    /// size standing through it, is refused this in the union and in the big
+    /// cap less the small one (Q1253).
+    ///
+    /// **A gap and not a limit** (§16.10): the face is there, and a point
+    /// inside the region each ring bounds would place it. `face` is one of the
+    /// caller's faces the joined face was cut from.
+    #[error("nothing could say which ring of a face joined from flat pieces is its outline")]
+    CannotPlaceTheRingsOfAJoinedFlatFace {
+        /// One of the faces it was cut from.
+        face: crate::FaceKey,
+    },
+
     /// Points along a curve a face is cut by cannot be put in order.
     ///
     /// A straight crossing is ordered by the axis it climbs fastest along and a
