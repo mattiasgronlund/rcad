@@ -33,21 +33,20 @@
 //! the circle says, and [`the_same_three_one_pair_at_a_time_make_the_same_block`]
 //! is the answer that came of reading it (`docs/decisions.md` §340.5).
 //!
-//! # And where a point cannot be asked
+//! # And where a point is asked
 //!
-//! Where the ball stands clear of the bar, `SolidView::classify_point` answers
-//! a point in the middle of the block, in the bar's stubs and beside them.
-//! Where the ball rests against the bar, the floor's two round holes touch, and
-//! the floor's one inner wire is both circles closing at the touch point. A
-//! point under the floor is then refused `CannotFollowAFacesTrimming` naming
-//! the floor: that is the classifier's own gap and not this fuse's, and the
-//! answer's volume and its face count are what pin the shape there.
+//! `SolidView::classify_point` answers a point in the middle of the block, in
+//! the bar's stubs and beside them, whether the ball stands clear of the bar
+//! or rests against it. Where it rests against it, the floor's two round holes
+//! touch, and the floor's one inner wire is both circles closing at the touch
+//! point. Each circle is read against the round surface across it, so a ray
+//! that crosses the floor is answered there too.
 
 use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Containment, Error, Model, Rule, SolidKey};
+use rcad_topo::{Containment, Error, Model, OnAFace, Rule, SolidKey};
 
 /// How fine the meshes every volume here is read off are.
 const A_DEFLECTION: f64 = 0.02;
@@ -158,46 +157,25 @@ fn a_ball_a_millionth_of_a_unit_clear_of_the_bar_still_fuses() {
 /// they do. A touch at one point adds no volume, so the closed form is the one
 /// a ball clear of the bar has.
 ///
-/// What `SolidView::classify_point` cannot yet say is where a point under the
-/// floor is. The floor's one inner wire is both circles, each a whole closed
-/// edge, and both close at the touch point. `SolidView::face_holds_the_point`
-/// refuses that floor `AFaceTrimmedByACurveThisCannotFollow` even at a point of
-/// it far from both circles, so every ray that crosses the floor is refused
-/// `CannotFollowAFacesTrimming` naming the floor, the stub under the floor
-/// among them. A point above the floor is answered as when the ball stands
-/// clear. Q1591 filed the row that takes the floor, and these points are
-/// pinned refused until it lands.
+/// The floor's one inner wire is both circles, each a whole closed edge, and
+/// both close at the touch point. `SolidView::face_holds_the_point` reads each
+/// circle against the round surface across it: the floor holds a point of it
+/// far from both circles, not one inside either circle, and has the touch
+/// point on its edge. So a point under the floor is answered as when the ball
+/// stands clear, and one in the half ball is inside.
 #[test]
-fn a_ball_resting_against_the_bar_fuses_into_the_same_block() {
+fn a_ball_resting_against_the_bar_makes_the_same_block_with_both_circles_in_its_floor() {
     let (model, answer) = united_all_at_once(3.0);
     let solids = answer.expect("a ball resting against the bar unites with the block");
-    it_measures_as_the_block_with_half_a_ball_and_two_stubs(&model, &solids);
+    it_is_the_block_with_half_a_ball_and_two_stubs(&model, &solids);
     let solid = model.solid(solids[0]).expect("this model made the key");
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
-    for (at, what) in [
-        (
-            Point::new(3.5, 3.5, 3.5),
-            "the middle of the block, clear of the ball and of the bar",
-        ),
-        (
-            Point::new(5.0, 3.25, SIDE + 1.5),
-            "the stub out of the top of the block",
-        ),
-    ] {
-        assert_eq!(
-            solid.classify_point(at, &policy, &mut log),
-            Containment::Inside,
-            "{what}"
-        );
-    }
-    for (x, y) in BESIDE_THE_STUBS {
-        assert_eq!(
-            solid.classify_point(Point::new(x, y, SIDE + 1.5), &policy, &mut log),
-            Containment::Outside,
-            "nothing but the bar reaches past the top at ({x}, {y})"
-        );
-    }
+    assert_eq!(
+        solid.classify_point(Point::new(3.0, 3.5, -0.5), &policy, &mut log),
+        Containment::Inside,
+        "half a unit under the floor, inside the half ball"
+    );
     let floor = solid
         .faces()
         .find(|face| {
@@ -206,31 +184,26 @@ fn a_ball_resting_against_the_bar_fuses_into_the_same_block() {
         })
         .expect("the block's floor is still one face")
         .key();
-    assert!(
-        matches!(
-            solid.face_holds_the_point(
-                floor,
-                PredicatePoint::Exact([1.0, 1.0, 0.0]),
-                &policy,
-                &mut log
-            ),
-            Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if face == floor
+    for (at, held, what) in [
+        ([1.0, 1.0, 0.0], OnAFace::Held, "far from both circles"),
+        (
+            [3.0, 3.5, 0.0],
+            OnAFace::NotHeld,
+            "inside the ball's circle",
         ),
-        "the floor cannot say it holds a point of its own far from both circles"
-    );
-    for at in [
-        Point::new(5.0, 3.25, -1.5),
-        Point::new(3.25, 1.75, -1.5),
-        Point::new(2.0, 3.25, -1.5),
-        Point::new(3.5, 3.25, -1.5),
-        Point::new(6.3, 5.7, -1.5),
-        Point::new(3.0, 3.5, -0.5),
+        ([5.0, 3.5, 0.0], OnAFace::NotHeld, "inside the bar's circle"),
+        (
+            [4.0, 3.5, 0.0],
+            OnAFace::OnItsBoundary,
+            "where the two circles touch",
+        ),
     ] {
         assert_eq!(
-            solid.classify_point(at, &policy, &mut log),
-            Containment::CannotFollowAFacesTrimming { face: floor },
-            "under the floor, at {at:?}, the floor's two touching circles are \
-             not followed"
+            solid
+                .face_holds_the_point(floor, PredicatePoint::Exact(at), &policy, &mut log)
+                .expect("the floor follows two whole circles that touch"),
+            held,
+            "the floor at {at:?}, {what}"
         );
     }
 }
