@@ -97,6 +97,16 @@
 //! the tube, was cut along the ellipses where the pipes cross it and refused
 //! the same way, because the band answered only for a plane square to it.
 //!
+//! **A hollow frustum under that top, cones for pipes, needed two things
+//! more** (Q1461). The band round a cone face reaches down to the apex, and
+//! as a box in how far up and how far out it held the apex as far out as the
+//! wide end, so a leaning plane is now asked at the band's two ends and at the
+//! apex, where the cone says how far out the face is. And two cones on one
+//! axis meet each other in circles, so where the top met both could not be
+//! worked out and the cones were taken to meet on it. Where three surfaces
+//! cannot be placed, the crossing of a plane and a cone is now asked whether
+//! the band round the cone's axis that it lies in misses the third surface.
+//!
 //! **A cut whose faces meet the face only on its boundary is marked too**
 //! (Q1470, `docs/decisions.md` §422). Where every face carrying a surface
 //! lies on one closed side of a plane and the face it cuts lies on the other,
@@ -346,19 +356,99 @@ fn the_cuts_left_on(face: &BakedFace, found: &[ACutFound]) -> Vec<Surface> {
 /// two partners meet at all. Under a certified policy, with its records
 /// dropped, for the reason [`two_faces_provably_apart`] gives: a crossing left
 /// off on a guess is an edge of the answer lost.
+///
+/// **Where the crossing is a plane's with a cone, the band round the cone's
+/// axis that it lies in is asked as well** (Q1461), when the three cannot be
+/// worked out and the partners do meet. Two cones on one axis meet in
+/// circles, and with a plane where they meet needs two of the three flat; a
+/// hollow frustum under a leaning top kept the ellipse where the top crosses
+/// each cone's other nappe, near neither circle, and was refused for it.
 fn the_crossing_meets_none_of(surface: &Surface, cut: &Surface, others: &[Surface]) -> bool {
     let policy = Policy::certified();
+    let crossing = the_band_a_plane_crosses_a_cone_in(surface, cut);
     others.iter().filter(|other| *other != cut).all(|other| {
         let mut dropped = ProvenanceLog::new();
         match meet_of_three_surfaces([surface, cut, other], &policy, &mut dropped) {
             Ok(MeetOfThree::Nowhere) => true,
             Ok(MeetOfThree::At(_) | MeetOfThree::MoreThanAPoint) => false,
             Ok(_) => false,
-            Err(_) => matches!(
-                intersect(cut, other, &policy, &mut dropped),
-                Ok(SurfaceMeet::Nothing)
-            ),
+            Err(_) => {
+                matches!(
+                    intersect(cut, other, &policy, &mut dropped),
+                    Ok(SurfaceMeet::Nothing)
+                ) || crossing.is_some_and(|band| a_surface_misses_a_band(other, band))
+            }
         }
+    })
+}
+
+/// The band round a cone's axis that the whole crossing of a plane and that
+/// cone lies in, the two either way round, or `None` where this cannot bound
+/// it.
+///
+/// Read round the cone's axis the way [`a_leaning_plane_misses_a_band`] reads
+/// a plane, every point of the plane has `near(up)² ≤ |n × w|²·out`, and every
+/// point of the cone has `out = slope²·up²`. So every point of the crossing
+/// has `q(up) ≤ 0`, where `q(up) = near(up)² − |n × w|²·slope²·up²`. Where the
+/// plane is nearer square to the axis than the cone's wall is,
+/// `(n·w)² > |n × w|²·slope²`, `q` is a bowl, at or below nought only between
+/// its two roots, and the crossing is an ellipse or the apex alone. A plane
+/// leaning more than that crosses the cone in a curve that runs off for ever,
+/// and no band holds it.
+///
+/// Interval arithmetic has no square root, so the roots are found in plain
+/// `f64` and each moved out by a millionth of how far out they are. What is
+/// proved, in interval arithmetic on the numbers the two surfaces store, is
+/// that `q` is above nought at each, falling at the lower and rising at the
+/// upper. In a bowl that leaves no point at or below nought outside them, so
+/// no point of the crossing either, wherever the `f64` roots landed.
+fn the_band_a_plane_crosses_a_cone_in(one: &Surface, other: &Surface) -> Option<ABandRoundAnAxis> {
+    let ((Surface::Plane(flat), Surface::Cone(cone)) | (Surface::Cone(cone), Surface::Plane(flat))) =
+        (one, other)
+    else {
+        return None;
+    };
+    let exactly = rcad_predicates::Interval::exactly;
+    let is =
+        |value: rcad_predicates::Interval, sign: rcad_predicates::Decision| value.sign() == sign;
+    let (origin, along) = axis_numbers(cone.axis());
+    let plane = APlaneRoundAnAxis::of(flat, origin, along);
+    let spread = plane.leaning * squared(exactly(cone.slope()));
+    if !is(
+        squared(plane.rising) - spread,
+        rcad_predicates::Decision::Pos,
+    ) {
+        return None;
+    }
+    let q = |up| squared(plane.near(up)) - spread * squared(up);
+    let q_rising = |up| plane.rising * plane.near(up) - spread * up;
+
+    let middle = |value: rcad_predicates::Interval| (value.lo() + value.hi()) / 2.0;
+    let (at_the_origin, rising, spread_f64) = (
+        middle(plane.at_the_origin),
+        middle(plane.rising),
+        middle(spread),
+    );
+    let bowl = rising * rising - spread_f64;
+    let centre = -at_the_origin * rising / bowl;
+    let half = (at_the_origin * at_the_origin * spread_f64).max(0.0).sqrt() / bowl;
+    let margin = (centre.abs() + half) * 1e-6;
+    let (low, high) = (centre - half - margin, centre + half + margin);
+    let (low_up, high_up) = (exactly(low), exactly(high));
+    if !(is(q(low_up), rcad_predicates::Decision::Pos)
+        && is(q_rising(low_up), rcad_predicates::Decision::Neg)
+        && is(q(high_up), rcad_predicates::Decision::Pos)
+        && is(q_rising(high_up), rcad_predicates::Decision::Pos))
+    {
+        return None;
+    }
+    let up = rcad_predicates::Interval::new(low, high).ok()?;
+    Some(ABandRoundAnAxis {
+        origin,
+        along,
+        up,
+        out: squared(exactly(cone.slope())) * squared(up),
+        slope: Some(cone.slope()),
     })
 }
 
@@ -610,6 +700,9 @@ fn a_surface_misses_a_box(surface: &Surface, room: [rcad_predicates::Interval; 3
 }
 
 /// Where a face lies round one axis: how far up it and how far out from it.
+/// The crossing of a plane and a cone is banded the same way
+/// ([`the_band_a_plane_crosses_a_cone_in`]), and what is said of the face here
+/// is said of it there.
 ///
 /// Both are measured the way the stored surfaces measure them, with the axis's
 /// direction `w` as stored and not scaled to length one: `up` holds
@@ -618,12 +711,18 @@ fn a_surface_misses_a_box(surface: &Surface, room: [rcad_predicates::Interval; 3
 /// `out = r²·|w|²`, and a cone every point with `out = slope²·(up − its apex's
 /// up)²`, whatever the length of `w` — the expressions the two side-of
 /// predicates in `rcad-geom` take the sign of.
+///
+/// `out` is a range of its own, so the band is a box in `up` and `out`. Where
+/// every point of the face is on one cone with its apex at `origin`, `slope`
+/// says which, and `out` is then `slope²·up²` at every point of the face and
+/// not merely somewhere in its range (Q1461).
 #[derive(Clone, Copy, Debug)]
 struct ABandRoundAnAxis {
     origin: [f64; 3],
     along: [f64; 3],
     up: rcad_predicates::Interval,
     out: rcad_predicates::Interval,
+    slope: Option<f64>,
 }
 
 /// The band round an axis the face certainly lies in, worked in interval
@@ -666,6 +765,7 @@ fn band_a_face_is_inside(face: &BakedFace) -> Option<ABandRoundAnAxis> {
         along,
         up: rcad_predicates::Interval::exactly(0.0),
         out: rcad_predicates::Interval::exactly(0.0),
+        slope: None,
     };
     let up = corners
         .clone()
@@ -685,6 +785,7 @@ fn band_a_face_is_inside(face: &BakedFace) -> Option<ABandRoundAnAxis> {
             }
             band.up = hull(up, rcad_predicates::Interval::exactly(0.0));
             band.out = squared(rcad_predicates::Interval::exactly(cone.slope())) * squared(band.up);
+            band.slope = Some(cone.slope());
         }
         Surface::Plane(_) => {
             if !band.is_square_to(&face.surface)
@@ -772,25 +873,74 @@ fn a_surface_misses_a_band(surface: &Surface, band: ABandRoundAnAxis) -> bool {
 /// keeps one sign over the band and `near² > |n × w|²·out` everywhere in it.
 /// Both are worked in interval arithmetic on the numbers the plane stores, as
 /// the square case is.
+///
+/// **On a cone, `out` is asked at three heights and not over its range**
+/// (Q1461). There `out = slope²·up²` at every point, so the second test is
+/// `|near| > √|n × w|²·slope·|up|`. Where `near` keeps one sign, both sides
+/// are straight in `up` on either side of the apex, so the gap between them is
+/// least at an end of the band or at the apex, and those three heights are
+/// enough. Over the box `out` is as wide at the apex as at the far rim: a
+/// frustum standing on its wide end, its apex just under a leaning top, was
+/// not proved clear of it by that.
 fn a_leaning_plane_misses_a_band(flat: &rcad_geom::Plane, band: ABandRoundAnAxis) -> bool {
     let exactly = rcad_predicates::Interval::exactly;
-    let [a, b, c, d] = flat.coefficients();
-    let normal = [a, b, c].map(exactly);
-    let along = band.along.map(exactly);
-    let near = (dot(normal, band.origin.map(exactly)) + exactly(d)) * band.length()
-        + dot(normal, along) * band.up;
+    let plane = APlaneRoundAnAxis::of(flat, band.origin, band.along);
     if !matches!(
-        near.sign(),
+        plane.near(band.up).sign(),
         rcad_predicates::Decision::Pos | rcad_predicates::Decision::Neg
     ) {
         return false;
     }
-    let [x, y, z] = cross(normal, along);
-    let leaning = squared(x) + squared(y) + squared(z);
-    matches!(
-        (squared(near) - leaning * band.out).sign(),
-        rcad_predicates::Decision::Pos
-    )
+    let clear = |up, out| {
+        matches!(
+            (squared(plane.near(up)) - plane.leaning * out).sign(),
+            rcad_predicates::Decision::Pos
+        )
+    };
+    let Some(slope) = band.slope else {
+        return clear(band.up, band.out);
+    };
+    [band.up.lo(), band.up.hi()]
+        .into_iter()
+        .chain(band.up.contains_zero().then_some(0.0))
+        .all(|up| {
+            let up = exactly(up);
+            clear(up, squared(exactly(slope)) * squared(up))
+        })
+}
+
+/// A plane read round the axis through `origin` along `w`, as
+/// [`a_leaning_plane_misses_a_band`] reads it, in interval arithmetic on the
+/// numbers the plane stores.
+#[derive(Clone, Copy, Debug)]
+struct APlaneRoundAnAxis {
+    /// `(n·origin + d)·|w|²`.
+    at_the_origin: rcad_predicates::Interval,
+    /// `n·w`.
+    rising: rcad_predicates::Interval,
+    /// `|n × w|²`.
+    leaning: rcad_predicates::Interval,
+}
+
+impl APlaneRoundAnAxis {
+    fn of(flat: &rcad_geom::Plane, origin: [f64; 3], along: [f64; 3]) -> Self {
+        let exactly = rcad_predicates::Interval::exactly;
+        let [a, b, c, d] = flat.coefficients();
+        let normal = [a, b, c].map(exactly);
+        let along = along.map(exactly);
+        let [x, y, z] = cross(normal, along);
+        Self {
+            at_the_origin: (dot(normal, origin.map(exactly)) + exactly(d)) * dot(along, along),
+            rising: dot(normal, along),
+            leaning: squared(x) + squared(y) + squared(z),
+        }
+    }
+
+    /// The plane's equation scaled by `|w|²` at a point `up` along the axis,
+    /// less the term that turns with the point round it.
+    fn near(self, up: rcad_predicates::Interval) -> rcad_predicates::Interval {
+        self.at_the_origin + self.rising * up
+    }
 }
 
 impl ABandRoundAnAxis {
@@ -1051,10 +1201,14 @@ fn how_two_faces_meet(
 
 #[cfg(test)]
 mod tests {
-    use rcad_geom::{Isometry, Plane, Point, Scale, Surface, Vector};
-    use rcad_predicates::{Policy, ProvenanceLog};
+    use rcad_geom::{Axis, Cone, Isometry, Plane, Point, Scale, Surface, Vector};
+    use rcad_predicates::{Interval, Policy, ProvenanceLog};
 
-    use super::{a_face_misses_a_surface_by_its_band, gather, no_face_of_one_meets_the_other};
+    use super::{
+        ABandRoundAnAxis, a_face_misses_a_surface_by_its_band, a_surface_misses_a_band, gather,
+        no_face_of_one_meets_the_other, the_band_a_plane_crosses_a_cone_in,
+        the_crossing_meets_none_of,
+    };
     use crate::fuse::bake::{BakedFace, BakedSolid, bake};
     use crate::{Error, Model, SolidKey};
 
@@ -1253,6 +1407,120 @@ mod tests {
                 "{plane:?}"
             );
         }
+    }
+
+    /// The wall of a frustum of the cone about `−z` of slope `1/2` with its
+    /// apex at `z = 22`, from `z = −4` up to `20`, as `band_a_face_is_inside`
+    /// bands it: `2` to `26` down from the apex, widened to take the apex in.
+    /// The plane `4z = x + 96` is `3.75` or more above it, and over the apex
+    /// the band's box reaches out as far as the wide end (Q1461).
+    #[test]
+    fn a_leaning_top_over_a_frustums_narrow_end_is_proved_to_miss_its_wall_by_its_slope() {
+        let top = leaning_plane_through(Point::new(0.0, 0.0, 24.0));
+        let wall = |slope| ABandRoundAnAxis {
+            origin: [0.0, 0.0, 22.0],
+            along: [0.0, 0.0, -1.0],
+            up: Interval::new(0.0, 26.0).expect("a range"),
+            out: Interval::new(0.0, 169.0).expect("a range"),
+            slope,
+        };
+        assert!(a_surface_misses_a_band(&top, wall(Some(0.5))));
+        assert!(
+            !a_surface_misses_a_band(&top, wall(None)),
+            "the box alone holds a point 13 out at the apex, which the top passes over"
+        );
+    }
+
+    /// `4z = x + 60` crosses that frustum's wall near `z = 15`.
+    #[test]
+    fn a_leaning_plane_across_a_frustums_wall_is_not_proved_to_miss_it() {
+        let across = leaning_plane_through(Point::new(0.0, 0.0, 15.0));
+        let wall = ABandRoundAnAxis {
+            origin: [0.0, 0.0, 22.0],
+            along: [0.0, 0.0, -1.0],
+            up: Interval::new(0.0, 26.0).expect("a range"),
+            out: Interval::new(0.0, 169.0).expect("a range"),
+            slope: Some(0.5),
+        };
+        assert!(!a_surface_misses_a_band(&across, wall));
+    }
+
+    /// The top `4z = x + 96` crosses the cone of slope `1/2` about `−z` with
+    /// its apex at `z = 22` in an ellipse on the nappe above the apex, from
+    /// `z = 214/9` over `x < 0` up to `170/7` over `x > 0`: `16/9` to `16/7`
+    /// above the apex. A cone of slope `1/4` on the same axis with its apex at
+    /// `z = 23` is `7/36` to `9/28` out from the axis at those heights and the
+    /// first cone `8/9` to `8/7`, so the two never meet on the top. The two cones do meet,
+    /// in circles at `z = 21` and `22⅓`, and the three surfaces have only the top
+    /// flat, so the crossing is proved clear of the second cone only by the band
+    /// round the axis it lies in (Q1461). Either cone crossing the top, with
+    /// the other the third surface, either way round.
+    #[test]
+    fn the_ellipse_a_leaning_top_crosses_a_cone_in_meets_no_second_cone_on_its_axis() {
+        let top = leaning_plane_through(Point::new(0.0, 0.0, 24.0));
+        let (outer, bore) = (cone_about_down(22.0, 0.5), cone_about_down(23.0, 0.25));
+        for (crossed, other) in [(outer, bore), (bore, outer)] {
+            assert!(the_crossing_meets_none_of(&top, &crossed, &[other]));
+            assert!(the_crossing_meets_none_of(&crossed, &top, &[other]));
+        }
+    }
+
+    /// The cone of slope `1` about `−z` with its apex at `z = 23` is `0.78`
+    /// out at the ellipse's lowest point, where the ellipse is `0.89` out, and
+    /// `1.29` at its highest, where the ellipse is `1.14`. So it crosses the
+    /// ellipse.
+    #[test]
+    fn the_ellipse_a_leaning_top_crosses_a_cone_in_is_not_proved_clear_of_a_cone_through_it() {
+        let top = leaning_plane_through(Point::new(0.0, 0.0, 24.0));
+        let (outer, through) = (cone_about_down(22.0, 0.5), cone_about_down(23.0, 1.0));
+        assert!(!the_crossing_meets_none_of(&top, &outer, &[through]));
+    }
+
+    /// From `16/9` to `16/7` above the apex, and a millionth or so wider.
+    #[test]
+    fn the_band_round_the_ellipse_a_leaning_top_crosses_a_cone_in_is_its_height_and_no_more() {
+        let top = leaning_plane_through(Point::new(0.0, 0.0, 24.0));
+        let band = the_band_a_plane_crosses_a_cone_in(&top, &cone_about_down(22.0, 0.5))
+            .expect("the top crosses the cone in an ellipse");
+        let (lowest, highest) = (-16.0 / 9.0, -16.0 / 7.0);
+        assert!(
+            band.up.lo() < highest && band.up.lo() > highest - 1e-5,
+            "{band:?}"
+        );
+        assert!(
+            band.up.hi() > lowest && band.up.hi() < lowest + 1e-5,
+            "{band:?}"
+        );
+        assert_eq!(band.slope, Some(0.5));
+    }
+
+    /// `x = 0` holds the axis and crosses the cone in two lines through the
+    /// apex, and `4x = z` leans more than the wall and crosses it in a
+    /// hyperbola. Neither ends, so no band holds them.
+    #[test]
+    fn a_plane_crossing_a_cone_in_a_curve_without_end_is_given_no_band() {
+        let cone = cone_about_down(22.0, 0.5);
+        for normal in [Vector::new(1.0, 0.0, 0.0), Vector::new(4.0, 0.0, -1.0)] {
+            let plane = Surface::Plane(
+                Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.0), normal)
+                    .expect("a normal with a length"),
+            );
+            assert!(
+                the_band_a_plane_crosses_a_cone_in(&plane, &cone).is_none(),
+                "{plane:?}"
+            );
+        }
+    }
+
+    fn cone_about_down(apex: f64, slope: f64) -> Surface {
+        Surface::Cone(
+            Cone::new(
+                Axis::new(Point::new(0.0, 0.0, apex), Vector::new(0.0, 0.0, -1.0))
+                    .expect("z is a direction"),
+                slope,
+            )
+            .expect("a positive slope"),
+        )
     }
 
     fn leaning_plane_through(point: Point) -> Surface {

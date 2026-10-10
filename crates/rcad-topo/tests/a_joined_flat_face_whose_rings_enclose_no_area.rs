@@ -1725,6 +1725,208 @@ fn the_block_under_a_leaning_top(model: &mut Model) -> rcad_topo::Result<SolidKe
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
+/// **A hollow frustum under the same leaning top, clear of it** (Q1461), under
+/// every rule, both ways round, certified and tolerant. The frustum is the cone
+/// about `−z` of slope `1/2` with its apex at `(0, 0, 22)`, from `z = −4` up to
+/// `20`, wide end down. The bore through it is the cone about `−z` of slope
+/// `1/4` with its apex at `(0, 0, 23)`, from `z = −6` up to `21`. The top is
+/// `3.75` or more above the frustum's wall, closest over its top rim.
+///
+/// Each cone crosses the top's plane in an ellipse on its other nappe, above
+/// its apex and near `z = 24`, and the two ellipses meet nothing else on the
+/// top, as the pipes' do in
+/// `a_tube_cut_by_a_block_whose_leaning_top_clears_it_is_answered_under_every_rule`.
+/// Until Q1461 both were kept on and every rule was refused under either
+/// policy, `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, for two reasons in
+/// `cuts::gather`. The band round a cone face's axis was a box in how far up
+/// and how far out, and it reaches down to the apex, so it held the apex at
+/// the frustum's full width and could not prove the top clear of the wall.
+/// And the two cones, on one axis, meet each other in circles at `z = 21` and
+/// `22⅓`, so where the three surfaces meet could not be worked out and the
+/// cones were taken to meet on the top, though neither circle comes near it.
+///
+/// A cone of slope `s` about `−z` with its apex at height `a` holds
+/// `π·s²·((a − z₀)³ − (a − z₁)³)/3` between heights `z₀ < z₁` below its apex. So
+/// the hollow frustum holds `1464π − 409.5π = 2109π/2`, and shares with the
+/// block what it holds from `z = 0` up, `2660π/3 − 3035π/12 = 2535π/4`. The
+/// block holds `18816`. The faces are the tube's with cones for pipes, the top
+/// left whole.
+#[test]
+fn a_hollow_frustum_under_a_leaning_top_that_clears_it_is_answered_under_every_rule() {
+    a_frustum_and_the_block_under_a_leaning_top_answer_every_rule(
+        |model| {
+            let frustum = a_frustum_about_z(model, 0.5, 22.0, -1.0, [-4.0, 20.0])
+                .unwrap_or_else(|why| panic!("the frustum: {why:?}"));
+            let bore = a_frustum_about_z(model, 0.25, 23.0, -1.0, [-6.0, 21.0])
+                .unwrap_or_else(|why| panic!("the bore: {why:?}"));
+            the_one_solid(model, frustum, bore, Rule::Difference)
+        },
+        [2109.0 * PI / 2.0, 2535.0 * PI / 4.0],
+        [[8, 2], [2, 2]],
+    );
+}
+
+/// **A frustum with no bore under the same top, clear of it**, answered under
+/// every rule, both ways round, certified and tolerant, before Q1461 and
+/// since: the cone of the hollow frustum above, slope `1/2` about `−z` with its
+/// apex at `(0, 0, 22)`, from `z = −4` to `20`; and the same cone with its apex
+/// at `(0, 0, 26)`, over the top's plane, from `z = −1` to `20`.
+///
+/// Each crosses the top in one ellipse on its other nappe. Before Q1461 the
+/// band round neither wall proved the top clear of it, and the band round the
+/// second still does not: it reaches down to the apex, and the top crosses the
+/// axis between the apex and the wall. So the ellipse is kept on, and with no
+/// second cone on the axis nothing stops where it meets the top's other cuts
+/// being worked out, and the top comes back whole.
+///
+/// The first holds `1464π` and shares `2660π/3` with the block; the second
+/// holds `6489π/4` and shares `4340π/3`.
+#[test]
+fn a_frustum_under_a_leaning_top_that_clears_it_is_answered_under_every_rule() {
+    for (apex, [bottom, top], volumes) in [
+        (22.0, [-4.0, 20.0], [1464.0 * PI, 2660.0 * PI / 3.0]),
+        (26.0, [-1.0, 20.0], [6489.0 * PI / 4.0, 4340.0 * PI / 3.0]),
+    ] {
+        a_frustum_and_the_block_under_a_leaning_top_answer_every_rule(
+            |model| {
+                a_frustum_about_z(model, 0.5, apex, -1.0, [bottom, top])
+                    .unwrap_or_else(|why| panic!("the frustum under {apex}: {why:?}"))
+            },
+            volumes,
+            [[7, 1], [2, 1]],
+        );
+    }
+}
+
+/// Fuse what `frustum` builds with `the_block_under_a_leaning_top` under every
+/// rule, both ways round, certified and tolerant, and check each answer is one
+/// solid holding what the frustum's `[alone, shared]` volumes say, with the
+/// faces flat and on a cone counted by `[with_the_block, without]`: the first
+/// for the union and the block less the frustum, the second for the other two.
+fn a_frustum_and_the_block_under_a_leaning_top_answer_every_rule(
+    frustum: impl Fn(&mut Model) -> SolidKey,
+    [frustum_alone, shared]: [f64; 2],
+    [with_the_block, without]: [[usize; 2]; 2],
+) {
+    let block_alone = 18816.0;
+    for (name, policy) in [
+        ("certified", Policy::certified()),
+        ("tolerant", Policy::tolerant(100.0)),
+    ] {
+        for (rule, swapped) in every_rule_both_ways() {
+            let (volume, flat_and_cone) = match (rule, swapped) {
+                (Rule::Union, _) => (frustum_alone + block_alone - shared, with_the_block),
+                (Rule::Intersection, _) => (shared, without),
+                (Rule::Difference, false) => (frustum_alone - shared, without),
+                (Rule::Difference, true) => (block_alone - shared, with_the_block),
+                (other, _) => panic!("not a rule this checks: {other:?}"),
+            };
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let built = frustum(&mut model);
+            let block = the_block_under_a_leaning_top(&mut model)
+                .unwrap_or_else(|why| panic!("the block: {why:?}"));
+            let [one, other] = if swapped {
+                [block, built]
+            } else {
+                [built, block]
+            };
+            let what = format!("{name}, {rule:?}, swapped {swapped}");
+            let answer = model
+                .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let [solid] = answer.solids() else {
+                panic!("{what}: {:?}", answer.solids());
+            };
+            assert_holds(&model, *solid, volume, &what);
+            let faces: Vec<Surface> = model
+                .solid(*solid)
+                .expect("this model made the key")
+                .faces()
+                .map(|face| face.surface())
+                .collect();
+            let on_cones = faces
+                .iter()
+                .filter(|surface| matches!(surface, Surface::Cone(_)))
+                .count();
+            assert_eq!(
+                [faces.len() - on_cones, on_cones],
+                flat_and_cone,
+                "{what}: {faces:?}"
+            );
+        }
+    }
+}
+
+/// A frustum of the cone about the `z` axis whose apex is at `(0, 0, apex)`
+/// and which opens up where `opening` is `1` and down where it is `−1`, with
+/// its caps at heights `bottom` and `top`. A circle runs right-handed about
+/// the cone's own axis, so about `−z` each one is used the other way round.
+fn a_frustum_about_z(
+    model: &mut Model,
+    slope: f64,
+    apex: f64,
+    opening: f64,
+    [bottom, top]: [f64; 2],
+) -> rcad_topo::Result<SolidKey> {
+    use Orientation::{Forward, Reversed};
+    let skin = Cone::new(
+        Axis::new(Point::new(0.0, 0.0, apex), Vector::new(0.0, 0.0, opening))
+            .expect("z is a direction"),
+        slope,
+    )
+    .expect("a positive slope");
+    let turned = |about_up: Orientation| {
+        if opening < 0.0 {
+            about_up.reversed()
+        } else {
+            about_up
+        }
+    };
+    let mut builder = SolidBuilder::new();
+    let at = |height: f64| Point::new(slope * (height - apex) * opening, 0.0, height);
+    let bottom_corner = builder.add_vertex(at(bottom))?;
+    let top_corner = builder.add_vertex(at(top))?;
+    let seam = builder.add_edge(bottom_corner, top_corner, EdgeRun::Straight)?;
+    let bottom_circle = builder.add_edge(
+        bottom_corner,
+        bottom_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
+    let top_circle = builder.add_edge(
+        top_corner,
+        top_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
+    let mut cap = |height: f64, outward: f64, edge, turn| {
+        let wire = a_wire(&mut builder, &[(edge, turn)])?;
+        builder.add_face(
+            Surface::Plane(
+                Plane::from_point_and_normal(
+                    Point::new(0.0, 0.0, height),
+                    Vector::new(0.0, 0.0, outward),
+                )
+                .expect("the z axis is a unit normal"),
+            ),
+            &[wire],
+        )
+    };
+    let lower = cap(bottom, -1.0, bottom_circle, turned(Reversed))?;
+    let upper = cap(top, 1.0, top_circle, turned(Forward))?;
+    let wire = a_wire(
+        &mut builder,
+        &[
+            (bottom_circle, turned(Forward)),
+            (seam, Forward),
+            (top_circle, turned(Reversed)),
+            (seam, Reversed),
+        ],
+    )?;
+    let wall = builder.add_face(Surface::Cone(skin), &[wire])?;
+    builder.add_shell(&[(lower, Forward), (upper, Forward), (wall, Forward)])?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
 /// **Corners that sweep no area and are not on one line.** A bar of radius 10
 /// cut to the region above three sides: `(6, −8)` to `(2, −9)`, on to
 /// `(−2, −7)`, on to `(−6, −8)`. The cap that is left runs the long way round

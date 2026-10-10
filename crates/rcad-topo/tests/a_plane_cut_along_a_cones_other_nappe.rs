@@ -1073,9 +1073,14 @@ fn a_slab_fourteen_deep_from_the_apex_up_across_a_steep_pointed_cone_answers_rig
 /// and the block-less-cone at crossing `0`, turn `1`. Leaned `1`, the same
 /// crossing and turn refuses `AWireWillNotLieFlatOnItsFace` on the union and
 /// the cone-less-block, and the sliver the intersection answers does not
-/// measure (`TwoPatchesOfTheMeshDrewTheSameSide`). Every lean-`1` crossing
-/// but `0`, turned `1`, refuses `order along a crossing` on every rule. Each
-/// test here holds one lean at every crossing and turn.
+/// measure (`TwoPatchesOfTheMeshDrewTheSameSide`). Leaned `1` and turned `1`,
+/// crossings `0.5` and `1.5` refuse `order along a crossing` on every rule,
+/// and crossing `−0.5`, the miss, answers right on every rule. Until Q1461's
+/// cone bands in `fuse/cuts.rs` it refused `order along a crossing` on every
+/// rule too, so this lean was `33` right and `12` of those, as `e7271921`
+/// measured them by case on `2a3486d6`; which of Q1461's two steps moved the
+/// four is not traced. Each test here holds one lean at every crossing and
+/// turn.
 #[test]
 fn a_block_leaned_a_quarter_across_a_unit_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
@@ -1103,14 +1108,14 @@ fn a_block_leaned_one_across_a_unit_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
         tally_on_every_second_point(&leaning_blocks(THE_UNIT_CONE, 1.0, &[0.0, 1.0, 3.0])),
         Tally {
-            right: 33,
+            right: 37,
             refused: [
                 ("AWireWillNotLieFlatOnItsFace", 2),
                 (
                     "the answer does not measure: TwoPatchesOfTheMeshDrewTheSameSide",
                     1
                 ),
-                ("order along a crossing", 12),
+                ("order along a crossing", 8),
             ]
             .into()
         }
@@ -1122,10 +1127,12 @@ fn a_block_leaned_one_across_a_unit_pointed_cone_answers_right_or_refuses() {
 /// ([`a_unit_cone_union_a_lean_four_block_passes_fuse_but_fails_validate`]).
 /// Crossing `0` puts the leaning face through the apex and nowhere else on
 /// the cone, a touch; turned `3`, which rounds the face `1.6e−15` clear of the
-/// apex ([`APART`], [`a_leaning_case`]), it refuses `ResultIsNotManifold` on
-/// every rule. Crossing `−0.5` misses the cone by `2` at the apex
-/// ([`APART`]), the other two crossings meet it ([`OVERLAPPING`]), and all
-/// thirty-six of those answer right.
+/// apex ([`APART`], [`a_leaning_case`]), it answers right on every rule. Until
+/// Q1461's cone bands in `fuse/cuts.rs` those four refused
+/// `ResultIsNotManifold`, and this test pinned `36` right; which of Q1461's two
+/// steps moved them is not traced. Crossing `−0.5` misses the cone by `2` at
+/// the apex ([`APART`]), the other two crossings meet it ([`OVERLAPPING`]),
+/// and all thirty-six of those answer right.
 fn a_unit_pointed_cones_lean_four_cases_away_from_the_defect() -> Vec<Case> {
     let mut cases = vec![a_leaning_case(THE_UNIT_CONE, 4.0, 0.0, 3.0)];
     for crossing in [0.5, -0.5, 1.5] {
@@ -1141,8 +1148,8 @@ fn a_unit_pointed_cone_with_a_lean_of_four_answers_right_or_refuses_away_from_th
     assert_eq!(
         tally_on_every_second_point(&a_unit_pointed_cones_lean_four_cases_away_from_the_defect()),
         Tally {
-            right: 36,
-            refused: [("ResultIsNotManifold", 4)].into()
+            right: 40,
+            refused: BTreeMap::new()
         }
     );
 }
