@@ -255,6 +255,19 @@ test(three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_plac
 test(a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently)
 | test(three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved)'`.
 
+> **2026-10-10 note (Q1554): the ball one rounding off a bar's axis is now
+> refused meshing a face, not for want of an order.** Q1554 orders a ball's
+> two loops round the bar's axis, so the last row of the table above no
+> longer stops at `ACrossingThisCannotBeOrderedAlong`. Its test is now
+> `a_ball_one_rounding_off_a_bars_axis_is_refused_meshing_every_fuse`, and
+> that is the name to put in the command above in place of
+> `a_ball_one_rounding_off_a_bars_axis_is_refused_before_any_order`. Every
+> fuse is refused `CannotMeshAFace`: `CornersCoincide` with the ball first and
+> for the bar less the ball, `ASideCutsOffOneCornerOfACurvedPatch` for the
+> union and the intersection with the bar first, under a certified and a
+> tolerant policy alike. Why the mesh refuses is not traced, and whether the
+> keep moves the new refusal was not run.
+
 **Two rows a kept product may reach, with nothing to re-run.** `Undecidable`
 out of `face_holds_the_point` asks `intersect`, so the plane-pipe room is on its
 way. *Which piece of a face a hole is in* follows rays along the crossings in

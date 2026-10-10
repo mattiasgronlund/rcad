@@ -470,6 +470,27 @@ The pins, pair by pair, the answer first and the limit after:
   meet, other than the rulings at an apex. That holds until the loop pairs are
   named, and their rows ask what `place_the_meets` needs then.
 
+> **2026-10-10 note (Q1554): the ball and pipe off the axis answer with the
+> ball first, and are refused meshing with the bar first.** Q1554 orders the
+> two loops round the bar's axis (`the_way_a_loop_round_a_pipe_through_a_ball_winds`
+> in `along_a_crossing.rs`), so the row above no longer stops at
+> `ACrossingThisCannotBeOrderedAlong`. With the ball first, all 12 fuses of the
+> four placements answer, each held to the ball, the bar and the ball inside
+> the bar by a midpoint rule (`ball_in_bar`):
+> `a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_ball_first_answers`.
+> With the bar first, all 12 are refused `CannotMeshAFace { why: CornersCoincide }`:
+> `a_ball_with_a_bar_through_it_off_its_axis_is_refused_meshing_every_fuse_with_the_bar_first`.
+> Traced for the union, the marcher's first step on the bar's wall
+> (`one_step` in `march.rs`) settles back one rounding off the loop's corner and
+> is kept as a step of `5.9e-17`, and the steps after it double from there;
+> that is a row of its own. The two replace
+> `a_ball_with_a_bar_through_it_off_its_axis_is_refused_ordering_the_loops` in
+> the pins above. Where the two loops meet, the bar touching the ball from
+> inside, is still refused in `intersect`
+> (`a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement`), so
+> what this section settles about `place_the_meets` stands: nothing yet hands
+> it two loops that meet.
+
 **The coaxial pairs 347.5 leaves out.** A ring with a pipe, a ball or a cone
 on its axis, a cone and a ball, and two cones, each on one axis, cross in
 circles round the axis at heights apart.
