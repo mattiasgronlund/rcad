@@ -2387,9 +2387,16 @@ impl BuildingAMesh {
     /// `docs/decisions.md` §199.4).
     ///
     /// `None` when no pinch is strictly beyond every corner the way the walk
-    /// keeps the material: a cone's apex on the side away from the material,
-    /// or a rim with a corner at the pole it would reach. Neither bounds a
-    /// face, and the caller refuses it.
+    /// keeps the material. On a cone that is the apex on the side away from
+    /// the material: the rim bounds the endless rest of the nappe, which is no
+    /// face, and the caller refuses it. A rim with a corner at the pinch it
+    /// would reach gets `None` too, and nothing Q578 built gets there. A
+    /// corner on a pinch opens the pole side across the material
+    /// ([`WalkingAWire::turn_at_a_corner_on_a_pole`]), so a rim through a
+    /// pinch either climbs nothing and is no cap, or goes right round with
+    /// that pinch on its far side (`a_cone_cap_whose_rim_runs_through_its_apex.rs`,
+    /// `docs/decisions.md` §199.4). It stays a refusal and not an assert,
+    /// since a wire this kernel never wrote can still arrive here (§16.11).
     fn which_pole_this_cap_reaches(
         &self,
         _: FaceView<'_>,
