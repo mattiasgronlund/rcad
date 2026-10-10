@@ -340,9 +340,10 @@ fn every_point_walked_round_one_of_the_two_ellipses_is_on_both_pipes() {
 /// took the count from 32 to 408 of the 1224. Since Q1645 a facing that still
 /// fails is the stored direction slid along a whole-number way in the flat, a
 /// unit in the last place at a time and at most 64 of them, until it dots with
-/// the middle exactly. That took the count from 408 to 688. Of the 248 surfaces
-/// it still finds nothing for, 189 lie in a flat that holds no whole-number way
-/// from −2 to 2;
+/// the middle exactly, which took the count from 408 to 688, and after that a
+/// sum of up to four of its own direction and fewer of the other's, which took
+/// it to 704. Of the 233 surfaces it still finds nothing for, 180 lie in a flat
+/// that holds no whole-number way from −2 to 2;
 /// `no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3`
 /// shows for one of those that no flat surface `f64` holds would do.
 ///
@@ -415,9 +416,9 @@ fn the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece()
          {pairs_put_to_both} pairs"
     );
     assert_eq!(
-        named_in_four_halves, 688,
-        "the pairs with a facing each, whole-number or slid a few units in the last place, \
-         that leans its own way and passes exactly through the middle are named"
+        named_in_four_halves, 704,
+        "the pairs with a facing each, whole-number, slid a few units in the last place or \
+         mostly its own, that leans its own way and passes exactly through the middle are named"
     );
 }
 
@@ -481,6 +482,61 @@ fn bores_on_3_4_0_and_3_0_4_are_picked_by_their_directions_slid_until_they_pass_
                     "each picker is one of the two slid surfaces: {surface:?}"
                 );
             }
+        }
+    }
+}
+
+/// Bores on `(3, −6, 2)` and `(2, 3, 6)` through `(11, −3.25, 0.5)` are
+/// picked, on the first one's side, by four times its direction plus the
+/// other's: `(2, −3, 2)`.
+///
+/// The flat of the two holds `(1, 0, 2)`, but no slide of the first direction
+/// along it dots with the middle exactly within the 64 steps tried. Four
+/// sevenths of `(3, −6, 2)` plus a seventh of `(2, 3, 6)` is `(2, −3, 2)`, and
+/// the stored directions, rounded as they are, add up to it with nothing
+/// rounded. It leans towards the first as anything with more of it than of the
+/// other does, and dots with the middle to a short sum. Since Q1645 such sums
+/// are tried last, after the slide, and they name four pairs of directions of
+/// the family the count test puts to the namer.
+#[test]
+fn bores_on_3_minus_6_2_and_2_3_6_are_picked_by_four_of_one_direction_and_one_of_the_other() {
+    let middle = Point::new(11.0, -3.25, 0.5);
+    let [one, other] = two_pipes_crossing_at(
+        middle,
+        [Vector::new(3.0, -6.0, 2.0), Vector::new(2.0, 3.0, 6.0)],
+        0.25,
+    );
+    let mostly_one = Vector::new(2.0, -3.0, 2.0);
+    assert_eq!(
+        one.axis().direction() * 4.0 + other.axis().direction(),
+        mostly_one,
+        "four of the one direction and one of the other round to nothing but (2, −3, 2)"
+    );
+
+    for pair in [[one, other], [other, one]] {
+        let named = intersect(
+            &Surface::Cylinder(pair[0]),
+            &Surface::Cylinder(pair[1]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(halves)) = named else {
+            panic!("a facing mostly along one direction names the pair: {named:?}")
+        };
+        assert_eq!(halves.len(), 4, "two ellipses, each in two halves");
+        for half in &halves {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = half.run() else {
+                panic!("a half is a piece of where the two pipes cross: {half:?}")
+            };
+            assert!(
+                picked_by.iter().any(|picker| matches!(
+                    picker,
+                    Picker::InFrontOf(surface)
+                        if [mostly_one, -mostly_one].contains(&surface.normal())
+                )),
+                "one of each half's pickers faces (0.6, 2, 1.6) one way or the other: \
+                 {picked_by:?}"
+            );
         }
     }
 }
