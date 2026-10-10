@@ -3678,7 +3678,8 @@ fn what_a_plane_along_a_pipe_leaves(
             Decision::Neg => {}
             Decision::Zero => places.extend(lines.where_one_meets_it(side, &plain, &lean, true)),
             Decision::Pos => places.extend(lines.where_one_meets_it(side, &plain, &lean, false)),
-            other => unreachable!("an exact sign is a sign: {other:?}"),
+            Decision::Undecidable { .. } => return Err(refused()),
+            other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
         }
     }
     if places.iter().any(|place| !place.uncertainty().is_finite()) {
