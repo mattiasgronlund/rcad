@@ -4614,8 +4614,9 @@ fn runs_through(
 
 /// Every input vertex the wires through it read past as though it were not
 /// there ([`read_through`]): where a closed input edge only started
-/// ([`vertices_that_only_start_a_closed_edge`]), and where one wire walks on
-/// along one curve and nothing else ends ([`corners_one_wire_walks_past`]).
+/// ([`vertices_that_only_start_a_closed_edge`]), and where every wire that
+/// ends there walks on along one curve and nothing else ends
+/// ([`corners_one_wire_walks_past`]).
 ///
 /// **A wire every side of which would start at one of the second kind keeps
 /// them.** It goes right round one closed curve with nothing else on it, so
@@ -4654,14 +4655,30 @@ fn vertices_read_through(
     read_past
 }
 
-/// The input vertices where exactly two kept sides end, one wire arriving
-/// along one curve and leaving along the same curve, and no other side ends
-/// under any name the point goes by.
+/// The input vertices where every kept side that ends there is one of two
+/// sides of a wire arriving along one curve and leaving along the same curve,
+/// and no other side ends under any name the point goes by: one wire, on any
+/// two surfaces, or any number of wires on the same two planes.
 ///
-/// **Such a vertex cannot be a corner of the answer**, since each of the two
-/// edges either side of it would have that one wire along it and nothing
-/// else, and the answer would be refused as not a manifold. So read past, it
-/// costs no answer that was one.
+/// **One wire alone cannot make such a vertex a corner of the answer**, since
+/// each of the two edges either side of it would have that one wire along it
+/// and nothing else, and the answer would be refused as not a manifold. So
+/// read past, it costs no answer that was one.
+///
+/// **Several wires on two planes walk one line, and the vertex is a point in
+/// the middle of a straight edge.** Read past, the answer holds the same
+/// points and has one edge where it had two, which is what §17.4's amendment
+/// of 2026-08-30 does at the commit to a corner with two faces round it in
+/// the middle of a straight edge. Kept, it cut the edge where the other solid
+/// did not: a box described face by face with a corner halfway along its
+/// front bottom edge, united with a box sharing that edge and nothing else,
+/// had two edges of two faces each along the line and the other box one, and
+/// was answered as two solids. The cube in its place is refused
+/// `ResultIsNotManifold { count: 4 }`, as §80.1 and §80.9 keep it, and read
+/// past, the block with the corner is refused the same (Q1568). Two curved
+/// surfaces can meet in curves that cross, so for them the same two surfaces
+/// do not show one curve, and several wires on them stay a corner; no test
+/// reaches one.
 ///
 /// **It is where pieces of one curved surface met in an earlier fuse.** The
 /// joiner keeps such a corner on purpose (`what_is_left`), and the next fuse
@@ -4689,7 +4706,7 @@ fn corners_one_wire_walks_past(
     on_three_planes: &BTreeMap<VertexSlot, [Plane; 3]>,
 ) -> BTreeSet<VertexSlot> {
     let mut sides_ending: BTreeMap<VertexSlot, usize> = BTreeMap::new();
-    let mut walked_past: BTreeMap<VertexSlot, usize> = BTreeMap::new();
+    let mut walked_past: BTreeMap<VertexSlot, Vec<&[Surface; 2]>> = BTreeMap::new();
     let mut lands_at: BTreeMap<VertexSlot, [u64; 3]> = BTreeMap::new();
     let mut ends_landing: BTreeMap<[u64; 3], usize> = BTreeMap::new();
     for wire in wires {
@@ -4707,7 +4724,10 @@ fn corners_one_wire_walks_past(
             if let MeetPoint::Existing { vertex, .. } = &side.ends[1]
                 && walks_on_along_one_curve(side, next, *vertex)
             {
-                *walked_past.entry(vertex.slot_in(model.id())).or_default() += 1;
+                walked_past
+                    .entry(vertex.slot_in(model.id()))
+                    .or_default()
+                    .push(&side.carried_by);
             }
         }
     }
@@ -4725,13 +4745,30 @@ fn corners_one_wire_walks_past(
     sides_ending
         .into_iter()
         .filter(|&(slot, ending)| {
-            ending == 2
-                && walked_past.get(&slot) == Some(&1)
+            walked_past
+                .get(&slot)
+                .is_some_and(|walks| every_side_ending_walks_on(walks, ending))
                 && !another_name.contains(&slot)
-                && ends_landing[&lands_at[&slot]] == 2
+                && ends_landing[&lands_at[&slot]] == ending
         })
         .map(|(slot, _)| slot)
         .collect()
+}
+
+/// Whether the wires that walk on past a vertex, carried by `walks`, are all
+/// of the `ending` sides that end there, and walk one curve: one wire on any
+/// two surfaces, or any number on the same two planes, which meet in one line.
+fn every_side_ending_walks_on(walks: &[&[Surface; 2]], ending: usize) -> bool {
+    let (&&[one, other], rest) = walks
+        .split_first()
+        .expect("a vertex is counted as walked past once a wire walks past it");
+    walks.len() * 2 == ending
+        && (rest.is_empty()
+            || (one.as_plane().is_some()
+                && other.as_plane().is_some()
+                && rest
+                    .iter()
+                    .all(|&&walk| walk == [one, other] || walk == [other, one])))
 }
 
 /// The input vertices where the kept pieces do nothing but walk along one
@@ -4874,7 +4911,7 @@ fn walks_on_along_one_curve(arriving: &FaceMeet, leaving: &FaceMeet, vertex: Ver
 /// one where a closed edge starts runs along that edge, so it can only stop
 /// somewhere that edge is cut, and a vertex it could stop at would be where
 /// another closed edge starts: then one side would run along two input edges.
-/// And [`vertices_read_through`] keeps every vertex one wire walks past in a
+/// And [`vertices_read_through`] keeps every vertex the wires walk past in a
 /// wire where this would happen.
 fn read_through<'a>(
     wire: &'a [FaceMeet],

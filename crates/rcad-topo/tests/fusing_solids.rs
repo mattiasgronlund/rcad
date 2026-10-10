@@ -184,7 +184,10 @@ fn two_overlapping_cubes_on_the_same_side_are_united_with_each_other() {
 
 /// Two cubes that share exactly one edge and nothing else. United, that edge
 /// would have four faces along it, and a `Model` means an edge with two
-/// (decisions.md §17.4).
+/// (decisions.md §17.4). Two touching solids are not an answer for it, and
+/// the refusal stands (§80.1, §80.9). A cube with a corner halfway along that
+/// edge is refused the same, in
+/// `a_block_moved_by_whole_numbers_keeps_its_corners_exact.rs` (Q1568).
 #[test]
 fn two_cubes_meeting_along_one_edge_cannot_be_united() {
     let mut model = a_model();

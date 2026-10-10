@@ -25,6 +25,15 @@
 //!
 //! This is a gap and not a limit (§16.10): every corner here is a whole number,
 //! and only the box hid it.
+//!
+//! **The corner halfway is a point on the edge, not a different solid.** United
+//! with a box that shares the front bottom edge and nothing else, the cube is
+//! refused `ResultIsNotManifold`: the two touch along a line that no one solid
+//! holds, and §80.1 and §80.9 keep that refusal. The block with the corner
+//! halfway was answered as two solids instead, because its edge stopped at the
+//! corner and the other box's edge did not, so no edge had four faces round
+//! it. Now the fuse reads past a corner that every face round it walks
+//! straight past, and both blocks are refused (Q1568).
 
 #![forbid(unsafe_code)]
 
@@ -105,11 +114,17 @@ fn a_block_with_a_corner_halfway_along_an_edge_moved_by_whole_numbers_fuses_as_u
 /// unmoved fuse rather than a count, so a shift that changed any answer at all
 /// would show.
 ///
+/// The block with a corner halfway is refused only where the cube is: united
+/// with the box that shares its front bottom edge and nothing else, 12 fuses
+/// over six shifts and both ways round, refused `ResultIsNotManifold` as §80.1
+/// and §80.9 keep it (Q1568).
+///
 /// The shifts stop at `2^36`, because the model refuses a coordinate more than
 /// `1e11` times its shortest edge (`Error::Invalid` of `DynamicRangeTooWide`),
 /// and the block's shortest edge is 1.
 #[test]
 fn every_fuse_of_a_block_moved_by_whole_numbers_answers_as_the_unmoved_block_does() {
+    let sharing_one_edge = PARTNERS[3];
     let shifts = [
         [1.0, 0.0, 0.0],
         [-7.0, 11.0, 5.0],
@@ -120,7 +135,8 @@ fn every_fuse_of_a_block_moved_by_whole_numbers_answers_as_the_unmoved_block_doe
     ];
     let mut compared = 0;
     let mut differ = Vec::new();
-    let mut refused_with_a_corner_halfway = Vec::new();
+    let mut refused_sharing_one_edge = 0;
+    let mut refused_otherwise = Vec::new();
     for block in [Block::Cube, Block::CornerHalfwayAlongAnEdge] {
         for partner in PARTNERS {
             for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
@@ -138,7 +154,11 @@ fn every_fuse_of_a_block_moved_by_whole_numbers_answers_as_the_unmoved_block_doe
                             differ.push(format!("{case}: {} where unmoved {}", moved.1, unmoved.1));
                         }
                         if block == Block::CornerHalfwayAlongAnEdge && moved.0.is_err() {
-                            refused_with_a_corner_halfway.push(format!("{case}: {}", moved.1));
+                            if rule == Rule::Union && partner.name == sharing_one_edge.name {
+                                refused_sharing_one_edge += 1;
+                            } else {
+                                refused_otherwise.push(format!("{case}: {}", moved.1));
+                            }
                         }
                     }
                 }
@@ -152,9 +172,14 @@ fn every_fuse_of_a_block_moved_by_whole_numbers_answers_as_the_unmoved_block_doe
         differ.len()
     );
     assert!(
-        refused_with_a_corner_halfway.is_empty(),
-        "the block with a corner halfway along an edge is refused: \
-         {refused_with_a_corner_halfway:#?}"
+        refused_otherwise.is_empty(),
+        "the block with a corner halfway along an edge is refused where the cube is not: \
+         {refused_otherwise:#?}"
+    );
+    assert_eq!(
+        refused_sharing_one_edge, 12,
+        "the union with {} is refused at every shift, both ways round",
+        sharing_one_edge.name
     );
 }
 
