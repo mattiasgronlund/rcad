@@ -494,7 +494,7 @@ mod tests {
         each_once_and_never_zero, exact_determinant, exponents_to_try, orient2d, orient2d_exactly,
         orient2d_reporting_level, orient2d_tolerantly, scaled_by_a_power_of_two,
     };
-    use crate::expansion::{expansion_sign, expansion_sum, two_diff};
+    use crate::expansion::{expansion_sign, expansion_sum, two_diff, two_sum};
     use crate::{
         Decision, Filtered, Level, Policy, Predicate, ProvenanceLog, decide, product_is_normal,
     };
@@ -832,6 +832,113 @@ mod tests {
         );
     }
 
+    /// The same turn with x scaled by `2^i` and y by `2^j`, every pair of
+    /// exponents from `-1100` to `1100`, which is the first of the two families
+    /// `docs/decisions.md` §358.4 used to argue without running. Every product
+    /// level 3 forms is one x times one y, so each moves by `2^(i + j)`, the
+    /// answer and `1 * 1` together; an odd `i + j` is all this adds to the walk
+    /// above. At `2^1023`, the most `1 * 1` allows, the answer is about
+    /// `9e-329`, still below half the smallest subnormal.
+    ///
+    /// Each axis holds the same three sizes, `1`, `0.5` and `t`, so each moves
+    /// exactly at the walk above's 1025 exponents, `-1` to `1023`: `1` runs off
+    /// the top past `2^1023`, and `t = 101201 * 2^-1073` loses its last bit
+    /// below `2^-1`. Neither axis limits the other, so `1025 * 1025` pairs move
+    /// all three points exactly.
+    #[test]
+    fn no_power_of_two_per_axis_rescues_that_turn() {
+        let (a, b, c) = a_turn_smaller_than_the_bottom_of_the_range_loses();
+        let mut tried = 0;
+        for i in -1100..=1100 {
+            for j in -1100..=1100 {
+                let (Some(a), Some(b), Some(c)) = (
+                    moved_exactly_per_axis(a, [i, j]),
+                    moved_exactly_per_axis(b, [i, j]),
+                    moved_exactly_per_axis(c, [i, j]),
+                ) else {
+                    continue;
+                };
+                tried += 1;
+                assert!(
+                    !orient2d(a, b, c).is_certified(),
+                    "x by 2^{i} and y by 2^{j} settled what the comment says nothing settles"
+                );
+            }
+        }
+        assert_eq!(
+            tried,
+            1025 * 1025,
+            "each axis moves exactly from 2^-1 to 2^1023, whatever the other does"
+        );
+    }
+
+    /// The same turn with every point moved by `(dx, dy)`, which keeps the
+    /// determinant: the second family §358.4 used to argue without running.
+    /// Each axis holds both `1` and `t`, and only `dx = 0` keeps `1 + dx` and
+    /// `t + dx` both exact.
+    ///
+    /// The family is every `f64`, which no test walks, so these moves stand for
+    /// it. `1 + dx` is exact only when `dx` is `0` or has no bit below
+    /// `2^-53`, and then `t + dx` would need its 53 bits to reach from `2^-1073`,
+    /// `t`'s lowest bit, up to about `dx` — unless the sum cancels, which needs
+    /// `dx` close to minus a coordinate. So the moves tried put the lowest bit
+    /// of `dx` at every place an `f64` has one, with every power of two and its
+    /// negative, the ulps of `1` and of `t` among them; and they try every
+    /// cancellation, one ulp either side of minus each size the turn holds.
+    ///
+    /// Exactness is asked of the rounding itself, and not by moving back as
+    /// [`moved_exactly`] does: `1 + 2^-1074` rounds to `1`, and taking `2^-1074`
+    /// away again gives `1` back, so moving back would call a move exact that
+    /// shifted `t` and left `1` where it was.
+    #[test]
+    fn only_moving_that_turn_by_nothing_keeps_it_exact() {
+        let (a, b, c) = a_turn_smaller_than_the_bottom_of_the_range_loses();
+        let t = c[0];
+        let ulp_of_t = SMALLEST_SUBNORMAL;
+        assert_eq!((1.0 + ulp_of_t) - ulp_of_t, 1.0);
+        assert_eq!(translated_exactly(1.0, ulp_of_t), None);
+
+        let moves = moves_to_try([1.0, 0.5, t]);
+        let exact_along = |axis: usize| -> Vec<f64> {
+            moves
+                .iter()
+                .copied()
+                .filter(|&by| {
+                    [a, b, c]
+                        .iter()
+                        .all(|point| translated_exactly(point[axis], by).is_some())
+                })
+                .collect()
+        };
+        let (dxs, dys) = (exact_along(0), exact_along(1));
+
+        let mut tried = 0;
+        for &dx in &dxs {
+            for &dy in &dys {
+                tried += 1;
+                let [a, b, c] = [a, b, c].map(|point| [point[0] + dx, point[1] + dy]);
+                assert!(
+                    !orient2d(a, b, c).is_certified(),
+                    "moving by ({dx:e}, {dy:e}) settled what the comment says nothing settles"
+                );
+            }
+        }
+        assert_eq!(
+            (dxs.as_slice(), dys.as_slice()),
+            ([0.0].as_slice(), [0.0].as_slice()),
+            "the moves that keep every x exact, and every y"
+        );
+        assert_eq!(tried, 1);
+        for size in [1.0, t] {
+            assert!(
+                moves
+                    .iter()
+                    .any(|&by| by != 0.0 && translated_exactly(size, by).is_some()),
+                "{size:e} alone has exact moves, so the check refuses something real"
+            );
+        }
+    }
+
     fn a_turn_smaller_than_the_bottom_of_the_range_loses() -> ([f64; 2], [f64; 2], [f64; 2]) {
         let t = 1e-318f64;
         assert!(t > 0.0 && !t.is_normal());
@@ -841,12 +948,48 @@ mod tests {
     /// `point` multiplied by `2^exponent`, or `None` when that is not exact —
     /// which is when moving it back does not give `point` again.
     fn moved_exactly(point: [f64; 2], exponent: i32) -> Option<[f64; 2]> {
-        let by = |value: f64, exponent: i32| {
-            let half = exponent / 2;
-            value * 2f64.powi(half) * 2f64.powi(exponent - half)
-        };
-        let moved = point.map(|value| by(value, exponent));
-        (moved.map(|value| by(value, -exponent)) == point).then_some(moved)
+        moved_exactly_per_axis(point, [exponent, exponent])
+    }
+
+    /// `point` with x multiplied by `2^exponents[0]` and y by `2^exponents[1]`,
+    /// or `None` when that is not exact.
+    ///
+    /// Moving back answers that soundly here, though not for a sum: a move that
+    /// multiplies by `2^k` with `k > 0` rounds only by overflowing, and the
+    /// way back from infinity is infinity; with `k < 0` it is the way back that
+    /// is exact, so getting `point` again means the move was.
+    fn moved_exactly_per_axis(point: [f64; 2], exponents: [i32; 2]) -> Option<[f64; 2]> {
+        let moved = [0, 1].map(|axis| times_two_to_the(point[axis], exponents[axis]));
+        let back = [0, 1].map(|axis| times_two_to_the(moved[axis], -exponents[axis]));
+        (back == point).then_some(moved)
+    }
+
+    /// `value * 2^exponent`, in two halves so that neither power of two leaves
+    /// the range on its own.
+    fn times_two_to_the(value: f64, exponent: i32) -> f64 {
+        let half = exponent / 2;
+        value * 2f64.powi(half) * 2f64.powi(exponent - half)
+    }
+
+    /// Nothing, every power of two from the smallest subnormal to the largest
+    /// and its negative, and minus each of `sizes` with the values one ulp
+    /// either side of it, and their negatives.
+    fn moves_to_try(sizes: [f64; 3]) -> Vec<f64> {
+        let powers = (-1074..=1023).map(|exponent| times_two_to_the(1.0, exponent));
+        let near_each_size = sizes
+            .into_iter()
+            .flat_map(|size| [size, -size])
+            .flat_map(|size| [size.next_down(), size, size.next_up()]);
+        core::iter::once(0.0)
+            .chain(powers.flat_map(|power| [power, -power]))
+            .chain(near_each_size)
+            .collect()
+    }
+
+    /// `value + by`, or `None` when that rounds.
+    fn translated_exactly(value: f64, by: f64) -> Option<f64> {
+        let (sum, lost) = two_sum(value, by);
+        (sum.is_finite() && lost == 0.0).then_some(sum)
     }
 
     /// `HIGHEST_BINADE_LEVEL_THREE_TAKES`'s arithmetic, run rather than argued:

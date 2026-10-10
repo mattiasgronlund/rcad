@@ -122,16 +122,33 @@ at both bends. At `1e-305` the turn is `-1e-610`, which `2^1018` lifts to about
 The pins still assert what they asserted before, and the slop bound
 `< 16 * EPSILON / 100` still holds on the new shape.
 
-**Two more families, reasoned and not run:**
+**Two more families, run too** (Q534; this paragraph argued them and ran
+neither until then):
 
 - **A power of two per axis.** Every product level 3 forms is one x times one
   y. Scaling x by `2^i` and y by `2^j` moves every product, and so the answer
   and `1 * 1` together, by the same `2^(i+j)`. The only thing this adds is an
   odd total. At `2^1023`, the most `1 * 1` allows, the answer is about
-  `9e-329`, still below `2^-1075`.
+  `9e-329`, still below `2^-1075`. `no_power_of_two_per_axis_rescues_that_turn`
+  (orient2d.rs) tries every `i` and `j` from `-1100` to `1100`. Each axis holds
+  the same three sizes, `1`, `0.5` and `t`, so each moves exactly at the same
+  1025 exponents as above, and neither limits the other: it asserts
+  `1025 * 1025` exact pairs, 1 050 625, and that none of them is decided. It
+  takes about 2 s.
 - **An exact translation.** Moving every point by `(dx, dy)` keeps the
   determinant. But each axis holds both `1` and `t`, and `1 + dx` and `t + dx`
-  are both exact only for `dx = 0`.
+  are both exact only for `dx = 0`: `1 + dx` needs `dx` to have no bit below
+  `2^-53`, and then `t + dx` needs its 53 bits to reach from `2^-1073` up to
+  about `dx`, unless the sum cancels. `only_moving_that_turn_by_nothing_keeps_it_exact`
+  (orient2d.rs) cannot walk every `f64`, so it tries the moves that stand for
+  them: every power of two and its negative, which puts the lowest bit of `dx`
+  at every place an `f64` has one, the ulps of `1` and of `t` among them; and
+  `±1`, `±0.5` and `±t` with one ulp either side, the moves where a sum
+  cancels. It asserts that `0` is the only exact move on each axis, so one
+  pair, and that it is not decided. It asks exactness of `two_sum`'s lost part
+  and not by moving back: `1 + 2^-1074` rounds to `1`, and taking `2^-1074`
+  away gives `1` again, so moving back would have admitted a move that shifts
+  `t` and leaves `1` where it was.
 
 **What would reach it** is a wider exponent: big integers, rationals, or a
 float that carries its own exponent. The answer is about `2^-2113` in a sum
