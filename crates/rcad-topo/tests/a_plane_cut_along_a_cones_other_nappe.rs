@@ -925,18 +925,6 @@ fn a_block_leaned_four_turned_three_across_a_steep_pointed_cone_answers_right_or
     );
 }
 
-/// [`a_leaning_case`] round `cone` at a lean of `lean`, at crossings `0`,
-/// `0.5`, `−0.5` and `1.5`, each turned by every one of `turns`.
-fn leaning_blocks(cone: ConeShape, lean: f64, turns: &[f64]) -> Vec<Case> {
-    let mut cases = Vec::new();
-    for crossing in [0.0, 0.5, -0.5, 1.5] {
-        for &turn in turns {
-            cases.push(a_leaning_case(cone, lean, crossing, turn));
-        }
-    }
-    cases
-}
-
 /// A cube stood on its corner round the steep cone's apex, of side `2`, `4`
 /// and `6` with its middle at `0`, `1`, `2.5` and `3.5`, as §350.4 swept it.
 /// Every one shares volume with the cone. Side `6`, middle `0` refuses `order
@@ -1033,20 +1021,6 @@ fn a_turned_corner_up_cube_centred_three_and_a_half_above_a_steep_pointed_cones_
     );
 }
 
-/// A corner-up cube of side `2`, `4` and `6` round `cone`, each with its
-/// middle on the axis at `z = middle` and turned `turn` about it, counted by
-/// [`a_corner_up_cubes_solids`].
-fn corner_up_cubes_of_every_side(cone: ConeShape, middle: f64, turn: f64) -> Vec<Case> {
-    [2.0, 4.0, 6.0]
-        .into_iter()
-        .map(|side| Case {
-            cone,
-            block: a_corner_up_cube(side, middle, turn),
-            solids: a_corner_up_cubes_solids(cone, side, middle),
-        })
-        .collect()
-}
-
 /// Twenty slabs `14` deep across the steep cone's axis, each `a_slab`'s own
 /// 2 by 12 box turned `0`, `0.5`, `1` or `1.5` about it. At `low = −14` the
 /// slab's top runs through the apex, a touch ([`APART`]); it answers right
@@ -1087,22 +1061,6 @@ fn a_slab_fourteen_deep_from_the_apex_up_across_a_steep_pointed_cone_answers_rig
     );
 }
 
-/// [`a_slab`] across `cone` from each of `lows`, turned `0`, `0.5`, `1` and
-/// `1.5`, counted by [`a_slabs_solids`].
-fn slabs(cone: ConeShape, lows: &[f64]) -> Vec<Case> {
-    let mut cases = Vec::new();
-    for &low in lows {
-        for turn in [0.0, 0.5, 1.0, 1.5] {
-            cases.push(Case {
-                cone,
-                block: a_slab(low, turn),
-                solids: a_slabs_solids(cone, low),
-            });
-        }
-    }
-    cases
-}
-
 /// The same leaning block round a cone of slope `1` instead of `2` — §350.1
 /// and §350.3's cone, run for the first time. Leans `0.25` and `0.375` meet
 /// the cone at every crossing, and so does a lean of `1` but at two. Leaned
@@ -1116,23 +1074,37 @@ fn slabs(cone: ConeShape, lows: &[f64]) -> Vec<Case> {
 /// crossing and turn refuses `AWireWillNotLieFlatOnItsFace` on the union and
 /// the cone-less-block, and the sliver the intersection answers does not
 /// measure (`TwoPatchesOfTheMeshDrewTheSameSide`). Every lean-`1` crossing
-/// but `0`, turned `1`, refuses `order along a crossing` on every rule.
+/// but `0`, turned `1`, refuses `order along a crossing` on every rule. Each
+/// test here holds one lean at every crossing and turn.
 #[test]
-fn a_unit_pointed_cone_with_a_lean_up_to_one_answers_right_or_refuses() {
-    let mut cases = Vec::new();
-    for lean in [0.25, 0.375, 1.0] {
-        for crossing in [0.0, 0.5, -0.5, 1.5] {
-            for turn in [0.0, 1.0, 3.0] {
-                cases.push(a_leaning_case(THE_UNIT_CONE, lean, crossing, turn));
-            }
-        }
-    }
+fn a_block_leaned_a_quarter_across_a_unit_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
-        tally_on_a_grid(&cases, 2),
+        tally_on_every_second_point(&leaning_blocks(THE_UNIT_CONE, 0.25, &[0.0, 1.0, 3.0])),
         Tally {
-            right: 125,
+            right: 46,
+            refused: [("the answer does not measure: CannotMeshAFace", 2)].into()
+        }
+    );
+}
+
+#[test]
+fn a_block_leaned_three_eighths_across_a_unit_pointed_cone_answers_right_or_refuses() {
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_UNIT_CONE, 0.375, &[0.0, 1.0, 3.0])),
+        Tally {
+            right: 46,
+            refused: [("the answer does not measure: CannotMeshAFace", 2)].into()
+        }
+    );
+}
+
+#[test]
+fn a_block_leaned_one_across_a_unit_pointed_cone_answers_right_or_refuses() {
+    assert_eq!(
+        tally_on_every_second_point(&leaning_blocks(THE_UNIT_CONE, 1.0, &[0.0, 1.0, 3.0])),
+        Tally {
+            right: 33,
             refused: [
-                ("the answer does not measure: CannotMeshAFace", 4),
                 ("AWireWillNotLieFlatOnItsFace", 2),
                 (
                     "the answer does not measure: TwoPatchesOfTheMeshDrewTheSameSide",
@@ -1167,10 +1139,7 @@ fn a_unit_pointed_cones_lean_four_cases_away_from_the_defect() -> Vec<Case> {
 #[test]
 fn a_unit_pointed_cone_with_a_lean_of_four_answers_right_or_refuses_away_from_the_known_defect() {
     assert_eq!(
-        tally_on_a_grid(
-            &a_unit_pointed_cones_lean_four_cases_away_from_the_defect(),
-            2
-        ),
+        tally_on_every_second_point(&a_unit_pointed_cones_lean_four_cases_away_from_the_defect()),
         Tally {
             right: 36,
             refused: [("ResultIsNotManifold", 4)].into()
@@ -1179,71 +1148,173 @@ fn a_unit_pointed_cone_with_a_lean_of_four_answers_right_or_refuses_away_from_th
 }
 
 /// The corner-up cube round the unit cone, the same sides and middles as
-/// [`a_steep_pointed_cones_corner_up_cubes`]. Every one shares volume with the
-/// cone. Side `2`, middle `1` refuses `a point inside a piece of a face` on
-/// every rule and both turns; the other eleven answer right. Three counts
-/// turn up here that the steep cone has none of: side `4`, middle `3.5`
-/// leaves the block less the cone in four, three tips round its lower side
-/// corners and its top above the cap; side `6`, middles `0` and `1` leave the
-/// cone less the block in three, one past each face through the cube's top
-/// corner; and side `6`, middles `2.5` and `3.5` hold the whole cone and leave
-/// none.
-fn a_unit_pointed_cones_corner_up_cubes() -> Vec<Case> {
+/// round the steep cone ([`corner_up_cubes_of_every_side`]). Every one shares
+/// volume with the cone. Side `2`, middle `1` refuses `a point inside a piece
+/// of a face` on every rule and both turns; the other eleven answer right.
+/// Three counts turn up here that the steep cone has none of: side `4`,
+/// middle `3.5` leaves the block less the cone in four, three tips round its
+/// lower side corners and its top above the cap; side `6`, middles `0` and
+/// `1` leave the cone less the block in three, one past each face through the
+/// cube's top corner; and side `6`, middles `2.5` and `3.5` hold the whole
+/// cone and leave none. Each test here holds the three sides at one middle and
+/// one turn.
+#[test]
+fn a_corner_up_cube_centred_on_a_unit_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_UNIT_CONE, 0.0, 0.0)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_turned_corner_up_cube_centred_on_a_unit_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_UNIT_CONE, 0.0, 0.7)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_corner_up_cube_centred_one_above_a_unit_pointed_cones_apex_answers_right_or_refuses() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_UNIT_CONE, 1.0, 0.0)),
+        Tally {
+            right: 8,
+            refused: [("a point inside a piece of a face", 4)].into()
+        }
+    );
+}
+
+#[test]
+fn a_turned_corner_up_cube_centred_one_above_a_unit_pointed_cones_apex_answers_right_or_refuses() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_UNIT_CONE, 1.0, 0.7)),
+        Tally {
+            right: 8,
+            refused: [("a point inside a piece of a face", 4)].into()
+        }
+    );
+}
+
+#[test]
+fn a_corner_up_cube_centred_two_and_a_half_above_a_unit_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_UNIT_CONE, 2.5, 0.0)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_turned_corner_up_cube_centred_two_and_a_half_above_a_unit_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_UNIT_CONE, 2.5, 0.7)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_corner_up_cube_centred_three_and_a_half_above_a_unit_pointed_cones_apex_answers_right() {
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_UNIT_CONE, 3.5, 0.0)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn a_turned_corner_up_cube_centred_three_and_a_half_above_a_unit_pointed_cones_apex_answers_right()
+{
+    assert_eq!(
+        tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_UNIT_CONE, 3.5, 0.7)),
+        Tally {
+            right: 12,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+/// Twenty slabs across the unit cone's axis, the same sweep as round the
+/// steep cone ([`slabs`]). `low = −14` touches the apex ([`APART`]) and
+/// answers right every turn; `low = −8` answers right only turned `0` and
+/// finds no point in a piece of a face the other three turns; `low` of `−3`,
+/// `0` and `2` answer right every turn. This test holds the slabs from `−14`,
+/// `−8` and `−3`, and the next those from `0` and `2`.
+#[test]
+fn a_slab_fourteen_deep_from_below_the_apex_across_a_unit_pointed_cone_answers_right_or_refuses() {
+    assert_eq!(
+        tally_on_every_second_point(&slabs(THE_UNIT_CONE, &[-14.0, -8.0, -3.0])),
+        Tally {
+            right: 36,
+            refused: [("a point inside a piece of a face", 12)].into()
+        }
+    );
+}
+
+#[test]
+fn a_slab_fourteen_deep_from_the_apex_up_across_a_unit_pointed_cone_answers_every_rule_right() {
+    assert_eq!(
+        tally_on_every_second_point(&slabs(THE_UNIT_CONE, &[0.0, 2.0])),
+        Tally {
+            right: 32,
+            refused: BTreeMap::new()
+        }
+    );
+}
+
+/// [`a_leaning_case`] round `cone` at a lean of `lean`, at crossings `0`,
+/// `0.5`, `−0.5` and `1.5`, each turned by every one of `turns`.
+fn leaning_blocks(cone: ConeShape, lean: f64, turns: &[f64]) -> Vec<Case> {
     let mut cases = Vec::new();
-    for side in [2.0, 4.0, 6.0] {
-        for middle in [0.0, 1.0, 2.5, 3.5] {
-            for turn in [0.0, 0.7] {
-                cases.push(Case {
-                    cone: THE_UNIT_CONE,
-                    block: a_corner_up_cube(side, middle, turn),
-                    solids: a_corner_up_cubes_solids(THE_UNIT_CONE, side, middle),
-                });
-            }
+    for crossing in [0.0, 0.5, -0.5, 1.5] {
+        for &turn in turns {
+            cases.push(a_leaning_case(cone, lean, crossing, turn));
         }
     }
     cases
 }
 
-#[test]
-fn a_corner_up_cube_round_a_unit_pointed_cones_apex_answers_right_or_refuses() {
-    assert_eq!(
-        tally_on_a_grid(&a_unit_pointed_cones_corner_up_cubes(), 2),
-        Tally {
-            right: 88,
-            refused: [("a point inside a piece of a face", 8)].into()
-        }
-    );
+/// A corner-up cube of side `2`, `4` and `6` round `cone`, each with its
+/// middle on the axis at `z = middle` and turned `turn` about it, counted by
+/// [`a_corner_up_cubes_solids`].
+fn corner_up_cubes_of_every_side(cone: ConeShape, middle: f64, turn: f64) -> Vec<Case> {
+    [2.0, 4.0, 6.0]
+        .into_iter()
+        .map(|side| Case {
+            cone,
+            block: a_corner_up_cube(side, middle, turn),
+            solids: a_corner_up_cubes_solids(cone, side, middle),
+        })
+        .collect()
 }
 
-/// Twenty slabs across the unit cone's axis, the same sweep as
-/// [`a_steep_pointed_cones_slabs`]. `low = −14` touches the apex
-/// ([`APART`]) and answers right every turn; `low = −8` answers right only
-/// turned `0` and finds no point
-/// in a piece of a face the other three turns; `low` of `−3`, `0` and `2`
-/// answer right every turn.
-fn a_unit_pointed_cones_slabs() -> Vec<Case> {
+/// [`a_slab`] across `cone` from each of `lows`, turned `0`, `0.5`, `1` and
+/// `1.5`, counted by [`a_slabs_solids`].
+fn slabs(cone: ConeShape, lows: &[f64]) -> Vec<Case> {
     let mut cases = Vec::new();
-    for low in [-14.0, -8.0, -3.0, 0.0, 2.0] {
+    for &low in lows {
         for turn in [0.0, 0.5, 1.0, 1.5] {
             cases.push(Case {
-                cone: THE_UNIT_CONE,
+                cone,
                 block: a_slab(low, turn),
-                solids: a_slabs_solids(THE_UNIT_CONE, low),
+                solids: a_slabs_solids(cone, low),
             });
         }
     }
     cases
-}
-
-#[test]
-fn a_slab_fourteen_deep_across_a_unit_pointed_cone_answers_right_or_refuses() {
-    assert_eq!(
-        tally_on_a_grid(&a_unit_pointed_cones_slabs(), 2),
-        Tally {
-            right: 68,
-            refused: [("a point inside a piece of a face", 12)].into()
-        }
-    );
 }
 
 /// The one case of the sweep above that comes back wrong rather than
