@@ -647,8 +647,10 @@ fn bores_on_2_3_6_and_2_6_3_are_picked_by_the_whole_number_triple_one_is_a_multi
 /// Each step of `2⁻⁵³` along `(1, 0, −1)` moves the dot by `21·2⁻⁵⁴`, and the
 /// stored direction's own dot, about `−1.55`, has a bit at `2⁻⁵⁵`. No number of
 /// such steps clears that bit, so the dot has to come down to where `f64` holds
-/// numbers that fine, below `¼`, and that is about `0.15` along the way: far past
-/// the 64 steps Q1645 searched. Q1653 solves for the step count instead.
+/// numbers that fine, below `¼`, and that takes from about `0.124` to `0.171`
+/// along the way: far past the 64 steps Q1645 searched. Q1653 solves for the
+/// step count instead, and takes the count nearest the stored direction, which
+/// leaves the dot just under `¼`.
 #[test]
 fn bores_on_0_3_4_and_4_3_0_are_picked_by_a_slide_solved_for() {
     let middle = Point::new(11.0, -3.25, 0.5);
