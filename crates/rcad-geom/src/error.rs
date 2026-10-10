@@ -292,20 +292,20 @@ pub enum Error {
         hi: f64,
     },
 
-    /// Two surfaces tangent along their crossing rather than at a point, so
-    /// what they cross in is one curve that runs through itself.
+    /// Two surfaces tangent at a point of their crossing, so what they cross in
+    /// is one curve that runs through itself there.
     ///
-    /// A ball resting on the inside of a pipe from the far side, or two pipes of
-    /// equal radius whose axes meet: the two loops the crossing would otherwise
-    /// come in touch each other, and there is no half-space that picks one of
-    /// them, because at the touching point they share a point.
+    /// A ball resting on the inside of a pipe from the far side, or a thin pipe
+    /// resting on the inside of a wider one: each crosses in a quartic whose two
+    /// loops touch where the two surfaces are tangent, and no half-space picks
+    /// one of them without a plane through exactly that point. Two pipes of one
+    /// width whose axes meet also cross in a curve that runs through itself, but
+    /// theirs is two ellipses that need no marcher, and `intersect` names them
+    /// as four halves (`docs/decisions.md` §31.9).
     ///
-    /// **A limit of the naming half taken with the evaluator, and a gap of the
-    /// naming half on its own** (§16.10, §29.6). [`EdgeRun`](crate::EdgeRun)
-    /// *can* say this: the two loops of a pinch are the two sides of one
-    /// half-space, and the two ellipses are the parts lying in one plane, which
-    /// is a pair of opposite half-spaces. What cannot be written down is either
-    /// of those planes, which is the same gap
+    /// **A gap** (§16.10, §31.9). [`EdgeRun`](crate::EdgeRun) *can* say this:
+    /// the two loops of a pinch are the two sides of one half-space through the
+    /// tangent point. Writing that plane down is the same gap
     /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] is about.
     ///
     /// The reason to refuse here rather than there is the evaluator. Where a
@@ -316,9 +316,8 @@ pub enum Error {
     /// is the demonstration.
     ///
     /// The family of fixes: a marcher that can be told to start away from a
-    /// singular point and stop at it, and a third `EdgeRun` variant that hands a
-    /// fuse the crossing point rather than making it notice. Both have one
-    /// consumer and it is M4's fuse.
+    /// singular point and stop at it. §31.9 defers it to the milestone that
+    /// builds the algebraic solver.
     #[error(
         "these two surfaces are tangent along where they cross, so what they cross in is one \
          curve that runs through itself"

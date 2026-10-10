@@ -730,6 +730,10 @@ struct Crossing {
     /// Where the partner rests along the face's surface on one straight line
     /// and crosses it nowhere, and `None` for every other crossing.
     touching: Option<AlongATouch>,
+    /// Where the face's pipe and a partner pipe of one width meet with their
+    /// axes crossing, for one of the four half ellipses they cross in, and
+    /// `None` for every other crossing.
+    half_an_ellipse: Option<HalfAnEllipse>,
     /// Every other surface that cuts the face in this same curve, folded into
     /// it by [`Arrangement::one_curve_two_partners_cut`]. Empty for nearly
     /// every crossing.
@@ -798,6 +802,29 @@ struct ThroughAnApex {
     /// `t·V` for one vector `V` along `d`, so a step `d` out and a step `−d`
     /// out read `V·d` and `(−V)·(−d)`, which are one number.
     towards_the_apex: bool,
+}
+
+/// One of the four halves two pipes of one width cross in when their axes
+/// meet: two ellipses, each cut in two where the walls touch, at `c ± r·n̂` for
+/// `c` where the axes meet and `n̂` along `ê × û`
+/// ([`intersect`](rcad_geom::intersect) names them).
+///
+/// **`∇S × ∇Q` is nothing at both ends**, because the two walls are tangent
+/// there. So the way a half leaves either end is read off the corner the two
+/// flat surfaces that pick it out hold it in: with `ê` and `û` the two
+/// directions those surfaces face, the half leaves both of its ends along
+/// `ê/‖ê‖ + û/‖û‖`, which is the ellipse's tangent at the end pointing into
+/// the corner. Everywhere between, the gradients are not parallel and the
+/// cross product says which way it runs, as on every other crossing.
+#[derive(Clone, Copy)]
+struct HalfAnEllipse {
+    /// The two picking surfaces' normals, exactly as stored: the first faces
+    /// along the axis of the pipe `intersect` sorts first, the second along
+    /// the other's.
+    facing: [[f64; 3]; 2],
+    /// Whether `∇S × ∇Q` points the way `facing[0] × facing[1]` does, which is
+    /// whether the face is the pipe sorted second.
+    forward_runs_with_the_bend: bool,
 }
 
 impl Crossing {
@@ -922,6 +949,12 @@ enum HowItRuns {
     /// of a hyperbola. The order is how far along `n × w` a point sits, for the
     /// plane's normal `n` and the cone's axis direction `w`
     /// ([`along_a_bend`] carries the derivation).
+    ///
+    /// A half ellipse of two pipes of one width whose axes meet
+    /// ([`HalfAnEllipse`]) is ordered this way too, with the normals of the
+    /// two flat surfaces that pick it out standing in for `n` and `w`; it
+    /// bends and does not close, and runs from one end to the other once along
+    /// their cross product.
     AlongABend {
         plane_normal: [f64; 3],
         cone_axis: [f64; 3],
@@ -974,9 +1007,14 @@ struct Node {
     /// here left one point two corners in the answer and an edge with one face
     /// along it (§284.7). [`Arrangement::names_of_one_point`] hands these on.
     also: Vec<([Surface; 3], u8)>,
-    /// Whether this is the second place a closed crossing is cut, across the
-    /// circle from where it starts, because it starts at a ball's pole — see
-    /// [`across_a_circle_that_starts_at_a_pole`].
+    /// Whether this is a place a crossing is cut only so that it is two edges
+    /// rather than one, and so must never be joined across
+    /// ([`Arrangement::the_two_arcs_to_join_at`]): the second place a closed
+    /// crossing is cut, across the circle from where it starts, because it
+    /// starts at a ball's pole ([`across_a_circle_that_starts_at_a_pole`]),
+    /// or the middle of a half ellipse
+    /// ([`Arrangement::place_the_middle_of_each_half`]), which, unlike the
+    /// first, is named by its surfaces in `made_of`.
     half_way_round: bool,
     /// The crossings running through it, in increasing order.
     crossings: Vec<usize>,
@@ -1322,10 +1360,12 @@ impl<'f> Arrangement<'f> {
                         a_ruling_through_an_apex(&self.surface, &partner, &picked_by, policy, log)?;
                     let touching =
                         a_line_one_surface_rests_on_another_along(self.face, &partner, &run, log)?;
+                    let half_an_ellipse = a_half_of_an_ellipse(&self.surface, &partner, &run);
                     self.crossings.push(Crossing {
                         partner,
                         through_an_apex,
                         touching,
+                        half_an_ellipse,
                         run,
                         picked_by,
                         // Filled in once there is a node to read it at.
@@ -1748,7 +1788,16 @@ impl<'f> Arrangement<'f> {
     }
 
     /// One node per place two crossings meet, unless a corner already is that
-    /// place.
+    /// place, and then one in the middle of each half ellipse
+    /// ([`Arrangement::place_the_middle_of_each_half`]).
+    ///
+    /// **Two crossings of one pair meet with no third surface there**, so
+    /// [`meet_of_three_surfaces`] is not asked about them. Two rulings of a
+    /// plane through a cone's apex meet at the apex
+    /// ([`Arrangement::place_where_two_rulings_cross`]), and two half ellipses
+    /// of two pipes of one width whose axes meet meet at the two places their
+    /// walls touch ([`Arrangement::place_where_two_halves_meet`]); every other
+    /// two crossings of one pair get no node (§347.9).
     ///
     /// Three surfaces can meet at two points, and both are nodes.
     /// [`MeetOfThree::MoreThanAPoint`] is an answer and not a refusal (§34.9):
@@ -1777,7 +1826,13 @@ impl<'f> Arrangement<'f> {
                     continue;
                 }
                 if self.crossings[first].partner == self.crossings[second].partner {
-                    self.place_where_two_rulings_cross(first, second);
+                    if self.crossings[first].half_an_ellipse.is_some()
+                        && self.crossings[second].half_an_ellipse.is_some()
+                    {
+                        self.place_where_two_halves_meet(first, second, log)?;
+                    } else {
+                        self.place_where_two_rulings_cross(first, second);
+                    }
                     continue;
                 }
                 let surfaces = [
@@ -1855,6 +1910,7 @@ impl<'f> Arrangement<'f> {
                 }
             }
         }
+        self.place_the_middle_of_each_half();
         Ok(())
     }
 
@@ -1867,15 +1923,18 @@ impl<'f> Arrangement<'f> {
         })
     }
 
-    /// The node where two curves of one pair cross, for the one pair here that
+    /// The node where two curves of one pair cross, for the pair here that
     /// names two curves crossing at a point it stores exactly: a plane through
     /// a cone's apex, whose two rulings cross there (§347).
     ///
     /// No third surface passes through that point, so
     /// [`meet_of_three_surfaces`] has nothing to solve, and none is needed: the
     /// apex is [`Cone::apex`], stored, and [`a_plane_cuts_a_cone_in_rulings`]
-    /// has proved it on the plane. Every other pair that names two curves is
-    /// left without a node here, and §347 says which of them can have two
+    /// has proved it on the plane. Two half ellipses of two pipes of one width
+    /// meet at places worked out in intervals and not stored, and
+    /// [`Arrangement::place_where_two_halves_meet`] places those. Every other
+    /// pair that names two curves is left without a node, and passes through
+    /// here only to be turned away; §347 says which of them can have two
     /// curves that cross.
     ///
     /// The node is named by the plane and the cone, whichever of the two the
@@ -1940,6 +1999,228 @@ impl<'f> Arrangement<'f> {
             half_way_round: false,
             crossings: vec![first, second],
         });
+    }
+
+    /// The two nodes where the four half ellipses of two pipes of one width
+    /// meet, whose axes cross ([`HalfAnEllipse`]): `c ± r·n̂`, for `c` where the
+    /// axes meet and `n̂` along `ê × û`, the two places the walls touch.
+    ///
+    /// **Every half runs from one of the two to the other**, so every two
+    /// halves meet at both, and this is asked six times about the same two
+    /// places. The first places each node and each later one adds its two
+    /// crossings to it, as [`Arrangement::place_where_two_rulings_cross`] does
+    /// at a cone's apex, so each place is one node with all four halves
+    /// through it.
+    ///
+    /// **The places are worked out here and not by [`meet_of_three_surfaces`]**,
+    /// because the picking surfaces are half-spaces, and a [`Plane`] built from
+    /// one is scaled to length one, which rounds wherever the pipe's direction
+    /// is slanted, and puts the solved place off the half. `c` is the point
+    /// of the lesser pipe's axis on the picking surface that faces along that
+    /// axis, which passes exactly through `c` (`intersect` proves that before
+    /// it names the halves). The enclosure is then of the true places.
+    ///
+    /// **Each node is named by `[a, b, b]`** for the lesser pipe `a` and the
+    /// greater `b`, by [`name_of_surface_bits`], so that the face on either
+    /// pipe names the two alike; and which of the two it is by its side of
+    /// `a`'s axis along `d_a × d_b`, each direction
+    /// [`written_the_one_way`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`](crate::Error::Undecidable) when which side a
+    /// place is on cannot be told, which takes the two axes all but parallel.
+    ///
+    /// # Panics
+    ///
+    /// If a picker of either half rules a place out. Both picking surfaces
+    /// pass exactly through `c`, and `n̂` is square to both their normals, so
+    /// both places are on both; a `Neg` there is that broken.
+    fn place_where_two_halves_meet(
+        &mut self,
+        first: usize,
+        second: usize,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let half = self.crossings[first]
+            .half_an_ellipse
+            .expect("only two halves are handed over");
+        let (Surface::Cylinder(face), Surface::Cylinder(other)) =
+            (self.surface, self.crossings[first].partner)
+        else {
+            unreachable!("a half ellipse is a crossing of two pipes")
+        };
+        let [Picker::InFrontOf(one), Picker::InFrontOf(two)] =
+            self.crossings[first].picked_by()[..]
+        else {
+            unreachable!("a half ellipse is picked out by two half-spaces")
+        };
+        let on_the_face = usize::from(half.forward_runs_with_the_bend);
+        let pickers = [one, two];
+        let mut pipes = [
+            (face, pickers[on_the_face]),
+            (other, pickers[1 - on_the_face]),
+        ];
+        pipes.sort_by_key(|(pipe, _)| name_of_surface_bits(&Surface::Cylinder(*pipe)));
+        let [(lesser, along_the_lesser), (greater, _)] = pipes;
+
+        let middle = where_an_axis_crosses_a_flat_surface(&lesser, &along_the_lesser);
+        let [one, two] = pickers.map(|picker| picker.normal().components().map(Interval::exactly));
+        let up = cross_of_intervals(one, two);
+        let reach = quotient_of(
+            Interval::exactly(lesser.radius()),
+            root_enclosing(dot_of(up, up)),
+        );
+        let places = [Interval::exactly(1.0), Interval::exactly(-1.0)].map(|side| {
+            as_exact_as_it_is(PredicatePoint::Constructed(
+                [0, 1, 2].map(|axis| middle[axis] + side * reach * up[axis]),
+            ))
+        });
+
+        let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
+        let across = cross_of(
+            PredicatePoint::from(written_the_one_way(lesser.axis().direction().components())),
+            PredicatePoint::from(written_the_one_way(greater.axis().direction().components())),
+        );
+        let origin = lesser.axis().origin().coordinates().map(Interval::exactly);
+        for place in places {
+            assert!(
+                nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
+                    && nothing_rules_the_point_out(self.crossings[second].picked_by(), place),
+                "each half ellipse holds both places the four halves meet at"
+            );
+            let at = place.enclosure();
+            let off_the_axis = [0, 1, 2].map(|axis| at[axis] - origin[axis]);
+            let which = match dot_of(off_the_axis, across).sign() {
+                Decision::Pos => 1,
+                Decision::Neg => 0,
+                Decision::Zero | Decision::Undecidable { .. } | _ => {
+                    return Err(gave_up(
+                        WHICH_WAY_A_CROSSING_RUNS,
+                        &[place, PredicatePoint::Constructed(across)],
+                        Measures::Length,
+                        log,
+                    ));
+                }
+            };
+            let name = (named, which);
+            if let Some(corner) =
+                self.the_corner_that_is_this_place(first, second, place, place, &places)
+            {
+                self.nodes[corner].stands_for_too(name);
+                continue;
+            }
+            if let Some(placed) = self
+                .nodes
+                .iter_mut()
+                .find(|node| node.vertex.is_none() && node.made_of == Some(name))
+            {
+                for crossing in [first, second] {
+                    if !placed.crossings.contains(&crossing) {
+                        placed.crossings.push(crossing);
+                    }
+                }
+                placed.crossings.sort_unstable();
+                continue;
+            }
+            self.nodes.push(Node {
+                point: place,
+                vertex: None,
+                made_of: Some(name),
+                also: Vec::new(),
+                half_way_round: false,
+                crossings: vec![first, second],
+            });
+        }
+        Ok(())
+    }
+
+    /// The node half way along each half ellipse ([`HalfAnEllipse`]): where the
+    /// plane holding both axes crosses it, at `c + r·m/‖ê × û‖` for `c` where
+    /// the axes meet, `ê` and `û` the normals of the two flat surfaces that
+    /// pick the half out, and `m = ê‖û‖ + û‖ê‖`.
+    ///
+    /// **Without it the four halves were one edge.** Every half runs between
+    /// the same two nodes ([`Arrangement::place_where_two_halves_meet`]) and
+    /// along the same two pipes, and `assemble` names an edge that does not
+    /// close by its two corners and the kind of crossing it is. So the four
+    /// halves of two bars of one radius crossing square were one edge with
+    /// eight faces along it, and every fuse of the two was refused
+    /// `ResultIsNotManifold { count: 8 }`. Cut half way along, each half is two
+    /// edges with a corner of their own between them, the way a circle from a
+    /// ball's pole is cut across from it (§194).
+    ///
+    /// **The place is on the half.** `m` lies in the plane holding both axes,
+    /// and the half's distance from the first axis is `r/‖ê × û‖` times
+    /// `‖m × ê‖/‖ê‖ = ‖û × ê‖`, which is `r`; the same for the second. Every
+    /// number is a stored one, worked in intervals.
+    ///
+    /// **Named `[a, b, b]`, as the two ends are** ([`where_two_halves_meet`]),
+    /// with `which` from 2 to 5: 2, and 2 more where the half lies ahead of `c`
+    /// along the lesser pipe's direction [`written_the_one_way`], and 1 more
+    /// where it lies ahead along the greater's. Each picker faces along its
+    /// pipe's stored direction or against it, exactly, so which way is a
+    /// comparison of stored numbers, no sign is asked, and both faces along
+    /// the half name it alike.
+    fn place_the_middle_of_each_half(&mut self) {
+        for crossing in 0..self.crossings.len() {
+            let Some(half) = self.crossings[crossing].half_an_ellipse else {
+                continue;
+            };
+            if !self.crossings[crossing].reaches_the_face {
+                continue;
+            }
+            let (Surface::Cylinder(face), Surface::Cylinder(other)) =
+                (self.surface, self.crossings[crossing].partner)
+            else {
+                unreachable!("a half ellipse is a crossing of two pipes")
+            };
+            let [Picker::InFrontOf(one), Picker::InFrontOf(two)] =
+                self.crossings[crossing].picked_by()[..]
+            else {
+                unreachable!("a half ellipse is picked out by two half-spaces")
+            };
+            let on_the_face = usize::from(half.forward_runs_with_the_bend);
+            let pickers = [one, two];
+            let mut pipes = [
+                (face, pickers[on_the_face]),
+                (other, pickers[1 - on_the_face]),
+            ];
+            pipes.sort_by_key(|(pipe, _)| name_of_surface_bits(&Surface::Cylinder(*pipe)));
+            let [(lesser, along_the_lesser), (greater, along_the_greater)] = pipes;
+
+            let middle = where_an_axis_crosses_a_flat_surface(&lesser, &along_the_lesser);
+            let [one, two] =
+                pickers.map(|picker| picker.normal().components().map(Interval::exactly));
+            let length = |normal: [Interval; 3]| root_enclosing(dot_of(normal, normal));
+            let into_the_corner =
+                [0, 1, 2].map(|axis| one[axis] * length(two) + two[axis] * length(one));
+            let up = cross_of_intervals(one, two);
+            let reach = quotient_of(
+                Interval::exactly(lesser.radius()),
+                root_enclosing(dot_of(up, up)),
+            );
+            let place = as_exact_as_it_is(PredicatePoint::Constructed(
+                [0, 1, 2].map(|axis| middle[axis] + reach * into_the_corner[axis]),
+            ));
+
+            let ahead_along = |pipe: &Cylinder, picker: &HalfSpace| {
+                picker.normal().components().map(|number| number + 0.0)
+                    == written_the_one_way(pipe.axis().direction().components())
+            };
+            let which = 2
+                + 2 * u8::from(ahead_along(&lesser, &along_the_lesser))
+                + u8::from(ahead_along(&greater, &along_the_greater));
+            let named = where_two_halves_meet(&self.surface, &self.crossings[crossing].partner);
+            self.nodes.push(Node {
+                point: place,
+                vertex: None,
+                made_of: Some((named, which)),
+                also: Vec::new(),
+                half_way_round: true,
+                crossings: vec![crossing],
+            });
+        }
     }
 
     /// Whether the two crossings can be shown to have no point in common.
@@ -3498,6 +3779,14 @@ impl<'f> Arrangement<'f> {
     /// all three are thrown away here
     /// (`a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`,
     /// Q1056's probe).
+    ///
+    /// **A half of an ellipse does not run on**, though it does not close
+    /// either: it ends at the two points where it meets the other ellipse of
+    /// its pair ([`HalfAnEllipse`]), and four halves make two closed curves
+    /// that can lie wholly inside the face, as a closed cut does. Two pipes of
+    /// one width whose axes meet lost their whole crossing here, and every
+    /// fuse of them came back with nothing cut on either pipe
+    /// (`two_bars_of_one_radius_whose_axes_meet_are_refused_telling_the_cells_of_a_pipe_apart`).
     fn drop_the_lumps_of_straight_cuts_alone(&mut self) {
         let mut same = Sameness::of(self.nodes.len());
         for arc in &self.arcs {
@@ -3506,7 +3795,12 @@ impl<'f> Arrangement<'f> {
         let keep: Vec<usize> = self
             .arcs
             .iter()
-            .filter(|arc| arc.boundary.is_some() || self.crossings[arc.crossing].order.closes())
+            .filter(|arc| {
+                let crossing = &self.crossings[arc.crossing];
+                arc.boundary.is_some()
+                    || crossing.order.closes()
+                    || crossing.half_an_ellipse.is_some()
+            })
             .map(|arc| same.leader(arc.ends[0]))
             .collect();
         self.arcs
@@ -3819,7 +4113,10 @@ impl<'f> Arrangement<'f> {
     /// for the reason an input corner is not: the face next door splits the
     /// edge there ([`Arrangement::place_the_touches`]).
     fn the_two_arcs_to_join_at(&self, node: usize, touching: &[usize]) -> Option<(usize, usize)> {
-        if self.nodes[node].vertex.is_some() || self.a_touch_is_at(node) {
+        if self.nodes[node].vertex.is_some()
+            || self.nodes[node].half_way_round
+            || self.a_touch_is_at(node)
+        {
             return None;
         }
         let &[one, other] = touching else {
@@ -4083,10 +4380,13 @@ impl<'f> Arrangement<'f> {
         // straddle zero. §35.2 again, arriving one function along.
         if first.crossing == second.crossing
             || self.are_two_halves_of_one_ruling(first.crossing, second.crossing)
+            || self.are_two_halves_of_one_ellipse(first.crossing, second.crossing)
         {
             return Ok(Decision::Zero);
         }
-        if self.has_a_way_of_its_own(first.crossing) || self.has_a_way_of_its_own(second.crossing) {
+        if self.has_a_way_of_its_own(node, first.crossing)
+            || self.has_a_way_of_its_own(node, second.crossing)
+        {
             return self.turn_between_two_ways_out(node, first, second, policy, log);
         }
         let [first_partner, second_partner] =
@@ -4219,10 +4519,44 @@ impl<'f> Arrangement<'f> {
             && *their_nappe == my_nappe.reversed()
     }
 
-    /// Whether a crossing's way out is a line it carries, rather than `∇S × ∇Q`.
-    fn has_a_way_of_its_own(&self, crossing: usize) -> bool {
+    /// Whether the two crossings are the two halves of one ellipse that two
+    /// pipes of one width cross in, which `rcad-geom` names by two opposite
+    /// corners of the same two flat surfaces ([`HalfAnEllipse`]).
+    ///
+    /// **Two such halves leave each point they share along one line, opposite
+    /// ways, and the turn between them is nothing**, for the reason two halves
+    /// of one ruling do in [`Arrangement::are_two_halves_of_one_ruling`]: the
+    /// ellipse is smooth through both ends, and worked out, `N · (t₁ × t₂)`
+    /// with `t₂ = −t₁` straddles nothing every time. The halves of the other
+    /// ellipse share one picker with each of these and are not opposite.
+    fn are_two_halves_of_one_ellipse(&self, one: usize, other: usize) -> bool {
+        let [mine, theirs] = [one, other].map(|crossing| &self.crossings[crossing]);
+        if mine.half_an_ellipse.is_none()
+            || theirs.half_an_ellipse.is_none()
+            || mine.partner != theirs.partner
+        {
+            return false;
+        }
+        let (
+            [Picker::InFrontOf(my_first), Picker::InFrontOf(my_second)],
+            [
+                Picker::InFrontOf(their_first),
+                Picker::InFrontOf(their_second),
+            ],
+        ) = (mine.picked_by(), theirs.picked_by())
+        else {
+            return false;
+        };
+        *their_first == my_first.reversed() && *their_second == my_second.reversed()
+    }
+
+    /// Whether a crossing's way out of `node` is a line it carries, rather than
+    /// `∇S × ∇Q`.
+    fn has_a_way_of_its_own(&self, node: usize, crossing: usize) -> bool {
         self.crossings[crossing].through_an_apex.is_some()
             || self.crossings[crossing].touching.is_some()
+            || (self.crossings[crossing].half_an_ellipse.is_some()
+                && self.is_an_end_of_the_halves(node, crossing))
     }
 
     /// The cone the face lies on, when `node` is that cone's apex exactly.
@@ -4476,14 +4810,19 @@ impl<'f> Arrangement<'f> {
     /// it runs on, the sign being which way along the crossing it goes, and
     /// `±` the line's own direction for a ruling through a cone's apex
     /// ([`ThroughAnApex`]) and for a line one surface rests on another along
-    /// ([`AlongATouch`]).
+    /// ([`AlongATouch`]), and at either end of a half ellipse, the way it runs
+    /// there ([`Arrangement::the_way_a_half_ellipse_runs_at_its_end`]).
     fn way_out_of(&self, node: usize, direction: Direction) -> [Interval; 3] {
         let at = self.nodes[node].point;
         let crossing = &self.crossings[direction.crossing];
-        let run = match (crossing.through_an_apex, crossing.touching) {
-            (Some(line), _) => line.along,
-            (None, Some(touch)) => touch.along,
-            (None, None) => cross_of(
+        let at_an_end = crossing.half_an_ellipse.and_then(|half| {
+            self.the_way_a_half_ellipse_runs_at_its_end(node, direction.crossing, half)
+        });
+        let run = match (crossing.through_an_apex, crossing.touching, at_an_end) {
+            (Some(line), _, _) => line.along,
+            (None, Some(touch), _) => touch.along,
+            (None, None, Some(end)) => end,
+            (None, None, None) => cross_of(
                 gradient_at(&self.surface, at),
                 gradient_at(&crossing.partner, at),
             ),
@@ -4493,6 +4832,69 @@ impl<'f> Arrangement<'f> {
         } else {
             run.map(|component| Interval::exactly(0.0) - component)
         }
+    }
+
+    /// The way `∇S × ∇Q` runs along a half ellipse at `node`, where `node` is
+    /// one of the two points the four halves meet at and the cross product is
+    /// nothing, and `None` at every other node.
+    ///
+    /// The half leaves both of its ends along `m = ê/‖ê‖ + û/‖û‖` for the
+    /// normals `ê` and `û` of the two flat surfaces that pick it out
+    /// ([`HalfAnEllipse`]), and climbs along `k = ê × û` from one end to the
+    /// other ([`a_half_of_an_ellipse`]). So where the cross product runs with
+    /// `k` it runs along `+m` out of the lower end and `−m` into the higher
+    /// one, and the other way round where it runs against `k`.
+    ///
+    /// Which end is which is the sign of `(p − o)·k` for the node `p` and the
+    /// face's axis origin `o`. The ends are `c ± r·n̂`, for `c` where the axes
+    /// meet and `n̂` along `k`, and `c − o` runs along the face's axis, which is
+    /// square to `k`. So `(p − o)·k` is `±r·‖k‖`, as far from nothing as the
+    /// pipe is wide, and every number in it is stored.
+    ///
+    /// `None` too where that sign cannot be told, and then the way out is the
+    /// cross product, which straddles nothing there and is refused where it is
+    /// asked.
+    fn the_way_a_half_ellipse_runs_at_its_end(
+        &self,
+        node: usize,
+        crossing: usize,
+        half: HalfAnEllipse,
+    ) -> Option<[Interval; 3]> {
+        if !self.is_an_end_of_the_halves(node, crossing) {
+            return None;
+        }
+        let Surface::Cylinder(pipe) = self.surface else {
+            unreachable!("a half ellipse is drawn on a pipe's face and on no other")
+        };
+        let [one, other] = half.facing.map(|normal| normal.map(Interval::exactly));
+        let length = |normal: [Interval; 3]| root_enclosing(dot_of(normal, normal));
+        let into_the_corner =
+            [0, 1, 2].map(|axis| one[axis] * length(other) + other[axis] * length(one));
+        let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+        let point = self.nodes[node].point.enclosure();
+        let off_the_axis = [0, 1, 2].map(|axis| point[axis] - origin[axis]);
+        let at_the_higher_end = match dot_of(off_the_axis, cross_of_intervals(one, other)).sign() {
+            Decision::Pos => true,
+            Decision::Neg => false,
+            Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+        };
+        Some(if at_the_higher_end == half.forward_runs_with_the_bend {
+            into_the_corner.map(|component| -component)
+        } else {
+            into_the_corner
+        })
+    }
+
+    /// Whether `node` is one of the two points where the four half ellipses
+    /// of the face's pipe and `crossing`'s partner meet
+    /// ([`Arrangement::place_where_two_halves_meet`]).
+    fn is_an_end_of_the_halves(&self, node: usize, crossing: usize) -> bool {
+        let name = where_two_halves_meet(&self.surface, &self.crossings[crossing].partner);
+        let Node { made_of, also, .. } = &self.nodes[node];
+        made_of
+            .iter()
+            .chain(also)
+            .any(|(surfaces, which)| *surfaces == name && *which < 2)
     }
 
     /// Which cell of the surface each walk bounds.
@@ -5236,6 +5638,7 @@ impl<'f> Arrangement<'f> {
             (_, Surface::Plane(_))
             | (Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_))
             | (Surface::Cylinder(_), Surface::Cone(_)) => (),
+            (Surface::Cylinder(_), Surface::Cylinder(_)) if crossing.half_an_ellipse.is_some() => {}
             (Surface::Cone(_), Surface::Torus(_))
             | (
                 Surface::Cylinder(_),
@@ -8049,6 +8452,14 @@ fn how_a_crossing_runs(
     {
         return how_a_circle_round_a_rings_axis_runs(surface, partner, level, run, log);
     }
+    if let Some(half) = a_half_of_an_ellipse(surface, partner, run) {
+        let [plane_normal, cone_axis] = half.facing;
+        return Ok(HowItRuns::AlongABend {
+            plane_normal,
+            cone_axis,
+            forward_runs_with_the_bend: half.forward_runs_with_the_bend,
+        });
+    }
     if !(a_pair_that_crosses_in_a_conic(surface, partner, log)?
         || one_of_two_loops_round_a_thin_pipe(surface, partner, run)
         || one_of_two_loops_round_a_pipe_through_a_ball(surface, partner, run))
@@ -8069,12 +8480,14 @@ fn how_a_crossing_runs(
 /// where it swallows the thin one's whole cross-section.
 ///
 /// [`intersect`](rcad_geom::intersect) names two pipes' crossing as a part of
-/// it picked out by a half-space only there: one loop is the whole of the
+/// it picked out by one half-space only there: one loop is the whole of the
 /// crossing, two pipes running the same way cross in lines, and two of one
-/// width on axes that meet are refused. Each of those two loops runs once
-/// round the thin pipe's axis, and [`which_comes_first_round_a_crossing`]
-/// orders it round that axis, asking again, exactly, whether the fat pipe
-/// swallows the thin one before it does (Q1483).
+/// width on axes that meet cross in four halves of two ellipses, each picked
+/// out by two half-spaces ([`a_half_of_an_ellipse`]). Each of those two loops
+/// runs once round the thin pipe's axis, and
+/// [`which_comes_first_round_a_crossing`] orders it round that axis, asking
+/// again, exactly, whether the fat pipe swallows the thin one before it does
+/// (Q1483).
 fn one_of_two_loops_round_a_thin_pipe(
     surface: &Surface,
     partner: &Surface,
@@ -8085,9 +8498,125 @@ fn one_of_two_loops_round_a_thin_pipe(
         (
             Surface::Cylinder(_),
             Surface::Cylinder(_),
-            EdgeRun::PartOfWhereItCrosses { .. }
-        )
+            EdgeRun::PartOfWhereItCrosses { picked_by, .. }
+        ) if picked_by.len() == 1
     )
+}
+
+/// One of the four halves of two ellipses that two pipes of one width cross
+/// in where their axes meet, read off the run [`intersect`](rcad_geom::intersect)
+/// named, and `None` for every other run.
+///
+/// `intersect` picks each half by two flat surfaces through the point where
+/// the axes meet, one facing along each pipe's stored direction, turned round
+/// or not by the corner the half is in, with that direction stored exactly.
+/// So which picker faces along which pipe is a comparison of stored numbers,
+/// and no sign is asked.
+///
+/// # Which way it runs
+///
+/// For the first pipe along `ê` and the second along `û`, with where the axes
+/// meet as the origin, a half in the corner `(s₀, s₁)` runs in the plane
+/// square to `s₁û − s₀ê`. On the ellipse of `ê = z` and `û = x`, radius one,
+/// that is `p = (cos t, sin t, cos t)` with `cos t > 0` for the corner
+/// `(+, +)`, and `∇S × ∇Q` for the face on the first pipe is
+/// `4·(x, y, 0) × (0, y, z)`, whose part along `y` is `−4·cos² t`. The
+/// picking surfaces' normals are `s₀ê` and `s₁û`, so `facing[0] × facing[1]`
+/// is `s₀s₁·y`, and `s₀s₁` is `+1` on this ellipse and `−1` on the other,
+/// where the same working gives `+4·cos² t`. On both, then, the cross product
+/// runs against `facing[0] × facing[1]` on the first pipe's face, and with it
+/// on the second's, where the two gradients swap rows.
+///
+/// That is the order [`along_a_bend`] puts points in, and it is a total one:
+/// a half's part along `ê × û` is `r·sin t` for `t` in an open half turn,
+/// which climbs strictly from one end to the other.
+fn a_half_of_an_ellipse(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+) -> Option<HalfAnEllipse> {
+    let (Surface::Cylinder(mine), Surface::Cylinder(theirs)) = (surface, partner) else {
+        return None;
+    };
+    if mine.radius() != theirs.radius() {
+        return None;
+    }
+    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+        return None;
+    };
+    let [Picker::InFrontOf(first), Picker::InFrontOf(second)] = picked_by[..] else {
+        return None;
+    };
+    let facing = [first, second].map(|picker| picker.normal().components());
+    let along = |normal: [f64; 3], pipe: &Cylinder| {
+        let direction = pipe.axis().direction().components();
+        normal == direction || normal == direction.map(|component| -component)
+    };
+    let face_is_first = if along(facing[0], mine) && along(facing[1], theirs) {
+        true
+    } else if along(facing[0], theirs) && along(facing[1], mine) {
+        false
+    } else {
+        return None;
+    };
+    Some(HalfAnEllipse {
+        facing,
+        forward_runs_with_the_bend: !face_is_first,
+    })
+}
+
+/// The three surfaces the two nodes where four half ellipses meet are named
+/// by: the lesser of the two pipes by [`name_of_surface_bits`], then the
+/// greater twice, so that the face on either pipe names them alike.
+fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface; 3] {
+    let (lesser, greater) = if name_of_surface_bits(one) <= name_of_surface_bits(other) {
+        (one, other)
+    } else {
+        (other, one)
+    };
+    [*lesser, *greater, *greater]
+}
+
+/// An enclosure of where `pipe`'s axis crosses the flat surface of `facing`,
+/// which faces along that axis: `o + λ·d` with `λ = (offset − g·o)/(g·d)`.
+fn where_an_axis_crosses_a_flat_surface(pipe: &Cylinder, facing: &HalfSpace) -> [Interval; 3] {
+    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+    let direction = pipe.axis().direction().components().map(Interval::exactly);
+    let normal = facing.normal().components().map(Interval::exactly);
+    let slide = quotient_of(
+        Interval::exactly(facing.offset()) - dot_of(normal, origin),
+        dot_of(normal, direction),
+    );
+    [0, 1, 2].map(|axis| origin[axis] + direction[axis] * slide)
+}
+
+/// `over / under` for every pair of numbers the two hold: each end exact where
+/// the division rounds nothing, and stepped outwards where it does.
+///
+/// # Panics
+///
+/// If `under` holds zero. Every caller divides by a length or a dot product it
+/// has shown is not nothing.
+fn quotient_of(over: Interval, under: Interval) -> Interval {
+    assert!(
+        !under.contains_zero(),
+        "dividing by {under:?}, which holds zero, has no enclosure"
+    );
+    let mut ends = [f64::INFINITY, f64::NEG_INFINITY];
+    for top in [over.lo(), over.hi()] {
+        for bottom in [under.lo(), under.hi()] {
+            let corner = top / bottom;
+            let exact = rcad_predicates::expansion::product_is_exact(corner, bottom)
+                && corner.mul_add(bottom, -top) == 0.0;
+            let (below, above) = if exact {
+                (corner, corner)
+            } else {
+                (corner.next_down(), corner.next_up())
+            };
+            ends = [ends[0].min(below), ends[1].max(above)];
+        }
+    }
+    Interval::new(ends[0], ends[1]).expect("no corner of two finite ranges is a NaN")
 }
 
 /// Whether `run` is one of the two loops a ball crosses a pipe in, either side
@@ -8721,6 +9250,18 @@ fn across_a_bend(plane_normal: [f64; 3], cone_axis: [f64; 3]) -> [Interval; 3] {
 /// plane and square to `n × w`, which is a multiple of the axis; the two
 /// parametrisations above hold no such pair, because equal `s` and equal
 /// `sinh σ` each mean equal parameter.
+///
+/// # A half ellipse is ordered by the same determinant
+///
+/// For a half ellipse of two pipes of radius `r` whose axes meet at `c`
+/// ([`HalfAnEllipse`]), `n` and `w` are the normals of its two pickers, each
+/// one pipe's stored direction or its reverse, so `n × w` runs along `n̂`, the
+/// unit vector square to both axes, one way or the other. The whole ellipse
+/// is `c + a·cos t + r·n̂·sin t` with `a` square to `n̂`, and the half is
+/// `t` from `−π/2` to `π/2`, between the two places the walls touch,
+/// `c ± r·n̂`. Its part along `n̂` is `r·sin t`, strictly increasing over that
+/// span, so the order is total along the half and [`Decision::Zero`] means one
+/// point, as above.
 ///
 /// # It is a determinant and never a built vector
 ///
@@ -9595,10 +10136,10 @@ mod tests {
     };
 
     use super::{
-        Arc, Arrangement, Boundary, CrossingsDrawn, HowItRuns, Node, Piece, as_exact_as_it_is,
-        canonical_cut_surfaces, prove_the_hinted_order, split_a_face, the_other_way,
-        the_way_a_half_ruling_leaves_the_apex, three_planes_faced_the_one_way,
-        where_the_crossing_starts,
+        Arc, Arrangement, Boundary, CrossingsDrawn, Direction, HowItRuns, Node, Piece,
+        as_exact_as_it_is, canonical_cut_surfaces, cross_of_intervals, prove_the_hinted_order,
+        split_a_face, the_other_way, the_way_a_half_ruling_leaves_the_apex,
+        three_planes_faced_the_one_way, where_the_crossing_starts,
     };
     use crate::fuse::bake::{BakedFace, BakedSolid, bake, what_writing_the_corner_down_cost};
     use crate::fuse::{FaceMeet, MeetPoint};
@@ -10869,6 +11410,150 @@ mod tests {
             ],
             "each run is its lowest-numbered arc, and nothing else moved"
         );
+    }
+
+    /// **The four half ellipses of the Steinmetz cross meet at two nodes, each
+    /// has a node half way along, and each leaves an end into its own
+    /// corner.**
+    ///
+    /// Two bars of radius 1, one up `z` and one along `x`, each from −2 to 2,
+    /// cross in the ellipses `x = z` and `x = −z`, which `intersect` names as
+    /// four halves. On the upright bar's wall `place_the_meets` puts one node
+    /// at each of `(0, ±1, 0)`, with all four halves through it, and one half
+    /// way along each half, at `(±1, 0, ±1)`
+    /// ([`Arrangement::place_where_two_halves_meet`],
+    /// [`Arrangement::place_the_middle_of_each_half`]).
+    ///
+    /// `∇S × ∇Q` is nothing at `(0, ±1, 0)`, where the two walls are tangent,
+    /// so the way out of a half there is read off its corner
+    /// ([`Arrangement::the_way_a_half_ellipse_runs_at_its_end`]). Worked by
+    /// hand: on the upright wall `∇S × ∇Q = 4·(yz, −xz, xy)`, which at a
+    /// middle `(a, 0, b)` is `(0, −4ab, 0)`. So forward along a half on `x = z`
+    /// runs down `y`, out of `(0, 1, 0)` towards its middle, and forward along
+    /// a half on `x = −z` runs up `y`, into `(0, 1, 0)` from its middle.
+    /// Forward out of `(0, 1, 0)` is then `ab·(a, 0, b)` on all four.
+    ///
+    /// Before Q1607 two halves of one pair met nowhere in the arrangement, and
+    /// none of these nodes was there.
+    #[test]
+    fn the_halves_of_the_steinmetz_cross_meet_at_two_nodes_and_leave_each_into_its_own_corner() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let upright = model
+            .add_round_bar(
+                1.0,
+                4.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, -2.0)).expect("a shift"),
+            )
+            .expect("a bar up `z`");
+        let lying = model
+            .add_round_bar(
+                1.0,
+                4.0,
+                &Isometry::translation(Vector::new(-2.0, 0.0, 0.0))
+                    .expect("a shift")
+                    .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("a turn about y")),
+            )
+            .expect("a bar along `x`");
+        let mut solids = bake(&model, &[upright, lying], &policy, &mut log).expect("two bars bake");
+        crate::fuse::cuts::gather(&mut solids, &policy, &mut log)
+            .expect("each bar's wall is cut by the other's");
+        let wall = solids[0]
+            .faces
+            .iter()
+            .find(|face| matches!(face.surface, Surface::Cylinder(_)))
+            .expect("the upright bar has a wall");
+
+        let mut arrangement = drawn_up_to_its_corners(wall);
+        arrangement.leave_out_the_cuts_clear_of_the_face();
+        let placed = arrangement.place_the_meets(&policy, &mut log);
+        assert!(placed.is_ok(), "the meets are placed: {placed:?}");
+
+        let halves: Vec<usize> = (0..arrangement.crossings.len())
+            .filter(|&crossing| {
+                matches!(
+                    arrangement.crossings[crossing].partner,
+                    Surface::Cylinder(_)
+                )
+            })
+            .collect();
+        assert_eq!(halves.len(), 4, "two ellipses, each in two halves");
+        let nodes_at = |place: [f64; 3]| -> Vec<usize> {
+            (0..arrangement.nodes.len())
+                .filter(|&node| holds(arrangement.nodes[node].point, place))
+                .collect()
+        };
+        for end in [[0.0, 1.0, 0.0], [0.0, -1.0, 0.0]] {
+            let nodes = nodes_at(end);
+            assert_eq!(nodes.len(), 1, "one node at {end:?}");
+            assert_eq!(
+                arrangement.nodes[nodes[0]].crossings, halves,
+                "all four halves run through {end:?}"
+            );
+        }
+
+        let corners = [
+            [1.0, 0.0, 1.0],
+            [1.0, 0.0, -1.0],
+            [-1.0, 0.0, 1.0],
+            [-1.0, 0.0, -1.0],
+        ];
+        let top = nodes_at([0.0, 1.0, 0.0])[0];
+        let mut middles = Vec::new();
+        for &half in &halves {
+            let along_it: Vec<&Node> = arrangement
+                .nodes
+                .iter()
+                .filter(|node| node.half_way_round && node.crossings == [half])
+                .collect();
+            assert_eq!(along_it.len(), 1, "half {half} has one node half way along");
+            let [a, _, b] = *corners
+                .iter()
+                .find(|&&corner| holds(along_it[0].point, corner))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "half {half}'s middle {:?} is at one of {corners:?}",
+                        along_it[0].point
+                    )
+                });
+            middles.push([a, 0.0, b]);
+
+            let way = arrangement.way_out_of(
+                top,
+                Direction {
+                    crossing: half,
+                    forward: true,
+                },
+            );
+            let worked_by_hand = [a * b * a, 0.0, a * b * b];
+            assert_eq!(
+                way.map(Interval::sign),
+                worked_by_hand.map(|component| Interval::exactly(component).sign()),
+                "half {half}, with its middle at ({a}, 0, {b}), leaves (0, 1, 0) forward along {worked_by_hand:?}: {way:?}"
+            );
+            assert!(
+                cross_of_intervals(way, worked_by_hand.map(Interval::exactly))
+                    .iter()
+                    .all(|component| component.contains_zero()),
+                "half {half} leaves (0, 1, 0) along {worked_by_hand:?} and not just towards it: {way:?}"
+            );
+        }
+        middles.sort_by(|one, other| one.partial_cmp(other).expect("no NaN"));
+        let mut every_corner = corners.to_vec();
+        every_corner.sort_by(|one, other| one.partial_cmp(other).expect("no NaN"));
+        assert_eq!(middles, every_corner, "one half in each corner");
+    }
+
+    /// Whether `point`'s box holds `place` and is no wider than a rounding.
+    fn holds(point: PredicatePoint, place: [f64; 3]) -> bool {
+        point
+            .enclosure()
+            .iter()
+            .zip(place)
+            .all(|(range, coordinate)| {
+                range.lo() <= coordinate && coordinate <= range.hi() && range.width() < 1e-12
+            })
     }
 
     fn the_unit_cube_baked_and_the_plane_x_equals_y() -> (BakedSolid, [f64; 4]) {

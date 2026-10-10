@@ -239,6 +239,11 @@ Where two of those loops touch, `intersect` refuses by name,
 for the ball and the pipe
 (`a_ball_resting_on_the_far_inside_of_a_pipe_crosses_it_in_a_curve_with_no_name`)
 and for two pipes (`two_leaning_pipes_of_the_same_thickness_whose_axes_meet_cross_in_a_curve_with_no_name`).
+*Since 2026-10-10 (Q1603, landed with Q1607) two pipes of one width whose
+axes meet are named, as four half ellipses that meet where the walls touch,
+and that pin is
+`two_leaning_pipes_of_the_same_thickness_whose_axes_meet_cross_in_four_half_ellipses`;
+see the note at the end of 347.9.*
 The plane-and-torus row refuses the two bitangent planes' Villarceau circles,
 which do cross, as a quartic. The rest are two curves apart by what the pair
 is. **None of that was tried here** by building two curves of one pair that
@@ -451,7 +456,10 @@ The pins, pair by pair, the answer first and the limit after:
 - Two leaning pipes:
   `a_thin_bar_through_a_thick_one_crosses_it_in_two_loops_and_every_fuse_answers`,
   `a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_before_any_arrangement`,
-  `two_bars_of_one_radius_whose_axes_meet_are_refused_before_any_arrangement`.
+  `two_bars_of_one_radius_whose_axes_meet_are_refused_before_any_arrangement`,
+  since 2026-10-10
+  `two_bars_of_one_radius_whose_axes_meet_are_refused_telling_the_cells_of_a_pipe_apart`
+  (the note at the end of this section).
 
 **What it settles.**
 
@@ -527,3 +535,52 @@ the half ring under a round plate.
 two_curves_of_one_pair_that_meet --no-fail-fast`, with each test's time read
 from `target/last-test.log`. The closed forms are worked by hand in each
 test's doc comment. Relay 1's quartic probe is described here and not kept.
+
+> **2026-10-10 note (Q1603, Q1607, Q1611): the Steinmetz cross is named and
+> gets its nodes, and is refused telling the cells of a pipe apart.**
+> `intersect` names two pipes of one width whose axes meet as four half
+> ellipses, each picked by a corner of the two flat surfaces through where the
+> axes meet (`four_half_ellipses_where_two_pipes_of_one_width_meet`). It does
+> so only where those surfaces pass exactly through that point, and refuses
+> the rest `CannotNameWhichPieceOfACrossingThisIs`, a gap: 1192 of the 1224
+> pairs of `the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece`,
+> which prints `32 of 1224 pairs named in four halves`. `place_the_meets` now
+> gives two halves of one pair the two places the walls touch, `c ± r n̂`
+> (`place_where_two_halves_meet`), and each half a node half way along
+> (`place_the_middle_of_each_half`), so this is the second pair, after the
+> apex's rulings, to get a node where two curves of one pair cross. Each half
+> is ordered as a bend along the cross product of its pickers' normals, and
+> leaves an end the way `the_way_a_half_ellipse_runs_at_its_end` says. Two
+> things above no longer hold: the table's last cell for the two leaning
+> pipes, which has the Steinmetz cross refused in `intersect`, and the
+> sentence of "What it settles" that nothing hands `place_the_meets` two
+> curves of one pair that meet other than the rulings at an apex. The thin
+> bar resting inside a thick one is still refused in `intersect`.
+>
+> The cross still does not answer: all six fuses are refused
+> `CannotTellTheCellsOfAFaceApart`.
+> `the_one_that_goes_round_the_axis_as_well` counts how often a walk crosses
+> a half-plane from a pipe's axis towards `up × across`, for `across` each of
+> `±x`, `±y` and `±z`. On either pipe two of the six are along its own axis
+> and give no half-plane, since `up × up` is nought, and each of the other
+> four runs through `(0, ±1, 0)` or through a middle at `(±1, 0, ±1)`. A node
+> on the half-plane's line, either side of the axis, leaves the side
+> `how_often_an_arc_crosses` asks of it neither left nor right, so that
+> half-plane gives no count. That is read off the code here, and 15b04034's
+> probe saw the same. Three
+> diagonal half-planes got every fuse past the arrangement (e7d4da47), to
+> `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` in `assemble.rs`, where the
+> two pipes' gradients are parallel at `(0, ±1, 0)` and their cross product
+> is nought. They were taken out because they answered three blocks of
+> `a_cone_shared_with_its_union_with_a_block_is_the_cone` wrongly where
+> `main` refuses (15b04034). Both are rows. The turned-pair property skips
+> the pair as a tangency a turn moves off (`is_on_a_knife_edge`): 10 of its
+> 438 skipped draws are this pair, counted by Q1611 with a print in that
+> branch that is not kept.
+>
+> The pins: `the_halves_of_the_steinmetz_cross_meet_at_two_nodes_and_leave_each_into_its_own_corner`
+> in `fuse/arrange.rs` holds the two nodes, the four middles and the way a
+> half leaves `(0, 1, 0)`, and fails on an assertion with `arrange.rs` as it
+> was before Q1607;
+> `two_bars_of_one_radius_whose_axes_meet_are_refused_telling_the_cells_of_a_pipe_apart`
+> holds the refusal.
