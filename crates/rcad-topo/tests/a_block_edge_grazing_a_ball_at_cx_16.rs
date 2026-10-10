@@ -106,6 +106,30 @@ fn every_fuse_refuses_on_a_point_inside_a_piece_between_the_two_places() {
     }
 }
 
+#[test]
+fn probe_what_each_fuse_gives() {
+    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        for ball_first in [true, false] {
+            for rule in EVERY_RULE {
+                let case = (policy.strictness(), ball_first, rule);
+                let mut log = ProvenanceLog::new();
+                match fuse_a_block_edge_grazing_a_ball(rule, &policy, ball_first, &mut log) {
+                    Ok(fused) => println!("PROBE {case:?}: Ok {} solids", fused.solids().len()),
+                    Err(Error::Undecidable { records }) => println!(
+                        "PROBE {case:?}: Undecidable {:?}",
+                        records
+                            .records()
+                            .iter()
+                            .map(|record| (record.predicate(), record.inputs().len()))
+                            .collect::<Vec<_>>()
+                    ),
+                    Err(other) => println!("PROBE {case:?}: {other:?}"),
+                }
+            }
+        }
+    }
+}
+
 /// The measurement that made the turn a gap: the sign it needs exists, and
 /// the same three surfaces solved about the ball's own centre reach it.
 ///
