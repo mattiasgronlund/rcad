@@ -1813,7 +1813,16 @@ fn where_two_leaning_pipes_cross(
 /// `(3, 4, 0)` and `(3, 0, 4)` through `(11, −3.25, 0.5)` were refused for the
 /// second until Q1645 slid each facing a few `2⁻⁵³` along `(0, 1, −1)`
 /// (`bores_on_3_4_0_and_3_0_4_are_picked_by_their_directions_slid_until_they_pass_exactly`).
-/// Bores on `(3, 4, 0)` and `(4, 0, 3)` through the same point are refused, and
+/// Q1653 solved for the step count rather than searching it, and tried each
+/// stored direction in its lowest terms, which named bores on `(0, 3, 4)` and
+/// `(4, 3, 0)` (`bores_on_0_3_4_and_4_3_0_are_picked_by_a_slide_solved_for`)
+/// and bores on `(−2, 3, 6)` and `(−2, 6, 3)`
+/// (`bores_on_2_3_6_and_2_6_3_are_picked_by_the_whole_number_triple_one_is_a_multiple_of`).
+/// At a middle in decimal millimetres, `(11.85, −3.15, 0.45)`, most pairs are
+/// still refused, and whether a flat surface in `f64` exists for them has not
+/// been asked
+/// (`the_namer_names_this_family_crossing_at_a_middle_in_decimal_millimetres`).
+/// Bores on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)` are refused, and
 /// no other facing would do: up to a power of two, `f64` holds twelve facings
 /// in their flat, and none of them passes exactly through `c`
 /// (`no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3`).
@@ -1910,12 +1919,22 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
 /// the shortest whole-number triple along each line in the flat is slid along,
 /// since a multiple of it slides along the same line in coarser steps.
 ///
-/// **Last come sums of `own` and `other`**: two to four of `own` and fewer of
+/// **Then come sums of `own` and `other`**: two to four of `own` and fewer of
 /// `other`, either way. Such a sum lies in the flat when nothing rounds, and
 /// leans towards `own` as anything holding more of it does. A few of them come
 /// out short even from the rounded stored directions: four of `(3, −6, 2)/7` and
 /// one of `(2, 3, 6)/7` add to exactly `(2, −3, 2)`. They go after the slide so
 /// that a pair the slide names keeps the surfaces it had.
+///
+/// **Then `own` in its lowest terms** ([`own_in_lowest_terms`]): `(2, 3, 6)/7`
+/// is stored as an exact multiple of `(2, 3, 6)` with a 52-bit factor, so its
+/// own dot with `c` rounds where the short triple's need not.
+///
+/// **Last come slides whose step count is solved for** ([`slides_solved_for`]),
+/// of `own` in its lowest terms and of `own`, along each way the short slide
+/// took, for the middles whose dot has more bits to clear than 64 steps run
+/// through. These two go after everything tried before Q1653, so that a pair
+/// named then keeps the surfaces it had.
 ///
 /// # Errors
 ///
@@ -2003,14 +2022,21 @@ fn a_flat_surface_through_where_the_walls_touch(
 /// uses, `(11, −3.25, 0.5)`: every component of that family's directions is
 /// above `¼`, so `u ≥ 2⁻⁵⁴`; `way·c` has nothing below `2⁻²`; so `δ` has nothing
 /// below `2⁻⁵⁶`. The dot is under `16`, so its grid is at most `2⁻⁴⁹`, and `k ≤ 7`.
-/// Measured there, `64` and `4096` both name 704 pairs of the 1224, and no
-/// facing is slid farther than `37·2⁻⁵³` in any component; `4096` makes that
-/// test ten times as slow, all of it in searches that find nothing.
+/// Measured there at Q1645, before the solved slide below, `64` and `4096` both
+/// named 704 pairs of the 1224, and no facing was slid farther than `37·2⁻⁵³`
+/// in any component; `4096` made that test ten times as slow, all of it in
+/// searches that found nothing.
 ///
 /// **A short slide is not enough everywhere.** A middle whose coordinates are
-/// long binary fractions, like a decimal `1.85`, puts `k` near 52, and the step
-/// count would have to be solved for rather than searched. And when the dot has
-/// a bit below `2ᵉ`, no number of steps clears it.
+/// long binary fractions, like a decimal `1.85`, puts `k` near 52. There the
+/// step count is solved for rather than searched, by [`slides_solved_for`],
+/// which also takes steps finer than this one. And when the dot has a bit below
+/// what one step moves, no count clears it while the dot stays the size it is.
+/// The solved slide then gives the counts that carry the dot down to a size
+/// whose grid holds that bit, as it does for bores on `(0, 3, 4)` and
+/// `(4, 3, 0)` through `(11, −3.25, 0.5)`, whose dot goes from about `−1.55` to
+/// about `−0.25`. The stored direction in its lowest terms
+/// ([`own_in_lowest_terms`]) has a dot with fewer bits to clear.
 const LONGEST_SLIDE: i32 = 1 << 6;
 
 /// The coarsest step a slide takes: the unit in the last place of a number from
@@ -2028,7 +2054,8 @@ const ONE_UNIT_OF_A_SLIDE: f64 = f64::EPSILON / 2.0;
 /// leaves the flat and is passed over, so the finer step costs searches and
 /// never a wrong facing. In
 /// `the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece`
-/// a fixed `2⁻⁵³` names 644 of the 1224 pairs, where this names 704.
+/// a fixed `2⁻⁵³` named 644 of the 1224 pairs and this 704, measured at Q1645
+/// before [`slides_solved_for`] was added.
 fn one_unit_in_the_last_place_of_what_it_moves(own: Vector, way: Vector) -> f64 {
     own.components()
         .into_iter()
@@ -2126,6 +2153,14 @@ fn greatest_common_factor(one: u128, other: u128) -> u128 {
 /// nothing, so if any count of a stretch on one side leans, the nearest does.
 /// Every facing given still has to pass the three exact checks, so a count
 /// worked out wrong only costs a facing, and nothing here is a tolerance.
+///
+/// [`a_flat_surface_through_where_the_walls_touch`] calls this with the stored
+/// direction as `own`, and also with that direction in its lowest terms
+/// ([`own_in_lowest_terms`]) when it has them. That is a positive multiple of
+/// the stored direction, so it lies in the same flat and leans the same way,
+/// and its dot with the middle has fewer bits to clear. Measured at Q1653, the
+/// lowest terms alone, without the stored direction, named 1096 and 316 of the
+/// 1224 pairs in the two count tests where both name 1096 and 328.
 fn slides_solved_for(middle: Point, own: Vector, way: Vector) -> Vec<Vector> {
     let (Some(start), Some(moved)) = (
         a_dot_in_whole_numbers(own.components(), middle.coordinates()),
@@ -2169,6 +2204,20 @@ fn own_slid(own: Vector, way: Vector, step: i32, count: i128) -> Option<Vector> 
 ///
 /// A step of `2⁻⁵³⁻ʲ` only gives facings whose moved components are under
 /// `2⁻ʲ`, so each finer step is a narrower search.
+///
+/// Measured at Q1653 as the pairs of 1224 that
+/// `the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece`
+/// and `the_namer_names_this_family_crossing_at_a_middle_in_decimal_millimetres`
+/// name: `0` names 1072 and 320, `1` and `4` name 1096 and 324, `8` and `16`
+/// name 1096 and 328. So `8`, past which nothing more was named.
+///
+/// **No step coarser than `2⁻⁵³`.** Steps as coarse as `2⁻¹` were tried, and
+/// they gave facings like `(−0.5, 2.09e15, −2.09e15)`, which pass the three
+/// exact checks with an offset of `−7.5e15`, and which the walk then refused
+/// with [`Error::CannotNameWhichPieceOfACrossingThisIs`]. A step of `2⁻⁵³` or
+/// finer keeps every moved component under `2⁵³` of a unit no coarser than the
+/// step times the way's component, so under `2` for a way of whole numbers
+/// from `−2` to `2`.
 const FINEST_SOLVED_STEP: i32 = 8;
 
 /// The step counts `n`, each nearest nothing in its stretch, for which
