@@ -191,41 +191,56 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_before_any_arrange
 /// quarter round `z` with the bar at `x = 1/2`. Every fuse was refused ordering
 /// points along a loop until Q1554 ordered them round the bar's axis.
 ///
-/// What they share is the ball inside the bar, [`ball_in_bar`].
+/// What they share is the ball inside the bar, [`ball_in_bar`]. With the bar
+/// first, every fuse is still refused meshing
+/// (`a_ball_with_a_bar_through_it_off_its_axis_is_refused_meshing_every_fuse_with_the_bar_first`).
 #[test]
-fn a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_answers() {
-    let ball = 32.0 * PI / 3.0;
-    let placements: [(Pair, f64, f64); 4] = [
-        (
-            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.5, 0.0]),
-            1.0,
-            0.5,
-        ),
-        (
-            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.0, 0.5]),
-            1.0,
-            0.5,
-        ),
-        (
-            |model| a_ball_and_a_bar(model, &Isometry::identity(), 0.5, [0.0, 1.0]),
-            0.5,
-            1.0,
-        ),
-        (
-            |model| {
-                let turned = Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z");
-                a_ball_and_a_bar(model, &turned, 1.0, [0.5, 0.0])
-            },
-            1.0,
-            0.5,
-        ),
-    ];
-    for (build, radius, off) in placements {
-        every_fuse_answers(
-            build,
-            [ball, 6.0 * PI * radius * radius, ball_in_bar(radius, off)],
-            [&[5], &[3], &[2], &[3, 3]],
-        );
+fn a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_ball_first_answers()
+ {
+    for (build, radius, off) in balls_with_a_bar_through_them_off_their_axis() {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            the_fuse_answers(
+                build,
+                (rule, true),
+                [
+                    32.0 * PI / 3.0,
+                    6.0 * PI * radius * radius,
+                    ball_in_bar(radius, off),
+                ],
+                [&[5], &[3], &[2], &[3, 3]],
+            );
+        }
+    }
+}
+
+/// The shapes of
+/// `a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_ball_first_answers`
+/// taken the other way round. Each loop is an edge with one corner, at its
+/// lowest or highest point. Traced for the union: with the bar first the mesh
+/// walks the loop on the bar's wall, in a frame that puts the corner at
+/// `(−1/2, 0, 0)`, and there the marcher's first trial settles back one
+/// rounding off the corner and is kept as a step of `5.9e-17`. The steps after
+/// it double from there, so two corners of the wall's chart coincide.
+#[test]
+fn a_ball_with_a_bar_through_it_off_its_axis_is_refused_meshing_every_fuse_with_the_bar_first() {
+    for (placement, (build, _, _)) in balls_with_a_bar_through_them_off_their_axis()
+        .into_iter()
+        .enumerate()
+    {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let mut model = a_model();
+            let said = fuse(&mut model, build, rule, false);
+            assert!(
+                matches!(
+                    said,
+                    Err(rcad_topo::Error::CannotMeshAFace {
+                        why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
+                        ..
+                    })
+                ),
+                "placement {placement}, {rule:?} (bar first): {said:?}"
+            );
+        }
     }
 }
 
@@ -469,22 +484,33 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
     );
 }
 
-fn every_fuse_answers(build: Pair, [first, second, shared]: [f64; 3], faces: [&[usize]; 4]) {
-    for (rule, first_first) in six_fuses() {
-        let (volume, faces) = match (rule, first_first) {
-            (Rule::Union, _) => (first + second - shared, faces[0]),
-            (Rule::Intersection, _) => (shared, faces[1]),
-            (Rule::Difference, true) => (first - shared, faces[2]),
-            (Rule::Difference, false) => (second - shared, faces[3]),
-            (other, _) => panic!("{other:?} is not one of the six"),
-        };
-        let mut model = a_model();
-        let said = fuse(&mut model, build, rule, first_first);
-        let what = format!(
-            "{rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}"
-        );
-        answers(&mut model, said, volume, faces, &what);
+fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
+    for one in six_fuses() {
+        the_fuse_answers(build, one, volumes, faces);
     }
+}
+
+/// The fuse `rule` of `build`'s two solids, the first first or not, answers
+/// with the volume and faces `every_fuse_answers` reads for it.
+fn the_fuse_answers(
+    build: Pair,
+    (rule, first_first): (Rule, bool),
+    [first, second, shared]: [f64; 3],
+    faces: [&[usize]; 4],
+) {
+    let (volume, faces) = match (rule, first_first) {
+        (Rule::Union, _) => (first + second - shared, faces[0]),
+        (Rule::Intersection, _) => (shared, faces[1]),
+        (Rule::Difference, true) => (first - shared, faces[2]),
+        (Rule::Difference, false) => (second - shared, faces[3]),
+        (other, _) => panic!("{other:?} is not one of the six"),
+    };
+    let mut model = a_model();
+    let said = fuse(&mut model, build, rule, first_first);
+    let what = format!(
+        "{rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}"
+    );
+    answers(&mut model, said, volume, faces, &what);
 }
 
 fn every_fuse_is_refused_where_two_loops_meet(build: Pair) {
@@ -701,6 +727,36 @@ fn a_half_ring_cut_by_a_round_plate(model: &mut Model) -> [SolidKey; 2] {
     [ring, a_bar(model, 6.0, [0.0, 0.0, -2.0], 2.5)]
 }
 
+/// The four balls with a bar through them off their axis, each with the bar's
+/// radius and how far its axis is off the ball's centre.
+fn balls_with_a_bar_through_them_off_their_axis() -> [(Pair, f64, f64); 4] {
+    [
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.5, 0.0]),
+            1.0,
+            0.5,
+        ),
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.0, 0.5]),
+            1.0,
+            0.5,
+        ),
+        (
+            |model| a_ball_and_a_bar(model, &Isometry::identity(), 0.5, [0.0, 1.0]),
+            0.5,
+            1.0,
+        ),
+        (
+            |model| {
+                let turned = Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z");
+                a_ball_and_a_bar(model, &turned, 1.0, [0.5, 0.0])
+            },
+            1.0,
+            0.5,
+        ),
+    ]
+}
+
 /// A ball of radius 2, placed by `ball`, and a bar of `radius` up `z` from −3
 /// to 3 at `at`.
 fn a_ball_and_a_bar(
@@ -775,10 +831,13 @@ fn bar_through_bar(big: f64, small: f64, off: f64) -> f64 {
 ///
 /// A midpoint rule of 1000 steps out from the axis by 64 round it. The
 /// integrand is smooth and periodic round the axis, so 64 steps there already
-/// agree with 16 to `1e-14`; out from the axis the error falls as the square
+/// agree with 16 to `1e-12`; out from the axis the error falls as the square
 /// of the step, and on the axis 1000 steps leave it `4.4e-7` above the closed
-/// form ([`the_ball_in_a_bar_on_its_axis_is_the_closed_form`]). The bar must lie
-/// inside the ball's equator, `radius + off < 2`.
+/// form ([`the_ball_in_a_bar_on_its_axis_is_the_closed_form`]). Off the axis,
+/// read as `4/3` of how far 1000 steps are from 2000, it is `4.9e-7` over for
+/// a bar of 1 at `1/2` and `3.6e-8` for a bar of `1/2` at 1: far below the
+/// `0.12` or more that a mesh of `0.01` may miss these volumes by. The bar
+/// must lie inside the ball's equator, `radius + off < 2`.
 fn ball_in_bar(radius: f64, off: f64) -> f64 {
     let (out, round) = (1000, 64);
     let (step_out, step_round) = (radius / f64::from(out), 2.0 * PI / f64::from(round));
@@ -792,77 +851,4 @@ fn ball_in_bar(radius: f64, off: f64) -> f64 {
         }
     }
     sum * step_out * step_round
-}
-
-#[test]
-fn probe_q1554_every_answer() {
-    let ball = 32.0 * PI / 3.0;
-    let placements: [(Pair, f64, f64); 4] = [
-        (
-            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.5, 0.0]),
-            1.0,
-            0.5,
-        ),
-        (
-            |model| a_ball_and_a_bar(model, &Isometry::identity(), 1.0, [0.0, 0.5]),
-            1.0,
-            0.5,
-        ),
-        (
-            |model| a_ball_and_a_bar(model, &Isometry::identity(), 0.5, [0.0, 1.0]),
-            0.5,
-            1.0,
-        ),
-        (
-            |model| {
-                let turned = Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z");
-                a_ball_and_a_bar(model, &turned, 1.0, [0.5, 0.0])
-            },
-            1.0,
-            0.5,
-        ),
-    ];
-    for (index, (build, radius, off)) in placements.into_iter().enumerate() {
-        let [first, second, shared] = [ball, 6.0 * PI * radius * radius, ball_in_bar(radius, off)];
-        for (rule, first_first) in six_fuses() {
-            let volume = match (rule, first_first) {
-                (Rule::Union, _) => first + second - shared,
-                (Rule::Intersection, _) => shared,
-                (Rule::Difference, true) => first - shared,
-                (Rule::Difference, false) => second - shared,
-                (other, _) => panic!("{other:?}"),
-            };
-            let mut model = a_model();
-            let said = fuse(&mut model, build, rule, first_first);
-            let policy = Policy::certified();
-            match said {
-                Err(why) => eprintln!("PROBE {index} {rule:?} {first_first}: refused {why:?}"),
-                Ok(solids) => {
-                    let valid = model.validate(&policy, &mut ProvenanceLog::new());
-                    let mut counted = Vec::new();
-                    let (mut measured, mut error) = (0.0, 0.0);
-                    for solid in solids {
-                        let view = model.solid(solid).expect("a solid");
-                        counted.push(view.faces().count());
-                        match view.measure(
-                            Deflection::of(0.01).expect("a length"),
-                            &policy,
-                            &mut ProvenanceLog::new(),
-                        ) {
-                            Ok(measure) => {
-                                measured += measure.volume();
-                                error += measure.volume_error();
-                            }
-                            Err(why) => eprintln!("PROBE {index} measure refused {why:?}"),
-                        }
-                    }
-                    eprintln!(
-                        "PROBE {index} {rule:?} {first_first}: faces {counted:?} valid {} measured {measured} want {volume} off {} error {error}",
-                        valid.is_ok(),
-                        (measured - volume).abs()
-                    );
-                }
-            }
-        }
-    }
 }
