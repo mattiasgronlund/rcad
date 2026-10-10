@@ -2481,15 +2481,9 @@ impl BuildingAMesh {
         // rather than assumed, and the two are brought into one longitude frame
         // before anything is measured against a longitude.
         //
-        // **Each is walked from a corner off the poles**, as a cap is
-        // ([`starting_off_the_poles`]). A ring over a pole leaves the pole
-        // down a meridian, and a loop that starts on the pole has the corner at
-        // the foot of that meridian a whole turn on, at its far end, where
-        // [`nearest_longitude`] does not look for it. The ball less the blocks
-        // `x ≥ 0, z ≥ 8` and `x ≥ 0, z ≤ 2` has one round each pole, its
-        // first cut ran from `(0, 4, 2)` up the wall to the north pole through
-        // the corner `(0, 4, 8)` it should have ended at, and the mesh was
-        // refused `LoopsTouch` there (Q1590).
+        // **Each is walked from a corner off the poles that no side along a
+        // meridian ends at** ([`starting_where_no_meridian_side_ends`]), since
+        // the first cut leaves from that corner.
         let pinch = match chart {
             Chart::Upright => stored.where_it_pinches(),
             Chart::OnItsSide => None,
@@ -2500,10 +2494,7 @@ impl BuildingAMesh {
             } else {
                 around.the_other_way()
             };
-            match pinch {
-                Some(pinch) => starting_off_the_poles(&facing, pinch),
-                None => facing,
-            }
+            starting_where_no_meridian_side_ends(&facing, pinch, whole_turn)
         };
         let up = facing_up(outer);
         let down = in_the_same_turn_as(&facing_up(hole), &up, whole_turn);
@@ -2512,7 +2503,6 @@ impl BuildingAMesh {
         let quarters: [f64; 4] = [0, 1, 2, 3].map(|step| from + f64::from(step) * whole_turn / 4.0);
         let (up, down) =
             with_a_corner_where_a_pole_side_of_either_passes(up, down, quarters, pinch, whole_turn);
-        let along_the_top = quarters.map(|at| nearest_longitude(&up, at, pinch));
         // **Each quarter is brought into the bottom loop's own turn first.**
         // Both loops run a whole turn, but each starts wherever the pair that
         // cut it started, so a quarter taken off the top can land outside the
@@ -2530,8 +2520,16 @@ impl BuildingAMesh {
         // the bottom at all and the next spanned half the turn — which is what
         // [`BuildingAMesh::cut_off_what_goes_too_far_round`]'s own argument says
         // no patch may do.
-        let along_the_bottom = quarters
-            .map(|at| nearest_longitude(&down, in_the_turn_of(&down, at, whole_turn), pinch));
+        let picked = quarters.map(|at| {
+            the_two_nearest_across(
+                &up,
+                &nearest_longitude(&up, at),
+                &down,
+                &nearest_longitude(&down, in_the_turn_of(&down, at, whole_turn)),
+            )
+        });
+        let along_the_top = picked.map(|[top, _]| top);
+        let along_the_bottom = picked.map(|[_, bottom]| bottom);
 
         let mut ends = Vec::with_capacity(4);
         for step in 0..4 {
@@ -4195,8 +4193,6 @@ fn runs_up(around: &WalkedLoop) -> bool {
 /// far pole that leaves from the pole corner runs along the rim's own first
 /// step, and the patches either side of that stretch fold onto each other.
 /// Starting the quarters at a corner off the pole keeps every cut off the rim.
-/// The corners before it move on a whole `climbed`, so the longitudes stay
-/// the walk's own unwrapped ones.
 fn starting_off_the_poles(cap: &WalkedLoop, pinch: f64) -> WalkedLoop {
     let Some(start) = cap
         .corners
@@ -4205,18 +4201,68 @@ fn starting_off_the_poles(cap: &WalkedLoop, pinch: f64) -> WalkedLoop {
     else {
         return cap.clone();
     };
-    let order = (start..cap.corners.len()).chain(0..start);
+    walked_from(cap, start)
+}
+
+/// One of a ring's two loops, walked from its first corner that is off the
+/// poles at `pinch` and that no side along a meridian ends at.
+///
+/// **Its first corner is where the first cut across the ring leaves from**,
+/// at the quarter `0`, and every corner the loop reaches straight down a
+/// meridian shares that corner's longitude. Started on such a corner, the
+/// corners above it on the same meridian come first and the foot of the side
+/// comes a whole turn on, at the far end, so the cut leaves from part way up
+/// the side and runs down along the rest of it. The ball of radius 5 at
+/// `(0, 0, 5)` less the blocks `x ≥ 0, z ≥ 8` and `x ≥ 0, z ≤ 2` keeps the
+/// band between two rings, each running over a pole and down the wall `x = 0`:
+/// started on its pole the north ring's first cut ran up the wall through
+/// `(0, 4, 8)`, and started just off it, part way down the wall, the cut ran
+/// down it, and the mesh was refused `LoopsTouch` either way (Q1590).
+///
+/// A side along a meridian is told by the step to its end gaining no
+/// longitude, read the short way round as the walk read its own steps, so
+/// that the side from the last corner to the first, which the loop's
+/// unwrapped longitudes put a whole turn apart, is told the same way. A loop
+/// with no such corner is walked from where it was, and a loop whose first
+/// corner is one is walked from it, as it always was.
+fn starting_where_no_meridian_side_ends(
+    around: &WalkedLoop,
+    pinch: Option<f64>,
+    whole: f64,
+) -> WalkedLoop {
+    let count = around.corners.len();
+    let off_the_poles = |at: usize| {
+        let latitude = around.corners[at][1];
+        pinch.is_none_or(|pinch| latitude != pinch && latitude != -pinch)
+    };
+    let reached_along_a_meridian = |at: usize| {
+        let before = around.corners[(at + count - 1) % count][0];
+        the_short_way_round(around.corners[at][0] - before, whole) == 0.0
+    };
+    let Some(start) = (0..count).find(|&at| off_the_poles(at) && !reached_along_a_meridian(at))
+    else {
+        return around.clone();
+    };
+    walked_from(around, start)
+}
+
+/// The same loop, walked from its corner `start`.
+///
+/// The corners before it move on a whole `climbed`, so the longitudes stay
+/// the walk's own unwrapped ones.
+fn walked_from(around: &WalkedLoop, start: usize) -> WalkedLoop {
+    let order = (start..around.corners.len()).chain(0..start);
     WalkedLoop {
         corners: order
             .clone()
             .map(|at| {
-                let [longitude, latitude] = cap.corners[at];
-                let on = if at < start { cap.climbed } else { 0.0 };
+                let [longitude, latitude] = around.corners[at];
+                let on = if at < start { around.climbed } else { 0.0 };
                 [longitude + on, latitude]
             })
             .collect(),
-        points: order.map(|at| cap.points[at]).collect(),
-        ..cap.clone()
+        points: order.map(|at| around.points[at]).collect(),
+        ..around.clone()
     }
 }
 
@@ -4758,35 +4804,59 @@ fn nearest_corner_off_the_rims_poles(
     .expect("a walked loop has a corner, and a quarter still to place has one left")
 }
 
-/// Which corner of a loop sits nearest a longitude.
+/// Of the corners a ring's top loop has at `top` and its bottom loop at
+/// `bottom`, the two nearest each other along the second coordinate: where a
+/// cut across the ring runs between.
+///
+/// **A side along a meridian is many corners at one longitude**, all as near
+/// a quarter as each other, and a cut from any but the end facing the other
+/// loop runs down along the rest of the side. The two loops of a ring do not
+/// touch, so on one meridian the corners of one lie all to one side of the
+/// other's, and the two nearest each other are the two facing ends. The ball
+/// of radius 5 at `(0, 0, 5)` less the blocks `x ≥ 0, z ≥ 8` and `x ≥ 0,
+/// z ≤ 2` keeps the band between two rings that each run down the wall
+/// `x = 0`, and of the corners down the wall at `y = −4` the first one off the
+/// pole was taken, a corner just below it: the mesh was refused `LoopsTouch`
+/// at `(0, −0.54, 9.97)` (Q1590).
+///
+/// **The same keeps a cut off a pole**: the end of a pole side shares its
+/// longitude with the corner the loop leaves the pole down to, the pole is the
+/// end of the two farthest from the other loop, and a cut that lands on the
+/// pole end from the far side of that meridian crosses the loop's own step
+/// down it. A ring whose hole runs through a ball's pole and starts there had
+/// its first quarter on that end, and the patch was refused
+/// `BoundaryCrossesItself`
+/// (`a_half_ball_holed_through_its_pole_and_capped_on_the_same_ball.rs`).
+fn the_two_nearest_across(
+    up: &WalkedLoop,
+    top: &[usize],
+    down: &WalkedLoop,
+    bottom: &[usize],
+) -> [usize; 2] {
+    let apart = |[one, other]: [usize; 2]| (up.corners[one][1] - down.corners[other][1]).abs();
+    top.iter()
+        .flat_map(|&one| bottom.iter().map(move |&other| [one, other]))
+        .min_by(|&one, &other| apart(one).total_cmp(&apart(other)))
+        .expect("a walked loop has a corner")
+}
+
+/// Which corners of a loop sit nearest a longitude: every one as near as the
+/// nearest, in the order the loop walks them.
 ///
 /// **Not counting whole turns as no distance at all**, which is the one thing a
 /// chain that goes right round makes wrong: its first corner and its last are a
 /// whole turn apart and would be equally near everything, so which of the two
 /// came back would decide whether the stretch after it goes a quarter of the way
 /// round or three quarters.
-///
-/// **Of two as near, the one off the pole at `pinch`**, for the reason
-/// [`nearest_corner_off_the_rims_poles`] gives a cap: the end of a pole side
-/// shares its longitude with the corner the loop leaves the pole down to, and a
-/// cut that lands on the pole end from the far side of that meridian crosses
-/// the loop's own step down it. A ring whose hole runs through a ball's pole
-/// and starts there had its first quarter on that end, and the patch was
-/// refused `BoundaryCrossesItself`
-/// (`a_half_ball_holed_through_its_pole_and_capped_on_the_same_ball.rs`).
-fn nearest_longitude(around: &WalkedLoop, at: f64, pinch: Option<f64>) -> usize {
-    let on_a_pole = |which: usize| {
-        let latitude = around.corners[which][1];
-        pinch.is_some_and(|pinch| latitude == pinch || latitude == -pinch)
-    };
+fn nearest_longitude(around: &WalkedLoop, at: f64) -> Vec<usize> {
+    let away = |which: usize| (around.corners[which][0] - at).abs();
+    let nearest = (0..around.corners.len())
+        .map(away)
+        .min_by(f64::total_cmp)
+        .expect("a walked loop has a corner");
     (0..around.corners.len())
-        .min_by(|&one, &other| {
-            let away = |which: usize| (around.corners[which][0] - at).abs();
-            away(one)
-                .total_cmp(&away(other))
-                .then(on_a_pole(one).cmp(&on_a_pole(other)))
-        })
-        .expect("a walked loop has a corner")
+        .filter(|&which| away(which) == nearest)
+        .collect()
 }
 
 /// A longitude moved by whole turns into the turn a loop's own corners run in,
