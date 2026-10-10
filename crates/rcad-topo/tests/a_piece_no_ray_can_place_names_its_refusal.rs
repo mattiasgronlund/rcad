@@ -566,6 +566,252 @@ fn q1581_probe() {
     }
 }
 
+#[test]
+fn q1581_seamless() {
+    let a_rounding = 8.881_784_197_001_252e-16;
+    let moves: [(&str, Isometry); 6] = [
+        ("same", Isometry::identity()),
+        ("up a rounding", at_height(a_rounding)),
+        ("down a rounding", at_height(-a_rounding)),
+        ("up 1e-13", at_height(1e-13)),
+        ("down 1e-13", at_height(-1e-13)),
+        (
+            "off axis 1e-13",
+            Isometry::translation(Vector::new(1e-13, 0.0, 0.0)).expect("a shift"),
+        ),
+    ];
+    for walk in [
+        [Orientation::Forward, Orientation::Forward],
+        [Orientation::Forward, Orientation::Reversed],
+        [Orientation::Reversed, Orientation::Forward],
+        [Orientation::Reversed, Orientation::Reversed],
+    ] {
+        let mut model = a_model();
+        match a_ball_joined_to_a_ring(&mut model, walk) {
+            Ok(key) => {
+                let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                eprintln!("Q1581 R ball walk {walk:?}: built {key:?}, validate {valid:?}");
+            }
+            Err(why) => eprintln!("Q1581 R ball walk {walk:?}: refused {why:?}"),
+        }
+        let mut model = a_model();
+        match a_frustum_joined_to_a_ring(&mut model, walk) {
+            Ok(key) => {
+                let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                eprintln!("Q1581 R cone walk {walk:?}: built {key:?}, validate {valid:?}");
+            }
+            Err(why) => eprintln!("Q1581 R cone walk {walk:?}: refused {why:?}"),
+        }
+    }
+    for flipped in [false] {
+        let mut model = a_model();
+        match a_ball_segment(&mut model, flipped) {
+            Ok(key) => {
+                let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                eprintln!("Q1581 S ball flipped {flipped}: built {key:?}, validate {valid:?}");
+            }
+            Err(why) => eprintln!("Q1581 S ball flipped {flipped}: refused {why:?}"),
+        }
+        let mut model = a_model();
+        match a_seamless_frustum(&mut model, flipped) {
+            Ok(key) => {
+                let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                eprintln!("Q1581 S cone flipped {flipped}: built {key:?}, validate {valid:?}");
+            }
+            Err(why) => eprintln!("Q1581 S cone flipped {flipped}: refused {why:?}"),
+        }
+    }
+    let flipped = false;
+    if std::env::var("Q1581_FUSE").is_err() {
+        return;
+    }
+    let ball_walk = [Orientation::Forward, Orientation::Reversed];
+    let cone_walk = [Orientation::Forward, Orientation::Reversed];
+    for (kind, walk, ring_solid, other) in [
+        (
+            "ball",
+            ball_walk,
+            a_ball_joined_to_a_ring as fn(&mut Model, [Orientation; 2]) -> Result<SolidKey, Error>,
+            a_ball_segment as fn(&mut Model, bool) -> Result<SolidKey, Error>,
+        ),
+        (
+            "cone",
+            cone_walk,
+            a_frustum_joined_to_a_ring,
+            a_seamless_frustum,
+        ),
+    ] {
+        for (label, moved) in &moves {
+            for rule in EVERY_RULE {
+                for ring_first in [true, false] {
+                    let what = format!("Q1581 {kind} S {label} {rule:?} ring first {ring_first}");
+                    let mut model = a_model();
+                    let ring = ring_solid(&mut model, walk).expect("R");
+                    let s = other(&mut model, flipped).expect("S");
+                    model.place_solid(s, moved).expect("this model");
+                    eprintln!("{what}: START");
+                    let got = fused_or_refused(&mut model, ring, s, rule, ring_first);
+                    eprintln!("{what}: {}", said_of(&got));
+                }
+            }
+        }
+    }
+    let ulp_5 = 8.881_784_197_001_252e-16;
+    for radius in [5.0 + ulp_5, 5.0 - ulp_5, 5.0 + 1e-13, 5.0 - 1e-13] {
+        for rule in EVERY_RULE {
+            for ring_first in [true, false] {
+                let what = format!("Q1581 whole ball {radius:e} {rule:?} ring first {ring_first}");
+                let mut model = a_model();
+                let ring = a_ball_joined_to_a_ring(&mut model, ball_walk).expect("R");
+                let ball = model
+                    .add_ball(radius, &Isometry::identity())
+                    .expect("a ball");
+                let got = fused_or_refused(&mut model, ring, ball, rule, ring_first);
+                eprintln!("{what}: {}", said_of(&got));
+            }
+        }
+    }
+}
+
+/// A ball of 5 about the origin joined to a ring of 6 round a tube of 5 about
+/// `z`: they cross in the circles through `(3, 0, ±4)`, both exact.
+fn a_ball_joined_to_a_ring(model: &mut Model, walk: [Orientation; 2]) -> Result<SolidKey, Error> {
+    let ball = Surface::Sphere(rcad_geom::Sphere::new(Point::origin(), 5.0).expect("a ball"));
+    let ring = Surface::Torus(Torus::new(Axis::z(), 6.0, 5.0).expect("a ring"));
+    a_solid_of_revolution_walked(
+        model,
+        &[(3.0, -4.0), (3.0, 4.0)],
+        &[ball.clone(), ring, ball],
+        &walk,
+    )
+}
+
+/// The cone `ρ = 9 − z` from `z = −6` to `7`, closed by two flat faces, joined
+/// to a ring of 10 round a tube of 5 about `z`: the cone crosses the ring in
+/// the circles through `(13, 0, −4)` and `(6, 0, 3)`.
+fn a_frustum_joined_to_a_ring(
+    model: &mut Model,
+    walk: [Orientation; 2],
+) -> Result<SolidKey, Error> {
+    let cone = the_cone_down_from_9();
+    let ring = Surface::Torus(Torus::new(Axis::z(), 10.0, 5.0).expect("a ring"));
+    a_solid_of_revolution_walked(
+        model,
+        &[(15.0, -6.0), (13.0, -4.0), (6.0, 3.0), (2.0, 7.0)],
+        &[
+            flat_at(-6.0, -1.0),
+            cone.clone(),
+            ring,
+            cone,
+            flat_at(7.0, 1.0),
+        ],
+        &[Orientation::Forward, walk[0], walk[1], Orientation::Forward],
+    )
+}
+
+fn the_cone_down_from_9() -> Surface {
+    Surface::Cone(
+        rcad_geom::Cone::new(
+            Axis::new(Point::new(0.0, 0.0, 9.0), Vector::new(0.0, 0.0, -1.0)).expect("an axis"),
+            1.0,
+        )
+        .expect("a cone"),
+    )
+}
+
+/// The ball of 5 about the origin above `z = 3`.
+fn a_ball_segment(model: &mut Model, flipped: bool) -> Result<SolidKey, Error> {
+    let ball = Surface::Sphere(rcad_geom::Sphere::new(Point::origin(), 5.0).expect("a ball"));
+    a_solid_of_revolution(model, &[(4.0, 3.0)], &[flat_at(3.0, -1.0), ball], flipped)
+}
+
+/// The cone `ρ = 9 − z` from `z = 2` to `5`.
+fn a_seamless_frustum(model: &mut Model, flipped: bool) -> Result<SolidKey, Error> {
+    a_solid_of_revolution(
+        model,
+        &[(7.0, 2.0), (4.0, 5.0)],
+        &[
+            flat_at(2.0, -1.0),
+            the_cone_down_from_9(),
+            flat_at(5.0, 1.0),
+        ],
+        flipped,
+    )
+}
+
+fn flat_at(z: f64, facing: f64) -> Surface {
+    Surface::Plane(
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, facing))
+            .expect("a unit normal"),
+    )
+}
+
+/// A solid of revolution about `z` with no seam: `corners` are its profile's
+/// corners `(ρ, z)` from the bottom of the axis to the top, each one circle,
+/// and `surfaces` the faces between them, one more than the corners.
+fn a_solid_of_revolution(
+    model: &mut Model,
+    corners: &[(f64, f64)],
+    surfaces: &[Surface],
+    flipped: bool,
+) -> Result<SolidKey, Error> {
+    let turns: Vec<Orientation> = corners
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            let by_a_ring = matches!(surfaces[index], Surface::Torus(_))
+                || matches!(surfaces[index + 1], Surface::Torus(_));
+            if by_a_ring && flipped {
+                Orientation::Reversed
+            } else {
+                Orientation::Forward
+            }
+        })
+        .collect();
+    a_solid_of_revolution_walked(model, corners, surfaces, &turns)
+}
+
+fn a_solid_of_revolution_walked(
+    model: &mut Model,
+    corners: &[(f64, f64)],
+    surfaces: &[Surface],
+    turns: &[Orientation],
+) -> Result<SolidKey, Error> {
+    let mut builder = SolidBuilder::new();
+    let mut circles = Vec::with_capacity(corners.len());
+    for (index, &(rho, z)) in corners.iter().enumerate() {
+        let corner = builder.add_vertex(Point::new(rho, 0.0, z))?;
+        let by_a_ring = matches!(surfaces[index], Surface::Torus(_))
+            || matches!(surfaces[index + 1], Surface::Torus(_));
+        let run = if by_a_ring {
+            EdgeRun::RightRoundWhereItCrosses {
+                and: flat_at(z, 1.0),
+            }
+        } else {
+            EdgeRun::RightRoundWhereItsFacesCross
+        };
+        circles.push(builder.add_edge(corner, corner, run)?);
+    }
+    let mut shell = Vec::with_capacity(surfaces.len());
+    for (index, surface) in surfaces.iter().enumerate() {
+        let mut wires = Vec::with_capacity(2);
+        if index > 0 {
+            let coedge = builder.add_coedge(circles[index - 1], turns[index - 1])?;
+            wires.push(builder.add_wire(&[DraftStep::Along(coedge)])?);
+        }
+        if index < circles.len() {
+            let coedge = builder.add_coedge(circles[index], turns[index].reversed())?;
+            wires.push(builder.add_wire(&[DraftStep::Along(coedge)])?);
+        }
+        shell.push((
+            builder.add_face(surface.clone(), &wires)?,
+            Orientation::Forward,
+        ));
+    }
+    builder.add_shell(&shell)?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
 fn said_of(got: &Result<usize, Error>) -> String {
     match got {
         Ok(solids) => format!("answered {solids} solids"),
