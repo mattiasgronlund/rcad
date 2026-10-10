@@ -109,6 +109,67 @@ Of the 162 KiCad refusals, one changed its name.
 `CannotNameWhichPieceOfACrossingThisIs` to "a torus crossing another curved
 surface is a space curve of degree up to eight".
 
+> **2026-10-10 note (Q558, from Q381): the four are limits, not gaps.** Each
+> of `#338`, `#2313`, `#2331` and `#3043` is a 22.5° mitre between an upright
+> pipe and a 45° pipe, both of radius `0.4`, written
+> `ELLIPSE(…,0.432956880117,0.4)`. The file puts each centre
+> `(±5e-13, 0, −5e-13)` off the leaning pipe's axis. It writes the centre's
+> two offsets from that axis's origin as `0.117157287526` and `0.117157287525`
+> for `#338` and `#2313`, and as `1.168556998188` and `1.168556998189` for
+> `#2331` and `#3043`, where a 45° axis needs them equal. Worked out in exact
+> decimals that is `√2·5e-13` off, **193.34** roundings of `16.471428571429`
+> and **283.90** of `11.217157287525`. The kernel's `f64` gives **193.70**
+> (+0.36) and **283.67** (−0.23). The allowance is 16. Their four siblings,
+> `#1769`, `#2216`, `#2523` and `#2960`, whose centre's `x` is a short decimal
+> (`22.1` or `0.4`), are `0` off, exactly and in `f64`.
+>
+> Each of the four edges runs from a corner where both seams meet,
+> `(x, ±4.8, 10.048600289336)`, to one across the pipe: `#33`, `#870`, `#926`
+> and `#1520`. The file puts that second corner `1.68305e-13` **inside** the
+> leaning pipe, **47.16** and **74.21** spacings of its largest number worked
+> out exactly. The kernel certifies it `Neg`, `1.6706e-13` off at **46.81**
+> spacings and `1.6894e-13` at **74.49**. The siblings' corner across the
+> pipe is outside it instead, certified `Pos` at `5.376e-13`, **107.61**
+> spacings, and `5.395e-13`, **237.89**. That is the file writing twelve
+> decimals, and corners off their faces are Q559's ground, not this note's.
+>
+> **Why they are limits** (§16.10). The reader can change one of three
+> things: the curve it names the run by, the allowance it holds that curve
+> to, or the file's numbers.
+>
+> - *The curve.* Two pipes of one radius whose axes meet cross only in the two
+>   planes through the meeting point that halve the angle between the axes. A
+>   point the same distance from both axes is as far along one as along the
+>   other, so it is on one of those planes. Here the axes meet at
+>   `z = 10.048600289337`, `1e-12` above the file's centre, and neither plane
+>   runs through the centre. A plane taken through the meeting point gives an
+>   ellipse on both pipes, but it misses both corners. The seam corner is
+>   `3.84e-13` off the nearer plane for `#338` and `#2313`, **104.91**
+>   spacings, and `3.82e-13` for `#2331` and `#3043`, **171.17**. The
+>   siblings' is on it. So no curve on both pipes starts where the file
+>   starts the edge, whatever plane is taken, and the corner across the pipe
+>   is off the leaning pipe besides.
+> - *The allowance.* Widening it past 193 or 284 roundings is a tolerance on
+>   the model, which §335.3 rules out. With the drawn check's `16` replaced by
+>   `200` in `a_surface_holds_the_ellipse`, `#338`'s elbow imports, named by
+>   its plane.
+> - *The file's numbers.* Moving a centre or a corner onto the crossing is
+>   healing, which §42.9 leaves to the user.
+>
+> Pinned in `crates/rcad-step/tests/a_mitre_whose_centre_the_file_writes_off_its_pipe.rs`,
+> from a STEP text holding one bend in the file's own decimals.
+> `a_mitre_whose_centre_is_off_its_leaning_pipe_is_named_by_its_pipes` holds
+> that `#338`'s elbow is refused `TheSolidTheFileDescribesIsNotOne`, with its
+> closed mitre walked against its surface (why the run named by two pipes
+> ends there is not traced), and the allowance at 200 fails it.
+> `a_mitre_whose_centre_is_on_both_pipes_is_named_by_its_plane` holds that
+> `#1769`'s elbow is named by its plane, validates, and meshes onto both
+> pipes, and the allowance at `0` fails it, refused
+> `CannotNameWhichPieceOfACrossingThisIs`.
+> `how_far_the_file_writes_each_mitre_off_its_leaning_pipe` holds every kernel
+> figure above for all eight. The exact figures came from a scratch script in
+> exact decimals, not committed.
+
 ### 335.5 Where the two Fujitsu relays stop now
 
 Both are still refused `TheSolidTheFileDescribesIsNotOne { why:
