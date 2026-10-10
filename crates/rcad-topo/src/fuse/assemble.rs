@@ -98,16 +98,21 @@ use super::{
     FaceMeet, MeetPoint, NamesOfOnePoint, Sameness, Scratch, as_exact_as_it_is, gave_up, middle_of,
 };
 
-/// Work out the whole result: its corners, edges, faces, shells and solids.
+/// Work out the result's corners, edges, faces and shells.
+///
+/// **Which shell is a void of which is left to
+/// [`Assembly::nest_the_shells`]**, which the fuse asks after
+/// [`Assembly::check_dynamic_range`]: nesting measures each shell's volume,
+/// and a sliver too thin for `f64` can measure as a shell enclosing nothing,
+/// which would hide the limit the range check names (`docs/decisions.md`
+/// §87.3).
 ///
 /// Nothing here writes to `model`.
 ///
 /// # Errors
 ///
 /// [`Error::ResultIsNotManifold`] when an edge of the result would have other
-/// than two faces along it, [`Error::Invalid`] when a shell encloses no space or
-/// a void has nothing round it, [`Error::Undecidable`] when one shell could not
-/// be placed inside or outside another, and
+/// than two faces along it,
 /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's one
 /// corner is a pole of the surface it is drawn on, and
 /// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
@@ -123,7 +128,6 @@ pub(crate) fn assemble(
     assembly.join_up_what_is_one_face(policy, log)?;
     assembly.runs = assembly.how_each_edge_runs()?;
     assembly.shells = assembly.group_into_shells()?;
-    assembly.solids = assembly.nest_the_shells(model, policy, log)?;
     Ok(assembly)
 }
 
@@ -532,7 +536,8 @@ impl Assembly {
     /// keys-resolve pass back.
     ///
     /// The thirteenth, the coordinate range, is the one this must not ask.
-    /// [`Assembly::check_dynamic_range`] asks it before either write and only
+    /// [`Assembly::check_dynamic_range`] asks it before either write, before
+    /// the shells are even nested, and only
     /// behind `the_inputs_fit_in_f64`, so that a caller whose own solids sit
     /// further apart than `f64` can resolve still gets an answer the arithmetic
     /// reached exactly. A fold over a model holding only the answer would put
@@ -567,6 +572,10 @@ impl Assembly {
     ///
     /// # Panics
     ///
+    /// If the shells were not nested first ([`Assembly::nest_the_shells`]),
+    /// before anything is written: an answer with no solids writes nothing,
+    /// which would read as an empty answer and not as this crate's mistake.
+    ///
     /// If the answer that swept clean does not survive the second write, or if
     /// writing it made the model's worst approximation grow past what this fuse
     /// accounted for. **The operation is atomic up to those two, and no
@@ -583,6 +592,14 @@ impl Assembly {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Written> {
+        assert_eq!(
+            self.solids
+                .iter()
+                .map(|lump| 1 + lump.voids.len())
+                .sum::<usize>(),
+            self.shells.len(),
+            "every shell is placed in one solid before the answer is written"
+        );
         let mut throwaway = Model::new(model.scale());
         let rehearsal = self.write_into(&mut throwaway, &self.solids, &self.runs);
         self.tag_everything_it_built(&mut throwaway, &rehearsal, inherited);
@@ -3272,14 +3289,14 @@ impl Assembly {
     /// met a face of another shell that nobody can follow.
     /// [`Error::Undecidable`] when no point on a shell could be placed inside or
     /// outside another for any other reason.
-    fn nest_the_shells(
-        &self,
+    pub(crate) fn nest_the_shells(
+        &mut self,
         model: &Model,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> Result<Vec<Lump>> {
+    ) -> Result<()> {
         if self.shells.is_empty() {
-            return Ok(Vec::new());
+            return Ok(());
         }
         let one_each: Vec<Lump> = (0..self.shells.len())
             .map(|shell| Lump {
@@ -3329,7 +3346,8 @@ impl Assembly {
             };
             lumps[holder].voids.push(hollow);
         }
-        Ok(lumps)
+        self.solids = lumps;
+        Ok(())
     }
 
     /// Whether a point on `hollow` lies inside `outer`.
@@ -9282,8 +9300,11 @@ mod tests {
             .expect("two overlapping cubes split each other");
         let chosen =
             choose(&busy, &scratch, Rule::Union, &policy, &mut log).expect("a union of two cubes");
-        let assembly =
+        let mut assembly =
             assemble(&busy, &scratch, &chosen, &policy, &mut log).expect("an answer to write");
+        assembly
+            .nest_the_shells(&busy, &policy, &mut log)
+            .expect("one shell, which encloses space");
 
         let mut empty = Model::new(scale);
         let into_empty = assembly
