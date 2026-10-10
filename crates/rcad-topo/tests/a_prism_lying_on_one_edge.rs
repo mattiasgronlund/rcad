@@ -48,7 +48,7 @@
 //! **Turned, the edge can lie on the top exactly and the union still be
 //! refused** (queue row Q1281). A wedge, the triangle `(0, 0)`, `(1, √3)`,
 //! `(0, √3)`, its upright wall rising from its edge and its other wall leaning
-//! with a normal whose `y` is exactly a half, lies on the block's top, the two
+//! with a normal whose `y` is exactly minus a half, lies on the block's top, the two
 //! turned about `x` together. Turning rounds every plane but keeps the edge on
 //! the top. The union was refused `ResultIsNotManifold { count: 4 }` at 14 of
 //! 24 turns: the parting asked a corner at an end of the edge which side of the
@@ -89,8 +89,8 @@ const THE_BLOCKS_OUTLINE: [[f64; 2]; 4] = [[-4.0, -3.0], [4.0, -3.0], [4.0, 0.0]
 const ROOT_THREE: f64 = 1.732_050_807_568_877_2;
 
 /// A wedge with its edge at the origin, an upright wall `x = 0` rising from
-/// it, and a wall leaning at sixty degrees whose normal has a `y` of exactly a
-/// half: its triangle is `(0, 0)`, `(1, √3)`, `(0, √3)`.
+/// it, and a wall leaning at sixty degrees whose normal has a `y` of exactly
+/// minus a half: its triangle is `(0, 0)`, `(1, √3)`, `(0, √3)`.
 const WEDGE: [[f64; 2]; 3] = [[0.0, 0.0], [1.0, ROOT_THREE], [0.0, ROOT_THREE]];
 
 /// How far the block and the wedge are turned about `x`, in fortieths of a
@@ -298,9 +298,10 @@ fn a_wedge_lying_on_its_edge_on_a_turned_blocks_top_answers_every_rule_both_ways
 ///
 /// The turn rounds every plane but keeps them meeting. The edge is where the
 /// upright wall `x = 0` meets the leaning wall, and the leaning wall's normal
-/// has a `y` of exactly a half, so turned, its `y` and `z` are exactly half the
-/// top's, which a turn about `x` leaves with no `x`. Both walls pass through
-/// the origin, as the top does, so on `x = 0` the leaning wall is the top.
+/// has a `y` of exactly minus a half, so turned, its `y` and `z` are exactly
+/// minus half the top's, which a turn about `x` leaves with no `x`. Both walls
+/// pass through the origin, as the top does, so on `x = 0` the leaning wall is
+/// the top turned round.
 #[test]
 fn the_turned_wedges_edge_is_on_the_turned_blocks_top_at_every_turn() {
     assert_eq!(ROOT_THREE, 3.0_f64.sqrt());
@@ -469,7 +470,8 @@ fn the_wall_that_turns_back_is_one_face_reaching_two_below_the_blocks_top() {
 /// **Queue row Q1117 guessed the union refused** `ResultIsNotManifold { count:
 /// 4 }`: `rest_on_the_outer_side_of` in `fuse/assemble.rs` parts the line only
 /// where every corner of the two faces resting along it is on the outer side
-/// of the top, and this wall has two corners at `y = −2`. It answers because
+/// of the top or a corner of the top's own pieces (queue row Q1281), and this
+/// wall has two corners at `y = −2`. It answers because
 /// what is asked is a piece of the wall, never the wall whole, and the fuse
 /// cuts each flat face along the line of every plane that crosses it, its own
 /// solid's and the other's (`fuse/cuts.rs`). That makes the piece along the

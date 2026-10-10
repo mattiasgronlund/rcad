@@ -955,11 +955,12 @@ impl Assembly {
     /// resting there.
     ///
     /// **Except a corner of the two pieces rested on**, the ends of the line
-    /// among them: it lies on their plane by how it was made, as the meet of
-    /// that plane and two others, and asking the plane again asks of the point
-    /// it was written down as, the middle of the box round that meet. On a
-    /// tilted top that middle can sit a rounding on the inner side, and
-    /// `Plane::side_of_point` answers for the point it is handed. A wedge lying
+    /// among them: a corner of a piece of a face lies on that face's surface
+    /// by how it was made, and asking the plane again asks only of the point
+    /// it was written down as, the middle of a box round where three planes
+    /// meet for a corner made that way. On a tilted top that middle can sit a
+    /// rounding on the inner side, and `Plane::side_of_point` answers for the
+    /// point it is handed. A wedge lying
     /// on its edge on a block's top, both turned about `x`, was refused united
     /// at 14 of 24 turns for its corner at an end of the edge read that way
     /// (queue row Q1281, `a_prism_lying_on_one_edge.rs`).
