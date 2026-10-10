@@ -175,8 +175,10 @@ surface is a space curve of degree up to eight".
 Both are still refused `TheSolidTheFileDescribesIsNotOne { why:
 Geometry(CannotNameWhichPieceOfACrossingThisIs) }`, but not at a mitre. All 9
 mitres in each are now named by their plane. The one run still named by a face
-is a **closed `CIRCLE`**: `#2708` in `FTR-F1C` and `#2384` in `FTR-F1A`. It is a
-circle of radius `0.1` round `(10.05, 1.15, 16.4)`, turning about
+is a quarter arc of a `CIRCLE`: edge `#2708` in `FTR-F1C` and `#2384` in
+`FTR-F1A`. (This said a closed `CIRCLE` until Q561, which read the edges: each
+runs a quarter of its circle.) The circle is of radius `0.1` round
+`(10.05, 1.15, 16.4)`, turning about
 `(3.663735981263E-015, 1., 0.)`, where a pin's pipe meets the ball of its own
 radius that rounds its end. The ball holds it exactly. The pipe's axis starts at
 `(10.05, -19.75, 16.4)` and leans the same `3.7e-15`, and `20.9` along it the
@@ -184,3 +186,92 @@ pipe's bound puts the circle `7.64e-14` off. That is **17.42** roundings, just
 past the 16. The run
 is named by the ball, and a ball and a pipe that only touch leave the walk two
 pieces it cannot tell apart. This is the circle arm's row, not this one.
+
+> **2026-10-10 note (Q561, from Q382): the two circles are limits, not gaps.**
+> Edge `#2708` of `FTR-F1C` runs a quarter of circle `#2709`, from
+> `#2404 = (10.05, 1.15, 16.5)` to `#1030 = (10.15, 1.15, 16.4)`, between the
+> pipe `#2723` and the ball `#3414`. `FTR-F1A`'s `#2384` runs `#2385` between
+> the same two points (`#2080`, `#962`) on the pipe `#2399` and the ball
+> `#2998`, all in the same decimals. The pipe's axis starts at
+> `(10.05, -19.75, 16.4)` and leans `3.663735981263e-15` in `x` per unit of
+> `y`, so `20.9` along it, beside the ball's centre, it is off that centre by
+> `7.6572082008e-14` in exact decimals, **17.46** roundings of `19.75`. The
+> kernel's `f64` gives `7.6395e-14`, **17.42** (−0.04). The file centres the
+> circle on the ball, so that is the circle's miss off the pipe.
+>
+> The miss is the centre's and nothing else's. The circle, the ball and the
+> pipe are all written radius `0.1`, so the radius is `0` off on both faces,
+> and the circle turns about the pipe's own direction bit for bit, so the
+> pipe's bound gets `0` from the tilt as well.
+>
+> In exact arithmetic this ball and this pipe do not cross in a circle at all.
+> Take `u` along `x` and `v` along `y` from the ball's centre and call the miss
+> `q`; along the loop below, the lean moves the axis by under `1e-21`, so take
+> it as running along `y` there. Taking the pipe's equation from the ball's leaves
+> `v² = q·(q − 2u)`, so the two meet only where `u ≤ q/2`, in one thin loop
+> over the half of the ball away from `#1030`, running `√(q·(2r − q))` either
+> way along the axis: **1.2375e-7** exactly, **1.2361e-7** from the kernel's
+> `q`. The file's arc runs from `u = 0` at `#2404` to `u = r` at `#1030`, so
+> past its first `q/2` it runs where the faces do not meet at all. The kernel
+> certifies `#1030`
+> inside the pipe, `Neg`, `7.6395e-14` off, **20.98** spacings of `16.4`
+> (**21.03** exactly).
+>
+> **Why they are limits** (§16.10). The ways out, each with the figure that
+> rules it out:
+>
+> - *The radius from a face* rather than the circle's. It is `0.1` on both,
+>   `0` off, so all of the `17.42` is the centre's.
+> - *The centre moved onto the pipe's axis.* The circle is then on the pipe and
+>   off the ball by as much: **20.98** roundings of `16.4` in `f64`, **21.03**
+>   exactly, past the 16 from the other side.
+> - *The centre moved halfway.* Half of each miss, about `8.7` and `10.5`
+>   roundings (halved from the two figures above, not run through the check),
+>   would pass both faces. But a run between two curved faces is named by the
+>   circle's plane, and the plane through the halfway centre with the file's
+>   normal is the file's plane to the last bit: both offsets are
+>   `1.1500000000000368`, since the move is `3.8e-14` along `x` and the
+>   normal's `x` is `3.7e-15`. The walk pairs that plane with the ball (the doc
+>   of `the_surface_that_names_the_curve` in `brep.rs`), which draws the file's
+>   circle, `17.42` off the pipe; paired with the pipe it would draw the circle
+>   `20.98` off the ball. So moving the centre is the allowance widened under
+>   another name.
+> - *The ball and the pipe themselves*, which is what the reader does now.
+>   Their crossing is the thin loop above, not a circle, and it does not reach
+>   `#1030`, which is inside the pipe. The walk cannot say which piece of it
+>   the arc is, and the solid is refused
+>   `CannotNameWhichPieceOfACrossingThisIs`. No curve on both faces ends at
+>   `#1030`, whatever surface the run is named by.
+> - *The allowance.* Widening it past `17.42` roundings is a tolerance on the
+>   model, which §335.3 rules out. With `A_CIRCLE_MAY_MISS_ITS_FACE_BY` at
+>   `18.0` in `brep.rs` the pin end below imports.
+> - *The file's numbers.* Moving the centre or `#1030` onto the crossing is
+>   healing, which §42.9 leaves to the user.
+>
+> Pinned in
+> `crates/rcad-step/tests/a_circle_the_file_puts_off_its_pipe_past_the_allowance.rs`,
+> from a STEP text holding one pin end, the ball, the leaning pipe and a far
+> disc, in the file's own decimals. Its rim is cut in two arcs, at `#2404` and
+> at `(10.05, 1.15, 16.3)` across from it, which are both on both faces;
+> `#1030` is not used, since it is off the pipe.
+> `a_circle_centred_off_its_leaning_pipe_is_named_by_the_ball` holds that this
+> pin end is refused `TheSolidTheFileDescribesIsNotOne { why:
+> Geometry(CannotNameWhichPieceOfACrossingThisIs) }`, as the two files are,
+> and the allowance at `18.0` fails it ("… was read as on the pipe").
+> `a_circle_centred_on_its_upright_pipe_is_named_by_its_plane` is the control
+> from the same file: the same ball on the upright pipe `#2699` with circle
+> `#2692` (`#2368` in `FTR-F1A`), centred on that pipe's axis, imports with
+> its four arc coedges named by the plane `z = 16.4`, and validates.
+> `how_far_the_file_puts_the_circle_off_its_pipe` holds every kernel figure
+> above. The exact figures came from 40-digit decimals in a one-line
+> `python3` script, not committed. Q382's count of the circles where curved
+> faces meet that fail with the radius as written and with the radius from a
+> face, over both corpora, was not reproduced, and is left out.
+>
+> The rim written **closed** goes another way, and no file here writes it so.
+> The reader names it `RightRoundWhereItsFacesCross` by the ball and the pipe,
+> the pin end imports and `Model::validate` passes it, and `measure` then
+> refuses `ACrossingAlongThisEdgeCouldNotBeFollowed { why:
+> CannotFollowACrossingBecauseNoStepStaysOnIt }`, `shortenings: 50`. That
+> crossing is the thin loop, not the rim, so the model holds a curve the file
+> did not draw. Filed as a row of its own.
