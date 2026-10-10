@@ -337,9 +337,7 @@ fn every_point_walked_round_one_of_the_two_ellipses_is_on_both_pipes() {
 /// exactly. It has to lie exactly in the flat the two axes span, and the flat
 /// holds one for two axes in one coordinate plane and for two directions scaled
 /// down from one whole-number triple, like `(1, 2, 2)/3` and `(2, 1, 2)/3`. That
-/// took the count from 32 to 408 of the 1224;
-/// `bores_on_3_4_0_and_3_0_4_are_refused_though_their_four_halves_are_there`
-/// pins one of the rest by name.
+/// took the count from 32 to 408 of the 1224.
 ///
 /// Every point of every piece drawn is on both pipes, so a half the namer names
 /// is a piece of this crossing and not merely something the walker returned.
@@ -415,28 +413,38 @@ fn the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece()
     );
 }
 
-/// Bores on `(3, 4, 0)` and `(3, 0, 4)` through `(11, −3.25, 0.5)` are still
-/// refused, and it is a **gap** (§16.10): the four halves are there, and so are
-/// flat surfaces that pass exactly through where the axes meet.
+/// Bores on `(3, 4, 0)` and `(3, 0, 4)` through `(11, −3.25, 0.5)` are picked
+/// by the stored directions slid a few units in the last place along `(0, 1, −1)`.
 ///
 /// Neither stored direction dots exactly with the middle, and the only
 /// directions with whole-number components from −2 to 2 in the flat the two
 /// span are `(0, 1, −1)` and its multiples. That one reads as far along one
 /// axis as back along the other, so its surface is the plane one ellipse lies
-/// in rather than a surface between its halves. The surfaces exist all the same: worked
-/// out in exact fractions, the first stored direction slid by `14·2⁻⁵³` along
-/// `(0, 1, −1)` still lies exactly in the flat, still leans towards its own
-/// axis, and dots with the middle to exactly `3.999999999999994`; the second,
-/// slid by `8·2⁻⁵³`, dots to exactly `6.9999999999999964`. The namer does not
-/// search for such a facing yet.
+/// in rather than a surface between its halves, and until Q1645 the pair was
+/// refused. Sliding a stored direction along it keeps the facing in the flat,
+/// and each step moves its dot with the middle by `2⁻⁵³·(−3.75)`. Worked out in
+/// exact fractions, apart from the kernel: the first stored direction slid by
+/// `14·2⁻⁵³` still leans towards its own axis and dots with the middle to
+/// exactly `3.999999999999994`, and the second, slid by `8·2⁻⁵³`, to exactly
+/// `6.9999999999999964`. No smaller slide does either. So every picker here is
+/// one of those two surfaces, facing either way, and both pass exactly through
+/// where the axes meet.
 #[test]
-fn bores_on_3_4_0_and_3_0_4_are_refused_though_their_four_halves_are_there() {
+fn bores_on_3_4_0_and_3_0_4_are_picked_by_their_directions_slid_until_they_pass_exactly() {
     let middle = Point::new(11.0, -3.25, 0.5);
     let [one, other] = two_pipes_crossing_at(
         middle,
         [Vector::new(3.0, 4.0, 0.0), Vector::new(3.0, 0.0, 4.0)],
         0.25,
     );
+    let one_unit = f64::EPSILON / 2.0;
+    let slid = |pipe: &Cylinder, steps: f64| {
+        pipe.axis().direction() + Vector::new(0.0, 1.0, -1.0) * (steps * one_unit)
+    };
+    let surfaces = [
+        (slid(&one, 14.0), 3.999_999_999_999_994),
+        (slid(&other, 8.0), 6.999_999_999_999_996_4),
+    ];
 
     for pair in [[one, other], [other, one]] {
         let named = intersect(
@@ -445,10 +453,27 @@ fn bores_on_3_4_0_and_3_0_4_are_refused_though_their_four_halves_are_there() {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         );
-        assert!(
-            matches!(named, Err(Error::CannotNameWhichPieceOfACrossingThisIs)),
-            "no whole-number facing from −2 to 2 leans towards either axis here: {named:?}"
-        );
+        let Ok(SurfaceMeet::Curves(halves)) = named else {
+            panic!("a facing slid until it passes exactly through names the pair: {named:?}")
+        };
+        assert_eq!(halves.len(), 4, "two ellipses, each in two halves");
+        for half in &halves {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = half.run() else {
+                panic!("a half is a piece of where the two pipes cross: {half:?}")
+            };
+            for picker in picked_by {
+                let Picker::InFrontOf(surface) = picker else {
+                    panic!("a half is picked by flat surfaces: {picker:?}")
+                };
+                assert!(
+                    surfaces.iter().any(|&(facing, offset)| {
+                        [(facing, offset), (-facing, -offset)]
+                            .contains(&(surface.normal(), surface.offset()))
+                    }),
+                    "each picker is one of the two slid surfaces: {surface:?}"
+                );
+            }
+        }
     }
 }
 
