@@ -178,7 +178,8 @@ fn direction_from(from: [f64; 3], to: [f64; 3]) -> [f64; 3] {
     way
 }
 
-fn triple(numbers: [f64; 3]) -> String {
+/// Three numbers as Part 21 writes a list of three `REAL`s, each by [`real`].
+pub fn triple(numbers: [f64; 3]) -> String {
     format!(
         "({},{},{})",
         real(numbers[0]),
