@@ -268,6 +268,20 @@ test(a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differ
 > tolerant policy alike. Why the mesh refuses is not traced, and whether the
 > keep moves the new refusal was not run.
 
+> **2026-10-10 note (Q1598): the ball one rounding off a bar's axis answers
+> every fuse.** Q1598 changes only the march, so that a trial which settles
+> back onto its start is tried again shorter rather than kept (§347.9's Q1598
+> note), and with that change alone every fuse of the last row of the table
+> above answers, both ways round and under a certified and a tolerant policy
+> alike. Each answer validates and measures within its mesh's volume error of
+> the closed form of the ball centred on the axis. The row is no longer a
+> refusal, so it drops out of the command above rather than being renamed in
+> it; its test is now
+> `a_ball_one_rounding_off_a_bars_axis_answers_every_fuse_as_one_on_it_does`
+> (Q1599). The ball of 2 with a bar off its axis answers with the bar first
+> too:
+> `a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_bar_first_answers`.
+
 **Two rows a kept product may reach, with nothing to re-run.** `Undecidable`
 out of `face_holds_the_point` asks `intersect`, so the plane-pipe room is on its
 way. *Which piece of a face a hole is in* follows rays along the crossings in

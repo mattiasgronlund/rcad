@@ -523,6 +523,23 @@ moved them.
 >   refused `ACrossingThisCannotBeOrderedAlong` before any cell
 >   (`a_small_ball_on_a_bars_wall_is_refused_before_any_cell`), §34.10's gap.
 
+> **2026-10-10 note (Q1598): both mesh refusals of the Q1554 note answer
+> now.** Q1598 changes only the march: a trial that settles back onto its start
+> is tried again shorter rather than kept (§347.9's Q1598 note). With that
+> change alone, both shapes the Q1554 note left refused `CannotMeshAFace`
+> answer, so that gap is closed:
+>
+> - The ball of 4 one rounding off a bar's axis answers all six fuses both ways
+>   round, under a certified and a tolerant policy alike. Each answer
+>   validates, has the faces of the ball centred on the axis, and measures
+>   within its mesh's volume error of the closed form, and the union and both
+>   differences add up against the ball and the bar measured alone. Its test is
+>   now `a_ball_one_rounding_off_a_bars_axis_answers_every_fuse_as_one_on_it_does`
+>   (Q1599). Which trial had been kept there was not traced.
+> - The ball of 2 with a bar through it off its axis answers all 12 fuses with
+>   the bar first as well:
+>   `a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_bar_first_answers`.
+
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot
 assemble what it cut, before writing anything — `two_balls_that_really_cross_are_refused_by_name`
