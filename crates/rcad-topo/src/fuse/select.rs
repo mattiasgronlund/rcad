@@ -81,13 +81,26 @@
 //! them after the plane where a point was found as well. So every piece one of
 //! them placed before is placed by the same rule now.
 //!
-//! # And last, by the piece of its own face across a side
+//! # Then by the piece of its own face across a side
 //!
 //! A flat piece none of those placed, against solids with only flat faces,
 //! takes the placement of the piece of its own face across one of its straight
 //! sides, where no plane of those solids but the face's own holds that side
 //! ([`by_the_piece_across_a_side`], §365.9). Near most of such a side the
 //! solids' skin is that plane or nothing, so the two pieces sit alike. It is
+//! tried after the sides, the corners and the plane, so a piece any of them
+//! placed is placed as before.
+//!
+//! # And last, by an edge of a face it lies on
+//!
+//! A flat piece that lies on the plane of a flat face `G` of a solid, with a
+//! straight side along an edge `e` of `G`, both ends exactly on `e`, is placed
+//! against that solid by which side of the plane across `e` its material is on
+//! ([`by_an_edge_of_a_face_it_lies_on`], §365.8, Q1606). Near the middle of
+//! that side the solid's skin is `G` and the face across `e` and nothing else:
+//! on `G`'s side the piece lies on `G`, and on the other it is inside or
+//! outside by the outward plane across `e`. This is the one side the piece
+//! across passes over, since the plane across `e` holds both its ends. It is
 //! tried after every other rule, so a piece any of them placed is placed as
 //! before.
 
@@ -150,7 +163,8 @@ pub(crate) struct Chosen {
 /// [`Error::Undecidable`] when a piece could not be placed against the solids
 /// it has to be placed against, and neither a side it shares, nor a corner, nor
 /// a plane ([`by_a_plane`]), nor the piece of its own face across a side
-/// ([`by_the_piece_across_a_side`]) placed it: under [`INSIDE_A_PIECE`] when no
+/// ([`by_the_piece_across_a_side`]), nor an edge of a face it lies on
+/// ([`by_an_edge_of_a_face_it_lies_on`]) placed it: under [`INSIDE_A_PIECE`] when no
 /// point inside it was found, and under [`PLACED_AGAINST_EVERY_SOLID`] when a
 /// point was found and could not be placed, or only a rung of
 /// [`rungs_towards_each_crossing`], [`shorter_steps_across_a_curved_piece`] or
@@ -158,10 +172,10 @@ pub(crate) struct Chosen {
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
 /// a point offered before the rungs was found inside the piece and the ray
 /// from a point tried met a face of a solid that nothing here can follow; no
-/// side, corner, plane or piece across is tried then. The same refusal, naming
-/// the same kind of face, when only a rung was found inside and a rung's ray
-/// met such a face, once no side, corner, plane or piece across has placed the
-/// piece.
+/// side, corner, plane, piece across or edge is tried then. The same refusal,
+/// naming the same kind of face, when only a rung was found inside and a rung's
+/// ray met such a face, once no side, corner, plane, piece across or edge has
+/// placed the piece.
 pub(crate) fn choose(
     model: &Model,
     scratch: &Scratch,
@@ -1029,10 +1043,11 @@ fn the_planes_meeting_at_each_corner_of_a_solid(solid: &BakedSolid) -> Option<Ve
         .collect()
 }
 
-/// The last rule: a flat piece that no point, side it shares, corner or plane
-/// placed takes the placement of the piece of its own face across one of its
-/// straight sides, where no plane of a solid it is placed against holds that
-/// side, unless that plane is the face's own.
+/// The rule before the last: a flat piece that no point, side it shares, corner
+/// or plane placed takes the placement of the piece of its own face across one
+/// of its straight sides, where no plane of a solid it is placed against holds
+/// that side, unless that plane is the face's own. Where it places nothing,
+/// [`by_an_edge_of_a_face_it_lies_on`] is tried last.
 ///
 /// **Why a neighbour can place a piece.** `P` and `P′` are pieces of one flat
 /// face `F` that share a side `s`, and `S` is a solid with only flat faces.

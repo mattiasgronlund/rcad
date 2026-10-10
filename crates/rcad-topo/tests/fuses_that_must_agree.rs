@@ -278,8 +278,9 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// Q1145 it is 27 refused, 6.12%, which leaves this threshold further off than
 /// the drift below argues for; it was moved down with neither. Just before
 /// Q1279 it was 30 of 447, 6.71%, and since Q1279 it is 16 of 447, 3.58%;
-/// the threshold was not moved then either. Since Q1357 it is 13 of 447,
-/// 2.91%, and the threshold stays where it is.
+/// the threshold was not moved then either. Since Q1357 it was 13 of 447,
+/// 2.91%. Just before Q1034 and Q1606 it was 14 of 450, 3.11%, and since them
+/// it is 8 of 450, 1.78%, and the threshold stays where it is.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
 /// drift — 6.1 points is twenty-six fuses, nearly four times the headroom
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
@@ -662,6 +663,13 @@ const A_DRAW_STRAYS_THIS_MANY_SPREADS: f64 = 3.0;
 /// because one fuse is the question this row actually asks: whether the family
 /// still reaches the four-faces-along-one-edge configuration it was built to
 /// reach. Zero is the answer that fires.
+///
+/// **Since Q1034 and Q1606 the shipped corpus gives 5 of 450, 1.1%, from 2.**
+/// The three new ones were refused before: a frame and a comb whose union and
+/// difference, and a comb and an ell whose union, now come back as two solids
+/// touching along a line with four faces along it, which is this row's
+/// configuration (`tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`). Five
+/// is inside one to twelve.
 ///
 /// **So the floor is a count, [`A_SKEW_PAIR_IS_NOT_A_SOLID_AT_LEAST`], and not
 /// a share.** It was written `0.0023`, one fuse in 429, and the number of fuses
@@ -1778,6 +1786,18 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
 /// other rule places now takes the placement of the piece of its own face
 /// across a side that no plane of the other solid holds but the face's own
 /// (`tests/a_sliver_on_the_plane_of_a_face_it_misses.rs`).
+///
+/// **Since Q1034 and Q1606 it is 8 of 450, from 14**: 6 name the point and 2
+/// are the edge too short. The corpus had grown to 450 fuses, and refused 14
+/// of them, 12 for the point, before either change. Each was run alone as
+/// well. Q1034 alone, which names the other sides of a piece where one side's
+/// two ends come out one corner rather than giving up the whole naming, moved
+/// nothing: 14. Q1606's rule alone, a flat piece placed by an edge of a face it
+/// lies on, took it to 11. The two together take it to 8, so three fuses need
+/// both. Of the six fuses no longer refused, three answer and three come back
+/// not a solid, from 2 to 5 in all: each is two solids that touch along a line
+/// (`tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs` pins four pairs of
+/// this corpus, both orders).
 #[test]
 fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
     let tally = measured(a_skew_pair(), |configuration, tally| {
@@ -1847,7 +1867,10 @@ fn how_often_a_certified_fuse_of_a_pair_leaning_the_same_way_refuses() {
 ///
 /// **Since Q1279 a fuse here may be refused for an answer with an edge too
 /// short beside its coordinates**, counted by name ([`a_flat_refusal`]) rather
-/// than failed: 2 of its 276 fuses are, and 22 are refused in all, from 28.
+/// than failed: 2 of its 276 fuses were, and 22 were refused in all, from 28.
+/// With Q1034 and Q1606 it is 4 of 280, and 20 refused in all: 12 name a point
+/// inside a piece of a face, and 4 a point in a piece that every solid could
+/// place. Which fuses moved since the 276 was not traced.
 #[test]
 fn swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit() {
     let tally = over(CASES, a_skew_pair(), |configuration, tally| {
