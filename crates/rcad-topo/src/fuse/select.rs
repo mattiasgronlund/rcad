@@ -98,6 +98,7 @@ use rcad_geom::{
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
     orient3d_of_points, side_of_a_plane_where_three_planes_meet,
+    which_meet_comes_first_along_a_line,
 };
 
 use crate::classify::{side_of_a_flat_face, stretched_to_the_plane};
@@ -110,7 +111,7 @@ use crate::{Containment, Error, FaceKey, Model, Result, SolidView, VertexKey};
 
 use super::arrange::{Piece, agreement_of_two_planes, name_of_surface_bits};
 use super::assemble::{NamedSide, the_edge_each_side_of_every_piece_is};
-use super::bake::{BakedCorner, BakedFace, BakedSolid};
+use super::bake::{BakedCorner, BakedEdge, BakedFace, BakedSolid};
 use super::{FaceMeet, MeetPoint, Scratch, as_exact_as_it_is, gave_up, middle_of, the_other_way};
 
 /// Which pieces of the two groups a fuse keeps.
@@ -226,7 +227,9 @@ pub(crate) fn choose(
                     model, scratch, &solids, against, index, in_plane, policy, log,
                 )
             };
-            let placed = placed.or_else(|| in_plane.as_ref().and_then(by_the_piece_across));
+            let placed = placed
+                .or_else(|| in_plane.as_ref().and_then(by_the_piece_across))
+                .or_else(|| by_an_edge_of_a_face_it_lies_on(&solids, against, mine, piece));
             placed.ok_or_else(|| match unfollowed {
                 Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
                 None => gave_up(unplaced, &corners.concat(), Measures::Length, log),
@@ -1188,6 +1191,204 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
         return None;
     };
     Some([*first.as_plane()?, *second.as_plane()?, *third.as_plane()?])
+}
+
+/// The rule after every other: a flat piece that lies on the plane of a flat
+/// face `G` of a solid, with a straight side along an edge `e` of `G`, placed
+/// against that solid by which side of the plane across `e` its material is on
+/// (`docs/decisions.md` §365.8, Q1606).
+///
+/// **Why an edge can place a piece.** `P` is the piece, on `G`'s plane, `S` the
+/// solid, and `H` the flat face across `e`. `s` is a side of `P` carried by
+/// `G`'s plane and `H`'s, so it runs along the line `e` runs along, and both
+/// its ends lie on `e` and are not one point. Take `m`, the middle of `s`: it
+/// is strictly inside `e`, so near `m` the skin of `S` is `G` and `H` and
+/// nothing else, `G` a half-plane on one side of `H`'s plane. Near `m` the
+/// inside of `P` is the half-plane of `G`'s plane on its material side of
+/// `H`'s plane. `P` was cut by every surface of `S`, so its inside lies all
+/// inside `S`, all outside it, or all on its skin (§17.4), and it is enough to
+/// know where it is near `m`.
+///
+/// - On `G`'s side of `H`'s plane, the inside of `P` near `m` lies on `G`, so
+///   `P` lies on `S`'s skin, on `G`, and faces `G`'s way or the other.
+/// - On the other side, it lies in `G`'s plane beyond `e`, and so in front of
+///   `H`'s outward plane where the solid's corner at `e` is convex and behind
+///   it where it is reflex: across a convex edge the solid is on `G`'s side of
+///   `H`'s plane, and across a reflex one `H` faces towards `G`. Behind is
+///   inside and in front is outside, with no need to ask which kind of edge it
+///   is.
+///
+/// **`G`'s side of `H`'s plane is read off the way `G`'s wire walks `e`**, with
+/// the face on its left about `G`'s own normal ([`BakedFace::wires`]). Left of
+/// a walk along `n_G × n_H` is the negative side of `H`'s plane, since
+/// `n_H · (n_G × (n_G × n_H)) = −‖n_G × n_H‖²`, as for
+/// [`FaceMeet::material_side`]. Every question here is
+/// [`which_meet_comes_first_along_a_line`] along that line, each point asked
+/// as the meet of three planes, or two planes compared bit for bit, so every
+/// answer is exact and nothing goes into the log. An end of `s` or of `e` that
+/// is not the meet of `G`'s plane, `H`'s and one plane more, a question that
+/// comes back undecided, or a plane that does not match leaves the side out.
+///
+/// Inside one solid of the group is inside. Lying on one or more with none
+/// having it inside is read as [`LyingOn`] reads it, and outside every one is
+/// outside. A solid no side of the piece lies along an edge of leaves the
+/// piece unplaced, and the caller refuses under the name the point search ran
+/// out under.
+///
+/// The piece this was built for is a sliver of a frame's wall `y = 1`, between
+/// a comb's wall `x = 2` and the frame's own leaning wall a rounding past it,
+/// along the edge where the comb's tooth top `y = 1` meets that wall. It holds
+/// no `f64` point, and no plane of the comb has it in front, since it lies on
+/// the tooth top (`tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`).
+fn by_an_edge_of_a_face_it_lies_on(
+    solids: &[&BakedSolid],
+    against: &[usize],
+    mine: usize,
+    piece: &Piece,
+) -> Option<Placement> {
+    let flat = *piece.surface.as_plane()?;
+    let mut inside_one = false;
+    let mut placed_against_every_one = true;
+    let mut lying_on = LyingOn::default();
+    for &index in against {
+        match beside_an_edge_of(solids, index, solids[mine], piece, flat) {
+            Some(Placement::Inside) => inside_one = true,
+            Some(Placement::Outside) => (),
+            Some(Placement::On { solid, same_way }) => lying_on.add(solid, same_way),
+            None => placed_against_every_one = false,
+        }
+    }
+    if inside_one {
+        Some(Placement::Inside)
+    } else {
+        placed_against_every_one.then(|| lying_on.placement())
+    }
+}
+
+/// Where `piece`, on the plane `flat`, sits against solid number `index` by
+/// [`by_an_edge_of_a_face_it_lies_on`]'s rule, read off the first side of it
+/// along an edge of a face of that solid on `flat`, or `None` where no side is.
+fn beside_an_edge_of(
+    solids: &[&BakedSolid],
+    index: usize,
+    own: &BakedSolid,
+    piece: &Piece,
+    flat: Plane,
+) -> Option<Placement> {
+    let solid = solids[index];
+    solid
+        .faces
+        .iter()
+        .filter(|face| {
+            face.surface
+                .as_plane()
+                .is_some_and(|plane| is_one_plane_either_way(*plane, flat))
+        })
+        .find_map(|face| {
+            face.wires.iter().flatten().find_map(|edge| {
+                piece.wires.iter().flatten().find_map(|side| {
+                    beside_one_edge(solid, index, own, piece, flat, face, edge, side)
+                })
+            })
+        })
+}
+
+/// Where `piece` sits against solid number `index` when its side `side` lies
+/// along the edge `edge` of the face `face`, on whose plane the piece lies, or
+/// `None` where it does not, as [`by_an_edge_of_a_face_it_lies_on`] asks it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the piece, the face, the edge and the side are each asked about"
+)]
+fn beside_one_edge(
+    solid: &BakedSolid,
+    index: usize,
+    own: &BakedSolid,
+    piece: &Piece,
+    flat: Plane,
+    face: &BakedFace,
+    edge: &BakedEdge,
+    side: &FaceMeet,
+) -> Option<Placement> {
+    let g = *face.surface.as_plane()?;
+    let h = *edge.across.as_plane()?;
+    if !is_straight(side) || !is_one_plane_either_way(*side.carried_by[0].as_plane()?, g) {
+        return None;
+    }
+    let across = *side.carried_by[1].as_plane()?;
+    if !is_one_plane_either_way(across, h) {
+        return None;
+    }
+    let line = [g.coefficients(), across.coefficients()];
+    let the_third = |three: [Plane; 3]| {
+        let mut rest = three.into_iter().filter(|plane| {
+            !is_one_plane_either_way(*plane, g) && !is_one_plane_either_way(*plane, h)
+        });
+        let third = rest.next()?;
+        rest.next().is_none().then(|| third.coefficients())
+    };
+    let start = the_third(three_planes(&edge.start.around)?)?;
+    let end = the_third(three_planes(&edge.end.around)?)?;
+    let [from, to] = &side.ends;
+    let from = the_third(the_planes_meeting_at(from, own, flat)?)?;
+    let to = the_third(the_planes_meeting_at(to, own, flat)?)?;
+    let order = |first, second| which_meet_comes_first_along_a_line(line, first, second).ok();
+    let along = order(start, end)?;
+    let towards_g = match along {
+        Decision::Pos => Decision::Neg,
+        Decision::Neg => Decision::Pos,
+        Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+    };
+    let is_on_the_edge = |point| {
+        [order(start, point), order(point, end)]
+            .iter()
+            .all(|step| *step == Some(along) || *step == Some(Decision::Zero))
+    };
+    let has_length = matches!(order(from, to)?, Decision::Pos | Decision::Neg);
+    if !has_length || !is_on_the_edge(from) || !is_on_the_edge(to) {
+        return None;
+    }
+    if side.material_side == towards_g {
+        let mine = outward_plane_of(piece)?;
+        let theirs = outward_plane_of_face(face)?;
+        let same_way = if mine == theirs {
+            true
+        } else if mine == theirs.reversed() {
+            false
+        } else {
+            return None;
+        };
+        return Some(Placement::On {
+            solid: index,
+            same_way,
+        });
+    }
+    let face_across = solid.faces.iter().find(|other| {
+        other.surface.as_plane() == Some(&h)
+            && other
+                .wires
+                .iter()
+                .flatten()
+                .any(|theirs| theirs.keys.iter().any(|key| edge.keys.contains(key)))
+    })?;
+    let outward = outward_plane_of_face(face_across)?;
+    let behind = if across == outward {
+        Decision::Neg
+    } else if across == outward.reversed() {
+        Decision::Pos
+    } else {
+        return None;
+    };
+    Some(if side.material_side == behind {
+        Placement::Inside
+    } else {
+        Placement::Outside
+    })
+}
+
+/// Whether `one` and `other` are one plane, bit for bit, facing either way.
+fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
+    one == other || one == other.reversed()
 }
 
 /// Whether one piece of a face holds a point on its surface, or `None` when
