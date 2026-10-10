@@ -496,6 +496,62 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
     );
 }
 
+#[test]
+fn probe_steinmetz_six() {
+    let up = Surface::Cylinder(
+        Cylinder::new(
+            Axis::new(Point::new(0.0, 0.0, -2.0), Vector::new(0.0, 0.0, 1.0)).expect("a"),
+            1.0,
+        )
+        .expect("p"),
+    );
+    let along = Surface::Cylinder(
+        Cylinder::new(
+            Axis::new(Point::new(-2.0, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0)).expect("a"),
+            1.0,
+        )
+        .expect("p"),
+    );
+    eprintln!(
+        "INTERSECT {:?}",
+        intersect(&up, &along, &Policy::certified(), &mut ProvenanceLog::new())
+    );
+    for (rule, first_first) in six_fuses() {
+        let mut model = a_model();
+        let said = fuse(
+            &mut model,
+            two_bars_of_one_radius_whose_axes_meet,
+            rule,
+            first_first,
+        );
+        match said {
+            Ok(solids) => {
+                let mut counted = vec![];
+                let mut measured = 0.0;
+                for solid in solids {
+                    let view = model.solid(solid).expect("s");
+                    counted.push(view.faces().count());
+                    let m = view.measure(
+                        Deflection::of(0.01).expect("d"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    );
+                    match m {
+                        Ok(m) => measured += m.volume(),
+                        Err(e) => eprintln!("measure err {e:?}"),
+                    }
+                }
+                let v = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                eprintln!(
+                    "PROBE {rule:?} {first_first}: faces {counted:?} vol {measured} valid {:?}",
+                    v.err()
+                );
+            }
+            Err(e) => eprintln!("PROBE {rule:?} {first_first}: refused {e:?}"),
+        }
+    }
+}
+
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
     for one in six_fuses() {
         the_fuse_answers(build, one, volumes, faces);
