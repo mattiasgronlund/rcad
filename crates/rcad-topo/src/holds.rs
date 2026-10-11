@@ -8202,69 +8202,78 @@ mod tests {
     /// A face that runs along one of two loops is refused rather than named as
     /// both.
     ///
-    /// One of the two disks a pipe leaves in a ball's skin. Its one boundary is a
-    /// whole closed curve and its one corner is on the pipe, so both of the two
-    /// things this reads — which side the face lies on, and whether the face has
-    /// every loop — have to catch it. Built by hand: a ball whose face is trimmed
-    /// by a pipe through it is lane 4's.
+    /// A thin bar of radius 1 along `y` through a fat one of radius 3 along `z`,
+    /// intersected, keeps two patches of the fat bar's wall, one at each end of
+    /// the thin bar. Each runs along one of the two loops the two pipes cross in.
+    /// The half-space [`intersect`] tells those loops apart by holds the fat
+    /// bar's axis and faces along the thin bar, so the fat pipe past it holds the
+    /// other patch and the wall outside the thin bar both, and no one side of
+    /// the thin pipe says which.
+    ///
+    /// Until Q1702 this was a disk a pipe leaves in a ball's skin, built by
+    /// hand; a ball with a pipe across it is read past the plane through its
+    /// centre now ([`what_lies_past_the_picker`]).
     #[test]
     fn a_face_along_one_of_two_loops_is_refused_rather_than_named_as_both() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-        let ball = model
-            .add_ball(OUTER, &Isometry::identity())
-            .expect("a ball");
-        let skin = model
-            .solid(ball)
-            .expect("this model made the key")
-            .faces()
-            .next()
-            .expect("one face")
-            .key();
-
-        // A pipe up the z axis crosses this ball in two circles, one either side
-        // of the equator. One corner on the upper one, and one closed edge round
-        // it, standing in for the boundary of the cap the pipe cuts out.
-        let across = (OUTER * OUTER - INNER * INNER).sqrt();
-        let on_the_circle = model.add_vertex(rcad_geom::Point::new(INNER, 0.0, across));
-        let loop_edge = model.add_closed_edge(on_the_circle);
-        let mine = model.add_coedge(loop_edge, Orientation::Forward);
-        let theirs = model.add_coedge(loop_edge, Orientation::Reversed);
-        let cut = model.add_wire(smallvec::smallvec![mine]);
-        let round_it = model.add_wire(smallvec::smallvec![theirs]);
-        let at_skin = skin.slot_in(model.id());
-        model.data_mut().faces[at_skin].wires.push(cut);
-        let pipe = Cylinder::new(Axis::z(), INNER).expect("a pipe");
-        let wall = model.add_face(Surface::Cylinder(pipe), SmallVec::from_buf([round_it]));
-        model
-            .data_mut()
-            .shells
-            .values_mut()
-            .next()
-            .expect("a shell")
-            .faces
-            .push(FaceUse {
-                face: wall,
-                loc: Isometry::identity(),
-                orient: Orientation::Forward,
-            });
-
-        let refusal = model
-            .solid(ball)
-            .expect("this model made the key")
-            .face_holds_the_point(
-                skin,
-                at(0.0, 0.0, -OUTER),
+        let fat = model
+            .add_round_bar(
+                3.0,
+                10.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, -5.0)).expect("a finite shift"),
+            )
+            .expect("a positive radius and height");
+        let along_y = Isometry::rotation(&Axis::x(), core::f64::consts::FRAC_PI_2)
+            .expect("a finite turn")
+            .compose(&Isometry::translation(Vector::new(0.0, 0.0, -10.0)).expect("a finite shift"));
+        let thin = model
+            .add_round_bar(1.0, 20.0, &along_y)
+            .expect("a positive radius and height");
+        let fused = model
+            .fuse(
+                &[fat],
+                &[thin],
+                crate::Rule::Intersection,
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             )
-            .expect_err("a face along one of two loops cannot be read off a sign");
-        assert!(
-            matches!(
-                refusal,
-                Error::AFaceMissesPartOfWhereItsSurfacesCross { .. }
-            ),
-            "got {refusal:?}"
-        );
+            .expect("a thin bar through a fat one");
+        let [solid] = fused.solids()[..] else {
+            panic!("one solid: {:?}", fused.solids());
+        };
+        let patches: Vec<FaceKey> = model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .filter(|face| match face.surface() {
+                Surface::Cylinder(pipe) => pipe.radius() == 3.0,
+                Surface::Plane(_) | Surface::Sphere(_) | _ => false,
+            })
+            .map(|face| face.key())
+            .collect();
+        assert_eq!(patches.len(), 2, "one patch of the fat wall at each end");
+
+        for patch in patches {
+            for point in [at(0.0, 3.0, 0.0), at(0.0, -3.0, 0.0)] {
+                let refusal = model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .face_holds_the_point(
+                        patch,
+                        point,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect_err("a face along one of two loops cannot be read off a sign");
+                assert!(
+                    matches!(
+                        refusal,
+                        Error::AFaceMissesPartOfWhereItsSurfacesCross { face } if face == patch
+                    ),
+                    "got {refusal:?}"
+                );
+            }
+        }
     }
 
     /// Each of the two caps a bar cuts out of a ball holds the patch of the
