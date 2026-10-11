@@ -100,6 +100,150 @@ fn a_round_bar_written_out_and_read_back_is_the_same_round_bar() {
     covered.report("a round bar");
 }
 
+/// The same bar turned by `place_solid` after it is built, rather than built
+/// turned: a round bar of radius three, five tall, turned half a turn about
+/// `y`.
+///
+/// `docs/decisions.md` §241.6. Q405's lane saw this turn and the one radian
+/// turn below written, at 2392 and 2697 bytes, only through a probe since
+/// removed, which its verifier could not rerun; this is the pin.
+#[test]
+fn a_round_bar_turned_a_half_turn_about_y_written_out_and_read_back_is_the_same_bar() {
+    let turn = Isometry::rotation(&rcad_geom::Axis::y(), std::f64::consts::PI).expect("a turn");
+    a_turned_bar_comes_back_the_same(
+        &turn,
+        "a bar of radius three, five tall, turned half a turn about y",
+    );
+}
+
+/// The same bar, turned one radian about the axis through the origin and
+/// `(1, 1, 1)`.
+///
+/// `docs/decisions.md` §241.6, the other of the two turns the comment above
+/// names.
+#[test]
+fn a_round_bar_turned_one_radian_about_one_one_one_written_out_and_read_back_is_the_same_bar() {
+    let diagonal = rcad_geom::Axis::new(Point::origin(), Vector::new(1.0, 1.0, 1.0))
+        .expect("a finite axis through the origin");
+    let turn = Isometry::rotation(&diagonal, 1.0).expect("a turn");
+    a_turned_bar_comes_back_the_same(
+        &turn,
+        "a bar of radius three, five tall, turned one radian about (1,1,1)",
+    );
+}
+
+/// A round bar `place_solid` turns, written and read back, held to
+/// `where_its_corners_are` and to a rounding, rather than to
+/// [`Covered::the_same_solid_comes_back`]'s bit-for-bit measurement and fuse.
+///
+/// **Neither half of that oracle holds for a placed solid, tried first.**
+/// `add_round_bar(3.0, 5.0, &Isometry::identity())` then `place_solid` leaves
+/// the turn composed into the solid's location, which `FaceView` applies
+/// lazily at measurement time; the file instead writes the turn baked into
+/// plain numbers (§42.8's "stored at the identity"), so the round-tripped
+/// model's mesh takes the same points through a different sum. The two areas
+/// came back `150.72991482151727` and `150.7299148215173`, a difference inside
+/// the rounding `docs/decisions.md` §338 already publishes on
+/// [`Measurement::volume_error`] and [`Measurement::area_error`] for "a turned
+/// one" — so volume, area and centroid are compared to that rounding instead.
+/// Corners are still compared bit for bit, since they are the file's own
+/// written digits parsed back rather than summed.
+///
+/// **The fuse does not hold either, tried second.** Cutting the turned,
+/// placed bar with a block — turned the same way, so the two overlap exactly
+/// as they would unplaced — refused with `Error::Undecidable` for both turns
+/// below and for every block offset tried, including offsets nowhere near a
+/// tangency. §246.6 found the same refusal, `"where a plane and a pipe
+/// cross"`, for a bar only *moved*, not turned, by `2⁻¹⁰⁰⁷`: `place_solid`
+/// leaves the pipe's own numbers one rounding off whatever a fresh
+/// `add_round_bar` at that placement would write, and the certified policy's
+/// exact arithmetic refuses rather than guess at the sign that rounding
+/// unsettles. Not diagnosed further here, matching §246.6's own "not
+/// diagnosed here" for the same refusal. This is why the writer fuzz harness
+/// falls back to located corners for a placed solid instead of a fuse.
+fn a_turned_bar_comes_back_the_same(turn: &Isometry, called: &str) {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let scale = Scale::new(Unit::Millimetre, 5.0).expect("a working size");
+
+    let mut model = Model::new(scale);
+    let bar = model
+        .add_round_bar(3.0, 5.0, &Isometry::identity())
+        .expect("a bar of radius three");
+    model.place_solid(bar, turn).expect("the bar can be turned");
+    model
+        .validate(&policy, &mut log)
+        .unwrap_or_else(|why| panic!("{called} is not sound before it is written: {why}"));
+
+    let mut untouched = Model::new(scale);
+    let reference = untouched
+        .add_round_bar(3.0, 5.0, &Isometry::identity())
+        .expect("a bar of radius three");
+
+    let text = rcad_step::write(&model, called)
+        .unwrap_or_else(|why| panic!("{called} is not written: {why}"));
+    let file = StepFile::read(text.as_bytes())
+        .unwrap_or_else(|why| panic!("{called} wrote a file this reader refuses: {why}"));
+    let import = Import::read(&file, &policy, &mut log)
+        .unwrap_or_else(|why| panic!("{called} is refused on the way back in: {why}"));
+    let [(_, read_back)] = import.solids() else {
+        panic!(
+            "{called} was one solid and came back as {}",
+            import.solids().len()
+        );
+    };
+    let read_back = *read_back;
+    let there = import.model();
+    there
+        .validate(&policy, &mut log)
+        .unwrap_or_else(|why| panic!("{called} comes back as a model that is not sound: {why}"));
+
+    let went = model.solid(bar).expect("this model made the key");
+    let came = there.solid(read_back).expect("this model made the key");
+    assert_eq!(
+        where_its_corners_are(went),
+        where_its_corners_are(came),
+        "{called} comes back with its corners somewhere else"
+    );
+    assert_ne!(
+        where_its_corners_are(went),
+        where_its_corners_are(untouched.solid(reference).expect("this model made the key")),
+        "{called} was not turned at all, so this compared two bars at the same place"
+    );
+
+    let deflection = the_same_mesh_on_both_sides();
+    let here = went
+        .measure(deflection, &policy, &mut log)
+        .unwrap_or_else(|why| panic!("{called} does not measure: {why}"));
+    let back = came
+        .measure(deflection, &policy, &mut log)
+        .unwrap_or_else(|why| panic!("{called} does not measure after the round trip: {why}"));
+    assert!(
+        (here.volume() - back.volume()).abs() <= here.volume_error().max(back.volume_error()),
+        "{called}: volume {} vs {}, more than {} or {} of rounding apart",
+        here.volume(),
+        back.volume(),
+        here.volume_error(),
+        back.volume_error()
+    );
+    assert!(
+        (here.surface_area() - back.surface_area()).abs()
+            <= here.area_error().max(back.area_error()),
+        "{called}: area {} vs {}, more than {} or {} of rounding apart",
+        here.surface_area(),
+        back.surface_area(),
+        here.area_error(),
+        back.area_error()
+    );
+    assert!(
+        here.centroid().distance_to(back.centroid())
+            <= here.centroid_wobble().max(back.centroid_wobble()),
+        "{called}: centroid {:?} vs {:?}, further apart than the rounding allows",
+        here.centroid(),
+        back.centroid()
+    );
+}
+
 /// The same bar moved along `y` by amounts down to the smallest `f64`, written
 /// out, read back and found the same, corner for corner and bit for bit.
 ///
