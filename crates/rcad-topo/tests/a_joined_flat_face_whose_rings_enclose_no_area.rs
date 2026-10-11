@@ -3389,63 +3389,6 @@ const AS_WRITTEN: Placed = Placed {
     top: 4.0,
 };
 
-#[test]
-fn probe_q1253() {
-    let small = Placed {
-        by: 0.125,
-        centre: [-2.0, 8.0],
-        bottom: -1.0,
-        top: 5.0,
-    };
-    for (rule, swapped) in every_rule_both_ways() {
-        let outcome = std::panic::catch_unwind(|| {
-            let mut model =
-                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, AS_WRITTEN)
-                .unwrap_or_else(|why| panic!("the cap: {why:?}"));
-            let through = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, small)
-                .unwrap_or_else(|why| panic!("the small cap: {why:?}"));
-            let answer = fused_in_order(&mut model, [cap, through], rule, swapped);
-            let volumes: Vec<f64> = answer
-                .iter()
-                .flatten()
-                .map(|&solid| {
-                    model
-                        .solid(solid)
-                        .expect("key")
-                        .measure(
-                            Deflection::of(0.001).expect("a fine mesh"),
-                            &Policy::certified(),
-                            &mut ProvenanceLog::new(),
-                        )
-                        .map(|m| m.volume())
-                        .unwrap_or(f64::NAN)
-                })
-                .collect();
-            let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-            format!("{answer:?} volumes {volumes:?} valid {valid:?}")
-        });
-        eprintln!("PROBE first {rule:?} swapped {swapped}: {outcome:?}");
-    }
-    for (rule, swapped) in every_rule_both_ways() {
-        let outcome = std::panic::catch_unwind(|| {
-            let mut model =
-                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, AS_WRITTEN)
-                .unwrap_or_else(|why| panic!("the cap: {why:?}"));
-            let through = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, small)
-                .unwrap_or_else(|why| panic!("the small cap: {why:?}"));
-            let holed = the_one_solid(&mut model, cap, through, Rule::Difference);
-            let bar = model
-                .add_round_bar(2.0, 2.0, &at(3.0, 7.0, 4.0))
-                .expect("a bar of radius two");
-            let answer = fused_in_order(&mut model, [holed, bar], rule, swapped);
-            format!("{answer:?}")
-        });
-        eprintln!("PROBE second {rule:?} swapped {swapped}: {outcome:?}");
-    }
-}
-
 /// [`a_bar_cut_to`], with side `i + 1` running as `sides[i]` says, `placed`
 /// where that says.
 fn a_bar_cut_to_pipes(
