@@ -13,14 +13,14 @@
 //! The two never meet, so the union is the two solids as they stand, the
 //! intersection is nothing, and each difference is its first argument.
 //!
-//! The last test stands the half ring on a bar it does meet, which every fuse
-//! refuses.
+//! The last test stands the half ring on a bar of its own outer radius, whose
+//! top rim is the half ring's outer equator, and fuses that every way too.
 
 use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Model, Rule, SolidKey};
 
 mod rings;
 
@@ -32,6 +32,9 @@ const THE_HALF_RING: f64 = 4.0 * PI * PI;
 
 /// A bar of radius `23/8` and height two.
 const THE_BAR: f64 = 529.0 * PI / 32.0;
+
+/// A bar of radius five and height two, the half ring's outer radius.
+const THE_BAR_UNDER_IT: f64 = 50.0 * PI;
 
 #[test]
 fn with_a_seam_every_fuse_is_the_solids_as_they_stand() {
@@ -89,56 +92,65 @@ fn every_fuse_is_the_solids_as_they_stand(a_seam: bool) {
 }
 
 /// The half ring standing on a bar of its own outer radius, `add_round_bar(5,
-/// 2)` moved by `(0, 0, −2)`, is refused by every fuse, both ways round, with
-/// a seam and without.
+/// 2)` moved by `(0, 0, −2)`, fused every way, both ways round, with a seam
+/// and without.
 ///
 /// The bar's top face holds the half ring's flat ring, and its top rim is the
 /// half ring's outer equator, where the bar's wall, `z = 0` and the ring meet
-/// along a whole circle. The answers are plain: the union is one solid of
-/// `50π + 4π²`, the intersection nothing, the half ring less the bar `4π²` and
-/// the bar less the half ring `50π`. This is the one shape known that would
-/// reach the join `fuse/assemble.rs`'s `the_name_each_closed_curve_goes_by`
-/// leaves out for a plane square to a ring's axis (§428.5). When this answers,
-/// that join needs a test of its own.
+/// along a whole circle. The union is one solid of `50π + 4π²`, the
+/// intersection nothing, the half ring less the bar `4π²` and the bar less the
+/// half ring `50π`.
+///
+/// Until Q1566 every one was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`,
+/// since `rcad-geom` had no road for `z = 0`, the bar's wall and the ring.
+/// With that road and no more, the union was refused as not a manifold, with
+/// one face along each of two rims: the bar's wall reaches the rim cut by
+/// `z = 0` and the pipe, and the ring's face the outer equator, which `z = 0`
+/// and the ring name by the outside of the pipe of the ring's own radius.
+/// `fuse/assemble.rs`'s `the_name_each_closed_curve_goes_by` joins the two now
+/// (§428.5).
 #[test]
-fn on_a_bar_of_its_outer_radius_every_fuse_is_refused_where_three_surfaces_meet() {
+fn on_a_bar_of_its_outer_radius_every_fuse_answers() {
     for a_seam in [true, false] {
-        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-            for ring_first in [true, false] {
-                let what = format!("{rule:?}, seam {a_seam}, half ring first {ring_first}");
-                let mut model = Model::new(Scale::millimetres(50.0).expect("a positive size"));
-                let ring = rings::the_top_half_of_a_ring(&mut model, 4.0, 1.0, a_seam)
-                    .expect("the top half of a ring described this way is a solid");
-                let bar = model
-                    .add_round_bar(
-                        5.0,
-                        2.0,
-                        &Isometry::translation(Vector::new(0.0, 0.0, -2.0))
-                            .expect("a finite shift"),
-                    )
-                    .expect("a bar of radius 5");
-                let (arguments, tools) = if ring_first {
-                    ([ring], [bar])
-                } else {
-                    ([bar], [ring])
-                };
-                let refused = model.fuse(
+        for (rule, ring_first, truths) in [
+            (Rule::Union, true, vec![THE_HALF_RING + THE_BAR_UNDER_IT]),
+            (Rule::Union, false, vec![THE_HALF_RING + THE_BAR_UNDER_IT]),
+            (Rule::Intersection, true, Vec::new()),
+            (Rule::Intersection, false, Vec::new()),
+            (Rule::Difference, true, vec![THE_HALF_RING]),
+            (Rule::Difference, false, vec![THE_BAR_UNDER_IT]),
+        ] {
+            let what = format!("{rule:?}, seam {a_seam}, half ring first {ring_first}");
+            let mut model = Model::new(Scale::millimetres(50.0).expect("a positive size"));
+            let ring = rings::the_top_half_of_a_ring(&mut model, 4.0, 1.0, a_seam)
+                .expect("the top half of a ring described this way is a solid");
+            let bar = model
+                .add_round_bar(
+                    5.0,
+                    2.0,
+                    &Isometry::translation(Vector::new(0.0, 0.0, -2.0)).expect("a finite shift"),
+                )
+                .expect("a bar of radius 5");
+            let (arguments, tools) = if ring_first {
+                ([ring], [bar])
+            } else {
+                ([bar], [ring])
+            };
+            let answer = model
+                .fuse(
                     &arguments,
                     &tools,
                     rule,
                     &Policy::certified(),
                     &mut ProvenanceLog::new(),
-                );
-                assert!(
-                    matches!(
-                        refused,
-                        Err(Error::Geometry(
-                            rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                        ))
-                    ),
-                    "{what}: {refused:?}"
-                );
-            }
+                )
+                .unwrap_or_else(|why| panic!("{what}: refused {why:?}"))
+                .solids()
+                .to_vec();
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            the_solids_measure(&model, &answer, &truths, &what);
         }
     }
 }

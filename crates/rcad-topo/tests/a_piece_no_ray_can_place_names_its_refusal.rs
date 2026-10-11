@@ -45,9 +45,9 @@
 //! is refused at `order along a crossing` while the two are cut, so that ring
 //! solid is never built. A ball or a cone joined to a ring, built face by face
 //! with no seam, is built; but against a piece of its own kind on it, it is
-//! refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, or `Undecidable` at
-//! `side of sphere` or `side of cone`, and moved off the axis, the piece is
-//! refused when the two are crossed. So neither kind is reached.
+//! refused `ResultIsNotManifold`, or `Undecidable` at `side of sphere` or
+//! `side of cone`, and moved off the axis, the piece is refused when the two
+//! are crossed. So neither kind is reached.
 //!
 //! Run with `settle_against_each`'s arm made to print, every fuse here, only
 //! the bends placed a quarter turn round reached it: 6 of their 36 fuses,
@@ -57,7 +57,9 @@
 //! `(4, 6.3e-16, 0)` and `(4, 8.9e-16, 0)`, could not be fired at the first
 //! bend's ring. Each of those pieces was then placed by some other point or
 //! rule, and since Q1537 each of the six fuses answers. Q1581's fuses, run
-//! with the arm made to print, printed nothing.
+//! with the arm made to print, printed nothing. The ball and the cone joined
+//! to a ring printed nothing again at Q1757, after Q1566 let them past the
+//! meet of three that refused them before.
 //!
 //! Q1125's run, of all 1755 tests of this crate's suite with the arm made to
 //! print, printed nine times, all in the placed bends' test, and each piece it
@@ -656,13 +658,24 @@ fn a_bend_and_a_ball_or_a_cone_on_its_axis_are_refused_while_they_are_cut() {
 /// frustum of the same cone from `z = 2` to `5`, whose wall lies on the ring
 /// solid's upper cone face. Each piece's bottom rim is inside the ring's tube.
 ///
-/// None reaches a ray. Where the piece sits, and moved up or down `z` by a
-/// rounding, every rule both ways round is refused
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Moved by `1e-13`, it is refused
-/// so with the ring solid named first, and `Undecidable` at `side of sphere`
-/// or `side of cone` with it named second, at the piece's bottom rim. Moved
-/// `1e-13` off the axis along `x`, the piece's ball is one the ring is not
-/// crossed with, and its cone one the ring solid's cone is not crossed with.
+/// None reaches a ray. Where the piece sits, every rule both ways round is
+/// refused `ResultIsNotManifold`, and so is the cone's piece moved up or down
+/// `z` by a rounding; the counts are pinned, the ring solid named first and
+/// then second (row Q1758). The ball's piece moved by a rounding, and either
+/// piece moved by `1e-13`, is refused `Undecidable` at `side of sphere` or
+/// `side of cone`; with the ring solid named second it is at the piece's
+/// bottom rim (row Q1759). Moved `1e-13` off the axis along `x`, the piece's
+/// ball is one the ring is not crossed with, and its cone one the ring solid's
+/// cone is not crossed with.
+///
+/// Until Q1566, every case on the axis but the ones moved `1e-13` with the ring
+/// solid named second was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`:
+/// a plane square to a ring's axis, the ring, and a ball or a cone on that
+/// axis was a meet of three `rcad-geom` had no road for.
+/// `what_a_plane_square_to_a_rings_axis_leaves` is that road now (§428.5), and
+/// with it alone, the join in `the_name_each_closed_curve_goes_by` narrowed
+/// back to flat-picked circles, these are refused as pinned here. Run again
+/// with `settle_against_each`'s arm made to print, they printed nothing.
 ///
 /// A whole ball about the origin, of 5 and a rounding or `5 ± 1e-13`, against
 /// the ball joined to a ring is refused `Undecidable` at `side of sphere` by
@@ -671,16 +684,17 @@ fn a_bend_and_a_ball_or_a_cone_on_its_axis_are_refused_while_they_are_cut() {
 #[test]
 fn a_ball_or_a_cone_joined_to_a_ring_with_a_piece_of_its_own_kind_on_it_is_refused_before_a_ray() {
     let a_rounding = 8.881_784_197_001_252e-16;
-    let three_surfaces = "WhereThreeSurfacesMeetNeedsTwoOfThemFlat";
     let a_ball: fn(&mut Model) -> Result<SolidKey, Error> = a_ball_joined_to_a_ring;
     let a_cone: fn(&mut Model) -> Result<SolidKey, Error> = a_frustum_joined_to_a_ring;
     let mut not_as_pinned = Vec::new();
-    for (kind, ring_solid, piece, its_side, off_the_axis) in [
+    for (kind, ring_solid, piece, its_side, moved_to_its_side, not_a_manifold, off_the_axis) in [
         (
             "ball",
             a_ball,
             a_ball_segment as fn(&mut Model) -> Result<SolidKey, Error>,
             "Undecidable at side of sphere",
+            &["up a rounding", "down a rounding", "up 1e-13", "down 1e-13"][..],
+            [(7, 5), (4, 3), (5, 1)],
             "ACrossingBetweenATorusAndAnotherCurvedSurface",
         ),
         (
@@ -688,6 +702,8 @@ fn a_ball_or_a_cone_joined_to_a_ring_with_a_piece_of_its_own_kind_on_it_is_refus
             a_cone,
             a_seamless_frustum,
             "Undecidable at side of cone",
+            &["up 1e-13", "down 1e-13"][..],
+            [(3, 3), (3, 3), (3, 1)],
             "ACrossingBetweenAConeAndAnotherCurvedSurface",
         ),
     ] {
@@ -702,7 +718,9 @@ fn a_ball_or_a_cone_joined_to_a_ring_with_a_piece_of_its_own_kind_on_it_is_refus
                 Isometry::translation(Vector::new(1e-13, 0.0, 0.0)).expect("a finite shift"),
             ),
         ] {
-            for rule in EVERY_RULE {
+            for (rule, (counted_ring_first, counted_ring_second)) in
+                EVERY_RULE.into_iter().zip(not_a_manifold)
+            {
                 for the_ring_first in [true, false] {
                     let mut model = a_model();
                     let ring = ring_solid(&mut model).expect("a ring solid");
@@ -712,10 +730,17 @@ fn a_ball_or_a_cone_joined_to_a_ring_with_a_piece_of_its_own_kind_on_it_is_refus
                         .expect("this model made the key");
                     let fused = fused_or_refused(&mut model, ring, on_it, rule, the_ring_first);
                     let said = the_refusal(&fused);
-                    let pinned = match moved {
-                        "off the axis" => off_the_axis,
-                        "up 1e-13" | "down 1e-13" if !the_ring_first => its_side,
-                        _ => three_surfaces,
+                    let count = if the_ring_first {
+                        counted_ring_first
+                    } else {
+                        counted_ring_second
+                    };
+                    let pinned = if moved == "off the axis" {
+                        off_the_axis.to_owned()
+                    } else if moved_to_its_side.contains(&moved) {
+                        its_side.to_owned()
+                    } else {
+                        format!("Err(ResultIsNotManifold {{ count: {count} }})")
                     };
                     if said != pinned {
                         not_as_pinned.push(format!(

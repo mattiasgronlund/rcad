@@ -6559,19 +6559,22 @@ fn closes_on_itself(meet: &FaceMeet) -> bool {
 /// apart, the union had two rims with one face along each and was refused as
 /// not a manifold (Q1470).
 ///
-/// **A plane square to a ring's axis is left out, though its name says which
-/// circle.** It cuts the ring in an outer and an inner circle, and since Q1513
-/// each is named by the side of the pipe of the ring's own radius that keeps
-/// it. The argument above would carry over, but no fuse has been seen to reach
-/// such a join, so nothing would test it. The top half of a ring on a bar of
-/// its own outer radius, whose top rim is the half ring's outer equator, is
-/// the shape that would, and every fuse of the two, both ways round, is
-/// refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, so no answer hangs on
-/// the join
-/// (`on_a_bar_of_its_outer_radius_every_fuse_is_refused_where_three_surfaces_meet`
-/// in `tests/a_half_ring_beside_a_bar_clear_of_it.rs`, §428.5). So only a
-/// circle picked by a flat half-space, whose name has `0` ahead of its numbers
-/// ([`which_curve_of_the_pair`]), joins here.
+/// **A plane square to a ring's axis joins the same way.** It cuts the ring in
+/// an outer and an inner circle, and since Q1513 each is named by the side of
+/// the pipe of the ring's own radius that keeps it, a name with `2` or `3`
+/// ahead of its numbers where a flat half-space's has `0`
+/// ([`which_curve_of_the_pair`]). The argument above carries over: where the
+/// plane and the two curved surfaces share more than a point, the other's
+/// conic shares more than four points with the two circles, so it is one of
+/// them; and it is the named one exactly where its start is on the side of
+/// the pipe that keeps the named circle. The top half of a ring on a bar of
+/// its own outer radius is this: the bar's top rim is the half ring's outer
+/// equator, the half ring's side of it the flat face under the half ring and
+/// the ring, and the bar's the cap plane and its pipe. Left apart, every union
+/// of the two, both ways round, was refused as not a manifold, while the
+/// intersection and both differences answered
+/// (`on_a_bar_of_its_outer_radius_every_fuse_answers` in
+/// `tests/a_half_ring_beside_a_bar_clear_of_it.rs`, Q1566).
 ///
 /// **One plane, at any scale.** Each pair holds the plane as its own side was
 /// cut, and a third solid's face on the same plane can cut the ball first and
@@ -6602,7 +6605,7 @@ fn the_name_each_closed_curve_goes_by<'a>(
     for (carried_by, curve, start) in closed {
         if let Some((flat, round)) = the_plane_and_the_ball_pipe_or_cone_of(carried_by) {
             cut_out_of.entry(curve).or_insert((flat, round, start));
-        } else if curve.1.is_some_and(|which| which[0] == 0)
+        } else if curve.1.is_some()
             && let Some((flat, ring)) = the_plane_and_the_ring_of(carried_by)
         {
             cut_out_of_a_ring
