@@ -21,9 +21,16 @@
 //!
 //! A point inside is held by no face, and there the cap's refusal still
 //! stands: the half ball alone places it inside.
+//!
+//! **A ray another face throws away is thrown away whatever the cap would
+//! add to it** (Q1727). A box round a point of the floor, or of the skin, is
+//! grazed by that face on every ray, and both half balls answer
+//! `Undecidable`. Until Q1727 the holed one named the cap, on a box whose
+//! answer following the cap could not have changed. A box on the cap itself
+//! is grazed by the cap alone, and is still refused.
 
 use rcad_geom::{EdgeRun, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Containment, DraftStep, FaceKey, Model, SolidBuilder, SolidKey, SolidView};
 
 const RADIUS: f64 = 5.0;
@@ -39,6 +46,12 @@ const ON_THE_FLOOR: [[f64; 3]; 4] = [
 
 /// Points inside both half balls, held by no face.
 const INSIDE: [[f64; 3]; 2] = [[1.0, -2.0, 1.0], [-0.5, 0.25, 2.0]];
+
+/// Points on the ball, off the cap: `y + 3z < 15`.
+const ON_THE_SKIN: [[f64; 3]; 2] = [[3.0, 0.0, 4.0], [0.0, -3.0, 4.0]];
+
+/// A point on the ball and on the cap, `y + 3z > 15`, as near as `f64` has it.
+const ON_THE_CAP: [f64; 3] = [0.0, 1.4, 4.8];
 
 #[test]
 fn a_point_on_the_floor_of_a_half_ball_whose_cap_nothing_follows_is_on_its_skin() {
@@ -114,6 +127,129 @@ fn a_point_inside_a_half_ball_whose_cap_nothing_follows_is_still_refused() {
             }
         }
     }
+}
+
+/// A box round a point of the floor holds points inside the half ball and
+/// points under it, and the floor grazes every ray from it, whatever the cap
+/// would add. So the holed half ball says what the half ball alone says,
+/// `Undecidable` with the floor's width. Until Q1727 the cap's refusal came
+/// first, on the first ray that met the ball.
+#[test]
+fn a_box_straddling_the_floor_of_a_half_ball_whose_cap_nothing_follows_is_undecidable() {
+    let wrong = where_the_holed_half_ball_does_not_say_what_the_half_ball_alone_does(&ON_THE_FLOOR);
+    assert!(
+        wrong.is_empty(),
+        "boxes on the floor not answered as on the half ball alone:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// The same on the ball, off the cap: the skin grazes every ray from the box,
+/// so the cap's refusal gives way there too. The cap grazes the ray as well,
+/// since nothing says it holds none of the box, but the skin's graze is one
+/// it would throw the ray away for anyway.
+#[test]
+fn a_box_straddling_the_skin_beside_a_cap_nothing_follows_is_undecidable() {
+    let wrong = where_the_holed_half_ball_does_not_say_what_the_half_ball_alone_does(&ON_THE_SKIN);
+    assert!(
+        wrong.is_empty(),
+        "boxes on the skin not answered as on the half ball alone:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// On the cap itself the skin holds none of the box, being holed there, and
+/// the only face that grazes a ray from it is the cap, for want of an answer
+/// about its trimming. Nothing that answered threw the ray away, so the
+/// refusal stands, though the half ball alone says `Undecidable`.
+#[test]
+fn a_box_straddling_a_cap_nothing_follows_is_still_refused() {
+    for said in what_both_say_of_boxes_round(&[ON_THE_CAP]) {
+        assert_eq!(
+            said.holed,
+            Containment::CannotFollowAFacesTrimming { face: said.cap },
+            "{}: the holed half ball",
+            said.what
+        );
+        assert!(
+            matches!(said.alone, Containment::Undecidable { .. }),
+            "{}: the half ball alone: {:?}",
+            said.what,
+            said.alone
+        );
+    }
+}
+
+/// Each box round `points` where the half ball alone is not `Undecidable`, or
+/// the holed half ball does not say the same.
+fn where_the_holed_half_ball_does_not_say_what_the_half_ball_alone_does(
+    points: &[[f64; 3]],
+) -> Vec<String> {
+    what_both_say_of_boxes_round(points)
+        .into_iter()
+        .filter(|said| {
+            !matches!(said.alone, Containment::Undecidable { .. }) || said.holed != said.alone
+        })
+        .map(|said| {
+            format!(
+                "{}: holed {:?}, alone {:?}",
+                said.what, said.holed, said.alone
+            )
+        })
+        .collect()
+}
+
+/// What the holed half ball and the half ball alone said of one box.
+struct Said {
+    what: String,
+    holed: Containment,
+    alone: Containment,
+    /// The cap of that holed half ball.
+    cap: FaceKey,
+}
+
+/// What both half balls say of a box round each of `points`, with the floor
+/// listed first and last, under a certified and a tolerant policy.
+fn what_both_say_of_boxes_round(points: &[[f64; 3]]) -> Vec<Said> {
+    let mut answers = Vec::new();
+    for floor_first in [false, true] {
+        let mut model = a_model();
+        let holed = a_half_ball(&mut model, Cap::OnThePole, floor_first);
+        let alone = a_half_ball(&mut model, Cap::None, floor_first);
+        let holed = model.solid(holed).expect("this model made the key");
+        let alone = model.solid(alone).expect("this model made the key");
+        let cap = the_cap(holed);
+        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            for &point in points {
+                let ask = |solid: SolidView<'_>| {
+                    solid.classify_uncertain_point(
+                        a_box_round(point),
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                };
+                answers.push(Said {
+                    what: format!(
+                        "{point:?}, floor first {floor_first}, {:?}",
+                        policy.strictness()
+                    ),
+                    holed: ask(holed),
+                    alone: ask(alone),
+                    cap,
+                });
+            }
+        }
+    }
+    answers
+}
+
+/// A box a few hundred roundings wide round `at`, which straddles every
+/// face `at` is on.
+fn a_box_round(at: [f64; 3]) -> PredicatePoint {
+    let reach = 256.0 * f64::EPSILON * at.iter().fold(1.0f64, |most, each| most.max(each.abs()));
+    PredicatePoint::Constructed(
+        at.map(|coordinate| Interval::around(coordinate, reach).expect("a finite place")),
+    )
 }
 
 fn a_model() -> Model {
