@@ -1187,3 +1187,62 @@ fn the_cube_of_q1208s_crash(model: &mut Model) -> SolidKey {
         .build(model, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("Q1208's cube is a sound solid")
 }
+
+/// Queue row Q1527's re-count, a probe to be taken out before the row lands:
+/// `PROBE_Q1527_ONLY=tolerant mise exec -- just t -p rcad-topo --test
+/// a_turned_cube_with_its_corner_on_a_face --no-capture probe_q1527_split`.
+/// Does nothing unless `PROBE_Q1527_ONLY` is set (`tolerant`, `certified` or
+/// `both`).
+#[test]
+fn probe_q1527_split() {
+    if std::env::var("PROBE_Q1527_ONLY").is_err() {
+        return;
+    }
+    let all = q1208s_random_turns(400);
+    let outside: Vec<(usize, Isometry, [f64; 3])> = all
+        .iter()
+        .enumerate()
+        .filter(|&(_, &(turn, at))| where_the_planes_at_the_corner_meet(&turn, at) == Decision::Neg)
+        .map(|(index, &(turn, at))| (index + 1, turn, at))
+        .collect();
+    let only = std::env::var("PROBE_Q1527_ONLY").ok();
+    for (policy_name, policy) in [("tolerant", tolerant()), ("certified", certified())] {
+        if only
+            .as_deref()
+            .is_some_and(|o| o != policy_name && o != "both")
+        {
+            continue;
+        }
+        for (rule, order) in [
+            (Rule::Union, Order::BlockFirst),
+            (Rule::Union, Order::TurnedFirst),
+            (Rule::Intersection, Order::BlockFirst),
+            (Rule::Intersection, Order::TurnedFirst),
+            (Rule::Difference, Order::BlockFirst),
+            (Rule::Difference, Order::TurnedFirst),
+        ] {
+            let mut split: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+            for &(number, turn, at) in &outside {
+                let mut model = a_model();
+                let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
+                let answer = fuse(&mut model, pair, rule, order, &policy);
+                let what = match answer {
+                    Err(Error::TheFuseWroteABrokenAnswer { broken }) => format!("{broken:?}"),
+                    Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. })) => {
+                        "DynamicRangeTooWide".to_owned()
+                    }
+                    other => what_a_fuse_gives(other),
+                };
+                split.entry(what).or_default().push(number);
+            }
+            println!("PROBE {policy_name} {rule:?} {order:?}");
+            for (what, numbers) in &split {
+                println!(
+                    "PROBE   {what}: {} {:?}",
+                    numbers.len(),
+                    &numbers[..numbers.len().min(12)]
+                );
+            }
+        }
+    }
+}
