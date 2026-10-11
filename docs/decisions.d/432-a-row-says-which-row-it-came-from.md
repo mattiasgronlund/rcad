@@ -114,4 +114,5 @@ row. The queue file is in git and travels with every copy.
   first row to carry the word. Filed again as Q1696, `was/Q1692`, once §432.1's
   last bullet found the first-row-closed guess wrong: Q1696 takes the parent
   from the commit message where the commit closes several rows, and prints
-  unknown where the message does not say.
+  unknown where the message does not say. Filed a third time as Q1704,
+  `was/Q1696`, to count the fuzz targets and corpus files of §433 too.
