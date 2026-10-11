@@ -191,3 +191,35 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
         })
         .sum()
 }
+
+#[test]
+fn probe_q1687_b() {
+    let policy = Policy::tolerant(25.0);
+    let (model, combs) = the_combs().build();
+    for rule in EVERY_RULE {
+        for (name, [first, second]) in [
+            ("0 first", [combs[0], combs[1]]),
+            ("1 first", [combs[1], combs[0]]),
+        ] {
+            let mut model = model.clone();
+            let mut log = ProvenanceLog::new();
+            match model.fuse(&[first], &[second], rule, &policy, &mut log) {
+                Ok(answer) => {
+                    let valid = model.validate(&policy, &mut ProvenanceLog::new());
+                    let records: Vec<String> = log
+                        .records()
+                        .iter()
+                        .map(|record| format!("{} {:e}", record.predicate(), record.enclosure()))
+                        .collect();
+                    eprintln!(
+                        "PROBE {rule:?} {name}: Ok {} solids {}, valid {:?}, records {records:?}",
+                        answer.solids().len(),
+                        volume_of(&model, answer.solids()),
+                        valid.is_ok()
+                    );
+                }
+                Err(why) => eprintln!("PROBE {rule:?} {name}: Err {why:?}"),
+            }
+        }
+    }
+}

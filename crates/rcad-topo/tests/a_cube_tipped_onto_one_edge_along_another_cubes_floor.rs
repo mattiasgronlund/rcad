@@ -352,3 +352,57 @@ fn a_cube(model: &mut Model) -> SolidKey {
         .add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube")
 }
+
+#[test]
+fn probe_q1687_b() {
+    for t in [0.024_f64, 0.0955, 0.1015, 0.154] {
+        let tilt = [0.0, 0.0, t.sin(), t.cos()];
+        for (rule, order) in [
+            (Rule::Union, Order::BlockFirst),
+            (Rule::Union, Order::TippedFirst),
+            (Rule::Intersection, Order::BlockFirst),
+            (Rule::Intersection, Order::TippedFirst),
+            (Rule::Difference, Order::TippedFirst),
+            (Rule::Difference, Order::BlockFirst),
+        ] {
+            let mut model = a_model();
+            let [block, tipped] = the_block_and_the_tipped_cube(&mut model, tilt);
+            let (one, other) = match order {
+                Order::BlockFirst => (block, tipped),
+                Order::TippedFirst => (tipped, block),
+            };
+            let mut log = ProvenanceLog::new();
+            match model.fuse(&[one], &[other], rule, &tolerant(), &mut log) {
+                Ok(answer) => {
+                    let valid = model.validate(&tolerant(), &mut ProvenanceLog::new());
+                    let volumes: Vec<String> = answer
+                        .solids()
+                        .iter()
+                        .map(|&solid| {
+                            match model.solid(solid).expect("key").measure(
+                                Deflection::of(0.1).expect("a deflection"),
+                                &Policy::certified(),
+                                &mut ProvenanceLog::new(),
+                            ) {
+                                Ok(measured) => format!("{}", measured.volume()),
+                                Err(why) => format!("{why:?}"),
+                            }
+                        })
+                        .collect();
+                    let records: Vec<String> = log
+                        .records()
+                        .iter()
+                        .map(|record| format!("{} {:e}", record.predicate(), record.enclosure()))
+                        .collect();
+                    eprintln!(
+                        "PROBE t={t} {rule:?} {order:?}: Ok {} solids {volumes:?}, by hand {}, valid {:?}, records {records:?}",
+                        answer.solids().len(),
+                        1000.0 - what_the_two_share(tilt),
+                        valid.is_ok()
+                    );
+                }
+                Err(why) => eprintln!("PROBE t={t} {rule:?} {order:?}: Err {why:?}"),
+            }
+        }
+    }
+}
