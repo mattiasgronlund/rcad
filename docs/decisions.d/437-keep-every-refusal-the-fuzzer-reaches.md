@@ -333,9 +333,10 @@ go when the scratchpad does. Its method is in this subsection.
 
 ### 437.10 Rows
 
-- **The morning refusal replay** (437.5). Tier 2, finding defects better (§230.1,
-  as §311 reordered it). Its selftest is `check-fuzz-triage-selftest`.
-- **Limit, gap or not known on `rcad-topo::Error` and `rcad-geom::Error`**
+- **Q1770, the morning refusal replay** (437.5). Tier 2, finding defects better
+  (§230.1, as §311 reordered it). Its selftest is `check-fuzz-triage-selftest`.
+- **Q1771, limit, gap or not known on `rcad-topo::Error` and `rcad-geom::Error`**
   (437.6), with a test for each limit or gap claimed, and the class added to the
-  report. Tier 2, waiting for the replay row.
-- **Q1752 filed again** with the three files of 437.9, as `crash/D`, tier 5.
+  report. Tier 2, `after:Q1770`.
+- **Q1772, Q1752 filed again** with the three files of 437.9, as `crash/D`, tier
+  5. Q1752 is dropped on this section.
