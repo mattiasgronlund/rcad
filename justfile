@@ -3344,7 +3344,8 @@ check-lanes-workflow:
     relay_continuity="    if (report && report.outcome !== 'blocked' && !sameSha(report.continued_from, before.landed_sha)) {"
     relay_switch='  git switch ${branch}'
     relay_trees='  return (prior.relayTrees || []).concat([prior.report && prior.report.worktree_path, prior.check && prior.check.worktree_path]).filter(Boolean)'
-    relay_outcome="    core.outcome = { type: 'string', enum: ['fixed', 'limit_demonstrated', 'partial', 'blocked', 'relay'] }"
+    relay_outcome="    core.outcome = { type: 'string', enum: ['fixed',"
+    relay_last="'relay'] }"
     relay_rule='**When "Lane budget passed" comes and your row is not done, hand over** (§416).'
     relay_detach='2. Run `git switch --detach`, so the lane after you can check your branch out.'
     test_first='**Commit the failing test first, on its own, then the fix.** Once a test fails'
@@ -3372,6 +3373,14 @@ check-lanes-workflow:
     rows_note_use='${rowsNote()}'
     tests_note_use='${testsNote()}'
     report_set='  if (answer.writeSet.length) ready.report = forTheVerifier()'
+    gone_outcome="'does_not_reproduce', $relay_last"
+    gone_rule='**A row naming the inputs that show its fault runs them on the base first**'
+    gone_route="  if (report.outcome === 'does_not_reproduce') return gone(lane, report, out)"
+    gone_unverified='  if (lane.verify === false) return out'
+    gone_close="  if (prior.kind === 'does_not_reproduce') return closedAtBase(lane, prior)"
+    gone_steps='## Does not reproduce'
+    gone_refusal="    if (check.verdict !== 'confirm') return stopped(lane, out, "
+    gone_done='mise exec -- just queue done <id> <base sha>'
     settings=.claude/settings.json
     script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
@@ -3714,7 +3723,7 @@ check-lanes-workflow:
             echo "$1 does not count the trees a row was relayed from among its trees, so nothing unlocks them or marks them finished (§416)"
             return 22
         fi
-        if ! grep -qxF -- "$relay_outcome" "$1"; then
+        if ! grep -F -- "$relay_outcome" "$1" | grep -qF -- "$relay_last"; then
             echo "$1 does not let a writing lane report the outcome relay (§416)"
             return 22
         fi
@@ -3751,6 +3760,23 @@ check-lanes-workflow:
             || ! grep -qxF -- "$rows_note_use" "$1" || ! grep -qxF -- "$tests_note_use" "$1" || ! grep -qxF -- "$report_set" "$1"; then
             echo "$1 does not give a brief built from a row the two notes every brief the dispatcher wrote carried (Q1047, Q1505, Q1347), or a writing lane the for_the_verifier field by default"
             [ "$failed" != 0 ] || failed=27
+        fi
+        if ! grep -F -- "$relay_outcome" "$1" | grep -qF -- "$gone_outcome" || ! grep -qF -- "$gone_rule" "$2/lane.md"; then
+            echo "$1 does not let a writing lane report does_not_reproduce, or $2/lane.md does not tell a lane to run its row's inputs on the base first; a lane whose row's fault is gone from main has nowhere to say so (§433.8)"
+            [ "$failed" != 0 ] || failed=28
+        fi
+        at=$(grep -nxF -- "$gone_route" "$1" | head -1 | cut -d: -f1)
+        prev=$(grep -nxF -- "$gone_unverified" "$1" | head -1 | cut -d: -f1)
+        line=$(grep -nxF -- "$gone_close" "$1" | head -1 | cut -d: -f1)
+        got=$(grep -nxF -- "$land_first" "$1" | head -1 | cut -d: -f1)
+        if [ -z "$at" ] || [ -z "$prev" ] || [ "$at" -ge "$prev" ] || [ -z "$line" ] || [ -z "$got" ] || [ "$line" -ge "$got" ] \
+            || ! grep -qxF -- "$gone_steps" "$2/verifier.md"; then
+            echo "$1 does not send a does_not_reproduce lane to its verifier before verify: false is read ('$gone_route' above '$gone_unverified'), or to the closing merger before the lander is weighed ('$gone_close' above '$land_first'), or $2/verifier.md has no '$gone_steps' steps; a row nobody ran again would close, or the lander would look for a branch to merge (§433.8)"
+            [ "$failed" != 0 ] || failed=29
+        fi
+        if ! grep -qF -- "$gone_refusal" "$1" || ! grep -qF -- "$gone_done" "$2/merger.md"; then
+            echo "$1 does not stop a does_not_reproduce lane whose verifier did not confirm ('$gone_refusal'), or $2/merger.md does not close a confirmed one with '$gone_done'; a fault that still shows would close its row (§433.8)"
+            [ "$failed" != 0 ] || failed=30
         fi
         return "$failed"
     }
