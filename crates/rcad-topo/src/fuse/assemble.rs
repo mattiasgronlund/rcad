@@ -722,6 +722,7 @@ impl Assembly {
             shells: Vec::new(),
             solids: Vec::new(),
         };
+        assembly.leave_out_each_pair_of_flat_faces_walking_one_ring_both_ways(log)?;
         assembly.leave_out_what_no_wire_walks();
         assembly.part_each_line_two_faces_rest_against_each_other_along(model);
         every_closed_edge_read_off_one_spelling(
@@ -730,6 +731,115 @@ impl Assembly {
             &mut assembly.faces,
         )?;
         Ok(assembly)
+    }
+
+    /// Leave out each pair of flat faces on two different planes whose one
+    /// ring each walks the same straight edges as the other's, each edge the
+    /// other way round.
+    ///
+    /// **As its corners are written, such a pair is one polygon twice, facing
+    /// both ways**, and bounds no space between the two. Only the planes the
+    /// two are stored on differ, and a plane carries no corner. A cube tipped
+    /// onto one edge along another cube's floor makes one: at `t = 0.002` the
+    /// cube's corner at `x = 5` rounds onto the floor, at
+    /// `(4.999999999999999, 5, 0)`, and the union kept a sliver of the cube's
+    /// bottom face and a sliver of its side, each the triangle of that corner
+    /// and the floor's `(0, 5, 0)` and `(5, 5, 0)`. The edge from `(0, 5, 0)`
+    /// to `(5, 5, 0)` then had four faces along it, the two slivers and the two
+    /// pieces of the floor either side of where the cube's edge rests on it,
+    /// and the union was refused `ResultIsNotManifold` at 115 of 400 tilts
+    /// under both policies (queue row Q1528,
+    /// `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`). Two combs
+    /// crossing where three of their corners lie a rounding apart make two
+    /// more, and `docs/decisions.md` §431 says why leaving them out is right.
+    ///
+    /// **Every edge left keeps its faces paired.** The pair walks each of its
+    /// edges once each way, so it takes one use off each side of every one of
+    /// them, as a single wire [`encloses_something`] leaves out does. An edge
+    /// only the pair walked has no face left, and
+    /// [`Assembly::leave_out_what_no_wire_walks`] leaves it out, with every
+    /// corner no edge left ends at.
+    ///
+    /// **[`Assembly::leave_out_each_flat_ring_another_plane_walks_back`] does
+    /// not reach such a pair**, though it would leave both faces out: it asks
+    /// once the faces are joined, and the joining refuses first, since it
+    /// needs exactly two faces along each edge to know which face is across
+    /// it. This asks before, and only of whole rings, which no edge with more
+    /// faces along it can confuse. It folds no corner, since the two rings'
+    /// corners are already one by name, so it runs under every policy, as
+    /// that rule and `docs/decisions.md` §365.7's do.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] when two planes cannot be told apart at all.
+    fn leave_out_each_pair_of_flat_faces_walking_one_ring_both_ways(
+        &mut self,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let mut walking_the_same_edges: BTreeMap<Vec<usize>, Vec<usize>> = BTreeMap::new();
+        for (index, face) in self.faces.iter().enumerate() {
+            let (Some(_), [ring]) = (face.surface.as_plane(), &face.wires[..]) else {
+                continue;
+            };
+            if !ring
+                .iter()
+                .all(|side| self.edges[side.edge].lies_on_two_planes())
+            {
+                continue;
+            }
+            let mut edges: Vec<usize> = ring.iter().map(|side| side.edge).collect();
+            edges.sort_unstable();
+            if edges.windows(2).any(|pair| pair[0] == pair[1]) {
+                continue;
+            }
+            walking_the_same_edges.entry(edges).or_default().push(index);
+        }
+        let mut gone = vec![false; self.faces.len()];
+        for faces in walking_the_same_edges.values() {
+            for (at, &one) in faces.iter().enumerate() {
+                for &other in &faces[at + 1..] {
+                    if !gone[one]
+                        && !gone[other]
+                        && self.walk_one_ring_both_ways(one, other, log)?
+                    {
+                        gone[one] = true;
+                        gone[other] = true;
+                    }
+                }
+            }
+        }
+        let mut gone = gone.into_iter();
+        self.faces
+            .retain(|_| !gone.next().expect("one mark per face"));
+        Ok(())
+    }
+
+    /// Whether two flat faces of one ring each, walking the same edges once
+    /// each, walk every one of them opposite ways and sit on different planes.
+    fn walk_one_ring_both_ways(
+        &self,
+        one: usize,
+        other: usize,
+        log: &mut ProvenanceLog,
+    ) -> Result<bool> {
+        let (mine, theirs) = (&self.faces[one], &self.faces[other]);
+        let forward_along = |face: &Face| -> BTreeMap<usize, bool> {
+            face.wires[0]
+                .iter()
+                .map(|side| (side.edge, side.forward))
+                .collect()
+        };
+        let theirs_forward = forward_along(theirs);
+        if forward_along(mine)
+            .iter()
+            .any(|(edge, forward)| theirs_forward[edge] == *forward)
+        {
+            return Ok(false);
+        }
+        Ok(
+            agreement_of_two_planes(&mine.outward_plane(), &theirs.outward_plane(), log)?
+                == PlaneAgreement::Different,
+        )
     }
 
     /// Leave out every edge no wire walks, and every corner no edge left ends

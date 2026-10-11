@@ -23,6 +23,19 @@
 //! fuse now leaves both out (`leave_out_each_flat_ring_another_plane_walks_back`
 //! in `fuse/assemble.rs`).
 //!
+//! **The union was refused** `ResultIsNotManifold { count: 4 }` at 115 of
+//! those 400 tilts, under both policies, both ways round (queue row Q1528;
+//! five of them are [`TILTS_THE_UNION_WAS_REFUSED_AT`]). There the cube's
+//! corner at `x = 5` itself rounds onto the floor, at
+//! `(4.999999999999999, 5, 0)`, and the union kept a sliver of the cube's
+//! bottom face and a sliver of its side `x = 5`, each the triangle of that
+//! corner and the floor's `(0, 5, 0)` and `(5, 5, 0)`. The two slivers walk
+//! one ring both ways, so the edge from `(0, 5, 0)` to `(5, 5, 0)` had four
+//! faces along it, and joining the floor's pieces refused before Q1506's rule
+//! could ask. The fuse now leaves such a pair out before it joins anything
+//! (`leave_out_each_pair_of_flat_faces_walking_one_ring_both_ways` in
+//! `fuse/assemble.rs`).
+//!
 //! What the two cubes share is the cube's square cross-section, clipped to
 //! the block, along the five of its ten that lie over the block:
 //! [`what_the_two_share`] works it out from the tilt.
@@ -37,6 +50,36 @@ const TILTS: [[f64; 4]; 2] = [
     [0.0, 0.0, 0.037_990_855_326_937_03, 0.999_278_086_876_484_9],
     [0.0, 0.0, 0.080_911_455_551_998_05, 0.996_721_293_221_157_7],
 ];
+
+/// Five of the 115 tilts, of 400, at which the union was refused
+/// `ResultIsNotManifold { count: 4 }` under both policies, both ways round
+/// (queue row Q1528): `t = 0.002`, `0.003`, `0.008`, `0.01` and `0.015`, as
+/// `f64::sin` and `f64::cos` give them.
+const TILTS_THE_UNION_WAS_REFUSED_AT: [[f64; 4]; 5] = [
+    [
+        0.0,
+        0.0,
+        0.001_999_998_666_666_933_3,
+        0.999_998_000_000_666_6,
+    ],
+    [0.0, 0.0, 0.002_999_995_500_002_025, 0.999_995_500_003_375],
+    [0.0, 0.0, 0.007_999_914_666_939_733, 0.999_968_000_170_666_3],
+    [0.0, 0.0, 0.009_999_833_334_166_664, 0.999_950_000_416_665_3],
+    [0.0, 0.0, 0.014_999_437_506_328_09, 0.999_887_502_109_359_2],
+];
+
+#[test]
+fn the_union_is_both_cubes_less_what_they_share_where_it_was_refused() {
+    for tilt in TILTS_THE_UNION_WAS_REFUSED_AT {
+        for policy in [certified(), tolerant()] {
+            for order in [Order::BlockFirst, Order::TippedFirst] {
+                let asked = format!("{tilt:?}, {order:?}, {policy:?}");
+                let volume = volume_of_a_fuse(tilt, Rule::Union, order, &policy, &asked);
+                assert_about(volume, 2000.0 - what_the_two_share(tilt), &asked);
+            }
+        }
+    }
+}
 
 #[test]
 fn the_union_is_both_cubes_less_what_they_share_tolerant() {

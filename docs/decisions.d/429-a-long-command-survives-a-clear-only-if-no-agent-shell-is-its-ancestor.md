@@ -142,3 +142,105 @@ The first real `/clear` after this lands is still the check §429.3 names:
 whether a `just land` or `just verify-lane` run outlives it. Nothing here
 changes what that check looks for, only what the selftest can tell about it
 ahead of time.
+
+### 429.8 What Q1671 built: a gate that outlives its call
+
+`just gate` now runs its steps in a run of their own, and the call only
+follows it. The call takes a lock in `<gate_log>.run/`, decides whether to
+follow a run, refuse, or start one, refuses a dirty tree as before (§415), and
+then starts the run as `( setsid bash <copy of the recipe's script> & )`. The
+subshell exits as soon as it has written the run's pid, so the run belongs to
+init and leads a session of its own before the call starts following it. The
+run is the old recipe from the emptying of the log onward, unchanged. Its
+stdout and stderr go to `<gate_log>.run/out`, and the last thing it does is
+write its exit code to `<gate_log>.run/exit`. The call prints `out` as it
+grows, checking every 0.2 s, and exits with the code in `exit`.
+
+What a reader sees is the same: `quiet`'s one line a step, the failing step's
+tail and the summary block, `loud`'s stream, the exit code, the served
+verdicts, the record, the audit and `fresh`. That holds because the run is the
+old code, and `check-gate-summary-selftest` still passes. One thing did change:
+the run's stderr now reaches the caller on stdout, folded into the one file. A
+refusal still goes to stderr, since the call prints it before any run starts.
+
+The files sit beside `gate_log`. Every selftest sets a `gate_log` of its own,
+so its runs never meet the real gate's. The run is known by its pid and its
+start, which is the boot id plus the start time from `/proc/<pid>/stat`. So a
+pid used again after a reboot, or after the pids wrap, is not taken for the
+run, and a zombie counts as ended.
+
+**The same gate.** Two calls are the same gate when they agree on six things:
+the commit, the steps, the steps that can be served, `reuse` or `fresh`,
+`quiet` or `loud`, and how many steps run at once. A call that follows a run
+takes the run's answer as its own, so the run has to be answering the same
+question:
+
+- A run on another commit read another tree.
+- A `gate-lane` run leaves `test-slow` out. A merger's whole gate that
+  followed it would put code on `main` that the slow tier never read.
+- A `reuse` run serves steps that `fresh` asked to have run.
+- The run prints in one form only, so `quiet` cannot follow `loud`.
+- `1` is asked for to rule out steps getting in each other's way (§372.8),
+  and a run of all of them at once cannot answer that.
+
+A call that is not the same gate as a live run exits 2. It names that run's
+pid, its start, and the six lines that make it that gate. It does not wait:
+two gates in one tree would share `target/`, the cargo lock and the step logs,
+and nothing asks for that. The check for a run to follow comes before the
+dirty-tree refusal, since following reads nothing of the tree, and a run can
+write into the tree, as a failing proptest does.
+
+**A run that died.** Say a run's pid is gone and it wrote no exit code,
+because it was killed outright or the machine rebooted. The next call of the
+same gate prints whatever output the run left, then `just gate: the run (pid
+N) ended without finishing; <gate_log> holds what it ran`, writes `lost`, and
+exits 1. A third call finds `lost` and starts a new run, which passes if its
+steps do. A dead run of another gate is not reported: the call just starts
+afresh.
+
+**A Ctrl-C.** A Ctrl-C in a terminal reaches the call but not the run, which
+is in a session of its own. So the call passes it on as SIGTERM to the run's
+whole process group, writes `stopped` so that the next call starts afresh
+instead of reporting a dead run, and exits 130.
+
+The call sends SIGTERM and not SIGINT because the run is a background job of
+the call's shell, and a background job of a script starts with SIGINT
+ignored. Measured with `target/probe-env.sh`:
+
+- `/proc/<pid>/status` showed `SigIgn: 0000000000000006`, which is SIGINT and
+  SIGQUIT, for a plain `sleep 3 &` started from a script.
+- A bash started that way did not run its own `trap … INT`.
+- Under `env --default-signal=INT`, the same bash did run it.
+
+The same is true of every step of the old gate, since each one was a
+background job of the recipe's shell. Whether a Ctrl-C stopped all of the
+steps before this change was not run. SIGTERM is not trapped, because SIGTERM
+is what §429.2's kill sends.
+
+**The test.** `check-gate-verdicts-selftest` has three arms for this. They use
+a step that waits for as long as a file is there (`_gate-selftest-sleep` with
+`GATE_SELFTEST_HOLD`). Each arm starts the gate in a group of its own, with
+SIGINT at its default, as a terminal or Claude Code would start it.
+
+- **Stopped like a `/clear`.** The arm stops the call as `stop_like_a_clear()`
+  does, finding the descendants before the first signal (§429.7), then runs
+  the same gate again. It checks that the second call follows the run, and
+  that a gate of other steps and a `fresh` gate both refuse beside it. Once
+  the step is let go, it checks that the follower prints the step's line and
+  the summary block and exits 0, and that the step ran only once.
+- **Killed outright.** The arm kills the run outright, then checks the report
+  of the second call and the new run of the third.
+- **A Ctrl-C.** The arm sends SIGINT to the call's group and checks that the
+  run is gone.
+
+Two checks show that the arms catch what they are for:
+
+- With the base's `gate` recipe put back and the arms kept, the first arm
+  fails with `the same gate run again on the same commit did not follow the
+  run whose call was stopped`.
+- With the follower's `trap … INT` line taken out, the third arm fails with
+  `a Ctrl-C to the gate's call left its run going`.
+
+**§429.2 and §429.3.** Nothing measured here disagrees with them. The first
+arm agrees with §429.3's `setsid -f` row. Because it finds the descendants
+before the kill, it says nothing about the order §429.7 left open.
