@@ -19,6 +19,16 @@
 //! asked: `Invalid(VolumeIsNotPositive { volume: 0.0 })`, either way round.
 //! The fuse now asks the range before it nests the shells, so all six
 //! certified fuses name the limit (`docs/decisions.md` §87.3).
+//!
+//! **Under a tolerant policy the intersection is now no solid** (queue row
+//! Q1687). The range is only a warning there, so until Q1687 the prism went on
+//! to be nested and was refused `VolumeIsNotPositive { volume: 0.0 }`. A
+//! tolerant fuse now leaves out a shell of flat faces whose corners all lie
+//! within the policy's wobble of the plane of one of its own faces
+//! (`leave_out_each_shell_thinner_than_the_wobble` in `fuse/assemble.rs`,
+//! §417's 2026-10-11 note). The prism's six corners all round onto `y = 2`, so
+//! it is left out, and nothing is left. That is the exact answer: the two
+//! combs share a line, and a line holds no space.
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 mod cones;
@@ -61,16 +71,21 @@ fn every_certified_fuse_of_the_two_combs_is_refused_for_the_range() {
 }
 
 /// Under `Policy::tolerant(25.0)` the range is only a warning, so moving where
-/// it is asked moves nothing, and these are what they were before Q1614. Queue
-/// row Q1615 owns them.
+/// it is asked moved nothing here. Queue row Q1615 owns the refusals.
 ///
 /// The union answers one solid, both ways round, holding what the two combs
 /// hold between them, with the one record the range warns with. The
-/// intersection is still the prism of no space, and either difference is
-/// refused as an outline winding against its face, once the answer is written
-/// with its corners rounded.
+/// intersection answers no solid, and the model it leaves validates: exactly,
+/// the two combs share a line, which holds no space. The prism of `3.08e−32`
+/// their rounded planes close is a shell whose corners all lie within the
+/// policy's wobble of one of its planes, so the fuse leaves it out and logs
+/// that once, `7.9e−15`, and logs nothing else. Until Q1687 it was refused
+/// `VolumeIsNotPositive { volume: 0.0 }`. Either difference is refused as an
+/// outline winding against its face, once the answer is written with its
+/// corners rounded.
 #[test]
-fn under_a_tolerant_policy_the_union_answers_and_the_rest_are_refused_by_name() {
+fn under_a_tolerant_policy_the_union_answers_the_intersection_is_nothing_and_each_difference_is_refused()
+ {
     let policy = Policy::tolerant(25.0);
     let (model, combs) = the_combs().build();
     let both = volume_of(&model, &combs);
@@ -89,19 +104,27 @@ fn under_a_tolerant_policy_the_union_answers_and_the_rest_are_refused_by_name() 
         );
 
         let mut intersection = model.clone();
-        let refused = intersection.fuse(
-            &[first],
-            &[second],
-            Rule::Intersection,
-            &policy,
-            &mut ProvenanceLog::new(),
-        );
+        let mut log = ProvenanceLog::new();
+        let answer = intersection
+            .fuse(&[first], &[second], Rule::Intersection, &policy, &mut log)
+            .unwrap_or_else(|why| panic!("the intersection, {first:?} first: {why:?}"));
         assert!(
-            matches!(
-                refused,
-                Err(Error::Invalid(Invalid::VolumeIsNotPositive { volume })) if volume == 0.0
-            ),
-            "the intersection, {first:?} first: {refused:?}"
+            answer.solids().is_empty(),
+            "the intersection, {first:?} first: {:?}",
+            answer.solids()
+        );
+        intersection
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("the intersection, {first:?} first: {why:?}"));
+        let predicates: Vec<&str> = log
+            .records()
+            .iter()
+            .map(|record| record.predicate())
+            .collect();
+        assert_eq!(
+            predicates,
+            ["a shell within the wobble of one of its planes taken as flat"],
+            "the intersection, {first:?} first"
         );
 
         let mut difference = model.clone();

@@ -540,3 +540,110 @@ edges.
 **What this leaves.** Queue row Q1615, the combs under a tolerant policy, is
 not answered by this fold, whose corners there have two meets each, and stays
 open. Nothing else.
+
+> **2026-10-11 note (Q1687): a tolerant fuse now also leaves out a shell
+> thinner than the wobble.** After the shells are grouped,
+> `Assembly::leave_out_each_shell_thinner_than_the_wobble` in
+> `fuse/assemble.rs` leaves out each shell whose faces are all flat, whose
+> edges all run straight between two different corners, and whose corners all
+> lie within `Policy::max_wobble` of the plane of one of its own faces. Its
+> edges are straight, so all of it lies between its corners, and none of it is
+> further from that plane than the furthest corner. Each such shell is asked of
+> `Policy::take_as_one_point` once, as the record *"a shell within the wobble
+> of one of its planes taken as flat"*, at `Level::Float`, whose inputs are its
+> corners and whose enclosure is the furthest any corner may be from the plane,
+> rounding and each corner's own box included. Under `Policy::certified()` it
+> returns before doing anything. It runs before the range check, so the range
+> no longer warns about a shell that is not in the answer.
+>
+> *How thick a shell it can take.* Under `Policy::tolerant(s)`, every corner
+> of the shell lies within `Policy::max_wobble`, `64 ε s = 2⁻⁴⁶ s`, of the
+> plane, on one side or the other: `3.6e−13` at `tolerant(25.0)` and
+> `1.4e−12` at `tolerant(100.0)`. The shell lies between its corners, so the
+> whole of it fits in a slab twice that, `2⁻⁴⁵ s`, across, and folding it onto
+> the plane moves no point of it further than `2⁻⁴⁶ s`. Each corner's own
+> rounding, `8 ε` times `Σ|nᵢ pᵢ| + |offset|`, has to fit in the same `64 ε s`,
+> so the fold takes no corner where that sum is over `8 s`. For a corner on or
+> near the plane the sum is at least about twice the plane's distance from the
+> origin, so on a plane further than about `4 s` from the origin the fold takes
+> nothing: a model that reaches well past the working size its policy was
+> given gets less of it. Read off `how_far_corners_may_be_from`, not run. The shells it took here were far
+> thinner than that: the records say `5.4e−15` to `7.1e−15` at
+> `tolerant(100.0)` and `7.9e−15` at `tolerant(25.0)`.
+>
+> *That is within what the policy already takes as one point,* measured as
+> the policy measures a wobble, by how far a point is moved: no point of the
+> shell is moved further than `max_wobble`, and `Policy::take_as_one_point`
+> moves one point up to `max_wobble` onto another. It is the same comparison,
+> `Policy::wobble_is_acceptable`, on a record of the same kind, a length. One
+> difference: measured across rather than by how far a point moves, two
+> points of the shell on either side of the plane can be up to twice
+> `max_wobble` apart, where `take_as_one_point` takes two points as one only
+> within `max_wobble`. The fold does not join them: it leaves the shell out,
+> and each corner the shell shares with the rest of the answer stays where it
+> was.
+>
+> *The shape.* `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`, the
+> tipped cube less the block, under `Policy::tolerant(100.0)`, at `t = 0.075`,
+> `0.0885`, `0.1315` and `0.142`. The tipped cube's bottom face and its side
+> `x = 5` are stored with `0.0` as the `x` of their normals, so the edge where
+> they meet runs parallel to the floor, `1.1e−16` below it at `t = 0.075`. The
+> arrangement cuts the bottom, the side and the floor by the block's side
+> `x = 0`, and the three meets there all round to `(0, 5, 0)`, so `Corners::of`
+> joins them and the strip under the block closes into a tetrahedron touching
+> the rest of the answer at that one point. 417.7's fold does not take it: the
+> bottom, the side and the floor all have `0.0` as the `x` of their normals, so
+> the three have no meet, and the fold finds no tip. The trace is the first
+> relay's, with prints in `Corners::of` and `Scratch::split_both_groups` since
+> taken out.
+>
+> *Before and after.* Before, the first three tilts answered two solids, the
+> tetrahedron of `8.2e−32` (`3.3e−31` at `0.1315`) and the body, with the
+> range check's one record, and `t = 0.142` was refused
+> `VolumeIsNotPositive { volume: 0.0 }`. After, each answers one solid of 9
+> faces and 14 corners that validates, `721.8754800645003` at `t = 0.075`, and
+> logs one record of this fold and no range record, of `5.4e−15` to `7.1e−15`.
+> At `t = 0.142` the shell left out has all four corners on the floor itself,
+> `z = 0`, which is why it measured `0.0`. The same cube `2⁻³⁰` higher is one
+> solid of 9 faces, `721.8754800912822`, and `2⁻³⁰` lower one of 11 faces,
+> `721.8754800377184`. Both are one solid, so two is wrong, and the volume now
+> answered lies between theirs.
+> `the_tipped_cube_less_the_block_is_one_solid_where_its_corner_rounds_below_the_floor_tolerant`
+> pins the four. Measured with a probe at the end of that file, taken out
+> before the tip.
+>
+> *Q1686's tilts*, `t = 0.024`, `0.0955`, `0.1015` and `0.154`, measured with
+> the same probe and not pinned: the tipped cube less the block, which the row
+> names as refused `VolumeIsNotPositive`, now answers one solid with one record
+> of this fold at each. The union and the intersection are still refused
+> `OuterWireWindsAgainstTheNormal` both ways round, and the block less the
+> tipped cube answers one solid with the range record. Q1687's second lane ran
+> them again with `probe_q1687_b`, committed in `5f97335e` and taken out in
+> the commit after it, and got the same: each of the eight differences
+> validates and is one solid within `8e−13` of `1000` less what the two share
+> worked by hand, `741.0000015943825` against `741.0000015943831` for the
+> tipped cube less the block at `t = 0.024`.
+>
+> *What it moved outside the file.* `two_skewed_combs_touching_along_one_line.rs`:
+> the combs' intersection under `Policy::tolerant(25.0)`, either comb first,
+> is the prism of `3.08e−32` alone, and was refused
+> `VolumeIsNotPositive { volume: 0.0 }`. It now answers no solid, which
+> validates, with one record of this fold of `7.9e−15`. Exactly, the two combs
+> share a line and no space, so no solid is their intersection. Their union and
+> both differences, and every certified fuse of them, did not move.
+> `under_a_tolerant_policy_the_union_answers_and_the_rest_are_refused_by_name`
+> pinned the old refusal and failed; it lay outside the first lane's write set,
+> so that lane reported it and did not move it (`mise exec -- just t -p
+> rcad-topo --no-fail-fast`, 1950 of 1951, at `d627ecb9`). Q1687's second lane
+> moved it, and renamed it
+> `under_a_tolerant_policy_the_union_answers_the_intersection_is_nothing_and_each_difference_is_refused`,
+> since the intersection now answers: no solid, the model validating under the
+> same policy, and a log of that one record, `7.90959966678835e−15`, over the
+> prism's six corners, all at `y = 2`. With it moved, every test of
+> `rcad-topo` passes (`mise exec -- just t -p rcad-topo --no-fail-fast`, 1952
+> passed).
+>
+> *Considered and not taken.* Folding the strip's two other corners into the
+> one below the floor, 417.7's wide rule of `6ffbb172`: reasoned, not run, to
+> give the block less the tipped cube an edge with four faces along it, as
+> 417.8 (a) records the wide rule doing.
