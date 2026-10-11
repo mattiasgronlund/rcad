@@ -599,7 +599,9 @@ function byMerger(lane, prior, stop) {
 // commit, gated and pushed as a merge is.
 function closedAtBase(lane, prior) {
   return agent(CLOSE(lane, prior), CLOSER(lane)).then((m) => {
-    if (m) m.via = 'closed done at the base with nothing merged, its fault no longer showing (§433.8)'
+    if (m) m.via = m.merged === true
+      ? 'closed done at the base with nothing merged, its fault no longer showing (§433.8)'
+      : 'a close at the base that its verifier confirmed and its merger did not push (§433.8)'
     return m
   })
 }
