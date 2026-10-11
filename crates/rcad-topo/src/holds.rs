@@ -8332,58 +8332,81 @@ mod tests {
         }
     }
 
-    /// Each end of the thin bar of [`two_crossed_bars`] the union keeps,
-    /// outside the fat bar, holds its own wall alone, with the thin bar square
-    /// to the fat one.
+    /// Each end of the thin bar of [`two_crossed_bars`] left outside the fat
+    /// bar holds its own wall alone, whether the union keeps both ends in one
+    /// solid or the thin bar less the fat one keeps them as two, with the thin
+    /// bar square to the fat one or [`LEANING`].
     ///
     /// Each end's wall runs along one of the two loops the pipes cross in.
     /// Past the half-space [`intersect`] tells those loops apart by, the thin
     /// wall is one tube the loop in front never meets, running inside the fat
     /// bar and then out beyond the other loop: all of it on the far side of
     /// the loop in front, the other end's wall too, though that is outside the
-    /// fat bar. The union with the thin bar [`LEANING`] is refused
+    /// fat bar. Until Q1717 the leaning walls were refused
+    /// `AFaceMissesPartOfWhereItsSurfacesCross`. The leaning union is refused
     /// `AWireWillNotLieFlatOnItsFace` before anything is asked of it, with or
-    /// without Q1717.
+    /// without Q1717, so the leaning ends are asked only as a difference.
     ///
     /// Every point asked is on the thin wall, 1 along `x` from its axis: 5
     /// along the axis either way is outside the fat bar, and within 1.5 of the
     /// middle inside it.
     #[test]
     fn each_end_of_a_thin_bar_poking_out_of_a_fat_one_holds_its_own_wall_alone() {
-        for turn in [core::f64::consts::FRAC_PI_2] {
-            let (model, solid) = two_crossed_bars(turn, crate::Rule::Union);
-            let ends: Vec<FaceKey> = model
-                .solid(solid)
-                .expect("this model made the key")
-                .faces()
-                .filter(|face| match face.surface() {
-                    Surface::Cylinder(pipe) => pipe.radius() == 1.0,
-                    Surface::Plane(_) | Surface::Sphere(_) | _ => false,
+        for (turn, rule) in [
+            (LEANING, crate::Rule::Difference),
+            (core::f64::consts::FRAC_PI_2, crate::Rule::Union),
+            (core::f64::consts::FRAC_PI_2, crate::Rule::Difference),
+        ] {
+            let (mut model, [fat, thin]) = a_fat_bar_and_a_thin_one(turn);
+            let what = format!("{rule:?}, turned {turn}");
+            let solids = model
+                .fuse(
+                    &[thin],
+                    &[fat],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} refused: {why:?}"))
+                .solids()
+                .to_vec();
+            let ends: Vec<(SolidKey, FaceKey)> = solids
+                .into_iter()
+                .flat_map(|solid| {
+                    model
+                        .solid(solid)
+                        .expect("this model made the key")
+                        .faces()
+                        .filter(|face| match face.surface() {
+                            Surface::Cylinder(pipe) => pipe.radius() == 1.0,
+                            Surface::Plane(_) | Surface::Sphere(_) | _ => false,
+                        })
+                        .map(|face| (solid, face.key()))
+                        .collect::<Vec<_>>()
                 })
-                .map(|face| face.key())
                 .collect();
             let [one, other] = ends[..] else {
-                panic!("one face of the thin wall at each end: {ends:?}");
+                panic!("{what}: one face of the thin wall at each end: {ends:?}");
             };
             let (sin, cos) = turn.sin_cos();
             let on_the_thin_wall = |along: f64| at(1.0, -along * sin, along * cos);
             let [ahead, behind] =
-                if what_it_holds(&model, solid, one, on_the_thin_wall(5.0)) == OnAFace::Held {
+                if what_it_holds(&model, one.0, one.1, on_the_thin_wall(5.0)) == OnAFace::Held {
                     [one, other]
                 } else {
                     [other, one]
                 };
-            for (end, its_own, the_other) in [(ahead, 5.0, -5.0), (behind, -5.0, 5.0)] {
+            for ((solid, end), its_own, the_other) in [(ahead, 5.0, -5.0), (behind, -5.0, 5.0)] {
                 assert_eq!(
                     what_it_holds(&model, solid, end, on_the_thin_wall(its_own)),
                     OnAFace::Held,
-                    "{its_own} along, turned {turn}"
+                    "{its_own} along, {what}"
                 );
                 for along in [the_other, 0.0, 1.5, -1.5] {
                     assert_eq!(
                         what_it_holds(&model, solid, end, on_the_thin_wall(along)),
                         OnAFace::NotHeld,
-                        "{along} along, turned {turn}"
+                        "{along} along, {what}"
                     );
                 }
             }
@@ -8507,6 +8530,24 @@ mod tests {
     /// leaves the fat one; a quarter turn lays it along `y`, and then what is
     /// left is `x² + z² ≤ 1` and `x² + y² ≤ 9`.
     fn two_crossed_bars(turn: f64, rule: crate::Rule) -> (Model, SolidKey) {
+        let (mut model, [fat, thin]) = a_fat_bar_and_a_thin_one(turn);
+        let fused = model
+            .fuse(
+                &[fat],
+                &[thin],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a thin bar through a fat one");
+        let [solid] = fused.solids()[..] else {
+            panic!("one solid: {:?}", fused.solids());
+        };
+        (model, solid)
+    }
+
+    /// The two bars of [`two_crossed_bars`], fat then thin, not yet fused.
+    fn a_fat_bar_and_a_thin_one(turn: f64) -> (Model, [SolidKey; 2]) {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let fat = model
             .add_round_bar(
@@ -8521,19 +8562,7 @@ mod tests {
         let thin = model
             .add_round_bar(1.0, 20.0, &leaning)
             .expect("a positive radius and height");
-        let fused = model
-            .fuse(
-                &[fat],
-                &[thin],
-                rule,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("a thin bar through a fat one");
-        let [solid] = fused.solids()[..] else {
-            panic!("one solid: {:?}", fused.solids());
-        };
-        (model, solid)
+        (model, [fat, thin])
     }
 
     /// How much [`two_crossed_bars`] holds: `∫∫ 2·√(9 − x²)/sin α` over the
