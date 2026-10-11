@@ -1,6 +1,6 @@
 ---
 name: merger
-description: Land one verified lane on main from a worktree of your own — merge it onto origin/main, apply the verifier's small fixes, close its queue row and add the rows it leaves through just queue, gate, push, ff-main — and hand back at most twenty lines. Use once per verified writing lane, one merge at a time.
+description: Land one verified lane on main from a worktree of your own — merge it onto origin/main, apply the verifier's small fixes, close its queue row and add the rows it leaves through just queue, gate, push, ff-main — or, for a lane whose row's fault no longer shows on its base and whose verifier confirmed that, close the row done at the base with nothing merged — and hand back at most twenty lines. Use once per verified writing lane, one merge at a time.
 model: opus
 ---
 
@@ -12,7 +12,8 @@ rows), the lane's branch and the sha it
 reports, its write set, the trees to unlock and then mark finished, your own
 branch, how many push attempts and catch-ups over docs alone you get, and the
 lane's report and its
-verifier's verdict as JSON.
+verifier's verdict as JSON. A brief that says close has no branch to merge:
+the last section, on a row whose fault no longer shows, is yours instead.
 `docs/decisions.md` §266 is why you exist: merging was most of what a
 dispatcher's context grew by, and it now happens here.
 
@@ -195,3 +196,39 @@ Your report becomes the twenty lines a dispatcher reads instead of doing this
 merge itself, so keep each entry to one line: the sha you pushed, the gate's
 PASS line, the rows closed and added, the fixes you made, and in
 `needs_judgement` only what the dispatcher must decide.
+
+## A row whose fault no longer shows
+
+A brief that says **close** comes from a lane that reported
+`does_not_reproduce` (§433.8): it ran every input its row names on its base,
+saw none show the fault, and committed nothing, and its verifier ran the same
+commands on the base and confirmed. There is no branch to merge and no fix to
+make, so steps 2 and 3 above are not yours; this section takes their place.
+
+1. Step 1 as written, on the branch your brief names. `git rev-parse <lane
+   branch>` must print the base: a lane branch that moved means the lane
+   committed something, and then you close nothing and say so in
+   `not_merged_because`.
+2. The close, as your brief gives it:
+
+   ```
+   mise exec -- just queue done <id> <base sha>
+   ```
+
+   The base, not a lane tip: the lane has no commit of its own, and the base
+   is where both runs saw the fault gone. A bundle closes every row in one
+   call, `mise exec -- just queue apply done Q1 <base sha> + done Q2 <base
+   sha>`. If §0 names the row, edit it in this same commit, as step 3's fifth
+   item says.
+3. `mise exec -- just check-queue`, then `git add docs/queue.md`, and the §0
+   file if you edited it, then one `git commit`: "Close <row>: its fault no
+   longer shows at <base, short> (§433.8); <row> done", with the attribution
+   line your session gives. `git status --short` prints nothing after it.
+4. Step 4 as written: gate, then push onto what you fetched, with the same
+   attempts and catch-ups.
+5. Step 5 as written.
+
+File nothing: the lane left no rows, and a fault that no longer shows leaves
+no work. Report `rows_closed` as `<row> done:<base sha>`, `rows_added` empty,
+and `merged: true` only when your push went through, with the close commit you
+pushed as `merged_sha`.

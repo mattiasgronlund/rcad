@@ -175,6 +175,25 @@ was not checked here.
 
 What this leaves:
 
-- **Q1728**: `does_not_reproduce` in the lane, verifier, merger and prep
-  instructions, in `lanes.js` and in the dispatch-lanes skill, with
-  `check-lanes-workflow` arms.
+- **2026-10-11, Q1728: built.** `lane.md` tells a lane whose row names the
+  inputs that show its fault to run them on its base before it reads any
+  code: a crash file through `rcad-fuzz-explain`, which shows the fault as
+  `outcome: panicked`; a corpus file through the test or recipe the row
+  names; a shape as a probe test it writes, runs and removes. When none
+  shows it, the lane commits nothing and reports `does_not_reproduce`, with
+  `landed_sha` the base and each run in `base_runs`. `lanes.js` takes that
+  outcome, and sends such a lane to its verifier even under `verify: false`,
+  and never to the lander. The verifier, by `verifier.md`'s "Does not
+  reproduce" steps, checks that the lane branch is still the base, that
+  every input the row names has a run, and runs each command again on the
+  base. On its `confirm` a merger closes the row with `just queue done <id>
+  <base sha>` in one queue commit, gated and pushed, and files nothing
+  (`merger.md`'s last section); on anything else the run comes back not
+  merged, naming the command that still shows the fault. `prep.md` gives a
+  fact when every crash file the row names is under the latest night's
+  `artifacts/` and absent from its `fuzz-triage-members.tsv`, with the sha
+  in its `fuzz-triage-replayed-main.txt`. The dispatch-lanes skill says what
+  such a return means. `check-lanes-workflow`'s arms 28 to 30 hold the
+  outcome and `lane.md`'s rule, the route to the verifier and past the
+  lander, and the stop on a verifier that does not confirm with
+  `merger.md`'s close; each of their eight cuts is caught by its own arm.

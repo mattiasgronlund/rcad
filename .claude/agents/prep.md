@@ -122,6 +122,22 @@ the lane would otherwise spend twenty minutes finding again:
   3 on the other three targets (§272.9). A smaller gap says nothing, and one
   pair is a floor, so ask for several runs a side. One measuring pass per
   corpus is enough: two passes over one corpus agreed to within 2 edges;
+- for a row that names crash files, whether the latest fuzz night still saw
+  them fail (§433.8). The night is the last field of the last line of
+  `latest` under the fuzz log root, `RCAD_FUZZ_LOGS` or else
+  `~/rcad-fuzz-logs`, as `_status-triage` reads it (`just recipe
+  _status-triage`). Its crash files are `<night>/artifacts/<target>/crash-<hex>`.
+  Its `fuzz-triage-members.tsv`, headed `target`, `group`, `file`, names by
+  full path every crash file of each group that still failed on the `main`
+  whose sha `fuzz-triage-replayed-main.txt` holds. A row's `crash-<hex>`
+  names a file whose hash it starts, as `_status-triage` matches it. When
+  every crash file the row names is under that night's `artifacts/` and none
+  is in its `fuzz-triage-members.tsv`, say so in a fact with the night, that
+  sha, and whether `git merge-base --is-ancestor <that sha> <base>` exits 0:
+  the lane runs them on its base first, and may close the row without a fix
+  (`lane.md`). A night with no `fuzz-triage-members.tsv` or no
+  `fuzz-triage-replayed-main.txt` was not triaged that way, and gives no such
+  fact;
 - nothing about the context hook for a writing row. A lane that sees "Lane
   budget passed" is past 150k of its own context; it commits, hands its branch
   over, and `lanes.js` starts a fresh lane on it, up to three times a row

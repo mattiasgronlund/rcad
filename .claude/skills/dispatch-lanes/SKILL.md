@@ -254,6 +254,24 @@ lander ran`. A stop sends it to the Opus merger instead. After a stop, the
 lander's own tree is unlocked but not marked finished, so it stays on disk
 until the merger that follows marks it (§384.3).
 
+A lane that reports `does_not_reproduce` ran every input its row names — crash
+files, corpus files, a shape — on its base, saw none show the fault, and
+committed nothing (§433.8). Its run sends it to the verifier even under
+`verify: false`, never to the lander, and the verifier runs the same commands
+on the base. On the verifier's confirm, a merger closes the row done at the
+base sha with nothing merged, and its result line reads `closed done at the
+base with nothing merged, its fault no longer showing (§433.8)`: that row is
+merged, and the Merged bullet below is what you do. Anything but a confirm
+comes back not merged, with `the verifier saw the fault still show: <command>`
+or `the verifier said confirm, but ...` in its stop line, and the Not merged
+bullet takes it: the fault is still there, so the row is taken again with
+that command in its brief. A confirmed lane whose merger did not push reads
+plain `not merged`, not `verified, not merged`, since `verified` there means
+a verifier's `merge` or `fix_first`; the line after it, `a close at the base
+that its verifier confirmed and its merger did not push (§433.8)`, says the
+fault is gone and only the close is left: a `done <row> <base sha>` step in
+the Not merged bullet's one `just queue apply`.
+
 - **Merged**: `git fetch origin` and `git rev-parse origin/main` — a reported
   sha can be invented — then merge `origin/main` into your branch, so the copy
   of the queue you fill from sees the row closed (§263.9). The slot is free:
