@@ -716,7 +716,11 @@ pub enum Error {
     /// two bars that cross is the seventh. All seven are answered, and so are
     /// three curved surfaces two of which square `p` the same way, since the
     /// plane those two differ by takes one of their places (Q1284): two cones of
-    /// one slope about one axis and a ball. This is what is left over — among it
+    /// one slope about one axis and a ball. So is a ring with a ball, a pipe or
+    /// a cone on its axis and a plane that holds that axis or is square to it:
+    /// a bend's end cap across a bar of the bend's own radius, and a bead's
+    /// flat face on a shaft of its outer radius (Q1566). This is what is left
+    /// over — among it
     /// a plane leaning to the axis of a pipe or a cone, which cuts it in an
     /// ellipse or another conic, against anything but a surface it bends the
     /// same way as (`a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses`

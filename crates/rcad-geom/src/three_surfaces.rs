@@ -60,14 +60,18 @@
 //!   and a ball off it, or through the axes of two bars that cross.
 //!   [`what_a_plane_along_a_pipe_leaves`].
 //! - **A ring and a ball, a pipe or a cone on its axis, and a plane that holds
-//!   it.** The two share circles square to the axis, at the heights
+//!   it or is square to it.** The two share circles square to the axis, at the heights
 //!   [`intersect`](crate::intersect) names them by, and the plane cuts each
 //!   in two points — a bend's end cap across the circles a bar of the bend's
 //!   own radius crosses its tube in. A pipe of the tube's radius along the
 //!   ring's core circle instead shares a circle and a loop with it: the plane
 //!   square to the pipe holds the circle, and any other cuts the loop in up to
 //!   four points.
-//!   [`what_a_plane_through_a_rings_axis_leaves`].
+//!   [`what_a_plane_through_a_rings_axis_leaves`]. A plane square to the axis
+//!   cuts the ring in two circles and the other surface in one, all about one
+//!   centre, so the three share a whole circle or nothing — a bead's flat face
+//!   on a shaft of its outer radius.
+//!   [`what_a_plane_square_to_a_rings_axis_leaves`].
 //!
 //! **Three curved surfaces, two of which bend the same way, are one plane and
 //! two curved surfaces** by the first family's own argument: every point the
@@ -1622,7 +1626,7 @@ fn where_three_curved_surfaces_meet(
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
 }
 
-/// One plane and two curved surfaces, by the eight roads the module doc names.
+/// One plane and two curved surfaces, by the roads the module doc names.
 ///
 /// **Nothing here guesses.** Each road either reaches an answer it has earned or
 /// hands the question on, and what nothing reaches is the refusal that was here
@@ -1631,10 +1635,12 @@ fn where_three_curved_surfaces_meet(
 ///
 /// The road for a plane square to two surfaces' one axis comes before the one
 /// for a plane that grazes, because a plane through a cone's apex square to its
-/// axis is both, and the first answers it from stored numbers alone. A plane
+/// axis is both, and the first answers it from stored numbers alone. The same
+/// holds for a ring in place of one of the two, and where the plane misses or
+/// touches the other surface both roads say the three share nothing. A plane
 /// that holds the axis is never square to it, and it cuts a pipe or a cone
 /// about that axis in two lines, so it neither misses nor grazes one: that road
-/// shares no triple with the two either side of it.
+/// shares no triple with the ones either side of it.
 ///
 /// The road for a plane beside the axis comes last. Such a plane can miss a
 /// pipe or a ball, or touch one, and the road for a plane that grazes answered
@@ -1654,6 +1660,9 @@ fn where_one_plane_and_two_curved_surfaces_meet(
         return Ok(answer);
     }
     if let Some(answer) = what_a_plane_square_to_their_one_axis_leaves(flat, one, other, at)? {
+        return Ok(answer);
+    }
+    if let Some(answer) = what_a_plane_square_to_a_rings_axis_leaves(flat, one, other, at)? {
         return Ok(answer);
     }
     if let Some(answer) =
@@ -2267,16 +2276,10 @@ struct ACircleAboutAnAxis {
 /// exactly.
 ///
 /// A torus about an axis square to the plane is cut in circles too, but in two
-/// of them, and is left to the refusal.
+/// of them, and [`what_a_plane_square_to_a_rings_axis_leaves`] takes it.
 fn the_circle_a_square_plane_cuts(flat: &Plane, surface: &Surface) -> Option<ACircleAboutAnAxis> {
     let normal = flat.normal().components();
-    let square_to_the_plane = |along: [f64; 3]| {
-        exact_cross_of(normal, along).is_some_and(|across| {
-            across
-                .iter()
-                .all(|component| matches!(component.sign(), Decision::Zero))
-        })
-    };
+    let square_to_the_plane = |along: [f64; 3]| it_runs_square_to(flat, along);
     match surface {
         Surface::Sphere(ball) => Some(ACircleAboutAnAxis {
             on_the_axis: ball.centre().coordinates(),
@@ -2324,6 +2327,118 @@ fn how_wide_a_square_plane_cuts_a_cone(flat: &Plane, cone: &Cone) -> Option<Exac
 /// `n·p − d`, exactly: how far `place` is in front of the plane, times `‖n‖`.
 fn how_far_a_plane_is_from(flat: &Plane, place: [f64; 3]) -> Option<Exact> {
     Some(Exact::dot_of(flat.normal().components(), place)?.minus(&Exact::of(flat.offset())))
+}
+
+/// What a plane square to a ring's axis leaves of the ring and a ball, a pipe
+/// or a cone on that axis, or `None` where the three are not that.
+///
+/// The plane cuts the ring in two circles about the point where the axis
+/// crosses it, in one where it rests on the tube, or not at all, and it cuts
+/// the other surface in one circle about that same point
+/// ([`the_circle_a_square_plane_cuts`]). **Circles about one centre are one
+/// circle or share nothing**, as in
+/// [`what_a_plane_square_to_their_one_axis_leaves`], and no circle of the ring
+/// is a point, since the tube never reaches the axis. So the three share a
+/// whole circle or nothing, and there is no point to place: the top rim of a
+/// bar of radius 5 under the top half of ring 4/1 is the ring's outer equator,
+/// and `z = 0`, the bar and the ring share all of it.
+///
+/// **Which, is one exact sign.** With `h` how far the plane is from the ring's
+/// centre, it cuts the tube where `s² = r² − h²` is not below nothing, in
+/// circles of radii `R ± s`. The other circle's radius `ρ` is one of them
+/// exactly where `(ρ − R)² = s²`, which is `ρ² + R² − s² = 2ρR`. Times `n·n`,
+/// with `P = (n·n)ρ²` as [`ACircleAboutAnAxis::squared_radius`] gives it and
+/// `H = n·c − d` for `c` the ring's centre, the left side is
+///
+/// `A = P + (n·n)(R² − r²) + H²`
+///
+/// and the right side is `2ρR(n·n)`. Where `P` is not below nothing, `A` is
+/// above nothing, because [`Torus::new`] keeps `R > r`; so the two sides are
+/// equal exactly where their squares are, `A² = 4P·(n·n)R²`. Where `P` is
+/// below nothing the plane misses a ball, and the square on the right is below
+/// nothing where `A²` never is. Where `s²` is below nothing the plane is past
+/// the tube, and `(ρ − R)² = s²` holds for no `ρ`. So `A² − 4P·(n·n)R²` is
+/// nothing exactly where the three share a circle, and otherwise they share
+/// nothing.
+///
+/// **Square, and one axis, are decided exactly**, as
+/// [`what_a_plane_square_to_their_one_axis_leaves`] decides them, and a ring
+/// leaning a rounding off square is handed on. Two rings are handed on too.
+fn what_a_plane_square_to_a_rings_axis_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
+) -> Result<Option<MeetOfThree>> {
+    let ((Surface::Torus(ring), round) | (round, Surface::Torus(ring))) = (one, other) else {
+        return Ok(None);
+    };
+    if !it_runs_square_to(flat, ring.axis().direction().components()) {
+        return Ok(None);
+    }
+    let Some(circle) = the_circle_a_square_plane_cuts(flat, round) else {
+        return Ok(None);
+    };
+    let Some(off_one_axis) = Exact::cross_of(
+        &Exact::gap_between(circle.on_the_axis, ring.centre().coordinates()),
+        flat.normal().components(),
+    ) else {
+        return Ok(None);
+    };
+    if !off_one_axis
+        .iter()
+        .all(|component| matches!(component.sign(), Decision::Zero))
+    {
+        return Ok(None);
+    }
+
+    // Past here the family is settled, so arithmetic that runs out is a
+    // refusal about *this* triple, which a slide along the range can retry.
+    let refused = || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at);
+    let Some(apart) = how_far_a_circle_is_from_a_rings(flat, ring, &circle) else {
+        return Err(refused());
+    };
+    match apart.sign() {
+        Decision::Zero => Ok(Some(MeetOfThree::MoreThanAPoint)),
+        Decision::Pos | Decision::Neg => Ok(Some(MeetOfThree::Nowhere)),
+        Decision::Undecidable { .. } => Err(refused()),
+        other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
+    }
+}
+
+/// `A² − 4P·(n·n)R²` for the circle a plane square to a ring's axis cuts
+/// another surface in, as [`what_a_plane_square_to_a_rings_axis_leaves`]
+/// writes it, exactly, or `None` where a product falls out of `f64`'s range.
+fn how_far_a_circle_is_from_a_rings(
+    flat: &Plane,
+    ring: &Torus,
+    circle: &ACircleAboutAnAxis,
+) -> Option<Exact> {
+    let normal = flat.normal().components();
+    let squared_normal = Exact::dot_of(normal, normal)?;
+    let round = circle.squared_radius.as_ref()?;
+    let (core, tube) = (ring.ring_radius(), ring.tube_radius());
+    let wide_core = squared_normal.times(&Exact::product_of(core, core)?)?;
+    let wide_tube = squared_normal.times(&Exact::product_of(tube, tube)?)?;
+    let height = how_far_a_plane_is_from(flat, ring.centre().coordinates())?;
+    let left = round
+        .plus(&wide_core)
+        .minus(&wide_tube)
+        .plus(&height.times(&height)?);
+    let twice = round.times(&wide_core)?;
+    let twice = twice.plus(&twice);
+    Some(left.times(&left)?.minus(&twice.plus(&twice)))
+}
+
+/// Whether `along` is square to the plane, decided exactly: crossed with the
+/// plane's normal it is nothing in every component. `false` where a product
+/// that needs falls out of `f64`'s range.
+fn it_runs_square_to(flat: &Plane, along: [f64; 3]) -> bool {
+    exact_cross_of(flat.normal().components(), along).is_some_and(|across| {
+        across
+            .iter()
+            .all(|component| matches!(component.sign(), Decision::Zero))
+    })
 }
 
 /// What a plane that holds the one axis two curved surfaces are turned about
