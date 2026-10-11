@@ -42,8 +42,10 @@ The pile:
   and 08:46:33 on 10-09, 10-10 and 10-11, using 14m35s, 16m59s and 15m10s of
   CPU, build included (`journalctl --user`).
 - 10-11's `artifacts/` is 398 MB and 10-06's was 326 MB. All of
-  `~/rcad-fuzz-logs` is 3.0 GB, because each night's directory holds a full
-  copy of its own.
+  `~/rcad-fuzz-logs` is 3.7 GB, because each night's directory holds a full
+  copy of its own. (This line first said 3.0 GB. That came from one `du` given
+  two `artifacts/` directories and then the whole tree, so it counted the tree
+  without those two.)
 
 ### 434.2 One per path through the code
 
@@ -178,5 +180,5 @@ flags, comes back under its own crash name.
   it to 08:30.
 - **13 092 timeout files and 6 718 slow-unit files** are carried the same way
   and never replayed (10-11's `artifacts/`). Not this section's.
-- **The night directories' own copies.** 3.0 GB, and nothing prunes them. Not
+- **The night directories' own copies.** 3.7 GB, and nothing prunes them. Not
   this section's either, and 434.3's record needs them.
