@@ -46,7 +46,7 @@ use crate::intersect::{
     whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
     whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
-use crate::march::{march, settled_with_a_bound};
+use crate::march::{Marched, march, settled_with_a_bound};
 use crate::meet::nowhere_in_particular;
 use crate::{
     Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
@@ -368,7 +368,9 @@ impl PointsAlongACrossing {
 /// than [`MOST_POINTS_ALONG_ONE_CROSSING`].
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on the
-/// run pick both of the two arcs between its ends, or neither.
+/// run pick both of the two arcs between its ends, or neither, and on a
+/// degree-four crossing when its two ends are on two of its loops, or cannot
+/// be told to be on one.
 ///
 /// [`Error::Undecidable`] when the conic's own size could not be worked out
 /// because a product fell out of range.
@@ -990,8 +992,11 @@ fn a_quartic_picked_up_at(
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on the
 /// run pick both of the loops the crossing leaves, or neither, and when a
-/// closed run's corner cannot be put on one side of what holds the two loops
-/// apart, or is across it from both seeds.
+/// run's corner cannot be put on one side of what holds the two loops apart,
+/// or is across it from both seeds. For a run between two corners, also when
+/// its corners are on different seeds' sides, sit at one place on the loop, or
+/// leave two arcs between them that its half-spaces both hold or neither
+/// holds ([`the_arc_between`]).
 ///
 /// [`Error::CannotPlaceAPointThatCloseToACrossing`] when the marcher's own bound
 /// takes more than its half of the deflection and the policy will not accept it.
@@ -1026,12 +1031,15 @@ fn follow_the_quartic(
             closest: walked.deviation,
         });
     }
-    let points = match the_corner_a_closed_run_starts_at(run) {
-        Some(corner) => {
-            let (start, off) = settled_with_a_bound(surfaces, seed)?;
-            begun_beside(corner, start, off, walked.points)?
-        }
-        None => walked.points,
+    let points = if let Some(corner) = the_corner_a_closed_run_starts_at(run) {
+        let (start, off) = settled_with_a_bound(surfaces, seed)?;
+        begun_beside(corner, start, off, walked.points)?
+    } else if let Some(ends) = the_two_corners_of_an_open_run(run) {
+        let (start, _) = settled_with_a_bound(surfaces, seed)?;
+        let picked_by = the_half_spaces_that_pick(run);
+        the_arc_between(ends, picked_by, surfaces, start, walked, policy, log)?
+    } else {
+        walked.points
     };
     Ok(PointsAlongACrossing {
         points,
@@ -1075,12 +1083,7 @@ fn begun_beside(
     let Some(round_the_start) = somewhere_within(start, off) else {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     };
-    let the_corner_is_the_start = corner
-        .enclosure()
-        .into_iter()
-        .zip(round_the_start.enclosure())
-        .all(|(mine, theirs)| mine.lo() <= theirs.hi() && theirs.lo() <= mine.hi());
-    if the_corner_is_the_start {
+    if the_boxes_share_a_point(corner, round_the_start) {
         return Ok(walked);
     }
     let corner = Point::from(corner.enclosure().map(middle_of));
@@ -1099,6 +1102,144 @@ fn begun_beside(
     };
     round.rotate_left(first % count);
     Ok(round)
+}
+
+/// The points of a closed loop the marcher walked from `start` that lie between
+/// a run's two corners, along whichever of the two arcs between them the run's
+/// half-spaces hold, in order from the first corner to the second.
+///
+/// **A corner the march passed through is not handed back as a point**, for the
+/// same reason [`begun_beside`] leaves out a corner that is the start: the caller
+/// puts both corners at the ends, and a corner among the points as well is two
+/// corners in one place (Q1508). A fuse puts a run's corner where the crossing
+/// meets a third surface, and the seed of a crossing of two pipes can be exactly
+/// there: a thin bar through a fat one cut by a wall through both axes has its
+/// corners and its seeds all on the wall.
+///
+/// The half-spaces are asked at the middle point of each arc, of the box the
+/// march says that point is inside, the way a conic's arc is asked at its middle
+/// angle ([`Conic::the_stretch_this_run_covers`]). An arc with no marched point
+/// on it is asked at the middle of its two corners, settled onto the crossing.
+/// Every point handed back is a point the march settled and bounded, so the
+/// march's bound holds of them all.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the two corners sit at
+/// one place on the loop, or the half-spaces hold both arcs or neither.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a point has no box round it,
+/// and what settling the middle of an arc with no point on it refuses.
+fn the_arc_between(
+    [from, to]: [PredicatePoint; 2],
+    picked_by: &[Picker],
+    surfaces: [&Surface; 2],
+    start: Point,
+    walked: Marched,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Vec<Point>> {
+    let deviation = walked.deviation;
+    let mut round = Vec::with_capacity(walked.points.len() + 1);
+    round.push(start);
+    round.extend(walked.points);
+    let count = round.len();
+    let mut kept = vec![true; count];
+    let first_end = where_on_the_loop_this_end_is(from, &round, deviation, &mut kept)?;
+    let second_end = where_on_the_loop_this_end_is(to, &round, deviation, &mut kept)?;
+    let laps = count as f64;
+    let reach = (second_end - first_end).rem_euclid(laps);
+    if reach == 0.0 {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    }
+
+    let mut onwards = Vec::new();
+    let mut backwards = Vec::new();
+    let first = first_end.floor() as usize;
+    for step in 1..=count {
+        let at = (first + step) % count;
+        if !kept[at] {
+            continue;
+        }
+        let along = (at as f64 - first_end).rem_euclid(laps);
+        if along > 0.0 && along < reach {
+            onwards.push(round[at]);
+        } else {
+            backwards.push(round[at]);
+        }
+    }
+    backwards.reverse();
+
+    let mut held = [false; 2];
+    for (arc, holds) in [&onwards, &backwards].into_iter().zip(&mut held) {
+        *holds = match arc.get(arc.len() / 2) {
+            Some(&middle) => every_half_space_holds(picked_by, middle, deviation, policy, log)?,
+            None => {
+                let [one, other] =
+                    [from, to].map(|end| Point::from(end.enclosure().map(middle_of)));
+                let between = one + (other - one) * 0.5;
+                let (middle, off) = settled_with_a_bound(surfaces, between)?;
+                every_half_space_holds(picked_by, middle, off, policy, log)?
+            }
+        };
+    }
+    match held {
+        [true, false] => Ok(onwards),
+        [false, true] => Ok(backwards),
+        [true, true] | [false, false] => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    }
+}
+
+/// Where on the closed loop of points `round` an end of a run sits: the index
+/// of the point it is, or of the point that starts the step it sits along plus
+/// how far along that step it is.
+///
+/// The end is put on the step nearest it, and is that step's point at either
+/// end when its own box and the box `deviation` round that point share a point;
+/// that point is then marked as not `kept`.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a point has no box round it.
+fn where_on_the_loop_this_end_is(
+    end: PredicatePoint,
+    round: &[Point],
+    deviation: f64,
+    kept: &mut [bool],
+) -> Result<f64> {
+    let count = round.len();
+    let at = Point::from(end.enclosure().map(middle_of));
+    let along_the_step_from = |here: usize| {
+        let way = round[(here + 1) % count] - round[here];
+        let along = (at - round[here]).dot(way) / way.length_squared().max(f64::MIN_POSITIVE);
+        (along.clamp(0.0, 1.0), way)
+    };
+    let how_far = |here: usize| {
+        let (along, way) = along_the_step_from(here);
+        (round[here] + way * along - at).length()
+    };
+    let nearest = (0..count)
+        .min_by(|one, other| how_far(*one).total_cmp(&how_far(*other)))
+        .expect("the loop holds at least the point it was walked from");
+    for corner in [nearest, (nearest + 1) % count] {
+        let Some(round_the_corner) = somewhere_within(round[corner], deviation) else {
+            return Err(Error::CannotWorkOutHowBigACrossingIs);
+        };
+        if the_boxes_share_a_point(end, round_the_corner) {
+            kept[corner] = false;
+            return Ok(corner as f64);
+        }
+    }
+    Ok(nearest as f64 + along_the_step_from(nearest).0)
+}
+
+/// Whether two boxes have a point in common, so that nothing the arithmetic
+/// knows tells the two places they stand for apart.
+fn the_boxes_share_a_point(one: PredicatePoint, other: PredicatePoint) -> bool {
+    one.enclosure()
+        .into_iter()
+        .zip(other.enclosure())
+        .all(|(mine, theirs)| mine.lo() <= theirs.hi() && theirs.lo() <= mine.hi())
 }
 
 /// The corner a closed run starts and ends at, when it names one.
@@ -1169,12 +1310,7 @@ fn the_seed_this_run_is_picked_up_at(
     log: &mut ProvenanceLog,
 ) -> Result<Point> {
     let surfaces = [&pair[0], &pair[1]];
-    let picked_by: &[Picker] = match run.run() {
-        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
-        EdgeRun::Straight
-        | EdgeRun::RightRoundWhereItsFacesCross
-        | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
-    };
+    let picked_by = the_half_spaces_that_pick(run);
 
     if let Some([from, to]) = the_two_corners_of_an_open_run(run) {
         let settled = [
@@ -1209,6 +1345,17 @@ fn the_seed_this_run_is_picked_up_at(
     match picked.as_slice() {
         [only] => Ok(*only),
         _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    }
+}
+
+/// The half-spaces that say which piece of a crossing a run is, and none for a
+/// run that is not one piece of one.
+fn the_half_spaces_that_pick(run: &NamedRun) -> &[Picker] {
+    match run.run() {
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
+        EdgeRun::Straight
+        | EdgeRun::RightRoundWhereItsFacesCross
+        | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
     }
 }
 

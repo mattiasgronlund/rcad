@@ -375,9 +375,18 @@ fn a_plane_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_is_refused_orde
 /// `I = 4∫₀¹ √((16 − y²)(1 − y²)) dy`, has no closed form, so the intersection
 /// is held to [`what_a_half_thin_bar_shares_with_a_fat_one`] and every other
 /// answer to the intersection as measured: the union `10π + 160π − I`, one
-/// solid of nine faces; the fat bar less the half `160π − I`, one solid of
-/// five with a channel through it; and the half less the fat bar two ends of
+/// solid of twelve faces; the fat bar less the half `160π − I`, one solid of
+/// eight with a channel through it; and the half less the fat bar two ends of
 /// `(10π − I)/2`, four faces each.
+///
+/// The fat bar's skin is four of the union's twelve and of the eight, and that
+/// was counted face by face rather than worked: the half either side of the
+/// wall's plane, cut apart along `y = 0` by the seam at `x = 4` and from each
+/// cap to the loop at `x = −4`, and the piece under the wall inside each loop's
+/// lower arc, which the rule keeps either side of that arc as it does a ball's
+/// skin behind the wall above. The rest is the cap at each end of the fat bar
+/// and, for the union, the thin bar's skin, wall and cap at each end outside
+/// it, or, for the fat bar less the half, the skin and wall of the channel.
 #[test]
 fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_answers_every_rule() {
     let gives = what_each_rule_gives(|model| {
@@ -413,11 +422,11 @@ fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_answers_every_rule() 
     let (half, fat) = (10.0 * PI, 160.0 * PI);
     let one_end = (half - shared.volume) / 2.0;
     let wanted: [&[(f64, usize)]; 6] = [
-        &[(half + fat - shared.volume, 9)],
-        &[(half + fat - shared.volume, 9)],
+        &[(half + fat - shared.volume, 12)],
+        &[(half + fat - shared.volume, 12)],
         &[(shared.volume, 4)],
         &[(shared.volume, 4)],
-        &[(fat - shared.volume, 5)],
+        &[(fat - shared.volume, 8)],
         &[(one_end, 4), (one_end, 4)],
     ];
     for (answer, wanted) in gives.iter().zip(wanted) {
