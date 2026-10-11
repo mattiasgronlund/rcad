@@ -38,6 +38,36 @@ const TILTS: [[f64; 4]; 2] = [
     [0.0, 0.0, 0.080_911_455_551_998_05, 0.996_721_293_221_157_7],
 ];
 
+/// Five of the 115 tilts, of 400, at which the union was refused
+/// `ResultIsNotManifold { count: 4 }` under both policies, both ways round
+/// (queue row Q1528): `t = 0.002`, `0.003`, `0.008`, `0.01` and `0.015`, as
+/// `f64::sin` and `f64::cos` give them.
+const TILTS_THE_UNION_WAS_REFUSED_AT: [[f64; 4]; 5] = [
+    [
+        0.0,
+        0.0,
+        0.001_999_998_666_666_933_3,
+        0.999_998_000_000_666_6,
+    ],
+    [0.0, 0.0, 0.002_999_995_500_002_025, 0.999_995_500_003_375],
+    [0.0, 0.0, 0.007_999_914_666_939_733, 0.999_968_000_170_666_3],
+    [0.0, 0.0, 0.009_999_833_334_166_664, 0.999_950_000_416_665_3],
+    [0.0, 0.0, 0.014_999_437_506_328_09, 0.999_887_502_109_359_2],
+];
+
+#[test]
+fn the_union_is_both_cubes_less_what_they_share_where_it_was_refused() {
+    for tilt in TILTS_THE_UNION_WAS_REFUSED_AT {
+        for policy in [certified(), tolerant()] {
+            for order in [Order::BlockFirst, Order::TippedFirst] {
+                let asked = format!("{tilt:?}, {order:?}, {policy:?}");
+                let volume = volume_of_a_fuse(tilt, Rule::Union, order, &policy, &asked);
+                assert_about(volume, 2000.0 - what_the_two_share(tilt), &asked);
+            }
+        }
+    }
+}
+
 #[test]
 fn the_union_is_both_cubes_less_what_they_share_tolerant() {
     for tilt in TILTS {
