@@ -140,6 +140,7 @@ gate_steps := "check-plugins \
     check-fuzz-yield-selftest \
     check-spend-selftest \
     check-row-time-selftest \
+    check-lineage-selftest \
     check-fmt \
     lint \
     test \
@@ -328,6 +329,7 @@ gate_reusable_steps := "check \
     check-fuzz-yield-selftest \
     check-spend-selftest \
     check-row-time-selftest \
+    check-lineage-selftest \
     check-fmt \
     lint \
     test \
@@ -4133,8 +4135,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "61" ]; then \
-        echo "found $n check-* recipes, expected 61"; \
+    if [ "$n" != "62" ]; then \
+        echo "found $n check-* recipes, expected 62"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -16728,3 +16730,220 @@ row-time *args:
 [private]
 check-row-time-selftest:
     @PYTHONDONTWRITEBYTECODE=1 python3 tooling/row-time/check-row-time.py
+
+# How far each row's work has grown, read back out of git: for each first
+# row (one nothing else led to) its descendants, depth and still-open count;
+# rows added vs. rows closed done, by week; and for each §433 fuzz target or
+# corpus file, the faults it found directly versus its whole tree, by the
+# week they were filed. A row filed since §432 names its parent in a word
+# (`from/<id>`, `was/<id>`, `from/fuzz:<target>`, `from/step:<file>`); an
+# older row's parent is read back out of the commit that added it: the
+# lane's own row on a lane merge, else the row the commit closed, else, where
+# a commit closes more than one row, the one the new row's own text names or
+# whose own text names the new row, else the one the commit message ties it
+# to in the same paragraph (never the subject line, which often names every
+# row a batch touches together). With one or more row ids it prints each
+# one's resolved parent instead of the three tables.
+# `docs/decisions.md` §432, §433, §348.2.
+#
+# Like `row-time` this reads git history and not the repository's current
+# state, so it is not a `check-*` and is not in `gate_steps`;
+# `check-lineage-selftest` holds what does not move with the week. Expect
+# 2-3 minutes against `main`'s real history: `docs/queue.md` has had a few
+# thousand commits touch it, and parsing the file at each one (not the git
+# calls themselves) is what costs the time.
+[doc("How far each row's work grows, read back out of git: `just lineage main`, `just lineage main Q412`.")]
+lineage ref *row_ids:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec python3 '{{ justfile_directory() }}/tooling/lineage/lineage.py' "$PWD" {{ref}} {{row_ids}}
+
+# Pins `lineage` against a scratch git history built by hand: a lane merge, a
+# row re-filed with `was/<id>`, one with `from/<id>`, one with
+# `from/fuzz:<target>`, one with `from/step:<file>`, and a commit that closes
+# two rows at once where neither row's own text names the other, only the
+# commit message's body (never its subject, §432's fab561be lesson) ties the
+# new row to one of them. Every commit is built with `commit-tree`, not a
+# working-tree commit, so the history is exact and the test needs no checkout.
+#
+# The first commit also fences the grammar's own syntax example, `<id> <tier>
+# ...`, the way `9414e41c` first wrote `docs/queue.md`: `rows.py` reads every
+# non-blank fenced line as a row, so without a filter on the id's shape that
+# line becomes a first row of its own, named literally `<id>`.
+[private]
+[doc("lineage agrees with a scratch history covering every §432/§433 resolution rule.")]
+check-lineage-selftest:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    repo="$dir/repo"
+    mkdir -p "$repo"
+    got=""
+    fail() {
+        echo "lineage drifted from its own scratch history: $1"
+        echo "--- got ---"; echo "$got"
+        exit 1
+    }
+    git init -q "$repo" || fail "git init failed"
+    git -C "$repo" config user.email lineage-selftest@example.com
+    git -C "$repo" config user.name "Lineage Selftest"
+
+    commit() {
+        # commit <content-file> <message-file> [parent-sha]...
+        local content="$1" msgfile="$2" qblob docs_tree root_tree
+        shift 2
+        qblob=$(git -C "$repo" hash-object -w -- "$content") || fail "hash-object $content"
+        docs_tree=$(printf '100644 blob %s\tqueue.md\n' "$qblob" | git -C "$repo" mktree) || fail "mktree docs/ for $content"
+        root_tree=$(printf '040000 tree %s\tdocs\n' "$docs_tree" | git -C "$repo" mktree) || fail "mktree root for $content"
+        local parent_args=()
+        for p in "$@"; do parent_args+=(-p "$p"); done
+        git -C "$repo" -c commit.gpgsign=false commit-tree "$root_tree" -F "$msgfile" "${parent_args[@]}" \
+            || fail "commit-tree for $content"
+    }
+
+    cat > "$dir/c0.md" <<'MD'
+    # A queue
+
+    ```
+    <id>  <tier>  <state>  <model>  <write set>  <what, one line, ending in one or more §N or §N.M>
+    ```
+
+    ```
+    Q1  1  todo  opus  -  a first row that nothing else led to §1
+    Q2  1  todo  opus  -  a seed row that later closes done and is re-filed as Q12 §1
+    Q3  1  todo  opus  -  a seed row that later closes done and leads to Q10 directly §1
+    Q4  1  todo  opus  -  a seed row that later drops in a commit naming Q20 beside it §1
+    ```
+    MD
+    printf 'queue: seed four rows\n' > "$dir/m0.txt"
+    c0=$(commit "$dir/c0.md" "$dir/m0.txt") || exit 1
+
+    cat > "$dir/c1.md" <<'MD'
+    # A queue
+
+    ```
+    Q1  1  todo  opus  -  a first row that nothing else led to §1
+    Q2  1  done:aaaa1111  opus  -  a seed row that later closes done and is re-filed as Q12 §1
+    Q3  1  todo  opus  -  a seed row that later closes done and leads to Q10 directly §1
+    Q4  1  todo  opus  -  a seed row that later drops in a commit naming Q20 beside it §1
+    ```
+    MD
+    printf 'queue: Q2 done\n' > "$dir/m1.txt"
+    c1=$(commit "$dir/c1.md" "$dir/m1.txt" "$c0") || exit 1
+
+    cat > "$dir/c2.md" <<'MD'
+    # A queue
+
+    ```
+    Q1  1  todo  opus  -  a first row that nothing else led to §1
+    Q2  1  done:aaaa1111  opus  -  a seed row that later closes done and is re-filed as Q12 §1
+    Q3  1  done:bbbb2222  opus  -  a seed row that later closes done and leads to Q10 directly §1
+    Q4  1  todo  opus  -  a seed row that later drops in a commit naming Q20 beside it §1
+    Q10  1  todo  opus  -  what closing Q3 led to directly §1
+    ```
+    MD
+    printf 'queue: Q3 done, Q10 follows\n' > "$dir/m2.txt"
+    c2=$(commit "$dir/c2.md" "$dir/m2.txt" "$c1") || exit 1
+
+    printf 'lane-q1-demo: no change yet\n' > "$dir/ml.txt"
+    l1=$(commit "$dir/c2.md" "$dir/ml.txt" "$c2") || exit 1
+
+    cat > "$dir/m1merge.md" <<'MD'
+    # A queue
+
+    ```
+    Q1  1  done:cccc3333  opus  -  a first row that nothing else led to §1
+    Q2  1  done:aaaa1111  opus  -  a seed row that later closes done and is re-filed as Q12 §1
+    Q3  1  done:bbbb2222  opus  -  a seed row that later closes done and leads to Q10 directly §1
+    Q4  1  todo  opus  -  a seed row that later drops in a commit naming Q20 beside it §1
+    Q10  1  todo  opus  -  what closing Q3 led to directly §1
+    Q11  1  todo  opus  -  what the lane for Q1 left behind §1
+    ```
+    MD
+    printf 'Merge lane-q1-demo: Q1 done, leaving Q11\n' > "$dir/mm1.txt"
+    m1=$(commit "$dir/m1merge.md" "$dir/mm1.txt" "$c2" "$l1") || exit 1
+
+    cat > "$dir/c3.md" <<'MD'
+    # A queue
+
+    ```
+    Q1  1  done:cccc3333  opus  -  a first row that nothing else led to §1
+    Q2  1  done:aaaa1111  opus  -  a seed row that later closes done and is re-filed as Q12 §1
+    Q3  1  done:bbbb2222  opus  -  a seed row that later closes done and leads to Q10 directly §1
+    Q4  1  todo  opus  -  a seed row that later drops in a commit naming Q20 beside it §1
+    Q10  1  todo  opus  -  what closing Q3 led to directly §1
+    Q11  1  todo  opus  -  what the lane for Q1 left behind §1
+    Q12  1  todo  opus  -  was/Q2 the seed row re-filed with clearer wording §1
+    Q13  1  todo  opus  -  from/Q3 a second row the closed seed row led to directly §1
+    Q14  1  todo  opus  -  from/fuzz:demo_target a fault the fuzzer demo_target found §1
+    Q15  1  todo  opus  -  from/step:CTC_Definitions/demo.stp a fault the corpus file demo.stp found §1
+    Q20  1  todo  opus  -  a seed row for the message-tie test below §1
+    ```
+    MD
+    printf 'queue: five new rows, three of them naming their own source\n' > "$dir/m3.txt"
+    c3=$(commit "$dir/c3.md" "$dir/m3.txt" "$m1") || exit 1
+
+    cat > "$dir/c4.md" <<'MD'
+    # A queue
+
+    ```
+    Q1  1  done:cccc3333  opus  -  a first row that nothing else led to §1
+    Q2  1  done:aaaa1111  opus  -  a seed row that later closes done and is re-filed as Q12 §1
+    Q3  1  done:bbbb2222  opus  -  a seed row that later closes done and leads to Q10 directly §1
+    Q4  1  dropped:dddd4444  opus  -  a seed row that later drops in a commit naming Q20 beside it §1
+    Q10  1  todo  opus  -  what closing Q3 led to directly §1
+    Q11  1  todo  opus  -  what the lane for Q1 left behind §1
+    Q12  1  todo  opus  -  was/Q2 the seed row re-filed with clearer wording §1
+    Q13  1  todo  opus  -  from/Q3 a second row the closed seed row led to directly §1
+    Q14  1  todo  opus  -  from/fuzz:demo_target a fault the fuzzer demo_target found §1
+    Q15  1  todo  opus  -  from/step:CTC_Definitions/demo.stp a fault the corpus file demo.stp found §1
+    Q20  1  done:eeee5555  opus  -  a seed row for the message-tie test below §1
+    Q21  1  todo  opus  -  what continued after the message-tie commit below §1
+    ```
+    MD
+    printf 'queue: close two seed rows, drop Q4 and finish Q20\n\nQ4 is dropped for want of a consumer; nothing further follows from it.\n\nWork continues from Q20 as Q21, carrying on what Q20 started.\n' > "$dir/m4.txt"
+    c4=$(commit "$dir/c4.md" "$dir/m4.txt" "$c3") || exit 1
+
+    git -C "$repo" update-ref refs/heads/main "$c4" || fail "could not point main at the last commit"
+
+    run() {
+        python3 '{{ justfile_directory() }}/tooling/lineage/lineage.py' "$repo" main "$@"
+    }
+
+    check_row() {
+        local row="$1" expected="$2"
+        got=$(run "$row") || fail "$row: lineage exited non-zero"
+        [ "$got" = "$expected" ] || fail "$row: got '$got', expected '$expected'"
+    }
+
+    check_row Q1  "Q1: parent none, from none, first"
+    check_row Q2  "Q2: parent none, from none, first"
+    check_row Q3  "Q3: parent none, from none, first"
+    check_row Q4  "Q4: parent none, from none, first"
+    check_row Q20 "Q20: parent none, from none, first"
+    check_row Q10 "Q10: parent Q3, from the commit, led-to"
+    check_row Q11 "Q11: parent Q1, from the commit, led-to"
+    check_row Q12 "Q12: parent Q2, from word, re-file"
+    check_row Q13 "Q13: parent Q3, from word, led-to"
+    check_row Q14 "Q14: parent fuzz:demo_target, from word, led-to"
+    check_row Q15 "Q15: parent step:CTC_Definitions/demo.stp, from word, led-to"
+    check_row Q21 "Q21: parent Q20, from the commit message, led-to"
+
+    got=$(run Q1 Q21) || fail "a two-row lookup call exited non-zero"
+    grep -qF "Q1: parent none, from none, first" <<<"$got" || fail "a two-row call lost Q1's line"
+    grep -qF "Q21: parent Q20, from the commit message, led-to" <<<"$got" || fail "a two-row call lost Q21's line"
+
+    got=$(run Q999)
+    code=$?
+    [ "$code" = "1" ] || fail "a row this history never added should exit 1, got $code"
+    grep -qF "Q999: not added by any commit this walk of" <<<"$got" || fail "an unknown row id's message changed shape"
+
+    got=$(run) || fail "the full report (no row id) crashed"
+    grep -qF "## First rows: how far each one's work has grown" <<<"$got" || fail "the full report dropped its first-row heading"
+    grep -qF "## Rows added vs. rows closed done, by week (§348.2, §432.1)" <<<"$got" || fail "the full report dropped its weekly heading"
+    grep -qF "## Each fuzz target or STEP file, by the week its faults were filed (§433)" <<<"$got" || fail "the full report dropped its §433 heading"
+    grep -qF "### fuzz:demo_target" <<<"$got" || fail "the full report dropped fuzz:demo_target's own section"
+    grep -qF "### step:CTC_Definitions/demo.stp" <<<"$got" || fail "the full report dropped step:CTC_Definitions/demo.stp's own section"
+    grep -qF "<id>" <<<"$got" && fail "the full report listed the fenced syntax example as a row named <id>"
+    true
