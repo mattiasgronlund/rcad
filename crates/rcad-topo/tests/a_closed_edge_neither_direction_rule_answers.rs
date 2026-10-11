@@ -143,6 +143,177 @@ fn off_the_pole_the_longitude_picks_the_way_round_whatever_the_spelling() {
     }
 }
 
+#[test]
+#[ignore = "Q629 relay: a probe that prints, to be turned into pins"]
+fn probe_q629() {
+    let north = Point::new(0.0, 0.0, RADIUS);
+    let south_of_the_other = Point::new(0.0, 3.0, 4.0);
+    let plane = Plane::from_point_and_normal(north, Vector::new(0.0, 1.0, 3.0)).expect("a plane");
+    for and in [plane, plane.reversed()] {
+        for cap_first in [false, true] {
+            for cap_way in [Orientation::Forward, Orientation::Reversed] {
+                let what = format!(
+                    "BALL and {:?} cap first {cap_first} cap {cap_way:?}",
+                    and.normal()
+                );
+                eprintln!("PROBE-CASE {what}");
+                let mut model = a_model();
+                match a_ball_in_two_faces(&mut model, and, cap_way, cap_first) {
+                    Err(why) => eprintln!("PROBE-RESULT {what}: refused {why:?}"),
+                    Ok(solid) => report(&model, solid, PI * 4.0 * RADIUS.powi(3) / 3.0, &what),
+                }
+                for corner in [north, south_of_the_other] {
+                    let what = format!(
+                        "LENS corner {corner:?} and {:?} a first {cap_first} a {cap_way:?}",
+                        and.normal()
+                    );
+                    eprintln!("PROBE-CASE {what}");
+                    let mut model = a_model();
+                    match a_lens(&mut model, corner, and, cap_way, cap_first) {
+                        Err(why) => eprintln!("PROBE-RESULT {what}: refused {why:?}"),
+                        Ok(solid) => {
+                            report(&model, solid, 2.0 * the_volume_of(Piece::TheCap), &what);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn report(model: &Model, solid: SolidKey, closed_form: f64, what: &str) {
+    let validated = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+    eprintln!("PROBE-RESULT {what}: builds, validate {validated:?}");
+    let view = model.solid(solid).expect("key");
+    for deflection in [0.5, 0.05] {
+        let mesh = view.mesh(
+            Deflection::of(deflection).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        match mesh {
+            Err(why) => eprintln!("PROBE-RESULT {what} {deflection}: mesh refused {why:?}"),
+            Ok(mesh) => {
+                let mut beyond_by_face: HashMap<rcad_topo::FaceKey, (usize, usize)> =
+                    HashMap::new();
+                for triangle in mesh.triangles() {
+                    let beyond = triangle
+                        .corners()
+                        .map(|corner| mesh.points()[corner as usize])
+                        .iter()
+                        .map(|point| point.y() + 3.0 * point.z())
+                        .sum::<f64>()
+                        > 45.0;
+                    let entry = beyond_by_face.entry(triangle.face()).or_default();
+                    if beyond {
+                        entry.0 += 1;
+                    } else {
+                        entry.1 += 1;
+                    }
+                }
+                let measured = view.measure(
+                    Deflection::of(deflection).expect("a positive length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                let faces: Vec<_> = view
+                    .faces()
+                    .map(|face| {
+                        (
+                            face.key(),
+                            face.surface(),
+                            beyond_by_face.get(&face.key()).copied(),
+                        )
+                    })
+                    .collect();
+                eprintln!(
+                    "PROBE-RESULT {what} {deflection}: faces (beyond, short) {faces:?}, measured {:?} closed form {closed_form}",
+                    measured.map(|m| (m.volume(), m.volume_error()))
+                );
+            }
+        }
+    }
+}
+
+/// The ball of radius 5 about the origin written as two faces on itself: the
+/// small cap beyond `y + 3z = 15`, and the rest. The rim between them is named
+/// by `and` and cornered on the north pole.
+fn a_ball_in_two_faces(
+    model: &mut Model,
+    and: Plane,
+    cap_way: Orientation,
+    cap_first: bool,
+) -> Result<SolidKey, Error> {
+    let ball = Surface::Sphere(Sphere::new(Point::origin(), RADIUS).expect("a ball"));
+    two_faces_round_one_rim(
+        model,
+        Point::new(0.0, 0.0, RADIUS),
+        and,
+        [ball, ball],
+        cap_way,
+        cap_first,
+    )
+}
+
+/// The lens two balls of radius 5 hold in common, one about the origin and one
+/// about `(0, 3, 9)`, which cross on `y + 3z = 15`.
+fn a_lens(
+    model: &mut Model,
+    corner: Point,
+    and: Plane,
+    first_way: Orientation,
+    first_listed_first: bool,
+) -> Result<SolidKey, Error> {
+    two_faces_round_one_rim(
+        model,
+        corner,
+        and,
+        [
+            Surface::Sphere(Sphere::new(Point::origin(), RADIUS).expect("a ball")),
+            Surface::Sphere(Sphere::new(Point::new(0.0, 3.0, 9.0), RADIUS).expect("a ball")),
+        ],
+        first_way,
+        first_listed_first,
+    )
+}
+
+fn two_faces_round_one_rim(
+    model: &mut Model,
+    corner: Point,
+    and: Plane,
+    [first, second]: [Surface; 2],
+    first_way: Orientation,
+    first_listed_first: bool,
+) -> Result<SolidKey, Error> {
+    let mut builder = SolidBuilder::new();
+    let corner = builder.add_vertex(corner)?;
+    let rim = builder.add_edge(
+        corner,
+        corner,
+        EdgeRun::RightRoundWhereItCrosses {
+            and: Surface::Plane(and),
+        },
+    )?;
+    let first_step = DraftStep::Along(builder.add_coedge(rim, first_way)?);
+    let second_step = DraftStep::Along(builder.add_coedge(rim, first_way.reversed())?);
+    let first_wire = builder.add_wire(&[first_step])?;
+    let second_wire = builder.add_wire(&[second_step])?;
+    let first = (
+        builder.add_face(first, &[first_wire])?,
+        Orientation::Forward,
+    );
+    let second = (
+        builder.add_face(second, &[second_wire])?,
+        Orientation::Forward,
+    );
+    builder.add_shell(&if first_listed_first {
+        [first, second]
+    } else {
+        [second, first]
+    })?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
 fn a_model() -> Model {
     Model::new(Scale::millimetres(125.0).expect("a positive size"))
 }
