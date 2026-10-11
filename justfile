@@ -12905,7 +12905,8 @@ check-queue-selftest:
     mkdir -p "$repo/docs/decisions.d" "$repo/.github/workflows" "$repo/tooling/queue"
     decisions="$repo/docs/decisions.d/sections.md"
     printf '%s\n' '## 13. How work is decomposed' '## 226. The test plan' \
-        '### 226.3 The nights' '## 230. One queue' '### 230.3 The fill' > "$decisions"
+        '### 226.3 The nights' '## 230. One queue' '### 230.3 The fill' \
+        '## 418. Fuzz-night triage' '### 418.3 The triage row' > "$decisions"
     touch "$repo/justfile" "$repo/.github/workflows/ci.yml" "$repo/tooling/queue/queue.py"
     git init -q "$repo"
     git -C "$repo" add -A
@@ -13465,6 +13466,11 @@ check-queue-selftest:
 
     ```
     Q90  1  todo  opus  docs/a.md  an unrelated open row §230
+    ```
+
+    ## Closed
+
+    ```
     ```
     MD
     got=$("$j" --justfile '{{ justfile() }}' --working-directory "$repo" fuzz-triage-row "$triage_logs" "$dir/triage-filed.md" 2>&1) \
