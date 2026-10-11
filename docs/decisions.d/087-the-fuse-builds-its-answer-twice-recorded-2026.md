@@ -226,6 +226,53 @@ the range check is not run there.
 > `Assembly::commit` asserts that the shells were nested before it writes
 > anything.
 
+> **2026-10-12 note (Q1664): the range is asked before the edges are
+> named.** `Assembly::check_dynamic_range` is now asked inside `assemble`
+> (`fuse/assemble.rs`), not in `Model::fused_under`. It was moved, not copied,
+> and it is still asked in that one place. The guard is the same:
+> `fused_under` still asks `the_inputs_fit_in_f64`, just before `assemble`,
+> and passes its answer in, and `None` asks nothing. A tolerant policy's
+> warning still goes into the log of its own that `fused_under` moves into the
+> caller's after the wobble check. The order inside `assemble` is now
+> `join_up_what_is_one_face`, `group_into_shells`,
+> `leave_out_each_shell_thinner_than_the_wobble`, the range, and then
+> `how_each_edge_runs`. So the Q1614 note's "`assemble`, which ends at
+> `group_into_shells`" no longer holds: the range sits inside `assemble`, and
+> `nest_the_shells` still comes after it, in `fused_under`.
+>
+> The reason is the same as Q1614's: a later step hid the limit behind a
+> refusal that reads as a mistake. Here the step was naming the edges, which
+> reads which way each edge leaves its corner. Seven narrow lunes of a ball,
+> cut by two knives through its polar axis
+> (`a_narrow_lune_from_a_pole_corner.rs`), were refused
+> `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` by `Edge::how_it_runs`.
+> There, `the_way_across_the_chord_into_the_arc` got an agreement of exactly
+> 0: the arc where the ball crosses the first knife runs from a pole to a
+> corner a rounding off it, `(0, 0, −1)` to `(0, 4.44e−16, −1)` in the Q1072
+> probe, so its chord lies along the tangent at the pole and says nothing
+> about which way the arc leaves. The seven are now refused
+> `DynamicRangeTooWide`, at ratios from `5.3e15` to `4.05e16`. The two
+> differences Q1614 moved keep their ratios, and the test pins all nine with
+> an empty log. The Q1072 probe, which made this move first, found no case of
+> that file that started or stopped answering.
+>
+> **The shells move ahead of the range too, which the row did not ask.**
+> Asked straight after `join_up_what_is_one_face`, the range was asked before a
+> tolerant fuse left out a shell thinner than the wobble (Q1687). Then it
+> warned about a shell the answer no longer holds. The combs' intersection
+> under `Policy::tolerant(25.0)` answers no solid, and it logged a dynamic
+> range record beside the one record
+> `two_skewed_combs_touching_along_one_line.rs` pins. Grouping the shells and
+> leaving the thin ones out read only which faces claim each edge, not how
+> each edge runs, so both can come first. The edges are named once, after
+> them.
+>
+> What this costs: a fuse whose answer is not a manifold now gets
+> `ResultIsNotManifold` even when it also has an edge that cannot be named,
+> where before it got the naming refusal. Under a tolerant policy, a fuse
+> refused for naming an edge now carries the leave-out's records in its log
+> first.
+
 ### 87.4 What is still a panic, and why the operation is not wholly atomic
 
 Two things fire after the real write and both stay panics:
