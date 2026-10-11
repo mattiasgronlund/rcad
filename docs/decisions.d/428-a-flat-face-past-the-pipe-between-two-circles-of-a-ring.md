@@ -138,6 +138,24 @@ plane square to their axis; it is a measurement, not this fix, so the row
 stands beside it. When the shape answers, whether a pipe-picked circle joins
 here is that row's to decide, with the shape as its test.
 
+*Since Q1566 and Q1757 (2026-10-11) the shape answers, and a pipe-picked
+circle joins. A plane square to a ring's axis cuts the ring in circles about
+the point where the axis crosses it, and a ball, a pipe or a cone on that axis
+in one more about the same point, so the three share a whole circle or nothing.
+`rcad-geom`'s `what_a_plane_square_to_a_rings_axis_leaves` is the road that
+says which, by one exact sign (`e8ae7c62`), and its doc comment carries the
+argument. With that road alone the first union the pin asks, the half ring
+with its seam named first, is refused `ResultIsNotManifold { count: 1 }`: the
+two rims are left apart. So `the_name_each_closed_curve_goes_by` now gathers
+every plane-and-ring circle whose name says which, pipe-picked as well as
+flat-picked (`dd75803d`); the argument for a plane through the axis carries
+over, as its doc comment says. All twelve fuses answer at the volumes above,
+and the pin is renamed `on_a_bar_of_its_outer_radius_every_fuse_answers`. The
+road also moves the ball and the cone joined to a ring in
+`tests/a_piece_no_ray_can_place_names_its_refusal.rs` off this refusal, to
+`ResultIsNotManifold` or `Undecidable` at `side of sphere` or `side of cone`;
+rows Q1758 and Q1759 hold those.*
+
 ### 428.6 The lead: the base refused, it did not answer wrong
 
 The first run's handoff guessed that a flat face on `z = 0` that a whole ring
@@ -162,6 +180,10 @@ round plate on the ring's own axis.
 
 - **The half ring on a bar of its own outer radius** (428.5), refused
   `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` by every fuse. Filed as a row.
+  *Answered by Q1566 and Q1757 since 2026-10-11, through
+  `what_a_plane_square_to_a_rings_axis_leaves` and the join taking
+  pipe-picked circles; the pin is now
+  `on_a_bar_of_its_outer_radius_every_fuse_answers` (428.5).*
 - **Two or more planes square to the axis on one ring's face** (428.4). Q1500
   holds it; not filed again. *Answered by Q1514 since 2026-10-10.*
 - **A block with a ring through it** (428.6). Q618 holds it; not filed again.
