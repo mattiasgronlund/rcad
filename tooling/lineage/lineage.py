@@ -18,6 +18,15 @@ own text names, or whose own (now-closed) text names the new row, and failing
 that the one the commit message ties it to in the same paragraph; where
 neither says, the parent is unknown, never a guess at which row closed first.
 
+No row filed before Q1703 merged could say `from/fuzz:` or `from/step:`, so
+a fault a night or a corpus file showed hangs there on whatever row was
+running, or on none. Where such a row's own text names the input that shows
+its fault -- a crash file, a seed by its hash, or one corpus file -- that
+fuzz target or corpus file is its parent instead (§433.6, §433.2), unless the
+row it already hangs on is in that input's tree. Every table that reads a
+parent is printed twice, without those sources and with them, and the
+sources read from text are listed on their own.
+
 Deliberately not `import queue`: `tooling/queue/queue.py` as a module named
 `queue` would shadow the standard library's own `queue`, which subprocess and
 threading can depend on. Only `Row` and `Queue` come from `rows.py`, which
@@ -25,6 +34,7 @@ collides with nothing. `CAME_FROM` and `CAME_FROM_AN_INPUT` are duplicated
 from `queue.py` rather than imported for the same reason.
 """
 
+import bisect
 import os
 import re
 import subprocess
@@ -36,6 +46,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from rows import CLASS, PIN, SMALL, Queue  # noqa: E402
 
 QUEUE_PATH = "docs/queue.md"
+MANIFEST_PATH = "corpus/manifest.sha256"
+TARGETS_DIR = "fuzz/fuzz_targets/"
+SEEDS_DIR = "fuzz/corpus/"
 FIELD_SEP = "\x1f"
 RECORD_SEP = "\x1e"
 
@@ -43,6 +56,14 @@ CAME_FROM = re.compile(r"^(from|was)/([TDQ][0-9]+|-)$")
 CAME_FROM_AN_INPUT = re.compile(r"^from/(fuzz|step):(\S+)$")
 LANE_MERGE_SUBJECT = re.compile(r"^Merge lane-q([0-9]+)-")
 ROW_ID = re.compile(r"^Q[0-9]+$")
+
+# The row whose merge let a row's word name a fuzz target or a STEP file (§433.7).
+ROW_THAT_LET_A_WORD_NAME_AN_INPUT = "Q1703"
+CRASH_FILE_UNDER_ITS_TARGET = re.compile(r"artifacts/([A-Za-z0-9_]+)/crash-[0-9a-f]+")
+CRASH_FILE_ALONE = re.compile(r"(?<![A-Za-z0-9_/])crash-[0-9a-f]{6,}")
+HASH = re.compile(r"(?<![A-Za-z0-9])[0-9a-f]{8,40}(?![A-Za-z0-9])")
+STEP_FILE_NAME = re.compile(r"(?<![A-Za-z0-9_.\-])[A-Za-z0-9_.\-]+\.(?:stp|step)(?![A-Za-z0-9_\-])")
+MANIFEST_LINE = re.compile(r"^[0-9a-f]{64} [ *](.+)$")
 
 
 class Commit:
@@ -96,20 +117,20 @@ def load_commits(top, ref):
     return commits
 
 
-def load_queue_blobs(top, shas):
-    """`docs/queue.md`'s bytes at every sha in `shas`, `None` where it does not exist there.
+def load_blobs(top, shas, path):
+    """`path`'s bytes at every sha in `shas`, `None` where it does not exist there.
 
     One `git cat-file --batch` rather than one `git show` per sha: at this
-    base 2245 commits touch the file on `main`, which with each commit's
-    parents is close to 4500 lookups, and `--batch` answers them all in one
-    process. Output is read by the byte count each header gives, not split on
-    newlines, since a row's text can itself hold no control bytes but the
-    general shape of a blob is arbitrary.
+    base 2245 commits touch `docs/queue.md` on `main`, which with each
+    commit's parents is close to 4500 lookups, and `--batch` answers them all
+    in one process. Output is read by the byte count each header gives, not
+    split on newlines, since a row's text can itself hold no control bytes but
+    the general shape of a blob is arbitrary.
     """
     ids = sorted(set(shas))
     if not ids:
         return {}
-    stdin = "".join(f"{sha}:{QUEUE_PATH}\n" for sha in ids).encode()
+    stdin = "".join(f"{sha}:{path}\n" for sha in ids).encode()
     out = git(top, "cat-file", "--batch", input_bytes=stdin)
     result = {}
     pos = 0
@@ -157,6 +178,7 @@ class ParentInfo:
 WORD_LABEL = "word"
 COMMIT_LABEL = "the commit"
 MESSAGE_LABEL = "the commit message"
+TEXT_LABEL = "the row's text"
 UNKNOWN_LABEL = "unknown"
 NONE_LABEL = "none"
 
@@ -199,11 +221,14 @@ def token_present(token, text):
     return re.search(r"(?<![0-9A-Za-z])" + re.escape(token) + r"(?![0-9A-Za-z])", text) is not None
 
 
+def description(row_text):
+    """A row's description: everything after its five fields."""
+    return " ".join(row_text.split()[5:])
+
+
 def description_words(row_text):
-    """The words of a row's description: everything after its five fields,
-    each word's surrounding punctuation stripped."""
-    fields = row_text.split()
-    return [w.strip(".,;:()[]“”") for w in fields[5:]]
+    """The words of a row's description, each word's surrounding punctuation stripped."""
+    return [w.strip(".,;:()[]“”") for w in description(row_text).split()]
 
 
 def is_a_re_file(new_text, candidate_text):
@@ -216,7 +241,8 @@ def is_a_re_file(new_text, candidate_text):
 
 
 class Graph:
-    """Every row's resolved parent, and the tree each first row or §433 source grows."""
+    """Every row's resolved parent, without and with the sources §433.6 reads out of
+    row text, and the tree each first row or §433 source grows either way."""
 
     def __init__(self, top, ref):
         self.top = top
@@ -226,18 +252,20 @@ class Graph:
         for commit in self.commits:
             shas.add(commit.sha)
             shas.update(commit.parents)
-        self.blobs = load_queue_blobs(top, shas)
+        self.blobs = load_blobs(top, shas, QUEUE_PATH)
         self._rows_cache = {}
         self.added_at = {}  # row id -> Commit
         self.closed_at = defaultdict(list)  # commit sha -> [row id]
         self.closed_kind = {}  # row id -> "done" | "dropped"
         self.closed_commit = {}  # row id -> Commit
-        self.parent_of = {}  # row id -> ParentInfo
-        self.children = defaultdict(list)  # parent id (row or "fuzz:"/"step:" node) -> [row id]
+        self.parent_of = {}  # row id -> ParentInfo, from its word or the commit that added it
+        self.read_from_text = {}  # row id -> ParentInfo of the input its own text names instead
         self._find_added()
         self._find_closed()
         self._resolve_parents()
-        self._build_children()
+        self._read_sources_from_text(KnownInputs(top, ref))
+        self.without_text = Tree(self.parent_of)
+        self.with_text = Tree({**self.parent_of, **self.read_from_text})
 
     def rows_of(self, sha):
         if sha not in self._rows_cache:
@@ -337,8 +365,187 @@ class Graph:
         relation = RE_FILE if candidate in dropped and is_a_re_file(row_text, candidate_text) else LED_TO
         return ParentInfo(candidate, label, relation)
 
-    def _build_children(self):
-        for row_id, info in self.parent_of.items():
+    def _read_sources_from_text(self, inputs):
+        """§433.6: give a row filed before Q1703 merged the input its own text names.
+
+        Only a row with no word, `from/-` or `from/<id>` is read: `was/<id>`
+        re-files a row, and `from/fuzz:` or `from/step:` names the input
+        already. The input beats the row that was running (§433.2), but not a
+        row in the input's own tree: a row whose parent is the input, or hangs
+        below it, was filed by the work on a fault that input showed, and
+        §433.2 keeps it there. So rows are read oldest first, each parent's
+        own source settled before its children are looked at.
+        """
+        filed_once_a_word_could_say_it = self._commits_from_q1703_on()
+        walk_order = {commit.sha: i for i, commit in enumerate(self.commits)}
+        parent_of = dict(self.parent_of)
+        for row_id in sorted(self.added_at, key=lambda r: (walk_order[self.added_at[r].sha], row_sort_key(r))):
+            commit = self.added_at[row_id]
+            if commit.sha in filed_once_a_word_could_say_it:
+                continue
+            row_text = self.rows_of(commit.sha)[row_id].text
+            if not text_may_name_the_source(extract_word(row_text)):
+                continue
+            source = inputs.source_named_by(description(row_text))
+            if source is None or source in parent_and_above(parent_of, parent_of[row_id].parent):
+                continue
+            parent_of[row_id] = ParentInfo(source, TEXT_LABEL, LED_TO)
+            self.read_from_text[row_id] = parent_of[row_id]
+
+    def _commits_from_q1703_on(self):
+        """The commit that closed Q1703 done and every commit after it on this ref.
+
+        A row filed in a commit with Q1703's merge in its history could say
+        `from/fuzz:` or `from/step:` itself, so its word stands. A row filed
+        anywhere else could not, even when its branch merged later. Empty
+        where Q1703 is not closed done on this ref, so every row is read.
+        """
+        commit = self.closed_commit.get(ROW_THAT_LET_A_WORD_NAME_AN_INPUT)
+        if commit is None or self.closed_kind[ROW_THAT_LET_A_WORD_NAME_AN_INPUT] != "done":
+            return set()
+        later = git(self.top, "rev-list", "--ancestry-path", f"{commit.sha}..{self.tip_sha}").decode().split()
+        return {commit.sha, *later}
+
+
+def text_may_name_the_source(word):
+    """Whether a row's word leaves its source to its text: no word at all, `from/-` or `from/<id>`."""
+    if word is None:
+        return True
+    if CAME_FROM_AN_INPUT.match(word):
+        return False
+    match = CAME_FROM.match(word)
+    return match is None or match.group(1) == "from"
+
+
+def parent_and_above(parent_of, parent):
+    """`parent` and every parent above it, up to a first row or a fuzz target or STEP file."""
+    chain = []
+    while parent is not None and parent not in chain:
+        chain.append(parent)
+        info = parent_of.get(parent)
+        parent = info.parent if info is not None else None
+    return chain
+
+
+class KnownInputs:
+    """Every fuzz target, fuzz seed and STEP corpus file `ref`'s history ever held:
+    what a row's text can name as the input that shows its fault (§433.6).
+
+    The whole history and not the tip, since a target's corpus is cut down
+    between nights and a file can leave the STEP corpus after a row names it
+    (§433.4).
+    """
+
+    def __init__(self, top, ref):
+        self.targets = sorted(
+            {
+                path[len(TARGETS_DIR) : -len(".rs")]
+                for path in paths_ever_under(top, ref, TARGETS_DIR)
+                if path.endswith(".rs") and "/" not in path[len(TARGETS_DIR) :]
+            }
+        )
+        self.targets_of_seed = defaultdict(set)
+        for path in paths_ever_under(top, ref, SEEDS_DIR):
+            parts = path[len(SEEDS_DIR) :].split("/")
+            if len(parts) == 2:
+                self.targets_of_seed[parts[1]].add(parts[0])
+        self.seeds = sorted(self.targets_of_seed)
+        self.corpus_tails = corpus_tails(corpus_paths_ever(top, ref))
+        self.corpus_files_named = defaultdict(list)  # a file's own name -> every corpus path ending in it
+        for path in self.corpus_tails:
+            self.corpus_files_named[path.rsplit("/", 1)[-1]].append(path)
+
+    def source_named_by(self, text):
+        """The one fuzz target or corpus file whose input `text` names, as
+        `fuzz:<target>` or `step:<file>`, or `None` where it names none or more than one.
+
+        An input counts only where the text says whose it is: a crash file under
+        `artifacts/<target>/`, or alone beside the one target the text names; a
+        seed whose hash, or its first eight digits or more, is in one target's
+        corpus; a corpus file by a name only it has, or by its directory where
+        two files share the name. A crash file beside no target or two, or a
+        shared name without its directory, says nothing. Nor does a target
+        named with no input of its own: Q58 names the writer target, and is no
+        fault of it.
+        """
+        sources = {f"fuzz:{target}" for target in CRASH_FILE_UNDER_ITS_TARGET.findall(text)}
+        if CRASH_FILE_ALONE.search(text):
+            named = [target for target in self.targets if name_present(target, text)]
+            if len(named) == 1:
+                sources.add(f"fuzz:{named[0]}")
+        for digits in HASH.findall(text):
+            targets = self._targets_of_a_seed_starting(digits)
+            if len(targets) == 1:
+                sources.add(f"fuzz:{targets.pop()}")
+        for name in STEP_FILE_NAME.findall(text):
+            path = self._corpus_file_called(name, text)
+            if path is not None:
+                sources.add(f"step:{self.corpus_tails[path].replace(' ', '_')}")
+        return sources.pop() if len(sources) == 1 else None
+
+    def _targets_of_a_seed_starting(self, digits):
+        targets = set()
+        i = bisect.bisect_left(self.seeds, digits)
+        while i < len(self.seeds) and self.seeds[i].startswith(digits):
+            targets |= self.targets_of_seed[self.seeds[i]]
+            i += 1
+        return targets
+
+    def _corpus_file_called(self, name, text):
+        paths = self.corpus_files_named.get(name, [])
+        if len(paths) > 1:
+            tails = {path: self.corpus_tails[path] for path in paths}
+            paths = [path for path, tail in tails.items() if tail in text or tail.replace(" ", "_") in text]
+        return paths[0] if len(paths) == 1 else None
+
+
+def paths_ever_under(top, ref, directory):
+    """Every file path any commit `ref` reaches added, changed or removed under `directory`."""
+    out = git(top, "log", "--root", "--full-history", "--format=", "--name-only", "--no-renames", ref, "--", directory)
+    return {line for line in out.decode("utf-8", "surrogateescape").splitlines() if line}
+
+
+def corpus_paths_ever(top, ref):
+    """Every path any version of `corpus/manifest.sha256` on `ref` lists."""
+    shas = git(top, "log", "--full-history", "--format=%H", ref, "--", MANIFEST_PATH).decode().split()
+    paths = set()
+    for blob in load_blobs(top, shas, MANIFEST_PATH).values():
+        if blob is None:
+            continue
+        for line in blob.decode("utf-8", "surrogateescape").splitlines():
+            match = MANIFEST_LINE.match(line)
+            if match:
+                paths.add(match.group(1))
+    return paths
+
+
+def corpus_tails(paths):
+    """Each corpus path's tail as §433.1 cuts it: after the `/` closest to its end that still
+    names one file. `from/step:` writes the tail with each space as `_`."""
+    tails = {}
+    for path in paths:
+        parts = path.split("/")
+        for k in range(1, len(parts) + 1):
+            tail = "/".join(parts[-k:])
+            if sum(1 for other in paths if other == tail or other.endswith("/" + tail)) == 1:
+                tails[path] = tail
+                break
+    return tails
+
+
+def name_present(name, text):
+    """Whether `name` (a fuzz target) appears in `text` as itself, not as part of a longer name."""
+    return re.search(r"(?<![0-9A-Za-z_])" + re.escape(name) + r"(?![0-9A-Za-z_])", text) is not None
+
+
+class Tree:
+    """One way of giving each row its parent, and the tree each first row or
+    fuzz target or STEP file grows from it."""
+
+    def __init__(self, parent_of):
+        self.parent_of = parent_of
+        self.children = defaultdict(list)  # parent id (row or "fuzz:"/"step:" node) -> [row id]
+        for row_id, info in parent_of.items():
             if info.parent is not None:
                 self.children[info.parent].append(row_id)
 
@@ -383,29 +590,41 @@ def row_sort_key(row_id):
     return (row_id[0], int(digits)) if digits.isdigit() else (row_id, 0)
 
 
+WITHOUT_TEXT = "without the sources read from row text"
+WITH_TEXT = "with the sources read from row text (§433.6)"
+
+
 def print_row_lookup(graph, row_id):
-    info = graph.parent_of.get(row_id)
+    info = graph.with_text.parent_of.get(row_id)
     if info is None:
         print(f"{row_id}: not added by any commit this walk of {graph.tip_sha[:8]} reached")
         return 1
-    parent = info.parent if info.parent is not None else "none"
-    print(f"{row_id}: parent {parent}, from {info.label}, {info.relation}")
+    line = f"{row_id}: {describe(info)}"
+    if row_id in graph.read_from_text:
+        line += f" (without it: {describe(graph.parent_of[row_id])})"
+    print(line)
     return 0
 
 
-def print_first_row_table(graph):
-    print("## First rows: how far each one's work has grown")
+def describe(info):
+    parent = info.parent if info.parent is not None else "none"
+    return f"parent {parent}, from {info.label}, {info.relation}"
+
+
+def print_first_row_table(graph, tree, which):
+    print(f"## First rows: how far each one's work has grown, {which}")
     print()
     print("| row | descendants | depth | still open |")
     print("|---|---|---|---|")
-    for root in sorted(graph.first_rows(), key=row_sort_key):
-        subtree = graph.subtree(root)
+    for root in sorted(tree.first_rows(), key=row_sort_key):
+        subtree = tree.subtree(root)
         open_count = sum(1 for row_id in subtree if graph.is_open_at_tip(row_id))
-        print(f"| {root} | {len(subtree)} | {graph.depth(root)} | {open_count} |")
+        print(f"| {root} | {len(subtree)} | {tree.depth(root)} | {open_count} |")
     print()
 
 
 def print_weekly_table(graph):
+    """Printed once: it counts rows added and closed, and reads no row's parent."""
     print("## Rows added vs. rows closed done, by week (§348.2, §432.1)")
     print()
     added_by_week = defaultdict(int)
@@ -424,18 +643,18 @@ def print_weekly_table(graph):
     print()
 
 
-def print_source_table(graph):
-    print("## Each fuzz target or STEP file, by the week its faults were filed (§433)")
+def print_source_table(graph, tree, which):
+    print(f"## Each fuzz target or STEP file, by the week its faults were filed (§433), {which}")
     print()
-    roots = graph.source_roots()
+    roots = tree.source_roots()
     if not roots:
-        print("(no from/fuzz: or from/step: rows on this ref)")
+        print("(no row on this ref has a fuzz target or a STEP file as its parent)")
         print()
         return
     for root in roots:
-        direct = graph.children.get(root, [])
-        faults = [row_id for row_id in direct if graph.parent_of[row_id].relation != RE_FILE]
-        subtree = graph.subtree(root)
+        direct = tree.children.get(root, [])
+        faults = [row_id for row_id in direct if tree.parent_of[row_id].relation != RE_FILE]
+        subtree = tree.subtree(root)
         print(f"### {root}")
         print()
         print(f"{len(faults)} faults found directly, {len(subtree)} rows in its whole tree.")
@@ -450,6 +669,22 @@ def print_source_table(graph):
         print()
 
 
+def print_sources_read_from_text(graph):
+    print("## Rows whose source is read from their own text (§433.6)")
+    print()
+    if not graph.read_from_text:
+        print("(no row filed before Q1703 merged names the input that shows its fault)")
+        print()
+        return
+    print("| row | read from its text | without it |")
+    print("|---|---|---|")
+    for row_id in sorted(graph.read_from_text, key=row_sort_key):
+        without = graph.parent_of[row_id]
+        parent = without.parent if without.parent is not None else "none"
+        print(f"| {row_id} | {graph.read_from_text[row_id].parent} | {parent}, from {without.label} |")
+    print()
+
+
 def main(argv):
     if len(argv) < 2:
         print("usage: lineage.py <repo-top> <ref> [row-id]", file=sys.stderr)
@@ -459,9 +694,12 @@ def main(argv):
     graph = Graph(top, ref)
     if row_ids:
         return max(print_row_lookup(graph, row_id) for row_id in row_ids)
-    print_first_row_table(graph)
+    print_first_row_table(graph, graph.without_text, WITHOUT_TEXT)
+    print_first_row_table(graph, graph.with_text, WITH_TEXT)
     print_weekly_table(graph)
-    print_source_table(graph)
+    print_source_table(graph, graph.without_text, WITHOUT_TEXT)
+    print_source_table(graph, graph.with_text, WITH_TEXT)
+    print_sources_read_from_text(graph)
     return 0
 
 
