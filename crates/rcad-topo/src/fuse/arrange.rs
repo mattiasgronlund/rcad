@@ -8904,9 +8904,12 @@ fn one_of_two_loops_round_a_pipe_through_a_ball(
 /// never asked is the order of two places one of which is the walk's start:
 /// [`round_a_closed_crossing_and_what_it_measures`] reads that off the start's
 /// name. A loop cut nowhere, or only at its start, has nothing to order. So a
-/// bar whose seam runs through the loop where the walk starts on it is answered,
-/// and a loop cut twice away from its start is refused by name and never
-/// ordered wrongly (Q1661).
+/// bar whose seam runs through the loop where the walk starts on it gets past
+/// the order, and a loop cut twice away from its start is refused by name and
+/// never ordered wrongly (Q1661). Past the order is the cells' question: the
+/// ball of radius 3 in the side of a bar of 2 answers every rule, and a ball of
+/// a quarter of the bar's radius on its seam, beside a slab that cuts the pipe
+/// in four lines, is refused telling the pipe's cells apart.
 ///
 /// The placement is asked here and not left to
 /// [`a_pair_that_crosses_in_a_conic`] answering first: a ball centred on the
