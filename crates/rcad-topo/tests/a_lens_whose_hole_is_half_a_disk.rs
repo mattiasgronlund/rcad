@@ -72,8 +72,10 @@
 //! over. So `rings_round` takes the outline as the one ring nothing could
 //! place. On one pipe, in the first union of the third route, the outline
 //! answers that it holds the other, as under gdb above. A second ring that
-//! nothing could place would reach a panic in `rings_round`, and so would
-//! rings that each answer they hold none of the others. The second is what
+//! nothing could place is, since Q1253, refused
+//! `Error::CannotPlaceTheRingsOfAJoinedFlatFace` rather than reaching a panic
+//! in `rings_round`; only rings that each answer they hold none of the
+//! others still reach a panic there. The second is what
 //! the union of the bars united and the half bar at the lens corner reaches
 //! (`a_half_bar_whose_corner_is_the_lens_corner_mostly_answers`), on base
 //! `1c002fe1` with Q1284's change, and it was not traced.

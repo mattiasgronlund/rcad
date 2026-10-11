@@ -28,8 +28,9 @@ answers Q39 and Q82.*
   walks every closed-edge coedge the other way, caps and wall alike:
   `tests/rings/mod.rs` (`a_bend`, `the_top_half_of_a_ring`); `holds.rs`'s
   `a_piece_of_pipe` and the two pucks; `mesh.rs`'s
-  `a_band_between_two_circles`; `classify.rs`'s `a_box_beside_a_blocks_side`;
-  and the bends written inline in `a_cone_and_a_torus_through_the_front_door.rs`,
+  `a_band_between_two_circles`; `classify.rs`'s `a_box_beside_a_blocks_side`
+  (moved out by Q721, 361.3's note below); and the bends written inline in
+  `a_cone_and_a_torus_through_the_front_door.rs`,
   `two_loops_side_by_side_on_a_torus.rs` and `a_ray_from_beside_a_box.rs`. A
   seam is walked both ways in one wire, so turning a wall's circles over is the
   same as reversing its wire (§329.5 item 2).
@@ -108,6 +109,15 @@ removed; that example no longer refuses.
 because no public call built a solid with a torus face and a flat face with
 straight sides. `a_ray_from_beside_a_box.rs` now builds one, so they can move
 out.
+
+*2026-10-11, Q721: moved.* The seven pins are out of `classify.rs`; four
+tests in `tests/a_ray_from_beside_a_box.rs` now ask the same boxes through
+the public `classify_uncertain_point` of the glued bend —
+`a_box_beside_a_side_of_the_block_a_bend_grows_out_of_is_answered`,
+`a_box_beside_the_top_of_a_turned_block_a_bend_grows_out_of_is_answered_outside`,
+`a_box_in_the_notch_of_an_l_a_bend_grows_out_of_is_answered_outside` and
+`a_box_in_the_notch_of_a_turned_l_a_bend_grows_out_of_is_still_refused`
+(§323.3's matching note).
 
 ### 361.4 Landed with the bends it left (Q667)
 

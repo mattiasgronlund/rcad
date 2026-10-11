@@ -275,3 +275,22 @@ pieces it cannot tell apart. This is the circle arm's row, not this one.
 > CannotFollowACrossingBecauseNoStepStaysOnIt }`, `shortenings: 50`. That
 > crossing is the thin loop, not the rim, so the model holds a curve the file
 > did not draw. Filed as a row of its own.
+
+> **2026-10-11 note (Q1659, `walk.rs`, `7151e6e5`): both relays now refuse a
+> different way.** Since Q1659 picked an open run's loop by its two corners and
+> settles each corner onto both surfaces before the march, the quarter arc
+> from `#2404` to `#1030` is refused there rather than reaching the ball/pipe
+> tie this section and the fourth way out of the 2026-10-10 note above
+> describe. `#1030` is where the ball and the pipe are tangent, so settling it
+> refuses `CannotFollowACrossingWhereItsSurfacesAreTangent { at:
+> SettlingAPointOntoBothSurfaces }` at every deflection
+> (`a_quarter_circle_ending_where_a_ball_and_its_own_pipe_do_not_cross_is_refused`
+> in `walk.rs`), not `CannotNameWhichPieceOfACrossingThisIs` as the section's
+> first sentence and that note say. `mise exec -- just t -p rcad-step --test
+> how_often_a_real_file_imports --no-capture` now prints "the builder or the
+> sweep: geometry: this crossing runs where its two surfaces are too nearly
+> parallel to follow it, asked while settling a point onto both of them" for
+> both `Relay_DPDT_Fujitsu_FTR-F1C.step` and `Relay_DPST_Fujitsu_FTR-F1A.step`.
+> The pin end in
+> `a_circle_the_file_puts_off_its_pipe_past_the_allowance.rs` still passes as
+> refused `CannotNameWhichPieceOfACrossingThisIs`, since it never uses `#1030`.
