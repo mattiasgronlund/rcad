@@ -43,13 +43,13 @@
 //! no arc, and the walk refuses it.
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Scale,
-    Sphere, Surface, Torus, Vector,
+    Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane,
+    Point, Scale, Sphere, Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftEdge, DraftFace, DraftStep, DraftWire, Error, Invalid, Model, Result, SolidBuilder,
-    SolidKey,
+    DraftEdge, DraftFace, DraftStep, DraftWire, Error, Invalid, Model, ProfileBuilder, Result,
+    Rule, SolidBuilder, SolidKey,
 };
 
 const F: Orientation = Orientation::Forward;
@@ -152,6 +152,144 @@ fn the_sweep_refuses_the_tilted_half_disc_read_back_from_bytes() {
             "half disc first {half_first}: the sweep gave {swept:?}"
         );
     }
+}
+
+/// A fuse never writes either tilted piece into the caller's model. It writes
+/// its answer into a throwaway model first and sweeps it there, with this check
+/// among the sweep's, and the room it gives is the answer's own, which is never
+/// wider than what `Model::validate` gives the caller's model afterwards. So
+/// the bar read back from bytes with its lid's piece tilted, united with a
+/// block through its floor that leaves the lid alone, is refused by the name
+/// the sweep gives it, and the model is left holding the two solids it held.
+#[test]
+fn a_fuse_whose_answer_keeps_a_tilted_piece_refuses_it_and_writes_nothing() {
+    let mut wrote = Vec::new();
+    for inner_first in [false, true] {
+        for (mut model, expected) in the_two_tilted_pieces_read_back_from_bytes(inner_first) {
+            let bar = model.solids().next().expect("the bar").key();
+            let block = a_block_through_the_floor(&mut model);
+
+            let fused = model.fuse(
+                &[bar],
+                &[block],
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+
+            let refused_by_name = matches!(
+                &fused,
+                Err(Error::TheFuseWroteABrokenAnswer { broken }) if *broken == expected
+            );
+            if !refused_by_name || model.solids().count() != 2 {
+                wrote.push(format!(
+                    "{expected:?}, inner piece first {inner_first}: {fused:?}, leaving {} solids",
+                    model.solids().count()
+                ));
+            }
+        }
+    }
+    assert!(wrote.is_empty(), "{wrote:#?}");
+}
+
+/// Moving a solid and copying one are the two mutations
+/// `Model::check_touched_edge` runs after that write no plane, no corner and
+/// no run of their own: a movement goes on the shell, and a copy is the
+/// original bit for bit. So a tilted piece reaches them only in a solid that
+/// already held it, and the one door such a solid comes in by is
+/// `Deserialize`, which asks nothing that needs arithmetic
+/// (`docs/decisions.md` §44.5). Both answer, and the sweep still refuses the
+/// bar, and its copy, by the same name. A panic here would be a panic on what
+/// a caller's bytes said.
+#[test]
+fn moving_or_copying_a_tilted_piece_read_back_from_bytes_leaves_it_for_the_sweep() {
+    let away = Isometry::translation(Vector::new(10.0, 0.0, 0.0)).expect("a movement");
+    let mut not_left = Vec::new();
+    for inner_first in [false, true] {
+        for (mut model, expected) in the_two_tilted_pieces_read_back_from_bytes(inner_first) {
+            let bar = model.solids().next().expect("the bar").key();
+
+            model.place_solid(bar, &away).expect("the bar moves");
+            let copy = model.copy_solid(bar).expect("the bar copies");
+
+            for (which, solid) in [("bar", bar), ("copy", copy)] {
+                let swept =
+                    model.validate_solid(solid, &Policy::certified(), &mut ProvenanceLog::new());
+                if !matches!(&swept, Err(Error::Invalid(broken)) if *broken == expected) {
+                    not_left.push(format!(
+                        "{expected:?}, inner piece first {inner_first}, the {which}: {swept:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(not_left.is_empty(), "{not_left:#?}");
+}
+
+/// The rest of what `Model::check_touched_edge` runs after is the kernel's own
+/// solids, and none of them has an edge this check could refuse: it asks only
+/// of an edge that runs `RightRoundWhereItCrosses` or `PartOfWhereItCrosses`
+/// with every face along it flat, and every such edge these write has a ball
+/// or a pipe along it. The ball's seam is the one such edge, so the count of
+/// them is not nought.
+#[test]
+fn no_solid_the_kernel_makes_has_a_named_crossing_between_flat_faces_alone() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(Scale::millimetres(10.0).expect("a size"));
+    let ring = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+        .with_hole(vec![[1.0, 1.0], [1.0, 3.0], [3.0, 3.0], [3.0, 1.0]])
+        .build(&policy, &mut log)
+        .expect("a square with a square hole");
+    let leaning_caps = [
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.25, 0.0, -1.0)),
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.5, 1.0)),
+    ]
+    .map(|cap| cap.expect("a plane"));
+    let made = [
+        model.add_cube(2.0, &policy, &mut log),
+        model.add_extrusion(&ring, 3.0, &Isometry::identity()),
+        model.add_round_bar(1.0, 2.0, &Isometry::identity()),
+        model.add_ball(1.5, &Isometry::identity()),
+        model.add_bar_cut_off_by(1.0, leaning_caps, &Isometry::identity(), &policy, &mut log),
+    ]
+    .map(|made| made.expect("the kernel makes it"));
+
+    let mut asked_about = 0;
+    let mut between_flat_faces_alone = Vec::new();
+    for key in made {
+        let solid = model.solid(key).expect("a solid of this model");
+        for edge in solid
+            .faces()
+            .flat_map(|face| face.wires())
+            .flat_map(|wire| wire.coedges())
+            .map(|coedge| coedge.edge())
+        {
+            let run = edge.run();
+            if !matches!(
+                run,
+                EdgeRun::RightRoundWhereItCrosses { .. } | EdgeRun::PartOfWhereItCrosses { .. }
+            ) {
+                continue;
+            }
+            asked_about += 1;
+            let something_curved_along_it = edge.neighbouring_faces().any(|face| {
+                let face = model.face(face).expect("a face of this model");
+                !matches!(face.surface(), Surface::Plane(_))
+            });
+            if !something_curved_along_it {
+                between_flat_faces_alone.push(format!("{run:?}"));
+            }
+        }
+    }
+    assert!(
+        asked_about > 0,
+        "no edge of these is one the check asks about"
+    );
+    assert!(
+        between_flat_faces_alone.is_empty(),
+        "{between_flat_faces_alone:#?}"
+    );
 }
 
 /// Why the tilted half disc is refused rather than drawn: the volume of the
@@ -757,6 +895,36 @@ fn one_step_round(builder: &mut SolidBuilder, edge: DraftEdge, way: Orientation)
     builder
         .add_wire(&[DraftStep::Along(coedge)])
         .expect("a wire")
+}
+
+/// The tilted disc and the tilted half disc read back from bytes, each with the
+/// name the sweep refuses it by.
+fn the_two_tilted_pieces_read_back_from_bytes(inner_first: bool) -> [(Model, Invalid); 2] {
+    let (model, built) = a_bar_with_its_lid_split_by_a_disc(pipe(1.0), the_lid(), inner_first);
+    built.expect("the disc on the lid's own plane builds");
+    [
+        (
+            with_the_inner_plane_swapped(&model, inner_first, tilted_through_the_corner()),
+            Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes,
+        ),
+        (
+            the_tilted_half_disc_read_back_from_bytes(inner_first),
+            Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes,
+        ),
+    ]
+}
+
+/// A cube of side 2 centred on the middle of the bar's floor, so that it pokes
+/// through the floor and stays well clear of the lid.
+fn a_block_through_the_floor(model: &mut Model) -> SolidKey {
+    let block = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube");
+    let down_and_back = Isometry::translation(Vector::new(-1.0, -1.0, -1.0)).expect("a movement");
+    model
+        .place_solid(block, &down_and_back)
+        .expect("the cube moves");
+    block
 }
 
 /// The bar with its lid split by a half disc on the lid's own plane, which
