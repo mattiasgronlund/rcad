@@ -115,7 +115,7 @@ fn a_point_beside_a_round_slot_down_a_blocks_side_is_placed_as_worked_by_hand() 
                 [4.0, 9.5, 7.0],
                 [4.0, 10.5, 7.0],
                 [7.0, 7.0, 7.0],
-                [6.2, 6.2, 7.0],
+                [6.0, 6.0, 7.0],
             ],
         ),
     ];
