@@ -42,7 +42,11 @@
 //!
 //! Where a face is trimmed by something else — an *arc* of a crossing, or one
 //! loop of a crossing that has two — this refuses by name rather than guessing.
-//! Both refusals are gaps and §35 names the consumer that calls each due.
+//! Both refusals are gaps and §35 names the consumer that calls each due. One
+//! loop of two is read after all where the half-space [`intersect`] picks it out
+//! by faces along a pipe's or a cone's axis, a ball a pipe cuts in two loops
+//! among them (Q1702): everything of the surface past that half-space is on one
+//! side of the loop ([`what_lies_past_the_picker`]).
 //!
 //! **A flat face is the exception, because it has a polygon after all**: put
 //! each arc back as its chord and the sides are one, and what the chord leaves
@@ -7370,6 +7374,21 @@ fn the_picker_this_face_is_read_past(
 /// is on the curve's side towards it: on a cone through the apex, which joins
 /// the two nappes, and on a ball as the cap past the flat surface.
 ///
+/// **A ball a pipe cuts in two loops is read too** (Q1702), the axis again
+/// being the pipe's, but its side is not stepped for: it is
+/// [`Decision::Pos`], the pipe's outside, wherever the corner is. The only
+/// half-space [`intersect`] names one of those loops by is the one through
+/// the ball's centre square to the pipe, built only where the ball swallows a
+/// whole cross-section of the pipe, so the circle the flat surface cuts the
+/// ball in is outside the pipe. The ball past the flat surface is one cap the
+/// loop in front never meets, holding that circle: all of it is on the band's
+/// side of the loop, even inside the other loop's patch. A step from the loop
+/// along the line of longitude says so only where the centre is nearer the
+/// axis than the pipe is wide; further off, it goes into the pipe on the side
+/// of the loop nearest the ball's pole. `arrange.rs`'s
+/// `whether_past_the_plane_through_a_balls_centre` reads a fuse's points the
+/// same way and says why (Q1554); `validate.rs` does not read this pair yet.
+///
 /// A ball on either side was left out for a while (Q1218), because reading it
 /// let a cut cone and a cone closed by a ball on its axis reach a panic in
 /// `fuse/assemble.rs`'s `rings_round`, whose rings each ran along a hyperbola.
@@ -7383,13 +7402,13 @@ fn the_picker_this_face_is_read_past(
 /// ([`the_picker_naming_the_circle_through`]). A pair `intersect` refuses to
 /// name has none, and is refused by name as before.
 ///
-/// The side is the partner's gradient against the step from `at` towards the
-/// flat surface, laid onto the surface: `|g|²·d − (g·d)·g` for the surface's
-/// gradient `g` and `d` the half-space's normal turned round, and `d` itself on
-/// a pipe, whose gradient is square to its axis. On a cone that runs along the
-/// ruling, and on a ball along the line of longitude. `None` where that is
-/// [`Decision::Zero`], which is the two surfaces touching rather than crossing
-/// there.
+/// For every other pair the side is the partner's gradient against the step
+/// from `at` towards the flat surface, laid onto the surface:
+/// `|g|²·d − (g·d)·g` for the surface's gradient `g` and `d` the half-space's
+/// normal turned round, and `d` itself on a pipe, whose gradient is square to
+/// its axis. On a cone that runs along the ruling, and on a ball along the line
+/// of longitude. `None` where that is [`Decision::Zero`], which is the two
+/// surfaces touching rather than crossing there.
 ///
 /// # Errors
 ///
