@@ -1023,23 +1023,26 @@ fn a_turned_corner_up_cube_centred_three_and_a_half_above_a_steep_pointed_cones_
 
 /// Twenty slabs `14` deep across the steep cone's axis, each `a_slab`'s own
 /// 2 by 12 box turned `0`, `0.5`, `1` or `1.5` about it. At `low = −14` the
-/// slab's top runs through the apex, a touch ([`APART`]); it answers right
-/// only turned `0` and finds no point in a piece of a face every other turn.
-/// `low` from `−8` to `0` answers right turned `0`, the cone in two solids
-/// either side of the slab, and splits between two more refusals the other
-/// three turns; `low = 2` answers right turned `0` and splits the same way
-/// turned `0.5` and `1`. This test holds the slabs from `−14`, `−8` and `−3`,
-/// and the next those from `0` and `2`.
+/// slab's top runs through the apex, a touch ([`APART`]). Every slab answers
+/// every rule right turned `0`, with the cone in two solids either side of the
+/// slab from `low = −8` to `0`, and the intersection and the block less the
+/// cone answer right every turn. The union and the cone less the block refuse
+/// the other three turns: from `−14` on `side of a half-space` all three, and
+/// from every other `low` on `ACurvedFaceGoesRightRoundWithNoSeam` turned
+/// `0.5` and `1` and on `side of a half-space` turned `1.5`. Until Q1537 the
+/// slabs from `−14`, `−8` and `−3` answered `18` right and refused `24` on
+/// `a point inside a piece of a face`, every rule of the slab from `−14` the
+/// other three turns among them (§35.6). This test holds the slabs from
+/// `−14`, `−8` and `−3`, and the next those from `0` and `2`.
 #[test]
 fn a_slab_fourteen_deep_from_below_the_apex_across_a_steep_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
         tally_on_every_second_point(&slabs(THE_STEEP_CONE, &[-14.0, -8.0, -3.0])),
         Tally {
-            right: 18,
+            right: 30,
             refused: [
-                ("a point inside a piece of a face", 24),
-                ("ACurvedFaceGoesRightRoundWithNoSeam", 4),
-                ("side of a half-space", 2),
+                ("ACurvedFaceGoesRightRoundWithNoSeam", 8),
+                ("side of a half-space", 10),
             ]
             .into()
         }
@@ -1259,18 +1262,18 @@ fn a_turned_corner_up_cube_centred_three_and_a_half_above_a_unit_pointed_cones_a
 }
 
 /// Twenty slabs across the unit cone's axis, the same sweep as round the
-/// steep cone ([`slabs`]). `low = −14` touches the apex ([`APART`]) and
-/// answers right every turn; `low = −8` answers right only turned `0` and
-/// finds no point in a piece of a face the other three turns; `low` of `−3`,
-/// `0` and `2` answer right every turn. This test holds the slabs from `−14`,
-/// `−8` and `−3`, and the next those from `0` and `2`.
+/// steep cone ([`slabs`]). `low = −14` touches the apex ([`APART`]). Every
+/// slab answers every rule right every turn. Until Q1537 the slab from `−8`
+/// found no point in a piece of a face on every rule turned `0.5`, `1` and
+/// `1.5` (§35.6). This test holds the slabs from `−14`, `−8` and `−3`, and the
+/// next those from `0` and `2`.
 #[test]
 fn a_slab_fourteen_deep_from_below_the_apex_across_a_unit_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
         tally_on_every_second_point(&slabs(THE_UNIT_CONE, &[-14.0, -8.0, -3.0])),
         Tally {
-            right: 36,
-            refused: [("a point inside a piece of a face", 12)].into()
+            right: 48,
+            refused: BTreeMap::new()
         }
     );
 }

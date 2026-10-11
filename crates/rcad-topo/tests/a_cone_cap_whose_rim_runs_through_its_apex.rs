@@ -47,7 +47,8 @@
 //!   touches the cone along the ruling, and every fuse answers the two as they
 //!   stand: the skin is never cut along the ruling. Turned into place instead,
 //!   the block's floor lands a rounding off the touching plane, and every fuse
-//!   is refused `Undecidable` before anything is meshed.
+//!   is refused once its answer is meshed: three by name while meshing, three
+//!   `Undecidable` after.
 //! - **A closed edge cornered at the apex.** It has to run along a closed
 //!   crossing through the apex, and every one is refused by name, through a
 //!   fuse and through `SolidBuilder` alike: a bar whose wall runs through the
@@ -166,18 +167,27 @@ fn planes_through_the_apex_cut_a_piece_out_of_the_cone_and_every_fuse_answers() 
 
 /// The block `[−6, 6] × [−12, 4] × [0, 6]` turned about `x` so that its floor
 /// lies on `2y − z = 0` and the block on the side away from the axis: it
-/// would touch the cone along the ruling `x = 0, y = z/2`, and every fuse is
-/// refused `Undecidable`, at "a point inside a piece of a face", before
-/// anything is meshed.
+/// would touch the cone along the ruling `x = 0, y = z/2`. Every fuse gets
+/// past `select`, and every one is refused once the answer's shells are
+/// nested, which meshes them to measure their volumes. The union both ways
+/// round and the cone less the block refuse
+/// `CannotNameWhichPieceOfACrossingThisIs` while that mesh is made. The other
+/// three are refused `Undecidable` on one "side of a half-space" left
+/// undecided at `(0, 4, 8)`, where the ruling meets the cap's rim.
 ///
 /// The turn's sine and cosine round apart, so the floor as turned is not the
 /// touching plane: its normal's parts are `−0.8944271909999157` and
 /// `0.44721359549995765`, where the nearest numbers to `−2/√5` and `1/√5` are
 /// `−0.8944271909999159` and `0.4472135954999579`. It cuts the cone in two
-/// rulings a rounding apart rather than touching it along one. The points the
-/// fuse could not place are `1.7e-7` either side of `x = 0` near the far end
-/// of that ruling. Laid exactly on its plane instead, the same touch answers
-/// every fuse, as the next test shows.
+/// rulings a rounding apart rather than touching it along one. Until Q1537
+/// every fuse was refused `Undecidable` before anything was meshed, at "a
+/// point inside a piece of a face", on a lens of the block's end face whose
+/// corners are `1.7e-7` either side of `x = 0` at `y = 5.37, z = 10.73`, where
+/// that ruling carried on past the cap meets the end face. The cap is at
+/// `z = 8`, so the lens is outside the cone, and the rule that places a piece
+/// by the piece across a side clear of every face places it there now
+/// (§35.6). Laid exactly on its plane instead, the same touch answers every
+/// fuse, as the next test shows.
 #[test]
 fn a_block_resting_on_the_cone_along_a_ruling_is_refused_before_any_mesh() {
     let touching = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, -2.0, 1.0))
@@ -209,10 +219,25 @@ fn a_block_resting_on_the_cone_along_a_ruling_is_refused_before_any_mesh() {
         let cone = a_pointed_cone(&mut model, SLOPE, HEIGHT);
         let block = a_block_turned_onto_the_ruling(&mut model);
         let said = fuse(&mut model, cone, block, rule, cone_first);
-        assert!(
-            matches!(said, Err(Error::Undecidable { .. })),
-            "{rule:?}, cone first {cone_first}: {said:?}"
+        let refused_while_meshing = matches!(
+            (rule, cone_first),
+            (Rule::Union, _) | (Rule::Difference, true)
         );
+        match said {
+            Err(Error::Geometry(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs))
+                if refused_while_meshing => {}
+            Err(Error::Undecidable { records }) if !refused_while_meshing => {
+                let [left_undecided] = records.records() else {
+                    panic!("{rule:?}, cone first {cone_first}: {records:#?}")
+                };
+                assert_eq!(
+                    left_undecided.predicate(),
+                    "side of a half-space",
+                    "{rule:?}, cone first {cone_first}: {left_undecided:#?}"
+                );
+            }
+            other => panic!("{rule:?}, cone first {cone_first}: {other:?}"),
+        }
     }
 }
 
