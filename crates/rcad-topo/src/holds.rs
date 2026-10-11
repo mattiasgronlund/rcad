@@ -8259,8 +8259,9 @@ mod tests {
     /// Each of the two patches a thin bar keeps of a fat bar's wall holds its
     /// own end of the thin bar and nothing else.
     ///
-    /// [`two_crossed_bars`] keeps one patch of the fat wall at each end of the
-    /// thin bar, each along one of the two loops the pipes cross in. The
+    /// [`two_crossed_bars`], the thin bar turned a quarter, keeps one patch of
+    /// the fat wall at each end of the thin bar, each along one of the two
+    /// loops the pipes cross in. The
     /// half-space [`intersect`] tells those loops apart by is `y ≥ 0` or
     /// `y ≤ 0`: it holds the fat bar's axis, and past it the fat wall holds the
     /// other patch and the wall outside the thin bar both, all of it outside
@@ -8275,7 +8276,7 @@ mod tests {
     /// the half-space is its own side not what is read.
     #[test]
     fn each_patch_a_thin_bar_keeps_of_a_fat_bars_wall_holds_its_own_end_alone() {
-        let (model, solid) = two_crossed_bars();
+        let (model, solid) = two_crossed_bars(core::f64::consts::FRAC_PI_2);
         let patches: Vec<FaceKey> = model
             .solid(solid)
             .expect("this model made the key")
@@ -8331,53 +8332,64 @@ mod tests {
     }
 
     /// The middle of [`two_crossed_bars`] is inside it, and a point either side
-    /// of it is told apart too. Until Q1717 every one was
-    /// `CannotFollowAFacesTrimming`, a ray at either patch of the fat wall
-    /// being refused.
+    /// of it is told apart too, with the thin bar square to the fat one or
+    /// [`LEANING`]. Until Q1717 every one was `CannotFollowAFacesTrimming`, a
+    /// ray at either patch of the fat wall being refused, and leaning, a ray at
+    /// the thin wall too.
     #[test]
     fn the_middle_of_two_crossed_bars_is_inside_them() {
-        let (model, solid) = two_crossed_bars();
-        for (point, expected) in [
-            ([0.0, 0.0, 0.0], crate::Containment::Inside),
-            ([0.0, -2.0, 0.5], crate::Containment::Inside),
-            ([0.0, 3.5, 0.0], crate::Containment::Outside),
-            ([2.0, 0.0, 0.0], crate::Containment::Outside),
-        ] {
-            assert_eq!(
-                model
-                    .solid(solid)
-                    .expect("this model made the key")
-                    .classify_point(
-                        Point::new(point[0], point[1], point[2]),
-                        &Policy::certified(),
-                        &mut ProvenanceLog::new(),
-                    ),
-                expected,
-                "{point:?}"
-            );
+        for turn in [LEANING, core::f64::consts::FRAC_PI_2] {
+            let (model, solid) = two_crossed_bars(turn);
+            for (point, expected) in [
+                ([0.0, 0.0, 0.0], crate::Containment::Inside),
+                ([0.0, -2.0, 0.5], crate::Containment::Inside),
+                ([0.0, 3.5, 0.0], crate::Containment::Outside),
+                ([2.0, 0.0, 0.0], crate::Containment::Outside),
+            ] {
+                assert_eq!(
+                    model
+                        .solid(solid)
+                        .expect("this model made the key")
+                        .classify_point(
+                            Point::new(point[0], point[1], point[2]),
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        ),
+                    expected,
+                    "{point:?}, the thin bar turned {turn}"
+                );
+            }
         }
     }
 
     /// [`two_crossed_bars`] fused with a block from `y = 0` up, along the
     /// half-space [`intersect`] tells the two loops apart by, or from `y = 1`
-    /// up, holds what it should under all three rules. Until Q1717 every one of
-    /// the six was refused `AFaceTrimmedByACurveThisCannotFollow`.
+    /// up, holds what it should under all three rules, with the thin bar
+    /// square to the fat one or [`LEANING`]. Until Q1717 every one of the
+    /// twelve was refused `AFaceTrimmedByACurveThisCannotFollow`.
     ///
     /// The block is 20 on a side and swallows everything of the two bars past
-    /// its bottom. The part of the two bars from `y = c` up is
-    /// `V/2 − π·c` for `0 ≤ c ≤ √8`, `V` being all of it and the thin bar's
-    /// cross-section a disk of area `π`.
+    /// its bottom. With the thin bar turned `α` off the fat one's axis, the
+    /// part of the two bars from `y = c` up is `V/2 − π·c/sin α` for
+    /// `0 ≤ c ≤ √8`, `V` being all of it and a cut across the thin bar square
+    /// to `y` an ellipse of area `π/sin α`.
     #[test]
     fn two_crossed_bars_fused_with_a_block_across_them_hold_what_they_should() {
-        let both = how_much_two_crossed_bars_hold();
+        for turn in [LEANING, core::f64::consts::FRAC_PI_2] {
+            fuse_two_crossed_bars_with_a_block_across_them(turn);
+        }
+    }
+
+    fn fuse_two_crossed_bars_with_a_block_across_them(turn: f64) {
+        let both = how_much_two_crossed_bars_hold(turn);
         for from in [0.0, 1.0] {
-            let past_the_block = both / 2.0 - core::f64::consts::PI * from;
+            let past_the_block = both / 2.0 - core::f64::consts::PI * from / turn.sin();
             for (rule, volume) in [
                 (crate::Rule::Intersection, past_the_block),
                 (crate::Rule::Difference, both - past_the_block),
                 (crate::Rule::Union, 8000.0 + both - past_the_block),
             ] {
-                let (mut model, bars) = two_crossed_bars();
+                let (mut model, bars) = two_crossed_bars(turn);
                 let policy = Policy::certified();
                 let square = crate::ProfileBuilder::new(vec![
                     [0.0, 0.0],
@@ -8395,7 +8407,7 @@ mod tests {
                             .expect("a finite shift"),
                     )
                     .expect("a positive height");
-                let what = format!("{rule:?} with a block from y = {from} up");
+                let what = format!("{rule:?} with a block from y = {from} up, turned {turn}");
                 let fused = model
                     .fuse(&[bars], &[block], rule, &policy, &mut ProvenanceLog::new())
                     .unwrap_or_else(|why| panic!("{what} refused: {why:?}"));
@@ -8424,10 +8436,18 @@ mod tests {
         }
     }
 
+    /// The thin bar of [`two_crossed_bars`] turned a twentieth of a turn short
+    /// of square to the fat one. It then stays within `|z| < 4.1` from end to
+    /// end, so it never reaches the flat surface either end of the fat bar is
+    /// on; turned a sixth of a turn off `z`, its ends would sit on them.
+    const LEANING: f64 = 0.4 * core::f64::consts::PI;
+
     /// A fat bar of radius 3 up `z` from `z = −5` to 5 and a thin one of radius
-    /// 1 along `y` from `y = −10` to 10, intersected: the thin bar cut off where
-    /// it leaves the fat one, `x² + z² ≤ 1` and `x² + y² ≤ 9`.
-    fn two_crossed_bars() -> (Model, SolidKey) {
+    /// 1 and length 20, centred on the origin and turned `turn` about `x` off
+    /// `z`, intersected: the thin bar cut off where it leaves the fat one. A
+    /// quarter turn lays it along `y`, and then what is left is `x² + z² ≤ 1`
+    /// and `x² + y² ≤ 9`.
+    fn two_crossed_bars(turn: f64) -> (Model, SolidKey) {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let fat = model
             .add_round_bar(
@@ -8436,11 +8456,11 @@ mod tests {
                 &Isometry::translation(Vector::new(0.0, 0.0, -5.0)).expect("a finite shift"),
             )
             .expect("a positive radius and height");
-        let along_y = Isometry::rotation(&Axis::x(), core::f64::consts::FRAC_PI_2)
+        let leaning = Isometry::rotation(&Axis::x(), turn)
             .expect("a finite turn")
             .compose(&Isometry::translation(Vector::new(0.0, 0.0, -10.0)).expect("a finite shift"));
         let thin = model
-            .add_round_bar(1.0, 20.0, &along_y)
+            .add_round_bar(1.0, 20.0, &leaning)
             .expect("a positive radius and height");
         let fused = model
             .fuse(
@@ -8457,12 +8477,13 @@ mod tests {
         (model, solid)
     }
 
-    /// How much [`two_crossed_bars`] holds: `∫∫ 2·√(9 − x²)` over the thin
-    /// bar's unit disk, which with `x = sin θ` is `4·∫ cos²θ·√(9 − sin²θ) dθ`
-    /// over half a turn. That runs smoothly round and round with period `π`, so
-    /// equal steps over one period are exact to a rounding long before a
-    /// thousand of them.
-    fn how_much_two_crossed_bars_hold() -> f64 {
+    /// How much [`two_crossed_bars`] holds: `∫∫ 2·√(9 − x²)/sin α` over the
+    /// thin bar's unit disk, `α` being the turn, since a line along the thin
+    /// bar crosses the fat one `1/sin α` as far as a line along `y` would. With
+    /// `x = sin θ` that is `4·∫ cos²θ·√(9 − sin²θ) dθ/sin α` over half a turn.
+    /// That runs smoothly round and round with period `π`, so equal steps over
+    /// one period are exact to a rounding long before a thousand of them.
+    fn how_much_two_crossed_bars_hold(turn: f64) -> f64 {
         let steps = 1000;
         let width = core::f64::consts::PI / f64::from(steps);
         let sum: f64 = (0..steps)
@@ -8471,7 +8492,7 @@ mod tests {
                 cos * cos * (9.0 - sin * sin).sqrt()
             })
             .sum();
-        4.0 * width * sum
+        4.0 * width * sum / turn.sin()
     }
 
     /// Each of the two caps a bar cuts out of a ball holds the patch of the
