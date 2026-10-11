@@ -51,6 +51,13 @@ response per message id. A lane's peak is the largest of them.
 - **Big lanes come back unfinished more often.** `partial` came back for 23%
   of the lanes that peaked between 150k and 250k, and 43% of those above 250k.
 
+*§437.8 corrected the shares in the second bullet on 2026-10-11. A transcript
+often records a response's output as a count taken early in the stream, so the
+lane's own output was charged to the tool results after it. Estimated properly,
+own output and thinking is about 38% of the growth; `Read` stays at 31%, and
+grep falls to 7.3%, `sed -n` to 3.2%, `just src` to 1.8% and `just t` to 4.7%.
+The bullet's point stands: reading code is the largest cost.*
+
 ### 416.2 What a split buys
 
 Each lane was replayed as two agents, cut at a point. The cost is the sum, over
