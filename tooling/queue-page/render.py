@@ -11,7 +11,8 @@ and writes a self-contained page: rows added against rows closed per day, two
 SVG charts of the queue's shape over every commit of `docs/queue.md` on main's
 first-parent line, a table of both by day, a table of the rows running now with
 the tier each was taken from and the agent it runs under, a table of the open
-rows a fill would not take now and why, then the current
+rows Mattias pinned and what holds each back, a table of the open rows a fill
+would not take now and why, then the current
 ready, running and lately-closed rows, and what the overnight fuzz job did
 night by night — that last section is `fuzz_section.py`'s, read from the fuzz log root the caller
 names.
@@ -169,6 +170,7 @@ def current_state(tip_text):
     return {
         "ready": ready_rows(tip),
         "running": running_rows(verbs, here, tip),
+        "pinned": pinned_rows(tip),
         "not_taken": rows_not_taken(tip, tip_text, here.trees()),
         "closed": closed_rows(tip),
     }
@@ -258,6 +260,15 @@ def tier_taken_from(hold, row):
     if hold["tier"] is not None:
         return hold["tier"]
     return row.tier if row else None
+
+
+def pinned_rows(tip):
+    """The open rows Mattias pinned, by their number, which is the order a fill takes them in (§430.3).
+
+    A closed row keeps its pin as the record that it was pinned (§430.4), so
+    the closed ones are left out: they hold nothing back and wait on nothing.
+    """
+    return sorted((row for row in tip.rows if row.pin is not None and not row.is_closed()), key=lambda row: row.pin)
 
 
 def rows_not_taken(tip, tip_text, trees):
@@ -427,6 +438,7 @@ def render_page(points, state, fuzz, rendered_at):
         added_closed_chart=added_closed_chart,
         statistics_table=statistics_table(days),
         running_table=running_table(state["running"], rendered_at),
+        pinned_table=pinned_table(state["pinned"], state["running"], state["not_taken"]),
         not_taken_table=not_taken_table(state["not_taken"]),
         ready_section=ready_section(state["ready"]),
         running_section=running_section(state["running"]),
@@ -592,11 +604,74 @@ def running_table(rows, rendered_at):
 </table>"""
 
 
+def pinned_table(rows, running, groups):
+    """One line per open pinned row, in the order a fill takes them, and what holds it back.
+
+    What holds a row back is what the table of rows the fill will not take
+    says of it, word for word, so the two tables cannot disagree. A row that
+    runs is held back by nothing, whether the claims file holds it or main's
+    copy says `lane:` with no take behind it, as `just queue` counts both.
+    """
+    if not rows:
+        return "<p>nothing pinned</p>"
+    running_on = {row["id"]: row["branch"] for row in running}
+    held_back = {row_id: why for _, lines in reasons_not_taken(groups) if lines is not None
+                 for row_id, _, why in lines}
+    lines = [
+        f'<tr><th><code>{html.escape(row.id)}</code></th><td class="n">{row.pin}</td>'
+        f'<td>{blocked_by(row, running_on, held_back, groups["meeting"] is None)}</td></tr>'
+        for row in rows
+    ]
+    body = "\n".join(lines)
+    return f"""<p class="qp-sub">open rows Mattias pinned (§430), by their number, which is the order a fill takes them in</p>
+<table class="qp-stats">
+<thead><tr><th>Row</th><th class="n">Pin</th><th>Blocked by</th></tr></thead>
+<tbody>
+{body}
+</tbody>
+</table>"""
+
+
+def blocked_by(row, running_on, held_back, meeting_not_worked_out):
+    if row.id in running_on:
+        return f"nothing: it is running, on <code>{html.escape(running_on[row.id])}</code>"
+    if row.state.startswith("lane:"):
+        return f"nothing: it is running, on <code>{html.escape(row.state[len('lane:'):])}</code>"
+    if row.id in held_back:
+        return held_back[row.id]
+    if meeting_not_worked_out:
+        return "ready, but whether it meets a running lane's write set is not worked out"
+    return "nothing: it is ready"
+
+
 def not_taken_table(groups):
     """One group per reason a fill passes an open row over, each headed by how many rows it holds.
 
     The third group names the entry, the row and the lane as `just queue next`
     does, since it is that recipe's own line taken apart.
+    """
+    bodies = []
+    for title, lines in reasons_not_taken(groups):
+        if lines is None:
+            bodies.append(
+                f'<tbody>\n<tr><th colspan="3">{title} (not worked out)</th></tr>\n'
+                f"<tr><td colspan=\"3\">no tree that holds main has main's own {QUEUE_PATH}, "
+                f"and <code>just queue blocked</code> is run only there</td></tr>\n</tbody>")
+        else:
+            bodies.append(not_taken_group(title, lines))
+    body = "\n".join(bodies)
+    return f"""<p class="qp-sub">open rows a fill would pass over even with every slot free, by why</p>
+<table class="qp-stats">
+<thead><tr><th>Row</th><th>Tier</th><th>Why</th></tr></thead>
+{body}
+</table>"""
+
+
+def reasons_not_taken(groups):
+    """Each reason a fill passes an open row over, as its title and its rows' id, tier and why.
+
+    The rows are None for the third reason when `meeting_a_running_lane` could
+    not work it out.
     """
     waiting = [
         (row.id, row.tier, "waits on " + ", ".join(
@@ -604,27 +679,13 @@ def not_taken_table(groups):
         for row, unfinished in groups["waiting"]
     ]
     parked = [(row.id, row.tier, f"parked for {html.escape(row.state[len('parked:'):])}") for row in groups["parked"]]
-    bodies = [not_taken_group("Waits on rows not yet done", waiting), not_taken_group("Parked", parked)]
-    title = "Meets a running lane's write set"
-    if groups["meeting"] is None:
-        bodies.append(
-            f'<tbody>\n<tr><th colspan="3">{title} (not worked out)</th></tr>\n'
-            f"<tr><td colspan=\"3\">no tree that holds main has main's own {QUEUE_PATH}, "
-            f"and <code>just queue blocked</code> is run only there</td></tr>\n</tbody>")
-    else:
-        meeting = [
-            (line["id"], line["tier"],
-             f'its <code>{html.escape(line["mine"])}</code> meets <code>{html.escape(line["other"])}</code>\'s '
-             f'<code>{html.escape(line["theirs"])}</code>, held {line["how"]} <code>{html.escape(line["holder"])}</code>')
-            for line in groups["meeting"]
-        ]
-        bodies.append(not_taken_group(title, meeting))
-    body = "\n".join(bodies)
-    return f"""<p class="qp-sub">open rows a fill would pass over even with every slot free, by why</p>
-<table class="qp-stats">
-<thead><tr><th>Row</th><th>Tier</th><th>Why</th></tr></thead>
-{body}
-</table>"""
+    meeting = None if groups["meeting"] is None else [
+        (line["id"], line["tier"],
+         f'its <code>{html.escape(line["mine"])}</code> meets <code>{html.escape(line["other"])}</code>\'s '
+         f'<code>{html.escape(line["theirs"])}</code>, held {line["how"]} <code>{html.escape(line["holder"])}</code>')
+        for line in groups["meeting"]
+    ]
+    return [("Waits on rows not yet done", waiting), ("Parked", parked), ("Meets a running lane's write set", meeting)]
 
 
 def not_taken_group(title, lines):
@@ -783,6 +844,9 @@ table.qp-stats .n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 
 <h2>Running rows</h2>
 {running_table}
+
+<h2>Pinned</h2>
+{pinned_table}
 
 <h2>Rows the fill will not take now</h2>
 {not_taken_table}
