@@ -11860,7 +11860,9 @@ _queue-rows file:
 # may start with a class: how bad the defect is, then how likely a user's model
 # meets it. A and B are tier 1 and C and D tier 5, so the fill walks tier 1 as
 # wrong/A, wrong/B, crash/A, crash/B, refuses/A, refuses/B, then the rows with
-# no class, and tier 5 as wrong/C, crash/C, refuses/C, then the same for D. The
+# no class, and tier 5 as wrong/C, crash/C, refuses/C, then the rows with no
+# class that wait on a tier 5 row (§435.5), then the same for D. The measure
+# line counts the rows with no class in each of the two tiers (§435.7). The
 # file's order only breaks ties inside one class. The line order cannot carry
 # it: the merge driver keeps the frame side's order within a block, so a merge
 # across a re-tag would undo it.
@@ -12127,10 +12129,11 @@ queue mode="" *args:
                 else if (cl[i] ~ /\/C$/) inc++
                 else if (cl[i] ~ /\/D$/) ind++
                 else if (tier[i] == "1") unclassed++
+                else if (tier[i] == "5") unclassed5++
             }
             for (x = 1; x <= w; x++) if (small[walk[x]]) smallready++
-            printf "tier 1, open and not parked: %d in A or B (%d wrong, %d crash, %d refuses), %d with no class; tier 5: %d in C, %d in D; %d small row%s ready, and a bundle is %d\n", \
-                ab, abof["wrong"], abof["crash"], abof["refuses"], unclassed, inc, ind, smallready, (smallready == 1 ? "" : "s"), bundle
+            printf "tier 1, open and not parked: %d in A or B (%d wrong, %d crash, %d refuses), %d with no class; tier 5: %d in C, %d in D, %d with no class; %d small row%s ready, and a bundle is %d\n", \
+                ab, abof["wrong"], abof["crash"], abof["refuses"], unclassed, inc, ind, unclassed5, smallready, (smallready == 1 ? "" : "s"), bundle
         }
         function refuse(line, msg) {
             printf "queue: %s:%s: cannot read %s; just check-queue says what is wrong\n", file, line, msg > "/dev/stderr"
@@ -12708,9 +12711,17 @@ check-queue-page-selftest:
 # crash or refuses, then `/` and a bucket A to D. A first word shaped like a
 # class that is none of them is refused as a typo, and so is a class on a row of
 # a tier other than 1 and 5, since the fill ranks only those by class. The class
-# names an open row's tier (§403): A and B sit in tier 1, C and D in tier 5,
-# and a tier 5 row with no class is refused. A closed row keeps the tier it
-# closed in. `small` has nothing to check: any tier may carry it.
+# names an open row's tier (§403): A and B sit in tier 1, C and D in tier 5.
+# A tier 5 row with no class is refused unless its `after:` names a tier 5 row,
+# open or closed, or a `Q` row this copy does not hold (§435.5); one a lane
+# holds, or a parked one, passes, since `take` and `park` write over the
+# `after:` that said why it is there. A closed row keeps the tier it closed in.
+# `small` has nothing to check: any tier may carry it.
+#
+# **A row that waits sits in no tier the fill reaches before an open row it
+# waits on** (§435): 1, 2, 2.2, 2.5, 3, 4, then 5. The refusal names both rows
+# and their tiers. A row with no class and no pin is told to move down; one
+# whose class or pin keeps it where it is is left to Mattias (§435.4).
 #
 # **A pin comes before the class** (§430): `pinned/<n>`, n a number from 1,
 # then the class or `small` if the row has one, and the class rules above read
@@ -12854,7 +12865,9 @@ _queue-check file decisions:
                 want = (tag ~ /\/[CD]$/) ? "5" : "1"
                 if (tier != want) err(line, id ": the class " tag " puts an open row in tier " want ", and this row is tier " tier "; move it with just queue tier " id " " want " (§403)")
             }
-            if (tier == "5" && !closed && !isclass) err(line, id ": an open tier 5 row carries a class C or D (§403), and this one has none; give it one with just queue tag, or move it with just queue tier")
+            tierof[id] = tier
+            keeps[id] = (pinned && !closed) ? "pin " w[1] : isclass ? "class " tag : ""
+            if (tier == "5" && (kind == "todo" || kind == "after") && !isclass) { five[++n5] = id; fiveline[id] = line }
             fpos = (pinned ? 2 : 1) + ((isclass || tag == "small") ? 1 : 0)
             if (w[fpos] ~ /^(from|was)\//) {
                 if (w[fpos] !~ /^(from\/([TDQ][0-9]+|-|(fuzz|step):[^ ]+)|was\/[TDQ][0-9]+)$/) err(line, id ": \"" w[fpos] "\" is not where a row came from: from/<id>, was/<id>, from/-, from/fuzz:<target> or from/step:<file> (§432, §433)")
@@ -12883,6 +12896,26 @@ _queue-check file decisions:
                 }
                 if (ok) ready++
                 else waiting++
+            }
+            for (i = 1; i <= nw; i++) {
+                id = wid[i]
+                if (!(tierof[id] in istier)) continue
+                m = split(waits[id], a, ",")
+                for (j = 1; j <= m; j++) {
+                    b = a[j]
+                    if (!(b in at) || kindof[b] == "done" || kindof[b] == "dropped" || !(tierof[b] in istier)) continue
+                    if (rank[tierof[id]] >= rank[tierof[b]]) continue
+                    if (keeps[id] == "") err(wline[id], id ": waits on " b ", which is tier " tierof[b] ", and sits in tier " tierof[id] ", which the fill reaches first; move it down with just queue tier " id " " tierof[b] " (§435)")
+                    else err(wline[id], id ": waits on " b ", which is tier " tierof[b] ", and its " keeps[id] " keeps it in tier " tierof[id] ", which the fill reaches first: which of the two moves is Mattias\047s to set (§435.4)")
+                }
+            }
+            for (i = 1; i <= n5; i++) {
+                id = five[i]; ok = 0
+                if (kindof[id] == "after") {
+                    m = split(waits[id], a, ",")
+                    for (j = 1; j <= m; j++) if ((a[j] in at) ? tierof[a[j]] == "5" : a[j] ~ /^Q/) ok = 1
+                }
+                if (!ok) err(fiveline[id], id ": an open tier 5 row carries a class C or D (§403), or waits on a tier 5 row (§435.5), and this one does neither; give it a class with just queue tag, or move it with just queue tier")
             }
             for (i = 1; i <= nfrom; i++) {
                 id = fromid[i]; src = fromsrc[id]
@@ -12940,7 +12973,7 @@ _queue-check file decisions:
 # and on a done one, and a tier the fill does not know refused. §403 adds tier 5
 # taken last though written first, a class naming the wrong tier for an open
 # row refused while a closed row keeps its tier, and a tier 5 row with no class
-# refused. §352 adds tiers 1 and 5 in class order against the order in the file,
+# that waits on nothing refused. §352 adds tiers 1 and 5 in class order against the order in the file,
 # with the measure line counted by hand; a full bundle of small rows going ahead
 # of tier 1, and a lone small row
 # still printed as a bundle; a partial bundle waiting for its tier and pulling the
@@ -12967,7 +13000,14 @@ _queue-check file decisions:
 # with the space written `_`, the colon tripping no refusal of a class; and
 # refuses a target that is not there, an unknown kind, a name two paths end in,
 # a name cut inside a file name, a name longer than it needs, `was/fuzz:`, and
-# a class with punctuation behind the word.
+# a class with punctuation behind the word. §435 adds a row in a tier the fill
+# reaches before an open row it waits on, refused: with no class and told to
+# move down, and with a pin or a class left to Mattias; and a tier 5 row with
+# no class that waits on a tier 1 row, refused. A tier 5 row with no class
+# passes when it waits on an open tier 5 row, a closed one, or a Q row this
+# copy does not hold, and when a lane holds it or it is parked; a row waiting on
+# a row in an earlier tier, or on a done row in a later one, passes too. The
+# classes fixture's measure line counts its tier 5 row with no class.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -13144,6 +13184,31 @@ check-queue-selftest:
     refused step-empty  's/from\/T9 a defect/from\/step: a defect/'  '"from/step:" is not where a row came from'
     refused was-input   's/was\/D1 the/was\/fuzz:where_two_surfaces_cross the/' '"was/fuzz:where_two_surfaces_cross" is not where a row came from'
     refused fuzz-first  's/wrong\/A from\/T9/from\/fuzz:where_two_surfaces_cross wrong\/A/' 'the tag wrong/A goes before from/fuzz:where_two_surfaces_cross'
+    refused waits-above 's/after:Q2/after:Q7/'                      'Q5: waits on Q7, which is tier 5, and sits in tier 3, which the fill reaches first; move it down with just queue tier Q5 5 (§435)'
+    refused pin-above   's/^T1  1  todo /T1  1  after:Q7 /'         "T1: waits on Q7, which is tier 5, and its pin pinned/1 keeps it in tier 1, which the fill reaches first: which of the two moves is Mattias's to set (§435.4)"
+    refused class-above 's/^T1  1  todo  opus  justfile#queue  pinned\/1 /T1  1  after:Q7  opus  justfile#queue  /' "T1: waits on Q7, which is tier 5, and its class refuses/B keeps it in tier 1, which the fill reaches first: which of the two moves is Mattias's to set (§435.4)"
+    refused five-on-one 's/^Q7  5  todo  opus  tooling\/queue\/queue.py  wrong\/C a defect/Q7  5  after:Q8  opus  tooling\/queue\/queue.py  a defect/' 'Q7: an open tier 5 row carries a class C or D (§403), or waits on a tier 5 row (§435.5), and this one does neither'
+
+    passes() {
+        sed "$2" "$dir/good.md" > "$dir/$1.md"
+        cmp -s "$dir/good.md" "$dir/$1.md" && fail "$1: the fixture did not change the good queue"
+        got=$(q _queue-check "$dir/$1.md" "$decisions" 2>&1) || fail "$1: $3"
+    }
+    nofive='s/^Q7  5  todo  opus  tooling\/queue\/queue.py  wrong\/C a defect/Q7  5  STATE  opus  tooling\/queue\/queue.py  a defect/'
+    passes five-on-open   "/^Q7 /a Q10  5  after:Q7  sonnet  -  no class, waiting on a tier 5 defect §230" \
+        'a tier 5 row with no class that waits on an open tier 5 row was refused'
+    passes five-on-closed "${nofive/STATE/after:D5}; /^D4 /a D5  5  done:42df376e  opus  -  wrong/C a defect closed in tier 5 §230" \
+        'a tier 5 row with no class that waits on a closed tier 5 row was refused'
+    passes five-on-unheld "${nofive/STATE/after:Q999}" \
+        'a tier 5 row with no class that waits on a Q row this copy does not hold was refused'
+    passes five-held      "${nofive/STATE/lane:lane-q7}" \
+        'a tier 5 row with no class that a lane holds was refused, though take writes over its after:'
+    passes five-parked    "${nofive/STATE/parked:§230}" \
+        'a parked tier 5 row with no class was refused, though park writes over its after:'
+    passes waits-below    's/^Q3  2  after:T9 /Q3  2  after:Q8 /' \
+        'a tier 2 row that waits on a tier 1 row was refused'
+    passes waits-on-done  "s/^Q3  2  after:T9 /Q3  2  after:D5 /; /^D4 /a D5  5  done:42df376e  opus  -  wrong/C a defect closed in tier 5 §230" \
+        'a tier 2 row that waits on a done tier 5 row was refused, though the fill reaches it as soon as it is ready'
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
@@ -13187,13 +13252,15 @@ check-queue-selftest:
     Q9  1  parked:§230  opus  docs/i.md  wrong/A parked, so out of the measure §230
     Q10  5  todo  opus  docs/j.md  refuses/C a refusal only a probe builds §230
     Q11  4  todo  opus  docs/k.md  tier four §230
+    Q12  5  after:Q13  opus  docs/l.md  no class, ready in tier 5 since the row it waits on is done §230
+    Q13  5  done:42df376e  opus  docs/m.md  wrong/C closed, and Q12 waited on it §230
     MD
-    drive classes next 10
-    [ "$(takes)" = "Q5 Q7 Q3 Q1 Q8 Q11 Q4 Q10 Q6 Q2 " ] \
-        || fail "tiers 1 and 5 were not each taken wrong before crash before refuses, A before B and C before D, with no class after B"
+    drive classes next 11
+    [ "$(takes)" = "Q5 Q7 Q3 Q1 Q8 Q11 Q4 Q10 Q12 Q6 Q2 " ] \
+        || fail "tiers 1 and 5 were not each taken wrong before crash before refuses, A before B and C before D, with no class after B and between C and D"
     drive classes
-    grep -qxF 'tier 1, open and not parked: 3 in A or B (2 wrong, 0 crash, 1 refuses), 1 with no class; tier 5: 2 in C, 2 in D; 0 small rows ready, and a bundle is 5' <<<"$got" \
-        || fail "the measure line does not count the classes fixture's tier 1 and tier 5 rows"
+    grep -qxF 'tier 1, open and not parked: 3 in A or B (2 wrong, 0 crash, 1 refuses), 1 with no class; tier 5: 2 in C, 2 in D, 1 with no class; 0 small rows ready, and a bundle is 5' <<<"$got" \
+        || fail "the measure line does not count the classes fixture's tier 1 and tier 5 rows, the tier 5 row with no class among them"
 
     bundled() {
         got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 --set queue_bundle "$2" queue "${@:3}" 2>&1) \
@@ -13233,7 +13300,7 @@ check-queue-selftest:
     grep -qxF "skip Q7 (tier 1): its docs/f.md meets Q6's docs/f.md, held by lane:lane-q6" <<<"$got" \
         || fail "a pinned row a running lane holds back was not skipped with the lane named"
     bundled pinned 2
-    grep -qxF 'tier 1, open and not parked: 2 in A or B (2 wrong, 0 crash, 0 refuses), 3 with no class; tier 5: 0 in C, 0 in D; 2 small rows ready, and a bundle is 2' <<<"$got" \
+    grep -qxF 'tier 1, open and not parked: 2 in A or B (2 wrong, 0 crash, 0 refuses), 3 with no class; tier 5: 0 in C, 0 in D, 0 with no class; 2 small rows ready, and a bundle is 2' <<<"$got" \
         || fail "the measure line did not read the class after a pin"
 
     fence partial <<'MD'
