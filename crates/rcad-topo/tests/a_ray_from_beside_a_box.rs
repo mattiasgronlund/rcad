@@ -17,7 +17,8 @@
 //! own tests, of one solid holding two shells, until that build opened (Q721).
 //! A box a face of the block meets is asked of the block alone too, which has
 //! no torus face, and the two answers must agree, since what the face says of
-//! the box does not depend on the ring (Q1716).
+//! the box does not depend on the ring (Q1716), and under a certified policy
+//! they agree where the ring meets the box too (Q1739).
 
 use std::collections::BTreeMap;
 
@@ -543,6 +544,70 @@ fn a_point_on_a_face_of_the_block_a_bend_grows_out_of_is_on_its_skin() {
         });
         assert_eq!(placed, [Containment::OnBoundary; 2], "{at:?}");
     }
+}
+
+/// Boxes on the bend's first cap circle, where the block's side `y = 0` and
+/// the bend's wall meet: the circle's top and bottom, and its inner and outer
+/// points.
+const ON_THE_CAP_CIRCLE: [[f64; 3]; 4] = [
+    [4.0, 0.0, 1.0],
+    [4.0, 0.0, -1.0],
+    [3.0, 0.0, 0.0],
+    [5.0, 0.0, 0.0],
+];
+
+/// A box on the circle a bend grows out of a block's side round is
+/// `Undecidable` under a certified policy, as the block alone says it is.
+///
+/// The box holds points in the block, in the bend's tube and outside both, so
+/// no one answer is right for all of it. The block's side grazes every ray
+/// from it, as it does on the block alone, and the bend's ring grazes each
+/// one too, since the box straddles its sign and its trimming does not hold
+/// none of it. Neither graze waits on a ray being fired at the ring, so firing
+/// one could not change the answer. Until Q1739 the ring's refusal stood
+/// wherever the box straddled the ring's sign, whatever else grazed the ray,
+/// and these came back `CannotFireARayAtAFacesSurface`.
+///
+/// A tolerant policy still parts the two: the block alone says `OnBoundary`
+/// and the bend `Undecidable`, as it does of a box on the same side away from
+/// the circle. That is a gap of its own, not traced yet.
+///
+/// A box on the bend's wall that no face of the block meets, `(3, 4, 0)` on
+/// its outer equator, is still refused: there only the ring throws the rays
+/// away (`docs/decisions.md` §323.3).
+#[test]
+fn a_box_on_the_circle_a_bend_grows_out_of_is_undecidable_as_on_the_block_alone() {
+    let policy = Policy::certified();
+    let (model, built) = the_bend_out_of(&THE_BLOCK);
+    let with_the_bend = model.solid(built).expect("this model made the key");
+    let (alone, block) = the_block_alone(&THE_BLOCK);
+    let without_it = alone.solid(block).expect("this model made the key");
+    for at in ON_THE_CAP_CIRCLE {
+        let placed = [with_the_bend, without_it].map(|solid| {
+            solid.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new())
+        });
+        assert!(
+            placed
+                .iter()
+                .all(|answer| matches!(answer, Containment::Undecidable { .. })),
+            "{at:?}, with the bend and without it: {placed:?}"
+        );
+    }
+
+    let the_wall = with_the_bend
+        .faces()
+        .find(|face| matches!(face.surface(), Surface::Torus(_)))
+        .expect("the bend's wall is on a torus")
+        .key();
+    let on_the_wall = with_the_bend.classify_uncertain_point(
+        a_box_round([3.0, 4.0, 0.0]),
+        &policy,
+        &mut ProvenanceLog::new(),
+    );
+    assert_eq!(
+        on_the_wall,
+        Containment::CannotFireARayAtAFacesSurface { face: the_wall }
+    );
 }
 
 /// A new model holding [`a_bend_out_of`] `outline`, walked the way that builds,

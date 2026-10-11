@@ -37,7 +37,11 @@
 //! could place*, and every other cell printed what it prints here; what moved
 //! the other cells since the table before was not traced. Queue row Q1118
 //! moved one cell since, the dome's touching row, from none answered to all
-//! 66; only that cell's line was printed again.
+//! 66; only that cell's line was printed again. Queue row Q1563 printed the
+//! bar inside a bar's line again on `eec03934`: Q1537's last placing rule had
+//! moved it from 30 of 60 answered, 24 refused at *a point inside a piece of a
+//! face* and 6 at *one shell inside another*, to what it prints now. With that
+//! rule switched off by hand the cell printed the old line again.
 //!
 //! | cell | touching | clear by one | what the touch alone refuses |
 //! |---|---|---|---|
@@ -48,7 +52,7 @@
 //! | a ball resting on a block | 78 of 78 | 78 of 78 | — |
 //! | a ball against a block's wall | 78 of 78 | 78 of 78 | — |
 //! | two bars touching along a line | 60 of 60 | 96 of 96 | — |
-//! | a bar inside a bar, touching | 30 of 60 | 96 of 96 | `Undecidable` at *a point inside a piece of a face* 24, `Undecidable` at *one shell inside another* 6 |
+//! | a bar inside a bar, touching | 50 of 60 | 96 of 96 | `Undecidable` at *one shell inside another* 10 |
 //! | two balls touching at a point | 60 of 60 | 96 of 96 | — |
 //! | a ball inside a ball, touching once | 60 of 60 | 96 of 96 | — |
 //! | the dome on a shaft of its radius | 66 of 66 | 90 of 90 | — |
@@ -67,8 +71,13 @@
 //! fixed since `d12913d4` and `71feed66` (queue row Q28), and the table above
 //! is that cell's touching row, measured now that it no longer panics. By
 //! hand, before queue row Q649, the touching row (radius three, radius one at
-//! `(0, 2)`) refused every fuse on *which way a crossing runs*; it has not
-//! been asked again since.
+//! `(0, 2)`) refused every fuse on *which way a crossing runs*. Each of the 10
+//! fuses the touching row still refuses is the thick bar less the thin one, which
+//! leaves a hollow touching the thick bar's wall along a line: whether one
+//! solid may have two shells that touch is queue row Q1635's question. Every
+//! other rule of every shape the cell draws answers the closed forms in
+//! [`a_thin_bar_touching_a_thick_bars_wall_from_inside_against_the_closed_forms`],
+//! which says what used to stop it.
 //!
 //! # Which refusals are gaps and which are limits
 //!
@@ -300,6 +309,114 @@ fn a_bar_inside_a_bar_touching_its_wall() {
         "a bar inside a bar, touching",
         touching::a_bar_inside_a_bar(),
         Expect::TheControlAnswers,
+    );
+}
+
+/// A thin bar standing inside a thick one and touching its wall, every shape
+/// the cell above can draw, against the closed forms.
+///
+/// The thick bar has radius `R` and height four and stands on the origin; the
+/// thin bar has radius `r` and height two, stands one unit up, and its axis is
+/// `R − r` from the thick bar's along `+x`, `−x` or `+y`, so the two pipes
+/// touch along one line from `z = 1` to `z = 3`. For `r` of one or two and
+/// `R − r` of two or three, that is twelve shapes. The thin bar is all inside
+/// the thick one, so `A ∪ B = 4πR²`, `A ∩ B = 2πr²`, and the thin bar less the
+/// thick one is no solid at all. Each answer is one solid, validates, and is
+/// checked against these to within what its mesh declares.
+///
+/// **Every one of the 20 fuses of the four shapes along `+x` used to be
+/// refused**, `Undecidable` at *a point inside a piece of a face* (queue row
+/// Q1563). Along `+x` the touch is on the thick bar's seam. The thin bar's
+/// pipe cuts each cap plane of the thick bar in a circle that touches the
+/// cap's rim at the seam corner, from inside, so the piece of the cap between
+/// the rim and that circle has two sides that both start and end at that one
+/// corner, and the point search found no point inside it. A gap (§16.10): the
+/// answer exists, and the control row reaches it. Q1537's last rule in
+/// `fuse/select.rs`, `by_the_piece_across_a_side_clear_of_every_face`, closed
+/// it: the seam corner lies on the thin bar's pipe but below its bottom cap or
+/// above its top one, so it is clear of every face of the thin bar, and the
+/// piece across a side is placed outside the thin bar. Those two pieces are
+/// the only ones the rule is asked about here. With it switched off, these 20
+/// are refused again and no other fuse here is.
+///
+/// The thick bar less the thin one is left out: it is the thick bar with a
+/// hollow touching its wall along that line, and whether one solid may have
+/// two shells that touch is queue row Q1635's question. Today it is refused
+/// `Undecidable` at *one shell inside another* for every shape.
+#[test]
+fn a_thin_bar_touching_a_thick_bars_wall_from_inside_against_the_closed_forms() {
+    let policy = Policy::certified();
+    let pi = std::f64::consts::PI;
+    let mut wrong = Vec::new();
+    for thin in 1..=2 {
+        for thicker in 2..=3 {
+            let thick = thin + thicker;
+            let (r, big) = (f64::from(thin), f64::from(thick));
+            let off = f64::from(thicker);
+            for (x, y) in [(off, 0.0), (-off, 0.0), (0.0, off)] {
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let outer = model
+                    .add_round_bar(big, 4.0, &Isometry::identity())
+                    .expect("a whole-number bar");
+                let inner = model
+                    .add_round_bar(
+                        r,
+                        2.0,
+                        &Isometry::translation(Vector::new(x, y, 1.0))
+                            .expect("a whole-number shift"),
+                    )
+                    .expect("a whole-number bar");
+                let whole = 4.0 * pi * big * big;
+                let thin_bar = 2.0 * pi * r * r;
+                for (one, other, rule, holds) in [
+                    (outer, inner, Rule::Union, Some(whole)),
+                    (inner, outer, Rule::Union, Some(whole)),
+                    (outer, inner, Rule::Intersection, Some(thin_bar)),
+                    (inner, outer, Rule::Intersection, Some(thin_bar)),
+                    (inner, outer, Rule::Difference, None),
+                ] {
+                    let case = format!(
+                        "{rule:?} of R = {big}, r = {r} at ({x}, {y}), thick bar first: {}",
+                        one == outer
+                    );
+                    let mut fused = model.clone();
+                    let answer = match fused.fuse(
+                        &[one],
+                        &[other],
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    ) {
+                        Ok(answer) => answer,
+                        Err(why) => {
+                            wrong.push(format!("{case} refused {}", named(&why)));
+                            continue;
+                        }
+                    };
+                    fused
+                        .validate(&policy, &mut ProvenanceLog::new())
+                        .unwrap_or_else(|why| panic!("{case} does not validate: {why}"));
+                    let Some(holds) = holds else {
+                        assert!(answer.solids().is_empty(), "{case} is no solid at all");
+                        continue;
+                    };
+                    assert_eq!(answer.solids().len(), 1, "{case} is one solid");
+                    let (volume, error) = volume_and_error(&fused, answer.solids());
+                    assert!(
+                        (volume - holds).abs() <= error,
+                        "{case} measures {volume} against {holds}, out by more than the {error} \
+                         its mesh declares"
+                    );
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} of 60 fuses refused; since Q1537 every one answers:\n{}",
+        wrong.len(),
+        wrong.join("\n")
     );
 }
 

@@ -179,6 +179,8 @@ flags, comes back under its own crash name.
   morning, and the lane may run the first fold once by hand rather than leave
   it to 08:30.
 - **13 092 timeout files and 6 718 slow-unit files** are carried the same way
-  and never replayed (10-11's `artifacts/`). Not this section's.
+  and never replayed (10-11's `artifacts/`). Not this section's: §436 keeps
+  them.
 - **The night directories' own copies.** 3.7 GB, and nothing prunes them. Not
-  this section's either, and 434.3's record needs them.
+  this section's either, and 434.3's record needs them. §436 has the nights
+  share their files instead of pruning them.

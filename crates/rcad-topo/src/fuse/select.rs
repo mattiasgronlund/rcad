@@ -1815,6 +1815,14 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 /// first and is undecided there, at `side of torus`, and the half-space naming
 /// the rim puts the start off the cap
 /// (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`).
+///
+/// It places a second kind of piece too, with no rounding in it: a thick
+/// bar's cap where a thin bar stands inside and touches the thick bar's wall
+/// along its seam. The thin bar's pipe cuts the cap's plane in a circle that
+/// touches the rim at the seam corner, so the piece between them has two
+/// sides, each from that corner back to it, and the point search finds no
+/// point inside it. The corner is on the thin bar's pipe but past its caps, so
+/// clear of every face of the thin bar (Q1563, `tests/fuses_that_touch.rs`).
 fn by_the_piece_across_a_side_clear_of_every_face(
     model: &Model,
     scratch: &Scratch,
