@@ -184,7 +184,9 @@ file. The lane counts again on its own base and moves what it finds there, with
 
 - **The row that builds it is Q1736**, tier 2.2 (§307.1), filed with this
   section. Until it lands, nothing holds the rule, and rows filed meanwhile can
-  break it.
+  break it. One already has: on `main` at `14d126b3`, committed 35 minutes
+  after `0280634f`, Q1731 (tier 2) waits on Q1728 (tier 2.2). The lane counts again on its
+  base for that reason.
 - **Inside one tier, 9 rows of tier 5 wait on a row the class walk reaches
   after theirs**, counted with the 12 already moved: four moved rows with no
   class wait on D rows (Q343, Q486, Q594, Q608), because the walk puts no class
