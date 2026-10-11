@@ -15,6 +15,9 @@
 //! inside it is refused by the fuse. So the boxes are asked of the glued bend,
 //! as it is, turned, and grown out of an L. They were asked in `classify.rs`'s
 //! own tests, of one solid holding two shells, until that build opened (Q721).
+//! A box a face of the block meets is asked of the block alone too, which has
+//! no torus face, and the two answers must agree, since what the face says of
+//! the box does not depend on the ring (Q1716).
 
 use std::collections::BTreeMap;
 
