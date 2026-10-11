@@ -36,7 +36,10 @@
 //! the rest to that part as measured. The cross-drilled shaft of
 //! `tests/a_cone_hollowed_along_its_axis.rs` (Q1483), whose fat bar's seam
 //! crosses a loop twice, sent no side of two pipes to that function between
-//! two corners when run with a print in it before Q1643.
+//! two corners when run with a print in it before Q1643. The one loop a thin
+//! bar reaching out of a fat one's side leaves does not reach it, cut by a wall
+//! through the loop or not: it is refused before its arcs are named, as the
+//! ball's one loop is (Q1683).
 //!
 //! A ball keeps its poles on the `z` line through its centre however it is
 //! placed, so the bars along `x` below keep them off the wall.
@@ -445,29 +448,71 @@ fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_answers_every_rule() 
     }
 }
 
+/// The bar of radius 1 along `x` at `y = 3.5`, `z = 5`, from `x = −10` to
+/// `x = 10`, `20π`, reaches from `y = 2.5` to `y = 4.5`, out through the side
+/// of the bar of radius 4 up `z` from `z = 0` to `z = 10`, `160π`. The two
+/// cross in one loop, not two: it runs through `x = 0` at
+/// `(0, 4, 5 ± sin 60°)`, where the thin bar's section crosses `y = 4`. Cut to
+/// `z ≥ 5`, `10π`, the thin bar's wall puts two corners on that loop, at
+/// `(±√9.75, 2.5, 5)`, one either side of `x = 0`.
+///
+/// The answers exist. What the half and the fat bar share is
+/// `I = ∫ 2√(16 − y²)·√(1 − (y − 3.5)²) dy` from `y = 2.5` to `y = 4`,
+/// `5.2332133219331` by Simpson's rule split at `y = 3.5`, each piece in a
+/// variable that takes its square root's corner away, the same to 13 places
+/// at 1000, 10 000 and 100 000 steps. So the union is `170π − I ≈
+/// 528.8375377883`, the half less the fat bar `10π − I ≈ 26.1827132140`, and
+/// the fat bar less the half `160π − I ≈ 497.4216112524`.
+///
+/// **Every rule both ways round is refused `ACrossingThisCannotBeOrderedAlong`,
+/// the half or the whole thin bar**, in `fuse/arrange.rs`'s
+/// `how_a_crossing_runs`, which orders the two loops a fat pipe crosses a thin
+/// one in where it swallows the thin one's whole section, and not the one loop
+/// this leaves. So `rcad-geom`'s `walk` never draws an arc of it: a print where
+/// it picks the loop a run between two corners is on did not print (Q1683).
 #[test]
-fn probe_q1683() {
-    let gives = what_each_rule_gives(|model| {
-        let thin = model
-            .add_round_bar(
-                1.0,
-                20.0,
-                &at(-10.0, 3.5, 5.0)
-                    .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is an axis")),
-            )
-            .expect("a bar of radius one");
-        let fat = model
-            .add_round_bar(4.0, 10.0, &Isometry::identity())
-            .expect("a bar of radius four");
-        [
-            cut(model, thin, [-20.0, -20.0, 5.0], [20.0, 20.0, 20.0]),
-            fat,
-        ]
-    });
-    for answer in &gives {
-        eprintln!("PROBE {answer:?}");
+fn a_thin_bar_reaching_out_of_a_fat_ones_side_is_refused_ordering_the_one_loop_they_cross_in() {
+    let pairs: [fn(&mut Model) -> [SolidKey; 2]; 2] = [
+        |model| {
+            let thin = thin_bar_out_of_a_fat_ones_side(model);
+            let fat = model
+                .add_round_bar(4.0, 10.0, &Isometry::identity())
+                .expect("a bar of radius four");
+            [
+                cut(model, thin, [-20.0, -20.0, 5.0], [20.0, 20.0, 20.0]),
+                fat,
+            ]
+        },
+        |model| {
+            let thin = thin_bar_out_of_a_fat_ones_side(model);
+            let fat = model
+                .add_round_bar(4.0, 10.0, &Isometry::identity())
+                .expect("a bar of radius four");
+            [thin, fat]
+        },
+    ];
+    for pair in pairs {
+        let gives = what_each_rule_gives(pair);
+        assert!(
+            gives
+                .iter()
+                .all(|answer| matches!(answer, Err(Error::ACrossingThisCannotBeOrderedAlong))),
+            "{gives:?}"
+        );
     }
-    panic!("probe");
+}
+
+/// The bar of radius 1 along `x` from `x = −10` to `x = 10` at `y = 3.5`,
+/// `z = 5`, which reaches from `y = 2.5` to `y = 4.5`.
+fn thin_bar_out_of_a_fat_ones_side(model: &mut Model) -> SolidKey {
+    model
+        .add_round_bar(
+            1.0,
+            20.0,
+            &at(-10.0, 3.5, 5.0)
+                .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is an axis")),
+        )
+        .expect("a bar of radius one")
 }
 
 /// `4∫₀¹ √((16 − y²)(1 − y²)) dy`, the part of the half bar of radius 1 above
