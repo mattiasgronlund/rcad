@@ -3230,6 +3230,25 @@ check-skills-selftest:
 # brief and a relay's both carry the hand-over rule themselves, because a
 # `claude` process keeps its agent types through a `/clear`, so a dispatcher
 # cleared after §416 would send lanes whose `lane.md` has no relay (Q1422).
+#
+# **Arms twenty-three to twenty-seven hold the prep stage (§396.4).** A
+# dispatcher used to check and brief every row itself, at every fill. A lane
+# sent as `{ label, queueId, notes }` now goes first to `prep`, a read-only
+# Sonnet type, which answers `ok` with the write set, model, marks and facts,
+# or `needs` with the files the row is missing. The twenty-third arm checks
+# that `lanes.js` sends one agent of that type and that `prep.md` gives it the
+# Sonnet model and no tool that writes, since it runs in the dispatcher's own
+# tree; the fourth already wants the file. The twenty-fourth checks that the
+# stage runs before the lane, that an answer other than `ok` starts no lane,
+# and that the files prep said the row needs come back in the row's lines. The
+# twenty-fifth checks that the lane takes its write set, model and marks from
+# prep's answer, and that an answer is refused when its write set is not its
+# rows', its model is not theirs, or it gives both marks. The twenty-sixth
+# checks that a lane giving fields of both forms is refused. The twenty-seventh
+# checks that a brief built from a row carries the two notes every brief the
+# dispatcher wrote carried (Q1047, Q1505, Q1347), and that a writing lane gets
+# the `for_the_verifier` field by default. Unlike the arms above, these five
+# do not stop at the first that fails, so the base's `lanes.js` names them all.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -3329,6 +3348,28 @@ check-lanes-workflow:
     test_first='**Commit the failing test first, on its own, then the fix.** Once a test fails'
     hand_over_use='${handOver()}'
     hand_over_text='hand over (§416), even if this brief says to carry on past it'
+    prep_type="agentType: 'prep',"
+    prep_tools='tools: Read, Grep, Glob, Bash'
+    prep_model='model: sonnet'
+    prep_stage='  (lane) => prepared(lane),'
+    work_stage='  (prep) => prep.stop ? prep : worked(prep.lane),'
+    verify_stage='  (report, item) => notPrepared(item) || verified(report, laneOf(item)),'
+    prep_needs='  if (answer.answer !== '
+    handed_needs='  for (const n of (prior.prep && prior.prep.needs) || []) row.lines.push(`needs ${n.file}: ${n.why}`)'
+    brief_writes='    writeSet: answer.writeSet,'
+    brief_model='    model: answer.model,'
+    brief_pins='    pinsOnly: answer.pinsOnly === true,'
+    brief_same='    sameBehaviour: answer.sameBehaviour === true,'
+    prep_union='  if (!sameSet(answer.writeSet, writeSetOf(rows))) return '
+    prep_rows_model='  if (answer.model !== modelOf(rows)) return '
+    prep_both='  if (answer.pinsOnly === true && answer.sameBehaviour === true) return '
+    both_forms='  if (lane.notes !== undefined && full.length) throw new Error(`lanes: ${lane.label} gives fields of both forms'
+    rows_note='no `tag` step when the add text already starts with the class'
+    tests_note='never `<binary> <name>` with a space (Q1347)'
+    report_default='Write `none` when every test you added or changed is in a tests/ directory.'
+    rows_note_use='${rowsNote()}'
+    tests_note_use='${testsNote()}'
+    report_set='  if (answer.writeSet.length) ready.report = forTheVerifier()'
     settings=.claude/settings.json
     script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
@@ -3684,6 +3725,32 @@ check-lanes-workflow:
             echo "$1 does not put the hand-over rule into both the lane's brief and a relay's ('$hand_over_use' twice, found $n); a process cleared after §416 keeps a lane.md without it (Q1422)"
             return 22
         fi
+        failed=0
+        n=$(grep -cF -- "$prep_type" "$1" || true)
+        if [ "$n" != 1 ] || ! grep -qxF -- "$prep_tools" "$2/prep.md" 2>/dev/null || ! grep -qxF -- "$prep_model" "$2/prep.md" 2>/dev/null; then
+            echo "$1 does not send one agent of type prep (\"$prep_type\" $n times), or $2/prep.md does not make it a Sonnet agent with the tools '$prep_tools' and none that writes; prep runs in the dispatcher's own tree (§396.4)"
+            [ "$failed" != 0 ] || failed=23
+        fi
+        if ! grep -qxF -- "$prep_stage" "$1" || ! grep -qxF -- "$work_stage" "$1" || ! grep -qxF -- "$verify_stage" "$1" \
+            || ! grep -qF -- "$prep_needs" "$1" || ! grep -qxF -- "$handed_needs" "$1"; then
+            echo "$1 does not run prep before the lane, start no lane for a row prep did not answer ok, and hand back the files prep said the row needs (§396.4)"
+            [ "$failed" != 0 ] || failed=24
+        fi
+        if ! grep -qxF -- "$brief_writes" "$1" || ! grep -qxF -- "$brief_model" "$1" || ! grep -qxF -- "$brief_pins" "$1" || ! grep -qxF -- "$brief_same" "$1" \
+            || ! grep -qF -- "$prep_union" "$1" || ! grep -qF -- "$prep_rows_model" "$1" || ! grep -qF -- "$prep_both" "$1"; then
+            echo "$1 does not start a short-form lane with the write set, model and marks prep answered, or does not refuse an answer whose write set is not its rows', whose model is not theirs, or which gives both marks (§396.4, §352.4, §399)"
+            [ "$failed" != 0 ] || failed=25
+        fi
+        if ! grep -qF -- "$both_forms" "$1"; then
+            echo "$1 does not refuse a lane that gives fields of both forms, notes beside a brief or a field prep would answer (§396.4)"
+            [ "$failed" != 0 ] || failed=26
+        fi
+        if ! grep -qF -- "$rows_note" "$1" || ! grep -qF -- "$tests_note" "$1" || ! grep -qF -- "$report_default" "$1" \
+            || ! grep -qxF -- "$rows_note_use" "$1" || ! grep -qxF -- "$tests_note_use" "$1" || ! grep -qxF -- "$report_set" "$1"; then
+            echo "$1 does not give a brief built from a row the two notes every brief the dispatcher wrote carried (Q1047, Q1505, Q1347), or a writing lane the for_the_verifier field by default"
+            [ "$failed" != 0 ] || failed=27
+        fi
+        return "$failed"
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
     swap() {
