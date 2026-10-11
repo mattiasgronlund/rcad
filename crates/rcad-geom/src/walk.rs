@@ -362,7 +362,14 @@ impl PointsAlongACrossing {
 ///
 /// [`Error::CannotPlaceAPointThatCloseToACrossing`] when a point cannot be
 /// worked out as close to the curve as `deflection` asks and the policy will not
-/// accept being that far out.
+/// accept being that far out. On a degree-four crossing that includes the two
+/// corners of a run between them, since they are drawn too: one further off
+/// the crossing than half of `deflection` is refused this way.
+///
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when a corner of
+/// a run between two corners of a degree-four crossing sits where the two
+/// surfaces are tangent, as the Fujitsu FTR-F1 relays' quarter arc does at
+/// `#1030`, at every deflection (§335.5).
 ///
 /// [`Error::TooManyPointsAlongOneCrossing`] when the deflection asks for more
 /// than [`MOST_POINTS_ALONG_ONE_CROSSING`].
@@ -999,7 +1006,14 @@ fn a_quartic_picked_up_at(
 /// holds ([`the_arc_between`]).
 ///
 /// [`Error::CannotPlaceAPointThatCloseToACrossing`] when the marcher's own bound
-/// takes more than its half of the deflection and the policy will not accept it.
+/// takes more than its half of the deflection and the policy will not accept it,
+/// and when a run between two corners has a corner further off the crossing
+/// than that ([`how_far_off_the_crossing_a_corner_can_be`]), asked before the
+/// march.
+///
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when a corner of a
+/// run between two corners sits where the two surfaces are tangent, so it
+/// cannot be settled onto both, also asked before the march.
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a settled point has no box
 /// round it.
@@ -1017,6 +1031,15 @@ fn follow_the_quartic(
     let half_the_budget = deflection.length() / 2.0;
     let surfaces = [&pair[0], &pair[1]];
     let seed = the_seed_this_run_is_picked_up_at(run, &pair, seeds, held_apart_by, policy, log)?;
+    if let Some(ends) = the_two_corners_of_an_open_run(run) {
+        let reach = how_far_off_the_crossing_a_corner_can_be(ends, surfaces)?;
+        if reach > half_the_budget && !policy.wobble_is_acceptable(reach) {
+            return Err(Error::CannotPlaceAPointThatCloseToACrossing {
+                asked: deflection.length(),
+                closest: reach,
+            });
+        }
+    }
 
     let walked = march(
         surfaces,
@@ -1045,6 +1068,43 @@ fn follow_the_quartic(
         points,
         deviation: tag,
     })
+}
+
+/// How far off the crossing the further of an open run's two corners can be:
+/// how far it moves settling onto both surfaces, plus the bound on how far off
+/// the crossing it still is once settled, plus half the diagonal of its box.
+///
+/// **The corners are drawn too.** The caller puts them at the two ends of the
+/// points, so a corner the crossing does not pass through puts a piece of the
+/// drawing that far off it, and every marched point between them is held to
+/// half the deflection. The Fujitsu FTR-F1 relays' quarter arc ends at `#1030`,
+/// where its ball and its pipe are tangent and `0.14` from where they cross,
+/// and it was marched along the file's rim with about `1e-6` claimed for it
+/// (Q1659, `docs/decisions.md` §335.5).
+///
+/// **Both corners are settled before either is measured against the budget**,
+/// so a corner that cannot be settled at all is refused that way at every
+/// deflection, and not only at the deflections the other corner fits.
+///
+/// # Errors
+///
+/// What [`settled_with_a_bound`] refuses:
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] at a corner where
+/// the two surfaces are tangent, and [`Error::CannotWorkOutHowBigACrossingIs`]
+/// when settling one lands somewhere that is not a point.
+fn how_far_off_the_crossing_a_corner_can_be(
+    ends: [PredicatePoint; 2],
+    surfaces: [&Surface; 2],
+) -> Result<f64> {
+    let mut furthest = 0.0_f64;
+    for end in ends {
+        let at = Point::from(end.enclosure().map(middle_of));
+        let (settled, off) = settled_with_a_bound(surfaces, at)?;
+        let [x, y, z] = end.enclosure().map(|side| side.hi() - side.lo());
+        let half_the_box = Vector::new(x, y, z).length() / 2.0;
+        furthest = furthest.max((settled - at).length() + off + half_the_box);
+    }
+    Ok(furthest)
 }
 
 /// A closed loop the marcher walked from `start`, turned round so that it
