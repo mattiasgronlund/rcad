@@ -158,6 +158,20 @@ glued bend's refusal is a gap of its own, not traced: its likely cause is
 gradient by the wall's `Reversed`, which reads the wall's material as lying
 outside its tube.
 
+*2026-10-11, Q721: the pins above moved off `classify.rs` and onto a public
+call.* `classify.rs`'s `mod a_box_beside_a_blocks_side`, which the paragraph
+above named as the home of the seven box pins, is gone. They run now as four
+tests in `tests/a_ray_from_beside_a_box.rs` —
+`a_box_beside_a_side_of_the_block_a_bend_grows_out_of_is_answered`,
+`a_box_beside_the_top_of_a_turned_block_a_bend_grows_out_of_is_answered_outside`,
+`a_box_in_the_notch_of_an_l_a_bend_grows_out_of_is_answered_outside` and
+`a_box_in_the_notch_of_a_turned_l_a_bend_grows_out_of_is_still_refused` — which
+ask the same boxes through the public `classify_uncertain_point` of the glued
+bend (two shells, a torus face and a flat face with straight sides) rather
+than through `no_face_meets` on a solid built by the crate-internal
+`Model::add_solid`. **No public call builds a solid that asks it yet** no
+longer holds: the glued bend is one, which is what moved the pins onto it.
+
 ### 323.4 A ring's face counted its crossings backwards
 
 With the box route in and nothing else, the fuse got past selection and came
