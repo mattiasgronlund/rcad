@@ -11,7 +11,10 @@ Queue row Q1442 (lane `lane-q1442-edges-only-dropped-wires-walked`, off
 417.5 (c); its counts are `q1442_the_count`, a probe likewise taken out.
 Queue row Q1506 (its second lane, `lane-q1506-the-turn-13-pin-repinned`, off
 `602ee000`) added to 417.3 and 417.5; its counts are `probe_q1506_split` and
-`probe_q1506_certified`, probes likewise taken out.*
+`probe_q1506_certified`, probes likewise taken out.
+Queue row Q1527 (lane `lane-q1527-fold-a-turned-cubes-tip-into-one-corner`,
+off `a5d31701`, in relays) wrote 417.7 and built it; its counts are
+`probe_q1527_split`, a probe likewise taken out.*
 
 ### 417.1 The shape
 
@@ -245,7 +248,8 @@ refused as an orphan.
 ### 417.5 The other half: the three crossings as one, not built
 
 At `(0, 3, 3)`, and in the 95 of the 199 still refused under the tolerant
-policy (137 before Q1442, 131 before Q1506), the answer meant is the block with its `x = 0` face whole, with the
+policy (137 before Q1442, 131 before Q1506, and still 95 on `a5d31701`, queue
+row Q1527's count before its fold), the answer meant is the block with its `x = 0` face whole, with the
 tip a rounding tall left out. It exists, so under `Policy::tolerant(100.0)` the
 refusal is a gap. Under `Policy::certified()` it is a limit:
 `a_turned_cube_with_its_corner_on_a_face.rs`'s doc shows every rounding of the
@@ -308,10 +312,67 @@ without a search; it is left to a row of its own because it changes
 
 ### 417.6 What this leaves
 
-- The fold of 417.5 (a), with the print of (c) first: a row.
+- The fold of 417.5 (a), with the print of (c) first: a row, Q1527, which
+  decided and built it (417.7).
 - The two tests of 417.3 outside the first lane's write set: repinned by a
   second lane in 8228a212, before this branch landed. Nothing left.
 - `ResultIsNotManifold { count: 0 }`, the prism's intersection and 6 of the
   turned-cube unions: done by queue row Q1442. It was an edge only left-out
   wires walked, and it is now left out with the corners no edge left ends at
   (417.3, 417.4).
+
+### 417.7 The fold of 417.5 (a), decided
+
+*Queue row Q1527.* Built. Under `Policy::tolerant`, a meet of three planes
+that shares two of its planes with an input corner on exactly three planes,
+and lies within `Policy::max_wobble` of that corner, is taken as that corner.
+The meet lies on the corner's edge, the line of the two planes they share, and
+the third plane cuts that edge a rounding from its end. At the turned cube's
+tip the three crossings are each such a meet of the cube's corner, so all
+four points become one corner, and the answer is written as the 2 turns of
+417.5 (c) whose four points round to one triple already are.
+
+**(i) Where the power lives.** In `rcad-predicates`, as one method,
+`Policy::take_as_one_point`. It takes a `Record` whose enclosure is the
+furthest two points may be apart, a length. Under `Strictness::Certified` it
+answers `false` and logs nothing. Under `Strictness::TolerantFallback` it
+answers `true` when that distance is within `Policy::max_wobble`, and then it
+resolves the record to `Decision::Zero` with an `Approximation` of
+`Cause::TolerantFallback` and logs it; otherwise it answers `false` and logs
+nothing. A refused fold logs nothing because the fuse's wobble check would
+refuse the whole fuse over it, and refusing the fold already leaves the fuse
+where it was. The power is in the policy crate because only there can a record
+be resolved (`Record::resolve_to` is the crate's own), and a record that
+stayed `Undecidable` would say the opposite of what happened. Which points are
+asked is `fuse/`'s rule, `fold_each_meet_a_rounding_from_an_input_corner` in
+`fuse/assemble.rs`, called once from `Scratch::split_both_groups`, so both
+naming passes see each fold and each fold logs one record.
+
+**(ii) Certified, nothing.** The fuse rule returns before it does any work
+when the policy is certified, and the method answers `false` there as well.
+`take_as_one_point_never_folds_under_a_certified_policy` pins the method, and
+every certified pin of `a_turned_cube_with_its_corner_on_a_face.rs` passed
+unchanged, the six at `ON_THE_FACE` among them. The certified refusals are the
+limit 417.5 names.
+
+**(iii) What a tolerant fuse answered before.** The rule only adds names to
+`NamesOfOnePoint`, so a fuse with no meet a rounding from an input corner's
+edge end is untouched. §42.1's amendment asks that a change to the predicates
+crate be strictly additive: the new method answers nothing any existing
+function answered, so no input answered before is answered differently by
+that crate. What the fuse rule moved is counted in 417.8.
+
+**(iv) Provenance.** One `Record` per fold, `"a meet of three planes taken as
+an input corner"`, whose inputs are the corner's box and the meet's box, at
+`Level::Exact` since the two are proved apart, with the distance as a
+`Measures::Length` enclosure. Nothing is recorded under a certified policy,
+since nothing is folded there. The corner that is written carries a
+`Cause::TolerantFallback` tag at least as wide as the distance, instead of
+`Cause::ConstructedPoint`: the fuse chose to move it, it was not only rounded.
+
+**Not folded.** A meet two input corners are both within the wobble of is
+left alone: one meet would join the two, and two input corners a rounding
+apart along one edge is an edge shorter than the wobble, which this rule does
+not judge. A meet with a curved surface among its three is left alone too:
+its three surfaces may meet more than once, and only three planes meet in
+exactly one point.
