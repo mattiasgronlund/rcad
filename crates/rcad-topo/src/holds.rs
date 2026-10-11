@@ -8218,22 +8218,171 @@ mod tests {
         );
     }
 
-    /// A face that runs along one of two loops is refused rather than named as
-    /// both.
+    /// Each of the two patches a thin bar keeps of a fat bar's wall holds its
+    /// own end of the thin bar and nothing else.
     ///
-    /// A thin bar of radius 1 along `y` through a fat one of radius 3 along `z`,
-    /// intersected, keeps two patches of the fat bar's wall, one at each end of
-    /// the thin bar. Each runs along one of the two loops the two pipes cross in.
-    /// The half-space [`intersect`] tells those loops apart by holds the fat
-    /// bar's axis and faces along the thin bar, so the fat pipe past it holds the
-    /// other patch and the wall outside the thin bar both, and no one side of
-    /// the thin pipe says which.
+    /// [`two_crossed_bars`] keeps one patch of the fat wall at each end of the
+    /// thin bar, each along one of the two loops the pipes cross in. The
+    /// half-space [`intersect`] tells those loops apart by is `y ≥ 0` or
+    /// `y ≤ 0`: it holds the fat bar's axis, and past it the fat wall holds the
+    /// other patch and the wall outside the thin bar both, all of it outside
+    /// the patch in front. Until Q1717 each patch was refused
+    /// `AFaceMissesPartOfWhereItsSurfacesCross`.
     ///
-    /// Until Q1702 this was a disk a pipe leaves in a ball's skin, built by
-    /// hand; a ball with a pipe across it is read past the plane through its
-    /// centre now ([`what_lies_past_the_picker`]).
+    /// Every point asked is exactly on the fat wall, `x² + y² = 9`. Inside the
+    /// thin bar is `x² + z² < 1`.
     #[test]
-    fn a_face_along_one_of_two_loops_is_refused_rather_than_named_as_both() {
+    fn each_patch_a_thin_bar_keeps_of_a_fat_bars_wall_holds_its_own_end_alone() {
+        let (model, solid) = two_crossed_bars();
+        let patches: Vec<FaceKey> = model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .filter(|face| match face.surface() {
+                Surface::Cylinder(pipe) => pipe.radius() == 3.0,
+                Surface::Plane(_) | Surface::Sphere(_) | _ => false,
+            })
+            .map(|face| face.key())
+            .collect();
+        let [one, other] = patches[..] else {
+            panic!("one patch of the fat wall at each end: {patches:?}");
+        };
+        let [ahead, behind] =
+            if what_it_holds(&model, solid, one, at(0.0, 3.0, 0.0)) == OnAFace::Held {
+                [one, other]
+            } else {
+                [other, one]
+            };
+        let in_neither = [
+            [0.0, 3.0, 2.0],
+            [0.0, -3.0, 2.0],
+            [3.0, 0.0, 0.0],
+            [-3.0, 0.0, 0.0],
+            [1.8, 2.4, 0.0],
+            [1.8, -2.4, 0.5],
+        ];
+        for (patch, its_own, round_it, the_others) in [
+            (ahead, [0.0, 3.0, 0.5], [0.0, 3.0, 1.0], [0.0, -3.0, -0.5]),
+            (behind, [0.0, -3.0, -0.5], [0.0, -3.0, 1.0], [0.0, 3.0, 0.5]),
+        ] {
+            assert_eq!(
+                what_it_holds(&model, solid, patch, PredicatePoint::from(its_own)),
+                OnAFace::Held,
+                "{its_own:?}"
+            );
+            assert_eq!(
+                what_it_holds(&model, solid, patch, PredicatePoint::from(round_it)),
+                OnAFace::OnItsBoundary,
+                "{round_it:?}"
+            );
+            for point in in_neither.into_iter().chain([the_others]) {
+                assert_eq!(
+                    what_it_holds(&model, solid, patch, PredicatePoint::from(point)),
+                    OnAFace::NotHeld,
+                    "{point:?}"
+                );
+            }
+        }
+    }
+
+    /// The middle of [`two_crossed_bars`] is inside it, and a point either side
+    /// of it is told apart too. Until Q1717 every one was
+    /// `CannotFollowAFacesTrimming`, a ray at either patch of the fat wall
+    /// being refused.
+    #[test]
+    fn the_middle_of_two_crossed_bars_is_inside_them() {
+        let (model, solid) = two_crossed_bars();
+        for (point, expected) in [
+            ([0.0, 0.0, 0.0], crate::Containment::Inside),
+            ([0.0, -2.0, 0.5], crate::Containment::Inside),
+            ([0.0, 3.5, 0.0], crate::Containment::Outside),
+            ([2.0, 0.0, 0.0], crate::Containment::Outside),
+        ] {
+            assert_eq!(
+                model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .classify_point(
+                        Point::new(point[0], point[1], point[2]),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    ),
+                expected,
+                "{point:?}"
+            );
+        }
+    }
+
+    /// [`two_crossed_bars`] fused with a block from `y = 0` up, along the
+    /// half-space [`intersect`] tells the two loops apart by, or from `y = 1`
+    /// up, holds what it should under all three rules. Until Q1717 every one of
+    /// the six was refused `AFaceTrimmedByACurveThisCannotFollow`.
+    ///
+    /// The block is 20 on a side and swallows everything of the two bars past
+    /// its bottom. The part of the two bars from `y = c` up is
+    /// `V/2 − π·c` for `0 ≤ c ≤ √8`, `V` being all of it and the thin bar's
+    /// cross-section a disk of area `π`.
+    #[test]
+    fn two_crossed_bars_fused_with_a_block_across_them_hold_what_they_should() {
+        let both = how_much_two_crossed_bars_hold();
+        for from in [0.0, 1.0] {
+            let past_the_block = both / 2.0 - core::f64::consts::PI * from;
+            for (rule, volume) in [
+                (crate::Rule::Intersection, past_the_block),
+                (crate::Rule::Difference, both - past_the_block),
+                (crate::Rule::Union, 8000.0 + both - past_the_block),
+            ] {
+                let (mut model, bars) = two_crossed_bars();
+                let policy = Policy::certified();
+                let square = crate::ProfileBuilder::new(vec![
+                    [0.0, 0.0],
+                    [20.0, 0.0],
+                    [20.0, 20.0],
+                    [0.0, 20.0],
+                ])
+                .build(&policy, &mut ProvenanceLog::new())
+                .expect("a square");
+                let block = model
+                    .add_extrusion(
+                        &square,
+                        20.0,
+                        &Isometry::translation(Vector::new(-10.0, from, -10.0))
+                            .expect("a finite shift"),
+                    )
+                    .expect("a positive height");
+                let what = format!("{rule:?} with a block from y = {from} up");
+                let fused = model
+                    .fuse(&[bars], &[block], rule, &policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{what} refused: {why:?}"));
+                let [solid] = fused.solids()[..] else {
+                    panic!("{what} is one solid, not {:?}", fused.solids());
+                };
+                model
+                    .validate(&policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{what} does not validate: {why:?}"));
+                let measured = model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .measure(
+                        rcad_geom::Deflection::of(0.001).expect("a fine mesh"),
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{what} does not measure: {why:?}"));
+                assert!(
+                    (measured.volume() - volume).abs() <= measured.volume_error(),
+                    "{what} holds {volume} and measures {} give or take {}",
+                    measured.volume(),
+                    measured.volume_error()
+                );
+            }
+        }
+    }
+
+    /// A fat bar of radius 3 up `z` from `z = −5` to 5 and a thin one of radius
+    /// 1 along `y` from `y = −10` to 10, intersected: the thin bar cut off where
+    /// it leaves the fat one, `x² + z² ≤ 1` and `x² + y² ≤ 9`.
+    fn two_crossed_bars() -> (Model, SolidKey) {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let fat = model
             .add_round_bar(
@@ -8260,39 +8409,24 @@ mod tests {
         let [solid] = fused.solids()[..] else {
             panic!("one solid: {:?}", fused.solids());
         };
-        let patches: Vec<FaceKey> = model
-            .solid(solid)
-            .expect("this model made the key")
-            .faces()
-            .filter(|face| match face.surface() {
-                Surface::Cylinder(pipe) => pipe.radius() == 3.0,
-                Surface::Plane(_) | Surface::Sphere(_) | _ => false,
-            })
-            .map(|face| face.key())
-            .collect();
-        assert_eq!(patches.len(), 2, "one patch of the fat wall at each end");
+        (model, solid)
+    }
 
-        for patch in patches {
-            for point in [at(0.0, 3.0, 0.0), at(0.0, -3.0, 0.0)] {
-                let refusal = model
-                    .solid(solid)
-                    .expect("this model made the key")
-                    .face_holds_the_point(
-                        patch,
-                        point,
-                        &Policy::certified(),
-                        &mut ProvenanceLog::new(),
-                    )
-                    .expect_err("a face along one of two loops cannot be read off a sign");
-                assert!(
-                    matches!(
-                        refusal,
-                        Error::AFaceMissesPartOfWhereItsSurfacesCross { face } if face == patch
-                    ),
-                    "got {refusal:?}"
-                );
-            }
-        }
+    /// How much [`two_crossed_bars`] holds: `∫∫ 2·√(9 − x²)` over the thin
+    /// bar's unit disk, which with `x = sin θ` is `4·∫ cos²θ·√(9 − sin²θ) dθ`
+    /// over half a turn. That runs smoothly round and round with period `π`, so
+    /// equal steps over one period are exact to a rounding long before a
+    /// thousand of them.
+    fn how_much_two_crossed_bars_hold() -> f64 {
+        let steps = 1000;
+        let width = core::f64::consts::PI / f64::from(steps);
+        let sum: f64 = (0..steps)
+            .map(|step| {
+                let (sin, cos) = (width * f64::from(step)).sin_cos();
+                cos * cos * (9.0 - sin * sin).sqrt()
+            })
+            .sum();
+        4.0 * width * sum
     }
 
     /// Each of the two caps a bar cuts out of a ball holds the patch of the
