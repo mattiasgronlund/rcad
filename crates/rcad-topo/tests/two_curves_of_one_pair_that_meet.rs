@@ -282,6 +282,80 @@ fn a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_f
     }
 }
 
+#[test]
+fn probe_q1661() {
+    for (rule, first_first) in six_fuses() {
+        let mut model = a_model();
+        let said = fuse(
+            &mut model,
+            a_bar_seamed_up_y_and_a_ball_in_its_side,
+            rule,
+            first_first,
+        );
+        eprintln!("PROBE {rule:?} {first_first}: {said:?}");
+        let Ok(solids) = said else { continue };
+        let policy = Policy::certified();
+        eprintln!(
+            "PROBE validate {:?}",
+            model.validate(&policy, &mut ProvenanceLog::new())
+        );
+        for solid in solids {
+            let view = model.solid(solid).expect("a solid");
+            let m = view.measure(
+                Deflection::of(0.01).expect("d"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            );
+            eprintln!(
+                "PROBE solid faces {} measure {:?}",
+                view.faces().count(),
+                m.map(|m| (m.volume(), m.volume_error()))
+            );
+        }
+    }
+    eprintln!(
+        "PROBE expected bar {} ball {} shared {}",
+        48.0 * PI,
+        36.0 * PI,
+        shared_probe()
+    );
+}
+
+fn shared_probe() -> f64 {
+    // ball radius 3 at (0,3), pipe radius 2 at origin; 2D midpoint over the pipe disc
+    let n = 4000;
+    let h = 4.0 / f64::from(n);
+    let mut sum = 0.0;
+    for i in 0..n {
+        let x = -2.0 + h * (f64::from(i) + 0.5);
+        for j in 0..n {
+            let y = -2.0 + h * (f64::from(j) + 0.5);
+            if x * x + y * y > 4.0 {
+                continue;
+            }
+            let s = 9.0 - x * x - (y - 3.0) * (y - 3.0);
+            if s > 0.0 {
+                sum += 2.0 * s.sqrt();
+            }
+        }
+    }
+    sum * h * h
+}
+
+fn a_bar_seamed_up_y_and_a_ball_in_its_side(model: &mut Model) -> [SolidKey; 2] {
+    let seam_up_y = Isometry::translation(Vector::new(0.0, 0.0, -1.0))
+        .expect("a finite move")
+        .compose(&Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z"));
+    let bar = model.add_round_bar(2.0, 12.0, &seam_up_y).expect("a bar");
+    let ball = model
+        .add_ball(
+            3.0,
+            &Isometry::translation(Vector::new(0.0, 3.0, 5.0)).expect("a finite move"),
+        )
+        .expect("a ball");
+    [bar, ball]
+}
+
 /// [`ball_in_bar`] on the ball's axis is the closed form
 /// `(4π/3)(2³ − (2² − 1)^(3/2))` of
 /// `a_ball_on_a_bars_axis_crosses_it_in_two_circles_and_every_fuse_answers`,
