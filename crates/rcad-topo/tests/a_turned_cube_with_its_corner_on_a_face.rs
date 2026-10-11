@@ -40,9 +40,10 @@
 //! answer meant is the block with its `x = 0` face whole, with the turned cube
 //! touching it from inside. The three crossings are proved apart, exactly, so
 //! no decision is left for a policy to resolve, and reaching the answer means
-//! taking three crossings a rounding apart as one. The tolerant fuse now takes
-//! each crossing, where two of the turned cube's planes at the corner meet the
-//! block's face, as that corner when it is within `Policy::max_wobble` of it
+//! taking three crossings a rounding apart as one. The block's face cuts each
+//! of the turned cube's three edges at the corner, where two of the cube's
+//! planes meet it, and when all three crossings are within `Policy::max_wobble`
+//! of the corner the tolerant fuse now takes the three together as that corner
 //! (`docs/decisions.md` §417.7), and every fuse answers, the volumes agreeing
 //! as [`every_fuse_answers_and_the_volumes_agree`] asks.
 //!
@@ -207,8 +208,8 @@ fn the_turned_cube_and_the_block_intersected_are_refused_certified() {
 }
 
 /// Under `Policy::tolerant(100.0)` the three crossings, each a rounding from
-/// the turned cube's corner along one of its edges, are taken as that corner
-/// (`docs/decisions.md` §417.7), and every fuse answers as if the corner were
+/// the turned cube's corner along one of its edges, are taken together as that
+/// corner (`docs/decisions.md` §417.7), and every fuse answers as if the corner were
 /// on the face: the turn above at `(0, 3, 3)`, and the first of Q1208's random
 /// turns, which was refused as a hole winding with its outline.
 ///
@@ -1093,121 +1094,4 @@ fn the_cube_of_q1208s_crash(model: &mut Model) -> SolidKey {
     builder
         .build(model, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("Q1208's cube is a sound solid")
-}
-
-#[test]
-fn probe_q1527_narrow() {
-    let Ok(only) = std::env::var("PROBE_Q1527_NARROW") else {
-        return;
-    };
-    let outside: Vec<(usize, Isometry, [f64; 3])> = q1208s_random_turns(400)
-        .into_iter()
-        .enumerate()
-        .filter(|&(_, (turn, at))| where_the_planes_at_the_corner_meet(&turn, at) == Decision::Neg)
-        .map(|(index, (turn, at))| (index + 1, turn, at))
-        .collect();
-    let further_in = 2.0_f64.powi(-30);
-    let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
-    for (policy_name, policy) in [("tolerant", tolerant()), ("certified", certified())] {
-        if only != policy_name && only != "both" {
-            continue;
-        }
-        for (rule, order) in [
-            (Rule::Union, Order::BlockFirst),
-            (Rule::Union, Order::TurnedFirst),
-            (Rule::Intersection, Order::BlockFirst),
-            (Rule::Intersection, Order::TurnedFirst),
-            (Rule::Difference, Order::BlockFirst),
-            (Rule::Difference, Order::TurnedFirst),
-        ] {
-            let mut split: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-            let mut against: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-            let mut folds: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-            for &(number, turn, at) in &outside {
-                let volumes = |shift: f64| -> Result<(Vec<f64>, usize), String> {
-                    let mut model = a_model();
-                    let pair =
-                        a_block_and_a_cube_turned(&mut model, &turn, [at[0] + shift, at[1], at[2]]);
-                    let (one, other) = match order {
-                        Order::BlockFirst => (pair[0], pair[1]),
-                        Order::TurnedFirst => (pair[1], pair[0]),
-                    };
-                    let mut log = ProvenanceLog::new();
-                    let answer = model
-                        .fuse(&[one], &[other], rule, &policy, &mut log)
-                        .map(|answer| answer.solids().to_vec());
-                    let folded = log
-                        .records()
-                        .iter()
-                        .filter(|record| record.predicate().contains("taken as an input corner"))
-                        .count();
-                    let answer = answer.map_err(|why| what_a_fuse_gives(Err(why)))?;
-                    let mut volumes: Vec<f64> = answer
-                        .iter()
-                        .map(|&solid| {
-                            model
-                                .solid(solid)
-                                .expect("key")
-                                .measure(
-                                    Deflection::of(0.1).expect("a deflection"),
-                                    &Policy::certified(),
-                                    &mut ProvenanceLog::new(),
-                                )
-                                .map_or(f64::NAN, |measured| measured.volume())
-                        })
-                        .collect();
-                    volumes.sort_by(f64::total_cmp);
-                    Ok((volumes, folded))
-                };
-                let here = volumes(0.0);
-                let what = match &here {
-                    Ok((solids, _)) => format!("{} solids", solids.len()),
-                    Err(why) => why.clone(),
-                };
-                split.entry(what).or_default().push(number);
-                let Ok((here, folded)) = here else {
-                    continue;
-                };
-                folds.entry(folded).or_default().push(number);
-                let verdict = match volumes(further_in) {
-                    Err(why) => format!("reference refused {why}"),
-                    Ok((reference, _)) => {
-                        let agree = here.len() == reference.len()
-                            && here.iter().zip(&reference).all(|(solid, moved)| {
-                                (solid - moved).abs()
-                                    <= further_in * 100.0 * 3.0_f64.sqrt() + allowed
-                            });
-                        if agree {
-                            "same".to_owned()
-                        } else {
-                            format!("{} solids where it has {}", here.len(), reference.len())
-                        }
-                    }
-                };
-                against.entry(verdict).or_default().push(number);
-            }
-            println!("PROBE {policy_name} {rule:?} {order:?}");
-            for (what, numbers) in &split {
-                println!(
-                    "PROBE   {what}: {} {:?}",
-                    numbers.len(),
-                    &numbers[..numbers.len().min(12)]
-                );
-            }
-            for (what, numbers) in &against {
-                println!(
-                    "PROBE   against further in, {what}: {} {:?}",
-                    numbers.len(),
-                    &numbers[..numbers.len().min(12)]
-                );
-            }
-            for (folded, numbers) in &folds {
-                println!(
-                    "PROBE   fold records {folded}: {} {:?}",
-                    numbers.len(),
-                    &numbers[..numbers.len().min(12)]
-                );
-            }
-        }
-    }
 }
