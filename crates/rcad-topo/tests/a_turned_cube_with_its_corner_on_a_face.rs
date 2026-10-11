@@ -252,6 +252,18 @@ fn the_turned_cube_and_the_block_intersected_are_refused_tolerant() {
     );
 }
 
+/// Under `Policy::tolerant(100.0)` the three crossings, each a rounding from
+/// the turned cube's corner along one of its edges, are taken as that corner
+/// (`docs/decisions.md` §417.7), and every fuse answers as if the corner were
+/// on the face: the turn above at `(0, 3, 3)`, and the first of Q1208's random
+/// turns, which was refused as a hole winding with its outline.
+#[test]
+fn under_a_tolerant_policy_the_tip_folds_into_one_corner_and_every_fuse_answers() {
+    every_fuse_answers_and_the_volumes_agree(&the_turn(), ON_THE_FACE, &tolerant());
+    let (turn, at) = q1208s_random_turns(1)[0];
+    every_fuse_answers_and_the_volumes_agree(&turn, at, &tolerant());
+}
+
 /// The same pair with the corner a thousandth inside the block's face, where
 /// nothing is a rounding from anything else.
 ///
