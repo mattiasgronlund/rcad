@@ -67,7 +67,7 @@ use rcad_geom::{
 };
 use rcad_predicates::{
     Approximation, Cause, Decision, Level, Measures, Point as PredicatePoint, Policy,
-    ProvenanceLog, Record, Strictness, side_of_a_plane_where_three_planes_meet,
+    ProvenanceLog, Record, Strictness, orient2d, side_of_a_plane_where_three_planes_meet,
 };
 use smallvec::SmallVec;
 
@@ -8404,8 +8404,8 @@ fn a_ring_of_one_or_two_sides_bounds_something(ring: &[Side], edges: &[Edge]) ->
     }
 }
 
-/// The seam of a piece's input face that `side` runs the whole of, where it
-/// runs along one.
+/// The seam of a piece's input face that `side` runs along, the whole of it or
+/// a piece.
 ///
 /// **A seam is left out at the door** (`bake`'s header), so no arc of the
 /// arrangement is boundary along it and no side ever names it the way a side
@@ -8413,25 +8413,25 @@ fn a_ring_of_one_or_two_sides_bounds_something(ring: &[Side], edges: &[Edge]) ->
 /// whose seam is the line it touches a wall along is cut open there, and the
 /// side that cut leaves is a piece of the seam, which history has to say.
 ///
-/// Only a straight side between the seam's own two corners, and only a straight
-/// seam: two straight sides with the same two ends are one segment, so this
-/// takes no arithmetic. A crossing that cannot be shown to run straight is not
-/// named.
+/// **A side can run along part of the seam only.** A wall that stops partway
+/// up the bar cuts the skin round at its top edge, and the seam comes out in
+/// two sides, one either side of that new corner, neither of them between the
+/// seam's own two corners. Until Q1761 only a side between those two was
+/// named, and both halves lost the seam's history
+/// (`a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it`).
+///
+/// Only a straight side and a straight seam, and only when both ends of the
+/// side are on the seam, which [`where_on_the_seam`] says. A straight side is
+/// the segment between its two ends, so a side whose two ends are on the seam
+/// lies along it. A crossing that cannot be shown to run straight is not
+/// named, and neither is a side with an end the seam's corners do not name
+/// and whose place is not known exactly.
 fn the_seam_a_side_runs_along(
     model: &Model,
     ancestors: &[FaceKey],
     side: &FaceMeet,
 ) -> Option<EdgeKey> {
-    let [
-        MeetPoint::Existing { vertex: start, .. },
-        MeetPoint::Existing { vertex: end, .. },
-    ] = &side.ends
-    else {
-        return None;
-    };
-    if start == end
-        || !side.along.is_empty()
-        || the_crossing_of_these_runs_straight(&side.carried_by) != Some(true)
+    if !side.along.is_empty() || the_crossing_of_these_runs_straight(&side.carried_by) != Some(true)
     {
         return None;
     }
@@ -8443,14 +8443,59 @@ fn the_seam_a_side_runs_along(
             .flat_map(|wire| wire.coedges())
             .map(|coedge| coedge.edge())
             .find(|edge| {
-                let ends = [edge.start().key(), edge.end().key()];
-                edge.neighbouring_faces().all(|other| other == face)
-                    && *edge.stored_run() == EdgeRun::Straight
-                    && ends.contains(start)
-                    && ends.contains(end)
+                if !edge.neighbouring_faces().all(|other| other == face)
+                    || *edge.stored_run() != EdgeRun::Straight
+                {
+                    return false;
+                }
+                let corners = [edge.start(), edge.end()];
+                let [Some(from), Some(to)] = side
+                    .ends
+                    .each_ref()
+                    .map(|end| where_on_the_seam(end, corners))
+                else {
+                    return false;
+                };
+                from != to
             })
             .map(|edge| edge.key())
     })
+}
+
+/// Where on a straight seam between `corners` the end of a side is, if it is
+/// on it: one of the seam's own two corners by name, or a place known exactly
+/// that lies on the segment between them.
+///
+/// **The seam's corners are matched by name first**, and take no arithmetic,
+/// so a side between the two is named however the seam is placed, as it was
+/// before Q1761. Any other end has to be shown on the segment: on the line
+/// through the corners in each of the three views along an axis, which is
+/// exact for places known exactly, and between them along every axis. A place
+/// known only to within a box is never shown to be on a line, and is not
+/// named.
+fn where_on_the_seam(end: &MeetPoint, corners: [VertexView<'_>; 2]) -> Option<[f64; 3]> {
+    if let MeetPoint::Existing { vertex, .. } = end
+        && let Some(corner) = corners.iter().find(|corner| corner.key() == *vertex)
+    {
+        return Some(corner.point().coordinates());
+    }
+    let at = end.point().exact_coordinates()?;
+    let [from, to] = corners.map(|corner| corner.point().coordinates());
+    let on_the_line = [[0, 1], [1, 2], [2, 0]].iter().all(|&[across, up]| {
+        match orient2d(
+            [from[across], from[up]],
+            [to[across], to[up]],
+            [at[across], at[up]],
+        ) {
+            Decision::Zero => true,
+            Decision::Pos | Decision::Neg => false,
+            // Not shown on the line, so the side is not shown to be on the seam.
+            Decision::Undecidable { .. } | _ => false,
+        }
+    });
+    let between = (0..3)
+        .all(|axis| from[axis].min(to[axis]) <= at[axis] && at[axis] <= from[axis].max(to[axis]));
+    (on_the_line && between).then_some(at)
 }
 
 #[cfg(test)]
