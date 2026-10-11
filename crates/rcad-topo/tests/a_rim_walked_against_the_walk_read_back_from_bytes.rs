@@ -16,8 +16,9 @@
 //! each face walks it says which side of the rim that face lies on. For each
 //! piece one way of writing the lid builds and the other is refused
 //! `FacesDoNotAgreeWhichWayTheyFace`, in every spelling. `Model::validate` finds
-//! that in `every_side_of_the_skin_is_used_both_ways`, which nothing but
-//! measuring a curved solid's volume reaches.
+//! that in `every_side_of_the_skin_is_used_both_ways`, which only
+//! `how_much_space_a_curved_solid_encloses` calls, for validate and the fuse.
+//! With that call taken out, validate passes every turned piece below.
 //!
 //! **On the pole there is nothing to read back.** With the corner on
 //! `(0, 0, 5)` every spelling builds either way round (§220.6), which
@@ -34,11 +35,16 @@
 //! **What a caller who skips validate gets back is wrong, and is not pinned.**
 //! `SolidView::mesh` hands back a mesh whose sides along the rim are each used
 //! twice the same way round, and `SolidView::measure` a positive volume with no
-//! refusal. The ball less the cap, turned, measures as the cap within the error
-//! it publishes; the cap, turned, measures as neither piece.
+//! refusal. Its ball face holds the other piece of the ball, and its lid faces
+//! into that piece. The ball less the cap, turned, measures as the cap within
+//! the error it publishes; the cap, turned, measures as neither piece.
 //! [`what_mesh_and_measure_hand_a_caller_who_skips_validate`] prints both at
-//! three deflections. That is an open defect, filed by Q631's lane, and the
-//! test is to become its pin.
+//! three deflections. `SolidView::mesh` and `measure` never call
+//! `every_side_of_the_skin_is_used_both_ways`; with `mesh` calling it on its
+//! own mesh, both refuse every one `FacesDoNotAgreeWhichWayTheyFace`. That is
+//! an open defect, filed by Q631's lane beside Q1052, the same wrong mesh for
+//! a tube wall read back with one circle turned, and this test is to become
+//! its pin.
 
 use core::f64::consts::PI;
 use std::collections::HashMap;
