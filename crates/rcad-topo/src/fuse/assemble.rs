@@ -114,9 +114,11 @@ use super::{
 /// [`Error::ResultIsNotManifold`] when an edge of the result would have other
 /// than two faces along it,
 /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's one
-/// corner is a pole of the surface it is drawn on, and
+/// corner is a pole of the surface it is drawn on,
 /// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
-/// coplanar pieces both wind as its outline.
+/// coplanar pieces both wind as its outline, and
+/// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] when nothing could say
+/// which of two or more rings that enclose nothing is its outline.
 pub(crate) fn assemble(
     model: &Model,
     scratch: &Scratch,
@@ -146,9 +148,11 @@ pub(crate) fn assemble(
 ///
 /// [`Error::Undecidable`] when two of the input's planes cannot be told apart at
 /// all, [`Error::ResultIsNotManifold`] when one of its edges is claimed by
-/// other than two faces, which means the input was already broken, and
+/// other than two faces, which means the input was already broken,
 /// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
-/// its coplanar faces both wind as its outline.
+/// its coplanar faces both wind as its outline, and
+/// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] when nothing could say
+/// which of two or more rings that enclose nothing is its outline.
 pub(crate) fn joined_faces_of_an_input(
     model: &Model,
     solid: SolidView<'_>,
