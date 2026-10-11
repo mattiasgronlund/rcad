@@ -136,9 +136,19 @@ A fix that breaks shows one of two ways.
   the fault again, from the kept files down the same branches, its crash file
   has a new name, which no row names, and it is raised the same way.
 
-The first is not yet shown. Q1731 shows it once: a crash file that
-fails on `main`, put into a scratch corpus and fuzzed briefly with the night's
-flags, comes back under its own crash name.
+The first was shown once, on 2026-10-12 (Q1731), in scratch.
+`crash-028ede449c34f11477f430fa20e4290be7c141ba` is a
+`where_two_surfaces_cross` file that 10-11's `fuzz-triage-members.tsv` lists
+as still failing on `main`. It was put alone into a scratch corpus under its
+bare hash, as the fold's merge keeps it, and fuzzed for 30 s by that night's
+cc97ce85 binary with the flags `fuzz-target` gives a forked night:
+`-max_len=71 -fork=1 -timeout=10 -ignore_crashes=1 -ignore_timeouts=1
+-ignore_ooms=1`, with `-artifact_prefix` in scratch. It came back as
+`crash-028ede449c34f11477f430fa20e4290be7c141ba`, its own name, 0.16 s after
+the run began (the birth times of the log and of the crash file). The fork's
+first pass over its seeds ran it, wrote it, and left it out of what it fuzzed
+from: the log says `-fork=1: 0 seed inputs`. So a kept file that crashes again
+is found by the night's first pass over its corpus, and not by luck later.
 
 ### 434.5 What still holds
 

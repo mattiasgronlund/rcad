@@ -114,6 +114,15 @@ A group named only by its place counts as not named, for the refusal. So the
 first triage after this lands files again the rows written before it, which
 name places.
 
+> **2026-10-12 note (Q1731): only files that pass leave (§434).** The morning
+> now removes from the tree each crash file that passed on `main` (§434.3), so
+> "every crash file of the nights before" above means every one not yet seen
+> to pass. A file of a failing group does not pass, so it stays, and a file a
+> row names stays in its group for as long as the group fails (§434.5). A file
+> that has left is listed in `~/rcad-fuzz-logs/removed-crash-files.tsv` with
+> the `main` it passed on, and prep reads that list as well as the members
+> file.
+
 ### 418.5 What is built, and in what order
 
 Two rows, Q1429 after Q1428.
