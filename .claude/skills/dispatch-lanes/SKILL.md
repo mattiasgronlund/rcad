@@ -247,9 +247,12 @@ until the merger that follows marks it (§384.3).
   sha can be invented — then merge `origin/main` into your branch, so the copy
   of the queue you fill from sees the row closed (§263.9). The slot is free:
   `mise exec -- just queue next 1`, and back to step 5.
-- **Not merged**: the branch is still on disk. `git worktree unlock` each tree
-  the result names, then decide: send the row again under a new label, fix it
-  in a tree of your own, or `just queue drop` or `just queue park` it.
+- **Not merged**: decide it before anything else, and write the decision to
+  the queue at once, in one `just queue apply` that also files the rows the
+  lane left, read from its journal. The three ways on: take the row again
+  under a new label with the fix in its brief; park it, with the section its
+  reason belongs under; or `just queue drop` it. `git worktree unlock` each
+  tree the result named once the apply is pushed.
 
 A lane's tree is unlocked by its verifier when checking starts, the verifier's
 by the merger, and the merger's by itself at the end, so a row holds one slot
@@ -257,6 +260,20 @@ at a time. A merged row's merger then marks all three finished, and the run
 removes them with `prune-worktrees`. The result's `prune:` lines say which
 went and why any stayed (§315). A row whose run stopped early leaves its trees
 locked, and the result names them.
+
+**Close every returned run out this way before anything else.** Once nothing
+is left that `just status`, `just queue` and `just lanes` cannot already show
+— no row still reading `lane:` with its trees unlocked and no agent behind
+it, no finding that lives only in a run's `journal.jsonl` — the close-out is
+one message: tell Mattias to `/clear` in the same `claude` process and run
+`/dispatch-lanes`. A run reports to the `claude` process that launched it, not
+to the conversation, so a cleared conversation still receives its
+completions; a new process loses those notifications outright. A run's
+journal, and its args once it completes, stay reachable from the old
+conversation's own directory, not the new one:
+`~/.claude/projects/<project>/<launching conversation id>/subagents/workflows/<run
+id>/journal.jsonl` and `.../workflows/<run id>.json`, `<project>` the tree's
+path with each `/` turned to `-`. `docs/decisions.md` §388.
 
 ## 7. What is still yours
 
