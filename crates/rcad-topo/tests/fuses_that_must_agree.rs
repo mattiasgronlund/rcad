@@ -281,7 +281,8 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// the threshold was not moved then either. Since Q1357 it was 13 of 447,
 /// 2.91%. Just before Q1034 and Q1606 it was 14 of 450, 3.11%, and since them
 /// it is 8 of 450, 1.78%, and the threshold stays where it is. Since Q1608 and
-/// Q1609 it is 2 of 450, 0.44%, and it still stays.
+/// Q1609 it was 2 of 450, 0.44%. Since Q1528 it is 3 of 450, 0.67%, and it
+/// still stays.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
 /// drift — 6.1 points is twenty-six fuses, nearly four times the headroom
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
@@ -1816,6 +1817,15 @@ fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
 /// by where such a side runs. The frame and ell's three answer and so does the
 /// combs' intersection; the combs' union and first less second come back not a
 /// solid, from 5 to 7 in all (§365.8's note on Q1608 and Q1609).
+///
+/// **Since Q1528 it is 3 of 450, from 2, and 5 not a solid, from 7.** Q1528's
+/// rule leaves out two flat faces that walk one ring both ways, which answers
+/// the combs' union both orders (26 faces holding 26) rather than leaving it
+/// not a solid, and the certified first comb less the second is now refused
+/// `DynamicRangeTooWide` at `11 · 2^51` rather than counted there, which is
+/// the third refusal — all three now named
+/// [`AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES`] (§365.8's note on Q1528 and
+/// Q1658).
 #[test]
 fn how_often_a_certified_fuse_of_a_skew_pair_refuses() {
     let tally = measured(a_skew_pair(), |configuration, tally| {
@@ -1899,6 +1909,11 @@ fn how_often_a_certified_fuse_of_a_pair_leaning_the_same_way_refuses() {
 /// note on Q1608 and Q1609). Since Q1633 the intersection answers the same two
 /// parts both ways round, and no comparison disagrees: 131 of the 140 are
 /// reached, 12 of the 280 fuses refused and 6 not a solid.
+///
+/// **Since Q1528 it is 133 of the 140 reached and 2 not a solid, from 6.**
+/// The same comb pair's union, which Q1528's rule now answers 26 faces
+/// holding 26 both ways round rather than leaving not a solid (§365.8's note
+/// on Q1528 and Q1658), accounts for the drop.
 #[test]
 fn swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit() {
     let tally = over(CASES, a_skew_pair(), |configuration, tally| {
