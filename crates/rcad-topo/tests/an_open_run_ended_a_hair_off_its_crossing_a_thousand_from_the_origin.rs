@@ -16,15 +16,29 @@
 //! by how far off the crossing it can be, which reaches the start, and the
 //! start is left out, as Q1690 did for a closed edge's corner.
 //!
-//! The same cut at the origin is refused before any mesh, ordering the two ends
-//! of one loop along it, so the answer is checked against its closed form and
-//! not against the origin's.
+//! Of the cut at the origin and a thousand from it, with the bar cut by the
+//! block first or by the ball, only the cut a thousand from the origin by the
+//! block first answers. At the origin it is refused ordering two ends of a loop
+//! along it, and by the ball first a thousand from the origin it is refused a
+//! face it cannot follow; the last two tests pin both. So the answer is checked
+//! against its closed form, and not against the origin's.
 
 use std::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+
+const BALL: f64 = 5.0;
+const BAR: f64 = 4.0;
+const OFF: f64 = 0.5;
+
+/// The two blocks, one each side of the wall through the bar's axis and the
+/// ball's centre, measured from the bar's axis: `low` and `high` corners.
+const EITHER_SIDE: [(&str, [f64; 3], [f64; 3]); 2] = [
+    ("y ≥ 0", [-20.0, 0.0, -20.0], [20.0, 20.0, 20.0]),
+    ("y ≤ 0", [-20.0, -20.0, -20.0], [20.0, 0.0, 20.0]),
+];
 
 /// A bar of radius 4 that reaches past both loops it crosses a ball of radius 5
 /// in, half a unit off the ball's centre, cut by a block whose wall is the
@@ -35,40 +49,12 @@ use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 #[test]
 fn a_ball_and_a_bar_cut_by_a_wall_through_where_their_loops_are_walked_from_measure_half_of_what_they_share()
  {
-    let [ball, bar, off, far] = [5.0, 4.0, 0.5, 1000.0];
-    let half = what_a_ball_off_a_bars_axis_shares(ball, bar, off) / 2.0;
-    for (side, low, high) in [
-        ("y ≥ 0", [-20.0, 0.0, -20.0], [20.0, 20.0, 20.0]),
-        ("y ≤ 0", [-20.0, -20.0, -20.0], [20.0, 0.0, 20.0]),
-    ] {
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let the_bar = model
-            .add_round_bar(bar, 12.0, &at(far, far, far - 1.0))
-            .expect("a bar");
-        let the_ball = model
-            .add_ball(ball, &at(far + off, far, far + 5.0))
-            .expect("a ball");
-        let the_block = block(&mut model, low, high, far);
-        let cut = model
-            .fuse(
-                &[the_bar],
-                &[the_block],
-                Rule::Intersection,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|why| panic!("the bar on {side}: {why:?}"));
-        let answer = model
-            .fuse(
-                cut.solids(),
-                &[the_ball],
-                Rule::Intersection,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|why| panic!("the ball in the bar on {side}: {why:?}"));
-        let [solid] = answer.solids()[..] else {
-            panic!("one solid on {side}, got {:?}", answer.solids());
+    let half = what_a_ball_off_a_bars_axis_shares(BALL, BAR, OFF) / 2.0;
+    for (side, low, high) in EITHER_SIDE {
+        let (model, answer) = cut(1000.0, low, high, Cuts::BlockFirst);
+        let answer = answer.unwrap_or_else(|why| panic!("{side}: {why:?}"));
+        let [solid] = answer[..] else {
+            panic!("one solid on {side}, got {answer:?}");
         };
         let measured = model
             .solid(solid)
@@ -79,6 +65,11 @@ fn a_ball_and_a_bar_cut_by_a_wall_through_where_their_loops_are_walked_from_meas
                 &mut ProvenanceLog::new(),
             )
             .expect("the answer measures");
+        eprintln!(
+            "{side}: {} against {half}, error {}",
+            measured.volume(),
+            measured.volume_error()
+        );
         assert!(
             (measured.volume() - half).abs() <= measured.volume_error(),
             "{side}: {} against {half}, error {}",
@@ -86,6 +77,93 @@ fn a_ball_and_a_bar_cut_by_a_wall_through_where_their_loops_are_walked_from_meas
             measured.volume_error()
         );
     }
+}
+
+/// The same cut at the origin is refused ordering two corners the wall puts on
+/// one loop, `(−4, 0, 7.18)` and `(4, 0, 8.57)`, whichever side of the wall the
+/// block is on and whichever the bar is cut by first. The answer exists: a
+/// thousand from the origin it measures half of what the ball and the bar
+/// share. Pinned as it stands, to move with the fix.
+#[test]
+fn the_same_cut_at_the_origin_is_refused_ordering_two_ends_of_a_loop_along_it() {
+    for (side, low, high) in EITHER_SIDE {
+        for cuts in [Cuts::BlockFirst, Cuts::BallFirst] {
+            let (_, said) = cut(0.0, low, high, cuts);
+            let Err(Error::Undecidable { records }) = said else {
+                panic!("{side}, {cuts:?}: {said:?}");
+            };
+            let first = &records.records()[0];
+            eprintln!("{side}, {cuts:?}: {first:?}");
+            assert_eq!(
+                first.predicate(),
+                "order along a crossing",
+                "{side}, {cuts:?}"
+            );
+        }
+    }
+}
+
+/// With the bar cut by the ball first, the cut a thousand from the origin is
+/// refused a face it cannot follow, whichever side of the wall the block is
+/// on. The answer exists: cut by the block first, it measures half of what the
+/// ball and the bar share. Pinned as it stands, to move with the fix.
+#[test]
+fn the_same_cut_with_the_ball_first_is_refused_a_face_it_cannot_follow() {
+    for (side, low, high) in EITHER_SIDE {
+        let (_, said) = cut(1000.0, low, high, Cuts::BallFirst);
+        eprintln!("{side}: {said:?}");
+        assert!(
+            matches!(
+                said,
+                Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+            ),
+            "{side}: {said:?}"
+        );
+    }
+}
+
+/// Which of the ball and the block cuts the bar first.
+#[derive(Clone, Copy, Debug)]
+enum Cuts {
+    BlockFirst,
+    BallFirst,
+}
+
+/// The bar of radius 4 up `z` from `z = −1` to `11`, the ball of radius 5 at
+/// `(0.5, 0, 5)`, and a block from `low` to `high`, each moved `far` along
+/// every axis, and the three intersected, the bar with the one `cuts` names
+/// first and the answer with the other.
+fn cut(
+    far: f64,
+    low: [f64; 3],
+    high: [f64; 3],
+    cuts: Cuts,
+) -> (Model, rcad_topo::Result<Vec<SolidKey>>) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bar = model
+        .add_round_bar(BAR, 12.0, &at(far, far, far - 1.0))
+        .expect("a bar");
+    let ball = model
+        .add_ball(BALL, &at(far + OFF, far, far + 5.0))
+        .expect("a ball");
+    let block = block(&mut model, low, high, far);
+    let [first, then] = match cuts {
+        Cuts::BlockFirst => [block, ball],
+        Cuts::BallFirst => [ball, block],
+    };
+    let mut intersected = |arguments: &[SolidKey], tool| {
+        model
+            .fuse(
+                arguments,
+                &[tool],
+                Rule::Intersection,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .map(|fused| fused.solids().to_vec())
+    };
+    let answer = intersected(&[bar], first).and_then(|cut| intersected(&cut, then));
+    (model, answer)
 }
 
 /// What a ball of radius `ball` shares with a pipe of radius `bar` whose axis
