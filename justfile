@@ -3230,6 +3230,25 @@ check-skills-selftest:
 # brief and a relay's both carry the hand-over rule themselves, because a
 # `claude` process keeps its agent types through a `/clear`, so a dispatcher
 # cleared after §416 would send lanes whose `lane.md` has no relay (Q1422).
+#
+# **Arms twenty-three to twenty-seven hold the prep stage (§396.4).** A
+# dispatcher used to check and brief every row itself, at every fill. A lane
+# sent as `{ label, queueId, notes }` now goes first to `prep`, a read-only
+# Sonnet type, which answers `ok` with the write set, model, marks and facts,
+# or `needs` with the files the row is missing. The twenty-third arm checks
+# that `lanes.js` sends one agent of that type and that `prep.md` gives it the
+# Sonnet model and no tool that writes, since it runs in the dispatcher's own
+# tree; the fourth already wants the file. The twenty-fourth checks that the
+# stage runs before the lane, that an answer other than `ok` starts no lane,
+# and that the files prep said the row needs come back in the row's lines. The
+# twenty-fifth checks that the lane takes its write set, model and marks from
+# prep's answer, and that an answer is refused when its write set is not its
+# rows', its model is not theirs, or it gives both marks. The twenty-sixth
+# checks that a lane giving fields of both forms is refused. The twenty-seventh
+# checks that a brief built from a row carries the two notes every brief the
+# dispatcher wrote carried (Q1047, Q1505, Q1347), and that a writing lane gets
+# the `for_the_verifier` field by default. Unlike the arms above, these five
+# do not stop at the first that fails, so the base's `lanes.js` names them all.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -3329,6 +3348,28 @@ check-lanes-workflow:
     test_first='**Commit the failing test first, on its own, then the fix.** Once a test fails'
     hand_over_use='${handOver()}'
     hand_over_text='hand over (§416), even if this brief says to carry on past it'
+    prep_type="agentType: 'prep',"
+    prep_tools='tools: Read, Grep, Glob, Bash'
+    prep_model='model: sonnet'
+    prep_stage='  (lane) => prepared(lane),'
+    work_stage='  (prep) => prep.stop ? prep : worked(prep.lane),'
+    verify_stage='  (report, item) => notPrepared(item) || verified(report, laneOf(item)),'
+    prep_needs='  if (answer.answer !== '
+    handed_needs='  for (const n of (prior.prep && prior.prep.needs) || []) row.lines.push(`needs ${n.file}: ${n.why}`)'
+    brief_writes='    writeSet: answer.writeSet,'
+    brief_model='    model: answer.model,'
+    brief_pins='    pinsOnly: answer.pinsOnly === true,'
+    brief_same='    sameBehaviour: answer.sameBehaviour === true,'
+    prep_union='  if (!sameSet(answer.writeSet, writeSetOf(rows))) return '
+    prep_rows_model='  if (answer.model !== modelOf(rows)) return '
+    prep_both='  if (answer.pinsOnly === true && answer.sameBehaviour === true) return '
+    both_forms='  if (lane.notes !== undefined && full.length) throw new Error(`lanes: ${lane.label} gives fields of both forms'
+    rows_note='no `tag` step when the add text already starts with the class'
+    tests_note='never `<binary> <name>` with a space (Q1347)'
+    report_default='Write `none` when every test you added or changed is in a tests/ directory.'
+    rows_note_use='${rowsNote()}'
+    tests_note_use='${testsNote()}'
+    report_set='  if (answer.writeSet.length) ready.report = forTheVerifier()'
     settings=.claude/settings.json
     script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
@@ -3373,7 +3414,7 @@ check-lanes-workflow:
     seq -f 'pub fn f%g() {}' 1 15 >> "$many/crates/k/src/lib.rs"
     commit "$many" branch
     scan() {
-        local n t at prev line types prog got
+        local n t at prev line types prog got failed
         n=$(grep -cxF -- "$create" "$1" || true)
         if [ "$n" != 1 ]; then
             echo "$1 has the line '$create' $n times, expected once"
@@ -3684,6 +3725,32 @@ check-lanes-workflow:
             echo "$1 does not put the hand-over rule into both the lane's brief and a relay's ('$hand_over_use' twice, found $n); a process cleared after §416 keeps a lane.md without it (Q1422)"
             return 22
         fi
+        failed=0
+        n=$(grep -cF -- "$prep_type" "$1" || true)
+        if [ "$n" != 1 ] || ! grep -qxF -- "$prep_tools" "$2/prep.md" 2>/dev/null || ! grep -qxF -- "$prep_model" "$2/prep.md" 2>/dev/null; then
+            echo "$1 does not send one agent of type prep (\"$prep_type\" $n times), or $2/prep.md does not make it a Sonnet agent with the tools '$prep_tools' and none that writes; prep runs in the dispatcher's own tree (§396.4)"
+            [ "$failed" != 0 ] || failed=23
+        fi
+        if ! grep -qxF -- "$prep_stage" "$1" || ! grep -qxF -- "$work_stage" "$1" || ! grep -qxF -- "$verify_stage" "$1" \
+            || ! grep -qF -- "$prep_needs" "$1" || ! grep -qxF -- "$handed_needs" "$1"; then
+            echo "$1 does not run prep before the lane, start no lane for a row prep did not answer ok, and hand back the files prep said the row needs (§396.4)"
+            [ "$failed" != 0 ] || failed=24
+        fi
+        if ! grep -qxF -- "$brief_writes" "$1" || ! grep -qxF -- "$brief_model" "$1" || ! grep -qxF -- "$brief_pins" "$1" || ! grep -qxF -- "$brief_same" "$1" \
+            || ! grep -qF -- "$prep_union" "$1" || ! grep -qF -- "$prep_rows_model" "$1" || ! grep -qF -- "$prep_both" "$1"; then
+            echo "$1 does not start a short-form lane with the write set, model and marks prep answered, or does not refuse an answer whose write set is not its rows', whose model is not theirs, or which gives both marks (§396.4, §352.4, §399)"
+            [ "$failed" != 0 ] || failed=25
+        fi
+        if ! grep -qF -- "$both_forms" "$1"; then
+            echo "$1 does not refuse a lane that gives fields of both forms, notes beside a brief or a field prep would answer (§396.4)"
+            [ "$failed" != 0 ] || failed=26
+        fi
+        if ! grep -qF -- "$rows_note" "$1" || ! grep -qF -- "$tests_note" "$1" || ! grep -qF -- "$report_default" "$1" \
+            || ! grep -qxF -- "$rows_note_use" "$1" || ! grep -qxF -- "$tests_note_use" "$1" || ! grep -qxF -- "$report_set" "$1"; then
+            echo "$1 does not give a brief built from a row the two notes every brief the dispatcher wrote carried (Q1047, Q1505, Q1347), or a writing lane the for_the_verifier field by default"
+            [ "$failed" != 0 ] || failed=27
+        fi
+        return "$failed"
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
     swap() {
@@ -3889,7 +3956,39 @@ check-lanes-workflow:
     S="$hand_over_use" awk 'index($0, ENVIRON["S"]) && !done { done = 1; sub(/\$\{handOver\(\)\}/, "") } { print }' "$file" > "$dir/hand-over-left-to-lane-md/lanes.js"
     fresh hand-over-unsaid
     swap "$file" "$hand_over_text" 'hand over (§416)' > "$dir/hand-over-unsaid/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22)
+    fresh no-prep-file
+    rm "$dir/no-prep-file/agents/prep.md"
+    fresh untyped-prep
+    grep -vF -- "$prep_type" "$file" > "$dir/untyped-prep/lanes.js"
+    fresh prep-writes
+    swap "$agents/prep.md" "$prep_tools" "$prep_tools, Edit, Write" > "$dir/prep-writes/agents/prep.md"
+    fresh prep-on-opus
+    swap "$agents/prep.md" "$prep_model" 'model: opus' > "$dir/prep-on-opus/agents/prep.md"
+    fresh prep-skipped
+    swap "$file" "$prep_stage" '  (lane) => ({ lane, stop: null }),' > "$dir/prep-skipped/lanes.js"
+    fresh needs-starts-a-lane
+    swap "$file" "$work_stage" '  (prep) => worked(prep.lane),' > "$dir/needs-starts-a-lane/lanes.js"
+    fresh needs-read-as-ok
+    grep -vF -- "$prep_needs" "$file" > "$dir/needs-read-as-ok/lanes.js"
+    fresh needs-not-returned
+    grep -vxF -- "$handed_needs" "$file" > "$dir/needs-not-returned/lanes.js"
+    fresh model-from-lane
+    swap "$file" "$brief_model" '    model: lane.model,' > "$dir/model-from-lane/lanes.js"
+    fresh write-set-widened
+    grep -vF -- "$prep_union" "$file" > "$dir/write-set-widened/lanes.js"
+    fresh model-unchecked
+    grep -vF -- "$prep_rows_model" "$file" > "$dir/model-unchecked/lanes.js"
+    fresh both-marks-from-prep
+    grep -vF -- "$prep_both" "$file" > "$dir/both-marks-from-prep/lanes.js"
+    fresh both-forms-allowed
+    grep -vF -- "$both_forms" "$file" > "$dir/both-forms-allowed/lanes.js"
+    fresh no-rows-note
+    grep -vF -- "$rows_note" "$file" > "$dir/no-rows-note/lanes.js"
+    fresh no-tests-note
+    grep -vF -- "$tests_note" "$file" > "$dir/no-tests-note/lanes.js"
+    fresh no-report-default
+    grep -vF -- "$report_default" "$file" > "$dir/no-report-default/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-widened:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-report-default:27)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
@@ -3906,7 +4005,7 @@ check-lanes-workflow:
             exit 1
         fi
     done
-    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, hands the verifier just verify-lane, relays a lane past its budget to a fresh one, and prunes only what merged; ${#cuts[@]} cuts, each caught"
+    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, hands the verifier just verify-lane, relays a lane past its budget to a fresh one, briefs a short-form lane through prep and starts no lane on anything but ok, and prunes only what merged; ${#cuts[@]} cuts, each caught"
 
 # Print the changed lines between two commits that could change what runs:
 # everything but `.md` files, comment lines, and test code -- files under
