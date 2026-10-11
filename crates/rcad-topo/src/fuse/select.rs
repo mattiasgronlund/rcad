@@ -104,7 +104,7 @@
 //! tried after every rule above, so a piece any of them placed is placed as
 //! before.
 //!
-//! # And last, by a side that starts inside an edge
+//! # Then by a side that starts inside an edge
 //!
 //! A flat piece with a straight side along the plane of a flat face `G` of a
 //! solid, starting strictly inside an edge `e` of `G`, is placed against that
@@ -113,8 +113,33 @@
 //! across `e`: where the side runs along `G`, the piece is inside when its
 //! material is on `G`'s inner side, and where it runs on beyond `e`, off the
 //! skin, the piece is inside when the side runs behind the outward plane
-//! across `e`. It is tried after every other rule, so a piece any of them
+//! across `e`. It is tried after every rule above, so a piece any of them
 //! placed is placed as before.
+//!
+//! # Then on a face it shares a side with
+//!
+//! A piece, flat or curved, that shares a side with a piece cut from a face
+//! `G` of a solid on its own surface, with the same partner surface and its
+//! material on the same side of it, lies on `G`
+//! ([`SidesItShares::place_on_a_face_it_shares_a_side_with`], §35.6, Q1537):
+//! near the middle of that side the two pieces are one part of one surface.
+//! Two quarter bends placed a quarter turn apart by a float turn need it:
+//! each bend's cap plane cuts the other bend's wall a rounding round from that
+//! bend's own cap rim, and no `f64` point lies in the band between. It is
+//! tried after every rule above, so a piece any of them placed is placed as
+//! before.
+//!
+//! # And last, by the piece across a side that starts clear of every face
+//!
+//! A piece, flat or curved, takes the placement of the piece of its own face
+//! across one of its sides, when the point search places that piece inside
+//! or outside and the start of the side is off every face of every solid it is
+//! placed against ([`by_the_piece_across_a_side_clear_of_every_face`], §35.6,
+//! Q1537): near that start the two pieces are on one side of the skin. A start
+//! on the plane and the ring of a cap of a bend is shown off the cap by the
+//! half-space that names the cap's circle ([`is_behind_the_meridian_disk`]).
+//! Two quarter bends placed half a turn apart need it. It is tried after
+//! every other rule, so a piece any of them placed is placed as before.
 
 use rcad_geom::{
     Cone, Cylinder, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
@@ -128,11 +153,11 @@ use rcad_predicates::{
 
 use crate::classify::{side_of_a_flat_face, stretched_to_the_plane};
 use crate::holds::{
-    how_the_axis_lies_on, lie_along_one_line, the_half_space_naming_the_meridian_circle_through,
-    the_meridian_half_space_keeps,
+    OnAFace, how_the_axis_lies_on, lie_along_one_line,
+    the_half_space_naming_the_meridian_circle_through, the_meridian_half_space_keeps,
 };
 use crate::validate::side_of_surface;
-use crate::{Containment, Error, FaceKey, Model, Result, SolidView, VertexKey};
+use crate::{Containment, Error, FaceKey, FaceView, Model, Result, SolidView, VertexKey};
 
 use super::arrange::{Piece, agreement_of_two_planes, name_of_surface_bits};
 use super::assemble::{NamedSide, the_edge_each_side_of_every_piece_is};
@@ -177,7 +202,10 @@ pub(crate) struct Chosen {
 /// a plane ([`by_a_plane`]), nor the piece of its own face across a side
 /// ([`by_the_piece_across_a_side`]), nor an edge of a face it lies on
 /// ([`by_an_edge_of_a_face_it_lies_on`]), nor a side that starts inside an edge
-/// ([`by_a_side_from_an_edge_it_starts_on`]) placed it: under
+/// ([`by_a_side_from_an_edge_it_starts_on`]), nor a face it shares a side with
+/// ([`SidesItShares::place_on_a_face_it_shares_a_side_with`]), nor the piece
+/// across a side that starts clear of every face
+/// ([`by_the_piece_across_a_side_clear_of_every_face`]) placed it: under
 /// [`INSIDE_A_PIECE`] when no point inside it was found, and under
 /// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be
 /// placed, or only a rung of [`rungs_towards_each_crossing`],
@@ -185,11 +213,10 @@ pub(crate) struct Chosen {
 /// [`between_the_middles_of_a_cone_pieces_sides`] was found.
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
 /// a point offered before the rungs was found inside the piece and the ray
-/// from a point tried met a face of a solid that nothing here can follow; no
-/// side, corner, plane, piece across or edge is tried then. The same refusal,
-/// naming the same kind of face, when only a rung was found inside and a rung's
-/// ray met such a face, once no side, corner, plane, piece across or edge has
-/// placed the piece.
+/// from a point tried met a face of a solid that nothing here can follow; none
+/// of those rules is tried then. The same refusal, naming the same kind of
+/// face, when only a rung was found inside and a rung's ray met such a face,
+/// once none of those rules has placed the piece.
 pub(crate) fn choose(
     model: &Model,
     scratch: &Scratch,
@@ -258,7 +285,16 @@ pub(crate) fn choose(
             let placed = placed
                 .or_else(|| in_plane.as_ref().and_then(by_the_piece_across))
                 .or_else(|| by_an_edge_of_a_face_it_lies_on(&solids, against, mine, piece))
-                .or_else(|| by_a_side_from_an_edge_it_starts_on(&solids, against, mine, piece));
+                .or_else(|| by_a_side_from_an_edge_it_starts_on(&solids, against, mine, piece))
+                .or_else(|| {
+                    by_a_shared_side
+                        .place_on_a_face_it_shares_a_side_with(index, against, policy, log)
+                })
+                .or_else(|| {
+                    by_the_piece_across_a_side_clear_of_every_face(
+                        model, scratch, &solids, against, index, policy, log,
+                    )
+                });
             placed.ok_or_else(|| match unfollowed {
                 Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
                 None => gave_up(unplaced, &corners.concat(), Measures::Length, log),
@@ -467,8 +503,8 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// piece across a side places the piece. The first says to look at the piece's
 /// trimming, the second says the piece is fine and a surface further down gave
 /// up — the lens in §216.4 is the second wearing the first's name. Neither is a
-/// refusal here, so that the caller can try the plane, the sides, the corners
-/// and the pieces across before it refuses.
+/// refusal here, so that the caller can try the plane, the sides, the corners,
+/// the pieces across and the edges before it refuses.
 ///
 /// **The rungs of [`rungs_towards_each_crossing`] come last**, after
 /// [`points_in_a_sliver_of_a_ball`] too, so a piece any earlier point placed
@@ -490,8 +526,9 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// both happen, for the reason that function gives.
 ///
 /// **A rung's ray that met such a face is named too, but by the caller**, and
-/// only once a side, a corner and a plane have each failed to place the piece:
-/// [`Search::OnlyRungsInside`] carries the face, so §365.6's order stands. Q1040
+/// only once every rule [`choose`] tries after the search has failed to place
+/// the piece: [`Search::OnlyRungsInside`] carries the face, so §365.6's order
+/// stands. Q1040
 /// found the piece that reaches it, the skin of a ball poking out of a half
 /// ball's rim, placed against a cut ball in its own group whose skin nobody
 /// follows (`tests/a_rung_whose_ray_meets_a_face_nobody_follows.rs`); it was
@@ -503,8 +540,8 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// when a point offered before the rungs was inside the piece, no point placed
 /// it, and one of them met that face. Such a point that none placed for any
 /// other reason is [`Search::NoPointInsidePlaced`], which the caller refuses
-/// under [`PLACED_AGAINST_EVERY_SOLID`] when no plane, side or corner places
-/// the piece.
+/// under [`PLACED_AGAINST_EVERY_SOLID`] when no rule [`choose`] tries after the
+/// search places the piece.
 #[expect(
     clippy::too_many_arguments,
     reason = "every one of these is a different thing the placement depends on, and bundling \
@@ -687,10 +724,9 @@ impl<'a> SidesItShares<'a> {
     ///
     /// **Nothing here refuses.** A naming that refuses, a plane agreement
     /// that cannot be told, or two shared sides that disagree each leave the
-    /// piece where the point search left it, and unless a corner, a plane or
-    /// the piece across a side places it the caller refuses under the name that
-    /// search ran out under,
-    /// as it did before this was tried.
+    /// piece where the point search left it, and unless a rule [`choose`]
+    /// tries after this places it the caller refuses under the name that
+    /// search ran out under, as it did before this was tried.
     fn place(
         &mut self,
         piece: usize,
@@ -698,17 +734,7 @@ impl<'a> SidesItShares<'a> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Option<Placement> {
-        if self.named.is_none() {
-            self.named = Some(
-                the_edge_each_side_of_every_piece_is(
-                    self.model,
-                    self.scratch,
-                    policy,
-                    &mut self.asked,
-                )
-                .ok(),
-            );
-        }
+        self.name_the_sides(policy);
         let named = self.named.as_ref().and_then(Option::as_ref)?;
         let mut trial = ProvenanceLog::new();
         let mut inside_one = false;
@@ -730,6 +756,21 @@ impl<'a> SidesItShares<'a> {
         self.asked.drain_into(log);
         trial.drain_into(log);
         Some(placement)
+    }
+
+    /// Name every side of every piece, the first time a piece needs it.
+    fn name_the_sides(&mut self, policy: &Policy) {
+        if self.named.is_none() {
+            self.named = Some(
+                the_edge_each_side_of_every_piece_is(
+                    self.model,
+                    self.scratch,
+                    policy,
+                    &mut self.asked,
+                )
+                .ok(),
+            );
+        }
     }
 
     /// Whether piece number `piece` is inside solid number `solid`, read off
@@ -786,6 +827,120 @@ impl<'a> SidesItShares<'a> {
                     return None;
                 }
                 found = Some(inside);
+            }
+        }
+        found
+    }
+
+    /// The rule after [`by_a_side_from_an_edge_it_starts_on`]: piece number
+    /// `piece` placed against the solids `against` by a side it shares with a
+    /// piece cut from a face of one of them on its own surface, with the same
+    /// partner and the same material side (`docs/decisions.md` §35.6, Q1537).
+    ///
+    /// **Why such a side puts a piece on the skin.** `P` is the piece, `S` the
+    /// solid, and `Q` a piece cut from a face `G` of `S`, on `P`'s surface. Both
+    /// have the side `s`, carried by that surface and one partner surface, and
+    /// each has its material on the same side of the partner. So near the
+    /// middle of `s` both are the part of the one surface on that side of the
+    /// partner, and `P`'s inside meets `Q`'s in an open set. `Q` lies in `G`,
+    /// which is on `S`'s skin. `P` was cut by every surface of `S`, so its inside
+    /// lies all inside `S`, all outside it, or all on its skin (§17.4), and so
+    /// it lies on the skin, on `G`, facing `G`'s way or the other, as
+    /// [`do_they_face_the_same_way`] says. Nothing asks where `s` runs, and
+    /// [`Self::is_inside`] passes this case over: it reads the side of a face
+    /// `P` crosses, and `P` here crosses none.
+    ///
+    /// Both partners are asked bit for bit and the two material sides compared,
+    /// as [`Self::is_inside`] asks them, since one name does not make one line.
+    /// A solid [`Self::is_inside`] places is placed so, inside one solid of the
+    /// group is inside, and lying on one or more is read as [`LyingOn`] reads
+    /// it. A solid neither rule places leaves the piece unplaced.
+    ///
+    /// The pieces this was built for are the two bands of two quarter bends
+    /// placed a quarter turn apart by a float turn: each bend's cap plane cuts
+    /// the other's wall a rounding round from that bend's own cap rim, and the
+    /// band between holds no `f64` point. Each band's own rim is the other
+    /// band's cut, one circle named once, started at two places
+    /// (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`).
+    fn place_on_a_face_it_shares_a_side_with(
+        &mut self,
+        piece: usize,
+        against: &[usize],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Option<Placement> {
+        self.name_the_sides(policy);
+        let named = self.named.as_ref().and_then(Option::as_ref)?;
+        let mut trial = ProvenanceLog::new();
+        let mut inside_one = false;
+        let mut each_one_placed = true;
+        let mut lying_on = LyingOn::default();
+        for &solid in against {
+            match self.is_inside(named, piece, solid, policy, &mut trial) {
+                Some(true) => inside_one = true,
+                Some(false) => (),
+                None => match self.lies_on(named, piece, solid, policy, &mut trial) {
+                    Some(same_way) => lying_on.add(solid, same_way),
+                    None => each_one_placed = false,
+                },
+            }
+        }
+        let placement = if inside_one {
+            Placement::Inside
+        } else if each_one_placed {
+            lying_on.placement()
+        } else {
+            return None;
+        };
+        self.asked.drain_into(log);
+        trial.drain_into(log);
+        Some(placement)
+    }
+
+    /// Whether piece number `piece` lies on solid number `solid` facing the
+    /// same way as the face it lies on, by
+    /// [`Self::place_on_a_face_it_shares_a_side_with`]'s rule, or `None` when
+    /// no side says or two say different things.
+    fn lies_on(
+        &self,
+        named: &[Vec<NamedSide>],
+        piece: usize,
+        solid: usize,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Option<bool> {
+        let mine = &self.scratch.pieces[piece];
+        let mut found = None;
+        for shared in &named[piece] {
+            let partner = name_of_surface_bits(&shared.side.carried_by[1]);
+            let theirs = named
+                .iter()
+                .zip(&self.scratch.cut_from)
+                .enumerate()
+                .filter(|(_, (_, from))| **from == solid)
+                .flat_map(|(other, (sides, _))| sides.iter().map(move |side| (other, side)))
+                .filter(|(_, side)| {
+                    side.edge == shared.edge
+                        && side.side.material_side == shared.side.material_side
+                        && name_of_surface_bits(&side.side.carried_by[1]) == partner
+                });
+            for (other, _) in theirs {
+                let cut_from = &self.scratch.pieces[other];
+                let face = self.solids[solid]
+                    .faces
+                    .iter()
+                    .find(|face| face.keys == cut_from.ancestors)
+                    .expect("a piece is cut from a face of the solid it is credited to");
+                let Some(same_way) =
+                    do_they_face_the_same_way(mine, outward_plane_of(mine), face, policy, log)
+                        .ok()?
+                else {
+                    continue;
+                };
+                if found.is_some_and(|already| already != same_way) {
+                    return None;
+                }
+                found = Some(same_way);
             }
         }
         found
@@ -1075,12 +1230,15 @@ fn the_planes_meeting_at_each_corner_of_a_solid(solid: &BakedSolid) -> Option<Ve
         .collect()
 }
 
-/// The third rule from the last: a flat piece that no point, side it shares,
-/// corner or plane placed takes the placement of the piece of its own face
-/// across one of its straight sides, where no plane of a solid it is placed
-/// against holds that side, unless that plane is the face's own. Where it
-/// places nothing, [`by_an_edge_of_a_face_it_lies_on`] is tried next, and
-/// [`by_a_side_from_an_edge_it_starts_on`] last.
+/// The rule after the sides, the corners and the plane: a flat piece that no
+/// point, side it shares, corner or plane placed takes the placement of the
+/// piece of its own face across one of its straight sides, where no plane of a
+/// solid it is placed against holds that side, unless that plane is the
+/// face's own. Where it places nothing, [`by_an_edge_of_a_face_it_lies_on`]
+/// is tried next, then
+/// [`by_a_side_from_an_edge_it_starts_on`],
+/// [`SidesItShares::place_on_a_face_it_shares_a_side_with`], and
+/// [`by_the_piece_across_a_side_clear_of_every_face`] last.
 ///
 /// **Why a neighbour can place a piece.** `P` and `P′` are pieces of one flat
 /// face `F` that share a side `s`, and `S` is a solid with only flat faces.
@@ -1413,10 +1571,11 @@ fn beside_one_edge(
     })
 }
 
-/// The last rule: a flat piece with a straight side along the plane of a flat
-/// face `G` of a solid, one end of that side strictly inside an edge `e` of
-/// `G`, placed against that solid by where that side runs from that end
-/// (`docs/decisions.md` §365.8, Q1608, Q1609).
+/// The rule after [`by_an_edge_of_a_face_it_lies_on`]: a flat piece with a
+/// straight side along the plane of a flat face `G` of a solid, one end of
+/// that side strictly inside an edge `e` of `G`, placed against that solid by
+/// where that side runs from that end (`docs/decisions.md` §365.8, Q1608,
+/// Q1609).
 ///
 /// **Why the start of a side can place a piece.** `P` is the piece, on a plane
 /// that is neither `G`'s nor that of `H`, the flat face across `e`, and `S` is
@@ -1617,6 +1776,170 @@ fn the_inner_side_of(face: &BakedFace, plane: Plane) -> Option<Decision> {
 /// Whether `one` and `other` are one plane, bit for bit, facing either way.
 fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
     one == other || one == other.reversed()
+}
+
+/// The last rule: a piece, flat or curved, that nothing before placed takes
+/// the placement of the piece of its own face across one of its sides, where
+/// the start of that side is clear of every face of every solid it is placed
+/// against, when the point search places that piece inside or outside
+/// (`docs/decisions.md` §35.6, Q1537).
+///
+/// **Why a neighbour can place a piece here.** `P` and `P′` are pieces of one
+/// face that share a side `s`, and `m` is where `s` starts. Each was cut by
+/// every surface of a solid `S`, so each lies all inside `S`, all outside it
+/// or all on its skin (§17.4). Every neighbourhood of `m` meets the inside of
+/// `P` and of `P′`. When `m` is off every face of `S`, it is off `S`'s skin,
+/// so a neighbourhood of it lies all inside `S` or all outside it, and the two
+/// are placed alike, neither of them on the skin. So a `P′` the search puts on
+/// the skin places nothing.
+///
+/// **`m` is a box, and every point of it has to be off every face.** A face
+/// whose surface puts the whole box strictly on one side is off it, asked as
+/// [`is_off_every_surface_of`] asks it. A flat face whose one wire is a
+/// meridian circle of the ring across it is off the box when the half-space
+/// naming that circle puts the whole box behind it
+/// ([`is_behind_the_meridian_disk`]). Otherwise the face is asked whether it
+/// holds the box ([`SolidView::what_this_face_holds`]), which takes the box as
+/// on its surface and answers [`OnAFace::NotHeld`] only when no point of it
+/// that is on the surface is on the face. Unlike
+/// [`by_the_piece_across_a_side`], this does not need `S`'s faces flat: it asks
+/// about one point and not about a whole side. What the faces and the search
+/// asked the policy goes into the log only when the piece is placed.
+///
+/// The pieces this was built for are the bands of two quarter bends placed
+/// half a turn apart by a float turn: each bend's cap plane cuts the other
+/// bend's wall a rounding round from that bend's own cap rim, half a ring from
+/// the first bend, and the band between holds no `f64` point. The cut starts
+/// on the other bend's cap plane and on its ring, half a ring from that cap.
+/// [`SolidView::what_this_face_holds`] reads the cap's rim against the ring
+/// first and is undecided there, at `side of torus`, and the half-space naming
+/// the rim puts the start off the cap
+/// (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`).
+fn by_the_piece_across_a_side_clear_of_every_face(
+    model: &Model,
+    scratch: &Scratch,
+    solids: &[&BakedSolid],
+    against: &[usize],
+    piece: usize,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Option<Placement> {
+    let theirs: Vec<SolidView<'_>> = against
+        .iter()
+        .map(|&index| model.solid_at(solids[index].key.slot_in(model.id())))
+        .collect();
+    scratch.pieces[piece]
+        .wires
+        .iter()
+        .flatten()
+        .find_map(|side| {
+            let across = &scratch.pieces[the_piece_across(scratch, piece, side)?];
+            let mut trial = ProvenanceLog::new();
+            let start = side.ends[0].point();
+            if !theirs
+                .iter()
+                .all(|&solid| is_clear_of_every_face_of(solid, start, policy, &mut trial))
+            {
+                return None;
+            }
+            let in_plane = match across.surface.as_plane() {
+                Some(flat) => Some(InPlane::of(flat)?),
+                None => None,
+            };
+            let candidates = candidate_points(across, &corners_of(across));
+            let search = place_the_piece(
+                model,
+                solids,
+                against,
+                &candidates,
+                across,
+                in_plane.as_ref(),
+                policy,
+                &mut trial,
+            );
+            let Ok(Search::Placed(placement @ (Placement::Inside | Placement::Outside))) = search
+            else {
+                return None;
+            };
+            trial.drain_into(log);
+            Some(placement)
+        })
+}
+
+/// Whether no face of `solid` holds any point of `point`'s box, each face
+/// asked first by its surface, as [`is_off_every_surface_of`] asks it, then,
+/// for a meridian disk, by the half-space naming its circle
+/// ([`is_behind_the_meridian_disk`]), and then by its trimming.
+fn is_clear_of_every_face_of(
+    solid: SolidView<'_>,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> bool {
+    solid.faces().all(|face| {
+        let surface = face.surface();
+        let side = surface.as_plane().map_or_else(
+            || side_of_surface(&surface, point),
+            |flat| side_of_a_flat_face(flat, point),
+        );
+        matches!(side, Decision::Pos | Decision::Neg)
+            || is_behind_the_meridian_disk(solid, face, point, policy, log)
+            || matches!(
+                solid.what_this_face_holds(face, point, policy, log),
+                Ok(OnAFace::NotHeld)
+            )
+    })
+}
+
+/// Whether `face` is the disk of one meridian circle of a ring, its only wire
+/// that circle and the face across it the ring, and the half-space naming that
+/// circle puts every point of `point`'s box behind it.
+///
+/// **Such a disk holds no point behind that half-space.** [`intersect`] names a
+/// meridian circle by a half-space only once it has proved the half-space's
+/// plane clears both circles a plane through the ring's axis cuts it in, so the
+/// circle, and the disk inside it, lie in front of that plane
+/// (`holds.rs`'s [`the_meridian_half_space_keeps`]). This asks no sign of the
+/// ring, which [`SolidView::what_this_face_holds`] reads first, so a box on
+/// the ring a long way from the disk is still put off it.
+///
+/// The circle is named where the face is stored, from the stored plane, ring
+/// and corner, and the half-space moved into place, as `holds.rs` names it,
+/// for its reason: a turn rounds the plane and the ring each on its own.
+fn is_behind_the_meridian_disk(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> bool {
+    let mut wires = face.wires();
+    let (Some(wire), None) = (wires.next(), wires.next()) else {
+        return false;
+    };
+    let Some(circle) = wire.coedges().next().filter(|_| wire.closes_on_one_edge()) else {
+        return false;
+    };
+    let Ok(Some(across)) = crate::holds::the_face_across(solid, face, circle.edge()) else {
+        return false;
+    };
+    let (flat, ring) = (face.stored_surface(), across.stored_surface());
+    if flat.as_plane().is_none()
+        || !matches!(ring, Surface::Torus(_))
+        || across.location() != face.location()
+    {
+        return false;
+    }
+    let corner = PredicatePoint::from(circle.start().stored_point().coordinates());
+    let Ok(Some(this_circle)) =
+        the_half_space_naming_the_meridian_circle_through(&flat, &ring, corner, policy, log)
+    else {
+        return false;
+    };
+    matches!(
+        the_meridian_half_space_keeps(&this_circle.transformed(&face.location()), point),
+        Ok(false)
+    )
 }
 
 /// Whether one piece of a face holds a point on its surface, or `None` when
@@ -2562,8 +2885,8 @@ fn settle_against_each(
             // whose box no face of the solid meets (§323). Since Q1392 let the
             // pieces of two bends placed a quarter turn round by a float turn be
             // cut, their fuses reach this arm, but each piece whose point
-            // reached it is placed by some other point or rule, and the fuse is
-            // refused at a later piece no point was found inside
+            // reached it is placed by some other point or rule, and since
+            // Q1537 each such fuse answers
             // (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`). A fuse
             // refused for want of this ray is what changing this waits for
             // (§35.6).
