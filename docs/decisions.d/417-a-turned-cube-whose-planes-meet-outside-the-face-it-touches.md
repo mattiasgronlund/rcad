@@ -540,3 +540,72 @@ edges.
 **What this leaves.** Queue row Q1615, the combs under a tolerant policy, is
 not answered by this fold, whose corners there have two meets each, and stays
 open. Nothing else.
+
+> **2026-10-11 note (Q1687): a tolerant fuse now also leaves out a shell
+> thinner than the wobble.** After the shells are grouped,
+> `Assembly::leave_out_each_shell_thinner_than_the_wobble` in
+> `fuse/assemble.rs` leaves out each shell whose faces are all flat, whose
+> edges all run straight between two different corners, and whose corners all
+> lie within `Policy::max_wobble` of the plane of one of its own faces. Its
+> edges are straight, so all of it lies between its corners, and none of it is
+> further from that plane than the furthest corner. Each such shell is asked of
+> `Policy::take_as_one_point` once, as the record *"a shell within the wobble
+> of one of its planes taken as flat"*, at `Level::Float`, whose inputs are its
+> corners and whose enclosure is the furthest any corner may be from the plane,
+> rounding and each corner's own box included. Under `Policy::certified()` it
+> returns before doing anything. It runs before the range check, so the range
+> no longer warns about a shell that is not in the answer.
+>
+> *The shape.* `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`, the
+> tipped cube less the block, under `Policy::tolerant(100.0)`, at `t = 0.075`,
+> `0.0885`, `0.1315` and `0.142`. The tipped cube's bottom face and its side
+> `x = 5` are stored with `0.0` as the `x` of their normals, so the edge where
+> they meet runs parallel to the floor, `1.1e−16` below it at `t = 0.075`. The
+> arrangement cuts the bottom, the side and the floor by the block's side
+> `x = 0`, and the three meets there all round to `(0, 5, 0)`, so `Corners::of`
+> joins them and the strip under the block closes into a tetrahedron touching
+> the rest of the answer at that one point. 417.7's fold does not take it: the
+> bottom, the side and the floor all have `0.0` as the `x` of their normals, so
+> the three have no meet, and the fold finds no tip. The trace is the first
+> relay's, with prints in `Corners::of` and `Scratch::split_both_groups` since
+> taken out.
+>
+> *Before and after.* Before, the first three tilts answered two solids, the
+> tetrahedron of `8.2e−32` (`3.3e−31` at `0.1315`) and the body, with the
+> range check's one record, and `t = 0.142` was refused
+> `VolumeIsNotPositive { volume: 0.0 }`. After, each answers one solid of 9
+> faces and 14 corners that validates, `721.8754800645003` at `t = 0.075`, and
+> logs one record of this fold and no range record, of `5.4e−15` to `7.1e−15`.
+> At `t = 0.142` the shell left out has all four corners on the floor itself,
+> `z = 0`, which is why it measured `0.0`. The same cube `2⁻³⁰` higher is one
+> solid of 9 faces, `721.8754800912822`, and `2⁻³⁰` lower one of 11 faces,
+> `721.8754800377184`. Both are one solid, so two is wrong, and the volume now
+> answered lies between theirs.
+> `the_tipped_cube_less_the_block_is_one_solid_where_its_corner_rounds_below_the_floor_tolerant`
+> pins the four. Measured with a probe at the end of that file, taken out
+> before the tip.
+>
+> *Q1686's tilts*, `t = 0.024`, `0.0955`, `0.1015` and `0.154`, measured with
+> the same probe and not pinned: the tipped cube less the block, which the row
+> names as refused `VolumeIsNotPositive`, now answers one solid with one record
+> of this fold at each. The union and the intersection are still refused
+> `OuterWireWindsAgainstTheNormal` both ways round, and the block less the
+> tipped cube answers one solid with the range record.
+>
+> *What it moved outside the file.* `two_skewed_combs_touching_along_one_line.rs`:
+> the combs' intersection under `Policy::tolerant(25.0)`, either comb first,
+> is the prism of `3.08e−32` alone, and was refused
+> `VolumeIsNotPositive { volume: 0.0 }`. It now answers no solid, which
+> validates, with one record of this fold of `7.9e−15`. Exactly, the two combs
+> share a line and no space, so no solid is their intersection. Their union and
+> both differences, and every certified fuse of them, did not move.
+> `under_a_tolerant_policy_the_union_answers_and_the_rest_are_refused_by_name`
+> pins the old refusal and fails; it lies outside Q1687's write set, so it was
+> reported and not moved. Every other test of `rcad-topo` passed (`mise exec --
+> just t -p rcad-topo --no-fail-fast`, 1951 of 1952), as did every other
+> crate's and the slow tier.
+>
+> *Considered and not taken.* Folding the strip's two other corners into the
+> one below the floor, 417.7's wide rule of `6ffbb172`: reasoned, not run, to
+> give the block less the tipped cube an edge with four faces along it, as
+> 417.8 (a) records the wide rule doing.
