@@ -617,7 +617,12 @@ open. Nothing else.
 > names as refused `VolumeIsNotPositive`, now answers one solid with one record
 > of this fold at each. The union and the intersection are still refused
 > `OuterWireWindsAgainstTheNormal` both ways round, and the block less the
-> tipped cube answers one solid with the range record.
+> tipped cube answers one solid with the range record. Q1687's second lane ran
+> them again with `probe_q1687_b`, committed in `5f97335e` and taken out in
+> the commit after it, and got the same: each of the eight differences
+> validates and is one solid within `8e−13` of `1000` less what the two share
+> worked by hand, `741.0000015943825` against `741.0000015943831` for the
+> tipped cube less the block at `t = 0.024`.
 >
 > *What it moved outside the file.* `two_skewed_combs_touching_along_one_line.rs`:
 > the combs' intersection under `Policy::tolerant(25.0)`, either comb first,
@@ -634,7 +639,9 @@ open. Nothing else.
 > `under_a_tolerant_policy_the_union_answers_the_intersection_is_nothing_and_each_difference_is_refused`,
 > since the intersection now answers: no solid, the model validating under the
 > same policy, and a log of that one record, `7.90959966678835e−15`, over the
-> prism's six corners, all at `y = 2`.
+> prism's six corners, all at `y = 2`. With it moved, every test of
+> `rcad-topo` passes (`mise exec -- just t -p rcad-topo --no-fail-fast`, 1952
+> passed).
 >
 > *Considered and not taken.* Folding the strip's two other corners into the
 > one below the floor, 417.7's wide rule of `6ffbb172`: reasoned, not run, to
