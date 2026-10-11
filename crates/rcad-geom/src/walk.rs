@@ -1119,6 +1119,18 @@ fn the_corner_a_closed_run_starts_at(run: &NamedRun) -> Option<PredicatePoint> {
     (from == to && from != nowhere_in_particular()).then_some(from)
 }
 
+/// The two corners a run that is one piece of a crossing runs between, when it
+/// names two places and they are not one.
+///
+/// `None` for a closed run, a whole curve, and a run with one end that names
+/// nothing, which are all walked round a whole loop as before.
+fn the_two_corners_of_an_open_run(run: &NamedRun) -> Option<[PredicatePoint; 2]> {
+    let [from, to] = run.ends();
+    let is_a_piece = matches!(run.run(), EdgeRun::PartOfWhereItCrosses { .. });
+    (is_a_piece && from != to && from != nowhere_in_particular() && to != nowhere_in_particular())
+        .then_some([from, to])
+}
+
 /// The place on the loop this run names that the marcher starts from, settled
 /// onto both surfaces.
 ///
@@ -1134,11 +1146,20 @@ fn the_corner_a_closed_run_starts_at(run: &NamedRun) -> Option<PredicatePoint> {
 /// first seed walked a ball `0.1` off a pipe's axis with its corner at
 /// `z = −3.9` round the loop at `z = +3.9` (Q1262).
 ///
+/// **A run between two corners starts on its corners' loop the same way**, and
+/// its half-spaces are not asked: they pick which of the two arcs between the
+/// corners the run is, not which loop. A wall through both axes of a thin bar
+/// through a fat one holds the seed of both loops, which sit on the wall, and
+/// was refused for it (Q1659). Both corners are asked, and a run whose two
+/// corners are on different seeds' sides is refused: two loops would put them
+/// on two loops, and one loop that reaches across the flat surface between
+/// them is not told from two here.
+///
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces pick
-/// both loops or neither, and whatever
-/// [`the_seed_on_the_loop_a_corner_is_on`] refuses.
+/// both loops or neither, when a run's two corners are on different seeds'
+/// sides, and whatever [`the_seed_on_the_loop_a_corner_is_on`] refuses.
 fn the_seed_this_run_is_picked_up_at(
     run: &NamedRun,
     pair: &[Surface; 2],
@@ -1155,6 +1176,17 @@ fn the_seed_this_run_is_picked_up_at(
         | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
     };
 
+    if let Some([from, to]) = the_two_corners_of_an_open_run(run) {
+        let settled = [
+            settled_with_a_bound(surfaces, seeds[0])?,
+            settled_with_a_bound(surfaces, seeds[1])?,
+        ];
+        let seed = the_seed_on_the_loop_a_corner_is_on(from, held_apart_by, settled, policy, log)?;
+        if the_seed_on_the_loop_a_corner_is_on(to, held_apart_by, settled, policy, log)? != seed {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        }
+        return Ok(seed);
+    }
     if picked_by.is_empty() {
         let settled = [
             settled_with_a_bound(surfaces, seeds[0])?,
