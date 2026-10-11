@@ -136,31 +136,11 @@ fn the_block_united_with_the_turned_cube_is_refused_certified() {
 }
 
 #[test]
-fn the_block_united_with_the_turned_cube_is_refused_tolerant() {
-    assert_refused(
-        Rule::Union,
-        Order::BlockFirst,
-        &tolerant(),
-        Refused::AHoleWindingWithItsOutline,
-    );
-}
-
-#[test]
 fn the_turned_cube_united_with_the_block_is_refused_certified() {
     assert_refused(
         Rule::Union,
         Order::TurnedFirst,
         &certified(),
-        Refused::AHoleWindingWithItsOutline,
-    );
-}
-
-#[test]
-fn the_turned_cube_united_with_the_block_is_refused_tolerant() {
-    assert_refused(
-        Rule::Union,
-        Order::TurnedFirst,
-        &tolerant(),
         Refused::AHoleWindingWithItsOutline,
     );
 }
@@ -175,23 +155,14 @@ fn the_block_less_the_turned_cube_is_refused_certified() {
     );
 }
 
-#[test]
-fn the_block_less_the_turned_cube_is_refused_tolerant() {
-    assert_refused(
-        Rule::Difference,
-        Order::BlockFirst,
-        &tolerant(),
-        Refused::AHoleWindingWithItsOutline,
-    );
-}
-
 /// The answer is the tip outside the face, a rounding across beside corners at
 /// 10, and it is refused for the range.
 ///
 /// **Q1614 moved it.** Until then the fuse nested the answer's shells before it
 /// asked the range, and the tip, its corners rounded, measured as a shell
-/// enclosing less than nothing, `VolumeIsNotPositive`, which is still what the
-/// tolerant fuse is refused for (`docs/decisions.md` §87.3).
+/// enclosing less than nothing, `VolumeIsNotPositive`, which is what the
+/// tolerant fuse was refused for until Q1527's fold (`docs/decisions.md` §87.3,
+/// §417.7).
 #[test]
 fn the_turned_cube_less_the_block_is_refused_certified() {
     assert_refused(
@@ -199,16 +170,6 @@ fn the_turned_cube_less_the_block_is_refused_certified() {
         Order::TurnedFirst,
         &certified(),
         Refused::TooWideARange,
-    );
-}
-
-#[test]
-fn the_turned_cube_less_the_block_is_refused_tolerant() {
-    assert_refused(
-        Rule::Difference,
-        Order::TurnedFirst,
-        &tolerant(),
-        Refused::NoSpaceInside,
     );
 }
 
@@ -223,16 +184,6 @@ fn the_block_and_the_turned_cube_intersected_are_refused_certified() {
 }
 
 #[test]
-fn the_block_and_the_turned_cube_intersected_are_refused_tolerant() {
-    assert_refused(
-        Rule::Intersection,
-        Order::BlockFirst,
-        &tolerant(),
-        Refused::AnOutlineWindingAgainstItsFace,
-    );
-}
-
-#[test]
 fn the_turned_cube_and_the_block_intersected_are_refused_certified() {
     assert_refused(
         Rule::Intersection,
@@ -242,21 +193,17 @@ fn the_turned_cube_and_the_block_intersected_are_refused_certified() {
     );
 }
 
-#[test]
-fn the_turned_cube_and_the_block_intersected_are_refused_tolerant() {
-    assert_refused(
-        Rule::Intersection,
-        Order::TurnedFirst,
-        &tolerant(),
-        Refused::AnOutlineWindingAgainstItsFace,
-    );
-}
-
 /// Under `Policy::tolerant(100.0)` the three crossings, each a rounding from
 /// the turned cube's corner along one of its edges, are taken as that corner
 /// (`docs/decisions.md` §417.7), and every fuse answers as if the corner were
 /// on the face: the turn above at `(0, 3, 3)`, and the first of Q1208's random
 /// turns, which was refused as a hole winding with its outline.
+///
+/// Until that fold the six fuses at `(0, 3, 3)` were refused under this policy
+/// too: the union both ways round and the block less the turned cube as a hole
+/// winding with its outline, the intersection both ways round as an outline
+/// winding against its face, and the turned cube less the block as a shell
+/// enclosing less than nothing.
 #[test]
 fn under_a_tolerant_policy_the_tip_folds_into_one_corner_and_every_fuse_answers() {
     every_fuse_answers_and_the_volumes_agree(&the_turn(), ON_THE_FACE, &tolerant());
@@ -405,146 +352,51 @@ fn random_turns_whose_planes_meet_inside_the_block_answer() {
 
 /// The same first 60 of Q1208's random turns, now each whose turned cube's
 /// three planes at the corner meet outside the block, under
-/// `Policy::tolerant(100.0)`: none of the 31 is refused for want of a point
-/// inside a piece of a face any more (Q1353). The triangle the crossings cut
-/// out of the block's face is inside the turned cube, and `select.rs`'s
-/// `by_a_plane` now places it there: every corner of it is on or behind every
-/// plane of the turned cube, and strictly behind one. 18 answer the union and
-/// the intersection, and the two hold both cubes between them; turns 47 and 48
-/// were refused `Undecidable` on the triangle before, and turns 8, 21 and 49
+/// `Policy::tolerant(100.0)`: every one of the 31 answers every rule both ways
+/// round, and the volumes agree as [`every_fuse_answers_and_the_volumes_agree`]
+/// asks. None is refused by name any more, so the name says more than is left.
+///
+/// Before Q1527's fold (`docs/decisions.md` §417.7) 12 were refused their
+/// union with the block first: turns 1, 5, 25, 29, 34, 51 and 57 as a hole
+/// winding with its outline, 14, 18 and 39 as an outline winding against its
+/// face, and 9 and 55 as an edge with four faces. Turn 13 answered its union
+/// and was refused its intersection as an outline winding against its face.
+/// Before that, turns 47 and 48 were refused `Undecidable` on the triangle the
+/// crossings cut out of the block's face until Q1353, and turns 8, 21 and 49
 /// `NoSpaceInside` until Q1506's rule left out the flat ring another plane
 /// walks back.
-///
-/// Turn 13 answers its union and is refused its intersection, as
-/// `ONLY_THE_UNION_ANSWERS` says; its union was refused as a hole winding with
-/// its outline until Q1506. With no intersection to hold it to, its union is
-/// held to the turned cube less the block, which answers: that is one cube
-/// less what they share, so the union is `2000 − (1000 −` it`)`, within the
-/// rounding the other checks allow. The other 12 are refused their union by
-/// name, as `REFUSED` says, once the answer is written with its corners
-/// rounded; what is left to reach them is the second half of
-/// `docs/decisions.md` §417.
 #[test]
 fn random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant() {
-    const REFUSED: [(usize, Refused); 12] = [
-        (1, Refused::AHoleWindingWithItsOutline),
-        (5, Refused::AHoleWindingWithItsOutline),
-        (9, Refused::AnEdgeWithFourFaces),
-        (14, Refused::AnOutlineWindingAgainstItsFace),
-        (18, Refused::AnOutlineWindingAgainstItsFace),
-        (25, Refused::AHoleWindingWithItsOutline),
-        (29, Refused::AHoleWindingWithItsOutline),
-        (34, Refused::AHoleWindingWithItsOutline),
-        (39, Refused::AnOutlineWindingAgainstItsFace),
-        (51, Refused::AHoleWindingWithItsOutline),
-        (55, Refused::AnEdgeWithFourFaces),
-        (57, Refused::AHoleWindingWithItsOutline),
-    ];
-    const ONLY_THE_UNION_ANSWERS: [(usize, Refused); 1] =
-        [(13, Refused::AnOutlineWindingAgainstItsFace)];
-    let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
     let mut outside = 0;
-    let mut both_answer = 0;
-    let mut only_the_union_answers = 0;
-    for (index, (turn, at)) in q1208s_random_turns(60).into_iter().enumerate() {
+    for (turn, at) in q1208s_random_turns(60) {
         if where_the_planes_at_the_corner_meet(&turn, at) != Decision::Neg {
             continue;
         }
         outside += 1;
-        let number = index + 1;
-        let asked = format!("turn {number}");
-        if let Some(&(_, refused)) = REFUSED.iter().find(|&&(which, _)| which == number) {
-            let mut model = a_model();
-            let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
-            refused.assert_is(
-                fuse(
-                    &mut model,
-                    pair,
-                    Rule::Union,
-                    Order::BlockFirst,
-                    &tolerant(),
-                ),
-                &asked,
-            );
-            continue;
-        }
-        let union = volume_of_a_fuse(
-            &turn,
-            at,
-            Rule::Union,
-            Order::BlockFirst,
-            &tolerant(),
-            &asked,
-        );
-        if let Some(&(_, refused)) = ONLY_THE_UNION_ANSWERS
-            .iter()
-            .find(|&&(which, _)| which == number)
-        {
-            only_the_union_answers += 1;
-            let mut model = a_model();
-            let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
-            refused.assert_is(
-                fuse(
-                    &mut model,
-                    pair,
-                    Rule::Intersection,
-                    Order::BlockFirst,
-                    &tolerant(),
-                ),
-                &format!("{asked}, the intersection"),
-            );
-            let turned_less_the_block = volume_of_a_fuse(
-                &turn,
-                at,
-                Rule::Difference,
-                Order::TurnedFirst,
-                &tolerant(),
-                &asked,
-            );
-            let shared = 1000.0 - turned_less_the_block;
-            assert!(
-                (union - (2000.0 - shared)).abs() <= allowed,
-                "{asked}: the union is {union}, and the turned cube less the block \
-                 {turned_less_the_block} says {}",
-                2000.0 - shared
-            );
-            continue;
-        }
-        both_answer += 1;
-        let intersection = volume_of_a_fuse(
-            &turn,
-            at,
-            Rule::Intersection,
-            Order::BlockFirst,
-            &tolerant(),
-            &asked,
-        );
-        assert!(
-            (union + intersection - 2000.0).abs() <= allowed,
-            "{asked}: the union {union} and the intersection {intersection} hold {} between \
-             them, not 2000",
-            union + intersection
-        );
+        every_fuse_answers_and_the_volumes_agree(&turn, at, &tolerant());
     }
     assert_eq!(outside, 31, "how many of the 60 meet outside the block");
-    assert_eq!(
-        (both_answer, only_the_union_answers),
-        (18, ONLY_THE_UNION_ANSWERS.len()),
-        "how many of the 31 answer both rules, and how many only the union"
-    );
 }
 
 /// The turned cube less the block, over the 199 of Q1208's 400 turns whose
 /// planes meet outside the block. Under `Policy::certified()` it answers 74
-/// and is refused for the range in the other 125. Under
-/// `Policy::tolerant(100.0)`, where the range only warns, it answers 124 and is
-/// refused 60 as a shell enclosing nothing and 15 as an outline winding against
-/// its face. The answers are counted, not measured.
+/// and is refused for the range in the other 125; those answers are counted,
+/// not measured. Under `Policy::tolerant(100.0)`, where the range only warns,
+/// it answers all 199, each as many solids as with the turned cube `2⁻³⁰`
+/// further in and each solid the volume of one there.
+///
+/// **Q1527's fold moved the tolerant 199** (`docs/decisions.md` §417.7,
+/// §417.8). Before it the tolerant fuse answered 124 and was refused 60 as a
+/// shell enclosing nothing and 15 as an outline winding against its face, and
+/// 50 of the 124 were wrong: each held the tip outside the face as a solid of
+/// its own, of `4e−48` to `4e−46`, a solid the cube moved further in does not
+/// have, 41 as two solids where there is one and 9 as three where there are
+/// two.
 ///
 /// **Q1614 moved the certified 125.** Until then the fuse nested the answer's
 /// shells before it asked the range, and 60 of them were refused as a shell
-/// enclosing nothing, as many as the tolerant fuse still is
-/// (`docs/decisions.md` §87.3, §417.3). The 74 answers did not move.
+/// enclosing nothing (`docs/decisions.md` §87.3, §417.3). The 74 answers did
+/// not move.
 #[test]
 fn the_turned_cube_less_the_block_over_the_199_turns_whose_planes_meet_outside() {
     let outside: Vec<_> = q1208s_random_turns(400)
@@ -552,42 +404,49 @@ fn the_turned_cube_less_the_block_over_the_199_turns_whose_planes_meet_outside()
         .filter(|&(turn, at)| where_the_planes_at_the_corner_meet(&turn, at) == Decision::Neg)
         .collect();
     assert_eq!(outside.len(), 199, "how many of the 400 meet outside");
-    let certified_split = [
+    let mut certified_split: BTreeMap<String, usize> = BTreeMap::new();
+    for &(turn, at) in &outside {
+        let mut model = a_model();
+        let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
+        let answer = fuse(
+            &mut model,
+            pair,
+            Rule::Difference,
+            Order::TurnedFirst,
+            &certified(),
+        );
+        *certified_split
+            .entry(what_a_fuse_gives(answer))
+            .or_default() += 1;
+    }
+    let expected: BTreeMap<String, usize> = [
         ("one solid", 66),
         ("two solids", 6),
         ("three solids", 2),
         ("DynamicRangeTooWide", 125),
-    ];
-    let tolerant_split = [
-        ("one solid", 66),
-        ("two solids", 47),
-        ("three solids", 11),
-        ("OuterWireWindsAgainstTheNormal", 15),
-        ("VolumeIsNotPositive", 60),
-    ];
-    for (policy, expected) in [
-        (certified(), certified_split.as_slice()),
-        (tolerant(), tolerant_split.as_slice()),
-    ] {
-        let mut split: BTreeMap<String, usize> = BTreeMap::new();
-        for &(turn, at) in &outside {
-            let mut model = a_model();
-            let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
-            let answer = fuse(
-                &mut model,
-                pair,
-                Rule::Difference,
-                Order::TurnedFirst,
-                &policy,
-            );
-            *split.entry(what_a_fuse_gives(answer)).or_default() += 1;
-        }
-        let expected: BTreeMap<String, usize> = expected
-            .iter()
-            .map(|&(what, count)| (what.to_owned(), count))
-            .collect();
-        assert_eq!(split, expected, "{policy:?}");
+    ]
+    .into_iter()
+    .map(|(what, count)| (what.to_owned(), count))
+    .collect();
+    assert_eq!(certified_split, expected, "certified");
+    let mut how_many_solids: BTreeMap<usize, usize> = BTreeMap::new();
+    for (index, &(turn, at)) in outside.iter().enumerate() {
+        let solids = each_solid_agrees_with_the_turned_cube_further_in(
+            &|model, further_in| {
+                a_block_and_a_cube_turned(model, &turn, [at[0] + further_in, at[1], at[2]])
+            },
+            Rule::Difference,
+            Order::TurnedFirst,
+            &tolerant(),
+            &format!("the {}th turn that meets outside", index + 1),
+        );
+        *how_many_solids.entry(solids.len()).or_default() += 1;
     }
+    assert_eq!(
+        how_many_solids,
+        BTreeMap::from([(1, 168), (2, 29), (3, 2)]),
+        "how many solids each tolerant answer is"
+    );
 }
 
 fn what_a_fuse_gives(answer: Result<Vec<SolidKey>, Error>) -> String {
@@ -601,44 +460,47 @@ fn what_a_fuse_gives(answer: Result<Vec<SolidKey>, Error>) -> String {
         Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. })) => {
             "DynamicRangeTooWide".to_owned()
         }
-        Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. })) => {
-            "VolumeIsNotPositive".to_owned()
-        }
-        Err(Error::TheFuseWroteABrokenAnswer {
-            broken: Invalid::OuterWireWindsAgainstTheNormal,
-        }) => "OuterWireWindsAgainstTheNormal".to_owned(),
         Err(other) => format!("{other:?}"),
     }
 }
 
 /// Every rule both ways round answers one or more solids that validate, and
-/// their volumes agree with each other and with the turned cube moved a
-/// little further in.
+/// their volumes agree with each other and, solid by solid, with the turned
+/// cube moved a little further in.
+fn every_fuse_answers_and_the_volumes_agree(turn: &Isometry, at: [f64; 3], policy: &Policy) {
+    every_fuse_of_a_pair_answers_and_the_volumes_agree(
+        &|model, further_in| {
+            a_block_and_a_cube_turned(model, turn, [at[0] + further_in, at[1], at[2]])
+        },
+        policy,
+        &format!("{at:?}"),
+    );
+}
+
+/// [`every_fuse_answers_and_the_volumes_agree`] for any block and turned cube,
+/// made by `pair` with the turned cube moved `further_in` along `+x`.
 ///
 /// The union is both cubes less what they share, so with the intersection it
 /// holds 2000; either difference is one cube less what they share, `1000`
-/// less the intersection. Those hold whatever the intersection is, so the
-/// intersection is held to the one with the turned cube moved `2⁻³⁰` further
-/// in, where nothing is a rounding from anything else. Moving a solid by `δ`
-/// changes what it shares with another by at most `δ` times its shadow, and a
-/// cube of side 10 casts at most `100·√3`. The rounding allowed is
+/// less the intersection. Those hold whatever the intersection is, so each
+/// answer is also held to the same rule's with the turned cube moved a little
+/// further in ([`each_solid_agrees_with_the_turned_cube_further_in`]). The
+/// rounding allowed is
 /// [`with_the_corner_a_thousandth_inside_the_union_and_intersection_hold_both_cubes`]'s.
-fn every_fuse_answers_and_the_volumes_agree(turn: &Isometry, at: [f64; 3], policy: &Policy) {
+fn every_fuse_of_a_pair_answers_and_the_volumes_agree(
+    pair: &dyn Fn(&mut Model, f64) -> [SolidKey; 2],
+    policy: &Policy,
+    asked: &str,
+) {
     let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
-    let further_in = 2.0_f64.powi(-30);
-    let reference = volume_of_a_fuse(
-        turn,
-        [at[0] + further_in, at[1], at[2]],
-        Rule::Intersection,
-        Order::BlockFirst,
-        policy,
-        &format!("{further_in} further in, {policy:?}"),
-    );
     for order in [Order::BlockFirst, Order::TurnedFirst] {
-        let asked = format!("{at:?}, {order:?}, {policy:?}");
-        let union = volume_of_a_fuse(turn, at, Rule::Union, order, policy, &asked);
-        let intersection = volume_of_a_fuse(turn, at, Rule::Intersection, order, policy, &asked);
-        let difference = volume_of_a_fuse(turn, at, Rule::Difference, order, policy, &asked);
+        let asked = format!("{asked}, {order:?}, {policy:?}");
+        let [union, intersection, difference] = [Rule::Union, Rule::Intersection, Rule::Difference]
+            .map(|rule| {
+                each_solid_agrees_with_the_turned_cube_further_in(pair, rule, order, policy, &asked)
+                    .iter()
+                    .sum::<f64>()
+            });
         assert!(
             (union + intersection - 2000.0).abs() <= allowed,
             "{asked}: the union {union} and the intersection {intersection} hold {} between \
@@ -651,12 +513,48 @@ fn every_fuse_answers_and_the_volumes_agree(turn: &Isometry, at: [f64; 3], polic
              between them, not 1000",
             difference + intersection
         );
-        assert!(
-            (intersection - reference).abs() <= further_in * 100.0 * 3.0_f64.sqrt() + allowed,
-            "{asked}: the intersection is {intersection}, and {reference} with the turned cube \
-             {further_in} further in"
-        );
     }
+}
+
+/// The volume of each solid one fuse answers, smallest first, having checked
+/// that the same fuse with the turned cube moved `2⁻³⁰` further in, where
+/// nothing is a rounding from anything else, answers as many solids, each the
+/// volume of one here.
+///
+/// Moving a solid by `δ` changes what it shares with any region by at most `δ`
+/// times its shadow, and a cube of side 10 casts at most `100·√3`, so each
+/// solid moves by no more than that and the rounding
+/// [`with_the_corner_a_thousandth_inside_the_union_and_intersection_hold_both_cubes`]
+/// allows. A solid a rounding thin, the tip outside the face left as a shell of
+/// its own, is one solid too many, though it moves no sum.
+fn each_solid_agrees_with_the_turned_cube_further_in(
+    pair: &dyn Fn(&mut Model, f64) -> [SolidKey; 2],
+    rule: Rule,
+    order: Order,
+    policy: &Policy,
+    asked: &str,
+) -> Vec<f64> {
+    let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
+    let further_in = 2.0_f64.powi(-30);
+    let here = volumes_of_each_solid(pair, 0.0, rule, order, policy, asked);
+    let reference = volumes_of_each_solid(
+        pair,
+        further_in,
+        rule,
+        order,
+        policy,
+        &format!("{asked}, {further_in} further in"),
+    );
+    let agree = here.len() == reference.len()
+        && here.iter().zip(&reference).all(|(solid, moved)| {
+            (solid - moved).abs() <= further_in * 100.0 * 3.0_f64.sqrt() + allowed
+        });
+    assert!(
+        agree,
+        "{asked}, {rule:?}: the solids hold {here:?}, and {reference:?} with the turned cube \
+         {further_in} further in"
+    );
+    here
 }
 
 /// Which side of the block's `x = 0` face the turned cube's three planes at
@@ -686,106 +584,72 @@ fn where_the_planes_at_the_corner_meet(turn: &Isometry, at: [f64; 3]) -> Decisio
 /// eight corners as stored, with the one at `(2.44e−149, 5, 7.63e−5)` put at
 /// `x = 0`, and its six planes through `Plane::from_coefficients`, which
 /// moves four of them by an ulp. Its three planes at that corner meet at
-/// `x = −6.8e−17`. Every fuse is refused just as the turned cube above is.
+/// `x = −6.8e−17`. Every certified fuse is refused just as the turned cube
+/// above is, and every tolerant one answers as the turned cube above does,
+/// the volumes agreeing as [`every_fuse_answers_and_the_volumes_agree`] asks.
 ///
-/// **Q1614 moved the certified turned cube less the block** from a shell
-/// enclosing less than nothing to the range, as it moved the turned cube's
-/// above.
+/// **Q1527's fold moved the tolerant six** (`docs/decisions.md` §417.7). Until
+/// then the union both ways round and the block less the turned cube were
+/// refused as the certified ones are, the turned cube less the block as a
+/// shell enclosing less than nothing, and the intersection both ways round as
+/// an outline winding against its face. **Q1614 moved the
+/// certified turned cube less the block** from a shell enclosing less than
+/// nothing to the range, as it moved the turned cube's above.
 ///
 /// The same cube made by turning `add_cube(10.0)` with the turn its corners
 /// say, about `(0.0381, 0.0379, −1.098)` by 0.582, is not this shape: its
 /// planes differ in the last bits, and none of its fuses panicked.
 #[test]
-fn the_cube_of_q1208s_crash_is_refused_by_name() {
+fn the_cube_of_q1208s_crash_is_refused_by_name_certified_and_answers_tolerant() {
     let table = [
         (
             Rule::Union,
             Order::BlockFirst,
-            true,
-            Refused::AHoleWindingWithItsOutline,
-        ),
-        (
-            Rule::Union,
-            Order::BlockFirst,
-            false,
             Refused::AHoleWindingWithItsOutline,
         ),
         (
             Rule::Union,
             Order::TurnedFirst,
-            true,
-            Refused::AHoleWindingWithItsOutline,
-        ),
-        (
-            Rule::Union,
-            Order::TurnedFirst,
-            false,
             Refused::AHoleWindingWithItsOutline,
         ),
         (
             Rule::Difference,
             Order::BlockFirst,
-            true,
             Refused::AHoleWindingWithItsOutline,
         ),
-        (
-            Rule::Difference,
-            Order::BlockFirst,
-            false,
-            Refused::AHoleWindingWithItsOutline,
-        ),
-        (
-            Rule::Difference,
-            Order::TurnedFirst,
-            true,
-            Refused::TooWideARange,
-        ),
-        (
-            Rule::Difference,
-            Order::TurnedFirst,
-            false,
-            Refused::NoSpaceInside,
-        ),
+        (Rule::Difference, Order::TurnedFirst, Refused::TooWideARange),
         (
             Rule::Intersection,
             Order::BlockFirst,
-            true,
-            Refused::TooWideARange,
-        ),
-        (
-            Rule::Intersection,
-            Order::BlockFirst,
-            false,
-            Refused::AnOutlineWindingAgainstItsFace,
-        ),
-        (
-            Rule::Intersection,
-            Order::TurnedFirst,
-            true,
             Refused::TooWideARange,
         ),
         (
             Rule::Intersection,
             Order::TurnedFirst,
-            false,
-            Refused::AnOutlineWindingAgainstItsFace,
+            Refused::TooWideARange,
         ),
     ];
-    for (rule, order, is_certified, refused) in table {
-        let policy = if is_certified {
-            certified()
-        } else {
-            tolerant()
-        };
+    for (rule, order, refused) in table {
         let mut model = a_model();
         let block = a_block(&mut model);
         let turned = the_cube_of_q1208s_crash(&mut model);
-        let asked = format!("Q1208's cube, {rule:?}, {order:?}, {policy:?}");
+        let asked = format!("Q1208's cube, {rule:?}, {order:?}, certified");
         refused.assert_is(
-            fuse(&mut model, [block, turned], rule, order, &policy),
+            fuse(&mut model, [block, turned], rule, order, &certified()),
             &asked,
         );
     }
+    every_fuse_of_a_pair_answers_and_the_volumes_agree(
+        &|model, further_in| {
+            let block = a_block(model);
+            let turned = the_cube_of_q1208s_crash(model);
+            let shift = Isometry::translation(Vector::new(further_in, 0.0, 0.0)).expect("a shift");
+            model.place_solid(turned, &shift).expect("a placement");
+            [block, turned]
+        },
+        &tolerant(),
+        "Q1208's cube",
+    );
 }
 
 /// The 30 of Q1208's 400 random turns whose union panicked.
@@ -795,11 +659,15 @@ fn the_cube_of_q1208s_crash_is_refused_by_name() {
 /// `(0, y, z)` with `y` and `z` in 1 to 9. Of 400, each policy refused 370 by
 /// name and answered or panicked on the rest; the 30 here panicked under both.
 /// The whole sweep takes eight seconds, so only these are kept. Each is now
-/// refused by name under both policies, and with the corner a thousandth
-/// inside, each answers one solid that validates, so the turned cube is sound
-/// and the refusal is about where its corner is.
+/// refused by name under `Policy::certified()`, and with the corner a
+/// thousandth inside, each answers one solid that validates, so the turned
+/// cube is sound and the refusal is about where its corner is. Under
+/// `Policy::tolerant(100.0)` each union with the block first answers since
+/// Q1527's fold (`docs/decisions.md` §417.7), and is as many solids, of the
+/// same volumes, as with the turned cube `2⁻³⁰` further in; until the fold it
+/// was refused as the certified one is.
 #[test]
-fn thirty_random_turns_that_panicked_are_refused_by_name() {
+fn thirty_random_turns_that_panicked_are_refused_by_name_certified_and_answer_tolerant() {
     const PANICKED: [usize; 30] = [
         1, 29, 34, 57, 69, 75, 76, 109, 127, 164, 169, 171, 179, 183, 189, 193, 216, 218, 222, 261,
         269, 270, 275, 286, 290, 366, 370, 378, 388, 400,
@@ -807,15 +675,27 @@ fn thirty_random_turns_that_panicked_are_refused_by_name() {
     let turns = q1208s_random_turns(400);
     for index in PANICKED {
         let (turn, at) = turns[index - 1];
-        for policy in [certified(), tolerant()] {
-            let asked = format!("turn {index}, {policy:?}");
-            let mut model = a_model();
-            let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
-            Refused::AHoleWindingWithItsOutline.assert_is(
-                fuse(&mut model, pair, Rule::Union, Order::BlockFirst, &policy),
-                &asked,
-            );
-        }
+        let mut model = a_model();
+        let pair = a_block_and_a_cube_turned(&mut model, &turn, at);
+        Refused::AHoleWindingWithItsOutline.assert_is(
+            fuse(
+                &mut model,
+                pair,
+                Rule::Union,
+                Order::BlockFirst,
+                &certified(),
+            ),
+            &format!("turn {index}, certified"),
+        );
+        each_solid_agrees_with_the_turned_cube_further_in(
+            &|model, further_in| {
+                a_block_and_a_cube_turned(model, &turn, [at[0] + further_in, at[1], at[2]])
+            },
+            Rule::Union,
+            Order::BlockFirst,
+            &tolerant(),
+            &format!("turn {index}, tolerant"),
+        );
         let mut model = a_model();
         let pair = a_block_and_a_cube_turned(&mut model, &turn, [1e-3, at[1], at[2]]);
         let answer = fuse(
@@ -840,19 +720,8 @@ enum Refused {
     /// triangle as a hole winding with its outline, refused in `rings_round`
     /// before anything is written.
     AHoleWindingWithItsOutline,
-    /// The intersection's cap on `x = 0` is the tiny triangle, and its stored
-    /// corners wind against the face, refused by the sweep of the answer.
-    AnOutlineWindingAgainstItsFace,
     /// The answer's shortest edge is a rounding long beside corners at 10.
     TooWideARange,
-    /// A shell of the answer is the tip outside the face, which encloses
-    /// nothing, or less than nothing, once its corners are rounded: all of the
-    /// turned cube less the block, under a tolerant policy only. A certified
-    /// one is refused for the range first (Q1614).
-    NoSpaceInside,
-    /// An edge of the answer has four faces along it, where the tip's sides
-    /// meet the block's face.
-    AnEdgeWithFourFaces,
 }
 
 impl Refused {
@@ -868,21 +737,8 @@ impl Refused {
                     broken: Invalid::HoleWindsWithTheOuterWire
                 }
             ),
-            Self::AnOutlineWindingAgainstItsFace => matches!(
-                why,
-                Error::TheFuseWroteABrokenAnswer {
-                    broken: Invalid::OuterWireWindsAgainstTheNormal
-                }
-            ),
             Self::TooWideARange => {
                 matches!(why, Error::Invalid(Invalid::DynamicRangeTooWide { .. }))
-            }
-            Self::NoSpaceInside => matches!(
-                why,
-                Error::Invalid(Invalid::VolumeIsNotPositive { volume }) if volume <= 0.0
-            ),
-            Self::AnEdgeWithFourFaces => {
-                matches!(why, Error::ResultIsNotManifold { count: 4 })
             }
         };
         assert!(matched, "{asked} is refused {why:?}, not {self:?}");
@@ -920,14 +776,38 @@ fn volume_of_a_fuse(
     policy: &Policy,
     asked: &str,
 ) -> f64 {
+    volumes_of_each_solid(
+        &|model, further_in| {
+            a_block_and_a_cube_turned(model, turn, [at[0] + further_in, at[1], at[2]])
+        },
+        0.0,
+        rule,
+        order,
+        policy,
+        asked,
+    )
+    .iter()
+    .sum()
+}
+
+/// The volume of each solid the fuse answers, smallest first, the answer
+/// validated.
+fn volumes_of_each_solid(
+    pair: &dyn Fn(&mut Model, f64) -> [SolidKey; 2],
+    further_in: f64,
+    rule: Rule,
+    order: Order,
+    policy: &Policy,
+    asked: &str,
+) -> Vec<f64> {
     let mut model = a_model();
-    let pair = a_block_and_a_cube_turned(&mut model, turn, at);
+    let pair = pair(&mut model, further_in);
     let answer = fuse(&mut model, pair, rule, order, policy)
         .unwrap_or_else(|why| panic!("{asked}, {rule:?}: {why}"));
     model
         .validate(policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("{asked}, {rule:?}: {why}"));
-    answer
+    let mut volumes: Vec<f64> = answer
         .iter()
         .map(|&solid| {
             model
@@ -941,7 +821,9 @@ fn volume_of_a_fuse(
                 .unwrap_or_else(|why| panic!("{asked}, {rule:?} does not measure: {why}"))
                 .volume()
         })
-        .sum()
+        .collect();
+    volumes.sort_by(f64::total_cmp);
+    volumes
 }
 
 fn fuse(
@@ -1257,4 +1139,76 @@ fn probe_q1527_split() {
             }
         }
     }
+}
+
+/// Queue row Q1527's measure of the turned cube less the block, a probe to be
+/// taken out before the row lands: every solid's volume, under a tolerant
+/// policy, at the turn and with the turned cube `2⁻³⁰` further in.
+/// `PROBE_Q1527_VOLUMES=1 mise exec -- just t -p rcad-topo --test
+/// a_turned_cube_with_its_corner_on_a_face --no-capture probe_q1527_volumes`.
+#[test]
+fn probe_q1527_volumes() {
+    if std::env::var("PROBE_Q1527_VOLUMES").is_err() {
+        return;
+    }
+    let further_in = 2.0_f64.powi(-30);
+    let all = std::env::var("PROBE_Q1527_VOLUMES").is_ok_and(|asked| asked == "all");
+    for (index, (turn, at)) in q1208s_random_turns(400).into_iter().enumerate() {
+        if where_the_planes_at_the_corner_meet(&turn, at) != Decision::Neg {
+            continue;
+        }
+        for (rule, order) in [
+            (Rule::Difference, Order::TurnedFirst),
+            (Rule::Difference, Order::BlockFirst),
+            (Rule::Union, Order::BlockFirst),
+            (Rule::Union, Order::TurnedFirst),
+            (Rule::Intersection, Order::BlockFirst),
+            (Rule::Intersection, Order::TurnedFirst),
+        ] {
+            let here = probe_volumes_of_each_solid(&turn, at, rule, order);
+            let reference =
+                probe_volumes_of_each_solid(&turn, [at[0] + further_in, at[1], at[2]], rule, order);
+            println!(
+                "PROBEV turn {} {rule:?}-{order:?} here {} {here:?} further_in {} {reference:?}",
+                index + 1,
+                here.as_ref().map_or(0, Vec::len),
+                reference.as_ref().map_or(0, Vec::len),
+            );
+            if !all {
+                break;
+            }
+        }
+    }
+}
+
+fn probe_volumes_of_each_solid(
+    turn: &Isometry,
+    at: [f64; 3],
+    rule: Rule,
+    order: Order,
+) -> Result<Vec<String>, String> {
+    let mut model = a_model();
+    let pair = a_block_and_a_cube_turned(&mut model, turn, at);
+    let answer =
+        fuse(&mut model, pair, rule, order, &tolerant()).map_err(|why| format!("{why:?}"))?;
+    let mut volumes: Vec<f64> = answer
+        .iter()
+        .map(|&solid| {
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(0.1).expect("a deflection"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .map(|measured| measured.volume())
+                .map_err(|why| format!("{why:?}"))
+        })
+        .collect::<Result<_, _>>()?;
+    volumes.sort_by(f64::total_cmp);
+    Ok(volumes
+        .iter()
+        .map(|volume| format!("{volume:.6e}"))
+        .collect())
 }
