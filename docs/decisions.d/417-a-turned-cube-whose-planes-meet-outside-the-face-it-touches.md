@@ -602,7 +602,7 @@ open. Nothing else.
 > `under_a_tolerant_policy_the_union_answers_and_the_rest_are_refused_by_name`
 > pins the old refusal and fails; it lies outside Q1687's write set, so it was
 > reported and not moved. Every other test of `rcad-topo` passed (`mise exec --
-> just t -p rcad-topo --no-fail-fast`, 1951 of 1952), as did every other
+> just t -p rcad-topo --no-fail-fast`, 1950 of 1951), as did every other
 > crate's and the slow tier.
 >
 > *Considered and not taken.* Folding the strip's two other corners into the
