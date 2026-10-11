@@ -6,10 +6,11 @@
 //! Q1034 and Q1606). In the other two it lies on one solid's floor, with a
 //! side starting inside an upright edge of the other solid, and the rule of
 //! Q1608 and Q1609 places it by that edge. Every rule of three of them answers
-//! now. Of the two combs, every rule answers but the first comb less the
-//! second, which needs an edge `2^-51` long beside a coordinate of 11 and is
-//! refused by that name. Their union is written without a notch a rounding
-//! across that holds no `f64` point (`docs/decisions.md` §431).
+//! now. Of the two combs, every rule answers but the certified first comb less
+//! the second, which as written keeps an edge `2^-51` long beside a coordinate
+//! of 11 and is refused by that name. Their union is written without a notch a
+//! rounding across that holds no `f64` point, and with the first comb's corner
+//! `(3, 1, 0)` one rounding off (`docs/decisions.md` §431).
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 mod cones;
@@ -289,18 +290,26 @@ fn no_answer_of_a_leaning_frame_and_a_leaning_ell_loses_a_piece() {
 /// (`docs/decisions.md` §365.7). Its two other walls, the strip of the floor
 /// `y = 1` and the strip of the tooth's wall `x − 2y = 1`, walk one ring of the
 /// same four edges, each the other way round, and enclose nothing as they are
-/// written. Until Q1528 four faces met along an edge of that ring and the union
-/// was refused `ResultIsNotManifold { count: 4 }`; now the two are left out
-/// together (§431).
+/// written. The plane of the second comb's wall also cuts the floor and the
+/// tooth's wall from `z = 0` to `1`, below that wall, into two more such
+/// strips. Until Q1528 four faces met along an edge of each ring and the union
+/// was refused `ResultIsNotManifold { count: 4 }`; now each pair is left out
+/// together (§431), and the first comb's corner `(3, 1, 0)` is written where
+/// the crossing and the meet are, one rounding off
+/// ([`the_union_leaves_out_a_notch_whose_three_corners_round_to_two_points`]).
 ///
 /// **The first less the second is a limit, refused by the limit's name**
-/// (queue rows Q1634 and Q1658). It would hold `22 − 3`. Its side of the
-/// tooth from `(3, 1)` to the meet is no ring of its own but the top of the
-/// tooth's wall, which runs on below `z = 1`, so it stays, and its top edge is
-/// written `2^-51` long beside the first comb's `11` across. That is a length
-/// over a length, so no scaling fits the two together (§3.5): refused
+/// (queue rows Q1634 and Q1658). It would hold `22 − 3`. Exactly, its side of
+/// the tooth from `(3, 1)` to the meet is the top of the tooth's wall, which
+/// runs on below `z = 1`. As written, the strip of that wall below `z = 1` is
+/// left out with its strip of the floor, as in the union, so from `z = 1` to
+/// `2` the side is a face of its own. The floor strip beside it is the top of
+/// the second comb's base and not in the difference, so no face walks the
+/// side's ring back and it stays. Its edges at `z = 1` and `2` are written
+/// `2^-51` long beside the first comb's `11` across. That is a length over a
+/// length, so no scaling fits the two together (§3.5): refused
 /// [`Invalid::DynamicRangeTooWide`] at `11 · 2^51`, under a certified policy.
-/// A tolerant one writes that edge and answers 25 faces holding `22 − 3`.
+/// A tolerant one writes those edges and answers 25 faces holding `22 − 3`.
 #[test]
 fn two_combs_leaning_opposite_ways_meet_in_two_parts_a_rounding_apart() {
     let (model, keys) = comb_and_comb().build();
@@ -414,9 +423,10 @@ fn two_combs_leaning_opposite_ways_the_other_way_round_meet_in_two_parts_a_round
 /// walls is strictly in front of the floor, inside both gaps. So the three are
 /// three points, and the notch between them, and the side of the tooth from
 /// the corner to the meet, are a rounding across: the edges the exact union
-/// and first comb less the second have. The difference keeps one and is
-/// refused for it, the limit the first combs test pins; the union's are all
-/// the notch's, and it is written without them.
+/// and first comb less the second have there. The difference keeps the side
+/// and is refused for it, the limit the first combs test pins. The union is
+/// written without the notch
+/// ([`the_union_leaves_out_a_notch_whose_three_corners_round_to_two_points`]).
 #[test]
 fn where_the_two_combs_cross_three_corners_lie_a_rounding_apart() {
     let (model, keys) = comb_and_comb().build();

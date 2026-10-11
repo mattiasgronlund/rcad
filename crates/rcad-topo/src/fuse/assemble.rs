@@ -749,7 +749,9 @@ impl Assembly {
     /// pieces of the floor either side of where the cube's edge rests on it,
     /// and the union was refused `ResultIsNotManifold` at 115 of 400 tilts
     /// under both policies (queue row Q1528,
-    /// `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`).
+    /// `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`). Two combs
+    /// crossing where three of their corners lie a rounding apart make two
+    /// more, and `docs/decisions.md` §431 says why leaving them out is right.
     ///
     /// **Every edge left keeps its faces paired.** The pair walks each of its
     /// edges once each way, so it takes one use off each side of every one of
