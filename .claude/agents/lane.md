@@ -32,6 +32,29 @@ a lane carrying on a branch another lane handed over (§416), gets other first
 commands in its brief: a plain `git switch` onto that branch and the checks after
 it.
 
+**A row naming the inputs that show its fault runs them on the base first**
+(§433.8). Those are the crash files, the corpus files and any shape the row
+says to build. Run each one before you read any code:
+
+- A crash file: `mise exec -- cargo run -q --profile test -p rcad-fuzz-explain
+  -- <target> <crash file>`, where the target is the directory under
+  `artifacts/` that holds the file. It shows its fault when the print says
+  `outcome: panicked`, as `Outcome`'s `Display` in
+  `crates/rcad-fuzz-explain/src/lib.rs` writes it.
+- A corpus file: the test or recipe the row names for it, run as it stands.
+- A shape: a probe test you write and do not commit, run with `mise exec --
+  just t <name>`, then remove.
+
+If none of them shows the fault, stop there. Commit nothing, so `git status
+--porcelain` prints nothing, and report outcome `does_not_reproduce`, with
+`landed_sha` the base; `files_changed`, `tests_that_fail_without_the_change`
+and `rows` empty; `for_the_verifier` `none`; and `base_runs` holding each
+input, the command, the probe's path and whole text for a shape, the lines of
+its print that say whether the fault shows, and `shows_fault`. Do not look for
+why it is gone: your verifier runs the same commands on the base, and on its
+confirm the row closes done at the base. If any of them shows the fault, do
+the row as usual.
+
 **You own the files your brief names and no others.** A change you find you need
 outside them goes in `out_of_write_set_needs`, and you do not make it. A brief
 that names no files makes you read-only: write no tracked file and make no
