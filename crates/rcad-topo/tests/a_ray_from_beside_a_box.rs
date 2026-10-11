@@ -384,6 +384,22 @@ fn a_box_in_the_notch_of_a_turned_l_a_bend_grows_out_of_is_still_refused() {
         .coordinates();
     let placed =
         solid.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new());
+    let (mut alone, block) = the_block_alone(&AN_L);
+    alone
+        .place_solid(block, &the_turn())
+        .expect("this model made the key");
+    let without_it = alone.solid(block).expect("this model made the key");
+    let alone_top = the_face_facing(
+        without_it,
+        the_turn().apply_to_vector(Vector::new(0.0, 0.0, 1.0)),
+    );
+    let mut log = ProvenanceLog::new();
+    let unbent = without_it.classify_uncertain_point(a_box_round(at), &policy, &mut log);
+    println!(
+        "bend {placed:?}; alone {unbent:?}, corners on plane {}, log {}",
+        every_corner_is_on_its_plane(alone_top),
+        log.len()
+    );
     assert!(
         matches!(placed, Containment::CannotFireARayAtAFacesSurface { .. }),
         "{placed:?}"
