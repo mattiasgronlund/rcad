@@ -6766,6 +6766,84 @@ fuzz-overnight window="28800":
     trap - EXIT
     copy_out
 
+    # Every night so far has copied the whole of `fuzz/artifacts/` again, so a
+    # name 21 nights hold is 21 copies of the same bytes (docs/decisions.d/436
+    # §436.3, §436.4). From here on, a file tonight holds that the nearest
+    # earlier night also holds — same target, same name — becomes a hard link
+    # to that night's file instead of a second copy.
+    #
+    # By name first: every name libFuzzer writes is the prefix plus the SHA-1
+    # of its own bytes (`WriteUnitToFileWithPrefix`, `FuzzerLoop.cpp:647`), so
+    # two nights agreeing on a name already claim the same bytes. **Checked
+    # against the tree, not trusted from the name**: the copier above runs
+    # every five minutes while a target writes, so a name can be `cp -n`'d out
+    # of a half-written file, and `-n` then keeps that short copy for the rest
+    # of the night (and, without this check, for every later night linked to
+    # it). So a file is linked only once the earlier night's copy is checked
+    # to hold the same bytes as `fuzz/artifacts/` does right now — which, this
+    # late, with every target stopped, no longer changes.
+    #
+    # This runs after this last `copy_out` and not any earlier one: only now
+    # has every target stopped, so only now is `fuzz/artifacts/` done
+    # changing under the files this reads.
+    #
+    # **Never a link into the tree.** libFuzzer reopens a name it has written
+    # before with `fopen(…, "wb")` (`FuzzerIO.cpp:82`), which truncates it, so
+    # a link to `fuzz/artifacts/` itself would be cut short by the next night
+    # that rewrites the name — and so would every later night linked to this
+    # one. Only ever linked to another night's own copy.
+    #
+    # Made under a temporary name outside `artifacts/` and renamed into place,
+    # so a night killed mid-link leaves no stray name for `fuzz-triage` or
+    # `fuzz-yield` to trip on — `mv` within `$night` is one rename, and nothing
+    # reads `$night` itself as artifacts.
+    #
+    # TODO(Q1753, unfinished — see docs/decisions.d/436 §436.6's handoff): this
+    # shell loop, forking `cmp`, `mktemp`, `ln` and `mv` once per file, had not
+    # finished linking two real nights (2026-10-08 against 2026-10-09, about
+    # 87 000 and 91 000 files) after 220 s, the point it was killed. It is
+    # correct — `thirty`/`thirty_one`/`thirty_two` below pass against it — but
+    # too slow for a real night, which recurs nearly every name night to night
+    # (docs/decisions.d/436 §436.3). A single process walking both trees in
+    # memory, replacing the forks with Python's own `os.link`/`os.replace`,
+    # is the fix; a `python3 - <<'TAG' ... TAG` heredoc here hit a `just`
+    # parse error ("Unexpected closing delimiter `)`") that this handoff did
+    # not have the budget left to chase down.
+    link_started=$(date +%s)
+    linked=0
+    if [ -d "$night/artifacts" ]; then
+        earlier=""
+        while IFS= read -r candidate; do
+            [[ "$(basename "$candidate")" < "$(basename "$night")" ]] || continue
+            [ -d "$candidate/artifacts" ] || continue
+            earlier="$candidate"
+        done < <(find "{{fuzz_log_root}}" -mindepth 1 -maxdepth 1 -type d \
+            -name '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' 2>/dev/null | sort)
+
+        if [ -n "$earlier" ]; then
+            for target_dir in "$night/artifacts"/*/; do
+                [ -d "$target_dir" ] || continue
+                target=$(basename "${target_dir%/}")
+                for tonight_file in "$target_dir"*; do
+                    [ -f "$tonight_file" ] || continue
+                    name=$(basename "$tonight_file")
+                    earlier_file="$earlier/artifacts/$target/$name"
+                    tree_file="fuzz/artifacts/$target/$name"
+                    [ -f "$earlier_file" ] || continue
+                    [ -f "$tree_file" ] || continue
+                    cmp -s "$earlier_file" "$tree_file" || continue
+                    link_tmp=$(mktemp "$night/link-tmp.XXXXXX")
+                    ln -f "$earlier_file" "$link_tmp"
+                    mv -f "$link_tmp" "$tonight_file"
+                    linked=$(( linked + 1 ))
+                done
+            done
+        fi
+    fi
+    link_elapsed=$(( $(date +%s) - link_started ))
+    echo "linked $linked file(s) to the nearest earlier night's copies, took ${link_elapsed}s" \
+        >"$night/link-artifacts.log"
+
     # The reader's STEP-corpus finds, merged out of tonight's scratch directory
     # and into the small persistent corpus `fuzz-target` seeds the next night
     # from, at a smaller `-max_len` (docs/decisions.md §295.6, §295.7). Gated on
@@ -8530,6 +8608,84 @@ check-fuzz-overnight-selftest:
         || fail "the night fuzzed targets after finding a sancov reference in rcad-fuzz-timing's rlib"
     }
 
+    # Thirty: docs/decisions.d/436 §436.4's rule, now built into the recipe
+    # rather than done by hand. An earlier night, planted here with a file
+    # byte-identical to the one tonight's stub writes under the same target
+    # and name, is what tonight's own copy becomes a hard link to — one
+    # inode shared by the two nights, and never the tree's own copy, which
+    # the next night that meets this name would reopen with `fopen(…, "wb")`
+    # and cut short.
+    thirty() {
+    rm -f fuzz/artifacts/*/slow-unit-"$tag"
+    : >"$dir/log"
+    earlier_night="$dir/logs/2000-01-01"
+    mkdir -p "$earlier_night/artifacts/where_two_surfaces_cross"
+    printf 'what a target found\n' \
+        >"$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
+    run 8 || fail "a night beside a byte-identical earlier night failed: $(cat "$dir/out")"
+    night="$dir/logs/$(date +%Y-%m-%d)"
+    tonight_file="$night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
+    earlier_file="$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
+    tree_file="fuzz/artifacts/where_two_surfaces_cross/slow-unit-$tag"
+    [ -f "$tonight_file" ] || fail "tonight's artifact never landed at $tonight_file"
+    [ "$(stat -c %i "$tonight_file")" = "$(stat -c %i "$earlier_file")" ] \
+        || fail "a file the second night shares with the first was not linked to it: $(ls -li "$tonight_file" "$earlier_file")"
+    [ "$(stat -c %i "$tonight_file")" != "$(stat -c %i "$tree_file")" ] \
+        || fail "a night's file shares an inode with the tree's own copy: $(ls -li "$tonight_file" "$tree_file")"
+    grep -qE '^linked [1-9][0-9]* file' "$night/link-artifacts.log" \
+        || fail "the night's log did not say how many files it linked: $(cat "$night/link-artifacts.log" 2>&1)"
+    grep -qE 'took [0-9]+s$' "$night/link-artifacts.log" \
+        || fail "the night's log did not say how long linking took: $(cat "$night/link-artifacts.log" 2>&1)"
+    rm -f fuzz/artifacts/*/slow-unit-"$tag"
+    rm -rf "$earlier_night"
+    }
+
+    # Thirty-one: a name only tonight holds — the earlier night planted here
+    # holds a file for the same target, but under a different name — is a
+    # plain copy, with one link and nowhere else to find it.
+    thirty_one() {
+    rm -f fuzz/artifacts/*/slow-unit-"$tag"
+    : >"$dir/log"
+    earlier_night="$dir/logs/2000-01-01"
+    mkdir -p "$earlier_night/artifacts/where_two_surfaces_cross"
+    printf 'an older nights unrelated find\n' \
+        >"$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-not-tonight-$tag"
+    run 8 || fail "a night beside an earlier night with no matching name failed: $(cat "$dir/out")"
+    night="$dir/logs/$(date +%Y-%m-%d)"
+    tonight_file="$night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
+    [ -f "$tonight_file" ] || fail "tonight's artifact never landed at $tonight_file"
+    [ "$(stat -c %h "$tonight_file")" = "1" ] \
+        || fail "a file new to the second night was linked to something: $(ls -li "$tonight_file")"
+    rm -f fuzz/artifacts/*/slow-unit-"$tag"
+    rm -rf "$earlier_night"
+    }
+
+    # Thirty-two: an earlier night's copy under the same target and name, but
+    # with bytes that do not match what is in the tree right now, is never
+    # linked to — a short copy from the five-minute copier meeting a
+    # half-written file, carried into one night, must not be carried into
+    # every night after it. Tonight stays its own copy, with the tree's own
+    # bytes.
+    thirty_two() {
+    rm -f fuzz/artifacts/*/slow-unit-"$tag"
+    : >"$dir/log"
+    earlier_night="$dir/logs/2000-01-01"
+    mkdir -p "$earlier_night/artifacts/where_two_surfaces_cross"
+    printf 'a short copy from a race, not what the tree holds\n' \
+        >"$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
+    run 8 || fail "a night beside an earlier night with a differing copy failed: $(cat "$dir/out")"
+    night="$dir/logs/$(date +%Y-%m-%d)"
+    tonight_file="$night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
+    earlier_file="$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
+    [ -f "$tonight_file" ] || fail "tonight's artifact never landed at $tonight_file"
+    [ "$(stat -c %i "$tonight_file")" != "$(stat -c %i "$earlier_file")" ] \
+        || fail "a night's file was linked to an earlier copy whose bytes differ from the tree's"
+    grep -qF "what a target found" "$tonight_file" \
+        || fail "tonight's file lost the tree's own bytes: $(cat "$tonight_file")"
+    rm -f fuzz/artifacts/*/slow-unit-"$tag"
+    rm -rf "$earlier_night"
+    }
+
     # **Which arms run at once, and why each still asserts what it says.** Run
     # in turn they took 86 s, nearly all of it the stub's sleeps (Q709), so
     # most of them run beside each other.
@@ -8607,6 +8763,9 @@ check-fuzz-overnight-selftest:
     alone sixteen
     alone twenty_nine
     alone twenty_three
+    alone thirty
+    alone thirty_one
+    alone thirty_two
     arm="after the last"
     head_did_not_move
 
