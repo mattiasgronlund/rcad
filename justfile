@@ -11925,6 +11925,15 @@ queue mode="" *args:
         [ "$mode" = next ] || { echo "queue: a count goes with next, and only with next" >&2; exit 1; }
         case "$n" in *[!0-9]*) echo "queue: '$n' is not a number of slots" >&2; exit 1 ;; esac
     fi
+    if [ "$mode" = next ]; then
+        triage=$({{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" _triage-refusal '{{ fuzz_log_root }}' '{{ queue_file }}')
+        trc=$?
+        if [ "$trc" -ne 0 ]; then
+            echo "$triage" >&2
+            exit "$trc"
+        fi
+        [ -z "$triage" ] || echo "$triage"
+    fi
     rows=$({{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" _queue-rows '{{ queue_file }}') || exit 1
     machine='{{ queue_running }}'
     elsewhere=""
@@ -12873,6 +12882,13 @@ check-queue-selftest:
     set -uo pipefail
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
+    # `queue next` now runs `_triage-refusal`, which reads `RCAD_FUZZ_LOGS`
+    # (§418.2); point it at a scratch directory before any `drive`/`bundled`
+    # call below runs `queue next`, or every one of them would read this
+    # machine's own fuzz logs. `take` and `add` run `queue-page` afterward too
+    # (§397.8), so its page dir is pointed at scratch here as well.
+    export RCAD_QUEUE_PAGE_DIR="$dir/queue-page"
+    export RCAD_FUZZ_LOGS="$dir/no-fuzz-logs"
     j='{{ just_executable() }}'
     got=""
     fail() {
@@ -12889,7 +12905,8 @@ check-queue-selftest:
     mkdir -p "$repo/docs/decisions.d" "$repo/.github/workflows" "$repo/tooling/queue"
     decisions="$repo/docs/decisions.d/sections.md"
     printf '%s\n' '## 13. How work is decomposed' '## 226. The test plan' \
-        '### 226.3 The nights' '## 230. One queue' '### 230.3 The fill' > "$decisions"
+        '### 226.3 The nights' '## 230. One queue' '### 230.3 The fill' \
+        '## 418. Fuzz-night triage' '### 418.3 The triage row' > "$decisions"
     touch "$repo/justfile" "$repo/.github/workflows/ci.yml" "$repo/tooling/queue/queue.py"
     git init -q "$repo"
     git -C "$repo" add -A
@@ -13232,11 +13249,6 @@ check-queue-selftest:
         "skip Q2 (tier 2): its docs/a.md meets Q1's docs/a.md, held by lane:lane-q1")" ] \
         || fail "blocked is not exactly the skip line of each ready row the running lane holds back, in the fill's order"
 
-    # `take` and `add` run `queue-page` afterward (§397.8); point it and the
-    # fuzz-log count it reads at scratch directories, never at a real clone's.
-    export RCAD_QUEUE_PAGE_DIR="$dir/queue-page"
-    export RCAD_FUZZ_LOGS="$dir/no-fuzz-logs"
-
     # Q1505: `add` refuses a description whose first word is a class (§352)
     # with punctuation stuck on after it, and still tags a row whose first
     # word is exactly a class, with nothing after it, as today.
@@ -13400,6 +13412,91 @@ check-queue-selftest:
     for m in $modes; do
         grep -qF "queue $m " <<<"$got" || fail "queue help names no line for '$m', which the recipe dispatches"
     done
+
+    # §418.2, §418.3: `queue next` refuses while the latest fuzz night has
+    # left a group no row names and no triage row is open, naming
+    # `just fuzz-triage-row`; it fills as usual once a triage row is open, or
+    # when the night has no verdicts file. `RCAD_FUZZ_LOGS` points at this
+    # fixture tree only for this section, never at the real machine's.
+    triage_logs="$dir/triage-fuzz-logs"
+    main_sha=$(git rev-parse HEAD)
+    point_triage_at() {
+        printf '2026-10-11 08:15  abc1234 (0 days old, 0 behind main)  5 targets  %s\n' "$triage_logs/$1" >"$triage_logs/latest"
+    }
+    triage_night() {
+        local night=$1
+        mkdir -p "$triage_logs/$night"
+        printf 'target\tfiles\tstill_fails\tsample\tgroup\n' >"$triage_logs/$night/fuzz-triage-verdicts.tsv"
+        printf 't\t3\tyes\t/night/artifacts/t/crash-aaaabbbbccccddddeeeeffff00001111\tpanicked at crates/rcad-geom/src/foo.rs:10:5: a group no row names\n' \
+            >>"$triage_logs/$night/fuzz-triage-verdicts.tsv"
+        printf 'target\tgroup\tfile\n' >"$triage_logs/$night/fuzz-triage-members.tsv"
+        printf 't\tpanicked at crates/rcad-geom/src/foo.rs:10:5: a group no row names\t/night/artifacts/t/crash-aaaabbbbccccddddeeeeffff00001111\n' \
+            >>"$triage_logs/$night/fuzz-triage-members.tsv"
+        printf '%s\n' "$main_sha" >"$triage_logs/$night/fuzz-triage-replayed-main.txt"
+        point_triage_at "$night"
+    }
+
+    fence triage-none <<'MD'
+    Q90  1  todo  opus  docs/a.md  an unrelated open row §230
+    MD
+    fence triage-open <<'MD'
+    Q90  1  todo  opus  docs/a.md  an unrelated open row §230
+    Q91  1  todo  opus  -  from/- Triage the latest fuzz night's groups that still fail on main and that no row names by a crash file, as section 418.3 says. §418.3
+    MD
+
+    export RCAD_FUZZ_LOGS="$triage_logs"
+    triage_night refuses-night
+    got=$("$j" --set queue_file "$dir/triage-none.md" --set queue_running 1 queue next 1 2>&1) \
+        && fail "queue next filled while a group no row names stood and no triage row was open"
+    grep -qF 'fuzz-triage-row' <<<"$got" || fail "the refusal did not name fuzz-triage-row"
+    grep -qF 'named by no row' <<<"$got" || fail "the refusal did not say a group is named by no row"
+
+    drive triage-open next 1
+    [ "$(takes)" = "Q90 " ] || fail "queue next did not fill once a triage row (Q91) was already open"
+
+    mkdir -p "$triage_logs/untriaged"
+    point_triage_at untriaged
+    drive triage-none next 1
+    [ "$(takes)" = "Q90 " ] || fail "queue next did not fill when the latest night has no verdicts file"
+    grep -qF 'has no fuzz-triage-verdicts.tsv' <<<"$got" || fail "the fill did not say the night has not been triaged"
+
+    point_triage_at refuses-night
+    cat > "$dir/triage-filed.md" <<'MD'
+    ## Tier 1
+
+    ```
+    Q90  1  todo  opus  docs/a.md  an unrelated open row §230
+    ```
+
+    ## Closed
+
+    ```
+    ```
+    MD
+    got=$("$j" --justfile '{{ justfile() }}' --working-directory "$repo" fuzz-triage-row "$triage_logs" "$dir/triage-filed.md" 2>&1) \
+        || fail "fuzz-triage-row failed when a group no row names stood and no triage row was open"
+    filed=$(grep -o 'filed Q[0-9]*' <<<"$got" | cut -d' ' -f2)
+    [ -n "$filed" ] || fail "fuzz-triage-row did not report filing a row"
+    fields=$("$j" --justfile '{{ justfile() }}' _queue-rows "$dir/triage-filed.md" \
+        | awk -F'\037' -v id="$filed" '$1 == "R" && $5 == id { print $6 "\037" $7 "\037" $8 "\037" $9; exit }')
+    [ "$fields" = $'1\037todo\037opus\037-' ] \
+        || fail "fuzz-triage-row's filed row is not tier 1, todo, opus, write-set - ($fields)"
+    grep -qF 'from/- Triage the latest fuzz night' "$dir/triage-filed.md" \
+        || fail "fuzz-triage-row did not write a row starting from/- Triage the latest fuzz night"
+
+    got=$("$j" --justfile '{{ justfile() }}' --working-directory "$repo" fuzz-triage-row "$triage_logs" "$dir/triage-filed.md" 2>&1) \
+        || fail "fuzz-triage-row failed on its second call, with a triage row already open"
+    grep -qF "$filed is already open" <<<"$got" || fail "fuzz-triage-row did not say $filed was already open"
+    [ "$(grep -c 'from/- Triage the latest fuzz night' "$dir/triage-filed.md")" = 1 ] \
+        || fail "fuzz-triage-row filed a second triage row while one was already open"
+
+    point_triage_at untriaged
+    got=$("$j" --justfile '{{ justfile() }}' --working-directory "$repo" fuzz-triage-row "$triage_logs" "$dir/triage-none.md" 2>&1) \
+        || fail "fuzz-triage-row failed on a night with no verdicts file"
+    grep -qxF 'fuzz-triage-row: nothing to file' <<<"$got" \
+        || fail "fuzz-triage-row did not say it had nothing to file when the night has no verdicts"
+    [ "$(grep -c 'from/- Triage the latest fuzz night' "$dir/triage-none.md")" = 0 ] \
+        || fail "fuzz-triage-row wrote a row though it said it had nothing to file"
 
     exit 0
 
@@ -14170,6 +14267,51 @@ _status-triage root queue:
             printf "(read from %s: a row names a group by one of its crash files, or by the place of its panic)\n", verdicts
         }
     ' "$surviving" "$members" "$verdicts"
+
+# §418.2: `queue next` refuses while a night has left groups no row names and
+# no triage row is open, naming `just fuzz-triage-row`. Any other answer of
+# `_status-triage` — no night, no verdicts file, zero failing groups, a hard
+# error — is not this recipe's to escalate: it is echoed and this exits 0.
+#
+# A triage row is told apart from any other by its text alone, since no
+# structural marker exists for one (§418.3): an open row (`todo`, `after:` or
+# `lane:`) whose write set is `-` and whose description holds the literal
+# words "Triage the latest fuzz night".
+[private]
+_triage-refusal root queue:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    status=$({{ just_executable() }} --justfile '{{ justfile() }}' _status-triage '{{ root }}' '{{ queue }}')
+    echo "$status"
+    unnamed=$(sed -n 's/.*: [0-9][0-9]* group(s) still fail on main: \([0-9][0-9]*\) named by no row.*/\1/p' <<<"$status" | tail -1)
+    [ -n "$unnamed" ] && [ "$unnamed" -gt 0 ] || exit 0
+    open=$({{ just_executable() }} --justfile '{{ justfile() }}' _queue-rows '{{ queue }}' 2>/dev/null \
+        | awk -F'\037' '$1 == "R" && $9 == "-" && ($7 == "todo" || $7 ~ /^after:/ || $7 ~ /^lane:/) && index($11, "Triage the latest fuzz night") > 0 { print $5; exit }')
+    [ -z "$open" ] || exit 0
+    echo "queue next: $unnamed group(s) still fail on main that no row names, and no triage row is open; run \`just fuzz-triage-row\` to file one (§418.2, §418.3)"
+    exit 1
+
+[doc("Files the triage row of §418.3 when a night's fuzz replay leaves groups no row names, and says which it did.")]
+fuzz-triage-row root=fuzz_log_root queue=queue_file:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    status=$({{ just_executable() }} --justfile '{{ justfile() }}' _status-triage '{{ root }}' '{{ queue }}')
+    echo "$status"
+    unnamed=$(sed -n 's/.*: [0-9][0-9]* group(s) still fail on main: \([0-9][0-9]*\) named by no row.*/\1/p' <<<"$status" | tail -1)
+    if [ -z "$unnamed" ] || [ "$unnamed" -eq 0 ]; then
+        echo "fuzz-triage-row: nothing to file"
+        exit 0
+    fi
+    open=$({{ just_executable() }} --justfile '{{ justfile() }}' _queue-rows '{{ queue }}' 2>/dev/null \
+        | awk -F'\037' '$1 == "R" && $9 == "-" && ($7 == "todo" || $7 ~ /^after:/ || $7 ~ /^lane:/) && index($11, "Triage the latest fuzz night") > 0 { print $5; exit }')
+    if [ -n "$open" ]; then
+        echo "fuzz-triage-row: $open is already open"
+        exit 0
+    fi
+    id=$({{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" --set queue_file '{{ queue }}' queue add 1 opus - \
+        "from/- Triage the latest fuzz night's groups that still fail on main and that no row names by a crash file, as section 418.3 says: read the night's verdicts when the lane starts, report one row per fault with its class naming one of the group's crash files, starting each from/fuzz:<target>, and file again any open row that names a group by place alone. §418.3") \
+        || exit 1
+    echo "fuzz-triage-row: filed $id"
 
 # The branch half of `status`, kept apart so `check-status-selftest` can hold it
 # against a repository whose right answer is known.

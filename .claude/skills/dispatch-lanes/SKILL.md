@@ -97,6 +97,13 @@ met. N defaults to the free slots, counted from the trees agents hold on this
 machine — lanes, verifiers and mergers alike, whoever sent them (§263.4).
 Tiers 1 and 5 go in class order, not file order (§352.3, §403.3).
 
+**If `queue next` refuses, naming `just fuzz-triage-row`**, a fuzz night has
+left groups that no open row names and no triage row is open yet (§418.2).
+Run `just fuzz-triage-row` — it files the one triage row §418.3 describes, or
+says why it filed nothing — then re-run `queue next`. It fills as usual, with
+no refusal, when the latest night has no verdicts file; that line says so and
+is not a reason to run `fuzz-triage-row`.
+
 A line `take Q1,Q2,Q3 (a bundle of 3 small rows, one lane)` is **one
 lane** doing all of those rows (§352.4), with each row's text indented under
 it.
