@@ -1128,10 +1128,17 @@ fn how_far_off_the_crossing_a_corner_can_be(
 /// one place (Q1508).
 ///
 /// Anywhere else `start` is put back among the points, because it is not an
-/// end any more. The corner goes between the two points it sits between — the
-/// nearest and whichever of its two neighbours is nearer — so splitting that
-/// one step at a point on the curve is all that changes, and a step split at a
+/// end any more. The corner goes between the two ends of the step nearest it,
+/// as [`where_on_the_loop_this_end_is`] puts a run's end, so splitting that one
+/// step at a point on the curve is all that changes, and a step split at a
 /// point on the curve strays from it less than the step did.
+///
+/// **Not beside whichever neighbour of the nearest point is nearer.** The march
+/// doubles its first step, so a corner a tenth of the way along the second step
+/// is nearer the seed behind the first point than the far end of its own step:
+/// `6e-3` against `9e-3` for a thin bar through a fat pipe. It was put between
+/// the seed and the first point, and the loop doubled back across the first
+/// point (Q1681).
 ///
 /// **Turned and never re-marched from the corner**, and that is measured: the
 /// LED's corner sits where its two surfaces touch, and a march begun there
@@ -1157,17 +1164,9 @@ fn begun_beside(
     let mut round = Vec::with_capacity(walked.len() + 1);
     round.push(start);
     round.extend(walked);
+    let (nearest, _) = the_step_nearest(corner, &round);
     let count = round.len();
-    let how_far = |at: usize| (round[at % count] - corner).length();
-    let nearest = (0..count)
-        .min_by(|one, other| how_far(*one).total_cmp(&how_far(*other)))
-        .expect("the loop holds at least the point it was walked from");
-    let first = if how_far(nearest + count - 1) < how_far(nearest + 1) {
-        nearest
-    } else {
-        nearest + 1
-    };
-    round.rotate_left(first % count);
+    round.rotate_left((nearest + 1) % count);
     Ok(round)
 }
 
@@ -1276,6 +1275,25 @@ fn where_on_the_loop_this_end_is(
 ) -> Result<f64> {
     let count = round.len();
     let at = Point::from(end.enclosure().map(middle_of));
+    let (nearest, along) = the_step_nearest(at, round);
+    for corner in [nearest, (nearest + 1) % count] {
+        let Some(round_the_corner) = somewhere_within(round[corner], deviation) else {
+            return Err(Error::CannotWorkOutHowBigACrossingIs);
+        };
+        if the_boxes_share_a_point(end, round_the_corner) {
+            kept[corner] = false;
+            return Ok(corner as f64);
+        }
+    }
+    Ok(nearest as f64 + along)
+}
+
+/// The step of the closed loop of points `round` that passes nearest `at`: the
+/// index of the point it starts from, and how far along it from there, between
+/// `0` and `1`, the place on it nearest `at` is. Of two steps equally near, the
+/// one with the lower index.
+fn the_step_nearest(at: Point, round: &[Point]) -> (usize, f64) {
+    let count = round.len();
     let along_the_step_from = |here: usize| {
         let way = round[(here + 1) % count] - round[here];
         let along = (at - round[here]).dot(way) / way.length_squared().max(f64::MIN_POSITIVE);
@@ -1288,16 +1306,7 @@ fn where_on_the_loop_this_end_is(
     let nearest = (0..count)
         .min_by(|one, other| how_far(*one).total_cmp(&how_far(*other)))
         .expect("the loop holds at least the point it was walked from");
-    for corner in [nearest, (nearest + 1) % count] {
-        let Some(round_the_corner) = somewhere_within(round[corner], deviation) else {
-            return Err(Error::CannotWorkOutHowBigACrossingIs);
-        };
-        if the_boxes_share_a_point(end, round_the_corner) {
-            kept[corner] = false;
-            return Ok(corner as f64);
-        }
-    }
-    Ok(nearest as f64 + along_the_step_from(nearest).0)
+    (nearest, along_the_step_from(nearest).0)
 }
 
 /// Whether two boxes have a point in common, so that nothing the arithmetic
