@@ -8526,7 +8526,8 @@ fn how_a_crossing_runs(
     }
     if !(a_pair_that_crosses_in_a_conic(surface, partner, log)?
         || one_of_two_loops_round_a_thin_pipe(surface, partner, run)
-        || one_of_two_loops_round_a_pipe_through_a_ball(surface, partner, run))
+        || one_of_two_loops_round_a_pipe_through_a_ball(surface, partner, run)
+        || the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in(surface, partner, run))
     {
         return Err(Error::ACrossingThisCannotBeOrderedAlong);
     }
@@ -8881,6 +8882,40 @@ fn one_of_two_loops_round_a_pipe_through_a_ball(
             EdgeRun::PartOfWhereItCrosses { .. }
         )
     )
+}
+
+/// Whether `run` is the one loop a ball whose centre is off a pipe's axis
+/// crosses it in, where the ball reaches into the pipe's side rather than
+/// swallowing its whole cross-section.
+///
+/// **Drawn, and put in order only by name.** The loop runs back and forth round
+/// the pipe's axis, so no determinant orders three points on it, and
+/// [`which_comes_first_round_a_crossing`] refuses to, by name,
+/// [`TheseTwoSurfacesDoNotCrossInAConic`](rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic),
+/// after asking again, exactly, whether the ball swallows the pipe. What it is
+/// never asked is the order of two places one of which is the walk's start:
+/// [`round_a_closed_crossing_and_what_it_measures`] reads that off the start's
+/// name. A loop cut nowhere, or only at its start, has nothing to order. So a
+/// bar whose seam runs through the loop where the walk starts on it is answered,
+/// and a loop cut twice away from its start is refused by name and never
+/// ordered wrongly (Q1661).
+///
+/// The placement is asked here and not left to
+/// [`a_pair_that_crosses_in_a_conic`] answering first: a ball centred on the
+/// axis crosses the pipe in two circles or touches it round one, and is no loop
+/// of this kind whatever order the gate asks in.
+fn the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+) -> bool {
+    let ((Surface::Sphere(ball), Surface::Cylinder(pipe))
+    | (Surface::Cylinder(pipe), Surface::Sphere(ball))) = (surface, partner)
+    else {
+        return false;
+    };
+    matches!(run.run(), EdgeRun::RightRoundWhereItsFacesCross)
+        && how_far_a_ball_sits_off_a_pipes_axis(ball, pipe) == Decision::Pos
 }
 
 /// How points along a circle a ring shares with a ball, a pipe or a cone on
