@@ -282,6 +282,49 @@ fn a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_f
     }
 }
 
+/// A bar of radius 2 up `z` from −1 to 11, turned a quarter round `z` so that
+/// its seam runs up `(0, 2, z)`, and a ball of radius 3 at `(0, 3, 5)`. The
+/// ball reaches into the bar's side and crosses its pipe in one loop, the whole
+/// of their crossing, and the seam runs through the loop's top and bottom,
+/// `(0, 2, 5 ± 2√2)`. One loop has no second curve of the pair to meet.
+///
+/// Every fuse was refused ordering points along the loop until Q1661: a loop
+/// that runs back and forth round the pipe's axis is ordered by no
+/// determinant, and `fuse/arrange.rs` let only the two loops of a ball that
+/// swallows the pipe through. The walk starts on the loop's top, where the
+/// seam crosses it, so the only other place on the loop that anything is cut
+/// is the bottom, and the start comes first by its name. Where neither place
+/// is the start, `rcad-geom` is asked which way the loop runs and refuses by
+/// name (`a_ball_driven_into_the_bar_is_refused_ordering_the_loop_they_cross_in`
+/// in `a_ball_and_a_bar_in_one_block.rs`).
+///
+/// What they share is the ball inside the bar, [`ball_in_the_side_of_a_bar`].
+/// The bar less the ball keeps its pipe, its two caps and the dent; the ball
+/// less the bar is its skin and the pipe's patch.
+#[test]
+fn a_ball_in_a_bars_side_across_its_seam_crosses_it_in_one_loop_and_every_fuse_answers() {
+    every_fuse_answers(
+        a_bar_seamed_up_y_and_a_ball_in_its_side,
+        [48.0 * PI, 36.0 * PI, ball_in_the_side_of_a_bar(1000)],
+        [&[4], &[2], &[4], &[2]],
+    );
+}
+
+/// [`ball_in_the_side_of_a_bar`] at the 1000 steps the fuse is held to is
+/// within `1e-6` of the rule at 100 000, which is `6e-7` above it. The mesh
+/// of `0.01` may miss the volumes it is held against by `0.4` or more.
+#[test]
+fn the_ball_in_the_side_of_a_bar_is_within_a_millionth_of_a_rule_a_hundred_times_finer() {
+    let (coarse, fine) = (
+        ball_in_the_side_of_a_bar(1000),
+        ball_in_the_side_of_a_bar(100_000),
+    );
+    assert!(
+        (coarse - fine).abs() < 1e-6,
+        "{coarse} at 1000 steps, {fine} at 100 000"
+    );
+}
+
 /// [`ball_in_bar`] on the ball's axis is the closed form
 /// `(4π/3)(2³ − (2² − 1)^(3/2))` of
 /// `a_ball_on_a_bars_axis_crosses_it_in_two_circles_and_every_fuse_answers`,
@@ -807,6 +850,20 @@ fn a_ball_and_a_bar(
     [ball, a_bar(model, radius, [at[0], at[1], -3.0], 6.0)]
 }
 
+fn a_bar_seamed_up_y_and_a_ball_in_its_side(model: &mut Model) -> [SolidKey; 2] {
+    let seam_up_y = Isometry::translation(Vector::new(0.0, 0.0, -1.0))
+        .expect("a finite move")
+        .compose(&Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z"));
+    let bar = model.add_round_bar(2.0, 12.0, &seam_up_y).expect("a bar");
+    let ball = model
+        .add_ball(
+            3.0,
+            &Isometry::translation(Vector::new(0.0, 3.0, 5.0)).expect("a finite move"),
+        )
+        .expect("a ball");
+    [bar, ball]
+}
+
 fn a_block(model: &mut Model, from: [f64; 3], to: [f64; 3]) -> SolidKey {
     let rectangle = ProfileBuilder::new(vec![
         [0.0, 0.0],
@@ -889,4 +946,31 @@ fn ball_in_bar(radius: f64, off: f64) -> f64 {
         }
     }
     sum * step_out * step_round
+}
+
+/// Volume the ball of radius 3 at `(0, 3)` shares with the bar of radius 2
+/// whose axis runs through the origin, both up `z` and the bar long enough to
+/// hold the ball's whole height there, by a midpoint rule of `steps` across
+/// `x`.
+///
+/// Seen down `z`, what they share stands on the lens where the bar's circle
+/// and the ball's meet, at `x = ±4√2/3`, `y = 2/3`. At each `x` the lens runs
+/// up `y` from the ball's edge `3 − c`, `c = √(9 − x²)`, to the bar's
+/// `√(4 − x²)`, and the ball is `2√(c² − (y − 3)²)` high there, so with
+/// `t = y − 3` the strip is `t√(c² − t²) + c² asin(t/c)` from `−c` to the
+/// bar's edge: closed form. Only the rule across `x` is approximate, and
+/// [`the_ball_in_the_side_of_a_bar_is_within_a_millionth_of_a_rule_a_hundred_times_finer`]
+/// says how far.
+fn ball_in_the_side_of_a_bar(steps: u32) -> f64 {
+    let edge = 4.0 * 2f64.sqrt() / 3.0;
+    let step = 2.0 * edge / f64::from(steps);
+    let mut sum = 0.0;
+    for i in 0..steps {
+        let x = -edge + step * (f64::from(i) + 0.5);
+        let squared = 9.0 - x * x;
+        let c = squared.sqrt();
+        let top = (4.0 - x * x).sqrt() - 3.0;
+        sum += top * (squared - top * top).sqrt() + squared * (top / c).asin() + squared * PI / 2.0;
+    }
+    sum * step
 }

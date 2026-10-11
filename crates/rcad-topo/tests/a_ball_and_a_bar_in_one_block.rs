@@ -19,7 +19,8 @@
 //! the floor — the skip does not go through, the floor's two circles touch at
 //! that point, the corner is placed there, and they fuse into the same block.
 //! Where the ball is driven into the bar they cross in a loop the floor runs
-//! through, and putting points in order along that loop is refused by name.
+//! through, and putting the floor's two corners in order along that loop is
+//! refused by name.
 //! Nothing here is compared against a size.
 //!
 //! # One pair at a time, the same block
@@ -321,17 +322,26 @@ fn a_floor_notched_by_a_second_bar_still_follows_the_two_touching_circles() {
 /// the loop the ball and the bar cross in, by name.
 ///
 /// The ball's centre is one and a half units from the bar's axis, so the two
-/// cross in a loop round the bar's wall near `x = 4`, and the floor runs
+/// cross in one loop round the bar's wall near `x = 4`, and the floor runs
 /// through the ball's centre and so through that loop, putting two corners on
-/// it. Ordering points along a loop a ball and a pipe cross in is open row
-/// Q1593's refusal, and Q1593 takes it. Q1593's own shape has the bar's seam
-/// through the loop; this bar's seam is at `x = 6`, on the far side, and it is
-/// the floor that runs through this one.
+/// it. Since Q1661 that loop is drawn, and put in order only where one of the
+/// two places compared is where the walk starts on it. Neither of the floor's
+/// two corners is, so which comes first round the loop is asked of
+/// `rcad-geom`, and `which_comes_first_round_a_crossing` refuses a ball that
+/// reaches into a pipe's side by name, as a pair that does not cross in a
+/// conic. The bar's own seam is at `x = 6`, on the far side; a bar whose seam
+/// runs through the loop is answered, in
+/// `two_curves_of_one_pair_that_meet.rs`.
 #[test]
 fn a_ball_driven_into_the_bar_is_refused_ordering_the_loop_they_cross_in() {
     let (_, answer) = united_all_at_once(3.5);
     assert!(
-        matches!(answer, Err(Error::ACrossingThisCannotBeOrderedAlong)),
+        matches!(
+            answer,
+            Err(Error::Geometry(
+                rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic
+            ))
+        ),
         "a ball crossing the bar in a loop the floor runs through: {answer:?}"
     );
 }
