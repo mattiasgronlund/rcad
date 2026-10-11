@@ -9557,8 +9557,12 @@ fuzz-triage night="" against="main":
     manifest=$(mktemp)
     report=$(mktemp)
     members=$(mktemp)
+    fold_scratch=""
+    fold_copy=""
     cleanup() {
         rm -f "$manifest" "$report" "$members"
+        [ -z "$fold_scratch" ] || rm -rf "$fold_scratch"
+        [ -z "$fold_copy" ] || rm -rf "$fold_copy"
         if [ -n "$borrowed" ]; then
             git worktree remove --force "$borrowed/tree" >/dev/null 2>&1 || true
             rm -rf "$borrowed"
@@ -9645,6 +9649,119 @@ fuzz-triage night="" against="main":
     if [ "$untellable" -gt 0 ]; then
         echo "$untellable of $total input(s) could not be told which target they came from, and are not in the groups above"
     fi
+
+    # The fold, §434.3. What it removes is this tree's own `fuzz/artifacts/`
+    # and what it merges with is this tree's own build, so both have to be the
+    # night's, and each guard says why it folds nothing.
+    echo
+    night_named=$(awk '{print $3}' <<<"$line")
+    fold_refusal=""
+    if [ -z "$line" ]; then
+        fold_refusal="$latest describes another night, and only the latest night's tree holds its files and its binaries"
+    elif [ "$night_named" = "BUILD" ]; then
+        fold_refusal="the night's targets did not build, so there is no night binary to merge with"
+    elif [ "$(git rev-parse --verify --quiet "$night_named^{commit}")" != "$(git rev-parse HEAD)" ]; then
+        fold_refusal="this tree stands on $(git rev-parse --short HEAD) and the night on $night_named, so neither this tree's fuzz/artifacts/ nor its fuzz binaries are the night's"
+    elif [ "$at" != "$(git rev-parse --verify --quiet 'main^{commit}')" ]; then
+        fold_refusal="this replayed {{ against }}, not main, and a crash file leaves only once it passes on main"
+    fi
+    if [ -n "$fold_refusal" ]; then
+        echo "fold:     none — $fold_refusal"
+        exit 0
+    fi
+
+    fold_scratch=$(mktemp -d)
+    corpus_root='{{ fuzz_corpus_root }}'
+    record="$root/removed-crash-files.tsv"
+    tree=$(pwd)
+    awk -F'\t' 'FILENAME == ARGV[1] { if (FNR > 1) failing[$NF] = 1; next } !($2 in failing)' \
+        "$members" "$manifest" >"$fold_scratch/passing"
+    if [ ! -s "$fold_scratch/passing" ]; then
+        echo "fold:     nothing passed on main, so nothing leaves fuzz/artifacts/"
+        exit 0
+    fi
+    [ -f "$record" ] || printf 'night\ttarget\tfile\treplayed_main\tkept\n' >"$record"
+    for target in $(cut -f1 "$fold_scratch/passing" | LC_ALL=C sort -u); do
+        here="$fold_scratch/$target"
+        mkdir -p "$here/in" "$here/libfuzzer"
+        awk -F'\t' -v target="$target" '$1 == target { print $2 }' "$fold_scratch/passing" >"$here/passing"
+        passing=$(grep -c . <"$here/passing")
+        said_passing=$(awk -F'\t' -v target="$target" \
+            'NR > 1 && $1 == target && $3 == "no" { n += $2 } END { print n + 0 }' "$report")
+        if [ "$passing" != "$said_passing" ]; then
+            echo "fold:     $target: none — the verdicts say $said_passing passed and the members file leaves $passing, so which ones passed is not known"
+            continue
+        fi
+        binary="$tree/fuzz/target/x86_64-unknown-linux-gnu/release/$target"
+        if [ ! -x "$binary" ]; then
+            echo "fold:     $target: none — there is no night binary at $binary, so all $passing passing file(s) stay"
+            continue
+        fi
+        xargs -d '\n' cp -t "$here/in" -- <"$here/passing"
+        # A copy, swapped in only when the merge succeeded, as the reader's
+        # nightly merge does (§295.7). The tracked `fuzz/corpus/<target>` is not
+        # handed in, so a file is kept for a path only a tracked file takes.
+        mkdir -p "$corpus_root"
+        fold_copy=$(mktemp -d "$corpus_root/$target-fold-tmp.XXXXXX")
+        if [ -d "$corpus_root/$target" ]; then
+            cp -R "$corpus_root/$target/." "$fold_copy/"
+        fi
+        ls -A "$fold_copy" | LC_ALL=C sort >"$here/before"
+        # In a scratch directory, with libFuzzer's own files sent there too: a
+        # crash or a timeout it writes into `fuzz/artifacts/` would be carried
+        # as if a night had found it (§434.3, fifth rule).
+        (cd "$here/libfuzzer" && env -u RCAD_FUZZ_TIMINGS "$binary" -merge=1 -timeout=10 \
+            -merge_control_file="$here/control" -artifact_prefix="$here/libfuzzer/" \
+            "$fold_copy" "$here/in") >"$here/merge.log" 2>&1
+        merged=$?
+        if [ "$merged" -ne 0 ]; then
+            rm -rf "$fold_copy"
+            fold_copy=""
+            echo "fold:     $target: none — the merge failed (exit $merged), so the corpus is as it was and all $passing passing file(s) stay; it ended:"
+            tail -5 "$here/merge.log" | sed 's/^/          /'
+            continue
+        fi
+        # The control file names every file the merge was given, then writes
+        # `FT <index>` only once one has run to the end. One that crashed the
+        # night's older binary or ran past ten seconds has none, and stays.
+        awk -v in_dir="$here/in/" '
+            NR == 1 { files = $1; next }
+            NR == 2 { next }
+            NR <= files + 2 { path[NR - 3] = $0; next }
+            $1 == "FT" && index(path[$2], in_dir) == 1 { print substr(path[$2], length(in_dir) + 1) }
+        ' "$here/control" | LC_ALL=C sort -u >"$here/read-whole"
+        ls -A "$fold_copy" | LC_ALL=C sort | LC_ALL=C comm -13 "$here/before" - \
+            | sed 's/^/crash-/' >"$here/kept"
+        # libFuzzer names a corpus file for the SHA-1 of its bytes, as it named
+        # the crash file, so a kept name that is no crash file's was cut on the
+        # way in and is another input.
+        cut_short=$(LC_ALL=C comm -23 "$here/kept" "$here/read-whole")
+        if [ -n "$cut_short" ]; then
+            rm -rf "$fold_copy"
+            fold_copy=""
+            echo "fold:     $target: none — the merge kept $(grep -c . <<<"$cut_short") file(s) named for no crash file it read whole, so it cut them (first: ${cut_short%%$'\n'*}); the corpus is as it was and all $passing passing file(s) stay"
+            continue
+        fi
+        rm -rf "${corpus_root:?}/$target"
+        mv "$fold_copy" "$corpus_root/$target"
+        fold_copy=""
+        while IFS= read -r name; do
+            if [ -f "fuzz/artifacts/$target/$name" ]; then printf '%s\n' "$name"; fi
+        done <"$here/read-whole" >"$here/leaving"
+        (cd "fuzz/artifacts/$target" && xargs -r -d '\n' rm -f -- <"$here/leaving")
+        while IFS= read -r name; do
+            if [ ! -e "fuzz/artifacts/$target/$name" ]; then printf '%s\n' "$name"; fi
+        done <"$here/leaving" >"$here/removed"
+        awk -v night="$(basename "$night")" -v target="$target" -v main="$at" '
+            FILENAME == ARGV[1] { kept[$0] = 1; next }
+            { print night "\t" target "\t" $0 "\t" main "\t" (($0 in kept) ? "yes" : "no") }
+        ' "$here/kept" "$here/removed" >>"$record"
+        folded=$(grep -c . <"$here/removed")
+        kept=$(grep -c . <"$here/kept")
+        left=$((passing - $(grep -c . <"$here/read-whole")))
+        echo "fold:     $target: $passing passed, $folded folded ($kept kept by the merge), $left left for the next morning"
+    done
+    echo "removed:  $record"
 
 # Turns one artifact `fuzz-triage` found into a seed, which today is a `cp`
 # somebody has to remember — and §98.5 is what happens when nobody does.
@@ -9770,7 +9887,10 @@ check-fuzz-triage-selftest:
     printf '#!/bin/sh\necho "mise: command not found (the 08:30 timer has no mise on its PATH)" >&2\nexit 127\n' \
         >"$no_mise/mise"
     chmod +x "$no_mise/mise"
-    triage() { PATH="$no_mise:$PATH" RCAD_FUZZ_LOGS="$logs" just fuzz-triage "$1" HEAD 2>&1; }
+    triage() {
+        PATH="$no_mise:$PATH" RCAD_FUZZ_LOGS="$logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+            just fuzz-triage "$1" HEAD 2>&1
+    }
 
     verdicts="$night/fuzz-triage-verdicts.tsv"
     header=$(printf 'target\tfiles\tstill_fails\tsample\tgroup')
@@ -9962,6 +10082,219 @@ check-fuzz-triage-selftest:
     fi
     grep -q 'no kind could be read' <<<"$got" \
         || fail "the refusal did not say it could not read a kind"
+
+    # Eleven onwards: the fold (§434.3), in a tree of its own standing on the
+    # night's commit, as `rcad-nightly-fuzz` does at 08:30. The decoder is the
+    # real one, run from this workspace by a `cargo` ahead on the PATH, since
+    # the fixture tree has no workspace. The reader takes any bytes without a
+    # panic, so its files pass on main; `where_two_surfaces_cross` decodes
+    # nothing from these bytes, so its file still fails. The night's binary is a
+    # stand-in that answers `-merge=1` as far as the fold reads it: the control
+    # file's `STARTED` and `FT` lines, a kept file named for the SHA-1 of its
+    # bytes, and a crash or a timeout written under `-artifact_prefix`, which
+    # is where libFuzzer writes them. What each input does is in its bytes.
+    reader=no_step_file_makes_the_reader_panic
+    surfaces=where_two_surfaces_cross
+    tree="$dir/night-tree"
+    fold_logs="$dir/fold-logs"
+    fold_corpus="$dir/fold-corpus"
+    record="$fold_logs/removed-crash-files.tsv"
+    cargo_here="$dir/cargo-here"
+    mkdir -p "$cargo_here" "$fold_logs" "$fold_corpus/$reader"
+    printf '#!/bin/sh\ncd "%s" && exec "%s" "$@"\n' "$PWD" "$(command -v cargo)" >"$cargo_here/cargo"
+    chmod +x "$cargo_here/cargo"
+    mkdir -p "$tree/fuzz/fuzz_targets" "$tree/fuzz/corpus/$reader"
+    touch "$tree/fuzz/fuzz_targets/$reader.rs" "$tree/fuzz/fuzz_targets/$surfaces.rs"
+    printf 'a tracked seed' >"$tree/fuzz/corpus/$reader/tracked-seed"
+    git -C "$tree" init -q -b main
+    commit() { git -C "$tree" -c user.name=selftest -c user.email=selftest@invalid commit -q --allow-empty -m "$1"; }
+    commit "the night's commit"
+    bin="$tree/fuzz/target/x86_64-unknown-linux-gnu/release"
+    mkdir -p "$bin"
+    cat >"$bin/$reader" <<'STAND_IN'
+    #!/usr/bin/env bash
+    set -eu
+    shopt -s nullglob
+    printf '%s\n' "$*" >>"$0.calls"
+    prefix="" control="" dirs=()
+    for arg in "$@"; do
+        case "$arg" in
+            -artifact_prefix=*) prefix="${arg#*=}" ;;
+            -merge_control_file=*) control="${arg#*=}" ;;
+            -*) ;;
+            *) dirs+=("$arg") ;;
+        esac
+    done
+    out="${dirs[0]}"
+    first=("$out"/*)
+    inputs=()
+    for d in "${dirs[@]:1}"; do inputs+=("$d"/*); done
+    { echo $((${#first[@]} + ${#inputs[@]})); echo "${#first[@]}"; printf '%s\n' "${first[@]}" "${inputs[@]}"; } >"$control"
+    status=0
+    i=${#first[@]}
+    for f in "${inputs[@]}"; do
+        echo "STARTED $i $(wc -c <"$f")" >>"$control"
+        hash=$(sha1sum "$f" | cut -d' ' -f1)
+        if grep -q 'crashes the night' "$f"; then
+            cp "$f" "${prefix}crash-$hash"
+        elif grep -q 'runs past ten seconds' "$f"; then
+            cp "$f" "${prefix}timeout-$hash"
+        else
+            if grep -q 'takes a new path' "$f"; then cp "$f" "$out/$hash"; fi
+            if grep -q 'is cut by the merge' "$f"; then
+                head -c 4 "$f" >"$out/$(head -c 4 "$f" | sha1sum | cut -d' ' -f1)"
+            fi
+            if grep -q 'fails the whole merge' "$f"; then cp "$f" "$out/$hash"; status=1; fi
+            echo "FT $i 1" >>"$control"
+        fi
+        i=$((i + 1))
+    done
+    exit "$status"
+    STAND_IN
+    chmod +x "$bin/$reader"
+    cp "$bin/$reader" "$bin/$surfaces"
+    put() {
+        local hash
+        hash=$(printf '%s' "$2" | sha1sum | cut -d' ' -f1)
+        mkdir -p "$tree/fuzz/artifacts/$1"
+        printf '%s' "$2" >"$tree/fuzz/artifacts/$1/crash-$hash"
+        echo "crash-$hash"
+    }
+    a_night() {
+        mkdir -p "$fold_logs/$1/artifacts"
+        cp -Rn "$tree/fuzz/artifacts/." "$fold_logs/$1/artifacts/"
+        printf '%s  %s  %s  %s  %s\n' "$1 08:10" "$2 (0 days old, 0 behind main)" \
+            "2 targets, 1 TO LOOK AT (fuzz:crash)" "some artifacts in $fold_logs/$1/artifacts" \
+            "$fold_logs/$1" >"$fold_logs/latest"
+    }
+    fold() {
+        PATH="$no_mise:$cargo_here:$PATH" RCAD_FUZZ_LOGS="$fold_logs" RCAD_FUZZ_CORPUS="$fold_corpus" \
+            {{ just_executable() }} --justfile "{{ justfile() }}" --working-directory "$tree" \
+            fuzz-triage "$@" 2>&1
+    }
+
+    # Eleven: a night's passing files leave `fuzz/artifacts/` once the merge
+    # has read them whole, and the one that takes a new path joins the corpus.
+    seen=$(printf 'already in the corpus' | sha1sum | cut -d' ' -f1)
+    printf 'already in the corpus' >"$fold_corpus/$reader/$seen"
+    new_path=$(put "$reader" 'this one takes a new path')
+    no_path=$(put "$reader" 'this one adds no path')
+    slow=$(put "$reader" 'this one runs past ten seconds')
+    older=$(put "$reader" 'this one crashes the night binary')
+    failing=$(put "$surfaces" 'not a real crash input')
+    main_sha=$(git -C "$tree" rev-parse HEAD)
+    a_night 2026-10-12 "$(git -C "$tree" rev-parse --short HEAD)"
+    got=$(fold) || fail "a night with files to fold made the triage itself fail"
+    grep -q "^fold:     $reader: 4 passed, 2 folded (1 kept by the merge), 2 left for the next morning$" <<<"$got" \
+        || fail "the fold did not say per target how many it folded, how many the merge kept, and how many stay"
+    [ ! -e "$tree/fuzz/artifacts/$reader/$new_path" ] && [ ! -e "$tree/fuzz/artifacts/$reader/$no_path" ] \
+        || fail "a file the replay saw pass and the merge read whole is still in fuzz/artifacts/"
+    [ -f "$tree/fuzz/artifacts/$reader/$slow" ] && [ -f "$tree/fuzz/artifacts/$reader/$older" ] \
+        || fail "a file the merge did not read to the end, because it crashed the night's binary or ran past ten seconds, left fuzz/artifacts/"
+    [ -f "$tree/fuzz/artifacts/$surfaces/$failing" ] || fail "a file that still fails on main left fuzz/artifacts/"
+    [ ! -e "$bin/$surfaces.calls" ] || fail "a file that still fails on main was handed to the merge"
+    [ -f "$fold_logs/2026-10-12/artifacts/$reader/$new_path" ] \
+        || fail "the night's own copy of a folded file was removed, and a row naming it could no longer replay it"
+    left_behind=$(cd "$tree" && find . -path ./.git -prune -o -type f \( -name 'crash-*' -o -name 'timeout-*' \) -print | LC_ALL=C sort)
+    expected=$(printf '%s\n' "./fuzz/artifacts/$reader/$older" "./fuzz/artifacts/$reader/$slow" \
+        "./fuzz/artifacts/$surfaces/$failing" | LC_ALL=C sort)
+    [ "$left_behind" = "$expected" ] \
+        || fail "the merge wrote a crash or a timeout into the tree, where the next night would carry it as found: $left_behind"
+    calls=$(cat "$bin/$reader.calls")
+    [ "$(grep -c . <<<"$calls")" = 1 ] || fail "the night's binary was not run once for the one target with passing files"
+    grep -q -- '-merge=1 ' <<<"$calls" || fail "the fold did not run a -merge=1"
+    grep -q -- '-timeout=10 ' <<<"$calls" || fail "the merge was not given -timeout=10"
+    grep -q -- "-artifact_prefix=$dir/" <<<"$calls" && ! grep -q -- "-artifact_prefix=$tree" <<<"$calls" \
+        || fail "what libFuzzer writes during the merge was not sent to a scratch directory: $calls"
+    merge_dirs=$(tr ' ' '\n' <<<"$calls" | grep -v '^-')
+    [ "$(grep -c . <<<"$merge_dirs")" = 2 ] \
+        || fail "the merge was handed more than the copy of the corpus and the passing files: $merge_dirs"
+    grep -q "^$fold_corpus/$reader-fold-tmp\." <<<"$(head -1 <<<"$merge_dirs")" \
+        || fail "the merge wrote into something other than a copy of the corpus: $merge_dirs"
+    [ "$(ls -A "$fold_corpus/$reader" | LC_ALL=C sort)" = "$(printf '%s\n' "$seen" "${new_path#crash-}" | LC_ALL=C sort)" ] \
+        || fail "the corpus does not hold what it held and the one file that took a new path: $(ls -A "$fold_corpus/$reader")"
+    [ "$(ls -A "$fold_corpus")" = "$reader" ] || fail "the copy the merge wrote into was left beside the corpus"
+    [ "$(head -1 "$record")" = "$(printf 'night\ttarget\tfile\treplayed_main\tkept')" ] \
+        || fail "the record of removed files does not name its five columns"
+    [ "$(tail -n +2 "$record" | LC_ALL=C sort)" = "$(printf '2026-10-12\t%s\t%s\t%s\t%s\n' \
+        "$reader" "$new_path" "$main_sha" yes "$reader" "$no_path" "$main_sha" no | LC_ALL=C sort)" ] \
+        || fail "the record does not give each removed file's night, target, name, replayed main and whether it was kept: $(cat "$record")"
+
+    # Twelve: a kept file named for no crash file's hash was cut on the way in
+    # and is another input, so nothing of that target's merge is let in.
+    cut_short=$(put "$reader" 'this one is cut by the merge')
+    corpus_before=$(ls -A "$fold_corpus/$reader")
+    record_before=$(cat "$record")
+    a_night 2026-10-13 "$(git -C "$tree" rev-parse --short HEAD)"
+    got=$(fold) || fail "a merge that cut an input made the triage itself fail"
+    grep -q "^fold:     $reader: none — the merge kept 1 file(s) named for no crash file it read whole" <<<"$got" \
+        || fail "a kept file not named for its crash file's hash was let into the corpus"
+    [ "$(ls -A "$fold_corpus/$reader")" = "$corpus_before" ] || fail "a merge that cut an input still replaced the corpus"
+    [ -f "$tree/fuzz/artifacts/$reader/$cut_short" ] || fail "a file the merge cut left fuzz/artifacts/"
+    [ "$(cat "$record")" = "$record_before" ] || fail "a fold that let nothing in still wrote to the record"
+    rm "$tree/fuzz/artifacts/$reader/$cut_short"
+
+    # Thirteen: a merge that fails leaves the corpus as it was, since it wrote
+    # into a copy, and every passing file stays for the next morning.
+    broken=$(put "$reader" 'this one fails the whole merge')
+    a_night 2026-10-14 "$(git -C "$tree" rev-parse --short HEAD)"
+    got=$(fold) || fail "a merge that failed made the triage itself fail"
+    grep -q "^fold:     $reader: none — the merge failed (exit 1)" <<<"$got" || fail "a failed merge was not reported"
+    [ "$(ls -A "$fold_corpus/$reader")" = "$corpus_before" ] || fail "a merge that failed still changed the corpus"
+    [ "$(ls -A "$fold_corpus")" = "$reader" ] || fail "the copy a failed merge wrote into was left beside the corpus"
+    [ -f "$tree/fuzz/artifacts/$reader/$broken" ] || fail "a file left fuzz/artifacts/ though the merge failed"
+    [ "$(cat "$record")" = "$record_before" ] || fail "a failed merge still wrote to the record"
+
+    # Fourteen: a target whose every file folds keeps its directory, which
+    # fuzz-yield's nearest earlier night needs (§434.5), and the record grows
+    # by a line rather than being written again.
+    rm "$tree/fuzz/artifacts/$reader/$broken" "$tree/fuzz/artifacts/$reader/$slow" \
+        "$tree/fuzz/artifacts/$reader/$older"
+    last=$(put "$reader" 'the last of them, and it adds no path')
+    a_night 2026-10-15 "$(git -C "$tree" rev-parse --short HEAD)"
+    got=$(fold) || fail "a fold that empties a target made the triage itself fail"
+    grep -q "^fold:     $reader: 1 passed, 1 folded (0 kept by the merge), 0 left for the next morning$" <<<"$got" \
+        || fail "the last of a target's files did not fold"
+    [ -d "$tree/fuzz/artifacts/$reader" ] || fail "a target whose every file folded lost its directory"
+    [ "$(head -n 3 "$record")" = "$record_before" ] || fail "the record was written again rather than appended to"
+    [ "$(tail -n 1 "$record")" = "$(printf '2026-10-15\t%s\t%s\t%s\tno' "$reader" "$last" "$main_sha")" ] \
+        || fail "the second fold's file was not appended to the record"
+
+    # Fifteen: a night that is not the latest, a night whose targets did not
+    # build, a tree not on the night's commit, and a replay of anything but
+    # main fold nothing, and each says why.
+    stays=$(put "$reader" 'a passing file that must stay')
+    a_night 2026-10-16 "$(git -C "$tree" rev-parse --short HEAD)"
+    got=$(fold "$fold_logs/2026-10-15") || fail "an older night made the triage itself fail"
+    grep -q "^fold:     none — .* describes another night" <<<"$got" || fail "a night that is not the latest was folded"
+    a_night 2026-10-17 BUILD
+    got=$(fold) || fail "a night that did not build made the triage itself fail"
+    grep -q "^fold:     none — the night's targets did not build" <<<"$got" \
+        || fail "a night whose targets did not build was folded"
+    a_night 2026-10-18 "$(git -C "$tree" rev-parse --short HEAD)"
+    commit "main moves on, and this tree with it"
+    got=$(fold) || fail "a tree off the night's commit made the triage itself fail"
+    grep -q "^fold:     none — this tree stands on" <<<"$got" || fail "a tree not on the night's commit was folded"
+    git -C "$tree" checkout -q --detach HEAD~1
+    got=$(fold "" HEAD) || fail "a replay of HEAD made the triage itself fail"
+    grep -q "^fold:     none — this replayed HEAD, not main" <<<"$got" || fail "a replay of something other than main was folded"
+    [ -f "$tree/fuzz/artifacts/$reader/$stays" ] || fail "a night that folds nothing removed a file"
+    [ "$(tail -n 1 "$record")" = "$(printf '2026-10-15\t%s\t%s\t%s\tno' "$reader" "$last" "$main_sha")" ] \
+        || fail "a night that folds nothing wrote to the record"
+
+    # Sixteen: when the members file and the replay's own list name files in
+    # different forms, every failing file would look like a passing one. The
+    # verdicts' count of passing files is checked against it, and a target
+    # where they differ folds nothing.
+    git -C "$tree" checkout -q main
+    printf '#!/bin/sh\ncd "%s" && "%s" "$@" || exit $?\nwhile [ $# -gt 1 ]; do [ "$1" = --members ] && sed -i "s|\\t/|\\t//|" "$2"; shift; done\n' \
+        "$PWD" "$(command -v cargo)" >"$cargo_here/cargo"
+    a_night 2026-10-19 "$(git -C "$tree" rev-parse --short HEAD)"
+    got=$(fold) || fail "a members file in another form made the triage itself fail"
+    grep -q "^fold:     $surfaces: none — the verdicts say 0 passed and the members file leaves 1" <<<"$got" \
+        || fail "a members file naming files in another form than the replay's let a failing file look like a passing one"
+    [ -f "$tree/fuzz/artifacts/$surfaces/$failing" ] && [ ! -e "$bin/$surfaces.calls" ] \
+        || fail "a file that still fails on main was folded"
 
 # Each timer's two unit files are tracked here and **copied** into
 # `~/.config/systemd/user/`. That is two records of one thing, which §60 says is
