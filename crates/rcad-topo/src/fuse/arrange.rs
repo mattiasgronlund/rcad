@@ -8424,11 +8424,15 @@ fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a pair whose crossing is
 /// none of an endless straight line, one closed curve lying in a plane, a
-/// plane's endless bend across a cone, or one of the two loops a fat pipe
-/// crosses a thin one in or a ball crosses a pipe in — a ball or a pipe whose
-/// crossing with a pipe is one loop. That is a **gap**: the curve is there and
-/// ordering points along it takes the marcher rather than a determinant
-/// (§34.10).
+/// plane's endless bend across a cone, one of the two loops a fat pipe crosses
+/// a thin one in or a ball crosses a pipe in, or the one loop a ball off a
+/// pipe's axis crosses it in — a pipe whose crossing with a pipe is one loop.
+/// That is a **gap**: the curve is there and ordering points along it takes the
+/// marcher rather than a determinant (§34.10). The ball's one loop passes here
+/// and is put in order only by the name of where it starts: two places on it
+/// neither of which is the start are refused later, by `rcad-geom`, as
+/// [`TheseTwoSurfacesDoNotCrossInAConic`](rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic)
+/// (Q1661).
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when the shape of the
 /// crossing itself cannot be told — two pipes whose axes cannot be shown to run
@@ -8503,13 +8507,16 @@ fn how_a_crossing_runs(
     }
     // Everything left is either a conic or a quartic. A conic is ordered by one
     // determinant: three points on a convex curve run round it in the order
-    // they wind (§34.5). A quartic is ordered only where it runs once round an
-    // axis, so that looked at down the axis it is a circle: the two loops a fat
-    // pipe crosses a thin one in, and the two a ball crosses a pipe in. The one
-    // loop a ball reaching into a pipe's side leaves closes too, so *finding a
-    // place to start* on a quartic says nothing about being able to order it,
-    // and reading the two as the same question is what gave a ball with a pipe
-    // through it four pieces where it has three.
+    // they wind (§34.5). A quartic is ordered by one only where it runs once
+    // round an axis, so that looked at down the axis it is a circle: the two
+    // loops a fat pipe crosses a thin one in, and the two a ball crosses a pipe
+    // in. The one loop a ball reaching into a pipe's side leaves closes too, so
+    // *finding a place to start* on a quartic says nothing about being able to
+    // order it, and reading the two as the same question is what gave a ball
+    // with a pipe through it four pieces where it has three. That loop is let
+    // through all the same, to be drawn and ordered by the start's name alone,
+    // since every other order on it is asked of `rcad-geom` and refused there
+    // by name (Q1661).
     if let EdgeRun::RightRoundWhereItCrosses {
         and: level @ Surface::Plane(_),
     } = run.run()
@@ -8864,7 +8871,8 @@ fn quotient_of(over: Interval, under: Interval) -> Interval {
 /// circle of a ball inscribed in the pipe. Each of the two runs once round the
 /// pipe's axis, and [`which_comes_first_round_a_crossing`] orders it round that
 /// axis, asking again, exactly, whether the ball swallows the pipe before it
-/// does (Q1554).
+/// does (Q1554). The one loop is let through beside this by
+/// [`the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in`].
 fn one_of_two_loops_round_a_pipe_through_a_ball(
     surface: &Surface,
     partner: &Surface,
@@ -9610,8 +9618,10 @@ fn along_a_bend(
 /// as parts of the crossing, and [`one_of_two_loops_round_a_pipe_through_a_ball`]
 /// lets those through beside this whatever it says (Q1554): each loop runs once
 /// round the pipe's axis, and the ordering reads it down that axis. A ball off
-/// the axis whose crossing is one loop is the whole of the crossing, passes
-/// neither gate, and is refused here.
+/// the axis whose crossing is one loop is the whole of the crossing, and
+/// [`the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in`] lets that through
+/// beside this too, to be drawn and put in order only by the name of where it
+/// starts (Q1661).
 ///
 /// A ball inscribed in the pipe touches it round one circle rather than
 /// crossing it, and passes this gate as well. Nothing orders along a touch:
@@ -9666,7 +9676,9 @@ fn a_pair_that_crosses_in_a_conic(
         // the axis, and a ball off it in quartic loops `intersect` names with
         // the same runs, so only the placement can tell the two apart. The two
         // loops are ordered all the same, through
-        // `one_of_two_loops_round_a_pipe_through_a_ball` beside this.
+        // `one_of_two_loops_round_a_pipe_through_a_ball` beside this, and the
+        // one loop is drawn through
+        // `the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in`.
         (Surface::Sphere(ball), Surface::Cylinder(pipe))
         | (Surface::Cylinder(pipe), Surface::Sphere(ball)) => {
             match how_far_a_ball_sits_off_a_pipes_axis(ball, pipe) {
