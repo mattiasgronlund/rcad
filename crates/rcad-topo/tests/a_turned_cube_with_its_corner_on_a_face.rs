@@ -18,8 +18,10 @@
 //! rings claiming to be the outline was an assert; it is now
 //! `TheFuseWroteABrokenAnswer { broken: HoleWindsWithTheOuterWire }`, which is
 //! what `Model::validate` would say of that face if it were written. The
-//! other six were refused by name already and still are. Every test below
-//! pins one fuse to its refusal.
+//! other six were refused by name already. The six under `Policy::certified()`
+//! still are, and a test below pins each to its refusal; the six under
+//! `Policy::tolerant(100.0)` answer since Q1527
+//! ([`under_a_tolerant_policy_the_tip_folds_into_one_corner_and_every_fuse_answers`]).
 //!
 //! **Under `Policy::certified()` the refusal is a limit, but not for the
 //! reason the windings suggest.** Rounding each coordinate of the tip and of
@@ -34,13 +36,15 @@
 //! since Q1614 the turned cube less the block too. The same count on Q1208's
 //! shape below: 160 of 512, every one with a range of at least `1.4e17`.
 //!
-//! **Under `Policy::tolerant(100.0)` it is a gap.** The answer meant is the
-//! block with its `x = 0` face whole, with the turned cube touching it from
-//! inside; it exists, and nothing here reaches it yet. The three crossings are
-//! proved apart, exactly, so no decision is left for a policy to resolve, and
-//! reaching it means taking three crossings a rounding apart as one: the
-//! second half of `docs/decisions.md` §417, not built. The six tolerant pins
-//! below stay refused until it is.
+//! **Under `Policy::tolerant(100.0)` it was a gap, and Q1527 closed it.** The
+//! answer meant is the block with its `x = 0` face whole, with the turned cube
+//! touching it from inside. The three crossings are proved apart, exactly, so
+//! no decision is left for a policy to resolve, and reaching the answer means
+//! taking three crossings a rounding apart as one. The tolerant fuse now takes
+//! each crossing, where two of the turned cube's planes at the corner meet the
+//! block's face, as that corner when it is within `Policy::max_wobble` of it
+//! (`docs/decisions.md` §417.7), and every fuse answers, the volumes agreeing
+//! as [`every_fuse_answers_and_the_volumes_agree`] asks.
 //!
 //! **Where the same turn's planes meet a rounding inside the face, every fuse
 //! answers under both policies** (Q1288). With the corner at `(0, 2, 4)` they
@@ -76,16 +80,18 @@
 //! in 148 before: 74 `Undecidable` on the triangle, 58 a hole winding with its
 //! outline and 16 an outline winding against its face. It answered 62 after
 //! that, 68 after Q1442 left out an edge only wires enclosing nothing walked,
-//! and answers 104 since Q1506 left out the flat ring another plane walks
-//! back. The intersection of 102 of the 104 answers too, and the two hold 2000
-//! between them; the intersection of turns 13 and 314 is refused as an
-//! outline winding against its face, and their union is 1000 more than the
-//! turned cube less the block. None is refused `Undecidable`, and the 95 left
-//! are refused by name once the answer is written with its corners rounded:
-//! 63 a hole winding with its outline, 16 an outline winding against its face
-//! and 16 an edge with four faces. The 34 shells enclosing nothing of before
-//! Q1506 are gone. The rule is exact, so it runs under `Policy::certified()`
-//! too, where the union of 16 of the 199 answered either way round before
+//! and 104 after Q1506 left out the flat ring another plane walks back. The
+//! intersection of 102 of the 104 answered too, and the two held 2000 between
+//! them; the intersection of turns 13 and 314 was refused as an outline
+//! winding against its face, and their union is 1000 more than the turned cube
+//! less the block. None was refused `Undecidable`, and the 95 left were
+//! refused by name once the answer was written with its corners rounded: 63 a
+//! hole winding with its outline, 16 an outline winding against its face and
+//! 16 an edge with four faces. The 34 shells enclosing nothing of before Q1506
+//! are gone. **Since Q1527's fold every rule both ways round answers all 199
+//! under the tolerant policy**, below. `by_a_plane`'s rule is exact, so it runs
+//! under `Policy::certified()` too, where the union of 16 of the 199 answered
+//! either way round before
 //! Q1506. 10 answered after Q1353: each validates and holds, within `1e−6`,
 //! what the turned cube moved `2⁻³⁰` further in gives, and how the tip is
 //! written in those 10 was not traced. The other 6 are Q1442's, whose three
@@ -98,9 +104,16 @@
 //! block answers the same 74 and is refused for the range in the other 125,
 //! where 60 of them were refused as a shell enclosing nothing
 //! ([`the_turned_cube_less_the_block_over_the_199_turns_whose_planes_meet_outside`]).
-//! `docs/decisions.md` §417.3 has the counts.
+//! The fold of Q1527 is tolerant only and moved none of these certified
+//! counts. Under the tolerant policy, with it, every rule both ways round
+//! answers all 199, each answer as many solids as with the turned cube `2⁻³⁰`
+//! further in and each solid the volume of one there: counted by a probe since
+//! taken out, and pinned for the turned cube less the block over all 199 and
+//! for every rule over the 31 below. `docs/decisions.md` §417.3 and §417.8
+//! have the counts.
 //! [`random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant`]
-//! keeps the first 60, 31 of which meet outside.
+//! keeps the first 60, 31 of which meet outside, and asks every rule both ways
+//! round of each of the 31.
 //!
 //! With the corner a thousandth inside the face, every fuse answers, and the
 //! union and the intersection hold both cubes between them:
@@ -389,9 +402,9 @@ fn random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_nam
 /// §417.8). Before it the tolerant fuse answered 124 and was refused 60 as a
 /// shell enclosing nothing and 15 as an outline winding against its face, and
 /// 50 of the 124 were wrong: each held the tip outside the face as a solid of
-/// its own, of `4e−48` to `4e−46`, a solid the cube moved further in does not
-/// have, 41 as two solids where there is one and 9 as three where there are
-/// two.
+/// its own, of `4.0e−48` to `2.1e−45`, a solid the cube moved further in does
+/// not have, 41 as two solids where there is one and 9 as three where there
+/// are two.
 ///
 /// **Q1614 moved the certified 125.** Until then the fuse nested the answer's
 /// shells before it asked the range, and 60 of them were refused as a shell
