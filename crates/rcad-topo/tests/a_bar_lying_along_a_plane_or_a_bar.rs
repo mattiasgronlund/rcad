@@ -150,11 +150,10 @@ fn a_bar_whose_seam_is_the_line_it_touches_a_wall_along_keeps_its_seam_in_histor
 /// two at `(0, 2, 2)` — `(0, 2, 1)`–`(0, 2, 2)` along the touch, and
 /// `(0, 2, 2)`–`(0, 2, 3)` above it, where the wall is no longer there to touch.
 ///
-/// **`images_of_edge` of the pre-fuse seam comes back empty every time**, even
-/// where the answer keeps both halves of it. Neither half's two ends are the
-/// seam's own two ends, so `the_seam_a_side_runs_along` names neither, and the
-/// seam's history is lost whole rather than split in two. This pins that as
-/// measured; it is not the fix.
+/// **The seam's images are both halves** there, and nothing where the answer
+/// keeps none of the bar's skin. Until Q1761 they were empty every time:
+/// neither half's two ends are the seam's own two ends, and only a side
+/// between those was read as running along the seam.
 #[test]
 fn a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it() {
     let mut wrong: Vec<String> = Vec::new();
@@ -176,32 +175,54 @@ fn a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it() {
                     &mut ProvenanceLog::new(),
                 )
                 .unwrap_or_else(|why| panic!("{what} refused: {why}"));
-            let images = answer
+            let lowest_first = |one: &EdgeKey, other: &EdgeKey| {
+                heights_of_the_ends_of(&model, *one)[0]
+                    .total_cmp(&heights_of_the_ends_of(&model, *other)[0])
+            };
+            let mut images = answer
                 .images_of_edge(seam)
-                .expect("this model made the key");
-            let along_the_touch: Vec<EdgeKey> = answer
+                .expect("this model made the key")
+                .to_vec();
+            images.sort_by(lowest_first);
+            let mut along_the_line: Vec<EdgeKey> = answer
                 .solids()
                 .iter()
                 .flat_map(|&solid| edges_of(&model, solid))
                 .filter(|&edge| runs_up_the_line(&model, edge, [0.0, 2.0]))
                 .collect();
+            along_the_line.sort_by(lowest_first);
+            let heights: Vec<[f64; 2]> = along_the_line
+                .iter()
+                .map(|&edge| heights_of_the_ends_of(&model, edge))
+                .collect();
             let keeps_the_bar = rule == Rule::Union || (rule == Rule::Difference && swapped);
-            let expected_count = if keeps_the_bar { 2 } else { 0 };
-            if along_the_touch.len() != expected_count || !images.is_empty() {
+            let wanted: &[[f64; 2]] = if keeps_the_bar {
+                &[[1.0, 2.0], [2.0, 3.0]]
+            } else {
+                &[]
+            };
+            if heights != wanted || images != along_the_line {
                 wrong.push(format!(
-                    "{what}: the answer's edges along the touch are {along_the_touch:?} (wanted \
-                     {expected_count} of them) and the seam's images are {images:?} (wanted none, \
-                     as measured)"
+                    "{what}: the answer's edges along the line are {along_the_line:?}, from and to \
+                     the heights {heights:?} (wanted {wanted:?}), and the seam's images are \
+                     {images:?}"
                 ));
             }
         }
     }
     assert!(
         wrong.is_empty(),
-        "the seam's images stay empty where the wall only touches part of it, even where the \
-         answer keeps the bar's seam split in two along the line:\n{}",
+        "the seam's images are its two halves either side of where the wall stops, where the \
+         answer keeps the bar, and nothing where it does not:\n{}",
         wrong.join("\n")
     );
+}
+
+/// The heights of an upright edge's two ends, lower first.
+fn heights_of_the_ends_of(model: &Model, edge: EdgeKey) -> [f64; 2] {
+    let edge = model.edge(edge).expect("this model made the key");
+    let [one, other] = [edge.start().point().z(), edge.end().point().z()];
+    [one.min(other), one.max(other)]
 }
 
 /// A bar of radius one in the hole of a tube, radius seven less radius three,
