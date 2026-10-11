@@ -495,6 +495,7 @@ def refuse_if_section_0_names(rows):
 
 def apply_queue(rows, tip, steps, landing):
     short = output("git", "rev-parse", "--short=8", tip)
+    steps = [said_where_from(step, rows[0]) for step in steps]
     batch = [["done", row, short] for row in rows] + steps
     words = []
     for step in batch:
@@ -509,6 +510,19 @@ def apply_queue(rows, tip, steps, landing):
         landing["needs_judgement"].append(f"queue apply printed {len(ids)} new ids for {len(adds)} add steps")
     for row_id, (_, tier, model, _write_set, what) in zip(ids, adds):
         landing["rows_added"].append(f"{row_id.strip()} tier {tier} {model}: {what[:80]}")
+
+
+def said_where_from(step, row):
+    """An `add` step that says which row it came from, `from/<row>` when the lane did not say (§432).
+
+    `just queue add` refuses a row that does not say, and a lane's rows come
+    from the row it ran, so a lane need not know. A lane that names its own
+    source, `from/<id>` or `was/<id>` as the first word or the one after the
+    tag, keeps it; a bundle's lane does that for a row that is not its first.
+    """
+    if step[0] != "add" or any(word.startswith(("from/", "was/")) for word in step[4].split()[:2]):
+        return step
+    return [*step[:4], f"from/{row} {step[4]}"]
 
 
 def gate_and_push(report):

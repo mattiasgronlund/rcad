@@ -122,7 +122,10 @@ what is not a row.
   joined by commas, or `-` for none. A row whose fix adds a refusal, or turns a
   panic into one, names its crate's `error.rs`, since the new variant goes
   there: Q574, Q604 and Q605 were each dropped and filed again for want of it
-  (§360.6).
+  (§360.6). Every row says which row it came from (§432), and `just land`
+  puts `from/<your row>` in front of a `<what>` that does not say. In a
+  bundle, start `<what>` with `from/<id>` for an item from a row that is not
+  the first; start it with `was/<id>` for a row that files `<id>` again.
 - `["tag", "@1", "<class>"]` or `["tag", "@1", "small"]`, one tag at most per
   row. A defect's row takes its class from `remaining`: `wrong`, `crash` or
   `refuses`, then `/A` to `/D` as above. The class names the tier (§403): a row

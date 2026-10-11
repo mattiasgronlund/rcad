@@ -11427,6 +11427,12 @@ _queue-rows file:
 # running lane blocks is skipped with the usual line, and one that waits is not
 # ready, so a chain of pinned rows goes out one row at a time as each lands.
 #
+# **A row says which row it came from** (§432), in the word after the pin and
+# the class: `from/<id>` when running `<id>` is why it exists, `was/<id>` when it
+# files `<id>` again, `from/-` when no row led to it. `add` refuses a row without
+# one, and `just land` writes `from/<the lane's row>` for a lane that names none.
+# The fill never reads it; it is there to count how far each row's work grows.
+#
 # **Two write sets meet** on the same path, unless both name items in it and the
 # items differ (§230.6); on a directory ending in `/` that holds the other path;
 # and `-` meets nothing. The directory test is a prefix test on a name that ends
@@ -11451,8 +11457,8 @@ _queue-rows file:
 # it the arguments.
 #
 # **`apply` runs several of those verbs as one batch** (§309): `just queue
-# apply take Q241 lane-a + take Q270 lane-b + add 2 sonnet - 'what' + after @1
-# Q270`. A standalone `+` separates the steps, which land on the file in
+# apply take Q241 lane-a + take Q270 lane-b + add 2 sonnet - 'from/Q241 what' +
+# after @1 Q270`. A standalone `+` separates the steps, which land on the file in
 # order, each seeing the ones before it, under one hold of the claims lock; a
 # refused step names its own number and text and aborts the whole batch before
 # anything is written. `@1`, `@2`, ... stand for the ids the batch's own first,
@@ -12415,7 +12421,13 @@ _queue-check file decisions:
 # ahead of a full bundle and of wrong/A; a pinned row a running lane blocks,
 # skipped; a class after a pin, still read by the check and the measure; and a
 # pin of 0, a pin on a tier 2 row and two open rows on one pin refused, while a
-# closed row may keep the pin an open row has.
+# closed row may keep the pin an open row has. §432 adds the word that says
+# where a row came from, after a pin and a class, after `small`, and on a closed
+# row; a `from/` naming a Q row this copy does not hold, passed; and a malformed
+# word, `was/-`, a row from itself, a T id that is no row and a class written
+# after the word, refused. `add` refuses a row without the word, one naming a
+# row that exists nowhere, and `was/-`; writes the word after the tag whichever
+# came first; and still refuses a class with punctuation or a pin behind it.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -12947,7 +12959,11 @@ check-queue-merge-driver:
 # above them; `rank`, `tier`, `tag`, `park`, `drop` and `after` each refusing a
 # pinned row, `add` refusing a pin, and `pin` refusing a pinned, a parked and a
 # C row; `unpin` leaving its row where it stood; and `take` and `done` closing a
-# pinned row with its pin. The
+# pinned row with its pin. §432's: every `add` saying where its row came from,
+# `was/T1` naming a closed row and `from/Q1` an open one; `tag` putting a class
+# or `small` in front of that word and `tag -` taking it off again; `unpin`
+# leaving the word first; and `add` refusing a pin before it looks for the
+# word. The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -13047,8 +13063,8 @@ check-queue-api-selftest:
     grep -qF 'Q4 is not ready: it waits on Q1 (todo)' <<<"$got" || fail "take did not say why Q4 is not ready"
 
     for n in 1 2; do
-        q "$one" add 2 opus - "a row added in one, $n §230" > "$root/add-one-$n" 2> "$root/err-one-$n" &
-        q "$two" add 2 opus - "a row added in two, $n §230" > "$root/add-two-$n" 2> "$root/err-two-$n" &
+        q "$one" add 2 opus - "from/- a row added in one, $n §230" > "$root/add-one-$n" 2> "$root/err-one-$n" &
+        q "$two" add 2 opus - "from/- a row added in two, $n §230" > "$root/add-two-$n" 2> "$root/err-two-$n" &
     done
     wait
     got=$(cat "$root"/add-* "$root"/err-* | sort | tr '\n' ' ')
@@ -13090,13 +13106,13 @@ check-queue-api-selftest:
     got=$(q "$lanes/idle" tier T1 2 2>&1) && fail "tier moved T1, which is closed"
     grep -qF 'T1 is closed' <<<"$got" || fail "tier did not say T1 is closed"
     g "$hub" worktree add -q -b spare "$lanes/spare" main
-    got=$(q "$lanes/spare" add 2.2 sonnet - "a row for a tier with no heading yet §230" 2>&1) \
+    got=$(q "$lanes/spare" add 2.2 sonnet - "was/T1 a row for a tier with no heading yet §230" 2>&1) \
         || fail "add refused tier 2.2, whose heading the file does not have yet"
     got=$(awk -v id="$got" '/^## / { h = $0 } $1 == id { print h }' "$lanes/spare/docs/queue.md")
     [ "$got" = "## Tier 2.2" ] || fail "add did not write ## Tier 2.2 over the row it added"
     g "$hub" worktree add -q -b up "$lanes/up" main
     grep -q '^## Tier 2.2' "$lanes/up/docs/queue.md" && fail "the tree for moving a row up has ## Tier 2.2 already"
-    up=$(q "$lanes/up" add 3 opus - "a row moved up into a tier with no heading yet §230") || fail "add for the row to move up failed"
+    up=$(q "$lanes/up" add 3 opus - "from/Q4 a row moved up into a tier with no heading yet §230") || fail "add for the row to move up failed"
     got=$(q "$lanes/up" tier "$up" 2.2 2>&1) || fail "tier refused to move $up up from tier 3 to tier 2.2, whose heading goes above it"
     got=$(awk -v id="$up" '/^## / { h = $0 } $1 == id { print h ": " $2 }' "$lanes/up/docs/queue.md")
     [ "$got" = "## Tier 2.2: 2.2" ] || fail "tier did not leave $up once, under ## Tier 2.2"
@@ -13117,7 +13133,7 @@ check-queue-api-selftest:
         || fail "done did not move Q1 under ## Closed"
     got=$(q "$one" running 2>&1) || fail "running failed"
     grep -qx '3 running' <<<"$got" || fail "done released a hold whose lane tree still stands, or counted it twice"
-    got=$(q "$two" add 2.5 opus docs/a.md "a row on Q1's file, added in two §230" 2>&1) || fail "two could not add a row on docs/a.md"
+    got=$(q "$two" add 2.5 opus docs/a.md "from/Q1 a row on Q1's file, added in two §230" 2>&1) || fail "two could not add a row on docs/a.md"
     on_a=$got
     got=$(q "$two" next 9 2>&1) || fail "next failed"
     grep -q '^take Q1 ' <<<"$got" && fail "next offered Q1, which one's copy already shows done"
@@ -13161,7 +13177,7 @@ check-queue-api-selftest:
     g "$hub" worktree remove --force "$gone"
     verify_gone="$lanes/verify-gone"
     g "$hub" worktree add -q --detach "$verify_gone" lane-gone && lock "$verify_gone"
-    got=$(q "$hub" add 3 opus - "a row whose lane tree is gone §230" 2>&1) || fail "add for the gone-lane row failed"
+    got=$(q "$hub" add 3 opus - "from/- a row whose lane tree is gone §230" 2>&1) || fail "add for the gone-lane row failed"
     q_gone=$got
     got=$(q "$hub" take "$q_gone" lane-gone 2>&1) || fail "take could not hold $q_gone on lane-gone"
     got=$(q "$hub" running 2>&1) || fail "running failed with a lane tree gone and its verifier held"
@@ -13176,7 +13192,7 @@ check-queue-api-selftest:
     g "$hub" worktree remove --force "$gone2"
     verify_gone2="$lanes/verify-gone-2"
     g "$hub" worktree add -q --detach "$verify_gone2" lane-gone-2 && lock "$verify_gone2"
-    got=$(q "$hub" add 3 opus - "a second row whose lane tree is gone §230" 2>&1) || fail "add for the second gone-lane row failed"
+    got=$(q "$hub" add 3 opus - "from/- a second row whose lane tree is gone §230" 2>&1) || fail "add for the second gone-lane row failed"
     q_gone2=$got
     got=$(q "$hub" take "$q_gone2" lane-gone-2 2>&1) || fail "take could not hold $q_gone2 on lane-gone-2"
     got=$(q "$hub" running 2>&1) || fail "running failed with two rows each missing their lane tree"
@@ -13197,7 +13213,7 @@ check-queue-api-selftest:
     verify_gone3="$lanes/verify-gone-3"
     g "$hub" worktree add -q --detach "$verify_gone3" lane-gone-3 && lock "$verify_gone3"
     g "$hub" branch -D lane-gone-3 >/dev/null
-    got=$(q "$hub" add 3 opus - "a row whose lane branch is deleted outright §230" 2>&1) || fail "add for the deleted-branch row failed"
+    got=$(q "$hub" add 3 opus - "from/- a row whose lane branch is deleted outright §230" 2>&1) || fail "add for the deleted-branch row failed"
     q_gone3=$got
     got=$(q "$hub" take "$q_gone3" lane-gone-3 2>&1) || fail "take could not hold $q_gone3 on a branch that is about to be deleted"
     got=$(q "$hub" running 2>&1) || fail "running failed with a lane branch deleted outright and its verifier held"
@@ -13213,7 +13229,7 @@ check-queue-api-selftest:
     verify_gone4="$lanes/verify-gone-4"
     g "$hub" worktree add -q --detach "$verify_gone4" lane-gone-4 && lock "$verify_gone4"
     g "$hub" branch -D lane-gone-4 >/dev/null
-    got=$(q "$hub" add 3 opus - "a second row whose lane branch is deleted outright §230" 2>&1) || fail "add for the second deleted-branch row failed"
+    got=$(q "$hub" add 3 opus - "from/- a second row whose lane branch is deleted outright §230" 2>&1) || fail "add for the second deleted-branch row failed"
     q_gone4=$got
     got=$(q "$hub" take "$q_gone4" lane-gone-4 2>&1) || fail "take could not hold $q_gone4 on a branch that is about to be deleted"
     got=$(q "$hub" running 2>&1) || fail "running failed with two rows each deleted outright"
@@ -13231,7 +13247,7 @@ check-queue-api-selftest:
     g "$hub" worktree add -q -b worktree-left-its-branch "$left" main && lock "$left"
     g "$left" switch -q -c lane-left main
     g "$left" switch -q --detach "$(g "$hub" rev-list --max-parents=0 main)"
-    got=$(q "$hub" add 3 opus - "a read-only row whose lane left its branch §230" 2>&1) || fail "add for the read-only row failed"
+    got=$(q "$hub" add 3 opus - "from/- a read-only row whose lane left its branch §230" 2>&1) || fail "add for the read-only row failed"
     q_left=$got
     got=$(q "$hub" take "$q_left" lane-left 2>&1) || fail "take could not hold $q_left on lane-left"
     got=$(q "$hub" running 2>&1) || fail "running failed with a read-only lane off its branch"
@@ -13241,7 +13257,7 @@ check-queue-api-selftest:
     # The other side of §299.2: a held branch already on main that no tree
     # left is still a stale hold, with a tree that left another branch beside it.
     g "$hub" branch lane-stale main
-    got=$(q "$hub" add 3 opus - "a row held on a branch already on main §230" 2>&1) || fail "add for the stale row failed"
+    got=$(q "$hub" add 3 opus - "from/- a row held on a branch already on main §230" 2>&1) || fail "add for the stale row failed"
     q_stale=$got
     got=$(q "$hub" take "$q_stale" lane-stale 2>&1) || fail "take could not hold $q_stale on lane-stale"
     got=$(q "$hub" running 2>&1) || fail "running failed with a stale hold"
@@ -13256,8 +13272,8 @@ check-queue-api-selftest:
     # names here.
     batch_wt="$root/rcad-worktrees/batch"
     g "$hub" worktree add -q -b apply-batch "$batch_wt" main
-    row_a=$(q "$batch_wt" add 2 opus - "a row this batch takes in step 1 §230") || fail "add for row_a failed"
-    row_b=$(q "$batch_wt" add 2 opus - "a row this batch takes in step 2 §230") || fail "add for row_b failed"
+    row_a=$(q "$batch_wt" add 2 opus - "from/- a row this batch takes in step 1 §230") || fail "add for row_a failed"
+    row_b=$(q "$batch_wt" add 2 opus - "from/- a row this batch takes in step 2 §230") || fail "add for row_b failed"
 
     before_queue=$(md5sum "$batch_wt/docs/queue.md" | cut -d' ' -f1)
     before_claims=$(md5sum "$claims_file" | cut -d' ' -f1)
@@ -13270,14 +13286,14 @@ check-queue-api-selftest:
     [ "$before_queue" = "$after_queue" ] || fail "a batch refused at its third step still changed docs/queue.md"
     [ "$before_claims" = "$after_claims" ] || fail "a batch refused at its third step still appended to the claims file"
 
-    got=$(q "$batch_wt" apply add 2 opus - "a row an after step points at §230" + after @1 Q2 2>&1) \
+    got=$(q "$batch_wt" apply add 2 opus - "from/- a row an after step points at §230" + after @1 Q2 2>&1) \
         || fail "add + after @1 was refused"
     new_id=$(sed -n '1p' <<<"$got")
     sed -n '2p' <<<"$got" | grep -qF "$new_id: todo -> after:Q2" || fail "after @1 did not print the new row waiting on Q2"
     got=$(awk -v id="$new_id" '$1 == id { print $2, $3 }' "$batch_wt/docs/queue.md")
     [ "$got" = "2 after:Q2" ] || fail "after @1 did not write tier 2, after:Q2 on the row the batch just added"
 
-    got=$(q "$batch_wt" apply add 2 opus - "the first of a pair §230" + add 2 opus - "the second of a pair §230" 2>&1) \
+    got=$(q "$batch_wt" apply add 2 opus - "from/- the first of a pair §230" + add 2 opus - "from/- the second of a pair §230" 2>&1) \
         || fail "two adds in one batch were refused"
     first_id=$(sed -n '1p' <<<"$got")
     second_id=$(sed -n '2p' <<<"$got")
@@ -13292,11 +13308,11 @@ check-queue-api-selftest:
     # the batch does not release it until every step has run.
     spam_wt="$root/rcad-worktrees/spam"
     g "$hub" worktree add -q -b spam "$spam_wt" main
-    (for i in $(seq 1 40); do q "$spam_wt" add 2.5 opus - "a spammed row $i §230" >/dev/null 2>&1; done) &
+    (for i in $(seq 1 40); do q "$spam_wt" add 2.5 opus - "from/- a spammed row $i §230" >/dev/null 2>&1; done) &
     spam_pid=$!
-    got=$(q "$batch_wt" apply add 2.5 opus - "a contiguous probe row 1 §230" \
-        + add 2.5 opus - "a contiguous probe row 2 §230" \
-        + add 2.5 opus - "a contiguous probe row 3 §230" 2>&1) \
+    got=$(q "$batch_wt" apply add 2.5 opus - "from/- a contiguous probe row 1 §230" \
+        + add 2.5 opus - "from/- a contiguous probe row 2 §230" \
+        + add 2.5 opus - "from/- a contiguous probe row 3 §230" 2>&1) \
         || fail "the three-step probe batch was refused"
     wait "$spam_pid"
     lines=$(grep -n 'a contiguous probe row' "$claims_file" | cut -d: -f1)
@@ -13313,11 +13329,12 @@ check-queue-api-selftest:
     tag_wt="$root/rcad-worktrees/tag"
     g "$hub" worktree add -q -b tag "$tag_wt" main
     words() { awk -v id="$1" '$1 == id { print $6, $7 }' "$tag_wt/docs/queue.md"; }
-    ranked=$(q "$tag_wt" add 1 opus - "a defect the tag verb ranks §230") || fail "add for the row to tag failed"
+    ranked=$(q "$tag_wt" add 1 opus - "from/- a defect the tag verb ranks §230") || fail "add for the row to tag failed"
     got=$(q "$tag_wt" tag "$ranked" refuses/B 2>&1) || fail "tag refused a class on a tier 1 row"
-    [ "$(words "$ranked")" = "refuses/B a" ] || fail "tag did not put refuses/B in front of the description"
+    [ "$(words "$ranked")" = "refuses/B from/-" ] \
+        || fail "tag did not put refuses/B in front of the description, ahead of the word that says where the row came from (§432)"
     got=$(q "$tag_wt" tag "$ranked" wrong/A 2>&1) || fail "tag refused to replace one class with another"
-    [ "$(words "$ranked")" = "wrong/A a" ] || fail "tag did not replace refuses/B with wrong/A"
+    [ "$(words "$ranked")" = "wrong/A from/-" ] || fail "tag did not replace refuses/B with wrong/A"
     got=$(q "$tag_wt" tag "$ranked" wrong/A 2>&1) && fail "tag set a class the row carries already"
     grep -qF "$ranked is tagged wrong/A already" <<<"$got" || fail "tag did not say the row carries wrong/A already"
     got=$(q "$tag_wt" tag "$ranked" wrong/E 2>&1) && fail "tag accepted wrong/E, which is no class"
@@ -13334,30 +13351,30 @@ check-queue-api-selftest:
     [ "$(under "$ranked")" = "## Tier 1: 1 wrong/B" ] || fail "tag wrong/B did not move the row back under ## Tier 1"
     got=$(q "$tag_wt" tier "$ranked" 5 2>&1) && fail "tier moved a row of class B to tier 5"
     grep -qF "carries the class wrong/B, which puts it in tier 1" <<<"$got" || fail "tier did not say a B row belongs in tier 1"
-    got=$(q "$tag_wt" add 1 opus - "refuses/C a class add writes onto a tier 1 row §230" 2>&1) \
+    got=$(q "$tag_wt" add 1 opus - "refuses/C from/- a class add writes onto a tier 1 row §230" 2>&1) \
         && fail "add wrote a C class onto a tier 1 row"
     grep -qF 'the class refuses/C puts an open row in tier 5, and this row is tier 1' <<<"$got" \
         || fail "add's refusal of a C row in tier 1 did not carry check-queue's reason"
-    got=$(q "$tag_wt" apply add 1 opus - "refuses/C a C row filed in tier 1 and moved §230" + tier @1 5 2>&1) \
+    got=$(q "$tag_wt" apply add 1 opus - "refuses/C from/- a C row filed in tier 1 and moved §230" + tier @1 5 2>&1) \
         || fail "tier refused to move a C row to tier 5, the tier its class names"
     [ "$(under "$(sed -n '1p' <<<"$got")")" = "## Tier 5: 5 refuses/C" ] || fail "tier did not move the C row under ## Tier 5"
     got=$(q "$tag_wt" tier "$ranked" 2 2>&1) && fail "tier moved a row carrying a class out of tier 1"
     grep -qF "remove it first with \`tag $ranked -\`" <<<"$got" || fail "tier did not name the tag step that frees the row"
     got=$(q "$tag_wt" tag "$ranked" - 2>&1) || fail "tag refused to remove the class"
-    [ "$(words "$ranked")" = "a defect" ] || fail "tag - did not leave the description as add wrote it"
+    [ "$(words "$ranked")" = "from/- a" ] || fail "tag - did not leave the description as add wrote it"
     got=$(q "$tag_wt" tier "$ranked" 2 2>&1) || fail "tier refused a row whose class was removed"
     got=$(q "$tag_wt" tag "$ranked" crash/C 2>&1) && fail "tag put a class on a tier 2 row"
     grep -qF "$ranked is tier 2, and a class ranks tier 1 and tier 5 rows only" <<<"$got" || fail "tag did not say a class ranks tiers 1 and 5 only"
     got=$(q "$tag_wt" tag "$ranked" small 2>&1) || fail "tag refused small on a tier 2 row"
-    [ "$(words "$ranked")" = "small a" ] || fail "tag did not put small in front of the description"
+    [ "$(words "$ranked")" = "small from/-" ] || fail "tag did not put small in front of the description"
     got=$(check "$tag_wt") || fail "the file tag wrote fails check-queue"
-    got=$(q "$tag_wt" add 2 sonnet - "wrong/B a class add writes onto a tier 2 row §230" 2>&1) \
+    got=$(q "$tag_wt" add 2 sonnet - "wrong/B from/- a class add writes onto a tier 2 row §230" 2>&1) \
         && fail "add wrote a class onto a tier 2 row"
     grep -qF 'the class wrong/B ranks tier 1 and tier 5 rows only, and this row is tier 2' <<<"$got" \
         || fail "add's refusal did not carry check-queue's reason"
 
-    first_small=$(q "$tag_wt" add 2 sonnet - "small the first row of a bundle §230") || fail "add for the first small row failed"
-    second_small=$(q "$tag_wt" add 2 sonnet - "small the second row of a bundle §230") || fail "add for the second small row failed"
+    first_small=$(q "$tag_wt" add 2 sonnet - "small from/- the first row of a bundle §230") || fail "add for the first small row failed"
+    second_small=$(q "$tag_wt" add 2 sonnet - "small from/- the second row of a bundle §230") || fail "add for the second small row failed"
     before=$(q "$tag_wt" running --count) || fail "running --count failed before the bundle was taken"
     got=$(q "$tag_wt" apply take "$first_small" lane-bundle + take "$second_small" lane-bundle 2>&1) \
         || fail "one branch could not take two small rows"
@@ -13371,8 +13388,8 @@ check-queue-api-selftest:
     # answers False there rather than None, and the two are counted apart.
     unlanded=$(g "$hub" commit-tree -p main -m "a bundle's own commit" 'main^{tree}') || fail "commit-tree failed"
     g "$hub" branch lane-bundle-2 "$unlanded"
-    third_small=$(q "$tag_wt" add 2 sonnet - "small the first row of a second bundle §230") || fail "add for the third small row failed"
-    fourth_small=$(q "$tag_wt" add 2 sonnet - "small the second row of a second bundle §230") || fail "add for the fourth small row failed"
+    third_small=$(q "$tag_wt" add 2 sonnet - "small from/- the first row of a second bundle §230") || fail "add for the third small row failed"
+    fourth_small=$(q "$tag_wt" add 2 sonnet - "small from/- the second row of a second bundle §230") || fail "add for the fourth small row failed"
     got=$(q "$tag_wt" apply take "$third_small" lane-bundle-2 + take "$fourth_small" lane-bundle-2 2>&1) \
         || fail "a branch with no tree could not take two small rows"
     again=$(q "$tag_wt" running --count) || fail "running --count failed after the second bundle was taken"
@@ -13384,9 +13401,9 @@ check-queue-api-selftest:
     tier1() { awk '/^## / { h = $0 } h == "## Tier 1" && /^[TDQ][0-9]/ { printf "%s ", $1 }' "$pin_wt/docs/queue.md"; }
     pinword() { awk -v id="$1" '$1 == id { print $2, $6 }' "$pin_wt/docs/queue.md"; }
     first_three() { awk 'NR <= 3 { printf "%s ", $1 }' <<<"$got"; }
-    classed=$(q "$pin_wt" add 1 opus - "wrong/A a defect the pinned rows go ahead of §230") || fail "add for the wrong/A row failed"
-    first=$(q "$pin_wt" add 1 opus - "a tier 1 row Mattias pins first §230") || fail "add for the first row to pin failed"
-    second=$(q "$pin_wt" add 2 opus - "a tier 2 row Mattias pins second §230") || fail "add for the second row to pin failed"
+    classed=$(q "$pin_wt" add 1 opus - "wrong/A from/- a defect the pinned rows go ahead of §230") || fail "add for the wrong/A row failed"
+    first=$(q "$pin_wt" add 1 opus - "from/- a tier 1 row Mattias pins first §230") || fail "add for the first row to pin failed"
+    second=$(q "$pin_wt" add 2 opus - "from/- a tier 2 row Mattias pins second §230") || fail "add for the second row to pin failed"
     got=$(q "$pin_wt" pin "$first" "$second" 2>&1) || fail "pin refused a tier 1 row and a tier 2 row"
     [ "$(pinword "$first")" = "1 pinned/1" ] || fail "pin did not put pinned/1 on $first"
     [ "$(pinword "$second")" = "1 pinned/2" ] || fail "pin did not move $second to tier 1 as pinned/2"
@@ -13407,11 +13424,11 @@ check-queue-api-selftest:
     grep -qF "$first is pinned/1 already; unpin it first to re-order" <<<"$got" || fail "pin did not say to unpin a pinned row first"
     got=$(q "$pin_wt" pin Q3 2>&1) && fail "pin put a parked row first"
     grep -qF 'Q3 is parked:§230, and the fill never takes a parked row' <<<"$got" || fail "pin did not say Q3 is parked"
-    fifth=$(q "$pin_wt" add 5 opus - "crash/C a crash only a probe builds §230") || fail "add for the tier 5 row failed"
+    fifth=$(q "$pin_wt" add 5 opus - "crash/C from/- a crash only a probe builds §230") || fail "add for the tier 5 row failed"
     got=$(q "$pin_wt" pin "$fifth" 2>&1) && fail "pin moved a C row out of tier 5"
     grep -qF "$fifth carries the class crash/C, which puts it in tier 5" <<<"$got" || fail "pin did not say a C row belongs in tier 5"
     got=$(q "$pin_wt" unpin "$second" 2>&1) || fail "unpin refused $second"
-    [ "$(pinword "$second")" = "1 a" ] || fail "unpin did not take the pin off and leave $second in tier 1"
+    [ "$(pinword "$second")" = "1 from/-" ] || fail "unpin did not take the pin off and leave $second in tier 1"
     [ "$(tier1)" = "$classed $first $second Q2 Q3 " ] || fail "unpin moved $second from where it stood"
     got=$(q "$pin_wt" take "$first" lane-pinned 2>&1) || fail "take refused a pinned row"
     pinned_sha=$(g "$pin_wt" rev-parse HEAD)
@@ -14909,7 +14926,7 @@ check-land-selftest:
     checks_at=$(grep -m1 -nxF '  git merge-base --is-ancestor ${branchOf(lane)} origin/main' .claude/workflows/lanes.js | cut -d: -f1 || true)
     [ -n "$waits_at" ] && [ -n "$checks_at" ] && [ "$waits_at" -lt "$checks_at" ] \
         || { echo "the merger's brief in .claude/workflows/lanes.js does not run just land wait-for ahead of its ancestor check (lines '$waits_at' and '$checks_at'), so it can read origin/main while the lander's run still lands the lane (§397.5)"; exit 1; }
-    steps_line='add 2.2 sonnet justfile small a row the lane left, ending in §384 + tag @1 small'
+    steps_line='add 2.2 sonnet justfile from/Q1 small a row the lane left, ending in §384 + tag @1 small + add 3 sonnet - small was/Q7 a row the lane filed again, ending in §384'
     arm=""
     at=""
     got=""
@@ -14955,6 +14972,7 @@ check-land-selftest:
         git -C "$at/stub/other" config commit.gpgsign false
         mkdir -p "$at/lander/target"
         printf '%s\n' add 2.2 sonnet justfile 'small a row the lane left, ending in §384' + tag @1 small \
+            + add 3 sonnet - 'small was/Q7 a row the lane filed again, ending in §384' \
             >"$at/lander/target/land-steps.txt"
         lane_sha=$(git -C "$at/lane" rev-parse HEAD)
     }
@@ -15090,7 +15108,8 @@ check-land-selftest:
     git -C "$at/origin.git" show main:docs/queue.md | grep -qxF "apply done Q1 ${lane_sha:0:8} + $steps_line" \
         || fail "the merge commit does not carry one queue apply: the done step, then the lane's own steps"
     [ "$(field rows_closed)" = "[\"Q1 done:${lane_sha:0:8}\"]" ] || fail "rows_closed is $(field rows_closed)"
-    [ "$(field rows_added)" = '["Q900 tier 2.2 sonnet: small a row the lane left, ending in §384"]' ] || fail "rows_added is $(field rows_added)"
+    [ "$(field rows_added)" = '["Q900 tier 2.2 sonnet: from/Q1 small a row the lane left, ending in §384", "Q901 tier 3 sonnet: small was/Q7 a row the lane filed again, ending in §384"]' ] \
+        || fail "rows_added is $(field rows_added), and a row the lane named no source for comes from Q1, the row it ran (§432)"
     [ "$(field push_attempts) $(field docs_catch_ups)" = "1 0" ] || fail "a first push that went through is not attempt 1 with no catch-ups"
     [ "$(field gate_pass_line)" = "gate: PASS" ] || fail "gate_pass_line is '$(field gate_pass_line)'"
     [ "$(field ff_main)" = "main fast-forwarded 1 commit(s)" ] || fail "ff_main is '$(field ff_main)'"

@@ -216,6 +216,10 @@ the rows its work leaves (§383.4). Check them as you check any claim: on a
 - Each follows `lane.md`'s rules: the tier, a class from what `remaining`
   says, on a tier 1 row for A and B and a tier 5 row for C and D (§403),
   `small` only where nothing needs a trace.
+- Each says which row it came from where `just land` would get it wrong
+  (§432): `from/<id>` on a bundle's row from an item that is not the first,
+  `was/<id>` on a row that files `<id>` again. A step that says nothing gets
+  `from/<the lane's first row>`.
 
 A step missing, wrong or repeated is a `fix_first`, with the step to add,
 change or drop in `fixes`.

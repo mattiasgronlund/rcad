@@ -249,9 +249,10 @@ until the merger that follows marks it (§384.3).
   `mise exec -- just queue next 1`, and back to step 5.
 - **Not merged**: decide it before anything else, and write the decision to
   the queue at once, in one `just queue apply` that also files the rows the
-  lane left, read from its journal. The three ways on: take the row again
-  under a new label with the fix in its brief; park it, with the section its
-  reason belongs under; or `just queue drop` it. `git worktree unlock` each
+  lane left, read from its journal, each `from/<row>` (§432). The three ways
+  on: take the row again under a new label with the fix in its brief; park it,
+  with the section its reason belongs under; or `just queue drop` it. A row
+  filed again after a drop says `was/<old row>`. `git worktree unlock` each
   tree the result named once the apply is pushed.
 
 A lane's tree is unlocked by its verifier when checking starts, the verifier's

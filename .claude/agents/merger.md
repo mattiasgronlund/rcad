@@ -87,7 +87,7 @@ below, and settle what the stop line names.
    any of them to a `.rs` file: a fix committed unformatted fails the merge
    gate at lint over formatting alone, as Q574's first gate did.
 3. One `mise exec -- just queue apply done <row> <lane tip sha> + add <tier>
-   <model> <write set> <what, ending in §N> + ...` (§309): the row's `done`
+   <model> <write set> from/<row> <what, ending in §N> + ...` (§309): the row's `done`
    step and every `add` step below, in one call. The lane's tip, not the merge
    commit: the merge commit carries the row and cannot name itself. Q140, Q141
    and Q145 were closed the same way. A bundle of small rows (§352.4) gets one
@@ -107,6 +107,11 @@ below, and settle what the stop line names.
    already a row — `just queue` lists them. A row your brief or the lane's
    report says belongs in another tier moves with `mise exec -- just queue
    tier <id> <tier>`, which writes that tier's heading if the file has none.
+   Every `add` says which row it came from (§432), and `just queue add`
+   refuses one that does not: put `from/<row>` in front of a step that does
+   not start with `from/` or `was/`, and in a bundle name the row the item
+   came from. A row that files a dropped or closed row again says
+   `was/<that row>`.
    A stale claim or a missing test the lane's own change caused, inside its
    write set, is not a row (§352.5): make it a step 2 fix when it is a few
    lines, and file it only when it is not. Nor is a stale note in a decisions
