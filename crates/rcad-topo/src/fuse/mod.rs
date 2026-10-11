@@ -499,8 +499,9 @@ impl Scratch {
             cut_from,
             names_of_one_point,
         };
-        let taken_as_input_corners =
-            assemble::fold_each_meet_a_rounding_from_an_input_corner(model, &scratch, policy, log);
+        let taken_as_input_corners = assemble::fold_each_corner_one_plane_cuts_a_rounding_from_it(
+            model, &scratch, policy, log,
+        );
         scratch.names_of_one_point.extend(taken_as_input_corners);
         Ok(scratch)
     }

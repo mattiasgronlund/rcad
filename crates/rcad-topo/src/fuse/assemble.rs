@@ -5322,33 +5322,47 @@ fn the_wider(one: Option<Approximation>, other: Option<Approximation>) -> Option
     }
 }
 
-/// Under a tolerant policy, each meet of three planes that lies a rounding from
-/// an input corner along one of that corner's edges, as one point with that
-/// corner (`docs/decisions.md` §417.7).
+/// Under a tolerant policy, the three meets where one plane cuts the three
+/// edges of an input corner a rounding from it, as one point with that corner
+/// (`docs/decisions.md` §417.7).
 ///
-/// **The meet shares two of its planes with the corner**, so it is on the line
-/// those two cross in, the corner's edge, and its third plane cuts that edge a
-/// rounding from the corner. A turned cube's corner on a block's face is the
-/// case: the face cuts the cube's three edges there in three meets, each proved
-/// apart from the corner and from the others, and no arrangement folds them,
-/// since an arrangement folds only where the policy read a sign nothing could
-/// decide as zero (§284.7). Kept as four corners, they wind a triangle a
-/// rounding wide that the face holds as a hole winding the wrong way.
+/// **A tip touching a face.** A turned cube's corner on a block's face is the
+/// case: the face's plane cuts the cube's three edges there in three meets,
+/// each proved apart from the corner and from the others, and no arrangement
+/// folds them, since an arrangement folds only where the policy read a sign
+/// nothing could decide as zero (§284.7). Kept as four corners, they wind a
+/// triangle a rounding wide that the face holds as a hole winding the wrong
+/// way. Taken as one, the plane runs through the corner, which moves it no
+/// further than the furthest of the three meets.
 ///
-/// **Only a meet proved apart from the corner, within [`Policy::max_wobble`]
-/// of it, and that no other input corner is that near.** Apart is asked of
-/// the planes and exactly, as which side of the meet's third plane the
-/// corner's three meet on ([`side_of_a_plane_where_three_planes_meet`]): the
-/// boxes of the two straddle each other at the turned cube's tip. A meet the
-/// corner's planes meet on is the corner, and joining it is the
-/// arrangement's to do. A meet near two input corners would join the two,
-/// which is an edge shorter than the wobble, and this does not judge one. A
-/// meet with something curved in it is left alone: only three planes meet at
-/// one point, so only there do the names alone say which point it is.
+/// **All three edges by one plane, or nothing.** Each meet shares two planes
+/// with the corner, so it lies on the edge those two cross in, and the plane
+/// the three meets do not share with the corner is the one that cuts. A plane
+/// parallel to one of the corner's faces and a rounding off it cuts one edge
+/// near the corner and the other two nowhere near it, and folding that one
+/// meet would close a sliver a tolerant fuse keeps (§417.8). The edges are
+/// counted by the names of their meets, not by where the meets round to: two
+/// of them rounding to one point are still two edges cut.
 ///
-/// Each fold is asked of [`Policy::take_as_one_point`], which logs it. Under a
-/// certified policy nothing is asked, and nothing folds.
-pub(crate) fn fold_each_meet_a_rounding_from_an_input_corner(
+/// **Only meets the pieces bring, at a corner proved off the plane, and with
+/// nothing else as near.** Each of the three must be a point some piece of
+/// either group runs to, or a name an arrangement joined to one, so a face on
+/// that plane cuts the corner's faces there. The corner is off the plane when
+/// its three planes are proved to meet off it, exactly
+/// ([`side_of_a_plane_where_three_planes_meet`]): the boxes of the corner and
+/// the meets straddle each other at the turned cube's tip, and a corner on the
+/// plane is the arrangement's to join. A corner two planes cut that way is a
+/// tip on an edge, not on a face, and is left alone. So is a tip with a meet
+/// that another input corner is within the wobble of: it would join the two
+/// corners, which is an edge shorter than the wobble, and this does not judge
+/// one. A meet with something curved in it is never asked about: only three
+/// planes meet at one point, so only there do the names alone say which point
+/// it is.
+///
+/// Each fold is asked of [`Policy::take_as_one_point`] once, as how far the
+/// furthest of its three meets may be from the corner, and that logs it. Under
+/// a certified policy nothing is asked, and nothing folds.
+pub(crate) fn fold_each_corner_one_plane_cuts_a_rounding_from_it(
     model: &Model,
     scratch: &Scratch,
     policy: &Policy,
@@ -5357,126 +5371,239 @@ pub(crate) fn fold_each_meet_a_rounding_from_an_input_corner(
     let Strictness::TolerantFallback { .. } = policy.strictness() else {
         return Vec::new();
     };
-    let pairs_of = |[one, other, last]: [[u64; 9]; 3]| [[one, other], [one, last], [other, last]];
-    let mut corners = Vec::new();
+    let corners: Vec<InputCorner> = input_corners_baked_on_exactly_three_planes(model, scratch)
+        .into_values()
+        .map(|(vertex, baked, planes)| InputCorner {
+            vertex,
+            baked,
+            planes,
+            names: names_of_the_three_surfaces(&planes.map(Surface::Plane)),
+            put: where_three_planes_meet_whichever_face_asks(planes).unwrap_or(baked),
+        })
+        .collect();
     let mut sharing: BTreeMap<[[u64; 9]; 2], Vec<usize>> = BTreeMap::new();
-    for (vertex, baked, planes) in
-        input_corners_baked_on_exactly_three_planes(model, scratch).into_values()
-    {
-        let names = names_of_the_three_surfaces(&planes.map(Surface::Plane));
-        for pair in pairs_of(names) {
-            sharing.entry(pair).or_default().push(corners.len());
+    for (index, corner) in corners.iter().enumerate() {
+        for pair in pairs_of_names(corner.names) {
+            sharing.entry(pair).or_default().push(index);
         }
-        let put = where_three_planes_meet_whichever_face_asks(planes).unwrap_or(baked);
-        corners.push((vertex, baked, planes, names, put));
     }
-    let mut near: BTreeMap<[[u64; 9]; 3], BTreeMap<usize, NearAnInputCorner>> = BTreeMap::new();
-    for end in scratch
-        .pieces
-        .iter()
-        .flat_map(|piece| piece.wires.iter().flatten())
-        .flat_map(|side| &side.ends)
-    {
-        let MeetPoint::OfThreeSurfaces {
-            surfaces,
-            which,
-            point,
-        } = end
-        else {
-            continue;
-        };
-        if !surfaces.iter().all(|surface| surface.as_plane().is_some()) {
-            continue;
-        }
-        assert_eq!(*which, 0, "three planes meet at one point");
-        let names = names_of_the_three_surfaces(surfaces);
-        for pair in pairs_of(names) {
+    let meets = every_meet_of_three_planes(scratch);
+    let mut cutting: BTreeMap<usize, BTreeMap<[u64; 9], Plane>> = BTreeMap::new();
+    for (&names, meet) in &meets {
+        for pair in pairs_of_names(names) {
             for &corner in sharing.get(&pair).into_iter().flatten() {
-                let (_, _, planes, corner_names, put) = &corners[corner];
-                let Some(third) = surfaces.iter().find(|surface| {
-                    !corner_names.contains(&name_of_the_surface_either_way_round(surface))
-                }) else {
-                    continue;
-                };
-                let far = how_far_apart_two_boxes_may_be(*put, *point);
-                if far > policy.max_wobble() {
-                    continue;
-                }
-                let worst = near
-                    .entry(names)
-                    .or_default()
-                    .entry(corner)
-                    .or_insert_with(|| NearAnInputCorner {
-                        far,
-                        surfaces: *surfaces,
-                        point: *point,
-                        proved_apart: the_corner_is_off_the_plane(planes, third),
-                    });
-                if far > worst.far {
-                    worst.far = far;
-                    worst.surfaces = *surfaces;
-                    worst.point = *point;
+                for surface in &meet.surfaces {
+                    let name = name_of_the_surface_either_way_round(surface);
+                    if !corners[corner].names.contains(&name) {
+                        let plane = surface.as_plane().expect("a meet of three planes");
+                        cutting.entry(corner).or_default().insert(name, *plane);
+                    }
                 }
             }
         }
     }
     let mut folded = Vec::new();
-    for mut candidates in near.into_values() {
-        let (corner, meet) = candidates
-            .pop_first()
-            .expect("a meet is only listed with a corner it is near");
-        if !candidates.is_empty() || !meet.proved_apart {
+    for (corner, planes) in cutting {
+        let input = &corners[corner];
+        let tips: Vec<Tip> = planes
+            .into_values()
+            .filter_map(|plane| the_tip_a_plane_cuts(input, plane, &meets, policy))
+            .collect();
+        let [tip] = tips.as_slice() else {
+            continue;
+        };
+        let another_corner_is_as_near = tip.meets.iter().any(|(surfaces, points)| {
+            pairs_of_names(names_of_the_three_surfaces(surfaces))
+                .iter()
+                .flat_map(|pair| sharing.get(pair).into_iter().flatten())
+                .filter(|&&other| other != corner)
+                .any(|&other| {
+                    furthest_from(corners[other].put, points)
+                        .is_some_and(|far| far <= policy.max_wobble())
+                })
+        });
+        if another_corner_is_as_near {
             continue;
         }
-        let (vertex, baked, _, _, put) = corners[corner];
+        let inputs: Vec<PredicatePoint> = std::iter::once(input.put)
+            .chain(
+                tip.meets
+                    .iter()
+                    .flat_map(|(_, points)| points.iter().copied()),
+            )
+            .collect();
         let record = Record::new(
-            "a meet of three planes taken as an input corner",
-            &[put, meet.point],
+            "three meets of one plane taken as an input corner",
+            &inputs,
             Level::Exact,
-            meet.far,
+            tip.far,
             Measures::Length,
         );
-        if policy.take_as_one_point(record, log) {
-            folded.push(NamesOfOnePoint {
-                kept: MeetPoint::Existing {
-                    vertex,
-                    point: baked,
-                },
-                folded: vec![(meet.surfaces, 0)],
-                moved: Some(Approximation::new(meet.far, Cause::TolerantFallback)),
-            });
-        }
+        assert!(
+            policy.take_as_one_point(record, log),
+            "a tip within the wobble is taken as one point"
+        );
+        folded.push(NamesOfOnePoint {
+            kept: MeetPoint::Existing {
+                vertex: input.vertex,
+                point: input.baked,
+            },
+            folded: tip
+                .meets
+                .iter()
+                .map(|(surfaces, _)| (*surfaces, 0))
+                .collect(),
+            moved: Some(Approximation::new(tip.far, Cause::TolerantFallback)),
+        });
     }
     folded
 }
 
-/// One meet of three planes near an input corner it shares two of them with:
-/// the furthest any spelling of it put it from the corner, that spelling and
-/// its box, and whether the corner's planes are proved to meet off the meet's
-/// third plane.
-struct NearAnInputCorner {
-    far: f64,
-    surfaces: [Surface; 3],
-    point: PredicatePoint,
-    proved_apart: bool,
+/// An input corner on exactly three planes: its vertex, the box `bake` solved
+/// it as, its planes and their names, and where [`Corners::of`] puts it.
+struct InputCorner {
+    vertex: VertexKey,
+    baked: PredicatePoint,
+    planes: [Plane; 3],
+    names: [[u64; 9]; 3],
+    put: PredicatePoint,
 }
 
-/// Whether the corner's three planes meet off `third`, exactly.
+/// The three pairs of three names, each in the order the three came.
+fn pairs_of_names([one, other, last]: [[u64; 9]; 3]) -> [[[u64; 9]; 2]; 3] {
+    [[one, other], [one, last], [other, last]]
+}
+
+/// One meet of three planes some piece runs to: one spelling of its planes,
+/// and every box it arrived as, none when it arrived only as a name an
+/// arrangement joined to another.
+struct MeetOfThreePlanes {
+    surfaces: [Surface; 3],
+    points: Vec<PredicatePoint>,
+}
+
+/// Every meet of three planes a piece of either group runs to, and every one
+/// an arrangement found to be one point with another name, by its names.
+fn every_meet_of_three_planes(scratch: &Scratch) -> BTreeMap<[[u64; 9]; 3], MeetOfThreePlanes> {
+    let mut meets: BTreeMap<[[u64; 9]; 3], MeetOfThreePlanes> = BTreeMap::new();
+    let mut arrived = |surfaces: &[Surface; 3], which: u8, point: Option<PredicatePoint>| {
+        if !surfaces.iter().all(|surface| surface.as_plane().is_some()) {
+            return;
+        }
+        assert_eq!(which, 0, "three planes meet at one point");
+        let meet = meets
+            .entry(names_of_the_three_surfaces(surfaces))
+            .or_insert_with(|| MeetOfThreePlanes {
+                surfaces: *surfaces,
+                points: Vec::new(),
+            });
+        if let Some(point) = point
+            && !meet.points.contains(&point)
+        {
+            meet.points.push(point);
+        }
+    };
+    let ends = scratch
+        .pieces
+        .iter()
+        .flat_map(|piece| piece.wires.iter().flatten())
+        .flat_map(|side| &side.ends);
+    let kept = scratch.names_of_one_point.iter().map(|one| &one.kept);
+    for end in ends.chain(kept) {
+        if let MeetPoint::OfThreeSurfaces {
+            surfaces,
+            which,
+            point,
+        } = end
+        {
+            arrived(surfaces, *which, Some(*point));
+        }
+    }
+    for (surfaces, which) in scratch
+        .names_of_one_point
+        .iter()
+        .flat_map(|one| &one.folded)
+    {
+        arrived(surfaces, *which, None);
+    }
+    meets
+}
+
+/// The three meets where one plane cuts a corner's three edges, and how far
+/// the furthest of them may be from the corner.
+struct Tip {
+    meets: Vec<([Surface; 3], Vec<PredicatePoint>)>,
+    far: f64,
+}
+
+/// Where `plane` cuts each of `corner`'s three edges, when the corner is
+/// proved off the plane and each of the three is a meet some piece brings,
+/// within [`Policy::max_wobble`] of the corner wherever it is solved.
+///
+/// Each meet is measured at every box it arrived as and where
+/// [`where_three_planes_meet_whichever_face_asks`] solves it, since a meet that
+/// arrived only as a name has no box of its own.
+fn the_tip_a_plane_cuts(
+    corner: &InputCorner,
+    plane: Plane,
+    meets: &BTreeMap<[[u64; 9]; 3], MeetOfThreePlanes>,
+    policy: &Policy,
+) -> Option<Tip> {
+    if !the_corner_is_off_the_plane(&corner.planes, plane) {
+        return None;
+    }
+    let [one, other, last] = corner.planes;
+    let mut tip = Tip {
+        meets: Vec::with_capacity(3),
+        far: 0.0,
+    };
+    for [first, second] in [[one, other], [one, last], [other, last]] {
+        let surfaces = [plane, first, second].map(Surface::Plane);
+        let arrived = meets.get(&names_of_the_three_surfaces(&surfaces))?;
+        let points: Vec<PredicatePoint> =
+            where_three_planes_meet_whichever_face_asks([plane, first, second])
+                .into_iter()
+                .chain(arrived.points.iter().copied())
+                .collect();
+        let far = furthest_from(corner.put, &points)?;
+        if far > policy.max_wobble() {
+            return None;
+        }
+        tip.far = tip.far.max(far);
+        tip.meets.push((arrived.surfaces, points));
+    }
+    Some(tip)
+}
+
+/// Whether the corner's three planes meet off `plane`, exactly.
 ///
 /// # Panics
 ///
 /// If the three planes do not meet in a point. `bake` solved the corner from
 /// them, so they do.
-fn the_corner_is_off_the_plane(planes: &[Plane; 3], third: &Surface) -> bool {
-    let third = third
-        .as_plane()
-        .expect("only a meet of three planes is asked about");
+fn the_corner_is_off_the_plane(planes: &[Plane; 3], plane: Plane) -> bool {
     let side = side_of_a_plane_where_three_planes_meet(
         planes.map(|flat| flat.coefficients()),
-        third.coefficients(),
+        plane.coefficients(),
     )
     .expect("bake solved the corner where its three planes meet");
-    matches!(side, Decision::Pos | Decision::Neg)
+    match side {
+        Decision::Pos | Decision::Neg => true,
+        Decision::Zero | Decision::Undecidable { .. } => false,
+        other => panic!(
+            "which side of a plane a corner's three planes meet on came back as a decision \
+             nothing here knows: {other:?}"
+        ),
+    }
+}
+
+/// The furthest a point of `points` may be from `corner`, or `None` when there
+/// are none.
+fn furthest_from(corner: PredicatePoint, points: &[PredicatePoint]) -> Option<f64> {
+    points
+        .iter()
+        .map(|&point| how_far_apart_two_boxes_may_be(corner, point))
+        .reduce(f64::max)
 }
 
 /// The furthest a point of one box can be from a point of the other, rounded
@@ -5570,9 +5697,9 @@ struct Corners {
     /// Where a point of more than one name goes when one of the names is an
     /// input corner, and which corner that is, by the name the point goes by.
     put_at: BTreeMap<CornerName, (PredicatePoint, VertexKey)>,
-    /// How far a tolerant policy moved a meet proved apart from an input
-    /// corner to put it there, by the name the point goes by: the furthest of
-    /// them ([`fold_each_meet_a_rounding_from_an_input_corner`]).
+    /// How far a tolerant policy moved meets proved apart from an input corner
+    /// to put them there, by the name the point goes by: the furthest of them
+    /// ([`fold_each_corner_one_plane_cuts_a_rounding_from_it`]).
     moved: BTreeMap<CornerName, f64>,
     /// For every closed curve the kept sides bring under more than one name,
     /// the one name each of them goes by. See
