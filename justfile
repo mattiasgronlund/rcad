@@ -11826,9 +11826,12 @@ _queue-rows file:
 #
 # **A row says which row it came from** (§432), in the word after the pin and
 # the class: `from/<id>` when running `<id>` is why it exists, `was/<id>` when it
-# files `<id>` again, `from/-` when no row led to it. `add` refuses a row without
-# one, and `just land` writes `from/<the lane's row>` for a lane that names none.
-# The fill never reads it; it is there to count how far each row's work grows.
+# files `<id>` again, `from/-` when nothing else led to it. A fault a crash file
+# or a corpus file shows says `from/fuzz:<target>` or `from/step:<file>` instead
+# (§433), and `add` checks that the target or the file is there. `add` refuses a
+# row without the word, and `just land` writes `from/<the lane's row>` for a
+# lane that names none. The fill never reads it; it is there to count how far
+# each row's work grows, and how much each fuzz target and corpus file found.
 #
 # **Two write sets meet** on the same path, unless both name items in it and the
 # items differ (§230.6); on a directory ending in `/` that holds the other path;
@@ -11897,7 +11900,7 @@ queue mode="" *args:
                 'just queue show <id>                         one row, its hold, and its state in other worktrees' \
                 'just queue running                           what holds a slot on this machine, one line each' \
                 'just queue take <id> <branch>                dispatch a ready row to <branch>: state lane:<branch>, held until done, drop or park' \
-                'just queue add <tier> <model> <write set> <what ending in §N>   a new todo row at the foot of its tier; prints the id. <what> starts with from/<id>, was/<id> or from/-: where the row came from (§432)' \
+                'just queue add <tier> <model> <write set> <what ending in §N>   a new todo row at the foot of its tier; prints the id. <what> starts with from/<id>, was/<id>, from/-, from/fuzz:<target> or from/step:<file>: where the row came from (§432, §433)' \
                 'just queue done <id> <merge sha>             close a row as done:<sha>, moved under Closed' \
                 'just queue drop <id> <§N>                    close a row as dropped:§N, moved under Closed' \
                 'just queue park <id> <§N>                    mark a row parked:§N, left in its tier' \
@@ -12612,11 +12615,15 @@ check-queue-page-selftest:
 # closed.
 #
 # **After the pin and the tag comes the word that says where the row came
-# from** (§432): `from/<id>`, `was/<id>` or `from/-`. Rows filed before §432
-# have none, so a row without one passes. A malformed one is refused, and so are
-# a row that says it comes from itself, a T or D id that is not a row, and a tag
-# written after the word, where the fill no longer reads it. A `Q` id this copy
-# does not hold passes, for the reason the next paragraph gives for `after:`.
+# from** (§432): `from/<id>`, `was/<id>` or `from/-`, or `from/fuzz:<target>`
+# or `from/step:<file>` for a fault a fuzz target or a corpus file shows
+# (§433). Rows filed before §432 have none, so a row without one passes. A
+# malformed one is refused, and so are a kind of input other than `fuzz` and
+# `step`, a row that says it comes from itself, a T or D id that is not a row,
+# and a tag written after the word, where the fill no longer reads it. A `Q` id
+# this copy does not hold passes, for the reason the next paragraph gives for
+# `after:`. A target or a corpus file is read for its shape only, a kind and
+# then a name: one renamed or gone since the row named it passes (§433.4).
 #
 # **An `after:` may name a `Q` row this copy does not hold yet** (§263.5): the
 # other dispatcher's new row, handed out by `just queue add` in its worktree and
@@ -12746,8 +12753,8 @@ _queue-check file decisions:
             if (tier == "5" && !closed && !isclass) err(line, id ": an open tier 5 row carries a class C or D (§403), and this one has none; give it one with just queue tag, or move it with just queue tier")
             fpos = (pinned ? 2 : 1) + ((isclass || tag == "small") ? 1 : 0)
             if (w[fpos] ~ /^(from|was)\//) {
-                if (w[fpos] !~ /^(from\/([TDQ][0-9]+|-)|was\/[TDQ][0-9]+)$/) err(line, id ": \"" w[fpos] "\" is not where a row came from: from/<id>, was/<id> or from/- (§432)")
-                else if (w[fpos] != "from/-") { fromid[++nfrom] = id; fromsrc[id] = substr(w[fpos], index(w[fpos], "/") + 1); fromline[id] = line }
+                if (w[fpos] !~ /^(from\/([TDQ][0-9]+|-|(fuzz|step):[^ ]+)|was\/[TDQ][0-9]+)$/) err(line, id ": \"" w[fpos] "\" is not where a row came from: from/<id>, was/<id>, from/-, from/fuzz:<target> or from/step:<file> (§432, §433)")
+                else if (w[fpos] ~ /\/[TDQ][0-9]+$/) { fromid[++nfrom] = id; fromsrc[id] = substr(w[fpos], index(w[fpos], "/") + 1); fromline[id] = line }
                 if (w[fpos + 1] ~ /^(wrong|crash|refuses)\/[ABCD]$/ || w[fpos + 1] == "small") err(line, id ": the tag " w[fpos + 1] " goes before " w[fpos] ", where the fill reads it (§432)")
             }
             s = what
