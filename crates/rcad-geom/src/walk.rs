@@ -5801,38 +5801,40 @@ mod tests {
         }
     }
 
+    /// A closed run's corner goes between the two points of the step it sits
+    /// on, wherever the step behind the nearest point is much the shorter. On a
+    /// circle walked through the angles `3.0`, `3.02` and `3.3`, a corner at
+    /// `3.05` is nearest `3.02` and nearer `3.0` than `3.3`, and it sits between
+    /// `3.02` and `3.3` (Q1681).
     #[test]
-    fn probe_step_ratios() {
-        let ratios = |name: &str, round: &[Point]| {
-            let count = round.len();
-            let steps: Vec<f64> = (0..count)
-                .map(|at| (round[(at + 1) % count] - round[at]).length())
-                .collect();
-            let mut most = (0.0_f64, 0);
-            let mut least = (f64::INFINITY, 0);
-            for at in 0..count {
-                let ratio = steps[(at + 1) % count] / steps[at];
-                if ratio > most.0 {
-                    most = (ratio, at);
-                }
-                if ratio < least.0 {
-                    least = (ratio, at);
-                }
-            }
-            let inner: Vec<f64> = (1..count - 2).map(|at| steps[at + 1] / steps[at]).collect();
-            eprintln!(
-                "PROBE {name}: {count} points, steps {:.3e}..{:.3e}, next/this most {:.4} at {}, least {:.4} at {}; away from the start most {:.4} least {:.4}",
-                steps.iter().copied().fold(f64::INFINITY, f64::min),
-                steps.iter().copied().fold(0.0, f64::max),
-                most.0,
-                most.1,
-                least.0,
-                least.1,
-                inner.iter().copied().fold(0.0, f64::max),
-                inner.iter().copied().fold(f64::INFINITY, f64::min),
-            );
-        };
-        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross).expect("whole");
+    fn a_corner_goes_on_the_step_it_sits_on_and_not_beside_the_nearer_neighbour() {
+        let on_the_circle = |angle: f64| Point::new(angle.cos(), angle.sin(), 0.0);
+        let walked_at = [
+            0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.02, 3.3, 3.8, 4.3, 4.8, 5.3, 5.8,
+        ];
+        let turned = begun_beside(
+            PredicatePoint::from(on_the_circle(3.05).coordinates()),
+            on_the_circle(0.0),
+            1e-12,
+            walked_at.map(on_the_circle).to_vec(),
+        )
+        .expect("a start with a box round it");
+        let from_beside_the_corner = [
+            3.3, 3.8, 4.3, 4.8, 5.3, 5.8, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.02,
+        ];
+        assert_eq!(turned, from_beside_the_corner.map(on_the_circle).to_vec());
+    }
+
+    /// A closed run whose corner sits on the march's second step is drawn along
+    /// that step, and does not double back across the march's first point.
+    ///
+    /// The march takes a short step from its seed and then doubles it, so a
+    /// corner a tenth of the way along the second step is nearest the first
+    /// point, and nearer the seed behind it than the far end of its own step.
+    /// The run was drawn from the corner back to the first point and on over the
+    /// corner again (Q1681).
+    #[test]
+    fn a_closed_run_whose_corner_sits_on_the_marchs_second_step_is_drawn_along_that_step() {
         let fat = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 4.0).expect("a radius"));
         let thin = Surface::Cylinder(
             Cylinder::new(
@@ -5842,35 +5844,64 @@ mod tests {
             )
             .expect("a radius"),
         );
-        let nearly = Surface::Cylinder(
-            Cylinder::new(
-                crate::Axis::new(Point::origin(), Vector::new(1.0, 0.0, 0.0)).expect("a direction"),
-                3.9,
-            )
-            .expect("a radius"),
+        let pair = [&fat, &thin];
+        let deflection = Deflection::of(0.01).expect("a length");
+        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("a closed run with no corner");
+        let marched = walk(
+            &whole,
+            pair,
+            deflection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the loop of a thin bar through a fat one is walked");
+        let seed = where_a_closed_crossing_starts(&whole, pair, &mut ProvenanceLog::new())
+            .expect("the loop has a seed");
+        let [first, second] = [marched.points()[0], marched.points()[1]];
+        let (corner, _) = settled_with_a_bound(pair, first + (second - first) * 0.1)
+            .expect("a point on the second step settles onto the crossing");
+
+        let how_far = |point: Point| (point - corner).length();
+        let nearest = std::iter::once(seed)
+            .chain(marched.points().iter().copied())
+            .min_by(|one, other| how_far(*one).total_cmp(&how_far(*other)));
+        eprintln!(
+            "the march's first step is {:.3e} long and its second {:.3e}; the corner is \
+             {:.3e} from the seed and {:.3e} from the far end of its step",
+            (first - seed).length(),
+            (second - first).length(),
+            how_far(seed),
+            how_far(second)
         );
-        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 2.0).expect("a radius"));
-        let ball = Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 0.0), 2.0).expect("a radius"));
-        for (name, pair) in [
-            ("thin bar through fat", [&fat, &thin]),
-            ("pipe 3.9 through pipe 4", [&fat, &nearly]),
-            ("ball through pipe side", [&ball, &pipe]),
-        ] {
-            for deflection in [0.1, 0.01] {
-                let walked = walk(
-                    &whole,
-                    pair,
-                    Deflection::of(deflection).expect("a length"),
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                )
-                .expect("walked");
-                let start = where_a_closed_crossing_starts(&whole, pair, &mut ProvenanceLog::new())
-                    .expect("a start");
-                let mut round = vec![start];
-                round.extend_from_slice(walked.points());
-                ratios(&format!("{name} at {deflection}"), &round);
-            }
-        }
+        assert_eq!(
+            nearest,
+            Some(first),
+            "the corner is nearest the first point"
+        );
+        assert!(
+            how_far(seed) < how_far(second),
+            "the corner is nearer the seed than the far end of its own step"
+        );
+
+        let run = NamedRun::new(
+            EdgeRun::RightRoundWhereItsFacesCross,
+            [corner, corner].map(|end| PredicatePoint::from(end.coordinates())),
+        )
+        .expect("a closed run with one corner");
+        let walked = walk(
+            &run,
+            pair,
+            deflection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the run round from the corner is walked");
+        assert_eq!(
+            [walked.points().first(), walked.points().last()],
+            [Some(&second), Some(&first)],
+            "the run starts at the far end of the corner's step and ends at its near end"
+        );
+        assert_eq!(walked.points().len(), marched.points().len() + 1);
     }
 }
