@@ -9493,6 +9493,25 @@ check-gate-fresh-cleanup-selftest:
 # as "did not come back clean", which reads exactly like a live crash and is
 # none. That input is counted as untellable instead, apart from every bucket
 # that was actually decoded.
+#
+# **Then a crash file that passed on `main` is folded into the corpus, and the
+# tree stops carrying it (§434.3).** Each target's passing files are merged
+# into `fuzz_corpus_root/<target>` with `-merge=1 -timeout=10` by the night's
+# own binary under `fuzz/target/x86_64-unknown-linux-gnu/release/`, into a copy
+# that replaces the corpus only once the merge exits 0. The merge keeps a file
+# only when it takes the code down a path no kept file takes (§434.2). A file
+# leaves this tree's `fuzz/artifacts/` only when the replay saw it pass and the
+# merge's control file says it was read to the end, so one the night's older
+# binary crashes on, or one that runs past ten seconds, stays for the next
+# morning. A kept file not named for a crash file's hash was cut on the way in,
+# and its target folds nothing. What libFuzzer writes during the merge goes to
+# a scratch directory and never into `fuzz/artifacts/`, and no target's
+# directory is removed, since `fuzz-yield` diffs against it. Each removed file
+# gets a line in `fuzz_log_root/removed-crash-files.tsv` (`night`, `target`,
+# `file`, `replayed_main`, `kept`), appended and never rewritten. All of it
+# happens only in a tree standing on the commit of the night `latest` names,
+# after a night that built, having replayed `main`. Anywhere else the `fold:`
+# line says why and nothing moves.
 [doc("The morning after: what the night found, decoded, and whether main still fails.")]
 fuzz-triage night="" against="main":
     #!/usr/bin/env bash
