@@ -104,5 +104,70 @@ its own row.
   `fuzz-triage-row` files says `from/-` and tells its lane to name each fault
   row's target. It waits on Q1703 because a triage lane that writes the word
   before `just queue add` takes it would stop `just land` at its queue step.
-- **Q1706**, after Q1704: reading the source of an older row back from its
-  text, with 30 links checked by hand.
+- **Q1707**, `was/Q1706`, after Q1704: reading the source of an older row back
+  from its text, with 30 links checked by hand. Q1706 read it only from rows
+  filed before this section. A fault row filed by hand between this section and
+  Q1703's merge can say only `from/-` or `from/<the triage row>`, so Q1707 reads
+  every row filed before Q1703 merged.
+
+Mattias pinned Q1703, Q1447, Q1704, Q1705 and Q1707, in that order, on the same
+day (a6cd6135). Q1447 is in the list because Q1705 waits on it, and a pinned row
+still waits on its `after:` (§430.4).
+
+### 433.8 A fault is not a row
+
+Mattias asked next whether this tells which faults were fixed, not only which
+rows were closed. It does not. Q1703 to Q1707 count rows.
+
+A row is not a fault. On 10-11's main, 28 groups of crash files still fail. Rows
+name 25 of them by a crash file, and 12 of those 25 are named by more than one
+row: a row filed again, or a done row whose files still fail, as `writer.rs:226`
+is named by Q1209 (done) and by Q1295 and Q1297 (open). Q1474 alone names 7
+groups. A group is not a fault either. The triage puts crash files with one
+panic place and message in one group, and a merge can fix part of a group.
+
+So here a fault is **the set of inputs one merge turns from failing to
+passing**. Passing is the replay's word: the input no longer panics, whether it
+now succeeds or is refused. The merge is a first-parent commit of `main`. Two
+faults fixed in one merge count as one, so the count is a lower bound.
+
+What is on disk, measured at 14:10Z over `/home/mattias/rcad-fuzz-logs` with a
+script reading the night directories:
+
+- A night keeps every earlier night's crash files. None of the 69 879 crash
+  files of 10-06 is missing from a later night, so an input that turned is
+  still there to replay (§410.3).
+- Since 10-09 the morning triage replays every crash file against that
+  morning's `main`. It keeps which files fail (`fuzz-triage-members.tsv`) and
+  against which commit (`fuzz-triage-replayed-main.txt`). 6 301, 8 507 and
+  11 201 files failed on 10-09, 10-10 and 10-11.
+- Between the 10-09 and 10-10 replays one file stopped failing, the only file
+  of its group (`assemble.rs:2556`, a piece of a face with a straight side of no
+  length). 131 first-parent commits lie between the two, and nothing records
+  which of them turned it. Between 10-10 and 10-11 none stopped, over 76.
+- 68 158 of 10-11's 79 359 crash files no longer fail, and 68 157 of those did
+  not fail at the first replay on 10-09. Which merges fixed them is recorded
+  nowhere.
+
+For KiCad, git already holds the answer. `KICAD_FILES_THAT_IMPORT` names every
+KiCad file that imports, and its test fails when one starts or stops. 11
+first-parent commits of `main` changed it, adding 165 names and removing none.
+`KICAD_FILES_THAT_ROUND_TRIP` was changed by 6 commits, adding 165. The first
+commit of each list says what worked when the list was written, not what that
+commit fixed, so it counts no fault. NIST files are not pinned by name.
+`how_often_a_real_file_imports` prints how many import and asserts nothing about
+which.
+
+What this leaves:
+
+- **Q1708**: each morning's triage names the merge that turned each file that
+  stopped failing, by bisecting the first-parent commits between the two
+  replays, and keeps one line per fault. `just faults` prints, per fuzz target
+  and per KiCad file and by week, the faults fixed, the inputs they turned, and
+  the rows closed in the merges that turned them.
+- **Q1709**: the NIST files that import are pinned by name, as KiCad's are, so
+  a merge that makes one import is seen in git.
+- The 68 157 files that turned before 10-09 are not filed. Finding their merges
+  means replaying them at merges a month old, against fuzz targets that have
+  changed since, and no one has measured whether those merges still build the
+  replay. Filed when someone asks for faults fixed before 10-09 (§13).
