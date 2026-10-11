@@ -392,6 +392,12 @@ answer tests fail, `classify_point` at `(0, 0, 0)` with
   the four choices whose flat face walks its two circles opposite ways round.
   In the other four the wall's wire keeps a different side of `z = 0` at each
   circle, and the wall is still refused, naming it.
+  **2026-10-11, Q1730:** since Q1726 merged Q1722's `count_crossings` fix,
+  `(4, 0, 0)` is `OnBoundary` in every choice
+  `classify_point_finds_the_hole_outside_and_the_flat_face_on_the_skin` asks —
+  the flat face holds it regardless of which way its two circles are walked.
+  The wall itself, asked directly, is unchanged: it still refuses on the four
+  choices above whose wire keeps a different side of `z = 0` at each circle.
 - The puck's lid (250.5) rests on the tube in one circle that no picker names,
   and stays refused. Q104 holds it.
 
