@@ -57,6 +57,7 @@ just queue running                         what holds a slot on this machine, on
 just queue show <id>                       one row, its hold, and its state in other worktrees
 just queue take <id> <branch>              dispatch a ready row to <branch>: state lane:<branch>, held until done/drop/park
 just queue add <tier> <model> <write set> <what ending in §N>    a new todo row at the foot of its tier; prints the id
+                                            <what> starts with from/<id>, was/<id> or from/-: where the row came from (§432)
 just queue tier <id> <tier>                move an open row to the foot of another tier, writing that tier's heading if missing;
                                             a row with a class goes only to the tier its class names
 just queue tag <id> <class>|small|-        tag an open row: a class (wrong, crash or refuses, then /A to /D) ranks a tier 1
@@ -391,8 +392,8 @@ def add_step(queue, claims, here, args, batch):
     what = " ".join(args[3:])
     refuse_unless_a_tier(tier)
     refuse_class_with_punctuation(what)
-    if what.split()[:1] and what.split()[0].startswith("pinned/"):
-        raise Refused("only Mattias pins a row, with `just queue pin` once it is added (§430); add it without the pin")
+    refuse_a_pin(what)
+    what = where_it_came_from_after_the_tag(what, queue, claims, here)
     refuse_conflicted(here, queue)
     block = queue.block_for_tier(tier)
     if block is None:
@@ -432,6 +433,53 @@ def refuse_class_with_punctuation(what):
         raise Refused(
             f"'{first}' is a class with punctuation after it; write exactly '{stuck.group(0)}', with nothing after it"
         )
+
+
+def refuse_a_pin(what):
+    if what.split()[:1] and what.split()[0].startswith("pinned/"):
+        raise Refused("only Mattias pins a row, with `just queue pin` once it is added (§430); add it without the pin")
+
+
+CAME_FROM = re.compile(r"^(from|was)/([TDQ][0-9]+|-)$")
+
+
+def where_it_came_from_after_the_tag(what, queue, claims, here):
+    """`what` with the word that says where the row came from moved to just after its tag (§432).
+
+    `from/<id>` is a row filed because of what running <id> found, `was/<id>`
+    one that files <id> again, and `from/-` one no other row led to. The word
+    may come first or just after the tag, so `just land` can put it in front of
+    a lane's row without reading the tag; the file always holds it after the
+    tag, which is where `check-queue` looks for it.
+    """
+    words = what.split(" ")
+    if says_where_from(words[0]):
+        word, rest = words[0], words[1:]
+    elif len(words) > 1 and is_a_tag(words[0]) and says_where_from(words[1]):
+        word, rest = words[1], [words[0], *words[2:]]
+    else:
+        raise Refused("a new row says where it came from, as the first word of its description or the word "
+                      "after its tag: from/<id> when running <id> is why it exists, was/<id> when it files <id> "
+                      "again, or from/- when no row led to it (§432)")
+    refuse_class_with_punctuation(" ".join(rest))
+    refuse_a_pin(" ".join(rest))
+    found = CAME_FROM.match(word)
+    if not found or word == "was/-":
+        raise Refused(f"'{word}' is not where a row came from: from/<id>, was/<id> or from/- (§432)")
+    source = found.group(2)
+    if source != "-" and queue.find(source) is None and not exists_elsewhere(here, claims, source):
+        raise Refused(f"'{word}' names {source}, which exists nowhere: not in this copy, not in any worktree's "
+                      f"copy, not on any branch, and never handed out by `just queue add`")
+    at = 1 if rest and is_a_tag(rest[0]) else 0
+    return " ".join([*rest[:at], word, *rest[at:]])
+
+
+def says_where_from(word):
+    return word.startswith(("from/", "was/"))
+
+
+def is_a_tag(word):
+    return CLASS.match(word) is not None or word == SMALL
 
 
 def branch_copies(relative):

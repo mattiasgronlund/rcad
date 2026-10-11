@@ -12185,6 +12185,13 @@ check-queue-page-selftest:
 # pin. A closed row keeps its pin, so a number may come back once its row has
 # closed.
 #
+# **After the pin and the tag comes the word that says where the row came
+# from** (§432): `from/<id>`, `was/<id>` or `from/-`. Rows filed before §432
+# have none, so a row without one passes. A malformed one is refused, and so are
+# a row that says it comes from itself, a T or D id that is not a row, and a tag
+# written after the word, where the fill no longer reads it. A `Q` id this copy
+# does not hold passes, for the reason the next paragraph gives for `after:`.
+#
 # **An `after:` may name a `Q` row this copy does not hold yet** (§263.5): the
 # other dispatcher's new row, handed out by `just queue add` in its worktree and
 # not merged here. A tree cannot see another worktree, so the gate cannot tell
@@ -12311,6 +12318,12 @@ _queue-check file decisions:
                 if (tier != want) err(line, id ": the class " tag " puts an open row in tier " want ", and this row is tier " tier "; move it with just queue tier " id " " want " (§403)")
             }
             if (tier == "5" && !closed && !isclass) err(line, id ": an open tier 5 row carries a class C or D (§403), and this one has none; give it one with just queue tag, or move it with just queue tier")
+            fpos = (pinned ? 2 : 1) + ((isclass || tag == "small") ? 1 : 0)
+            if (w[fpos] ~ /^(from|was)\//) {
+                if (w[fpos] !~ /^(from\/([TDQ][0-9]+|-)|was\/[TDQ][0-9]+)$/) err(line, id ": \"" w[fpos] "\" is not where a row came from: from/<id>, was/<id> or from/- (§432)")
+                else if (w[fpos] != "from/-") { fromid[++nfrom] = id; fromsrc[id] = substr(w[fpos], index(w[fpos], "/") + 1); fromline[id] = line }
+                if (w[fpos + 1] ~ /^(wrong|crash|refuses)\/[ABCD]$/ || w[fpos + 1] == "small") err(line, id ": the tag " w[fpos + 1] " goes before " w[fpos] ", where the fill reads it (§432)")
+            }
             s = what
             while (match(s, /§[0-9]+(\.[0-9]+)?/)) { cite(line, id, substr(s, RSTART, RLENGTH)); s = substr(s, RSTART + RLENGTH) }
             hk = key(head)
@@ -12333,6 +12346,11 @@ _queue-check file decisions:
                 }
                 if (ok) ready++
                 else waiting++
+            }
+            for (i = 1; i <= nfrom; i++) {
+                id = fromid[i]; src = fromsrc[id]
+                if (src == id) err(fromline[id], id ": says it comes from itself")
+                else if (!(src in kindof) && src !~ /^Q/) err(fromline[id], id ": comes from " src ", which is not a row in this file, and a T or D id is never handed out again")
             }
             if (!("closed" in seen)) err("", "heading \"## Closed\" is missing")
             if (rows == 0) err("", "has no rows, so there was nothing to check")
@@ -12435,6 +12453,7 @@ check-queue-selftest:
     ```
     T1  1  todo  opus  justfile#queue  pinned/1 refuses/B make the queue fill from the top §230.3
     Q2  1  lane:lane-q2  opus  .github/workflows/ci.yml  a row a lane holds §230
+    Q8  1  todo  opus  -  pinned/2 wrong/A from/T9 a defect the first row found §230
     ```
 
     ## Tier 2
@@ -12447,6 +12466,7 @@ check-queue-selftest:
 
     ```
     Q6  2.2  todo  sonnet  tooling/queue/  changes how the work is done §230
+    Q9  2.2  todo  sonnet  -  was/D1 the dropped row filed again §230
     ```
 
     ## Tier 2.5
@@ -12479,12 +12499,13 @@ check-queue-selftest:
     D1  2  dropped:§226  opus  -  dropped for the queue §226
     D2  1  dropped:§226  opus  -  refuses/C closed in tier 1, before tier 5 was there §226
     D3  1  done:42df376e  -  -  pinned/1 closed with its pin, the number T1 has now §230
+    D4  2  dropped:§230  opus  -  small from/- a row no other row led to, dropped §230
     ```
     MD
 
     got=$(q _queue-check "$dir/good.md" "$decisions" 2>&1) \
         || fail "a queue with nothing wrong in it was rejected"
-    grep -qF '11 rows; 4 ready, 1 waiting, 1 running in 4 slots, 1 parked, 4 closed' <<<"$got" \
+    grep -qF '14 rows; 6 ready, 1 waiting, 1 running in 4 slots, 1 parked, 5 closed' <<<"$got" \
         || fail "the line a pass prints does not count the good queue's rows"
     got=$(q check-queue "$dir/good.md" 2>&1) \
         || fail "check-queue rejected the good queue against the sections in decisions_dir"
@@ -12492,6 +12513,9 @@ check-queue-selftest:
     grep -q '^## Tier 4' "$dir/no-tier-4.md" && fail "the fixture without Tier 4 still has its heading"
     got=$(q _queue-check "$dir/no-tier-4.md" "$decisions" 2>&1) \
         || fail "a tier with no rows was refused for leaving its heading out"
+    sed 's/from\/T9 a defect/from\/Q999 a defect/' "$dir/good.md" > "$dir/from-not-held.md"
+    got=$(q _queue-check "$dir/from-not-held.md" "$decisions" 2>&1) \
+        || fail "a row that comes from a Q row this copy does not hold yet was refused"
 
     refused() {
         sed "$2" "$dir/good.md" > "$dir/$1.md"
@@ -12536,6 +12560,11 @@ check-queue-selftest:
     refused pin-zero    's/pinned\/1 refuses/pinned\/0 refuses/'   '"pinned/0" is not a pin'
     refused pin-tier-2  's/  small waits on a done row/  pinned\/2 small waits on a done row/' 'an open pinned row is tier 1 (§430), and this row is tier 2'
     refused pin-twice   's/  a row a lane holds/  pinned\/1 a row a lane holds/' 'pinned/1 is on line'
+    refused from-shape  's/was\/D1 the/was\/X1 the/'                '"was/X1" is not where a row came from'
+    refused was-nothing 's/was\/D1 the/was\/- the/'                 '"was/-" is not where a row came from'
+    refused from-self   's/was\/D1 the/was\/Q9 the/'                'Q9: says it comes from itself'
+    refused from-none   's/from\/T9 a defect/from\/T99 a defect/'   'comes from T99, which is not a row'
+    refused from-first  's/wrong\/A from\/T9/from\/T9 wrong\/A/'    'the tag wrong/A goes before from/T9'
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
@@ -12755,10 +12784,36 @@ check-queue-selftest:
     grep -qF "'refuses/C,' is a class with punctuation after it; write exactly 'refuses/C', with nothing after it" <<<"$got" \
         || fail "add did not explain the comma refusal"
 
-    got=$(qf add 1 opus - 'wrong/B a tier one row with its class exactly §230' 2>&1) \
+    got=$(qf add 1 opus - 'wrong/B from/- a tier one row with its class exactly §230' 2>&1) \
         || fail "add refused a class with nothing stuck after it"
-    grep -q "^$got .*wrong/B a tier one row with its class exactly §230\$" "$dir/addfix.md" \
+    grep -q "^$got .*wrong/B from/- a tier one row with its class exactly §230\$" "$dir/addfix.md" \
         || fail "add did not write the row with its class still tagging it"
+
+    # §432: a new row says where it came from, and the word is written after
+    # the tag whichever of the two came first, since just land puts it in front.
+    got=$(qf add 2 sonnet - 'a row that says nothing of where it came from §230' 2>&1) \
+        && fail "add accepted a row that does not say where it came from"
+    grep -qF 'a new row says where it came from' <<<"$got" || fail "add did not say why it refused a row with no from/"
+    got=$(qf add 1 opus - 'from/T9 refuses/B a defect the first row found §230' 2>&1) \
+        || fail "add refused a row whose from/ came before its class"
+    grep -q "^$got .*  refuses/B from/T9 a defect the first row found §230\$" "$dir/addfix.md" \
+        || fail "add did not move from/T9 to after the class"
+    got=$(qf add 2 sonnet - 'small was/D1 the dropped row filed again §230' 2>&1) \
+        || fail "add refused a re-file written after its tag"
+    grep -q "^$got .*  small was/D1 the dropped row filed again §230\$" "$dir/addfix.md" \
+        || fail "add did not keep was/D1 after small"
+    got=$(qf add 2 sonnet - 'from/Q404 a row from a row that exists nowhere §230' 2>&1) \
+        && fail "add accepted from/ naming a row that exists nowhere"
+    grep -qF "'from/Q404' names Q404, which exists nowhere" <<<"$got" || fail "add did not name the missing row"
+    got=$(qf add 2 sonnet - 'was/- a re-file of nothing §230' 2>&1) \
+        && fail "add accepted was/-"
+    grep -qF "'was/-' is not where a row came from" <<<"$got" || fail "add did not refuse was/- by name"
+    got=$(qf add 1 opus - 'from/- refuses/C: a class with a colon behind the word §230' 2>&1) \
+        && fail "add accepted 'refuses/C:' behind from/-"
+    grep -qF "'refuses/C:' is a class with punctuation after it" <<<"$got" || fail "add did not check the class behind from/-"
+    got=$(qf add 1 opus - 'from/- pinned/9 a pin behind the word §230' 2>&1) \
+        && fail "add accepted a pin behind from/-"
+    grep -qF 'only Mattias pins a row' <<<"$got" || fail "add did not refuse the pin behind from/-"
 
     # Q1436: `take` lets a stale `lane:` state in another worktree's copy
     # through when main's own history of the queue file already held that
