@@ -34,6 +34,11 @@ A row of class A or B sits in tier 1, and a row of class C or D sits in tier 5.
 `check-queue` holds all four. When it refuses a class in the wrong tier, it
 names the verb that fixes it: `just queue tier <id> <tier>`.
 
+*§435 amended this on 2026-10-11, at Mattias's word. A row with no class that
+waits on a tier 5 row goes down to tier 5 with it, so an open tier 5 row has a
+class, or its `after:` names a tier 5 row. And a row with no class stays in
+tier 1 only while it waits on nothing outside tier 1. Q1736 builds the check.*
+
 ### 403.3 The fill walks tiers 1 and 5 in class order
 
 §352.3's list of classes is unchanged, and the fill now walks it in tier 5 as
@@ -48,6 +53,10 @@ and tier 5 goes
 Both of §352.3's rules survive: how bad comes first inside A to C, and D comes
 last whatever its symptom. What changes is that C now waits below tiers 2 to 4.
 §352.3 had C above the rows with no class.
+
+*§435.5 adds a place to tier 5's walk on 2026-10-11: `<no class>` between
+`refuses/C` and `wrong/D`, for the rows that wait on a tier 5 row. The fill
+already sorted a row with no class there, so only the walk as written changed.*
 
 ### 403.4 `tag` moves the row to the tier its class names
 
