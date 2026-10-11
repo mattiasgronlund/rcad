@@ -85,7 +85,9 @@ pub enum Containment {
     /// instead, as it is on the same solid without that face (Q1722). A box
     /// whose every ray a face that answered grazes, as a box straddling a
     /// flat face is grazed by it, is [`Containment::Undecidable`]: no answer
-    /// from the trimming would have counted those rays either (Q1727).
+    /// from the trimming would have counted those rays either (Q1727). The
+    /// face whose trimming nothing follows is not one that answered where it
+    /// grazes a ray only for want of showing it holds none of the box (Q1740).
     ///
     /// Deliberately not [`Containment::Undecidable`]. That one means every
     /// predicate was asked and none could prove an answer; this means the
@@ -369,7 +371,10 @@ impl SolidView<'_> {
         let Some(reach) = stretched_to_the_plane(&face.plane(), point) else {
             return true;
         };
-        !self.face_holds_none_of(face, reach, policy, log)
+        !matches!(
+            self.what_it_holds_of_the_box(face, reach, policy, log),
+            Ok(OnAFace::NotHeld)
+        )
     }
 
     /// What every point of `point`'s box is, read off one exact point beside
@@ -779,9 +784,8 @@ impl SolidView<'_> {
             }
             Decision::Pos | Decision::Neg => (),
             Decision::Undecidable { enclosure } => {
-                if !self.face_holds_none_of(face, point, policy, log) {
-                    tally.grazed(enclosure);
-                }
+                let held = self.what_it_holds_of_the_box(face, point, policy, log);
+                tally.grazed_unless_it_holds_none(held, face.key(), enclosure);
             }
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
@@ -845,10 +849,13 @@ impl SolidView<'_> {
                 Meeting::Ahead { at } => at,
                 Meeting::Behind => continue,
                 Meeting::Straddles { at } => {
-                    if !self.face_holds_none_of(face, PredicatePoint::Constructed(at), policy, log)
-                    {
-                        tally.grazed(0.0);
-                    }
+                    let held = self.what_it_holds_of_the_box(
+                        face,
+                        PredicatePoint::Constructed(at),
+                        policy,
+                        log,
+                    );
+                    tally.grazed_unless_it_holds_none(held, face.key(), 0.0);
                     continue;
                 }
                 Meeting::CouldNotTell => {
@@ -902,10 +909,10 @@ impl SolidView<'_> {
         tally.take_in(held, face.key());
     }
 
-    /// Whether `face` holds no point of `point`'s box, so that the box can
-    /// neither put a point on the skin through `face` nor be where the ray
-    /// crosses it, whichever side of the face's surface each of its points is
-    /// on.
+    /// What `face` holds of `point`'s box. Only [`OnAFace::NotHeld`] says
+    /// anything about the whole box: that it can neither put a point on the
+    /// skin through `face` nor be where the ray crosses it, whichever side of
+    /// the face's surface each of its points is on.
     ///
     /// **It rests on §323.3's contract**: [`OnAFace::NotHeld`] is a sign decided
     /// about every point of the box, which is what the ray already drops a root
@@ -916,22 +923,19 @@ impl SolidView<'_> {
     /// rounding either side of it. Neither is on the lower bar's wall, and each
     /// threw every ray away until Q1080. What the face was asked goes into `log`
     /// only when it holds none of the box.
-    fn face_holds_none_of(
+    fn what_it_holds_of_the_box(
         self,
         face: FaceView<'_>,
         point: PredicatePoint,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> bool {
+    ) -> crate::Result<OnAFace> {
         let mut trial = ProvenanceLog::new();
-        let held_by_none = matches!(
-            self.what_this_face_holds(face, point, policy, &mut trial),
-            Ok(OnAFace::NotHeld)
-        );
-        if held_by_none {
+        let held = self.what_this_face_holds(face, point, policy, &mut trial);
+        if matches!(held, Ok(OnAFace::NotHeld)) {
             trial.drain_into(log);
         }
-        held_by_none
+        held
     }
 }
 
@@ -1463,6 +1467,35 @@ impl Crossings {
             Ok(OnAFace::NotHeld) => (),
             Err(Error::Undecidable { .. }) => self.grazed(0.0),
             Err(_) => self.unfollowed(face),
+        }
+    }
+
+    /// Take in what a face holds of a box its own sign could not place, or of
+    /// a root that could not be told from the point the ray started at.
+    ///
+    /// Only none of the box lets the ray by, and anything else grazes it. **A
+    /// face whose trimming nothing follows is noted as well**: its graze is
+    /// for want of the answer it refused, and [`Crossings::add`] keeps such a
+    /// graze from throwing the ray away. Taken as one from a face that
+    /// answered, it threw away a ray no face that answered grazed, and a box
+    /// on the ball under the floor of a half ball whose cap nothing follows
+    /// came back [`Containment::Undecidable`], where the half ball alone puts
+    /// it outside (Q1740).
+    fn grazed_unless_it_holds_none(
+        &mut self,
+        held: crate::Result<OnAFace>,
+        face: FaceKey,
+        enclosure: f64,
+    ) {
+        match held {
+            Ok(OnAFace::NotHeld) => (),
+            Ok(OnAFace::Held | OnAFace::OnItsBoundary) | Err(Error::Undecidable { .. }) => {
+                self.grazed(enclosure);
+            }
+            Err(_) => {
+                self.grazed(enclosure);
+                self.unfollowed(face);
+            }
         }
     }
 

@@ -28,6 +28,13 @@
 //! `Undecidable`. Until Q1727 the holed one named the cap, on a box whose
 //! answer following the cap could not have changed. A box on the cap itself
 //! is grazed by the cap alone, and is still refused.
+//!
+//! **A graze for want of the cap's answer is the cap's refusal** (Q1740). A
+//! box on the ball under the floor is grazed by the cap's own sign, since the
+//! cap cannot say it holds none of the box, and until Q1740 that graze went in
+//! as one from a face that answered: a box whose one ray meeting the ball
+//! ahead was grazed by the skin and the floor came back `Undecidable`, where
+//! the half ball alone places it outside.
 
 use rcad_geom::{EdgeRun, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
 use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
@@ -52,6 +59,18 @@ const ON_THE_SKIN: [[f64; 3]; 2] = [[3.0, 0.0, 4.0], [0.0, -3.0, 4.0]];
 
 /// A point on the ball and on the cap, `y + 3z > 15`, as near as `f64` has it.
 const ON_THE_CAP: [f64; 3] = [0.0, 1.4, 4.8];
+
+/// A point on the ball under the floor, `z < 0`, aimed so that the ray to the
+/// third of the targets `SolidView::classify_point` fires at leaves the ball on
+/// the equator, near `(3.786, -3.266, 0)`. The other two rays leave the ball
+/// behind the point, so no ray from it meets the ball ahead.
+///
+/// No point of the ball has all three rays leave it behind: seen from the
+/// ball's centre the second and third targets are 165.3° apart, and a ray
+/// leaves the ball behind only from a point within 77.5° of the second, or
+/// 79.4° of the third. So a box on the cap always has a ray that meets the
+/// ball ahead, where the cap is asked and refuses.
+const UNDER_THE_FLOOR: [f64; 3] = [2.615527281489544, 2.1172300591344544, -3.698155474893049];
 
 #[test]
 fn a_point_on_the_floor_of_a_half_ball_whose_cap_nothing_follows_is_on_its_skin() {
@@ -176,6 +195,33 @@ fn a_box_straddling_a_cap_nothing_follows_is_still_refused() {
             "{}: the half ball alone: {:?}",
             said.what,
             said.alone
+        );
+    }
+}
+
+/// A box on the ball under the floor, outside both half balls, is held by no
+/// face. The skin and the floor say so, and the cap cannot, so it grazes every
+/// ray from the box for want of that answer. The third ray is grazed where it
+/// leaves the ball on the equator as well, by the skin and the floor, and is
+/// thrown away whatever the cap would say; the other two are grazed by the cap
+/// alone. So the answer names the cap, where the half ball alone places the
+/// box outside. Until Q1740 the cap's graze from its own sign went in as one
+/// from a face that answered, every ray was thrown away, and the holed half
+/// ball said `Undecidable`, which a looser policy does nothing for.
+#[test]
+fn a_box_on_the_ball_under_the_floor_names_the_cap_nothing_follows() {
+    for said in what_both_say_of_boxes_round(&[UNDER_THE_FLOOR]) {
+        assert_eq!(
+            said.holed,
+            Containment::CannotFollowAFacesTrimming { face: said.cap },
+            "{}: the holed half ball",
+            said.what
+        );
+        assert_eq!(
+            said.alone,
+            Containment::Outside,
+            "{}: the half ball alone",
+            said.what
         );
     }
 }
