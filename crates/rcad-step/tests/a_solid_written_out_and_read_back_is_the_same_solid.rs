@@ -824,6 +824,85 @@ fn the_axis_leans_off_a_cap_by(model: &Model, bar: SolidKey, lean: f64) {
     );
 }
 
+/// A bar whose caps lean `2^-1023` off running along it is built, and the
+/// writer refuses it by name, because the ellipse each cap crosses the pipe in
+/// is longer than any `f64`.
+///
+/// Q769. The bottom cap is the plane `y = 2^-1023·z`. It crosses a pipe of
+/// radius 2 about `z` in an ellipse 2 across and `2·√(1 + tan²θ)` long, with
+/// `tan θ = 2^1023`: `2^1024` and a little more, past `f64::MAX`. That is the
+/// `!long.is_finite()` return of `where_a_plane_crosses_a_pipe`. The top cap is
+/// the same plane `2^-1020` further down `y`, which puts both corners on the
+/// seam, at heights 0 and 8, and both ellipses' centres on the axis at those
+/// same heights, so it is the long size and not a centre that leaves `f64`
+/// (Q1480 is the arm where a centre does).
+///
+/// **`add_bar_cut_off_by` builds the bar.** The Q763 lane guessed it would
+/// refuse such a cap first. It does not: `n·a` is `-2^-1023` and not zero, so
+/// the cap cuts the pipe right round.
+///
+/// **A limit, not a gap** (`docs/decisions.md` §16.10). The curve itself
+/// leaves `f64`: the bottom cap meets the pipe's ruling `x = 0, y = 2` at
+/// `z = 2 / 2^-1023 = 2^1024`, so the far end of the ellipse's long axis is no
+/// point an `f64` holds, and its length is no size one holds. `Model::validate`
+/// refuses the bar too.
+#[test]
+fn a_bar_whose_caps_almost_run_along_it_is_refused_by_name_because_their_ellipses_outgrow_f64() {
+    let lean = f64::MIN_POSITIVE / 2.0;
+    let bottom = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, -lean))
+        .expect("a normal with a length");
+    let top = Plane::from_point_and_normal(
+        Point::new(0.0, -8.0 * lean, 0.0),
+        Vector::new(0.0, -1.0, lean),
+    )
+    .expect("a normal with a length");
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 8.0).expect("a working size"));
+    let bar = model
+        .add_bar_cut_off_by(
+            2.0,
+            [bottom, top],
+            &Isometry::identity(),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("caps that do not run along the pipe cut it right round");
+    assert_eq!(
+        where_its_corners_are(model.solid(bar).expect("this model made the key")),
+        [[2.0, 0.0, 0.0], [2.0, 0.0, 8.0]].map(|corner: [f64; 3]| corner.map(f64::to_bits)),
+        "both corners on the seam"
+    );
+    assert_eq!(
+        2.0 / lean,
+        f64::INFINITY,
+        "the bottom cap meets the ruling x = 0, y = 2 further up than an f64 reaches"
+    );
+    let unsound = model.validate(&policy, &mut ProvenanceLog::new());
+    assert!(
+        matches!(
+            unsound,
+            Err(rcad_topo::Error::Geometry(
+                rcad_geom::Error::CannotWorkOutHowBigACrossingIs
+            ))
+        ),
+        "validated as {unsound:?}"
+    );
+
+    let refused = rcad_step::write(&model, "a bar whose caps almost run along it")
+        .expect_err("an ellipse longer than any f64 is not written");
+    assert!(
+        matches!(
+            refused,
+            CannotWrite::ACurveTheFacesEitherSideOfItDoNotName {
+                first: "plane",
+                second: "pipe",
+                closed: true,
+            }
+        ),
+        "refused as {refused:?}"
+    );
+}
+
 /// The short side of a bar sliced along its length is written with an arc
 /// where each cap stops short of right round the pipe, and comes back the same.
 ///
