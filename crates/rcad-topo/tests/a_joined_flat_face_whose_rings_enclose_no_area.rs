@@ -3578,87 +3578,141 @@ fn a_bar_cut_to_pipes(
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
+/// **An arc a hair off its chord, on a joined flat face, read by how it
+/// bulges** (Q633). A plate of radius 12 about `(−3, −4)`, from `z = −4` to
+/// `0`, bored through by a bar of radius 3 about `(0.6δ, 0.8δ)` and holed by
+/// one of radius 1/2 about `(−6, −4)`; and a bar of radius 8 about `(−3, −4)`,
+/// as tall, holed by one of radius 1/4 about `(−6, −4)`. With `δ = 0` the bore
+/// touches the bar's wall from inside at `(1.8, 2.4)`, the corner of a 3-4-5
+/// triangle; with `δ > 0` it pokes out past the wall by `δ`, so the bar fills
+/// the bore all but a sliver between two arcs.
+///
+/// United, each cap joins into one face with three rings: the plate's outer
+/// circle, the small hole of radius 1/4, and the sliver, whose two corners are
+/// where the circles of radius 3 and 8 cross, `2√(9.6δ)` apart. **The sliver's
+/// two arcs, of radius 3 and 8, bulge the same way off one chord**, by `1.6δ`
+/// and `0.6δ`, so `holds_the_other_rings` places it by how each arc bulges.
+/// The chord leans along `(−4, 3)`, so its two ends round apart. Only the union
+/// joins the caps, so only the union reads a bulge (a temporary print, Q633).
+///
+/// What each rule leaves, in area times the height 4, with `L` the area of the
+/// bore past the bar:
+///
+/// - the union, `576π − π/4 − 4L`: the disk of radius 12 less the small hole
+///   and the sliver;
+/// - the intersection, `219π + 4L`: the bar less the bore and the hole of
+///   radius 1/2;
+/// - the plate less the bar, `320π − 4L`: one solid;
+/// - the bar less the plate, two solids: the part of the bore inside the bar,
+///   `36π − 4L`, and the ring between the two small holes, `3π/4`.
+///
+/// **Every rule, both ways round, gives that with the sliver `10⁻⁸` thick.**
+/// Each bulge reads the right way by far: what moves a chord end across the
+/// line from the other end to the point the reading winds round is four times
+/// an arc's sagitta (Q622), here `2.4·10⁻⁸` for the bar's arc, millions of
+/// ulps. Read the wrong way round, with the holed bar first, the bar's arc
+/// would claim the part of the bar's disk on the near side of the chord, which
+/// holds the small hole's corner, and the sliver would hold the hole as the
+/// outline does.
 #[test]
-fn probe_q633_sweep() {
-    for k in 1..=300 {
-        let delta = f64::from(k) * 1e-18;
-        for swapped in [false, true] {
-            let what = format!("delta {delta:e}, swapped {swapped}");
-            eprintln!("Q633 RUN {what}");
-            let answer = std::panic::catch_unwind(|| {
-                let mut model =
-                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-                let pair = a_bored_plate_and_a_holed_bar_inside_the_bore(&mut model, delta);
-                fused_in_order(&mut model, pair, Rule::Union, swapped)
-                    .map(|solids| solids.len())
-                    .map_err(|why| format!("{why:?}").chars().take(80).collect::<String>())
-            });
-            match answer {
-                Ok(Ok(solids)) => eprintln!("Q633 ANSWER {what}: {solids}"),
-                Ok(Err(why)) => eprintln!("Q633 REFUSED {what}: {why}"),
-                Err(_) => eprintln!("Q633 PANIC {what}"),
+fn a_bar_filling_a_plates_bore_all_but_a_sliver_is_answered_under_every_rule() {
+    let sliver = 4.0 * what_the_bore_holds_past_the_bar(1e-8);
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pair = a_bored_plate_and_a_bar_filling_its_bore(&mut model, 1e-8);
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, pair, rule, swapped);
+        match (rule, swapped) {
+            (Rule::Difference, true) => {
+                let [between_the_holes, in_the_bore] = the_two_smaller_first(&model, answer, &what);
+                assert_holds(&model, between_the_holes, 0.75 * PI, &what);
+                assert_holds(&model, in_the_bore, 36.0 * PI - sliver, &what);
+            }
+            (rule, swapped) => {
+                let volume = match (rule, swapped) {
+                    (Rule::Union, _) => 576.0 * PI - PI / 4.0 - sliver,
+                    (Rule::Intersection, _) => 219.0 * PI + sliver,
+                    (Rule::Difference, false) => 320.0 * PI - sliver,
+                    (other, _) => panic!("not a rule this probes: {other:?}"),
+                };
+                assert_holds(&model, the_only(answer, &what), volume, &what);
             }
         }
     }
 }
 
+/// **The same with the sliver `10⁻¹²` thick: the union is answered both ways
+/// round, and so is the bar less the plate**, each holding what the circles
+/// say. The chord is about `6·10⁻⁶` long and the bar's arc reads the right way
+/// by `2.4·10⁻¹²`, still thousands of ulps. The intersection both ways round
+/// and the plate less the bar are refused `CannotNameWhichPieceOfACrossingThisIs`
+/// (Q633). The sliver is past §3.5's envelope here, `15/10⁻¹²` against `10¹¹`.
 #[test]
-fn probe_q633_round() {
-    for delta in [1e-1, 1e-8, 1e-12, 1e-14, 1e-15, 1e-16, 3e-17] {
-        for (rule, swapped) in every_rule_both_ways() {
-            let mut model =
-                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let pair = a_bored_plate_and_a_holed_bar_inside_the_bore(&mut model, delta);
-            let what = format!("delta {delta:e}, {rule:?}, swapped {swapped}");
-            eprintln!("Q633 RUN {what}");
-            match fused_in_order(&mut model, pair, rule, swapped) {
-                Ok(solids) => {
-                    let volumes: Vec<String> = solids
-                        .iter()
-                        .map(|solid| {
-                            model
-                                .solid(*solid)
-                                .expect("this model made the key")
-                                .measure(
-                                    Deflection::of(0.001).expect("a fine mesh"),
-                                    &Policy::certified(),
-                                    &mut ProvenanceLog::new(),
-                                )
-                                .map_or_else(
-                                    |why| format!("does not measure: {why}"),
-                                    |measured| {
-                                        format!(
-                                            "{} +- {}",
-                                            measured.volume(),
-                                            measured.volume_error()
-                                        )
-                                    },
-                                )
-                        })
-                        .collect();
-                    let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                    eprintln!(
-                        "Q633 ANSWER {what}: {volumes:?} expected {} valid {valid:?}",
-                        what_the_bored_plate_and_the_holed_bar_answer(rule, swapped, delta)
-                    );
-                }
-                Err(why) => eprintln!("Q633 REFUSED {what}: {why:?}"),
+fn a_bar_filling_a_plates_bore_all_but_a_sliver_a_trillionth_thick_is_united_both_ways() {
+    let sliver = 4.0 * what_the_bore_holds_past_the_bar(1e-12);
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pair = a_bored_plate_and_a_bar_filling_its_bore(&mut model, 1e-12);
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, pair, rule, swapped);
+        match (rule, swapped) {
+            (Rule::Union, _) => assert_holds(
+                &model,
+                the_only(answer, &what),
+                576.0 * PI - PI / 4.0 - sliver,
+                &what,
+            ),
+            (Rule::Difference, true) => {
+                let [between_the_holes, in_the_bore] = the_two_smaller_first(&model, answer, &what);
+                assert_holds(&model, between_the_holes, 0.75 * PI, &what);
+                assert_holds(&model, in_the_bore, 36.0 * PI - sliver, &what);
             }
+            (Rule::Intersection | Rule::Difference, _) => assert!(
+                matches!(
+                    answer,
+                    Err(Error::Geometry(
+                        rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+                    ))
+                ),
+                "{what}: {answer:?}"
+            ),
+            (other, _) => panic!("not a rule this probes: {other:?}"),
         }
     }
 }
 
-fn what_the_bored_plate_and_the_holed_bar_answer(rule: Rule, swapped: bool, delta: f64) -> f64 {
-    let sliver = what_the_bore_holds_past_the_bar(delta);
-    match (rule, swapped) {
-        (Rule::Union, _) => 576.0 * PI - PI / 4.0 - 4.0 * sliver,
-        (Rule::Intersection, _) => 219.0 * PI + 4.0 * sliver,
-        (Rule::Difference, false) => 320.0 * PI - 4.0 * sliver,
-        (Rule::Difference, true) => 36.0 * PI + 0.75 * PI - 4.0 * sliver,
-        (other, _) => panic!("not a rule this probes: {other:?}"),
+/// **With the sliver `10⁻¹⁴` thick every rule is refused**: the union both
+/// ways round `Undecidable`, and the rest
+/// `CannotNameWhichPieceOfACrossingThisIs` (Q633).
+#[test]
+fn a_bar_filling_a_plates_bore_all_but_a_sliver_a_hundred_trillionth_thick_is_refused() {
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pair = a_bored_plate_and_a_bar_filling_its_bore(&mut model, 1e-14);
+        let refused = fused_in_order(&mut model, pair, rule, swapped);
+        let what = format!("{rule:?}, swapped {swapped}");
+        match rule {
+            Rule::Union => assert!(
+                matches!(refused, Err(Error::Undecidable { .. })),
+                "{what}: {refused:?}"
+            ),
+            Rule::Intersection | Rule::Difference => assert!(
+                matches!(
+                    refused,
+                    Err(Error::Geometry(
+                        rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+                    ))
+                ),
+                "{what}: {refused:?}"
+            ),
+            other => panic!("not a rule this probes: {other:?}"),
+        }
     }
 }
 
+/// The area of the bore of radius 3 past the wall of the bar of radius 8,
+/// their centres `5 + δ` apart: the bore less the two circular segments either
+/// side of the chord between the two crossings.
 fn what_the_bore_holds_past_the_bar(delta: f64) -> f64 {
     let apart = 5.0 + delta;
     let segment = |mine: f64, theirs: f64| {
@@ -3670,7 +3724,9 @@ fn what_the_bore_holds_past_the_bar(delta: f64) -> f64 {
     9.0 * PI - (segment(3.0, 8.0) + segment(8.0, 3.0))
 }
 
-fn a_bored_plate_and_a_holed_bar_inside_the_bore(model: &mut Model, delta: f64) -> [SolidKey; 2] {
+/// The plate bored by a bar of radius 3 standing `δ` past the wall of the bar
+/// of radius 8, and that bar, each holed about `(−6, −4)`: the plate first.
+fn a_bored_plate_and_a_bar_filling_its_bore(model: &mut Model, delta: f64) -> [SolidKey; 2] {
     let plate = model
         .add_round_bar(12.0, 4.0, &at(-3.0, -4.0, -4.0))
         .expect("a bar of radius twelve");
@@ -3690,194 +3746,4 @@ fn a_bored_plate_and_a_holed_bar_inside_the_bore(model: &mut Model, delta: f64) 
         .expect("a bar of radius a quarter");
     let holed = the_one_solid(model, bar, narrow_hole, Rule::Difference);
     [holed_plate, holed]
-}
-
-#[test]
-fn probe_q633() {
-    for delta in [1e-1, 1e-8, 1e-10, 1e-12, 1e-13, 1e-14, 1e-15] {
-        for (rule, swapped) in every_rule_both_ways() {
-            let mut model =
-                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let pair = a_bored_plate_and_a_holed_block_whose_wall_leans(&mut model, delta);
-            let what = format!("delta {delta:e}, {rule:?}, swapped {swapped}");
-            eprintln!("Q633 RUN {what}");
-            match fused_in_order(&mut model, pair, rule, swapped) {
-                Ok(solids) => {
-                    let volumes: Vec<String> = solids
-                        .iter()
-                        .map(|solid| {
-                            model
-                                .solid(*solid)
-                                .expect("this model made the key")
-                                .measure(
-                                    Deflection::of(0.001).expect("a fine mesh"),
-                                    &Policy::certified(),
-                                    &mut ProvenanceLog::new(),
-                                )
-                                .map_or_else(
-                                    |why| format!("does not measure: {why}"),
-                                    |measured| {
-                                        format!(
-                                            "{} +- {}",
-                                            measured.volume(),
-                                            measured.volume_error()
-                                        )
-                                    },
-                                )
-                        })
-                        .collect();
-                    let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                    eprintln!(
-                        "Q633 ANSWER {what}: {volumes:?} expected {} valid {valid:?}",
-                        what_the_bored_plate_and_the_holed_block_answer(rule, swapped, delta)
-                    );
-                }
-                Err(why) => eprintln!("Q633 REFUSED {what}: {why:?}"),
-            }
-        }
-    }
-}
-
-fn what_the_bored_plate_and_the_holed_block_answer(rule: Rule, swapped: bool, delta: f64) -> f64 {
-    let past_the_wall = what_the_bore_holds_past_the_leaning_wall(delta);
-    match (rule, swapped) {
-        (Rule::Union, _) => 399.0 * PI - past_the_wall,
-        (Rule::Intersection, _) => 300.0 - 36.0 * PI + past_the_wall,
-        (Rule::Difference, false) => 400.0 * PI - 300.0 - past_the_wall,
-        (Rule::Difference, true) => 35.0 * PI - past_the_wall,
-        (other, _) => panic!("not a rule this probes: {other:?}"),
-    }
-}
-
-fn what_the_bore_holds_past_the_leaning_wall(delta: f64) -> f64 {
-    let antiderivative = |h: f64| {
-        let half_chord = (9.0 - h * h).max(0.0).sqrt();
-        9.0 * (h * (h / 3.0).clamp(-1.0, 1.0).acos() - half_chord) + half_chord.powi(3) / 3.0
-    };
-    4.0 * (antiderivative(3.0 - delta) - antiderivative(2.0 - delta))
-}
-
-fn a_bored_plate_and_a_holed_block_whose_wall_leans(
-    model: &mut Model,
-    delta: f64,
-) -> [SolidKey; 2] {
-    let plate = model
-        .add_round_bar(10.0, 4.0, &at(0.0, 0.0, -4.0))
-        .expect("a bar of radius ten");
-    let bore = model
-        .add_round_bar(3.0, 6.0, &at(delta, 0.0, -5.0))
-        .expect("a bar of radius three");
-    let bored = the_one_solid(model, plate, bore, Rule::Difference);
-    let block = a_block_whose_wall_leans(model).unwrap_or_else(|why| panic!("the block: {why:?}"));
-    let hole = model
-        .add_round_bar(0.5, 6.0, &at(0.0, 0.0, -5.0))
-        .expect("a bar of radius a half");
-    let holed = the_one_solid(model, block, hole, Rule::Difference);
-    [bored, holed]
-}
-
-/// The block `−5 ≤ x`, `−5 ≤ y ≤ 5`, `−4 ≤ z ≤ 0`, up to the wall `4x = z + 12`,
-/// which is at `x = 3` along the top and `x = 2` along the floor.
-fn a_block_whose_wall_leans(model: &mut Model) -> rcad_topo::Result<SolidKey> {
-    use Orientation::{Forward, Reversed};
-    let mut builder = SolidBuilder::new();
-    let mut both_ends = |[x, z]: [f64; 2]| {
-        Ok::<_, rcad_topo::Error>([
-            builder.add_vertex(Point::new(x, -5.0, z))?,
-            builder.add_vertex(Point::new(x, 5.0, z))?,
-        ])
-    };
-    let [rear_floor_front, rear_floor_back] = both_ends([-5.0, -4.0])?;
-    let [rear_top_front, rear_top_back] = both_ends([-5.0, 0.0])?;
-    let [wall_top_front, wall_top_back] = both_ends([3.0, 0.0])?;
-    let [wall_floor_front, wall_floor_back] = both_ends([2.0, -4.0])?;
-    let mut straight = |start, end| builder.add_edge(start, end, EdgeRun::Straight);
-    let rear_floor_across = straight(rear_floor_front, rear_floor_back)?;
-    let rear_top_across = straight(rear_top_front, rear_top_back)?;
-    let wall_top_across = straight(wall_top_front, wall_top_back)?;
-    let wall_floor_across = straight(wall_floor_front, wall_floor_back)?;
-    let front_rear = straight(rear_floor_front, rear_top_front)?;
-    let front_top = straight(rear_top_front, wall_top_front)?;
-    let front_wall = straight(wall_floor_front, wall_top_front)?;
-    let front_floor = straight(rear_floor_front, wall_floor_front)?;
-    let back_rear = straight(rear_floor_back, rear_top_back)?;
-    let back_top = straight(rear_top_back, wall_top_back)?;
-    let back_wall = straight(wall_floor_back, wall_top_back)?;
-    let back_floor = straight(rear_floor_back, wall_floor_back)?;
-
-    let top = a_flat_face(
-        &mut builder,
-        Point::new(0.0, 0.0, 0.0),
-        Vector::new(0.0, 0.0, 1.0),
-        &[
-            (front_top, Forward),
-            (wall_top_across, Forward),
-            (back_top, Reversed),
-            (rear_top_across, Reversed),
-        ],
-    )?;
-    let floor = a_flat_face(
-        &mut builder,
-        Point::new(0.0, 0.0, -4.0),
-        Vector::new(0.0, 0.0, -1.0),
-        &[
-            (rear_floor_across, Forward),
-            (back_floor, Forward),
-            (wall_floor_across, Reversed),
-            (front_floor, Reversed),
-        ],
-    )?;
-    let rear = a_flat_face(
-        &mut builder,
-        Point::new(-5.0, 0.0, 0.0),
-        Vector::new(-1.0, 0.0, 0.0),
-        &[
-            (front_rear, Forward),
-            (rear_top_across, Forward),
-            (back_rear, Reversed),
-            (rear_floor_across, Reversed),
-        ],
-    )?;
-    let wall = a_flat_face(
-        &mut builder,
-        Point::new(3.0, 0.0, 0.0),
-        Vector::new(4.0, 0.0, -1.0),
-        &[
-            (wall_floor_across, Forward),
-            (back_wall, Forward),
-            (wall_top_across, Reversed),
-            (front_wall, Reversed),
-        ],
-    )?;
-    let front = a_flat_face(
-        &mut builder,
-        Point::new(0.0, -5.0, 0.0),
-        Vector::new(0.0, -1.0, 0.0),
-        &[
-            (front_floor, Forward),
-            (front_wall, Forward),
-            (front_top, Reversed),
-            (front_rear, Reversed),
-        ],
-    )?;
-    let back = a_flat_face(
-        &mut builder,
-        Point::new(0.0, 5.0, 0.0),
-        Vector::new(0.0, 1.0, 0.0),
-        &[
-            (back_rear, Forward),
-            (back_top, Forward),
-            (back_wall, Reversed),
-            (back_floor, Reversed),
-        ],
-    )?;
-    builder.add_shell(&[
-        (top, Forward),
-        (floor, Forward),
-        (rear, Forward),
-        (wall, Forward),
-        (front, Forward),
-        (back, Forward),
-    ])?;
-    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
