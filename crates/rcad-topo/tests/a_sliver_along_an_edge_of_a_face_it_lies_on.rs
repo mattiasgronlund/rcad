@@ -6,8 +6,10 @@
 //! Q1034 and Q1606). In the other two it lies on one solid's floor, with a
 //! side starting inside an upright edge of the other solid, and the rule of
 //! Q1608 and Q1609 places it by that edge. Every rule of three of them answers
-//! now. Of the two combs, three fuses still stop further on, a rounding from
-//! where the sliver was.
+//! now. Of the two combs, every rule answers but the first comb less the
+//! second, which needs an edge `2^-51` long beside a coordinate of 11 and is
+//! refused by that name. Their union is written without a notch a rounding
+//! across that holds no `f64` point (`docs/decisions.md` §431).
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 mod cones;
@@ -18,7 +20,7 @@ use rcad_predicates::expansion::{compress, expansion_sum, product_is_exact, scal
 use rcad_predicates::{
     Decision, Policy, ProvenanceLog, meet_of_three_planes, side_of_a_plane_where_three_planes_meet,
 };
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 
 use pairs::{Configuration, Elsewhere, Placed, Shape, Skew};
 
@@ -269,26 +271,36 @@ fn no_answer_of_a_leaning_frame_and_a_leaning_ell_loses_a_piece() {
 /// Q1606's rule places it by an edge of the second comb's gap floor, on that
 /// floor and facing its way, in all three fuses.
 ///
-/// **The union and the first less the second are a limit**, refused with
-/// four faces along an edge (queue row Q1634). They would hold `22 + 7 − 3`
-/// and `22 − 3`. Stored, each has a part a rounding across at `(3, 1)` from
-/// `z = 1` to `2`: the union a three-sided notch, which neither comb fills,
-/// between `(3, 1)`, the crossing of `x + 2y = 5` with `y = 1`, and the meet
-/// of `x + 2y = 5` with `x − 2y = 1`, and the difference the side of the first
-/// comb's tooth from `(3, 1)` to that meet. Those are three points, each
-/// within `2e-15` of `(3, 1)`
-/// ([`where_the_two_combs_cross_three_corners_lie_a_rounding_apart`]), so
-/// either answer has an edge under `4e-15` long beside the first comb's corner
-/// at `(5, 0, 0)`: a spread past `1e15`, against the `1e11` a model supports
-/// (`docs/decisions.md` §3.5). It is a length over a length, so no scaling
-/// fits the two together, and only a tolerance would close the notch.
+/// Stored, the union and the first less the second each have a part a
+/// rounding across at `(3, 1)` from `z = 1` to `2`: the union a three-sided
+/// notch, which neither comb fills, between `(3, 1)`, the crossing of
+/// `x + 2y = 5` with `y = 1`, and the meet of `x + 2y = 5` with `x − 2y = 1`,
+/// and the difference the side of the first comb's tooth from `(3, 1)` to that
+/// meet. Those are three points within `4e-16` of `(3, 1)`, and no `f64` point
+/// lies inside the notch
+/// ([`where_the_two_combs_cross_three_corners_lie_a_rounding_apart`]).
 ///
-/// The fuse stops before it measures that spread. The boxes of the crossing
-/// and of the meet have the same middle, `(3.0000000000000004, 1)`, and
-/// `Corners::of` in `fuse/assemble.rs` makes two names written to one point
-/// one corner. The strip of the first comb's floor `y = 1` from `(3, 1)` to
-/// the crossing and the strip of its tooth's wall from `(3, 1)` to the meet
-/// then have the same corners, and four faces meet along an edge of theirs.
+/// **The union is written without the notch, one solid of 26 faces holding
+/// `22 + 7 − 3`**, under each policy and with the second comb first too. The
+/// boxes of the crossing and of the meet have the same middle,
+/// `(3.0000000000000004, 1)`, so `Corners::of` in `fuse/assemble.rs` makes
+/// them one corner. The notch's wall on `x + 2y = 5` then has two sides of no
+/// length and walks out and back along one edge, and is left out
+/// (`docs/decisions.md` §365.7). Its two other walls, the strip of the floor
+/// `y = 1` and the strip of the tooth's wall `x − 2y = 1`, walk one ring of the
+/// same four edges, each the other way round, and enclose nothing as they are
+/// written. Until Q1528 four faces met along an edge of that ring and the union
+/// was refused `ResultIsNotManifold { count: 4 }`; now the two are left out
+/// together (§431).
+///
+/// **The first less the second is a limit, refused by the limit's name**
+/// (queue rows Q1634 and Q1658). It would hold `22 − 3`. Its side of the
+/// tooth from `(3, 1)` to the meet is no ring of its own but the top of the
+/// tooth's wall, which runs on below `z = 1`, so it stays, and its top edge is
+/// written `2^-51` long beside the first comb's `11` across. That is a length
+/// over a length, so no scaling fits the two together (§3.5): refused
+/// [`Invalid::DynamicRangeTooWide`] at `11 · 2^51`, under a certified policy.
+/// A tolerant one writes that edge and answers 25 faces holding `22 − 3`.
 #[test]
 fn two_combs_leaning_opposite_ways_meet_in_two_parts_a_rounding_apart() {
     let (model, keys) = comb_and_comb().build();
@@ -304,8 +316,38 @@ fn two_combs_leaning_opposite_ways_meet_in_two_parts_a_rounding_apart() {
     );
     holds_exactly(&met, &solids, 3.0, "the intersection");
 
-    stops_at_four_faces_along_an_edge(&model, keys[0], keys[1], Rule::Union);
-    stops_at_four_faces_along_an_edge(&model, keys[0], keys[1], Rule::Difference);
+    for (either, solids) in [
+        fused(&model, keys[0], keys[1], Rule::Union),
+        fused_tolerantly(&model, keys[0], keys[1], Rule::Union),
+    ] {
+        assert_eq!(face_counts(&either, &solids), [26], "the union's faces");
+        holds_exactly(&either, &solids, 22.0 + 7.0 - 3.0, "the union");
+    }
+
+    let mut less = model.clone();
+    let answer = less
+        .fuse(
+            &[keys[0]],
+            &[keys[1]],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .map(|fused| fused.solids().to_vec());
+    assert!(
+        matches!(
+            answer,
+            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) if ratio == 11.0 * 2f64.powi(51)
+        ),
+        "the certified difference gave {answer:?}"
+    );
+    let (less, solids) = fused_tolerantly(&model, keys[0], keys[1], Rule::Difference);
+    assert_eq!(
+        face_counts(&less, &solids),
+        [25],
+        "the tolerant difference's faces"
+    );
+    holds_exactly(&less, &solids, 22.0 - 3.0, "the tolerant difference");
 }
 
 /// The same two with the second comb first. The intersection is the same two
@@ -324,7 +366,9 @@ fn two_combs_leaning_opposite_ways_meet_in_two_parts_a_rounding_apart() {
 /// line, and the line is now parted into one edge per part, as it already was
 /// where the two faces on the plane were pieces of one input face.
 ///
-/// The union is refused as it is with the first comb first, the same limit.
+/// The union is the one written with the first comb first, one solid of 26
+/// faces without the notch a rounding across, under each policy. Until Q1528
+/// it was refused with four faces along an edge, as that one was.
 #[test]
 fn two_combs_leaning_opposite_ways_the_other_way_round_meet_in_two_parts_a_rounding_apart() {
     let (model, keys) = comb_and_comb().build();
@@ -338,7 +382,13 @@ fn two_combs_leaning_opposite_ways_the_other_way_round_meet_in_two_parts_a_round
     );
     holds_exactly(&met, &solids, 3.0, "the intersection");
 
-    stops_at_four_faces_along_an_edge(&model, keys[1], keys[0], Rule::Union);
+    for (either, solids) in [
+        fused(&model, keys[1], keys[0], Rule::Union),
+        fused_tolerantly(&model, keys[1], keys[0], Rule::Union),
+    ] {
+        assert_eq!(face_counts(&either, &solids), [26], "the union's faces");
+        holds_exactly(&either, &solids, 22.0 + 7.0 - 3.0, "the union");
+    }
 
     let (less, solids) = fused(&model, keys[1], keys[0], Rule::Difference);
     assert_eq!(
@@ -363,8 +413,10 @@ fn two_combs_leaning_opposite_ways_the_other_way_round_meet_in_two_parts_a_round
 /// in front of the tooth's wall, outside the first comb. The meet of the two
 /// walls is strictly in front of the floor, inside both gaps. So the three are
 /// three points, and the notch between them, and the side of the tooth from
-/// the corner to the meet, are a rounding across: the edges the union and the
-/// first comb less the second need, and the limit the test above pins.
+/// the corner to the meet, are a rounding across: the edges the exact union
+/// and first comb less the second have. The difference keeps one and is
+/// refused for it, the limit the first combs test pins; the union's are all
+/// the notch's, and it is written without them.
 #[test]
 fn where_the_two_combs_cross_three_corners_lie_a_rounding_apart() {
     let (model, keys) = comb_and_comb().build();
@@ -531,24 +583,34 @@ fn fused(
     (model, solids)
 }
 
-/// The fuse's answer has four faces along one edge, so it is not a solid.
-fn is_not_a_solid(model: &Model, arguments: SolidKey, tools: SolidKey, rule: Rule) {
-    four_faces_along_an_edge(model, arguments, tools, rule);
-}
-
-/// What the stored planes describe has no four faces along any edge, and the
-/// fuse refuses it with four: where it stops now, pinned so that a move is
-/// seen (`docs/decisions.md` §365.8).
-fn stops_at_four_faces_along_an_edge(
+/// Fuse a copy of `model` under a tolerant policy, and check that what came
+/// back validates under it.
+fn fused_tolerantly(
     model: &Model,
     arguments: SolidKey,
     tools: SolidKey,
     rule: Rule,
-) {
-    four_faces_along_an_edge(model, arguments, tools, rule);
+) -> (Model, Vec<SolidKey>) {
+    let policy = Policy::tolerant(100.0);
+    let mut model = model.clone();
+    let solids = match model.fuse(
+        &[arguments],
+        &[tools],
+        rule,
+        &policy,
+        &mut ProvenanceLog::new(),
+    ) {
+        Ok(fused) => fused.solids().to_vec(),
+        Err(why) => panic!("the tolerant {rule:?} refused: {why:?}"),
+    };
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .expect("a tolerant fuse's answer validates under its policy");
+    (model, solids)
 }
 
-fn four_faces_along_an_edge(model: &Model, arguments: SolidKey, tools: SolidKey, rule: Rule) {
+/// The fuse's answer has four faces along one edge, so it is not a solid.
+fn is_not_a_solid(model: &Model, arguments: SolidKey, tools: SolidKey, rule: Rule) {
     let mut model = model.clone();
     let answer = model
         .fuse(
