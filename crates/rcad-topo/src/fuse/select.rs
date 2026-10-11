@@ -132,7 +132,7 @@ use crate::holds::{
     the_half_space_naming_the_meridian_circle_through, the_meridian_half_space_keeps,
 };
 use crate::validate::side_of_surface;
-use crate::{Containment, Error, FaceKey, Model, Result, SolidView, VertexKey};
+use crate::{Containment, Error, FaceKey, FaceView, Model, Result, SolidView, VertexKey};
 
 use super::arrange::{Piece, agreement_of_two_planes, name_of_surface_bits};
 use super::assemble::{NamedSide, the_edge_each_side_of_every_piece_is};
@@ -1830,8 +1830,9 @@ fn by_the_piece_across_a_side_clear_of_every_face(
 }
 
 /// Whether no face of `solid` holds any point of `point`'s box, each face
-/// asked first by its surface, as [`is_off_every_surface_of`] asks it, and
-/// then by its trimming.
+/// asked first by its surface, as [`is_off_every_surface_of`] asks it, then,
+/// for a meridian disk, by the half-space naming its circle
+/// ([`is_behind_the_meridian_disk`]), and then by its trimming.
 fn is_clear_of_every_face_of(
     solid: SolidView<'_>,
     point: PredicatePoint,
@@ -1845,11 +1846,63 @@ fn is_clear_of_every_face_of(
             |flat| side_of_a_flat_face(flat, point),
         );
         matches!(side, Decision::Pos | Decision::Neg)
+            || is_behind_the_meridian_disk(solid, face, point, policy, log)
             || matches!(
                 solid.what_this_face_holds(face, point, policy, log),
                 Ok(OnAFace::NotHeld)
             )
     })
+}
+
+/// Whether `face` is the disk of one meridian circle of a ring, its only wire
+/// that circle and the face across it the ring, and the half-space naming that
+/// circle puts every point of `point`'s box behind it.
+///
+/// **Such a disk holds no point behind that half-space.** [`intersect`] names a
+/// meridian circle by a half-space only once it has proved the half-space's
+/// plane clears both circles a plane through the ring's axis cuts it in, so the
+/// circle, and the disk inside it, lie in front of that plane
+/// (`holds.rs`'s [`the_meridian_half_space_keeps`]). This asks no sign of the
+/// ring, which [`SolidView::what_this_face_holds`] reads first, so a box on
+/// the ring a long way from the disk is still put off it.
+///
+/// The circle is named where the face is stored, from the stored plane, ring
+/// and corner, and the half-space moved into place, as `holds.rs` names it,
+/// for its reason: a turn rounds the plane and the ring each on its own.
+fn is_behind_the_meridian_disk(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> bool {
+    let mut wires = face.wires();
+    let (Some(wire), None) = (wires.next(), wires.next()) else {
+        return false;
+    };
+    let Some(circle) = wire.coedges().next().filter(|_| wire.closes_on_one_edge()) else {
+        return false;
+    };
+    let Ok(Some(across)) = crate::holds::the_face_across(solid, face, circle.edge()) else {
+        return false;
+    };
+    let (flat, ring) = (face.stored_surface(), across.stored_surface());
+    if flat.as_plane().is_none()
+        || !matches!(ring, Surface::Torus(_))
+        || across.location() != face.location()
+    {
+        return false;
+    }
+    let corner = PredicatePoint::from(circle.start().stored_point().coordinates());
+    let Ok(Some(this_circle)) =
+        the_half_space_naming_the_meridian_circle_through(&flat, &ring, corner, policy, log)
+    else {
+        return false;
+    };
+    matches!(
+        the_meridian_half_space_keeps(&this_circle.transformed(&face.location()), point),
+        Ok(false)
+    )
 }
 
 /// Whether one piece of a face holds a point on its surface, or `None` when
