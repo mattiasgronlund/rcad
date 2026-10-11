@@ -114,60 +114,67 @@ Mattias pinned Q1703, Q1447, Q1704, Q1705 and Q1707, in that order, on the same
 day (a6cd6135). Q1447 is in the list because Q1705 waits on it, and a pinned row
 still waits on its `after:` (§430.4).
 
-### 433.8 A fault is not a row
+### 433.8 A row that no longer reproduces is closed without a lane's fix
 
-Mattias asked next whether this tells which faults were fixed, not only which
-rows were closed. It does not. Q1703 to Q1707 count rows.
+*Mattias, 2026-10-11, on which faults were fixed: "what I meant by a fault was
+when a row identified a root cause and fixed that, and that was what I expected
+that fixing such a root cause would fix a large set of failed files as they all
+run into the same root problem. What I was after in my question was that if we
+report rows for a set of files day one then add a new row for a new set of
+files day two, it might be that both rows actually are created related to files
+where the root cause was the same for all of them, i.e. fixing the root cause
+for one of the rows implicitly fixed the other row. That is the second row
+investigated would not reproduce using the latest checking on origin/main. In
+which case I hope it would be possible to close the second row without any
+deeper investigation."*
 
-A row is not a fault. On 10-11's main, 28 groups of crash files still fail. Rows
-name 25 of them by a crash file, and 12 of those 25 are named by more than one
-row: a row filed again, or a done row whose files still fail, as `writer.rs:226`
-is named by Q1209 (done) and by Q1295 and Q1297 (open). Q1474 alone names 7
-groups. A group is not a fault either. The triage puts crash files with one
-panic place and message in one group, and a merge can fix part of a group.
+Q1708 and Q1709, filed first under this number, read the question as which
+merge fixed each crash file. They were dropped.
 
-So here a fault is **the set of inputs one merge turns from failing to
-passing**. Passing is the replay's word: the input no longer panics, whether it
-now succeeds or is refused. The merge is a first-parent commit of `main`. Two
-faults fixed in one merge count as one, so the count is a lower bound.
+It happens. On 10-11's replayed `main` (a5d31701), 28 groups of crash files
+still fail. Rows name 25 of them by a crash file, and 12 of those 25 by more
+than one row. Of the 14 open rows that name a crash file, 12 name only files
+that still fail. Q1316 names one file, and it passes. Q1487 names seven, and
+four of them pass. Q1487's own text says Q1316's file is its bar: a round bar
+whose slanted cap crosses its top. Measured at 14:40Z with a script matching the
+open rows' `crash-<hex>` words against the night's `artifacts/` and
+`fuzz-triage-members.tsv`.
 
-What is on disk, measured at 14:10Z over `/home/mattias/rcad-fuzz-logs` with a
-script reading the night directories:
+Nothing lets a lane stop there today. A lane reports `fixed`,
+`limit_demonstrated`, `partial`, `blocked` or `relay`, and its verifier wants a
+test that fails on the base. A lane on a row whose files pass has nowhere to
+say so.
 
-- A night keeps every earlier night's crash files. None of the 69 879 crash
-  files of 10-06 is missing from a later night, so an input that turned is
-  still there to replay (§410.3).
-- Since 10-09 the morning triage replays every crash file against that
-  morning's `main`. It keeps which files fail (`fuzz-triage-members.tsv`) and
-  against which commit (`fuzz-triage-replayed-main.txt`). 6 301, 8 507 and
-  11 201 files failed on 10-09, 10-10 and 10-11.
-- Between the 10-09 and 10-10 replays one file stopped failing, the only file
-  of its group (`assemble.rs:2556`, a piece of a face with a straight side of no
-  length). 131 first-parent commits lie between the two, and nothing records
-  which of them turned it. Between 10-10 and 10-11 none stopped, over 76.
-- 68 158 of 10-11's 79 359 crash files no longer fail, and 68 157 of those did
-  not fail at the first replay on 10-09. Which merges fixed them is recorded
-  nowhere.
+So:
 
-For KiCad, git already holds the answer. `KICAD_FILES_THAT_IMPORT` names every
-KiCad file that imports, and its test fails when one starts or stops. 11
-first-parent commits of `main` changed it, adding 165 names and removing none.
-`KICAD_FILES_THAT_ROUND_TRIP` was changed by 6 commits, adding 165. The first
-commit of each list says what worked when the list was written, not what that
-commit fixed, so it counts no fault. NIST files are not pinned by name.
-`how_often_a_real_file_imports` prints how many import and asserts nothing about
-which.
+- **A lane whose row names the inputs that show its fault runs them on its base
+  first.** These are the crash files, the corpus files, and any shape the row
+  says to build. If none of them shows the fault, the lane stops, makes no
+  commit, and reports `does_not_reproduce`, giving each command and what it
+  printed. It does not look for why.
+- **Its verifier runs the same commands on the base**, and confirms only when
+  none of them shows the fault.
+- **The row is then closed `done:<base sha>`.** It is `done` because the fault
+  is gone from `main`, and the sha is the base because that is where it was
+  shown gone. The merge that fixed it lies between the last replay that failed
+  its files and the base. Finding that merge is a bisect, and it is not filed
+  until someone asks which fix closed which rows.
+- **A row closed this way comes back if its fault does.** §418.4 counts a done
+  row as naming its group only while its sha is not in the replayed `main`. If
+  one of its files fails again on a later `main`, its group is unnamed, and the
+  triage files a row for it.
+- **Prep says so before the lane starts.** The run's prep stage (§396) reads the
+  latest night. When every crash file the row names passes on that night's
+  replayed `main`, the brief says so and names the sha.
+
+The lane runs the row's own shape, and not only its files, because of rows like
+Q1316. Its file passes, but the row also names a plate moved 2^-1007 that
+`validate_solid` refused `TooSmall` at 3741c5a7, built through the public API.
+That shape shows the fault as much as the file does. Whether it still fails
+was not checked here.
 
 What this leaves:
 
-- **Q1708**: each morning's triage names the merge that turned each file that
-  stopped failing, by bisecting the first-parent commits between the two
-  replays, and keeps one line per fault. `just faults` prints, per fuzz target
-  and per KiCad file and by week, the faults fixed, the inputs they turned, and
-  the rows closed in the merges that turned them.
-- **Q1709**: the NIST files that import are pinned by name, as KiCad's are, so
-  a merge that makes one import is seen in git.
-- The 68 157 files that turned before 10-09 are not filed. Finding their merges
-  means replaying them at merges a month old, against fuzz targets that have
-  changed since, and no one has measured whether those merges still build the
-  replay. Filed when someone asks for faults fixed before 10-09 (§13).
+- **Q1728**: `does_not_reproduce` in the lane, verifier, merger and prep
+  instructions, in `lanes.js` and in the dispatch-lanes skill, with
+  `check-lanes-workflow` arms.
