@@ -166,26 +166,37 @@ fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() 
     }
 }
 
-/// A quarter bend and a copy placed a quarter turn either way round, or half a
-/// turn, by `place_solid` rather than written out, for three rings:
-/// `cos(π/2)` and `sin(π)` are not nought, so the copy's caps lie on planes
-/// through the ring's axis a rounding off the first bend's, the shape two
-/// cubes a rounding apart are (`tests/two_turned_cubes_a_rounding_apart.rs`).
+/// The three rings the bends placed round by a float turn are tried on.
+const PLACED_RINGS: [(f64, f64); 3] = [(4.0, 1.0), (1.0, 0.5), (2.0, 1.0)];
+
+/// A quarter bend and a copy placed a quarter turn either way round, by
+/// `place_solid` rather than written out, for three rings: `cos(π/2)` is not
+/// nought, so the copy's cap lies on a plane through the ring's axis a
+/// rounding off the first bend's, the shape two cubes a rounding apart are
+/// (`tests/two_turned_cubes_a_rounding_apart.rs`), and the two bends overlap
+/// in a sliver of ring or touch across a gap no `f64` lies in.
 ///
 /// The pieces are cut: a point of one bend's cap rim, a rounding off the
 /// other's cap plane, is put on its side of that plane by the two planes' own
-/// numbers (Q1392). But each such plane cuts the ring in a second circle too,
-/// a rounding round from the other bend's own cap rim, and the band of that
-/// bend's wall between the two holds no point the search offers. Every rule
-/// both ways round is refused `Undecidable` at `a point inside a piece of a
-/// face`, though the same two bends written out answer
-/// (`two_bends_turned_by_whole_quarter_turns_answer_every_rule`). These are
-/// the only fuses here whose points reach the arm that folds the refusal; the
-/// header says which.
+/// numbers (Q1392). Each such plane cuts the other bend's wall in a circle a
+/// rounding round from that bend's own cap rim, and the band of wall between
+/// the two holds no point the search offers. The band shares its rim with the
+/// band of the other bend's wall that the other cap plane cut, on the same
+/// ring and on the same side of the same plane, so it lies on that bend's
+/// skin (Q1537). Until then every rule both ways round was refused
+/// `Undecidable` at `a point inside a piece of a face`.
+///
+/// Every rule both ways round now answers one solid that validates: the union
+/// two bends' worth of ring, the difference one, and the intersection a sliver
+/// under a millionth of a millionth of a bend, each against `π² R r² / 2` a
+/// bend, within the measure's own error. Ring 4 and tube 1 turned `+π/2` is
+/// still refused `CannotMeshAFace` for the union with the placed bend named
+/// first and for the intersection both ways round, which is not this row's.
 #[test]
-fn a_bend_placed_a_quarter_turn_round_from_another_is_refused_before_a_ray() {
-    for (ring, tube) in [(4.0, 1.0), (1.0, 0.5), (2.0, 1.0)] {
-        for turn in [FRAC_PI_2, -FRAC_PI_2, PI] {
+fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
+    for (which, (ring, tube)) in PLACED_RINGS.into_iter().enumerate() {
+        let one_bend = PI * PI * ring * tube * tube / 2.0;
+        for turn in [FRAC_PI_2, -FRAC_PI_2] {
             for rule in EVERY_RULE {
                 for the_first_first in [true, false] {
                     let what = format!(
@@ -195,9 +206,71 @@ fn a_bend_placed_a_quarter_turn_round_from_another_is_refused_before_a_ray() {
                     let mut model = a_model();
                     let first = a_quarter_bend(&mut model, ring, tube);
                     let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, turn);
-                    let refused =
-                        fused_or_refused(&mut model, first, placed, rule, the_first_first);
-                    expect(refused, Some("a point inside a piece of a face"), &what);
+                    let measured =
+                        fused_and_measured(&mut model, first, placed, rule, the_first_first);
+                    let not_meshed = which == 0
+                        && turn > 0.0
+                        && (rule == Rule::Intersection
+                            || (rule == Rule::Union && !the_first_first));
+                    if not_meshed {
+                        assert!(
+                            matches!(measured, Err(Error::CannotMeshAFace { .. })),
+                            "{what}: {measured:?}"
+                        );
+                        continue;
+                    }
+                    let measured = measured.unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                    let [(volume, error)] = measured[..] else {
+                        panic!("{what}: one solid, not {measured:?}");
+                    };
+                    let near = |expected: f64| (volume - expected).abs() <= error;
+                    let answered = match rule {
+                        Rule::Union => near(2.0 * one_bend),
+                        Rule::Difference => near(one_bend),
+                        Rule::Intersection => volume < one_bend * 1e-12,
+                        other => panic!("not a rule this tries: {other:?}"),
+                    };
+                    assert!(answered, "{what}: {volume} ± {error}, a bend {one_bend}");
+                }
+            }
+        }
+    }
+}
+
+/// The same two bends with the copy placed half a turn round: `sin(π)` is not
+/// nought, so each bend's cap plane cuts the other bend's wall in a circle a
+/// rounding round from that bend's own cap rim, half a ring away from the
+/// first, and the band of wall between the two holds no point the search
+/// offers. A point of the cut is clear of every face of the other bend, so the
+/// band is placed as the rest of its own wall across the cut is: outside the
+/// other bend (Q1537). Until then every rule both ways round was refused
+/// `Undecidable` at `a point inside a piece of a face`.
+///
+/// The intersection answers nothing and validates. The union and the
+/// difference keep each band beside the rest of its wall and are refused
+/// `CannotMeshAFace`, which is not this row's.
+#[test]
+fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
+    for (ring, tube) in PLACED_RINGS {
+        for rule in EVERY_RULE {
+            for the_first_first in [true, false] {
+                let what = format!(
+                    "ring {ring}, tube {tube}, {rule:?}, the first first {the_first_first}"
+                );
+                let mut model = a_model();
+                let first = a_quarter_bend(&mut model, ring, tube);
+                let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, PI);
+                let measured = fused_and_measured(&mut model, first, placed, rule, the_first_first);
+                match rule {
+                    Rule::Intersection => assert!(
+                        matches!(&measured, Ok(solids) if solids.is_empty()),
+                        "{what}: {measured:?}"
+                    ),
+                    Rule::Union | Rule::Difference => assert!(
+                        matches!(measured, Err(Error::CannotMeshAFace { .. })),
+                        "{what}: {measured:?}"
+                    ),
+                    other => panic!("not a rule this tries: {other:?}"),
                 }
             }
         }
@@ -212,7 +285,7 @@ fn a_bend_placed_a_quarter_turn_round_from_another_is_refused_before_a_ray() {
 /// Placed round a quarter turn either way, or half a turn, its flat faces lie
 /// on planes through the ring's axis a rounding off the bend's caps, as the
 /// placed bend's caps do in
-/// `a_bend_placed_a_quarter_turn_round_from_another_is_refused_before_a_ray`.
+/// `a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule`.
 /// Every rule both ways round is then refused `Undecidable` at `order along a
 /// crossing` while the pieces are cut, before any point is put to a ray.
 #[test]
@@ -1220,6 +1293,37 @@ fn fused_or_refused(
             &mut ProvenanceLog::new(),
         )
         .map(|answer| answer.solids().len())
+}
+
+/// The volume of each solid the fuse answers with and the measure's own error
+/// on it, once the model it leaves validates, or the fuse's refusal.
+fn fused_and_measured(
+    model: &mut Model,
+    one: SolidKey,
+    other: SolidKey,
+    rule: Rule,
+    one_first: bool,
+) -> Result<Vec<(f64, f64)>, Error> {
+    let (arguments, tools) = if one_first {
+        ([one], [other])
+    } else {
+        ([other], [one])
+    };
+    let policy = Policy::certified();
+    let answer = model.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())?;
+    model.validate(&policy, &mut ProvenanceLog::new())?;
+    let deflection = rcad_geom::Deflection::of(0.01).expect("a deflection");
+    answer
+        .solids()
+        .iter()
+        .map(|&solid| {
+            let measured =
+                model
+                    .solid(solid)?
+                    .measure(deflection, &policy, &mut ProvenanceLog::new())?;
+            Ok((measured.volume(), measured.volume_error()))
+        })
+        .collect()
 }
 
 /// That the fuse answered when `said` is `None`, and was refused `Undecidable`
