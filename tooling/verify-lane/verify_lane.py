@@ -50,7 +50,7 @@ COLOUR = re.compile(r"\x1b\[[0-9;]*m")
 WRITES = re.compile(
     r"\b(claim-section|mark-finished|prune-worktrees|release-lanes|ff-main|clean-targets)\b"
     r"|\bjust\s+land\b"
-    r"|\bqueue\s+(take|add|done|drop|park|after|rank|tier|tag|pick|apply)\b"
+    r"|\bqueue\s+(take|add|done|drop|park|after|rank|tier|tag|pick|pin|unpin|apply)\b"
     r"|\bgit\s+(commit|push|switch|checkout|reset|stash|worktree|merge|rebase|restore|clean|am|cherry-pick|revert|tag)\b"
     r"|(^|[;&|(]\s*)rm\s")
 RECORDS = {

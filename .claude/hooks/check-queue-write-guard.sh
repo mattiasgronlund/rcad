@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Runs queue-write-guard.sh against queue-write-cases.json and reports every case
-# that came out wrong: each writing form refused, each reading form allowed.
+# that came out wrong: each writing form refused, each reading form allowed, and
+# each form that runs `pin` or `unpin` asked about, since those are Mattias's
+# (docs/decisions.md §430).
 #
 # The cases are JSON in the shape `.claude/patching-cases.local.json` uses, with
 # `tool` and `file_path` added for an Edit or a Write, and live in a file rather
@@ -40,6 +42,9 @@ for index in $(seq 0 $((total - 1))); do
 		failed=$((failed + 1))
 	elif [ "$got" = deny ] && ! jq -r '.hookSpecificOutput.permissionDecisionReason' <<<"$out" | grep -qF 'just queue take'; then
 		printf 'a refusal that does not name the just queue verbs: %s\n' "$why"
+		failed=$((failed + 1))
+	elif [ "$got" = ask ] && ! jq -r '.hookSpecificOutput.permissionDecisionReason' <<<"$out" | grep -qF "Mattias's call (docs/decisions.md §430)"; then
+		printf 'an ask that does not say pinning is Mattias'"'"'s call: %s\n' "$why"
 		failed=$((failed + 1))
 	fi
 done

@@ -68,6 +68,11 @@ just queue park <id> <§N>                  state parked:§N, left in its tier
 just queue after <id> <id>[,<id>...]       state after:<ids>; each id must exist in some copy, branch or claim
 just queue rank <id> before <id>           move <id> to sit just before the other id, within their shared tier
 just queue pick <id> ours|theirs           keep one side of a row the merge driver left in conflict
+just queue pin <id> [<id>...]              Mattias's alone (§430): pinned/<n> in front of each open row's description,
+                                            n one past the highest open pin, the row moved to tier 1 after the pinned
+                                            rows; next takes pinned rows first, by n, and no verb but take, done and
+                                            pick touches one
+just queue unpin <id> [<id>...]            Mattias's alone: take pinned/<n> off; the row stays where it is in tier 1
 just queue apply <verb> <args> [+ <verb> <args>]...   run several of the verbs above as one all-or-nothing
                                             batch, under one hold of the claims lock; @1, @2, ... are the
                                             ids the batch's own adds hand out"""
@@ -386,6 +391,8 @@ def add_step(queue, claims, here, args, batch):
     what = " ".join(args[3:])
     refuse_unless_a_tier(tier)
     refuse_class_with_punctuation(what)
+    if what.split()[:1] and what.split()[0].startswith("pinned/"):
+        raise Refused("only Mattias pins a row, with `just queue pin` once it is added (§430); add it without the pin")
     refuse_conflicted(here, queue)
     block = queue.block_for_tier(tier)
     if block is None:
@@ -467,6 +474,7 @@ def done_step(queue, claims, here, args, batch):
 
 def drop_step(queue, claims, here, args, batch):
     need(args, 2, "drop <id> <§N>")
+    refuse_if_pinned(require_row(queue, here, args[0]), "drop")
     return close_step(queue, here, args[0], f"dropped:{section(args[1])}", "drop")
 
 
@@ -491,6 +499,7 @@ def park_step(queue, claims, here, args, batch):
     row = require_row(queue, here, row_id)
     if row.is_closed():
         raise Refused(f"{row_id} is closed: {row.state}")
+    refuse_if_pinned(row, "park")
     queue.replace(row, row.with_state(state))
     message = f"{row_id}: {row.state} -> {state}"
     return queue, message, ("release", row_id, now(), here.top, "park")
@@ -505,6 +514,7 @@ def after_step(queue, claims, here, args, batch):
     row = require_row(queue, here, row_id)
     if row.is_closed() or row.state.startswith("lane:"):
         raise Refused(f"{row_id} is {row.state}, and only a row nobody holds can wait")
+    refuse_if_pinned(row, "after")
     for other in waits:
         if not ID.match(other):
             raise Refused(f"'{other}' is not an id")
@@ -548,6 +558,7 @@ def rank_step(queue, claims, here, args, batch):
         raise Refused(f"{other_id} is not a row in {here.relative}")
     if row.is_closed() or other.is_closed():
         raise Refused("a closed row sits under ## Closed and is never ranked")
+    refuse_if_pinned(row, "rank")
     if row.block != other.block:
         raise Refused(f"{row_id} is tier {row.tier}, {other_id} is tier {other.tier}; "
                       f"rank only moves a row within its own tier")
@@ -572,6 +583,7 @@ def tier_step(queue, claims, here, args, batch):
     row = require_row(queue, here, row_id)
     if row.is_closed():
         raise Refused(f"{row_id} is closed: {row.state}, and a closed row sits under ## Closed in no tier")
+    refuse_if_pinned(row, "tier")
     if row.tier == to:
         raise Refused(f"{row_id} is tier {to} already")
     if row.tag is not None and CLASS.match(row.tag) and to != tier_of_class(row.tag):
@@ -607,6 +619,7 @@ def tag_step(queue, claims, here, args, batch):
     row = require_row(queue, here, row_id)
     if row.is_closed():
         raise Refused(f"{row_id} is closed: {row.state}")
+    refuse_if_pinned(row, "tag")
     is_class = tag is not None and CLASS.match(tag) is not None
     if is_class and row.tier not in ("1", "5"):
         raise Refused(f"{row_id} is tier {row.tier}, and a class ranks tier 1 and tier 5 rows only")
@@ -633,6 +646,13 @@ def move_to_tier(queue, row, to):
     moved = queue.find(row.id)
     queue.remove(moved)
     queue.append_to_block(block, moved.with_tier(to))
+
+
+def refuse_if_pinned(row, verb):
+    """An open pinned row is where Mattias put it, and a dispatcher's verb does not move it (§430)."""
+    if row.pin is not None and not row.is_closed():
+        raise Refused(f"{row.id} is pinned/{row.pin}: Mattias placed it, so `{verb}` leaves it alone. "
+                      f"Take it, close it with `done`, or ask him to `unpin` it (§430)")
 
 
 def pick_step(queue, claims, here, args, batch):
@@ -673,9 +693,79 @@ def put_in_its_block(queue, row):
     queue.append_to_block(block, row.text)
 
 
+def pin_step(queue, claims, here, args, batch):
+    """Put open rows first in the fill, in the order given, where no dispatcher moves them (§430).
+
+    Each row gets `pinned/<n>` in front of its description, n one past the
+    highest pin an open row carries, moves to tier 1 if it is elsewhere, and
+    goes just after the pinned rows there, so the file reads in the order the
+    fill takes. The fill goes by the number and not by the line, because the
+    merge driver keeps one side's line order within a block. Only Mattias runs
+    this: the queue write guard asks him before any command that does.
+    """
+    row_ids = ids_of(args, "pin <id> [<id>...]")
+    refuse_conflicted(here, queue)
+    messages = []
+    for row_id in row_ids:
+        row = require_row(queue, here, row_id)
+        if row.is_closed():
+            raise Refused(f"{row_id} is closed: {row.state}")
+        if row.state.startswith("parked:"):
+            raise Refused(f"{row_id} is {row.state}, and the fill never takes a parked row, pinned or not")
+        if row.pin is not None:
+            raise Refused(f"{row_id} is pinned/{row.pin} already; unpin it first to re-order")
+        if row.tag is not None and CLASS.match(row.tag) and tier_of_class(row.tag) != "1":
+            raise Refused(f"{row_id} carries the class {row.tag}, which puts it in tier 5, and a pinned row is tier 1")
+        number = 1 + max((other.pin for other in queue.rows if other.pin is not None and not other.is_closed()),
+                         default=0)
+        queue.replace(row, row.with_pin(number))
+        moved = ""
+        if row.tier != "1":
+            move_to_tier(queue, queue.find(row_id), "1")
+            moved = f", tier {row.tier} -> 1"
+        put_after_the_pins(queue, queue.find(row_id))
+        messages.append(f"{row_id}: pinned/{number}{moved}, taken ahead of every row not pinned")
+    return queue, "\n".join(messages), None
+
+
+def put_after_the_pins(queue, row):
+    """`row` just after the last other pinned row in its block, or first in the block if there is none."""
+    others = [other for other in queue.rows if other.block == row.block and other.id != row.id]
+    pinned = [other for other in others if other.pin is not None]
+    if pinned:
+        queue.move_after(row, pinned[-1])
+    elif others:
+        queue.move_before(row, others[0])
+
+
+def unpin_step(queue, claims, here, args, batch):
+    """Take `pinned/<n>` off open rows, each left where it stands in tier 1 (§430). Mattias's alone, as `pin` is."""
+    row_ids = ids_of(args, "unpin <id> [<id>...]")
+    refuse_conflicted(here, queue)
+    messages = []
+    for row_id in row_ids:
+        row = require_row(queue, here, row_id)
+        if row.is_closed():
+            raise Refused(f"{row_id} is closed: {row.state}, and a closed row keeps its pin")
+        if row.pin is None:
+            raise Refused(f"{row_id} is not pinned")
+        queue.replace(row, row.with_pin(None))
+        messages.append(f"{row_id}: pinned/{row.pin} taken off, the row left where it stands in tier {row.tier}")
+    return queue, "\n".join(messages), None
+
+
+def ids_of(args, usage):
+    """The ids in `args`, each argument one id or several joined by commas."""
+    row_ids = [part for arg in args for part in arg.split(",") if part]
+    if not row_ids:
+        raise Refused(f"usage: {usage}")
+    return row_ids
+
+
 STEP_FUNCS = {
     "take": take_step, "add": add_step, "done": done_step, "drop": drop_step, "park": park_step,
     "after": after_step, "rank": rank_step, "tier": tier_step, "tag": tag_step, "pick": pick_step,
+    "pin": pin_step, "unpin": unpin_step,
 }
 
 

@@ -174,6 +174,46 @@
     "command": "mise exec -- just queue take Q5 lane-q5-x"
   },
   {
+    "expect": "ask",
+    "why": "pin is Mattias's to run, so it asks him (§430)",
+    "command": "just queue pin Q1"
+  },
+  {
+    "expect": "ask",
+    "why": "pin as the first step of an apply batch, through mise, the way Mattias runs it",
+    "command": "mise exec -- just queue apply pin Q813 Q817 Q818 Q840"
+  },
+  {
+    "expect": "ask",
+    "why": "unpin as a later step of an apply batch, after a +",
+    "command": "just queue apply take Q2 lane-q2 + unpin Q1"
+  },
+  {
+    "expect": "ask",
+    "why": "pin run straight through queue.py, past the recipe",
+    "command": "python3 tooling/queue/queue.py pin Q1"
+  },
+  {
+    "expect": "ask",
+    "why": "unpin inside bash -c",
+    "command": "bash -c 'mise exec -- just queue unpin Q1'"
+  },
+  {
+    "expect": "allow",
+    "why": "the word pin inside a description is not the pin verb",
+    "command": "just queue add 2 opus - 'a pin in the text §230'"
+  },
+  {
+    "expect": "allow",
+    "why": "pin as a whole description in an apply batch is no step: a step starts after a +",
+    "command": "just queue apply add 2 opus - pin + take Q1 lane-q1"
+  },
+  {
+    "expect": "allow",
+    "why": "a commit message naming the pin verb",
+    "command": "git commit -m \"queue: pin Q813 at Mattias's word (§430)\""
+  },
+  {
     "expect": "allow",
     "why": "a commit message holding a > inside quotes",
     "command": "git add docs/queue.md && git commit -m \"docs: queue — Q5 > lane\""
