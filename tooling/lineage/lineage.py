@@ -42,6 +42,7 @@ RECORD_SEP = "\x1e"
 CAME_FROM = re.compile(r"^(from|was)/([TDQ][0-9]+|-)$")
 CAME_FROM_AN_INPUT = re.compile(r"^from/(fuzz|step):(\S+)$")
 LANE_MERGE_SUBJECT = re.compile(r"^Merge lane-q([0-9]+)-")
+ROW_ID = re.compile(r"^Q[0-9]+$")
 
 
 class Commit:
@@ -126,11 +127,18 @@ def load_queue_blobs(top, shas):
 
 
 def rows_at(blob):
-    """`{row id: Row}` for a blob's bytes, `{}` for a missing one."""
+    """`{row id: Row}` for a blob's bytes, `{}` for a missing one.
+
+    `Queue` reads every non-blank fenced line as a row (`rows.py`'s own
+    docstring), and an old `docs/queue.md` fenced the grammar's own syntax
+    example, `<id> <tier> ...`, right beside the real rows. Keeping only ids
+    shaped `Q<digits>` is what stops that example from turning into a first
+    row named literally `<id>`.
+    """
     if blob is None:
         return {}
     text = blob.decode("utf-8", "surrogateescape")
-    return {row.id: row for row in Queue(text).rows}
+    return {row.id: row for row in Queue(text).rows if ROW_ID.match(row.id)}
 
 
 class ParentInfo:

@@ -16765,6 +16765,11 @@ lineage ref *row_ids:
 # commit message's body (never its subject, §432's fab561be lesson) ties the
 # new row to one of them. Every commit is built with `commit-tree`, not a
 # working-tree commit, so the history is exact and the test needs no checkout.
+#
+# The first commit also fences the grammar's own syntax example, `<id> <tier>
+# ...`, the way `9414e41c` first wrote `docs/queue.md`: `rows.py` reads every
+# non-blank fenced line as a row, so without a filter on the id's shape that
+# line becomes a first row of its own, named literally `<id>`.
 [private]
 [doc("lineage agrees with a scratch history covering every §432/§433 resolution rule.")]
 check-lineage-selftest:
@@ -16799,6 +16804,10 @@ check-lineage-selftest:
 
     cat > "$dir/c0.md" <<'MD'
     # A queue
+
+    ```
+    <id>  <tier>  <state>  <model>  <write set>  <what, one line, ending in one or more §N or §N.M>
+    ```
 
     ```
     Q1  1  todo  opus  -  a first row that nothing else led to §1
@@ -16936,3 +16945,5 @@ check-lineage-selftest:
     grep -qF "## Each fuzz target or STEP file, by the week its faults were filed (§433)" <<<"$got" || fail "the full report dropped its §433 heading"
     grep -qF "### fuzz:demo_target" <<<"$got" || fail "the full report dropped fuzz:demo_target's own section"
     grep -qF "### step:CTC_Definitions/demo.stp" <<<"$got" || fail "the full report dropped step:CTC_Definitions/demo.stp's own section"
+    grep -qF "<id>" <<<"$got" && fail "the full report listed the fenced syntax example as a row named <id>"
+    true
