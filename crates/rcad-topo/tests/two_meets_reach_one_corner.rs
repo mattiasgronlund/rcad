@@ -98,7 +98,7 @@ const EVERY_CORNER: [Corner; 3] = [
 ///   face of it goes right round with no seam. Why the same rule leaves the
 ///   lens below the floor of the form above unplaced was not traced.
 #[test]
-fn a_block_corner_where_its_edge_grazes_a_ball_refuses_on_a_piece_of_the_ball_without_a_point() {
+fn a_block_corner_where_its_edge_grazes_a_ball_refuses_on_the_balls_piece_or_its_own_answer() {
     let place = f64::powi(2.0, -51);
     let edge = f64::powi(2.0, -25);
     for corner in EVERY_CORNER {

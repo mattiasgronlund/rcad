@@ -189,7 +189,7 @@ fn planes_through_the_apex_cut_a_piece_out_of_the_cone_and_every_fuse_answers() 
 /// (§35.6). Laid exactly on its plane instead, the same touch answers every
 /// fuse, as the next test shows.
 #[test]
-fn a_block_resting_on_the_cone_along_a_ruling_is_refused_before_any_mesh() {
+fn a_block_resting_on_the_cone_along_a_ruling_is_refused_once_its_answer_is_meshed() {
     let touching = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, -2.0, 1.0))
         .expect("a normal that is not zero");
     let skin = Surface::Cone(Cone::new(Axis::z(), SLOPE).expect("a positive slope"));
