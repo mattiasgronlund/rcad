@@ -732,6 +732,64 @@ between "cannot" and "we chose not to", which §24.17 is about.
 > which puts `k` near 52, where a searched slide cannot reach and the step
 > count would have to be solved for.
 
+> **2026-10-10 note (Q1646): what stopped the bars crossing right through in
+> the arrangement.** Q1625's arrangement refusal for the bars through
+> `(11, 0, 0)` came from `place_the_meets` asking about a bar's pipe, its own far
+> cap and the other pipe. The cap cuts its pipe in a circle, and nothing could
+> prove that circle misses the other pipe. Q1292 is not the cause. Q1646 added
+> `a_cut_of_a_pipe_is_clear_of_the_third`, which boxes the cap's circle and asks
+> the third surface about the box, and `a_half_of_an_ellipse` now knows a half
+> by which pipe each picker leans towards, asked exactly as
+> `(n·E)²‖U‖² > (n·U)²‖E‖²`. Where those bars stop now is in the dated sentence
+> that ends Q1625's note above. Pinned in `two_equal_bars_leaning_at_each_other.rs`
+> (`mise exec -- just t -p rcad-topo --test two_equal_bars_leaning_at_each_other`).
+
+> **2026-10-10 note (Q1653, Q1654): the slide is solved for rather than
+> searched, and names 1096 of the 1224.** `a_flat_surface_through_where_the_walls_touch`
+> now tries two more facings after everything Q1645 tried, and every one still
+> passes the three exact checks. The first is the stored direction in its
+> lowest terms (`own_in_lowest_terms`). `(2, 3, 6)/7` is stored as exactly
+> `p·2⁻⁵⁴·(2, 3, 6)` with `p = (2⁵⁴ − 1)/7`, since `2/7`, `3/7` and `6/7` each
+> sit a seventh of a unit in the last place above their grid points. So its dot
+> with the middle is `p`, 52 bits, times a short sum, and it rounds where the
+> triple's does not
+> (`bores_on_2_3_6_and_2_6_3_are_picked_by_the_whole_number_triple_one_is_a_multiple_of`).
+> The second is a slide of the stored direction, and of its lowest terms, along
+> each whole-number way, with the step count solved for rather than searched
+> (`slides_solved_for`). Steps run from `2⁻⁵³` down to `2⁻⁶¹`
+> (`FINEST_SOLVED_STEP = 8`). In units of its lowest bit the dot is `X + n·Y`.
+> Where `Y` is odd, the counts that put it on `f64`'s grid are
+> `n ≡ −X·Y⁻¹` modulo a power of two, one for each size of dot. Where `Y` is
+> even, the counts taken are those that carry the dot down to a size whose grid
+> holds its low bit. Those are families (a) and (b) of the row. The row's
+> example, own `(0, 0.6, 0.8)` slid along `(1, 0, −1)`, is named by a slide of
+> about `0.124` that brings the dot from about `−1.55` to just under `−¼`
+> (`bores_on_0_3_4_and_4_3_0_are_picked_by_a_slide_solved_for`). Family (c), the
+> whole set of facings `f64` holds in the flat, was not built, because (a), (b)
+> and the lowest terms named all 53 surfaces.
+>
+> At `(11, −3.25, 0.5)` the count goes from 704 of 1224 to 752 with the solved
+> slide alone, and to 1096 with both. The 56 surfaces still refused there all
+> lie in a flat of two `(3, 4, 0)/5` directions with no whole-number way from
+> −2 to 2, the shape
+> `no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3`
+> shows has no facing for one pair. At `(11.85, −3.15, 0.45)`, a middle in
+> decimal millimetres, the count goes from 100 to 168 and then 328
+> (`the_namer_names_this_family_crossing_at_a_middle_in_decimal_millimetres`).
+> 371 surfaces are still refused there: 196 in a flat of two `(3, 4, 0)/5`
+> directions with no whole-number way, 162 in one with a way, and 13 in a flat
+> of two `(1, 1, 0)` directions with a way. Whether a facing `f64` holds exists
+> for those was not asked, and Q1657's picker holding the exact middle would
+> name them either way. Steps coarser than `2⁻⁵³` were tried, down to `2⁻¹`,
+> and gave facings like `(−0.5, 2.09e15, −2.09e15)` at an offset of `−7.5e15`,
+> which the walk then refused, so none is taken. The count test at
+> `(11, −3.25, 0.5)` runs in 1.36 s against 2.3 s at the base. Measured with
+> `mise exec -- just t -p rcad-geom --test two_pipes_of_one_width_on_crossing_axes
+> -E 'test(/the_namer_names_this_family/)' --no-capture`. The 752 and 168 were
+> measured with the lowest terms taken out. The 371 were counted with a
+> temporary print before the namer's `Ok(None)` and sorted by a scratch script;
+> neither is kept.
+
 ### 31.10 What this gate does not know
 
 §30.3's whole lesson is that a settling document written before anyone has read
