@@ -2550,7 +2550,8 @@ test-ignored:
 # The four hooks below it are rcad's own, need no plugin, and run either way —
 # which is why the skip wraps one line and not the recipe. The fourth is the
 # guard that sends a write to `docs/queue.md` through `just queue` (§263.7): its
-# cases hold each writing form refused and each reading form allowed.
+# cases hold each writing form refused, each reading form allowed, and each
+# form that runs `pin` or `unpin` asked about, since only Mattias pins (§430).
 [doc("The hooks against their own cases: shell patching, context budget, worktrees.")]
 check-hooks:
     #!/usr/bin/env bash
@@ -11412,10 +11413,19 @@ _queue-rows file:
 # **Rows tagged `small` go out in bundles** (§352.4): one lane takes up to
 # `queue_bundle` of them, and its line is `take Q1,Q2 (a bundle of 2 small rows,
 # one lane)` with each row's text indented under it. A full bundle that meets
-# nothing running goes to the first slot, ahead of tier 1. Otherwise a small row
+# nothing running goes to the first slot after the pinned rows, ahead of tier 1.
+# Otherwise a small row
 # waits for the walk to reach its tier, and takes the next ready small rows with
 # it. It is never taken alone, and the rows of one bundle may overlap each other,
 # since one lane does them all. The plain output ends with §352.6's measure.
+#
+# **Rows Mattias pinned go first** (§430). A description starting `pinned/<n>`
+# is a row he put at the head of the queue, and the fill takes the ready ones
+# before anything else, the full bundle too, in the order of n. Not in the
+# order of the file, for the reason above: the merge driver keeps one side's
+# line order. A class or `small` after the pin still counts. A pinned row a
+# running lane blocks is skipped with the usual line, and one that waits is not
+# ready, so a chain of pinned rows goes out one row at a time as each lands.
 #
 # **Two write sets meet** on the same path, unless both name items in it and the
 # items differ (§230.6); on a directory ending in `/` that holds the other path;
@@ -11426,11 +11436,14 @@ _queue-rows file:
 # it refuses rather than guesses at, and points at `check-queue` for the why.
 #
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
-# `done`, `drop`, `park`, `after`, `rank`, `tier`, `tag` and `pick`, with `show`
+# `done`, `drop`, `park`, `after`, `rank`, `tier`, `tag`, `pick`, `pin` and
+# `unpin`, with `show`
 # and `running` to read. `tier` moves an open row to another tier and, like
 # `add`, writes that tier's heading when the file has none (§307). `tag` sets,
 # replaces or removes a row's class or `small` (§352.2), and a class moves the
-# row to the tier it names (§403.4).
+# row to the tier it names (§403.4). `pin` and `unpin` are Mattias's alone
+# (§430): the queue write guard asks him before any command that runs one, and
+# of the other verbs only `take`, `done` and `pick` touch a pinned row.
 # Each takes the lock on the claims file in the git common directory, checks the
 # file as it would be with `check-queue`, and writes only if that passes. `just
 # queue take` with no arguments, or any verb given the wrong ones, prints the
@@ -11452,7 +11465,7 @@ _queue-rows file:
 # do rows another dispatcher holds, from its hold or its own copy.
 #
 # **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
-# `rank`, `tier`, `tag`, `pick`, `apply` — also runs `queue-page` after it**, so the page
+# `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply` — also runs `queue-page` after it**, so the page
 # stays current as a side effect instead of needing its own trigger (Q254). Its
 # own exit code is what this returns; a render that fails says so on stderr and
 # fails nothing, since a bad page is not a reason to lose a queue write that
@@ -11463,7 +11476,7 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|rank|tier|tag|pick|apply)
+        take|add|done|drop|park|after|rank|tier|tag|pick|pin|unpin|apply)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@"
             status=$?
@@ -11473,7 +11486,7 @@ queue mode="" *args:
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
         ""|ready|blocked|next) ;;
-        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, blocked, next [N], or one of take, add, done, drop, park, after, rank, tier, tag, pick, apply, show, running" >&2; exit 1 ;;
+        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, blocked, next [N], or one of take, add, done, drop, park, after, rank, tier, tag, pick, pin, unpin, apply, show, running" >&2; exit 1 ;;
     esac
     n="${2:-}"
     if [ $# -gt 2 ]; then echo "queue: $mode takes at most one count" >&2; exit 1; fi
@@ -11512,8 +11525,10 @@ queue mode="" *args:
             ln[r] = $2; id[r] = $5; tier[r] = $6; st[r] = $7; ws[r] = $9; raw[r] = $11
             at[$5] = r
             split($10, word, " ")
-            cl[r] = (($6 == "1" || $6 == "5") && (word[1] in isclass)) ? word[1] : "-"
-            small[r] = (word[1] == "small")
+            pin[r] = (word[1] ~ /^pinned\/[1-9][0-9]*$/) ? substr(word[1], 8) + 0 : 0
+            first = pin[r] ? word[2] : word[1]
+            cl[r] = (($6 == "1" || $6 == "5") && (first in isclass)) ? first : "-"
+            small[r] = (first == "small")
         }
         END {
             if (bad) exit 1
@@ -11538,10 +11553,16 @@ queue mode="" *args:
             }
             if (bad) exit 1
             w = 0
+            for (i = 1; i <= r; i++)
+                if (kind[i] == "ready" && pin[i]) {
+                    for (x = ++w; x > 1 && pin[walk[x - 1]] > pin[i]; x--) walk[x] = walk[x - 1]
+                    walk[x] = i
+                }
+            pinned_n = w
             for (t = 1; t <= nt; t++)
                 for (k = 1; k <= nc; k++)
                     for (i = 1; i <= r; i++)
-                        if (kind[i] == "ready" && tier[i] == tiers[t] && cl[i] == classes[k]) walk[++w] = i
+                        if (kind[i] == "ready" && !pin[i] && tier[i] == tiers[t] && cl[i] == classes[k]) walk[++w] = i
 
             if (mode == "ready") {
                 for (x = 1; x <= w; x++) print raw[walk[x]]
@@ -11559,26 +11580,9 @@ queue mode="" *args:
                 if (running + n > slots)
                     printf "note: %d running and %d more is past the %d slots of §397.7\n", running, n, slots
                 lanes_n = 0; taken_n = 0; skipped = 0
-                if (n > 0) {
-                    m = 0
-                    for (x = 1; x <= w && m < bundle; x++)
-                        if (small[walk[x]] && !blocked(walk[x], 0)) pick[++m] = walk[x]
-                    if (m == bundle) take_bundle(m)
-                }
-                for (x = 1; x <= w && lanes_n < n; x++) {
-                    i = walk[x]
-                    if (i in took) continue
-                    if (blocked(i, 1)) { skipped++; continue }
-                    if (!small[i]) {
-                        took[i] = 1; taken[++taken_n] = i; lanes_n++
-                        print "take " raw[i]
-                        continue
-                    }
-                    m = 1; pick[1] = i
-                    for (y = x + 1; y <= w && m < bundle; y++)
-                        if (small[walk[y]] && !(walk[y] in took) && !blocked(walk[y], 0)) pick[++m] = walk[y]
-                    take_bundle(m)
-                }
+                for (x = 1; x <= pinned_n && lanes_n < n; x++) take_at(x)
+                if (lanes_n < n) take_full_bundle()
+                for (x = pinned_n + 1; x <= w && lanes_n < n; x++) take_at(x)
                 if (n == 0) printf "took 0 of 0: every one of the %d slots is held\n", slots
                 else if (lanes_n == n) printf "took %d of %d\n", lanes_n, n
                 else if (skipped) printf "took %d of %d: every other ready row meets a running lane or a row taken above\n", lanes_n, n
@@ -11635,6 +11639,26 @@ queue mode="" *args:
         function refuse(line, msg) {
             printf "queue: %s:%s: cannot read %s; just check-queue says what is wrong\n", file, line, msg > "/dev/stderr"
             bad = 1
+        }
+        function take_at(x,    i, y, m) {
+            i = walk[x]
+            if (i in took) return
+            if (blocked(i, 1)) { skipped++; return }
+            if (!small[i]) {
+                took[i] = 1; taken[++taken_n] = i; lanes_n++
+                print "take " raw[i]
+                return
+            }
+            m = 1; pick[1] = i
+            for (y = x + 1; y <= w && m < bundle; y++)
+                if (small[walk[y]] && !(walk[y] in took) && !blocked(walk[y], 0)) pick[++m] = walk[y]
+            take_bundle(m)
+        }
+        function take_full_bundle(    x, m) {
+            m = 0
+            for (x = 1; x <= w && m < bundle; x++)
+                if (small[walk[x]] && !(walk[x] in took) && !blocked(walk[x], 0)) pick[++m] = walk[x]
+            if (m == bundle) take_bundle(m)
         }
         function blocked(i, say,    j) {
             for (j = 1; j <= r; j++)
@@ -12155,6 +12179,12 @@ check-queue-page-selftest:
 # and a tier 5 row with no class is refused. A closed row keeps the tier it
 # closed in. `small` has nothing to check: any tier may carry it.
 #
+# **A pin comes before the class** (§430): `pinned/<n>`, n a number from 1,
+# then the class or `small` if the row has one, and the class rules above read
+# that second word. An open pinned row is tier 1, and no two open rows share a
+# pin. A closed row keeps its pin, so a number may come back once its row has
+# closed.
+#
 # **An `after:` may name a `Q` row this copy does not hold yet** (§263.5): the
 # other dispatcher's new row, handed out by `just queue add` in its worktree and
 # not merged here. A tree cannot see another worktree, so the gate cannot tell
@@ -12265,12 +12295,20 @@ _queue-check file decisions:
             }
             n = split(what, w, " ")
             if (n == 0 || w[n] !~ /^§[0-9]+(\.[0-9]+)?$/) err(line, id ": the description does not end in a §N or §N.M")
-            isclass = (w[1] ~ /^(wrong|crash|refuses)\/[ABCD]$/)
-            if (w[1] ~ /^[a-z]+\/[A-Z]$/ && !isclass) err(line, id ": \"" w[1] "\" is not a class: wrong, crash or refuses, then /A, /B, /C or /D")
-            else if (isclass && tier != "1" && tier != "5") err(line, id ": the class " w[1] " ranks tier 1 and tier 5 rows only, and this row is tier " tier)
+            pinned = (w[1] ~ /^pinned\//)
+            if (pinned && w[1] !~ /^pinned\/[1-9][0-9]*$/) err(line, id ": \"" w[1] "\" is not a pin: pinned/ and then a number from 1 (§430)")
+            else if (pinned && !closed) {
+                if (tier != "1") err(line, id ": an open pinned row is tier 1 (§430), and this row is tier " tier)
+                if (w[1] in pinline) err(line, id ": " w[1] " is on line " pinline[w[1]] " too, and two open rows never share a pin")
+                else pinline[w[1]] = line
+            }
+            tag = pinned ? w[2] : w[1]
+            isclass = (tag ~ /^(wrong|crash|refuses)\/[ABCD]$/)
+            if (tag ~ /^[a-z]+\/[A-Z]$/ && !isclass) err(line, id ": \"" tag "\" is not a class: wrong, crash or refuses, then /A, /B, /C or /D")
+            else if (isclass && tier != "1" && tier != "5") err(line, id ": the class " tag " ranks tier 1 and tier 5 rows only, and this row is tier " tier)
             else if (isclass && !closed) {
-                want = (w[1] ~ /\/[CD]$/) ? "5" : "1"
-                if (tier != want) err(line, id ": the class " w[1] " puts an open row in tier " want ", and this row is tier " tier "; move it with just queue tier " id " " want " (§403)")
+                want = (tag ~ /\/[CD]$/) ? "5" : "1"
+                if (tier != want) err(line, id ": the class " tag " puts an open row in tier " want ", and this row is tier " tier "; move it with just queue tier " id " " want " (§403)")
             }
             if (tier == "5" && !closed && !isclass) err(line, id ": an open tier 5 row carries a class C or D (§403), and this one has none; give it one with just queue tag, or move it with just queue tier")
             s = what
@@ -12355,7 +12393,11 @@ _queue-check file decisions:
 # lane blocks, which neither joins nor completes a bundle. `blocked` prints the
 # skip line of each ready row a running lane holds back, in the fill's order, and
 # none for a row only a row taken above holds back, nor for a waiting or a parked
-# row (Q1510).
+# row (Q1510). §430 adds pinned rows taken first, by number and not by line,
+# ahead of a full bundle and of wrong/A; a pinned row a running lane blocks,
+# skipped; a class after a pin, still read by the check and the measure; and a
+# pin of 0, a pin on a tier 2 row and two open rows on one pin refused, while a
+# closed row may keep the pin an open row has.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -12391,7 +12433,7 @@ check-queue-selftest:
     ## Tier 1 — what a fuse gets wrong
 
     ```
-    T1  1  todo  opus  justfile#queue  refuses/B make the queue fill from the top §230.3
+    T1  1  todo  opus  justfile#queue  pinned/1 refuses/B make the queue fill from the top §230.3
     Q2  1  lane:lane-q2  opus  .github/workflows/ci.yml  a row a lane holds §230
     ```
 
@@ -12436,12 +12478,13 @@ check-queue-selftest:
     T9  1  done:42df376e  -  justfile  the first row of the test plan §226
     D1  2  dropped:§226  opus  -  dropped for the queue §226
     D2  1  dropped:§226  opus  -  refuses/C closed in tier 1, before tier 5 was there §226
+    D3  1  done:42df376e  -  -  pinned/1 closed with its pin, the number T1 has now §230
     ```
     MD
 
     got=$(q _queue-check "$dir/good.md" "$decisions" 2>&1) \
         || fail "a queue with nothing wrong in it was rejected"
-    grep -qF '10 rows; 4 ready, 1 waiting, 1 running in 4 slots, 1 parked, 3 closed' <<<"$got" \
+    grep -qF '11 rows; 4 ready, 1 waiting, 1 running in 4 slots, 1 parked, 4 closed' <<<"$got" \
         || fail "the line a pass prints does not count the good queue's rows"
     got=$(q check-queue "$dir/good.md" 2>&1) \
         || fail "check-queue rejected the good queue against the sections in decisions_dir"
@@ -12490,6 +12533,9 @@ check-queue-selftest:
     refused c-in-tier-1 's/refuses\/B make/refuses\/C make/'        'the class refuses/C puts an open row in tier 5, and this row is tier 1'
     refused b-in-tier-5 's/wrong\/C a defect/wrong\/B a defect/'    'the class wrong/B puts an open row in tier 1, and this row is tier 5'
     refused no-class-5  's/  wrong\/C a defect/  a defect/'         'an open tier 5 row carries a class C or D'
+    refused pin-zero    's/pinned\/1 refuses/pinned\/0 refuses/'   '"pinned/0" is not a pin'
+    refused pin-tier-2  's/  small waits on a done row/  pinned\/2 small waits on a done row/' 'an open pinned row is tier 1 (§430), and this row is tier 2'
+    refused pin-twice   's/  a row a lane holds/  pinned\/1 a row a lane holds/' 'pinned/1 is on line'
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
@@ -12563,6 +12609,24 @@ check-queue-selftest:
     bundled full 3 next 3
     [ "$(takes)" = "Q1,Q2,Q3 T1 Q4 " ] || fail "the small row left over was not taken once the walk reached it"
     grep -qxF 'take Q4 (a bundle of 1 small row, one lane)' <<<"$got" || fail "a small row alone was not printed as a bundle"
+
+    fence pinned <<'MD'
+    Q1  1  todo  opus  docs/a.md  wrong/A a wrong answer a real file met §230
+    Q2  1  todo  opus  docs/b.md  pinned/2 the second pin, written first §230
+    Q3  1  todo  opus  docs/c.md  pinned/1 wrong/A the first pin, written second §230
+    Q6  1  lane:lane-q6  opus  docs/f.md  running §230
+    Q7  1  todo  opus  docs/f.md  pinned/3 a pin the running lane holds back §230
+    Q4  2  todo  sonnet  docs/d.md  small one test §230
+    Q5  3  todo  sonnet  docs/e.md  small another test §230
+    MD
+    bundled pinned 2 next 4
+    [ "$(takes)" = "Q3 Q2 Q4,Q5 Q1 " ] \
+        || fail "the pinned rows were not taken first, by number and not by line, ahead of the full bundle and of wrong/A"
+    grep -qxF "skip Q7 (tier 1): its docs/f.md meets Q6's docs/f.md, held by lane:lane-q6" <<<"$got" \
+        || fail "a pinned row a running lane holds back was not skipped with the lane named"
+    bundled pinned 2
+    grep -qxF 'tier 1, open and not parked: 2 in A or B (2 wrong, 0 crash, 0 refuses), 3 with no class; tier 5: 0 in C, 0 in D; 2 small rows ready, and a bundle is 2' <<<"$got" \
+        || fail "the measure line did not read the class after a pin"
 
     fence partial <<'MD'
     Q1  1  todo  opus  docs/a.md  tier one §230
@@ -12822,7 +12886,13 @@ check-queue-merge-driver:
 # refused a class on tier 2, and two small rows taken onto one branch holding
 # one slot, not two. §403's: a C class moving its row to tier 5 and writing the
 # heading, a B class moving it back, `tier` taking a C row to tier 5 and
-# refusing a B row there, and `add` refused a C class on tier 1. The
+# refusing a B row there, and `add` refused a C class on tier 1. §430's: `pin`
+# putting a tier 1 row and a tier 2 row first in tier 1, numbered in the order
+# given, and `ready` taking them ahead of wrong/A even once that row is ranked
+# above them; `rank`, `tier`, `tag`, `park`, `drop` and `after` each refusing a
+# pinned row, `add` refusing a pin, and `pin` refusing a pinned, a parked and a
+# C row; `unpin` leaving its row where it stood; and `take` and `done` closing a
+# pinned row with its pin. The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -13252,6 +13322,48 @@ check-queue-api-selftest:
         || fail "a branch with no tree could not take two small rows"
     again=$(q "$tag_wt" running --count) || fail "running --count failed after the second bundle was taken"
     [ "$again" = "$((after + 1))" ] || fail "two small rows on a branch with no tree held $((again - after)) slots, and a bundle is one lane"
+
+    # §430: `pin` puts rows first, by its own number, and no dispatcher's verb moves them.
+    pin_wt="$root/rcad-worktrees/pin"
+    g "$hub" worktree add -q -b pin "$pin_wt" main
+    tier1() { awk '/^## / { h = $0 } h == "## Tier 1" && /^[TDQ][0-9]/ { printf "%s ", $1 }' "$pin_wt/docs/queue.md"; }
+    pinword() { awk -v id="$1" '$1 == id { print $2, $6 }' "$pin_wt/docs/queue.md"; }
+    first_three() { awk 'NR <= 3 { printf "%s ", $1 }' <<<"$got"; }
+    classed=$(q "$pin_wt" add 1 opus - "wrong/A a defect the pinned rows go ahead of §230") || fail "add for the wrong/A row failed"
+    first=$(q "$pin_wt" add 1 opus - "a tier 1 row Mattias pins first §230") || fail "add for the first row to pin failed"
+    second=$(q "$pin_wt" add 2 opus - "a tier 2 row Mattias pins second §230") || fail "add for the second row to pin failed"
+    got=$(q "$pin_wt" pin "$first" "$second" 2>&1) || fail "pin refused a tier 1 row and a tier 2 row"
+    [ "$(pinword "$first")" = "1 pinned/1" ] || fail "pin did not put pinned/1 on $first"
+    [ "$(pinword "$second")" = "1 pinned/2" ] || fail "pin did not move $second to tier 1 as pinned/2"
+    [ "$(tier1)" = "$first $second Q2 Q3 $classed " ] || fail "pin did not put the pinned rows first in tier 1, in the order pinned"
+    got=$(q "$pin_wt" ready 2>&1) || fail "ready failed with pinned rows"
+    [ "$(first_three)" = "$first $second $classed " ] || fail "ready did not list the pinned rows first, by number, ahead of wrong/A"
+    got=$(q "$pin_wt" rank "$classed" before "$first" 2>&1) || fail "rank refused to move a row that is not pinned above a pinned one"
+    got=$(q "$pin_wt" ready 2>&1) || fail "ready failed with a row ranked above the pinned ones"
+    [ "$(first_three)" = "$first $second $classed " ] || fail "a row ranked above the pinned rows in the file was taken ahead of them"
+    for step in "rank $first before $classed" "tier $first 2" "tag $first small" "park $first §230" "drop $first §230" "after $first Q2"; do
+        got=$(q "$pin_wt" $step 2>&1) && fail "$step went through on a row Mattias pinned"
+        grep -qF "$first is pinned/1: Mattias placed it, so \`${step%% *}\` leaves it alone. Take it, close it with \`done\`, or ask him to \`unpin\` it (§430)" <<<"$got" \
+            || fail "$step did not say the pinned row is Mattias's to move"
+    done
+    got=$(q "$pin_wt" add 1 opus - "pinned/9 a pin add writes §230" 2>&1) && fail "add wrote a row with a pin on it"
+    grep -qF 'only Mattias pins a row' <<<"$got" || fail "add did not say a pin is Mattias's to set"
+    got=$(q "$pin_wt" pin "$first" 2>&1) && fail "pin numbered a row that is pinned already"
+    grep -qF "$first is pinned/1 already; unpin it first to re-order" <<<"$got" || fail "pin did not say to unpin a pinned row first"
+    got=$(q "$pin_wt" pin Q3 2>&1) && fail "pin put a parked row first"
+    grep -qF 'Q3 is parked:§230, and the fill never takes a parked row' <<<"$got" || fail "pin did not say Q3 is parked"
+    fifth=$(q "$pin_wt" add 5 opus - "crash/C a crash only a probe builds §230") || fail "add for the tier 5 row failed"
+    got=$(q "$pin_wt" pin "$fifth" 2>&1) && fail "pin moved a C row out of tier 5"
+    grep -qF "$fifth carries the class crash/C, which puts it in tier 5" <<<"$got" || fail "pin did not say a C row belongs in tier 5"
+    got=$(q "$pin_wt" unpin "$second" 2>&1) || fail "unpin refused $second"
+    [ "$(pinword "$second")" = "1 a" ] || fail "unpin did not take the pin off and leave $second in tier 1"
+    [ "$(tier1)" = "$classed $first $second Q2 Q3 " ] || fail "unpin moved $second from where it stood"
+    got=$(q "$pin_wt" take "$first" lane-pinned 2>&1) || fail "take refused a pinned row"
+    pinned_sha=$(g "$pin_wt" rev-parse HEAD)
+    got=$(q "$pin_wt" done "$first" "$pinned_sha" 2>&1) || fail "done refused a pinned row"
+    awk -v id="$first" '/^## Closed/ { c = 1 } c && $1 == id && $6 == "pinned/1" { f = 1 } END { exit !f }' "$pin_wt/docs/queue.md" \
+        || fail "done did not move the pinned row under ## Closed with its pin"
+    got=$(check "$pin_wt") || fail "the file the pin verbs wrote fails check-queue"
     exit 0
 
 # The fuzz half of `status`: for the night `latest` names, how many of the
@@ -15275,7 +15387,8 @@ check-verify-lane-selftest:
         + tests is_fixed check-fixed \
         + number 'lines that say fixed' 1 'grep -c fixed src/lib.txt' \
         + number 'a count the lane misread' 7 'grep -c fixed src/lib.txt' \
-        + number 'a count whose command writes' 0 'git commit -q --allow-empty -m "a number"'
+        + number 'a count whose command writes' 0 'git commit -q --allow-empty -m "a number"' \
+        + number 'a count whose command pins a row' 0 'just queue pin Q1'
     run
     [ "$(field worktree_path) $(field branch_ok)" = "$at/verify true" ] || fail "worktree_path and branch_ok are $(field worktree_path) $(field branch_ok)"
     [ "$(field files_outside_write_set)" = '["outside.txt"]' ] || fail "files_outside_write_set is $(field files_outside_write_set)"
@@ -15292,6 +15405,7 @@ check-verify-lane-selftest:
         || fail "of three numbers, one has a value its command prints and one has a value it does not, but number_mismatches is $(field number_mismatches)"
     says number_mismatches "a count the lane misread: '7' is not in what"
     says left_to_you 'a count whose command writes: not run'
+    says left_to_you 'a count whose command pins a row: not run'
     back_at_the_tip
     ! locked lane || fail "the lane's tree is still locked"
 

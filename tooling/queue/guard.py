@@ -11,6 +11,11 @@ reading from writing gets routed round. `docs/decisions.md` §263.
 
 git is left alone: `git checkout --theirs`, `restore` and every merge write the
 file, and git is how a conflict is settled.
+
+A command that runs the `pin` or `unpin` verb is not refused but asked about:
+pinning a row is Mattias's call, and the ask puts it in front of him even in
+auto mode (§430). He can run the verbs himself with a `!` command, which no
+hook sees.
 """
 
 import ast
@@ -34,23 +39,38 @@ REASON = (
     "and `pick <id> ours|theirs` after a "
     "merge conflict. Reading it is fine: grep, git show, a read-only script. This call was refused because {why}."
 )
+PIN_REASON = (
+    "Pinning a queue row is Mattias's call (docs/decisions.md §430): a pinned row goes first in the fill, "
+    "and no dispatcher's verb moves it. This asks him because the command runs `{verb}`. A dispatcher "
+    "takes a pinned row, closes it with `done`, or asks Mattias to unpin it."
+)
+PIN_VERBS = ("pin", "unpin")
 
 
 def main():
     payload = json.load(sys.stdin)
     tool = payload.get("tool_name") or ""
     given = payload.get("tool_input") or {}
+    verb = None
     if "command" in given and tool in ("", "Bash"):
-        why = writes(given.get("command") or "", {}, [])
+        command = given.get("command") or ""
+        why = writes(command, {}, [])
+        verb = pin_verb_in(command, {})
     else:
         path = given.get("file_path") or given.get("notebook_path") or ""
         why = f"{tool or 'this tool'} writes {path}" if is_queue(path, []) else None
     if why:
-        json.dump({"hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": REASON.format(why=why),
-        }}, sys.stdout)
+        decide("deny", REASON.format(why=why))
+    elif verb:
+        decide("ask", PIN_REASON.format(verb=verb))
+
+
+def decide(decision, reason):
+    json.dump({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": decision,
+        "permissionDecisionReason": reason,
+    }}, sys.stdout)
 
 
 def is_queue(path, cds):
@@ -337,6 +357,38 @@ def other_script_writes(name, script, queue_in_argv):
     if re.search(idioms.get(name, r"$^"), script):
         return f"a {name} script names docs/queue.md and writes a file"
     return None
+
+
+def pin_verb_in(command, variables):
+    """`pin` or `unpin` if this shell text runs one as a queue verb, else None (§430)."""
+    code, bodies = split_heredocs(command)
+    for words, _, heredocs in simple_commands(code, bodies, variables):
+        verb = pin_verb_of(unwrap(words), heredocs, variables)
+        if verb:
+            return verb
+    return None
+
+
+def pin_verb_of(words, heredocs, variables):
+    """The verb is the word after `queue`, or after `queue.py`; after `apply`, also every word after a `+`."""
+    if not words:
+        return None
+    name, args = os.path.basename(words[0]), words[1:]
+    if name in ("bash", "sh", "zsh", "dash"):
+        scripts = list(heredocs)
+        if "-c" in args[:-1]:
+            scripts.append(args[args.index("-c") + 1])
+        return next((verb for verb in (pin_verb_in(script, dict(variables)) for script in scripts) if verb), None)
+    if name == "just" and "queue" in args:
+        steps = args[args.index("queue") + 1:]
+    elif re.match(r"^python[0-9.]*$", name) and any(os.path.basename(arg) == "queue.py" for arg in args):
+        steps = args[[os.path.basename(arg) for arg in args].index("queue.py") + 1:]
+    else:
+        return None
+    verbs = steps[:1]
+    if verbs == ["apply"]:
+        verbs = steps[1:2] + [steps[index + 1] for index, word in enumerate(steps[:-1]) if word == "+"]
+    return next((verb for verb in verbs if verb in PIN_VERBS), None)
 
 
 if __name__ == "__main__":

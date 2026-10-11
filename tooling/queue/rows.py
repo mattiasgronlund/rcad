@@ -15,9 +15,11 @@ CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
 TIER_HEADING = re.compile(r"^Tier (" + "|".join(re.escape(tier) for tier in TIERS_IN_ORDER) + r")( |$)")
 # The first word of a description may be a tag (§352): a defect's class, or
 # `small`, which a row of any tier may carry. The class decides an open row's
-# tier: A and B are tier 1, C and D tier 5 (§403).
+# tier: A and B are tier 1, C and D tier 5 (§403). A row Mattias pinned starts
+# with `pinned/<n>` instead, and its tag, if it has one, comes second (§430).
 CLASS = re.compile(r"^(wrong|crash|refuses)/[ABCD]$")
 SMALL = "small"
+PIN = re.compile(r"^pinned/([1-9][0-9]*)$")
 WHAT = re.compile(r"^(\s*(?:\S+\s+){5})(\S+)(.*)$")
 
 
@@ -47,7 +49,12 @@ class Row:
         self.state = fields[2] if len(fields) > 2 else ""
         self.model = fields[3] if len(fields) > 3 else ""
         self.write_set = fields[4] if len(fields) > 4 else ""
-        first = fields[5] if len(fields) > 5 else ""
+        words = fields[5:]
+        pinned = PIN.match(words[0]) if words else None
+        self.pin = int(pinned.group(1)) if pinned else None
+        if pinned:
+            words = words[1:]
+        first = words[0] if words else ""
         self.tag = first if CLASS.match(first) or first == SMALL else None
 
     def is_closed(self):
@@ -67,6 +74,7 @@ class Row:
 
     def with_tag(self, tag):
         """The row with its tag replaced, added in front of the description, or removed when `tag` is None."""
+        assert self.pin is None, f"tag reached the pinned row {self.id}, and only pin and unpin change one"
         match = WHAT.match(self.text)
         assert match, f"a row of fewer than six fields reached with_tag: {self.text!r}"
         head, first, rest = match.groups()
@@ -75,6 +83,18 @@ class Row:
         if tag is None:
             return head + rest.lstrip()
         return head + tag + rest
+
+    def with_pin(self, pin):
+        """The row with `pinned/<pin>` in front of its description, or taken off it when `pin` is None."""
+        match = WHAT.match(self.text)
+        assert match, f"a row of fewer than six fields reached with_pin: {self.text!r}"
+        head, first, rest = match.groups()
+        if self.pin is None:
+            assert pin is not None, f"unpin reached {self.id}, which is not pinned"
+            return head + f"pinned/{pin} " + first + rest
+        if pin is None:
+            return head + rest.lstrip()
+        return head + f"pinned/{pin}" + rest
 
 
 class Queue:
@@ -176,6 +196,14 @@ class Queue:
         del self.lines[row.index]
         other_index = other.index if other.index < row.index else other.index - 1
         self.lines.insert(other_index, line)
+        self.parse()
+
+    def move_after(self, row, other):
+        """Move `row`'s line to sit just after `other`'s, within the same block."""
+        line = self.lines[row.index]
+        del self.lines[row.index]
+        other_index = other.index if other.index < row.index else other.index - 1
+        self.lines.insert(other_index + 1, line)
         self.parse()
 
     def append_to_block(self, block, text):
