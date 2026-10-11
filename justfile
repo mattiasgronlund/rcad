@@ -12840,6 +12840,21 @@ check-queue-selftest:
     grep -q '^Q1  1  lane:lane-new-a ' "$a/docs/queue.md" \
         || fail "take did not write lane:lane-new-a once the only other lane: state left was one main's history held"
 
+    # Q817: `queue help` names every mode and verb the recipe's own case
+    # dispatches, read from that case itself, so a verb added later with no
+    # help line fails here rather than only going undocumented.
+    got=$(q queue help 2>&1) || fail "queue help failed"
+    modes=$(sed -n '/^queue mode="" \*args:/,/^[[:space:]]*esac$/p' '{{ justfile() }}' \
+        | grep -E '^[[:space:]]*[A-Za-z"][A-Za-z0-9_"|]*\)([[:space:]]*;;)?[[:space:]]*$' \
+        | sed -E 's/^[[:space:]]*//; s/\)[[:space:]]*;;[[:space:]]*$//; s/\)[[:space:]]*$//' \
+        | tr '|' '\n' \
+        | sed -E 's/^"+$//' \
+        | sed '/^$/d')
+    [ -n "$modes" ] || fail "no verb or mode was read from the queue recipe's own case"
+    for m in $modes; do
+        grep -qF "queue $m " <<<"$got" || fail "queue help names no line for '$m', which the recipe dispatches"
+    done
+
     exit 0
 
 # The merge driver `.gitattributes` names for `docs/queue.md`, spelt as this
