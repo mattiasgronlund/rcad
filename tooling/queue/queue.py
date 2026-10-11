@@ -60,14 +60,17 @@ just queue add <tier> <model> <write set> <what ending in §N>    a new todo row
                                             <what> starts with from/<id>, was/<id>, from/-, from/fuzz:<target>
                                             or from/step:<file>: where the row came from (§432, §433)
 just queue tier <id> <tier>                move an open row to the foot of another tier, writing that tier's heading if missing;
-                                            a row with a class goes only to the tier its class names
+                                            a row with a class goes only to the tier its class names; the rows with
+                                            no class that wait on it go along when it moves down, and it never moves
+                                            up past a row it waits on (§435)
 just queue tag <id> <class>|small|-        tag an open row: a class (wrong, crash or refuses, then /A to /D) ranks a tier 1
                                             or tier 5 row and moves it to tier 1 for A and B, tier 5 for C and D; small lets
                                             a lane take it with other small rows; - removes it
 just queue done <id> <merge sha>           state done:<sha>, moved under ## Closed
 just queue drop <id> <§N>                  state dropped:§N, moved under ## Closed
 just queue park <id> <§N>                  state parked:§N, left in its tier
-just queue after <id> <id>[,<id>...]       state after:<ids>; each id must exist in some copy, branch or claim
+just queue after <id> <id>[,<id>...]       state after:<ids>; each id must exist in some copy, branch or claim; a row
+                                            with no class moves down to the latest tier among the rows it names (§435)
 just queue rank <id> before <id>           move <id> to sit just before the other id, within their shared tier
 just queue pick <id> ours|theirs           keep one side of a row the merge driver left in conflict
 just queue pin <id> [<id>...]              Mattias's alone (§430): pinned/<n> in front of each open row's description,
@@ -645,6 +648,17 @@ def after_step(queue, claims, here, args, batch):
     state = "after:" + ",".join(waits)
     queue.replace(row, row.with_state(state))
     message = f"{row_id}: {row.state} -> {state}"
+    waiting = queue.find(row_id)
+    later = [other for other in open_blockers(queue, waiting) if fill_order(other.tier) > fill_order(row.tier)]
+    if later:
+        if waiting.has_class():
+            raise Refused(f"{row_id} carries the class {row.tag}, which keeps it in tier {row.tier}, and it would "
+                          f"wait on {later[0].id}, which is tier {later[0].tier}: which of the two moves is "
+                          f"Mattias's to set (§435.4)")
+        to = max((other.tier for other in later), key=fill_order)
+        beside = " and ".join(other.id for other in later if other.tier == to)
+        taken = move_row(queue, waiting, to)
+        message += f", tier {row.tier} -> {to}, beside {beside}, which it waits on{taken}"
     return queue, message, None
 
 
@@ -708,8 +722,8 @@ def tier_step(queue, claims, here, args, batch):
     if row.tag is not None and CLASS.match(row.tag) and to != tier_of_class(row.tag):
         raise Refused(f"{row_id} carries the class {row.tag}, which puts it in tier {tier_of_class(row.tag)}; "
                       f"remove it first with `tag {row_id} -`")
-    move_to_tier(queue, row, to)
-    message = f"{row_id}: tier {row.tier} -> {to}, at the foot of ## Tier {to}"
+    taken = move_row(queue, row, to)
+    message = f"{row_id}: tier {row.tier} -> {to}, at the foot of ## Tier {to}{taken}"
     return queue, message, None
 
 
@@ -748,9 +762,99 @@ def tag_step(queue, claims, here, args, batch):
     message = f"{row_id}: tag {row.tag or '-'} -> {tag or '-'}"
     if is_class and tier_of_class(tag) != row.tier:
         to = tier_of_class(tag)
-        move_to_tier(queue, queue.find(row_id), to)
-        message += f", tier {row.tier} -> {to}, at the foot of ## Tier {to}"
+        taken = move_row(queue, queue.find(row_id), to)
+        message += f", tier {row.tier} -> {to}, at the foot of ## Tier {to}{taken}"
     return queue, message, None
+
+
+def move_row(queue, row, to):
+    """`move_to_tier`, keeping each open row in no tier the fill reaches before a row it waits on (§435.6).
+
+    A move to an earlier tier is refused if the row would then sit above a row
+    it waits on. A move to a later tier takes along, down the chain, each row
+    with no class that waits on it and would sit above it. A move out of tier 5
+    takes up each tier 5 row with no class that waited on no other tier 5 row,
+    since nothing keeps it there any more (§435.5). Returns what the step's
+    message adds: each row taken along.
+    """
+    was = row.tier
+    if fill_order(to) < fill_order(was):
+        refuse_a_move_above_what_it_waits_on(queue, row, to)
+    move_to_tier(queue, row, to)
+    if fill_order(to) > fill_order(was):
+        return take_down_what_waits_on(queue, row.id, to)
+    return take_up_out_of_tier_5(queue, row.id) if was == "5" else ""
+
+
+def fill_order(tier):
+    return TIERS_IN_ORDER.index(tier)
+
+
+def open_blockers(queue, row):
+    """The open rows this copy holds that `row` waits on."""
+    found = (queue.find(other) for other in row.waits_on())
+    return [other for other in found if other is not None and not other.is_closed()]
+
+
+def waiting_on(queue, row_id):
+    return [other for other in queue.rows if not other.is_closed() and row_id in other.waits_on()]
+
+
+def refuse_a_move_above_what_it_waits_on(queue, row, to):
+    for blocker in open_blockers(queue, row):
+        if fill_order(blocker.tier) > fill_order(to):
+            mattias = ""
+            if row.has_class() or row.pin is not None:
+                mattias = ": which of the two moves is Mattias's to set (§435.4)"
+            raise Refused(f"{row.id} waits on {blocker.id}, which is tier {blocker.tier}, so in tier {to} it would "
+                          f"sit in a tier the fill reaches first (§435){mattias}")
+
+
+def take_down_what_waits_on(queue, moved_id, to):
+    taken = ""
+    blockers = [moved_id]
+    while blockers:
+        blocker = blockers.pop(0)
+        for waiter in waiting_on(queue, blocker):
+            if fill_order(waiter.tier) >= fill_order(to):
+                continue
+            if waiter.pin is not None or waiter.has_class():
+                what = f"is pinned/{waiter.pin}" if waiter.pin is not None else f"carries the class {waiter.tag}"
+                raise Refused(f"{waiter.id} waits on {blocker} and {what}, so it cannot follow {blocker} to tier "
+                              f"{to}: which of the two moves is Mattias's to set (§435.4)")
+            taken += f", takes {waiter.id} along, tier {waiter.tier} -> {to}"
+            move_to_tier(queue, waiter, to)
+            blockers.append(waiter.id)
+    return taken
+
+
+def take_up_out_of_tier_5(queue, moved_id):
+    """Each open tier 5 row with no class that waited on no tier 5 row but `moved_id`, moved up after it.
+
+    It goes to the latest tier among the rows it still waits on, so it sits
+    above none of them.
+    """
+    taken = ""
+    left = [moved_id]
+    while left:
+        gone = left.pop(0)
+        for waiter in waiting_on(queue, gone):
+            if waiter.tier != "5" or waiter.has_class() or still_waits_on_tier_5(queue, waiter):
+                continue
+            to = max((other.tier for other in open_blockers(queue, waiter)), key=fill_order)
+            taken += f", takes {waiter.id} along, tier 5 -> {to}"
+            move_to_tier(queue, waiter, to)
+            left.append(waiter.id)
+    return taken
+
+
+def still_waits_on_tier_5(queue, row):
+    """Whether `row`'s `after:` names a tier 5 row, open or closed, or a Q row this copy does not hold, as check-queue reads it."""
+    for other_id in row.waits_on():
+        other = queue.find(other_id)
+        if (other is None and other_id.startswith("Q")) or (other is not None and other.tier == "5"):
+            return True
+    return False
 
 
 def move_to_tier(queue, row, to):
@@ -835,13 +939,17 @@ def pin_step(queue, claims, here, args, batch):
             raise Refused(f"{row_id} is pinned/{row.pin} already; unpin it first to re-order")
         if row.tag is not None and CLASS.match(row.tag) and tier_of_class(row.tag) != "1":
             raise Refused(f"{row_id} carries the class {row.tag}, which puts it in tier 5, and a pinned row is tier 1")
+        outside = [other for other in open_blockers(queue, row) if other.tier != "1"]
+        if outside:
+            raise Refused(f"{row_id} waits on {outside[0].id}, which is tier {outside[0].tier}, and a pinned row "
+                          f"is tier 1, which the fill reaches first (§435)")
         number = 1 + max((other.pin for other in queue.rows if other.pin is not None and not other.is_closed()),
                          default=0)
         queue.replace(row, row.with_pin(number))
         moved = ""
         if row.tier != "1":
-            move_to_tier(queue, queue.find(row_id), "1")
-            moved = f", tier {row.tier} -> 1"
+            taken = move_row(queue, queue.find(row_id), "1")
+            moved = f", tier {row.tier} -> 1{taken}"
         put_after_the_pins(queue, queue.find(row_id))
         messages.append(f"{row_id}: pinned/{number}{moved}, taken ahead of every row not pinned")
     return queue, "\n".join(messages), None

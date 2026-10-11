@@ -60,6 +60,13 @@ class Row:
     def is_closed(self):
         return self.state.startswith(("done:", "dropped:"))
 
+    def waits_on(self):
+        """The ids an `after:` state names, and none for any other state."""
+        return self.state[len("after:"):].split(",") if self.state.startswith("after:") else []
+
+    def has_class(self):
+        return self.tag is not None and CLASS.match(self.tag) is not None
+
     def with_state(self, state):
         match = re.match(r"^(\s*\S+\s+\S+\s+)(\S+)(.*)$", self.text)
         assert match, f"a row of fewer than three fields reached with_state: {self.text!r}"
