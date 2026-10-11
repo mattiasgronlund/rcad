@@ -11485,8 +11485,31 @@ queue mode="" *args:
         show|running)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
+        help)
+            printf '%s\n' \
+                'just queue                                   ready rows by tier, then running, waiting, parked' \
+                'just queue ready                             the ready rows alone, for status to show' \
+                'just queue blocked                           each ready row a running lane holds back, as next would skip it' \
+                'just queue next [N]                          what N free slots take; N defaults to the free slots on this machine' \
+                'just queue show <id>                         one row, its hold, and its state in other worktrees' \
+                'just queue running                           what holds a slot on this machine, one line each' \
+                'just queue take <id> <branch>                dispatch a ready row to <branch>: state lane:<branch>, held until done, drop or park' \
+                'just queue add <tier> <model> <write set> <what ending in §N>   a new todo row at the foot of its tier; prints the id' \
+                'just queue done <id> <merge sha>             close a row as done:<sha>, moved under Closed' \
+                'just queue drop <id> <§N>                    close a row as dropped:§N, moved under Closed' \
+                'just queue park <id> <§N>                    mark a row parked:§N, left in its tier' \
+                'just queue after <id> <id>[,<id>...]         mark a row waiting on others: state after:<ids>' \
+                'just queue rank <id> before <id>             move a row to sit just before another, in their shared tier' \
+                'just queue tier <id> <tier>                  move an open row to the foot of another tier' \
+                'just queue tag <id> <class>|small|-          set, replace or remove a row class or small mark' \
+                'just queue pick <id> ours|theirs             keep one side of a row the merge driver left in conflict' \
+                'just queue pin <id> [<id>...]                only Mattias runs this (§430): marks each open row pinned, moved to the front of tier 1' \
+                'just queue unpin <id> [<id>...]              only Mattias runs this too: takes the pin off; the row stays where it is' \
+                'just queue apply <verb> <args> [+ <verb> <args>]...   run several of the verbs above as one all-or-nothing batch' \
+                'just queue help                              this list'
+            exit 0 ;;
         ""|ready|blocked|next) ;;
-        *) echo "queue: '$mode' is not a mode or a verb; give nothing, ready, blocked, next [N], or one of take, add, done, drop, park, after, rank, tier, tag, pick, pin, unpin, apply, show, running" >&2; exit 1 ;;
+        *) echo "queue: '$mode' is not a mode or a verb; run 'just queue help' for every mode and verb it takes" >&2; exit 1 ;;
     esac
     n="${2:-}"
     if [ $# -gt 2 ]; then echo "queue: $mode takes at most one count" >&2; exit 1; fi
