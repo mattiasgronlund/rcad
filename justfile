@@ -16884,8 +16884,15 @@ check-row-time-selftest:
 # a commit closes more than one row, the one the new row's own text names or
 # whose own text names the new row, else the one the commit message ties it
 # to in the same paragraph (never the subject line, which often names every
-# row a batch touches together). With one or more row ids it prints each
-# one's resolved parent instead of the three tables.
+# row a batch touches together). No row filed before Q1703 merged could say
+# `from/fuzz:` or `from/step:`, so where such a row's own text names the
+# input that shows its fault -- a crash file, a seed by its hash, or one
+# corpus file -- that input is its parent instead, unless the row it already
+# hangs on is in that input's tree (§433.6, §433.2). The first-row and source
+# tables are printed twice, without those links and with them, and the links
+# are listed last; the weekly table reads no parent and is printed once. With
+# one or more row ids it prints each one's resolved parent instead of the
+# tables, and after a parent read from the row's text, the one it has without.
 # `docs/decisions.md` §432, §433, §348.2.
 #
 # Like `row-time` this reads git history and not the repository's current
