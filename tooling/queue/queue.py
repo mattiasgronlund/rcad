@@ -57,7 +57,8 @@ just queue running                         what holds a slot on this machine, on
 just queue show <id>                       one row, its hold, and its state in other worktrees
 just queue take <id> <branch>              dispatch a ready row to <branch>: state lane:<branch>, held until done/drop/park
 just queue add <tier> <model> <write set> <what ending in §N>    a new todo row at the foot of its tier; prints the id
-                                            <what> starts with from/<id>, was/<id> or from/-: where the row came from (§432)
+                                            <what> starts with from/<id>, was/<id>, from/-, from/fuzz:<target>
+                                            or from/step:<file>: where the row came from (§432, §433)
 just queue tier <id> <tier>                move an open row to the foot of another tier, writing that tier's heading if missing;
                                             a row with a class goes only to the tier its class names
 just queue tag <id> <class>|small|-        tag an open row: a class (wrong, crash or refuses, then /A to /D) ranks a tier 1
@@ -441,16 +442,26 @@ def refuse_a_pin(what):
 
 
 CAME_FROM = re.compile(r"^(from|was)/([TDQ][0-9]+|-)$")
+CAME_FROM_AN_INPUT = re.compile(r"^from/(fuzz|step):(\S+)$")
+WHERE_FROM = "from/<id>, was/<id>, from/-, from/fuzz:<target> or from/step:<file>"
+FUZZ_TARGETS = "fuzz/fuzz_targets"
+CORPUS_MANIFEST = "corpus/manifest.sha256"
 
 
 def where_it_came_from_after_the_tag(what, queue, claims, here):
-    """`what` with the word that says where the row came from moved to just after its tag (§432).
+    """`what` with the word that says where the row came from moved to just after its tag (§432, §433).
 
     `from/<id>` is a row filed because of what running <id> found, `was/<id>`
-    one that files <id> again, and `from/-` one no other row led to. The word
-    may come first or just after the tag, so `just land` can put it in front of
-    a lane's row without reading the tag; the file always holds it after the
-    tag, which is where `check-queue` looks for it.
+    one that files <id> again, `from/fuzz:<target>` and `from/step:<file>` one
+    whose fault a crash file of that fuzz target or that file of the STEP
+    corpus shows, and `from/-` one nothing else led to. The word may come first
+    or just after the tag, so `just land` can put it in front of a lane's row
+    without reading the tag; the file always holds it after the tag, which is
+    where `check-queue` looks for it.
+
+    The target and the corpus file are checked against this tree here and
+    never by `check-queue` (§433.4): a row that named a target since renamed
+    still says truly where it came from.
     """
     words = what.split(" ")
     if says_where_from(words[0]):
@@ -460,22 +471,82 @@ def where_it_came_from_after_the_tag(what, queue, claims, here):
     else:
         raise Refused("a new row says where it came from, as the first word of its description or the word "
                       "after its tag: from/<id> when running <id> is why it exists, was/<id> when it files <id> "
-                      "again, or from/- when no row led to it (§432)")
+                      "again, from/fuzz:<target> or from/step:<file> when a crash file of that fuzz target or "
+                      "that file of the STEP corpus shows its fault, or from/- when nothing else led to it "
+                      "(§432, §433)")
     refuse_class_with_punctuation(" ".join(rest))
     refuse_a_pin(" ".join(rest))
-    found = CAME_FROM.match(word)
-    if not found or word == "was/-":
-        raise Refused(f"'{word}' is not where a row came from: from/<id>, was/<id> or from/- (§432)")
-    source = found.group(2)
-    if source != "-" and queue.find(source) is None and not exists_elsewhere(here, claims, source):
-        raise Refused(f"'{word}' names {source}, which exists nowhere: not in this copy, not in any worktree's "
-                      f"copy, not on any branch, and never handed out by `just queue add`")
+    an_input = CAME_FROM_AN_INPUT.match(word)
+    if an_input and an_input.group(1) == "fuzz":
+        refuse_a_fuzz_target_not_there(word, an_input.group(2), here.top)
+    elif an_input:
+        refuse_a_corpus_name_not_naming_one_file(word, an_input.group(2), here.top)
+    else:
+        refuse_a_row_that_is_nowhere(word, queue, claims, here)
     at = 1 if rest and is_a_tag(rest[0]) else 0
     return " ".join([*rest[:at], word, *rest[at:]])
 
 
 def says_where_from(word):
     return word.startswith(("from/", "was/"))
+
+
+def refuse_a_fuzz_target_not_there(word, target, top):
+    targets = sorted(name[:-len(".rs")] for name in os.listdir(os.path.join(top, FUZZ_TARGETS)) if name.endswith(".rs"))
+    if target not in targets:
+        raise Refused(f"'{word}' names no fuzz target: there is no {FUZZ_TARGETS}/{target}.rs, and the targets "
+                      f"are {', '.join(targets)} (§433.4)")
+
+
+def refuse_a_corpus_name_not_naming_one_file(word, name, top):
+    """Refuse a corpus file's name that is not §433.1's: the end of exactly one
+    manifest path, cut after a `/` as close to the end as still names one file.
+
+    A longer cut naming the same file is refused too, though §433.4 alone
+    would take it: one file under two names would be counted as two sources.
+    """
+    paths = corpus_paths(top)
+    ending = [path for path in paths if ends_in(path, name)]
+    if not ending:
+        raise Refused(f"'{word}' names no file of the STEP corpus: no path in {CORPUS_MANIFEST} ends in /{name}, "
+                      f"with each space written _ (§433.4)")
+    if len(ending) > 1:
+        names = " or ".join(f"from/step:{shortest_name(path, paths)}" for path in ending)
+        raise Refused(f"'{word}' names {len(ending)} files of the STEP corpus; write {names} (§433.1)")
+    shortest = shortest_name(ending[0], paths)
+    if name != shortest:
+        raise Refused(f"'{word}' names one file with more of its path than it needs; write it as "
+                      f"from/step:{shortest} (§433.1)")
+
+
+def corpus_paths(top):
+    """Every path in the STEP corpus's manifest, each space written `_` as a row writes it (§433.1)."""
+    with open(os.path.join(top, CORPUS_MANIFEST), encoding="utf-8") as manifest:
+        return [line.rstrip("\n").split(None, 1)[1].replace(" ", "_") for line in manifest if line.strip()]
+
+
+def ends_in(path, name):
+    return path == name or path.endswith("/" + name)
+
+
+def shortest_name(path, paths):
+    """The end of `path`, cut after a `/` as close to the end as still names it alone (§433.1)."""
+    parts = path.split("/")
+    for start in range(len(parts) - 1, 0, -1):
+        name = "/".join(parts[start:])
+        if sum(ends_in(other, name) for other in paths) == 1:
+            return name
+    return path
+
+
+def refuse_a_row_that_is_nowhere(word, queue, claims, here):
+    found = CAME_FROM.match(word)
+    if not found or word == "was/-":
+        raise Refused(f"'{word}' is not where a row came from: {WHERE_FROM} (§432, §433)")
+    source = found.group(2)
+    if source != "-" and queue.find(source) is None and not exists_elsewhere(here, claims, source):
+        raise Refused(f"'{word}' names {source}, which exists nowhere: not in this copy, not in any worktree's "
+                      f"copy, not on any branch, and never handed out by `just queue add`")
 
 
 def is_a_tag(word):

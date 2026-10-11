@@ -11826,9 +11826,12 @@ _queue-rows file:
 #
 # **A row says which row it came from** (§432), in the word after the pin and
 # the class: `from/<id>` when running `<id>` is why it exists, `was/<id>` when it
-# files `<id>` again, `from/-` when no row led to it. `add` refuses a row without
-# one, and `just land` writes `from/<the lane's row>` for a lane that names none.
-# The fill never reads it; it is there to count how far each row's work grows.
+# files `<id>` again, `from/-` when nothing else led to it. A fault a crash file
+# or a corpus file shows says `from/fuzz:<target>` or `from/step:<file>` instead
+# (§433), and `add` checks that the target or the file is there. `add` refuses a
+# row without the word, and `just land` writes `from/<the lane's row>` for a
+# lane that names none. The fill never reads it; it is there to count how far
+# each row's work grows, and how much each fuzz target and corpus file found.
 #
 # **Two write sets meet** on the same path, unless both name items in it and the
 # items differ (§230.6); on a directory ending in `/` that holds the other path;
@@ -11897,7 +11900,7 @@ queue mode="" *args:
                 'just queue show <id>                         one row, its hold, and its state in other worktrees' \
                 'just queue running                           what holds a slot on this machine, one line each' \
                 'just queue take <id> <branch>                dispatch a ready row to <branch>: state lane:<branch>, held until done, drop or park' \
-                'just queue add <tier> <model> <write set> <what ending in §N>   a new todo row at the foot of its tier; prints the id. <what> starts with from/<id>, was/<id> or from/-: where the row came from (§432)' \
+                'just queue add <tier> <model> <write set> <what ending in §N>   a new todo row at the foot of its tier; prints the id. <what> starts with from/<id>, was/<id>, from/-, from/fuzz:<target> or from/step:<file>: where the row came from (§432, §433)' \
                 'just queue done <id> <merge sha>             close a row as done:<sha>, moved under Closed' \
                 'just queue drop <id> <§N>                    close a row as dropped:§N, moved under Closed' \
                 'just queue park <id> <§N>                    mark a row parked:§N, left in its tier' \
@@ -12612,11 +12615,15 @@ check-queue-page-selftest:
 # closed.
 #
 # **After the pin and the tag comes the word that says where the row came
-# from** (§432): `from/<id>`, `was/<id>` or `from/-`. Rows filed before §432
-# have none, so a row without one passes. A malformed one is refused, and so are
-# a row that says it comes from itself, a T or D id that is not a row, and a tag
-# written after the word, where the fill no longer reads it. A `Q` id this copy
-# does not hold passes, for the reason the next paragraph gives for `after:`.
+# from** (§432): `from/<id>`, `was/<id>` or `from/-`, or `from/fuzz:<target>`
+# or `from/step:<file>` for a fault a fuzz target or a corpus file shows
+# (§433). Rows filed before §432 have none, so a row without one passes. A
+# malformed one is refused, and so are a kind of input other than `fuzz` and
+# `step`, a row that says it comes from itself, a T or D id that is not a row,
+# and a tag written after the word, where the fill no longer reads it. A `Q` id
+# this copy does not hold passes, for the reason the next paragraph gives for
+# `after:`. A target or a corpus file is read for its shape only, a kind and
+# then a name: one renamed or gone since the row named it passes (§433.4).
 #
 # **An `after:` may name a `Q` row this copy does not hold yet** (§263.5): the
 # other dispatcher's new row, handed out by `just queue add` in its worktree and
@@ -12746,8 +12753,8 @@ _queue-check file decisions:
             if (tier == "5" && !closed && !isclass) err(line, id ": an open tier 5 row carries a class C or D (§403), and this one has none; give it one with just queue tag, or move it with just queue tier")
             fpos = (pinned ? 2 : 1) + ((isclass || tag == "small") ? 1 : 0)
             if (w[fpos] ~ /^(from|was)\//) {
-                if (w[fpos] !~ /^(from\/([TDQ][0-9]+|-)|was\/[TDQ][0-9]+)$/) err(line, id ": \"" w[fpos] "\" is not where a row came from: from/<id>, was/<id> or from/- (§432)")
-                else if (w[fpos] != "from/-") { fromid[++nfrom] = id; fromsrc[id] = substr(w[fpos], index(w[fpos], "/") + 1); fromline[id] = line }
+                if (w[fpos] !~ /^(from\/([TDQ][0-9]+|-|(fuzz|step):[^ ]+)|was\/[TDQ][0-9]+)$/) err(line, id ": \"" w[fpos] "\" is not where a row came from: from/<id>, was/<id>, from/-, from/fuzz:<target> or from/step:<file> (§432, §433)")
+                else if (w[fpos] ~ /^(from|was)\/[TDQ][0-9]+$/) { fromid[++nfrom] = id; fromsrc[id] = substr(w[fpos], index(w[fpos], "/") + 1); fromline[id] = line }
                 if (w[fpos + 1] ~ /^(wrong|crash|refuses)\/[ABCD]$/ || w[fpos + 1] == "small") err(line, id ": the tag " w[fpos + 1] " goes before " w[fpos] ", where the fill reads it (§432)")
             }
             s = what
@@ -12848,6 +12855,15 @@ _queue-check file decisions:
 # after the word, refused. `add` refuses a row without the word, one naming a
 # row that exists nowhere, and `was/-`; writes the word after the tag whichever
 # came first; and still refuses a class with punctuation or a pin behind it.
+# §433 adds `from/fuzz:<target>` and `from/step:<file>`: on an open row after a
+# pin and a class, and on a closed row after `small`, passed by their shape
+# alone, a name ending like a row id included; and a kind it does not know, a kind with no name, `was/` with a kind,
+# and a class written after the word, refused. `add` takes a target that is
+# there, a corpus file by its own name, and one NIST name by its directory
+# with the space written `_`, the colon tripping no refusal of a class; and
+# refuses a target that is not there, an unknown kind, a name two paths end in,
+# a name cut inside a file name, a name longer than it needs, `was/fuzz:`, and
+# a class with punctuation behind the word.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -12948,6 +12964,20 @@ check-queue-selftest:
     sed 's/from\/T9 a defect/from\/Q999 a defect/' "$dir/good.md" > "$dir/from-not-held.md"
     got=$(q _queue-check "$dir/from-not-held.md" "$decisions" 2>&1) \
         || fail "a row that comes from a Q row this copy does not hold yet was refused"
+    # §433.4: check-queue reads only the shape of a fuzz target's or a corpus
+    # file's name, so a row naming one since renamed or gone still passes.
+    sed 's/from\/T9 a defect/from\/fuzz:a_target_since_renamed a defect/' "$dir/good.md" > "$dir/from-fuzz.md"
+    grep -qF 'wrong/A from/fuzz:a_target_since_renamed a defect' "$dir/from-fuzz.md" || fail "the from/fuzz: fixture did not change Q8"
+    got=$(q _queue-check "$dir/from-fuzz.md" "$decisions" 2>&1) \
+        || fail "a pinned row with a class that comes from a fuzz target was refused, though check-queue reads only the shape"
+    sed 's/small from\/- a row/small from\/step:CTC_Definitions\/a_file_gone_from_the_corpus.stp a row/' "$dir/good.md" > "$dir/from-step.md"
+    grep -qF 'small from/step:CTC_Definitions/a_file_gone_from_the_corpus.stp a row' "$dir/from-step.md" || fail "the from/step: fixture did not change D4"
+    got=$(q _queue-check "$dir/from-step.md" "$decisions" 2>&1) \
+        || fail "a closed small row that comes from a corpus file was refused, though check-queue reads only the shape"
+    sed 's/from\/T9 a defect/from\/step:a_directory\/T99 a defect/' "$dir/good.md" > "$dir/from-step-like-a-row.md"
+    grep -qF 'wrong/A from/step:a_directory/T99 a defect' "$dir/from-step-like-a-row.md" || fail "the from/step: fixture ending like a row id did not change Q8"
+    got=$(q _queue-check "$dir/from-step-like-a-row.md" "$decisions" 2>&1) \
+        || fail "a corpus name ending in /T99 was read as the row T99"
 
     refused() {
         sed "$2" "$dir/good.md" > "$dir/$1.md"
@@ -12997,6 +13027,11 @@ check-queue-selftest:
     refused from-self   's/was\/D1 the/was\/Q9 the/'                'Q9: says it comes from itself'
     refused from-none   's/from\/T9 a defect/from\/T99 a defect/'   'comes from T99, which is not a row'
     refused from-first  's/wrong\/A from\/T9/from\/T9 wrong\/A/'    'the tag wrong/A goes before from/T9'
+    refused from-kind   's/from\/T9 a defect/from\/night:10-11 a defect/' '"from/night:10-11" is not where a row came from'
+    refused fuzz-empty  's/from\/T9 a defect/from\/fuzz: a defect/'  '"from/fuzz:" is not where a row came from'
+    refused step-empty  's/from\/T9 a defect/from\/step: a defect/'  '"from/step:" is not where a row came from'
+    refused was-input   's/was\/D1 the/was\/fuzz:where_two_surfaces_cross the/' '"was/fuzz:where_two_surfaces_cross" is not where a row came from'
+    refused fuzz-first  's/wrong\/A from\/T9/from\/fuzz:where_two_surfaces_cross wrong\/A/' 'the tag wrong/A goes before from/fuzz:where_two_surfaces_cross'
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
@@ -13246,6 +13281,51 @@ check-queue-selftest:
     got=$(qf add 1 opus - 'from/- pinned/9 a pin behind the word §230' 2>&1) \
         && fail "add accepted a pin behind from/-"
     grep -qF 'only Mattias pins a row' <<<"$got" || fail "add did not refuse the pin behind from/-"
+
+    # §433: a row can come from a fuzz target or a file of the STEP corpus, and
+    # `add` checks the name against this tree (§433.4). The scratch repository
+    # gets one target and three corpus files, two of them one NIST name used
+    # twice, under directories with a space in their names.
+    mkdir -p "$repo/fuzz/fuzz_targets" "$repo/corpus"
+    touch "$repo/fuzz/fuzz_targets/where_two_surfaces_cross.rs"
+    printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  %s\n' \
+        'kicad/LED_D5.0mm.step' \
+        'nist/ftc-ctc/NIST-FTC-CTC-PMI-CAD-models/CTC Definitions/nist_ctc_01_asme1_rd.stp' \
+        'nist/pmi-step-files/NIST-PMI-STEP-Files/AP203 geometry only/nist_ctc_01_asme1_rd.stp' \
+        > "$repo/corpus/manifest.sha256"
+    got=$(qf add 1 opus - 'from/fuzz:where_two_surfaces_cross crash/A a panic a crash file shows §230' 2>&1) \
+        || fail "add refused a row from a fuzz target that is there"
+    grep -q "^$got .*  crash/A from/fuzz:where_two_surfaces_cross a panic a crash file shows §230\$" "$dir/addfix.md" \
+        || fail "add did not move from/fuzz: to after the class"
+    got=$(qf add 1 opus - 'wrong/B from/step:LED_D5.0mm.step a wrong answer a corpus file shows §230' 2>&1) \
+        || fail "add refused a row from a corpus file named by its own name, or the colon in it tripped the refusal of a class with punctuation (Q1505)"
+    grep -q "^$got .*  wrong/B from/step:LED_D5.0mm.step a wrong answer a corpus file shows §230\$" "$dir/addfix.md" \
+        || fail "add did not keep from/step: after the class"
+    got=$(qf add 2 sonnet - 'from/step:CTC_Definitions/nist_ctc_01_asme1_rd.stp a NIST name used twice keeps its directory §230' 2>&1) \
+        || fail "add refused a corpus name that keeps one directory, with the space in it written _"
+    got=$(qf add 2 sonnet - 'from/fuzz:where_no_target_is a target with no .rs §230' 2>&1) \
+        && fail "add accepted a fuzz target with no .rs under fuzz/fuzz_targets/"
+    grep -qF "'from/fuzz:where_no_target_is' names no fuzz target" <<<"$got" || fail "add did not say the target is not there"
+    got=$(qf add 2 sonnet - 'from/night:10-11 a kind of input the queue does not know §230' 2>&1) \
+        && fail "add accepted a kind of input it does not know"
+    grep -qF "'from/night:10-11' is not where a row came from" <<<"$got" || fail "add did not refuse the unknown kind by name"
+    got=$(qf add 2 sonnet - 'from/step:nist_ctc_01_asme1_rd.stp a NIST name without its directory §230' 2>&1) \
+        && fail "add accepted a corpus name that ends two paths"
+    grep -qF "'from/step:nist_ctc_01_asme1_rd.stp' names 2 files of the STEP corpus" <<<"$got" \
+        || fail "add did not say the name ends two paths"
+    grep -qF 'from/step:AP203_geometry_only/nist_ctc_01_asme1_rd.stp' <<<"$got" || fail "add did not name a name that would do"
+    got=$(qf add 2 sonnet - 'from/step:D5.0mm.step the end of a file name, not cut after a / §230' 2>&1) \
+        && fail "add accepted a corpus name that does not start just after a /"
+    grep -qF "'from/step:D5.0mm.step' names no file of the STEP corpus" <<<"$got" || fail "add did not refuse a name cut inside a file name"
+    got=$(qf add 2 sonnet - 'from/step:kicad/LED_D5.0mm.step more of the path than names the file §230' 2>&1) \
+        && fail "add accepted a corpus name longer than it needs"
+    grep -qF 'write it as from/step:LED_D5.0mm.step' <<<"$got" || fail "add did not give the shorter name"
+    got=$(qf add 2 sonnet - 'was/fuzz:where_two_surfaces_cross a re-file of a target §230' 2>&1) \
+        && fail "add accepted was/ naming a fuzz target"
+    grep -qF "'was/fuzz:where_two_surfaces_cross' is not where a row came from" <<<"$got" || fail "add did not refuse was/fuzz: by name"
+    got=$(qf add 1 opus - 'from/fuzz:where_two_surfaces_cross refuses/C: a class with a colon behind the word §230' 2>&1) \
+        && fail "add accepted 'refuses/C:' behind from/fuzz:"
+    grep -qF "'refuses/C:' is a class with punctuation after it" <<<"$got" || fail "add did not check the class behind from/fuzz:"
 
     # Q1436: `take` lets a stale `lane:` state in another worktree's copy
     # through when main's own history of the queue file already held that
