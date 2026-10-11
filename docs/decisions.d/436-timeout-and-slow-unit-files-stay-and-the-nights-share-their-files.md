@@ -159,6 +159,17 @@ the tree, as it is now.
   it holds, shared or not. The real total is `du -s ~/rcad-fuzz-logs` given on
   its own. What one night adds is its new files and its directory entries: the
   entries in 10-11's `artifacts/` take 8.3 MB.
+- **Built into `fuzz-overnight`, right after the night's last `copy_out`**
+  (Q1753, first `3c48eb5f` then `cbff930b`). `cbff930b` replaced the first
+  lane's shell loop — which forked `cmp`, `mktemp`, `ln` and `mv` once per
+  file, and was correct but had not finished linking `cp -R` copies of two
+  real nights (86 838 and 91 080 files) after 220 s — with one Python process
+  that walks `$night/artifacts/` itself: `os.path.isfile` for `[ -f ]`,
+  `filecmp.cmp(..., shallow=False)` for `cmp -s`, `os.link` then
+  `os.replace` for `ln -f` then `mv -f`, none of them forking a process.
+  Timed on the same two `cp -R` copies, placed under `target/` and removed
+  once measured, the one-pass walk took 1.1-1.3 s. `check-fuzz-overnight-selftest`'s
+  `thirty`, `thirty_one` and `thirty_two` pin the four rules above.
 
 **The nights already on disk were linked by hand on 2026-10-11**, at 19:51Z,
 outside the night's hours. This covered only the dated nights' `artifacts/`:
@@ -189,14 +200,10 @@ files hashed to their names, on 99 169 inodes.
 
 ### 436.6 What this leaves
 
-- **Q1753** builds 436.4 in `fuzz-overnight` and pins it in
-  `check-fuzz-overnight-selftest`. A file the second night shares with the first
-  is one inode. A file new to the second night is not linked. No night file
-  shares an inode with the tree. An earlier night's copy whose bytes differ
-  from the tree's is copied, not linked. The lane picks how to compare: by
-  name and hash, since every name libFuzzer writes is the SHA-1 of its bytes,
-  or with `hardlink` over the two nights. It measures how long the step takes
-  on a real night. For scale: linking by name over all 21 nights took 48 s, with
-  the files already in memory from a dry run that took 107 s. `hardlink` over
-  the same nights had not finished after 13 CPU-minutes.
+- **Q1753 is done**, by `3c48eb5f` and then `cbff930b` (436.4): `fuzz-overnight`
+  links by name and hash, comparing against the tree, and `check-fuzz-overnight-selftest`'s
+  `thirty`, `thirty_one` and `thirty_two` pin the four rules. For scale: hand-linking
+  by name over all 21 nights took 48 s (436.4's last paragraph); the built
+  recipe's own one-pass walk of the two heaviest single nights (86 838 and
+  91 080 files) took 1.1-1.3 s.
 - **Nothing for the timeout and slow-unit files** (436.2).
