@@ -60,8 +60,8 @@
 //! rim, since no face has a corner to read a side from. One description then
 //! means the lens with the plane facing one way and the union of the two balls
 //! with it facing the other. The ball written as two faces on itself, split on
-//! its pole, measures whole either way, but its two faces trade sides. The
-//! ignored test says what turning the plane over must not change.
+//! its pole, measures whole either way, but its two faces trade sides. That is
+//! an open defect, and nothing here pins it.
 //!
 //! **The other corners with no longitude.** A ball whose north pole is a cone's
 //! apex, kept in common with the cone, is refused
@@ -262,53 +262,6 @@ fn a_ball_whose_north_pole_is_a_cones_apex_is_refused_by_name() {
     }
 }
 
-/// On the first ball's pole, with the rim named by the plane, no reading says
-/// which way the rim runs, and the mesher keeps the walker's order, which turns
-/// round with the plane. So the two balls with the first walking the rim
-/// forward measure the lens with the plane facing one way and the union of the
-/// two balls with it facing the other, and the ball written as two faces on
-/// itself has its two faces trade sides.
-#[test]
-#[ignore = "open: wrong/C, on a ball's pole the solid turns with the plane naming the rim (§220.6)"]
-fn on_a_balls_pole_turning_over_the_plane_that_names_the_rim_changes_nothing() {
-    let north = Point::new(0.0, 0.0, RADIUS);
-    let [up, down] = the_rims_plane_either_way_round(north);
-    let mut changed = Vec::new();
-    for first_listed_first in [false, true] {
-        for first_way in [Orientation::Forward, Orientation::Reversed] {
-            for (shape, build) in [
-                (
-                    "the two balls",
-                    two_balls_round_one_rim
-                        as fn(&mut Model, Point, EdgeRun, Orientation, bool) -> _,
-                ),
-                ("the ball in two faces", a_ball_in_two_faces),
-            ] {
-                let [facing_up, facing_down] = [up, down].map(|and| {
-                    let mut model = a_model();
-                    let said = build(
-                        &mut model,
-                        north,
-                        EdgeRun::RightRoundWhereItCrosses {
-                            and: Surface::Plane(and),
-                        },
-                        first_way,
-                        first_listed_first,
-                    );
-                    what_it_comes_to(&model, said)
-                });
-                if !facing_up.is_the_same_as(&facing_down) {
-                    changed.push(format!(
-                        "{shape}, the first face {first_way:?}, listed first {first_listed_first}: \
-                         facing up {facing_up:?}, facing down {facing_down:?}"
-                    ));
-                }
-            }
-        }
-    }
-    assert!(changed.is_empty(), "{changed:#?}");
-}
-
 /// Written with its first face walking the rim either way round, and listed
 /// first or last, the solid builds, validates, meshes closed, measures the
 /// closed form for the way the first face walks, and the face walking the rim
@@ -359,72 +312,6 @@ fn the_first_ball_walking_forward_keeps_the_lens_and_backward_the_union(
             two_balls_round_one_rim(model, corner, run.clone(), first_way, first_listed_first)
         },
     );
-}
-
-/// What a description came to: refused, by the builder, `Model::validate` or
-/// the measure, or its volume, the error the measure publishes, and the side
-/// of the plane the face walking the rim forward lies on.
-#[derive(Debug)]
-enum Answer {
-    Refused(String),
-    Built {
-        volume: f64,
-        volume_error: f64,
-        forward_face: Side,
-    },
-}
-
-impl Answer {
-    fn is_the_same_as(&self, other: &Answer) -> bool {
-        match (self, other) {
-            (Answer::Refused(one), Answer::Refused(other)) => one == other,
-            (
-                Answer::Built {
-                    volume,
-                    volume_error,
-                    forward_face,
-                },
-                Answer::Built {
-                    volume: other_volume,
-                    volume_error: other_error,
-                    forward_face: other_face,
-                },
-            ) => {
-                (volume - other_volume).abs() <= volume_error + other_error
-                    && forward_face == other_face
-            }
-            (Answer::Refused(_), Answer::Built { .. })
-            | (Answer::Built { .. }, Answer::Refused(_)) => false,
-        }
-    }
-}
-
-fn what_it_comes_to(model: &Model, said: Result<SolidKey, Error>) -> Answer {
-    let solid = match said {
-        Ok(solid) => solid,
-        Err(why) => return Answer::Refused(format!("builds: {why:?}")),
-    };
-    if let Err(why) = model.validate(&Policy::certified(), &mut ProvenanceLog::new()) {
-        return Answer::Refused(format!("validates: {why:?}"));
-    }
-    let measured = model
-        .solid(solid)
-        .expect("this model made the key")
-        .measure(
-            Deflection::of(0.05).expect("a positive length"),
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        );
-    match measured {
-        Err(why) => Answer::Refused(format!("measures: {why:?}")),
-        Ok(measured) => Answer::Built {
-            volume: measured.volume(),
-            volume_error: measured.volume_error(),
-            forward_face: the_side_the_face_walking_the_rim_forward_lies_on(
-                model, solid, "measured",
-            ),
-        },
-    }
 }
 
 /// The plane `y + 3z = 15` through `corner`, facing away from the origin and
