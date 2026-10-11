@@ -63,6 +63,38 @@
 //! `CannotPlaceTheRingsOfAJoinedFlatFace` (Q1253). With one of those sides straight and leaning,
 //! the fuse puts a corner on the arc where the line along it leaves the cap,
 //! and the ring winds (Q1254).
+//!
+//! The family of an arc read along its chord was tried on a plate bored by a
+//! bar of radius 3 that pokes `δ` past the wall of a bar of radius 8 filling
+//! the bore (Q633). In that family the winding `how_each_arc_bulges` reads, of
+//! an arc's two ends and a point towards its middle, comes out `Zero`. The
+//! bore is set off along `(0.6, 0.8)`, so the sliver between the two arcs has
+//! a leaning chord whose two ends round apart. Only the union joins the caps,
+//! so only the union reads a bulge. The three tests at the end of this file
+//! pin it: every rule answers at `δ = 10⁻⁸`; at `10⁻¹²` the union and the bar
+//! less the plate answer and the rest are refused; at `10⁻¹⁴` every rule is
+//! refused, the union only after `rings_round` has placed every ring right. A
+//! sweep of the union both ways round over `δ = k·10⁻¹⁸`, `k = 1` to `300`,
+//! with a print in `how_each_arc_bulges` that is not kept, read 2269 arcs the
+//! right way, 91 the wrong way and none `Zero`. With the holed bar first, 37
+//! of those 600 unions panic in `rings_round`, '2 of its rings each hold the
+//! others', all at `δ` of `7.4·10⁻¹⁷` or less, where the sliver's chord is
+//! `5.3·10⁻⁸` long or shorter and one of its arcs reads the wrong way. That
+//! panic is filed as a crash of class D: `15/7.4·10⁻¹⁷`, about `2·10¹⁷`,
+//! against §3.5's `10¹¹`.
+//!
+//! **No reading came out `Zero` in the shapes tried.** That is a measurement
+//! of these shapes, not a proof that no shape can reach `Zero`. Here a reading
+//! goes wrong once rounding moves a chord end by four times its arc's
+//! sagitta, which shrinks as `δ`, but goes `Zero` only once the chord's two
+//! ends come within an ulp or two of each other, and the chord shrinks only
+//! as `√δ`: at `δ = 7.4·10⁻¹⁷` four sagittas of the bar's arc are under an
+//! ulp while the chord is still `5.3·10⁻⁸` long. So the readings go wrong long
+//! before they could go `Zero`. Two other shapes were tried. A bored plate
+//! against a block whose wall leans never reached the reading: the block's
+//! planes put corners on the plate's circle, so the outline winds. And with
+//! the bore and the bar centred on one line along `x`, the chord's two ends
+//! share `x` exactly, and every arc read the right way.
 
 use std::f64::consts::PI;
 
@@ -3550,13 +3582,17 @@ fn a_bar_cut_to_pipes(
 ///   `36π − 4L`, and the ring between the two small holes, `3π/4`.
 ///
 /// **Every rule, both ways round, gives that with the sliver `10⁻⁸` thick.**
-/// Each bulge reads the right way by far: what moves a chord end across the
-/// line from the other end to the point the reading winds round is four times
-/// an arc's sagitta (Q622), here `2.4·10⁻⁸` for the bar's arc, millions of
-/// ulps. Read the wrong way round, with the holed bar first, the bar's arc
-/// would claim the part of the bar's disk on the near side of the chord, which
-/// holds the small hole's corner, and the sliver would hold the hole as the
-/// outline does.
+/// Each bulge reads the right way by far. A chord end must move four times its
+/// arc's sagitta to flip the reading (Q622): here `4·0.6δ = 2.4·10⁻⁸` for the
+/// bar's arc and `4·1.6δ = 6.4·10⁻⁸` for the bore's, tens of millions of ulps
+/// of the corners' coordinates.
+///
+/// With the reading flipped in `how_each_arc_bulges` (run for Q633), the union
+/// with the holed bar first panics in `rings_round`, '2 of its rings each hold
+/// the others': the sliver comes to hold the small hole's corner, as the
+/// outline does. With the plate first the outline's corner `(9, −4)` is asked
+/// first, and it is outside the bar, so the flip goes unnoticed there: every
+/// other fuse in this test still answers right with the reading flipped.
 #[test]
 fn a_bar_filling_a_plates_bore_all_but_a_sliver_is_answered_under_every_rule() {
     let sliver = 4.0 * what_the_bore_holds_past_the_bar(1e-8);
@@ -3627,6 +3663,13 @@ fn a_bar_filling_a_plates_bore_all_but_a_sliver_a_trillionth_thick_is_united_bot
 /// **With the sliver `10⁻¹⁴` thick every rule is refused**: the union both
 /// ways round `Undecidable`, and the rest
 /// `CannotNameWhichPieceOfACrossingThisIs` (Q633).
+///
+/// The union, both ways round, reaches `rings_round` and places every ring
+/// right: the chord is `6.2·10⁻⁷` long
+/// and the bar's arc reads the right way by `4·0.6δ = 2.4·10⁻¹⁴`, about 54
+/// ulps. Only after that is it refused `Undecidable`, on the side of a
+/// half-space at points built near the sliver's corners, `(1.8, 2.4)` on the
+/// floor and the top, in boxes under `10⁻¹²` wide.
 #[test]
 fn a_bar_filling_a_plates_bore_all_but_a_sliver_a_hundred_trillionth_thick_is_refused() {
     for (rule, swapped) in every_rule_both_ways() {
