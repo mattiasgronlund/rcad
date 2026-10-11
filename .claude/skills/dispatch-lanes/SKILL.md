@@ -152,7 +152,33 @@ The args are `{ base, lanes: [ { label, queueId, brief, writeSet, model,
 sourcePaths, pinsOnly, sameBehaviour, report, verify } ] }`. The workflow appends the base,
 the `switch -c` and its refusal to the brief itself, and sends each role with
 its type, so `.claude/agents/lane.md`, `verifier.md` and `merger.md` carry the
-standing rules and a brief carries only what is this row's:
+standing rules. A complete call looks like this:
+
+```
+{
+  "base": "35cb5eaca58ccaa65ecd9d5712eabef3e350d633",
+  "lanes": [
+    {
+      "label": "fix-the-corner-case",
+      "queueId": "Q999",
+      "brief": "Fix the off-by-one that drops the last edge of a closed loop.",
+      "writeSet": ["crates/rcad-geom/src/walk.rs"],
+      "model": "sonnet",
+      "sourcePaths": ["crates/rcad-geom/src"],
+      "pinsOnly": false,
+      "sameBehaviour": false,
+      "report": { "properties": { "finding": { "type": "string" } }, "required": ["finding"] },
+      "verify": true
+    }
+  ]
+}
+```
+
+`verify: false` skips the verifier, leaving the merger's own gate as the only
+check. An empty `writeSet` makes the lane read-only, with no verifier and no
+merge, as this file says again further down.
+
+A brief carries only what is this row's:
 
 - the work, and anything to report beyond the standard record;
 - for a bundle, `queueId: "Q1,Q2,Q3"` as `queue next` printed it, and
