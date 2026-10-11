@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Check one writing lane's claims against its branch — that its tests fail without the change and pass with it, or for a lane marked pinsOnly (nothing in src/ to revert) that its new tests pass on the branch, or for a lane marked sameBehaviour (it changes lines that run and keeps what they compute) that its tests pass with the source reverted and one fails under a mutation of the lines it changed, or for a lane whose lines-that-run command counts no line that runs (comments and test code only) that its tests pass, or for a lane that names no test that every paragraph it moved landed once and unchanged — and that its numbers and claims hold. Use once per writing lane, when that lane reports.
+description: Check one writing lane's claims against its branch — that its tests fail without the change and pass with it, or for a lane marked pinsOnly (nothing in src/ to revert) that its new tests pass on the branch, or for a lane marked sameBehaviour (it changes lines that run and keeps what they compute) that its tests pass with the source reverted and one fails under a mutation of the lines it changed, or for a lane whose lines-that-run command counts no line that runs (comments and test code only) that its tests pass, or for a lane that names no test that every paragraph it moved landed once and unchanged — and that its numbers and claims hold; or, for a lane that reported does_not_reproduce (it ran the inputs its row names on the base, saw none show the fault, and committed nothing), that its branch is still the base and that none of those inputs shows the fault when run again on the base. Use once per writing lane, when that lane reports.
 model: sonnet
 ---
 
@@ -9,7 +9,10 @@ model: sonnet
 `CLAUDE.md` is already in your context, and this adds to it rather than
 replacing it. Your brief names the lane, its queue row, base, branch, write set
 and worktree, the source paths to revert, which steps to run — **tests**,
-**same behaviour** or **moved text** — and the lane's report as JSON. `docs/decisions.md` §266 says
+**same behaviour**, **moved text** or **does not reproduce** — and the lane's
+report as JSON. A brief for the does not reproduce steps carries no
+`just verify-lane` input: its section below is the whole check, and none of
+the other sections applies to it. `docs/decisions.md` §266 says
 why these steps live here and not in `.claude/workflows/lanes.js`.
 
 **Every command you run stays in the foreground, this role included.**
@@ -201,6 +204,43 @@ code, or it should have.
    and `paragraphs_checked` counts the ones you traced.
 8. Check every new sentence that states a fact about the repo — a path, a
    recipe, a count, a section number — against the tree.
+
+## Does not reproduce
+
+A lane whose row names the inputs that show its fault — crash files, corpus
+files, a shape to build — runs them on its base before anything else, and
+when none shows the fault it commits nothing and reports `does_not_reproduce`
+with each run in `base_runs` (§433.8). On your `confirm` a merger closes the
+row done at the base, and nobody runs those inputs again, so your runs are the
+row's whole proof. There is no change to revert, no gate to read and no row
+to file, so no other section of this file applies but `notes`' five lines,
+and the verdict is `confirm` or `refuse`.
+
+1. Unlock the lane's tree, `git worktree unlock <the lane's worktree>`, and
+   run no `just verify-lane`.
+2. `git rev-parse <branch>` must print the base. Report `branch_at_base` from
+   it. When it prints anything else, the lane committed something, and that
+   is a `refuse`.
+3. Read the row with `mise exec -- just queue show <id>`, once for each id of
+   a bundle. Every crash file, corpus file or shape it names that shows its
+   fault needs a run in `base_runs`. Put each one with no run in
+   `inputs_left_out`; any there is a `refuse`.
+4. `git checkout --detach <base>` in your own tree.
+5. Run each command of `base_runs` as it stands, one plain Bash call each, in
+   the foreground with `timeout` 600000. For a run with a probe, write the
+   probe test at its path with the Write tool, exactly as `base_runs` gives
+   it, run the command, then delete the file. A probe is the one file you
+   write, and it does not stay: `git status --porcelain` prints nothing
+   when you are done. For each run, report the command, the lines of its
+   print that say whether the fault shows, verbatim, and `shows_fault`. A
+   crash file run through `rcad-fuzz-explain` shows its fault when the print
+   says `outcome: panicked`. A run that does not build, or ends before its
+   print says either way, has not shown the fault gone: report it with
+   `shows_fault: true`.
+6. `confirm` only when every input has a run and none shows the fault.
+   Otherwise `refuse`, and name in `still_shown_by` the command whose print
+   still shows it. A lane's run that says the fault is gone and yours that
+   says it shows is a `refuse`, whatever the lane printed.
 
 ## The rows
 
