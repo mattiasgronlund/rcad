@@ -81,7 +81,8 @@ pub enum Containment {
     },
     /// One face of the solid is trimmed in a way
     /// [`SolidView::face_holds_the_point`] cannot follow, so no ray was ever
-    /// counted.
+    /// counted. A point another face holds is [`Containment::OnBoundary`]
+    /// instead, as it is on the same solid without that face (Q1722).
     ///
     /// Deliberately not [`Containment::Undecidable`]. That one means every
     /// predicate was asked and none could prove an answer; this means the
@@ -250,12 +251,12 @@ impl SolidView<'_> {
         let mut worst_enclosure = 0.0f64;
         let mut asked_beside = false;
         for target in ray_targets(low, high) {
-            let pass = match self.count_crossings(point, target, policy, log) {
-                Ok(pass) => pass,
-                Err(no_ray) => return no_ray,
-            };
+            let pass = self.count_crossings(point, target, policy, log);
             if pass.on_boundary {
                 return Containment::OnBoundary;
+            }
+            if let Some(face) = pass.unfollowed_at {
+                return Containment::CannotFollowAFacesTrimming { face };
             }
             if let Some(face) = pass.unfired_at {
                 if !asked_beside {
@@ -419,9 +420,10 @@ impl SolidView<'_> {
             if !self.no_face_meets(the_box_round_both(point, beside), policy, &mut trial) {
                 continue;
             }
-            let Ok(pass) = self.count_crossings(beside, target, policy, &mut trial) else {
+            let pass = self.count_crossings(beside, target, policy, &mut trial);
+            if pass.unfollowed_at.is_some() {
                 continue;
-            };
+            }
             assert!(
                 !pass.on_boundary,
                 "{beside:?} is in a box round {point:?} that no face of the solid meets, and a \
@@ -638,29 +640,28 @@ impl SolidView<'_> {
             )
     }
 
-    /// One ray's tally, or which face's trimming stopped it being counted.
+    /// One ray's tally.
     ///
-    /// A face nothing can follow is not something another ray gets past, so it
-    /// comes straight back rather than being counted as a graze. A face whose
-    /// surface the ray cannot be fired at does not stop the count: it is noted
-    /// in the tally, and every other face is still asked whether it holds the
-    /// point or grazes the ray, since neither depends on that face (Q1716).
+    /// A face whose trimming nothing can follow, or whose surface the ray
+    /// cannot be fired at, does not stop the count: it is noted in the tally,
+    /// and every other face is still asked whether it holds the point or
+    /// grazes the ray, since neither depends on that face (Q1716, Q1722).
     fn count_crossings(
         self,
         point: PredicatePoint,
         target: Point,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> Result<Crossings, Containment> {
+    ) -> Crossings {
         let mut tally = Crossings::default();
         for face in self.faces() {
             if face.surface().as_plane().is_some() && every_side_of_it_is_straight(face) {
-                self.count_a_polygon(face, &mut tally, point, target, policy, log)?;
+                self.count_a_polygon(face, &mut tally, point, target, policy, log);
             } else {
-                self.count_where_the_ray_meets_it(face, &mut tally, point, target, policy, log)?;
+                self.count_where_the_ray_meets_it(face, &mut tally, point, target, policy, log);
             }
         }
-        Ok(tally)
+        tally
     }
 
     /// What the ray does to one flat face whose every side is straight: its
@@ -698,7 +699,7 @@ impl SolidView<'_> {
         target: Point,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> Result<(), Containment> {
+    ) {
         let flat = face
             .surface()
             .as_plane()
@@ -725,9 +726,8 @@ impl SolidView<'_> {
             }
         });
         if on_the_plane {
-            self.ask_whether_the_face_holds_it(face, tally, point, policy, log)?;
+            self.ask_whether_the_face_holds_it(face, tally, point, policy, log);
         }
-        Ok(())
     }
 
     /// What the ray does to one face, by where it meets that face's surface.
@@ -754,7 +754,7 @@ impl SolidView<'_> {
         target: Point,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> Result<(), Containment> {
+    ) {
         let surface = face.surface();
         let from = point.enclosure();
         let along = gap_enclosing(from, target);
@@ -764,7 +764,7 @@ impl SolidView<'_> {
             // crosses nothing. Whether it is on the *face* is the outline's
             // question, the same as a flat face's.
             Decision::Zero => {
-                self.ask_whether_the_face_holds_it(face, tally, point, policy, log)?;
+                self.ask_whether_the_face_holds_it(face, tally, point, policy, log);
                 false
             }
             Decision::Pos | Decision::Neg => false,
@@ -787,20 +787,20 @@ impl SolidView<'_> {
             1
         };
         let steps = match where_a_line_meets_a_surface(from, along, &surface, policy, log) {
-            Ok(WhereALineMeetsIt::Nowhere) => return Ok(()),
+            Ok(WhereALineMeetsIt::Nowhere) => return,
             // The ray's line lies in the surface itself, so nothing here counts
             // a crossing rather than a run alongside it — a graze, the same way
             // a plane's own near-parallel ray already was.
             Ok(WhereALineMeetsIt::MoreThanAPoint) => {
                 tally.grazed(0.0);
-                return Ok(());
+                return;
             }
             Ok(WhereALineMeetsIt::At(steps)) => steps,
             // `WhereALineMeetsIt` grows a variant at every milestone; whatever
             // the new one says, nothing this ray found can be trusted with it.
             Ok(_) => {
                 tally.grazed(0.0);
-                return Ok(());
+                return;
             }
             // A torus needs its line exact (`Error::WhereALineMeetsARingNeedsTheLineExactly`)
             // and refuses everywhere else too, which is what
@@ -813,14 +813,14 @@ impl SolidView<'_> {
             // (Q1716).
             Err(_) if matches!(surface, Surface::Torus(_)) => {
                 tally.unfired(face.key(), meets_it);
-                return Ok(());
+                return;
             }
             // A plane, a ball, a pipe or a cone that could not tell is what
             // `Meeting::CouldNotTell` already meant: nothing this ray says can be
             // trusted, so it is grazed and the next of three targets gets a go.
             Err(_) => {
                 tally.grazed(0.0);
-                return Ok(());
+                return;
             }
         };
         for step in steps {
@@ -860,8 +860,12 @@ impl SolidView<'_> {
                     tally.grazed(0.0);
                     continue;
                 }
+                // Nothing this face says about the ray can be counted, and the
+                // other faces are still asked: one that holds the point puts it
+                // on the skin whatever this face would have added (Q1722).
                 Err(_) => {
-                    return Err(Containment::CannotFollowAFacesTrimming { face: face.key() });
+                    tally.unfollowed(face.key());
+                    return;
                 }
             }
             match dot_enclosing(along, gradient_at(&surface, at)).sign() {
@@ -870,7 +874,6 @@ impl SolidView<'_> {
                 Decision::Zero | Decision::Undecidable { .. } | _ => tally.grazed(0.0),
             }
         }
-        Ok(())
     }
 
     /// Put what the face says about a point on its own surface into the tally.
@@ -885,9 +888,9 @@ impl SolidView<'_> {
         point: PredicatePoint,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> Result<(), Containment> {
+    ) {
         let held = self.what_this_face_holds(face, point, policy, log);
-        tally.take_in(held, face.key())
+        tally.take_in(held, face.key());
     }
 
     /// Whether `face` holds no point of `point`'s box, so that the box can
@@ -1371,6 +1374,10 @@ struct Crossings {
     /// Whether a face the ray could not be fired at may hold a point of the
     /// box the ray starts from, and grazed the ray for it.
     an_unfired_face_meets_it: bool,
+    /// The first face whose trimming nothing could follow where the ray asked
+    /// it, so that no count of this ray is to be trusted and no other ray
+    /// gets past it.
+    unfollowed_at: Option<FaceKey>,
 }
 
 impl Crossings {
@@ -1403,15 +1410,19 @@ impl Crossings {
     /// On the face or on its boundary both put the point on the solid's skin,
     /// because a face's boundary is part of the face. A sign nobody could settle
     /// is a graze and the next ray gets a go; a face whose trimming nothing can
-    /// follow is not something another ray gets past, so it stops the walk.
-    fn take_in(&mut self, held: crate::Result<OnAFace>, face: FaceKey) -> Result<(), Containment> {
+    /// follow is not something another ray gets past, so it is noted.
+    fn take_in(&mut self, held: crate::Result<OnAFace>, face: FaceKey) {
         match held {
             Ok(OnAFace::Held | OnAFace::OnItsBoundary) => self.on_boundary = true,
             Ok(OnAFace::NotHeld) => (),
             Err(Error::Undecidable { .. }) => self.grazed(0.0),
-            Err(_) => return Err(Containment::CannotFollowAFacesTrimming { face }),
+            Err(_) => self.unfollowed(face),
         }
-        Ok(())
+    }
+
+    /// Nothing can follow `face`'s trimming where the ray asked it.
+    fn unfollowed(&mut self, face: FaceKey) {
+        self.unfollowed_at.get_or_insert(face);
     }
 }
 
