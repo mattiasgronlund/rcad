@@ -83,6 +83,14 @@ limit. Both are there to stop an accident, not a session set on getting round
 them. What an ask does in a background subagent the docs do not say, and it is
 not measured here: no lane has a reason to run these verbs.
 
+*Seen on 2026-10-11, at the first real pin.* A top-level session in auto mode
+ran `mise exec -- just queue apply pin Q813 Q817 Q818 Q840`. Its transcript
+holds a `hook_success` record for `PreToolUse:Bash` on that call at 09:26:12Z,
+whose output is `permissionDecision: ask` with this section's reason. The
+call's result came back at 09:40:14Z, 14 minutes later, with the four rows
+pinned 1 to 4. A command a hook asks about runs only after a yes, so the
+prompt reached Mattias and he said yes.
+
 ### 430.6 Decided while building it
 
 The plan put a newly pinned row before the first tier 1 row that is not
