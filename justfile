@@ -13895,16 +13895,24 @@ check-queue-api-selftest:
 # group. One that is an ancestor drops out — the fix landed and the row is
 # closed for good.
 #
-# **A place several failing groups share is counted apart.** `writer.rs:226` is
-# the assertion every reader refusal in the writer fuzzer reaches, whatever the
-# refusal: on 2026-10-08 four groups failed there, and Q1364, which is about one
-# of them, holds that place. Counted as named, the "in the solid #N" group no
-# row is about would have read as filed. Counted as unnamed, the same night read
-# 10 unnamed where 8 of those had a row on their place, and a count that is
-# mostly false alarms stops being read (§135.4). So the line gives both: the
-# groups no row names at all, and the groups a row names only by a place
-# another failing group shares, which need a look to say which group the row
-# is about. A group named by a file is never counted by place at all.
+# **The ancestor check runs only for a done row naming a crash file.** A place
+# only flags a group for a look, it never un-names one (next paragraph), so a
+# done row with no crash file changes nothing whether its fix landed or not —
+# checking it anyway cost two `git` calls apiece, 39.7s over the 803 done rows
+# against `origin/main` on 2026-10-08 at 22:10Z, for every `just status` and
+# every `queue next`, against the 22 of those 803 that carry one. A done row
+# with no crash file always survives this walk, and one whose sha does not
+# resolve no longer refuses: nothing was going to be weighed against it anyway.
+#
+# **A place is flagged apart, needing a look, but never un-names a group.**
+# `writer.rs:226` is the assertion every reader refusal in the writer fuzzer
+# reaches, whatever the refusal: on 2026-10-08 four groups failed there, and
+# Q1364, which is about one of them, holds that place. A row naming only a
+# place does not name its group (§418.4): every group no row names by a crash
+# file counts as not named, whether or not a row sits on its place, shared by
+# another failing group or not. The ones among those whose place a row does
+# name are flagged again, to say which group the row might be about. A group
+# named by a file is never flagged this way.
 #
 # A night with no verdicts file says so, because not triaged is a different
 # answer from nothing failing — the rule `tooling/fuzz-yield/nights.py` keeps.
@@ -13950,18 +13958,20 @@ _status-triage root queue:
     while IFS=$'\037' read -r id state text; do
         case "$state" in
             done:*)
-                sha=${state#done:}
-                if ! git rev-parse --verify --quiet "${sha}^{commit}" >/dev/null 2>&1; then
-                    echo "$id: done:$sha does not resolve to a commit here, so this group's status could not be told"
-                    exit 1
-                fi
-                git merge-base --is-ancestor "$sha" "$replayed"
-                rc=$?
-                if [ "$rc" -eq 0 ]; then
-                    continue
-                elif [ "$rc" -ne 1 ]; then
-                    echo "$id: git merge-base --is-ancestor $sha $replayed exited $rc, which this does not know how to read"
-                    exit 1
+                if [[ "$text" =~ crash-[0-9a-fA-F]{8} ]]; then
+                    sha=${state#done:}
+                    if ! git rev-parse --verify --quiet "${sha}^{commit}" >/dev/null 2>&1; then
+                        echo "$id: done:$sha does not resolve to a commit here, so this group's status could not be told"
+                        exit 1
+                    fi
+                    git merge-base --is-ancestor "$sha" "$replayed"
+                    rc=$?
+                    if [ "$rc" -eq 0 ]; then
+                        continue
+                    elif [ "$rc" -ne 1 ]; then
+                        echo "$id: git merge-base --is-ancestor $sha $replayed exited $rc, which this does not know how to read"
+                        exit 1
+                    fi
                 fi
                 ;;
         esac
@@ -14031,7 +14041,6 @@ _status-triage root queue:
             verdict_group_seen[$1 SUBSEP $5] = 1
             place[failing] = place_of($5)
             if (place[failing] == "!") refuse(verdicts ": line " FNR " is a panic whose place this cannot read: " $5)
-            if (place[failing] != "") sharing[place[failing]]++
         }
         END {
             if (refused) exit 1
@@ -14068,15 +14077,14 @@ _status-triage root queue:
             for (i = 1; i <= failing; i++) {
                 key = group_key[i]
                 if (key in named_by_file) continue
+                unnamed++
                 by_place = 0
                 for (r = 1; r <= nrows; r++) {
                     if (place[i] != "" && names_place(row_text[r], place[i])) by_place = 1
                 }
-                if (by_place && sharing[place[i]] == 1) continue
                 if (by_place) shared_only++
-                else unnamed++
             }
-            printf "%s: %d group(s) still fail on main: %d named by no row, and %d only by a place another failing group shares\n", night, failing, unnamed + 0, shared_only + 0
+            printf "%s: %d group(s) still fail on main: %d named by no row, and %d of those named only by a place, needing a look\n", night, failing, unnamed + 0, shared_only + 0
             printf "(read from %s: a row names a group by one of its crash files, or by the place of its panic)\n", verdicts
         }
     ' "$surviving" "$members" "$verdicts"
