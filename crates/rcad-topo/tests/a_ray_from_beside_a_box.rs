@@ -358,6 +358,11 @@ fn a_box_in_the_notch_of_an_l_a_bend_grows_out_of_is_answered_outside() {
 /// the box in the notch is still outside the L, a quarter from the nearest
 /// wall, so the answer exists and this is a gap: `its_fan_adds_up_to_nothing_over`
 /// does not answer for a fan that is not flat.
+///
+/// The bend refuses the box as the turned L alone does, `Undecidable`, since
+/// every ray from it grazes a face of the L whatever the ring would add. Until
+/// Q1716 the ring's refusal came first, and it was
+/// `CannotFireARayAtAFacesSurface`.
 #[test]
 fn a_box_in_the_notch_of_a_turned_l_a_bend_grows_out_of_is_still_refused() {
     let policy = Policy::certified();
@@ -365,15 +370,12 @@ fn a_box_in_the_notch_of_a_turned_l_a_bend_grows_out_of_is_still_refused() {
     model
         .place_solid(built, &the_turn())
         .expect("this model made the key");
-    let solid = model.solid(built).expect("this model made the key");
-    let top = the_face_facing(
-        solid,
-        the_turn().apply_to_vector(Vector::new(0.0, 0.0, 1.0)),
-    );
-    assert!(
-        !every_corner_is_on_its_plane(top),
-        "the turn left every corner of the top on its plane"
-    );
+    let with_the_bend = model.solid(built).expect("this model made the key");
+    let (mut alone, block) = the_block_alone(&AN_L);
+    alone
+        .place_solid(block, &the_turn())
+        .expect("this model made the key");
+    let without_it = alone.solid(block).expect("this model made the key");
     let in_the_notch = [4.25, -3.0, 2.0];
     assert_eq!(
         what_the_shape_says(&AN_L, in_the_notch),
@@ -382,27 +384,22 @@ fn a_box_in_the_notch_of_a_turned_l_a_bend_grows_out_of_is_still_refused() {
     let at = the_turn()
         .apply_to_point(Point::from(in_the_notch))
         .coordinates();
-    let placed =
-        solid.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new());
-    let (mut alone, block) = the_block_alone(&AN_L);
-    alone
-        .place_solid(block, &the_turn())
-        .expect("this model made the key");
-    let without_it = alone.solid(block).expect("this model made the key");
-    let alone_top = the_face_facing(
-        without_it,
-        the_turn().apply_to_vector(Vector::new(0.0, 0.0, 1.0)),
-    );
-    let mut log = ProvenanceLog::new();
-    let unbent = without_it.classify_uncertain_point(a_box_round(at), &policy, &mut log);
-    println!(
-        "bend {placed:?}; alone {unbent:?}, corners on plane {}, log {}",
-        every_corner_is_on_its_plane(alone_top),
-        log.len()
-    );
+    let placed = [with_the_bend, without_it].map(|solid| {
+        let top = the_face_facing(
+            solid,
+            the_turn().apply_to_vector(Vector::new(0.0, 0.0, 1.0)),
+        );
+        assert!(
+            !every_corner_is_on_its_plane(top),
+            "the turn left every corner of the top on its plane"
+        );
+        solid.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new())
+    });
     assert!(
-        matches!(placed, Containment::CannotFireARayAtAFacesSurface { .. }),
-        "{placed:?}"
+        placed
+            .iter()
+            .all(|answer| matches!(answer, Containment::Undecidable { .. })),
+        "with the bend and without it: {placed:?}"
     );
 }
 
