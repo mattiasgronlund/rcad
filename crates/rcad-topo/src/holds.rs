@@ -8276,7 +8276,8 @@ mod tests {
     /// the half-space is its own side not what is read.
     #[test]
     fn each_patch_a_thin_bar_keeps_of_a_fat_bars_wall_holds_its_own_end_alone() {
-        let (model, solid) = two_crossed_bars(core::f64::consts::FRAC_PI_2);
+        let (model, solid) =
+            two_crossed_bars(core::f64::consts::FRAC_PI_2, crate::Rule::Intersection);
         let patches: Vec<FaceKey> = model
             .solid(solid)
             .expect("this model made the key")
@@ -8331,6 +8332,64 @@ mod tests {
         }
     }
 
+    /// Each end of the thin bar of [`two_crossed_bars`] the union keeps,
+    /// outside the fat bar, holds its own wall alone, with the thin bar square
+    /// to the fat one.
+    ///
+    /// Each end's wall runs along one of the two loops the pipes cross in.
+    /// Past the half-space [`intersect`] tells those loops apart by, the thin
+    /// wall is one tube the loop in front never meets, running inside the fat
+    /// bar and then out beyond the other loop: all of it on the far side of
+    /// the loop in front, the other end's wall too, though that is outside the
+    /// fat bar. The union with the thin bar [`LEANING`] is refused
+    /// `AWireWillNotLieFlatOnItsFace` before anything is asked of it, with or
+    /// without Q1717.
+    ///
+    /// Every point asked is on the thin wall, 1 along `x` from its axis: 5
+    /// along the axis either way is outside the fat bar, and within 1.5 of the
+    /// middle inside it.
+    #[test]
+    fn each_end_of_a_thin_bar_poking_out_of_a_fat_one_holds_its_own_wall_alone() {
+        for turn in [core::f64::consts::FRAC_PI_2] {
+            let (model, solid) = two_crossed_bars(turn, crate::Rule::Union);
+            let ends: Vec<FaceKey> = model
+                .solid(solid)
+                .expect("this model made the key")
+                .faces()
+                .filter(|face| match face.surface() {
+                    Surface::Cylinder(pipe) => pipe.radius() == 1.0,
+                    Surface::Plane(_) | Surface::Sphere(_) | _ => false,
+                })
+                .map(|face| face.key())
+                .collect();
+            let [one, other] = ends[..] else {
+                panic!("one face of the thin wall at each end: {ends:?}");
+            };
+            let (sin, cos) = turn.sin_cos();
+            let on_the_thin_wall = |along: f64| at(1.0, -along * sin, along * cos);
+            let [ahead, behind] =
+                if what_it_holds(&model, solid, one, on_the_thin_wall(5.0)) == OnAFace::Held {
+                    [one, other]
+                } else {
+                    [other, one]
+                };
+            for (end, its_own, the_other) in [(ahead, 5.0, -5.0), (behind, -5.0, 5.0)] {
+                assert_eq!(
+                    what_it_holds(&model, solid, end, on_the_thin_wall(its_own)),
+                    OnAFace::Held,
+                    "{its_own} along, turned {turn}"
+                );
+                for along in [the_other, 0.0, 1.5, -1.5] {
+                    assert_eq!(
+                        what_it_holds(&model, solid, end, on_the_thin_wall(along)),
+                        OnAFace::NotHeld,
+                        "{along} along, turned {turn}"
+                    );
+                }
+            }
+        }
+    }
+
     /// The middle of [`two_crossed_bars`] is inside it, and a point either side
     /// of it is told apart too, with the thin bar square to the fat one or
     /// [`LEANING`]. Until Q1717 every one was `CannotFollowAFacesTrimming`, a
@@ -8339,7 +8398,7 @@ mod tests {
     #[test]
     fn the_middle_of_two_crossed_bars_is_inside_them() {
         for turn in [LEANING, core::f64::consts::FRAC_PI_2] {
-            let (model, solid) = two_crossed_bars(turn);
+            let (model, solid) = two_crossed_bars(turn, crate::Rule::Intersection);
             for (point, expected) in [
                 ([0.0, 0.0, 0.0], crate::Containment::Inside),
                 ([0.0, -2.0, 0.5], crate::Containment::Inside),
@@ -8389,7 +8448,7 @@ mod tests {
                 (crate::Rule::Difference, both - past_the_block),
                 (crate::Rule::Union, 8000.0 + both - past_the_block),
             ] {
-                let (mut model, bars) = two_crossed_bars(turn);
+                let (mut model, bars) = two_crossed_bars(turn, crate::Rule::Intersection);
                 let policy = Policy::certified();
                 let square = crate::ProfileBuilder::new(vec![
                     [0.0, 0.0],
@@ -8444,10 +8503,10 @@ mod tests {
 
     /// A fat bar of radius 3 up `z` from `z = −5` to 5 and a thin one of radius
     /// 1 and length 20, centred on the origin and turned `turn` about `x` off
-    /// `z`, intersected: the thin bar cut off where it leaves the fat one. A
-    /// quarter turn lays it along `y`, and then what is left is `x² + z² ≤ 1`
-    /// and `x² + y² ≤ 9`.
-    fn two_crossed_bars(turn: f64) -> (Model, SolidKey) {
+    /// `z`, fused under `rule`. Intersected, the thin bar is cut off where it
+    /// leaves the fat one; a quarter turn lays it along `y`, and then what is
+    /// left is `x² + z² ≤ 1` and `x² + y² ≤ 9`.
+    fn two_crossed_bars(turn: f64, rule: crate::Rule) -> (Model, SolidKey) {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let fat = model
             .add_round_bar(
@@ -8466,7 +8525,7 @@ mod tests {
             .fuse(
                 &[fat],
                 &[thin],
-                crate::Rule::Intersection,
+                rule,
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             )
