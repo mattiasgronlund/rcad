@@ -181,17 +181,21 @@ count in the table was the same on all three runs.
   |---|---|---|---|---|
   | leaning block | 192 | 98 | 178 | 12 `CannotTellTheCellsOfAFaceApart`, 2 `CannotMeshAFace` |
   | corner-up cube | 96 | 72 | 88 | 8 `order along a crossing` |
-  | slab | 80 | 40 | 38 | 24 `a point inside a piece of a face`, 12 `ACurvedFaceGoesRightRoundWithNoSeam`, 6 `side of a half-space` |
+  | slab | 80 | 40 | 50 | 16 `ACurvedFaceGoesRightRoundWithNoSeam`, 14 `side of a half-space` |
 
   The two columns are not known to hold the same cases, since the turns and
   heights may not be §350.4's, and the base is ten days of fixes on from
   `bd525f4e`. Which change moved which count was not traced. At the turns
   pinned here, none of the leaning block's 56 `a point inside a piece of a
   face` of the bullet above is left, and the corner-up cube refuses no
-  `ACurvedFaceGoesRightRoundWithNoSeam`.
+  `ACurvedFaceGoesRightRoundWithNoSeam`. **2026-10-11, Q1742 (Q1733, §35.6):**
+  the slab is now 50 right of 80, refusing 16 `ACurvedFaceGoesRightRoundWithNoSeam`
+  and 14 `side of a half-space`, and no more `a point inside a piece of a
+  face`.
 - **Round the unit cone**, the leaning block is 169 right of 192, the cube 88 of
-  96 and the slab 68 of 80. The leaning block refuses 8 `order along a
-  crossing` and 2 `AWireWillNotLieFlatOnItsFace`, 5 answers do not measure (4
+  96 and the slab 80 of 80 (Q1733, §35.6; was 68 of 80, naming 12 `a point
+  inside a piece of a face` in the slab from `−8`). The leaning block refuses 8
+  `order along a crossing` and 2 `AWireWillNotLieFlatOnItsFace`, 5 answers do not measure (4
   `CannotMeshAFace`, 1 `TwoPatchesOfTheMeshDrewTheSameSide`), and 8 more fuses
   are Q1562's, below. Q1461's cone bands moved eight, each a block that misses
   the cone, and all eight answer right since: leaned `1`, crossing `−0.5`,
@@ -202,9 +206,10 @@ count in the table was the same on all three runs.
   Which of its two steps moved them was not traced. None of the unit cone's
   refusals names the apex. Nobody traced whether its step down the axis lands
   on the apex, as 350.1 works out, and is turned away there, as 350.3 says.
-- **The unit cone's 20 `a point inside a piece of a face`** are 8 in the cube
-  (side `2`, middle `1`, both turns) and 12 in the slab (from `−8`, turned `0.5`,
-  `1` and `1.5`). An untraced lead.
+- **The unit cone's `a point inside a piece of a face`** are 8 in the cube
+  (side `2`, middle `1`, both turns). An untraced lead. **2026-10-11, Q1742
+  (Q1733, §35.6):** the 12 that used to be in the slab (from `−8`, turned
+  `0.5`, `1` and `1.5`) are gone; the slab is 80 of 80 now.
 - **Leaned `1` at crossing `0`, the face touches the unit cone along the ruling
   `x = z`.** Turned `1`, the face as the model stores it passes `4.4e−16` beyond
   the apex, so it cuts a real sliver from the cone, at most `6e−8` across

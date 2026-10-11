@@ -489,3 +489,15 @@ per face rather than once per query.
 | `Invalid::AFaceStraddlesSomethingTrimmingIt` | a curved face stands on both sides of a whole crossing that bounds it | **not a refusal at all** — a model whose topology and geometry disagree, which arrives from a file. `a_curved_face_standing_on_both_sides_of_something_that_trims_it_is_caught` |
 | `Undecidable` out of `face_holds_the_point` | a sign about a box could not be settled | **limit** where the box straddles the surface and a **gap** where the arithmetic ran out; no generator here reaches either, and §35.8's four families refuse none of it |
 
+> **2026-10-11 note (Q1723): the `AFaceMissesPartOfWhereItsSurfacesCross` row's
+> demonstration no longer exists.** Q1717 replaced
+> `a_face_along_one_of_two_loops_is_refused_rather_than_named_as_both` in
+> `crates/rcad-topo/src/holds.rs` with
+> `each_patch_a_thin_bar_keeps_of_a_fat_bars_wall_holds_its_own_end_alone`, since
+> two pipes crossing in two loops are read now. The refusal itself still fires:
+> `crates/rcad-topo/tests/a_half_rings_flat_face_read_back_from_bytes.rs`'s
+> `the_wall_holds_the_half_of_the_ring_its_wire_keeps` asks the wall of a
+> half-ring whose wire keeps different sides of `z = 0` at its two circles, and
+> gets `Err(Error::AFaceMissesPartOfWhereItsSurfacesCross { face })` naming that
+> wall, for every point it tries.
+

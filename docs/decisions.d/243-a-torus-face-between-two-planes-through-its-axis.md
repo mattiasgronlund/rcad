@@ -322,6 +322,15 @@ outer circle `Forward` on the flat face and wall used `Forward`, keeping
 `holds.rs` put back to `c11bf21f`, both tests fail, `classify_point` with
 `CannotFollowAFacesTrimming` at choice `(Reversed, Forward, Forward)`.
 
+> **2026-10-11 note (Q1730): `(4, 0, 0)` is `OnBoundary` in every choice
+> asked, not just the first four.** Q1726 merged Q1722's fix to
+> `count_crossings`, and `classify_point_finds_the_hole_outside_and_the_flat_face_on_the_skin`
+> now pins `OnBoundary` on every choice it asks. The ray from `(4, 0, 0)`
+> still meets the wall, which still refuses on the four choices whose wire
+> keeps a different side of `z = 0` at each circle — that refusal is
+> unchanged — but the flat face holds the point all the same, so
+> `classify_point` answers `OnBoundary` regardless.
+
 **`Model::validate` passes a half-ring whose hole is walked the wrong way.**
 Asked of the eight read-back half-rings on `c11bf21f`, `validate` refused the
 four that walk the outer circle `Reversed` on the flat face, with
