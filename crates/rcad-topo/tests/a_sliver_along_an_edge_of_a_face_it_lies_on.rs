@@ -420,25 +420,7 @@ fn two_combs_leaning_opposite_ways_the_other_way_round_meet_in_two_parts_a_round
 #[test]
 fn where_the_two_combs_cross_three_corners_lie_a_rounding_apart() {
     let (model, keys) = comb_and_comb().build();
-    let first = planes_through_three_one_one(&model, keys[0]);
-    let second = planes_through_three_one_one(&model, keys[1]);
-    let one_of = |planes: &[[f64; 4]], which: &dyn Fn(&[f64; 4]) -> bool| -> [f64; 4] {
-        let found: Vec<[f64; 4]> = planes
-            .iter()
-            .copied()
-            .filter(|plane| which(plane))
-            .collect();
-        let [plane] = found[..] else {
-            panic!("one plane, not {found:?}");
-        };
-        plane
-    };
-    let tooth_wall = one_of(&first, &|&[a, b, _, _]| a > 0.0 && b < 0.0);
-    let first_floor = one_of(&first, &|&[a, b, _, _]| a == 0.0 && b > 0.0);
-    let floor = one_of(&second, &|&[a, b, _, _]| a == 0.0 && b > 0.0);
-    let wall = one_of(&second, &|&[a, b, _, _]| a < 0.0 && b < 0.0);
-    let bottom = one_of(&second, &|&[_, _, c, _]| c < 0.0);
-    assert_eq!(first_floor, floor, "the two gap floors are one plane");
+    let [tooth_wall, floor, wall, bottom] = the_planes_through_three_one(&model, &keys);
 
     let crossing = [bottom, floor, wall];
     let meet = [bottom, wall, tooth_wall];
@@ -462,6 +444,94 @@ fn where_the_two_combs_cross_three_corners_lie_a_rounding_apart() {
             );
         }
     }
+}
+
+/// **The union is written without the notch, and with the first comb's corner
+/// `(3, 1)` where the crossing and the meet are written.** The tooth's wall is
+/// stored `a·x − 2a·y − a = 0`, which is `x − 2y = 1` exactly, the gap floor
+/// `y = 1` exactly, and the second comb's wall `−a·x − 2a·y + d = 0`, which is
+/// `x + 2y = 5 + δ` with `δ = (d − 5a)/a` between `2^-52` and `2^-51`. So the
+/// first comb's corner A is `(3, 1)`, the crossing B is `(3 + δ, 1)` and the
+/// meet C is `(3 + δ/2, 1 + δ/4)`, and the notch, the triangle between them
+/// from `z = 1` to `2`, holds `δ²/8`, `1.7e-32`.
+///
+/// A's box is the point itself, so `Corners::of` in `fuse/assemble.rs` would
+/// write it there. B's and C's boxes have the one middle W,
+/// `(3.0000000000000004, 1)`, so it writes them there as one corner. Both of
+/// those boxes hold A. As written, the floor and the tooth's wall then each
+/// have a strip from A to W, from `z = 0` to `1`, where the plane of the second
+/// comb's wall cuts them below that wall, and from `z = 1` to `2`, the notch's.
+/// Each pair is one ring walked both ways, and `docs/decisions.md` §431's rule
+/// leaves it out. So the union has no corner at `(3, 1, z)`: the first comb's
+/// `(3, 1, 0)` is written at W, one rounding off, and its `(3, 1, 2)` and the
+/// second comb's `(3, 1, 1)` and `(3, 1, 2)` go with the notch.
+#[test]
+fn the_union_leaves_out_a_notch_whose_three_corners_round_to_two_points() {
+    let (model, keys) = comb_and_comb().build();
+    let [tooth_wall, floor, wall, bottom] = the_planes_through_three_one(&model, &keys);
+    let (a, d) = (tooth_wall[0], wall[3]);
+    assert_eq!(tooth_wall, [a, -2.0 * a, 0.0, -a], "the tooth's wall");
+    assert_eq!(floor, [0.0, 1.0, 0.0, -1.0], "the gap floor");
+    assert_eq!(wall, [-a, -2.0 * a, 0.0, d], "the second comb's wall");
+
+    let delta = plus(&[d], &negated(&times(5.0, a))).iter().sum::<f64>() / a;
+    assert!(
+        2f64.powi(-52) < delta && delta < 2f64.powi(-51),
+        "the second comb's wall is x + 2y = 5 + {delta:e}"
+    );
+    let notch = delta * delta / 8.0;
+    assert!(
+        (notch / 1.733_336_949_948_512_3e-32 - 1.0).abs() < 1e-14,
+        "the notch holds {notch:e}"
+    );
+
+    let w = [3.000_000_000_000_000_4, 1.0, 1.0];
+    for (planes, written, what) in [
+        (
+            [bottom, floor, tooth_wall],
+            [3.0, 1.0, 1.0],
+            "the first comb's corner",
+        ),
+        ([bottom, floor, wall], w, "the crossing"),
+        ([bottom, wall, tooth_wall], w, "the meet"),
+    ] {
+        let [one, other, last] = planes;
+        let box_of_it = meet_of_three_planes(one, other, last)
+            .expect("three planes meeting at a point")
+            .enclosure();
+        assert_eq!(
+            box_of_it.map(|along| along.lo() + (along.hi() - along.lo()) / 2.0),
+            written,
+            "where {what} is written"
+        );
+        assert!(
+            box_of_it
+                .iter()
+                .zip([3.0, 1.0, 1.0])
+                .all(|(along, at)| along.lo() <= at && at <= along.hi()),
+            "{what}'s box {box_of_it:?} holds the first comb's corner"
+        );
+    }
+
+    assert_eq!(
+        corners_near_three_one(&model, keys[0]),
+        [[3.0, 1.0, 0.0], [3.0, 1.0, 2.0]],
+        "the first comb's corners"
+    );
+    assert_eq!(
+        corners_near_three_one(&model, keys[1]),
+        [[3.0, 1.0, 1.0], [3.0, 1.0, 2.0]],
+        "the second comb's corners"
+    );
+    let (either, solids) = fused(&model, keys[0], keys[1], Rule::Union);
+    let [solid] = solids[..] else {
+        panic!("the union is {solids:?}");
+    };
+    assert_eq!(
+        corners_near_three_one(&either, solid),
+        [[w[0], 1.0, 0.0], w],
+        "the union's corners"
+    );
 }
 
 fn configuration(first: Placed, second: Placed) -> Configuration {
@@ -673,6 +743,34 @@ fn face_counts(model: &Model, solids: &[SolidKey]) -> Vec<usize> {
     counts
 }
 
+/// The planes the two combs store through `(3, 1, 1)`, as `[a, b, c, d]`: the
+/// first comb's tooth wall `x − 2y = 1`, the gap floor `y = 1` both combs
+/// share, the second comb's wall `x + 2y = 5` and its bottom `z = 1`.
+fn the_planes_through_three_one(model: &Model, keys: &[SolidKey]) -> [[f64; 4]; 4] {
+    let first = planes_through_three_one_one(model, keys[0]);
+    let second = planes_through_three_one_one(model, keys[1]);
+    let tooth_wall = one_plane_of(&first, |&[a, b, _, _]| a > 0.0 && b < 0.0);
+    let first_floor = one_plane_of(&first, |&[a, b, _, _]| a == 0.0 && b > 0.0);
+    let floor = one_plane_of(&second, |&[a, b, _, _]| a == 0.0 && b > 0.0);
+    let wall = one_plane_of(&second, |&[a, b, _, _]| a < 0.0 && b < 0.0);
+    let bottom = one_plane_of(&second, |&[_, _, c, _]| c < 0.0);
+    assert_eq!(first_floor, floor, "the two gap floors are one plane");
+    [tooth_wall, floor, wall, bottom]
+}
+
+/// The one plane of `planes` that `which` picks.
+fn one_plane_of(planes: &[[f64; 4]], which: impl Fn(&[f64; 4]) -> bool) -> [f64; 4] {
+    let found: Vec<[f64; 4]> = planes
+        .iter()
+        .copied()
+        .filter(|plane| which(plane))
+        .collect();
+    let [plane] = found[..] else {
+        panic!("one plane, not {found:?}");
+    };
+    plane
+}
+
 /// The planes of `solid`'s faces that pass within a rounding of `(3, 1, 1)`,
 /// each once, as `[a, b, c, d]`.
 fn planes_through_three_one_one(model: &Model, solid: SolidKey) -> Vec<[f64; 4]> {
@@ -697,6 +795,22 @@ fn has_a_corner_at(model: &Model, solid: SolidKey, at: [f64; 3]) -> bool {
                 .points()
                 .any(|corner| corner.coordinates() == at)
         })
+}
+
+/// The corners of `solid`'s faces within `1e-12` of the line `x = 3, y = 1`,
+/// each once, lowest first.
+fn corners_near_three_one(model: &Model, solid: SolidKey) -> Vec<[f64; 3]> {
+    let mut corners: Vec<[f64; 3]> = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .flat_map(|face| face.wires().flat_map(|wire| wire.points()))
+        .map(|corner| corner.coordinates())
+        .filter(|&[x, y, _]| (x - 3.0).abs() < 1e-12 && (y - 1.0).abs() < 1e-12)
+        .collect();
+    corners.sort_by(|one, other| one.partial_cmp(other).expect("no corner is NaN"));
+    corners.dedup();
+    corners
 }
 
 /// Six times the volume the solid's triangles enclose, exactly: the sum over
