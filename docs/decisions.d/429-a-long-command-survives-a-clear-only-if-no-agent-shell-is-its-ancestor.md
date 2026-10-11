@@ -94,7 +94,7 @@ use. The auto-mode classifier refuses a `kill`, so ending one early is
 Mattias's. A gate that ends by itself costs at most that much, and it costs
 less than a gate killed and run again.
 
-### 429.7 What Q1670 built, and a gap it found in §429.2's own test
+### 429.7 What Q1670 built, and where §429.2 and §429.3 disagree
 
 Q1670 is the double fork, as `start_detached()` in both `land.py` and
 `verify_lane.py`: fork once for a process in between, that process forks the
@@ -127,15 +127,16 @@ swapped back in, each selftest's killed-follower arm fails, with `follow()`'s
 own line `the run (pid …) ended without finishing`; with the fix back in,
 both pass.
 
-This also answers what the lane before this one found and could not yet
-place: a literal copy of §429.2's own kill order (scan the whole process
-table only after the SIGTERM) does not reproduce the table in §429.3 for
-`Popen, parent still running`. That table measured the real Claude Code
-binary's kill against a plain child with nothing else running; reproducing it
-with `just`'s own process topology — shells inside shells, `ps` and `awk`
-forking fresh on every call — is slower again, and loses every time, for
-either shape of code. A reader chasing the same gap should scan for the
-pid before killing, not look for a faster scan.
+That leaves §429.2 and §429.3 disagreeing, and nothing here settles it. Done
+in §429.2's order, the scan lost to the reparenting every time, for the old
+code as well as the new; yet §429.3's table, taken against the real kill,
+found the old shape's child killed. Either Claude Code lists the processes
+before its SIGTERM takes effect, not after as §429.2 reads the binary, or its
+walk is fast enough to win where a shell's lost. Neither is measured. The
+test does not hang on which: a run that is not the follower's descendant
+before any signal never becomes one, so a scan taken first, which finds every
+descendant there is at that moment, misses the run exactly when Claude Code's
+walk would, whenever that walk runs.
 
 The first real `/clear` after this lands is still the check §429.3 names:
 whether a `just land` or `just verify-lane` run outlives it. Nothing here
