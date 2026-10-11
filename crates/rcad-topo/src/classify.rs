@@ -109,8 +109,12 @@ pub enum Containment {
     /// on numbers a line can be written out of exactly. Most rays do not, and
     /// then an exact point beside the point is fired from instead, once no face
     /// of the solid is shown to meet the box round both (`docs/decisions.md`
-    /// §323). This is what is left: a point a face meets, or one whose every
-    /// such ray grazes something.
+    /// §323). This is what is left: a point no point beside it speaks for,
+    /// since a face meets it or every such ray grazes something, and whose own
+    /// ray no face but the ring's threw away. A point another face holds is
+    /// [`Containment::OnBoundary`], and a box whose every ray another face
+    /// grazes is [`Containment::Undecidable`], as they are on the same solid
+    /// without the ring (Q1716).
     ///
     /// Deliberately its own answer and not
     /// [`Containment::CannotFollowAFacesTrimming`], which says a *trimming*
@@ -244,18 +248,27 @@ impl SolidView<'_> {
         }
 
         let mut worst_enclosure = 0.0f64;
+        let mut asked_beside = false;
         for target in ray_targets(low, high) {
             let pass = match self.count_crossings(point, target, policy, log) {
                 Ok(pass) => pass,
-                Err(no_ray @ Containment::CannotFireARayAtAFacesSurface { .. }) => {
-                    return self
-                        .what_a_point_beside_it_says(point, low, high, policy, log)
-                        .unwrap_or(no_ray);
-                }
                 Err(no_ray) => return no_ray,
             };
             if pass.on_boundary {
                 return Containment::OnBoundary;
+            }
+            if let Some(face) = pass.unfired_at {
+                if !asked_beside {
+                    asked_beside = true;
+                    if let Some(placed) =
+                        self.what_a_point_beside_it_says(point, low, high, policy, log)
+                    {
+                        return placed;
+                    }
+                }
+                if !pass.is_thrown_away_without_them() {
+                    return Containment::CannotFireARayAtAFacesSurface { face };
+                }
             }
             if let Some(face) = pass.parted_at {
                 return self
@@ -414,6 +427,9 @@ impl SolidView<'_> {
                 "{beside:?} is in a box round {point:?} that no face of the solid meets, and a \
                  ray from it says it is on the solid's skin"
             );
+            if pass.unfired_at.is_some() {
+                continue;
+            }
             if let Some(face) = pass.parted_at {
                 let Some(placed) =
                     self.what_its_plane_says_beside_it(face, point, policy, &mut trial)
@@ -625,7 +641,10 @@ impl SolidView<'_> {
     /// One ray's tally, or which face's trimming stopped it being counted.
     ///
     /// A face nothing can follow is not something another ray gets past, so it
-    /// comes straight back rather than being counted as a graze.
+    /// comes straight back rather than being counted as a graze. A face whose
+    /// surface the ray cannot be fired at does not stop the count: it is noted
+    /// in the tally, and every other face is still asked whether it holds the
+    /// point or grazes the ray, since neither depends on that face (Q1716).
     fn count_crossings(
         self,
         point: PredicatePoint,
@@ -740,21 +759,24 @@ impl SolidView<'_> {
         let from = point.enclosure();
         let along = gap_enclosing(from, target);
 
-        match side_of_surface(&surface, point) {
+        let meets_it = match side_of_surface(&surface, point) {
             // The point is on this face's surface, so the ray starts there and
             // crosses nothing. Whether it is on the *face* is the outline's
             // question, the same as a flat face's.
             Decision::Zero => {
                 self.ask_whether_the_face_holds_it(face, tally, point, policy, log)?;
+                false
             }
-            Decision::Pos | Decision::Neg => (),
+            Decision::Pos | Decision::Neg => false,
             Decision::Undecidable { enclosure } => {
-                if !self.face_holds_none_of(face, point, policy, log) {
+                let meets_it = !self.face_holds_none_of(face, point, policy, log);
+                if meets_it {
                     tally.grazed(enclosure);
                 }
+                meets_it
             }
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
-        }
+        };
 
         // `+1` where the surface's own gradient points out of the material and
         // `-1` where the face is used the other way round, which is the same
@@ -785,9 +807,13 @@ impl SolidView<'_> {
             // `Containment::CannotFireARayAtAFacesSurface` already means: no ray
             // was ever put to this face's surface. A corner sitting exactly on
             // the lattice gives an exact line, reaches `Ok` above, and is
-            // answered rather than refused.
+            // answered rather than refused. The other faces are still counted:
+            // one that holds the point puts it on the skin, and one that grazes
+            // the ray throws it away, whatever this face would have added
+            // (Q1716).
             Err(_) if matches!(surface, Surface::Torus(_)) => {
-                return Err(Containment::CannotFireARayAtAFacesSurface { face: face.key() });
+                tally.unfired(face.key(), meets_it);
+                return Ok(());
             }
             // A plane, a ball, a pipe or a cone that could not tell is what
             // `Meeting::CouldNotTell` already meant: nothing this ray says can be
@@ -1339,6 +1365,12 @@ struct Crossings {
     /// The first flat face whose corners and stored plane read the point
     /// differently ([`Hit::ReadingsPart`]).
     parted_at: Option<FaceKey>,
+    /// The first face whose surface the ray could not be fired at, so that
+    /// its crossings are not in `winding`.
+    unfired_at: Option<FaceKey>,
+    /// Whether a face the ray could not be fired at may hold a point of the
+    /// box the ray starts from, and grazed the ray for it.
+    an_unfired_face_meets_it: bool,
 }
 
 impl Crossings {
@@ -1351,6 +1383,19 @@ impl Crossings {
     /// The ray met `face` where its corners and its stored plane part.
     fn parted(&mut self, face: FaceKey) {
         self.parted_at.get_or_insert(face);
+    }
+
+    /// The ray could not be fired at `face`'s surface; `meets_it` is whether
+    /// `face` grazed it already, as one that may hold a point of its box.
+    fn unfired(&mut self, face: FaceKey, meets_it: bool) {
+        self.unfired_at.get_or_insert(face);
+        self.an_unfired_face_meets_it |= meets_it;
+    }
+
+    /// Whether this ray is thrown away whatever the faces it could not be
+    /// fired at would add to it: a face it was fired at grazed it.
+    fn is_thrown_away_without_them(&self) -> bool {
+        self.grazed_something && !self.an_unfired_face_meets_it && self.parted_at.is_none()
     }
 
     /// Take in what a face said about a point on its own surface.

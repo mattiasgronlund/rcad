@@ -15,6 +15,9 @@
 //! inside it is refused by the fuse. So the boxes are asked of the glued bend,
 //! as it is, turned, and grown out of an L. They were asked in `classify.rs`'s
 //! own tests, of one solid holding two shells, until that build opened (Q721).
+//! A box a face of the block meets is asked of the block alone too, which has
+//! no torus face, and the two answers must agree, since what the face says of
+//! the box does not depend on the ring (Q1716).
 
 use std::collections::BTreeMap;
 
@@ -252,7 +255,8 @@ const BESIDE_THE_SIDES: [([f64; 3], Containment); 7] = [
 
 /// A box on the plane of a side of the block a bend grows out of, and off the
 /// side, is answered by a ray from an exact point beside it, since no face
-/// meets the box round both; a box on a side is met by that side, and refused.
+/// meets the box round both. A box on a side is
+/// [`a_box_on_a_face_of_the_block_a_bend_grows_out_of_is_answered_as_the_block_alone`].
 #[test]
 fn a_box_beside_a_side_of_the_block_a_bend_grows_out_of_is_answered() {
     let policy = Policy::certified();
@@ -264,17 +268,6 @@ fn a_box_beside_a_side_of_the_block_a_bend_grows_out_of_is_answered() {
         let placed = solid.classify_uncertain_point(a_box_round(at), &policy, &mut log);
         assert_eq!(placed, should, "{at:?}");
         assert!(log.is_empty(), "{at:?} was settled exactly: {log:?}");
-    }
-    for on_a_side in [[4.0, -2.0, 0.0], [4.0, -1.0, 2.0]] {
-        let placed = solid.classify_uncertain_point(
-            a_box_round(on_a_side),
-            &policy,
-            &mut ProvenanceLog::new(),
-        );
-        assert!(
-            matches!(placed, Containment::CannotFireARayAtAFacesSurface { .. }),
-            "{on_a_side:?}: {placed:?}"
-        );
     }
 }
 
@@ -333,8 +326,8 @@ fn a_box_beside_the_top_of_a_turned_block_a_bend_grows_out_of_is_answered_outsid
 /// The top of an L a bend grows out of is fanned from the end of one arm, so
 /// two of its triangles, wound opposite ways, reach over the notch between the
 /// arms. They add up to nothing there, and a box in the notch on the plane of
-/// the top is answered outside; a box on an arm is met by the top, and
-/// refused.
+/// the top is answered outside. A box on an arm is
+/// [`a_box_on_a_face_of_the_block_a_bend_grows_out_of_is_answered_as_the_block_alone`].
 #[test]
 fn a_box_in_the_notch_of_an_l_a_bend_grows_out_of_is_answered_outside() {
     let policy = Policy::certified();
@@ -361,14 +354,6 @@ fn a_box_in_the_notch_of_an_l_a_bend_grows_out_of_is_answered_outside() {
         &mut ProvenanceLog::new(),
     );
     assert_eq!(placed, Containment::Outside);
-
-    let on_an_arm = [3.0, -3.0, 2.0];
-    let placed =
-        solid.classify_uncertain_point(a_box_round(on_an_arm), &policy, &mut ProvenanceLog::new());
-    assert!(
-        matches!(placed, Containment::CannotFireARayAtAFacesSurface { .. }),
-        "{placed:?}"
-    );
 }
 
 /// The L turned leaves its top's corners a rounding off its stored plane, and
@@ -376,6 +361,11 @@ fn a_box_in_the_notch_of_an_l_a_bend_grows_out_of_is_answered_outside() {
 /// the box in the notch is still outside the L, a quarter from the nearest
 /// wall, so the answer exists and this is a gap: `its_fan_adds_up_to_nothing_over`
 /// does not answer for a fan that is not flat.
+///
+/// The bend refuses the box as the turned L alone does, `Undecidable`, since
+/// every ray from it grazes a face of the L whatever the ring would add. Until
+/// Q1716 the ring's refusal came first, and it was
+/// `CannotFireARayAtAFacesSurface`.
 #[test]
 fn a_box_in_the_notch_of_a_turned_l_a_bend_grows_out_of_is_still_refused() {
     let policy = Policy::certified();
@@ -383,15 +373,12 @@ fn a_box_in_the_notch_of_a_turned_l_a_bend_grows_out_of_is_still_refused() {
     model
         .place_solid(built, &the_turn())
         .expect("this model made the key");
-    let solid = model.solid(built).expect("this model made the key");
-    let top = the_face_facing(
-        solid,
-        the_turn().apply_to_vector(Vector::new(0.0, 0.0, 1.0)),
-    );
-    assert!(
-        !every_corner_is_on_its_plane(top),
-        "the turn left every corner of the top on its plane"
-    );
+    let with_the_bend = model.solid(built).expect("this model made the key");
+    let (mut alone, block) = the_block_alone(&AN_L);
+    alone
+        .place_solid(block, &the_turn())
+        .expect("this model made the key");
+    let without_it = alone.solid(block).expect("this model made the key");
     let in_the_notch = [4.25, -3.0, 2.0];
     assert_eq!(
         what_the_shape_says(&AN_L, in_the_notch),
@@ -400,11 +387,22 @@ fn a_box_in_the_notch_of_a_turned_l_a_bend_grows_out_of_is_still_refused() {
     let at = the_turn()
         .apply_to_point(Point::from(in_the_notch))
         .coordinates();
-    let placed =
-        solid.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new());
+    let placed = [with_the_bend, without_it].map(|solid| {
+        let top = the_face_facing(
+            solid,
+            the_turn().apply_to_vector(Vector::new(0.0, 0.0, 1.0)),
+        );
+        assert!(
+            !every_corner_is_on_its_plane(top),
+            "the turn left every corner of the top on its plane"
+        );
+        solid.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new())
+    });
     assert!(
-        matches!(placed, Containment::CannotFireARayAtAFacesSurface { .. }),
-        "{placed:?}"
+        placed
+            .iter()
+            .all(|answer| matches!(answer, Containment::Undecidable { .. })),
+        "with the bend and without it: {placed:?}"
     );
 }
 
@@ -476,6 +474,77 @@ fn an_l_less_a_bend_wholly_inside_it_is_refused_as_a_quartic() {
     }
 }
 
+/// Boxes on a flat face of the glued block, two on the block's sides and one
+/// on an arm of the L's top, each with the outline it is on.
+const ON_A_FACE: [(&[[i32; 2]], [f64; 3]); 3] = [
+    (&THE_BLOCK, [4.0, -2.0, 0.0]),
+    (&THE_BLOCK, [4.0, -1.0, 2.0]),
+    (&AN_L, [3.0, -3.0, 2.0]),
+];
+
+/// A box on a flat face of the block a bend grows out of is answered as the
+/// block alone answers it: a bend elsewhere on the solid, which no ray from
+/// the box can be fired at, does not change what the face says.
+///
+/// Under a certified policy the box straddles the face's plane, every ray from
+/// it is thrown away at that face, and the answer is `Undecidable`, with or
+/// without the bend. A tolerant policy takes the box onto the plane, the face
+/// holds it, and the answer is `OnBoundary`. Until Q1716 the bend's ring
+/// refused every ray first, and both came back `CannotFireARayAtAFacesSurface`,
+/// which says no policy helps when one does.
+#[test]
+fn a_box_on_a_face_of_the_block_a_bend_grows_out_of_is_answered_as_the_block_alone() {
+    for (outline, at) in ON_A_FACE {
+        let (model, built) = the_bend_out_of(outline);
+        let with_the_bend = model.solid(built).expect("this model made the key");
+        let (alone, block) = the_block_alone(outline);
+        let without_it = alone.solid(block).expect("this model made the key");
+        let placed = |policy: &Policy| {
+            [with_the_bend, without_it].map(|solid| {
+                solid.classify_uncertain_point(a_box_round(at), policy, &mut ProvenanceLog::new())
+            })
+        };
+        let certified = placed(&Policy::certified());
+        assert!(
+            certified
+                .iter()
+                .all(|answer| matches!(answer, Containment::Undecidable { .. })),
+            "{at:?}, with the bend and without it: {certified:?}"
+        );
+        assert_eq!(
+            placed(&Policy::tolerant(100.0)),
+            [Containment::OnBoundary; 2],
+            "{at:?}"
+        );
+    }
+}
+
+/// An exact point on a flat face of the block a bend grows out of is on the
+/// solid's skin, whether or not the ray from it can be fired at the bend.
+///
+/// `(4.1, −2, 0.3)` on the side `y = −2` and `(4, −1.3, 2)` on the top are
+/// exact, and neither's step to a ray's target is, so the bend's ring refuses
+/// every ray from them. The face holds each all the same, and the block alone
+/// says `OnBoundary` of both. Until Q1716 the ring's refusal threw away what
+/// the face said, and the bend said `CannotFireARayAtAFacesSurface`.
+#[test]
+fn a_point_on_a_face_of_the_block_a_bend_grows_out_of_is_on_its_skin() {
+    let policy = Policy::certified();
+    let (model, built) = the_bend_out_of(&THE_BLOCK);
+    let with_the_bend = model.solid(built).expect("this model made the key");
+    let (alone, block) = the_block_alone(&THE_BLOCK);
+    let without_it = alone.solid(block).expect("this model made the key");
+    for at in [[4.1, -2.0, 0.3], [4.0, -1.3, 2.0]] {
+        let placed = [with_the_bend, without_it].map(|solid| {
+            let mut log = ProvenanceLog::new();
+            let placed = solid.classify_point(Point::from(at), &policy, &mut log);
+            assert!(log.is_empty(), "{at:?} was settled exactly: {log:?}");
+            placed
+        });
+        assert_eq!(placed, [Containment::OnBoundary; 2], "{at:?}");
+    }
+}
+
 /// A new model holding [`a_bend_out_of`] `outline`, walked the way that builds,
 /// with one closed edge round the cap.
 fn the_bend_out_of(outline: &[[i32; 2]]) -> (Model, SolidKey) {
@@ -487,6 +556,29 @@ fn the_bend_out_of(outline: &[[i32; 2]]) -> (Model, SolidKey) {
         TheCapCircle::OneClosedEdge,
     )
     .expect("a bend growing out of a block's side is a solid");
+    (model, built)
+}
+
+/// A new model holding the block stood up on `outline` from `z = −2` to
+/// `z = 2`, as [`a_bend_out_of`] stands it, with no bend.
+fn the_block_alone(outline: &[[i32; 2]]) -> (Model, SolidKey) {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let profile = ProfileBuilder::new(
+        outline
+            .iter()
+            .map(|corner| corner.map(f64::from))
+            .collect::<Vec<_>>(),
+    )
+    .build(&policy, &mut ProvenanceLog::new())
+    .expect("an outline along the axes");
+    let built = model
+        .add_extrusion(
+            &profile,
+            4.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, -2.0)).expect("a finite shift"),
+        )
+        .expect("a block");
     (model, built)
 }
 
