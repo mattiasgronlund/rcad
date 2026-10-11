@@ -36,6 +36,18 @@
 //! (`leave_out_each_pair_of_flat_faces_walking_one_ring_both_ways` in
 //! `fuse/assemble.rs`).
 //!
+//! **The tipped cube less the block was two solids**, under a tolerant
+//! policy, at the four tilts of
+//! [`TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT`] (queue row Q1687).
+//! There the cube's corner at `x = 5` is stored a rounding below the floor,
+//! and the wedge between the cube's edge and the floor, under the block,
+//! closed into a tetrahedron of `8.2e−32` to `3.3e−31` touching the rest at
+//! `(0, 5, 0)`, or at `t = 0.142` into a shell flat on the floor that
+//! measured `0.0` and refused the fuse. The same cube `2⁻³⁰` higher or lower
+//! is one solid. A tolerant fuse now leaves out a shell whose corners all lie
+//! within the policy's wobble of one of its own planes
+//! (`leave_out_each_shell_thinner_than_the_wobble` in `fuse/assemble.rs`).
+//!
 //! What the two cubes share is the cube's square cross-section, clipped to
 //! the block, along the five of its ten that lie over the block:
 //! [`what_the_two_share`] works it out from the tilt.
@@ -66,6 +78,19 @@ const TILTS_THE_UNION_WAS_REFUSED_AT: [[f64; 4]; 5] = [
     [0.0, 0.0, 0.007_999_914_666_939_733, 0.999_968_000_170_666_3],
     [0.0, 0.0, 0.009_999_833_334_166_664, 0.999_950_000_416_665_3],
     [0.0, 0.0, 0.014_999_437_506_328_09, 0.999_887_502_109_359_2],
+];
+
+/// Four tilts at which the tipped cube less the block, under a tolerant
+/// policy, was not one solid (queue row Q1687): `t = 0.075`, `0.0885` and
+/// `0.1315`, where it answered a second solid, a tetrahedron of `8.2e−32` to
+/// `3.3e−31` below the floor, and `t = 0.142`, where it was refused
+/// `VolumeIsNotPositive { volume: 0.0 }`. As `f64::sin` and `f64::cos` give
+/// them.
+const TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT: [[f64; 4]; 4] = [
+    [0.0, 0.0, 0.074_929_707_272_742_34, 0.997_188_818_112_207_5],
+    [0.0, 0.0, 0.088_384_519_545_367_51, 0.996_086_430_338_62],
+    [0.0, 0.0, 0.131_121_339_064_130_45, 0.991_366_327_066_856_5],
+    [0.0, 0.0, 0.141_523_266_230_237_75, 0.989_934_929_738_073_8],
 ];
 
 #[test]
@@ -178,6 +203,22 @@ fn the_tipped_cube_less_the_block_is_the_cube_less_what_they_share() {
     }
 }
 
+#[test]
+fn the_tipped_cube_less_the_block_is_one_solid_where_its_corner_rounds_below_the_floor_tolerant() {
+    for tilt in TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT {
+        let asked = format!("{tilt:?}");
+        let volumes = volumes_of_a_fuse(
+            tilt,
+            Rule::Difference,
+            Order::TippedFirst,
+            &tolerant(),
+            &asked,
+        );
+        assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
+        assert_about(volumes[0], 1000.0 - what_the_two_share(tilt), &asked);
+    }
+}
+
 /// The volume the block and the tipped cube share.
 ///
 /// The tipped cube's square cross-section, in `(y, z)`, has its corner at
@@ -223,6 +264,20 @@ enum Order {
 }
 
 fn volume_of_a_fuse(tilt: [f64; 4], rule: Rule, order: Order, policy: &Policy, asked: &str) -> f64 {
+    volumes_of_a_fuse(tilt, rule, order, policy, asked)
+        .iter()
+        .sum()
+}
+
+/// The volume of each solid of the answer, once the model it is written into
+/// validates.
+fn volumes_of_a_fuse(
+    tilt: [f64; 4],
+    rule: Rule,
+    order: Order,
+    policy: &Policy,
+    asked: &str,
+) -> Vec<f64> {
     let mut model = a_model();
     let pair = the_block_and_the_tipped_cube(&mut model, tilt);
     let answer = fuse(&mut model, pair, rule, order, policy)
@@ -244,7 +299,7 @@ fn volume_of_a_fuse(tilt: [f64; 4], rule: Rule, order: Order, policy: &Policy, a
                 .unwrap_or_else(|why| panic!("{asked}, {rule:?} does not measure: {why}"))
                 .volume()
         })
-        .sum()
+        .collect()
 }
 
 fn refusal(tilt: [f64; 4], rule: Rule, order: Order, policy: &Policy, asked: &str) -> Error {
