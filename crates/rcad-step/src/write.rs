@@ -1514,7 +1514,8 @@ enum Shape {
 }
 
 /// The closed curve a plane crosses a pipe in, or `None` where the plane
-/// runs along the pipe and crosses it in no closed curve at all.
+/// runs along the pipe and crosses it in no closed curve at all, and where it
+/// so nearly does that the curve is longer than any `f64`.
 ///
 /// With `n` the plane's normal and `a` the pipe's axis, the curve is centred
 /// where the axis meets the plane. It is a circle of the pipe's radius `r`
@@ -1542,6 +1543,14 @@ enum Shape {
 /// curved one by where the faces cross, and an arc by those faces and the
 /// curve's own plane, so it reads the curve's centre and axis back but never
 /// its sizes.
+///
+/// **A long size past `f64::MAX` is a limit, not a gap** (`docs/decisions.md`
+/// §16.10), and it takes a plane within about `r / f64::MAX` of running along
+/// the pipe. `add_bar_cut_off_by` builds a bar of radius 2 whose caps lean
+/// `2^-1023` off that, so `tan θ` is `2^1023` and the long size `2^1024`: the
+/// cap meets the pipe's skin `2^1024` along it, which is no point an `f64`
+/// holds, and `Model::validate` refuses that bar
+/// (`a_bar_whose_caps_almost_run_along_it_is_refused_by_name_because_their_ellipses_outgrow_f64`).
 fn where_a_plane_crosses_a_pipe(flat: &Plane, pipe: &Cylinder) -> Option<Crossing> {
     let along = pipe.axis().direction();
     let facing = flat.normal().dot(along);
