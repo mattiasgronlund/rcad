@@ -220,6 +220,11 @@ the rows its work leaves (§383.4). Check them as you check any claim: on a
   (§432): `from/<id>` on a bundle's row from an item that is not the first,
   `was/<id>` on a row that files `<id>` again. A step that says nothing gets
   `from/<the lane's first row>`.
+- A step for a fault that a crash file or a corpus file shows starts with
+  `from/fuzz:<target>` or `from/step:<file>`, not `from/<the lane's row>`
+  (§433.2), and a triage lane names, on each fault row, the target whose
+  crash file that row names (§433.3). One that says `from/<the lane's row>`,
+  or nothing, is a `fix_first`.
 
 A step missing, wrong or repeated is a `fix_first`, with the step to add,
 change or drop in `fixes`.

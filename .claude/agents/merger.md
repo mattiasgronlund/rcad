@@ -111,7 +111,13 @@ below, and settle what the stop line names.
    refuses one that does not: put `from/<row>` in front of a step that does
    not start with `from/` or `was/`, and in a bundle name the row the item
    came from. A row that files a dropped or closed row again says
-   `was/<that row>`.
+   `was/<that row>`. A step for a fault that a crash file or a corpus file
+   shows says `from/fuzz:<target>` or `from/step:<file>`, not `from/<row>`
+   (§433.2), and `just queue add` refuses a target or a file this tree does
+   not have: keep the word the lane gave it, and put it in front where the
+   lane left it out and the step names the crash file or the corpus file. A
+   triage lane's fault rows each name the target whose crash file they name
+   (§433.3).
    A stale claim or a missing test the lane's own change caused, inside its
    write set, is not a row (§352.5): make it a step 2 fix when it is a few
    lines, and file it only when it is not. Nor is a stale note in a decisions

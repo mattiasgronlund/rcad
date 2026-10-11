@@ -253,11 +253,21 @@ until the merger that follows marks it (§384.3).
   `mise exec -- just queue next 1`, and back to step 5.
 - **Not merged**: decide it before anything else, and write the decision to
   the queue at once, in one `just queue apply` that also files the rows the
-  lane left, read from its journal, each `from/<row>` (§432). The three ways
+  lane left, read from its journal, each `from/<row>` (§432), or
+  `from/fuzz:<target>` or `from/step:<file>` for a fault a crash file or a
+  corpus file shows (§433.2). The three ways
   on: take the row again under a new label with the fix in its brief; park it,
   with the section its reason belongs under; or `just queue drop` it. A row
   filed again after a drop says `was/<old row>`. `git worktree unlock` each
   tree the result named once the apply is pushed.
+
+**A triage row's fault rows each name their fuzz target** (§433.3). The
+triage row itself is `from/-`, and its lane starts each fault row it reports
+with `from/fuzz:<target>`, the target whose crash file that row names;
+`lane.md` tells it so. When you file a read-only lane's rows yourself, keep
+that word. A fault row you file from a night's crash file or a corpus file
+starts with `from/fuzz:<target>` or `from/step:<file>`, not `from/-` (§433.2);
+`just queue add` checks that the target or the file is there.
 
 A lane's tree is unlocked by its verifier when checking starts, the verifier's
 by the merger, and the merger's by itself at the end, so a row holds one slot

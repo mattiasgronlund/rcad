@@ -126,6 +126,16 @@ what is not a row.
   puts `from/<your row>` in front of a `<what>` that does not say. In a
   bundle, start `<what>` with `from/<id>` for an item from a row that is not
   the first; start it with `was/<id>` for a row that files `<id>` again.
+  A row for a fault that a crash file of a fuzz target, or a file of the STEP
+  corpus, shows starts with `from/fuzz:<target>` or `from/step:<file>`, not
+  `from/<your row>`, even when your row's work turned it up (§433.2).
+  `<target>` is the target's file name under `fuzz/fuzz_targets/` without
+  `.rs`. `<file>` is the corpus file's own name with each space written `_`,
+  or with one directory in front where `just queue add` says the name ends two
+  paths (§433.1). A triage lane starts each fault row it reports with the
+  target whose crash file that row names: the directory under `artifacts/`,
+  and the first column of `fuzz-triage-members.tsv` (§433.3). A row your
+  work leads to that is not such a fault still comes from your row.
 - `["tag", "@1", "<class>"]` or `["tag", "@1", "small"]`, one tag at most per
   row. A defect's row takes its class from `remaining`: `wrong`, `crash` or
   `refuses`, then `/A` to `/D` as above. The class names the tier (§403): a row
