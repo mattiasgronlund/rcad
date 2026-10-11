@@ -66,7 +66,7 @@ class Stop(Exception):
 def main(argv):
     if argv == ["wait"]:
         top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip()
-        return follow(os.path.join(top, STATE), None)
+        return follow(os.path.join(top, STATE))
     if len(argv) == 2 and argv[0] == "wait-for":
         return wait_for(argv[1])
     if argv == ["--detached-run"]:
@@ -126,12 +126,11 @@ def start(argv):
     os.makedirs(state)
     write(os.path.join(state, "printed"), "0")
     write_json(os.path.join(state, "args.json"), args)
-    with open(os.path.join(state, "log"), "w", encoding="utf-8") as log:
-        child = subprocess.Popen(
-            [sys.executable, os.path.abspath(__file__), "--detached-run"],
-            cwd=top, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-    write(os.path.join(state, "pid"), f"{child.pid}\n")
-    return follow(state, child)
+    log_path = os.path.join(state, "log")
+    write(log_path, "")
+    start_detached([sys.executable, os.path.abspath(__file__), "--detached-run"], top, log_path,
+                    os.path.join(state, "pid"))
+    return follow(state)
 
 
 def ended(report, stop):
@@ -213,11 +212,42 @@ def refuse_unless_a_clean_linked_tree():
         raise Stop("tree", f"this tree has uncommitted changes, and just land switches it: {status}")
 
 
-def follow(state, child):
+def start_detached(cmd, cwd, log_path, pid_path):
+    """Starts `cmd` with a double fork, as `setsid -f` does, so nothing here ends up its parent (§429.5).
+
+    The process in between forks the run, writes the run's own pid to
+    `pid_path`, and exits; `waitpid` blocks until it has, which is also until
+    the pid file is on disk, so the caller never has to sleep and hope it is
+    there yet. The run calls `setsid` itself, so it leads its own session and
+    process group, and `cmd`'s first word is executed in place of it, not
+    read again later: the lane's checkout cannot change what runs detached.
+    """
+    middle = os.fork()
+    if middle == 0:
+        run_pid = os.fork()
+        if run_pid == 0:
+            os.chdir(cwd)
+            os.setsid()
+            devnull = os.open(os.devnull, os.O_RDONLY)
+            os.dup2(devnull, 0)
+            os.close(devnull)
+            logfd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+            os.dup2(logfd, 1)
+            os.dup2(logfd, 2)
+            os.close(logfd)
+            os.execv(cmd[0], cmd)
+            os._exit(127)  # os.execv only returns on failure
+        write(pid_path, f"{run_pid}\n")
+        os._exit(0)
+    os.waitpid(middle, 0)
+
+
+def follow(state):
     """Print what the run logged since the last call, until it ends or this call's time is up.
 
     Exits with the run's own code once it has ended, its JSON the last line,
-    and 3 while it is still going.
+    and 3 while it is still going. Holds no handle to the run: a run outlives
+    whatever started it, so the only trace of it here is its pid file.
     """
     try:
         with open(os.path.join(state, "pid"), encoding="utf-8") as f:
@@ -235,7 +265,7 @@ def follow(state, child):
             if not printed:
                 print(last_line(read(os.path.join(state, "log"))))
             return int(read(ended_file).strip() or 1)
-        if not running(pid, child):
+        if not running(pid):
             if os.path.exists(ended_file):
                 continue
             print(f"land: the run (pid {pid}) ended without finishing; {os.path.join(state, 'log')} "
@@ -269,9 +299,7 @@ def print_new(state):
     return True
 
 
-def running(pid, child):
-    if child is not None:
-        return child.poll() is None
+def running(pid):
     try:
         return stat_fields(pid)[0] != "Z"
     except OSError:

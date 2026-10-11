@@ -14703,7 +14703,10 @@ check-land-selftest:
             echo "$n" >"$STUB_DIR/gates"
             if [ -e "$STUB_DIR/gate-blocks" ] && [ "$n" = 1 ]; then
                 touch "$STUB_DIR/gate-started"
-                for _ in $(seq 1200); do sleep 0.05; done
+                for _ in $(seq 1200); do
+                    [ ! -e "$STUB_DIR/gate-release" ] || break
+                    sleep 0.05
+                done
             fi
             case "$(cat "$STUB_DIR/race" 2>/dev/null)" in
                 code) race code ;;
