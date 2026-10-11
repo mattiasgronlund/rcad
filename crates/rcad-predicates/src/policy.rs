@@ -134,6 +134,54 @@ impl Policy {
     pub fn wobble_is_acceptable(self, wobble: f64) -> bool {
         wobble <= self.max_wobble()
     }
+
+    /// Whether this policy takes two points proved apart as one point, logging
+    /// the move when it does.
+    ///
+    /// `record`'s enclosure is the furthest the two points may be apart, so it
+    /// must measure a [`Measures::Length`]. Under [`Strictness::Certified`] the
+    /// answer is `false` and nothing is logged. Under
+    /// [`Strictness::TolerantFallback`] it is `true` when that distance is
+    /// within [`Policy::max_wobble`], and then the record is resolved to
+    /// [`Decision::Zero`] with a [`Cause::TolerantFallback`] tag of the distance
+    /// and logged; otherwise it is `false` and nothing is logged, since a record
+    /// wider than the budget would refuse the operation that asked, and
+    /// declining the move already leaves that operation where it was.
+    ///
+    /// A power [`resolve_under_policy`] does not have: that one only reads a
+    /// sign nothing could decide as zero, and here the two points were proved
+    /// apart (`docs/decisions.md` §417.7).
+    ///
+    /// # Panics
+    ///
+    /// If `record` does not measure a length, or its outcome is already
+    /// certified.
+    pub fn take_as_one_point(self, mut record: Record, log: &mut ProvenanceLog) -> bool {
+        assert_eq!(
+            record.measures(),
+            Measures::Length,
+            "{}: how far apart two points are is a length",
+            record.predicate()
+        );
+        assert!(
+            !record.outcome().is_certified(),
+            "{}: a certified decision does not go through a policy",
+            record.predicate()
+        );
+        let Strictness::TolerantFallback { working_size } = self.strictness else {
+            return false;
+        };
+        let wobble = record.wobble(working_size);
+        if !self.wobble_is_acceptable(wobble) {
+            return false;
+        }
+        record.resolve_to(
+            Decision::Zero,
+            Approximation::new(wobble, Cause::TolerantFallback),
+        );
+        log.push(record);
+        true
+    }
 }
 
 /// What a predicate's value measures, which is what says how a slop budget
@@ -681,5 +729,48 @@ mod tests {
             crate::Approximation::new(1e-17, Cause::UndecidableResolved),
         );
         let _ = resolve_under_policy(record, &Policy::certified(), &mut ProvenanceLog::new());
+    }
+
+    #[test]
+    fn take_as_one_point_never_folds_under_a_certified_policy() {
+        let mut log = ProvenanceLog::new();
+        let distance = record_measuring(f64::MIN_POSITIVE, Measures::Length);
+
+        assert!(!Policy::certified().take_as_one_point(distance, &mut log));
+        assert!(log.is_empty());
+    }
+
+    #[test]
+    fn a_tolerant_policy_takes_two_points_within_its_budget_as_one_and_tags_the_move() {
+        let policy = Policy::tolerant(100.0);
+        let distance = policy.max_wobble();
+        let mut log = ProvenanceLog::new();
+
+        assert!(policy.take_as_one_point(record_measuring(distance, Measures::Length), &mut log));
+        assert_eq!(log.len(), 1);
+        assert_eq!(log.records()[0].outcome(), Decision::Zero);
+        let tag = log.records()[0]
+            .approximation()
+            .expect("a move carries how far it went");
+        assert_eq!(tag.magnitude(), distance);
+        assert_eq!(tag.cause(), Cause::TolerantFallback);
+        assert!(policy.wobble_is_acceptable(log.worst_wobble(100.0)));
+    }
+
+    #[test]
+    fn a_tolerant_policy_keeps_two_points_further_apart_than_its_budget_and_logs_nothing() {
+        let policy = Policy::tolerant(100.0);
+        let distance = policy.max_wobble().next_up();
+        let mut log = ProvenanceLog::new();
+
+        assert!(!policy.take_as_one_point(record_measuring(distance, Measures::Length), &mut log));
+        assert!(log.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "is a length")]
+    fn how_far_apart_two_points_are_may_not_be_filed_as_a_volume() {
+        let _ = Policy::tolerant(100.0)
+            .take_as_one_point(record_with_enclosure(1e-30), &mut ProvenanceLog::new());
     }
 }

@@ -448,7 +448,8 @@ pub(crate) struct Scratch {
     /// the one that came second, and `a ∪ a` came back empty.
     pub(crate) cut_from: Vec<usize>,
     /// Every point some face's arrangement found to be more than one name,
-    /// from the faces of both groups, kept piece or not.
+    /// from the faces of both groups, kept piece or not, and every meet a
+    /// tolerant policy took as an input corner a rounding from it (§417.7).
     pub(crate) names_of_one_point: Vec<NamesOfOnePoint>,
 }
 
@@ -491,13 +492,18 @@ impl Scratch {
             }
             cut_from.resize(pieces.len(), operand);
         }
-        Ok(Self {
+        let mut scratch = Self {
             arguments,
             tools,
             pieces,
             cut_from,
             names_of_one_point,
-        })
+        };
+        let taken_as_input_corners = assemble::fold_each_corner_one_plane_cuts_a_rounding_from_it(
+            model, &scratch, policy, log,
+        );
+        scratch.names_of_one_point.extend(taken_as_input_corners);
+        Ok(scratch)
     }
 }
 
@@ -654,6 +660,11 @@ pub(crate) struct NamesOfOnePoint {
     /// `meet_of_three_surfaces`'s own fixed order, and which of their meeting
     /// points each one was, as [`MeetPoint::OfThreeSurfaces`] carries them.
     pub(crate) folded: Vec<([Surface; 3], u8)>,
+    /// How far a tolerant policy moved the folded meets to put them at `kept`,
+    /// when they were proved apart from it and taken as one point all the same
+    /// (`docs/decisions.md` §417.7). `None` for a fold the arrangement made,
+    /// where the two were one point within rounding.
+    pub(crate) moved: Option<Approximation>,
 }
 
 /// Give up on a decision nothing can bound, recording that it was asked.
