@@ -45,8 +45,9 @@
 //! Both refusals are gaps and §35 names the consumer that calls each due. One
 //! loop of two is read after all where the half-space [`intersect`] picks it out
 //! by faces along a pipe's or a cone's axis, a ball a pipe cuts in two loops
-//! among them (Q1702): everything of the surface past that half-space is on one
-//! side of the loop ([`what_lies_past_the_picker`]).
+//! among them (Q1702), and where two pipes cross in two loops, the half-space
+//! holding the fat one's axis (Q1717): everything of the surface past that
+//! half-space is on one side of the loop ([`what_lies_past_the_picker`]).
 //!
 //! **A flat face is the exception, because it has a polygon after all**: put
 //! each arc back as its chord and the sides are one, and what the chord leaves
@@ -828,7 +829,8 @@ fn walk_one_outline(
 /// (`tests/a_pointed_cone_drilled_along_its_axis.rs`, row Q1218).
 ///
 /// Where the edge's curve is picked out of the two by a flat half-space facing
-/// along their axis ([`the_picker_this_face_is_read_past`]), the edge still
+/// along their axis, or one of the few others [`what_lies_past_the_picker`]
+/// names ([`the_picker_this_face_is_read_past`]), the edge still
 /// cuts the surface in two, and the face is one of the two pieces: in front of
 /// the half-space the trimming crosses the surface in the edge's curve alone,
 /// so a point there is on the side of the trimming it reads, and every point
@@ -7389,6 +7391,28 @@ fn the_picker_this_face_is_read_past(
 /// `whether_past_the_plane_through_a_balls_centre` reads a fuse's points the
 /// same way and says why (Q1554); `validate.rs` does not read this pair yet.
 ///
+/// **So are two pipes, where the fat one swallows the thin one's whole
+/// cross-section** (Q1717) and they cross in two loops round the thin pipe's
+/// axis. The half-space [`intersect`] names each loop by holds the fat pipe's
+/// axis and faces across it, and neither loop reaches its flat surface. Its
+/// side is not stepped for either: it is which of the two pipes the face is
+/// on.
+///
+/// - **On the fat wall** the flat surface meets the wall in two straight
+///   lines. A line that ran into the thin pipe would come out again through a
+///   loop, which the flat surface misses, so the patch the loop in front
+///   bounds lies wholly in front of it, and everything past is outside that
+///   patch: [`Decision::Pos`], even on the other loop's patch.
+/// - **On the thin wall** the flat surface cuts one closed curve, between the
+///   two loops along every ruling and so inside the fat pipe, and the wall
+///   past it is one tube the loop in front never meets: [`Decision::Neg`],
+///   even beyond the other loop.
+///
+/// `arrange.rs`'s `whether_past_the_plane_between_two_loops` reads a fuse's
+/// points the same way (Q1483). Two pipes whose axes lie along one line cross
+/// in straight lines, and two of one width in no two loops, so neither is read
+/// this way and each is refused by name as before.
+///
 /// A ball on either side was left out for a while (Q1218), because reading it
 /// let a cut cone and a cone closed by a ball on its axis reach a panic in
 /// `fuse/assemble.rs`'s `rings_round`, whose rings each ran along a hyperbola.
@@ -7447,6 +7471,20 @@ fn what_lies_past_the_picker(
     let Some(Picker::InFrontOf(picker)) = named else {
         return Ok(None);
     };
+    if let (Surface::Cylinder(this), Surface::Cylinder(other)) = (surface, partner) {
+        if lie_along_one_line(
+            this.axis().direction().components(),
+            other.axis().direction().components(),
+        ) {
+            return Ok(None);
+        }
+        let side = match this.radius().partial_cmp(&other.radius()) {
+            Some(core::cmp::Ordering::Greater) => Decision::Pos,
+            Some(core::cmp::Ordering::Less) => Decision::Neg,
+            Some(core::cmp::Ordering::Equal) | None => return Ok(None),
+        };
+        return Ok(Some(PastThePicker { picker, side }));
+    }
     if !lie_along_one_line(picker.normal().components(), axis.direction().components()) {
         return Ok(None);
     }
@@ -8218,48 +8256,28 @@ mod tests {
         );
     }
 
-    /// A face that runs along one of two loops is refused rather than named as
-    /// both.
+    /// Each of the two patches a thin bar keeps of a fat bar's wall holds its
+    /// own end of the thin bar and nothing else.
     ///
-    /// A thin bar of radius 1 along `y` through a fat one of radius 3 along `z`,
-    /// intersected, keeps two patches of the fat bar's wall, one at each end of
-    /// the thin bar. Each runs along one of the two loops the two pipes cross in.
-    /// The half-space [`intersect`] tells those loops apart by holds the fat
-    /// bar's axis and faces along the thin bar, so the fat pipe past it holds the
-    /// other patch and the wall outside the thin bar both, and no one side of
-    /// the thin pipe says which.
+    /// [`two_crossed_bars`], the thin bar turned a quarter, keeps one patch of
+    /// the fat wall at each end of the thin bar, each along one of the two
+    /// loops the pipes cross in. The
+    /// half-space [`intersect`] tells those loops apart by is `y ≥ 0` or
+    /// `y ≤ 0`: it holds the fat bar's axis, and past it the fat wall holds the
+    /// other patch and the wall outside the thin bar both, all of it outside
+    /// the patch in front. Until Q1717 each patch was refused
+    /// `AFaceMissesPartOfWhereItsSurfacesCross`.
     ///
-    /// Until Q1702 this was a disk a pipe leaves in a ball's skin, built by
-    /// hand; a ball with a pipe across it is read past the plane through its
-    /// centre now ([`what_lies_past_the_picker`]).
+    /// Every point asked is exactly on the fat wall, `x² + y² = 9`. Inside the
+    /// thin bar is `x² + z² < 1`. A point on a loop, `(0, ±3, 1)`, is asked
+    /// only of the patch along the other loop: the quarter turn that lays the
+    /// thin bar along `y` rounds, its direction coming out `(0, −1, 2.2e-16)`,
+    /// so such a point lands a hair to one side of the thin pipe, and only past
+    /// the half-space is its own side not what is read.
     #[test]
-    fn a_face_along_one_of_two_loops_is_refused_rather_than_named_as_both() {
-        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-        let fat = model
-            .add_round_bar(
-                3.0,
-                10.0,
-                &Isometry::translation(Vector::new(0.0, 0.0, -5.0)).expect("a finite shift"),
-            )
-            .expect("a positive radius and height");
-        let along_y = Isometry::rotation(&Axis::x(), core::f64::consts::FRAC_PI_2)
-            .expect("a finite turn")
-            .compose(&Isometry::translation(Vector::new(0.0, 0.0, -10.0)).expect("a finite shift"));
-        let thin = model
-            .add_round_bar(1.0, 20.0, &along_y)
-            .expect("a positive radius and height");
-        let fused = model
-            .fuse(
-                &[fat],
-                &[thin],
-                crate::Rule::Intersection,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("a thin bar through a fat one");
-        let [solid] = fused.solids()[..] else {
-            panic!("one solid: {:?}", fused.solids());
-        };
+    fn each_patch_a_thin_bar_keeps_of_a_fat_bars_wall_holds_its_own_end_alone() {
+        let (model, solid) =
+            two_crossed_bars(core::f64::consts::FRAC_PI_2, crate::Rule::Intersection);
         let patches: Vec<FaceKey> = model
             .solid(solid)
             .expect("this model made the key")
@@ -8270,29 +8288,299 @@ mod tests {
             })
             .map(|face| face.key())
             .collect();
-        assert_eq!(patches.len(), 2, "one patch of the fat wall at each end");
-
-        for patch in patches {
-            for point in [at(0.0, 3.0, 0.0), at(0.0, -3.0, 0.0)] {
-                let refusal = model
-                    .solid(solid)
-                    .expect("this model made the key")
-                    .face_holds_the_point(
-                        patch,
-                        point,
-                        &Policy::certified(),
-                        &mut ProvenanceLog::new(),
-                    )
-                    .expect_err("a face along one of two loops cannot be read off a sign");
-                assert!(
-                    matches!(
-                        refusal,
-                        Error::AFaceMissesPartOfWhereItsSurfacesCross { face } if face == patch
-                    ),
-                    "got {refusal:?}"
+        let [one, other] = patches[..] else {
+            panic!("one patch of the fat wall at each end: {patches:?}");
+        };
+        let [ahead, behind] =
+            if what_it_holds(&model, solid, one, at(0.0, 3.0, 0.0)) == OnAFace::Held {
+                [one, other]
+            } else {
+                [other, one]
+            };
+        let in_neither = [
+            [0.0, 3.0, 2.0],
+            [0.0, -3.0, 2.0],
+            [3.0, 0.0, 0.0],
+            [-3.0, 0.0, 0.0],
+            [1.8, 2.4, 0.0],
+            [1.8, -2.4, 0.5],
+        ];
+        for (patch, its_own, the_others) in [
+            (
+                ahead,
+                [0.0, 3.0, 0.5],
+                [[0.0, -3.0, -0.5], [0.0, -3.0, 1.0]],
+            ),
+            (
+                behind,
+                [0.0, -3.0, -0.5],
+                [[0.0, 3.0, 0.5], [0.0, 3.0, 1.0]],
+            ),
+        ] {
+            assert_eq!(
+                what_it_holds(&model, solid, patch, PredicatePoint::from(its_own)),
+                OnAFace::Held,
+                "{its_own:?}"
+            );
+            for point in in_neither.into_iter().chain(the_others) {
+                assert_eq!(
+                    what_it_holds(&model, solid, patch, PredicatePoint::from(point)),
+                    OnAFace::NotHeld,
+                    "{point:?}"
                 );
             }
         }
+    }
+
+    /// Each end of the thin bar of [`two_crossed_bars`] left outside the fat
+    /// bar holds its own wall alone, whether the union keeps both ends in one
+    /// solid or the thin bar less the fat one keeps them as two, with the thin
+    /// bar square to the fat one or [`LEANING`].
+    ///
+    /// Each end's wall runs along one of the two loops the pipes cross in.
+    /// Past the half-space [`intersect`] tells those loops apart by, the thin
+    /// wall is one tube the loop in front never meets, running inside the fat
+    /// bar and then out beyond the other loop: all of it on the far side of
+    /// the loop in front, the other end's wall too, though that is outside the
+    /// fat bar. Until Q1717 the leaning walls were refused
+    /// `AFaceMissesPartOfWhereItsSurfacesCross`. The leaning union is refused
+    /// `AWireWillNotLieFlatOnItsFace` before anything is asked of it, with or
+    /// without Q1717, so the leaning ends are asked only as a difference.
+    ///
+    /// Every point asked is on the thin wall, 1 along `x` from its axis: 5
+    /// along the axis either way is outside the fat bar, and within 1.5 of the
+    /// middle inside it.
+    #[test]
+    fn each_end_of_a_thin_bar_poking_out_of_a_fat_one_holds_its_own_wall_alone() {
+        for (turn, rule) in [
+            (LEANING, crate::Rule::Difference),
+            (core::f64::consts::FRAC_PI_2, crate::Rule::Union),
+            (core::f64::consts::FRAC_PI_2, crate::Rule::Difference),
+        ] {
+            let (mut model, [fat, thin]) = a_fat_bar_and_a_thin_one(turn);
+            let what = format!("{rule:?}, turned {turn}");
+            let solids = model
+                .fuse(
+                    &[thin],
+                    &[fat],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} refused: {why:?}"))
+                .solids()
+                .to_vec();
+            let ends: Vec<(SolidKey, FaceKey)> = solids
+                .into_iter()
+                .flat_map(|solid| {
+                    model
+                        .solid(solid)
+                        .expect("this model made the key")
+                        .faces()
+                        .filter(|face| match face.surface() {
+                            Surface::Cylinder(pipe) => pipe.radius() == 1.0,
+                            Surface::Plane(_) | Surface::Sphere(_) | _ => false,
+                        })
+                        .map(|face| (solid, face.key()))
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            let [one, other] = ends[..] else {
+                panic!("{what}: one face of the thin wall at each end: {ends:?}");
+            };
+            let (sin, cos) = turn.sin_cos();
+            let on_the_thin_wall = |along: f64| at(1.0, -along * sin, along * cos);
+            let [ahead, behind] =
+                if what_it_holds(&model, one.0, one.1, on_the_thin_wall(5.0)) == OnAFace::Held {
+                    [one, other]
+                } else {
+                    [other, one]
+                };
+            for ((solid, end), its_own, the_other) in [(ahead, 5.0, -5.0), (behind, -5.0, 5.0)] {
+                assert_eq!(
+                    what_it_holds(&model, solid, end, on_the_thin_wall(its_own)),
+                    OnAFace::Held,
+                    "{its_own} along, {what}"
+                );
+                for along in [the_other, 0.0, 1.5, -1.5] {
+                    assert_eq!(
+                        what_it_holds(&model, solid, end, on_the_thin_wall(along)),
+                        OnAFace::NotHeld,
+                        "{along} along, {what}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The middle of [`two_crossed_bars`] is inside it, and a point either side
+    /// of it is told apart too, with the thin bar square to the fat one or
+    /// [`LEANING`]. Until Q1717 every one was `CannotFollowAFacesTrimming`, a
+    /// ray at either patch of the fat wall being refused, and leaning, a ray at
+    /// the thin wall too.
+    #[test]
+    fn the_middle_of_two_crossed_bars_is_inside_them() {
+        for turn in [LEANING, core::f64::consts::FRAC_PI_2] {
+            let (model, solid) = two_crossed_bars(turn, crate::Rule::Intersection);
+            for (point, expected) in [
+                ([0.0, 0.0, 0.0], crate::Containment::Inside),
+                ([0.0, -2.0, 0.5], crate::Containment::Inside),
+                ([0.0, 3.5, 0.0], crate::Containment::Outside),
+                ([2.0, 0.0, 0.0], crate::Containment::Outside),
+            ] {
+                assert_eq!(
+                    model
+                        .solid(solid)
+                        .expect("this model made the key")
+                        .classify_point(
+                            Point::new(point[0], point[1], point[2]),
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        ),
+                    expected,
+                    "{point:?}, the thin bar turned {turn}"
+                );
+            }
+        }
+    }
+
+    /// [`two_crossed_bars`] fused with a block from `y = 0` up, along the
+    /// half-space [`intersect`] tells the two loops apart by, or from `y = 1`
+    /// up, holds what it should under all three rules, with the thin bar
+    /// square to the fat one or [`LEANING`]. Until Q1717 every one of the
+    /// twelve was refused `AFaceTrimmedByACurveThisCannotFollow`.
+    ///
+    /// The block is 20 on a side and swallows everything of the two bars past
+    /// its bottom. With the thin bar turned `α` off the fat one's axis, the
+    /// part of the two bars from `y = c` up is `V/2 − π·c/sin α` for
+    /// `0 ≤ c ≤ √8`, `V` being all of it and a cut across the thin bar square
+    /// to `y` an ellipse of area `π/sin α`.
+    #[test]
+    fn two_crossed_bars_fused_with_a_block_across_them_hold_what_they_should() {
+        for turn in [LEANING, core::f64::consts::FRAC_PI_2] {
+            fuse_two_crossed_bars_with_a_block_across_them(turn);
+        }
+    }
+
+    fn fuse_two_crossed_bars_with_a_block_across_them(turn: f64) {
+        let both = how_much_two_crossed_bars_hold(turn);
+        for from in [0.0, 1.0] {
+            let past_the_block = both / 2.0 - core::f64::consts::PI * from / turn.sin();
+            for (rule, volume) in [
+                (crate::Rule::Intersection, past_the_block),
+                (crate::Rule::Difference, both - past_the_block),
+                (crate::Rule::Union, 8000.0 + both - past_the_block),
+            ] {
+                let (mut model, bars) = two_crossed_bars(turn, crate::Rule::Intersection);
+                let policy = Policy::certified();
+                let square = crate::ProfileBuilder::new(vec![
+                    [0.0, 0.0],
+                    [20.0, 0.0],
+                    [20.0, 20.0],
+                    [0.0, 20.0],
+                ])
+                .build(&policy, &mut ProvenanceLog::new())
+                .expect("a square");
+                let block = model
+                    .add_extrusion(
+                        &square,
+                        20.0,
+                        &Isometry::translation(Vector::new(-10.0, from, -10.0))
+                            .expect("a finite shift"),
+                    )
+                    .expect("a positive height");
+                let what = format!("{rule:?} with a block from y = {from} up, turned {turn}");
+                let fused = model
+                    .fuse(&[bars], &[block], rule, &policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{what} refused: {why:?}"));
+                let [solid] = fused.solids()[..] else {
+                    panic!("{what} is one solid, not {:?}", fused.solids());
+                };
+                model
+                    .validate(&policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{what} does not validate: {why:?}"));
+                let measured = model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .measure(
+                        rcad_geom::Deflection::of(0.001).expect("a fine mesh"),
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{what} does not measure: {why:?}"));
+                assert!(
+                    (measured.volume() - volume).abs() <= measured.volume_error(),
+                    "{what} holds {volume} and measures {} give or take {}",
+                    measured.volume(),
+                    measured.volume_error()
+                );
+            }
+        }
+    }
+
+    /// The thin bar of [`two_crossed_bars`] turned a twentieth of a turn short
+    /// of square to the fat one. It then stays within `|z| < 4.1` from end to
+    /// end, so it never reaches the flat surface either end of the fat bar is
+    /// on; turned a sixth of a turn off `z`, its ends would sit on them.
+    const LEANING: f64 = 0.4 * core::f64::consts::PI;
+
+    /// A fat bar of radius 3 up `z` from `z = −5` to 5 and a thin one of radius
+    /// 1 and length 20, centred on the origin and turned `turn` about `x` off
+    /// `z`, fused under `rule`. Intersected, the thin bar is cut off where it
+    /// leaves the fat one; a quarter turn lays it along `y`, and then what is
+    /// left is `x² + z² ≤ 1` and `x² + y² ≤ 9`.
+    fn two_crossed_bars(turn: f64, rule: crate::Rule) -> (Model, SolidKey) {
+        let (mut model, [fat, thin]) = a_fat_bar_and_a_thin_one(turn);
+        let fused = model
+            .fuse(
+                &[fat],
+                &[thin],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a thin bar through a fat one");
+        let [solid] = fused.solids()[..] else {
+            panic!("one solid: {:?}", fused.solids());
+        };
+        (model, solid)
+    }
+
+    /// The two bars of [`two_crossed_bars`], fat then thin, not yet fused.
+    fn a_fat_bar_and_a_thin_one(turn: f64) -> (Model, [SolidKey; 2]) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let fat = model
+            .add_round_bar(
+                3.0,
+                10.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, -5.0)).expect("a finite shift"),
+            )
+            .expect("a positive radius and height");
+        let leaning = Isometry::rotation(&Axis::x(), turn)
+            .expect("a finite turn")
+            .compose(&Isometry::translation(Vector::new(0.0, 0.0, -10.0)).expect("a finite shift"));
+        let thin = model
+            .add_round_bar(1.0, 20.0, &leaning)
+            .expect("a positive radius and height");
+        (model, [fat, thin])
+    }
+
+    /// How much [`two_crossed_bars`] holds: `∫∫ 2·√(9 − x²)/sin α` over the
+    /// thin bar's unit disk, `α` being the turn, since a line along the thin
+    /// bar crosses the fat one `1/sin α` as far as a line along `y` would. With
+    /// `x = sin θ` that is `4·∫ cos²θ·√(9 − sin²θ) dθ/sin α` over half a turn.
+    /// That runs smoothly round and round with period `π`, so equal steps over
+    /// one period are exact to a rounding long before a thousand of them.
+    fn how_much_two_crossed_bars_hold(turn: f64) -> f64 {
+        let steps = 1000;
+        let width = core::f64::consts::PI / f64::from(steps);
+        let sum: f64 = (0..steps)
+            .map(|step| {
+                let (sin, cos) = (width * f64::from(step)).sin_cos();
+                cos * cos * (9.0 - sin * sin).sqrt()
+            })
+            .sum();
+        4.0 * width * sum / turn.sin()
     }
 
     /// Each of the two caps a bar cuts out of a ball holds the patch of the
