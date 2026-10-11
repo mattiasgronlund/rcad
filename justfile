@@ -11500,7 +11500,7 @@ queue mode="" *args:
                 'just queue show <id>                         one row, its hold, and its state in other worktrees' \
                 'just queue running                           what holds a slot on this machine, one line each' \
                 'just queue take <id> <branch>                dispatch a ready row to <branch>: state lane:<branch>, held until done, drop or park' \
-                'just queue add <tier> <model> <write set> <what ending in §N>   a new todo row at the foot of its tier; prints the id' \
+                'just queue add <tier> <model> <write set> <what ending in §N>   a new todo row at the foot of its tier; prints the id. <what> starts with from/<id>, was/<id> or from/-: where the row came from (§432)' \
                 'just queue done <id> <merge sha>             close a row as done:<sha>, moved under Closed' \
                 'just queue drop <id> <§N>                    close a row as dropped:§N, moved under Closed' \
                 'just queue park <id> <§N>                    mark a row parked:§N, left in its tier' \
