@@ -41,24 +41,32 @@
 //! that arc still builds, bounded by its two ends (Q1086), and leaning further
 //! it is still refused. An arc from one branch of a hyperbola to the other is
 //! no arc, and the walk refuses it.
+//!
+//! **The checks after each mutation do not ask this, and need not** (Q614).
+//! Moving a solid and copying one write no plane and no run, so a tilted piece
+//! reaches them only from a file, and the sweep refuses it there. The kernel's
+//! own solids have no such edge. A builder and a fuse sweep what they will
+//! write in a model of their own first, and write nothing when it refuses.
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Scale,
-    Sphere, Surface, Torus, Vector,
+    Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane,
+    Point, Scale, Sphere, Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftEdge, DraftFace, DraftStep, DraftWire, Error, Invalid, Model, Result, SolidBuilder,
-    SolidKey,
+    DraftEdge, DraftFace, DraftStep, DraftWire, Error, Invalid, Model, ProfileBuilder, Result,
+    Rule, SolidBuilder, SolidKey,
 };
 
 const F: Orientation = Orientation::Forward;
 const R: Orientation = Orientation::Reversed;
 
+/// The builder sweeps what it was told in a model of its own before it writes
+/// anything into the caller's, so the model it was handed holds nothing after.
 #[test]
 fn a_disc_tilted_off_the_lid_is_refused_whichever_face_is_listed_first() {
     for disc_first in [false, true] {
-        let (_, built) =
+        let (model, built) =
             a_bar_with_its_lid_split_by_a_disc(pipe(1.0), tilted_through_the_corner(), disc_first);
 
         assert!(
@@ -70,6 +78,7 @@ fn a_disc_tilted_off_the_lid_is_refused_whichever_face_is_listed_first() {
             ),
             "disc first {disc_first}: the builder gave {built:?}"
         );
+        assert_eq!(model.solids().count(), 0, "disc first {disc_first}");
     }
 }
 
@@ -152,6 +161,197 @@ fn the_sweep_refuses_the_tilted_half_disc_read_back_from_bytes() {
             "half disc first {half_first}: the sweep gave {swept:?}"
         );
     }
+}
+
+/// A fuse sweeps its answer before it writes it into the caller's model: it
+/// writes it into a throwaway model first and refuses it there if the sweep
+/// does, with this check among the sweep's and the answer's own room. So a
+/// check of its own after the write would have nothing left to refuse.
+///
+/// Each bar here runs from `z = −1000` up to its lid at 4, with the piece of
+/// its lid `2e-12` off the lid at the far side of its curve: a disc and a half
+/// disc that high above the lid, and a half disc leaning along its chord. That
+/// is inside the `1.4e-11` room a corner `1000` out gets, so each builds and
+/// passes the sweep, and outside the `5.7e-14` room of the answer cut down to
+/// the top 4. Whatever the fuse answers, the model is left holding the two
+/// solids it held, or every solid it made passes the sweep.
+///
+/// Today none of them reaches that sweep: two planes apart meet nowhere, and
+/// the half disc leaning along its chord is refused `Undecidable`, ordering
+/// corners along the lid's rim. The disc leaning through its corner is left
+/// out, because the fuse panics on it, in `arcs_an_edge_covers`.
+#[test]
+fn a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model() {
+    let above =
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0 + 2e-12), up()).expect("a plane");
+    let leaning = leaning_off_the_lid_through(Point::new(0.0, 0.0, 4.0), 2e-12);
+    let mut wrote = Vec::new();
+    for inner_first in [false, true] {
+        for (which, (mut model, built)) in [
+            (
+                "disc above",
+                a_bar_whose_lid_is_split(-1000.0, above, inner_first, a_circle_naming(pipe(1.0))),
+            ),
+            (
+                "half disc above",
+                a_bar_whose_lid_is_split(
+                    -1000.0,
+                    above,
+                    inner_first,
+                    a_half_circle_and_its_chord(pipe(1.0)),
+                ),
+            ),
+            (
+                "half disc leaning",
+                a_bar_whose_lid_is_split(
+                    -1000.0,
+                    leaning,
+                    inner_first,
+                    a_half_circle_and_its_chord(pipe(1.0)),
+                ),
+            ),
+        ] {
+            let bar = built.unwrap_or_else(|why| panic!("{which}: the tall bar gave {why:?}"));
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{which}: the sweep gave {why:?}"));
+            let block = a_block_whose_floor_is_at(0.0, &mut model);
+
+            let fused = model.fuse(
+                &[bar],
+                &[block],
+                Rule::Intersection,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+
+            let what_it_left = match &fused {
+                Err(_) if model.solids().count() == 2 => continue,
+                Err(_) => format!("{} solids", model.solids().count()),
+                Ok(fused) => {
+                    let swept: Result<Vec<()>> = fused
+                        .solids()
+                        .iter()
+                        .map(|&made| {
+                            model.validate_solid(
+                                made,
+                                &Policy::certified(),
+                                &mut ProvenanceLog::new(),
+                            )
+                        })
+                        .collect();
+                    match swept {
+                        Ok(_) => continue,
+                        Err(why) => format!("a solid the sweep refuses with {why:?}"),
+                    }
+                }
+            };
+            wrote.push(format!(
+                "{which}, inner piece first {inner_first}: {fused:?}, leaving {what_it_left}"
+            ));
+        }
+    }
+    assert!(wrote.is_empty(), "{wrote:#?}");
+}
+
+/// Moving a solid and copying one are the two mutations
+/// `Model::check_touched_edge` runs after that write no plane, no corner and
+/// no run of their own: a movement goes on the shell, and a copy is the
+/// original bit for bit. So a tilted piece reaches them only in a solid that
+/// already held it, and the one door such a solid comes in by is
+/// `Deserialize`, which asks nothing that needs arithmetic
+/// (`docs/decisions.md` §44.5). Both answer, and the sweep still refuses the
+/// bar, and its copy, by the same name. A panic here would be a panic on what
+/// a caller's bytes said.
+#[test]
+fn moving_or_copying_a_tilted_piece_read_back_from_bytes_leaves_it_for_the_sweep() {
+    let away = Isometry::translation(Vector::new(10.0, 0.0, 0.0)).expect("a movement");
+    let mut not_left = Vec::new();
+    for inner_first in [false, true] {
+        for (mut model, expected) in the_two_tilted_pieces_read_back_from_bytes(inner_first) {
+            let bar = model.solids().next().expect("the bar").key();
+
+            model.place_solid(bar, &away).expect("the bar moves");
+            let copy = model.copy_solid(bar).expect("the bar copies");
+
+            for (which, solid) in [("bar", bar), ("copy", copy)] {
+                let swept =
+                    model.validate_solid(solid, &Policy::certified(), &mut ProvenanceLog::new());
+                if !matches!(&swept, Err(Error::Invalid(broken)) if *broken == expected) {
+                    not_left.push(format!(
+                        "{expected:?}, inner piece first {inner_first}, the {which}: {swept:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(not_left.is_empty(), "{not_left:#?}");
+}
+
+/// The rest of what `Model::check_touched_edge` runs after is the kernel's own
+/// solids, and none of them has an edge this check could refuse: it asks only
+/// of an edge that runs `RightRoundWhereItCrosses` or `PartOfWhereItCrosses`
+/// with every face along it flat, and every such edge these write has a ball
+/// or a pipe along it. The ball's seam is the one such edge, so the count of
+/// them is not nought.
+#[test]
+fn no_solid_the_kernel_makes_has_a_named_crossing_between_flat_faces_alone() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(Scale::millimetres(10.0).expect("a size"));
+    let ring = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+        .with_hole(vec![[1.0, 1.0], [1.0, 3.0], [3.0, 3.0], [3.0, 1.0]])
+        .build(&policy, &mut log)
+        .expect("a square with a square hole");
+    let leaning_caps = [
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.25, 0.0, -1.0)),
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.5, 1.0)),
+    ]
+    .map(|cap| cap.expect("a plane"));
+    let made = [
+        model.add_cube(2.0, &policy, &mut log),
+        model.add_extrusion(&ring, 3.0, &Isometry::identity()),
+        model.add_round_bar(1.0, 2.0, &Isometry::identity()),
+        model.add_ball(1.5, &Isometry::identity()),
+        model.add_bar_cut_off_by(1.0, leaning_caps, &Isometry::identity(), &policy, &mut log),
+    ]
+    .map(|made| made.expect("the kernel makes it"));
+
+    let mut asked_about = 0;
+    let mut between_flat_faces_alone = Vec::new();
+    for key in made {
+        let solid = model.solid(key).expect("a solid of this model");
+        for edge in solid
+            .faces()
+            .flat_map(|face| face.wires())
+            .flat_map(|wire| wire.coedges())
+            .map(|coedge| coedge.edge())
+        {
+            let run = edge.run();
+            if !matches!(
+                run,
+                EdgeRun::RightRoundWhereItCrosses { .. } | EdgeRun::PartOfWhereItCrosses { .. }
+            ) {
+                continue;
+            }
+            asked_about += 1;
+            let something_curved_along_it = edge.neighbouring_faces().any(|face| {
+                let face = model.face(face).expect("a face of this model");
+                !matches!(face.surface(), Surface::Plane(_))
+            });
+            if !something_curved_along_it {
+                between_flat_faces_alone.push(format!("{run:?}"));
+            }
+        }
+    }
+    assert!(
+        asked_about > 0,
+        "no edge of these is one the check asks about"
+    );
+    assert!(
+        between_flat_faces_alone.is_empty(),
+        "{between_flat_faces_alone:#?}"
+    );
 }
 
 /// Why the tilted half disc is refused rather than drawn: the volume of the
@@ -615,7 +815,13 @@ fn a_bar_with_its_lid_split_by_a_disc(
     disc: Plane,
     disc_first: bool,
 ) -> (Model, Result<SolidKey>) {
-    a_bar_whose_lid_is_split(disc, disc_first, |builder| {
+    a_bar_whose_lid_is_split(0.0, disc, disc_first, a_circle_naming(named))
+}
+
+/// The circle of radius 1 on the lid through `(1, 0, 4)`, naming `named`, and
+/// the wires round the hole it leaves and round the disc inside it.
+fn a_circle_naming(named: Surface) -> impl FnOnce(&mut SolidBuilder) -> (DraftWire, DraftWire) {
+    move |builder| {
         let on_the_circle = builder
             .add_vertex(Point::new(1.0, 0.0, 4.0))
             .expect("a corner");
@@ -635,7 +841,7 @@ fn a_bar_with_its_lid_split_by_a_disc(
             one_step_round(builder, circle, round_the_hole),
             one_step_round(builder, circle, round_the_disc),
         )
-    })
+    }
 }
 
 /// The lid split by the half of the circle of radius 1 at `x ≥ 0` and the
@@ -647,14 +853,21 @@ fn a_bar_with_its_lid_split_by_a_half_disc(
     half: Plane,
     half_first: bool,
 ) -> (Model, Result<SolidKey>) {
+    a_bar_whose_lid_is_split(0.0, half, half_first, a_half_circle_and_its_chord(named))
+}
+
+/// The half of the circle of radius 1 on the lid at `x ≥ 0`, naming `named`
+/// and picked out by the half-space `x ≥ 0`, and the chord `x = 0` across it.
+fn a_half_circle_and_its_chord(
+    named: Surface,
+) -> impl FnOnce(&mut SolidBuilder) -> (DraftWire, DraftWire) {
     let east = HalfSpace::through_a_point_facing(Point::origin(), Vector::new(1.0, 0.0, 0.0))
         .expect("a half-space");
     let run = EdgeRun::PartOfWhereItCrosses {
         and: named,
         picked_by: smallvec::smallvec![Picker::from(east)],
     };
-    let corners = [Point::new(0.0, -1.0, 4.0), Point::new(0.0, 1.0, 4.0)];
-    a_bar_with_its_lid_split_by_an_arc_and_its_chord(run, corners, half, half_first)
+    an_arc_and_its_chord(run, [Point::new(0.0, -1.0, 4.0), Point::new(0.0, 1.0, 4.0)])
 }
 
 /// The lid split by an arc that runs `run` between two corners on it and by
@@ -665,7 +878,22 @@ fn a_bar_with_its_lid_split_by_an_arc_and_its_chord(
     inner: Plane,
     inner_first: bool,
 ) -> (Model, Result<SolidKey>) {
-    a_bar_whose_lid_is_split(inner, inner_first, |builder| {
+    a_bar_whose_lid_is_split(
+        0.0,
+        inner,
+        inner_first,
+        an_arc_and_its_chord(run, [from, to]),
+    )
+}
+
+/// An arc on the lid that runs `run` between two corners on it, the chord back
+/// between them, and the wires round the hole they leave and round the piece
+/// they close off.
+fn an_arc_and_its_chord(
+    run: EdgeRun,
+    [from, to]: [Point; 2],
+) -> impl FnOnce(&mut SolidBuilder) -> (DraftWire, DraftWire) {
+    move |builder| {
         let south = builder.add_vertex(from).expect("a corner");
         let north = builder.add_vertex(to).expect("a corner");
         let arc = builder.add_edge(south, north, run).expect("an edge");
@@ -678,22 +906,23 @@ fn a_bar_with_its_lid_split_by_an_arc_and_its_chord(
             builder.add_wire(&steps).expect("a wire")
         };
         (round(builder, R), round(builder, F))
-    })
+    }
 }
 
-/// A bar of radius 3 up `z` from 0 to 4, its lid split in two by what `split`
-/// adds: the wire it hands back first goes round the hole it leaves in the
-/// lid, and the second round the piece inside, which is put on `inner`. Every
-/// edge is walked the way Q386's probe found the sound bar wants.
+/// A bar of radius 3 up `z` from `floor` to 4, its lid split in two by what
+/// `split` adds: the wire it hands back first goes round the hole it leaves in
+/// the lid, and the second round the piece inside, which is put on `inner`.
+/// Every edge is walked the way Q386's probe found the sound bar wants.
 fn a_bar_whose_lid_is_split(
+    floor: f64,
     inner: Plane,
     inner_first: bool,
     split: impl FnOnce(&mut SolidBuilder) -> (DraftWire, DraftWire),
 ) -> (Model, Result<SolidKey>) {
-    let base = Plane::from_point_and_normal(Point::origin(), -up()).expect("a plane");
+    let base = Plane::from_point_and_normal(Point::new(0.0, 0.0, floor), -up()).expect("a plane");
     let mut builder = SolidBuilder::new();
     let at_the_bottom = builder
-        .add_vertex(Point::new(3.0, 0.0, 0.0))
+        .add_vertex(Point::new(3.0, 0.0, floor))
         .expect("a corner");
     let at_the_top = builder
         .add_vertex(Point::new(3.0, 0.0, 4.0))
@@ -757,6 +986,36 @@ fn one_step_round(builder: &mut SolidBuilder, edge: DraftEdge, way: Orientation)
     builder
         .add_wire(&[DraftStep::Along(coedge)])
         .expect("a wire")
+}
+
+/// The tilted disc and the tilted half disc read back from bytes, each with the
+/// name the sweep refuses it by.
+fn the_two_tilted_pieces_read_back_from_bytes(inner_first: bool) -> [(Model, Invalid); 2] {
+    let (model, built) = a_bar_with_its_lid_split_by_a_disc(pipe(1.0), the_lid(), inner_first);
+    built.expect("the disc on the lid's own plane builds");
+    [
+        (
+            with_the_inner_plane_swapped(&model, inner_first, tilted_through_the_corner()),
+            Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes,
+        ),
+        (
+            the_tilted_half_disc_read_back_from_bytes(inner_first),
+            Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes,
+        ),
+    ]
+}
+
+/// A cube of side 10 whose floor is at `z = floor`, wide enough to hold the
+/// bar's wall and tall enough to hold its lid.
+fn a_block_whose_floor_is_at(floor: f64, model: &mut Model) -> SolidKey {
+    let block = model
+        .add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube");
+    let under_the_bar = Isometry::translation(Vector::new(-5.0, -5.0, floor)).expect("a movement");
+    model
+        .place_solid(block, &under_the_bar)
+        .expect("the cube moves");
+    block
 }
 
 /// The bar with its lid split by a half disc on the lid's own plane, which
