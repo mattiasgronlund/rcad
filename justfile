@@ -739,6 +739,19 @@ pre-gate:
 # step would run beside the others to the end of the gate before it could say
 # "commit first". Like the refusal of a misspelt word it prints no summary
 # block: the block describes steps, and none ran. `docs/decisions.md` §415.
+#
+# **The steps run in a run of their own, and the call only follows it.** A
+# `/clear` kills the command every agent has running, and a gate is the one it
+# kills most (§429.1). So the call starts the run with a double fork, which
+# leaves no agent's shell its ancestor, then prints what the run prints and
+# exits with its code. The run's pid, output and exit code are files in
+# `<gate_log>.run/`. The same gate run again in the same tree — the same
+# commit and the same words — follows a run that is still going instead of
+# starting another, so a merger whose gate came back 137 gets it back by
+# running the same command. Any other gate refuses while one runs. A run that
+# died without an exit code is reported once, as ended without finishing, and
+# the gate after that starts afresh. A Ctrl-C is passed on to the run.
+# `docs/decisions.md` §429.8.
 [doc("Every step, as many at once as there are cores, on a tree with nothing uncommitted or untracked. `just gate quiet` prints one line a step and the summary; `just gate quiet fresh` serves nothing from an earlier green; a third word `1` runs the steps in turn.")]
 gate mode="loud" verdicts="reuse" jobs="cores":
     #!/usr/bin/env bash
@@ -760,21 +773,132 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         echo "just gate takes how many steps to run at once, or nothing, third, not '{{ jobs }}'" >&2
         exit 2
     fi
-    # Before the log is emptied, so a refused run leaves the last real gate's
-    # log where it was. `--untracked-files` is named because a user's
-    # `status.showUntrackedFiles=no` would otherwise hide an untracked `.rs`
-    # that cargo compiles all the same.
-    dirty=$(git status --porcelain --untracked-files=normal) || {
-        echo "just gate could not ask git whether this tree has uncommitted or untracked files" >&2
-        exit 2
-    }
-    if [ -n "$dirty" ]; then
-        echo "just gate refuses a tree with uncommitted or untracked files, since no sha names what it would read:" >&2
-        git status --short --untracked-files=normal >&2
-        echo "commit first — a WIP commit is enough, and the branch is still on disk (docs/decisions.md §415)" >&2
-        exit 2
-    fi
     log='{{ gate_log }}'
+    # Absolute, so that `pgrep -af <tree>` finds the run by its script's path.
+    case "$log" in
+        /*) run="$log.run" ;;
+        *) run="$PWD/$log.run" ;;
+    esac
+    if [ -z "${RCAD_GATE_RUN:-}" ]; then
+        mkdir -p "$run"
+        exec 9>"$run/lock"
+        flock 9
+        # What makes two calls the same gate: the commit, since the run reads
+        # the tree it started on, and every word that changes what it runs or
+        # prints. The run prints one form only, and `1` is asked for to rule
+        # out steps getting in each other's way (§372.8).
+        this=$(
+            echo commit "$(git rev-parse HEAD 2>/dev/null)"
+            echo steps {{ gate_steps }}
+            echo reusable {{ gate_reusable_steps }}
+            echo verdicts "$verdicts"
+            echo mode "$mode"
+            echo jobs "$jobs"
+        )
+        # A pid can be another process by the time it is read again, after a
+        # reboot or once the pids wrap, so the run is known by its start too.
+        # A zombie has ended.
+        identity() {
+            local stat
+            read -r stat 2>/dev/null <"/proc/$1/stat" || return 1
+            stat=${stat##*) }
+            set -- $stat
+            case "$1" in Z|X) return 1 ;; esac
+            echo "$(</proc/sys/kernel/random/boot_id) ${20}"
+        }
+        alive() { [ -n "$2" ] && [ "$(identity "$1")" = "$2" ]; }
+        # Prints what the run prints until it ends, and exits with its code.
+        # The run is no child of this call, so `wait` cannot reach it: its files
+        # are all there is to go on.
+        follow() {
+            local pid want code
+            pid=$(<"$run/pid")
+            want=$(cat "$run/start" 2>/dev/null)
+            # A Ctrl-C reaches this call and not the run, which leads a session
+            # of its own and, as a background job, ignores SIGINT. So it is
+            # passed on as SIGTERM, to the run's whole process group.
+            trap 'stop "$pid" "$want"' INT
+            exec 3<"$run/out"
+            while :; do
+                code=""
+                [ ! -e "$run/exit" ] || code=$(<"$run/exit")
+                cat <&3
+                [ -z "$code" ] || exit "$code"
+                if ! alive "$pid" "$want"; then
+                    [ ! -e "$run/exit" ] || continue
+                    : >"$run/lost"
+                    echo "just gate: the run (pid $pid) ended without finishing; $log holds what it ran"
+                    exit 1
+                fi
+                sleep 0.2
+            done
+        }
+        stop() {
+            ! alive "$1" "$2" || kill -TERM -- "-$1" 2>/dev/null
+            : >"$run/stopped"
+            echo "just gate: a Ctrl-C stopped the run (pid $1)" >&2
+            exit 130
+        }
+        # A run that ended, or that a call already found dead or stopped, is
+        # not followed: the gate starts afresh.
+        if [ -e "$run/pid" ] && [ ! -e "$run/exit" ] && [ ! -e "$run/lost" ] && [ ! -e "$run/stopped" ]; then
+            pid=$(<"$run/pid")
+            if [ "$(cat "$run/gate" 2>/dev/null)" = "$this" ]; then
+                flock -u 9
+                exec 9>&-
+                ! alive "$pid" "$(cat "$run/start" 2>/dev/null)" \
+                    || echo "· following the gate already running in this tree, pid $pid, started $(cat "$run/started")"
+                follow
+            fi
+            if alive "$pid" "$(cat "$run/start" 2>/dev/null)"; then
+                {
+                    echo "just gate will not start beside the gate already running in this tree, pid $pid," \
+                        "started $(cat "$run/started"), since it is another gate:"
+                    sed 's/^/  /' "$run/gate"
+                    echo "wait for it to end, or run that same gate to follow it (docs/decisions.md §429.8)"
+                } >&2
+                exit 2
+            fi
+        fi
+        # After the check for a run to follow, since following reads nothing
+        # of the tree and a run can write into it, as a failing proptest does.
+        # Before the log is emptied, so a refused run leaves the last real
+        # gate's log where it was. `--untracked-files` is named because a
+        # user's `status.showUntrackedFiles=no` would otherwise hide an
+        # untracked `.rs` that cargo compiles all the same.
+        dirty=$(git status --porcelain --untracked-files=normal) || {
+            echo "just gate could not ask git whether this tree has uncommitted or untracked files" >&2
+            exit 2
+        }
+        if [ -n "$dirty" ]; then
+            echo "just gate refuses a tree with uncommitted or untracked files, since no sha names what it would read:" >&2
+            git status --short --untracked-files=normal >&2
+            echo "commit first — a WIP commit is enough, and the branch is still on disk (docs/decisions.md §415)" >&2
+            exit 2
+        fi
+        # Removed rather than emptied, so that a run still exiting keeps the
+        # files it has open, and the new run gets files of its own.
+        rm -f "$run/pid" "$run/start" "$run/exit" "$run/lost" "$run/stopped" \
+            "$run/gate" "$run/out" "$run/script" "$run/started"
+        printf '%s\n' "$this" >"$run/gate"
+        # `$0` is just's copy of this script, which goes when just does.
+        cp "$0" "$run/script"
+        : >"$run/out"
+        date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started"
+        # A double fork, as `setsid -f` does: the subshell starts the run and
+        # exits, so the run is init's before this call follows it, and in a
+        # session of its own.
+        (
+            RCAD_GATE_RUN=1 setsid bash "$run/script" "$@" </dev/null >>"$run/out" 2>&1 9>&- &
+            echo "$!" >"$run/pid"
+            identity "$!" >"$run/start"
+        )
+        flock -u 9
+        exec 9>&-
+        follow
+    fi
+    # The gates a selftest runs inside this one are calls, not runs.
+    unset RCAD_GATE_RUN
     mkdir -p "$(dirname "$log")"
     : >"$log"
     # One log a step, so that a failing step's tail is its own however many
@@ -1003,6 +1127,9 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     if [ "$status" -eq 0 ]; then
         {{ just_executable() }} _record-green "{{ gate_steps }}"
     fi
+    # Moved into place whole, so a follower never reads half of it.
+    echo "$status" >"$run/exit.new"
+    mv "$run/exit.new" "$run/exit"
     exit $status
 
 # A name for the code a gate reads. It prints a sha256, or one sentence saying
@@ -2069,8 +2196,12 @@ check-gate-verdicts-selftest:
     hold="$dir/hold"
     run="$dir/gate.log.run"
     export GATE_SELFTEST_HOLD="$hold"
+    # In a group of its own, as Claude Code starts a command, so that it can be
+    # stopped as Claude Code stops one. With SIGINT as a terminal leaves it: a
+    # background job starts with SIGINT ignored, and bash cannot trap a signal
+    # that was ignored when it started.
     started_gate() {
-        setsid "$j" --set gate_steps _gate-selftest-sleep --set gate_reusable_steps '' \
+        env --default-signal=INT setsid "$j" --set gate_steps _gate-selftest-sleep --set gate_reusable_steps '' \
             --set gate_log "$dir/gate.log" gate quiet >"$1" 2>&1 &
     }
 
