@@ -118,7 +118,7 @@ pub enum Containment {
     /// ray no face but the ring's threw away. A point another face holds is
     /// [`Containment::OnBoundary`], and a box whose every ray another face
     /// grazes is [`Containment::Undecidable`], as they are on the same solid
-    /// without the ring (Q1716).
+    /// without the ring, even where the box meets the ring too (Q1716, Q1739).
     ///
     /// Deliberately its own answer and not
     /// [`Containment::CannotFollowAFacesTrimming`], which says a *trimming*
@@ -770,24 +770,21 @@ impl SolidView<'_> {
         let from = point.enclosure();
         let along = gap_enclosing(from, target);
 
-        let meets_it = match side_of_surface(&surface, point) {
+        match side_of_surface(&surface, point) {
             // The point is on this face's surface, so the ray starts there and
             // crosses nothing. Whether it is on the *face* is the outline's
             // question, the same as a flat face's.
             Decision::Zero => {
                 self.ask_whether_the_face_holds_it(face, tally, point, policy, log);
-                false
             }
-            Decision::Pos | Decision::Neg => false,
+            Decision::Pos | Decision::Neg => (),
             Decision::Undecidable { enclosure } => {
-                let meets_it = !self.face_holds_none_of(face, point, policy, log);
-                if meets_it {
+                if !self.face_holds_none_of(face, point, policy, log) {
                     tally.grazed(enclosure);
                 }
-                meets_it
             }
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
-        };
+        }
 
         // `+1` where the surface's own gradient points out of the material and
         // `-1` where the face is used the other way round, which is the same
@@ -821,9 +818,10 @@ impl SolidView<'_> {
             // answered rather than refused. The other faces are still counted:
             // one that holds the point puts it on the skin, and one that grazes
             // the ray throws it away, whatever this face would have added
-            // (Q1716).
+            // (Q1716), even where this face's own sign straddled the point and
+            // grazed it above (Q1739).
             Err(_) if matches!(surface, Surface::Torus(_)) => {
-                tally.unfired(face.key(), meets_it);
+                tally.unfired(face.key());
                 return;
             }
             // A plane, a ball, a pipe or a cone that could not tell is what
@@ -1385,9 +1383,6 @@ struct Crossings {
     /// The first face whose surface the ray could not be fired at, so that
     /// its crossings are not in `winding`.
     unfired_at: Option<FaceKey>,
-    /// Whether a face the ray could not be fired at may hold a point of the
-    /// box the ray starts from, and grazed the ray for it.
-    an_unfired_face_meets_it: bool,
     /// The first face whose trimming nothing could follow where the ray asked
     /// it, so that no count of this ray is to be trusted, and no other ray
     /// gets past it unless a face that answered threw it away.
@@ -1397,13 +1392,16 @@ struct Crossings {
 impl Crossings {
     /// Add in one face's own tally.
     ///
-    /// **A graze from a face that did not answer is not one the ray would get
-    /// whatever that face said.** A face whose trimming nothing follows
-    /// grazes a ray where it cannot show it holds none of the box the ray
-    /// starts from or meets it in, and that is for want of the answer it
-    /// refused; following its trimming might have put the box off it. A graze
-    /// from any other face throws the ray away whatever the faces that did not
-    /// answer would add.
+    /// **Only a graze from a face that answered throws the ray away whatever
+    /// the faces that did not answer would add.** A face whose trimming
+    /// nothing follows grazes a ray where it cannot show it holds none of the
+    /// box the ray starts from or meets it in, and that is for want of the
+    /// answer it refused; following its trimming might have put the box off
+    /// it. A ring the ray could not be fired at grazes it from its own sign,
+    /// before any firing, so that graze would stand whatever a ray fired at
+    /// the ring said. It is left out all the same, so that a box on the ring's
+    /// wall that no other face grazes stays refused, as `docs/decisions.md`
+    /// §323.3 keeps it (Q1739).
     fn add(&mut self, face: Self) {
         let Self {
             winding,
@@ -1413,7 +1411,6 @@ impl Crossings {
             worst_enclosure,
             parted_at,
             unfired_at,
-            an_unfired_face_meets_it,
             unfollowed_at,
         } = face;
         let it_answered = unfired_at.is_none() && unfollowed_at.is_none();
@@ -1424,7 +1421,6 @@ impl Crossings {
         self.worst_enclosure = self.worst_enclosure.max(worst_enclosure);
         self.parted_at = self.parted_at.or(parted_at);
         self.unfired_at = self.unfired_at.or(unfired_at);
-        self.an_unfired_face_meets_it |= an_unfired_face_meets_it;
         self.unfollowed_at = self.unfollowed_at.or(unfollowed_at);
     }
 
@@ -1439,20 +1435,19 @@ impl Crossings {
         self.parted_at.get_or_insert(face);
     }
 
-    /// The ray could not be fired at `face`'s surface; `meets_it` is whether
-    /// `face` grazed it already, as one that may hold a point of its box.
-    fn unfired(&mut self, face: FaceKey, meets_it: bool) {
+    /// The ray could not be fired at `face`'s surface.
+    fn unfired(&mut self, face: FaceKey) {
         self.unfired_at.get_or_insert(face);
-        self.an_unfired_face_meets_it |= meets_it;
     }
 
     /// Whether this ray is thrown away whatever the faces it could not be
     /// fired at, or whose trimming nothing could follow, would add to it: a
-    /// face that answered grazed it (Q1716, Q1727).
+    /// face that answered grazed it (Q1716, Q1727). That holds where the box
+    /// straddles the sign of the ring left unfired, too (Q1739). A ray fired
+    /// at the ring would add crossings, grazes or a trimming nothing follows,
+    /// and a ray another face grazed is thrown away whichever it added.
     fn is_thrown_away_without_them(&self) -> bool {
-        self.a_face_that_answered_grazed_it
-            && !self.an_unfired_face_meets_it
-            && self.parted_at.is_none()
+        self.a_face_that_answered_grazed_it && self.parted_at.is_none()
     }
 
     /// Take in what a face said about a point on its own surface.
