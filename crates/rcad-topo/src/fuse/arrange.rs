@@ -1174,6 +1174,7 @@ impl<'f> Arrangement<'f> {
             .map(|node| NamesOfOnePoint {
                 kept: self.meet_point(node),
                 folded: self.nodes[node].also.clone(),
+                moved: None,
             })
             .collect()
     }
