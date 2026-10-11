@@ -24,6 +24,14 @@ in the same commit. On 2026-10-11 that gave:
 - Since 10-03, each row closed `done` filed 0.95 new rows (596 for 625). Before
   that it was about 1.5. The four rows filed on 09-25, Q1, Q28, Q5 and Q4, had
   led to 713 rows between them, 145 still open.
+- Where a commit closes more than one row and the new row names none of them,
+  the parent above is a guess: the first row closed. 40 rows got their parent
+  that way. The 16 of them in Q1's tree come from three dispatcher commits
+  whose messages say which row left which, and 7 of the 16 were wrong:
+  c0b29166 says Q57 left Q72, Q73 and Q74, fab561be says Q75's verifier found
+  Q114, Q115 and Q116, and e5a7d95a says Q412 replaces Q204. Moving those 7
+  takes Q1's tree from 335 rows to 224. The 111 rows that leave go to Q4 and
+  Q5, so the 713 stands. The other 24 guesses were not checked.
 
 The gap in the second bullet is why the row must say it, at the moment it is
 filed, by whoever knows.
@@ -103,4 +111,7 @@ row. The queue file is in git and travels with every copy.
 - **A recipe that prints the growth**: for each first row, how many rows it led
   to and how many are open, reading the word on rows filed since this section
   and §432.1's commit inference on older ones. Filed as Q1692, `from/-`, the
-  first row to carry the word.
+  first row to carry the word. Filed again as Q1696, `was/Q1692`, once §432.1's
+  last bullet found the first-row-closed guess wrong: Q1696 takes the parent
+  from the commit message where the commit closes several rows, and prints
+  unknown where the message does not say.
