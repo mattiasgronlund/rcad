@@ -445,6 +445,31 @@ fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_answers_every_rule() 
     }
 }
 
+#[test]
+fn probe_q1683() {
+    let gives = what_each_rule_gives(|model| {
+        let thin = model
+            .add_round_bar(
+                1.0,
+                20.0,
+                &at(-10.0, 3.5, 5.0)
+                    .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is an axis")),
+            )
+            .expect("a bar of radius one");
+        let fat = model
+            .add_round_bar(4.0, 10.0, &Isometry::identity())
+            .expect("a bar of radius four");
+        [
+            cut(model, thin, [-20.0, -20.0, 5.0], [20.0, 20.0, 20.0]),
+            fat,
+        ]
+    });
+    for answer in &gives {
+        eprintln!("PROBE {answer:?}");
+    }
+    panic!("probe");
+}
+
 /// `4∫₀¹ √((16 − y²)(1 − y²)) dy`, the part of the half bar of radius 1 above
 /// inside the bar of radius 4, worked by the midpoint rule in `t` with
 /// `y = sin t`. The integrand `4cos²t·√(16 − sin²t)` is smooth and its odd
