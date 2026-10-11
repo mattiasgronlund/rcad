@@ -164,7 +164,9 @@ what is not a row.
   `refuses`, then `/A` to `/D` as above. The class names the tier (§403): a row
   of class A or B is `add 1`, and one of class C or D is `add 5`. A row in any
   tier is `small` by the rule above.
-- `["after", "@1", "<id>[,<id>]"]` for a row that waits on another.
+- `["after", "@1", "<id>[,<id>]"]` for a row that waits on another. A row
+  with no class goes down to the latest tier among the rows it waits on, so
+  `add 1` and then `after` a tier 5 row lands it in tier 5 (§435.6).
 
 `@1`, `@2` are the first and second `add` of your own list. Ids come from a
 shared counter, so a step never names a new id itself. Before you add a row,

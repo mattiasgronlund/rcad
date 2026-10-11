@@ -37,7 +37,8 @@ names the verb that fixes it: `just queue tier <id> <tier>`.
 *§435 amended this on 2026-10-11, at Mattias's word. A row with no class that
 waits on a tier 5 row goes down to tier 5 with it, so an open tier 5 row has a
 class, or its `after:` names a tier 5 row. And a row with no class stays in
-tier 1 only while it waits on nothing outside tier 1. Q1736 builds the check.*
+tier 1 only while it waits on nothing outside tier 1. `check-queue` holds this
+now (§435.10).*
 
 ### 403.3 The fill walks tiers 1 and 5 in class order
 
