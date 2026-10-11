@@ -42,7 +42,11 @@
 //!
 //! Where a face is trimmed by something else — an *arc* of a crossing, or one
 //! loop of a crossing that has two — this refuses by name rather than guessing.
-//! Both refusals are gaps and §35 names the consumer that calls each due.
+//! Both refusals are gaps and §35 names the consumer that calls each due. One
+//! loop of two is read after all where the half-space [`intersect`] picks it out
+//! by faces along a pipe's or a cone's axis, a ball a pipe cuts in two loops
+//! among them (Q1702): everything of the surface past that half-space is on one
+//! side of the loop ([`what_lies_past_the_picker`]).
 //!
 //! **A flat face is the exception, because it has a polygon after all**: put
 //! each arc back as its chord and the sides are one, and what the chord leaves
@@ -7370,6 +7374,21 @@ fn the_picker_this_face_is_read_past(
 /// is on the curve's side towards it: on a cone through the apex, which joins
 /// the two nappes, and on a ball as the cap past the flat surface.
 ///
+/// **A ball a pipe cuts in two loops is read too** (Q1702), the axis again
+/// being the pipe's, but its side is not stepped for: it is
+/// [`Decision::Pos`], the pipe's outside, wherever the corner is. The only
+/// half-space [`intersect`] names one of those loops by is the one through
+/// the ball's centre square to the pipe, built only where the ball swallows a
+/// whole cross-section of the pipe, so the circle the flat surface cuts the
+/// ball in is outside the pipe. The ball past the flat surface is one cap the
+/// loop in front never meets, holding that circle: all of it is on the band's
+/// side of the loop, even inside the other loop's patch. A step from the loop
+/// along the line of longitude says so only where the centre is nearer the
+/// axis than the pipe is wide; further off, it goes into the pipe on the side
+/// of the loop nearest the ball's pole. `arrange.rs`'s
+/// `whether_past_the_plane_through_a_balls_centre` reads a fuse's points the
+/// same way and says why (Q1554); `validate.rs` does not read this pair yet.
+///
 /// A ball on either side was left out for a while (Q1218), because reading it
 /// let a cut cone and a cone closed by a ball on its axis reach a panic in
 /// `fuse/assemble.rs`'s `rings_round`, whose rings each ran along a hyperbola.
@@ -7383,13 +7402,13 @@ fn the_picker_this_face_is_read_past(
 /// ([`the_picker_naming_the_circle_through`]). A pair `intersect` refuses to
 /// name has none, and is refused by name as before.
 ///
-/// The side is the partner's gradient against the step from `at` towards the
-/// flat surface, laid onto the surface: `|g|²·d − (g·d)·g` for the surface's
-/// gradient `g` and `d` the half-space's normal turned round, and `d` itself on
-/// a pipe, whose gradient is square to its axis. On a cone that runs along the
-/// ruling, and on a ball along the line of longitude. `None` where that is
-/// [`Decision::Zero`], which is the two surfaces touching rather than crossing
-/// there.
+/// For every other pair the side is the partner's gradient against the step
+/// from `at` towards the flat surface, laid onto the surface:
+/// `|g|²·d − (g·d)·g` for the surface's gradient `g` and `d` the half-space's
+/// normal turned round, and `d` itself on a pipe, whose gradient is square to
+/// its axis. On a cone that runs along the ruling, and on a ball along the line
+/// of longitude. `None` where that is [`Decision::Zero`], which is the two
+/// surfaces touching rather than crossing there.
 ///
 /// # Errors
 ///
@@ -7408,7 +7427,9 @@ fn what_lies_past_the_picker(
     ) {
         return Ok(None);
     }
-    let axis = if let Surface::Cylinder(pipe) = surface {
+    let axis = if let (Surface::Cylinder(pipe), _) | (Surface::Sphere(_), Surface::Cylinder(pipe)) =
+        (surface, partner)
+    {
         pipe.axis()
     } else if let (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) =
         (surface, partner)
@@ -7428,6 +7449,12 @@ fn what_lies_past_the_picker(
     };
     if !lie_along_one_line(picker.normal().components(), axis.direction().components()) {
         return Ok(None);
+    }
+    if let (Surface::Sphere(_), Surface::Cylinder(_)) = (surface, partner) {
+        return Ok(Some(PastThePicker {
+            picker,
+            side: Decision::Pos,
+        }));
     }
     let down = picker
         .normal()
@@ -8194,69 +8221,208 @@ mod tests {
     /// A face that runs along one of two loops is refused rather than named as
     /// both.
     ///
-    /// One of the two disks a pipe leaves in a ball's skin. Its one boundary is a
-    /// whole closed curve and its one corner is on the pipe, so both of the two
-    /// things this reads — which side the face lies on, and whether the face has
-    /// every loop — have to catch it. Built by hand: a ball whose face is trimmed
-    /// by a pipe through it is lane 4's.
+    /// A thin bar of radius 1 along `y` through a fat one of radius 3 along `z`,
+    /// intersected, keeps two patches of the fat bar's wall, one at each end of
+    /// the thin bar. Each runs along one of the two loops the two pipes cross in.
+    /// The half-space [`intersect`] tells those loops apart by holds the fat
+    /// bar's axis and faces along the thin bar, so the fat pipe past it holds the
+    /// other patch and the wall outside the thin bar both, and no one side of
+    /// the thin pipe says which.
+    ///
+    /// Until Q1702 this was a disk a pipe leaves in a ball's skin, built by
+    /// hand; a ball with a pipe across it is read past the plane through its
+    /// centre now ([`what_lies_past_the_picker`]).
     #[test]
     fn a_face_along_one_of_two_loops_is_refused_rather_than_named_as_both() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-        let ball = model
-            .add_ball(OUTER, &Isometry::identity())
-            .expect("a ball");
-        let skin = model
-            .solid(ball)
-            .expect("this model made the key")
-            .faces()
-            .next()
-            .expect("one face")
-            .key();
-
-        // A pipe up the z axis crosses this ball in two circles, one either side
-        // of the equator. One corner on the upper one, and one closed edge round
-        // it, standing in for the boundary of the cap the pipe cuts out.
-        let across = (OUTER * OUTER - INNER * INNER).sqrt();
-        let on_the_circle = model.add_vertex(rcad_geom::Point::new(INNER, 0.0, across));
-        let loop_edge = model.add_closed_edge(on_the_circle);
-        let mine = model.add_coedge(loop_edge, Orientation::Forward);
-        let theirs = model.add_coedge(loop_edge, Orientation::Reversed);
-        let cut = model.add_wire(smallvec::smallvec![mine]);
-        let round_it = model.add_wire(smallvec::smallvec![theirs]);
-        let at_skin = skin.slot_in(model.id());
-        model.data_mut().faces[at_skin].wires.push(cut);
-        let pipe = Cylinder::new(Axis::z(), INNER).expect("a pipe");
-        let wall = model.add_face(Surface::Cylinder(pipe), SmallVec::from_buf([round_it]));
-        model
-            .data_mut()
-            .shells
-            .values_mut()
-            .next()
-            .expect("a shell")
-            .faces
-            .push(FaceUse {
-                face: wall,
-                loc: Isometry::identity(),
-                orient: Orientation::Forward,
-            });
-
-        let refusal = model
-            .solid(ball)
-            .expect("this model made the key")
-            .face_holds_the_point(
-                skin,
-                at(0.0, 0.0, -OUTER),
+        let fat = model
+            .add_round_bar(
+                3.0,
+                10.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, -5.0)).expect("a finite shift"),
+            )
+            .expect("a positive radius and height");
+        let along_y = Isometry::rotation(&Axis::x(), core::f64::consts::FRAC_PI_2)
+            .expect("a finite turn")
+            .compose(&Isometry::translation(Vector::new(0.0, 0.0, -10.0)).expect("a finite shift"));
+        let thin = model
+            .add_round_bar(1.0, 20.0, &along_y)
+            .expect("a positive radius and height");
+        let fused = model
+            .fuse(
+                &[fat],
+                &[thin],
+                crate::Rule::Intersection,
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             )
-            .expect_err("a face along one of two loops cannot be read off a sign");
-        assert!(
-            matches!(
-                refusal,
-                Error::AFaceMissesPartOfWhereItsSurfacesCross { .. }
-            ),
-            "got {refusal:?}"
-        );
+            .expect("a thin bar through a fat one");
+        let [solid] = fused.solids()[..] else {
+            panic!("one solid: {:?}", fused.solids());
+        };
+        let patches: Vec<FaceKey> = model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .filter(|face| match face.surface() {
+                Surface::Cylinder(pipe) => pipe.radius() == 3.0,
+                Surface::Plane(_) | Surface::Sphere(_) | _ => false,
+            })
+            .map(|face| face.key())
+            .collect();
+        assert_eq!(patches.len(), 2, "one patch of the fat wall at each end");
+
+        for patch in patches {
+            for point in [at(0.0, 3.0, 0.0), at(0.0, -3.0, 0.0)] {
+                let refusal = model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .face_holds_the_point(
+                        patch,
+                        point,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect_err("a face along one of two loops cannot be read off a sign");
+                assert!(
+                    matches!(
+                        refusal,
+                        Error::AFaceMissesPartOfWhereItsSurfacesCross { face } if face == patch
+                    ),
+                    "got {refusal:?}"
+                );
+            }
+        }
+    }
+
+    /// Each of the two caps a bar cuts out of a ball holds the patch of the
+    /// ball's skin inside the bar on its own side of the ball's centre, and
+    /// nothing else.
+    ///
+    /// The bar, of radius 1 up `z`, is 2.5 off the centre of the ball of radius
+    /// 5, further than it is wide, so the ball's poles are outside it. Each cap
+    /// runs along one of the two loops the bar's pipe crosses the ball in, and
+    /// a point of the skin past the plane through the ball's centre square to
+    /// the bar is on the other side of the cap's loop from the cap, whatever
+    /// its own side of the pipe: inside the pipe on the other cap. Until Q1702
+    /// each cap was refused `AFaceMissesPartOfWhereItsSurfacesCross`.
+    ///
+    /// Every point asked is exactly on the skin: `(−0.5, 0, 9)` and
+    /// `(−0.5, 0, 1)` inside the bar, the rest outside it, `(−2.5, 0, 5)` on the
+    /// plane through the centre.
+    #[test]
+    fn each_cap_a_bar_cuts_out_of_a_ball_off_its_centre_holds_its_own_patch_alone() {
+        let (model, solid) = a_ball_and_a_bar_off_its_centre(crate::Rule::Intersection, -1.0);
+        let caps: Vec<FaceKey> = model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface::Sphere(_)))
+            .map(|face| face.key())
+            .collect();
+        let [one, other] = caps[..] else {
+            panic!("two caps on the sphere: {caps:?}");
+        };
+        let [top, bottom] =
+            if what_it_holds(&model, solid, one, at(-0.5, 0.0, 9.0)) == OnAFace::Held {
+                [one, other]
+            } else {
+                [other, one]
+            };
+        for (cap, its_own) in [(top, [-0.5, 0.0, 9.0]), (bottom, [-0.5, 0.0, 1.0])] {
+            for point in ON_THE_BALL_OFF_THE_BAR {
+                let expected = if point == its_own {
+                    OnAFace::Held
+                } else {
+                    OnAFace::NotHeld
+                };
+                assert_eq!(
+                    what_it_holds(&model, solid, cap, PredicatePoint::from(point)),
+                    expected,
+                    "{point:?}"
+                );
+            }
+        }
+    }
+
+    /// A ball with a bar off its centre poking out of its top keeps a skin that
+    /// holds every point of the ball but the patch inside the bar at the top:
+    /// the patch inside the bar at the bottom too, past the plane through the
+    /// ball's centre, where the skin's own side of the bar is the patch's.
+    /// Until Q1702 it was refused `AFaceMissesPartOfWhereItsSurfacesCross`.
+    #[test]
+    fn a_balls_skin_round_a_bar_poking_out_of_its_top_holds_the_patch_inside_the_bar_at_its_bottom()
+    {
+        let (model, solid) = a_ball_and_a_bar_off_its_centre(crate::Rule::Union, 7.0);
+        let skins: Vec<FaceKey> = model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface::Sphere(_)))
+            .map(|face| face.key())
+            .collect();
+        let [skin] = skins[..] else {
+            panic!("one face on the sphere: {skins:?}");
+        };
+        for point in ON_THE_BALL_OFF_THE_BAR {
+            let expected = if point == [-0.5, 0.0, 9.0] {
+                OnAFace::NotHeld
+            } else {
+                OnAFace::Held
+            };
+            assert_eq!(
+                what_it_holds(&model, solid, skin, PredicatePoint::from(point)),
+                expected,
+                "{point:?}"
+            );
+        }
+    }
+
+    /// Points exactly on the ball [`a_ball_and_a_bar_off_its_centre`] makes:
+    /// one inside the bar either side of the ball's centre, and the rest
+    /// outside it.
+    const ON_THE_BALL_OFF_THE_BAR: [[f64; 3]; 9] = [
+        [-0.5, 0.0, 9.0],
+        [-0.5, 0.0, 1.0],
+        [2.5, 0.0, 10.0],
+        [2.5, 0.0, 0.0],
+        [-2.5, 0.0, 5.0],
+        [7.5, 0.0, 5.0],
+        [5.5, 0.0, 9.0],
+        [2.5, 3.0, 1.0],
+        [2.5, -4.0, 2.0],
+    ];
+
+    /// A ball of radius 5 at `(2.5, 0, 5)` and a bar of radius 1 up `z` from
+    /// `from` to 15, fused under `rule` into one solid.
+    fn a_ball_and_a_bar_off_its_centre(rule: crate::Rule, from: f64) -> (Model, SolidKey) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let ball = model
+            .add_ball(
+                5.0,
+                &Isometry::translation(Vector::new(2.5, 0.0, 5.0)).expect("a finite shift"),
+            )
+            .expect("a positive radius");
+        let bar = model
+            .add_round_bar(
+                1.0,
+                15.0 - from,
+                &Isometry::translation(Vector::new(0.0, 0.0, from)).expect("a finite shift"),
+            )
+            .expect("a positive radius and height");
+        let fused = model
+            .fuse(
+                &[ball],
+                &[bar],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a ball and a bar off its centre");
+        let [solid] = fused.solids()[..] else {
+            panic!("one solid: {:?}", fused.solids());
+        };
+        (model, solid)
     }
 
     /// What [`is_a_family_this_follows`] refuses a cone face for when the apex is

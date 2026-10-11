@@ -17,11 +17,10 @@
 //! start is left out, as Q1690 did for a closed edge's corner.
 //!
 //! Of the cut at the origin and a thousand from it, with the bar cut by the
-//! block first or by the ball, only the cut a thousand from the origin by the
-//! block first answers. At the origin it is refused ordering two ends of a loop
-//! along it, and by the ball first a thousand from the origin it is refused a
-//! face it cannot follow; the last two tests pin both. So the answer is checked
-//! against its closed form, and not against the origin's.
+//! block first or by the ball, both cuts a thousand from the origin answer. At
+//! the origin it is refused ordering two ends of a loop along it, which the
+//! last test pins. So the answer is checked against its closed form, and not
+//! against the origin's.
 
 use std::f64::consts::PI;
 
@@ -49,34 +48,21 @@ const EITHER_SIDE: [(&str, [f64; 3], [f64; 3]); 2] = [
 #[test]
 fn a_ball_and_a_bar_cut_by_a_wall_through_where_their_loops_are_walked_from_measure_half_of_what_they_share()
  {
-    let half = what_a_ball_off_a_bars_axis_shares(BALL, BAR, OFF) / 2.0;
-    for (side, low, high) in EITHER_SIDE {
-        let (model, answer) = cut(1000.0, low, high, Cuts::BlockFirst);
-        let answer = answer.unwrap_or_else(|why| panic!("{side}: {why:?}"));
-        let [solid] = answer[..] else {
-            panic!("one solid on {side}, got {answer:?}");
-        };
-        let measured = model
-            .solid(solid)
-            .expect("this model made the key")
-            .measure(
-                Deflection::of(0.01).expect("a fine mesh"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("the answer measures");
-        eprintln!(
-            "{side}: {} against {half}, error {}",
-            measured.volume(),
-            measured.volume_error()
-        );
-        assert!(
-            (measured.volume() - half).abs() <= measured.volume_error(),
-            "{side}: {} against {half}, error {}",
-            measured.volume(),
-            measured.volume_error()
-        );
-    }
+    measures_half_of_what_the_ball_and_the_bar_share(Cuts::BlockFirst);
+}
+
+/// The same cut with the bar cut by the ball first measures the same half,
+/// whichever side of the wall the block is on.
+///
+/// It was refused a face it cannot follow (Q1702). Placing a piece of the block
+/// asks whether the ball and the bar's answer holds where a ray met the cap the
+/// bar leaves on the ball, and the cap runs along one of the two loops the bar
+/// crosses the ball in. `holds.rs` read a cap along one of two loops past the
+/// flat surface between them on a pipe and on a cone, and not on a ball, so it
+/// refused the cap `AFaceMissesPartOfWhereItsSurfacesCross`.
+#[test]
+fn the_same_cut_with_the_ball_first_measures_the_same_half() {
+    measures_half_of_what_the_ball_and_the_bar_share(Cuts::BallFirst);
 }
 
 /// The same cut at the origin is refused ordering two corners the wall puts on
@@ -103,21 +89,36 @@ fn the_same_cut_at_the_origin_is_refused_ordering_two_ends_of_a_loop_along_it() 
     }
 }
 
-/// With the bar cut by the ball first, the cut a thousand from the origin is
-/// refused a face it cannot follow, whichever side of the wall the block is
-/// on. The answer exists: cut by the block first, it measures half of what the
-/// ball and the bar share. Pinned as it stands, to move with the fix.
-#[test]
-fn the_same_cut_with_the_ball_first_is_refused_a_face_it_cannot_follow() {
+/// The cut a thousand from the origin, in the order `cuts` names, measures half
+/// of what the ball and the bar share, within the error the measurement gives,
+/// whichever side of the wall the block is on.
+fn measures_half_of_what_the_ball_and_the_bar_share(cuts: Cuts) {
+    let half = what_a_ball_off_a_bars_axis_shares(BALL, BAR, OFF) / 2.0;
     for (side, low, high) in EITHER_SIDE {
-        let (_, said) = cut(1000.0, low, high, Cuts::BallFirst);
-        eprintln!("{side}: {said:?}");
+        let (model, answer) = cut(1000.0, low, high, cuts);
+        let answer = answer.unwrap_or_else(|why| panic!("{side}, {cuts:?}: {why:?}"));
+        let [solid] = answer[..] else {
+            panic!("one solid on {side}, {cuts:?}, got {answer:?}");
+        };
+        let measured = model
+            .solid(solid)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.01).expect("a fine mesh"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the answer measures");
+        eprintln!(
+            "{side}, {cuts:?}: {} against {half}, error {}",
+            measured.volume(),
+            measured.volume_error()
+        );
         assert!(
-            matches!(
-                said,
-                Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
-            ),
-            "{side}: {said:?}"
+            (measured.volume() - half).abs() <= measured.volume_error(),
+            "{side}, {cuts:?}: {} against {half}, error {}",
+            measured.volume(),
+            measured.volume_error()
         );
     }
 }
