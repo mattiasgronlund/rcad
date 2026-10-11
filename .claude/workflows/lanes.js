@@ -33,13 +33,30 @@
 // registers what `meta.name` says. Pass args:
 //
 //   { base: "<sha>",
-//     lanes: [ { label, queueId, brief, writeSet, ... }, ... ] }
+//     lanes: [ { label, queueId, notes }, { label, queueId, brief, writeSet, ... }, ... ] }
 //
-// Per lane: `label` (required, names the branch and the progress row),
-// `queueId` (the docs/queue.md row this lane does; required when it writes,
-// because its merger closes that row. A bundle of small rows (§352.4) gives
-// them all, `Q1,Q2,Q3`, as `queue next` printed them, and its merger
-// closes each), `brief` (required, what the lane is for
+// A lane comes in one of two forms (§396.4). The short form, `{ label,
+// queueId, notes }`, is the usual one. The run first sends the row to `prep`,
+// a read-only Sonnet agent (`.claude/agents/prep.md`) that reads it with `just
+// queue show` and the code at the base, and answers `ok` or `needs`. On `ok`,
+// and only once its write set and model are checked against the rows it
+// copied, the lane's brief is built from the rows' text, prep's facts, the
+// dispatcher's `notes` (optional: only what the row's text does not say) and
+// the two notes every brief carries, and the lane starts with the write set,
+// model, `sourcePaths` and marks prep answered and the `for_the_verifier`
+// field a writing lane gets by default. On anything else -- `needs`, an answer
+// that does not check, a prep that threw -- no lane starts, and the row comes
+// back not merged with prep's answer in its lines. The full form below is for
+// a row sent again with a finding in its brief, a `report` schema, or `verify:
+// false`. A lane giving `notes` beside any of the full form's own fields is
+// refused.
+//
+// Both forms: `label` (required and unique in a run, names the branch and the
+// progress row), `queueId` (the docs/queue.md row this lane does; required for
+// the short form, and for the full form when it writes, because its merger
+// closes that row. A bundle of small rows (§352.4) gives them all,
+// `Q1,Q2,Q3`, as `queue next` printed them, and its merger closes each), and
+// `branch` (below). The full form: `brief` (required, what the lane is for
 // -- the base and the switch below are appended), `writeSet` (the files it
 // owns; absent or empty means read-only, which also means no verifier, no
 // commit and no merge), `branch` (default `lane-<label>`, and it must not exist
@@ -65,7 +82,7 @@
 // this lane's own), and `verify: false` to skip the check, which leaves the
 // merger's gate as the only one.
 //
-// The standing rules of each role live in `.claude/agents/lane.md`,
+// The standing rules of each role live in `.claude/agents/prep.md`, `lane.md`,
 // `verifier.md` and `merger.md`, which `agentType` loads, and CLAUDE.md, which
 // every role reads once. What stays here is what differs per lane.
 export const meta = {
@@ -73,6 +90,7 @@ export const meta = {
   description: 'Run rcad lanes in worktrees off one pinned base, verify each writing lane, and merge the ones that pass onto main one at a time',
   whenToUse: 'Dispatching one queue row, or several rows off one known-green base sha.',
   phases: [
+    { title: 'Prep', detail: 'check and brief each short-form lane\'s row at the base', model: 'sonnet' },
     { title: 'Work', detail: 'one isolated worktree per lane' },
     { title: 'Verify', detail: 're-derive each writing lane\'s claims from its branch', model: 'sonnet' },
     { title: 'Merge', detail: 'one at a time: just land through a Haiku lander, or the Opus merger when it stops or the verifier asked for fixes', model: 'opus' },
@@ -94,15 +112,29 @@ const branchOf = (lane) => lane.branch || `lane-${lane.label}`
 const mergeBranchOf = (lane) => `merge-${lane.label}`
 const afterLandBranchOf = (lane) => `merge-${lane.label}-after-land`
 const STEP_WORDS = { add: 5, after: 3, tag: 3 }
+const QUEUE_IDS = /^[TDQ][0-9]+(,[TDQ][0-9]+)*$/
+const FULL_FORM = ['brief', 'writeSet', 'model', 'sourcePaths', 'pinsOnly', 'sameBehaviour', 'report', 'verify']
+const fullFields = (lane) => FULL_FORM.filter((k) => lane[k] !== undefined)
 
 if (!args || typeof args !== 'object') throw new Error('lanes: pass args {base, lanes: [...]}')
 const BASE = args.base
 if (typeof BASE !== 'string' || BASE.length < 7) throw new Error('lanes: args.base must be a full sha of the tree the lanes start from')
 const LANES = Array.isArray(args.lanes) ? args.lanes : []
 if (!LANES.length) throw new Error('lanes: args.lanes is empty')
+const labels = new Set()
 for (const lane of LANES) {
-  if (!lane || !lane.label || !lane.brief) throw new Error('lanes: every lane needs a label and a brief')
-  if (writes(lane) && !/^[TDQ][0-9]+(,[TDQ][0-9]+)*$/.test(lane.queueId || '')) {
+  if (!lane || !lane.label) throw new Error('lanes: every lane needs a label')
+  if (labels.has(lane.label)) throw new Error(`lanes: two lanes are labelled ${lane.label}; a label names one lane's branch and its row of the run`)
+  labels.add(lane.label)
+  const full = fullFields(lane)
+  if (lane.notes !== undefined && full.length) throw new Error(`lanes: ${lane.label} gives fields of both forms, notes beside ${full.join(', ')}; send { label, queueId, notes } for prep to brief, or the full form with a brief of its own (§396.4)`)
+  if (!full.length) {
+    if (!QUEUE_IDS.test(lane.queueId || '')) throw new Error(`lanes: ${lane.label} is in the short form, so it needs the queueId of its docs/queue.md row, or Q1,Q2,... for a bundle, for prep to read`)
+    if (lane.notes !== undefined && typeof lane.notes !== 'string') throw new Error(`lanes: ${lane.label} gives notes that are not text; they go into its brief as they stand`)
+    continue
+  }
+  if (!lane.brief) throw new Error(`lanes: ${lane.label} needs a brief, or none of ${FULL_FORM.join(', ')} for prep to write one`)
+  if (writes(lane) && !QUEUE_IDS.test(lane.queueId || '')) {
     throw new Error(`lanes: ${lane.label} writes, so it needs the queueId of its docs/queue.md row, or Q1,Q2,... for a bundle; its merger closes them`)
   }
   if (lane.pinsOnly === true && lane.sameBehaviour === true) {
@@ -110,19 +142,24 @@ for (const lane of LANES) {
   }
 }
 
-log(`${LANES.length} lane(s) off ${BASE.slice(0, 8)}: ${LANES.map((l) => `${l.label}${writes(l) ? ` (${l.queueId})` : ' (read-only)'}`).join(', ')}`)
+log(`${LANES.length} lane(s) off ${BASE.slice(0, 8)}: ${LANES.map((l) => `${l.label}${!fullFields(l).length ? ` (${l.queueId}, prep first)` : writes(l) ? ` (${l.queueId})` : ' (read-only)'}`).join(', ')}`)
 
 // The script body runs top to bottom before the functions below it are
-// reached, and only function declarations are hoisted, so the one piece of
-// state the stages share is declared here.
+// reached, and only function declarations are hoisted, so the state the
+// stages share is declared here. A stage after the first is handed the item
+// as it was sent, so it reads the lane prep briefed through `laneOf`.
 let lastMerge = Promise.resolve()
 const relayed = new Map()
+const preps = new Map()
+const laneOf = (item) => preps.get(item.label).lane
 
 const results = await pipeline(
   LANES,
-  (lane) => worked(lane),
-  (report, lane) => verified(report, lane),
-  (prior, lane) => {
+  (lane) => prepared(lane),
+  (prep) => prep.stop ? prep : worked(prep.lane),
+  (report, item) => notPrepared(item) || verified(report, laneOf(item)),
+  (prior, item) => {
+    const lane = laneOf(item)
     if (prior.stop) return handedBack(lane, prior)
     if (!writes(lane)) return { lane: lane.label, answer: prior.report }
     return mergeAfterTheLast(lane, prior).then((merge) => {
@@ -140,6 +177,87 @@ const rows = results.map((r, i) => r || {
 })
 log(`done: ${rows.filter((r) => r.merged).length} of ${LANES.length} lane(s) merged`)
 return { base: BASE, lanes: rows }
+
+// §396.4: checking a row against the code and writing its brief were close to
+// half of what a dispatcher wrote before its first lane, and a third over a
+// session (§396.1). Prep does both inside the run, in the dispatcher's tree
+// and with no tree of its own, since it writes nothing. A full-form lane skips it. A prep that throws is a
+// stop like any other: a `claude` process started before `prep.md` existed
+// cannot resolve the type.
+function prepared(lane) {
+  if (fullFields(lane).length) return kept(lane, { lane, answer: null, stop: null })
+  return agent(PREP(lane), {
+    label: `prep:${lane.label}`,
+    phase: 'Prep',
+    agentType: 'prep',
+    schema: prepSchema(),
+    model: 'sonnet',
+  }).then((answer) => {
+    const stop = prepRefused(lane, answer)
+    return kept(lane, stop ? { lane, answer, stop } : { lane: briefed(lane, answer), answer, stop: null })
+  }, (e) => kept(lane, { lane, answer: null, stop: `prep threw (${e && e.message}); a session begun before its tree held .claude/agents/prep.md cannot resolve the type, so restart it, or send the row in the full form` }))
+}
+
+function kept(lane, prep) {
+  preps.set(lane.label, prep)
+  return prep
+}
+
+// lanes.js cannot read docs/queue.md, so prep copies each row's id, model and
+// write set as `just queue show` prints them, and its answer is held to that
+// copy: the ids to the ones sent, the write set to the union of the rows' and
+// the model to theirs. Prep never widens a write set, because only `queue
+// next` checks one against the rows already running (§396.4).
+function prepRefused(lane, answer) {
+  if (!answer) return 'prep returned nothing'
+  if (answer.answer !== 'ok') return `prep answered ${answer.answer}, so no lane starts`
+  if (Array.isArray(answer.needs) && answer.needs.length) return `prep answered ok and still named ${answer.needs.length} file(s) the row needs, so no lane starts`
+  if (answer.pinsOnly === true && answer.sameBehaviour === true) return 'prep marked the row both pinsOnly and sameBehaviour; a pins-only lane has nothing in src/ whose behaviour it keeps (§399)'
+  const rows = Array.isArray(answer.rows) ? answer.rows : []
+  const ids = rows.map((r) => r && r.id)
+  if (!sameSet(ids, lane.queueId.split(','))) return `prep reported the rows ${ids.join(',') || 'none'}, not ${lane.queueId}`
+  if (!sameSet(answer.writeSet, writeSetOf(rows))) return `prep answered the write set ${JSON.stringify(answer.writeSet)}, not ${JSON.stringify(writeSetOf(rows))}, the union of its rows'; it never widens or narrows one (§396.4)`
+  if (answer.model !== modelOf(rows)) return `prep answered the model ${answer.model}, not ${modelOf(rows)}, which its rows' model column gives (§352.4)`
+  return null
+}
+
+function sameSet(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false
+  const x = [...new Set(a)].sort()
+  const y = [...new Set(b)].sort()
+  return x.length === y.length && x.every((v, i) => v === y[i])
+}
+
+function writeSetOf(rows) {
+  const files = []
+  for (const r of rows) {
+    for (const f of (r && typeof r.write_set === 'string' ? r.write_set : '').split(',')) {
+      const file = f.trim()
+      if (file && file !== '-' && !files.includes(file)) files.push(file)
+    }
+  }
+  return files
+}
+
+function modelOf(rows) {
+  return rows.some((r) => r && r.model === 'opus') ? 'opus' : 'sonnet'
+}
+
+function briefed(lane, answer) {
+  const ready = {
+    label: lane.label,
+    queueId: lane.queueId,
+    brief: SHORT_BRIEF(lane, answer),
+    writeSet: answer.writeSet,
+    model: answer.model,
+    sourcePaths: Array.isArray(answer.sourcePaths) ? answer.sourcePaths : [],
+    pinsOnly: answer.pinsOnly === true,
+    sameBehaviour: answer.sameBehaviour === true,
+  }
+  if (lane.branch) ready.branch = lane.branch
+  if (answer.writeSet.length) ready.report = forTheVerifier()
+  return ready
+}
 
 // §416: the median lane peaked at 203k with its first commit at the very end,
 // so a lane stopped at the budget warning handed on nothing, and briefs told
@@ -192,6 +310,14 @@ function relayRefused(report) {
 
 function sameSha(a, b) {
   return typeof a === 'string' && typeof b === 'string' && a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a))
+}
+
+// A row prep stopped started no lane, so there is nothing to verify; it goes
+// straight to `handedBack`, which lists the files prep said it needs.
+function notPrepared(item) {
+  const prep = preps.get(item.label)
+  if (!prep.stop) return null
+  return stopped(prep.lane, { report: null, check: null, kind: null, relayTrees: [], relayedFrom: null, prep: prep.answer }, prep.stop)
 }
 
 // A lane that started somewhere else measured another tree; verifying its
@@ -518,6 +644,7 @@ function handedBack(lane, prior) {
     for (const c of prior.check.number_mismatches || []) row.lines.push(`number: ${c}`)
     for (const c of prior.check.moved_text_problems || []) row.lines.push(`moved text: ${c}`)
   }
+  for (const n of (prior.prep && prior.prep.needs) || []) row.lines.push(`needs ${n.file}: ${n.why}`)
   row.unlock = treesOf(prior)
   return row
 }
@@ -587,6 +714,48 @@ function handOver() {
   return 'When "Lane budget passed" comes and your row is not done, hand over (§416), even if this brief says to carry on past it: commit everything by explicit path, run git switch --detach, and report outcome relay, with landed_sha your last commit and a handoff saying what is done by commit, what is next in order, the places as file, function and lines, what you measured with its command, and what you tried that did not work.'
 }
 
+// Prep runs in the dispatcher's tree, whose HEAD carries the `take` commit
+// past the base and can carry more, so it is pointed at the base itself.
+function PREP(lane) {
+  return `Prepare queue ${rowsOf(lane)} for its lane, by prep.md's rules, and answer ok or needs.
+Base: main at ${BASE}. Read the code there, with git show ${BASE}:<path> and git grep -n '<pattern>' ${BASE}, not at your tree's HEAD.
+${lane.notes ? `The dispatcher's notes, which go into the lane's brief as they stand, after your facts: ${lane.notes}` : 'The dispatcher sent no notes.'}`
+}
+
+// What a dispatcher wrote by hand for every row until §396.4: the row, its
+// mark and why, what was found at the base, its own notes, and the two notes
+// every brief it wrote carried word for word.
+function SHORT_BRIEF(lane, answer) {
+  const bundle = lane.queueId.includes(',')
+  const facts = Array.isArray(answer.facts) && answer.facts.length
+    ? `\n\nWhat prep found at the base:\n${answer.facts.map((f) => `- ${f}`).join('\n')}`
+    : ''
+  const notes = lane.notes ? `\n\nFrom the dispatcher: ${lane.notes}` : ''
+  return `Do ${bundle ? 'each row' : 'the row'}. ${bundle ? 'Their lines' : 'Its line'}, as just queue show prints ${bundle ? 'them' : 'it'}:
+
+${answer.rows.map((r) => r.line).join('\n')}${marksOf(answer)}${facts}${notes}
+
+${rowsNote()}
+
+${testsNote()}
+`
+}
+
+function marksOf(answer) {
+  const why = answer.marks_why ? `: ${answer.marks_why}` : ''
+  if (answer.pinsOnly === true) return `\n\nThe row is marked pinsOnly (§287)${why}`
+  if (answer.sameBehaviour === true) return `\n\nThe row is marked sameBehaviour (§399)${why}`
+  return ''
+}
+
+function rowsNote() {
+  return 'Rows: no `tag` step when the add text already starts with the class; `add` tags it from the text, `queue apply` refuses the repeat, and `just land` stops (Q1047). The class must be the text\'s first word exactly, `refuses/B` and not `refuses/B:`, or `add` does not read it (Q1505). A row\'s text ends with its §N and nothing after it, not even a full stop, or check-queue refuses it and `just land` stops.'
+}
+
+function testsNote() {
+  return 'Test names in tests_that_fail_without_the_change are bare nextest names matching ^name(::name)*$, never `<binary> <name>` with a space (Q1347).'
+}
+
 function reportSchema(lane, relay) {
   const core = {
     start_sha: { type: 'string', description: 'what git log -1 said BEFORE your switch' },
@@ -628,6 +797,58 @@ function reportSchema(lane, relay) {
     type: 'object',
     required: required.concat(Array.isArray(extra.required) ? extra.required : []),
     properties: Object.assign(core, extra.properties || {}),
+  }
+}
+
+// Every writing brief a dispatcher sent before §396.4 set this field: a
+// verifier reverting a src/ directory to the base takes the #[cfg(test)] pins
+// in it back out too, so the lane says how to lay them back.
+function forTheVerifier() {
+  return {
+    properties: {
+      for_the_verifier: { type: 'string', description: 'How to lay back every #[cfg(test)] test you add or change in src/ when the source is reverted to the base, without `git checkout <base> -- <src dir>`: the commands, and what each such test prints then. Write `none` when every test you added or changed is in a tests/ directory.' },
+    },
+    required: ['for_the_verifier'],
+  }
+}
+
+function prepSchema() {
+  return {
+    type: 'object',
+    required: ['answer', 'rows', 'writeSet', 'model', 'sourcePaths', 'pinsOnly', 'sameBehaviour', 'marks_why', 'facts', 'needs'],
+    properties: {
+      answer: { type: 'string', enum: ['ok', 'needs'], description: 'ok when a lane can start from the rows as they stand; needs when the work touches a file their write sets do not name' },
+      rows: {
+        type: 'array',
+        description: 'each row, as mise exec -- just queue show <id> prints it',
+        items: {
+          type: 'object',
+          required: ['id', 'model', 'write_set', 'line'],
+          properties: {
+            id: { type: 'string', description: 'the row\'s id, as Q840' },
+            model: { type: 'string', description: 'the row\'s model column, exactly as printed' },
+            write_set: { type: 'string', description: 'the row\'s write-set column, exactly as printed: paths joined by commas, or - for none' },
+            line: { type: 'string', description: 'the row\'s whole line, exactly as printed; it is the lane\'s brief' },
+          },
+        },
+      },
+      writeSet: { type: 'array', items: { type: 'string' }, description: 'the union of the rows\' write sets, leaving out -, never widened or narrowed (§396.4)' },
+      model: { type: 'string', enum: ['opus', 'sonnet'], description: 'opus if any row\'s model column says opus, else sonnet (§352.4)' },
+      sourcePaths: { type: 'array', items: { type: 'string' }, description: 'what the verifier reverts to the base; empty to default to the crates/<c>/src directories in the write set' },
+      pinsOnly: { type: 'boolean', description: 'true only for a row that pins a test and writes a decisions section, with no src/ path in its work; said, never inferred (§287)' },
+      sameBehaviour: { type: 'boolean', description: 'true only for a row that changes lines that run and keeps what they compute; said, never inferred, and never beside pinsOnly (§399)' },
+      marks_why: { type: 'string', description: 'why the mark you set holds; empty when you set neither' },
+      facts: { type: 'array', items: { type: 'string' }, description: 'what you found at the base that the lane needs, one bullet each, each with the file and line it is from' },
+      needs: {
+        type: 'array',
+        description: 'each file the work touches that the rows do not name, and why; empty with ok',
+        items: {
+          type: 'object',
+          required: ['file', 'why'],
+          properties: { file: { type: 'string' }, why: { type: 'string' } },
+        },
+      },
+    },
   }
 }
 
