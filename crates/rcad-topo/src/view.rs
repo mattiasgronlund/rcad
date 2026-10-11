@@ -1426,22 +1426,23 @@ impl<'m> EdgeView<'m> {
     /// A round cap's boundary is one of these. Anything that reads an edge as a
     /// straight side between two different corners has to ask this first.
     ///
-    /// **This is the one list of run kinds that close, and six sites read it.**
-    /// The mesher's direction rule, the fuse's shortest chord, the winding count
-    /// on a round wire, [`EdgeView::segment`] below, `check_dynamic_range` in
-    /// [`Model::validate`](crate::Model::validate) and `rcad-step`'s writer all
-    /// ask this and nothing else. Naming the kinds at each of the six would be
-    /// six copies of one rule, which is the drift
+    /// **This is the one list of run kinds that close, and every site that
+    /// needs to know reads it here rather than asking on its own.** The
+    /// mesher's direction rule, each of the fuse's own checks, the winding
+    /// count on a round wire, [`EdgeView::segment`] below, `check_dynamic_range`
+    /// in [`Model::validate`](crate::Model::validate) and `rcad-step`'s writer
+    /// all ask this and nothing else. Naming the kinds again at every one of
+    /// them would be one copy of the rule per site, which is the drift
     /// [`the_ends_are_the_whole_of_it`](crate::SolidBuilder) was pulled back
     /// into one list to stop (§44.11).
     ///
-    /// **Two kinds close, and the second one arrived here rather than at the six.**
-    /// [`EdgeRun::RightRoundWhereItCrosses`] is a closed curve that carries the
-    /// surface making the cut, for a rim whose two faces are the one surface —
-    /// a frustum's wall split in two by a leaning plane. It is closed for
-    /// exactly the reason the first one is, so it is one word on this line and
-    /// nothing at the six sites, which is the whole of what pulling the rule
-    /// together bought. `docs/decisions.md` §216.
+    /// **Two kinds close, and the second one arrived here rather than at any
+    /// of those sites.** [`EdgeRun::RightRoundWhereItCrosses`] is a closed
+    /// curve that carries the surface making the cut, for a rim whose two
+    /// faces are the one surface — a frustum's wall split in two by a leaning
+    /// plane. It is closed for exactly the reason the first one is, so it is
+    /// one word on this line and nothing anywhere else, which is the whole of
+    /// what pulling the rule together bought. `docs/decisions.md` §216.
     ///
     /// # Why this refuses rather than answering `false`
     ///
@@ -1449,7 +1450,7 @@ impl<'m> EdgeView<'m> {
     /// with no wildcard for `just check-wildcards` to count and nothing for
     /// clippy to warn about, so a fourth kind of [`EdgeRun`] — the enum is
     /// `#[non_exhaustive]` and lives in `rcad-geom`, and this milestone did grow
-    /// its vocabulary — arrived at all six sites reading as *not closed*, with
+    /// its vocabulary — arrived at every site reading this as *not closed*, with
     /// zero compile errors. `tests/a_fourth_kind_of_run.rs` is what says a
     /// fourth kind arrived.
     ///
@@ -1465,9 +1466,10 @@ impl<'m> EdgeView<'m> {
     /// already give a run kind they cannot follow, so a new kind of run refuses
     /// under one name across the kernel rather than under a fresh one per site.
     ///
-    /// **What each of the six then does is not the same**, and each says so
-    /// where it asks: five refuse, and the winding count refuses under its own
-    /// name because its refusal points at the face.
+    /// **What each site then does is not the same**, and each says so where
+    /// it asks: most refuse under the shared name, and two rename it to their
+    /// own — `rcad-step`'s writer, to `CannotWrite::ARunKindThisWriterHasNoCurveFor`,
+    /// and the winding count, because its refusal points at the face.
     ///
     /// # Errors
     ///

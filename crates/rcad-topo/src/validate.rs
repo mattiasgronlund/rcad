@@ -2208,7 +2208,7 @@ fn the_walk_draws_one_branch_of_an_endless_bend(on: &Plane, cone: &Cone) -> bool
 /// two ends it cannot prove are on one side of the apex
 /// (`which_branch_of_a_hyperbola_this_run_is`), so no curve between two ends on
 /// two nappes is ever drawn for this to bound. The test file
-/// `a_closed_edge_between_two_planes_its_curve_leaves.rs` builds one, in
+/// `an_edge_between_two_planes_its_curve_leaves.rs` builds one, in
 /// `an_arc_from_one_branch_of_a_hyperbola_to_the_other_is_refused`.
 ///
 /// What an end misses the branch by is left out, as it is for every width

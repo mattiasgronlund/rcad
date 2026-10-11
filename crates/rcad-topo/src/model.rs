@@ -899,7 +899,7 @@ impl Model {
     ///   the sweep's, with the room of the solid or the answer itself, and write
     ///   nothing when it refuses.
     ///
-    /// `tests/a_closed_edge_between_two_planes_its_curve_leaves.rs` holds each
+    /// `tests/an_edge_between_two_planes_its_curve_leaves.rs` holds each
     /// kind: `moving_or_copying_a_tilted_piece_read_back_from_bytes_leaves_it_for_the_sweep`,
     /// `no_solid_the_kernel_makes_has_a_named_crossing_between_flat_faces_alone`,
     /// `a_disc_tilted_off_the_lid_is_refused_whichever_face_is_listed_first` and

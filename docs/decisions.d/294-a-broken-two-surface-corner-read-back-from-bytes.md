@@ -984,7 +984,7 @@ none disagreed, and 17 were untold, all of them from those two pins.
   (`walking_the_cut_along_a_turned_and_shifted_frustums_seam_names_the_branch_its_corners_are_on`).
 
 **Q1195's shape, run after the fix as a scratch probe not kept.** The bar of
-`a_closed_edge_between_two_planes_its_curve_leaves.rs` with its lid split by a
+`an_edge_between_two_planes_its_curve_leaves.rs` with its lid split by a
 half disc on `leaning_off_the_lid_through((0, 0, 4), −1e-14)`, the arc naming
 `a_cone_the_lid_crosses_in_a_parabola`, half disc listed first: it builds, and
 `Model::validate` under `certified` accepts it. That is the check Q1195 asks to
