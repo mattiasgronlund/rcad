@@ -5100,6 +5100,134 @@ mod tests {
         }
     }
 
+    /// A thin pipe along `x` at `z = 5` right through a fat one up `z`, cut by
+    /// the wall `y = 0` through both axes: the wall puts corners at
+    /// `(−4, 0, 4)` and `(−4, 0, 6)` on the `−x` loop, and a run between them
+    /// picked by `y ≥ 0` or `y ≤ 0` is walked along that half of that loop only,
+    /// from its first corner to its second, either way round and whichever face
+    /// is listed first.
+    ///
+    /// Both loops' seeds are on the wall, so `y ≥ 0` held both and the run was
+    /// refused; picked by its corners, the whole loop came back (Q1659). The
+    /// seed of the `−x` loop is `(−4, 0, 6)`, one of the corners, so a point
+    /// walked on a corner is checked for too: it is on neither half.
+    #[test]
+    fn a_run_between_two_corners_of_a_loop_of_a_thin_pipe_through_a_fat_one_is_walked_along_its_half()
+     {
+        let fat = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 4.0).expect("a radius"));
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::new(-10.0, 0.0, 5.0), Vector::new(1.0, 0.0, 0.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let corners = [Point::new(-4.0, 0.0, 4.0), Point::new(-4.0, 0.0, 6.0)];
+        for side in [1.0, -1.0] {
+            let picker = Picker::from(
+                crate::HalfSpace::through_a_point_facing(
+                    Point::origin(),
+                    Vector::new(0.0, side, 0.0),
+                )
+                .expect("the y axis has length"),
+            );
+            for [from, to] in [corners, [corners[1], corners[0]]] {
+                let run = NamedRun::new(
+                    EdgeRun::PartOfWhereItCrosses {
+                        and: thin,
+                        picked_by: smallvec![picker],
+                    },
+                    [from, to].map(|end| PredicatePoint::from(end.coordinates())),
+                )
+                .expect("a run between two corners");
+                for pair in [[&fat, &thin], [&thin, &fat]] {
+                    let walked = walk(
+                        &run,
+                        pair,
+                        Deflection::of(0.01).expect("a length"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect("half a loop of a thin pipe through a fat one is walked");
+                    let points = walked.points();
+                    assert!(points.len() > 2, "half the loop has points");
+                    for point in points {
+                        let [x, y, z] = point.coordinates();
+                        assert!(
+                            x < 0.0 && y * side > 0.0,
+                            "the run on y·{side} > 0 from {from:?} was walked through ({x}, {y}, {z})"
+                        );
+                    }
+                    let [first, last] = [points[0], points[points.len() - 1]];
+                    assert!(
+                        (first - from).length() < (first - to).length()
+                            && (last - to).length() < (last - from).length(),
+                        "the run from {from:?} to {to:?} was walked from {first:?} to {last:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A run between two corners closer together than one step of the march
+    /// has no marched point on it, and is still told from the rest of its loop:
+    /// the half-spaces are asked at the middle of its two corners, settled onto
+    /// the crossing, and nothing comes back between the corners.
+    ///
+    /// The loop is the `−x` one of the thin pipe through the fat one above, and
+    /// the second corner is the box `1e-9` round where `y = 1/20` on its lower
+    /// half: `x = −√(16 − y²)`, `z = 5 − √(1 − y²)`. The run is picked by
+    /// `y ≥ 0` and `z ≤ 4.5`. By `y ≥ 0` alone it is refused, though the rest
+    /// of the loop dips below the wall: the middle point of the rest is the
+    /// seed `(−4, 0, 6)`, on the wall, so `y ≥ 0` holds at both arcs' middles.
+    #[test]
+    fn a_run_shorter_than_a_step_of_the_march_is_told_from_the_rest_of_its_loop() {
+        let fat = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 4.0).expect("a radius"));
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::new(-10.0, 0.0, 5.0), Vector::new(1.0, 0.0, 0.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let y = 0.05_f64;
+        let near = Point::new(-(16.0 - y * y).sqrt(), y, 5.0 - (1.0 - y * y).sqrt());
+        let ends = [
+            PredicatePoint::from(Point::new(-4.0, 0.0, 4.0).coordinates()),
+            somewhere_within(near, 1e-9).expect("a box round a point"),
+        ];
+        let over = Picker::from(
+            crate::HalfSpace::through_a_point_facing(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis has length"),
+        );
+        let low = Picker::from(
+            crate::HalfSpace::through_a_point_facing(
+                Point::new(0.0, 0.0, 4.5),
+                Vector::new(0.0, 0.0, -1.0),
+            )
+            .expect("the z axis has length"),
+        );
+        let run = NamedRun::new(
+            EdgeRun::PartOfWhereItCrosses {
+                and: thin,
+                picked_by: smallvec![over, low],
+            },
+            ends,
+        )
+        .expect("a run between two corners");
+        let walked = walk(
+            &run,
+            [&fat, &thin],
+            Deflection::of(1.0).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a short run of a thin pipe through a fat one is walked");
+        assert_eq!(walked.points(), &[] as &[Point]);
+    }
+
     /// A fuse puts a closed loop's corner where the marcher starts
     /// ([`where_a_closed_crossing_starts`]), and the caller puts that corner at
     /// both ends of what comes back — so nothing walked may sit on it, nor a
