@@ -6602,7 +6602,7 @@ fn the_name_each_closed_curve_goes_by<'a>(
     for (carried_by, curve, start) in closed {
         if let Some((flat, round)) = the_plane_and_the_ball_pipe_or_cone_of(carried_by) {
             cut_out_of.entry(curve).or_insert((flat, round, start));
-        } else if curve.1.is_some_and(|which| which[0] == 0)
+        } else if curve.1.is_some()
             && let Some((flat, ring)) = the_plane_and_the_ring_of(carried_by)
         {
             cut_out_of_a_ring
