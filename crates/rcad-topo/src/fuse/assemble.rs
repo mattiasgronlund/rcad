@@ -125,6 +125,9 @@ pub(crate) fn assemble(
     log: &mut ProvenanceLog,
 ) -> Result<Assembly> {
     let mut assembly = Assembly::from_the_pieces(model, scratch, chosen, policy, log)?;
+    if std::env::var_os("RCAD_PROBE_Q1528").is_some() {
+        assembly.probe_q1528_print();
+    }
     assembly.join_up_what_is_one_face(policy, log)?;
     assembly.runs = assembly.how_each_edge_runs()?;
     assembly.shells = assembly.group_into_shells()?;
@@ -370,6 +373,50 @@ pub(crate) struct Assembly {
 }
 
 impl Assembly {
+    fn probe_q1528_print(&self) {
+        let claimants = self.claimants_of_each_edge();
+        for (index, face) in self.faces.iter().enumerate() {
+            let plane = face
+                .surface
+                .as_plane()
+                .map(|plane| (plane.normal(), plane.offset()));
+            eprintln!(
+                "face {index}: ancestors {:?} plane {plane:?}",
+                face.ancestors
+            );
+            for ring in &face.wires {
+                let walked: Vec<String> = ring
+                    .iter()
+                    .map(|side| {
+                        let [start, end] = self.edges[side.edge].ends;
+                        let at = if side.forward { start } else { end };
+                        let corner = &self.corners[at];
+                        format!(
+                            "c{at}{}({}, {}, {}) e{}[{}]",
+                            if corner.from.is_some() { "*" } else { "" },
+                            corner.point.x(),
+                            corner.point.y(),
+                            corner.point.z(),
+                            side.edge,
+                            claimants[side.edge].len()
+                        )
+                    })
+                    .collect();
+                eprintln!("    {}", walked.join(" -> "));
+            }
+        }
+        for (edge, by) in claimants.iter().enumerate() {
+            if by.len() != 2 {
+                let [start, end] = self.edges[edge].ends;
+                eprintln!(
+                    "edge {edge} c{start} -> c{end} claimed by {} darts, faces {:?}",
+                    by.len(),
+                    by.iter().map(|dart| dart.face).collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+
     /// The input faces each face of the result was cut out of, in the order
     /// [`Assembly::write_into`] writes them.
     ///
