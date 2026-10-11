@@ -60,12 +60,12 @@ const CLEAR: f64 = 0.4;
 /// centre, `r²·acos(3/5) − 3·4`, where the side meets the pipe at `(10, ±4)`.
 #[test]
 fn a_point_beside_a_round_slot_down_a_blocks_side_is_placed_as_worked_by_hand() {
-    let slots: [(&str, [f64; 2], f64, &[[f64; 3]]); 3] = [
-        (
-            "a half-round slot, its axis on the block's side",
-            [10.0, 0.0],
-            PI * RADIUS * RADIUS / 2.0,
-            &[
+    let slots = [
+        Slot {
+            name: "a half-round slot, its axis on the block's side",
+            axis: [10.0, 0.0],
+            cross_section: PI * RADIUS * RADIUS / 2.0,
+            points: &[
                 [8.0, 0.0, 4.0],
                 [8.0, 0.0, 6.0],
                 [8.0, 0.0, 9.0],
@@ -81,12 +81,12 @@ fn a_point_beside_a_round_slot_down_a_blocks_side_is_placed_as_worked_by_hand() 
                 [9.0, 4.4, 7.0],
                 [9.0, 5.6, 7.0],
             ],
-        ),
-        (
-            "a shallow slot, its axis three past the block's side",
-            [13.0, 0.0],
-            RADIUS * RADIUS * (3.0_f64 / 5.0).acos() - 3.0 * 4.0,
-            &[
+        },
+        Slot {
+            name: "a shallow slot, its axis three past the block's side",
+            axis: [13.0, 0.0],
+            cross_section: RADIUS * RADIUS * (3.0_f64 / 5.0).acos() - 3.0 * 4.0,
+            points: &[
                 [9.0, 0.0, 4.0],
                 [9.0, 0.0, 6.0],
                 [9.0, 0.0, 9.0],
@@ -100,12 +100,12 @@ fn a_point_beside_a_round_slot_down_a_blocks_side_is_placed_as_worked_by_hand() 
                 [8.5, 0.0, 7.0],
                 [7.5, 0.0, 7.0],
             ],
-        ),
-        (
-            "a quarter-round notch, its axis on the block's corner",
-            [10.0, 10.0],
-            PI * RADIUS * RADIUS / 4.0,
-            &[
+        },
+        Slot {
+            name: "a quarter-round notch, its axis on the block's corner",
+            axis: [10.0, 10.0],
+            cross_section: PI * RADIUS * RADIUS / 4.0,
+            points: &[
                 [8.0, 8.0, 4.0],
                 [8.0, 8.0, 6.0],
                 [6.0, 6.0, 9.0],
@@ -117,9 +117,15 @@ fn a_point_beside_a_round_slot_down_a_blocks_side_is_placed_as_worked_by_hand() 
                 [7.0, 7.0, 7.0],
                 [6.0, 6.0, 7.0],
             ],
-        ),
+        },
     ];
-    for (name, [x, y], cross_section, points) in slots {
+    for Slot {
+        name,
+        axis: [x, y],
+        cross_section,
+        points,
+    } in slots
+    {
         let mut model = a_model();
         let block = a_block(&mut model);
         let bar = model
@@ -151,12 +157,12 @@ fn a_point_beside_a_round_slot_down_a_blocks_side_is_placed_as_worked_by_hand() 
 /// `(4π·r³/3 − 52π/3)/2`. Its top meets the side at `(10, ±4, 10)`.
 #[test]
 fn a_point_beside_a_round_dimple_in_a_blocks_edge_is_placed_as_worked_by_hand() {
-    let dimples: [(&str, [f64; 3], f64, &[[f64; 3]]); 2] = [
-        (
-            "a quarter of a ball, its centre on the block's top edge",
-            [10.0, 0.0, 10.0],
-            PI * RADIUS.powi(3) / 3.0,
-            &[
+    let dimples = [
+        Dimple {
+            name: "a quarter of a ball, its centre on the block's top edge",
+            centre: [10.0, 0.0, 10.0],
+            removed: PI * RADIUS.powi(3) / 3.0,
+            points: &[
                 [9.5, 0.0, 9.5],
                 [10.5, 0.0, 9.5],
                 [9.5, 6.0, 9.5],
@@ -170,12 +176,12 @@ fn a_point_beside_a_round_dimple_in_a_blocks_edge_is_placed_as_worked_by_hand() 
                 [9.0, 3.0, 7.0],
                 [9.0, 4.0, 6.0],
             ],
-        ),
-        (
-            "half a ball less a cap, its centre on the block's side",
-            [10.0, 0.0, 7.0],
-            (4.0 * PI * RADIUS.powi(3) / 3.0 - 52.0 * PI / 3.0) / 2.0,
-            &[
+        },
+        Dimple {
+            name: "half a ball less a cap, its centre on the block's side",
+            centre: [10.0, 0.0, 7.0],
+            removed: (4.0 * PI * RADIUS.powi(3) / 3.0 - 52.0 * PI / 3.0) / 2.0,
+            points: &[
                 [9.5, 0.0, 7.0],
                 [10.5, 0.0, 7.0],
                 [9.5, 6.0, 7.0],
@@ -189,9 +195,15 @@ fn a_point_beside_a_round_dimple_in_a_blocks_edge_is_placed_as_worked_by_hand() 
                 [9.0, 0.0, 2.6],
                 [9.0, 0.0, 1.5],
             ],
-        ),
+        },
     ];
-    for (name, centre, removed, points) in dimples {
+    for Dimple {
+        name,
+        centre,
+        removed,
+        points,
+    } in dimples
+    {
         let mut model = a_model();
         let block = a_block(&mut model);
         let ball = model
@@ -211,6 +223,27 @@ fn a_point_beside_a_round_dimple_in_a_blocks_edge_is_placed_as_worked_by_hand() 
         let (model, answer) = the_block_less(model, block, ball, name);
         is_placed_as_worked_by_hand(&model, answer, removed, points, in_the_ball, name);
     }
+}
+
+/// A bar of [`RADIUS`] standing from [`FLOOR`], taken out of the block, and the
+/// points asked of what is left.
+struct Slot {
+    name: &'static str,
+    /// Where the bar's axis is, as `x` and `y`.
+    axis: [f64; 2],
+    /// The area of the slot across, worked by hand.
+    cross_section: f64,
+    points: &'static [[f64; 3]],
+}
+
+/// A ball of [`RADIUS`] taken out of the block, and the points asked of what is
+/// left.
+struct Dimple {
+    name: &'static str,
+    centre: [f64; 3],
+    /// The space the ball takes out of the block, worked by hand.
+    removed: f64,
+    points: &'static [[f64; 3]],
 }
 
 fn a_model() -> Model {
