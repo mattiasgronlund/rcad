@@ -50,14 +50,14 @@
 //! refused when the two are crossed. So neither kind is reached.
 //!
 //! Run with `settle_against_each`'s arm made to print, every fuse here, only
-//! the placed bends reached it: 3 of their 54 fuses, ring 4 and tube 1 turned
-//! `−π/2`, the first bend named first, one fuse per rule. Each time the piece
-//! was the placed bend's cap on the plane whose normal is `(−2.2e-16, 1, 0)`,
-//! and its three points, at `(4, 8.9e-16, 0)`, `(4, 6.3e-16, 0)` and
-//! `(4, 8.9e-16, 0)`, could not be fired at the first bend's ring. Each of
-//! those pieces was then placed inside by a side, a corner, a plane or a piece
-//! across, and each fuse was refused at a later piece no point was found
-//! inside. Q1581's fuses, run with the arm made to print, printed nothing.
+//! the bends placed a quarter turn round reached it: 6 of their 36 fuses,
+//! ring 4 and tube 1 turned `−π/2`, every rule both ways round, 18 prints in
+//! all. Each time the piece was the placed bend's cap on the plane whose
+//! normal is `(−2.2e-16, 1, 0)`, and its three points, at `(4, 8.9e-16, 0)`,
+//! `(4, 6.3e-16, 0)` and `(4, 8.9e-16, 0)`, could not be fired at the first
+//! bend's ring. Each of those pieces was then placed by some other point or
+//! rule, and since Q1537 each of the six fuses answers. Q1581's fuses, run
+//! with the arm made to print, printed nothing.
 //!
 //! Q1125's run, of all 1755 tests of this crate's suite with the arm made to
 //! print, printed nine times, all in the placed bends' test, and each piece it
@@ -142,6 +142,26 @@ fn two_bends_turned_by_whole_quarter_turns_answer_every_rule() {
 /// A whole turn, `2π`, is such a hair: its sine rounds to `−2.4e-16`, so the
 /// copy sits that far back round the ring. It is refused the same way, before
 /// a ray.
+///
+/// Run with a print where no rule placed a piece (Q1537), each refused fuse
+/// stops at a band of one bend's wall a hair wide, outside the other bend.
+/// With the first bend named first it is the first bend's wall between its
+/// own start cap rim and the copy's start cap plane; with the copy first, the
+/// copy's wall between the first bend's end cap plane and its own end cap
+/// rim. Neither rule Q1537 added places it:
+///
+/// - Its cut is also a side of a piece of the other bend's wall, with the
+///   same partner, but its material is on the other side of that partner, so
+///   it is not a piece lying on the other bend's skin.
+/// - The piece of its own wall across that cut lies on the other bend's wall,
+///   and the cut runs along the other bend's cap rim, so the cut does not
+///   start clear of that cap.
+/// - Its other side is its own cap rim, and no piece of its own wall lies
+///   across that.
+///
+/// Not tried: placing it by which side of the other bend's cap plane its
+/// material is on, outside in front of the cap's outward plane, as
+/// `by_a_side_from_an_edge_it_starts_on` places a flat piece beyond an edge.
 #[test]
 fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() {
     for (turn, said) in [
@@ -191,7 +211,10 @@ const PLACED_RINGS: [(f64, f64); 3] = [(4.0, 1.0), (1.0, 0.5), (2.0, 1.0)];
 /// under a millionth of a millionth of a bend, each against `π² R r² / 2` a
 /// bend, within the measure's own error. Ring 4 and tube 1 turned `+π/2` is
 /// still refused `CannotMeshAFace` for the union with the placed bend named
-/// first and for the intersection both ways round, which is not this row's.
+/// first and for the intersection both ways round. Run with a print where the
+/// shells are nested, the face not meshed is each time a band of ring wall
+/// between two meridian circles a rounding apart, a whole circle each, refused
+/// `CornersCoincide`.
 #[test]
 fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
     for (which, (ring, tube)) in PLACED_RINGS.into_iter().enumerate() {
@@ -241,14 +264,18 @@ fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
 /// nought, so each bend's cap plane cuts the other bend's wall in a circle a
 /// rounding round from that bend's own cap rim, half a ring away from the
 /// first, and the band of wall between the two holds no point the search
-/// offers. A point of the cut is clear of every face of the other bend, so the
-/// band is placed as the rest of its own wall across the cut is: outside the
-/// other bend (Q1537). Until then every rule both ways round was refused
+/// offers. The start of the cut is clear of every face of the other bend, so
+/// the band is placed as the rest of its own wall across the cut is: outside
+/// the other bend (Q1537). That start lies on the other bend's cap plane and
+/// on its ring, and is shown off its cap by the half-space that names the
+/// cap's circle, half a ring away. Until then every rule both ways round was refused
 /// `Undecidable` at `a point inside a piece of a face`.
 ///
 /// The intersection answers nothing and validates. The union and the
 /// difference keep each band beside the rest of its wall and are refused
-/// `CannotMeshAFace`, which is not this row's.
+/// `CannotMeshAFace`: run with a print where the shells are nested, the face
+/// not meshed is each time a band of ring wall between two meridian circles a
+/// rounding apart, a whole circle each, refused `CornersCoincide`.
 #[test]
 fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
     for (ring, tube) in PLACED_RINGS {
