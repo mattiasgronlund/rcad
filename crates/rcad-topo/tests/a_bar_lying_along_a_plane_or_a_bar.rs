@@ -28,6 +28,16 @@
 //! has an edge on it. `fuse/assemble.rs` names the seam for a straight side
 //! between the seam's own two corners, gathers every side's input edges onto
 //! the edge they share, and hands each half of a parted line its own face's.
+//!
+//! **A wall that only touches part of the seam loses the whole seam's history**
+//! (queue row Q808, a gap of its own, not yet fixed). `the_seam_a_side_runs_along`
+//! names the seam only for a side whose two ends are the seam's own two
+//! corners; a wall that stops partway up the bar cuts the touching side off at
+//! a new corner the wall's own top edge makes, so neither half of the split
+//! seam has a side between the seam's own two ends, and both lose their
+//! history at once. `a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it`
+//! pins this as measured, and the fixing row belongs with `fuse/assemble.rs`
+//! (or `fuse/bake.rs`) in its write set, not here.
 
 use core::f64::consts::PI;
 
@@ -123,6 +133,73 @@ fn a_bar_whose_seam_is_the_line_it_touches_a_wall_along_keeps_its_seam_in_histor
         wrong.is_empty(),
         "the seam's images are the one edge of the answer along it where the answer keeps the \
          bar, and nothing where it does not:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// A cube `4 × 4 × 2` (`z` in `0..2`) and a bar of radius one, two high, at
+/// `(−1, 2, 1)`. The bar's own two seam corners are `(0, 2, 1)` and `(0, 2, 3)`
+/// (`a_bar`'s doc comment), so its seam runs from `z = 1` to `z = 3`, but the
+/// cube's wall at `x = 0` only stands up to `z = 2`: the touch is the line
+/// `(0, 2, z)` for `z` in `[1, 2]` only, and the wall's own top edge crosses
+/// the bar's skin at `(0, 2, 2)`, a corner the seam's own two ends do not name.
+///
+/// Every rule both ways round: never refused, and every fuse keeps the bar
+/// whole wherever `a_bar_whose_seam_is_the_line_it_touches_a_wall_along_keeps_its_seam_in_history`
+/// does (union, and the bar less the cube). There the answer's seam is cut in
+/// two at `(0, 2, 2)` — `(0, 2, 1)`–`(0, 2, 2)` along the touch, and
+/// `(0, 2, 2)`–`(0, 2, 3)` above it, where the wall is no longer there to touch.
+///
+/// **`images_of_edge` of the pre-fuse seam comes back empty every time**, even
+/// where the answer keeps both halves of it. Neither half's two ends are the
+/// seam's own two ends, so `the_seam_a_side_runs_along` names neither, and the
+/// seam's history is lost whole rather than split in two. This pins that as
+/// measured; it is not the fix.
+#[test]
+fn a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it() {
+    let mut wrong: Vec<String> = Vec::new();
+    for swapped in [false, true] {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let cube = a_block(&mut model, [4.0, 4.0, 2.0]);
+            let bar = a_bar(&mut model, 1.0, 2.0, [-1.0, 2.0, 1.0]);
+            let seam = the_one_straight_edge_of(&model, bar);
+            let [first, second] = if swapped { [bar, cube] } else { [cube, bar] };
+            let what = format!("{rule:?}, bar first {swapped}");
+            let answer = model
+                .fuse(
+                    &[first],
+                    &[second],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} refused: {why}"));
+            let images = answer
+                .images_of_edge(seam)
+                .expect("this model made the key");
+            let along_the_touch: Vec<EdgeKey> = answer
+                .solids()
+                .iter()
+                .flat_map(|&solid| edges_of(&model, solid))
+                .filter(|&edge| runs_up_the_line(&model, edge, [0.0, 2.0]))
+                .collect();
+            let keeps_the_bar = rule == Rule::Union || (rule == Rule::Difference && swapped);
+            let expected_count = if keeps_the_bar { 2 } else { 0 };
+            if along_the_touch.len() != expected_count || !images.is_empty() {
+                wrong.push(format!(
+                    "{what}: the answer's edges along the touch are {along_the_touch:?} (wanted \
+                     {expected_count} of them) and the seam's images are {images:?} (wanted none, \
+                     as measured)"
+                ));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "the seam's images stay empty where the wall only touches part of it, even where the \
+         answer keeps the bar's seam split in two along the line:\n{}",
         wrong.join("\n")
     );
 }
