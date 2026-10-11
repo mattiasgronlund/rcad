@@ -4966,6 +4966,81 @@ mod tests {
         );
     }
 
+    /// A plane square to a ring's axis cuts it in two circles about the axis,
+    /// and a bar, a ball or a cone on that axis in one, so the three share one
+    /// whole circle or nothing.
+    ///
+    /// `z = 0` cuts ring 4/1 in its equators, of radii 5 and 3: the top rim of
+    /// a bar of radius 5 standing under the top half of the ring is the outer
+    /// one, and a bar of radius 3 meets the inner. `z = 3` cuts ring 8/5 in
+    /// circles of radii `8 ± 4`, a ball of radius 13 about `(0, 0, 8)` in one
+    /// of radius 12, and a cone of slope one with its apex at `(0, 0, −1)` in
+    /// one of radius 4. A plane past the tube, or a round surface whose circle
+    /// is neither, leaves nothing. A bar of radius 5 off the ring's axis cuts
+    /// `z = 0` in a circle about another centre, which this does not take.
+    #[test]
+    fn a_plane_square_to_a_rings_axis_and_a_round_surface_on_it_share_a_circle_or_nothing() {
+        let ring = |core: f64, tube: f64| {
+            Surface::Torus(Torus::new(Axis::z(), core, tube).expect("a ring thicker than nothing"))
+        };
+        let on_z = |through: [f64; 3]| {
+            Axis::new(
+                Point::new(through[0], through[1], through[2]),
+                Vector::new(0.0, 0.0, 1.0),
+            )
+            .expect("an axis")
+        };
+        let bar = |through: [f64; 3], radius: f64| {
+            Surface::Cylinder(Cylinder::new(on_z(through), radius).expect("a radius"))
+        };
+        let ball = |height: f64, radius: f64| {
+            Surface::Sphere(Sphere::new(Point::new(0.0, 0.0, height), radius).expect("a radius"))
+        };
+        let cone =
+            |apex: f64| Surface::Cone(Cone::new(on_z([0.0, 0.0, apex]), 1.0).expect("a slope"));
+        let across = |height: f64, up: f64| flat([0.0, 0.0, up], [0.0, 0.0, height]);
+        let (thin, fat) = (ring(4.0, 1.0), ring(8.0, 5.0));
+
+        let shared = [
+            (across(0.0, 1.0), &thin, bar([0.0, 0.0, -2.0], 5.0)),
+            (across(0.0, -1.0), &thin, bar([0.0, 0.0, -2.0], 5.0)),
+            (across(0.0, 1.0), &thin, bar([0.0, 0.0, 0.0], 3.0)),
+            (across(3.0, 1.0), &fat, bar([0.0, 0.0, 0.0], 12.0)),
+            (across(3.0, -1.0), &fat, ball(8.0, 13.0)),
+            (across(3.0, 1.0), &fat, cone(-1.0)),
+        ];
+        for (plane, ring, round) in &shared {
+            for order in [[plane, *ring, round], [round, plane, *ring]] {
+                assert_eq!(
+                    meet(order),
+                    Ok(MeetOfThree::MoreThanAPoint),
+                    "{plane:?} {round:?}"
+                );
+            }
+        }
+
+        let apart = [
+            (across(0.0, 1.0), &thin, bar([0.0, 0.0, 0.0], 4.5)),
+            (across(0.0, 1.0), &thin, bar([0.0, 0.0, 0.0], 1.0)),
+            (across(3.0, 1.0), &fat, ball(8.0, 12.0)),
+            (across(3.0, 1.0), &fat, cone(-2.0)),
+            (across(6.0, 1.0), &fat, bar([0.0, 0.0, 0.0], 8.0)),
+            (across(1.0, 1.0), &thin, ball(9.0, 1.0)),
+        ];
+        for (plane, ring, round) in &apart {
+            assert_eq!(
+                meet([plane, *ring, round]),
+                Ok(MeetOfThree::Nowhere),
+                "{plane:?} {round:?}"
+            );
+        }
+
+        assert_eq!(
+            meet([&across(0.0, 1.0), &thin, &bar([1.0, 0.0, 0.0], 5.0)]),
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+        );
+    }
+
     #[test]
     fn three_planes_square_to_the_axes_meet_where_they_say() {
         let answer = meet([
