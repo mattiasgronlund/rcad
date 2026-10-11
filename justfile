@@ -13918,10 +13918,16 @@ check-queue-api-selftest:
     g "$two" commit -qam "two's queue"
     g "$hub" merge -q --no-edit one || fail "main did not take one"
     got=$(g "$hub" merge --no-edit two 2>&1) || fail "one and two changed different rows and did not merge through the driver"
-    got=$(check "$hub") || fail "the merged queue fails check-queue"
     for row in '^Q1  1  done:' '^Q2  1  lane:lane-q2 ' "^Q3  1  after:$in_two " 'added in one, 1 ' 'added in one, 2 ' 'added in two, 1 ' 'added in two, 2 '; do
         grep -q "$row" "$hub/docs/queue.md" || fail "the merge lost the row matching $row"
     done
+    # §435: one copy could not see the tier of the row Q3 waits on; the merge can.
+    got=$(check "$hub") && fail "the merged queue passed with Q3 in tier 1 waiting on $in_two, a tier 2 row"
+    grep -qF "Q3: waits on $in_two, which is tier 2, and sits in tier 1, which the fill reaches first; move it down with just queue tier Q3 2 (§435)" <<<"$got" \
+        || fail "check-queue did not name Q3 and $in_two, and their tiers, once the merge showed both"
+    got=$(q "$hub" tier Q3 2 2>&1) || fail "tier refused to move Q3 down beside the row it waits on"
+    g "$hub" commit -qam "Q3 down to tier 2"
+    got=$(check "$hub") || fail "the merged queue fails check-queue"
 
     g "$hub" switch -q -c three
     got=$(q "$hub" park Q3 §230 2>&1) || fail "park refused Q3"
@@ -13937,7 +13943,7 @@ check-queue-api-selftest:
     grep -q '^<<<<<<< ours: Q3$' "$hub/docs/queue.md" || fail "the row in conflict is not marked in the file"
     got=$(q "$hub" park Q2 §230 2>&1) && fail "a verb wrote a file that still holds a conflict"
     got=$(q "$hub" pick Q3 theirs 2>&1) || fail "pick could not settle Q3"
-    awk '/^## Closed/ { c = 1 } c && /^Q3  1  dropped:§230 / { f = 1 } END { exit !f }' "$hub/docs/queue.md" \
+    awk '/^## Closed/ { c = 1 } c && /^Q3  2  dropped:§230 / { f = 1 } END { exit !f }' "$hub/docs/queue.md" \
         || fail "pick theirs did not keep four's drop under ## Closed"
     got=$(check "$hub") || fail "the file pick settled fails check-queue"
 
@@ -14181,7 +14187,7 @@ check-queue-api-selftest:
     got=$(q "$pin_wt" pin "$first" "$second" 2>&1) || fail "pin refused a tier 1 row and a tier 2 row"
     [ "$(pinword "$first")" = "1 pinned/1" ] || fail "pin did not put pinned/1 on $first"
     [ "$(pinword "$second")" = "1 pinned/2" ] || fail "pin did not move $second to tier 1 as pinned/2"
-    [ "$(tier1)" = "$first $second Q2 Q3 $classed " ] || fail "pin did not put the pinned rows first in tier 1, in the order pinned"
+    [ "$(tier1)" = "$first $second Q2 $classed " ] || fail "pin did not put the pinned rows first in tier 1, in the order pinned"
     got=$(q "$pin_wt" ready 2>&1) || fail "ready failed with pinned rows"
     [ "$(first_three)" = "$first $second $classed " ] || fail "ready did not list the pinned rows first, by number, ahead of wrong/A"
     got=$(q "$pin_wt" rank "$classed" before "$first" 2>&1) || fail "rank refused to move a row that is not pinned above a pinned one"
@@ -14203,7 +14209,7 @@ check-queue-api-selftest:
     grep -qF "$fifth carries the class crash/C, which puts it in tier 5" <<<"$got" || fail "pin did not say a C row belongs in tier 5"
     got=$(q "$pin_wt" unpin "$second" 2>&1) || fail "unpin refused $second"
     [ "$(pinword "$second")" = "1 from/-" ] || fail "unpin did not take the pin off and leave $second in tier 1"
-    [ "$(tier1)" = "$classed $first $second Q2 Q3 " ] || fail "unpin moved $second from where it stood"
+    [ "$(tier1)" = "$classed $first $second Q2 " ] || fail "unpin moved $second from where it stood"
     got=$(q "$pin_wt" take "$first" lane-pinned 2>&1) || fail "take refused a pinned row"
     pinned_sha=$(g "$pin_wt" rev-parse HEAD)
     got=$(q "$pin_wt" done "$first" "$pinned_sha" 2>&1) || fail "done refused a pinned row"
