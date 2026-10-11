@@ -1063,7 +1063,8 @@ fn follow_the_quartic(
     }
     let points = if let Some(corner) = the_corner_a_closed_run_starts_at(run) {
         let (start, off) = settled_with_a_bound(surfaces, seed)?;
-        begun_beside(corner, start, off, walked.points)?
+        let corner = where_on_the_crossing_this_corner_can_be(corner, surfaces)?;
+        begun_beside(corner, start, off, walked)?
     } else if let Some(ends) = the_two_corners_of_an_open_run(run) {
         let (start, _) = settled_with_a_bound(surfaces, seed)?;
         let picked_by = the_half_spaces_that_pick(run);
@@ -1105,33 +1106,93 @@ fn how_far_off_the_crossing_a_corner_can_be(
 ) -> Result<f64> {
     let mut furthest = 0.0_f64;
     for end in ends {
-        let at = Point::from(end.enclosure().map(middle_of));
-        let (settled, off) = settled_with_a_bound(surfaces, at)?;
-        let [x, y, z] = end.enclosure().map(|side| side.hi() - side.lo());
-        let half_the_box = Vector::new(x, y, z).length() / 2.0;
-        furthest = furthest.max((settled - at).length() + off + half_the_box);
+        furthest = furthest.max(how_far_off_the_crossing_this_corner_can_be(end, surfaces)?);
     }
     Ok(furthest)
 }
 
-/// A closed loop the marcher walked from `start`, turned round so that it
-/// begins and ends beside `corner`.
+/// The box the place on the crossing a closed run's corner stands for is known
+/// to be inside: a box round the corner's middle reaching as far as the corner
+/// can be off the crossing ([`how_far_off_the_crossing_this_corner_can_be`]),
+/// which holds the corner's own box too.
 ///
-/// **Handed back as it was walked when `corner` is `start`**, to within what
-/// the arithmetic knows of either: the corner's own box and the box `off` round
-/// `start` share a point. A march already begins and ends one step from its
-/// start, and the caller puts the corner at both ends, so putting `start` back
-/// would put the corner among the points a second time. A fuse puts the corner
-/// at the seed ([`where_a_closed_crossing_starts`]), and a mesh shifts it into
-/// its own frame and settles the seed again there, so the two can land an ulp
-/// apart, and a loop that held both was refused by the mesh as two corners in
-/// one place (Q1508).
+/// **A corner is a point somebody rounded, and not always in the frame it is
+/// walked in.** A mesh shifts a face stored far from the origin until its
+/// numbers are small and walks the loop again there. The corner the fuse put at
+/// the seed was rounded where it was stored, so for a ball and a bar a thousand
+/// from the origin it lands `2.2e-14` off the crossing, where every point the
+/// march walks there is within `6e-15` of it. The corner's own box missed the
+/// start's by that much, the start was kept beside it, and moved back out to
+/// where the face is stored the two were one point, which the mesh refused as
+/// two corners in one place (Q1690). Settled onto both surfaces, the corner
+/// lands on the start, or `1.8e-15` from it, inside the start's own box.
+///
+/// **A corner that cannot be settled is judged by its own box**, which is all
+/// that was known of a corner before Q1690. Settling refuses where the two
+/// surfaces are tangent, and a closed run's corner can sit at such a place: the
+/// LED's body meets its dome where the two touch all the way round (§189.3).
+/// The bound only ever leaves a point out beside the corner, so going without it
+/// costs that and no more, where refusing would refuse a loop the march has
+/// already walked.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when the box round the corner's
+/// middle comes out as something that is not a box.
+fn where_on_the_crossing_this_corner_can_be(
+    corner: PredicatePoint,
+    surfaces: [&Surface; 2],
+) -> Result<PredicatePoint> {
+    let Ok(reach) = how_far_off_the_crossing_this_corner_can_be(corner, surfaces) else {
+        return Ok(corner);
+    };
+    let middle = Point::from(corner.enclosure().map(middle_of));
+    somewhere_within(middle, reach).ok_or(Error::CannotWorkOutHowBigACrossingIs)
+}
+
+/// How far off the crossing a corner can be: how far its middle moves settling
+/// onto both surfaces, plus the bound on how far off the crossing it still is
+/// once settled, plus half the diagonal of its box.
+///
+/// # Errors
+///
+/// What [`settled_with_a_bound`] refuses.
+fn how_far_off_the_crossing_this_corner_can_be(
+    corner: PredicatePoint,
+    surfaces: [&Surface; 2],
+) -> Result<f64> {
+    let at = Point::from(corner.enclosure().map(middle_of));
+    let (settled, off) = settled_with_a_bound(surfaces, at)?;
+    let [x, y, z] = corner.enclosure().map(|side| side.hi() - side.lo());
+    let half_the_box = Vector::new(x, y, z).length() / 2.0;
+    Ok((settled - at).length() + off + half_the_box)
+}
+
+/// A closed loop the marcher walked from `start`, turned round so that it
+/// begins and ends beside `corner`, with no point of it on the corner.
+///
+/// `corner` is the box the place on the crossing the corner stands for is in
+/// ([`where_on_the_crossing_this_corner_can_be`]). `off` is the bound round
+/// `start`, and `walked`'s deviation the bound round every point it holds.
+///
+/// **A point the corner sits on is left out**: `start` when the corner's box
+/// and the box `off` round `start` share a point, or else either end of the
+/// step nearest the corner when the corner's box and the box the deviation
+/// round that end share one, the test [`where_on_the_loop_this_end_is`] puts a
+/// run's end to. The caller puts the corner at both ends of what comes back, so
+/// a point nothing the arithmetic knows tells from it would be the corner a
+/// second time, and a mesh refuses a loop through one place twice (Q1508,
+/// Q1690). The loop then begins with the point after the one left out, so a
+/// corner on `start` hands the loop back as it was walked: a march already
+/// begins and ends one step from its start. That is the usual case, since a
+/// fuse puts the corner at the seed ([`where_a_closed_crossing_starts`]).
 ///
 /// Anywhere else `start` is put back among the points, because it is not an
 /// end any more. The corner goes between the two ends of the step nearest it,
 /// as [`where_on_the_loop_this_end_is`] puts a run's end, so splitting that one
 /// step at a point on the curve is all that changes, and a step split at a
-/// point on the curve strays from it less than the step did.
+/// point on the curve strays from it less than the step did. A point left out
+/// moves that step by no more than the two boxes reach.
 ///
 /// **Not beside whichever neighbour of the nearest point is nearer.** The march
 /// doubles its first step, so a corner a tenth of the way along the second step
@@ -1147,26 +1208,32 @@ fn how_far_off_the_crossing_a_corner_can_be(
 ///
 /// # Errors
 ///
-/// [`Error::CannotWorkOutHowBigACrossingIs`] when `start` has no box round it.
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a point it asks about has no
+/// box round it.
 fn begun_beside(
     corner: PredicatePoint,
     start: Point,
     off: f64,
-    walked: Vec<Point>,
+    Marched { points, deviation }: Marched,
 ) -> Result<Vec<Point>> {
-    let Some(round_the_start) = somewhere_within(start, off) else {
-        return Err(Error::CannotWorkOutHowBigACrossingIs);
-    };
-    if the_boxes_share_a_point(corner, round_the_start) {
-        return Ok(walked);
-    }
-    let corner = Point::from(corner.enclosure().map(middle_of));
-    let mut round = Vec::with_capacity(walked.len() + 1);
+    let mut round = Vec::with_capacity(points.len() + 1);
     round.push(start);
-    round.extend(walked);
-    let (nearest, _) = the_step_nearest(corner, &round);
+    round.extend(points);
     let count = round.len();
-    round.rotate_left((nearest + 1) % count);
+    let (nearest, _) = the_step_nearest(Point::from(corner.enclosure().map(middle_of)), &round);
+    let after_it = (nearest + 1) % count;
+    for at in [0, nearest, after_it] {
+        let bound = if at == 0 { off } else { deviation };
+        let Some(round_the_point) = somewhere_within(round[at], bound) else {
+            return Err(Error::CannotWorkOutHowBigACrossingIs);
+        };
+        if the_boxes_share_a_point(corner, round_the_point) {
+            round.rotate_left((at + 1) % count);
+            round.pop();
+            return Ok(round);
+        }
+    }
+    round.rotate_left(after_it);
     Ok(round)
 }
 
@@ -1175,7 +1242,7 @@ fn begun_beside(
 /// half-spaces hold, in order from the first corner to the second.
 ///
 /// **A corner the march passed through is not handed back as a point**, for the
-/// same reason [`begun_beside`] leaves out a corner that is the start: the caller
+/// same reason [`begun_beside`] leaves out a point its corner sits on: the caller
 /// puts both corners at the ends, and a corner among the points as well is two
 /// corners in one place (Q1508). A fuse puts a run's corner where the crossing
 /// meets a third surface, and the seed of a crossing of two pipes can be exactly
@@ -5651,6 +5718,10 @@ mod tests {
     /// from comes back in that point's place. The loop was turned to begin at
     /// the point the corner sits on, so it opened with the corner and then the
     /// same point again, two corners in one place (Q1690).
+    ///
+    /// The corners are all above the ball's centre, on the side of it the
+    /// loop's start is on. A corner below it is walked from the other seed
+    /// ([`the_seed_on_the_loop_a_corner_is_on`]), so its march is not this one.
     #[test]
     fn a_closed_loop_cornered_on_one_of_its_marched_points_holds_that_corner_only_at_its_ends() {
         let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 2.0).expect("a radius"));
@@ -5667,7 +5738,7 @@ mod tests {
         )
         .expect("one loop of a ball through a pipe is walked");
         let count = marched.points().len();
-        for corner in [1, count / 2, count - 1].map(|at| marched.points()[at]) {
+        for corner in [1, count / 4, count - 1].map(|at| marched.points()[at]) {
             let run = NamedRun::new(
                 EdgeRun::RightRoundWhereItsFacesCross,
                 [corner, corner].map(|end| PredicatePoint::from(end.coordinates())),
@@ -5936,7 +6007,10 @@ mod tests {
             PredicatePoint::from(on_the_circle(3.05).coordinates()),
             on_the_circle(0.0),
             1e-12,
-            walked_at.map(on_the_circle).to_vec(),
+            Marched {
+                points: walked_at.map(on_the_circle).to_vec(),
+                deviation: 1e-12,
+            },
         )
         .expect("a start with a box round it");
         let from_beside_the_corner = [

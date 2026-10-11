@@ -6,9 +6,11 @@
 //! far from the origin until its numbers are small and walks the loop again
 //! there, so the corner, rounded where it was stored, lands `2.2e-14` off the
 //! place the walk starts from in the shifted frame, for a ball and a bar a
-//! thousand from the origin. `rcad-geom`'s `begun_beside` keeps that start
+//! thousand from the origin. `rcad-geom`'s `begun_beside` kept that start
 //! beside the corner, and the mesh the fuse checks its answer with refused it
-//! as two corners in one place.
+//! as two corners in one place (`CornersCoincide`). The corner is now judged by
+//! how far off the crossing it can be, which reaches the start, and the start
+//! is left out.
 
 use std::f64::consts::PI;
 
