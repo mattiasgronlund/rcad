@@ -294,6 +294,26 @@ the ring at seven of the 234 turns. The ring alone measures `8π²` at those
 turns; what the fuse writes back for it encloses about `−4·10⁻¹⁶`
 (`a_whole_ring_turned_any_way_and_a_bar_far_from_it_answer_or_are_refused_as_enclosing_nothing`).
 
+**2026-10-11 note (Q622): a sliver arc of the bar in the tube's wall is read the
+right way down to where the fuse refuses, and the wrong way one ulp past it.**
+Q600 slid the bar of `a_bar_inside_a_tubes_wall.rs` towards the tube's walls,
+so one arc of the joined cap is a hair off its chord
+(`a_sliver_arc_on_a_joined_flat_face.rs`). Q622 read all 840 arcs that sweep
+builds, both bars and three angles, down to the thinnest union each one gives:
+none bulges the wrong way and none reads `Zero`. What decides the reading is
+how far a chord end must move to flip it, which is four times the arc's
+sagitta, not the half chord that test's module doc names. That margin is at
+least 5.7e3 ulps on every union built. With the bar one ulp across the outer
+wall it is under one ulp, and there `choose` (`fuse/select.rs`) refuses 'a
+point inside a piece of a face' first. With `choose` edited to place those
+pieces, which no input does today, 4 arcs read the wrong way, all on the
+radius-7 arc, and `rings_round` panicked at `assemble.rs:1996`: at 180° with
+the bar one ulp across, the stored corner `-6.999999999999998` sits 1.6 ulps
+off a crossing that rounds to `-7`, which tilts the `1.4e-7` chord past the
+tangent against a margin of 0.4 ulp. So whoever moves that refusal needs Q623's
+exact reading first; `every_sliver_the_union_builds_holds_both_down_to_where_the_fuse_refuses`
+fails when the refusal moves, which is what sends them here.
+
 ### 191.6 What is left
 
 `ignored_tests` goes 2 → 6 and `wildcard_arms` 87 → 88 (the justfile says which
