@@ -12754,7 +12754,7 @@ _queue-check file decisions:
             fpos = (pinned ? 2 : 1) + ((isclass || tag == "small") ? 1 : 0)
             if (w[fpos] ~ /^(from|was)\//) {
                 if (w[fpos] !~ /^(from\/([TDQ][0-9]+|-|(fuzz|step):[^ ]+)|was\/[TDQ][0-9]+)$/) err(line, id ": \"" w[fpos] "\" is not where a row came from: from/<id>, was/<id>, from/-, from/fuzz:<target> or from/step:<file> (§432, §433)")
-                else if (w[fpos] ~ /\/[TDQ][0-9]+$/) { fromid[++nfrom] = id; fromsrc[id] = substr(w[fpos], index(w[fpos], "/") + 1); fromline[id] = line }
+                else if (w[fpos] ~ /^(from|was)\/[TDQ][0-9]+$/) { fromid[++nfrom] = id; fromsrc[id] = substr(w[fpos], index(w[fpos], "/") + 1); fromline[id] = line }
                 if (w[fpos + 1] ~ /^(wrong|crash|refuses)\/[ABCD]$/ || w[fpos + 1] == "small") err(line, id ": the tag " w[fpos + 1] " goes before " w[fpos] ", where the fill reads it (§432)")
             }
             s = what
@@ -12857,7 +12857,7 @@ _queue-check file decisions:
 # came first; and still refuses a class with punctuation or a pin behind it.
 # §433 adds `from/fuzz:<target>` and `from/step:<file>`: on an open row after a
 # pin and a class, and on a closed row after `small`, passed by their shape
-# alone; and a kind it does not know, a kind with no name, `was/` with a kind,
+# alone, a name ending like a row id included; and a kind it does not know, a kind with no name, `was/` with a kind,
 # and a class written after the word, refused. `add` takes a target that is
 # there, a corpus file by its own name, and one NIST name by its directory
 # with the space written `_`, the colon tripping no refusal of a class; and
