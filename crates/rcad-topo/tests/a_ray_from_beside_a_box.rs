@@ -19,10 +19,10 @@ use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, NamedRun, Orientation, Picker, Plane,
     Point, Scale, Surface, Torus, Vector,
 };
-use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftEdge, DraftStep, Error, Invalid, Model, ProfileBuilder, Result, Rule, SolidBuilder,
-    SolidKey,
+    Containment, DraftEdge, DraftStep, Error, FaceView, Invalid, Model, ProfileBuilder, Result,
+    Rule, SolidBuilder, SolidKey, SolidView, WireView,
 };
 use smallvec::smallvec;
 
@@ -235,6 +235,176 @@ fn the_cap_circles_two_halves_are_the_half_under_its_middle_and_the_half_over_it
     }
 }
 
+/// Boxes on the planes of the glued block's sides, none on a side, and what
+/// every point of each is against the block and the bend.
+const BESIDE_THE_SIDES: [([f64; 3], Containment); 7] = [
+    ([6.0, 1.0, 0.0], Containment::Outside),
+    ([2.0, 1.0, 0.0], Containment::Outside),
+    ([2.0, 3.5, 0.0], Containment::Inside),
+    ([2.0, 3.5, 0.5], Containment::Inside),
+    ([4.0, 1.0, 2.0], Containment::Outside),
+    ([4.0, 1.0, -2.0], Containment::Outside),
+    ([1.0, -2.0, 0.0], Containment::Outside),
+];
+
+/// A box on the plane of a side of the block a bend grows out of, and off the
+/// side, is answered by a ray from an exact point beside it, since no face
+/// meets the box round both; a box on a side is met by that side, and refused.
+#[test]
+fn a_box_beside_a_side_of_the_block_a_bend_grows_out_of_is_answered() {
+    let policy = Policy::certified();
+    let (model, built) = the_bend_out_of(&THE_BLOCK);
+    let solid = model.solid(built).expect("this model made the key");
+    for (at, should) in BESIDE_THE_SIDES {
+        assert_eq!(what_the_shape_says(&THE_BLOCK, at), should, "{at:?}");
+        let mut log = ProvenanceLog::new();
+        let placed = solid.classify_uncertain_point(a_box_round(at), &policy, &mut log);
+        assert_eq!(placed, should, "{at:?}");
+        assert!(log.is_empty(), "{at:?} was settled exactly: {log:?}");
+    }
+    for on_a_side in [[4.0, -2.0, 0.0], [4.0, -1.0, 2.0]] {
+        let placed = solid.classify_uncertain_point(
+            a_box_round(on_a_side),
+            &policy,
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(placed, Containment::CannotFireARayAtAFacesSurface { .. }),
+            "{on_a_side:?}: {placed:?}"
+        );
+    }
+}
+
+/// The glued block turned leaves its top's corners a rounding off the top's
+/// stored plane, and a box on that plane a quarter off the top, beside the
+/// middle of one of its sides, is inside the bounding box of one of the top's
+/// triangles. Only the directions across a triangle's sides keep the two
+/// apart, and the box is answered outside.
+#[test]
+fn a_box_beside_the_top_of_a_turned_block_a_bend_grows_out_of_is_answered_outside() {
+    let policy = Policy::certified();
+    let (mut model, built) = the_bend_out_of(&THE_BLOCK);
+    model
+        .place_solid(built, &the_turn())
+        .expect("this model made the key");
+    let solid = model.solid(built).expect("this model made the key");
+    let top = the_face_facing(
+        solid,
+        the_turn().apply_to_vector(Vector::new(0.0, 0.0, 1.0)),
+    );
+    assert!(
+        !every_corner_is_on_its_plane(top),
+        "the turn left every corner of the top on its plane"
+    );
+    let beside_the_top = [4.0, -2.25, 2.0];
+    assert_eq!(
+        what_the_shape_says(&THE_BLOCK, beside_the_top),
+        Containment::Outside
+    );
+    let at = the_turn()
+        .apply_to_point(Point::from(beside_the_top))
+        .coordinates();
+    let mut bounds_round_it = 0;
+    top.for_each_triangle(|corners| {
+        let corners = corners.map(|corner| corner.coordinates());
+        let inside = (0..3).all(|axis| {
+            let (low, high) = corners
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), corner| {
+                    (low.min(corner[axis]), high.max(corner[axis]))
+                });
+            (low..=high).contains(&at[axis])
+        });
+        bounds_round_it += usize::from(inside);
+    });
+    assert!(
+        bounds_round_it > 0,
+        "no triangle's bounding box holds the box, so the coordinate axes alone settle it"
+    );
+    let mut log = ProvenanceLog::new();
+    let placed = solid.classify_uncertain_point(a_box_round(at), &policy, &mut log);
+    assert_eq!(placed, Containment::Outside, "{at:?}");
+    assert!(log.is_empty(), "it was settled exactly: {log:?}");
+}
+
+/// The top of an L a bend grows out of is fanned from the end of one arm, so
+/// two of its triangles, wound opposite ways, reach over the notch between the
+/// arms. They add up to nothing there, and a box in the notch on the plane of
+/// the top is answered outside; a box on an arm is met by the top, and
+/// refused.
+#[test]
+fn a_box_in_the_notch_of_an_l_a_bend_grows_out_of_is_answered_outside() {
+    let policy = Policy::certified();
+    let (model, built) = the_bend_out_of(&AN_L);
+    let solid = model.solid(built).expect("this model made the key");
+    let in_the_notch = [4.25, -3.0, 2.0];
+    let mut covered = [0; 2];
+    the_face_facing(solid, Vector::new(0.0, 0.0, 1.0)).for_each_triangle(|corners| {
+        if let Some(counter_clockwise) = which_way_it_covers(corners, in_the_notch) {
+            covered[usize::from(counter_clockwise)] += 1;
+        }
+    });
+    assert!(
+        covered[0] > 0 && covered[1] > 0,
+        "the top's fan should cover the notch both ways round: {covered:?}"
+    );
+    assert_eq!(
+        what_the_shape_says(&AN_L, in_the_notch),
+        Containment::Outside
+    );
+    let placed = solid.classify_uncertain_point(
+        a_box_round(in_the_notch),
+        &policy,
+        &mut ProvenanceLog::new(),
+    );
+    assert_eq!(placed, Containment::Outside);
+
+    let on_an_arm = [3.0, -3.0, 2.0];
+    let placed =
+        solid.classify_uncertain_point(a_box_round(on_an_arm), &policy, &mut ProvenanceLog::new());
+    assert!(
+        matches!(placed, Containment::CannotFireARayAtAFacesSurface { .. }),
+        "{placed:?}"
+    );
+}
+
+/// The L turned leaves its top's corners a rounding off its stored plane, and
+/// then the two triangles over the notch are not in one plane. Every point of
+/// the box in the notch is still outside the L, a quarter from the nearest
+/// wall, so the answer exists and this is a gap: `its_fan_adds_up_to_nothing_over`
+/// does not answer for a fan that is not flat.
+#[test]
+fn a_box_in_the_notch_of_a_turned_l_a_bend_grows_out_of_is_still_refused() {
+    let policy = Policy::certified();
+    let (mut model, built) = the_bend_out_of(&AN_L);
+    model
+        .place_solid(built, &the_turn())
+        .expect("this model made the key");
+    let solid = model.solid(built).expect("this model made the key");
+    let top = the_face_facing(
+        solid,
+        the_turn().apply_to_vector(Vector::new(0.0, 0.0, 1.0)),
+    );
+    assert!(
+        !every_corner_is_on_its_plane(top),
+        "the turn left every corner of the top on its plane"
+    );
+    let in_the_notch = [4.25, -3.0, 2.0];
+    assert_eq!(
+        what_the_shape_says(&AN_L, in_the_notch),
+        Containment::Outside
+    );
+    let at = the_turn()
+        .apply_to_point(Point::from(in_the_notch))
+        .coordinates();
+    let placed =
+        solid.classify_uncertain_point(a_box_round(at), &policy, &mut ProvenanceLog::new());
+    assert!(
+        matches!(placed, Containment::CannotFireARayAtAFacesSurface { .. }),
+        "{placed:?}"
+    );
+}
+
 /// A solid built face by face has one shell, so a block with a bend-shaped
 /// hollow sealed inside it cannot be described.
 #[test]
@@ -301,6 +471,120 @@ fn an_l_less_a_bend_wholly_inside_it_is_refused_as_a_quartic() {
             "{rule:?}: {answer:?}"
         );
     }
+}
+
+/// A new model holding [`a_bend_out_of`] `outline`, walked the way that builds,
+/// with one closed edge round the cap.
+fn the_bend_out_of(outline: &[[i32; 2]]) -> (Model, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let built = a_bend_out_of(
+        &mut model,
+        outline,
+        Orientation::Forward,
+        TheCapCircle::OneClosedEdge,
+    )
+    .expect("a bend growing out of a block's side is a solid");
+    (model, built)
+}
+
+/// What `at` is against the block stood up on `outline` and the bend growing
+/// out of it, read off the shape: inside the outline from `z = −2` to `z = 2`,
+/// or inside the tube of radius one round the circle of radius four about
+/// `+z`, in the quarter where `x` and `y` are both above nought.
+///
+/// Every point asked here is small whole numbers and quarters, so every sum
+/// and product is exact. A point within an eighth of the skin along an axis is
+/// not asked, since the skin itself is not read here.
+fn what_the_shape_says(outline: &[[i32; 2]], at: [f64; 3]) -> Containment {
+    let inside = |[x, y, z]: [f64; 3]| {
+        let crossings = (0..outline.len())
+            .filter(|&position| {
+                let [from, to] = [outline[position], outline[(position + 1) % outline.len()]]
+                    .map(|corner| corner.map(f64::from));
+                from[0] == to[0] && from[0] > x && from[1].min(to[1]) <= y && y < from[1].max(to[1])
+            })
+            .count();
+        let in_the_block = crossings % 2 == 1 && -2.0 < z && z < 2.0;
+        let round = x * x + y * y;
+        let in_the_bend =
+            x > 0.0 && y > 0.0 && (round + z * z + 15.0) * (round + z * z + 15.0) < 64.0 * round;
+        in_the_block || in_the_bend
+    };
+    let answer = inside(at);
+    for axis in 0..3 {
+        for step in [-0.125, 0.125] {
+            let mut nudged = at;
+            nudged[axis] += step;
+            assert_eq!(
+                inside(nudged),
+                answer,
+                "{at:?} is within an eighth of the skin along axis {axis}"
+            );
+        }
+    }
+    if answer {
+        Containment::Inside
+    } else {
+        Containment::Outside
+    }
+}
+
+/// A box the size `select.rs` puts round a point it puts back onto a curved
+/// surface: `256 ε` for every unit out from the origin.
+fn a_box_round(at: [f64; 3]) -> PredicatePoint {
+    let reach = 256.0 * f64::EPSILON * at.iter().fold(1.0f64, |most, each| most.max(each.abs()));
+    PredicatePoint::Constructed(
+        at.map(|coordinate| Interval::around(coordinate, reach).expect("a finite place")),
+    )
+}
+
+/// `0.7` about `(1, 2, 3)` through the origin, which lines no flat face of
+/// the glued block up with the axes.
+fn the_turn() -> Isometry {
+    let slant = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
+    Isometry::rotation(&slant, 0.7).expect("a turn")
+}
+
+/// The flat face of `solid` whose plane faces most nearly `up`.
+fn the_face_facing(solid: SolidView<'_>, up: Vector) -> FaceView<'_> {
+    let up = up.components();
+    let facing_up = |face: &FaceView<'_>| {
+        face.surface().as_plane().map_or(f64::NEG_INFINITY, |flat| {
+            let normal = flat.normal().components();
+            (0..3).map(|axis| normal[axis] * up[axis]).sum::<f64>()
+        })
+    };
+    solid
+        .faces()
+        .max_by(|one, other| facing_up(one).total_cmp(&facing_up(other)))
+        .expect("a solid with faces")
+}
+
+fn every_corner_is_on_its_plane(face: FaceView<'_>) -> bool {
+    let flat = *face.surface().as_plane().expect("a flat face");
+    face.wires().flat_map(WireView::points).all(|corner| {
+        flat.side_of_point(PredicatePoint::from(corner.coordinates())) == Decision::Zero
+    })
+}
+
+/// Whether the triangle `corners`, lying in the plane `z = at[2]`, covers
+/// `at` strictly inside it: `Some(true)` wound counter-clockwise seen from
+/// above, `Some(false)` clockwise. Small whole numbers and quarters, so
+/// every product here is exact.
+fn which_way_it_covers(corners: [Point; 3], at: [f64; 3]) -> Option<bool> {
+    let corners = corners.map(|corner| corner.coordinates());
+    if corners.iter().any(|corner| corner[2] != at[2]) {
+        return None;
+    }
+    let turn = |from: [f64; 3], to: [f64; 3], there: [f64; 3]| {
+        (to[0] - from[0]) * (there[1] - from[1]) - (to[1] - from[1]) * (there[0] - from[0])
+    };
+    let [a, b, c] = corners;
+    let whole = turn(a, b, c);
+    let inside = [turn(a, b, at), turn(b, c, at), turn(c, a, at)]
+        .iter()
+        .all(|part| part * whole > 0.0);
+    inside.then_some(whole > 0.0)
 }
 
 /// The block `[2, 6] × [−2, 0] × [−2, 2]` with a quarter bend of ring four and
