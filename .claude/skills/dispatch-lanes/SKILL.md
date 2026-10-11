@@ -99,25 +99,16 @@ Tiers 1 and 5 go in class order, not file order (§352.3, §403.3).
 
 A line `take Q1,Q2,Q3 (a bundle of 3 small rows, one lane)` is **one
 lane** doing all of those rows (§352.4), with each row's text indented under
-it. Its model is opus if any of its rows says opus, else sonnet. Its write set
-is the union of its rows' sets, leaving out `-`.
+it.
 
-Before a brief, check the row's write set against what the work really
-touches. A row whose write set is wrong is fixed in the file first: a lane that
-needs a file its row does not name either stops or writes outside its set, and
-the fill has already let another lane hold that file. A row that adds a
-`check-*` recipe or an `#[ignore]` moves a count the gate pins —
-`check-gate-runs-every-check`'s `check-*` count, `check-ignored`'s declared
-count, `wildcard_arms` — so name the recipe that pins that count in its write
-set too, or the merger has to bump it outside the write set on its own
-(`.claude/agents/merger.md`).
-
-Model per row, from its `model` field. Opus for anything reasoning about a
-numerical refusal, a published bound, or whether a claim of impossibility
-holds. Sonnet by name for: replaying a corpus, reproducing and classifying a
-fuzz artifact, bisecting, running the gate and reporting, sweeping references
-after a renumber, resolving a `decisions.md` conflict down to a marker
-deletion, disk and worktree sweeps.
+**Checking a row against the code is not yours.** Its `lanes` run sends the
+row to prep first (`.claude/agents/prep.md`, §396.4). Prep reads the row and
+the code at the base, and holds the rules this step held: the write set
+against the work, the recipe that pins a count the row moves, the model per
+row and per bundle, `sourcePaths`, the marks, and the facts the lane needs. A
+row prep finds wrong comes back not merged before any lane starts, with a
+`needs <file>: <why>` line for each file it is missing. Re-file it with those
+files, drop and add, then `queue next` (§396.4).
 
 ## 5. Dispatch: one `lanes` workflow per row
 
@@ -126,11 +117,15 @@ then a merger that lands it on `main` and hands back about twenty lines. You no
 longer merge in your own context, which is where most of it went (§266).
 
 A session reads its agent types once, when it starts. A session begun before its
-tree held `.claude/agents/lane.md`, `verifier.md`, `merger.md` and `lander.md`
-cannot resolve them, and every stage of the run throws — except the lander's: a
-missing `lander` type does not throw the run, it sends the lane to the Opus
-merger instead, on its own branch, `merge-<label>-after-land` (§384.3). Start a
-new session rather than run it (§266.6).
+tree held `.claude/agents/prep.md`, `lane.md`, `verifier.md`, `merger.md` and
+`lander.md` cannot resolve them, and every stage of the run throws — except
+two. A missing `lander` type does not throw the run, it sends the lane to the
+Opus merger instead, on its own branch, `merge-<label>-after-land` (§384.3). A
+missing `prep` type stops a short-form lane before it starts, and the row comes
+back not merged with `prep threw` in its lines. Start a new session rather than
+run it (§266.6). **A session begun before its tree held `prep.md` restarts
+before it sends a short-form lane;** the full form, which sends no prep, works
+meanwhile.
 
 For every row the fill took:
 
@@ -150,11 +145,47 @@ For every row the fill took:
    had proven by three reproduced mutations. `scriptPath` runs the file in your
    tree as it is when you call.
 
-The args are `{ base, lanes: [ { label, queueId, brief, writeSet, model,
-sourcePaths, pinsOnly, sameBehaviour, report, verify } ] }`. The workflow appends the base,
-the `switch -c` and its refusal to the brief itself, and sends each role with
-its type, so `.claude/agents/lane.md`, `verifier.md` and `merger.md` carry the
-standing rules. A complete call looks like this:
+The args are `{ base, lanes: [ { label, queueId, notes } ] }`, the short form
+(§396.4). A complete call looks like this:
+
+```
+{
+  "base": "35cb5eaca58ccaa65ecd9d5712eabef3e350d633",
+  "lanes": [
+    { "label": "fix-the-corner-case", "queueId": "Q999" }
+  ]
+}
+```
+
+- `queueId` is the row's id, or `Q1,Q2,Q3` for a bundle as `queue next`
+  printed it, in one run for the whole bundle.
+- `notes` is text, and only what the row's text does not say: a finding from an
+  earlier run, a file another running lane holds. Leave it out when the row
+  says it all.
+- The branch defaults to `lane-<label>` and must not exist yet. This repo keeps
+  its finished `lane-*` branches, so check `git branch --list 'lane-*'` first;
+  a reused label stops the lane at its second command (§237). Two lanes with
+  one label in a run are refused at its start.
+
+The run sends the row to prep, then builds the lane's brief from the row's
+line, prep's marks and facts, your `notes`, and the two notes every brief
+carries, on the steps in `rows` and on the test names in
+`tests_that_fail_without_the_change`. The lane starts with the write set,
+model, `sourcePaths` and marks prep answered, and a writing lane is asked for a
+`for_the_verifier` field by default: how to lay back the `#[cfg(test)]` pins it
+adds in `src/` when its verifier reverts the source. The workflow appends the
+base, the `switch -c` and its refusal to the brief itself, and sends each role
+with its type, so `.claude/agents/prep.md`, `lane.md`, `verifier.md` and
+`merger.md` carry the standing rules.
+
+**The full form is for a row sent again with a finding in its brief, a
+`report` schema, or `verify: false`.** You then write what prep would have: the
+brief, and every field by `prep.md`'s rules. The workflow gives a full-form
+brief neither of the two notes nor the `for_the_verifier` field, so type both
+notes into the brief and put the field in `report` yourself; `rowsNote`,
+`testsNote` and `forTheVerifier` in `lanes.js` hold the words. A lane giving
+`notes` beside a full-form field is refused at the run's start. A full-form
+call:
 
 ```
 {
@@ -177,67 +208,20 @@ standing rules. A complete call looks like this:
 ```
 
 `verify: false` skips the verifier, leaving the merger's own gate as the only
-check. An empty `writeSet` makes the lane read-only, with no verifier and no
-merge, as this file says again further down.
-
-A brief carries only what is this row's:
-
-- the work, and anything to report beyond the standard record;
-- for a bundle, `queueId: "Q1,Q2,Q3"` as `queue next` printed it, and
-  one run for the whole bundle;
-- the write set, as `writeSet`. The branch defaults to `lane-<label>` and must
-  not exist yet — this repo keeps its finished `lane-*` branches, so check `git
-  branch --list 'lane-*'` first; a reused label stops the lane at its second
-  command (§237);
-- nothing about the context hook for a writing lane. One that sees "Lane
-  budget passed" is past 150k of its own context; it commits, hands its branch
-  over, and `lanes.js` starts a fresh lane on it, up to three times a row
-  (§416). "Carry on past it" would undo that. A read-only lane has nothing to
-  hand over and stops at the warning, so say "carry on past it" in a read-only
-  brief that builds a probe or reads a listing;
-- for a row that writes a section, `mise exec -- just claim-section '<what>'`
-  before writing;
-- the verbatim API signatures and exact-arithmetic facts that lane needs,
-  because rediscovering those costs it twenty minutes;
-- for a row that compares two fuzz setups on coverage, how far two identical
-  runs drift apart. After one 9 736 s slice, measured with `RCAD_FUZZ_TIMINGS`
-  unset, one pair ended 60 edges apart on the reader, 10 on the writer and 0
-  to 3 on the other three targets (§272.9). A smaller gap says nothing, and
-  one pair is a floor, so ask for several runs a side. One measuring pass per
-  corpus is enough: two passes over one corpus agreed to within 2 edges.
+check.
 
 `base` is a sha you have seen go green: step 3's, or the sha a merger pushed,
-since it gated that tree. `sourcePaths` defaults to the `crates/<c>/src`
-directories in the write set; set it by hand when that is not what the verifier
-should revert — for a tooling row whose test is a recipe, the file the recipe
-checks. A row whose `lines-that-run` print ends `lines that run: 0` — `.md`
-files, comments, test code — names no failing test, and its verifier traces
-every paragraph it moved instead; a row that adds a test, a `#[cfg(test)]` pin
-in `src/` included, still names it. A bundle of such rows merges on that print
-with no `pinsOnly` and no `sourcePaths` (§375, §382). A row that only pins a test
-and writes a decisions section, with no `src/` path anywhere in its work,
-needs `pinsOnly: true`: say so explicitly, never leave it to be inferred from
-an empty `sourcePaths`, because that emptiness is also what a tooling row shows
-when its dispatcher forgot to set `sourcePaths` by hand, and that must keep
-refusing. Give a `pinsOnly` row a `src/` path too — in `writeSet` or
-`sourcePaths` — and it is refused instead: there is something to revert then.
-A row that changes lines that run and keeps what they compute — one of two
-copies dropped for the other (Q854), a body lifted into a function (Q601), a
-block moved — needs `sameBehaviour: true`, said explicitly for
-`pinsOnly`'s reason: a lane naming no failing test is also what a lane that
-changed behaviour and found no test looks like. Its lane names the tests that
-reach the change, and its verifier shows they pass with the source reverted
-and fail under a mutation of a line the change adds (§399). Never both marks;
-the workflow throws at its start.
+since it gated that tree.
 
 **Never do a row in your own tree because the workflow cannot merge it.** A
 row the workflow has no road for is a missing road in `lanes.js`: file it as
 a 2.2 row and dispatch the row once it is built. Q854's dispatcher did the
 row itself, which is how §399 came to be written (§399.1).
 
-An empty `writeSet` makes a read-only lane, which is neither verified nor
-merged, and its answer comes back whole. A test-only row gets no write access
-to `src/` and reports defects instead.
+A row whose write set is `-`, or an empty `writeSet` in the full form, makes a
+read-only lane, which is neither verified nor merged, and its answer comes back
+whole. A test-only row gets no write access to `src/` and reports defects
+instead.
 
 Several rows off one base can share a run, and their merges then wait for one
 another. But a slot refills when its run returns (§230.4), so a shared run

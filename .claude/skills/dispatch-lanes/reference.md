@@ -128,3 +128,10 @@ that note still sent Q796's merge to the Opus merger (`lander` not found,
 `c5db0045`), though the merge stage ran after the note; its next run, launched
 after it, merged Q801 through the lander (`67109a2e`). So once the note comes,
 the next run you launch has the type, and a run already going does not.
+
+`prep`, the type a short-form lane's run sends first (§396.4), came after
+these. Nobody has yet seen a session gain it the way one gained `lander`, so a
+session begun before its tree held `prep.md` restarts before it sends a
+short-form lane, and does not wait for the note. A run that finds no `prep`
+stops that lane before it starts, and the row comes back not merged with `prep
+threw` in its lines; the full form sends no prep and works meanwhile.
