@@ -102,4 +102,5 @@ row. The queue file is in git and travels with every copy.
   that would let the header change; the bullet waits for it.
 - **A recipe that prints the growth**: for each first row, how many rows it led
   to and how many are open, reading the word on rows filed since this section
-  and §432.1's commit inference on older ones. Filed as a row with `from/-`.
+  and §432.1's commit inference on older ones. Filed as Q1692, `from/-`, the
+  first row to carry the word.
