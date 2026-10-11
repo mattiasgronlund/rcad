@@ -12974,6 +12974,10 @@ check-queue-selftest:
     grep -qF 'small from/step:CTC_Definitions/a_file_gone_from_the_corpus.stp a row' "$dir/from-step.md" || fail "the from/step: fixture did not change D4"
     got=$(q _queue-check "$dir/from-step.md" "$decisions" 2>&1) \
         || fail "a closed small row that comes from a corpus file was refused, though check-queue reads only the shape"
+    sed 's/from\/T9 a defect/from\/step:a_directory\/T99 a defect/' "$dir/good.md" > "$dir/from-step-like-a-row.md"
+    grep -qF 'wrong/A from/step:a_directory/T99 a defect' "$dir/from-step-like-a-row.md" || fail "the from/step: fixture ending like a row id did not change Q8"
+    got=$(q _queue-check "$dir/from-step-like-a-row.md" "$decisions" 2>&1) \
+        || fail "a corpus name ending in /T99 was read as the row T99"
 
     refused() {
         sed "$2" "$dir/good.md" > "$dir/$1.md"
