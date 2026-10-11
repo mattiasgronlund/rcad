@@ -89,6 +89,8 @@ local green is the only green there is.
 mise exec -- just queue next        # or: just queue next N
 ```
 
+`just queue help` prints every queue mode and verb with its usage.
+
 It takes the first ready row of the highest tier whose write set meets no
 running `lane:` row and no row taken above it, and names what each skipped row
 met. N defaults to the free slots, counted from the trees agents hold on this
