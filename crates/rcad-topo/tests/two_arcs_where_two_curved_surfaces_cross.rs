@@ -23,8 +23,10 @@
 //! with two corners on one curve. A wall or a cap through a loop off the axis
 //! has its corners placed where the three surfaces meet since Q1591, and then
 //! the one loop a ball reaching into a bar's side leaves is refused before its
-//! arcs are named, as it is with no plane through it (Q1593). The circle a ball
-//! touches its bar round is refused before its arcs are named.
+//! arcs are named: since Q1661 by `rcad-geom`, putting the two corners in order
+//! round the loop, where with only the bar's seam through it every rule answers
+//! (`two_curves_of_one_pair_that_meet.rs`). The circle a ball touches its bar
+//! round is refused before its arcs are named.
 //!
 //! The two loops a thin bar through a fat one leaves, cut by a wall through
 //! both axes, do reach it. Named by their corners alone, a loop's two arcs were
@@ -301,13 +303,20 @@ fn a_ball_a_bar_holds_round_one_circle_is_refused_where_a_wall_crosses_it() {
 ///
 /// Until Q1591 each was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`,
 /// before the fuse had a corner. `rcad-geom`'s `three_surfaces.rs` places those
-/// corners now, and every rule both ways round is refused one step further on,
-/// `ACrossingThisCannotBeOrderedAlong`, the refusal the same ball and bar get
-/// with no plane through the loop (Q1593). Of the places that refusal is
-/// raised, the one a loop of a ball and a pipe reaches is `fuse/arrange.rs`'s
-/// `how_a_crossing_runs`, which orders the two loops a ball crosses a pipe it
-/// holds in and not the one a ball reaching into a pipe's side leaves. So no
-/// arc of this loop reaches `which_arc_of_a_circle_this_is` yet.
+/// corners now. Until Q1661 every rule both ways round was then refused
+/// `ACrossingThisCannotBeOrderedAlong` by `fuse/arrange.rs`'s
+/// `how_a_crossing_runs`, which ordered the two loops a ball crosses a pipe it
+/// holds in and not the one a ball reaching into a pipe's side leaves.
+///
+/// That gate lets the one loop through now, to be put in order only by the
+/// name of where the walk starts on it, and every rule both ways round is
+/// refused one step further on, by name, out of `rcad-geom`:
+/// `TheseTwoSurfacesDoNotCrossInAConic`, as `rcad-geom` declines to say which
+/// of two places comes first round the loop. The floor's two corners on the
+/// loop of a ball driven into a bar are refused the same way
+/// (`a_ball_driven_into_the_bar_is_refused_ordering_the_loop_they_cross_in` in
+/// `a_ball_and_a_bar_in_one_block.rs`), and Q1767 takes both. So no arc of
+/// this loop reaches `which_arc_of_a_circle_this_is` yet.
 #[test]
 fn a_plane_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_is_refused_ordering_the_loop() {
     let pairs: [fn(&mut Model) -> [SolidKey; 2]; 3] = [
@@ -343,9 +352,12 @@ fn a_plane_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_is_refused_orde
     for pair in pairs {
         let gives = what_each_rule_gives(pair);
         assert!(
-            gives
-                .iter()
-                .all(|answer| matches!(answer, Err(Error::ACrossingThisCannotBeOrderedAlong))),
+            gives.iter().all(|answer| matches!(
+                answer,
+                Err(Error::Geometry(
+                    rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic
+                ))
+            )),
             "{gives:?}"
         );
     }
