@@ -5800,4 +5800,77 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn probe_step_ratios() {
+        let ratios = |name: &str, round: &[Point]| {
+            let count = round.len();
+            let steps: Vec<f64> = (0..count)
+                .map(|at| (round[(at + 1) % count] - round[at]).length())
+                .collect();
+            let mut most = (0.0_f64, 0);
+            let mut least = (f64::INFINITY, 0);
+            for at in 0..count {
+                let ratio = steps[(at + 1) % count] / steps[at];
+                if ratio > most.0 {
+                    most = (ratio, at);
+                }
+                if ratio < least.0 {
+                    least = (ratio, at);
+                }
+            }
+            let inner: Vec<f64> = (1..count - 2).map(|at| steps[at + 1] / steps[at]).collect();
+            eprintln!(
+                "PROBE {name}: {count} points, steps {:.3e}..{:.3e}, next/this most {:.4} at {}, least {:.4} at {}; away from the start most {:.4} least {:.4}",
+                steps.iter().copied().fold(f64::INFINITY, f64::min),
+                steps.iter().copied().fold(0.0, f64::max),
+                most.0,
+                most.1,
+                least.0,
+                least.1,
+                inner.iter().copied().fold(0.0, f64::max),
+                inner.iter().copied().fold(f64::INFINITY, f64::min),
+            );
+        };
+        let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross).expect("whole");
+        let fat = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 4.0).expect("a radius"));
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::new(0.0, 0.5, 0.0), Vector::new(1.0, 0.0, 0.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let nearly = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::origin(), Vector::new(1.0, 0.0, 0.0)).expect("a direction"),
+                3.9,
+            )
+            .expect("a radius"),
+        );
+        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 2.0).expect("a radius"));
+        let ball = Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 0.0), 2.0).expect("a radius"));
+        for (name, pair) in [
+            ("thin bar through fat", [&fat, &thin]),
+            ("pipe 3.9 through pipe 4", [&fat, &nearly]),
+            ("ball through pipe side", [&ball, &pipe]),
+        ] {
+            for deflection in [0.1, 0.01] {
+                let walked = walk(
+                    &whole,
+                    pair,
+                    Deflection::of(deflection).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("walked");
+                let start = where_a_closed_crossing_starts(&whole, pair, &mut ProvenanceLog::new())
+                    .expect("a start");
+                let mut round = vec![start];
+                round.extend_from_slice(walked.points());
+                ratios(&format!("{name} at {deflection}"), &round);
+            }
+        }
+    }
 }
