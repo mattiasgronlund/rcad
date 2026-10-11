@@ -129,7 +129,9 @@ queue` (§263).
 `mise exec -- just gate quiet`, one plain Bash call, `timeout` 600000, no
 redirect and no pipe, in the foreground even when your new tree is cold. A
 failing gate is not pushed: say which step failed
-and whether the lane or `main` brought it.
+and whether the lane or `main` brought it. A gate that comes back with exit
+137 was killed while its run went on, so run the same command again: it
+follows that run to its summary instead of starting another (§429.8).
 
 Then:
 

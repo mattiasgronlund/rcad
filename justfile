@@ -739,6 +739,19 @@ pre-gate:
 # step would run beside the others to the end of the gate before it could say
 # "commit first". Like the refusal of a misspelt word it prints no summary
 # block: the block describes steps, and none ran. `docs/decisions.md` §415.
+#
+# **The steps run in a run of their own, and the call only follows it.** A
+# `/clear` kills the command every agent has running, and a gate is the one it
+# kills most (§429.1). So the call starts the run with a double fork, which
+# leaves no agent's shell its ancestor, then prints what the run prints and
+# exits with its code. The run's pid, output and exit code are files in
+# `<gate_log>.run/`. The same gate run again in the same tree — the same
+# commit and the same words — follows a run that is still going instead of
+# starting another, so a merger whose gate came back 137 gets it back by
+# running the same command. Any other gate refuses while one runs. A run that
+# died without an exit code is reported once, as ended without finishing, and
+# the gate after that starts afresh. A Ctrl-C is passed on to the run.
+# `docs/decisions.md` §429.8.
 [doc("Every step, as many at once as there are cores, on a tree with nothing uncommitted or untracked. `just gate quiet` prints one line a step and the summary; `just gate quiet fresh` serves nothing from an earlier green; a third word `1` runs the steps in turn.")]
 gate mode="loud" verdicts="reuse" jobs="cores":
     #!/usr/bin/env bash
@@ -760,21 +773,132 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         echo "just gate takes how many steps to run at once, or nothing, third, not '{{ jobs }}'" >&2
         exit 2
     fi
-    # Before the log is emptied, so a refused run leaves the last real gate's
-    # log where it was. `--untracked-files` is named because a user's
-    # `status.showUntrackedFiles=no` would otherwise hide an untracked `.rs`
-    # that cargo compiles all the same.
-    dirty=$(git status --porcelain --untracked-files=normal) || {
-        echo "just gate could not ask git whether this tree has uncommitted or untracked files" >&2
-        exit 2
-    }
-    if [ -n "$dirty" ]; then
-        echo "just gate refuses a tree with uncommitted or untracked files, since no sha names what it would read:" >&2
-        git status --short --untracked-files=normal >&2
-        echo "commit first — a WIP commit is enough, and the branch is still on disk (docs/decisions.md §415)" >&2
-        exit 2
-    fi
     log='{{ gate_log }}'
+    # Absolute, so that `pgrep -af <tree>` finds the run by its script's path.
+    case "$log" in
+        /*) run="$log.run" ;;
+        *) run="$PWD/$log.run" ;;
+    esac
+    if [ -z "${RCAD_GATE_RUN:-}" ]; then
+        mkdir -p "$run"
+        exec 9>"$run/lock"
+        flock 9
+        # What makes two calls the same gate: the commit, since the run reads
+        # the tree it started on, and every word that changes what it runs or
+        # prints. The run prints one form only, and `1` is asked for to rule
+        # out steps getting in each other's way (§372.8).
+        this=$(
+            echo commit "$(git rev-parse HEAD 2>/dev/null)"
+            echo steps {{ gate_steps }}
+            echo reusable {{ gate_reusable_steps }}
+            echo verdicts "$verdicts"
+            echo mode "$mode"
+            echo jobs "$jobs"
+        )
+        # A pid can be another process by the time it is read again, after a
+        # reboot or once the pids wrap, so the run is known by its start too.
+        # A zombie has ended.
+        identity() {
+            local stat
+            read -r stat 2>/dev/null <"/proc/$1/stat" || return 1
+            stat=${stat##*) }
+            set -- $stat
+            case "$1" in Z|X) return 1 ;; esac
+            echo "$(</proc/sys/kernel/random/boot_id) ${20}"
+        }
+        alive() { [ -n "$2" ] && [ "$(identity "$1")" = "$2" ]; }
+        # Prints what the run prints until it ends, and exits with its code.
+        # The run is no child of this call, so `wait` cannot reach it: its files
+        # are all there is to go on.
+        follow() {
+            local pid want code
+            pid=$(<"$run/pid")
+            want=$(cat "$run/start" 2>/dev/null)
+            # A Ctrl-C reaches this call and not the run, which leads a session
+            # of its own and, as a background job, ignores SIGINT. So it is
+            # passed on as SIGTERM, to the run's whole process group.
+            trap 'stop "$pid" "$want"' INT
+            exec 3<"$run/out"
+            while :; do
+                code=""
+                [ ! -e "$run/exit" ] || code=$(<"$run/exit")
+                cat <&3
+                [ -z "$code" ] || exit "$code"
+                if ! alive "$pid" "$want"; then
+                    [ ! -e "$run/exit" ] || continue
+                    : >"$run/lost"
+                    echo "just gate: the run (pid $pid) ended without finishing; $log holds what it ran"
+                    exit 1
+                fi
+                sleep 0.2
+            done
+        }
+        stop() {
+            ! alive "$1" "$2" || kill -TERM -- "-$1" 2>/dev/null
+            : >"$run/stopped"
+            echo "just gate: a Ctrl-C stopped the run (pid $1)" >&2
+            exit 130
+        }
+        # A run that ended, or that a call already found dead or stopped, is
+        # not followed: the gate starts afresh.
+        if [ -e "$run/pid" ] && [ ! -e "$run/exit" ] && [ ! -e "$run/lost" ] && [ ! -e "$run/stopped" ]; then
+            pid=$(<"$run/pid")
+            if [ "$(cat "$run/gate" 2>/dev/null)" = "$this" ]; then
+                flock -u 9
+                exec 9>&-
+                ! alive "$pid" "$(cat "$run/start" 2>/dev/null)" \
+                    || echo "· following the gate already running in this tree, pid $pid, started $(cat "$run/started")"
+                follow
+            fi
+            if alive "$pid" "$(cat "$run/start" 2>/dev/null)"; then
+                {
+                    echo "just gate will not start beside the gate already running in this tree, pid $pid," \
+                        "started $(cat "$run/started"), since it is another gate:"
+                    sed 's/^/  /' "$run/gate"
+                    echo "wait for it to end, or run that same gate to follow it (docs/decisions.md §429.8)"
+                } >&2
+                exit 2
+            fi
+        fi
+        # After the check for a run to follow, since following reads nothing
+        # of the tree and a run can write into it, as a failing proptest does.
+        # Before the log is emptied, so a refused run leaves the last real
+        # gate's log where it was. `--untracked-files` is named because a
+        # user's `status.showUntrackedFiles=no` would otherwise hide an
+        # untracked `.rs` that cargo compiles all the same.
+        dirty=$(git status --porcelain --untracked-files=normal) || {
+            echo "just gate could not ask git whether this tree has uncommitted or untracked files" >&2
+            exit 2
+        }
+        if [ -n "$dirty" ]; then
+            echo "just gate refuses a tree with uncommitted or untracked files, since no sha names what it would read:" >&2
+            git status --short --untracked-files=normal >&2
+            echo "commit first — a WIP commit is enough, and the branch is still on disk (docs/decisions.md §415)" >&2
+            exit 2
+        fi
+        # Removed rather than emptied, so that a run still exiting keeps the
+        # files it has open, and the new run gets files of its own.
+        rm -f "$run/pid" "$run/start" "$run/exit" "$run/lost" "$run/stopped" \
+            "$run/gate" "$run/out" "$run/script" "$run/started"
+        printf '%s\n' "$this" >"$run/gate"
+        # `$0` is just's copy of this script, which goes when just does.
+        cp "$0" "$run/script"
+        : >"$run/out"
+        date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started"
+        # A double fork, as `setsid -f` does: the subshell starts the run and
+        # exits, so the run is init's before this call follows it, and in a
+        # session of its own.
+        (
+            RCAD_GATE_RUN=1 setsid bash "$run/script" "$@" </dev/null >>"$run/out" 2>&1 9>&- &
+            echo "$!" >"$run/pid"
+            identity "$!" >"$run/start"
+        )
+        flock -u 9
+        exec 9>&-
+        follow
+    fi
+    # The gates a selftest runs inside this one are calls, not runs.
+    unset RCAD_GATE_RUN
     mkdir -p "$(dirname "$log")"
     : >"$log"
     # One log a step, so that a failing step's tail is its own however many
@@ -1003,6 +1127,9 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     if [ "$status" -eq 0 ]; then
         {{ just_executable() }} _record-green "{{ gate_steps }}"
     fi
+    # Moved into place whole, so a follower never reads half of it.
+    echo "$status" >"$run/exit.new"
+    mv "$run/exit.new" "$run/exit"
     exit $status
 
 # A name for the code a gate reads. It prints a sha256, or one sentence saying
@@ -1438,9 +1565,28 @@ _pre-gate-selftest-long:
 # A gate step that takes two seconds and does nothing else, so that
 # `check-gate-summary-selftest` and `check-pre-gate-selftest` can tell steps run
 # at once from steps run in turn by the clock.
+#
+# Given `GATE_SELFTEST_HOLD`, a path, it does not sleep: it adds a line to
+# `<path>.ran` as it starts and then waits while the path is there, so that
+# `check-gate-verdicts-selftest` can stop a gate's follower while the gate is
+# still running and count how many runs reached the step (§429.8). Two minutes
+# held is a selftest that never let it go, and fails.
 [private]
 _gate-selftest-sleep:
-    @sleep 2
+    #!/usr/bin/env bash
+    set -euo pipefail
+    hold=${GATE_SELFTEST_HOLD:-}
+    if [ -z "$hold" ]; then
+        sleep 2
+        exit 0
+    fi
+    echo "$$" >>"$hold.ran"
+    for _ in $(seq 1200); do
+        [ -e "$hold" ] || exit 0
+        sleep 0.1
+    done
+    echo "held for two minutes: nothing removed $hold" >&2
+    exit 1
 
 # Holds `gate-docs` to the two things it claims: that it drops the compiles, and
 # that it still runs everything a prose commit can break.
@@ -1677,8 +1823,9 @@ check-gate-verdicts-selftest:
     trap 'rm -rf "$dir"' EXIT
     j='{{ just_executable() }}'
     got=""
+    drifted='the verdict cache drifted from what docs/decisions.md §337 says'
     fail() {
-        echo "the verdict cache drifted from what docs/decisions.md §337 says: $1"
+        echo "$drifted: $1"
         [ -z "$got" ] || { echo "--- got ---"; echo "$got"; }
         exit 1
     }
@@ -1993,6 +2140,157 @@ check-gate-verdicts-selftest:
         || fail "a pass whose tree changed while it ran did not say why it recorded nothing"
     [ -f "$store/$f0" ] && fail "a pass whose tree changed while it ran recorded a green"
     rm "$repo/crates/late.rs"
+
+    # A `/clear` stops the command every agent has running, and a gate is the
+    # command it stops most (§429.1). So the gate runs its steps in a run begun
+    # with a double fork, and the call only follows it: stopping the call stops
+    # nothing else, and the same command run again follows the run rather than
+    # starting another (§429.8). The follower is stopped as §429.2 says Claude
+    # Code stops a command, its process group and then every descendant, found
+    # before the first signal and not after it: found after it, even a run that
+    # was the follower's own child has been handed to init, and the arm passes
+    # on the code it is meant to fail on (§429.7).
+    drifted='a gate whose call was stopped drifted from what docs/decisions.md §429.8 says'
+    descendants_of() {
+        local root=$1
+        ps -A -o pid=,ppid= | awk -v root="$root" '
+            { parent[$1] = $2 }
+            END {
+                for (pid in parent) {
+                    cur = pid
+                    for (i = 0; i < 1000 && (cur in parent); i++) {
+                        if (parent[cur] == root) { print pid; break }
+                        cur = parent[cur]
+                    }
+                }
+            }'
+    }
+    stop_like_a_clear() {
+        local group=$1 pid before
+        before=$(descendants_of "$group")
+        kill -TERM -- "-$group" 2>/dev/null || true
+        for pid in $before; do
+            kill -TERM "$pid" 2>/dev/null || true
+        done
+        sleep 0.2
+        kill -KILL -- "-$group" 2>/dev/null || true
+        for pid in $before; do
+            kill -KILL "$pid" 2>/dev/null || true
+        done
+    }
+    within_ten_seconds() {
+        for _ in $(seq 100); do
+            ! eval "$1" || return 0
+            sleep 0.1
+        done
+        return 1
+    }
+    gone() {
+        local stat
+        read -r stat 2>/dev/null <"/proc/$1/stat" || return 0
+        stat=${stat##*) }
+        [ "${stat:0:1}" = Z ]
+    }
+    # `_gate-selftest-sleep` adds a line to `$hold.ran` each time a run starts
+    # it, and waits while `$hold` is there.
+    hold="$dir/hold"
+    run="$dir/gate.log.run"
+    export GATE_SELFTEST_HOLD="$hold"
+    # In a group of its own, as Claude Code starts a command, so that it can be
+    # stopped as Claude Code stops one. With SIGINT as a terminal leaves it: a
+    # background job starts with SIGINT ignored, and bash cannot trap a signal
+    # that was ignored when it started.
+    started_gate() {
+        env --default-signal=INT setsid "$j" --set gate_steps _gate-selftest-sleep --set gate_reusable_steps '' \
+            --set gate_log "$dir/gate.log" gate quiet >"$1" 2>&1 &
+    }
+
+    touch "$hold"
+    started_gate "$dir/stopped"
+    follower=$!
+    within_ten_seconds '[ -e "$hold.ran" ]' || fail "the gate never started its step"
+    stop_like_a_clear "$follower"
+    wait "$follower" 2>/dev/null || true
+    "$j" --set gate_steps _gate-selftest-sleep --set gate_reusable_steps '' \
+        --set gate_log "$dir/gate.log" gate quiet >"$dir/again" 2>&1 &
+    again=$!
+    within_ten_seconds 'grep -q "^· following " "$dir/again"' \
+        || { got=$(cat "$dir/again"); fail "the same gate run again on the same commit did not follow the run whose call was stopped"; }
+
+    # Another gate beside it refuses and names the one running: other steps, as
+    # a lane's gate is beside a whole one, and the same steps with `fresh`.
+    rc=0
+    got=$(gate list '') || rc=$?
+    [ "$rc" -eq 2 ] || fail "a gate of other steps exited $rc beside a running gate, where a refusal exits 2"
+    grep -q '^just gate will not start beside the gate already running in this tree' <<<"$got" \
+        || fail "a gate of other steps beside a running one did not say why it would not start"
+    grep -qx "  commit $base" <<<"$got" || fail "the refusal did not name the running gate's commit"
+    grep -qx '  steps _gate-selftest-sleep' <<<"$got" || fail "the refusal did not name the running gate's steps"
+    grep -q '^· ' <<<"$got" && fail "a refused gate started a step"
+    rc=0
+    got=$(gate _gate-selftest-sleep '' fresh) || rc=$?
+    [ "$rc" -eq 2 ] || fail "a fresh gate exited $rc beside a gate of the same steps that was not, where a refusal exits 2"
+    grep -qx '  verdicts reuse' <<<"$got" || fail "the refusal of a fresh gate did not say the running one serves"
+
+    rm "$hold"
+    rc=0
+    wait "$again" || rc=$?
+    got=$(cat "$dir/again")
+    [ "$rc" -eq 0 ] || fail "a gate that followed a passing run exited $rc"
+    grep -qE '^· _gate-selftest-sleep \([0-9]+\.[0-9] s\)$' <<<"$got" || fail "a gate that followed a run did not print its step's line"
+    grep -qx 'gate: PASS' <<<"$got" || fail "a gate that followed a passing run did not say it passed"
+    [ "$(tail -6 <<<"$got" | grep -c '=== gate summary ===')" -eq 1 ] \
+        || fail "a gate that followed a run did not end on its summary block"
+    [ "$(grep -c . "$hold.ran")" -eq 1 ] \
+        || fail "the step started $(grep -c . "$hold.ran") times, so the run whose call was stopped did not finish and another started"
+
+    # A run that dies without writing its exit code, killed outright here, is
+    # not followed forever: the next gate says it ended without finishing and
+    # fails, and the one after that starts a new run.
+    rm "$hold.ran"
+    touch "$hold"
+    started_gate "$dir/stopped"
+    follower=$!
+    within_ten_seconds '[ -e "$hold.ran" ]' || fail "the gate never started its step"
+    stop_like_a_clear "$follower"
+    wait "$follower" 2>/dev/null || true
+    kill -KILL -- "-$(cat "$run/pid")"
+    rm "$hold"
+    rc=0
+    got=$(gate _gate-selftest-sleep '') || rc=$?
+    [ "$rc" -ne 0 ] || fail "a gate exited 0 on a run that was killed before it finished"
+    grep -q "^just gate: the run (pid [0-9]*) ended without finishing; " <<<"$got" \
+        || fail "a gate whose run was killed did not say it ended without finishing"
+    rc=0
+    got=$(gate _gate-selftest-sleep '') || rc=$?
+    [ "$rc" -eq 0 ] || fail "the gate after the one that found a dead run exited $rc"
+    grep -q '^· following ' <<<"$got" && fail "the gate after the one that found a dead run followed it again"
+    grep -qx 'gate: PASS' <<<"$got" || fail "the gate after the one that found a dead run did not pass"
+    [ "$(grep -c . "$hold.ran")" -eq 2 ] || fail "the gate after the one that found a dead run did not run the step itself"
+
+    # A Ctrl-C in a terminal reaches the follower's group, and the follower
+    # passes it on to the run, so it stops the steps as it did when they were
+    # the follower's own. Stopped on purpose, the run is not reported as one
+    # that ended without finishing.
+    rm "$hold.ran"
+    touch "$hold"
+    started_gate "$dir/interrupted"
+    follower=$!
+    within_ten_seconds '[ -e "$hold.ran" ]' || fail "the gate never started its step"
+    pid=$(cat "$run/pid")
+    kill -INT -- "-$follower"
+    rc=0
+    wait "$follower" || rc=$?
+    [ "$rc" -ne 0 ] || { got=$(cat "$dir/interrupted"); fail "a gate stopped with a Ctrl-C exited 0"; }
+    within_ten_seconds 'gone "$pid"' || fail "a Ctrl-C to the gate's call left its run going"
+    rm "$hold"
+    rc=0
+    got=$(gate _gate-selftest-sleep '') || rc=$?
+    [ "$rc" -eq 0 ] || fail "the gate after one stopped with a Ctrl-C exited $rc"
+    grep -q 'ended without finishing' <<<"$got" && fail "a run stopped with a Ctrl-C was reported as one that died"
+    echo "a gate whose call is stopped as a /clear stops it finishes, and the same gate follows it to its summary;" \
+        "another gate beside it refuses; a run killed outright is reported once as ended without finishing," \
+        "and the gate after that starts a new run; a Ctrl-C stops the run"
     exit 0
 
 # Two gate steps that print the line a nextest run ends with, one for 3 tests
