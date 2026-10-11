@@ -129,7 +129,8 @@ fn the_flat_face_holds_the_annulus_between_its_two_circles() {
 /// The middle of the hole is outside the half-ring, and a point on the flat
 /// face is on its skin. The ray from that point meets the wall, so the wall is
 /// asked too, and where its wire keeps one side of `z = 0` at one circle and
-/// the other side at the other it is refused, naming the wall (§243.8).
+/// the other side at the other it refuses (§243.8). The flat face holds the
+/// point all the same, so it is on the skin on every choice (Q1722).
 ///
 /// Asked of every choice but [`is_the_hole_walked_the_way_its_outline_runs`].
 #[test]
@@ -153,13 +154,7 @@ fn classify_point_finds_the_hole_outside_and_the_flat_face_on_the_skin() {
             &policy,
             &mut ProvenanceLog::new(),
         );
-        let expected = match the_side_of_z_0_the_wall_keeps(choice) {
-            Some(_) => Containment::OnBoundary,
-            None => Containment::CannotFollowAFacesTrimming {
-                face: half_ring.wall,
-            },
-        };
-        assert_eq!(on_the_face, expected, "{choice:?}");
+        assert_eq!(on_the_face, Containment::OnBoundary, "{choice:?}");
     }
 }
 
