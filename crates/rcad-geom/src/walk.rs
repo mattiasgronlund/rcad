@@ -5230,6 +5230,133 @@ mod tests {
         }
     }
 
+    /// A thin pipe along `x` at `y = 3.5`, `z = 5` reaches from `y = 2.5` to
+    /// `y = 4.5`, out through the side of a fat one up `z`, so the two cross in
+    /// one loop, through `(0, 4, 5 ± sin 60°)`. The wall `z = 5` puts corners on
+    /// it at `(±√9.75, 2.5, 5)`, one either side of the flat surface `x = 0`
+    /// that holds two loops apart, and a run between them picked by `z ≥ 5` or
+    /// `z ≤ 5` is walked along that arc, from its first corner to its second,
+    /// either way round and whichever face is listed first. Every point is on
+    /// both pipes within the bound the walk claims.
+    ///
+    /// The two seeds are the two corners, one each side of `x = 0`, and the run
+    /// was refused for its corners being on different seeds' sides, as though
+    /// they were on two loops (Q1683).
+    #[test]
+    fn a_run_between_two_corners_of_the_one_loop_a_thin_pipe_reaching_out_of_a_fat_one_leaves_is_walked()
+     {
+        let fat = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 4.0).expect("a radius"));
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::new(-10.0, 3.5, 5.0), Vector::new(1.0, 0.0, 0.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let across = 9.75_f64.sqrt();
+        let corners = [Point::new(across, 2.5, 5.0), Point::new(-across, 2.5, 5.0)];
+        for side in [1.0, -1.0] {
+            let picker = Picker::from(
+                crate::HalfSpace::through_a_point_facing(
+                    Point::new(0.0, 0.0, 5.0),
+                    Vector::new(0.0, 0.0, side),
+                )
+                .expect("the z axis has length"),
+            );
+            for [from, to] in [corners, [corners[1], corners[0]]] {
+                let run = NamedRun::new(
+                    EdgeRun::PartOfWhereItCrosses {
+                        and: thin,
+                        picked_by: smallvec![picker],
+                    },
+                    [from, to].map(|end| PredicatePoint::from(end.coordinates())),
+                )
+                .expect("a run between two corners");
+                for pair in [[&fat, &thin], [&thin, &fat]] {
+                    let walked = walk(
+                        &run,
+                        pair,
+                        Deflection::of(0.01).expect("a length"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect("an arc of the one loop is walked between its corners");
+                    let bound = walked.deviation().magnitude();
+                    let points = walked.points();
+                    assert!(points.len() > 2, "the arc has points");
+                    for point in points {
+                        let [x, y, z] = point.coordinates();
+                        let off_the_fat_one = ((x * x + y * y).sqrt() - 4.0).abs();
+                        let off_the_thin_one =
+                            (((y - 3.5) * (y - 3.5) + (z - 5.0) * (z - 5.0)).sqrt() - 1.0).abs();
+                        assert!(
+                            (z - 5.0) * side > 0.0
+                                && off_the_fat_one <= bound
+                                && off_the_thin_one <= bound,
+                            "the run on z·{side} > 5·{side} from {from:?} was walked through \
+                             ({x}, {y}, {z}), {off_the_fat_one} and {off_the_thin_one} off the \
+                             two pipes against {bound}"
+                        );
+                    }
+                    let [first, last] = [points[0], points[points.len() - 1]];
+                    assert!(
+                        (first - from).length() < (first - to).length()
+                            && (last - to).length() < (last - from).length(),
+                        "the run from {from:?} to {to:?} was walked from {first:?} to {last:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A run between a corner on each of the two loops a thin pipe through a
+    /// fat one leaves names no arc of either, and is refused: the corners
+    /// `(4, 0, 4)` and `(−4, 0, 4)` of the wall `y = 0` through both axes, one
+    /// on each side of the flat surface `x = 0` between the loops. A run between
+    /// two corners on the one loop of the test above is walked.
+    #[test]
+    fn a_run_between_corners_on_the_two_loops_of_a_thin_pipe_through_a_fat_one_is_refused() {
+        let fat = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 4.0).expect("a radius"));
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::new(-10.0, 0.0, 5.0), Vector::new(1.0, 0.0, 0.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let picker = Picker::from(
+            crate::HalfSpace::through_a_point_facing(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis has length"),
+        );
+        let corners = [Point::new(4.0, 0.0, 4.0), Point::new(-4.0, 0.0, 4.0)];
+        for [from, to] in [corners, [corners[1], corners[0]]] {
+            let run = NamedRun::new(
+                EdgeRun::PartOfWhereItCrosses {
+                    and: thin,
+                    picked_by: smallvec![picker],
+                },
+                [from, to].map(|end| PredicatePoint::from(end.coordinates())),
+            )
+            .expect("a run between two corners");
+            for pair in [[&fat, &thin], [&thin, &fat]] {
+                assert_eq!(
+                    walk(
+                        &run,
+                        pair,
+                        Deflection::of(0.01).expect("a length"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .map(|walked| walked.points().len()),
+                    Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+                    "a run from {from:?} to {to:?}"
+                );
+            }
+        }
+    }
+
     /// A run between two corners closer together than one step of the march
     /// has no marched point on it, and is still told from the rest of its loop:
     /// the half-spaces are asked at the middle of its two corners, settled onto
