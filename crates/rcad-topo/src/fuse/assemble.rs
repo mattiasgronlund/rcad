@@ -5485,11 +5485,12 @@ fn how_far_apart_two_boxes_may_be(one: PredicatePoint, other: PredicatePoint) ->
     let (one, other) = (one.enclosure(), other.enclosure());
     let squared: f64 = (0..3)
         .map(|axis| {
-            let furthest = (one[axis].hi() - other[axis].lo()).max(other[axis].hi() - one[axis].lo());
+            let furthest =
+                (one[axis].hi() - other[axis].lo()).max(other[axis].hi() - one[axis].lo());
             furthest * furthest
         })
         .sum();
-    Some(squared.sqrt() * (1.0 + 4.0 * f64::EPSILON))
+    squared.sqrt() * (1.0 + 4.0 * f64::EPSILON)
 }
 
 /// Each corner of an input solid with exactly three planes round it, and those
