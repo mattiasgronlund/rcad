@@ -28,6 +28,15 @@
 // MAX_RELAYS times a row. The verifier and the merger see one branch and the
 // last lane's report, which carries the whole row's account.
 //
+// Since §433.8 a lane whose row names the inputs that show its fault -- crash
+// files, corpus files, a shape -- runs them on its base first, and when none
+// shows it, commits nothing and reports `does_not_reproduce` with each run. That
+// lane goes to its verifier even under `verify: false`, since the row would
+// otherwise close on the lane's word alone, and the verifier runs the same
+// commands on the base. On its `confirm` a merger closes the row done at the
+// base; it never goes to the lander, since there is no branch for `just land`
+// to merge. Anything but a `confirm` comes back not merged.
+//
 // Invoke it as the `lanes` workflow, which is `meta.name` below and not this
 // file's name: Claude Code loads `.claude/workflows/*.js`, parses `meta`, and
 // registers what `meta.name` says. Pass args:
@@ -332,6 +341,7 @@ function verified(report, lane) {
   }
   if (!writes(lane)) return out
   if (report.outcome === 'blocked') return stopped(lane, out, 'the lane is blocked')
+  if (report.outcome === 'does_not_reproduce') return gone(lane, report, out)
   if (lane.verify === false) return out
   out.kind = lane.sameBehaviour === true ? 'same_behaviour' : namesTests(report) ? 'tests' : 'moved_text'
   if (out.kind === 'same_behaviour') {
@@ -353,6 +363,40 @@ function verified(report, lane) {
     if (why.length) return stopped(lane, out, `the verifier said ${check.verdict}, but ${why.join('; ')}`)
     return out
   })
+}
+
+// §433.8: a lane whose row's fault no longer shows made no commit, so there is
+// nothing to revert, no gate of its own to read and no branch to merge. Its
+// verifier runs the lane's commands on the base again, and a `confirm` is held
+// to the runs it reports, as `unproven` holds a `merge`.
+function gone(lane, report, out) {
+  out.kind = 'does_not_reproduce'
+  if (!sameSha(report.landed_sha, BASE)) return stopped(lane, out, `the lane reported does_not_reproduce and landed ${report.landed_sha}, not the base ${BASE.slice(0, 8)}; a lane whose fault does not show commits nothing (§433.8)`)
+  if (!Array.isArray(report.base_runs) || !report.base_runs.length) return stopped(lane, out, 'the lane reported does_not_reproduce with no base_runs, so its verifier has nothing to run again (§433.8)')
+  return agent(GONE(lane, report), {
+    label: `verify:${lane.label}`,
+    phase: 'Verify',
+    isolation: 'worktree',
+    agentType: 'verifier',
+    schema: goneSchema(),
+    model: 'sonnet',
+  }).then((check) => {
+    out.check = check
+    if (!check) return stopped(lane, out, 'the verifier returned nothing')
+    if (check.verdict !== 'confirm') return stopped(lane, out, check.still_shown_by ? `the verifier saw the fault still show: ${check.still_shown_by}` : `the verifier refused it: ${unconfirmed(check) || 'it gave no reason'}`)
+    const why = unconfirmed(check)
+    if (why) return stopped(lane, out, `the verifier said confirm, but ${why}`)
+    return out
+  })
+}
+
+function unconfirmed(check) {
+  if (check.branch_at_base !== true) return 'the lane branch is not at the base, so the lane committed something'
+  if (!Array.isArray(check.inputs_left_out) || check.inputs_left_out.length) return `the lane ran none of these inputs the row names: ${(check.inputs_left_out || []).join(', ') || 'the verifier did not say which'}`
+  if (!Array.isArray(check.runs) || !check.runs.length) return 'the verifier reported no runs'
+  const shown = check.runs.find((run) => !run || run.shows_fault !== false)
+  if (shown) return `its run of ${shown && shown.command} did not say the fault is gone`
+  return null
 }
 
 function stopped(lane, out, why) {
@@ -495,6 +539,7 @@ function mergeAfterTheLast(lane, prior) {
 // it, which is why the merger's brief has it wait with `just land wait-for`,
 // then check `origin/main` for the lane's tip, before it merges anything.
 function merging(lane, prior) {
+  if (prior.kind === 'does_not_reproduce') return closedAtBase(lane, prior)
   if (!landable(prior)) return byMerger(lane, prior, null)
   return agent(LAND(lane, prior), LANDER(lane)).then(
     (land) => land && land.merged === true ? landedBy(land) : byMerger(lane, prior, landStop(land)),
@@ -549,6 +594,16 @@ function byMerger(lane, prior, stop) {
   })
 }
 
+// §433.8: the lane made no commit, so the lander, whose `just land` merges a
+// branch, never sees the row. A merger closes it done at the base in one queue
+// commit, gated and pushed as a merge is.
+function closedAtBase(lane, prior) {
+  return agent(CLOSE(lane, prior), CLOSER(lane)).then((m) => {
+    if (m) m.via = 'closed done at the base with nothing merged, its fault no longer showing (§433.8)'
+    return m
+  })
+}
+
 function LANDER(lane) {
   return {
     label: `land:${lane.label}`,
@@ -563,6 +618,17 @@ function LANDER(lane) {
 function MERGER(lane) {
   return {
     label: `merge:${lane.label}`,
+    phase: 'Merge',
+    isolation: 'worktree',
+    agentType: 'merger',
+    schema: mergedSchema(),
+    model: 'opus',
+  }
+}
+
+function CLOSER(lane) {
+  return {
+    label: `close:${lane.label}`,
     phase: 'Merge',
     isolation: 'worktree',
     agentType: 'merger',
@@ -769,7 +835,22 @@ function reportSchema(lane, relay) {
   }
   const required = ['start_sha', 'base_sha', 'branch', 'worktree_path', 'outcome', 'summary', 'numbers', 'remaining']
   if (writes(lane)) {
-    core.outcome = { type: 'string', enum: ['fixed', 'limit_demonstrated', 'partial', 'blocked', 'relay'] }
+    core.outcome = { type: 'string', enum: ['fixed', 'limit_demonstrated', 'partial', 'blocked', 'does_not_reproduce', 'relay'] }
+    core.base_runs = {
+      type: 'array',
+      description: 'only with outcome does_not_reproduce, lane.md and §433.8: one run on the base for each input the row names that shows its fault -- crash file, corpus file or shape',
+      items: {
+        type: 'object',
+        required: ['input', 'command', 'printed', 'shows_fault'],
+        properties: {
+          input: { type: 'string', description: 'the crash file, corpus file or shape, as the row names it' },
+          command: { type: 'string', description: 'the exact command you ran, in the foreground' },
+          probe: { type: 'string', description: 'for a shape, the path and the whole text of the probe test you wrote, ran and removed; empty otherwise' },
+          printed: { type: 'string', description: 'the lines of its print that say whether the fault shows, verbatim' },
+          shows_fault: { type: 'boolean' },
+        },
+      },
+    }
     core.handoff = { type: 'string', description: 'only with outcome relay, lane.md and §416: what is done, by commit; what is next, in order; the places, as file, function and lines; what you measured, with its command; and what you tried that did not work' }
     core.landed_sha = { type: 'string', description: 'your last commit' }
     core.decisions_section = { type: 'string', description: 'the section number you claimed with just claim-section, if any' }
@@ -950,6 +1031,26 @@ function linesThatRunCommand(lane) {
   return `mise exec -- just lines-that-run ${BASE} ${branchOf(lane)}`
 }
 
+// §433.8: no change to revert and no gate to read, so none of `just
+// verify-lane`'s steps apply. The verifier runs what the lane ran, on the base,
+// in a tree of its own.
+function GONE(lane, r) {
+  const ids = lane.queueId.split(',')
+  return `Check lane ${lane.label}, queue ${rowsOf(lane)}, by the does not reproduce steps (§433.8). The lane reported does_not_reproduce: it says it ran every input the row names on the base, saw none show the fault, and committed nothing.
+Base: ${BASE}
+Branch: ${branchOf(lane)}
+The lane's worktree, to unlock first -- this is not your own tree, and not what you report as worktree_path: ${r.worktree_path}
+Do not run just verify-lane: there is no change to revert and no gate to read.
+Check that git rev-parse ${branchOf(lane)} prints ${BASE}, and report branch_at_base from it; when it does not, the lane committed something, and that is a refuse.
+Read the row with ${ids.map((id) => `mise exec -- just queue show ${id}`).join(', then ')}. Every crash file, corpus file or shape it names that shows its fault must have a run in the lane's base_runs; one with none goes in inputs_left_out, and that is a refuse.
+Then, in your own tree: git checkout --detach ${BASE}
+Run each command in base_runs as it stands, one plain Bash call each, in the foreground with timeout 600000. For a run with a probe, write the probe test at its path with the Write tool, exactly as base_runs gives it, run the command, then delete the file, so that git status --porcelain prints nothing. Report each run's command, the lines of its print that say whether the fault shows, verbatim, and shows_fault.
+Confirm only when every input has a run and none shows the fault. Otherwise refuse, and name in still_shown_by the command whose print still shows it.
+Your own worktree is a different tree the harness made for this check. Run git rev-parse --show-toplevel in it and report exactly that output as worktree_path.
+
+The lane claims (JSON): ${JSON.stringify(r)}`
+}
+
 function MERGE(lane, prior, stop) {
   const r = prior.report
   const branch = stop ? afterLandBranchOf(lane) : mergeBranchOf(lane)
@@ -987,6 +1088,34 @@ The verifier's verdict (JSON): ${JSON.stringify(prior.check)}`
 function relayedFrom(prior) {
   const trees = prior.relayTrees || []
   return trees.length ? `the lanes it was relayed from, ${trees.join(', ')}; ` : ''
+}
+
+// The rows close at the base, not at a lane tip: the lane made no commit, and
+// the base is where its verifier ran the row's inputs and saw none show the
+// fault (§433.8). `queue done` takes any sha that names a commit.
+function CLOSE(lane, prior) {
+  const r = prior.report
+  const ids = lane.queueId.split(',')
+  const close = ids.length > 1
+    ? `mise exec -- just queue apply ${ids.map((id) => `done ${id} ${BASE}`).join(' + ')}`
+    : `mise exec -- just queue done ${lane.queueId} ${BASE}`
+  return `Close queue ${rowsOf(lane)}, lane ${lane.label}, done at the base, by merger.md's section on a row whose fault no longer shows (§433.8), or say why not. Nothing merges: the lane made no commit, and its verifier ran the row's inputs on the base and saw none show the fault.
+Base: main at ${BASE}.
+Trees to unlock: the lane's, ${r.worktree_path}; ${relayedFrom(prior)}the verifier's, ${prior.check.worktree_path}
+Only if your push went through, after unlocking your own tree: mise exec -- just mark-finished ${treesOf(prior).join(' ')} <your own tree>
+Your first commands, in this order:
+  git log --oneline -1
+  git fetch origin
+  git switch -c close-${lane.label} origin/main
+If the switch refuses because close-${lane.label} already exists, stop and report it as not merged. Never reach for \`checkout -B\` or \`switch -C\`.
+The close, as one command:
+  ${close}
+Then gate and send it on as merger.md's step 4 says, and finish by its step 5. File no rows: the lane left none.
+Push attempts: at most ${MERGE_ATTEMPTS}. A catch-up over docs alone costs no attempt; at most ${DOCS_CATCH_UPS} of those, reported as docs_catch_ups.
+
+The lane's report (JSON): ${JSON.stringify(r)}
+
+The verifier's check (JSON): ${JSON.stringify(prior.check)}`
 }
 
 // Every argument the lander types is literal text, since the Bash guard of a
@@ -1074,6 +1203,34 @@ function verdictSchema(kind) {
     required.push('paragraphs_checked', 'moved_text_problems')
   }
   return { type: 'object', required, properties }
+}
+
+function goneSchema() {
+  return {
+    type: 'object',
+    required: ['worktree_path', 'branch_at_base', 'runs', 'inputs_left_out', 'verdict', 'still_shown_by'],
+    properties: {
+      worktree_path: { type: 'string', description: 'the output of git rev-parse --show-toplevel run in your OWN tree, not the lane\'s worktree path given in the prompt' },
+      branch_at_base: { type: 'boolean', description: 'true only when git rev-parse of the lane branch printed the base' },
+      runs: {
+        type: 'array',
+        description: 'each command of the lane\'s base_runs, run as it stands with your tree at the base',
+        items: {
+          type: 'object',
+          required: ['command', 'printed', 'shows_fault'],
+          properties: {
+            command: { type: 'string' },
+            printed: { type: 'string', description: 'the lines of its print that say whether the fault shows, verbatim' },
+            shows_fault: { type: 'boolean' },
+          },
+        },
+      },
+      inputs_left_out: { type: 'array', items: { type: 'string' }, description: 'each crash file, corpus file or shape the row names that the lane\'s base_runs has no run of' },
+      verdict: { type: 'string', enum: ['confirm', 'refuse'] },
+      still_shown_by: { type: 'string', description: 'with refuse, the command whose print still shows the fault; empty otherwise' },
+      notes: { type: 'string', description: 'at most five lines, for the dispatcher: what no other field says' },
+    },
+  }
 }
 
 function numberSchema() {
