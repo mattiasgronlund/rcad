@@ -14885,13 +14885,17 @@ check-land-selftest:
             }'
     }
     stop_like_a_clear() {
-        local group=$1 pid
+        local group=$1 pid before
+        before=$(descendants_of "$group")
         kill -TERM -- "-$group" 2>/dev/null || true
-        for pid in $(descendants_of "$group"); do
+        for pid in $before; do
             kill -TERM "$pid" 2>/dev/null || true
         done
         sleep 0.2
         kill -KILL -- "-$group" 2>/dev/null || true
+        for pid in $before; do
+            kill -KILL "$pid" 2>/dev/null || true
+        done
     }
     spool_empty() {
         local left
@@ -15338,13 +15342,17 @@ check-verify-lane-selftest:
             }'
     }
     stop_like_a_clear() {
-        local group=$1 pid
+        local group=$1 pid before
+        before=$(descendants_of "$group")
         kill -TERM -- "-$group" 2>/dev/null || true
-        for pid in $(descendants_of "$group"); do
+        for pid in $before; do
             kill -TERM "$pid" 2>/dev/null || true
         done
         sleep 0.2
         kill -KILL -- "-$group" 2>/dev/null || true
+        for pid in $before; do
+            kill -KILL "$pid" 2>/dev/null || true
+        done
     }
 
     fixture fails-reverted

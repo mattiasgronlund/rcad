@@ -93,3 +93,51 @@ up to the nine minutes `gate`'s `[doc]` names, on cores another lane could
 use. The auto-mode classifier refuses a `kill`, so ending one early is
 Mattias's. A gate that ends by itself costs at most that much, and it costs
 less than a gate killed and run again.
+
+### 429.7 What Q1670 built, and a gap it found in §429.2's own test
+
+Q1670 is the double fork, as `start_detached()` in both `land.py` and
+`verify_lane.py`: fork once for a process in between, that process forks the
+run, writes the run's own pid to the pid file, and exits right away; the
+caller's `os.waitpid` on it blocks until it has. The run is reparented to
+init while that process is exiting, before the lander or the verifier ever
+calls `follow()`. There is no moment to catch here: by the time anything
+could look, it has already happened.
+
+The killed-follower test, added in an earlier run on this row, did not show
+the fix doing anything, because of how it was written, not because the fix
+was wrong. It found the follower's descendants *after* sending it SIGTERM —
+the order §429.2 gives for Claude Code's own kill — by forking `ps -A` and
+`awk`. On this machine that fork is slower than the kernel reparenting an
+orphaned child once its parent dies, so by the time the scan ran, even the
+old single-forked run already showed ppid 1, the same as the new
+double-forked one. The test passed on both the old code and the new, which
+told nobody anything.
+
+The fix was to scan before the kill, not after. `stop_like_a_clear()` in both
+selftests now calls `descendants_of()` first, sends SIGTERM to the follower's
+group and to every pid the scan found, waits, then sends SIGKILL to both. The
+old code's run is a direct child of the follower for as long as the follower
+is alive, so the scan finds it no matter when it is run — nothing races here
+either, because the thing being looked for does not go away on its own. The
+new code's run has already been reparented to init before the follower calls
+`follow()`, so the scan never finds it, at any point before or after the
+kill. Checked both ways: with the old `land.py` and the old `verify_lane.py`
+swapped back in, each selftest's killed-follower arm fails, with `follow()`'s
+own line `the run (pid …) ended without finishing`; with the fix back in,
+both pass.
+
+This also answers what the lane before this one found and could not yet
+place: a literal copy of §429.2's own kill order (scan the whole process
+table only after the SIGTERM) does not reproduce the table in §429.3 for
+`Popen, parent still running`. That table measured the real Claude Code
+binary's kill against a plain child with nothing else running; reproducing it
+with `just`'s own process topology — shells inside shells, `ps` and `awk`
+forking fresh on every call — is slower again, and loses every time, for
+either shape of code. A reader chasing the same gap should scan for the
+pid before killing, not look for a faster scan.
+
+The first real `/clear` after this lands is still the check §429.3 names:
+whether a `just land` or `just verify-lane` run outlives it. Nothing here
+changes what that check looks for, only what the selftest can tell about it
+ahead of time.
