@@ -185,16 +185,101 @@ boxes with `x` and `y` exactly zero and `z` overlapping round `16`; and
 `which_comes_first_round_a_crossing` answers `Zero` on both walls.
 `crates/rcad-topo/tests/a_tilted_wall_grazing_a_ball_sums_to_zero.rs` checks
 each of those. Q74 also reported a circle where two balls meet reaching the
-arm, two balls `2⁻²⁴` apart along `x` cut by `z = 1`; that was not re-run here.
+arm, two balls `2⁻²⁴` apart along `x` cut by `z = 1`. Q663 did not re-run it;
+Q701 did, and the note at the end of this part says what it answers.
 
-**A circle plane whose normal has three non-zero parts cannot reach the arm.**
-This is Q74's argument, not a search. `inari` rounds outward, so the sweep
-comes out `[0, 0]` only if every coordinate of a box with width is multiplied
-by an exact zero. With no zero in the normal, either both nodes lie on one line
-along an axis through the start, and such a line crosses the plane once, so
-the two are one place; or one box is exactly the start, a box of no width.
-Every box of no width is made an exact point (`as_exact_as_it_is` for meets and
-corners), and `one == from` answers that before the sum is asked.
+**A crossing in a plane whose normal has three non-zero parts reaches the arm
+only with two nodes that are one place.** *Rewritten by Q701, 2026-10-11.*
+Until then this paragraph was Q74's argument with no search or test behind
+it. It argued from one sum, where the sweep is now two (step 1). It named only
+meets and corners as the places a box of no width is made exact (step 3). And
+it put the two nodes on a line through the start, which they need not be on
+(step 4). The steps below each have a test or a reading behind them.
+
+The **family** is every pair `the_way_this_crossing_winds` accepts whose
+crossing lies in a plane:
+
+- a plane against a ball, a pipe, a cone or a torus (both circle families),
+- two balls,
+- and the circles square to an axis that a ball and a pipe, a cone and a pipe,
+  a cone and a ball, or two cones share.
+
+In each, the plane the crossing lies in has a normal that is zero in the same
+parts as the normal `n` the sweep is read against. For a plane pair `n` is that
+plane's own normal, both torus rows included. For two balls it is
+`c₂ − c₁` rounded, and a difference of two `f64`s rounds to zero only where it
+is zero. For the circles on an axis it is the axis direction, which
+`HalfSpace::through_a_point_facing` stores as handed over. For two cones of
+one slope it is the step between the apexes, which lies along the axis. Left
+out are the two loops round a thin pipe, a pipe swallowing a thinner one and
+a ball swallowing a pipe off its axis. They do not lie in a plane, and whether
+they reach the arm with two places is not shown.
+
+Write `f` for the start, `P` and `Q` for the two boxes, `p` and `q` for points
+in them, `u = p − f`, `w = q − f`, and `V = n · (u × w)`.
+
+1. **A zero means `V` is zero over the whole of both boxes.** The interval
+   level sweeps two ways, `n · (u × w)` and `n · (u × (q − p))`, which are one
+   number, and answers where the two enclosures overlap (§406.1,
+   `along_a_crossing.rs`'s `on_intervals`). Each holds `V` for every `p` in
+   `P` and `q` in `Q`, so an overlap of exactly `[0, 0]` means `V` is zero for
+   all of them. It does not mean either sum is a point: `[0, h]` against
+   `[l, 0]` overlaps in `[0, 0]`. The exact level runs only where all three are
+   `Exact`, and two `Exact` nodes overlap only where they are equal, which
+   `one == other` answers first (244.1).
+2. **Where one box has width along an axis, the other has width along that
+   axis at most.** `V = (n × u) · w` is linear in `w`. So where `Q` has width
+   along axis `i`, `(n × u)ᵢ = n_j u_k − n_k u_j` is zero over `P`, and with
+   `n_j` and `n_k` not zero `P` has no width along `j` or `k`. The same holds
+   with the two boxes swapped. So a box along `x` against one along `y` never
+   sweeps zero.
+3. **Case A: one box wide in two axes or three.** By step 2 the other box,
+   say `P`, is a point, and two parts of `n × u` are zero. The third is too,
+   since `(n × u) · n = 0` and that part of `n` is not zero. So `u = μn`.
+   - **`μ ≠ 0`**: `V` is truly zero, and the interval still straddles,
+     because interval arithmetic takes each place a variable occurs on its
+     own. Each wide coordinate of `w`, and of `q − p` in the second sum,
+     occurs twice, once with `+k` and once with `−k`, where
+     `k = μ n_a n_b ≠ 0` for the other two axes `a` and `b`. Taking those two
+     at the two ends of the box and everything else at one value gives `±k`
+     times the box's width. So each sum straddles zero strictly, their overlap
+     does too, and the answer is not `Zero`.
+   - **`μ = 0`**: `P` is the start, a box of no width. Every node of no width
+     is an `Exact` point. That is a reading of every place
+     `fuse/arrange.rs` makes a node, on `959d1d64`, and not a test. Meets,
+     touches, and the places `place_where_two_halves_meet` and
+     `place_the_middle_of_each_half` make go through `as_exact_as_it_is`.
+     Corners come from `bake.rs`'s
+     `where_the_model_puts_a_corner`, which is `Exact` for a solid that has not
+     moved and `as_exact_as_it_is` for one that has, or from `derive_a_corner`,
+     which uses `as_exact_as_it_is`. A cone's apex and the one pole a circle
+     runs through are `Exact`. The start's own node and the point across a
+     circle from a pole are `Exact` or a box of positive reach. Every other
+     node copies one of these. `PredicatePoint` compares by value, so
+     `one == from` answers before the sum is asked.
+4. **Case B: both boxes wide along one axis `i` at most.** Overlapping, they
+   agree exactly on the other two coordinates, so both lie on one line `L`
+   along `i`. Their true places lie on `L` and on the crossing's plane, whose
+   normal is not zero along `i`. So `L` crosses that plane once, and the two
+   are one place. `L` need not pass through `f` for `V` to be zero.
+5. **Case C: two points.** This is case B with no width at all. Two points
+   overlap only where they are the same triple, both are `Exact` by step 3's
+   reading, and `one == other` answers first.
+
+The steps are tested in
+`crates/rcad-topo/tests/a_tilted_wall_grazing_a_ball_sums_to_zero.rs` on the
+plane through the origin with normal `(1, 2, 2)`. It cuts a ball of radius 9
+at `(6, −6, 3)` in a circle through the origin, and every sweep starts there:
+
+- `a_point_along_a_tilted_normal_against_a_wide_box_does_not_sweep_zero` is
+  step 3. It runs `μ` of `±1`, `2`, `0.5` and `2⁻⁶⁰`, boxes wide in two axes
+  and in three, both orders. At `μ = 0` the sweep is `Zero`, which is why
+  `one == from` has to answer first.
+- `two_boxes_on_an_axis_through_the_start_sweep_zero_and_that_axis_crosses_the_plane_once`
+  is step 4, and the same two boxes moved off the start straddle.
+- `boxes_along_two_different_axes_from_the_start_do_not_sweep_zero` is step 2.
+
+No search over tilted planes was run.
 
 **Why the answer no longer carries weight.** Reaching the arm mattered because
 the arm answered `Zero`, and `merge_points_that_are_one_point` folded on it
@@ -225,6 +310,51 @@ Q663 until Q699, while the order refused before the turn was asked. Q699
 decides that order, so the pin is
 `a_certified_fuse_refuses_on_the_turn_at_the_place_below_16` again, and §317's
 gap shows through that fuse under a certified policy.
+
+**2026-10-11, Q701: the two-ball circle, run again.** Two balls of radius
+`1 + 2⁻⁵¹` at `(0, y, 0)` and `(2⁻²⁴, y, 0)` cross in a circle in the plane
+`x = 2⁻²⁵`, and `z = 1` cuts that circle at `(2⁻²⁵, y ± 2⁻⁵¹, 1)`. The fuses
+are the whole first ball against the second with its cap above `z = 1` cut
+off, each rule, either solid first. The normal the two balls' circle is swept
+against is `(2⁻²⁴, 0, 0)`, with two zero parts, so this is 244.1's family
+along another axis and not a tilted plane.
+
+- **At `y = 16`** the two places are not `f64`s. They come back as boxes with
+  `x` and `z` exact that touch at `y = 16`. Round the two balls' circle from
+  its walked start `(2⁻²⁵, 16, 1)` they sweep exactly zero, which is the
+  overlap arm's input.
+  - Under `Policy::certified` every fuse refuses before it gets there. The
+    order of the two places is asked round a ball's circle in `z = 1` first,
+    and from that circle's walked start the sweep straddles. The one record is
+    `order along a crossing`, `Interval`, `Volume`, `1.5881867761018131e-22`.
+    The places are two and the start is neither, so that order exists: a gap,
+    filed as a queue row. A temporary print in the arm, never committed,
+    printed nothing for these fuses.
+  - Under `Policy::tolerant(25.0)` every fuse reaches the overlap arm, where
+    Q699's `the_one_ahead_of_the_start` orders the pair, and then refuses on
+    §346's limit. The one record past the budget is `a point in a piece that
+    every solid could place`, `Length`, enclosure infinite. The print counted
+    48 arm hits, all in these fuses and all ordered. A scratch edit that turns
+    the arm's order into an infinite refusal makes this pin fail, which is how
+    the pin is known to go through the arm.
+- **At `y = 0`** the two places are the exact `(2⁻²⁵, ±2⁻⁵¹, 1)`, apart, so
+  they never reach the overlap arm, though they sweep zero round the two
+  balls' circle. Under both policies every fuse refuses on `a point inside a
+  piece of a face`, `Length`, enclosure infinite, on the two places. That is
+  §346's limit, as at 244.6's `cx = 0`.
+
+The pins are in
+`crates/rcad-topo/tests/a_tilted_wall_grazing_a_ball_sums_to_zero.rs`:
+`two_balls_at_y_16_cut_z_1_in_two_boxes_that_sweep_zero_round_their_circle`,
+`two_balls_at_y_0_cut_z_1_in_two_exact_places_that_are_apart`,
+`two_balls_at_y_16_refuse_under_a_certified_policy_round_a_circle_in_z_1`,
+`two_balls_at_y_16_under_a_tolerant_policy_refuse_on_a_piece_no_solid_can_place`
+and `two_balls_at_y_0_refuse_on_a_point_inside_a_piece_of_a_face`, beside the
+three steps' tests above.
+
+**The table's `Volume` for the prism with the ball first is out of date.** The
+record has been a `Length` since Q706 (§318.5), and
+`a_certified_fuse_refuses_on_the_order_of_the_two_places` pins `Length`.
 
 ### 244.6 A start between the two places puts the one ahead of it first
 
