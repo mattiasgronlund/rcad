@@ -5832,6 +5832,89 @@ mod tests {
         }
     }
 
+    /// A run between two corners, each a hair off its crossing beside one of
+    /// the two places its loop can be walked from, holds each corner only at
+    /// its end, picked by `y ≥ 0` or `y ≤ 0`, either way round and whichever
+    /// face is listed first.
+    ///
+    /// A ball of radius two round `(1, 0, 0)` crosses a pipe of radius two
+    /// round `z` in one loop, and the wall `y = 0` cuts it at the two seeds,
+    /// `(2, 0, ±√3)`. Each corner is further from its seed than either is
+    /// from the crossing. A mesh meets that a thousand from the origin, for a
+    /// ball and a bar cut by a block's wall through both: it shifts a face near
+    /// the origin and walks the run again there, and a corner, rounded where
+    /// it was stored, lands `2.2e-14` off the crossing and the start. The run
+    /// kept the start beside the corner, and moved back out to where the face
+    /// is stored the two were one point, which the mesh refused as two corners
+    /// in one place
+    /// (`an_open_run_ended_a_hair_off_its_crossing_a_thousand_from_the_origin.rs`,
+    /// Q1697).
+    #[test]
+    fn a_run_ended_a_hair_off_its_crossing_beside_its_start_holds_that_end_only_at_its_end() {
+        let round_z = Cylinder::new(crate::Axis::z(), 2.0).expect("a radius");
+        let round_one = Sphere::new(Point::new(1.0, 0.0, 0.0), 2.0).expect("a radius");
+        let [pipe, ball] = [Surface::Cylinder(round_z), Surface::Sphere(round_one)];
+        let seeds = where_a_ball_reaches_across_a_pipe(&round_one, &round_z).map(|seed| {
+            settled_with_a_bound([&ball, &pipe], seed)
+                .expect("a seed is on the crossing")
+                .0
+        });
+        let corners = seeds.map(|seed| {
+            let [x, y, _] = seed.coordinates();
+            seed + Vector::new(x, y, 0.0).normalized().expect("a way out") * 1e-14
+        });
+        for side in [1.0, -1.0] {
+            let picker = Picker::from(
+                crate::HalfSpace::through_a_point_facing(
+                    Point::origin(),
+                    Vector::new(0.0, side, 0.0),
+                )
+                .expect("the y axis has length"),
+            );
+            for [from, to] in [corners, [corners[1], corners[0]]] {
+                let run = NamedRun::new(
+                    EdgeRun::PartOfWhereItCrosses {
+                        and: ball,
+                        picked_by: smallvec![picker],
+                    },
+                    [from, to].map(|end| PredicatePoint::from(end.coordinates())),
+                )
+                .expect("a run between two corners");
+                for pair in [[&ball, &pipe], [&pipe, &ball]] {
+                    let walked = walk(
+                        &run,
+                        pair,
+                        Deflection::of(0.01).expect("a length"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .expect("half the loop of a ball through a pipe is walked");
+                    let deviation = walked.deviation().magnitude();
+                    for (corner, seed) in corners.into_iter().zip(seeds) {
+                        let round_the_seed =
+                            somewhere_within(seed, deviation).expect("a box round the seed");
+                        assert!(
+                            !the_boxes_share_a_point(
+                                PredicatePoint::from(corner.coordinates()),
+                                round_the_seed
+                            ),
+                            "the corner {corner:?} is outside the box {deviation} round its seed"
+                        );
+                        let nearest = walked
+                            .points()
+                            .iter()
+                            .map(|point| (*point - corner).length())
+                            .fold(f64::INFINITY, f64::min);
+                        assert!(
+                            nearest > 1e-6,
+                            "y·{side} ≥ 0 from {from:?}: a point walked is {nearest} from the corner {corner:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// A closed run cornered where its two surfaces touch is walked, and not
     /// refused, though its corner cannot be settled onto both.
     ///
