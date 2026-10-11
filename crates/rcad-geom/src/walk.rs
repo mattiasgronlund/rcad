@@ -380,7 +380,10 @@ impl PointsAlongACrossing {
 /// be told to be on one.
 ///
 /// [`Error::Undecidable`] when the conic's own size could not be worked out
-/// because a product fell out of range.
+/// because a product fell out of range, and whatever
+/// [`intersect`](crate::intersect) refuses for a degree-four pair asked whether
+/// it crosses in one loop or two, which only a run whose two ends are on
+/// different sides of the flat surface between the loops asks.
 ///
 /// [`Error::AnEndOfARunNamesNoPlace`] when an end is neither the box that says
 /// nothing at all is known nor a box with a middle.
@@ -1001,9 +1004,13 @@ fn a_quartic_picked_up_at(
 /// run pick both of the loops the crossing leaves, or neither, and when a
 /// run's corner cannot be put on one side of what holds the two loops apart,
 /// or is across it from both seeds. For a run between two corners, also when
-/// its corners are on different seeds' sides, sit at one place on the loop, or
-/// leave two arcs between them that its half-spaces both hold or neither
-/// holds ([`the_arc_between`]).
+/// its corners are on different seeds' sides of a crossing of two loops, sit
+/// at one place on the loop, or leave two arcs between them that its
+/// half-spaces both hold or neither holds ([`the_arc_between`]).
+///
+/// Whatever [`intersect`](crate::intersect) refuses for the pair, for a run
+/// whose two corners are on different seeds' sides
+/// ([`the_crossing_is_one_loop`]).
 ///
 /// [`Error::CannotPlaceAPointThatCloseToACrossing`] when the marcher's own bound
 /// takes more than its half of the deflection and the policy will not accept it,
@@ -1351,16 +1358,22 @@ fn the_two_corners_of_an_open_run(run: &NamedRun) -> Option<[PredicatePoint; 2]>
 /// its half-spaces are not asked: they pick which of the two arcs between the
 /// corners the run is, not which loop. A wall through both axes of a thin bar
 /// through a fat one holds the seed of both loops, which sit on the wall, and
-/// was refused for it (Q1659). Both corners are asked, and a run whose two
-/// corners are on different seeds' sides is refused: two loops would put them
-/// on two loops, and one loop that reaches across the flat surface between
-/// them is not told from two here.
+/// was refused for it (Q1659). Both corners are asked. Two corners on
+/// different seeds' sides are on two loops, and the run is refused, unless the
+/// crossing is one loop that reaches across the flat surface between the seeds
+/// ([`the_crossing_is_one_loop`]): then both seeds are on it, and the run
+/// starts at its first corner's. A thin pipe reaching out of a fat one's side,
+/// cut by a wall through that loop, has its two seeds at its two corners, one
+/// each side of that surface, and was refused for it (Q1683).
 ///
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces pick
 /// both loops or neither, when a run's two corners are on different seeds'
-/// sides, and whatever [`the_seed_on_the_loop_a_corner_is_on`] refuses.
+/// sides of a crossing of two loops, and whatever
+/// [`the_seed_on_the_loop_a_corner_is_on`] refuses. Whatever
+/// [`intersect`](crate::intersect) refuses for the pair, for a run whose two
+/// corners are on different seeds' sides.
 fn the_seed_this_run_is_picked_up_at(
     run: &NamedRun,
     pair: &[Surface; 2],
@@ -1378,7 +1391,9 @@ fn the_seed_this_run_is_picked_up_at(
             settled_with_a_bound(surfaces, seeds[1])?,
         ];
         let seed = the_seed_on_the_loop_a_corner_is_on(from, held_apart_by, settled, policy, log)?;
-        if the_seed_on_the_loop_a_corner_is_on(to, held_apart_by, settled, policy, log)? != seed {
+        if the_seed_on_the_loop_a_corner_is_on(to, held_apart_by, settled, policy, log)? != seed
+            && !the_crossing_is_one_loop(pair, policy, log)?
+        {
             return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
         }
         return Ok(seed);
@@ -1573,6 +1588,32 @@ fn which_side_of_what_holds_two_loops_apart(
         ),
         other => panic!("a side of a flat surface came back as {other:?}"),
     }
+}
+
+/// Whether the two surfaces cross in a single loop: whether
+/// [`intersect`](crate::intersect) names one curve right round, which is what it
+/// names where a ball or a pipe reaches only part way across a pipe. Two loops
+/// it names as two curves, each picked by a half-space.
+///
+/// # Errors
+///
+/// Whatever [`intersect`](crate::intersect) refuses for the pair.
+fn the_crossing_is_one_loop(
+    pair: &[Surface; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    Ok(
+        match crate::intersect::intersect(&pair[0], &pair[1], policy, log)? {
+            SurfaceMeet::Curves(runs) => matches!(
+                runs.as_slice(),
+                [one] if one.run() == &EdgeRun::RightRoundWhereItsFacesCross
+            ),
+            SurfaceMeet::Nothing
+            | SurfaceMeet::TouchAtOnePoint { .. }
+            | SurfaceMeet::SameSurface => false,
+        },
+    )
 }
 
 /// A run that goes on for ever and bends, walked over the stretch of it this
