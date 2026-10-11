@@ -24,10 +24,14 @@
 //!   inside the block and two slivers of the block's faces inside the ball —
 //!   and **no point with `f64` coordinates is inside any of them**
 //!   (`a_block_edge_grazing_a_ball.rs` shows it). Where the block reaches both
-//!   places, `select` places the three by the sides they share (§365.3), and
-//!   stops on a lens of the ball beyond the block's floor or roof instead.
-//!   Where it reaches one, the ball's sliver shares no side with the block and
-//!   is still refused. The test below says which piece each form stops on.
+//!   places, `select` places the three by the sides they share (§365.3). With
+//!   the block above the bottom place it stops on a lens of the ball beyond
+//!   the block's floor instead. With the block below the top place the same
+//!   lens beyond its roof is placed too (§35.6), and what stops the fuse is
+//!   the answer: too wide a range under a certified policy, a curved face
+//!   with no seam under a tolerant one. Where the block reaches one place, the
+//!   ball's sliver shares no side with the block and is still refused. The
+//!   test below says where each form stops.
 //! - The small ball's piece inside the cube used to be refused the same way,
 //!   because `select` gave a point on a curved face a box floored at one unit
 //!   wide. That box is sized by the ball now, and the fuse gets past `select`.
@@ -40,7 +44,7 @@
 
 use rcad_geom::{Isometry, Scale, Vector};
 use rcad_predicates::{Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog, Record};
-use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule};
+use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule};
 
 const INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 
@@ -63,8 +67,9 @@ const EVERY_CORNER: [Corner; 3] = [
     Corner::BottomPlaceBlockAbove,
 ];
 
-/// Each corner form refuses `a point inside a piece of a face`, on a piece of
-/// the ball, and which piece depends on where the block is.
+/// Two corner forms refuse `a point inside a piece of a face`, on a piece of
+/// the ball, and which piece depends on where the block is. The third gets
+/// past `select` and its answer is refused.
 ///
 /// - **With the block above the top place**, on the sliver between the two
 ///   places. It holds no point with `f64` coordinates (§346.3), and it is
@@ -72,43 +77,67 @@ const EVERY_CORNER: [Corner; 3] = [
 ///   corner. So no side of it is a side of a piece of the block's faces, and
 ///   the rule that places a piece by a side it shares (§365.3) cannot reach
 ///   it.
-/// - **With the block reaching the other place**, the three slivers are placed
-///   by that rule, and the refusal moves to the ball's lens beyond `x = −1` on
-///   the far side of the block's floor or roof from the slivers. That lens runs
-///   between `(−1, ±2⁻²⁵, ±2⁻⁵¹)`, `2⁻²⁴` across and `2⁻²⁵` high, with both its
-///   corners on the plane of the block's face: the candidates blended from two
+/// - **With the block above the bottom place**, reaching the top place too,
+///   the three slivers are placed by that rule, and the refusal moves to the
+///   ball's lens beyond `x = −1` below the block's floor. That lens runs
+///   between `(−1, ±2⁻²⁵, −2⁻⁵¹)`, `2⁻²⁴` across and `2⁻²⁵` high, with both
+///   its corners on the plane of the floor: the candidates blended from two
 ///   corners lie on that plane, not in the lens. It is outside the block and
 ///   touches it at one corner, so the rule does not reach it either. Until the
-///   rule these refused on the sliver, as the first one does.
+///   rule it refused on the sliver, as the first one does.
+/// - **With the block below the top place**, reaching the bottom place too,
+///   the slivers are placed the same way, and so is the same lens above the
+///   roof, between `(−1, ±2⁻²⁵, 2⁻⁵¹)`: outside the block, by the piece of the
+///   ball across a side that starts clear of every face of the block
+///   (§35.6, Q1537). The lens is the ball beyond `x = −1` above `z = 2⁻⁵¹`, and
+///   the block's roof is `z = 2⁻⁵¹`, so every point of the lens but its two
+///   corners is above the block. What stops the fuse then is the answer: under
+///   `Policy::certified()` its shortest edge is too short beside its
+///   coordinates, `DynamicRangeTooWide` at a ratio of `2⁵²`, which is asked
+///   before anything is meshed, and under `Policy::tolerant(25.0)` a curved
+///   face of it goes right round with no seam. Why the same rule leaves the
+///   lens below the floor of the form above unplaced was not traced.
 #[test]
 fn a_block_corner_where_its_edge_grazes_a_ball_refuses_on_a_piece_of_the_ball_without_a_point() {
     let place = f64::powi(2.0, -51);
     let edge = f64::powi(2.0, -25);
     for corner in EVERY_CORNER {
         let refused_on = match corner {
-            Corner::TopPlaceBlockAbove => [[-1.0, edge, -place], [-1.0, edge, place]],
-            Corner::TopPlaceBlockBelow => [[-1.0, edge, place], [-1.0, -edge, place]],
-            Corner::BottomPlaceBlockAbove => [[-1.0, -edge, -place], [-1.0, edge, -place]],
+            Corner::TopPlaceBlockAbove => Some([[-1.0, edge, -place], [-1.0, edge, place]]),
+            Corner::TopPlaceBlockBelow => None,
+            Corner::BottomPlaceBlockAbove => Some([[-1.0, -edge, -place], [-1.0, edge, -place]]),
         }
-        .map(PredicatePoint::Exact);
-        for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        .map(|corners| corners.map(PredicatePoint::Exact));
+        for (policy, certified) in [(Policy::certified(), true), (Policy::tolerant(25.0), false)] {
             for rule in EVERY_RULE {
+                let case = (corner, rule, certified);
                 let mut model =
                     Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
                 let mut log = ProvenanceLog::new();
-                let records = match fuse_a_block_whose_corner_is_on_a_ball(
-                    &mut model, corner, rule, &policy, &mut log,
+                match (
+                    refused_on,
+                    fuse_a_block_whose_corner_is_on_a_ball(
+                        &mut model, corner, rule, &policy, &mut log,
+                    ),
                 ) {
-                    Err(Error::Undecidable { records }) => records.records().to_vec(),
-                    Ok(fused) => panic!(
-                        "{policy:?}: the fuse answered with {} solids, so every piece of the \
+                    (_, Ok(fused)) => panic!(
+                        "{case:?}: the fuse answered with {} solids, so every piece of the \
                          ball was placed. These shapes can now show which place \
                          `a_corner_is_this_place` folds (§288.3)",
                         fused.solids().len()
                     ),
-                    Err(other) => panic!("{policy:?}: {other:?}"),
-                };
-                assert_the_one_refusal_is_the_piece(&records, &refused_on, (corner, rule));
+                    (Some(corners), Err(Error::Undecidable { records })) => {
+                        assert_the_one_refusal_is_the_piece(records.records(), &corners, case);
+                    }
+                    (None, Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })))
+                        if certified =>
+                    {
+                        assert_eq!(ratio, f64::powi(2.0, 52), "{case:?}");
+                    }
+                    (None, Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }))
+                        if !certified => {}
+                    (_, Err(other)) => panic!("{case:?}: {other:?}"),
+                }
             }
         }
     }
