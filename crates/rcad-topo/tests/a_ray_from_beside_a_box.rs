@@ -18,7 +18,9 @@
 //! A box a face of the block meets is asked of the block alone too, which has
 //! no torus face, and the two answers must agree, since what the face says of
 //! the box does not depend on the ring (Q1716), and under a certified policy
-//! they agree where the ring meets the box too (Q1739).
+//! they agree where the ring meets the box too (Q1739). A box on the ring's
+//! wall that no face of the block meets is asked of a ball whose wall it is on
+//! too, and both say `Undecidable` (Q1763).
 
 use std::collections::BTreeMap;
 
