@@ -556,6 +556,33 @@ open. Nothing else.
 > returns before doing anything. It runs before the range check, so the range
 > no longer warns about a shell that is not in the answer.
 >
+> *How thick a shell it can take.* Under `Policy::tolerant(s)`, every corner
+> of the shell lies within `Policy::max_wobble`, `64 ε s = 2⁻⁴⁶ s`, of the
+> plane, on one side or the other: `3.6e−13` at `tolerant(25.0)` and
+> `1.4e−12` at `tolerant(100.0)`. The shell lies between its corners, so the
+> whole of it fits in a slab twice that, `2⁻⁴⁵ s`, across, and folding it onto
+> the plane moves no point of it further than `2⁻⁴⁶ s`. Each corner's own
+> rounding, `8 ε` times `Σ|nᵢ pᵢ| + |offset|`, has to fit in the same `64 ε s`,
+> so the fold takes no corner where that sum is over `8 s`. For a corner on or
+> near the plane the sum is at least about twice the plane's distance from the
+> origin, so on a plane further than about `4 s` from the origin the fold takes
+> nothing: a model that reaches well past the working size its policy was
+> given gets less of it. Read off `how_far_corners_may_be_from`, not run. The shells it took here were far
+> thinner than that: the records say `5.4e−15` to `7.1e−15` at
+> `tolerant(100.0)` and `7.9e−15` at `tolerant(25.0)`.
+>
+> *That is within what the policy already takes as one point,* measured as
+> the policy measures a wobble, by how far a point is moved: no point of the
+> shell is moved further than `max_wobble`, and `Policy::take_as_one_point`
+> moves one point up to `max_wobble` onto another. It is the same comparison,
+> `Policy::wobble_is_acceptable`, on a record of the same kind, a length. One
+> difference: measured across rather than by how far a point moves, two
+> points of the shell on either side of the plane can be up to twice
+> `max_wobble` apart, where `take_as_one_point` takes two points as one only
+> within `max_wobble`. The fold does not join them: it leaves the shell out,
+> and each corner the shell shares with the rest of the answer stays where it
+> was.
+>
 > *The shape.* `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`, the
 > tipped cube less the block, under `Policy::tolerant(100.0)`, at `t = 0.075`,
 > `0.0885`, `0.1315` and `0.142`. The tipped cube's bottom face and its side
@@ -600,10 +627,14 @@ open. Nothing else.
 > share a line and no space, so no solid is their intersection. Their union and
 > both differences, and every certified fuse of them, did not move.
 > `under_a_tolerant_policy_the_union_answers_and_the_rest_are_refused_by_name`
-> pins the old refusal and fails; it lies outside Q1687's write set, so it was
-> reported and not moved. Every other test of `rcad-topo` passed (`mise exec --
-> just t -p rcad-topo --no-fail-fast`, 1950 of 1951), as did every other
-> crate's and the slow tier.
+> pinned the old refusal and failed; it lay outside the first lane's write set,
+> so that lane reported it and did not move it (`mise exec -- just t -p
+> rcad-topo --no-fail-fast`, 1950 of 1951, at `d627ecb9`). Q1687's second lane
+> moved it, and renamed it
+> `under_a_tolerant_policy_the_union_answers_the_intersection_is_nothing_and_each_difference_is_refused`,
+> since the intersection now answers: no solid, the model validating under the
+> same policy, and a log of that one record, `7.90959966678835e−15`, over the
+> prism's six corners, all at `y = 2`.
 >
 > *Considered and not taken.* Folding the strip's two other corners into the
 > one below the floor, 417.7's wide rule of `6ffbb172`: reasoned, not run, to
