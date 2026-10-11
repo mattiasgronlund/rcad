@@ -154,6 +154,50 @@ already says a hunt goes to a lane at its first probe. Step 4 of
 compute. Prep answers it too, said explicitly and never inferred, for the same
 reason, and never both marks on one row.
 
+**2026-10-11, Q840:** built, as this section says, with these details:
+
+- **`.claude/agents/prep.md`**: a Sonnet type with `Read`, `Grep`, `Glob`
+  and `Bash`, and no `Edit` or `Write`. It holds the rules of the list above,
+  `sameBehaviour` beside `pinsOnly`, and the facts rules that were step 5's:
+  `claim-section` before a section, how far two fuzz runs drift, and nothing
+  about the context hook for a writing row. It reads the code at the run's
+  base with `git show` and `git grep`, because it runs in the dispatcher's
+  tree, whose `HEAD` carries the `take`. A bundle goes to one prep.
+- **The short form in `lanes.js`.** A lane with none of the full form's
+  fields is sent to prep first. Prep copies each row's id, model and write
+  set as `just queue show` prints them, since `lanes.js` cannot read the
+  queue file. Its `ok` is then held to that copy. The ids must be the ones
+  sent. The write set must be the union of the rows' sets, never wider or
+  narrower. The model must be `opus` if any row says so, else `sonnet`. The
+  answer must not carry both marks. Anything else stops the row before any
+  lane starts: `needs`, an answer that fails a check, or a prep that throws.
+  The row comes back not merged, with a `needs <file>: <why>` line for each
+  file prep named.
+- **What a short-form brief carries**: the rows' lines, the mark and why,
+  prep's facts and the dispatcher's `notes`. It ends with the two notes every
+  brief carried word for word, one on `tag` steps and a row's last word, one
+  on bare test names. A writing short-form lane is also asked for a
+  `for_the_verifier` field by default, saying how to lay back the
+  `#[cfg(test)]` pins it adds in `src/`. A full-form brief gets none of the
+  three; its dispatcher still types them.
+- **Refused at the run's start**: a lane with no label, two lanes with one
+  label, a lane giving `notes` beside a full-form field, and a short-form lane
+  with no `queueId`.
+- **`check-lanes-workflow`** gains arms 23 to 27 and sixteen cuts. Prep is
+  sent with its type, and `prep.md` makes it a Sonnet agent with no tool that
+  writes. It runs before the lane. A `needs` starts no lane and comes back. A short-form lane takes
+  its write set, model and marks from prep's checked answer. Both forms are
+  refused. The two notes and the default field are on a short-form brief.
+  Each arm fails with the base's `lanes.js`.
+- **`dispatch-lanes` shrinks.** Step 4 keeps the bundle line and points to
+  `prep.md`. Step 5 sends `{ label, queueId }`, and keeps the full form for a
+  row sent again with a finding, a `report` schema, or `verify: false`.
+
+Nobody has run prep yet. A `claude` process reads its agent types when it
+starts, and the session that built it began before `prep.md` existed. The
+first short-form run must come from a dispatcher restarted after this lands.
+Until then the full form works as before.
+
 ### 396.5 What it should save, what it costs, and the test
 
 **Saved.** Before the first lane, the two shares should fall from 9 642
