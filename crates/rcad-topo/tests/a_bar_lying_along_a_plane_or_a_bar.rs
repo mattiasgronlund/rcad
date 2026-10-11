@@ -26,18 +26,17 @@
 //! Q801). The seam is left out of the arrangement, so the side the touch cuts
 //! along it named no input edge and the seam read as deleted where the answer
 //! has an edge on it. `fuse/assemble.rs` names the seam for a straight side
-//! between the seam's own two corners, gathers every side's input edges onto
-//! the edge they share, and hands each half of a parted line its own face's.
+//! along it, gathers every side's input edges onto the edge they share, and
+//! hands each half of a parted line its own face's.
 //!
-//! **A wall that only touches part of the seam loses the whole seam's history**
-//! (queue row Q808, a gap of its own, not yet fixed). `the_seam_a_side_runs_along`
-//! names the seam only for a side whose two ends are the seam's own two
-//! corners; a wall that stops partway up the bar cuts the touching side off at
-//! a new corner the wall's own top edge makes, so neither half of the split
-//! seam has a side between the seam's own two ends, and both lose their
-//! history at once. `a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it`
-//! pins this as measured, and the fixing row belongs with `fuse/assemble.rs`
-//! (or `fuse/bake.rs`) in its write set, not here.
+//! **A wall that only touches part of the seam keeps both halves in the seam's
+//! history** (queue row Q1761, found by Q808). A wall that stops partway up the
+//! bar cuts the seam in two at a new corner its own top edge makes, so neither
+//! half runs between the seam's own two corners, and until Q1761 neither was
+//! named and the seam read as deleted. `the_seam_a_side_runs_along` now names a
+//! straight side whose two ends are each a corner of the seam or a place known
+//! exactly on it, read where the bar is placed.
+//! `a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it` pins it.
 
 use core::f64::consts::PI;
 

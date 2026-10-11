@@ -85,7 +85,8 @@ use crate::validate::{
 };
 use crate::view::how_far_apart;
 use crate::{
-    Containment, EdgeKey, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey, VertexView,
+    Containment, EdgeKey, EdgeView, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey,
+    VertexView,
 };
 
 use super::arrange::{
@@ -282,7 +283,8 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
     let mut edges = Edges::default();
     let mut arcs_at_one_corner = BTreeMap::new();
     let mut named = Vec::with_capacity(scratch.pieces.len());
-    for (piece, wires) in scratch.pieces.iter().zip(&wires) {
+    for (index, (piece, wires)) in scratch.pieces.iter().zip(&wires).enumerate() {
+        let solid = the_solid_a_piece_was_cut_from(model, scratch, index);
         let mut of_this_piece = Vec::new();
         for meet in wires.iter().flat_map(|wire| wire.iter()) {
             let from = corners.of(model, &meet.ends[0], policy, log)?;
@@ -320,7 +322,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
                     continue;
                 }
             }
-            let seam = the_seam_a_side_runs_along(model, &piece.ancestors, meet);
+            let seam = the_seam_a_side_runs_along(model, solid, &piece.ancestors, meet);
             let side = edges.of(
                 meet,
                 seam,
@@ -681,6 +683,7 @@ impl Assembly {
         let mut faces = Vec::new();
         for (kept, kept_wires) in chosen.iter().zip(&kept_wires) {
             let piece = &scratch.pieces[kept.piece];
+            let solid = the_solid_a_piece_was_cut_from(model, scratch, kept.piece);
             let turned_round = piece.orientation.is_reversed() != kept.reversed;
             let wires: Vec<Vec<Side>> = kept_wires
                 .iter()
@@ -689,6 +692,7 @@ impl Assembly {
                         wire,
                         turned_round,
                         &piece.ancestors,
+                        solid,
                         model,
                         &mut corners,
                         &mut edges,
@@ -8315,6 +8319,7 @@ fn sides_of(
     wire: &[FaceMeet],
     turned_round: bool,
     ancestors: &[FaceKey],
+    solid: SolidView<'_>,
     model: &Model,
     corners: &mut Corners,
     edges: &mut Edges,
@@ -8333,7 +8338,7 @@ fn sides_of(
         {
             continue;
         }
-        let seam = the_seam_a_side_runs_along(model, ancestors, meet);
+        let seam = the_seam_a_side_runs_along(model, solid, ancestors, meet);
         sides.push(edges.of(
             meet,
             seam,
@@ -8426,8 +8431,16 @@ fn a_ring_of_one_or_two_sides_bounds_something(ring: &[Side], edges: &[Edge]) ->
 /// lies along it. A crossing that cannot be shown to run straight is not
 /// named, and neither is a side with an end the seam's corners do not name
 /// and whose place is not known exactly.
+///
+/// **The seam's corners are read where `solid` puts them**, the input solid
+/// the piece was cut from, because that is where `bake` put every place a side
+/// ends at. [`Model::face`] views a face where it was built: a bar placed at
+/// `(−1, 2, 1)` has its seam there from `(1, 0, 0)` to `(1, 0, 2)`, and the
+/// new corner `(0, 2, 2)` is on neither. Only a face with a seam is looked up
+/// in `solid`, since that takes a walk over the solid's faces.
 fn the_seam_a_side_runs_along(
     model: &Model,
+    solid: SolidView<'_>,
     ancestors: &[FaceKey],
     side: &FaceMeet,
 ) -> Option<EdgeKey> {
@@ -8436,18 +8449,28 @@ fn the_seam_a_side_runs_along(
         return None;
     }
     ancestors.iter().find_map(|&face| {
-        model
+        let is_a_straight_seam = |edge: &EdgeView<'_>| {
+            edge.neighbouring_faces().all(|other| other == face)
+                && *edge.stored_run() == EdgeRun::Straight
+        };
+        let has_a_straight_seam = model
             .face(face)
             .expect("a piece's ancestor is a face of the model the fuse was given")
             .wires()
             .flat_map(|wire| wire.coedges())
+            .any(|coedge| is_a_straight_seam(&coedge.edge()));
+        if !has_a_straight_seam {
+            return None;
+        }
+        solid
+            .faces()
+            .find(|placed| placed.key() == face)
+            .expect("a piece's ancestor is a face of the solid it was cut from")
+            .wires()
+            .flat_map(|wire| wire.coedges())
             .map(|coedge| coedge.edge())
+            .filter(is_a_straight_seam)
             .find(|edge| {
-                if !edge.neighbouring_faces().all(|other| other == face)
-                    || *edge.stored_run() != EdgeRun::Straight
-                {
-                    return false;
-                }
                 let corners = [edge.start(), edge.end()];
                 let [Some(from), Some(to)] = side
                     .ends
@@ -8496,6 +8519,23 @@ fn where_on_the_seam(end: &MeetPoint, corners: [VertexView<'_>; 2]) -> Option<[f
     let between = (0..3)
         .all(|axis| from[axis].min(to[axis]) <= at[axis] && at[axis] <= from[axis].max(to[axis]));
     (on_the_line && between).then_some(at)
+}
+
+/// The input solid the piece at `piece` in [`Scratch::pieces`] was cut from,
+/// viewed the way `bake` viewed it, so its faces carry the placement `bake`
+/// moved them by.
+fn the_solid_a_piece_was_cut_from<'m>(
+    model: &'m Model,
+    scratch: &Scratch,
+    piece: usize,
+) -> SolidView<'m> {
+    let operand = scratch
+        .arguments
+        .iter()
+        .chain(&scratch.tools)
+        .nth(scratch.cut_from[piece])
+        .expect("every piece was cut from one of the fuse's operands");
+    model.solid_at(operand.key.slot_in(model.id()))
 }
 
 #[cfg(test)]
