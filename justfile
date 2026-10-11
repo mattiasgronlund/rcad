@@ -10100,8 +10100,11 @@ check-fuzz-triage-selftest:
     fold_corpus="$dir/fold-corpus"
     record="$fold_logs/removed-crash-files.tsv"
     cargo_here="$dir/cargo-here"
-    mkdir -p "$cargo_here" "$fold_logs" "$fold_corpus/$reader"
-    printf '#!/bin/sh\ncd "%s" && exec "%s" "$@"\n' "$PWD" "$(command -v cargo)" >"$cargo_here/cargo"
+    mkdir -p "$cargo_here" "$fold_logs" "$fold_corpus/$reader" "$dir/tmp"
+    # The stand-in puts this run's own PATH back before it names `cargo`: mise's
+    # `cargo` shim looks for the next `cargo` on the PATH, finds this one, and
+    # the two exec each other for ever.
+    printf '#!/bin/sh\ncd "%s" && PATH="%s" exec cargo "$@"\n' "$PWD" "$PATH" >"$cargo_here/cargo"
     chmod +x "$cargo_here/cargo"
     mkdir -p "$tree/fuzz/fuzz_targets" "$tree/fuzz/corpus/$reader"
     touch "$tree/fuzz/fuzz_targets/$reader.rs" "$tree/fuzz/fuzz_targets/$surfaces.rs"
@@ -10162,13 +10165,13 @@ check-fuzz-triage-selftest:
     }
     a_night() {
         mkdir -p "$fold_logs/$1/artifacts"
-        cp -Rn "$tree/fuzz/artifacts/." "$fold_logs/$1/artifacts/"
+        cp -R "$tree/fuzz/artifacts/." "$fold_logs/$1/artifacts/"
         printf '%s  %s  %s  %s  %s\n' "$1 08:10" "$2 (0 days old, 0 behind main)" \
             "2 targets, 1 TO LOOK AT (fuzz:crash)" "some artifacts in $fold_logs/$1/artifacts" \
             "$fold_logs/$1" >"$fold_logs/latest"
     }
     fold() {
-        PATH="$no_mise:$cargo_here:$PATH" RCAD_FUZZ_LOGS="$fold_logs" RCAD_FUZZ_CORPUS="$fold_corpus" \
+        PATH="$no_mise:$cargo_here:$PATH" RCAD_FUZZ_LOGS="$fold_logs" RCAD_FUZZ_CORPUS="$fold_corpus" TMPDIR="$dir/tmp" \
             {{ just_executable() }} --justfile "{{ justfile() }}" --working-directory "$tree" \
             fuzz-triage "$@" 2>&1
     }
@@ -10214,6 +10217,7 @@ check-fuzz-triage-selftest:
     [ "$(ls -A "$fold_corpus/$reader" | LC_ALL=C sort)" = "$(printf '%s\n' "$seen" "${new_path#crash-}" | LC_ALL=C sort)" ] \
         || fail "the corpus does not hold what it held and the one file that took a new path: $(ls -A "$fold_corpus/$reader")"
     [ "$(ls -A "$fold_corpus")" = "$reader" ] || fail "the copy the merge wrote into was left beside the corpus"
+    [ -z "$(ls -A "$dir/tmp")" ] || fail "the fold left its scratch behind: $(ls -A "$dir/tmp")"
     [ "$(head -1 "$record")" = "$(printf 'night\ttarget\tfile\treplayed_main\tkept')" ] \
         || fail "the record of removed files does not name its five columns"
     [ "$(tail -n +2 "$record" | LC_ALL=C sort)" = "$(printf '2026-10-12\t%s\t%s\t%s\t%s\n' \
@@ -10287,8 +10291,8 @@ check-fuzz-triage-selftest:
     # verdicts' count of passing files is checked against it, and a target
     # where they differ folds nothing.
     git -C "$tree" checkout -q main
-    printf '#!/bin/sh\ncd "%s" && "%s" "$@" || exit $?\nwhile [ $# -gt 1 ]; do [ "$1" = --members ] && sed -i "s|\\t/|\\t//|" "$2"; shift; done\n' \
-        "$PWD" "$(command -v cargo)" >"$cargo_here/cargo"
+    printf '#!/bin/sh\n(cd "%s" && PATH="%s" exec cargo "$@") || exit $?\nwhile [ $# -gt 1 ]; do [ "$1" = --members ] && sed -i "s|\\t/|\\t//|" "$2"; shift; done\n' \
+        "$PWD" "$PATH" >"$cargo_here/cargo"
     a_night 2026-10-19 "$(git -C "$tree" rev-parse --short HEAD)"
     got=$(fold) || fail "a members file in another form made the triage itself fail"
     grep -q "^fold:     $surfaces: none — the verdicts say 0 passed and the members file leaves 1" <<<"$got" \
