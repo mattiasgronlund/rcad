@@ -14,7 +14,11 @@ Queue row Q1506 (its second lane, `lane-q1506-the-turn-13-pin-repinned`, off
 `probe_q1506_certified`, probes likewise taken out.
 Queue row Q1527 (lane `lane-q1527-fold-a-turned-cubes-tip-into-one-corner`,
 off `a5d31701`, in relays) wrote 417.7 and built it; its counts are
-`probe_q1527_split`, a probe likewise taken out.*
+`probe_q1527_split`, a probe likewise taken out. Its second lane,
+`lane-q1527-compile-and-pin-the-tip-fold`, made it compile and pinned it, and
+its third, `lane-q1527-narrow-the-tip-fold-to-a-corner-one-plane-cuts`, off
+`bb6a0d09`, in relays, narrowed it, amended 417.7 and wrote 417.8; its counts
+are `probe_q1527_narrow`, likewise taken out.*
 
 ### 417.1 The shape
 
@@ -245,7 +249,10 @@ refused as an orphan.
 
 §423 is the family's fourth rule, a flat ring another plane walks back.
 
-### 417.5 The other half: the three crossings as one, not built
+### 417.5 The other half: the three crossings as one, built in 417.7
+
+*Not built when this was written; (a) is built since queue row Q1527, as
+417.7 words it, and 417.8 counts what it moved.*
 
 At `(0, 3, 3)`, and in the 95 of the 199 still refused under the tolerant
 policy (137 before Q1442, 131 before Q1506, and still 95 on `a5d31701`, queue
@@ -323,14 +330,24 @@ without a search; it is left to a row of its own because it changes
 
 ### 417.7 The fold of 417.5 (a), decided
 
-*Queue row Q1527.* Built. Under `Policy::tolerant`, a meet of three planes
-that shares two of its planes with an input corner on exactly three planes,
-and lies within `Policy::max_wobble` of that corner, is taken as that corner.
-The meet lies on the corner's edge, the line of the two planes they share, and
-the third plane cuts that edge a rounding from its end. At the turned cube's
-tip the three crossings are each such a meet of the cube's corner, so all
-four points become one corner, and the answer is written as the 2 turns of
-417.5 (c) whose four points round to one triple already are.
+*Queue row Q1527.* Built. Under `Policy::tolerant`, take an input corner on
+exactly three planes, and a fourth plane its three planes are proved to meet
+off, exactly. The fourth plane cuts each of the corner's three edges, the
+line where two of the corner's planes meet, at a meet of three planes. When
+each of the three meets is a point some piece runs to, and all three are
+within `Policy::max_wobble` of the corner, the three are taken as that corner
+together, with one record for the corner; when any one is not, none is. At the turned cube's tip the block's face cuts the cube's three edges at
+its corner in the three crossings, so all four points become one corner, and
+the answer is written as the 2 turns of 417.5 (c) whose four points round to
+one triple already are.
+
+**Narrowed from a rule per meet.** As first written and built (`6ffbb172`),
+the rule took each meet on its own: any meet of three planes sharing two of
+them with an input corner, within the wobble of it, was taken as that corner.
+That answered the 199 turns exactly as the narrowed rule does, and moved seven
+tests outside the row's write set, each of a shape that is not a tip touching
+a face. The dispatcher chose to narrow the rule rather than move them; 417.8
+has the seven and the legs the narrowing rests on.
 
 **(i) Where the power lives.** In `rcad-predicates`, as one method,
 `Policy::take_as_one_point`. It takes a `Record` whose enclosure is the
@@ -344,8 +361,8 @@ refuse the whole fuse over it, and refusing the fold already leaves the fuse
 where it was. The power is in the policy crate because only there can a record
 be resolved (`Record::resolve_to` is the crate's own), and a record that
 stayed `Undecidable` would say the opposite of what happened. Which points are
-asked is `fuse/`'s rule, `fold_each_meet_a_rounding_from_an_input_corner` in
-`fuse/assemble.rs`, called once from `Scratch::split_both_groups`, so both
+asked is `fuse/`'s rule, `fold_each_corner_one_plane_cuts_a_rounding_from_it`
+in `fuse/assemble.rs`, called once from `Scratch::split_both_groups`, so both
 naming passes see each fold and each fold logs one record.
 
 **(ii) Certified, nothing.** The fuse rule returns before it does any work
@@ -356,23 +373,167 @@ unchanged, the six at `ON_THE_FACE` among them. The certified refusals are the
 limit 417.5 names.
 
 **(iii) What a tolerant fuse answered before.** The rule only adds names to
-`NamesOfOnePoint`, so a fuse with no meet a rounding from an input corner's
-edge end is untouched. §42.1's amendment asks that a change to the predicates
+`NamesOfOnePoint`, so a fuse with no input corner whose three edges one plane
+cuts a rounding from it is untouched. §42.1's amendment asks that a change to the predicates
 crate be strictly additive: the new method answers nothing any existing
 function answered, so no input answered before is answered differently by
 that crate. What the fuse rule moved is counted in 417.8.
 
-**(iv) Provenance.** One `Record` per fold, `"a meet of three planes taken as
-an input corner"`, whose inputs are the corner's box and the meet's box, at
-`Level::Exact` since the two are proved apart, with the distance as a
-`Measures::Length` enclosure. Nothing is recorded under a certified policy,
-since nothing is folded there. The corner that is written carries a
-`Cause::TolerantFallback` tag at least as wide as the distance, instead of
-`Cause::ConstructedPoint`: the fuse chose to move it, it was not only rounded.
+**(iv) Provenance.** One `Record` per corner folded, `"three meets of one
+plane taken as an input corner"`, whose inputs are the corner's box, where
+`Corners::of` puts it, and every box of each of the three meets: each box it
+arrived as in a piece, and where its three planes are solved. It is at
+`Level::Exact`, since each meet is proved apart from the corner, with the
+furthest any meet may be from the corner as a `Measures::Length` enclosure.
+Nothing is recorded under a certified policy, since nothing is folded there.
+The corner that is written carries a `Cause::TolerantFallback` tag at least
+as wide as that distance, instead of `Cause::ConstructedPoint`: the fuse
+chose to move it, it was not only rounded.
 
-**Not folded.** A meet two input corners are both within the wobble of is
-left alone: one meet would join the two, and two input corners a rounding
-apart along one edge is an edge shorter than the wobble, which this rule does
-not judge. A meet with a curved surface among its three is left alone too:
-its three surfaces may meet more than once, and only three planes meet in
-exactly one point.
+**Not folded.**
+
+- A corner the plane cuts within the wobble in fewer than three of its edges.
+  A plane parallel to one of the corner's faces, a rounding off it, cuts one
+  edge near the corner and is parallel to the other two, and folding that one
+  meet closes a sliver a tolerant fuse keeps (417.8).
+- A corner with a meet that arrived in no piece: each of the three must be a
+  point some piece of either group runs to, or a name an arrangement joined
+  to one, so that a face on the plane cuts the corner's faces there.
+- A corner two planes each cut that way: a tip on an edge of the other solid,
+  not on a face, which this rule does not judge.
+- A corner not proved off the plane, exactly. When its three planes meet on
+  the plane, the three meets are the corner, and joining them is the
+  arrangement's; when the side cannot be told, nothing is folded.
+- A tip with a meet that another input corner, sharing two planes with it, is
+  within the wobble of: the fold would join the two corners, and two input
+  corners a rounding apart along one edge is an edge shorter than the wobble,
+  which this rule does not judge.
+- A meet with a curved surface among its three: its three surfaces may meet
+  more than once, and only three planes meet in exactly one point.
+
+### 417.8 What the fold moved, and why it was narrowed
+
+*Queue row Q1527's third lane. Each count over the 199 is `probe_q1527_narrow`,
+a probe at the end of `a_turned_cube_with_its_corner_on_a_face.rs` at
+`1c54c454`, taken out in `9cdcf07b`: `PROBE_Q1527_NARROW=both mise exec --
+just t -p rcad-topo --test a_turned_cube_with_its_corner_on_a_face
+--no-capture probe_q1527_narrow`. For each of the six fuses it gives the
+split, each answer against the same fuse with the turned cube `2⁻³⁰` further
+in, solid by solid within what `each_solid_agrees_with_the_turned_cube_further_in`
+allows, and how many fold records each answer's log holds. "Before" is the
+same run with `PROBE_Q1527_NARROW=tolerant` and the fold's names dropped by a
+temporary edit in `Scratch::split_both_groups`,
+`scratch.names_of_one_point.extend(taken_as_input_corners.into_iter().take(0))`,
+restored after: the fold still asks and logs, and folds nothing. Run again by
+this lane, not quoted.*
+
+**The 199, under `Policy::tolerant(100.0)`.**
+
+| fuse                       | answers before          | refused before                     | answers after            |
+|----------------------------|-------------------------|------------------------------------|--------------------------|
+| union, block first         | 104 one                 | 63 hole, 16 outline, 16 `count: 4` | 199 one                  |
+| union, turned cube first   | 104 one                 | 47 hole, 32 outline, 16 `count: 4` | 199 one                  |
+| intersection, either order | 134 one                 | 65 outline                         | 199 one                  |
+| block less the turned cube | 57 one, 12 two, 7 three | 65 hole, 58 `count: 4`             | 152 one, 32 two, 15 three |
+| turned cube less the block | 66 one, 47 two, 11 three | 60 `VolumeIsNotPositive`, 15 outline | 168 one, 29 two, 2 three |
+
+"One", "two" and "three" are how many solids an answer is; a hole is a hole
+winding with its outline, an outline one winding against its face. The 60
+`VolumeIsNotPositive` are 33 at `0.0` and 27 a rounding below it, `−3.6e−48`
+to `−5.3e−46`. Where 417.3 counts the same fuse since Q1506 and Q1614, the
+union with the block first and the turned cube less the block, the before
+column is its count, and every before count here equals the second lane's,
+counted the same way on the wide rule's code.
+
+**Wrong answers before, none after.** Before the fold, every answer of the
+first five fuses agreed with the turned cube further in, and 50 of the
+turned cube less the block's 124 did not: 41 were two solids where it is one
+and 9 three where it is two. Each extra solid is the tip outside the face as
+a shell of its own, of `4.0e−48` (turn 38) to `2.1e−45` (turn 203), which is
+the second lane's measure of them, quoted from its report and not run again.
+After the fold every answer of all six agrees, and each logs exactly one fold
+record. `the_turned_cube_less_the_block_over_the_199_turns_whose_planes_meet_outside`
+pins that fuse's 199 and
+`random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant`
+every rule over 31 of them.
+
+**The 199, under `Policy::certified()`: nothing moved.** The union either way
+round answers 53 and is refused 95 `DynamicRangeTooWide`, 35 a hole winding
+with its outline and 16 `count: 4`; the intersection either way round answers
+8 and is refused 191 for the range; the block less the turned cube answers 8
+and is refused 98 for the range, 58 `count: 4` and 35 a hole; the turned cube
+less the block answers 74 (66 one, 6 two, 2 three) and is refused 125 for the
+range. Every certified answer agrees with the turned cube further in, and no
+certified fuse logs a fold record.
+
+**Why the rule was narrowed.** The rule as 417.7 first worded it gave the
+same counts over the 199, and moved seven tests outside the row's write set,
+each passing on `main` (the second lane, at `d06c443e`, `mise exec -- just t
+-p rcad-topo --no-fail-fast`; quoted from its report, not run again):
+
+- (a) `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`,
+  `the_block_less_the_tipped_cube_is_the_block_less_what_they_share_tolerant`:
+  answered, then `ResultIsNotManifold`, an edge with four faces along it.
+- (b) `two_skewed_combs_touching_along_one_line.rs`,
+  `under_a_tolerant_policy_the_union_answers_and_the_rest_are_refused_by_name`:
+  the union answered one solid, then was refused `Undecidable` on *a point
+  inside a piece of a face*, after four fold records, `6.7e−16` to
+  `1.8e−15`, that joined two different meets to each of the corners
+  `(−1, 2, 3)` and `(−1, 2, 1)`.
+- (c) `a_fuse_that_builds_a_sliver.rs`,
+  `the_edge_across_a_sliver_is_as_long_as_the_sliver_is`: the shortest edge of
+  the tolerant union, `1e−200`, became `5.0`, the sliver folded shut.
+- (d) `a_model_only_the_policy_that_built_it_calls_valid.rs`, three tests: the
+  answer's range, `4.32e17`, became `3.0`, and a certified sweep accepted the
+  tolerant answer it refused.
+- (e) `turning_a_fuse.rs`,
+  `a_tall_block_through_a_flat_one_turned_answers_every_rule_under_a_tolerant_policy`:
+  15 fold records where the pin asks for one dynamic range check.
+
+With the fold's names dropped, five passed, and (b) and (e) failed only on the
+records the fold still logged. With the narrowed rule all seven pass
+unchanged, and so does every other test of `rcad-topo` (this lane, `mise exec
+-- just t -p rcad-topo --no-fail-fast`, 1935 passed). The `which == 0` assert
+in `every_meet_of_three_planes` did not fire there.
+
+**The legs the narrowing rests on.**
+
+1. *At the turned cube's tip the block's face cuts all three of the tip's
+   edges within the wobble.* Measured: every one of the 199 tolerant fuses, in
+   all six, logs exactly one fold record, and the rule writes one only when
+   all three meets qualify.
+2. *The sliver (c) and the turned flat block (e) are a plane a rounding off
+   one face of a corner, which cuts one of its edges near it.* That they moved
+   back is measured, by their tests passing unchanged. Which meets the wide
+   rule folded there was not printed: for (c) it is read off the test's shape,
+   the high block's bottom at `y = 1e−200` cutting the low block's upright
+   edges a hair above their corners and parallel to the corners' other two
+   edges, and for (e) off its doc, whose walls are a rounding off each other.
+3. *Each corner of the combs (b) had two meets, not three.* Read off the wide
+   rule's fold records, so measured. The narrowed rule leaves them alone: the
+   test passes unchanged, its log with it, so it holds no fold record.
+4. *The tipped cube (a).* It passes unchanged with the narrowed rule. Why the
+   wide rule moved it was not traced.
+
+Not measured: whether requiring each meet to arrive in a piece, beyond
+solving its three planes, is what keeps (b) unchanged. A run with that
+requirement dropped would show it.
+
+**What `Corners::of` joined before the fold** (the first lane's relay 0, a
+print in `Corners::of` since taken out, of the tolerant fuse with the block
+first; quoted from its report, not printed again). Turns 1 (union, a hole
+winding with its outline) and 14 (union, an outline against its face): four
+distinct tip corners, none joined, the apex at `x = +2.22e−16` and
+`+1.1e−16`, rounded inside the block though its exact meet is outside. Turn 9
+(union, `count: 4`): two crossings joined by coordinate at
+`(0, 6.83097718778129, 2.231386738753705)`, the third crossing and the apex
+apart. Turn 13 (intersection, an outline against its face): the apex and one
+crossing joined by coordinate at `(0, 8.782418566086339, 7.364001411137167)`,
+the other two apart. So the rule counts the edges a plane cuts by the names of
+their meets, not by the points they round to: in turn 9 three meets are two
+points, and a rule counting points would see two where the plane cuts three
+edges.
+
+**What this leaves.** Queue row Q1615, the combs under a tolerant policy, is
+not answered by this fold, whose corners there have two meets each, and stays
+open. Nothing else.
