@@ -118,7 +118,7 @@ pub enum Containment {
     /// ray no face but the ring's threw away. A point another face holds is
     /// [`Containment::OnBoundary`], and a box whose every ray another face
     /// grazes is [`Containment::Undecidable`], as they are on the same solid
-    /// without the ring (Q1716).
+    /// without the ring, even where the box meets the ring too (Q1716, Q1739).
     ///
     /// Deliberately its own answer and not
     /// [`Containment::CannotFollowAFacesTrimming`], which says a *trimming*
@@ -1392,13 +1392,16 @@ struct Crossings {
 impl Crossings {
     /// Add in one face's own tally.
     ///
-    /// **A graze from a face that did not answer is not one the ray would get
-    /// whatever that face said.** A face whose trimming nothing follows
-    /// grazes a ray where it cannot show it holds none of the box the ray
-    /// starts from or meets it in, and that is for want of the answer it
-    /// refused; following its trimming might have put the box off it. A graze
-    /// from any other face throws the ray away whatever the faces that did not
-    /// answer would add.
+    /// **Only a graze from a face that answered throws the ray away whatever
+    /// the faces that did not answer would add.** A face whose trimming
+    /// nothing follows grazes a ray where it cannot show it holds none of the
+    /// box the ray starts from or meets it in, and that is for want of the
+    /// answer it refused; following its trimming might have put the box off
+    /// it. A ring the ray could not be fired at grazes it from its own sign,
+    /// before any firing, so that graze would stand whatever a ray fired at
+    /// the ring said. It is left out all the same, so that a box on the ring's
+    /// wall that no other face grazes stays refused, as `docs/decisions.md`
+    /// §323.3 keeps it (Q1739).
     fn add(&mut self, face: Self) {
         let Self {
             winding,
@@ -1439,9 +1442,10 @@ impl Crossings {
 
     /// Whether this ray is thrown away whatever the faces it could not be
     /// fired at, or whose trimming nothing could follow, would add to it: a
-    /// face that answered grazed it (Q1716, Q1727). That holds where the ring
-    /// left unfired grazed it too, since the box straddles the ring's sign: a
-    /// graze from another face still throws the ray away (Q1739).
+    /// face that answered grazed it (Q1716, Q1727). That holds where the box
+    /// straddles the sign of the ring left unfired, too (Q1739). A ray fired
+    /// at the ring would add crossings, grazes or a trimming nothing follows,
+    /// and a ray another face grazed is thrown away whichever it added.
     fn is_thrown_away_without_them(&self) -> bool {
         self.a_face_that_answered_grazed_it && self.parted_at.is_none()
     }

@@ -17,7 +17,8 @@
 //! own tests, of one solid holding two shells, until that build opened (Q721).
 //! A box a face of the block meets is asked of the block alone too, which has
 //! no torus face, and the two answers must agree, since what the face says of
-//! the box does not depend on the ring (Q1716).
+//! the box does not depend on the ring (Q1716), and under a certified policy
+//! they agree where the ring meets the box too (Q1739).
 
 use std::collections::BTreeMap;
 
@@ -566,6 +567,10 @@ const ON_THE_CAP_CIRCLE: [[f64; 3]; 4] = [
 /// one could not change the answer. Until Q1739 the ring's refusal stood
 /// wherever the box straddled the ring's sign, whatever else grazed the ray,
 /// and these came back `CannotFireARayAtAFacesSurface`.
+///
+/// A tolerant policy still parts the two: the block alone says `OnBoundary`
+/// and the bend `Undecidable`, as it does of a box on the same side away from
+/// the circle. That is a gap of its own, not traced yet.
 ///
 /// A box on the bend's wall that no face of the block meets, `(3, 4, 0)` on
 /// its outer equator, is still refused: there only the ring throws the rays
