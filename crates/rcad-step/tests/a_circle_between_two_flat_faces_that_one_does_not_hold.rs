@@ -37,7 +37,7 @@ use written_by_hand::{a_header, real, triple};
 /// **not** `ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes`, which that
 /// variant's own doc comment cites this very bar for. The difference is where
 /// the curved surface comes from: the topo-level pin in
-/// `a_closed_edge_between_two_planes_its_curve_leaves.rs` hands
+/// `an_edge_between_two_planes_its_curve_leaves.rs` hands
 /// `SolidBuilder` a run that names the pipe directly
 /// (`EdgeRun::RightRoundWhereItCrosses { and: pipe(1.0) }`), a surface that
 /// is not either face's own. A reader has no such pipe to hand: with the lid's
@@ -92,7 +92,7 @@ fn a_circle_leaning_off_the_one_plane_both_its_flat_faces_sit_on_is_not_a_solid_
 /// circle of radius 1 about the bar's axis into an annulus on the lid's own
 /// plane and a disc on the plane through the circle's corner `(1, 0, 4)`
 /// leaning a tenth along `x` — `Plane::from_point_and_normal((1, 0, 4),
-/// (-0.1, 0, 1))` in `a_closed_edge_between_two_planes_its_curve_leaves.rs`.
+/// (-0.1, 0, 1))` in `an_edge_between_two_planes_its_curve_leaves.rs`.
 ///
 /// The side is one `CYLINDRICAL_SURFACE` with a seam up `x = 3, y = 0`; the
 /// bottom and the annulus are `PLANE`s normal to `z`; the disc is a third
