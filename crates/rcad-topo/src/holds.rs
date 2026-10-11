@@ -45,8 +45,9 @@
 //! Both refusals are gaps and §35 names the consumer that calls each due. One
 //! loop of two is read after all where the half-space [`intersect`] picks it out
 //! by faces along a pipe's or a cone's axis, a ball a pipe cuts in two loops
-//! among them (Q1702): everything of the surface past that half-space is on one
-//! side of the loop ([`what_lies_past_the_picker`]).
+//! among them (Q1702), and where two pipes cross in two loops, the half-space
+//! holding the fat one's axis (Q1717): everything of the surface past that
+//! half-space is on one side of the loop ([`what_lies_past_the_picker`]).
 //!
 //! **A flat face is the exception, because it has a polygon after all**: put
 //! each arc back as its chord and the sides are one, and what the chord leaves
@@ -828,7 +829,8 @@ fn walk_one_outline(
 /// (`tests/a_pointed_cone_drilled_along_its_axis.rs`, row Q1218).
 ///
 /// Where the edge's curve is picked out of the two by a flat half-space facing
-/// along their axis ([`the_picker_this_face_is_read_past`]), the edge still
+/// along their axis, or one of the few others [`what_lies_past_the_picker`]
+/// names ([`the_picker_this_face_is_read_past`]), the edge still
 /// cuts the surface in two, and the face is one of the two pieces: in front of
 /// the half-space the trimming crosses the surface in the edge's curve alone,
 /// so a point there is on the side of the trimming it reads, and every point
@@ -7389,6 +7391,28 @@ fn the_picker_this_face_is_read_past(
 /// `whether_past_the_plane_through_a_balls_centre` reads a fuse's points the
 /// same way and says why (Q1554); `validate.rs` does not read this pair yet.
 ///
+/// **So are two pipes, where the fat one swallows the thin one's whole
+/// cross-section** (Q1717) and they cross in two loops round the thin pipe's
+/// axis. The half-space [`intersect`] names each loop by holds the fat pipe's
+/// axis and faces across it, and neither loop reaches its flat surface. Its
+/// side is not stepped for either: it is which of the two pipes the face is
+/// on.
+///
+/// - **On the fat wall** the flat surface meets the wall in two straight
+///   lines. A line that ran into the thin pipe would come out again through a
+///   loop, which the flat surface misses, so the patch the loop in front
+///   bounds lies wholly in front of it, and everything past is outside that
+///   patch: [`Decision::Pos`], even on the other loop's patch.
+/// - **On the thin wall** the flat surface cuts one closed curve, between the
+///   two loops along every ruling and so inside the fat pipe, and the wall
+///   past it is one tube the loop in front never meets: [`Decision::Neg`],
+///   even beyond the other loop.
+///
+/// `arrange.rs`'s `whether_past_the_plane_between_two_loops` reads a fuse's
+/// points the same way (Q1483). Two pipes whose axes lie along one line cross
+/// in straight lines, and two of one width in no two loops, so neither is read
+/// this way and each is refused by name as before.
+///
 /// A ball on either side was left out for a while (Q1218), because reading it
 /// let a cut cone and a cone closed by a ball on its axis reach a panic in
 /// `fuse/assemble.rs`'s `rings_round`, whose rings each ran along a hyperbola.
@@ -7447,6 +7471,20 @@ fn what_lies_past_the_picker(
     let Some(Picker::InFrontOf(picker)) = named else {
         return Ok(None);
     };
+    if let (Surface::Cylinder(this), Surface::Cylinder(other)) = (surface, partner) {
+        if lie_along_one_line(
+            this.axis().direction().components(),
+            other.axis().direction().components(),
+        ) {
+            return Ok(None);
+        }
+        let side = match this.radius().partial_cmp(&other.radius()) {
+            Some(core::cmp::Ordering::Greater) => Decision::Pos,
+            Some(core::cmp::Ordering::Less) => Decision::Neg,
+            Some(core::cmp::Ordering::Equal) | None => return Ok(None),
+        };
+        return Ok(Some(PastThePicker { picker, side }));
+    }
     if !lie_along_one_line(picker.normal().components(), axis.direction().components()) {
         return Ok(None);
     }
@@ -8230,7 +8268,11 @@ mod tests {
     /// `AFaceMissesPartOfWhereItsSurfacesCross`.
     ///
     /// Every point asked is exactly on the fat wall, `x² + y² = 9`. Inside the
-    /// thin bar is `x² + z² < 1`.
+    /// thin bar is `x² + z² < 1`. A point on a loop, `(0, ±3, 1)`, is asked
+    /// only of the patch along the other loop: the quarter turn that lays the
+    /// thin bar along `y` rounds, its direction coming out `(0, −1, 2.2e-16)`,
+    /// so such a point lands a hair to one side of the thin pipe, and only past
+    /// the half-space is its own side not what is read.
     #[test]
     fn each_patch_a_thin_bar_keeps_of_a_fat_bars_wall_holds_its_own_end_alone() {
         let (model, solid) = two_crossed_bars();
@@ -8261,21 +8303,24 @@ mod tests {
             [1.8, 2.4, 0.0],
             [1.8, -2.4, 0.5],
         ];
-        for (patch, its_own, round_it, the_others) in [
-            (ahead, [0.0, 3.0, 0.5], [0.0, 3.0, 1.0], [0.0, -3.0, -0.5]),
-            (behind, [0.0, -3.0, -0.5], [0.0, -3.0, 1.0], [0.0, 3.0, 0.5]),
+        for (patch, its_own, the_others) in [
+            (
+                ahead,
+                [0.0, 3.0, 0.5],
+                [[0.0, -3.0, -0.5], [0.0, -3.0, 1.0]],
+            ),
+            (
+                behind,
+                [0.0, -3.0, -0.5],
+                [[0.0, 3.0, 0.5], [0.0, 3.0, 1.0]],
+            ),
         ] {
             assert_eq!(
                 what_it_holds(&model, solid, patch, PredicatePoint::from(its_own)),
                 OnAFace::Held,
                 "{its_own:?}"
             );
-            assert_eq!(
-                what_it_holds(&model, solid, patch, PredicatePoint::from(round_it)),
-                OnAFace::OnItsBoundary,
-                "{round_it:?}"
-            );
-            for point in in_neither.into_iter().chain([the_others]) {
+            for point in in_neither.into_iter().chain(the_others) {
                 assert_eq!(
                     what_it_holds(&model, solid, patch, PredicatePoint::from(point)),
                     OnAFace::NotHeld,
