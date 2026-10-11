@@ -23,6 +23,19 @@
 //! fuse now leaves both out (`leave_out_each_flat_ring_another_plane_walks_back`
 //! in `fuse/assemble.rs`).
 //!
+//! **The union was refused** `ResultIsNotManifold { count: 4 }` at 115 of
+//! those 400 tilts, under both policies, both ways round (queue row Q1528;
+//! five of them are [`TILTS_THE_UNION_WAS_REFUSED_AT`]). There the cube's
+//! corner at `x = 5` itself rounds onto the floor, at
+//! `(4.999999999999999, 5, 0)`, and the union kept a sliver of the cube's
+//! bottom face and a sliver of its side `x = 5`, each the triangle of that
+//! corner and the floor's `(0, 5, 0)` and `(5, 5, 0)`. The two slivers walk
+//! one ring both ways, so the edge from `(0, 5, 0)` to `(5, 5, 0)` had four
+//! faces along it, and joining the floor's pieces refused before Q1506's rule
+//! could ask. The fuse now leaves such a pair out before it joins anything
+//! (`leave_out_each_pair_of_flat_faces_walking_one_ring_both_ways` in
+//! `fuse/assemble.rs`).
+//!
 //! What the two cubes share is the cube's square cross-section, clipped to
 //! the block, along the five of its ten that lie over the block:
 //! [`what_the_two_share`] works it out from the tilt.
