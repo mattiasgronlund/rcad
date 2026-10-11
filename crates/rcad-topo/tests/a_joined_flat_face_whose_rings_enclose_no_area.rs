@@ -3579,6 +3579,120 @@ fn a_bar_cut_to_pipes(
 }
 
 #[test]
+fn probe_q633_sweep() {
+    for k in 1..=300 {
+        let delta = f64::from(k) * 1e-18;
+        for swapped in [false, true] {
+            let what = format!("delta {delta:e}, swapped {swapped}");
+            eprintln!("Q633 RUN {what}");
+            let answer = std::panic::catch_unwind(|| {
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let pair = a_bored_plate_and_a_holed_bar_inside_the_bore(&mut model, delta);
+                fused_in_order(&mut model, pair, Rule::Union, swapped)
+                    .map(|solids| solids.len())
+                    .map_err(|why| format!("{why:?}").chars().take(80).collect::<String>())
+            });
+            match answer {
+                Ok(Ok(solids)) => eprintln!("Q633 ANSWER {what}: {solids}"),
+                Ok(Err(why)) => eprintln!("Q633 REFUSED {what}: {why}"),
+                Err(_) => eprintln!("Q633 PANIC {what}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn probe_q633_round() {
+    for delta in [1e-1, 1e-8, 1e-12, 1e-14, 1e-15, 1e-16, 3e-17] {
+        for (rule, swapped) in every_rule_both_ways() {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let pair = a_bored_plate_and_a_holed_bar_inside_the_bore(&mut model, delta);
+            let what = format!("delta {delta:e}, {rule:?}, swapped {swapped}");
+            eprintln!("Q633 RUN {what}");
+            match fused_in_order(&mut model, pair, rule, swapped) {
+                Ok(solids) => {
+                    let volumes: Vec<String> = solids
+                        .iter()
+                        .map(|solid| {
+                            model
+                                .solid(*solid)
+                                .expect("this model made the key")
+                                .measure(
+                                    Deflection::of(0.001).expect("a fine mesh"),
+                                    &Policy::certified(),
+                                    &mut ProvenanceLog::new(),
+                                )
+                                .map_or_else(
+                                    |why| format!("does not measure: {why}"),
+                                    |measured| {
+                                        format!(
+                                            "{} +- {}",
+                                            measured.volume(),
+                                            measured.volume_error()
+                                        )
+                                    },
+                                )
+                        })
+                        .collect();
+                    let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                    eprintln!(
+                        "Q633 ANSWER {what}: {volumes:?} expected {} valid {valid:?}",
+                        what_the_bored_plate_and_the_holed_bar_answer(rule, swapped, delta)
+                    );
+                }
+                Err(why) => eprintln!("Q633 REFUSED {what}: {why:?}"),
+            }
+        }
+    }
+}
+
+fn what_the_bored_plate_and_the_holed_bar_answer(rule: Rule, swapped: bool, delta: f64) -> f64 {
+    let sliver = what_the_bore_holds_past_the_bar(delta);
+    match (rule, swapped) {
+        (Rule::Union, _) => 576.0 * PI - PI / 4.0 - 4.0 * sliver,
+        (Rule::Intersection, _) => 219.0 * PI + 4.0 * sliver,
+        (Rule::Difference, false) => 320.0 * PI - 4.0 * sliver,
+        (Rule::Difference, true) => 36.0 * PI + 0.75 * PI - 4.0 * sliver,
+        (other, _) => panic!("not a rule this probes: {other:?}"),
+    }
+}
+
+fn what_the_bore_holds_past_the_bar(delta: f64) -> f64 {
+    let apart = 5.0 + delta;
+    let segment = |mine: f64, theirs: f64| {
+        let half_angle = ((apart * apart + mine * mine - theirs * theirs) / (2.0 * apart * mine))
+            .clamp(-1.0, 1.0)
+            .acos();
+        mine * mine * (half_angle - half_angle.sin() * half_angle.cos())
+    };
+    9.0 * PI - (segment(3.0, 8.0) + segment(8.0, 3.0))
+}
+
+fn a_bored_plate_and_a_holed_bar_inside_the_bore(model: &mut Model, delta: f64) -> [SolidKey; 2] {
+    let plate = model
+        .add_round_bar(12.0, 4.0, &at(-3.0, -4.0, -4.0))
+        .expect("a bar of radius twelve");
+    let bore = model
+        .add_round_bar(3.0, 6.0, &at(0.6 * delta, 0.8 * delta, -5.0))
+        .expect("a bar of radius three");
+    let bored = the_one_solid(model, plate, bore, Rule::Difference);
+    let wide_hole = model
+        .add_round_bar(0.5, 6.0, &at(-6.0, -4.0, -5.0))
+        .expect("a bar of radius a half");
+    let holed_plate = the_one_solid(model, bored, wide_hole, Rule::Difference);
+    let bar = model
+        .add_round_bar(8.0, 4.0, &at(-3.0, -4.0, -4.0))
+        .expect("a bar of radius eight");
+    let narrow_hole = model
+        .add_round_bar(0.25, 6.0, &at(-6.0, -4.0, -5.0))
+        .expect("a bar of radius a quarter");
+    let holed = the_one_solid(model, bar, narrow_hole, Rule::Difference);
+    [holed_plate, holed]
+}
+
+#[test]
 fn probe_q633() {
     for delta in [1e-1, 1e-8, 1e-10, 1e-12, 1e-13, 1e-14, 1e-15] {
         for (rule, swapped) in every_rule_both_ways() {
