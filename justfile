@@ -6798,51 +6798,82 @@ fuzz-overnight window="28800":
     # `fuzz-yield` to trip on — `mv` within `$night` is one rename, and nothing
     # reads `$night` itself as artifacts.
     #
-    # TODO(Q1753, unfinished — see docs/decisions.d/436 §436.6's handoff): this
-    # shell loop, forking `cmp`, `mktemp`, `ln` and `mv` once per file, had not
-    # finished linking two real nights (2026-10-08 against 2026-10-09, about
-    # 87 000 and 91 000 files) after 220 s, the point it was killed. It is
-    # correct — `thirty`/`thirty_one`/`thirty_two` below pass against it — but
-    # too slow for a real night, which recurs nearly every name night to night
-    # (docs/decisions.d/436 §436.3). A single process walking both trees in
-    # memory, replacing the forks with Python's own `os.link`/`os.replace`,
-    # is the fix; a `python3 - <<'TAG' ... TAG` heredoc here hit a `just`
-    # parse error ("Unexpected closing delimiter `)`") that this handoff did
-    # not have the budget left to chase down.
+    # One Python process walking `$night/artifacts/` itself, rather than a
+    # shell loop forking `cmp`, `mktemp`, `ln` and `mv` once per file (Q1753):
+    # that loop was correct — `thirty`/`thirty_one`/`thirty_two` below pass
+    # against it unchanged — but on `cp -R` copies of the 2026-10-08 and
+    # 2026-10-09 nights (about 87 000 and 91 000 files) it had not finished
+    # after 220 s, the point it was killed. Every decision below is the
+    # shell loop's own: `os.path.isfile` is `[ -f ]`, `filecmp.cmp(...,
+    # shallow=False)` reads both files and is `cmp -s`, and `os.link` then
+    # `os.replace` is `ln -f` then `mv -f` — a temporary name under `$night`,
+    # outside `artifacts/`, renamed into place, so a night killed mid-link
+    # still leaves no stray name. None of the three forks a process.
     link_started=$(date +%s)
-    linked=0
-    if [ -d "$night/artifacts" ]; then
-        earlier=""
-        while IFS= read -r candidate; do
-            [[ "$(basename "$candidate")" < "$(basename "$night")" ]] || continue
-            [ -d "$candidate/artifacts" ] || continue
-            earlier="$candidate"
-        done < <(find "{{fuzz_log_root}}" -mindepth 1 -maxdepth 1 -type d \
-            -name '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' 2>/dev/null | sort)
+    python3 - "$night" "{{fuzz_log_root}}" "$link_started" <<'PY'
+    import filecmp
+    import os
+    import sys
+    import time
 
-        if [ -n "$earlier" ]; then
-            for target_dir in "$night/artifacts"/*/; do
-                [ -d "$target_dir" ] || continue
-                target=$(basename "${target_dir%/}")
-                for tonight_file in "$target_dir"*; do
-                    [ -f "$tonight_file" ] || continue
-                    name=$(basename "$tonight_file")
-                    earlier_file="$earlier/artifacts/$target/$name"
-                    tree_file="fuzz/artifacts/$target/$name"
-                    [ -f "$earlier_file" ] || continue
-                    [ -f "$tree_file" ] || continue
-                    cmp -s "$earlier_file" "$tree_file" || continue
-                    link_tmp=$(mktemp "$night/link-tmp.XXXXXX")
-                    ln -f "$earlier_file" "$link_tmp"
-                    mv -f "$link_tmp" "$tonight_file"
-                    linked=$(( linked + 1 ))
-                done
-            done
-        fi
-    fi
-    link_elapsed=$(( $(date +%s) - link_started ))
-    echo "linked $linked file(s) to the nearest earlier night's copies, took ${link_elapsed}s" \
-        >"$night/link-artifacts.log"
+    night, log_root, link_started = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    night_name = os.path.basename(night)
+
+    def is_night_dir(name):
+        return (
+            len(name) == 10
+            and name[4] == "-"
+            and name[7] == "-"
+            and name[:4].isdigit()
+            and name[5:7].isdigit()
+            and name[8:].isdigit()
+        )
+
+    earlier = None
+    if os.path.isdir(log_root):
+        for name in sorted(os.listdir(log_root)):
+            if not is_night_dir(name) or name >= night_name:
+                continue
+            candidate = os.path.join(log_root, name)
+            if os.path.isdir(os.path.join(candidate, "artifacts")):
+                earlier = candidate
+
+    linked = 0
+    night_artifacts = os.path.join(night, "artifacts")
+    if earlier is not None and os.path.isdir(night_artifacts):
+        for target in sorted(os.listdir(night_artifacts)):
+            target_dir = os.path.join(night_artifacts, target)
+            if not os.path.isdir(target_dir):
+                continue
+            for name in sorted(os.listdir(target_dir)):
+                tonight_file = os.path.join(target_dir, name)
+                if not os.path.isfile(tonight_file):
+                    continue
+                earlier_file = os.path.join(earlier, "artifacts", target, name)
+                tree_file = os.path.join("fuzz", "artifacts", target, name)
+                if not os.path.isfile(earlier_file) or not os.path.isfile(tree_file):
+                    continue
+                if not filecmp.cmp(earlier_file, tree_file, shallow=False):
+                    continue
+                link_tmp = os.path.join(
+                    night, "link-tmp." + str(os.getpid()) + "-" + name
+                )
+                if os.path.lexists(link_tmp):
+                    os.remove(link_tmp)
+                os.link(earlier_file, link_tmp)
+                os.replace(link_tmp, tonight_file)
+                linked += 1
+
+    link_elapsed = int(time.time()) - link_started
+    with open(os.path.join(night, "link-artifacts.log"), "w") as f:
+        f.write(
+            "linked "
+            + str(linked)
+            + " file(s) to the nearest earlier night's copies, took "
+            + str(link_elapsed)
+            + "s\n"
+        )
+    PY
 
     # The reader's STEP-corpus finds, merged out of tonight's scratch directory
     # and into the small persistent corpus `fuzz-target` seeds the next night
