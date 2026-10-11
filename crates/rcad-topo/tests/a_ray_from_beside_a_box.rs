@@ -102,8 +102,9 @@ fn a_bend_growing_out_of_a_blocks_side_builds_walked_the_one_way_round() {
 fn a_bend_whose_cap_circle_is_two_halves_builds_walked_the_one_way_round() {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let built = a_bend_out_of_a_block_with_its_cap(
+    let built = a_bend_out_of(
         &mut model,
+        &THE_BLOCK,
         Orientation::Forward,
         TheCapCircle::TwoHalves,
     )
@@ -129,8 +130,9 @@ fn a_bend_whose_cap_circle_is_two_halves_builds_walked_the_one_way_round() {
     );
 
     let mut elsewhere = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let turned_over = a_bend_out_of_a_block_with_its_cap(
+    let turned_over = a_bend_out_of(
         &mut elsewhere,
+        &THE_BLOCK,
         Orientation::Reversed,
         TheCapCircle::TwoHalves,
     );
@@ -152,8 +154,9 @@ fn a_bend_whose_cap_circle_is_two_halves_builds_walked_the_one_way_round() {
 fn the_cap_circles_two_halves_are_the_half_under_its_middle_and_the_half_over_it() {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let built = a_bend_out_of_a_block_with_its_cap(
+    let built = a_bend_out_of(
         &mut model,
+        &THE_BLOCK,
         Orientation::Forward,
         TheCapCircle::TwoHalves,
     )
@@ -308,8 +311,23 @@ fn an_l_less_a_bend_wholly_inside_it_is_refused_as_a_quartic() {
 /// `the_side_walks_it`; the bend's wall walks it the other way. The other five
 /// sides are rectangles.
 fn a_bend_out_of_a_block(model: &mut Model, the_side_walks_it: Orientation) -> Result<SolidKey> {
-    a_bend_out_of_a_block_with_its_cap(model, the_side_walks_it, TheCapCircle::OneClosedEdge)
+    a_bend_out_of(
+        model,
+        &THE_BLOCK,
+        the_side_walks_it,
+        TheCapCircle::OneClosedEdge,
+    )
 }
+
+/// The block's outline seen from `+z`, `[2, 6] × [−2, 0]`, walked
+/// counter-clockwise.
+const THE_BLOCK: [[i32; 2]; 4] = [[2, -2], [6, -2], [6, 0], [2, 0]];
+
+/// An L seen from `+z`, of arms two wide: the block's outline, and
+/// `[2, 4] × [−4, −2]` under it. Between the arms is the notch
+/// `[4, 6] × [−4, −2]`. It starts at the end of the first arm, so the fan of its
+/// top reaches over the notch.
+const AN_L: [[i32; 2]; 6] = [[6, 0], [2, 0], [2, -4], [4, -4], [4, -2], [6, -2]];
 
 /// How the bend's first cap circle, the hole in the block's side, is drawn.
 #[derive(Clone, Copy, Debug)]
@@ -324,25 +342,29 @@ enum TheCapCircle {
     TwoHalves,
 }
 
-/// [`a_bend_out_of_a_block`] with its cap circle drawn `cap`'s way.
+/// [`a_bend_out_of_a_block`] with the block's outline `outline` instead, and
+/// its cap circle drawn `cap`'s way.
+///
+/// The outline is seen from `+z`, walked counter-clockwise, its sides along
+/// the axes, and it has the side from `(6, 0)` to `(2, 0)`, which holds the
+/// cap circle; it is stood up from `z = −2` to `z = 2`.
 ///
 /// Walked `Forward`, the side goes round the cap's two halves from `(3, 0, 0)`
 /// under the middle to `(5, 0, 0)` and back over it, which is clockwise seen
 /// from `+y`, the side's outward normal, as a hole in it has to be. `Forward`
 /// is the walk that builds, whichever way the cap is drawn.
-fn a_bend_out_of_a_block_with_its_cap(
+fn a_bend_out_of(
     model: &mut Model,
+    outline: &[[i32; 2]],
     the_side_walks_it: Orientation,
     cap: TheCapCircle,
 ) -> Result<SolidKey> {
     let mut builder = SolidBuilder::new();
     let mut corners = BTreeMap::new();
-    for x in [2, 6] {
-        for y in [-2, 0] {
-            for z in [-2, 2] {
-                let at = Point::new(f64::from(x), f64::from(y), f64::from(z));
-                corners.insert([x, y, z], builder.add_vertex(at)?);
-            }
+    for &[x, y] in outline {
+        for z in [-2, 2] {
+            let at = Point::new(f64::from(x), f64::from(y), f64::from(z));
+            corners.insert([x, y, z], builder.add_vertex(at)?);
         }
     }
     let start_corner = builder.add_vertex(Point::new(3.0, 0.0, 0.0))?;
@@ -392,26 +414,35 @@ fn a_bend_out_of_a_block_with_its_cap(
         EdgeRun::RightRoundWhereItsFacesCross,
     )?;
 
+    let mut rounds: Vec<([i32; 3], Vec<[i32; 3]>)> = Vec::with_capacity(outline.len() + 2);
+    for (position, &[x, y]) in outline.iter().enumerate() {
+        let [to_x, to_y] = outline[(position + 1) % outline.len()];
+        assert!(
+            x == to_x || y == to_y,
+            "({x}, {y}) to ({to_x}, {to_y}) is not along an axis"
+        );
+        rounds.push((
+            [(to_y - y).signum(), (x - to_x).signum(), 0],
+            vec![[x, y, -2], [to_x, to_y, -2], [to_x, to_y, 2], [x, y, 2]],
+        ));
+    }
+    rounds.push(([0, 0, 1], outline.iter().map(|&[x, y]| [x, y, 2]).collect()));
+    rounds.push((
+        [0, 0, -1],
+        outline[..1]
+            .iter()
+            .chain(outline[1..].iter().rev())
+            .map(|&[x, y]| [x, y, -2])
+            .collect(),
+    ));
+
     let mut straight = BTreeMap::new();
     let mut sides = Vec::new();
-    for (normal, round) in [
-        ([0, 1, 0], [[2, 0, -2], [2, 0, 2], [6, 0, 2], [6, 0, -2]]),
-        (
-            [0, -1, 0],
-            [[2, -2, -2], [6, -2, -2], [6, -2, 2], [2, -2, 2]],
-        ),
-        ([1, 0, 0], [[6, -2, -2], [6, 0, -2], [6, 0, 2], [6, -2, 2]]),
-        ([-1, 0, 0], [[2, -2, -2], [2, -2, 2], [2, 0, 2], [2, 0, -2]]),
-        ([0, 0, 1], [[2, -2, 2], [6, -2, 2], [6, 0, 2], [2, 0, 2]]),
-        (
-            [0, 0, -1],
-            [[2, -2, -2], [2, 0, -2], [6, 0, -2], [6, -2, -2]],
-        ),
-    ] {
-        let mut steps = Vec::with_capacity(4);
-        for position in 0..4 {
+    for (normal, round) in rounds {
+        let mut steps = Vec::with_capacity(round.len());
+        for position in 0..round.len() {
             let from = round[position];
-            let to = round[(position + 1) % 4];
+            let to = round[(position + 1) % round.len()];
             let (edge, turn) = if let Some(&edge) = straight.get(&(to, from)) {
                 (edge, Orientation::Reversed)
             } else {
