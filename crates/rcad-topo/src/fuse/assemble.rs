@@ -99,14 +99,28 @@ use super::{
     FaceMeet, MeetPoint, NamesOfOnePoint, Sameness, Scratch, as_exact_as_it_is, gave_up, middle_of,
 };
 
-/// Work out the result's corners, edges, faces and shells.
+/// Work out the result's corners, edges, faces and shells, and ask the range
+/// of the answer they make.
+///
+/// **The range is asked here, once, of the corners and edges as they are once
+/// the pieces are joined and any shell a tolerant policy takes as flat is left
+/// out, and before the edges are named.** `inputs_reach` is
+/// `the_inputs_fit_in_f64`'s answer, and `None` asks nothing
+/// ([`Assembly::check_dynamic_range`] says why). Naming an edge reads which
+/// way it leaves its corner, and an arc from a pole to a corner a rounding off
+/// it has a chord along the tangent there, which says nothing about that: a
+/// narrow lune of a ball was refused
+/// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for it, where the
+/// chord a rounding long is the limit the range names (Q1664,
+/// `tests/a_narrow_lune_from_a_pole_corner.rs`). A tolerant policy's warning
+/// goes into `range_warning`, so the caller can hold it back from the wobble
+/// check.
 ///
 /// **Which shell is a void of which is left to
-/// [`Assembly::nest_the_shells`]**, which the fuse asks after
-/// [`Assembly::check_dynamic_range`]: nesting measures each shell's volume,
-/// and a sliver too thin for `f64` can measure as a shell enclosing nothing,
-/// which would hide the limit the range check names (`docs/decisions.md`
-/// §87.3).
+/// [`Assembly::nest_the_shells`]**, which the fuse asks after this: nesting
+/// measures each shell's volume, and a sliver too thin for `f64` can measure
+/// as a shell enclosing nothing, which would hide the limit the range check
+/// names (`docs/decisions.md` §87.3).
 ///
 /// Nothing here writes to `model`.
 ///
@@ -114,6 +128,8 @@ use super::{
 ///
 /// [`Error::ResultIsNotManifold`] when an edge of the result would have other
 /// than two faces along it,
+/// [`Invalid::DynamicRangeTooWide`] when the answer's smallest feature is too
+/// small beside its coordinates under a policy that fails on that,
 /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's one
 /// corner is a pole of the surface it is drawn on,
 /// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
@@ -124,14 +140,19 @@ pub(crate) fn assemble(
     model: &Model,
     scratch: &Scratch,
     chosen: &[Chosen],
+    inputs_reach: Option<f64>,
     policy: &Policy,
     log: &mut ProvenanceLog,
+    range_warning: &mut ProvenanceLog,
 ) -> Result<Assembly> {
     let mut assembly = Assembly::from_the_pieces(model, scratch, chosen, policy, log)?;
     assembly.join_up_what_is_one_face(policy, log)?;
-    assembly.runs = assembly.how_each_edge_runs()?;
     assembly.shells = assembly.group_into_shells()?;
     assembly.leave_out_each_shell_thinner_than_the_wobble(policy, log)?;
+    if let Some(inputs_reach) = inputs_reach {
+        assembly.check_dynamic_range(inputs_reach, policy, range_warning)?;
+    }
+    assembly.runs = assembly.how_each_edge_runs()?;
     Ok(assembly)
 }
 
@@ -443,6 +464,13 @@ impl Assembly {
     /// inputs fit on their own, so it refuses only a feature finer than any the
     /// inputs could carry.
     ///
+    /// **Asked in [`assemble`], before the edges are named**, and nowhere
+    /// else: of the corners, the edges' ends and the cone faces' corners, none
+    /// of which naming an edge changes. Until Q1664 it was asked after, and
+    /// seven narrow lunes of a ball were refused naming an arc whose chord a
+    /// rounding long lay along the tangent at a pole, where this names the
+    /// limit (`docs/decisions.md` §87.3).
+    ///
     /// # Errors
     ///
     /// [`Invalid::DynamicRangeTooWide`] when the larger of `inputs_reach` and
@@ -544,7 +572,7 @@ impl Assembly {
     ///
     /// The thirteenth, the coordinate range, is the one this must not ask.
     /// [`Assembly::check_dynamic_range`] asks it before either write, before
-    /// the shells are even nested, and only
+    /// the edges are even named, and only
     /// behind `the_inputs_fit_in_f64`, so that a caller whose own solids sit
     /// further apart than `f64` can resolve still gets an answer the arithmetic
     /// reached exactly. A fold over a model holding only the answer would put
@@ -3461,15 +3489,17 @@ impl Assembly {
     /// policy nothing is asked and nothing is left out. Asked once the shells
     /// are grouped, so a fuse refused before this is refused by the same step,
     /// and before [`Assembly::check_dynamic_range`], whose warning is about the
-    /// answer, which the shell no longer is part of. Each edge of the shell
-    /// goes with it, and each corner no edge left ends at
+    /// answer, which the shell no longer is part of. That puts this ahead of
+    /// naming the edges too, since the range is asked before they are named
+    /// (Q1664, `docs/decisions.md` §87.3). Each edge of the shell goes with it,
+    /// and each corner no edge left ends at
     /// ([`Assembly::leave_out_what_no_wire_walks`]): a corner the shell
     /// touches another at stays.
     ///
     /// # Errors
     ///
-    /// None in practice: the runs and the shells are worked out again over
-    /// what is left, and both were worked out over more without refusing.
+    /// None in practice: the shells are grouped again over what is left, and
+    /// were grouped over more without refusing.
     fn leave_out_each_shell_thinner_than_the_wobble(
         &mut self,
         policy: &Policy,
@@ -3511,7 +3541,6 @@ impl Assembly {
         self.faces
             .retain(|_| !gone.next().expect("one mark per face"));
         self.leave_out_what_no_wire_walks();
-        self.runs = self.how_each_edge_runs()?;
         self.shells = self.group_into_shells()?;
         Ok(())
     }
@@ -10064,8 +10093,16 @@ mod tests {
             .expect("two overlapping cubes split each other");
         let chosen =
             choose(&busy, &scratch, Rule::Union, &policy, &mut log).expect("a union of two cubes");
-        let mut assembly =
-            assemble(&busy, &scratch, &chosen, &policy, &mut log).expect("an answer to write");
+        let mut assembly = assemble(
+            &busy,
+            &scratch,
+            &chosen,
+            None,
+            &policy,
+            &mut log,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("an answer to write");
         assembly
             .nest_the_shells(&busy, &policy, &mut log)
             .expect("one shell, which encloses space");

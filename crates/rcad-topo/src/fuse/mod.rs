@@ -182,7 +182,8 @@ impl Model {
     /// thirteen checks: the throwaway holds the answer and nothing else, which
     /// is what makes a whole-model sweep of it local to what this fuse wrote.
     /// The thirteenth, the model-wide coordinate range, is left out —
-    /// `Assembly::check_dynamic_range` below asks that one, behind a guard, and
+    /// `Assembly::check_dynamic_range` asks that one, in `assemble` and behind
+    /// a guard, and
     /// asking it again over a model holding only the answer would undo the
     /// guard (§87.3). Before §66.3 the check was `debug_assertions`-gated *and*
     /// skipped whenever the model did not already validate, so a release fuse
@@ -248,30 +249,33 @@ impl Model {
     ) -> Result<Fused> {
         let scratch = Scratch::split_both_groups(self, arguments, tools, policy, log)?;
         let chosen = choose(self, &scratch, rule, policy, log)?;
-        let mut assembly = assemble(self, &scratch, &chosen, policy, log)?;
 
         // The last question the answer itself can be asked, and the only one
         // neither input could have been asked instead: a fuse invents features
         // — the sliver where two nearly-flush faces meet — and a sliver has no
-        // lower size short of zero. This is the **only** place it is asked;
-        // `Assembly::commit` deliberately sweeps the throwaway with the twelve
-        // checks that are not this one, so that the guard on this line is what
-        // decides whether it is asked at all. Two of the fuse's own tests are
-        // pairs whose inputs do not fit and whose answer this fuse reaches
-        // exactly, and a sweep asking the question again refuses both (§87.3).
+        // lower size short of zero. `assemble` asks it, once, and only when
+        // this guard says the inputs fit; `Assembly::commit` deliberately
+        // sweeps the throwaway with the twelve checks that are not this one,
+        // so that the guard is what decides whether it is asked at all. Two of
+        // the fuse's own tests are pairs whose inputs do not fit and whose
+        // answer this fuse reaches exactly, and a sweep asking the question
+        // again refuses both (§87.3).
         //
-        // Asked before the shells are nested, because nesting measures each
-        // shell's volume, and a sliver a rounding thin whose corners round
-        // onto one plane measures nothing and was refused as a shell enclosing
-        // no space, where this names the limit it is (Q1614). A tolerant
-        // policy's warning is held back until the wobble check below has run:
-        // that check judges the decisions this fuse could not prove, a range is
-        // not one, and before Q1614 the check ran ahead of this and never saw
-        // it.
+        // A tolerant policy's warning is held back until the wobble check
+        // below has run: that check judges the decisions this fuse could not
+        // prove, a range is not one, and before Q1614 the check ran ahead of
+        // the range and never saw it.
+        let inputs_reach = the_inputs_fit_in_f64(self, arguments, tools)?;
         let mut range_warning = ProvenanceLog::new();
-        if let Some(inputs_reach) = the_inputs_fit_in_f64(self, arguments, tools)? {
-            assembly.check_dynamic_range(inputs_reach, policy, &mut range_warning)?;
-        }
+        let mut assembly = assemble(
+            self,
+            &scratch,
+            &chosen,
+            inputs_reach,
+            policy,
+            log,
+            &mut range_warning,
+        )?;
         assembly.nest_the_shells(self, policy, log)?;
 
         // Exit criterion 7, and the one place it is easy to get wrong (§17.2).
