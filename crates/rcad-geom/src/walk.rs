@@ -1111,10 +1111,12 @@ fn how_far_off_the_crossing_a_corner_can_be(
     Ok(furthest)
 }
 
-/// The box the place on the crossing a closed run's corner stands for is known
-/// to be inside: a box round the corner's middle reaching as far as the corner
-/// can be off the crossing ([`how_far_off_the_crossing_this_corner_can_be`]),
-/// which holds the corner's own box too.
+/// The box the place on the crossing a run's corner stands for is known to be
+/// inside: a box round the corner's middle reaching as far as the corner can be
+/// off the crossing ([`how_far_off_the_crossing_this_corner_can_be`]), which
+/// holds the corner's own box too. A closed run's one corner is judged by it
+/// ([`begun_beside`]), and so is each end of a run between two corners
+/// ([`where_on_the_loop_this_end_is`], Q1697).
 ///
 /// **A corner is a point somebody rounded, and not always in the frame it is
 /// walked in.** A mesh shifts a face stored far from the origin until its
@@ -1134,7 +1136,9 @@ fn how_far_off_the_crossing_a_corner_can_be(
 /// (`a_closed_loop_cornered_where_its_surfaces_touch_is_walked_though_its_corner_cannot_be_settled`).
 /// The bound only ever leaves a point out beside the corner, so going without it
 /// costs that and no more, where refusing would refuse a loop the march has
-/// already walked.
+/// already walked. A run between two corners never reaches this: a corner of
+/// one where the surfaces touch is refused before the march
+/// ([`how_far_off_the_crossing_a_corner_can_be`]).
 ///
 /// # Errors
 ///
@@ -1251,7 +1255,10 @@ fn begun_beside(
 /// corners in one place (Q1508). A fuse puts a run's corner where the crossing
 /// meets a third surface, and the seed of a crossing of two pipes can be exactly
 /// there: a thin bar through a fat one cut by a wall through both axes has its
-/// corners and its seeds all on the wall.
+/// corners and its seeds all on the wall. The march passed through a corner
+/// when the box round a point it walked meets the box reaching as far off the
+/// crossing as the corner can be, and not only the corner's own box
+/// ([`where_on_the_loop_this_end_is`], Q1697).
 ///
 /// The half-spaces are asked at the middle point of each arc, of the box the
 /// march says that point is inside, the way a conic's arc is asked at its middle
@@ -1282,8 +1289,12 @@ fn the_arc_between(
     round.extend(walked.points);
     let count = round.len();
     let mut kept = vec![true; count];
-    let first_end = where_on_the_loop_this_end_is(from, &round, deviation, &mut kept)?;
-    let second_end = where_on_the_loop_this_end_is(to, &round, deviation, &mut kept)?;
+    let mut where_on_the_loop = |end| {
+        let end = where_on_the_crossing_this_corner_can_be(end, surfaces)?;
+        where_on_the_loop_this_end_is(end, &round, deviation, &mut kept)
+    };
+    let first_end = where_on_the_loop(from)?;
+    let second_end = where_on_the_loop(to)?;
     let laps = count as f64;
     let reach = (second_end - first_end).rem_euclid(laps);
     if reach == 0.0 {
@@ -1331,9 +1342,24 @@ fn the_arc_between(
 /// of the point it is, or of the point that starts the step it sits along plus
 /// how far along that step it is.
 ///
-/// The end is put on the step nearest it, and is that step's point at either
-/// end when its own box and the box `deviation` round that point share a point;
-/// that point is then marked as not `kept`.
+/// `end` is the box the place on the crossing the run's end stands for is in
+/// ([`where_on_the_crossing_this_corner_can_be`]). The end is put on the step
+/// nearest its middle, and is that step's point at either end when `end` and
+/// the box `deviation` round that point share a point; that point is then
+/// marked as not `kept`, and a point left out moves the step by no more than
+/// the two boxes reach.
+///
+/// **Judged by how far off the crossing the end can be, and not by its own
+/// box**, for the reason a closed run's corner is (Q1690). A
+/// mesh shifts a face stored far from the origin and walks the run again
+/// there, and an end rounded where it was stored lands off the crossing by
+/// more than the march's bound. A ball off a bar's axis, cut by a block's wall
+/// through the axis and the ball's centre a thousand from the origin, has each
+/// loop's end on the wall `2.1e-14` and `2.2e-14` from the start the march
+/// sets off from there, against a bound of `8.0e-15` and `6.0e-15`. Its own
+/// box missed the start's, the start was kept beside it, and moved back out to
+/// where the face is stored the two were one point, which the mesh refused as
+/// two corners in one place (Q1697).
 ///
 /// # Errors
 ///
