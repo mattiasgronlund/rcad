@@ -128,6 +128,7 @@ pub(crate) fn assemble(
     assembly.join_up_what_is_one_face(policy, log)?;
     assembly.runs = assembly.how_each_edge_runs()?;
     assembly.shells = assembly.group_into_shells()?;
+    assembly.leave_out_each_shell_thinner_than_the_wobble(policy, log)?;
     Ok(assembly)
 }
 
@@ -3416,6 +3417,166 @@ impl Assembly {
             shells.entry(same.leader(face)).or_default().push(face);
         }
         Ok(shells.into_values().collect())
+    }
+
+    /// Leave out each shell of flat faces whose corners all lie within
+    /// [`Policy::max_wobble`] of the plane of one of its own faces, under a
+    /// tolerant policy.
+    ///
+    /// **Such a shell bounds no space a tolerant policy can tell from none.**
+    /// Its edges are straight, so all of it lies between its corners, and
+    /// taking each corner onto that one plane, which moves none of them
+    /// further than the policy lets a point move, folds it flat. A cube tipped
+    /// onto one edge along another cube's floor makes one. At `t = 0.075` the
+    /// cube's corner at `x = 5` is stored a rounding below the floor, at
+    /// `(5, 5, −1.1e−16)`, and its bottom face and its side meet in an edge
+    /// parallel to the floor, a rounding below it. The cube less the block
+    /// keeps the wedge between that edge and the floor, which crosses the
+    /// block's side `x = 0` in a triangle of three meets of three planes. All
+    /// three round to `(0, 5, 0)`, so the wedge's part under the block closed
+    /// into a tetrahedron of `8.2e−32` touching the rest at that one point:
+    /// two solids, where the same cube `2⁻³⁰` higher or lower is one (queue
+    /// row Q1687, `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`).
+    /// At `t = 0.142` the shell's four corners all round onto the floor
+    /// itself, so it measured `0.0` and the fuse was refused
+    /// [`Invalid::VolumeIsNotPositive`]. A shell like that can be the whole
+    /// answer: two skewed combs touching along one line share a prism of
+    /// `3.1e−32` and no space, and their intersection now answers no solid
+    /// (`two_skewed_combs_touching_along_one_line.rs`, queue row Q1615).
+    ///
+    /// **Only flat faces with straight edges between two corners**, since only
+    /// then is every point of the shell between its corners: a half ball's
+    /// one corner lies on its disc's plane.
+    ///
+    /// Asked of [`Policy::take_as_one_point`] once per shell, as the furthest
+    /// any corner may be from the plane, and that logs it. Under a certified
+    /// policy nothing is asked and nothing is left out. Asked once the shells
+    /// are grouped, so a fuse refused before this is refused by the same step,
+    /// and before [`Assembly::check_dynamic_range`], whose warning is about the
+    /// answer, which the shell no longer is part of. Each edge of the shell
+    /// goes with it, and each corner no edge left ends at
+    /// ([`Assembly::leave_out_what_no_wire_walks`]): a corner the shell
+    /// touches another at stays.
+    ///
+    /// # Errors
+    ///
+    /// None in practice: the runs and the shells are worked out again over
+    /// what is left, and both were worked out over more without refusing.
+    fn leave_out_each_shell_thinner_than_the_wobble(
+        &mut self,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let Strictness::TolerantFallback { .. } = policy.strictness() else {
+            return Ok(());
+        };
+        let mut gone = vec![false; self.faces.len()];
+        for shell in &self.shells {
+            let Some((far, corners)) =
+                self.how_far_a_shell_of_flat_faces_is_from_flat(shell, policy)
+            else {
+                continue;
+            };
+            let inputs: Vec<PredicatePoint> = corners
+                .iter()
+                .map(|&corner| PredicatePoint::from(self.corners[corner].point.coordinates()))
+                .collect();
+            let record = Record::new(
+                "a shell within the wobble of one of its planes taken as flat",
+                &inputs,
+                Level::Float,
+                far,
+                Measures::Length,
+            );
+            assert!(
+                policy.take_as_one_point(record, log),
+                "a shell within the wobble of a plane is taken as flat"
+            );
+            for &face in shell {
+                gone[face] = true;
+            }
+        }
+        if !gone.contains(&true) {
+            return Ok(());
+        }
+        let mut gone = gone.into_iter();
+        self.faces
+            .retain(|_| !gone.next().expect("one mark per face"));
+        self.leave_out_what_no_wire_walks();
+        self.runs = self.how_each_edge_runs()?;
+        self.shells = self.group_into_shells()?;
+        Ok(())
+    }
+
+    /// The furthest any corner of `shell` may be from the plane of the one of
+    /// its faces they are all nearest, with those corners, when every face of
+    /// it is flat, every edge runs straight between two corners, and that
+    /// distance is within [`Policy::max_wobble`].
+    fn how_far_a_shell_of_flat_faces_is_from_flat(
+        &self,
+        shell: &[usize],
+        policy: &Policy,
+    ) -> Option<(f64, Vec<usize>)> {
+        let mut corners = Vec::new();
+        for side in shell
+            .iter()
+            .flat_map(|&face| self.faces[face].wires.iter().flatten())
+        {
+            let edge = &self.edges[side.edge];
+            if !edge.lies_on_two_planes() || edge.ends[0] == edge.ends[1] {
+                return None;
+            }
+            corners.extend(edge.ends);
+        }
+        corners.sort_unstable();
+        corners.dedup();
+        let mut nearest: Option<f64> = None;
+        for &face in shell {
+            let plane = self.faces[face].surface.as_plane()?;
+            if let Some(far) =
+                self.how_far_corners_may_be_from(&corners, plane, policy.max_wobble())
+            {
+                nearest = Some(nearest.map_or(far, |near| near.min(far)));
+            }
+        }
+        Some((nearest?, corners))
+    }
+
+    /// The furthest any of `corners` may be from `plane`, rounded up, or
+    /// `None` as soon as one may be further than `within`.
+    ///
+    /// Each distance is [`Plane::signed_distance_to`] the corner's point, plus
+    /// what rounding could have cost it, plus [`Corner::wobble`], the widest
+    /// the box the point was solved as is, which bounds how far the point is
+    /// from anywhere in it. A stored normal is a rounding off length one,
+    /// which [`Plane::NORMAL_LENGTH_ROUNDOFF`] covers.
+    fn how_far_corners_may_be_from(
+        &self,
+        corners: &[usize],
+        plane: &Plane,
+        within: f64,
+    ) -> Option<f64> {
+        let normal = plane.normal().components();
+        let mut far: f64 = 0.0;
+        for &corner in corners {
+            let Corner { point, wobble, .. } = self.corners[corner];
+            let size = normal
+                .iter()
+                .zip(point.coordinates())
+                .map(|(along, at)| (along * at).abs())
+                .sum::<f64>()
+                + plane.offset().abs();
+            let may_be = (plane.signed_distance_to(point).abs()
+                + 8.0 * f64::EPSILON * size
+                + f64::MIN_POSITIVE
+                + wobble)
+                * (1.0 + Plane::NORMAL_LENGTH_ROUNDOFF);
+            if may_be > within {
+                return None;
+            }
+            far = far.max(may_be);
+        }
+        Some(far)
     }
 
     /// Sort the shells into solids: each one that encloses space, with the ones
