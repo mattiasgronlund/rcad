@@ -76,7 +76,7 @@ class Refusal(Exception):
 def main(argv):
     try:
         if argv == ["wait"]:
-            return follow(None)
+            return follow()
         if len(argv) == 2 and argv[0] == "--detached-run":
             return detached_run(argv[1])
         if len(argv) == 1 and not argv[0].startswith("-"):
@@ -99,20 +99,52 @@ def start(path):
     os.makedirs(state)
     with open(os.path.join(state, "printed"), "w", encoding="utf-8") as f:
         f.write("0")
-    with open(os.path.join(state, "log"), "w", encoding="utf-8") as log:
-        child = subprocess.Popen(
-            [sys.executable, os.path.abspath(__file__), "--detached-run", os.path.abspath(path)],
-            cwd=top, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-    with open(os.path.join(state, "pid"), "w", encoding="utf-8") as f:
-        f.write(f"{child.pid}\n")
-    return follow(child)
+    log_path = os.path.join(state, "log")
+    with open(log_path, "w", encoding="utf-8"):
+        pass
+    start_detached([sys.executable, os.path.abspath(__file__), "--detached-run", os.path.abspath(path)],
+                    top, log_path, os.path.join(state, "pid"))
+    return follow()
 
 
-def follow(child):
+def start_detached(cmd, cwd, log_path, pid_path):
+    """Starts `cmd` with a double fork, as `setsid -f` does, so nothing here ends up its parent (§429.5).
+
+    The process in between forks the run, writes the run's own pid to
+    `pid_path`, and exits; `waitpid` blocks until it has, which is also until
+    the pid file is on disk, so the caller never has to sleep and hope it is
+    there yet. The run calls `setsid` itself, so it leads its own session and
+    process group, and `cmd`'s first word is executed in place of it, not
+    read again later: the one python process that judges the branch is the
+    one started before the checkout, as the module doc promises.
+    """
+    middle = os.fork()
+    if middle == 0:
+        run_pid = os.fork()
+        if run_pid == 0:
+            os.chdir(cwd)
+            os.setsid()
+            devnull = os.open(os.devnull, os.O_RDONLY)
+            os.dup2(devnull, 0)
+            os.close(devnull)
+            logfd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+            os.dup2(logfd, 1)
+            os.dup2(logfd, 2)
+            os.close(logfd)
+            os.execv(cmd[0], cmd)
+            os._exit(127)  # os.execv only returns on failure
+        with open(pid_path, "w", encoding="utf-8") as f:
+            f.write(f"{run_pid}\n")
+        os._exit(0)
+    os.waitpid(middle, 0)
+
+
+def follow():
     """Print what the run logged since the last call, until it ends or this call's time is up.
 
     Exits 0 once the run has ended, with its JSON as the last line, and 3 while
-    it is still going.
+    it is still going. Holds no handle to the run: a run outlives whatever
+    started it, so the only trace of it here is its pid file.
     """
     state = os.path.join(toplevel(), STATE)
     try:
@@ -131,7 +163,7 @@ def follow(child):
             if not printed:
                 print(last_line(read(os.path.join(state, "log"))))
             return int(read(ended).strip() or 1)
-        if not alive(pid, child):
+        if not alive(pid):
             if os.path.exists(ended):
                 continue
             print(f"verify-lane: the run (pid {pid}) ended without finishing; "
@@ -165,9 +197,7 @@ def print_new(state):
     return True
 
 
-def alive(pid, child):
-    if child is not None:
-        return child.poll() is None
+def alive(pid):
     try:
         with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
             return f.read().rsplit(")", 1)[1].split()[0] != "Z"

@@ -14736,6 +14736,12 @@ land *args:
 # gate drops the lock. The test holds the lock from a `flock` process of its own,
 # never on one of its fds, which every `just land` it starts would inherit.
 #
+# A killed-follower arm pins §429.5: it stops the agent's own `just land`,
+# started in a session of its own, the way Claude Code kills a command
+# (§429.2) — SIGTERM to its group, then every descendant `ps` finds, then
+# SIGKILL to the group — and shows the detached run it started still lands
+# the lane, read back with `just land wait` from the same tree.
+#
 # The dead-entry arm also pins `wait-for`'s two legs. A run stopped with
 # `SIGSTOP` while it waits on the lock keeps its entry alive and never takes the
 # lock when it is freed, so `wait-for` with the lock free must still wait on the
@@ -14815,7 +14821,10 @@ check-land-selftest:
             echo "$n" >"$STUB_DIR/gates"
             if [ -e "$STUB_DIR/gate-blocks" ] && [ "$n" = 1 ]; then
                 touch "$STUB_DIR/gate-started"
-                for _ in $(seq 1200); do sleep 0.05; done
+                for _ in $(seq 1200); do
+                    [ ! -e "$STUB_DIR/gate-release" ] || break
+                    sleep 0.05
+                done
             fi
             case "$(cat "$STUB_DIR/race" 2>/dev/null)" in
                 code) race code ;;
@@ -14972,6 +14981,33 @@ check-land-selftest:
     }
     on_origin() {
         git -C "$at/origin.git" merge-base --is-ancestor "$1" main 2>/dev/null
+    }
+    descendants_of() {
+        local root=$1
+        ps -A -o pid=,ppid= | awk -v root="$root" '
+            { parent[$1] = $2 }
+            END {
+                for (pid in parent) {
+                    cur = pid
+                    for (i = 0; i < 1000 && (cur in parent); i++) {
+                        if (parent[cur] == root) { print pid; break }
+                        cur = parent[cur]
+                    }
+                }
+            }'
+    }
+    stop_like_a_clear() {
+        local group=$1 pid before
+        before=$(descendants_of "$group")
+        kill -TERM -- "-$group" 2>/dev/null || true
+        for pid in $before; do
+            kill -TERM "$pid" 2>/dev/null || true
+        done
+        sleep 0.2
+        kill -KILL -- "-$group" 2>/dev/null || true
+        for pid in $before; do
+            kill -KILL "$pid" 2>/dev/null || true
+        done
     }
     spool_empty() {
         local left
@@ -15180,7 +15216,21 @@ check-land-selftest:
     [ "$(gates)" = 2 ] || fail "the killed holder's gate and the waiting lane's are 2 gates, not $(gates)"
     grep -qF 'land: the run that waited to land lane-x' <<<"$got" || fail "nothing says the killed holder's entry was dropped"
     spool_empty
-    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, and wait-for waits on a live entry and on a held lock"
+
+    fixture killed-follower
+    touch "$at/stub/gate-blocks"
+    STUB_DIR="$at/stub" LAND_JUST="$dir/bin/just" LAND_WAIT=60 setsid {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$at/lander" land Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify" >"$at/follower.log" 2>&1 &
+    follower=$!
+    until_there "$at/stub/gate-started"
+    stop_like_a_clear "$follower"
+    wait "$follower" 2>/dev/null || true
+    touch "$at/stub/gate-release"
+    wait_for lander
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the run a killed follower started did not finish landing"
+    on_origin "$lane_sha" || fail "the lane a killed follower started landing is not on origin/main"
+    ! locked lander || fail "the lander tree is still locked after a killed follower"
+    spool_empty
+    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, outlives a killed follower, and wait-for waits on a live entry and on a held lock"
 
 # A verifier's fixed steps for one lane, run for it (§383.4 item 4, §385): unlock
 # the lane's tree, `git log` from the base to the branch, the files outside the
@@ -15230,8 +15280,11 @@ verify-lane *args:
 # says the behaviour changed (§399); a lines-that-run count of 0; a source path
 # holding test code the branch changed; a lane that names no test; a write-set
 # entry naming one item of a file, matched against the file it is in; a run
-# longer than one call, which a second call follows to its end; and an input
-# file it cannot read, or that marks a lane both `pinsOnly` and `sameBehaviour`.
+# longer than one call, which a second call follows to its end; an input
+# file it cannot read, or that marks a lane both `pinsOnly` and `sameBehaviour`;
+# and, pinning §429.5, the agent's own `just verify-lane` stopped mid-gate the
+# way Claude Code kills a command (§429.2), which still leaves the detached run
+# to finish and `just verify-lane wait` to read its verdict back.
 #
 # The JSON's fields are held to `verdictSchema` in `lanes.js`, read out of that
 # file, so a field the schema renames fails here and not in a verifier's report.
@@ -15377,6 +15430,41 @@ check-verify-lane-selftest:
     }
     no_test_ran() {
         ! grep -qE '^just (t |check-)' "$at/stub/log" || fail "it ran a test: $(grep -E '^just (t |check-)' "$at/stub/log")"
+    }
+    until_there() {
+        for _ in $(seq 400); do
+            if [ $# -eq 1 ] && [ -e "$1" ]; then return 0; fi
+            if [ $# -eq 2 ] && grep -qF "$2" "$1" 2>/dev/null; then return 0; fi
+            sleep 0.05
+        done
+        fail "waited 20 s for $1 ${2:-}"
+    }
+    descendants_of() {
+        local root=$1
+        ps -A -o pid=,ppid= | awk -v root="$root" '
+            { parent[$1] = $2 }
+            END {
+                for (pid in parent) {
+                    cur = pid
+                    for (i = 0; i < 1000 && (cur in parent); i++) {
+                        if (parent[cur] == root) { print pid; break }
+                        cur = parent[cur]
+                    }
+                }
+            }'
+    }
+    stop_like_a_clear() {
+        local group=$1 pid before
+        before=$(descendants_of "$group")
+        kill -TERM -- "-$group" 2>/dev/null || true
+        for pid in $before; do
+            kill -TERM "$pid" 2>/dev/null || true
+        done
+        sleep 0.2
+        kill -KILL -- "-$group" 2>/dev/null || true
+        for pid in $before; do
+            kill -KILL "$pid" 2>/dev/null || true
+        done
     }
 
     fixture fails-reverted
@@ -15549,6 +15637,26 @@ check-verify-lane-selftest:
     [ "$rc" -eq 0 ] && [ "$json" = "$first" ] || fail "a wait after the run ended does not print its JSON again"
     back_at_the_tip
 
+    fixture killed-follower
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    echo 2 >"$at/stub/gate-sleeps"
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ + source-paths src/ + tests is_fixed
+    STUB_DIR="$at/stub" REAL_JUST='{{ just_executable() }}' REAL_JUSTFILE='{{ justfile() }}' \
+        VERIFY_LANE_JUST="$dir/bin/just" VERIFY_LANE_WAIT=60 \
+        setsid {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$at/verify" verify-lane target/verify-lane.txt \
+        >"$at/follower.log" 2>&1 &
+    follower=$!
+    until_there "$at/stub/heads" gate
+    stop_like_a_clear "$follower"
+    wait "$follower" 2>/dev/null || true
+    call wait
+    [ "$rc" -eq 0 ] || fail "the wait after a killed follower exited $rc"
+    held_to_the_schema
+    [ "$(field tests_pass_on_branch) $(field tests_fail_without_fix)" = "true true" ] \
+        || fail "a killed follower's run gave tests_pass_on_branch $(field tests_pass_on_branch) and tests_fail_without_fix $(field tests_fail_without_fix)"
+    back_at_the_tip
+
     fixture bad-input
     input base "$base" + colour blue
     call target/verify-lane.txt
@@ -15558,7 +15666,7 @@ check-verify-lane-selftest:
     call target/verify-lane.txt
     [ "$rc" -eq 2 ] && grep -qF 'both pinsOnly and sameBehaviour' <<<"$got" || fail "an input marking the lane both pinsOnly and sameBehaviour did not refuse"
     [ ! -e "$at/verify/target/verify-lane" ] || fail "it started a run on an input marking the lane both pinsOnly and sameBehaviour"
-    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 15 arms"
+    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 16 arms"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #
