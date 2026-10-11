@@ -1,17 +1,20 @@
-//! Every public way to a solid with both a torus face and a flat face with
-//! straight sides, and what refuses each (`docs/decisions.md` §323.3).
+//! A box beside a solid with both a torus face and a flat face with straight
+//! sides, asked through the public API, and every public way to such a solid
+//! (`docs/decisions.md` §323.3).
 //!
 //! A ray from a point near a torus face is fired from an exact point beside
 //! it, once no face of the solid is shown to meet the box round both. A flat
 //! face with straight sides is its fan of triangles, and a box on the plane of
 //! one and off the face was refused until `classify.rs` held the two up against
-//! the coordinate axes too. Only a solid with both kinds of face can ask that,
-//! and none of these three built one until the bend's wall was used forwards
-//! (§361), when the first began to — so the answers are pinned in
-//! `classify.rs`'s own tests, on one solid holding two shells, the way a fuse
-//! writes two pieces that do not touch. Each test here fails the day its way
-//! opens, and that is the day the pin can move out here. The first builds with
-//! its cap circle drawn as two half circles too (Q524).
+//! the coordinate axes and the directions across a triangle's sides, and added
+//! up the fan of a face that is not convex. Only a solid with both kinds of
+//! face can ask that. Of the three public ways to one, a bend growing out of a
+//! block's side builds since the bend's wall was used forwards (§361), with its
+//! cap circle drawn as one edge or as two half circles (Q524); a block with a
+//! bend-shaped hollow inside it cannot be described, and an L less a bend
+//! inside it is refused by the fuse. So the boxes are asked of the glued bend,
+//! as it is, turned, and grown out of an L. They were asked in `classify.rs`'s
+//! own tests, of one solid holding two shells, until that build opened (Q721).
 
 use std::collections::BTreeMap;
 
