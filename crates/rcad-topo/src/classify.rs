@@ -82,7 +82,10 @@ pub enum Containment {
     /// One face of the solid is trimmed in a way
     /// [`SolidView::face_holds_the_point`] cannot follow, so no ray was ever
     /// counted. A point another face holds is [`Containment::OnBoundary`]
-    /// instead, as it is on the same solid without that face (Q1722).
+    /// instead, as it is on the same solid without that face (Q1722). A box
+    /// whose every ray a face that answered grazes, as a box straddling a
+    /// flat face is grazed by it, is [`Containment::Undecidable`]: no answer
+    /// from the trimming would have counted those rays either (Q1727).
     ///
     /// Deliberately not [`Containment::Undecidable`]. That one means every
     /// predicate was asked and none could prove an answer; this means the
@@ -255,7 +258,9 @@ impl SolidView<'_> {
             if pass.on_boundary {
                 return Containment::OnBoundary;
             }
-            if let Some(face) = pass.unfollowed_at {
+            if let Some(face) = pass.unfollowed_at
+                && !pass.is_thrown_away_without_them()
+            {
                 return Containment::CannotFollowAFacesTrimming { face };
             }
             if let Some(face) = pass.unfired_at {
@@ -646,6 +651,10 @@ impl SolidView<'_> {
     /// cannot be fired at, does not stop the count: it is noted in the tally,
     /// and every other face is still asked whether it holds the point or
     /// grazes the ray, since neither depends on that face (Q1716, Q1722).
+    ///
+    /// Each face is tallied on its own and then added in, so that a graze is
+    /// known to come from a face that answered or from one that did not
+    /// ([`Crossings::add`], Q1727).
     fn count_crossings(
         self,
         point: PredicatePoint,
@@ -655,11 +664,13 @@ impl SolidView<'_> {
     ) -> Crossings {
         let mut tally = Crossings::default();
         for face in self.faces() {
+            let mut its_own = Crossings::default();
             if face.surface().as_plane().is_some() && every_side_of_it_is_straight(face) {
-                self.count_a_polygon(face, &mut tally, point, target, policy, log);
+                self.count_a_polygon(face, &mut its_own, point, target, policy, log);
             } else {
-                self.count_where_the_ray_meets_it(face, &mut tally, point, target, policy, log);
+                self.count_where_the_ray_meets_it(face, &mut its_own, point, target, policy, log);
             }
+            tally.add(its_own);
         }
         tally
     }
@@ -1364,6 +1375,9 @@ struct Crossings {
     winding: i64,
     on_boundary: bool,
     grazed_something: bool,
+    /// Whether a face the ray was fired at, and whose trimming was followed
+    /// wherever the ray asked it, grazed the ray.
+    a_face_that_answered_grazed_it: bool,
     worst_enclosure: f64,
     /// The first flat face whose corners and stored plane read the point
     /// differently ([`Hit::ReadingsPart`]).
@@ -1375,12 +1389,45 @@ struct Crossings {
     /// box the ray starts from, and grazed the ray for it.
     an_unfired_face_meets_it: bool,
     /// The first face whose trimming nothing could follow where the ray asked
-    /// it, so that no count of this ray is to be trusted and no other ray
-    /// gets past it.
+    /// it, so that no count of this ray is to be trusted, and no other ray
+    /// gets past it unless a face that answered threw it away.
     unfollowed_at: Option<FaceKey>,
 }
 
 impl Crossings {
+    /// Add in one face's own tally.
+    ///
+    /// **A graze from a face that did not answer is not one the ray would get
+    /// whatever that face said.** A face whose trimming nothing follows
+    /// grazes a ray where it cannot show it holds none of the box the ray
+    /// starts from or meets it in, and that is for want of the answer it
+    /// refused; following its trimming might have put the box off it. A graze
+    /// from any other face throws the ray away whatever the faces that did not
+    /// answer would add.
+    fn add(&mut self, face: Self) {
+        let Self {
+            winding,
+            on_boundary,
+            grazed_something,
+            a_face_that_answered_grazed_it: _,
+            worst_enclosure,
+            parted_at,
+            unfired_at,
+            an_unfired_face_meets_it,
+            unfollowed_at,
+        } = face;
+        let it_answered = unfired_at.is_none() && unfollowed_at.is_none();
+        self.winding += winding;
+        self.on_boundary |= on_boundary;
+        self.grazed_something |= grazed_something;
+        self.a_face_that_answered_grazed_it |= grazed_something && it_answered;
+        self.worst_enclosure = self.worst_enclosure.max(worst_enclosure);
+        self.parted_at = self.parted_at.or(parted_at);
+        self.unfired_at = self.unfired_at.or(unfired_at);
+        self.an_unfired_face_meets_it |= an_unfired_face_meets_it;
+        self.unfollowed_at = self.unfollowed_at.or(unfollowed_at);
+    }
+
     /// Nothing this ray says can be trusted any more.
     fn grazed(&mut self, enclosure: f64) {
         self.grazed_something = true;
@@ -1400,9 +1447,12 @@ impl Crossings {
     }
 
     /// Whether this ray is thrown away whatever the faces it could not be
-    /// fired at would add to it: a face it was fired at grazed it.
+    /// fired at, or whose trimming nothing could follow, would add to it: a
+    /// face that answered grazed it (Q1716, Q1727).
     fn is_thrown_away_without_them(&self) -> bool {
-        self.grazed_something && !self.an_unfired_face_meets_it && self.parted_at.is_none()
+        self.a_face_that_answered_grazed_it
+            && !self.an_unfired_face_meets_it
+            && self.parted_at.is_none()
     }
 
     /// Take in what a face said about a point on its own surface.
@@ -1410,7 +1460,8 @@ impl Crossings {
     /// On the face or on its boundary both put the point on the solid's skin,
     /// because a face's boundary is part of the face. A sign nobody could settle
     /// is a graze and the next ray gets a go; a face whose trimming nothing can
-    /// follow is not something another ray gets past, so it is noted.
+    /// follow is noted, and another ray gets past it only where a face that
+    /// answered threw this one away.
     fn take_in(&mut self, held: crate::Result<OnAFace>, face: FaceKey) {
         match held {
             Ok(OnAFace::Held | OnAFace::OnItsBoundary) => self.on_boundary = true,
