@@ -248,6 +248,9 @@ no edge with no face, and a corner with no edge was dropped by the joining or
 refused as an orphan.
 
 §423 is the family's fourth rule, a flat ring another plane walks back.
+§431 is the fifth: two flat faces walking one ring both ways, left out before
+the faces are joined. §431.3 takes the two combs' union it writes as right by
+this section's judgment.
 
 ### 417.5 The other half: the three crossings as one, built in 417.7
 

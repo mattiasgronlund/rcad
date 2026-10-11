@@ -912,6 +912,23 @@ sliver in the plane of a face of the non-convex solid.
 > `check_dynamic_range` sees the spread. That is Q1658, `refuses/D`.
 > `a_sliver_along_an_edge_of_a_face_it_lies_on.rs` pins the six comb fuses.
 
+> **2026-10-11 note (Q1528, Q1658): the comb pair's unions answer, and comb 3
+> less comb 2 is refused by the limit's name.** Lane
+> `lane-q1528-q1658-leave-out-a-ring-walked-both-ways`, off `984e8603`. §431
+> supersedes the last note's "a limit" for the unions. Q1528's rule leaves out
+> two flat faces that walk one ring both ways, and with the crossing and the
+> meet written as one corner the notch's floor and tooth wall are such a pair.
+> So the unions, in either order and under each policy, answer one solid of 26
+> faces holding `26`, without the notch, which holds `1.7e-32` and no `f64`
+> point. §431.3 takes that answer as right, as §417.4 took the prism's.
+> Comb 3 less comb 2 keeps the tooth's side from `(3, 1)` to the meet, with
+> edges `2^-51` long beside the comb's `11`, and a certified policy now refuses
+> it `DynamicRangeTooWide` at `11 · 2^51`, the limit's own name (§431.4); a
+> tolerant one answers 25 faces holding `19`. That settles Q1658.
+> `two_combs_leaning_opposite_ways_meet_in_two_parts_a_rounding_apart` and
+> `the_union_leaves_out_a_notch_whose_three_corners_round_to_two_points` pin
+> both.
+
 ### 365.9 A piece placed by the piece of its own face across a side
 
 *Queue row Q1357. Lane `lane-q1357-a-triangle-on-the-plane-of-a-face-it-misses`,
