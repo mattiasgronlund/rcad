@@ -63,6 +63,38 @@
 //! `CannotPlaceTheRingsOfAJoinedFlatFace` (Q1253). With one of those sides straight and leaning,
 //! the fuse puts a corner on the arc where the line along it leaves the cap,
 //! and the ring winds (Q1254).
+//!
+//! The family of an arc read along its chord was tried on a plate bored by a
+//! bar of radius 3 that pokes `δ` past the wall of a bar of radius 8 filling
+//! the bore (Q633). In that family the winding `how_each_arc_bulges` reads, of
+//! an arc's two ends and a point towards its middle, comes out `Zero`. The
+//! bore is set off along `(0.6, 0.8)`, so the sliver between the two arcs has
+//! a leaning chord whose two ends round apart. Only the union joins the caps,
+//! so only the union reads a bulge. The three tests at the end of this file
+//! pin it: every rule answers at `δ = 10⁻⁸`; at `10⁻¹²` the union and the bar
+//! less the plate answer and the rest are refused; at `10⁻¹⁴` every rule is
+//! refused, the union only after `rings_round` has placed every ring right. A
+//! sweep of the union both ways round over `δ = k·10⁻¹⁸`, `k = 1` to `300`,
+//! with a print in `how_each_arc_bulges` that is not kept, read 2269 arcs the
+//! right way, 91 the wrong way and none `Zero`. With the holed bar first, 37
+//! of those 600 unions panic in `rings_round`, '2 of its rings each hold the
+//! others', all at `δ` of `7.4·10⁻¹⁷` or less, where the sliver's chord is
+//! `5.3·10⁻⁸` long or shorter and one of its arcs reads the wrong way. That
+//! panic is filed as a crash of class D: `15/7.4·10⁻¹⁷`, about `2·10¹⁷`,
+//! against §3.5's `10¹¹`.
+//!
+//! **No reading came out `Zero` in the shapes tried.** That is a measurement
+//! of these shapes, not a proof that no shape can reach `Zero`. Here a reading
+//! goes wrong once rounding moves a chord end by four times its arc's
+//! sagitta, which shrinks as `δ`, but goes `Zero` only once the chord's two
+//! ends come within an ulp or two of each other, and the chord shrinks only
+//! as `√δ`: at `δ = 7.4·10⁻¹⁷` four sagittas of the bar's arc are under an
+//! ulp while the chord is still `5.3·10⁻⁸` long. So the readings go wrong long
+//! before they could go `Zero`. Two other shapes were tried. A bored plate
+//! against a block whose wall leans never reached the reading: the block's
+//! planes put corners on the plate's circle, so the outline winds. And with
+//! the bore and the bar centred on one line along `x`, the chord's two ends
+//! share `x` exactly, and every arc read the right way.
 
 use std::f64::consts::PI;
 
@@ -3389,63 +3421,6 @@ const AS_WRITTEN: Placed = Placed {
     top: 4.0,
 };
 
-#[test]
-fn probe_q1253() {
-    let small = Placed {
-        by: 0.125,
-        centre: [-2.0, 8.0],
-        bottom: -1.0,
-        top: 5.0,
-    };
-    for (rule, swapped) in every_rule_both_ways() {
-        let outcome = std::panic::catch_unwind(|| {
-            let mut model =
-                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, AS_WRITTEN)
-                .unwrap_or_else(|why| panic!("the cap: {why:?}"));
-            let through = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, small)
-                .unwrap_or_else(|why| panic!("the small cap: {why:?}"));
-            let answer = fused_in_order(&mut model, [cap, through], rule, swapped);
-            let volumes: Vec<f64> = answer
-                .iter()
-                .flatten()
-                .map(|&solid| {
-                    model
-                        .solid(solid)
-                        .expect("key")
-                        .measure(
-                            Deflection::of(0.001).expect("a fine mesh"),
-                            &Policy::certified(),
-                            &mut ProvenanceLog::new(),
-                        )
-                        .map(|m| m.volume())
-                        .unwrap_or(f64::NAN)
-                })
-                .collect();
-            let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-            format!("{answer:?} volumes {volumes:?} valid {valid:?}")
-        });
-        eprintln!("PROBE first {rule:?} swapped {swapped}: {outcome:?}");
-    }
-    for (rule, swapped) in every_rule_both_ways() {
-        let outcome = std::panic::catch_unwind(|| {
-            let mut model =
-                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let cap = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, AS_WRITTEN)
-                .unwrap_or_else(|why| panic!("the cap: {why:?}"));
-            let through = a_bar_cut_to_pipes(&mut model, 10.0, &PIPE_CAP, &PIPE_CAP_SIDES, small)
-                .unwrap_or_else(|why| panic!("the small cap: {why:?}"));
-            let holed = the_one_solid(&mut model, cap, through, Rule::Difference);
-            let bar = model
-                .add_round_bar(2.0, 2.0, &at(3.0, 7.0, 4.0))
-                .expect("a bar of radius two");
-            let answer = fused_in_order(&mut model, [holed, bar], rule, swapped);
-            format!("{answer:?}")
-        });
-        eprintln!("PROBE second {rule:?} swapped {swapped}: {outcome:?}");
-    }
-}
-
 /// [`a_bar_cut_to`], with side `i + 1` running as `sides[i]` says, `placed`
 /// where that says.
 fn a_bar_cut_to_pipes(
@@ -3576,4 +3551,185 @@ fn a_bar_cut_to_pipes(
     }
     builder.add_shell(&faces)?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// **An arc a hair off its chord, on a joined flat face, read by how it
+/// bulges** (Q633). A plate of radius 12 about `(−3, −4)`, from `z = −4` to
+/// `0`, bored through by a bar of radius 3 about `(0.6δ, 0.8δ)` and holed by
+/// one of radius 1/2 about `(−6, −4)`; and a bar of radius 8 about `(−3, −4)`,
+/// as tall, holed by one of radius 1/4 about `(−6, −4)`. With `δ = 0` the bore
+/// touches the bar's wall from inside at `(1.8, 2.4)`, the corner of a 3-4-5
+/// triangle; with `δ > 0` it pokes out past the wall by `δ`, so the bar fills
+/// the bore all but a sliver between two arcs.
+///
+/// United, each cap joins into one face with three rings: the plate's outer
+/// circle, the small hole of radius 1/4, and the sliver, whose two corners are
+/// where the circles of radius 3 and 8 cross, `2√(9.6δ)` apart. **The sliver's
+/// two arcs, of radius 3 and 8, bulge the same way off one chord**, by `1.6δ`
+/// and `0.6δ`, so `holds_the_other_rings` places it by how each arc bulges.
+/// The chord leans along `(−4, 3)`, so its two ends round apart. Only the union
+/// joins the caps, so only the union reads a bulge (a temporary print, Q633).
+///
+/// What each rule leaves, in area times the height 4, with `L` the area of the
+/// bore past the bar:
+///
+/// - the union, `576π − π/4 − 4L`: the disk of radius 12 less the small hole
+///   and the sliver;
+/// - the intersection, `219π + 4L`: the bar less the bore and the hole of
+///   radius 1/2;
+/// - the plate less the bar, `320π − 4L`: one solid;
+/// - the bar less the plate, two solids: the part of the bore inside the bar,
+///   `36π − 4L`, and the ring between the two small holes, `3π/4`.
+///
+/// **Every rule, both ways round, gives that with the sliver `10⁻⁸` thick.**
+/// Each bulge reads the right way by far. A chord end must move four times its
+/// arc's sagitta to flip the reading (Q622): here `4·0.6δ = 2.4·10⁻⁸` for the
+/// bar's arc and `4·1.6δ = 6.4·10⁻⁸` for the bore's, tens of millions of ulps
+/// of the corners' coordinates.
+///
+/// With the reading flipped in `how_each_arc_bulges` (run for Q633), the union
+/// with the holed bar first panics in `rings_round`, '2 of its rings each hold
+/// the others': the sliver comes to hold the small hole's corner, as the
+/// outline does. With the plate first the outline's corner `(9, −4)` is asked
+/// first, and it is outside the bar, so the flip goes unnoticed there: every
+/// other fuse in this test still answers right with the reading flipped.
+#[test]
+fn a_bar_filling_a_plates_bore_all_but_a_sliver_is_answered_under_every_rule() {
+    let sliver = 4.0 * what_the_bore_holds_past_the_bar(1e-8);
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pair = a_bored_plate_and_a_bar_filling_its_bore(&mut model, 1e-8);
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, pair, rule, swapped);
+        match (rule, swapped) {
+            (Rule::Difference, true) => {
+                let [between_the_holes, in_the_bore] = the_two_smaller_first(&model, answer, &what);
+                assert_holds(&model, between_the_holes, 0.75 * PI, &what);
+                assert_holds(&model, in_the_bore, 36.0 * PI - sliver, &what);
+            }
+            (rule, swapped) => {
+                let volume = match (rule, swapped) {
+                    (Rule::Union, _) => 576.0 * PI - PI / 4.0 - sliver,
+                    (Rule::Intersection, _) => 219.0 * PI + sliver,
+                    (Rule::Difference, false) => 320.0 * PI - sliver,
+                    (other, _) => panic!("not a rule this probes: {other:?}"),
+                };
+                assert_holds(&model, the_only(answer, &what), volume, &what);
+            }
+        }
+    }
+}
+
+/// **The same with the sliver `10⁻¹²` thick: the union is answered both ways
+/// round, and so is the bar less the plate**, each holding what the circles
+/// say. The chord is about `6·10⁻⁶` long and the bar's arc reads the right way
+/// by `2.4·10⁻¹²`, still thousands of ulps. The intersection both ways round
+/// and the plate less the bar are refused `CannotNameWhichPieceOfACrossingThisIs`
+/// (Q633). The sliver is past §3.5's envelope here, `15/10⁻¹²` against `10¹¹`.
+#[test]
+fn a_bar_filling_a_plates_bore_all_but_a_sliver_a_trillionth_thick_is_united_both_ways() {
+    let sliver = 4.0 * what_the_bore_holds_past_the_bar(1e-12);
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pair = a_bored_plate_and_a_bar_filling_its_bore(&mut model, 1e-12);
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_in_order(&mut model, pair, rule, swapped);
+        match (rule, swapped) {
+            (Rule::Union, _) => assert_holds(
+                &model,
+                the_only(answer, &what),
+                576.0 * PI - PI / 4.0 - sliver,
+                &what,
+            ),
+            (Rule::Difference, true) => {
+                let [between_the_holes, in_the_bore] = the_two_smaller_first(&model, answer, &what);
+                assert_holds(&model, between_the_holes, 0.75 * PI, &what);
+                assert_holds(&model, in_the_bore, 36.0 * PI - sliver, &what);
+            }
+            (Rule::Intersection | Rule::Difference, _) => assert!(
+                matches!(
+                    answer,
+                    Err(Error::Geometry(
+                        rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+                    ))
+                ),
+                "{what}: {answer:?}"
+            ),
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        }
+    }
+}
+
+/// **With the sliver `10⁻¹⁴` thick every rule is refused**: the union both
+/// ways round `Undecidable`, and the rest
+/// `CannotNameWhichPieceOfACrossingThisIs` (Q633).
+///
+/// The union, both ways round, reaches `rings_round` and places every ring
+/// right: the chord is `6.2·10⁻⁷` long
+/// and the bar's arc reads the right way by `4·0.6δ = 2.4·10⁻¹⁴`, about 54
+/// ulps. Only after that is it refused `Undecidable`, on the side of a
+/// half-space at points built near the sliver's corners, `(1.8, 2.4)` on the
+/// floor and the top, in boxes under `10⁻¹²` wide.
+#[test]
+fn a_bar_filling_a_plates_bore_all_but_a_sliver_a_hundred_trillionth_thick_is_refused() {
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pair = a_bored_plate_and_a_bar_filling_its_bore(&mut model, 1e-14);
+        let refused = fused_in_order(&mut model, pair, rule, swapped);
+        let what = format!("{rule:?}, swapped {swapped}");
+        match rule {
+            Rule::Union => assert!(
+                matches!(refused, Err(Error::Undecidable { .. })),
+                "{what}: {refused:?}"
+            ),
+            Rule::Intersection | Rule::Difference => assert!(
+                matches!(
+                    refused,
+                    Err(Error::Geometry(
+                        rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+                    ))
+                ),
+                "{what}: {refused:?}"
+            ),
+            other => panic!("not a rule this probes: {other:?}"),
+        }
+    }
+}
+
+/// The area of the bore of radius 3 past the wall of the bar of radius 8,
+/// their centres `5 + δ` apart: the bore less the two circular segments either
+/// side of the chord between the two crossings.
+fn what_the_bore_holds_past_the_bar(delta: f64) -> f64 {
+    let apart = 5.0 + delta;
+    let segment = |mine: f64, theirs: f64| {
+        let half_angle = ((apart * apart + mine * mine - theirs * theirs) / (2.0 * apart * mine))
+            .clamp(-1.0, 1.0)
+            .acos();
+        mine * mine * (half_angle - half_angle.sin() * half_angle.cos())
+    };
+    9.0 * PI - (segment(3.0, 8.0) + segment(8.0, 3.0))
+}
+
+/// The plate bored by a bar of radius 3 standing `δ` past the wall of the bar
+/// of radius 8, and that bar, each holed about `(−6, −4)`: the plate first.
+fn a_bored_plate_and_a_bar_filling_its_bore(model: &mut Model, delta: f64) -> [SolidKey; 2] {
+    let plate = model
+        .add_round_bar(12.0, 4.0, &at(-3.0, -4.0, -4.0))
+        .expect("a bar of radius twelve");
+    let bore = model
+        .add_round_bar(3.0, 6.0, &at(0.6 * delta, 0.8 * delta, -5.0))
+        .expect("a bar of radius three");
+    let bored = the_one_solid(model, plate, bore, Rule::Difference);
+    let wide_hole = model
+        .add_round_bar(0.5, 6.0, &at(-6.0, -4.0, -5.0))
+        .expect("a bar of radius a half");
+    let holed_plate = the_one_solid(model, bored, wide_hole, Rule::Difference);
+    let bar = model
+        .add_round_bar(8.0, 4.0, &at(-3.0, -4.0, -4.0))
+        .expect("a bar of radius eight");
+    let narrow_hole = model
+        .add_round_bar(0.25, 6.0, &at(-6.0, -4.0, -5.0))
+        .expect("a bar of radius a quarter");
+    let holed = the_one_solid(model, bar, narrow_hole, Rule::Difference);
+    [holed_plate, holed]
 }
