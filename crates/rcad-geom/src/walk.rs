@@ -1127,24 +1127,28 @@ fn how_far_off_the_crossing_a_corner_can_be(
 /// two corners in one place (Q1690). Settled onto both surfaces, the corner
 /// lands on the start, or `1.8e-15` from it, inside the start's own box.
 ///
-/// **A corner that cannot be settled is judged by its own box**, which is all
-/// that was known of a corner before Q1690. Settling refuses where the two
-/// surfaces are tangent, and a closed run's corner can sit at such a place: the
-/// LED's body meets its dome where the two touch all the way round (§189.3).
+/// **A corner where the two surfaces touch is judged by its own box**, which is
+/// all that was known of a corner before Q1690. Settling refuses there, and a
+/// closed run can be cornered there: a ball and a pipe that cross in a figure
+/// of eight touch where it passes through itself
+/// (`a_closed_loop_cornered_where_its_surfaces_touch_is_walked_though_its_corner_cannot_be_settled`).
 /// The bound only ever leaves a point out beside the corner, so going without it
 /// costs that and no more, where refusing would refuse a loop the march has
 /// already walked.
 ///
 /// # Errors
 ///
-/// [`Error::CannotWorkOutHowBigACrossingIs`] when the box round the corner's
-/// middle comes out as something that is not a box.
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when settling the corner lands
+/// somewhere that is not a point, or the box round the corner's middle comes
+/// out as something that is not a box.
 fn where_on_the_crossing_this_corner_can_be(
     corner: PredicatePoint,
     surfaces: [&Surface; 2],
 ) -> Result<PredicatePoint> {
-    let Ok(reach) = how_far_off_the_crossing_this_corner_can_be(corner, surfaces) else {
-        return Ok(corner);
+    let reach = match how_far_off_the_crossing_this_corner_can_be(corner, surfaces) {
+        Ok(reach) => reach,
+        Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent { .. }) => return Ok(corner),
+        Err(other) => return Err(other),
     };
     let middle = Point::from(corner.enclosure().map(middle_of));
     somewhere_within(middle, reach).ok_or(Error::CannotWorkOutHowBigACrossingIs)
@@ -5826,6 +5830,55 @@ mod tests {
                 "at {deflection} a point walked is {nearest} from the corner {corner:?}"
             );
         }
+    }
+
+    /// A closed run cornered where its two surfaces touch is walked, and not
+    /// refused, though its corner cannot be settled onto both.
+    ///
+    /// A ball of radius two round the origin and a pipe of radius one whose
+    /// axis passes through `(1, 0, 0)` cross in a figure of eight that passes
+    /// through itself at `(2, 0, 0)` (Viviani's curve), and the two surfaces
+    /// touch there. Settling the corner onto both refuses, so the walk judges
+    /// the corner by its own box, as it judged every corner before Q1690. What
+    /// this holds is that the walk is not refused for want of a settled corner,
+    /// and not that a loop through itself is drawn well: a point it walks is
+    /// `3.4e-10` from the corner.
+    #[test]
+    fn a_closed_loop_cornered_where_its_surfaces_touch_is_walked_though_its_corner_cannot_be_settled()
+     {
+        let ball = Surface::Sphere(Sphere::new(Point::new(0.0, 0.0, 0.0), 2.0).expect("a radius"));
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::new(1.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                    .expect("an axis"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let corner = PredicatePoint::from([2.0, 0.0, 0.0]);
+        let settling = how_far_off_the_crossing_this_corner_can_be(corner, [&ball, &pipe]);
+        assert!(
+            matches!(
+                settling,
+                Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent { .. })
+            ),
+            "the corner where the two surfaces touch settles: {settling:?}"
+        );
+
+        let run = NamedRun::new(EdgeRun::RightRoundWhereItsFacesCross, [corner, corner])
+            .expect("a closed run with one corner");
+        let walked = walk(
+            &run,
+            [&ball, &pipe],
+            Deflection::of(0.1).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            walked.is_ok(),
+            "the figure of eight is refused from the corner where it passes through itself: {:?}",
+            walked.err()
+        );
     }
 
     /// A thin pipe of radius one slanting through a fat one of radius four,
