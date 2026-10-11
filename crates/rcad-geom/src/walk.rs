@@ -5355,6 +5355,76 @@ mod tests {
         }
     }
 
+    /// A run between two corners with a corner further off the crossing than
+    /// half the deflection is refused, since the caller draws its corners too:
+    /// the thin pipe through the fat one above, from `(−4, 0, 4)` to a corner
+    /// either `1/100` outside the fat pipe at `(−4.01, 0, 6)` or known only as
+    /// the box `1/100` round `(−4, 0, 6)`. The first is `1/100` off once settled
+    /// and the second can be half the box's diagonal, `√3/100`, off.
+    ///
+    /// A deflection of `1/100` has `1/200` for each point, so both are refused
+    /// with how far off they can be; at `1/10` both fit and are walked. Before
+    /// the corners were asked, the outside one was walked at `1/100` with
+    /// `1.3e-15` claimed, its last point the seed `(−4, 0, 6)`, `1/100` short
+    /// of the corner the caller draws next (Q1659).
+    #[test]
+    fn a_corner_further_off_its_crossing_than_half_the_deflection_is_refused() {
+        let fat = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 4.0).expect("a radius"));
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::new(-10.0, 0.0, 5.0), Vector::new(1.0, 0.0, 0.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let over = Picker::from(
+            crate::HalfSpace::through_a_point_facing(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis has length"),
+        );
+        let first = PredicatePoint::from(Point::new(-4.0, 0.0, 4.0).coordinates());
+        let outside = PredicatePoint::from(Point::new(-4.01, 0.0, 6.0).coordinates());
+        let a_box =
+            somewhere_within(Point::new(-4.0, 0.0, 6.0), 0.01).expect("a box round a point");
+        let a_hundredth = 0.01_f64;
+        for (second, off) in [
+            (outside, a_hundredth),
+            (a_box, a_hundredth * 3.0_f64.sqrt()),
+        ] {
+            let run = NamedRun::new(
+                EdgeRun::PartOfWhereItCrosses {
+                    and: thin,
+                    picked_by: smallvec![over],
+                },
+                [first, second],
+            )
+            .expect("a run between two corners");
+            let walked = |deflection: f64| {
+                walk(
+                    &run,
+                    [&fat, &thin],
+                    Deflection::of(deflection).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+            };
+            match walked(a_hundredth) {
+                Err(Error::CannotPlaceAPointThatCloseToACrossing { asked, closest }) => {
+                    assert_eq!(asked, a_hundredth);
+                    assert!(
+                        closest >= off * (1.0 - 1e-9) && closest <= off * (1.0 + 1e-6),
+                        "a corner {off} off the crossing was measured {closest} off"
+                    );
+                }
+                other => panic!("a corner {off} off the crossing was walked at 1/100 as {other:?}"),
+            }
+            assert!(
+                walked(0.1).is_ok(),
+                "a corner {off} off the crossing is inside half of 1/10"
+            );
+        }
+    }
+
     /// A fuse puts a closed loop's corner where the marcher starts
     /// ([`where_a_closed_crossing_starts`]), and the caller puts that corner at
     /// both ends of what comes back — so nothing walked may sit on it, nor a
