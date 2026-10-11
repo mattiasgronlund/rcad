@@ -36,6 +36,18 @@
 //! (`leave_out_each_pair_of_flat_faces_walking_one_ring_both_ways` in
 //! `fuse/assemble.rs`).
 //!
+//! **The tipped cube less the block was two solids**, under a tolerant
+//! policy, at the four tilts of
+//! [`TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT`] (queue row Q1687).
+//! There the cube's corner at `x = 5` is stored a rounding below the floor,
+//! and the wedge between the cube's edge and the floor, under the block,
+//! closed into a tetrahedron of `8.2e−32` to `3.3e−31` touching the rest at
+//! `(0, 5, 0)`, or at `t = 0.142` into a shell flat on the floor that
+//! measured `0.0` and refused the fuse. The same cube `2⁻³⁰` higher or lower
+//! is one solid. A tolerant fuse now leaves out a shell whose corners all lie
+//! within the policy's wobble of one of its own planes
+//! (`leave_out_each_shell_thinner_than_the_wobble` in `fuse/assemble.rs`).
+//!
 //! What the two cubes share is the cube's square cross-section, clipped to
 //! the block, along the five of its ten that lie over the block:
 //! [`what_the_two_share`] works it out from the tilt.
@@ -339,121 +351,4 @@ fn a_cube(model: &mut Model) -> SolidKey {
     model
         .add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube")
-}
-
-#[test]
-fn probe_q1687() {
-    let tilts: Vec<f64> = std::env::var("PROBE_Q1687")
-        .unwrap_or_else(|_| "0.075,0.0885,0.1315,0.142".into())
-        .split(',')
-        .map(|t| t.parse().unwrap())
-        .collect();
-    for t in tilts {
-        let tilt = [0.0, 0.0, f64::sin(t), f64::cos(t)];
-        for (label, dz) in [
-            ("as is", 0.0),
-            ("up", 2f64.powi(-30)),
-            ("down", -(2f64.powi(-30))),
-        ] {
-            for policy in [tolerant(), certified()] {
-                let mut model = a_model();
-                let block = a_cube(&mut model);
-                let tipped = a_cube(&mut model);
-                let placement = Isometry::try_from(([5.0, 5.0, dz], tilt)).expect("a placement");
-                model.place_solid(tipped, &placement).expect("a placement");
-                if std::env::var("PROBE_Q1687_INPUT").is_ok() {
-                    let view = model.solid(tipped).expect("a solid");
-                    for face in view.faces() {
-                        eprintln!("PROBE   input face {:?}", face.plane());
-                    }
-                    let mut seen = std::collections::HashSet::new();
-                    for face in view.faces() {
-                        for wire in face.wires() {
-                            for coedge in wire.coedges() {
-                                let corner = coedge.start();
-                                if seen.insert(corner.key()) {
-                                    eprintln!("PROBE   input corner {:?}", corner.point());
-                                }
-                            }
-                        }
-                    }
-                }
-                let mut log = ProvenanceLog::new();
-                let answer = model.fuse(&[tipped], &[block], Rule::Difference, &policy, &mut log);
-                let strict = if policy.max_wobble() == 0.0 {
-                    "certified"
-                } else {
-                    "tolerant"
-                };
-                match answer {
-                    Err(why) => eprintln!("PROBE t={t} {label} {strict}: refused {why:?}"),
-                    Ok(answer) => {
-                        let solids = answer.solids().to_vec();
-                        let valid = model.validate(&policy, &mut ProvenanceLog::new());
-                        eprintln!(
-                            "PROBE t={t} {label} {strict}: {} solids, validate {:?}, {} log records",
-                            solids.len(),
-                            valid.map(|_| ()),
-                            log.records().len()
-                        );
-                        for solid in solids {
-                            let view = model.solid(solid).expect("a solid");
-                            let volume = view
-                                .measure(
-                                    Deflection::of(0.1).expect("a deflection"),
-                                    &Policy::certified(),
-                                    &mut ProvenanceLog::new(),
-                                )
-                                .map(|m| m.volume());
-                            let faces = view.faces().count();
-                            let mut seen = std::collections::HashSet::new();
-                            let mut corners = Vec::new();
-                            for face in view.faces() {
-                                for wire in face.wires() {
-                                    for coedge in wire.coedges() {
-                                        let corner = coedge.start();
-                                        if seen.insert(corner.key()) {
-                                            corners.push(corner.point());
-                                        }
-                                    }
-                                }
-                            }
-                            if corners.len() <= 8 {
-                                eprintln!(
-                                    "PROBE   solid: {faces} faces, volume {volume:?}, {} corners {corners:?}",
-                                    corners.len()
-                                );
-                                for face in view.faces() {
-                                    eprintln!(
-                                        "PROBE     face {:?} {:?}",
-                                        face.plane(),
-                                        face.outer_wire().points().collect::<Vec<_>>()
-                                    );
-                                }
-                                for record in log.records() {
-                                    eprintln!("PROBE     record {record:?}");
-                                }
-                            } else {
-                                eprintln!(
-                                    "PROBE   solid: {faces} faces, volume {volume:?}, {} corners",
-                                    corners.len()
-                                );
-                                if std::env::var("PROBE_Q1687_FACES").is_ok() {
-                                    for face in view.faces() {
-                                        for wire in face.wires() {
-                                            eprintln!(
-                                                "PROBE     face {:?} wire {:?}",
-                                                face.plane(),
-                                                wire.points().collect::<Vec<_>>()
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

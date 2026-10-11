@@ -3433,10 +3433,16 @@ impl Assembly {
     /// parallel to the floor, a rounding below it. The cube less the block
     /// keeps the wedge between that edge and the floor, which crosses the
     /// block's side `x = 0` in a triangle of three meets of three planes. All
-    /// three round to `(0, 5, 0)`, so the wedge's part beside the block closed
+    /// three round to `(0, 5, 0)`, so the wedge's part under the block closed
     /// into a tetrahedron of `8.2e−32` touching the rest at that one point:
     /// two solids, where the same cube `2⁻³⁰` higher or lower is one (queue
     /// row Q1687, `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`).
+    /// At `t = 0.142` the shell's four corners all round onto the floor
+    /// itself, so it measured `0.0` and the fuse was refused
+    /// [`Invalid::VolumeIsNotPositive`]. A shell like that can be the whole
+    /// answer: two skewed combs touching along one line share a prism of
+    /// `3.1e−32` and no space, and their intersection now answers no solid
+    /// (`two_skewed_combs_touching_along_one_line.rs`, queue row Q1615).
     ///
     /// **Only flat faces with straight edges between two corners**, since only
     /// then is every point of the shell between its corners: a half ball's
