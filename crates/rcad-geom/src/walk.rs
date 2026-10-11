@@ -5228,6 +5228,73 @@ mod tests {
         assert_eq!(walked.points(), &[] as &[Point]);
     }
 
+    /// The quarter of a circle the Fujitsu FTR-F1 relays put where a pin's pipe
+    /// meets the ball of its own radius that rounds its end, from
+    /// `#2404 = (10.05, 1.15, 16.5)` to `#1030 = (10.15, 1.15, 16.4)`, is
+    /// refused: the ball and the pipe cross in one thin loop over the half of
+    /// the ball away from `#1030`, and `#1030` is `0.14` from every point of it
+    /// (§335.5).
+    ///
+    /// Picked by its corners, the arc was walked at `0.1`, `0.2` and `1.0`
+    /// along the file's rim, whose points are `0.14` off the thin loop at
+    /// `#1030`'s end, with a deviation of about `1e-6` claimed for them, and
+    /// both relay files imported a curve their ball and pipe do not cross in
+    /// (Q1659). At `0.001`, `0.01` and `0.4` the march gave up instead.
+    /// `#1030` cannot be settled onto both surfaces at all, since they are
+    /// tangent there, so it is asked first and the answer is one refusal at
+    /// every deflection. The ball, the leaning pipe and the half-space on the
+    /// chord are the file's, as the reader names the arc.
+    #[test]
+    fn a_quarter_circle_ending_where_a_ball_and_its_own_pipe_do_not_cross_is_refused() {
+        let ball =
+            Surface::Sphere(Sphere::new(Point::new(10.05, 1.15, 16.4), 0.1).expect("a radius"));
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(
+                    Point::new(10.05, -19.75, 16.4),
+                    Vector::new(3.663_735_981_263e-15, 1.0, 0.0),
+                )
+                .expect("a direction"),
+                0.1,
+            )
+            .expect("a radius"),
+        );
+        let corners = [Point::new(10.05, 1.15, 16.5), Point::new(10.15, 1.15, 16.4)];
+        let on_the_chord = Picker::from(
+            crate::HalfSpace::through_a_point_facing(corners[0], Vector::new(0.1, 0.0, 0.1))
+                .expect("the chord crosses the axis"),
+        );
+        let run = NamedRun::new(
+            EdgeRun::PartOfWhereItCrosses {
+                and: pipe,
+                picked_by: smallvec![on_the_chord],
+            },
+            corners.map(|end| PredicatePoint::from(end.coordinates())),
+        )
+        .expect("a run between two corners");
+        for deflection in [0.001, 0.01, 0.1, 0.2, 0.4, 1.0] {
+            let walked = walk(
+                &run,
+                [&ball, &pipe],
+                Deflection::of(deflection).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .map(|walked| walked.points().len());
+            assert!(
+                matches!(
+                    walked,
+                    Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                        at: crate::WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+                        ..
+                    })
+                ),
+                "#1030 sits where the ball and the pipe are tangent, and the arc to it was \
+                 walked at {deflection} as {walked:?}"
+            );
+        }
+    }
+
     /// A fuse puts a closed loop's corner where the marcher starts
     /// ([`where_a_closed_crossing_starts`]), and the caller puts that corner at
     /// both ends of what comes back — so nothing walked may sit on it, nor a
