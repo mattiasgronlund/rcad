@@ -553,6 +553,13 @@ impl Model {
     /// crossing has none between two planes proved different is refused, which
     /// is the safe way for a missing bound to fall.
     ///
+    /// **Not shared with [`Model::check_touched_edge`]**, unlike the two checks
+    /// before it in [`Model::check_edge`]. A mutation that ends there either
+    /// writes no edge this refuses or asks this first in a model of its own, and
+    /// the one other way such an edge reaches it is in a file the caller read
+    /// in, which is the caller's input and not a panic (Q614). That doc names
+    /// the mutations, and the tests that hold each.
+    ///
     /// # Errors
     ///
     /// [`Invalid::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes`] for a closed

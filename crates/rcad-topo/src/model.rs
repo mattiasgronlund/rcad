@@ -875,6 +875,35 @@ impl Model {
                 || self.data.edges[other].run != EdgeRun::Straight)
     }
 
+    /// That both ends are there, that two coedges walk the edge opposite ways,
+    /// and that something curved along it says where it bends.
+    ///
+    /// **It does not ask whether the flat faces along it put it in one place**
+    /// (`check_flat_faces_put_an_edge_in_one_place`, Q574, Q604), and it has no
+    /// need to (Q614). Every mutation that ends here is one of three kinds:
+    ///
+    /// - [`Model::place_solid`] and [`Model::copy_solid`] write no plane, no
+    ///   corner and no run: a movement goes on the shell, and a copy is the
+    ///   original bit for bit. An edge that check refuses reaches them only in a
+    ///   solid that already held it, and the one door such a solid comes in by
+    ///   is `Deserialize`, which asks nothing that needs arithmetic
+    ///   (decisions.md §44.5). That is the caller's input, which is an `Err` and
+    ///   not a panic, and [`Model::validate`] gives the `Err`.
+    /// - The kernel's own solids — [`Model::add_cube`], [`Model::add_extrusion`],
+    ///   [`Model::add_round_bar`], [`Model::add_ball`] and
+    ///   [`Model::add_bar_cut_off_by`] — have no edge that check asks about with
+    ///   only flat faces along it. Every run naming a crossing they write has a
+    ///   pipe or a ball beside it.
+    /// - [`SolidBuilder::build`](crate::SolidBuilder::build) and a fuse sweep
+    ///   what they will write in a model of their own first, that check among
+    ///   the sweep's, with the room of the solid or the answer itself, and write
+    ///   nothing when it refuses.
+    ///
+    /// `tests/a_closed_edge_between_two_planes_its_curve_leaves.rs` holds each
+    /// kind: `moving_or_copying_a_tilted_piece_read_back_from_bytes_leaves_it_for_the_sweep`,
+    /// `no_solid_the_kernel_makes_has_a_named_crossing_between_flat_faces_alone`,
+    /// `a_disc_tilted_off_the_lid_is_refused_whichever_face_is_listed_first` and
+    /// `a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model`.
     pub(crate) fn check_touched_edge(&self, slot: EdgeSlot) {
         let edge = self.data.edges.get(slot).expect("touched edge is gone");
         assert!(
