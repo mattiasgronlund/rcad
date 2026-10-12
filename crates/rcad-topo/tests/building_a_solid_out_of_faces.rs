@@ -670,6 +670,184 @@ fn holds_what_pappus_gives_the_top_half_of_a_ring(
     }
 }
 
+#[test]
+fn probe_q825_crown_with_a_slot() {
+    let mut model = Model::new(Scale::millimetres(250.0).expect("a positive size"));
+    let built = a_crown_of_a_ring_with_a_slot_across_its_top(&mut model);
+    println!("build: {built:?}");
+    if let Ok(crown) = built {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        println!("validate: {:?}", model.validate(&policy, &mut log));
+        for deflection in [1.0, 0.5, 0.1] {
+            let measured = model.solid(crown).expect("key").measure(
+                Deflection::of(deflection).expect("pos"),
+                &policy,
+                &mut log,
+            );
+            println!("at {deflection}: {measured:?}");
+        }
+    }
+}
+
+fn a_crown_of_a_ring_with_a_slot_across_its_top(model: &mut Model) -> Result<SolidKey> {
+    let (ring, tube) = (100.0, 25.0);
+    let skin =
+        Surface::Torus(Torus::new(Axis::z(), ring, tube).expect("a tube narrower than its ring"));
+    let flat = |height: f64, normal: Vector| {
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, height), normal)
+            .expect("a coordinate direction is a unit normal")
+    };
+    let crown_floor = flat(20.0, Vector::new(0.0, 0.0, -1.0));
+    let slot_floor = flat(24.0, Vector::new(0.0, 0.0, 1.0));
+    let start_wall = flat(0.0, Vector::new(-1.0, 0.0, 0.0));
+    let end_wall = flat(0.0, Vector::new(0.0, 1.0, 0.0));
+    let pipe = Cylinder::new(Axis::z(), ring).expect("the ring's own radius");
+    let side = |normal: Vector, offset: f64| {
+        Picker::from(HalfSpace::new(normal, offset).expect("a normal with a length"))
+    };
+
+    let mut builder = SolidBuilder::new();
+    let outer_corner = builder.add_vertex(Point::new(115.0, 0.0, 20.0))?;
+    let inner_corner = builder.add_vertex(Point::new(85.0, 0.0, 20.0))?;
+    let slot_outer_start = builder.add_vertex(Point::new(0.0, 107.0, 24.0))?;
+    let slot_inner_start = builder.add_vertex(Point::new(0.0, 93.0, 24.0))?;
+    let slot_outer_end = builder.add_vertex(Point::new(-107.0, 0.0, 24.0))?;
+    let slot_inner_end = builder.add_vertex(Point::new(-93.0, 0.0, 24.0))?;
+
+    let outer_circle = builder.add_edge(
+        outer_corner,
+        outer_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
+    let inner_circle = builder.add_edge(
+        inner_corner,
+        inner_corner,
+        EdgeRun::RightRoundWhereItsFacesCross,
+    )?;
+    let seam = builder.add_edge(
+        outer_corner,
+        inner_corner,
+        EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(end_wall),
+            picked_by: smallvec::smallvec![
+                side(Vector::new(1.0, 0.0, 0.0), 0.0),
+                side(Vector::new(0.0, 0.0, 1.0), 0.0),
+            ],
+        },
+    )?;
+    let along_the_slot_floor = |inside: Picker| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(slot_floor),
+        picked_by: smallvec::smallvec![
+            inside,
+            side(Vector::new(-1.0, 0.0, 0.0), 0.0),
+            side(Vector::new(0.0, 1.0, 0.0), 0.0),
+        ],
+    };
+    let outer_side = builder.add_edge(
+        slot_outer_start,
+        slot_outer_end,
+        along_the_slot_floor(Picker::OutsideAPipe(pipe)),
+    )?;
+    let inner_side = builder.add_edge(
+        slot_inner_start,
+        slot_inner_end,
+        along_the_slot_floor(Picker::InsideAPipe(pipe)),
+    )?;
+    let over_the_start_wall = builder.add_edge(
+        slot_outer_start,
+        slot_inner_start,
+        EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(start_wall),
+            picked_by: smallvec::smallvec![
+                side(Vector::new(0.0, 1.0, 0.0), 0.0),
+                side(Vector::new(0.0, 0.0, 1.0), 24.0),
+            ],
+        },
+    )?;
+    let over_the_end_wall = builder.add_edge(
+        slot_outer_end,
+        slot_inner_end,
+        EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(end_wall),
+            picked_by: smallvec::smallvec![
+                side(Vector::new(-1.0, 0.0, 0.0), 0.0),
+                side(Vector::new(0.0, 0.0, 1.0), 24.0),
+            ],
+        },
+    )?;
+    let under_the_start_wall =
+        builder.add_edge(slot_inner_start, slot_outer_start, EdgeRun::Straight)?;
+    let under_the_end_wall = builder.add_edge(slot_inner_end, slot_outer_end, EdgeRun::Straight)?;
+
+    let a_wire = |builder: &mut SolidBuilder, steps: &[(DraftEdge, Orientation)]| {
+        let mut along = Vec::with_capacity(steps.len());
+        for &(edge, turn) in steps {
+            along.push(DraftStep::Along(builder.add_coedge(edge, turn)?));
+        }
+        builder.add_wire(&along)
+    };
+    let round_the_crown = a_wire(
+        &mut builder,
+        &[
+            (outer_circle, Orientation::Forward),
+            (seam, Orientation::Forward),
+            (inner_circle, Orientation::Reversed),
+            (seam, Orientation::Reversed),
+        ],
+    )?;
+    let round_the_slot = a_wire(
+        &mut builder,
+        &[
+            (over_the_start_wall, Orientation::Forward),
+            (inner_side, Orientation::Forward),
+            (over_the_end_wall, Orientation::Reversed),
+            (outer_side, Orientation::Reversed),
+        ],
+    )?;
+    let crown = builder.add_face(skin, &[round_the_crown, round_the_slot])?;
+
+    let outer_rim = a_wire(&mut builder, &[(outer_circle, Orientation::Reversed)])?;
+    let inner_rim = a_wire(&mut builder, &[(inner_circle, Orientation::Forward)])?;
+    let floor = builder.add_face(Surface::Plane(crown_floor), &[outer_rim, inner_rim])?;
+
+    let slot_floor_wire = a_wire(
+        &mut builder,
+        &[
+            (outer_side, Orientation::Forward),
+            (under_the_end_wall, Orientation::Reversed),
+            (inner_side, Orientation::Reversed),
+            (under_the_start_wall, Orientation::Forward),
+        ],
+    )?;
+    let slot_floor_face = builder.add_face(Surface::Plane(slot_floor), &[slot_floor_wire])?;
+    let start_wall_wire = a_wire(
+        &mut builder,
+        &[
+            (under_the_start_wall, Orientation::Reversed),
+            (over_the_start_wall, Orientation::Reversed),
+        ],
+    )?;
+    let start_wall_face = builder.add_face(Surface::Plane(start_wall), &[start_wall_wire])?;
+    let end_wall_wire = a_wire(
+        &mut builder,
+        &[
+            (under_the_end_wall, Orientation::Forward),
+            (over_the_end_wall, Orientation::Forward),
+        ],
+    )?;
+    let end_wall_face = builder.add_face(Surface::Plane(end_wall), &[end_wall_wire])?;
+
+    builder.add_shell(&[
+        (crown, Orientation::Forward),
+        (floor, Orientation::Forward),
+        (slot_floor_face, Orientation::Forward),
+        (start_wall_face, Orientation::Forward),
+        (end_wall_face, Orientation::Forward),
+    ])?;
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
 /// The seam of a bend, named from geometry a file carries rather than from
 /// the model — exactly `rings::a_quarter_bend`'s own construction of it,
 /// which is what a reader reconstructing a `surface_curve` off a torus does.
