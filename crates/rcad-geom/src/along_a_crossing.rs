@@ -113,7 +113,7 @@ use rcad_predicates::{
     SideOfSurface, are_real_numbers, decide, is_a_real_point,
 };
 
-use crate::enclosure::{cross_enclosing, dot_enclosing, exactly};
+use crate::enclosure::{cross_enclosing, dot_enclosing, exactly, gap_enclosing};
 use crate::exact::Exact;
 use crate::intersect::{
     halfway_between_a_cones_apex_and_a_ball_on_its_axis, how_a_ball_on_a_cones_axis_meets_it,
@@ -176,33 +176,38 @@ pub fn which_comes_first_round_a_crossing(
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Result<Decision> {
-    let anticlockwise_about = match the_way_this_crossing_winds(pair, from)? {
-        WhichWayItWinds::About(normal) => normal,
-        WhichWayItWinds::CannotTell => return Ok(NOTHING_IS_KNOWN),
-    };
-    if !(is_a_real_point(from)
-        && is_a_real_point(one)
-        && is_a_real_point(other)
-        && are_real_numbers(anticlockwise_about.components()))
-    {
+    let winds = the_way_this_crossing_winds(pair, from)?;
+    if !(is_a_real_point(from) && is_a_real_point(one) && is_a_real_point(other)) {
         return Ok(NOTHING_IS_KNOWN);
     }
-    Ok(decide(&HowThreeOnACurveWind {
-        from,
-        one,
-        other,
-        anticlockwise_about: anticlockwise_about.components(),
-    })
-    .0)
+    match winds {
+        WhichWayItWinds::About(normal) if are_real_numbers(normal.components()) => {
+            Ok(decide(&HowThreeOnACurveWind {
+                from,
+                one,
+                other,
+                anticlockwise_about: normal.components(),
+            })
+            .0)
+        }
+        WhichWayItWinds::About(_) | WhichWayItWinds::CannotTell => Ok(NOTHING_IS_KNOWN),
+        WhichWayItWinds::RoundALine(line) => {
+            Ok(which_comes_first_round_a_line(line, from, one, other))
+        }
+    }
 }
 
-/// The normal a crossing runs anticlockwise about, when that can be worked out.
+/// What a crossing runs round, when that can be worked out.
 ///
-/// **Exhaustive on purpose.** There is a normal or there is not, and a caller
-/// that cannot have one has nothing left to order by.
+/// **Exhaustive on purpose.** There is a normal, a line, or neither, and a
+/// caller that has neither has nothing left to order by.
 enum WhichWayItWinds {
     /// The crossing runs anticlockwise about this.
     About(Vector),
+    /// The crossing is the one loop a ball off a pipe's axis crosses it in,
+    /// which runs back and forth round the pipe's axis, about no normal, and
+    /// once round this line.
+    RoundALine(RoundALine),
     /// Which of two circles the run is on could not be decided from the point
     /// the ordering starts at — the honest answer is that nothing is known, and
     /// not a refusal.
@@ -215,9 +220,31 @@ impl WhichWayItWinds {
     fn the_other_way(self) -> Self {
         match self {
             Self::About(normal) => Self::About(-normal),
+            Self::RoundALine(line) => Self::RoundALine(RoundALine {
+                backwards: !line.backwards,
+                ..line
+            }),
             Self::CannotTell => Self::CannotTell,
         }
     }
+}
+
+/// The line through a ball's centre `c` that meets a pipe's axis square to it,
+/// and which way round it the one loop the two cross in runs.
+///
+/// Every half-plane with this line for its edge crosses the loop once, so
+/// going round the loop goes once round the line, and three points of the loop
+/// are ordered by how far round the line each one is.
+#[derive(Clone, Copy, Debug)]
+struct RoundALine {
+    centre: [f64; 3],
+    /// A point of the pipe's axis.
+    on_the_axis: [f64; 3],
+    /// The pipe's axis direction `w`.
+    along: [f64; 3],
+    /// `false` for the pair taken ball first, which runs anticlockwise about
+    /// the step from the centre back to the axis.
+    backwards: bool,
 }
 
 /// The normal the crossing of these two surfaces runs anticlockwise about.
@@ -554,12 +581,17 @@ fn the_way_a_circle_round_a_pipes_axis_winds(
 /// same half-space through the centre, which is the picker
 /// [`intersect`](crate::intersect) hands back on these two runs.
 ///
+/// A ball that does not swallow the pipe's whole cross-section, `R − r < a`,
+/// and still reaches into its side crosses it in one loop instead, and
+/// [`the_way_the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in_winds`] orders
+/// that.
+///
 /// # Errors
 ///
-/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the ball is proved not
-/// to swallow the pipe's whole cross-section, `R − r ≤ a`: a ball that reaches
-/// into the pipe's side crosses it in one loop that runs back and forth round
-/// the axis, and one that touches it from inside in a figure of eight.
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where `R − r = a`, a ball that
+/// touches the pipe from inside and crosses it in a figure of eight, and from
+/// [`the_way_the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in_winds`] for a
+/// ball that misses the pipe or touches it at one point.
 fn the_way_a_loop_round_a_pipe_through_a_ball_winds(
     ball: &Sphere,
     pipe: &Cylinder,
@@ -568,8 +600,11 @@ fn the_way_a_loop_round_a_pipe_through_a_ball_winds(
 ) -> Result<WhichWayItWinds> {
     match whether_a_ball_swallows_a_pipe(ball, pipe, across) {
         Some(Decision::Pos) => {}
-        Some(Decision::Zero | Decision::Neg) => {
-            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        Some(Decision::Zero) => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        Some(Decision::Neg) => {
+            return the_way_the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in_winds(
+                ball, pipe, across,
+            );
         }
         Some(Decision::Undecidable { .. }) | None => return Ok(WhichWayItWinds::CannotTell),
         Some(other) => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
@@ -609,6 +644,83 @@ fn whether_a_ball_swallows_a_pipe(
             .minus(&Exact::squared_length_of(across)?)
             .sign(),
     )
+}
+
+/// The line the one loop runs round, of a ball off a pipe's axis that does not
+/// swallow the pipe's whole cross-section, for the pair taken ball first.
+/// `across` is `(c − o) × w`, already known not to be nothing.
+///
+/// # Every half-plane edged by the line crosses the loop once
+///
+/// Put the axis along `z` with the centre at `(a, 0, 0)`, so the line is the
+/// `x` axis. The loop is there where `|r − a| < R < r + a`. A half-plane edged
+/// by the line at angle `φ` round it cuts the pipe in half an ellipse centred
+/// at the axis, of height squared `(r² − x²) / cos² φ` above the line, and the
+/// ball in half a circle centred at `c`, of height squared `R² − (x − a)²`.
+/// Both are there for `x` from `a − R`, where the circle starts inside the
+/// pipe, to `r`, where the ellipse ends inside the ball. The ellipse's height
+/// squared less the circle's is a quadratic in `x` whose `x²` is taken
+/// `−tan² φ` times, so it is concave; it is above nothing at `a − R` and below
+/// it at `r`, so it is nothing once, and crosses there rather than touching.
+/// So the loop is a smooth graph over the angle round the line, the line
+/// misses it, and the loop runs in the order of that angle.
+///
+/// # Which way round
+///
+/// With `X = (c − o) × w`, `X × w` is `−W d` for `d` the step out from the axis
+/// to the centre, so `(p − c) · w` and `(p − c) · X` are coordinates square to
+/// `d` that turn anticlockwise about `−d`. At the top of the loop, `(r, 0, z)`
+/// with `z` above nothing, `∇S × ∇T = (p − c) × ρ` is `(0, rz, 0)`, which runs
+/// anticlockwise about `−x`, the step from the centre back to the axis.
+///
+/// # Errors
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the ball is proved to
+/// miss the pipe or to touch it at one point, `R ≤ |r − a|`.
+fn the_way_the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in_winds(
+    ball: &Sphere,
+    pipe: &Cylinder,
+    across: &[Exact; 3],
+) -> Result<WhichWayItWinds> {
+    match whether_a_balls_equator_misses_a_pipes_circle(ball, pipe, across) {
+        Some(Decision::Neg) => Ok(WhichWayItWinds::RoundALine(RoundALine {
+            centre: ball.centre().coordinates(),
+            on_the_axis: pipe.axis().origin().coordinates(),
+            along: pipe.axis().direction().components(),
+            backwards: false,
+        })),
+        Some(Decision::Zero | Decision::Pos) => Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        Some(Decision::Undecidable { .. }) | None => Ok(WhichWayItWinds::CannotTell),
+        Some(other) => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+    }
+}
+
+/// The sign of `V² − 4r²AW`, with `V = (r² − R²)W + A` and `W` and `A` as in
+/// [`whether_a_ball_swallows_a_pipe`]. That is `W²` times `M² − 4a²r²` for
+/// `M = r² + a² − R²`, which is `W² ((r − a)² − R²)((r + a)² − R²)`: the
+/// sign of whether the ball's circle through its centre square to the axis
+/// misses the pipe's circle in that plane. Below nothing where the two cross
+/// twice, which with a ball that does not swallow the pipe's cross-section is
+/// the one loop. `None` where a product leaves what [`Exact`] can hold.
+fn whether_a_balls_equator_misses_a_pipes_circle(
+    ball: &Sphere,
+    pipe: &Cylinder,
+    across: &[Exact; 3],
+) -> Option<Decision> {
+    let along = pipe.axis().direction().components();
+    let squared_along = Exact::dot_of(along, along)?;
+    let squared_across = Exact::squared_length_of(across)?;
+    let pipe_squared = Exact::product_of(pipe.radius(), pipe.radius())?;
+    let ball_squared = Exact::product_of(ball.radius(), ball.radius())?;
+    let reach = pipe_squared
+        .minus(&ball_squared)
+        .times(&squared_along)?
+        .plus(&squared_across);
+    let crossed = Exact::of(4.0)
+        .times(&pipe_squared)?
+        .times(&squared_across)?
+        .times(&squared_along)?;
+    Some(reach.square_minus(&crossed)?.sign())
 }
 
 /// Which way one of the two circles a cone and a pipe on its axis cross in
@@ -1010,6 +1122,227 @@ impl Predicate for HowThreeOnACurveWind {
             Decision::Pos => Some(Decision::Pos),
             // A product overflowed on the way in. Exact arithmetic that is not
             // exact has nothing to offer, so this level cannot run.
+            Decision::Undecidable { .. } => None,
+            other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+        }
+    }
+}
+
+/// Which of `one` and `other` comes first round `line` from `from`: the answer
+/// [`which_comes_first_round_a_crossing`] gives on the one loop a ball off a
+/// pipe's axis crosses it in.
+///
+/// How far round the line a point is is never worked out as an angle. Each of
+/// the two is put in the half turn ahead of `from` or the half turn after it,
+/// by how it turns round the line from `from`. Two in different halves are
+/// ordered by that alone, and two in one half by how they turn from each
+/// other, which within half a turn is the order they come in.
+///
+/// A point at `from`'s own angle comes first, as the arrangement's own start
+/// does, and [`Decision::Zero`] means `one` and `other` are the same place on
+/// the loop. A point the two readings cannot place gets the answer a box
+/// straddling it gets: how far either of the two is from the other is not
+/// what was measured, so the enclosure is not handed on.
+fn which_comes_first_round_a_line(
+    line: RoundALine,
+    from: PredicatePoint,
+    one: PredicatePoint,
+    other: PredicatePoint,
+) -> Decision {
+    match [one, other].map(|place| how_far_round(line, from, place)) {
+        [HowFarRound::AtTheStart, HowFarRound::AtTheStart] => Decision::Zero,
+        [HowFarRound::CannotTell, _] | [_, HowFarRound::CannotTell] => NOTHING_IS_KNOWN,
+        [HowFarRound::AtTheStart, _]
+        | [HowFarRound::LessThanHalfWay, HowFarRound::HalfWayOrMore] => Decision::Pos,
+        [_, HowFarRound::AtTheStart]
+        | [HowFarRound::HalfWayOrMore, HowFarRound::LessThanHalfWay] => Decision::Neg,
+        [HowFarRound::LessThanHalfWay, HowFarRound::LessThanHalfWay]
+        | [HowFarRound::HalfWayOrMore, HowFarRound::HalfWayOrMore] => {
+            match line.turns(one, other) {
+                Decision::Zero => match line.faces(one, other) {
+                    Decision::Pos => Decision::Zero,
+                    Decision::Undecidable { .. } => NOTHING_IS_KNOWN,
+                    // Both are off the line and in one half turn, which holds
+                    // no two points half a turn apart.
+                    unreachable @ (Decision::Zero | Decision::Neg) => unreachable!(
+                        "two points in one half turn round a line, at one angle, face apart: \
+                         {unreachable:?}"
+                    ),
+                    other => unreachable!("unhandled decision: {other:?}"),
+                },
+                decided @ (Decision::Pos | Decision::Neg | Decision::Undecidable { .. }) => decided,
+                other => unreachable!("unhandled decision: {other:?}"),
+            }
+        }
+    }
+}
+
+/// How far round a [`RoundALine`] a point is from where the ordering starts.
+///
+/// **Exhaustive on purpose.** A turn starting at nothing splits into these and
+/// nothing else.
+#[derive(Clone, Copy, Debug)]
+enum HowFarRound {
+    /// At the start's own angle, nothing round.
+    AtTheStart,
+    /// Above nothing and under half a turn round.
+    LessThanHalfWay,
+    /// Half a turn round or more, and under a whole one.
+    HalfWayOrMore,
+    /// Too near the start's angle, or the angle half a turn from it, to tell,
+    /// or on the line itself, which has no angle round it.
+    CannotTell,
+}
+
+/// How far round `line` `place` is from `from`.
+fn how_far_round(line: RoundALine, from: PredicatePoint, place: PredicatePoint) -> HowFarRound {
+    match line.turns(from, place) {
+        Decision::Pos => HowFarRound::LessThanHalfWay,
+        Decision::Neg => HowFarRound::HalfWayOrMore,
+        Decision::Zero => match line.faces(from, place) {
+            Decision::Pos => HowFarRound::AtTheStart,
+            Decision::Neg => HowFarRound::HalfWayOrMore,
+            // The loop misses the line, but the arrangement asks about a step
+            // ahead of the start too, and that can be on it.
+            Decision::Zero | Decision::Undecidable { .. } => HowFarRound::CannotTell,
+            other => unreachable!("unhandled decision: {other:?}"),
+        },
+        Decision::Undecidable { .. } => HowFarRound::CannotTell,
+        other => unreachable!("unhandled decision: {other:?}"),
+    }
+}
+
+impl RoundALine {
+    /// [`Decision::Pos`] where `ahead` is under half a turn ahead of `place`
+    /// round the line, the way the loop runs, [`Decision::Neg`] where it is
+    /// under half a turn behind, and [`Decision::Zero`] where the two are at
+    /// one angle or half a turn apart.
+    fn turns(self, place: PredicatePoint, ahead: PredicatePoint) -> Decision {
+        let [first, second] = if self.backwards {
+            [ahead, place]
+        } else {
+            [place, ahead]
+        };
+        decide(&HowTwoPointsSitRoundALine {
+            line: self,
+            first,
+            second,
+            asks: WhatIsAsked::HowTheyTurn,
+        })
+        .0
+    }
+
+    /// [`Decision::Pos`] where two points that [`turns`](Self::turns) put at
+    /// one angle or half a turn apart are at one angle, and [`Decision::Neg`]
+    /// where they are half a turn apart. Nothing where either is on the line.
+    fn faces(self, first: PredicatePoint, second: PredicatePoint) -> Decision {
+        decide(&HowTwoPointsSitRoundALine {
+            line: self,
+            first,
+            second,
+            asks: WhatIsAsked::WhetherTheyFaceOneWay,
+        })
+        .0
+    }
+}
+
+/// How two points sit round a [`RoundALine`], evaluated the two ways the
+/// cascade can use.
+///
+/// A point `p` is read as `s = (p − c) · w` and `t = (p − c) · X`, for
+/// `X = (c − o) × w`: two coordinates square to the line, which turn
+/// anticlockwise about the step from the centre back to the axis. How two
+/// points turn is `t₁ s₂ − s₁ t₂`, which is `W ((p₁ − c) × (p₂ − c)) · (−d)`,
+/// a volume like the sweep [`HowThreeOnACurveWind`] works out. Whether they
+/// face one way is `s₁ s₂ + t₁ t₂`, whose two terms are of different units,
+/// since `X` is a length long and `w` is not; so it is a sign and not a size,
+/// and it is asked only where the two turn by nothing. There the two steps
+/// out from the line lie along one line, and stretching one coordinate does
+/// not change the sign.
+struct HowTwoPointsSitRoundALine {
+    line: RoundALine,
+    first: PredicatePoint,
+    second: PredicatePoint,
+    asks: WhatIsAsked,
+}
+
+/// Which of the two readings of [`HowTwoPointsSitRoundALine`] is asked.
+///
+/// **Exhaustive on purpose.** These two decide where a point is round a
+/// line, and nothing else is asked of two points there.
+#[derive(Clone, Copy, Debug)]
+enum WhatIsAsked {
+    HowTheyTurn,
+    WhetherTheyFaceOneWay,
+}
+
+impl Predicate for HowTwoPointsSitRoundALine {
+    fn name(&self) -> &'static str {
+        ROUND_A_CROSSING
+    }
+
+    /// No level 1, for the reason [`HowThreeOnACurveWind`] gives.
+    fn on_floats(&self) -> Option<Filtered> {
+        None
+    }
+
+    /// How the two turn is swept two ways, and the overlap is the answer, as
+    /// in [`HowThreeOnACurveWind`]: `t₁ s₂ − s₁ t₂` is `t₁ (s₂ − s₁) −
+    /// s₁ (t₂ − t₁)` for every two points, and the second reads the short step
+    /// between two points close together rather than two long ones from the
+    /// centre.
+    fn on_intervals(&self) -> Interval {
+        let along = exactly(self.line.along);
+        let out = cross_enclosing(
+            gap_enclosing(self.line.on_the_axis, self.line.centre),
+            along,
+        );
+        let gap = |here: [Interval; 3], there: [Interval; 3]| -> [Interval; 3] {
+            core::array::from_fn(|axis| there[axis] - here[axis])
+        };
+        let read = |step: [Interval; 3]| [dot_enclosing(step, along), dot_enclosing(step, out)];
+        let centre = exactly(self.line.centre);
+        let [first, second] = [self.first, self.second].map(PredicatePoint::enclosure);
+        let [s_first, t_first] = read(gap(centre, first));
+        let [s_second, t_second] = read(gap(centre, second));
+        match self.asks {
+            WhatIsAsked::HowTheyTurn => {
+                let [s_step, t_step] = read(gap(first, second));
+                where_two_enclosures_of_one_number_overlap(
+                    t_first * s_second - s_first * t_second,
+                    t_first * s_step - s_first * t_step,
+                )
+            }
+            WhatIsAsked::WhetherTheyFaceOneWay => s_first * s_second + t_first * t_second,
+        }
+    }
+
+    fn exactly(&self) -> Option<Decision> {
+        let out = Exact::cross_of(
+            &Exact::gap_between(self.line.on_the_axis, self.line.centre),
+            self.line.along,
+        )?;
+        let along = Exact::of_each(self.line.along);
+        let read = |point: PredicatePoint| -> Option<[Exact; 2]> {
+            let step = Exact::gap_between(self.line.centre, point.exact_coordinates()?);
+            Some([
+                Exact::dot_of_two_exact(&step, &along)?,
+                Exact::dot_of_two_exact(&step, &out)?,
+            ])
+        };
+        let [s_first, t_first] = read(self.first)?;
+        let [s_second, t_second] = read(self.second)?;
+        let value = match self.asks {
+            WhatIsAsked::HowTheyTurn => t_first.times(&s_second)?.minus(&s_first.times(&t_second)?),
+            WhatIsAsked::WhetherTheyFaceOneWay => {
+                s_first.times(&s_second)?.plus(&t_first.times(&t_second)?)
+            }
+        };
+        match value.sign() {
+            Decision::Neg => Some(Decision::Neg),
+            Decision::Zero => Some(Decision::Zero),
+            Decision::Pos => Some(Decision::Pos),
+            // A product overflowed on the way in, as in `HowThreeOnACurveWind`.
             Decision::Undecidable { .. } => None,
             other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
         }
@@ -2028,26 +2361,105 @@ mod tests {
         }
     }
 
-    /// A ball off a pipe's axis that does not swallow the pipe's whole
-    /// cross-section crosses it in one loop that runs back and forth round the
-    /// axis, and is refused rather than ordered: one that reaches into the
-    /// pipe's side, and one no wider than the pipe. A ball that touches the
-    /// pipe from inside is in
+    /// Ten points of the one loop a ball off a pipe's axis that does not
+    /// swallow its whole cross-section crosses it in come back in the order
+    /// they run round it, from each of the ten, every pair of the other nine
+    /// both ways and with the pair of surfaces swapped. The loop runs back and
+    /// forth round the pipe's axis, so no normal orders it the way a conic is
+    /// ordered. The ball that reaches into the pipe's side is wide enough that
+    /// the loop's shadow on a plane square to the line from the axis to the
+    /// centre is not convex: `1² + 1.5²` is less than `2²`. The other is no
+    /// wider than the pipe, and its loop runs through the pipe's axis. Each
+    /// step is checked against `∇S × ∇T` before the order is asked, so what
+    /// this pins is the geometry.
+    #[test]
+    fn ten_points_on_the_one_loop_where_a_ball_crosses_a_pipe_off_its_axis_come_back_in_the_order_they_run_round_it()
+     {
+        for (radius, off) in [(2.0, 1.5), (1.0, 1.0)] {
+            let [ball, pipe] = a_ball_off_a_pipes_axis(radius, off);
+            let round = round_the_one_loop(radius, off);
+            let count = round.len();
+            for start in 0..count {
+                let [here, next] = [round[start], round[(start + 1) % count]];
+                let runs = Vector::new(here[0] - off, here[1], here[2])
+                    .cross(Vector::new(here[0], here[1], 0.0));
+                let step = Vector::new(next[0] - here[0], next[1] - here[1], next[2] - here[2]);
+                assert!(
+                    runs.dot(step) > 0.0,
+                    "ball {radius} off {off}: the crossing runs {runs:?} at {here:?} and the \
+                     step to {next:?} is {step:?}"
+                );
+            }
+            for start in 0..count {
+                let at = |ahead: usize| PredicatePoint::from(round[(start + ahead) % count]);
+                for one in 1..count {
+                    for other in one + 1..count {
+                        let what = format!(
+                            "ball {radius} off {off}, from point {start}, {one} then {other} ahead"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&ball, &pipe],
+                                at(0),
+                                at(one),
+                                at(other)
+                            ),
+                            Ok(Decision::Pos),
+                            "{what}"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&ball, &pipe],
+                                at(0),
+                                at(other),
+                                at(one)
+                            ),
+                            Ok(Decision::Neg),
+                            "{what}, asked the other way"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&pipe, &ball],
+                                at(0),
+                                at(one),
+                                at(other)
+                            ),
+                            Ok(Decision::Neg),
+                            "{what}, the pair swapped"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Ten points of the one loop [`a_ball_off_a_pipes_axis`] crosses its pipe
+    /// in, in the order the crossing runs with the ball taken first: above
+    /// `z = 0` with the angle round the pipe's axis rising, then below it with
+    /// the angle falling.
+    fn round_the_one_loop(radius: f64, off: f64) -> Vec<[f64; 3]> {
+        let widest = ((1.0 + off * off - radius * radius) / (2.0 * off)).acos();
+        let on_the_side = |side: f64, step: i32| {
+            let angle = widest * f64::from(step) / 3.0;
+            let [x, y] = [angle.cos(), angle.sin()];
+            let across = (x - off) * (x - off) + y * y;
+            [x, y, side * (radius * radius - across).sqrt()]
+        };
+        let above = (-2..=2).map(|step| on_the_side(1.0, step));
+        let below = (-2..=2).rev().map(|step| on_the_side(-1.0, step));
+        above.chain(below).collect()
+    }
+
+    /// A ball off a pipe's axis that misses the pipe, or touches its side from
+    /// outside at one point, crosses it in no loop, and is refused rather than
+    /// ordered. A ball that touches the pipe from inside is in
     /// [`a_crossing_that_is_not_a_conic_is_refused_rather_than_ordered`].
     #[test]
-    fn a_ball_off_a_pipes_axis_that_does_not_swallow_it_is_refused() {
-        for (what, radius, off, on_both) in [
-            (
-                "reaching into its side",
-                2.0,
-                1.5,
-                [1.0, 0.0, 3.75_f64.sqrt()],
-            ),
-            ("no wider than it", 1.0, 1.0, [1.0, 0.0, 1.0]),
-        ] {
+    fn a_ball_off_a_pipes_axis_that_misses_it_or_touches_its_side_is_refused() {
+        for (what, radius, off) in [("missing it", 0.5, 2.0), ("touching its side", 1.0, 2.0)] {
             let [ball, pipe] = a_ball_off_a_pipes_axis(radius, off);
             let [from, one, other] =
-                [on_both, [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]].map(PredicatePoint::from);
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]].map(PredicatePoint::from);
             for pair in [[&ball, &pipe], [&pipe, &ball]] {
                 assert_eq!(
                     which_comes_first_round_a_crossing(pair, from, one, other),
