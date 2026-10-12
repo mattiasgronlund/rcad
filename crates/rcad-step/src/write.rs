@@ -3605,6 +3605,537 @@ mod plane_round_trip_tests {
             })
             .collect()
     }
+
+    mod probe_q1819 {
+        use core::f64::consts::{FRAC_PI_2, TAU};
+
+        use rcad_geom::{
+            Axis, Cylinder, Isometry, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Scale, Sphere,
+            Surface, Vector,
+        };
+        use rcad_predicates::{Policy, ProvenanceLog};
+        use rcad_topo::Model;
+
+        use super::super::{
+            Crossing, Shape, a_centre_for_an_arc_between, a_centre_its_plane_reads_back_from,
+            a_surface_holds_the_circle, how_far_off_the_circle_can_be, stepped,
+            the_nearest_centre_its_faces_hold_the_circle_at, where_a_plane_crosses_a_ball,
+            where_a_plane_crosses_a_pipe, write,
+        };
+        use super::{a_dome_on_a_bar, what_its_rim_is_cut_from};
+        use crate::{Import, StepFile};
+
+        struct Rng(u64);
+        impl Rng {
+            fn next(&mut self) -> u64 {
+                self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+                let mut z = self.0;
+                z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+                z ^ (z >> 31)
+            }
+            fn unit(&mut self) -> f64 {
+                (self.next() >> 11) as f64 / (1u64 << 53) as f64
+            }
+            fn range(&mut self, low: i64, high: i64) -> i64 {
+                low + (self.next() % ((high - low + 1) as u64)) as i64
+            }
+        }
+
+        fn near_a_power_of_two(rng: &mut Rng, low: i64, high: i64) -> f64 {
+            let power = 2_f64.powi(rng.range(low, high) as i32);
+            let sign = if rng.next() & 1 == 0 { 1.0 } else { -1.0 };
+            sign * stepped(power, rng.range(-2, 2) as i32)
+        }
+
+        fn a_turn_told(rng: &mut Rng) -> (Isometry, String) {
+            let quarter = |axis: Axis, times: i64| {
+                Isometry::rotation(&axis, times as f64 * FRAC_PI_2).expect("a finite turn")
+            };
+            let direction = Vector::new(rng.unit() - 0.5, rng.unit() - 0.5, rng.unit() - 0.5);
+            let Ok(axis) = Axis::new(Point::origin(), direction) else {
+                return (Isometry::identity(), "identity".into());
+            };
+            if rng.next() % 4 == 0 {
+                let angle = rng.unit() * TAU;
+                return (
+                    Isometry::rotation(&axis, angle).expect("a finite turn"),
+                    format!("whole: direction {direction:?} angle {angle:?}"),
+                );
+            }
+            let small = 10_f64.powf(-6.0 + 4.0 * rng.unit());
+            let wobble = Isometry::rotation(&axis, small).expect("a finite turn");
+            let (qz, qx) = (rng.range(0, 3), rng.range(0, 3));
+            let about_z = quarter(Axis::z(), qz);
+            let about_x = quarter(Axis::x(), qx);
+            (
+                wobble.compose(&about_z.compose(&about_x)),
+                format!("wobble: direction {direction:?} small {small:?} qz {qz} qx {qx}"),
+            )
+        }
+
+        fn a_place(rng: &mut Rng, low: i64, high: i64) -> Vector {
+            let mut one = || {
+                if rng.next() % 5 == 0 {
+                    0.0
+                } else {
+                    near_a_power_of_two(rng, low, high)
+                }
+            };
+            Vector::new(one(), one(), one())
+        }
+
+        fn units(surface: &Surface, centre: Point, axis: Vector, radius: f64) -> f64 {
+            let (off, largest) =
+                how_far_off_the_circle_can_be(surface, centre, axis, radius).expect("a bound");
+            off / (NEAREST_F64_POINT_ROUNDOFF * largest)
+        }
+
+        fn held_with(
+            cut: &Plane,
+            faces: [&Surface; 2],
+            radius: f64,
+            starts: &[Point],
+        ) -> Option<Point> {
+            let both_hold = |centre: Point| {
+                faces
+                    .iter()
+                    .all(|face| a_surface_holds_the_circle(face, centre, cut.normal(), radius))
+            };
+            starts.iter().find_map(|&near| {
+                a_centre_its_plane_reads_back_from(cut, near, both_hold).or_else(|| {
+                    the_nearest_centre_its_faces_hold_the_circle_at(
+                        cut,
+                        &faces,
+                        &Crossing {
+                            centre: near,
+                            turning: cut.normal(),
+                            shape: Shape::Circle { radius },
+                        },
+                    )
+                })
+            })
+        }
+
+        fn round_trip(radius: f64, length: f64, ball_radius: f64, moved: &Isometry) -> String {
+            let policy = Policy::certified();
+            let mut log = ProvenanceLog::new();
+            let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
+            let solid = a_dome_on_a_bar(&mut model, radius, length, ball_radius);
+            model.place_solid(solid, moved).expect("a key");
+            let text = match write(&model, "a dome") {
+                Ok(text) => text,
+                Err(why) => return format!("WRITE REFUSED {why}"),
+            };
+            let file = StepFile::read(text.as_bytes()).expect("it parses");
+            match Import::read(&file, &policy, &mut log) {
+                Err(why) => format!("READ REFUSED {why}"),
+                Ok(back) => {
+                    let kinds: Vec<&str> = what_its_rim_is_cut_from(back.model())
+                        .iter()
+                        .map(|and| match and {
+                            Surface::Plane(_) => "plane",
+                            Surface::Sphere(_) => "ball",
+                            Surface::Cylinder(_) => "pipe",
+                            _ => "other",
+                        })
+                        .collect();
+                    format!("READ rim cut from {kinds:?}")
+                }
+            }
+        }
+
+        struct Dome {
+            radius: f64,
+            length: f64,
+            ball_radius: f64,
+            place: Vector,
+            told: String,
+            moved: Isometry,
+            pipe: Surface,
+            ball: Surface,
+            sphere: Sphere,
+            cut: Plane,
+            crossing: Crossing,
+            across: f64,
+        }
+
+        fn draw(rng: &mut Rng) -> Option<Dome> {
+            let radius = near_a_power_of_two(rng, -3, 5).abs();
+            let length = if rng.next() % 2 == 0 {
+                near_a_power_of_two(rng, 0, 12).abs()
+            } else {
+                2_f64.powi(rng.range(0, 12) as i32) * (1.0 + rng.unit())
+            };
+            let bigger = if rng.next() % 2 == 0 {
+                1.0
+            } else {
+                1.0 + rng.unit()
+            };
+            let ball_radius = radius * bigger;
+            let above = ((ball_radius - radius) * (ball_radius + radius)).sqrt();
+            let place = a_place(rng, -2, 12);
+            let (turn, told) = a_turn_told(rng);
+            let moved = Isometry::translation(place)
+                .expect("a finite move")
+                .compose(&turn);
+            let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius"))
+                .transformed(&moved);
+            let ball = Surface::Sphere(
+                Sphere::new(Point::new(0.0, 0.0, length - above), ball_radius).expect("a radius"),
+            )
+            .transformed(&moved);
+            let cut = Plane::from_point_and_normal(
+                Point::new(0.0, 0.0, length),
+                Vector::new(0.0, 0.0, 1.0),
+            )
+            .ok()?;
+            let Surface::Plane(cut) = Surface::Plane(cut).transformed(&moved) else {
+                unreachable!()
+            };
+            let Surface::Cylinder(round) = pipe else {
+                unreachable!()
+            };
+            let Surface::Sphere(sphere) = ball else {
+                unreachable!()
+            };
+            let crossing = where_a_plane_crosses_a_pipe(&cut, &round)?;
+            let Shape::Circle { radius: across } = crossing.shape else {
+                return None;
+            };
+            Some(Dome {
+                radius,
+                length,
+                ball_radius,
+                place,
+                told,
+                moved,
+                pipe,
+                ball,
+                sphere,
+                cut,
+                crossing,
+                across,
+            })
+        }
+
+        fn written(dome: &Dome) -> Option<(Point, f64)> {
+            a_centre_for_an_arc_between(&dome.pipe, &dome.ball, &dome.cut, &dome.crossing)
+                .map(|centre| (centre, dome.across))
+        }
+
+        #[derive(Default)]
+        struct Counts {
+            not_held: u64,
+            far_at_foot: u64,
+            near_at_foot: u64,
+            own_held: u64,
+            own_held_far: u64,
+            halfway_held: u64,
+            halfway_held_far: u64,
+            halfway_not_own: u64,
+        }
+
+        fn look(dome: &Dome, counts: &mut Counts) -> bool {
+            let Some((centre, written_radius)) = written(dome) else {
+                return false;
+            };
+            let normal = dome.cut.normal();
+            if [&dome.pipe, &dome.ball]
+                .iter()
+                .all(|face| a_surface_holds_the_circle(face, centre, normal, written_radius))
+            {
+                return false;
+            }
+            counts.not_held += 1;
+            let foot = where_a_plane_crosses_a_ball(&dome.cut, &dome.sphere).expect("crosses");
+            let Shape::Circle { radius: own } = foot.shape else {
+                unreachable!()
+            };
+            let at_foot = units(&dome.ball, foot.centre, normal, dome.across);
+            let far = at_foot > 16.0;
+            if far {
+                counts.far_at_foot += 1;
+            } else {
+                counts.near_at_foot += 1;
+            }
+            let starts = [dome.crossing.centre, foot.centre];
+            let own_found = held_with(&dome.cut, [&dome.pipe, &dome.ball], own, &starts);
+            if own_found.is_some() {
+                counts.own_held += 1;
+                if far {
+                    counts.own_held_far += 1;
+                }
+            }
+            let halfway = 0.5 * (own + dome.across);
+            let halfway_found = held_with(&dome.cut, [&dome.pipe, &dome.ball], halfway, &starts);
+            if halfway_found.is_some() {
+                counts.halfway_held += 1;
+                if far {
+                    counts.halfway_held_far += 1;
+                }
+                if own_found.is_none() {
+                    counts.halfway_not_own += 1;
+                }
+            }
+            println!(
+                "CASE radius {:?} length {:?} ball {:?} place {:?} turn {} at foot {at_foot} \
+                 own {own:?} pipe-with-own-at-foot {} own found {} halfway found {}",
+                dome.radius,
+                dome.length,
+                dome.ball_radius,
+                dome.place,
+                dome.told,
+                units(&dome.pipe, foot.centre, normal, own),
+                own_found.is_some(),
+                halfway_found.is_some(),
+            );
+            true
+        }
+
+        fn report(counts: &Counts) {
+            let Counts {
+                not_held,
+                far_at_foot,
+                near_at_foot,
+                own_held,
+                own_held_far,
+                halfway_held,
+                halfway_held_far,
+                halfway_not_own,
+            } = counts;
+            println!(
+                "not held {not_held} far at foot {far_at_foot} near at foot {near_at_foot}; own \
+                 radius held {own_held} (far {own_held_far}) halfway held {halfway_held} (far \
+                 {halfway_held_far}) halfway not own {halfway_not_own}"
+            );
+        }
+
+        #[test]
+        #[ignore = "Q1819 relay probe: run by hand with --run-ignored only, remove before the row lands"]
+        fn probe_q1819_domes_whose_ball_is_far_off_at_its_foot() {
+            let mut rng = Rng(17920);
+            let mut counts = Counts::default();
+            let mut tried = 0;
+            let mut states = Vec::new();
+            for _ in 0..3_000_000 {
+                let state = rng.0;
+                let Some(dome) = draw(&mut rng) else {
+                    continue;
+                };
+                tried += 1;
+                if look(&dome, &mut counts) {
+                    states.push(state);
+                }
+            }
+            println!("tried {tried}");
+            report(&counts);
+            println!("STATES {states:?}");
+        }
+
+        const STATES: &[u64] = &[
+            3168959767257606720,
+            13233567512045390276,
+            13094203359367936782,
+            3397402411482425728,
+            10514819992189034799,
+            5374005340413058923,
+            16070540646762951470,
+            15833028045495322469,
+            396682087910927445,
+            6622301509773995276,
+            6449300319549315137,
+            14199729003862987080,
+            5414641507263850733,
+            8295473136692703241,
+            12066177928328938415,
+            18432924625677421571,
+            9608856467157215794,
+            16377554790939524640,
+            13325093388361259543,
+            6872027076341056462,
+            6760150754871861952,
+            10033492177860005204,
+            3700456603909675313,
+            5711408236600764081,
+            2731224743109291084,
+            4457392779858401151,
+            9975827937242909428,
+            17553323389408202027,
+            12677781002413317316,
+            14237960680367655912,
+            10415630895976286186,
+            279964700299266001,
+            15345935156208301816,
+            17897490901797440840,
+            10612525713717000852,
+            17764595915939489654,
+            1664862358286151420,
+            14562219028088687083,
+            9725783304216988728,
+            14052997080670685587,
+            16803278724884801903,
+            16245482323793483952,
+            1176011579944119628,
+            7116417486907667674,
+            16657839451719307368,
+            9123319039273395748,
+            1757607692799576158,
+            17431278420147808287,
+            17468428001184615091,
+            6803640608371870432,
+            15600185063057737408,
+            3750273580301958686,
+            902027531825599920,
+            13687575838235241868,
+            16202715839500539330,
+            1959564387658445765,
+            15444226542747379871,
+            149589738483653335,
+            8307643549036013064,
+            2621262950770353764,
+            2087997757557372648,
+            13214412355457375617,
+            13958536198969213765,
+            3596678443958693618,
+            17781201986566228627,
+            5733748190756948267,
+            960834251635140841,
+            1001888081894222085,
+            18012293549189686787,
+            11348416715045958141,
+            4870097613983704633,
+            8647705278572842038,
+            13880409214123019323,
+            17593411551917311918,
+            17786981657672238321,
+            15678023620318201461,
+            10654141039354949211,
+            5335787154945575287,
+            10186600587607846603,
+            11421806464452066261,
+            6409364798850434151,
+            7094007022987257400,
+            7993305975344064523,
+            14505953950265804276,
+            7025487532019653486,
+            17707965090059507719,
+            4230955687361551575,
+            7884780323536253429,
+            13345257237498726436,
+            7368163753906133648,
+            12884877788883385736,
+            16434482643155729881,
+            2166874069286226101,
+            4371793641239561378,
+            8193961551802734361,
+            6794290692116722861,
+            15668938514571956112,
+            11331875156785919537,
+            2162254366674863894,
+            8815553910547913407,
+            8431402407818203728,
+            17929509542528958468,
+            11509352559117642615,
+            11411330111729584034,
+            9965675673643079100,
+            525119033896554860,
+            2483194130184732627,
+            18166850355017906062,
+            8562964189825734167,
+            17547107460480867117,
+            3210413560533616749,
+            4555030884776324822,
+            17593368998961189556,
+            15791610596688750776,
+            18256736769129163438,
+            2865458849503130535,
+            576904453902794302,
+            6821181496786293326,
+            5767832978030176751,
+            17813947442214410539,
+            7641917417564739098,
+            16027796121880584855,
+            1080109323958570888,
+            11774357672791064572,
+            3027073380316147826,
+            14883919821475049757,
+            3471236464904935261,
+            12722599167477054264,
+            4635086100879119957,
+            8538685878373306317,
+            2826340824852367662,
+            10460794979196152934,
+            12352071706923982976,
+            14896488619881096406,
+            5590198383067790902,
+            9277921974144437917,
+            5263687503878348832,
+            13738204865833534355,
+            16115058128691706379,
+            6856520720861481965,
+            7140608693315342227,
+            8961198845985660593,
+            17582261193651030846,
+            4987986120528431774,
+            8799890573526834446,
+            15419934870634866931,
+            3399774946755427834,
+            11077721847753405292,
+            7907804539652979537,
+            1868046768626811002,
+            12916070123727134027,
+            15628830311072718586,
+            3086290189182260503,
+            18061930609896154355,
+            11685622206245645152,
+            814892209149112148,
+            2301134685911077425,
+            10760338968732589346,
+            8997111479522709584,
+            1652376797036941028,
+            2669911279205438532,
+            1534309268828073215,
+            15690481355136408233,
+            17071436550676172409,
+            5454353795676218525,
+            8913990575634660996,
+            15613289740633314432,
+            12151601962836596461,
+            17962415425428245270,
+            7065543056523125679,
+            1910408739082392973,
+            152304957292343122,
+            9176978223497120284,
+            8681688023187040176,
+            4539702104383799144,
+            13547862663158316561,
+            16616496982785337428,
+            9191539976615626302,
+            8861568469287794379,
+            16319896808474154795,
+            15393523901141519283,
+            7808439867485690678,
+            3519433256438159351,
+        ];
+
+        #[test]
+        #[ignore = "Q1819 relay probe: run by hand with --run-ignored only, remove before the row lands"]
+        fn probe_q1819_the_domes_again() {
+            let mut counts = Counts::default();
+            for (index, &state) in STATES.iter().enumerate() {
+                let dome = draw(&mut Rng(state)).expect("a dome");
+                look(&dome, &mut counts);
+                if index < 3 {
+                    println!(
+                        "ROUND TRIP {}",
+                        round_trip(dome.radius, dome.length, dome.ball_radius, &dome.moved)
+                    );
+                }
+            }
+            report(&counts);
+        }
+    }
 }
 
 #[cfg(test)]
