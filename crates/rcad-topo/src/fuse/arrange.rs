@@ -3070,23 +3070,17 @@ impl<'f> Arrangement<'f> {
         for (
             node,
             Node {
-                point,
-                crossings,
-                vertex,
-                half_way_round,
-                ..
+                crossings, vertex, ..
             },
         ) in self.nodes.iter().enumerate()
         {
-            let off_the_face =
-                vertex.is_none() && !half_way_round && self.face.bounds.provably_misses(*point);
             for &crossing in crossings {
                 let crossed_by_nothing_drawn = vertex.is_none()
                     && crossings.len() > 1
                     && crossings
                         .iter()
                         .all(|&other| other == crossing || !self.crossings[other].reaches_the_face);
-                if crossed_by_nothing_drawn || off_the_face {
+                if crossed_by_nothing_drawn {
                     set_aside[crossing].push(node);
                 } else {
                     on_each[crossing].push(node);
