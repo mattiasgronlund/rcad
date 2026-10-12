@@ -60,7 +60,7 @@
 //! rounding inside it** (queue row Q1582). With the triangle above in place of
 //! the wedge, both ends are above at 17 of 60 turns and every rule both ways
 //! round answers there. Where an end is inside, every exact answer needs the
-//! sliver between the prism and the top, under `2.2e-16` deep, and the fuse
+//! sliver between the prism and the top, under `1.8e-15` deep, and the fuse
 //! refuses most rules `DynamicRangeTooWide` or `HoleWindsWithTheOuterWire`:
 //! limits under `Policy::certified()`. One was a gap: at the turn `0.625` the
 //! parting read the prism's wall's far corner by its written point, a rounding
@@ -408,7 +408,7 @@ fn a_resting_prism_with_one_end_a_rounding_inside_a_turned_top_unites_as_they_st
 /// `HoleWindsWithTheOuterWire`, the union both ways round and the block less
 /// the prism at 11 turns. Every refusal comes where an end is inside, and every
 /// exact answer there needs the sliver, which the test below shows is under
-/// one rounding deep. Under `Policy::certified()` those are limits.
+/// two roundings deep. Under `Policy::certified()` those are limits.
 ///
 /// **One gap was fixed.** At the turn `0.625`, one end inside, the union was
 /// refused `ResultIsNotManifold { count: 4 }` both ways round, for a corner of
@@ -511,22 +511,32 @@ fn a_resting_prism_on_a_turned_blocks_top_answers_as_they_stand_or_is_refused_by
     );
 }
 
-/// **Every end of the resting prism's edge inside the turned top is under a
-/// rounding deep**, the gap between two doubles where the end is: the meet of
+/// **Every end of the resting prism's edge inside the turned top is under two
+/// roundings deep**, two gaps between doubles where the end is: the meet of
 /// the two walls and that end's plane, asked exactly, is above the top moved
-/// in by that gap, at each of the 65 ends inside over [`TURNS`].
+/// in by two gaps, at each of the 65 ends inside over [`TURNS`]. All but one
+/// are under one gap; the end at `z = 8` turned `1.475` is `9.1e-16` deep,
+/// just past the `8.9e-16` there.
 ///
 /// The end at `z = 2` turned has its larger coordinate between `√2` and 2,
 /// where doubles are `2.2e-16` apart, and the end at `z = 8` between `4√2` and
 /// 8, where they are `8.9e-16` apart: half the end plane's offset times
-/// `f64::EPSILON`. Every exact answer with an end inside has the sliver between
-/// the prism and the top there, so a feature under `8.9e-16` beside a block
-/// reaching 10 from the origin: a range above `1.1e16`, against the `1e11` a
-/// model supports (`docs/decisions.md` §3.5). Under `Policy::certified()` each
-/// refusal of the test above is a limit, as §417.5 rules for the turned cube's
-/// tip (`docs/decisions.md` §438).
+/// `f64::EPSILON`. The depth is a rounding of the walls' turned normals, and
+/// both walls pass through the origin, so it grows with the end's distance
+/// from it.
+///
+/// Every exact answer with an end inside has the sliver between the prism and
+/// the top there, and a side across it along the top, from where one wall
+/// meets the top to where the other does. The walls lean out 3 across for 2
+/// up and 1 across for 2 up, so that side is twice the depth, under `3.6e-15`,
+/// beside a block reaching 10 from the origin: a range above `2.7e15`, against
+/// the `1e11` a model supports (`docs/decisions.md` §3.5). Under
+/// `Policy::certified()` each refusal of the test above is a limit by that
+/// range, as §417.5 rules for the turned cube's tip (`docs/decisions.md`
+/// §438). It is not shown that no double lies in the sliver: at a small turn
+/// the end's smaller coordinate has finer doubles than its larger one.
 #[test]
-fn every_end_of_the_resting_prisms_edge_inside_the_turned_top_is_under_a_rounding_deep() {
+fn every_end_of_the_resting_prisms_edge_inside_the_turned_top_is_under_two_roundings_deep() {
     assert_eq!(
         2.0 * f64::EPSILON / 2.0,
         2.0_f64.next_down().next_up() - 2.0_f64.next_down()
@@ -535,7 +545,7 @@ fn every_end_of_the_resting_prisms_edge_inside_the_turned_top_is_under_a_roundin
         8.0 * f64::EPSILON / 2.0,
         8.0_f64.next_down().next_up() - 8.0_f64.next_down()
     );
-    let mut deeper = Vec::new();
+    let mut deeper_than = [Vec::new(), Vec::new()];
     let mut inside = 0;
     for turn in TURNS.map(a_turn) {
         let planes = planes_round_the_edge_turned(&turned_by(turn), |model| {
@@ -547,22 +557,26 @@ fn every_end_of_the_resting_prisms_edge_inside_the_turned_top_is_under_a_roundin
                 continue;
             }
             inside += 1;
-            let a_rounding_where_the_end_is = end[3].abs() / 2.0 * f64::EPSILON;
-            let the_top_moved_in = [x, y, z, offset + a_rounding_where_the_end_is];
-            let against_the_top_moved_in = side_of_a_plane_where_three_planes_meet(
-                [planes.walls[0], planes.walls[1], *end],
-                the_top_moved_in,
-            )
-            .expect("two walls and an end meet in a point");
-            if against_the_top_moved_in != Decision::Pos {
-                deeper.push(format!(
-                    "turned {turn}, end {end:?}: {against_the_top_moved_in:?}"
-                ));
+            let a_gap_where_the_end_is = end[3].abs() / 2.0 * f64::EPSILON;
+            for (gaps, deeper) in [1.0, 2.0].into_iter().zip(&mut deeper_than) {
+                let the_top_moved_in = [x, y, z, offset + gaps * a_gap_where_the_end_is];
+                let against_the_top_moved_in = side_of_a_plane_where_three_planes_meet(
+                    [planes.walls[0], planes.walls[1], *end],
+                    the_top_moved_in,
+                )
+                .expect("two walls and an end meet in a point");
+                if against_the_top_moved_in != Decision::Pos {
+                    deeper.push(format!("turned {turn}, end at {}", end[3].abs()));
+                }
             }
         }
     }
-    assert!(deeper.is_empty(), "{}", deeper.join("\n"));
     assert_eq!(inside, 65, "21 turns with one end inside and 22 with two");
+    assert_eq!(
+        deeper_than,
+        [vec!["turned 1.475, end at 8".to_owned()], Vec::new()],
+        "deeper than one gap, and than two"
+    );
 }
 
 /// The prism turned over and moved into the block, its edge on the top face
