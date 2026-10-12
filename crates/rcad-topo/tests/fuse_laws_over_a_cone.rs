@@ -150,6 +150,10 @@ fn a_block_shared_with_its_union_with_a_cone_is_the_block() {
 /// wrong answers they are, and the rows of [`SHARED_WITH_THE_UNION_IN_PIECES`],
 /// which [`a_frustum_beside_a_block_comes_back_from_absorption_with_its_wall_in_pieces`]
 /// pins.
+///
+/// Three of those rows, `(0.5, 1.0, 6.0)`, `(0.25, 3.0, 10.0)` and
+/// `(0.25, 3.0, 6.0)`, answer since the half-plane fix of Q1660 (commit
+/// `ca916de9`); before it they were refused `CannotTellTheCellsOfAFaceApart`.
 #[test]
 fn a_cone_shared_with_its_union_with_a_block_is_the_cone() {
     let pairs: Vec<Pair> = every_pair()
@@ -175,6 +179,11 @@ fn a_cone_shared_with_its_union_with_a_block_is_the_cone() {
 /// cone that the fuse does not join, so it has corners `A` never had, and
 /// lacks the corners of `A`'s seam. The day the fuse joins those pieces this
 /// fails, and the rows go back to the two laws.
+///
+/// `(0.5, 1.0, 6.0)`, `(0.25, 3.0, 10.0)` and `(0.25, 3.0, 6.0)` answer in
+/// both this test's rows and `SHARED_WITH_THE_UNION_IN_PIECES`'s since the
+/// half-plane fix of Q1660 (commit `ca916de9`); before it they were refused
+/// `CannotTellTheCellsOfAFaceApart`.
 #[test]
 fn a_frustum_beside_a_block_comes_back_from_absorption_with_its_wall_in_pieces() {
     let policy = Policy::certified();
@@ -868,11 +877,14 @@ const UNITED_WITH_THE_SHARE_IN_PIECES: [(f64, f64, f64); 10] = [
 ];
 
 /// The same for `A ∩ (A ∪ B)`.
-const SHARED_WITH_THE_UNION_IN_PIECES: [(f64, f64, f64); 4] = [
+const SHARED_WITH_THE_UNION_IN_PIECES: [(f64, f64, f64); 7] = [
     (0.5, 4.0, 9.0),
     (0.5, 2.0, 10.0),
     (0.5, 3.0, 11.0),
     (0.5, 2.0, 11.0),
+    (0.5, 1.0, 6.0),
+    (0.25, 3.0, 10.0),
+    (0.25, 3.0, 6.0),
 ];
 
 /// Whether `pair` is a frustum beside a block with one of `rows`' numbers.
