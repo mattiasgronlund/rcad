@@ -149,7 +149,7 @@ fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
 /// **Q1614 moved the certified six.** The fuse meshes the ball's face while
 /// it nests the answer's shells, and since Q1614 it asks the range before
 /// that (`docs/decisions.md` §87.3). Until then the certified six were refused
-/// as the tolerant six are, with the same two records.
+/// as the tolerant six are, with the two records the tolerant six then had.
 ///
 /// **The last two were refused earlier, while the answer was written**, by
 /// `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom`, until the
@@ -159,9 +159,13 @@ fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
 /// the sliver's two short arcs alone, and the refusal comes from the mesh.
 /// Neither ever answered.
 ///
-/// Each tolerant one comes back with two records, `side of a half-space`,
-/// which nesting the shells writes, and each certified one, stopped before
-/// that, with none. Neither record has been traced.
+/// **No fuse records anything.** Until Q1837 each tolerant one came back with
+/// two records, `side of a half-space`, written while the shells were nested.
+/// Q1837 changed nothing but the walk, which since then picks the arc of a
+/// circle whose middle a half-space surely holds without asking the sign of
+/// the other arc's middle, and records a sign only when neither arc is told.
+/// So the two were signs about the middle of an arc nobody could tell, asked
+/// while the other arc was told. The refusal did not move.
 #[test]
 fn the_slivers_no_point_is_inside_are_placed_by_their_sides_and_each_answer_is_refused_later() {
     for rule in EVERY_RULE {
@@ -182,14 +186,7 @@ fn the_slivers_no_point_is_inside_are_placed_by_their_sides_and_each_answer_is_r
             }
 
             let (fused, records) = fused_and_recorded(rule, &Policy::tolerant(25.0), ball_first);
-            assert_eq!(
-                records
-                    .iter()
-                    .map(|record| (record.predicate(), record.level()))
-                    .collect::<Vec<_>>(),
-                [("side of a half-space", Level::Interval); 2],
-                "tolerant, {case:?}: {records:#?}"
-            );
+            assert!(records.is_empty(), "tolerant, {case:?}: {records:#?}");
             match fused {
                 Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }) => {}
                 Ok(fused) => panic!(
@@ -198,80 +195,6 @@ fn the_slivers_no_point_is_inside_are_placed_by_their_sides_and_each_answer_is_r
                     fused.solids().len()
                 ),
                 Err(other) => panic!("tolerant, {case:?}: {other:?}"),
-            }
-        }
-    }
-}
-
-#[test]
-fn probe_q1844_table() {
-    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
-        for rule in EVERY_RULE {
-            for ball_first in [true, false] {
-                let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm"));
-                let ball = model
-                    .add_ball(1.0 + f64::powi(2.0, -51), &Isometry::identity())
-                    .expect("r");
-                let edge = f64::powi(2.0, -25);
-                let square = ProfileBuilder::new(vec![
-                    [-4.0, edge],
-                    [-1.0, edge],
-                    [-1.0, edge + 3.0],
-                    [-4.0, edge + 3.0],
-                ])
-                .build(&Policy::certified(), &mut ProvenanceLog::new())
-                .expect("sq");
-                let block = model
-                    .add_extrusion(
-                        &square,
-                        4.0,
-                        &Isometry::translation(Vector::new(0.0, 0.0, -2.0)).expect("s"),
-                    )
-                    .expect("h");
-                let mut log = ProvenanceLog::new();
-                let fused = if ball_first {
-                    model.fuse(&[ball], &[block], rule, &policy, &mut log)
-                } else {
-                    model.fuse(&[block], &[ball], rule, &policy, &mut log)
-                };
-                let records: Vec<_> = match &fused {
-                    Err(Error::Undecidable { records }) => records.records().to_vec(),
-                    _ => log.records().to_vec(),
-                };
-                let recs: Vec<_> = records
-                    .iter()
-                    .map(|r| (r.predicate(), r.level(), r.outcome()))
-                    .collect();
-                let what = match &fused {
-                    Ok(fused) => {
-                        let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                        let vols: Vec<_> = fused
-                            .solids()
-                            .iter()
-                            .map(|s| {
-                                model
-                                    .solid(*s)
-                                    .expect("k")
-                                    .measure(
-                                        rcad_geom::Deflection::of(0.001).expect("d"),
-                                        &Policy::certified(),
-                                        &mut ProvenanceLog::new(),
-                                    )
-                                    .map(|m| (m.volume(), m.volume_error()))
-                            })
-                            .collect();
-                        format!("Ok {vols:?} validate {valid:?}")
-                    }
-                    Err(e) => format!("Err {e:?}"),
-                };
-                println!(
-                    "PROBE z {} {rule:?} ball_first {ball_first}: {what} records {recs:?}",
-                    if policy == Policy::certified() {
-                        "certified"
-                    } else {
-                        "tolerant"
-                    }
-                );
             }
         }
     }

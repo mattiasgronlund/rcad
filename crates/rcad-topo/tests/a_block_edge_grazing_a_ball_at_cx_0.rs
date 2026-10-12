@@ -31,30 +31,40 @@
 //! coordinates. That is §346's limit, the same one the edge along `z` meets at
 //! `h = 0` in `a_block_edge_grazing_a_ball.rs`, and every fuse refused on it
 //! until §365.3's rule placed those slivers by the sides they share (Q712).
-//! Every fuse now gets past `select` and is refused while its answer is
-//! written, with `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom`.
+//! Every fuse now gets past `select`. Under `Policy::certified()` each is
+//! refused for the range. Under `Policy::tolerant(25.0)` each is refused
+//! `CannotMeshAFace` with `CornersCoincide`: a face of the answer could not be
+//! cut into triangles because two of its corners are one. Until Q1837 each
+//! was refused earlier, while its answer was written, with
+//! `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom`.
 
-use rcad_geom::{Error as GeometryError, Isometry, Point, Scale, Vector};
-use rcad_predicates::{Level, Policy, ProvenanceLog};
+use rcad_geom::{Isometry, Point, Scale, Vector};
+use rcad_mesh::CannotTriangulate;
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, Fused, Invalid, Model, ProfileBuilder, Rule};
-
-/// The name `order_along` records a refusal under.
-const ALONG_A_CROSSING: &str = "order along a crossing";
 
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
 /// The pin: under either policy, every rule with either solid first gets past
-/// placing the pieces, and nothing is recorded about the order along a
-/// crossing. Under `Policy::tolerant(25.0)` each is refused
-/// `CannotNameWhichPieceOfACrossingThisIs`, with one `side of a half-space`
-/// record. Under `Policy::certified()` each is refused for the range,
-/// `DynamicRangeTooWide` at `2⁵¹ + 2²⁵`, the block's bottom corners at
-/// `z = −2 − 2⁻²⁵` over the two places' `2⁻⁵⁰`, with no record at all.
+/// placing the pieces, and records nothing at all, so nothing about the order
+/// along a crossing. Under `Policy::tolerant(25.0)` each is refused
+/// `CannotMeshAFace` with `CornersCoincide` at position 2, or 3 for the
+/// difference with the ball first. Under `Policy::certified()` each is refused
+/// for the range, `DynamicRangeTooWide` at `2⁵¹ + 2²⁵`, the block's bottom
+/// corners at `z = −2 − 2⁻²⁵` over the two places' `2⁻⁵⁰`.
 ///
-/// **Q1614 moved the certified six.** The tolerant refusal and its record both
-/// come out of nesting the answer's shells, and since Q1614 the fuse asks the
-/// range before that (`docs/decisions.md` §87.3). Until then the certified six
-/// were refused as the tolerant six are, record and all.
+/// **Q1837 moved the tolerant six.** Until it, each was refused
+/// `CannotNameWhichPieceOfACrossingThisIs` by the walk, with one `side of a
+/// half-space` record: one arc of a circle had a middle no half-space could
+/// tell, and the walk refused though the other arc's middle was told. The walk
+/// now keeps the arc that is told and records nothing, and the fuse goes on to
+/// a face whose corners coincide. Which face that is, and whether the answer,
+/// with its sliver `2⁻⁵⁰` long, can be meshed, has not been traced.
+///
+/// **Q1614 moved the certified six.** Since Q1614 the fuse asks the range
+/// before it nests the answer's shells (`docs/decisions.md` §87.3). Until then
+/// the certified six were refused as the tolerant six then were, record and
+/// all.
 ///
 /// Here the two places fence off two slivers, not three: the ball's skin past
 /// `y = 1` below the top, which is outside the block, and the block's side
@@ -63,10 +73,9 @@ const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference
 /// both slivers placed by their sides in all twelve fuses, the ball's outside
 /// the block and the block's inside the ball, and `select` finishing.
 ///
-/// The tolerant intersection and block less the ball are refused the same way
-/// here, where along `z` at `h = 0` they are refused
-/// `ACurvedFaceGoesRightRoundWithNoSeam` instead. Neither refusal has been
-/// traced.
+/// Along `z` at `h = 0` the six tolerant fuses are refused
+/// `ACurvedFaceGoesRightRoundWithNoSeam` instead, also with nothing recorded.
+/// Neither refusal has been traced.
 ///
 /// Before Q449 a certified fuse refused on which of the two places comes
 /// first round a circle, and a tolerant one with `CannotTellTheCellsOfAFaceApart`.
@@ -88,8 +97,17 @@ fn the_order_of_the_two_places_is_decided_and_the_slivers_between_them_are_place
                             "{case}"
                         );
                     }
-                    Err(Error::Geometry(GeometryError::CannotNameWhichPieceOfACrossingThisIs))
-                        if !certified => {}
+                    Err(Error::CannotMeshAFace {
+                        why: CannotTriangulate::CornersCoincide { position },
+                        ..
+                    }) if !certified => {
+                        let at = if (rule, ball_first) == (Rule::Difference, true) {
+                            3
+                        } else {
+                            2
+                        };
+                        assert_eq!(position, at, "{case}");
+                    }
                     Ok(fused) => panic!(
                         "{case}: the fuse answered with {} solids; check each against its \
                          volume and pin it",
@@ -98,95 +116,7 @@ fn the_order_of_the_two_places_is_decided_and_the_slivers_between_them_are_place
                     Err(other) => panic!("{case}: {other:?}"),
                 }
                 let records = log.records();
-                assert!(
-                    records
-                        .iter()
-                        .all(|record| record.predicate() != ALONG_A_CROSSING),
-                    "{case}: {records:#?}"
-                );
-                let expected: &[(&str, Level)] = if certified {
-                    &[]
-                } else {
-                    &[("side of a half-space", Level::Interval)]
-                };
-                assert_eq!(
-                    records
-                        .iter()
-                        .map(|record| (record.predicate(), record.level()))
-                        .collect::<Vec<_>>(),
-                    expected,
-                    "{case}: {records:#?}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn probe_q1844_table() {
-    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
-        for rule in EVERY_RULE {
-            for ball_first in [true, false] {
-                let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm"));
-                let ball = model
-                    .add_ball(1.0 + f64::powi(2.0, -51), &Isometry::identity())
-                    .expect("r");
-                let square =
-                    ProfileBuilder::new(vec![[-2.0, -2.0], [2.0, -2.0], [2.0, 1.0], [-2.0, 1.0]])
-                        .build(&Policy::certified(), &mut ProvenanceLog::new())
-                        .expect("sq");
-                let top = -f64::powi(2.0, -25);
-                let block = model
-                    .add_extrusion(
-                        &square,
-                        2.0,
-                        &Isometry::translation(Vector::new(0.0, 0.0, top - 2.0)).expect("s"),
-                    )
-                    .expect("h");
-                let mut log = ProvenanceLog::new();
-                let fused = if ball_first {
-                    model.fuse(&[ball], &[block], rule, &policy, &mut log)
-                } else {
-                    model.fuse(&[block], &[ball], rule, &policy, &mut log)
-                };
-                let records: Vec<_> = match &fused {
-                    Err(Error::Undecidable { records }) => records.records().to_vec(),
-                    _ => log.records().to_vec(),
-                };
-                let recs: Vec<_> = records
-                    .iter()
-                    .map(|r| (r.predicate(), r.level(), r.outcome()))
-                    .collect();
-                let what = match &fused {
-                    Ok(fused) => {
-                        let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                        let vols: Vec<_> = fused
-                            .solids()
-                            .iter()
-                            .map(|s| {
-                                model
-                                    .solid(*s)
-                                    .expect("k")
-                                    .measure(
-                                        rcad_geom::Deflection::of(0.001).expect("d"),
-                                        &Policy::certified(),
-                                        &mut ProvenanceLog::new(),
-                                    )
-                                    .map(|m| (m.volume(), m.volume_error()))
-                            })
-                            .collect();
-                        format!("Ok {vols:?} validate {valid:?}")
-                    }
-                    Err(e) => format!("Err {e:?}"),
-                };
-                println!(
-                    "PROBE x {} {rule:?} ball_first {ball_first}: {what} records {recs:?}",
-                    if policy == Policy::certified() {
-                        "certified"
-                    } else {
-                        "tolerant"
-                    }
-                );
+                assert!(records.is_empty(), "{case}: {records:#?}");
             }
         }
     }
