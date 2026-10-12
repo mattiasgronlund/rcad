@@ -12734,8 +12734,8 @@ _queue-rows file:
 #
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
 # `done`, `drop`, `park`, `after`, `rank`, `tier`, `tag`, `pick`, `pin` and
-# `unpin`, with `show`
-# and `running` to read, and `narrow`, which changes a hold and no row. `tier` moves an open row to another tier and, like
+# `unpin`, with `show` and `running` to read, and `narrow`, which changes a hold
+# and no row. `tier` moves an open row to another tier and, like
 # `add`, writes that tier's heading when the file has none (§307). `tag` sets,
 # replaces or removes a row's class or `small` (§352.2), and a class moves the
 # row to the tier it names (§403.4). `pin` and `unpin` are Mattias's alone
