@@ -1179,19 +1179,26 @@ fn which_comes_first_round_a_line(
         | [HowFarRound::HalfWayOrMore, HowFarRound::LessThanHalfWay] => Decision::Neg,
         [HowFarRound::LessThanHalfWay, HowFarRound::LessThanHalfWay]
         | [HowFarRound::HalfWayOrMore, HowFarRound::HalfWayOrMore] => {
-            match line.turns(one, other) {
-                Decision::Zero => match line.faces(one, other) {
-                    Decision::Pos => Decision::Zero,
-                    Decision::Undecidable { .. } => NOTHING_IS_KNOWN,
-                    // Both are off the line and in one half turn, which holds
-                    // no two points half a turn apart.
-                    unreachable @ (Decision::Zero | Decision::Neg) => unreachable!(
-                        "two points in one half turn round a line, at one angle, face apart: \
-                         {unreachable:?}"
-                    ),
-                    other => unreachable!("unhandled decision: {other:?}"),
-                },
-                decided @ (Decision::Pos | Decision::Neg | Decision::Undecidable { .. }) => decided,
+            // Plain variants and no `name @ (...)`: `just check-wildcards` does
+            // not see a variant named inside one, and counts the `other` arm
+            // after it as a wildcard over it (§40).
+            let turned = line.turns(one, other);
+            match turned {
+                Decision::Zero => {
+                    let faced = line.faces(one, other);
+                    match faced {
+                        Decision::Pos => Decision::Zero,
+                        Decision::Undecidable { .. } => NOTHING_IS_KNOWN,
+                        // Both are off the line and in one half turn, which
+                        // holds no two points half a turn apart.
+                        Decision::Zero | Decision::Neg => unreachable!(
+                            "two points in one half turn round a line, at one angle, face apart: \
+                             {faced:?}"
+                        ),
+                        other => unreachable!("unhandled decision: {other:?}"),
+                    }
+                }
+                Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => turned,
                 other => unreachable!("unhandled decision: {other:?}"),
             }
         }
