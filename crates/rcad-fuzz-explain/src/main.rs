@@ -143,10 +143,7 @@ const PROGRESS_EVERY: usize = 2000;
 /// `--refusals`'s whole job: list the corpus, replay it, print the groups, and
 /// write the faults where asked.
 fn refusals_in_a_corpus(rest: &[String]) -> ExitCode {
-    let Some((corpus, mut options)) = rest
-        .split_first()
-        .map(|(corpus, options)| (corpus, options))
-    else {
+    let Some((corpus, mut options)) = rest.split_first() else {
         eprintln!("--refusals: name the corpus directory to replay");
         return ExitCode::FAILURE;
     };

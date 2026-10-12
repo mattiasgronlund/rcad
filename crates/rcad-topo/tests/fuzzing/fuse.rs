@@ -262,7 +262,7 @@ pub fn two_models_split_and_fused_keeping_the_provenance(
     data: &[u8],
     log: &mut ProvenanceLog,
 ) -> Reached {
-    two_models_split_and_fused_noting_everything(data, log, &mut |_, _| {}, &mut |_| {})
+    two_models_split_and_fused_noting_everything(data, log, &mut |_, _| {}, &mut |_, _| {})
 }
 
 /// **The same draw, handing every refusal's [`Error`] to `on_refusal` instead
