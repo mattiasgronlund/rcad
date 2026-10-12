@@ -12620,6 +12620,12 @@ queue_slots := "4"
 # the gate run once for all of them.
 queue_bundle := "5"
 
+# Files two lanes may hold at once (§424.4): a whole-file entry on one of
+# these, or the same item in it, only meets once two running lanes, rows held
+# elsewhere or rows taken above already hold it. A directory above the file
+# still meets everything under it, and every other path keeps §230.3's rule.
+queue_shared_files := "crates/rcad-topo/src/fuse/arrange.rs,crates/rcad-topo/src/fuse/assemble.rs"
+
 # How many slots are held, when a fixture needs to say so. Empty — always, outside
 # a selftest — means `queue next` counts the machine (§263.4): a queue file under
 # `mktemp` has no machine of its own, and one counted from wherever the selftest
@@ -12728,6 +12734,13 @@ _queue-rows file:
 # items differ (§230.6); on a directory ending in `/` that holds the other path;
 # and `-` meets nothing. The directory test is a prefix test on a name that ends
 # in `/`, so `crates/rcad-fuse/` does not hold `crates/rcad-fuse-extra/x.rs`.
+#
+# **A whole-file entry on a `queue_shared_files` file, or the same item in it,
+# only meets once two holders already have it** (§424.4, §424.8): a running
+# lane, a row held elsewhere, or a row taken above, any two of the three. The
+# third such entry is what meets; the first two do not. A directory that holds
+# the file is not such an entry, so it still meets everything under it at once,
+# and every path off the list keeps the plain rule above.
 #
 # What it cannot read — an open fence, a short row, a state it does not know —
 # it refuses rather than guesses at, and points at `check-queue` for the why.
@@ -12859,7 +12872,8 @@ queue mode="" *args:
     fi
     { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; [ -z "$narrowed" ] || printf '%s\n' "$narrowed"; } \
         | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" -v cand_id="${2:-}" -v cand_ws="${3:-}" \
-        -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' '
+        -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' \
+        -v shared_files='{{ queue_shared_files }}' '
         BEGIN {
             FS = "\037"
             nt = split("1 2 2.2 2.5 3 4 5", tiers, " ")
@@ -12868,6 +12882,8 @@ queue mode="" *args:
             for (k = 1; k <= nc; k++) if (classes[k] != "-") isclass[classes[k]] = 1
             bundle += 0
             if (bundle < 1) { printf "queue: queue_bundle is %d, and a bundle holds at least one row\n", bundle > "/dev/stderr"; bad = 1; exit 1 }
+            ns = split(shared_files, sharedlist, ",")
+            for (si = 1; si <= ns; si++) if (sharedlist[si] != "") shared[sharedlist[si]] = 1
         }
         $1 == "U" { refuse($2, "a fence is never closed"); next }
         $1 != "R" { next }
@@ -13029,19 +13045,50 @@ queue mode="" *args:
                 if (small[walk[x]] && !(walk[x] in took) && !blocked(walk[x], 0)) pick[++m] = walk[x]
             if (m == bundle) take_bundle(m)
         }
-        function blocked(i, say,    j) {
+        function blocked(i, say,    j, sharedcount, h1, h2) {
+            sharedcount = 0
             for (j = 1; j <= r; j++)
                 if (kind[j] == "running" && sets_meet(ws[i], ws[j])) {
+                    if (meet_shared) {
+                        sharedcount++
+                        if (sharedcount == 1) h1 = id[j] " (held by " st[j] ")"
+                        else if (sharedcount == 2) {
+                            h2 = id[j] " (held by " st[j] ")"
+                            if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], mine, h1, h2
+                            return 1
+                        }
+                        continue
+                    }
                     if (say) printf "skip %s (tier %s): its %s meets %s\047s %s, held by %s\n", id[i], tier[i], mine, id[j], theirs, st[j]
                     return 1
                 }
             for (j = 1; j <= e; j++)
                 if (sets_meet(ws[i], ews[j])) {
+                    if (meet_shared) {
+                        sharedcount++
+                        if (sharedcount == 1) h1 = eid[j] " (held elsewhere by " est[j] ")"
+                        else if (sharedcount == 2) {
+                            h2 = eid[j] " (held elsewhere by " est[j] ")"
+                            if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], mine, h1, h2
+                            return 1
+                        }
+                        continue
+                    }
                     if (say) printf "skip %s (tier %s): its %s meets %s\047s %s, held elsewhere by %s\n", id[i], tier[i], mine, eid[j], theirs, est[j]
                     return 1
                 }
             for (j = 1; j <= taken_n; j++)
                 if (sets_meet(ws[i], ws[taken[j]])) {
+                    if (meet_shared) {
+                        sharedcount++
+                        if (sharedcount == 1) h1 = id[taken[j]] " (taken above)"
+                        else if (sharedcount == 2) {
+                            h2 = id[taken[j]] " (taken above)"
+                            if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], mine, h1, h2
+                            return 1
+                        }
+                        continue
+                    }
                     if (say) printf "skip %s (tier %s): its %s meets %s\047s %s, taken above\n", id[i], tier[i], mine, id[taken[j]], theirs
                     return 1
                 }
@@ -13061,16 +13108,21 @@ queue mode="" *args:
             nx = split(x, ex, ","); ny = split(y, ey, ",")
             for (i = 1; i <= nx; i++)
                 for (j = 1; j <= ny; j++)
-                    if (entries_meet(ex[i], ey[j])) { mine = ex[i]; theirs = ey[j]; return 1 }
+                    if (entries_meet(ex[i], ey[j])) { mine = ex[i]; theirs = ey[j]; meet_shared = shared_match; return 1 }
             return 0
         }
-        function entries_meet(x, y,    px, py, ix, iy, h) {
+        function entries_meet(x, y,    px, py, ix, iy, h, m) {
+            shared_match = 0
             if (x == "-" || y == "-") return 0
             px = x; ix = ""; h = index(x, "#")
             if (h) { px = substr(x, 1, h - 1); ix = substr(x, h + 1) }
             py = y; iy = ""; h = index(y, "#")
             if (h) { py = substr(y, 1, h - 1); iy = substr(y, h + 1) }
-            if (px == py) return !(ix != "" && iy != "" && ix != iy)
+            if (px == py) {
+                m = !(ix != "" && iy != "" && ix != iy)
+                if (m && (px in shared)) shared_match = 1
+                return m
+            }
             if (px ~ /\/$/ && index(py, px) == 1) return 1
             if (py ~ /\/$/ && index(px, py) == 1) return 1
             return 0
@@ -14222,16 +14274,53 @@ check-queue-selftest:
         || fail "a fill past the slots did not say so, citing the section that sets them"
 
     fence items <<'MD'
-    Q1  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs#a  one function §230
-    Q2  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs#b  another function §230
-    Q3  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs#a  the first function again §230
+    Q1  1  todo  opus  crates/rcad-topo/src/fuse/select.rs#a  one function §230
+    Q2  1  todo  opus  crates/rcad-topo/src/fuse/select.rs#b  another function §230
+    Q3  1  todo  opus  crates/rcad-topo/src/fuse/select.rs#a  the first function again §230
     MD
     drive items next 3
     [ "$(takes)" = "Q1 Q2 " ] || fail "two different items of one file were not both taken"
-    grep -qxF "skip Q3 (tier 1): its crates/rcad-topo/src/fuse/assemble.rs#a meets Q1's crates/rcad-topo/src/fuse/assemble.rs#a, taken above" <<<"$got" \
+    grep -qxF "skip Q3 (tier 1): its crates/rcad-topo/src/fuse/select.rs#a meets Q1's crates/rcad-topo/src/fuse/select.rs#a, taken above" <<<"$got" \
         || fail "the same item twice was not skipped against the row taken above"
     grep -q '^took 2 of 3: every other ready row meets' <<<"$got" \
         || fail "a short fill did not say why it was short"
+
+    # §424.4: `arrange.rs` and `assemble.rs` are on `queue_shared_files`, so a
+    # second lane into either is not a meet, and only the third is.
+    fence shared <<'MD'
+    Q1  1  lane:lane-q1  opus  crates/rcad-topo/src/fuse/arrange.rs  the first lane on a shared file §230
+    Q2  1  todo  opus  crates/rcad-topo/src/fuse/arrange.rs  a second lane into the same shared file §230
+    Q3  1  todo  opus  crates/rcad-topo/src/fuse/arrange.rs  a third, once two already hold it §230
+    MD
+    drive shared next 2
+    [ "$(takes)" = "Q2 " ] || fail "a shared file with one running lane did not let a second lane in"
+    grep -qxF "skip Q3 (tier 1): its crates/rcad-topo/src/fuse/arrange.rs is shared, and Q1 (held by lane:lane-q1) and Q2 (taken above) already hold it" <<<"$got" \
+        || fail "a shared file already held by a running lane and a row taken above did not keep a third out, naming both"
+
+    # A directory above a shared file is not itself a shared entry: it still
+    # meets every row under it at once, both files on the list included.
+    fence shareddir <<'MD'
+    Q1  1  lane:lane-dir  opus  crates/rcad-topo/src/fuse/  a directory holding two shared files §230
+    Q2  1  todo  opus  crates/rcad-topo/src/fuse/arrange.rs  blocked by the directory, not shared §230
+    Q3  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs  blocked by the directory too §230
+    MD
+    drive shareddir next 2
+    [ "$(takes)" = "" ] || fail "a directory holding shared files let a row into one of them anyway"
+    grep -qxF "skip Q2 (tier 1): its crates/rcad-topo/src/fuse/arrange.rs meets Q1's crates/rcad-topo/src/fuse/, held by lane:lane-dir" <<<"$got" \
+        || fail "a directory holding a shared file did not block a row naming the file at once"
+    grep -qxF "skip Q3 (tier 1): its crates/rcad-topo/src/fuse/assemble.rs meets Q1's crates/rcad-topo/src/fuse/, held by lane:lane-dir" <<<"$got" \
+        || fail "a directory holding a shared file did not block a second row naming the other shared file too"
+
+    # A file left off queue_shared_files keeps §230.3's rule: one holder blocks
+    # the next.
+    fence notshared <<'MD'
+    Q1  1  lane:lane-q1  opus  crates/rcad-topo/src/fuse/select.rs  a lane on a file not on the shared list §230
+    Q2  1  todo  opus  crates/rcad-topo/src/fuse/select.rs  blocked by the one lane already holding it §230
+    MD
+    drive notshared next 1
+    [ "$(takes)" = "" ] || fail "a file left off queue_shared_files let a second lane in after only one holder"
+    grep -qxF "skip Q2 (tier 1): its crates/rcad-topo/src/fuse/select.rs meets Q1's crates/rcad-topo/src/fuse/select.rs, held by lane:lane-q1" <<<"$got" \
+        || fail "a file not on the shared list did not keep one holder blocking the next"
 
     fence dirs <<'MD'
     Q1  1  lane:lane-dir  opus  crates/rcad-topo/src/fuse/  holds a directory §230
