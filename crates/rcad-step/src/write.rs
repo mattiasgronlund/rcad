@@ -938,7 +938,7 @@ impl Writing {
         let Shape::Circle { radius } = touching.shape else {
             return None;
         };
-        let centre = a_centre_its_plane_reads_back_from(cut, touching.centre)?;
+        let centre = a_centre_its_plane_reads_back_from(cut, touching.centre, |_| true)?;
         if !either_side
             .iter()
             .all(|face| a_surface_holds_the_circle(face, centre, cut.normal(), radius))
@@ -1370,7 +1370,7 @@ fn the_half_circle_from_pole_to_pole(
     } else {
         return None;
     };
-    let centre = a_centre_its_plane_reads_back_from(cut, ball.centre())?;
+    let centre = a_centre_its_plane_reads_back_from(cut, ball.centre(), |_| true)?;
     let circle = Crossing {
         centre,
         turning: cut.normal(),
@@ -1422,17 +1422,23 @@ fn the_arc_its_own_plane_names(
     };
     let (crossing, centre) = if let Some(pipe) = a_pipe(first).or_else(|| a_pipe(second)) {
         let crossing = where_a_plane_crosses_a_pipe(cut, &pipe)?;
-        let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)?;
+        let centre = a_centre_for_an_arc_between(first, second, cut, &crossing)?;
         (crossing, centre)
     } else if let Some(ball) = a_ball(first).or_else(|| a_ball(second)) {
         let crossing = where_a_plane_crosses_a_ball(cut, &ball)?;
-        let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)?;
+        let centre = a_centre_for_an_arc_between(first, second, cut, &crossing)?;
         (crossing, centre)
     } else {
         let ring = a_ring(first).or_else(|| a_ring(second))?;
         let crossing = where_a_plane_square_to_a_ring_crosses_it_nearest(cut, &ring, start)?;
-        let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)
-            .or_else(|| the_nearest_centre_a_ring_holds_its_circle_at(cut, &ring, &crossing))?;
+        let centre =
+            a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true).or_else(|| {
+                the_nearest_centre_its_faces_hold_the_circle_at(
+                    cut,
+                    &[&Surface::Torus(ring)],
+                    &crossing,
+                )
+            })?;
         (crossing, centre)
     };
     let crossing = Crossing {
@@ -1442,6 +1448,52 @@ fn the_arc_its_own_plane_names(
     };
     let the_edge_runs_its_way = crossing.the_arc_runs_its_own_way(run, start, end)?;
     Some((crossing, the_edge_runs_its_way))
+}
+
+/// Where to centre the circle of an arc between `first` and `second`, a pipe
+/// or a ball beside the edge, so that the reader names the arc by `cut`: a
+/// point from which [`plane_through`] gives back `cut`, and where both faces
+/// hold the circle as the reader asks it ([`a_surface_holds_the_circle`],
+/// shared with the reader).
+///
+/// **The walk asks both faces, then the wider search does**, then the walk is
+/// taken without asking. A dome on a long bar, turned, can have the walk land
+/// on the offset more than the reader's sixteen units off the ball, and the
+/// reader then names the rim by the pipe and the ball and comes back with a
+/// different volume, or, for half a ball of the bar's own radius, which only
+/// touches the bar, refuses the file (Q1792,
+/// `a_dome_on_a_long_bar_turned_a_long_way_comes_back_with_its_rim_cut_from_its_plane`).
+///
+/// **Where neither finds a centre both faces hold, the walk's own is
+/// written**, as it was before both were asked: a dome wider than its bar
+/// is then read back named by its faces, which cross, and is still the same
+/// solid. Refusing it here would lose a file that reads back today.
+///
+/// **A seam, one face on both sides, and an ellipse are not asked**: the
+/// reader names a seam by the plane its run carries without asking the face,
+/// and holds an ellipse by a rule of its own this writer has no copy of.
+fn a_centre_for_an_arc_between(
+    first: &Surface,
+    second: &Surface,
+    cut: &Plane,
+    crossing: &Crossing,
+) -> Option<Point> {
+    let Shape::Circle { radius } = crossing.shape else {
+        return a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true);
+    };
+    if first == second {
+        return a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true);
+    }
+    let both_hold = |centre: Point| {
+        [first, second]
+            .iter()
+            .all(|face| a_surface_holds_the_circle(face, centre, cut.normal(), radius))
+    };
+    a_centre_its_plane_reads_back_from(cut, crossing.centre, both_hold)
+        .or_else(|| {
+            the_nearest_centre_its_faces_hold_the_circle_at(cut, &[first, second], crossing)
+        })
+        .or_else(|| a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true))
 }
 
 /// Whether the pole at `position` of `walk` stands where the wire turns back
@@ -1918,7 +1970,11 @@ fn where_a_cap_holding_a_rings_axis_crosses_it(
 /// radius three at `(10, 7, −15)` that `how_often_a_model_the_mutator_draws_is_refused`
 /// draws has an offset of `0.80`, and a step of either coordinate moves the dot
 /// six ulps of it or more (Q822).
-fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point> {
+fn a_centre_its_plane_reads_back_from(
+    cut: &Plane,
+    near: Point,
+    held: impl Fn(Point) -> bool,
+) -> Option<Point> {
     let normal = cut.normal();
     let read = |at: [f64; 3]| {
         plane_through(Point::new(at[0], at[1], at[2]), normal)
@@ -1937,9 +1993,11 @@ fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point>
         for _ in 0..16 {
             let offset = read(at)?;
             if offset.to_bits() == cut.offset().to_bits() {
-                return Some(Point::new(at[0], at[1], at[2]));
-            }
-            if (offset < cut.offset()) != below {
+                let centre = Point::new(at[0], at[1], at[2]);
+                if held(centre) {
+                    return Some(centre);
+                }
+            } else if (offset < cut.offset()) != below {
                 break;
             }
             at[axis] = if below == (components[axis] > 0.0) {
@@ -1963,8 +2021,9 @@ fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point>
                 let mut at = start;
                 at[first] = stepped(start[first], along_first);
                 at[second] = stepped(start[second], along_second);
-                if reads_back(at) {
-                    return Some(Point::new(at[0], at[1], at[2]));
+                let centre = Point::new(at[0], at[1], at[2]);
+                if reads_back(at) && held(centre) {
+                    return Some(centre);
                 }
             }
         }
@@ -2029,20 +2088,22 @@ fn stepped(from: f64, steps: i32) -> f64 {
 /// plane but sits further off the ring's axis than the reader allows is read
 /// as a curve off its faces, and the file is then refused, where this
 /// refuses by name.
-fn the_nearest_centre_a_ring_holds_its_circle_at(
+fn the_nearest_centre_its_faces_hold_the_circle_at(
     cut: &Plane,
-    ring: &Torus,
+    either_side: &[&Surface],
     crossing: &Crossing,
 ) -> Option<Point> {
     let Shape::Circle { radius } = crossing.shape else {
         return None;
     };
     let normal = cut.normal();
-    let surface = Surface::Torus(*ring);
     let components = normal.components();
     let start = crossing.centre.coordinates();
     let short = cut.offset() - plane_through(crossing.centre, normal).ok()?.offset();
-    let (_, largest) = how_far_off_the_circle_can_be(&surface, crossing.centre, normal, radius)?;
+    let largest = either_side.iter().try_fold(0.0_f64, |most, face| {
+        how_far_off_the_circle_can_be(face, crossing.centre, normal, radius)
+            .map(|(_, largest)| most.max(largest))
+    })?;
     let reach = 2.0 * A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF * largest;
     let leaning: Vec<usize> = (0..3).filter(|&axis| components[axis] != 0.0).collect();
     let mut nearest: Option<(f64, Point)> = None;
@@ -2066,7 +2127,9 @@ fn the_nearest_centre_a_ring_holds_its_circle_at(
                                 && back.offset().to_bits() == cut.offset().to_bits()
                         });
                         if !reads_back
-                            || !a_surface_holds_the_circle(&surface, centre, normal, radius)
+                            || !either_side.iter().all(|face| {
+                                a_surface_holds_the_circle(face, centre, normal, radius)
+                            })
                         {
                             continue;
                         }
