@@ -1334,9 +1334,12 @@ fn the_curve_of_a_seam_of_one_ball(
 /// run's** ([`a_centre_its_plane_reads_back_from`]). The reader names the
 /// seam by the plane through the circle's centre about its axis, and the
 /// ball's own centre, dotted with a normal a turn left, can land an ulp off
-/// the offset the turn left (Q822). A centre an ulp or two off the ball's
-/// is well inside what the reader allows a circle on a ball. Where no centre
-/// is found this is `None`, and a whole ball is then written on its chart
+/// the offset the turn left (Q822). That centre can be fifteen `f64`s of one
+/// coordinate off the ball's, not an ulp or two: every point of the circle
+/// moves with it, so the circle can sit `15ε` of the largest number off the
+/// ball, and the reader allows sixteen. Only measurement says the roundings
+/// fit in the one left (Q1789). Where no centre is found this is `None`, and
+/// a whole ball is then written on its chart
 /// ([`a_whole_ball_written_on_its_chart`]).
 fn the_half_circle_from_pole_to_pole(
     ball: &Sphere,
@@ -1893,6 +1896,19 @@ fn where_a_cap_holding_a_rings_axis_crosses_it(
 /// `−1/√2` does, on the two pipes of `Relay_SPDT_SANYOU_SRD_Series_Form_C`
 /// — where a step of the other lands on it. A normal that does not come back
 /// as itself is not helped by any point, and refuses at once.
+///
+/// **One coordinate is stepped at most fifteen `f64`s**: the point is read
+/// before each step, sixteen times. A step is at most `ε` of the largest
+/// number, the most where the coordinate stands on a power of two and steps
+/// away from zero, so the centre moves at most `15ε` of it, and the reader
+/// allows a circle `16ε` off its face (`A_CIRCLE_MAY_MISS_ITS_FACE_BY` in
+/// `brep.rs`). That leaves one for the roundings of `near` and of the reader's
+/// own bound, and nothing here argues one is enough. It is measured, with
+/// nothing to spare: a ball one `f64` under `32` in radius at `(3, −32, 0)`,
+/// turned `1.5709511621` about `z` and cut a sixteenth of its radius off its
+/// centre, is stepped all fifteen along `y` and the reader's bound reads
+/// `15.9998` (Q1789,
+/// `a_ball_cut_near_its_middle_is_stepped_fifteen_times_to_the_edge_of_what_the_reader_holds`).
 ///
 /// **Then the two finest coordinates are stepped together**, nearest first
 /// and at most [`MOST_STEPS_OF_TWO_COORDINATES`] each way. Where the offset is
