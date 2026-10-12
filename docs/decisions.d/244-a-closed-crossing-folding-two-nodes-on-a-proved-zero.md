@@ -13,7 +13,8 @@ that did it, and nothing here reaches it.* **Since §248 it does, and since
 Q663 the arm asks the policy (244.5). Since Q449 a start between the two
 places puts the one ahead of it first (244.6). Since Q699 (`a1d7c237`) two
 places whose boxes each end at a start off the crossing, as at `cx = 16`, are
-ordered by which end of its box the start is at.**
+ordered by which end of its box the start is at. Since Q859 an ellipse reaches
+the arm, and at its walked start the run reads as the centre does (244.8).**
 
   244.1   Which proved zeros reach the arm
   244.2   A block edge grazing a ball puts the start between two nodes
@@ -22,6 +23,7 @@ ordered by which end of its box the start is at.**
   244.5   The premise lapsed with §248, and the arm now asks the policy
   244.6   A start between the two places puts the one ahead of it first
   244.7   Two boxes that end at the start are put in order by which end it is at
+  244.8   An ellipse reaches the arm, and at its start the run reads as the centre does
 
 ### 244.1 Which proved zeros reach the arm
 
@@ -483,3 +485,137 @@ crossing's two places are one box used twice, with the start outside it on
 more than one axis, so no single axis is left moved by exactly one and the
 function answers `Undecidable` again. Queue row Q908 takes up ordering those
 two by another method.
+
+### 244.8 An ellipse reaches the arm, and at its start the run reads as the centre does
+
+*Queue row Q859, from 244.6. Lane `lane-q859-an-ellipse-start-between-two-places`,
+off `e158959b`, in three relays. Test-only: another lane held
+`crates/rcad-topo/src/fuse/`, so nothing under `src/` moved.*
+
+**The shape.** `crates/rcad-topo/tests/an_ellipse_start_between_two_places.rs`
+builds it through the public API:
+
+- a round bar of radius `1 + 2⁻⁵¹`, 10 tall, its axis up `z` through
+  `(−16, 0, 0)`;
+- a block on the square `x ∈ [−17, −13]`, `y ∈ [−6, 6]`, 4 tall, moved down 2
+  and turned `−0.5` about `x`.
+
+The turn leaves `x` alone, so the block's side is exactly `x = −17`, and its top
+leans across the bar and cuts the wall in an ellipse. That ellipse is walked
+from `conic.at(0)`: the centre, where the axis meets the top, plus the bar's
+radius along the way square to both the axis and the top's normal. Here that way
+is `−x`, so the start's `x` is `−16 − (1 + 2⁻⁵¹)`, which rounds to `−17`. The
+start is on the block's side, `2⁻⁵¹` inside the bar, and the side cuts the
+ellipse at two places `y ≈ ±2⁻²⁵`, one either side of it. It is 244.2's edge
+grazing a ball, with a pipe for the ball.
+
+**Why it reaches the arm.** The start and both places have `x = −17` exactly
+and the top's normal has no `x` part, so the sweep through the three is exactly
+`[0, 0]`. Neither place is one the start is a rounding off, because the step
+to each has a proved sign along the run, and `the_start_is_a_rounding_off`
+answers `false` for any such place. The two boxes are apart and neither holds
+the start, which leaves `the_one_the_start_is`'s `(false, false)` arm, the one
+that asks `the_one_ahead_of_the_start`.
+`the_tops_ellipse_starts_on_the_side_between_the_two_places_the_side_cuts_it_at`
+checks the start, the two boxes and the zero sweep, with either surface first.
+
+That the fuses go through the arm is a run, not a test. Under `gdb`, with no
+change to the source, a breakpoint was set on `Model::fuse`, on the arm, on
+`the_one_ahead_of_the_start`, on the overlap arm and on the line that answers
+`Undecidable`. Over the twelve fuses below, the arm and the function were each
+hit 72 times, six per fuse, each arm hit followed by a function hit. The last
+two were never hit.
+
+**What the arm reads, and the two checks the row asked for.** Write `n` for
+the top's normal, `w` for the bar's axis direction, `o` for a point on the axis,
+`c` for the ellipse's centre, `S` for the start and `P` for a place. 244.6 and
+the row write the normal a circle winds about as `w`. On an ellipse a plane
+cuts, that normal is `n`, and `w` stays the axis, as `gradient_at` has it.
+
+With the top first the arm reads the sign of `(P − S) · (n × ∇wall)` at `S`.
+Here `∇wall` at `S` and `S − c` are both the exact `(−1, 0, 0)`, so the run is
+`n × (S − c)` bit for bit. The step to the place below `y = 0` reads `Pos` and the step to the
+one above reads `Neg`, so the arm puts the place below first. With the wall
+first every sign turns over.
+`the_one_ahead_of_the_start_comes_before_the_point_across_the_ellipse_and_the_other_after_it`
+works this out with the arm's own arithmetic and checks it two ways:
+
+- **The sweep to a third point.** Take `(−15, 0, c_z)`, the other end of the
+  short axis and, up to a rounding, where the bar's seam crosses the top. With
+  the top first the sweep puts the place below before it, and it before the place
+  above. With the wall first both answers turn over. So going round, the three
+  come below, across, above, and of the two orders only the arm's agrees.
+- **The centre.** `det(n, S − c, P − c)`, with `c` worked out as
+  `where_a_plane_cuts_a_pipe` works it out, gives the arm's sign for both
+  places.
+
+**Why the two readings agree at every walked start.** 244.6 and the arm's doc
+comment say that on a pipe's or a cone's ellipse the run and the centre are
+not one polynomial. For points in general that is true. At a walked start they
+are one, times a positive number:
+
+1. Every ellipse a plane cuts in a pipe or a cone is walked from `conic.at(0)`,
+   which is `c + across`, with `across` the short semi-axis. That is
+   `where_a_closed_crossing_starts`, `where_a_plane_cuts_a_pipe` and
+   `where_a_plane_cuts_a_cone` in `rcad-geom`'s `walk.rs`. `across` is the
+   first direction `two_directions_in` hands back, which is square to `w`.
+   Where the plane is square to the axis it falls back to `Plane::basis`, which
+   lies in the plane and so is square to `w` too. So `S − c` is square to `w`,
+   up to the rounding of `S` and `c`.
+2. `gradient_at` in `fuse/arrange.rs` is linear in the point:
+   `∇(x) = G(x − o)`, with `G = |w|² I − k w wᵀ`. `k` is `1` for a pipe and
+   `1 + slope²` for a cone, and `o` is the apex for a cone.
+3. The centre of the conic a plane cuts out of such a surface is the point of
+   the plane where the gradient has no part along the plane, so
+   `G(c − o) = λn`. For a pipe `c − o` lies along `w`, and `G(c − o)` is zero.
+4. So `∇(S) = G(S − c) + λn`, and `n × ∇(S) = n × G(S − c)`. With `S − c`
+   square to `w`, `G(S − c) = |w|²(S − c)`.
+5. So with the plane first the run is `|w|² n × (S − c)`, and
+   `(P − S) · (|w|² n × (S − c))` is `|w|² det(n, S − c, P − c)`. That is the
+   centre's reading times `|w|²`, which is more than zero.
+
+Away from an end of the short axis, `n × ∇(S)` is
+`|w|² n × (S − c) − k (w · (S − c)) n × w`, and the two readings differ by
+the last term. So the doc comment's sentence holds for points in general, but
+not for any start the walk hands out. On this shape the two agree bit for bit,
+which the test checks. The pipe is pinned by that test. The cone is algebra
+only, and no shape of a cone was built.
+
+**The ring lead.** The dispatcher passed on a lead from Q1701's lane, never
+run: where the walked start is a rounding inside the curve, the sweep could
+put a node in a ring with nodes ahead of and behind the start, and the
+insertion sort in `nodes_along` does not check for a ring. On this shape the
+place below, the point across and the place above sweep in that order, either
+surface first, and agree with the arm, so these three make no ring. Not read:
+the fuse's own node at the bar's seam, and what the arm orders on its other
+five hits per fuse. No ring was found, and no row is filed for one.
+
+**What the fuses answer.**
+`every_fuse_gets_past_the_order_of_the_two_places_and_is_refused_naming_a_piece_of_a_crossing`
+pins it. Under `Policy::certified` and `Policy::tolerant(25.0)`, every rule
+with either solid first refuses `Geometry(CannotNameWhichPieceOfACrossingThisIs)`
+while its answer is written, with no `order along a crossing` record. Had the
+arm left the pair `Undecidable`, a certified fuse would have refused with that
+record. The records are all `side of a half-space`, at `Interval`: three for
+the union and for the bar less the block, one for the intersection and for the
+block less the bar. Why each fuse is then refused was not traced.
+
+A probe of the lane's, never committed, ran the same fuses at other radii:
+
+- At `1.5` and `0.75`, every fuse under both policies answers one solid with
+  no records. So the refusal above needs the `2⁻⁵¹` graze.
+- At exactly `1`, the bar flush inside the block's side, every certified fuse
+  refuses `Undecidable` at `orient3d`, `Interval`, enclosure
+  `8.516308344827248e-16`. Its inputs are the top's normal, `(−1, 0, 0)` and
+  the box `(−1, ±0, ±8.9e-16)`. Under `tolerant(25.0)` every fuse answers one
+  solid with five `orient3d` records.
+
+**What this leaves**, each filed as a queue row by Q859:
+
+- The refusal of every fuse of this shape, `refuses/C`, to be traced once
+  Q1386, the grazing block's own refusal while its answer is written, is
+  traced.
+- The flush bar's `orient3d` refusal under a certified policy, `refuses/B`.
+- The sentence in `the_one_ahead_of_the_start`'s doc comment that says the run
+  and the centre are not one polynomial on an ellipse. It should say that they
+  are at every walked start, and cite this part.
