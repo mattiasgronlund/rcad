@@ -2922,14 +2922,19 @@ enum HalfSpacesSay {
 
 /// What `picked_by` says about the box `at`, with nothing recorded: only the
 /// caller knows whether a sign nobody could tell was needed for its answer.
+///
+/// Only a sure `Neg` rules the arc out and only a sure `Zero` or `Pos` holds
+/// it, so anything else — `Undecidable` today, and any answer `Decision` grows
+/// later — cannot tell, which never picks an arc on its own.
 fn what_the_half_spaces_say(picked_by: &[Picker], at: PredicatePoint) -> HalfSpacesSay {
     let mut said = HalfSpacesSay::Hold;
     for picker in picked_by {
-        match picker.side_of_point(at) {
-            Decision::Neg => return HalfSpacesSay::RuleOut,
-            Decision::Undecidable { .. } => said = HalfSpacesSay::CannotTell,
-            Decision::Zero | Decision::Pos => {}
-            other => panic!("a half-space came back with a decision nothing knows: {other:?}"),
+        let side = picker.side_of_point(at);
+        if side == Decision::Neg {
+            return HalfSpacesSay::RuleOut;
+        }
+        if side != Decision::Zero && side != Decision::Pos {
+            said = HalfSpacesSay::CannotTell;
         }
     }
     said
