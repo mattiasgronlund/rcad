@@ -39,9 +39,13 @@
 //! `tests/a_cone_hollowed_along_its_axis.rs` (Q1483), whose fat bar's seam
 //! crosses a loop twice, sent no side of two pipes to that function between
 //! two corners when run with a print in it before Q1643. The one loop a thin
-//! bar reaching out of a fat one's side leaves does not reach it, cut by a wall
-//! through the loop or not: it is refused before its arcs are named, as the
-//! ball's one loop is (Q1683).
+//! bar reaching out of a fat one's side leaves, cut by a wall through the loop,
+//! does not reach it: it is refused before its arcs are named, as the ball's
+//! one loop is, since Q1685 by `rcad-geom` when asked to put the two corners in
+//! order round it, and by `fuse/arrange.rs` before that (Q1683). Whole, the
+//! thin bar answers both intersections and the fat bar less it, and the rules
+//! that keep its skin outside the fat bar are refused by the mesh the fuse
+//! checks its answer with.
 //!
 //! A ball keeps its poles on the `z` line through its centre however it is
 //! placed, so the bars along `x` below keep them off the wall.
@@ -468,44 +472,40 @@ fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_answers_every_rule() 
 /// `z ≥ 5`, `10π`, the thin bar's wall puts two corners on that loop, at
 /// `(±√9.75, 2.5, 5)`, one either side of `x = 0`.
 ///
-/// The answers exist. What the half and the fat bar share is
-/// `I = ∫ 2√(16 − y²)·√(1 − (y − 3.5)²) dy` from `y = 2.5` to `y = 4`,
-/// `5.2332133219331` by Simpson's rule split at `y = 3.5`, each piece in a
-/// variable that takes its square root's corner away, the same to 13 places
-/// at 1000, 10 000 and 100 000 steps. So the union is `170π − I ≈
-/// 528.8375377883`, the half less the fat bar `10π − I ≈ 26.1827132140`, and
-/// the fat bar less the half `160π − I ≈ 497.4216112524`.
+/// The answers exist. What the half and the fat bar share is `I`,
+/// [`what_a_half_thin_bar_out_of_a_fat_ones_side_shares_with_it`], so the union
+/// is `170π − I ≈ 528.8375377883`, the half less the fat bar `10π − I ≈
+/// 26.1827132140`, and the fat bar less the half `160π − I ≈ 497.4216112524`.
 ///
-/// **Every rule both ways round is refused `ACrossingThisCannotBeOrderedAlong`,
-/// the half or the whole thin bar**, in `fuse/arrange.rs`'s
-/// `how_a_crossing_runs`, which orders the two loops a fat pipe crosses a thin
-/// one in where it swallows the thin one's whole section, and not the one loop
-/// this leaves. So `rcad-geom`'s `walk` never draws an arc of it: a print where
-/// it picks the loop a run between two corners is on did not print (Q1683).
+/// Until Q1685 every rule both ways round was refused
+/// `ACrossingThisCannotBeOrderedAlong`, the half or the whole thin bar, by
+/// `fuse/arrange.rs`'s `how_a_crossing_runs`, which ordered the two loops a fat
+/// pipe crosses a thin one in where it swallows the thin one's whole section,
+/// and not the one loop this leaves. So `rcad-geom`'s `walk` never drew an arc
+/// of it: a print where it picks the loop a run between two corners is on did
+/// not print (Q1683).
+///
+/// That gate lets the one loop through now, to be put in order only by the
+/// name of where the walk starts on it, and **every rule both ways round is
+/// refused one step further on**, by name, out of `rcad-geom`:
+/// `TheseTwoSurfacesDoNotCrossInAConic`, as `rcad-geom` declines to say which
+/// of the two corners comes first round the loop, as it does for the ball's
+/// one loop above.
 #[test]
-fn a_thin_bar_reaching_out_of_a_fat_ones_side_is_refused_ordering_the_one_loop_they_cross_in() {
-    let pairs: [fn(&mut Model) -> [SolidKey; 2]; 2] = [
-        |model| {
-            let thin = thin_bar_out_of_a_fat_ones_side(model);
-            let fat = model
-                .add_round_bar(4.0, 10.0, &Isometry::identity())
-                .expect("a bar of radius four");
-            [
-                cut(model, thin, [-20.0, -20.0, 5.0], [20.0, 20.0, 20.0]),
-                fat,
-            ]
-        },
-        |model| {
-            let thin = thin_bar_out_of_a_fat_ones_side(model);
-            let fat = model
-                .add_round_bar(4.0, 10.0, &Isometry::identity())
-                .expect("a bar of radius four");
-            [thin, fat]
-        },
-    ];
-    let gives = pairs.map(what_each_rule_gives);
+fn a_half_thin_bar_reaching_out_of_a_fat_ones_side_is_refused_ordering_the_one_loop_they_cross_in()
+{
+    let gives = what_each_rule_gives(|model| {
+        let thin = thin_bar_out_of_a_fat_ones_side(model);
+        let fat = model
+            .add_round_bar(4.0, 10.0, &Isometry::identity())
+            .expect("a bar of radius four");
+        [
+            cut(model, thin, [-20.0, -20.0, 5.0], [20.0, 20.0, 20.0]),
+            fat,
+        ]
+    });
     assert!(
-        gives.iter().flatten().all(|answer| matches!(
+        gives.iter().all(|answer| matches!(
             answer,
             Err(Error::Geometry(
                 rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic
@@ -513,6 +513,72 @@ fn a_thin_bar_reaching_out_of_a_fat_ones_side_is_refused_ordering_the_one_loop_t
         )),
         "{gives:?}"
     );
+}
+
+/// The whole of the thin bar of the test above, `20π`, against the same bar of
+/// radius 4, `160π`. The thin bar's axis is at the fat bar's mid-height and
+/// both its sides clear the fat bar's caps, so the two share `2I`, twice what
+/// the half shares.
+///
+/// Until Q1685 every rule both ways round was refused
+/// `ACrossingThisCannotBeOrderedAlong` in `how_a_crossing_runs`, as the half
+/// was. With the one loop through that gate, **both intersections answer**,
+/// one solid of two faces holding `2I`, and **the fat bar less the thin one
+/// answers** `160π − 2I`, one solid of four faces.
+///
+/// The three rules that keep the thin bar's skin outside the fat bar are
+/// refused by the mesh the fuse checks its answer with: the union thin bar
+/// first and the thin bar less the fat one, `180π − 2I` and `20π − 2I`, as
+/// `AWireWillNotLieFlatOnItsFace`, and the union fat bar first as
+/// `CurvedFaceWithAHoleGoesTooFarRound`.
+#[test]
+fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_both_intersections_and_the_fat_bar_less_it()
+ {
+    let gives = what_each_rule_gives(|model| {
+        let thin = thin_bar_out_of_a_fat_ones_side(model);
+        let fat = model
+            .add_round_bar(4.0, 10.0, &Isometry::identity())
+            .expect("a bar of radius four");
+        [thin, fat]
+    });
+    let [
+        union_thin_first,
+        union_fat_first,
+        Ok(shared_thin_first),
+        Ok(shared_fat_first),
+        thin_less_fat,
+        Ok(fat_less_thin),
+    ] = &gives[..]
+    else {
+        panic!("both intersections and the fat bar less the thin one answer: {gives:?}");
+    };
+    assert!(
+        matches!(
+            union_thin_first,
+            Err(Error::AWireWillNotLieFlatOnItsFace { .. })
+        ) && matches!(
+            union_fat_first,
+            Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
+        ) && matches!(
+            thin_less_fat,
+            Err(Error::AWireWillNotLieFlatOnItsFace { .. })
+        ),
+        "{gives:?}"
+    );
+    let shared = 2.0 * what_a_half_thin_bar_out_of_a_fat_ones_side_shares_with_it();
+    for (solids, volume, faces) in [
+        (shared_thin_first, shared, 2),
+        (shared_fat_first, shared, 2),
+        (fat_less_thin, 160.0 * PI - shared, 4),
+    ] {
+        let [solid] = solids[..] else {
+            panic!("one solid: {gives:?}");
+        };
+        assert!(
+            solid.faces == faces && (solid.volume - volume).abs() <= solid.error,
+            "{gives:?}"
+        );
+    }
 }
 
 /// The bar of radius 1 along `x` from `x = −10` to `x = 10` at `y = 3.5`,
@@ -526,6 +592,38 @@ fn thin_bar_out_of_a_fat_ones_side(model: &mut Model) -> SolidKey {
                 .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is an axis")),
         )
         .expect("a bar of radius one")
+}
+
+/// `I = ∫ 2√(16 − y²)·√(1 − (y − 3.5)²) dy` from `y = 2.5` to `y = 4`, what
+/// [`thin_bar_out_of_a_fat_ones_side`] cut to `z ≥ 5` shares with the bar of
+/// radius 4 up `z`: at each `y` the section is `2√(16 − y²)` long along `x` and
+/// `√(1 − (y − 3.5)²)` high above `z = 5`.
+///
+/// Worked by Simpson's rule either side of `y = 3.5`, each piece in a variable
+/// that takes its square root's corner away: `y = 3.5 − cos t` below, and
+/// `y = 4 − s²` above. 1000 steps a piece give `5.2332133219331`, the same to
+/// 13 places as 10 000 and 100 000.
+fn what_a_half_thin_bar_out_of_a_fat_ones_side_shares_with_it() -> f64 {
+    let below = by_simpsons_rule(PI / 2.0, |t| {
+        2.0 * (16.0 - (3.5 - t.cos()).powi(2)).sqrt() * t.sin().powi(2)
+    });
+    let above = by_simpsons_rule(0.5_f64.sqrt(), |s| {
+        4.0 * s * s * (8.0 - s * s).sqrt() * (1.0 - (0.5 - s * s).powi(2)).sqrt()
+    });
+    below + above
+}
+
+/// `∫ integrand` from nought to `to`, by Simpson's rule in 1000 steps.
+fn by_simpsons_rule(to: f64, integrand: impl Fn(f64) -> f64) -> f64 {
+    let steps = 1000_u32;
+    let step = to / f64::from(steps);
+    let inside: f64 = (1..steps)
+        .map(|at| {
+            let weight = if at % 2 == 1 { 4.0 } else { 2.0 };
+            weight * integrand(f64::from(at) * step)
+        })
+        .sum();
+    (integrand(0.0) + inside + integrand(to)) * step / 3.0
 }
 
 /// `4∫₀¹ √((16 − y²)(1 − y²)) dy`, the part of the half bar of radius 1 above
