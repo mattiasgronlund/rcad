@@ -2028,26 +2028,105 @@ mod tests {
         }
     }
 
-    /// A ball off a pipe's axis that does not swallow the pipe's whole
-    /// cross-section crosses it in one loop that runs back and forth round the
-    /// axis, and is refused rather than ordered: one that reaches into the
-    /// pipe's side, and one no wider than the pipe. A ball that touches the
-    /// pipe from inside is in
+    /// Ten points of the one loop a ball off a pipe's axis that does not
+    /// swallow its whole cross-section crosses it in come back in the order
+    /// they run round it, from each of the ten, every pair of the other nine
+    /// both ways and with the pair of surfaces swapped. The loop runs back and
+    /// forth round the pipe's axis, so no normal orders it the way a conic is
+    /// ordered. The ball that reaches into the pipe's side is wide enough that
+    /// the loop's shadow on a plane square to the line from the axis to the
+    /// centre is not convex: `1² + 1.5²` is less than `2²`. The other is no
+    /// wider than the pipe, and its loop runs through the pipe's axis. Each
+    /// step is checked against `∇S × ∇T` before the order is asked, so what
+    /// this pins is the geometry.
+    #[test]
+    fn ten_points_on_the_one_loop_where_a_ball_crosses_a_pipe_off_its_axis_come_back_in_the_order_they_run_round_it()
+     {
+        for (radius, off) in [(2.0, 1.5), (1.0, 1.0)] {
+            let [ball, pipe] = a_ball_off_a_pipes_axis(radius, off);
+            let round = round_the_one_loop(radius, off);
+            let count = round.len();
+            for start in 0..count {
+                let [here, next] = [round[start], round[(start + 1) % count]];
+                let runs = Vector::new(here[0] - off, here[1], here[2])
+                    .cross(Vector::new(here[0], here[1], 0.0));
+                let step = Vector::new(next[0] - here[0], next[1] - here[1], next[2] - here[2]);
+                assert!(
+                    runs.dot(step) > 0.0,
+                    "ball {radius} off {off}: the crossing runs {runs:?} at {here:?} and the \
+                     step to {next:?} is {step:?}"
+                );
+            }
+            for start in 0..count {
+                let at = |ahead: usize| PredicatePoint::from(round[(start + ahead) % count]);
+                for one in 1..count {
+                    for other in one + 1..count {
+                        let what = format!(
+                            "ball {radius} off {off}, from point {start}, {one} then {other} ahead"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&ball, &pipe],
+                                at(0),
+                                at(one),
+                                at(other)
+                            ),
+                            Ok(Decision::Pos),
+                            "{what}"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&ball, &pipe],
+                                at(0),
+                                at(other),
+                                at(one)
+                            ),
+                            Ok(Decision::Neg),
+                            "{what}, asked the other way"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&pipe, &ball],
+                                at(0),
+                                at(one),
+                                at(other)
+                            ),
+                            Ok(Decision::Neg),
+                            "{what}, the pair swapped"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Ten points of the one loop [`a_ball_off_a_pipes_axis`] crosses its pipe
+    /// in, in the order the crossing runs with the ball taken first: above
+    /// `z = 0` with the angle round the pipe's axis rising, then below it with
+    /// the angle falling.
+    fn round_the_one_loop(radius: f64, off: f64) -> Vec<[f64; 3]> {
+        let widest = ((1.0 + off * off - radius * radius) / (2.0 * off)).acos();
+        let on_the_side = |side: f64, step: i32| {
+            let angle = widest * f64::from(step) / 3.0;
+            let [x, y] = [angle.cos(), angle.sin()];
+            let across = (x - off) * (x - off) + y * y;
+            [x, y, side * (radius * radius - across).sqrt()]
+        };
+        let above = (-2..=2).map(|step| on_the_side(1.0, step));
+        let below = (-2..=2).rev().map(|step| on_the_side(-1.0, step));
+        above.chain(below).collect()
+    }
+
+    /// A ball off a pipe's axis that misses the pipe, or touches its side from
+    /// outside at one point, crosses it in no loop, and is refused rather than
+    /// ordered. A ball that touches the pipe from inside is in
     /// [`a_crossing_that_is_not_a_conic_is_refused_rather_than_ordered`].
     #[test]
-    fn a_ball_off_a_pipes_axis_that_does_not_swallow_it_is_refused() {
-        for (what, radius, off, on_both) in [
-            (
-                "reaching into its side",
-                2.0,
-                1.5,
-                [1.0, 0.0, 3.75_f64.sqrt()],
-            ),
-            ("no wider than it", 1.0, 1.0, [1.0, 0.0, 1.0]),
-        ] {
+    fn a_ball_off_a_pipes_axis_that_misses_it_or_touches_its_side_is_refused() {
+        for (what, radius, off) in [("missing it", 0.5, 2.0), ("touching its side", 1.0, 2.0)] {
             let [ball, pipe] = a_ball_off_a_pipes_axis(radius, off);
             let [from, one, other] =
-                [on_both, [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]].map(PredicatePoint::from);
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]].map(PredicatePoint::from);
             for pair in [[&ball, &pipe], [&pipe, &ball]] {
                 assert_eq!(
                     which_comes_first_round_a_crossing(pair, from, one, other),
