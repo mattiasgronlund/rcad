@@ -8073,6 +8073,11 @@ fn round_a_closed_crossing_and_what_it_measures(
     {
         return Ok((read, Measures::Volume));
     }
+    if matches!(decided, Decision::Undecidable { .. })
+        && let Some(read) = along_the_stretch_between_the_two(pair, from, one, other)
+    {
+        return Ok((read, Measures::Volume));
+    }
     // Compared rather than matched: only a proved zero is re-read, and every
     // other answer goes back as it came (§40).
     if decided != Decision::Zero {
@@ -8234,6 +8239,68 @@ fn round_a_closed_crossing_by_its_angle(
     }
     let other_past_one = (the_way_it_turns * turned(off_the_axis(one), off_the_axis(other))).sign();
     proved(other_past_one).then_some(other_past_one)
+}
+
+/// Which of two points comes first round the loop a plane cuts a pipe in, read
+/// off the way the loop runs at each of them where the start is proved off the
+/// stretch between them: `None` for every other pair, and wherever a sign it
+/// reads is not proved.
+///
+/// **The loop is an ellipse in the plane, run anticlockwise about the normal
+/// [`which_comes_first_round_a_crossing`] winds it about**, along `∇S × ∇T`.
+/// Write `d` for the step from `one` to `other`. Where the loop runs with `d`
+/// at both, it turns by less than a half turn going round from `one` to
+/// `other`, and runs with `d` all the way: it must pass the place it runs
+/// along `d` before `other` and the place it runs against `d` after, and the
+/// way it runs at `one` and at `other` is within a quarter turn of `d`. So
+/// every point of that stretch lies between the two planes square to `d`
+/// through `one` and through `other`, and a start proved outside them is on
+/// the rest of the loop. Going round from there reaches `one` first. Where the
+/// loop runs against `d` at both, the same holds with the two swapped.
+///
+/// **This is for a plane that leans against the pipe by a rounding.** Its loop
+/// is an ellipse some `10¹⁶` long, and the start, the point at angle zero of
+/// the conic worked out in `f64`, is as far from the bar and units off the
+/// pipe. A side of a block notched into a round bar 5 tall, both turned one
+/// radian about `(1, 1, 1)`, leans so, and its plane crosses the bar's wall at
+/// the two caps in two places the sweep from that start cannot tell apart,
+/// with an enclosure about 400, nor the angle round the axis, since the two
+/// are on one ruling to a rounding. Every fuse of the two was refused on them
+/// (§246.6). Between those two places the loop runs along the bar to within a
+/// rounding, so the way it runs at each has a dot with `d` of order one, and
+/// the start is `10¹⁶` outside either plane.
+///
+/// **It reads the start where it is held, as the sweep does.** The order it
+/// gives is the one from every point of the loop outside the two planes, so a
+/// start held off the loop stands for any point of it that is, and the sweep
+/// is not overruled: this is asked only where the sweep and the angle cannot
+/// say.
+fn along_the_stretch_between_the_two(
+    pair: [&Surface; 2],
+    from: PredicatePoint,
+    one: PredicatePoint,
+    other: PredicatePoint,
+) -> Option<Decision> {
+    let ([Surface::Plane(_), Surface::Cylinder(_)] | [Surface::Cylinder(_), Surface::Plane(_)]) =
+        pair
+    else {
+        return None;
+    };
+    let [start, mine, theirs] = [from, one, other].map(|place| place.enclosure());
+    let step = [0, 1, 2].map(|axis| theirs[axis] - mine[axis]);
+    let runs_with_the_step = |place: PredicatePoint| {
+        let runs = cross_of(gradient_at(pair[0], place), gradient_at(pair[1], place));
+        dot_of(step, runs).sign()
+    };
+    let [at_one, at_other] = [one, other].map(runs_with_the_step);
+    let the_start_past =
+        |place: [Interval; 3]| dot_of([0, 1, 2].map(|axis| start[axis] - place[axis]), step).sign();
+    let off_the_stretch =
+        the_start_past(mine) == Decision::Neg || the_start_past(theirs) == Decision::Pos;
+    // Compared rather than matched: only one proved sign at both is read, and
+    // every other answer leaves the pair to the policy (§40).
+    let proved = at_one == Decision::Pos || at_one == Decision::Neg;
+    (off_the_stretch && proved && at_one == at_other).then_some(at_one)
 }
 
 /// Whether two nodes whose boxes share a point are that one point.
