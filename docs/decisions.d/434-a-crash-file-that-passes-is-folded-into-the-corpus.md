@@ -234,10 +234,23 @@ morning triage that runs this recipe (434.6).
   `none — the merge failed (exit 72), so the corpus is as it was and all 68013
   passing file(s) stay`, removed its copy, and went on to the next target. At
   `TimeoutStartSec` systemd sends `SIGTERM` to every process of the triage, the
-  recipe's shell too, and that shell runs its `EXIT` trap, which removes the
-  copy, and stops (a probe of the same trap in scratch: exit 143, nothing
-  left). So an uncapped fold would be killed every morning in the writer's
-  merge, with nothing folded and the targets after it never reached. Hence the
-  cap: 2000 new files at 1.4 a second is about 24 minutes, which puts the
-  writer's morning near 81 minutes at that load, and its pile folds over about
-  34 mornings.
+  recipe's shell too, so an uncapped fold would be killed every morning in the
+  writer's merge, with nothing folded and the targets after it never reached.
+  Hence the cap: 2000 new files at 1.4 a second is about 24 minutes, which puts
+  the writer's morning near 81 minutes at that load, and its pile folds over
+  about 34 mornings.
+- **The fuse** (`two_solids_fused_by_a_stranger`): 137 passed on 41d96a4e, 135
+  folded, 1 kept by the merge, 2 left. Its merge took 1854 s, nearly all of it
+  rerunning its 15 448 corpus files, 22 of which ran past the timeout. So any
+  morning that gives the fuse one passing file costs about half an hour.
+- **The cone target** (`where_a_cone_or_a_torus_crosses`, 2 passed) had rerun
+  1824 of its 3010 files in 18 minutes when the run was stopped, at 01:18:54Z,
+  9141 s after it began. `where_two_surfaces_cross` (8 passed) was never
+  reached.
+- **A `SIGTERM` leaves the copy behind.** The run was stopped with `SIGTERM` to
+  `just`, the recipe's shell and the merge's processes, as systemd's timeout
+  sends it. `just` printed ``Recipe `fuzz-triage` was terminated by signal
+  15``, and `where_a_cone_or_a_torus_crosses-fold-tmp.GklTdT` was left in the
+  corpus root, with the fold's scratch: the recipe's `EXIT` trap did not
+  remove them. A bare `bash` with the same trap, sent the same signal, did run
+  it, so what differs under `just` is not traced. A row is filed for it.
