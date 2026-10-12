@@ -123,7 +123,62 @@ and is asserted against rather than answered.
 
 What is not answered, and stays refused: a box a face meets — the new test
 pins a box on the first bend's own wall refused against that bend — and a box
-with an infinite end, which has no finite middle.
+with an infinite end, which has no finite middle. **A box only the ring's own
+wall meets is not refused any more but `Undecidable`** (queue row Q1763,
+below).
+
+*2026-10-11, Q1763: a box on a ring's wall that no other face grazes is
+`Undecidable`, as a box on a ball's wall is.* The case is a box the ring's own
+sign cannot place, which the ring's face holds some of, and which no other face
+of the solid grazes. The example is the box round `(3, 4, 0)` on the outer
+equator of the glued bend's wall, which no face of the block meets; the block
+alone says `Outside`. At `b8c4892c` the bend refused that box
+`CannotFireARayAtAFacesSurface` under the certified policy, and a ball of
+radius 5 about the origin, whose wall `(3, 4, 0)` is on too, said
+`Undecidable`. The tolerant policy was not measured at that base.
+
+The decision is `Undecidable`. `classify.rs` keeps the two answers apart,
+citing §4.2: `Undecidable` says the predicates were asked and none could
+prove an answer, and `CannotFireARayAtAFacesSurface` says no ray was put to
+the ring's surface. Here the ring's sign was asked, could not place the box,
+and the face could not show it holds none of it, so the ring grazed every ray
+from the box. That graze comes before any ray is fired at the ring, since
+`count_where_the_ray_meets_it` stops at the refusal, so a ray fired at the
+ring could not have undone it. The refusal told a caller that the missing ray
+was why there was no answer, and it was not; a smaller box round the point is
+what can answer. No policy tells the two apart here either: under
+`Policy::tolerant(100.0)` the bend and the ball both say `Undecidable` now, and
+`Undecidable` already covers a box no policy settles. Under §16.10 this is a
+limit, not a gap. The bend's ring is 4 and its tube 1, and
+`(9 + 16 + 0 + 15)² = 1600 = 4 · 16 · 25`, so `(3, 4, 0)` is on the wall
+exactly, the box holds points inside the solid and points outside it, and no
+one answer is right for all of it.
+
+The code: `Crossings::add` now counts a face's graze as one that throws the
+ray away (`a_graze_that_stands`) wherever that face's trimming was followed,
+and no longer asks whether a ray was fired at the face. A graze from a face
+whose trimming nothing follows still throws no ray away (Q1740), since
+following that trimming might have put the box off the face.
+
+The pins: `a_box_on_a_bends_wall_that_no_face_of_the_block_meets_is_undecidable_as_on_a_ball`,
+in `tests/a_ray_from_beside_a_box.rs`, asks the bend and the ball under both
+policies, and the block alone. The row asked which fuse pins move: none. Every
+test in the workspace was run with `--no-fail-fast`, slow tier included, and
+one pin moved, not a fuse's:
+`a_bend_less_a_turned_copy_of_itself.rs`'s
+`a_box_no_face_meets_is_answered_and_one_on_the_wall_is_not`, the test the
+paragraph above says pins a box on the first bend's own wall refused, and
+323.6 names. That box now gets `Undecidable { enclosure: 9.84755388344638e-10 }`,
+and the pin moves with this row. Read from the code and not measured:
+`fuse/select.rs`'s `settle_against_each` gives up on the point for either
+answer. `fuse/assemble.rs`'s `one_shell_is_inside_another` asks exact corners
+through `classify_point`, and `Torus::side_of` decides an exact point unless a product overflows or
+falls into the subnormals;
+only a corner exactly on the ring's wall that the face's trimming cannot place
+would now be `Undecidable` there rather than refused, and no pin moved for it.
+One thing a fuse does see: `settle_against_each` keeps the ray's records only when the
+answer is not `Undecidable`, so such a point now adds no records to the fuse's
+log.*
 
 A box on the plane of a straight-sided face's fan triangle and off the
 triangle is answered now (row Q342). It was refused, because only the plane
