@@ -14222,16 +14222,53 @@ check-queue-selftest:
         || fail "a fill past the slots did not say so, citing the section that sets them"
 
     fence items <<'MD'
-    Q1  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs#a  one function §230
-    Q2  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs#b  another function §230
-    Q3  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs#a  the first function again §230
+    Q1  1  todo  opus  crates/rcad-topo/src/fuse/select.rs#a  one function §230
+    Q2  1  todo  opus  crates/rcad-topo/src/fuse/select.rs#b  another function §230
+    Q3  1  todo  opus  crates/rcad-topo/src/fuse/select.rs#a  the first function again §230
     MD
     drive items next 3
     [ "$(takes)" = "Q1 Q2 " ] || fail "two different items of one file were not both taken"
-    grep -qxF "skip Q3 (tier 1): its crates/rcad-topo/src/fuse/assemble.rs#a meets Q1's crates/rcad-topo/src/fuse/assemble.rs#a, taken above" <<<"$got" \
+    grep -qxF "skip Q3 (tier 1): its crates/rcad-topo/src/fuse/select.rs#a meets Q1's crates/rcad-topo/src/fuse/select.rs#a, taken above" <<<"$got" \
         || fail "the same item twice was not skipped against the row taken above"
     grep -q '^took 2 of 3: every other ready row meets' <<<"$got" \
         || fail "a short fill did not say why it was short"
+
+    # §424.4: `arrange.rs` and `assemble.rs` are on `queue_shared_files`, so a
+    # second lane into either is not a meet, and only the third is.
+    fence shared <<'MD'
+    Q1  1  lane:lane-q1  opus  crates/rcad-topo/src/fuse/arrange.rs  the first lane on a shared file §230
+    Q2  1  todo  opus  crates/rcad-topo/src/fuse/arrange.rs  a second lane into the same shared file §230
+    Q3  1  todo  opus  crates/rcad-topo/src/fuse/arrange.rs  a third, once two already hold it §230
+    MD
+    drive shared next 2
+    [ "$(takes)" = "Q2 " ] || fail "a shared file with one running lane did not let a second lane in"
+    grep -qxF "skip Q3 (tier 1): its crates/rcad-topo/src/fuse/arrange.rs is shared, and Q1 (held by lane:lane-q1) and Q2 (taken above) already hold it" <<<"$got" \
+        || fail "a shared file already held by a running lane and a row taken above did not keep a third out, naming both"
+
+    # A directory above a shared file is not itself a shared entry: it still
+    # meets every row under it at once, both files on the list included.
+    fence shareddir <<'MD'
+    Q1  1  lane:lane-dir  opus  crates/rcad-topo/src/fuse/  a directory holding two shared files §230
+    Q2  1  todo  opus  crates/rcad-topo/src/fuse/arrange.rs  blocked by the directory, not shared §230
+    Q3  1  todo  opus  crates/rcad-topo/src/fuse/assemble.rs  blocked by the directory too §230
+    MD
+    drive shareddir next 2
+    [ "$(takes)" = "" ] || fail "a directory holding shared files let a row into one of them anyway"
+    grep -qxF "skip Q2 (tier 1): its crates/rcad-topo/src/fuse/arrange.rs meets Q1's crates/rcad-topo/src/fuse/, held by lane:lane-dir" <<<"$got" \
+        || fail "a directory holding a shared file did not block a row naming the file at once"
+    grep -qxF "skip Q3 (tier 1): its crates/rcad-topo/src/fuse/assemble.rs meets Q1's crates/rcad-topo/src/fuse/, held by lane:lane-dir" <<<"$got" \
+        || fail "a directory holding a shared file did not block a second row naming the other shared file too"
+
+    # A file left off queue_shared_files keeps §230.3's rule: one holder blocks
+    # the next.
+    fence notshared <<'MD'
+    Q1  1  lane:lane-q1  opus  crates/rcad-topo/src/fuse/select.rs  a lane on a file not on the shared list §230
+    Q2  1  todo  opus  crates/rcad-topo/src/fuse/select.rs  blocked by the one lane already holding it §230
+    MD
+    drive notshared next 1
+    [ "$(takes)" = "" ] || fail "a file left off queue_shared_files let a second lane in after only one holder"
+    grep -qxF "skip Q2 (tier 1): its crates/rcad-topo/src/fuse/select.rs meets Q1's crates/rcad-topo/src/fuse/select.rs, held by lane:lane-q1" <<<"$got" \
+        || fail "a file not on the shared list did not keep one holder blocking the next"
 
     fence dirs <<'MD'
     Q1  1  lane:lane-dir  opus  crates/rcad-topo/src/fuse/  holds a directory §230
