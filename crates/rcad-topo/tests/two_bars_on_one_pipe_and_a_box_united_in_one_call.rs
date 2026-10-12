@@ -618,6 +618,208 @@ fn a_bar(model: &mut Model, bottom: f64, axis_at: f64, turned_round: bool) -> So
         .expect("a bar described face by face")
 }
 
+#[test]
+fn probe_q1406() {
+    let policy = Policy::certified();
+    let turn = core::f64::consts::FRAC_PI_4;
+    let along = |y: f64| y * (4.0 - y * y).sqrt() / 2.0 + 2.0 * (y / 2.0).asin();
+    let moment = |y: f64| -(4.0 - y * y).powf(1.5) / 3.0;
+    let (k, r) = (0.1 * 2.0_f64.sqrt(), 1.75_f64.sqrt());
+    let inside = moment(r) - moment(k) - k * (along(r) - along(k)) - 0.75 * (r - k) * (r - k);
+    let the_box_outside = 2.5 * 1.9 * 3.6 - inside;
+    eprintln!(
+        "by hand: union {} ; lower∪box {} ; upper {}",
+        16.0 * PI + the_box_outside,
+        8.0 * PI + the_box_outside,
+        8.0 * PI
+    );
+    let rules = [
+        ("union", Rule::Union),
+        ("intersection", Rule::Intersection),
+        ("difference", Rule::Difference),
+    ];
+    for wall in EVERY_WALL {
+        for (box_arg, upper_arg) in EVERY_ORDER_OF_THE_TWO_FUSES {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let [lower, upper] = the_two_bars(&mut model, wall);
+            let third = a_turned_box(&mut model, turn);
+            let first = if box_arg {
+                model.fuse(
+                    &[third],
+                    &[lower],
+                    Rule::Union,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+            } else {
+                model.fuse(
+                    &[lower],
+                    &[third],
+                    Rule::Union,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+            };
+            let first = match first {
+                Ok(f) => f.solids().to_vec(),
+                Err(e) => {
+                    eprintln!("{wall:?} box_arg={box_arg}: first refused {e:?}");
+                    continue;
+                }
+            };
+            eprintln!(
+                "{wall:?} box_arg={box_arg}: first {}",
+                volumes(&model, &first)
+            );
+            if !box_arg && !upper_arg {
+                for face in model.solid(first[0]).expect("key").faces() {
+                    let kind = match face.surface() {
+                        Surface::Plane(_) => "plane",
+                        Surface::Cylinder(_) => "pipe",
+                        _ => "other",
+                    };
+                    for wire in face.wires() {
+                        let points: Vec<String> = wire
+                            .points()
+                            .map(|p| format!("({:.4}, {:.4}, {:.4})", p.x(), p.y(), p.z()))
+                            .collect();
+                        eprintln!("    {kind} {:?} wire: {}", face.key(), points.join(" "));
+                    }
+                }
+            }
+            for (name, rule) in rules {
+                for upper_first in [false, true] {
+                    if upper_first != upper_arg && rule == Rule::Union {
+                        continue;
+                    }
+                    let said = if upper_first {
+                        model.fuse(&[upper], &first, rule, &policy, &mut ProvenanceLog::new())
+                    } else {
+                        model.fuse(&first, &[upper], rule, &policy, &mut ProvenanceLog::new())
+                    };
+                    match said {
+                        Ok(f) => {
+                            let solids = f.solids().to_vec();
+                            let valid = model.validate(&policy, &mut ProvenanceLog::new());
+                            eprintln!(
+                                "  {wall:?} box_arg={box_arg} {name} upper_first={upper_first}: {} valid={:?}",
+                                volumes(&model, &solids),
+                                valid.is_ok()
+                            );
+                        }
+                        Err(e) => eprintln!(
+                            "  {wall:?} box_arg={box_arg} {name} upper_first={upper_first}: REFUSED {e:?}"
+                        ),
+                    }
+                }
+            }
+        }
+        for one_call in [false, true] {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let [lower, upper] = the_two_bars(&mut model, wall);
+            let third = a_turned_box(&mut model, turn);
+            let said = if one_call {
+                model.fuse(
+                    &[lower],
+                    &[upper, third],
+                    Rule::Union,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+            } else {
+                model.fuse(
+                    &[upper, third],
+                    &[lower],
+                    Rule::Union,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+            };
+            match said {
+                Ok(f) => eprintln!(
+                    "  {wall:?} one call lower_first={one_call}: {}",
+                    volumes(&model, &f.solids().to_vec())
+                ),
+                Err(e) => eprintln!("  {wall:?} one call lower_first={one_call}: REFUSED {e:?}"),
+            }
+        }
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let [lower, upper] = the_two_bars(&mut model, wall);
+        let third = a_turned_box(&mut model, turn);
+        let said = model
+            .fuse(
+                &[lower],
+                &[upper],
+                Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .and_then(|bars| {
+                model.fuse(
+                    bars.solids(),
+                    &[third],
+                    Rule::Union,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+            });
+        match said {
+            Ok(f) => eprintln!(
+                "  {wall:?} bars first: {}",
+                volumes(&model, &f.solids().to_vec())
+            ),
+            Err(e) => eprintln!("  {wall:?} bars first: REFUSED {e:?}"),
+        }
+    }
+    panic!("probe");
+}
+
+fn volumes(model: &Model, solids: &[SolidKey]) -> String {
+    let policy = Policy::certified();
+    solids
+        .iter()
+        .map(|&solid| {
+            match model.solid(solid).expect("key").measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            ) {
+                Ok(m) => format!("{} ± {}", m.volume(), m.volume_error()),
+                Err(e) => format!("measure refused {e:?}"),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+        + &format!(" ({} solids)", solids.len())
+}
+
+fn a_turned_box(model: &mut Model, turn: f64) -> SolidKey {
+    if turn > 0.5 {
+        let rectangle =
+            ProfileBuilder::new(vec![[1.5, -2.0], [4.0, -2.0], [4.0, -0.1], [1.5, -0.1]])
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a rectangle");
+        let about_x = Isometry::rotation(&Axis::x(), turn).expect("a finite turn");
+        let down = Isometry::translation(Vector::new(0.0, 0.0, -0.4)).expect("a finite shift");
+        return model
+            .add_extrusion(&rectangle, 3.6, &about_x.compose(&down))
+            .expect("a positive height");
+    }
+    let rectangle = ProfileBuilder::new(vec![[1.5, -0.5], [4.0, -0.5], [4.0, 0.5], [1.5, 0.5]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+    let centre = Isometry::translation(Vector::new(0.0, 0.0, 1.0)).expect("a finite shift");
+    let about_x = Isometry::rotation(&Axis::x(), turn).expect("a finite turn");
+    let half_down = Isometry::translation(Vector::new(0.0, 0.0, -0.5)).expect("a finite shift");
+    model
+        .add_extrusion(
+            &rectangle,
+            1.0,
+            &centre.compose(&about_x).compose(&half_down),
+        )
+        .expect("a positive height")
+}
+
 fn a_box(model: &mut Model, [x, y, z]: [[f64; 2]; 3]) -> SolidKey {
     let rectangle =
         ProfileBuilder::new(vec![[x[0], y[0]], [x[1], y[0]], [x[1], y[1]], [x[0], y[1]]])
