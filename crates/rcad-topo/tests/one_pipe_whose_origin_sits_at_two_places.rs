@@ -36,7 +36,7 @@ use rcad_geom::{
     intersect,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Model, Rule, SolidBuilder, SolidKey};
 
 const RADIUS: f64 = 2.0;
 
@@ -312,34 +312,29 @@ fn the_stacked_bars_unite_into_one_bar_however_the_wall_is_written() {
     }
 }
 
-/// Where the pierced bar's wall says its axis passes through: the point the
-/// thin bar's axis leaves the axis from.
-const PIERCED_ORIGIN: f64 = 15.0;
-
-const THIN_RADIUS: f64 = 0.5;
-
-/// How far along its own axis the thin bar runs, from `(0, 0, 4)`.
+/// Where the pinned bar's wall says its axis passes through when it is written
+/// apart from the lower bar's: the height the pin crosses that axis at.
 ///
-/// Sixteen and not something shorter because both corners of a bar's seam
-/// have to sit exactly on its wall, and on a slanted wall that needs
-/// `4 + t·0.6` to come out exact: `0.6`'s last mantissa bit is a one, so
-/// `t` is a power of two whose product shares a binade with the sum, and
-/// sixteen is the smallest. Zero is the other end, where nothing rounds.
-const THIN_LENGTH: f64 = 4.0;
+/// Thirteen above the plane the two bars meet on, so that a refusal of the
+/// union is not about the pin being near the lower bar.
+const PINNED_ORIGIN: f64 = 15.0;
 
-/// The thin bar's wall, slanting up and out from the pierced bar's axis.
-///
-/// Its numbers sort between the two spellings of the wall it pierces: its
-/// origin is above the lower spelling's and level with the upper one's, and
-/// its axis starts `−0.8` where theirs starts `0`.
-fn the_thin_slanted_wall() -> Cylinder {
+const PIN_RADIUS: f64 = 0.5;
+
+/// How far the pin runs each way from the pinned bar's axis: past its wall, so
+/// that it goes right through. Along `−x` every corner of it is exact.
+const PIN_REACH: f64 = 4.0;
+
+/// The pin's wall, along `−x` through the pinned bar's axis at
+/// [`PINNED_ORIGIN`].
+fn the_pin_wall() -> Cylinder {
     Cylinder::new(
         Axis::new(
-            Point::new(0.0, 0.0, PIERCED_ORIGIN),
+            Point::new(0.0, 0.0, PINNED_ORIGIN),
             Vector::new(-1.0, 0.0, 0.0),
         )
         .expect("a direction with a length"),
-        THIN_RADIUS,
+        PIN_RADIUS,
     )
     .expect("a positive radius")
 }
@@ -443,113 +438,147 @@ fn volume_of(model: &Model, solid: SolidKey) -> (f64, f64) {
     (measured.volume(), measured.volume_error())
 }
 
-/// **A real fuse reaches the circle a thin pipe names until the wall is
-/// joined onto a spelling sorting below it.**
+/// **A pin through the upper bar is where the second spelling still costs the
+/// answer.**
 ///
-/// The upper bar's wall, written about `(0, 0, 4)`, is pierced by a thin
-/// slanted bar whose wall sorts between it and the lower spelling. The
-/// closed crossing between the two walls is stored running the way the
-/// lower of them by bits winds, which is the thin pipe's. Uniting the
-/// pierced bar with the lower bar joins the two walls onto the lower
-/// spelling, which sorts below the thin pipe, so the crossing is then the
-/// wall's to name, and the two wind it opposite ways: at the top of the
-/// crossing, `(−2, 0, 6.125)`, the wall's longitude is `z × (−1, 0, 0) =
-/// (0, −1, 0)` and the thin pipe's `(−0.8, 0, 0.6) × (0.6, 0, 0.8) =
-/// (0, 1, 0)`. Both sides of it have to turn round, which is the branch of
-/// `turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way`
-/// for two different surfaces, and which only an assembly built by hand
-/// had reached (§231.5).
+/// The lower bar from `z = 0` to `2`, and the upper bar from `2` to `20` with
+/// a thin bar along `−x` right through it at `z = 15`, unite into one solid
+/// when the upper wall is written about the lower bar's origin. Written about
+/// `(0, 0, 15)` instead, the same union is refused
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in both orders: the fuse asks
+/// where the lower wall, the pin's wall and the upper wall meet, and
+/// `where_three_curved_surfaces_meet` in `rcad-geom` refuses any three of which
+/// two are one surface written twice. One spelling answering is the
+/// demonstration that the answer exists (§16.10), since the two spellings are
+/// the same points
+/// ([`two_bars_stacked_on_one_pipe_are_one_pipe_written_twice`]).
 ///
-/// Both orders give one solid that validates, with the wall one face on the
-/// lower spelling, and its volume is the lower bar's worked out by hand and
-/// the pierced bar's as measured, since the two meet only on the plane
-/// `z = 2`.
+/// **The route is built for a branch no fuse reaches yet.** The pin's wall
+/// sorts between the two spellings, so each closed crossing of the pin and
+/// the upper wall is stored the pin's way, and joining the walls onto the
+/// lower spelling makes it the wall's to name: the branch of
+/// `turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way` for
+/// two different surfaces, which only an assembly built by hand reaches today
+/// (§231.5). Worked by hand and not run: at `(−2, 0, 15.5)` the wall's
+/// longitude is `z × (−1, 0, 0) = (0, −1, 0)` and the pin's `(−1, 0, 0) × z =
+/// (0, 1, 0)`, so that crossing turns round, and at `(2, 0, 15.5)` both are
+/// `(0, 1, 0)` and it does not. Once the refusal lifts, two spellings are to
+/// answer here what one answers.
 #[test]
-fn a_wall_joined_below_a_thin_pipe_through_it_turns_the_crossing_round() {
-    let policy = Policy::certified();
+fn two_bars_on_one_pipe_written_twice_with_a_pin_through_one_are_refused_where_one_spelling_unites()
+{
     let lower_wall = Surface::Cylinder(a_wall_naming_its_axis_at(LOWER_ORIGIN));
-    let upper_wall = Surface::Cylinder(a_wall_naming_its_axis_at(PIERCED_ORIGIN));
-    let thin_wall = Surface::Cylinder(the_thin_slanted_wall());
+    let pin_wall = Surface::Cylinder(the_pin_wall());
+    let upper_wall = Surface::Cylinder(a_wall_naming_its_axis_at(PINNED_ORIGIN));
     assert_eq!(
         [
-            lower_wall.how_it_sorts_against(&thin_wall),
-            thin_wall.how_it_sorts_against(&upper_wall)
+            lower_wall.how_it_sorts_against(&pin_wall),
+            pin_wall.how_it_sorts_against(&upper_wall)
         ],
         [std::cmp::Ordering::Less; 2],
-        "the thin pipe has to sort between the two spellings or the branch is not reached"
+        "the pin's wall has to sort between the two spellings or the branch is not reached"
     );
 
+    let one_spelling = the_lower_bar_and_the_pinned_bar_united(LOWER_ORIGIN);
+    for (lower_first, said) in [true, false].into_iter().zip(one_spelling) {
+        let walls = said.unwrap_or_else(|refused| {
+            panic!("one spelling, lower first {lower_first}: {refused:?}")
+        });
+        assert_eq!(
+            (
+                walls.len(),
+                [lower_wall, pin_wall]
+                    .map(|wall| walls.iter().filter(|&&face| face == wall).count())
+            ),
+            (3, [1, 2]),
+            "one spelling, lower first {lower_first}: the wall is one face and the pin two, \
+             one each side of it: {walls:?}"
+        );
+    }
+
+    let two_spellings = the_lower_bar_and_the_pinned_bar_united(PINNED_ORIGIN);
+    for (lower_first, said) in [true, false].into_iter().zip(two_spellings) {
+        assert!(
+            matches!(
+                said,
+                Err(Error::Geometry(
+                    rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
+                ))
+            ),
+            "two spellings, lower first {lower_first}: {said:?}"
+        );
+    }
+}
+
+/// The lower bar united with the pinned bar, both ways round, with the pinned
+/// bar's wall naming its axis at `pinned_axis_origin`: the curved surfaces of
+/// the answer's faces, or the refusal.
+///
+/// An answer is checked as far as it goes before it comes back: it is one
+/// solid, it validates, and its volume is the lower bar's worked out by hand
+/// and the pinned bar's as measured, since the two meet only on the plane
+/// `z = 2`.
+fn the_lower_bar_and_the_pinned_bar_united(
+    pinned_axis_origin: f64,
+) -> [Result<Vec<Surface>, Error>; 2] {
+    let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, 2.0, LOWER_ORIGIN);
-    let upper = a_bar_whose_wall_names_its_axis_at(&mut model, 2.0, 20.0, PIERCED_ORIGIN);
-    let thin = a_bar_along(
-        &mut model,
-        the_thin_slanted_wall(),
-        -THIN_LENGTH,
-        THIN_LENGTH,
-    );
-    let pierced = model
+    let upper = a_bar_whose_wall_names_its_axis_at(&mut model, 2.0, 20.0, pinned_axis_origin);
+    let pin = a_bar_along(&mut model, the_pin_wall(), -PIN_REACH, PIN_REACH);
+    let pinned = model
         .fuse(
             &[upper],
-            &[thin],
+            &[pin],
             Rule::Union,
             &policy,
             &mut ProvenanceLog::new(),
         )
-        .unwrap_or_else(|refused| panic!("the thin bar through the upper bar: {refused:?}"));
-    let [pierced] = pierced.solids() else {
+        .unwrap_or_else(|refused| {
+            panic!("the pin through the bar, wall at {pinned_axis_origin}: {refused:?}")
+        });
+    let [pinned] = pinned.solids() else {
         panic!(
-            "a thin bar through a bar is one solid: {:?}",
-            pierced.solids()
+            "a pin through a bar is one solid, wall at {pinned_axis_origin}: {:?}",
+            pinned.solids()
         );
     };
-    let (pierced_volume, pierced_bound) = volume_of(&model, *pierced);
-    let by_hand = std::f64::consts::PI * RADIUS * RADIUS * 2.0;
+    let pinned = *pinned;
+    let (pinned_volume, pinned_bound) = volume_of(&model, pinned);
+    let lower_by_hand = std::f64::consts::PI * RADIUS * RADIUS * 2.0;
 
-    for lower_first in [true, false] {
+    [[lower, pinned], [pinned, lower]].map(|[arguments, tools]| {
         let mut model = model.clone();
-        let [arguments, tools] = if lower_first {
-            [lower, *pierced]
-        } else {
-            [*pierced, lower]
-        };
-        let fused = model
-            .fuse(
-                &[arguments],
-                &[tools],
-                Rule::Union,
-                &policy,
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|refused| panic!("lower first {lower_first}: {refused:?}"));
+        let fused = model.fuse(
+            &[arguments],
+            &[tools],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )?;
         model
             .validate(&policy, &mut ProvenanceLog::new())
             .unwrap_or_else(|broken| {
-                panic!("lower first {lower_first}, came back broken: {broken:?}")
+                panic!("wall at {pinned_axis_origin}, came back broken: {broken:?}")
             });
         let [solid] = fused.solids() else {
             panic!(
-                "the two bars end to end are one solid, lower first {lower_first}: {:?}",
+                "the two bars end to end are one solid, wall at {pinned_axis_origin}: {:?}",
                 fused.solids()
             );
         };
-        let walls: Vec<Surface> = model
+        let (volume, bound) = volume_of(&model, *solid);
+        assert!(
+            (volume - lower_by_hand - pinned_volume).abs() <= bound + pinned_bound,
+            "wall at {pinned_axis_origin}: {volume} ± {bound} against {lower_by_hand} and \
+             {pinned_volume} ± {pinned_bound}"
+        );
+        Ok(model
             .solid(*solid)
             .expect("this model made the key")
             .faces()
             .map(|face| face.surface())
             .filter(|surface| surface.as_plane().is_none())
-            .collect();
-        assert_eq!(
-            walls,
-            [lower_wall, thin_wall],
-            "the wall is one face on the lower spelling, lower first {lower_first}"
-        );
-        let (volume, bound) = volume_of(&model, *solid);
-        assert!(
-            (volume - by_hand - pierced_volume).abs() <= bound + pierced_bound,
-            "lower first {lower_first}: {volume} ± {bound} against {by_hand} and \
-             {pierced_volume} ± {pierced_bound}"
-        );
-    }
+            .collect())
+    })
 }
