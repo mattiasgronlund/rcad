@@ -1,7 +1,8 @@
-//! A box whose top corner, where three planes meet, and a pyramid whose apex,
-//! where four planes meet, are moved in their file, read back, and fused.
-//! `docs/decisions.md` §294.16 and §294.17 are the record and this file is
-//! their measurement.
+//! A box whose top corner, where three planes meet, a pyramid whose apex,
+//! where four planes meet, and a half bar whose corner, where a cap, a round
+//! wall and a cut meet, are moved in their file, read back, and fused.
+//! `docs/decisions.md` §294.16, §294.17 and §294.18 are the record and this
+//! file is their measurement.
 //!
 //! §294 moved a round bar's top corner, which has only two surfaces round it,
 //! and found no wrong `Ok` and no panic
@@ -35,6 +36,20 @@
 //! but one: cut by a block whose face runs exactly through the apex, it
 //! cannot say which side of that face the apex is on, which is a defect of its
 //! own and pinned here as it stands.
+//!
+//! The half bar is a round bar of radius 3 and height 10 less the block that
+//! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
+//! the wall's cylinder and the cut's plane `y = 0` round it, and those three
+//! meet at `(3, 0, 10)` as well, where the half bar keeps a corner of its own.
+//! §294.18 moves the corner a millimetre four ways, and **every fuse refuses
+//! as the box's corner does**, though one of its surfaces is curved. It also
+//! moves the corner onto `(3, 0, 10)`, the one move that could pick the other
+//! place and come back a wrong `Ok`. The fuse does put the corner there, on
+//! top of the half bar's own, and **every fuse refuses**, most of them as
+//! `validate` does, with `EdgeHasNoLength`. The sound half bar answers every
+//! partner but the block that cut it, fused again flush along its flat face,
+//! which it refuses when turned: a defect of its own, pinned here as it
+//! stands.
 //!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
