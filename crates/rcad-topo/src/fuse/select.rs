@@ -160,7 +160,10 @@ use crate::validate::side_of_surface;
 use crate::{Containment, Error, FaceKey, FaceView, Model, Result, SolidView, VertexKey};
 
 use super::arrange::{Piece, agreement_of_two_planes, name_of_surface_bits};
-use super::assemble::{NamedSide, the_edge_each_side_of_every_piece_is};
+use super::assemble::{
+    NamedSide, the_edge_each_side_of_every_piece_is,
+    the_pieces_of_each_shell_both_hold_taken_as_flat,
+};
 use super::bake::{BakedCorner, BakedEdge, BakedFace, BakedSolid};
 use super::{FaceMeet, MeetPoint, Scratch, as_exact_as_it_is, gave_up, middle_of, the_other_way};
 
@@ -233,13 +236,8 @@ pub(crate) fn choose(
     );
 
     let mut by_a_shared_side = SidesItShares::of(model, scratch, &solids);
-    let mut chosen = Vec::new();
+    let mut placed = Vec::with_capacity(scratch.pieces.len());
     for (index, (piece, &mine)) in scratch.pieces.iter().zip(&scratch.cut_from).enumerate() {
-        let side = if mine < arguments {
-            Side::Argument
-        } else {
-            Side::Tool
-        };
         let corners = corners_of(piece);
         let in_plane = match piece.surface.as_plane() {
             Some(flat) => {
@@ -306,28 +304,74 @@ pub(crate) fn choose(
             .collect();
         let against_own = place(&own_group, log)?;
         if keeps(
-            row_for(Rule::Union).row(side).fate(against_own),
+            row_for(Rule::Union)
+                .row(Side::of(mine, arguments))
+                .fate(against_own),
             against_own,
             mine,
         )
         .is_none()
         {
+            placed.push(None);
             continue;
         }
 
         let other_group: Vec<usize> = (0..solids.len())
             .filter(|&other| (other < arguments) != (mine < arguments))
             .collect();
-        let against_other = place(&other_group, log)?;
-        let fate = row_for(rule).row(side).fate(against_other);
-        if let Some(reversed) = keeps(fate, against_other, mine) {
-            chosen.push(Chosen {
-                piece: index,
-                reversed,
-            });
+        placed.push(Some(place(&other_group, log)?));
+    }
+
+    let selection = row_for(rule);
+    if selection.keeps_a_buried_piece_apart_from_one_lying_the_other_way() {
+        let held_by_both = kept_by(row_for(Rule::Intersection), &placed, scratch);
+        let buried: Vec<bool> = placed
+            .iter()
+            .map(|placement| *placement == Some(Placement::Inside))
+            .collect();
+        for shell in the_pieces_of_each_shell_both_hold_taken_as_flat(
+            model,
+            scratch,
+            &held_by_both,
+            &buried,
+            policy,
+            log,
+        ) {
+            for &piece in &shell {
+                let of_an_argument = scratch.cut_from[piece] < arguments;
+                let solid = shell
+                    .iter()
+                    .map(|&other| scratch.cut_from[other])
+                    .find(|&other| (other < arguments) != of_an_argument)
+                    .expect("a shell taken as flat holds pieces of both groups");
+                placed[piece] = Some(Placement::On {
+                    solid,
+                    same_way: false,
+                });
+            }
         }
     }
-    Ok(chosen)
+    Ok(kept_by(selection, &placed, scratch))
+}
+
+/// The pieces `selection` keeps, from where each piece sits against the other
+/// group, or `None` for a piece its own group buries, which no rule keeps.
+fn kept_by(
+    selection: &'static Selection,
+    placed: &[Option<Placement>],
+    scratch: &Scratch,
+) -> Vec<Chosen> {
+    let arguments = scratch.arguments.len();
+    placed
+        .iter()
+        .zip(&scratch.cut_from)
+        .enumerate()
+        .filter_map(|(piece, (placement, &mine))| {
+            let placement = (*placement)?;
+            let fate = selection.row(Side::of(mine, arguments)).fate(placement);
+            keeps(fate, placement, mine).map(|reversed| Chosen { piece, reversed })
+        })
+        .collect()
 }
 
 /// §17.4's selection table, as data.
@@ -410,6 +454,16 @@ impl Selection {
             Side::Tool => &self.tools,
         }
     }
+
+    /// Whether a piece buried in the other group fares otherwise than one
+    /// lying on it facing the other way, in either group: so whether reading
+    /// the pieces of a shell taken as flat as lying on the other group can
+    /// change what this rule keeps. Not for a union, which drops both.
+    fn keeps_a_buried_piece_apart_from_one_lying_the_other_way(&'static self) -> bool {
+        [&self.arguments, &self.tools]
+            .iter()
+            .any(|row| row.inside != row.on_opposite_way)
+    }
 }
 
 /// What one rule does with a piece of one group, by where that piece sits.
@@ -450,6 +504,18 @@ enum Fate {
 enum Side {
     Argument,
     Tool,
+}
+
+impl Side {
+    /// The group of the solid `mine`, by its place in the two groups laid end
+    /// to end, of which the first `arguments` are the arguments.
+    fn of(mine: usize, arguments: usize) -> Self {
+        if mine < arguments {
+            Self::Argument
+        } else {
+            Self::Tool
+        }
+    }
 }
 
 /// Where a piece sits relative to a group of solids.
