@@ -821,7 +821,7 @@ function rowsNote() {
 }
 
 function testsNote() {
-  return 'Test names in tests_that_fail_without_the_change are bare nextest names matching ^name(::name)*$, never `<binary> <name>` with a space (Q1347).'
+  return 'Test names in tests_that_fail_without_the_change are bare nextest names matching ^name(::name)*$, never `<binary> <name>` with a space (Q1347). A tooling lane whose test is a `check-*-selftest` recipe names it there too, by its recipe name, not by a nextest path (§287).'
 }
 
 function reportSchema(lane, relay) {
