@@ -9784,7 +9784,8 @@ check-gate-fresh-cleanup-selftest:
 # night's directory. `$night/fuzz-refusals.tsv` has one row per group: `variant`,
 # `key` (an `Undecidable`'s predicates still undecided, any other refusal's
 # words with every number written `N`), `refusals`, `files`, `certified`,
-# `tolerant`, `first_way_round`, `other_way_round` and one `sample` file.
+# `tolerant`, `first_way_round`, `other_way_round`, one `sample` file, and
+# `class` (`limit`, `gap` or `not known`, from `Error::limit_or_gap`, §437.6).
 # `$night/fuzz-refusals-faults.tsv` names each file that `panicked`, `hung` or
 # was `unreadable`: `fault`, `file`, `said`. The `since:` line compares the
 # groups with the latest earlier night that has a `fuzz-refusals.tsv`, and an
@@ -10754,11 +10755,11 @@ check-fuzz-triage-selftest:
     [ "$calls" = 1 ] || fail "the corpus cost $calls replay call(s), not the one it is replayed in"
     refusals_file="$first_night/fuzz-refusals.tsv"
     [ -f "$refusals_file" ] || fail "no fuzz-refusals.tsv landed in the night's own directory"
-    [ "$(head -1 "$refusals_file")" = "$(printf 'variant\tkey\trefusals\tfiles\tcertified\ttolerant\tfirst_way_round\tother_way_round\tsample')" ] \
-        || fail "fuzz-refusals.tsv's header does not name the nine columns of §437.5"
+    [ "$(head -1 "$refusals_file")" = "$(printf 'variant\tkey\trefusals\tfiles\tcertified\ttolerant\tfirst_way_round\tother_way_round\tsample\tclass')" ] \
+        || fail "fuzz-refusals.tsv's header does not name the ten columns of §437.5 and §437.6"
     groups=$(tail -n +2 "$refusals_file" | grep -c . || true)
     [ "$groups" -gt 0 ] || fail "the checked-in corpus met no refusal, and every_model_the_fuse_fuzzer_kept_is_fused_again says it meets many"
-    not_adding_up=$(awk -F'\t' 'NR > 1 && (NF != 9 || $5 + $6 != $3 || $7 + $8 != $3 || $4 < 1 || $4 > $3)' "$refusals_file")
+    not_adding_up=$(awk -F'\t' 'NR > 1 && (NF != 10 || $5 + $6 != $3 || $7 + $8 != $3 || $4 < 1 || $4 > $3)' "$refusals_file")
     [ -z "$not_adding_up" ] \
         || fail "a group's certified and tolerant, or its two ways round, do not add up to its refusals: $not_adding_up"
     while IFS= read -r sample; do
