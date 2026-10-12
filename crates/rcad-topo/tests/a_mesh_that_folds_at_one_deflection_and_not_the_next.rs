@@ -70,7 +70,7 @@
 //! `piece.closes_on_one_curve`, which a loop of several arcs fails without any
 //! second closed curve — a sliver chopped by further planes. 288 of those are
 //! built here by narrowing the block that cuts the ball until its own side faces
-//! do the chopping, and of the 282 that answer **not one of their 2 820 meshes
+//! do the chopping, and all 288 answer: **not one of their 2 880 meshes
 //! folds**; the chop puts the rim's own arc off the plane of the cut, so none of
 //! them comes back flat either. The bare cut is reached — 93 cuts of the 2 798
 //! that sweep takes are `steps = 1` — it just meets nothing.
@@ -201,20 +201,22 @@ fn no_sliver_cut_through_a_balls_pole_folds_at_any_deflection() {
 ///
 /// Swept at four leans, twelve turns and six widths, the widths given as a
 /// fraction of the rim's own radius so the chop lands in the same place on every
-/// rim. **288 solids, 282 of which answer, and not one of their 2 820 meshes
-/// folds.** The bare cut is real — instrumenting `cut_in_two` over this sweep
-/// showed 93 cuts of 2 798 taken with `steps = 1` — but the chop also puts the
-/// rim's own arc off the plane of the cut, so no coarse mesh here comes back
-/// flat and none of them reaches the rescue's ladder at all.
+/// rim. **All 288 solids answer, and not one of their 2 880 meshes folds.** The
+/// bare cut is real — instrumenting `cut_in_two` over this sweep showed 93 cuts
+/// of 2 798 taken with `steps = 1` — but the chop also puts the rim's own arc
+/// off the plane of the cut, so no coarse mesh here comes back flat and none of
+/// them reaches the rescue's ladder at all.
 ///
-/// The six that refuse are named rather than dropped. All are chopped at half
-/// the rim: at lean `0.9` turned 2, 4 and 10 twelfths and at `1.2` turned 4
-/// twelfths, `Undecidable` on `side of a half-space`, not traced; at `1.35`
-/// and `1.5` turned 4 twelfths, on `a point inside a piece of a face`. There
-/// were ten, all on that last name, until a piece no point was found in was
-/// placed by a side it shares (§365.3, Q712): that answers the four chopped at
-/// three tenths of the rim at lean `0.9`, which the next test holds to their
-/// volume, and moves the four above on to the other name. Eight more refused
+/// Until Q1837 six refused `Undecidable`, all chopped at half the rim: at lean
+/// `0.9` turned 2, 4 and 10 twelfths and at `1.2` turned 4 twelfths, on `side
+/// of a half-space` (Q968); at `1.35` and `1.5` turned 4 twelfths, on `a point
+/// inside a piece of a face`. Those were the walk's signs about the short arc
+/// of a rim cut a hair apart, which it no longer needs where the other arc is
+/// told; `the_six_chopped_slivers_the_walk_once_refused_hold_their_volume`
+/// holds them to their volume. There were ten, all on that last name, until a
+/// piece no point was found in was placed by a side it shares (§365.3, Q712):
+/// that answers the four chopped at three tenths of the rim at lean `0.9`,
+/// which the test after that holds to their volume. Eight more refused
 /// `ResultIsNotManifold`, at leans `1.35` and `1.5` turned `0`, until §340.10:
 /// the box round one of the block's faces stopped a rounding short of the nodes
 /// on the ball's cut across it, and the cut was dropped as missing the face.
@@ -253,14 +255,44 @@ fn no_sliver_chopped_by_the_blocks_own_sides_folds_at_any_deflection() {
     assert_eq!(
         tally,
         BTreeMap::from([
-            ("answered", 282),
-            ("Undecidable", 6),
-            ("meshed", 2820),
+            ("answered", 288),
+            ("meshed", 2880),
             ("folds a later rung cured", 0),
             ("folds no later rung cured", 0),
         ]),
         "every rung of every chopped sliver's ladder"
     );
+}
+
+/// The six chopped slivers the walk refused until Q1837, all chopped at half
+/// the rim: lean `0.9` turned 2, 4 and 10 twelfths, and leans `1.2`, `1.35` and
+/// `1.5` turned 4 twelfths. Each validates and holds the volume a sum over its
+/// slices gives.
+#[test]
+fn the_six_chopped_slivers_the_walk_once_refused_hold_their_volume() {
+    let (radius, across) = (1.0, 0.5);
+    for (lean, step) in [(0.9, 2), (0.9, 4), (0.9, 10), (1.2, 4), (1.35, 4), (1.5, 4)] {
+        let turn = f64::from(step) * PI / 6.0;
+        let what =
+            format!("the sliver at lean {lean}, turn {turn}, chopped at {across} of its rim");
+        let (model, answer) = chopped_sliver(radius, lean, turn, across);
+        let answer = answer.unwrap_or_else(|why| panic!("{what}: refused {why:?}"));
+        let probe = measure(&model, &answer, 0.001, &what);
+        println!(
+            "PROBE {what}: solids {} volume {} error {} closed {}",
+            answer.len(),
+            probe.volume(),
+            probe.volume_error(),
+            a_chopped_slivers_volume(lean, turn, across * lean.sin())
+        );
+        measures_within_what_it_declares(
+            &model,
+            &answer,
+            0.001,
+            a_chopped_slivers_volume(lean, turn, across * lean.sin()),
+            &what,
+        );
+    }
 }
 
 /// The four chopped slivers that only a side they share places: lean `0.9`,
