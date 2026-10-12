@@ -2683,11 +2683,11 @@ mod plane_round_trip_tests {
     use core::f64::consts::{FRAC_PI_2, SQRT_2, TAU};
 
     use rcad_geom::{
-        Axis, Cylinder, EdgeRun, HalfSpace, Isometry, NEAREST_F64_POINT_ROUNDOFF, Orientation,
-        Picker, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
+        Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, NEAREST_F64_POINT_ROUNDOFF,
+        Orientation, Picker, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
     };
     use rcad_predicates::{Policy, ProvenanceLog};
-    use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey, WireView};
+    use rcad_topo::{DraftStep, Measurement, Model, SolidBuilder, SolidKey, WireView};
 
     use super::{
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, CannotWrite, Shape, a_centre_its_plane_reads_back_from,
@@ -3280,6 +3280,89 @@ mod plane_round_trip_tests {
         );
     }
 
+    /// A bar of radius just under `4` and length `8.67`, with a dome of radius
+    /// `6.22` on top, moved just under a half down `y`: read back, it stands on
+    /// the surfaces and corners the placed dome stands on, bit for bit, yet
+    /// measures `473.6193176` where the placed one measures `473.6193001`
+    /// (Q1809).
+    ///
+    /// **The gap is the volume measure, not the writer or the reader.** A
+    /// placed face is meshed in the frame it is stored in, and its points are
+    /// moved out after (`the_surface_this_face_is_meshed_on` in `rcad-topo`),
+    /// while a solid read back is stored where it stands and is meshed there.
+    /// So the same dome built where it stands, with no placement, measures
+    /// what the one read back measures, bit for bit. Both answers are within
+    /// the volume errors the measure gives with them, so neither is wrong.
+    ///
+    /// Of a thousand domes on bars placed near powers of two and turned, at a
+    /// deflection of `0.01`, every one came back on the same surfaces and
+    /// corners, bit for bit; none measured bit for bit what was built; none
+    /// was off by more than the two volume errors; and the worst was off by
+    /// `5.9e-5` of its volume. That worst one is this bar, at this place, with
+    /// a turn. The probes that measured it are in `fea9d72d`.
+    #[test]
+    fn a_dome_read_back_measures_what_the_same_dome_built_where_it_stands_measures() {
+        let (radius, length, dome_radius) = (
+            3.999_999_999_999_999_6,
+            8.667_790_572_490_11,
+            6.221_314_647_173_96,
+        );
+        let standing_on = Point::new(0.0, -0.499_999_999_999_999_9, 0.0);
+        let [_, read_back] = a_dome_measured_placed_and_read_back(
+            (radius, length, dome_radius),
+            &Isometry::translation(standing_on - Point::origin()).expect("a finite move"),
+            0.01,
+        );
+        let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
+        a_dome_on_a_bar(&mut model, radius, length, dome_radius, standing_on);
+        let standing = its_measurement(&model, 0.01);
+        println!("built where it stands: {:?}", standing.volume());
+        assert_eq!(
+            read_back.volume().to_bits(),
+            standing.volume().to_bits(),
+            "read back {:?}, built where it stands {:?}",
+            read_back.volume(),
+            standing.volume()
+        );
+    }
+
+    /// The bar of
+    /// [`a_dome_on_a_long_bar_turned_a_long_way_comes_back_with_its_rim_cut_from_its_plane`],
+    /// `3561` long and turned `2.97` about a line mostly along `y`: read back,
+    /// it stands on the surfaces and corners the placed dome stands on, bit
+    /// for bit, and at a deflection of `0.04` measures `3.3e-7` of its volume
+    /// off what the placed one measures. That is the gap Q1792's first relay
+    /// saw (Q1809), and it is the one
+    /// [`a_dome_read_back_measures_what_the_same_dome_built_where_it_stands_measures`]
+    /// traces to the volume measure: nothing the file carries moved.
+    #[test]
+    fn a_turned_dome_on_a_long_bar_reads_back_within_its_volume_errors_but_not_bit_for_bit() {
+        let axis = Axis::new(
+            Point::origin(),
+            Vector::new(
+                -0.018_298_610_974_051_055,
+                0.374_487_539_909_369_2,
+                -0.017_226_945_673_374_46,
+            ),
+        )
+        .expect("a direction with a length");
+        a_dome_measured_placed_and_read_back(
+            (
+                16.000_000_000_000_007,
+                3_561.383_252_900_813,
+                29.695_524_847_710_807,
+            ),
+            &Isometry::translation(Vector::new(
+                0.0,
+                -1.999_999_999_999_999_8,
+                4_095.999_999_999_999_5,
+            ))
+            .expect("a finite move")
+            .compose(&Isometry::rotation(&axis, 2.972_547_828_691_298_3).expect("a finite turn")),
+            0.04,
+        );
+    }
+
     /// Builds a bar with a dome on top ([`a_dome_on_a_bar`]), places it by
     /// `place` after `turn`, writes it and reads it back, and asks that the
     /// read solid is sound and that each use of the two halves of its rim is
@@ -3297,7 +3380,7 @@ mod plane_round_trip_tests {
         let policy = Policy::certified();
         let mut log = ProvenanceLog::new();
         let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
-        let solid = a_dome_on_a_bar(&mut model, radius, length, dome_radius);
+        let solid = a_dome_on_a_bar(&mut model, radius, length, dome_radius, Point::origin());
         let moved = Isometry::translation(place)
             .expect("a finite move")
             .compose(turn);
@@ -3399,14 +3482,104 @@ mod plane_round_trip_tests {
         HalfwayBetween,
     }
 
-    /// A bar of `radius` standing on the origin along `z`, `length` tall, with
-    /// a dome of `dome_radius` on top whose rim is the bar's top circle: a flat
-    /// foot, the bar's skin with one straight seam, and a ball's cap with no
-    /// pole on it. The rim is two halves, each cut from the plane `z = length`
-    /// and picked by a half-space through the rim's centre.
-    fn a_dome_on_a_bar(model: &mut Model, radius: f64, length: f64, dome_radius: f64) -> SolidKey {
+    /// Builds [`a_dome_on_a_bar`] on the origin, places it by `moved`, writes
+    /// it and reads it back, and asks that the solid read back stands on the
+    /// placed one's surfaces and corners bit for bit, and that the two measure
+    /// within the sum of their volume errors of each other but not bit for
+    /// bit. Gives what the placed dome and the one read back measure at
+    /// `deflection`, in that order.
+    fn a_dome_measured_placed_and_read_back(
+        (radius, length, dome_radius): (f64, f64, f64),
+        moved: &Isometry,
+        deflection: f64,
+    ) -> [Measurement; 2] {
+        let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
+        let solid = a_dome_on_a_bar(&mut model, radius, length, dome_radius, Point::origin());
+        model
+            .place_solid(solid, moved)
+            .expect("the key came from this model");
+        let text = write(&model, "a dome on a bar").expect("the dome is written");
+        let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+        let back = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("the dome this writer wrote is refused: {why}"));
+        assert_eq!(
+            where_its_faces_and_corners_are(back.model()),
+            where_its_faces_and_corners_are(&model)
+        );
+        let [placed, read_back] =
+            [&model, back.model()].map(|model| its_measurement(model, deflection));
+        let gap = (placed.volume() - read_back.volume()).abs();
+        println!(
+            "placed: {:?}, read back: {:?}, off by {:e} of it",
+            placed.volume(),
+            read_back.volume(),
+            gap / placed.volume()
+        );
+        assert!(
+            gap < placed.volume_error() + read_back.volume_error(),
+            "off by {gap}, with volume errors of {} placed and {} read back",
+            placed.volume_error(),
+            read_back.volume_error()
+        );
+        assert_ne!(
+            placed.volume().to_bits(),
+            read_back.volume().to_bits(),
+            "the placed dome measures bit for bit what the one read back does, so a placed \
+             face may no longer be meshed in the frame it is stored in"
+        );
+        [placed, read_back]
+    }
+
+    /// What the model's one solid measures at `deflection`.
+    fn its_measurement(model: &Model, deflection: f64) -> Measurement {
+        model
+            .solids()
+            .next()
+            .expect("the model holds one solid")
+            .measure(
+                Deflection::of(deflection).expect("a deflection above zero"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a dome on a bar is measured")
+    }
+
+    /// The surfaces the faces of the model's one solid stand on, and the
+    /// corners each of its coedges starts from, written out in full so that
+    /// every bit tells, down to the sign of a zero, and sorted so that the
+    /// order the faces were made in does not.
+    fn where_its_faces_and_corners_are(model: &Model) -> [Vec<String>; 2] {
+        let solid = model.solids().next().expect("the model holds one solid");
+        let surfaces = solid
+            .faces()
+            .map(|face| format!("{:?}", face.surface()))
+            .collect();
+        let corners = solid
+            .faces()
+            .flat_map(|face| face.wires().flat_map(WireView::coedges).collect::<Vec<_>>())
+            .map(|coedge| format!("{:?}", coedge.start().point()))
+            .collect();
+        [surfaces, corners].map(|mut written: Vec<String>| {
+            written.sort();
+            written
+        })
+    }
+
+    /// A bar of `radius` standing on `standing_on` along `z`, `length` tall,
+    /// with a dome of `dome_radius` on top whose rim is the bar's top circle: a
+    /// flat foot, the bar's skin with one straight seam, and a ball's cap with
+    /// no pole on it. The rim is two halves, each cut from the plane of the
+    /// bar's top and picked by a half-space through the rim's centre.
+    fn a_dome_on_a_bar(
+        model: &mut Model,
+        radius: f64,
+        length: f64,
+        dome_radius: f64,
+        standing_on: Point,
+    ) -> SolidKey {
         let below_the_rim = ((dome_radius - radius) * (dome_radius + radius)).sqrt();
-        let top = Point::new(0.0, 0.0, length);
+        let [x, y, z] = standing_on.coordinates();
+        let top = Point::new(x, y, z + length);
         let half_of_the_rim = |facing: Vector| EdgeRun::PartOfWhereItCrosses {
             and: Surface::Plane(
                 Plane::from_point_and_normal(top, Vector::new(0.0, 0.0, 1.0))
@@ -3419,9 +3592,9 @@ mod plane_round_trip_tests {
         };
         let mut builder = SolidBuilder::new();
         let [foot, near, far] = [
-            Point::new(radius, 0.0, 0.0),
-            Point::new(radius, 0.0, length),
-            Point::new(-radius, 0.0, length),
+            Point::new(x + radius, y, z),
+            Point::new(x + radius, y, z + length),
+            Point::new(x - radius, y, z + length),
         ]
         .map(|at| builder.add_vertex(at).expect("a corner"));
         let [round_the_foot, up_the_seam, rim_in_front, rim_behind] = [
@@ -3465,18 +3638,25 @@ mod plane_round_trip_tests {
         let skin = [
             (
                 Surface::Plane(
-                    Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                    Plane::from_point_and_normal(standing_on, Vector::new(0.0, 0.0, -1.0))
                         .expect("the z axis is a unit normal"),
                 ),
                 foot_wire,
             ),
             (
-                Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius")),
+                Surface::Cylinder(
+                    Cylinder::new(
+                        Axis::new(standing_on, Vector::new(0.0, 0.0, 1.0))
+                            .expect("the z axis has a length"),
+                        radius,
+                    )
+                    .expect("a radius"),
+                ),
                 bar_wire,
             ),
             (
                 Surface::Sphere(
-                    Sphere::new(Point::new(0.0, 0.0, length - below_the_rim), dome_radius)
+                    Sphere::new(Point::new(x, y, z + (length - below_the_rim)), dome_radius)
                         .expect("a radius"),
                 ),
                 dome_wire,
