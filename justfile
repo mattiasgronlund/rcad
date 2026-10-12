@@ -8648,34 +8648,62 @@ check-fuzz-overnight-selftest:
     # the order is stable for a given name but not predictable from the name
     # alone, and `$tag` carries this run's own PID and `$RANDOM`. So rather
     # than assume any one stale name sorts first, this tries a few until one
-    # does, against an empty placeholder standing in for the real slot.
-    # Twenty-six of them failing at once is not a real possibility (each is
-    # roughly a coin flip), but it is checked rather than assumed, because a
-    # silent pass here would mean this arm tests nothing.
+    # does, against a placeholder standing in for the real slot.
     #
-    # Named so both directories end in `-$tag`, matching `clean_up`'s own
-    # `selftest-*"$tag"` glob, so the trap at the end of this script sweeps
-    # them away with everything else this run planted.
+    # Q1519: every one of those 26 tries is checked against the *same*
+    # planted name, so they are not 26 independent coin flips — a run where
+    # that one name's own hash happens to be the lowest of the 27 loses all
+    # 26 at once, which for a uniform hash is about 1 run in 27, not the old
+    # comment's 2^-26. Measured directly on this filesystem: 300 runs of
+    # this same plant-26-against-one-fixed-name loop, in a fresh directory
+    # each time, lost 5 — the same order of magnitude as 1-in-27, nowhere
+    # near 2^-26. So this no longer trusts one planted name's luck: a loss
+    # replants the real slot under a fresh name too, for a fresh 1-in-27
+    # draw against the same 26 tries, up to eight times. Eight independent
+    # ~1-in-27 draws losing in a row is under 2e-12 even by the old (wrong)
+    # coin-flip arithmetic, let alone the measured rate — low enough that a
+    # real loss here is a filesystem whose order is not acting as roughly
+    # uniform, not a flake.
+    #
+    # Named so every directory this makes ends in `-$tag`: the retry's own
+    # discriminator goes in front of it, never after, so `clean_up`'s
+    # `selftest-*"$tag"` glob still sweeps every attempt, tried or kept, with
+    # everything else this run planted. `tag` is shadowed with `local` for
+    # the retry's own directory names and reverts to the run-wide value the
+    # moment this function returns, so `clean_up` and every other arm still
+    # see the one tag they always did — which means the next arm's own build
+    # no longer writes into this arm's `real_out`, the way it did when every
+    # arm shared the one plain name and each one's fresh, clean rebuild
+    # overwrote the last one's rlib in passing. So this arm removes its own
+    # `real_out` and `stale_out` once it is done with them, rather than
+    # leaving the dirty one for whichever arm runs next to find.
     twenty_nine() {
     : >"$dir/log"
     base="fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing"
-    real_out="$base/selftest-$tag/out"
-    mkdir -p "$real_out"
-    touch "$real_out/librcad_fuzz_timing-selftest-$tag.rlib"
-
+    outer_tag="$tag"
     stale=""
-    for probe in a b c d e f g h i j k l m n o p q r s t u v w x y z; do
-        stale_out="$base/selftest-stale-$probe-$tag/out"
-        mkdir -p "$stale_out"
-        touch "$stale_out/librcad_fuzz_timing-selftest-stale-$probe-$tag.rlib"
-        first=$(find "$base" -name 'librcad_fuzz_timing-*.rlib' | head -n1)
-        case "$first" in
-            *"/selftest-stale-$probe-$tag/"*) stale="$probe"; break ;;
-        esac
-        rm -rf "$base/selftest-stale-$probe-$tag"
+    attempt=0
+    while [ -z "$stale" ] && [ "$attempt" -lt 8 ]; do
+        attempt=$((attempt + 1))
+        local tag="r$attempt-$outer_tag"
+        real_out="$base/selftest-$tag/out"
+        mkdir -p "$real_out"
+        touch "$real_out/librcad_fuzz_timing-selftest-$tag.rlib"
+
+        for probe in a b c d e f g h i j k l m n o p q r s t u v w x y z; do
+            stale_out="$base/selftest-stale-$probe-$tag/out"
+            mkdir -p "$stale_out"
+            touch "$stale_out/librcad_fuzz_timing-selftest-stale-$probe-$tag.rlib"
+            first=$(find "$base" -name 'librcad_fuzz_timing-*.rlib' | head -n1)
+            case "$first" in
+                *"/selftest-stale-$probe-$tag/"*) stale="$probe"; break ;;
+            esac
+            rm -rf "$base/selftest-stale-$probe-$tag"
+        done
+        [ -n "$stale" ] || rm -rf "$real_out"
     done
     [ -n "$stale" ] \
-        || fail "none of 26 stale rlib names sorted before the one this build writes under find on this filesystem, so this arm could not set up its own test"
+        || fail "none of 26 stale rlib names sorted before the real one under find, on $attempt different real names in a row — this filesystem's hash order is not acting as roughly uniform"
 
     stale_out="$base/selftest-stale-$stale-$tag/out"
     rm -f "$real_out"/librcad_fuzz_timing-*.rlib "$stale_out"/librcad_fuzz_timing-*.rlib
@@ -8693,6 +8721,7 @@ check-fuzz-overnight-selftest:
         || fail "an instrumented timing rlib did not read as a build failure in the summary: $(cat "$dir/logs/latest")"
     [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
         || fail "the night fuzzed targets after finding a sancov reference in rcad-fuzz-timing's rlib"
+    rm -rf "$real_out" "$stale_out"
     }
 
     # Thirty: docs/decisions.d/436 §436.4's rule, now built into the recipe
@@ -8866,7 +8895,35 @@ check-fuzz-overnight-selftest:
 
     # Twenty-six: the whole selftest inside its bound (§15.6), counted by bash
     # from the moment it started, so time lost anywhere in it counts.
-    bound=60
+    #
+    # Q1769: Thirty, Thirty-one and Thirty-two put three more `alone` arms on
+    # this list after the sixty-second bound was set (Q709, 2026-10-02, idle).
+    # Measured instead under the fuzz night that was actually running (24
+    # cores, `uptime`'s load average logged beside each run): three runs of
+    # this recipe before Q1753 (789396ef, six alone arms, no link pass) took
+    # 34.8, 37.0 and 37.2 s wall (10.2-10.5 s user, 16.4-17.3 s sys; load
+    # 34-48), and three after it (41d96a4e, nine alone arms, every `run()`
+    # call now shelling out to the link pass below) took 55.5, 52.9 and
+    # 50.7 s (12.0-12.4 s user, 19.5-20.0 s sys; load 41-50). A bare `python3
+    # -c pass` took 0.06-0.07 s under the same load, and the whole selftest
+    # makes about 22 calls into `run()`, so the link pass's own startup
+    # accounts for under two of the fifteen-to-eighteen-second wall increase
+    # — the lead that named it as the cause was wrong. What does account for
+    # it: each of the three new arms is one more `alone` arm with its own
+    # four-second stub sleep, run strictly in turn, so three more seconds of
+    # unavoidable, unoverlapped sleep landed on a bound that never priced
+    # them in, on top of their own CPU work. Q1766's lander gate saw this
+    # step take 66 s against the old bound of 60, with four lanes going —
+    # heavier contention than this session raised on its own. Running these
+    # three beside the others instead would change what they test: all
+    # three share one fixed "earlier night" directory name with each other
+    # and would race on it, so that is a correctness change for a later row
+    # (queued below), not a one-line move tonight. The bound moves instead,
+    # by the same ratio Q709 set it by — about twice the worst wall time
+    # measured — taking the lander's own 66 s rather than this session's
+    # smaller ones, since the lander's four-lane night is the closer match
+    # to what this bound has to survive.
+    bound=130
     [ "$SECONDS" -le "$bound" ] \
         || { echo "check-fuzz-overnight-selftest took $SECONDS s, over its bound of $bound s: arms that should run beside each other are running in turn, or one of them is waiting on something new"; exit 1; }
 
