@@ -10319,6 +10319,22 @@ check-fuzz-triage-selftest:
     [ -f "$tree/fuzz/artifacts/$surfaces/$failing" ] && [ ! -e "$bin/$surfaces.calls" ] \
         || fail "a file that still fails on main was folded"
 
+    # Seventeen: a morning hands the merge at most RCAD_FUZZ_FOLD_AT_MOST of a
+    # target's passing files, and the rest stay for the next morning. Without
+    # the cap the writer's first fold, 68 013 files, runs past the service's
+    # four hours and is killed every morning with nothing folded (§434.7).
+    printf '#!/bin/sh\ncd "%s" && PATH="%s" exec cargo "$@"\n' "$PWD" "$PATH" >"$cargo_here/cargo"
+    find "$tree/fuzz/artifacts/$reader" -type f -delete
+    put "$reader" 'the first of three, and it adds no path' >/dev/null
+    put "$reader" 'the second of three, and it adds no path' >/dev/null
+    put "$reader" 'the third of three, and it adds no path' >/dev/null
+    a_night 2026-10-20 "$(git -C "$tree" rev-parse --short HEAD)"
+    got=$(RCAD_FUZZ_FOLD_AT_MOST=2 fold) || fail "a fold past its cap made the triage itself fail"
+    grep -q "^fold:     $reader: 3 passed, 2 folded (0 kept by the merge), 1 left for the next morning$" <<<"$got" \
+        || fail "a morning handed the merge more passing files than RCAD_FUZZ_FOLD_AT_MOST, so the first fold would never end inside the service's four hours"
+    [ "$(find "$tree/fuzz/artifacts/$reader" -type f | grep -c .)" = 1 ] \
+        || fail "the file past the cap did not stay in fuzz/artifacts/ for the next morning"
+
 # Each timer's two unit files are tracked here and **copied** into
 # `~/.config/systemd/user/`. That is two records of one thing, which §60 says is
 # the shape to delete, and on 2026-09-15 it had a price: the night lost eight
