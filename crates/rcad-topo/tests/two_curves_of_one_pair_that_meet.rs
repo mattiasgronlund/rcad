@@ -20,7 +20,7 @@
 //! its apex, and that is the node §347.1 built. Two pipes of one radius whose
 //! axes meet are tangent at two points, and their crossing reaches them
 //! without being pushed there: that is the Steinmetz cross, which gets its
-//! nodes and is then refused by name inside the arrangement.
+//! nodes, and every fuse of it answers.
 //!
 //! The fuses run three rules both ways round, certified, in a model of 100 mm.
 
@@ -175,40 +175,28 @@ fn a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement() {
 /// halves of the ellipses running into it, and one half way along each half,
 /// at `(±1, 0, ±1)`.
 ///
-/// **Every fuse is refused telling the cells of a pipe apart.** Which cell
-/// a walk round a pipe is in is read off how often each walk crosses a
-/// half-plane through the axis, and every half-plane tried runs along an axis
-/// of the model: on each pipe the two meeting points and the four middles sit
-/// on all of them. Three diagonal half-planes got past it, and the union came
-/// to `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` in `assemble`, where
-/// the two pipes' gradients are parallel at `(0, ±1, 0)` and the way along an
-/// edge from there is nought; but the same three answered three fuses of a
-/// cone beside a block in `fuse_laws_over_a_cone.rs` wrongly, so they are not
-/// in.
+/// Each bar is `4π`. What they share is the Steinmetz solid, `16r³/3`, which
+/// stays within `|x|, |z| ≤ 1`, inside both bars. The union keeps each pipe
+/// in two pieces, either side of the other bar, and the four caps, 8 faces;
+/// what they share has 4; each bar less the other is two pieces of 3 faces,
+/// which touch at the two points.
 ///
-/// The answer it should reach: each bar is `4π`. What they share is the
-/// Steinmetz solid, `16r³/3`, which stays within `|x|, |z| ≤ 1`, inside both
-/// bars. The union keeps each pipe in two pieces, either side of the other bar,
-/// and the four caps, 8 faces; what they share has 4; each bar less the other
-/// is two pieces of 3 faces, which touch at the two points.
+/// Every fuse was refused telling the cells of a pipe apart until Q1660. Which
+/// cell a walk round a pipe is in is read off how often each walk crosses a
+/// half-plane through the axis, and every half-plane tried ran along an axis
+/// of the model: on each pipe the two meeting points and the four middles sat
+/// on all of them. The half-plane is now chosen half way across the widest
+/// gap between the nodes. Past it every fuse was refused
+/// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` in `assemble`, where the
+/// two pipes' gradients are parallel at `(0, ±1, 0)` and the way along an edge
+/// out of there was read as nought.
 #[test]
-fn two_bars_of_one_radius_whose_axes_meet_are_refused_telling_the_cells_of_a_pipe_apart() {
-    for (rule, first_first) in six_fuses() {
-        let mut model = a_model();
-        let said = fuse(
-            &mut model,
-            two_bars_of_one_radius_whose_axes_meet,
-            rule,
-            first_first,
-        );
-        assert!(
-            matches!(
-                said,
-                Err(rcad_topo::Error::CannotTellTheCellsOfAFaceApart { .. })
-            ),
-            "{rule:?} (first first: {first_first}): {said:?}"
-        );
-    }
+fn two_bars_of_one_radius_whose_axes_meet_cross_in_four_half_ellipses_and_every_fuse_answers() {
+    every_fuse_answers(
+        two_bars_of_one_radius_whose_axes_meet,
+        [4.0 * PI, 4.0 * PI, 16.0 / 3.0],
+        [&[8], &[4], &[3, 3], &[3, 3]],
+    );
 }
 
 /// A bar of radius 2 up `z`, and a bar of radius 1 along `x` at `y = 1`, which
