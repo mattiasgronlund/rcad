@@ -145,4 +145,72 @@ rcad-topo` (1261 run, 1261 passed).
   both faces curved: a ball and a cone on one axis meeting in the ball's great
   circle through its pole. The touch fallback is asked before the faces' walks
   and would answer with the cone's longitude, which turns with the way the
-  cone's axis is written. Nobody has built it.
+  cone's axis is written. Built by Q834, and it does turn: §341.7.
+
+### 341.7 A ball and a cone crossing through the ball's pole
+
+*Queue row Q834, from §341.6. Lane
+`lane-q834-a-ball-and-a-cone-crossing-through-its-pole`, off `70cabed1`, in two
+runs. **A refusal pinned, and the fix §341.6 named measured and not landed**
+(§16.10): it trades the refusal for another.*
+
+The shape is a half ball of radius 1.5 about the origin, below `y = 0`, under a
+frustum of a cone about the `y` axis with slope one half, standing on the rim
+`y = 0` and closed by a flat lid at `y = 2`. The ball is written about its own
+`z`, so its pole `(0, 0, 1.5)` is on the rim. The cone's apex is 3 below the rim,
+so the frustum flares out to a lid of radius 2.5, or 3 above it, so it narrows
+in to a lid of radius 0.5. The rim is named by its two faces
+(`EdgeRun::RightRoundWhereItsFacesCross`). Each shape is written eight ways:
+either face listed first, the cone's axis written up or down, the ball using
+the rim either way. At the pole validate's rule reads nothing and skips the
+rim, so the eight are one solid (§341.5).
+
+On `70cabed1`, measured by the three pins in
+`rcad-topo/tests/a_ball_and_a_cone_crossing_through_its_pole.rs`:
+
+| frustum | rim's corner | builds | refused |
+|---|---|---|---|
+| flares out | pole | axis up with the ball reversed, axis down with it forward | the other four, `AWireWillNotLieFlatOnItsFace` |
+| narrows in | pole | the same four | the same other four |
+| either | equator `(1.5, 0, 0)` | the ball forward | the ball reversed, `AClosedEdgeIsWalkedAgainstItsSurface` |
+
+Each in both face orders. Each that builds validates, meshes each face on its
+own side of `y = 0` and measures `π(2r³/3 + h/3·(r² + r·l + l²))`, with `l` the
+lid's radius, at `0.05`, `0.0137` and `0.001`. So at the pole which four build
+turns with the way the cone's axis is written, which is not a fact about the
+shape: the touch fallback answers with the cone's longitude. At the equator the
+rule has the ball's latitude, and nothing turns.
+
+**The fix §341.6 named is not enough.** Asking the faces' walk before the touch
+fallback wherever the two surfaces' gradients cross at the corner (`2d536b6f`,
+not landed):
+
+| frustum | pole | equator |
+|---|---|---|
+| flares out | all eight build | as before |
+| narrows in | all eight refused `AWireWillNotLieFlatOnItsFace` | as before |
+
+The narrowing cone meets the ball a second time, at
+`y = 2r²a/(r² + a²) = 1.2` for an apex `a = 3` above the rim, through the middle
+of its own face. Next to the rim the face is inside the ball, and the lid's
+corner `(0, 2, 0.5)` is outside it. `mesh.rs`'s
+`the_way_this_face_walks_a_closed_edge` reads the face's side of the face
+across off its corners with no picker
+(`which_side_of_a_surface_a_run_names_this_face_lies_on`), so it reads the lid's
+corner, gets outside, and turns the rim. Validate reads the side of the face
+across with `which_side_of_it_this_face_lies_on`, which reads a corner past the
+half-space picking the curve out (Q1190) for a ball and a cone whose axis runs
+through its centre; at the equator, where validate's rule reads the latitude,
+it passes the narrowing frustum's forward writing. That function and
+`PastThePicker` are private to `validate.rs`, outside this row's files, and a
+third copy of the side question in `mesh.rs` is what §341.6's first bullet
+says to stop. So `mesh.rs` stays as it was, the pole pins hold the refusal and
+fail on the day it is fixed, and the fix is a row of its own: read the faces'
+walk with validate's reading where the partner is the face across, then ask it
+before the touch fallback where the gradients cross. Not run: whether that
+builds all eight of both frustums.
+
+Commands: `mise exec -- just t -p rcad-topo --test
+a_ball_and_a_cone_crossing_through_its_pole --no-fail-fast`, on the branch (3
+passed) and with `2d536b6f`'s `mesh.rs` laid in (the two pole pins fail, the
+equator pin passes).
