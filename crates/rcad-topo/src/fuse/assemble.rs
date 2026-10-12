@@ -3665,9 +3665,12 @@ impl Assembly {
     /// At `t = 0.142` the shell's four corners all round onto the floor
     /// itself, so it measured `0.0` and the fuse was refused
     /// [`Invalid::VolumeIsNotPositive`]. A shell like that can be the whole
-    /// answer: two skewed combs touching along one line share a prism of
-    /// `3.1e−32` and no space, and their intersection now answers no solid
-    /// (`two_skewed_combs_touching_along_one_line.rs`, queue row Q1615).
+    /// intersection: two skewed combs touching along one line share a prism of
+    /// `3.1e−32` and no space (`two_skewed_combs_touching_along_one_line.rs`,
+    /// queue row Q1615). Since Q1710 that prism is taken as flat before
+    /// anything is kept, by [`the_pieces_of_each_shell_both_hold_taken_as_flat`],
+    /// which asks [`Assembly::takes_as_flat`] as this does, so the intersection
+    /// keeps none of it and this fold no longer meets it.
     ///
     /// **Only flat faces with straight edges between two corners**, since only
     /// then is every point of the shell between its corners: a half ball's

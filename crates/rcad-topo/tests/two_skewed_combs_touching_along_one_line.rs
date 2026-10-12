@@ -29,6 +29,17 @@
 //! §417's 2026-10-11 note). The prism's six corners all round onto `y = 2`, so
 //! it is left out, and nothing is left. That is the exact answer: the two
 //! combs share a line, and a line holds no space.
+//!
+//! **Under a tolerant policy each difference is now the comb it starts from**
+//! (queue row Q1710). Until Q1710 each comb less the other kept the prism as a
+//! notch in its own shell, whose floor, a triangle of the other comb's bottom
+//! or top, had all three corners rounded onto `y = 2` and so wound neither
+//! way: refused `OuterWireWindsAgainstTheNormal`. The shell fold above takes
+//! only a shell of its own. Now the fuse asks the same question of what the
+//! intersection would keep before it keeps anything, and reads each piece of
+//! the prism as lying on the other comb facing the other way, which is what
+//! two solids touching from outside do (`fuse/select.rs`, §417's 2026-10-12
+//! note). The intersection still keeps none of it, and logs the one record.
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 mod cones;

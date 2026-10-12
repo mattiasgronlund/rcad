@@ -140,6 +140,24 @@
 //! half-space that names the cap's circle ([`is_behind_the_meridian_disk`]).
 //! Two quarter bends placed half a turn apart need it. It is tried after
 //! every other rule, so a piece any of them placed is placed as before.
+//!
+//! # Then a piece of a flat shell both groups hold lies on the other group
+//!
+//! Once every piece is placed, under a tolerant policy, [`choose`] puts
+//! together what the intersection would keep and asks of each of its shells
+//! whether the policy takes it as flat, as the shell fold of `assemble.rs`
+//! does ([`the_pieces_of_each_shell_both_hold_taken_as_flat`], Q1710, §417).
+//! Each piece of such a shell, where every piece is buried in the other group
+//! and both groups have pieces, is read as lying on the other group facing
+//! the other way: a shell with no inside is two sides of one sheet, back to
+//! back. So the intersection keeps none of it, and a difference keeps the
+//! argument's pieces and drops the tool's. Two skewed combs touching along
+//! one line need it: the comb less the other kept the prism of `3.1e−32` their
+//! rounded planes close as a notch in its own shell, which the shell fold
+//! cannot reach, and the notch's floor rounded to a triangle with no winding.
+//! A union drops a buried piece and one lying the other way alike, so it asks
+//! nothing; nor does a certified policy, and a piece of no such shell is
+//! placed as above.
 
 use rcad_geom::{
     Cone, Cylinder, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
