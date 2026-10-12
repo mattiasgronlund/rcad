@@ -149,7 +149,7 @@ fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
 /// **Q1614 moved the certified six.** The fuse meshes the ball's face while
 /// it nests the answer's shells, and since Q1614 it asks the range before
 /// that (`docs/decisions.md` §87.3). Until then the certified six were refused
-/// as the tolerant six are, with the same two records.
+/// as the tolerant six are, with the two records the tolerant six then had.
 ///
 /// **The last two were refused earlier, while the answer was written**, by
 /// `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom`, until the
@@ -159,9 +159,13 @@ fn where_the_two_meets_are_exact_nothing_asks_whether_they_are_one() {
 /// the sliver's two short arcs alone, and the refusal comes from the mesh.
 /// Neither ever answered.
 ///
-/// Each tolerant one comes back with two records, `side of a half-space`,
-/// which nesting the shells writes, and each certified one, stopped before
-/// that, with none. Neither record has been traced.
+/// **No fuse records anything.** Until Q1837 each tolerant one came back with
+/// two records, `side of a half-space`, written while the shells were nested.
+/// Q1837 changed nothing but the walk, which since then picks the arc of a
+/// circle whose middle a half-space surely holds without asking the sign of
+/// the other arc's middle, and records a sign only when neither arc is told.
+/// So the two were signs about the middle of an arc nobody could tell, asked
+/// while the other arc was told. The refusal did not move.
 #[test]
 fn the_slivers_no_point_is_inside_are_placed_by_their_sides_and_each_answer_is_refused_later() {
     for rule in EVERY_RULE {
@@ -182,14 +186,7 @@ fn the_slivers_no_point_is_inside_are_placed_by_their_sides_and_each_answer_is_r
             }
 
             let (fused, records) = fused_and_recorded(rule, &Policy::tolerant(25.0), ball_first);
-            assert_eq!(
-                records
-                    .iter()
-                    .map(|record| (record.predicate(), record.level()))
-                    .collect::<Vec<_>>(),
-                [("side of a half-space", Level::Interval); 2],
-                "tolerant, {case:?}: {records:#?}"
-            );
+            assert!(records.is_empty(), "tolerant, {case:?}: {records:#?}");
             match fused {
                 Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }) => {}
                 Ok(fused) => panic!(

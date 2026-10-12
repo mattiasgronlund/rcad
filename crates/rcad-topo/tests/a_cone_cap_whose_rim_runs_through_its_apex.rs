@@ -46,9 +46,8 @@
 //! - **A plane along one ruling.** Laid exactly on its plane, a block's wall
 //!   touches the cone along the ruling, and every fuse answers the two as they
 //!   stand: the skin is never cut along the ruling. Turned into place instead,
-//!   the block's floor lands a rounding off the touching plane, and every fuse
-//!   is refused once its answer is meshed: three by name while meshing, three
-//!   `Undecidable` after.
+//!   the block's floor lands a rounding off the touching plane and cuts a
+//!   sliver off the cap's rim, and every fuse answers and measures.
 //! - **A closed edge cornered at the apex.** It has to run along a closed
 //!   crossing through the apex, and every one is refused by name, through a
 //!   fuse and through `SolidBuilder` alike: a bar whose wall runs through the
@@ -63,7 +62,9 @@ use rcad_geom::{
     SurfaceMeet, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{
+    DraftStep, Error, Measurement, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+};
 
 mod cones;
 
@@ -167,29 +168,53 @@ fn planes_through_the_apex_cut_a_piece_out_of_the_cone_and_every_fuse_answers() 
 
 /// The block `[−6, 6] × [−12, 4] × [0, 6]` turned about `x` so that its floor
 /// lies on `2y − z = 0` and the block on the side away from the axis: it
-/// would touch the cone along the ruling `x = 0, y = z/2`. Every fuse gets
-/// past `select`, and every one is refused once the answer's shells are
-/// nested, which meshes them to measure their volumes. The union both ways
-/// round and the cone less the block refuse
-/// `CannotNameWhichPieceOfACrossingThisIs` while that mesh is made. The other
-/// three are refused `Undecidable` on one "side of a half-space" left
-/// undecided at `(0, 4, 8)`, where the ruling meets the cap's rim.
+/// would touch the cone along the ruling `x = 0, y = z/2`. Every fuse answers
+/// one solid that validates, meshes closed and measures: the cone and the
+/// block for the union, nothing for what they share, the cone for the cone
+/// less the block, and the block for the block less the cone.
 ///
 /// The turn's sine and cosine round apart, so the floor as turned is not the
 /// touching plane: its normal's parts are `−0.8944271909999157` and
 /// `0.44721359549995765`, where the nearest numbers to `−2/√5` and `1/√5` are
 /// `−0.8944271909999159` and `0.4472135954999579`. It cuts the cone in two
-/// rulings a rounding apart rather than touching it along one. Until Q1537
-/// every fuse was refused `Undecidable` before anything was meshed, at "a
-/// point inside a piece of a face", on a lens of the block's end face whose
-/// corners are `1.7e-7` either side of `x = 0` at `y = 5.37, z = 10.73`, where
-/// that ruling carried on past the cap meets the end face. The cap is at
-/// `z = 8`, so the lens is outside the cone, and the rule that places a piece
-/// by the piece across a side clear of every face places it there now
-/// (§35.6). Laid exactly on its plane instead, the same touch answers every
-/// fuse, as the next test shows.
+/// rulings a rounding apart rather than touching it along one, and they meet
+/// the cap's rim `1.26e-7` either side of `x = 0`. What the two share is the
+/// cone over the sliver of the cap between those two ends, under
+/// [`THE_WEDGE`], so each answer is given that much more room.
+///
+/// **Each fuse has to pick the right arc of the rim**, the sliver or the long
+/// way round, and its volume says which it picked: the long arc for the union
+/// and the cone less the block, the sliver for the other three. Until Q1837
+/// the union both ways round and the cone less the block were refused
+/// `CannotNameWhichPieceOfACrossingThisIs` while the answer was meshed, and the
+/// other three `Undecidable` on one "side of a half-space" left undecided: the
+/// floor is `1.5e-15` from the sliver's middle, and no box round that middle
+/// could tell which side it was on. The long arc's middle, eight away, is told
+/// outright, and one arc told is enough
+/// (`the_two_arcs_of_a_cap_rim_cut_a_hair_apart.rs` in rcad-geom).
+///
+/// **The block is held against itself as it stands, not against `1152`.** Its
+/// turn's rounding leaves it `1151.9999999999993` as built, with its corners a
+/// few roundings off where its own planes meet: the corner it has at
+/// `(±6, 5.366563145999493, 10.733126291998989)` is outside the box
+/// `Plane::meet_of_three` puts round the meet of its three planes, whose `y` is
+/// `5.366563145999494` at least. The fuse writes each corner down again from
+/// those planes, within the slop it tags it with, so it moves them by up to
+/// `7.9e-15`, and the block less the cone comes out `1152.0000000000007`. That
+/// answer's own error, `5.7e-19`, is only the space hidden under the hair of
+/// cone skin it keeps. How far the corners moved is given room as
+/// `two_turned_cubes_a_rounding_apart.rs` gives it: the skin's area times the
+/// furthest move, `5.7e-12` here, against the `1.4e-12` the answer is out. The
+/// error also leaves out the rounding of the answer's own sum: summed exactly,
+/// its mesh encloses `7.9e-15` less than the measure says, which that room
+/// covers seven hundred times over.
+///
+/// Until Q1537 every fuse was refused `Undecidable` before anything was
+/// meshed, on a lens of the block's end face where that ruling carried on past
+/// the cap meets it, outside the cone (§35.6). Laid exactly on its plane
+/// instead, the same touch answers every fuse, as the next test shows.
 #[test]
-fn a_block_resting_on_the_cone_along_a_ruling_is_refused_once_its_answer_is_meshed() {
+fn a_block_resting_on_the_cone_along_a_ruling_answers_every_fuse() {
     let touching = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, -2.0, 1.0))
         .expect("a normal that is not zero");
     let skin = Surface::Cone(Cone::new(Axis::z(), SLOPE).expect("a positive slope"));
@@ -213,33 +238,58 @@ fn a_block_resting_on_the_cone_along_a_ruling_is_refused_once_its_answer_is_mesh
             "{surface:?} touches the cone along a ruling"
         );
     }
+    let block_corners = the_corners_and_where_their_planes_meet(&model, block);
+    let the_block = measurement_of(&model, block, "the block as it stands");
 
     for (rule, cone_first) in six_fuses() {
+        let (holds_the_cone, holds_the_block) = match (rule, cone_first) {
+            (Rule::Union, _) => (true, true),
+            (Rule::Intersection, _) => (false, false),
+            (Rule::Difference, true) => (true, false),
+            (Rule::Difference, false) => (false, true),
+            (other, _) => panic!("{other:?} is not one of the six"),
+        };
+        let what = format!("{rule:?}, cone first {cone_first}");
         let mut model = a_model();
         let cone = a_pointed_cone(&mut model, SLOPE, HEIGHT);
         let block = a_block_turned_onto_the_ruling(&mut model);
-        let said = fuse(&mut model, cone, block, rule, cone_first);
-        let refused_while_meshing = matches!(
-            (rule, cone_first),
-            (Rule::Union, _) | (Rule::Difference, true)
-        );
-        match said {
-            Err(Error::Geometry(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs))
-                if refused_while_meshing => {}
-            Err(Error::Undecidable { records }) if !refused_while_meshing => {
-                let [left_undecided] = records.records() else {
-                    panic!("{rule:?}, cone first {cone_first}: {records:#?}")
-                };
-                assert_eq!(
-                    left_undecided.predicate(),
-                    "side of a half-space",
-                    "{rule:?}, cone first {cone_first}: {left_undecided:#?}"
-                );
-            }
-            other => panic!("{rule:?}, cone first {cone_first}: {other:?}"),
+        let solids = fuse(&mut model, cone, block, rule, cone_first)
+            .unwrap_or_else(|why| panic!("{what}: refused {why:?}"));
+        let [solid] = solids[..] else {
+            panic!("{what}: {} solids", solids.len())
+        };
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}: validates: {why:?}"));
+        meshes_closed(&model, solid, 1, &what);
+
+        let found = measurement_of(&model, solid, &what);
+        let mut volume = 0.0;
+        let mut room = found.volume_error() + THE_WEDGE;
+        if holds_the_cone {
+            volume += CONE;
         }
+        if holds_the_block {
+            let moved = how_far_the_corners_moved(&block_corners, &the_corners_of(&model, solid))
+                .unwrap_or_else(|why| panic!("{what}: {why}"));
+            volume += the_block.volume();
+            room += the_block.volume_error() + found.surface_area() * moved;
+        }
+        assert!(
+            (found.volume() - volume).abs() <= room,
+            "{what}: measured {}, closed form {volume}, room {room}",
+            found.volume()
+        );
     }
 }
+
+/// More than the cone and the turned block share: the cone over the sliver of
+/// its cap that the block's floor cuts off, since the floor runs through the
+/// apex. The sliver is no wider than its two ends on the rim, `2.53e-7` apart,
+/// and no deeper than their sagitta on a rim of radius four,
+/// `(1.27e-7)² / 8 = 2.02e-15`, so its area is under `5.11e-22`, and the cone
+/// over it is a third of that times the height eight, under `1.37e-21`.
+const THE_WEDGE: f64 = 2e-21;
 
 /// A block whose wall lies exactly on the plane `x − 2y = 0`, against the
 /// cone of slope one half lying along `x`: the wall touches the cone along
@@ -628,7 +678,12 @@ fn meshes_closed(model: &Model, solid: SolidKey, shells: usize, what: &str) {
 
 /// The solid's volume and the error its measure publishes.
 fn measured(model: &Model, solid: SolidKey, what: &str) -> (f64, f64) {
-    let measured = model
+    let measured = measurement_of(model, solid, what);
+    (measured.volume(), measured.volume_error())
+}
+
+fn measurement_of(model: &Model, solid: SolidKey, what: &str) -> Measurement {
+    model
         .solid(solid)
         .expect("this model made the key")
         .measure(
@@ -636,6 +691,97 @@ fn measured(model: &Model, solid: SolidKey, what: &str) -> (f64, f64) {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
-        .unwrap_or_else(|why| panic!("{what}: the solid measures: {why:?}"));
-    (measured.volume(), measured.volume_error())
+        .unwrap_or_else(|why| panic!("{what}: the solid measures: {why:?}"))
+}
+
+/// Every corner of the solid, each with the slop the kernel tagged it with.
+fn the_corners_of(model: &Model, solid: SolidKey) -> Vec<(Point, f64)> {
+    let mut corners = Vec::new();
+    for face in model.solid(solid).expect("this model made the key").faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                let corner = coedge.start();
+                let slop = corner
+                    .approximation()
+                    .map_or(0.0, |approximation| approximation.magnitude());
+                corners.push((corner.point(), slop));
+            }
+        }
+    }
+    corners
+}
+
+/// Each corner of a solid whose faces are all flat, with the box
+/// `Plane::meet_of_three` puts round where the planes of its three faces there
+/// meet, as `[low, high]` along each axis.
+fn the_corners_and_where_their_planes_meet(
+    model: &Model,
+    solid: SolidKey,
+) -> Vec<(Point, [[f64; 2]; 3])> {
+    let view = model.solid(solid).expect("this model made the key");
+    let mut corners: Vec<Point> = Vec::new();
+    for (corner, _) in the_corners_of(model, solid) {
+        if !corners.contains(&corner) {
+            corners.push(corner);
+        }
+    }
+    corners
+        .into_iter()
+        .map(|corner| {
+            let planes: Vec<Plane> = view
+                .faces()
+                .filter(|face| {
+                    face.wires().any(|wire| {
+                        wire.coedges()
+                            .any(|coedge| coedge.start().point() == corner)
+                    })
+                })
+                .map(|face| {
+                    let Surface::Plane(plane) = face.surface() else {
+                        panic!("a face at {corner:?} on {:?}", face.surface())
+                    };
+                    plane
+                })
+                .collect();
+            let [first, second, third] = planes[..] else {
+                panic!("{} faces at {corner:?}", planes.len())
+            };
+            let meet = Plane::meet_of_three(&first, &second, &third)
+                .unwrap_or_else(|why| panic!("the planes at {corner:?} meet: {why:?}"));
+            (corner, meet.enclosure().map(|side| [side.lo(), side.hi()]))
+        })
+        .collect()
+}
+
+/// The furthest the answer moved any of the input's corners: how far each is
+/// from the answer's corner nearest it. That corner must be within the slop it
+/// is tagged with of where the input's planes there meet.
+fn how_far_the_corners_moved(
+    input: &[(Point, [[f64; 2]; 3])],
+    answer: &[(Point, f64)],
+) -> Result<f64, String> {
+    let mut moved = 0.0_f64;
+    for &(corner, meet) in input {
+        let &(nearest, slop) = answer
+            .iter()
+            .min_by(|one, other| {
+                corner
+                    .distance_to(one.0)
+                    .total_cmp(&corner.distance_to(other.0))
+            })
+            .ok_or("the answer has no corners")?;
+        let off_the_meet = [nearest.x(), nearest.y(), nearest.z()]
+            .into_iter()
+            .zip(meet)
+            .map(|(at, [low, high])| (low - at).max(at - high).max(0.0))
+            .fold(0.0_f64, f64::hypot);
+        if off_the_meet > slop {
+            return Err(format!(
+                "{nearest:?}, nearest {corner:?}, is {off_the_meet:e} from where the planes \
+                 there meet, tagged {slop:e}"
+            ));
+        }
+        moved = moved.max(corner.distance_to(nearest));
+    }
+    Ok(moved)
 }
