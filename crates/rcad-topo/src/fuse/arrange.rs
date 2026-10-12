@@ -12143,6 +12143,63 @@ mod curved {
         }
     }
 
+    /// Two bars of radius `1/4`, the first along `x` through `(11, −3.25,
+    /// 0.5)`, the second two long, starting there and turned 50° about `z`,
+    /// both cut against each other: `two_bars` in
+    /// `tests/two_equal_bars_leaning_at_each_other.rs`.
+    fn a_bar_starting_where_it_crosses_another() -> Vec<BakedSolid> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let onto_x = Isometry::quarter_turns(&Axis::y(), 1).expect("a turn about y");
+        let shift = |by: [f64; 3]| {
+            Isometry::translation(Vector::new(by[0], by[1], by[2])).expect("a finite move")
+        };
+        let first = model
+            .add_round_bar(0.25, 4.0, &shift([9.0, -3.25, 0.5]).compose(&onto_x))
+            .expect("a bar along x");
+        let turned = Isometry::rotation(&Axis::z(), f64::to_radians(50.0))
+            .expect("a turn about z")
+            .compose(&onto_x);
+        let second = model
+            .add_round_bar(0.25, 2.0, &shift([11.0, -3.25, 0.5]).compose(&turned))
+            .expect("a bar starting on the first one's axis");
+        let mut solids = bake(&model, &[first, second], &policy, &mut log).expect("both bake");
+        cuts::gather(&mut solids, &policy, &mut log).expect("they cut each other");
+        solids
+    }
+
+    fn the_wall(bar: &BakedSolid) -> &BakedFace {
+        bar.faces
+            .iter()
+            .find(|face| face.surface.as_plane().is_none())
+            .expect("a bar has a wall")
+    }
+
+    /// The first bar's wall is cut by the second bar's near cap, in an
+    /// ellipse, and by the second pipe, in four half ellipses, and all of
+    /// them meet at the two points `c ± r·n̂` where the walls touch. Told
+    /// that cap holds where the axes meet, as `bake` tells the second bar's
+    /// own wall, the wall is split, with the meet of the cap's crossing and
+    /// each half named as the node where the halves meet. Before, it was
+    /// handed to `meet_of_three_surfaces`, which solves no plane and two
+    /// pipes, and refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` (Q1814).
+    ///
+    /// The cap is copied over by hand here, where gathering the cuts would
+    /// carry it.
+    #[test]
+    fn a_wall_told_a_cap_holds_where_the_axes_meet_is_split_where_the_cap_meets_the_halves() {
+        let solids = a_bar_starting_where_it_crosses_another();
+        let mut wall = the_wall(&solids[0]).clone();
+        wall.caps_through_the_start_of_their_axis = the_wall(&solids[1])
+            .caps_through_the_start_of_their_axis
+            .clone();
+        assert_eq!(wall.caps_through_the_start_of_their_axis.len(), 1);
+        let split = split_a_face(&wall, &Policy::certified(), &mut ProvenanceLog::new())
+            .map(|split| split.pieces.len());
+        assert!(split.is_ok(), "{split:?}");
+    }
+
     /// §31.7 criterion 12: the pieces a face is cut into cover it and overlap
     /// nowhere.
     ///
