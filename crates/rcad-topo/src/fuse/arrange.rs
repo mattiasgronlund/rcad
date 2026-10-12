@@ -8065,6 +8065,11 @@ fn round_a_closed_crossing_and_what_it_measures(
         [false, true] => return Ok((Decision::Neg, Measures::Length)),
         [true, true] | [false, false] => {}
     }
+    if matches!(decided, Decision::Undecidable { .. })
+        && let Some(read) = round_a_closed_crossing_by_its_angle(pair, from, one, other)
+    {
+        return Ok((read, Measures::Volume));
+    }
     // Compared rather than matched: only a proved zero is re-read, and every
     // other answer goes back as it came (§40).
     if decided != Decision::Zero {
@@ -8122,6 +8127,85 @@ fn the_start_is_a_rounding_off(
     // Compared rather than matched: only a proved `Neg` puts `place` outside
     // the line, and every other answer leaves it where the sweep puts it (§40).
     Ok(which_comes_first_round_a_crossing(pair, from, ahead, place)? == Decision::Neg)
+}
+
+/// Which of two points comes first round the loop a plane cuts a pipe in,
+/// read as how far each is turned about the pipe's axis from the start: `None`
+/// for every other pair, and wherever a sign it reads is not proved.
+///
+/// **Seen down the axis the loop is the pipe's circle**, each point of it over
+/// one point of the circle, since the plane does not lie along the axis. So
+/// going round the loop turns about the axis all the way round once, always
+/// the same way, and the points come in the order they are turned from the
+/// start. That way is the sign of `w·((from − c) × run)`, for `w` the axis,
+/// `c` its stored origin and `run` the way the loop runs at the start, `∇S ×
+/// ∇T`. A point `p` then lies in the half turn ahead of the start where
+/// `w·((from − c) × (p − c))` has that sign, and in the half turn behind where
+/// it has the other. A point ahead comes before a point behind, and of two in
+/// one half turn the one the other is turned ahead of comes first. Nothing
+/// here forms the loop's centre: any point of the axis is as good as `c`, and
+/// what lies along `w` drops out of each determinant.
+///
+/// **Where the sweep cannot say, this can, for a point a rounding past the
+/// start.** A square bar standing on an edge, its top edge on the plane `y = 0`
+/// through a round bar's axis, crosses the bar's wall along its face `z − y =
+/// 1 + √½`, and the loop there is walked from `(2, 0, 1 + √½)`: on the pipe,
+/// and `6.8e-17` off the plane. The top edge meets the pipe at `y =
+/// −1.3e-16`, a hair ahead, and the next corner round is at `(√3.5, −√½, 1)`.
+/// The area the three sweep is about `3.3e-17`, which the corner's box,
+/// `2.2e-15` wide along `x`, swamps. Turned about the axis from the start,
+/// that corner is `2·y`, proved ahead by its box's `y` alone, since the
+/// start's `y` is exactly nothing, and the next corner is ahead of it
+/// (Q1817).
+///
+/// **It is read only where the sweep cannot say**, and that is the reading
+/// this has to agree with. Where the start is on the loop the two count from
+/// one place and agree everywhere. Where it is a rounding off, as above, the
+/// sweep counts from where its line of sight from the start grazes the loop,
+/// and this from the point of the loop over the start's own place on the
+/// circle, and those are a rounding apart too. A node between the two would be
+/// put first by one reading and last by the other, and swept against one node
+/// and turned against another it could sit in a ring of three, none of them
+/// first. The square bar's corner is not between them: worked out exactly, the
+/// area the three sweep is positive, so the sweep would put the corner first
+/// as this does.
+fn round_a_closed_crossing_by_its_angle(
+    pair: [&Surface; 2],
+    from: PredicatePoint,
+    one: PredicatePoint,
+    other: PredicatePoint,
+) -> Option<Decision> {
+    let ([Surface::Plane(_), Surface::Cylinder(pipe)]
+    | [Surface::Cylinder(pipe), Surface::Plane(_)]) = pair
+    else {
+        return None;
+    };
+    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let off_the_axis = |place: PredicatePoint| {
+        let at = place.enclosure();
+        [0, 1, 2].map(|axis| at[axis] - origin[axis])
+    };
+    let turned = |first: [Interval; 3], second: [Interval; 3]| {
+        dot_of(cross_of_intervals(first, second), along)
+    };
+    let start = off_the_axis(from);
+    let run = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
+    let the_way_it_turns = turned(start, run);
+    let ahead_of_the_start =
+        |place: PredicatePoint| (the_way_it_turns * turned(start, off_the_axis(place))).sign();
+    let [one_ahead, other_ahead] = [one, other].map(ahead_of_the_start);
+    let proved = |sign: Decision| sign == Decision::Pos || sign == Decision::Neg;
+    // Compared rather than matched: only two proved signs are read, and every
+    // other answer leaves the pair to the policy (§40).
+    if !(proved(one_ahead) && proved(other_ahead)) {
+        return None;
+    }
+    if one_ahead != other_ahead {
+        return Some(one_ahead);
+    }
+    let other_past_one = (the_way_it_turns * turned(off_the_axis(one), off_the_axis(other))).sign();
+    proved(other_past_one).then_some(other_past_one)
 }
 
 /// Whether two nodes whose boxes share a point are that one point.
