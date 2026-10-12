@@ -85,13 +85,13 @@
 //!   is no corner of any answer, and since Q1302 `assemble.rs` reads that
 //!   wire past it (`corners_one_wire_walks_past`).
 
-use core::f64::consts::PI;
+use core::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI, SQRT_2};
 
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface,
     Vector,
 };
-use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog, Record};
 use rcad_topo::{DraftStep, Error, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 const RADIUS: f64 = 2.0;
@@ -618,206 +618,107 @@ fn a_bar(model: &mut Model, bottom: f64, axis_at: f64, turned_round: bool) -> So
         .expect("a bar described face by face")
 }
 
-#[test]
-fn probe_q1406() {
-    let policy = Policy::certified();
-    let turn = core::f64::consts::FRAC_PI_4;
-    let along = |y: f64| y * (4.0 - y * y).sqrt() / 2.0 + 2.0 * (y / 2.0).asin();
-    let moment = |y: f64| -(4.0 - y * y).powf(1.5) / 3.0;
-    let (k, r) = (0.1 * 2.0_f64.sqrt(), 1.75_f64.sqrt());
-    let inside = moment(r) - moment(k) - k * (along(r) - along(k)) - 0.75 * (r - k) * (r - k);
-    let the_box_outside = 2.5 * 1.9 * 3.6 - inside;
-    eprintln!(
-        "by hand: union {} ; lower∪box {} ; upper {}",
-        16.0 * PI + the_box_outside,
-        8.0 * PI + the_box_outside,
-        8.0 * PI
-    );
-    let rules = [
-        ("union", Rule::Union),
-        ("intersection", Rule::Intersection),
-        ("difference", Rule::Difference),
-    ];
-    for wall in EVERY_WALL {
-        for (box_arg, upper_arg) in EVERY_ORDER_OF_THE_TWO_FUSES {
-            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-            let [lower, upper] = the_two_bars(&mut model, wall);
-            let third = a_turned_box(&mut model, turn);
-            let first = if box_arg {
-                model.fuse(
-                    &[third],
-                    &[lower],
-                    Rule::Union,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-            } else {
-                model.fuse(
-                    &[lower],
-                    &[third],
-                    Rule::Union,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-            };
-            let first = match first {
-                Ok(f) => f.solids().to_vec(),
-                Err(e) => {
-                    eprintln!("{wall:?} box_arg={box_arg}: first refused {e:?}");
-                    continue;
-                }
-            };
-            eprintln!(
-                "{wall:?} box_arg={box_arg}: first {}",
-                volumes(&model, &first)
-            );
-            if !box_arg && !upper_arg {
-                for face in model.solid(first[0]).expect("key").faces() {
-                    let kind = match face.surface() {
-                        Surface::Plane(_) => "plane",
-                        Surface::Cylinder(_) => "pipe",
-                        _ => "other",
-                    };
-                    for wire in face.wires() {
-                        let points: Vec<String> = wire
-                            .points()
-                            .map(|p| format!("({:.4}, {:.4}, {:.4})", p.x(), p.y(), p.z()))
-                            .collect();
-                        eprintln!("    {kind} {:?} wire: {}", face.key(), points.join(" "));
-                    }
-                }
-            }
-            for (name, rule) in rules {
-                for upper_first in [false, true] {
-                    if upper_first != upper_arg && rule == Rule::Union {
-                        continue;
-                    }
-                    let said = if upper_first {
-                        model.fuse(&[upper], &first, rule, &policy, &mut ProvenanceLog::new())
-                    } else {
-                        model.fuse(&first, &[upper], rule, &policy, &mut ProvenanceLog::new())
-                    };
-                    match said {
-                        Ok(f) => {
-                            let solids = f.solids().to_vec();
-                            let valid = model.validate(&policy, &mut ProvenanceLog::new());
-                            eprintln!(
-                                "  {wall:?} box_arg={box_arg} {name} upper_first={upper_first}: {} valid={:?}",
-                                volumes(&model, &solids),
-                                valid.is_ok()
-                            );
-                        }
-                        Err(e) => eprintln!(
-                            "  {wall:?} box_arg={box_arg} {name} upper_first={upper_first}: REFUSED {e:?}"
-                        ),
-                    }
-                }
-            }
-        }
-        for one_call in [false, true] {
-            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-            let [lower, upper] = the_two_bars(&mut model, wall);
-            let third = a_turned_box(&mut model, turn);
-            let said = if one_call {
-                model.fuse(
-                    &[lower],
-                    &[upper, third],
-                    Rule::Union,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-            } else {
-                model.fuse(
-                    &[upper, third],
-                    &[lower],
-                    Rule::Union,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-            };
-            match said {
-                Ok(f) => eprintln!(
-                    "  {wall:?} one call lower_first={one_call}: {}",
-                    volumes(&model, &f.solids().to_vec())
-                ),
-                Err(e) => eprintln!("  {wall:?} one call lower_first={one_call}: REFUSED {e:?}"),
-            }
-        }
-        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-        let [lower, upper] = the_two_bars(&mut model, wall);
-        let third = a_turned_box(&mut model, turn);
-        let said = model
-            .fuse(
-                &[lower],
-                &[upper],
-                Rule::Union,
-                &policy,
-                &mut ProvenanceLog::new(),
-            )
-            .and_then(|bars| {
-                model.fuse(
-                    bars.solids(),
-                    &[third],
-                    Rule::Union,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-            });
-        match said {
-            Ok(f) => eprintln!(
-                "  {wall:?} bars first: {}",
-                volumes(&model, &f.solids().to_vec())
-            ),
-            Err(e) => eprintln!("  {wall:?} bars first: REFUSED {e:?}"),
-        }
-    }
-    panic!("probe");
-}
-
-fn volumes(model: &Model, solids: &[SolidKey]) -> String {
-    let policy = Policy::certified();
-    solids
-        .iter()
-        .map(|&solid| {
-            match model.solid(solid).expect("key").measure(
-                Deflection::of(0.01).expect("a positive length"),
-                &policy,
-                &mut ProvenanceLog::new(),
-            ) {
-                Ok(m) => format!("{} ± {}", m.volume(), m.volume_error()),
-                Err(e) => format!("measure refused {e:?}"),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-        + &format!(" ({} solids)", solids.len())
-}
-
-fn a_turned_box(model: &mut Model, turn: f64) -> SolidKey {
-    if turn > 0.5 {
-        let rectangle =
-            ProfileBuilder::new(vec![[1.5, -2.0], [4.0, -2.0], [4.0, -0.1], [1.5, -0.1]])
-                .build(&Policy::certified(), &mut ProvenanceLog::new())
-                .expect("a rectangle");
-        let about_x = Isometry::rotation(&Axis::x(), turn).expect("a finite turn");
-        let down = Isometry::translation(Vector::new(0.0, 0.0, -0.4)).expect("a finite shift");
-        return model
-            .add_extrusion(&rectangle, 3.6, &about_x.compose(&down))
-            .expect("a positive height");
-    }
-    let rectangle = ProfileBuilder::new(vec![[1.5, -0.5], [4.0, -0.5], [4.0, 0.5], [1.5, 0.5]])
+/// Q1406's box: `x ∈ [1.5, 4]`, `(y + z)/√2 ∈ [-2, -0.1]` and
+/// `(z - y)/√2 ∈ [-0.4, 3.2]`, a block turned an eighth of a turn about `x`.
+///
+/// It pokes out of the lower bar's wall and bottom cap and comes nowhere near
+/// the circle the bars meet on. Of the planes its faces lie on, only `x = 1.5`
+/// crosses that circle, at `(1.5, ±√1.75, 2)`, where that face is not: on the
+/// pipe, `y + z = -0.1·√2` reaches up to `z = 2 - 0.1·√2`, `y + z = -2·√2` to
+/// `2 - 2·√2` and `z - y = -0.4·√2` to `2 - 0.4·√2`, and `z - y = 3.2·√2`
+/// comes no lower than `3.2·√2 - 2`.
+fn a_box_turned_an_eighth_of_a_turn_about_x(model: &mut Model) -> SolidKey {
+    let rectangle = ProfileBuilder::new(vec![[1.5, -2.0], [4.0, -2.0], [4.0, -0.1], [1.5, -0.1]])
         .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a rectangle");
-    let centre = Isometry::translation(Vector::new(0.0, 0.0, 1.0)).expect("a finite shift");
-    let about_x = Isometry::rotation(&Axis::x(), turn).expect("a finite turn");
+    let about_x = Isometry::rotation(&Axis::x(), FRAC_PI_4).expect("a finite turn");
+    let down = Isometry::translation(Vector::new(0.0, 0.0, -0.4)).expect("a finite shift");
+    model
+        .add_extrusion(&rectangle, 3.6, &about_x.compose(&down))
+        .expect("a positive height")
+}
+
+/// How much of [`a_box_turned_an_eighth_of_a_turn_about_x`] is outside the
+/// bars: all of it, `2.5 · 1.9 · 3.6`, less what it shares with the lower bar.
+///
+/// It shares nothing with the upper bar, since where it rises past `z = 2` it
+/// is at `y ≤ -2 - 0.1·√2`. Inside the lower bar its other faces are out of
+/// reach, so what it shares is where `x ≥ 1.5`, `x² + y² ≤ 4` and
+/// `0 ≤ z ≤ -k - y`, with `k = 0.1·√2`: with `u = -y` running from `k` to
+/// `r = √1.75`, the integral of `(√(4 - u²) - 1.5)·(u - k)`.
+fn the_turned_box_outside_the_bars() -> f64 {
+    let k = 0.1 * SQRT_2;
+    let r = 1.75_f64.sqrt();
+    let under_the_circle = |u: f64| u * (4.0 - u * u).sqrt() / 2.0 + 2.0 * (u / 2.0).asin();
+    let its_moment = |u: f64| -(4.0 - u * u).powf(1.5) / 3.0;
+    let shared = its_moment(r)
+        - its_moment(k)
+        - k * (under_the_circle(r) - under_the_circle(k))
+        - 0.75 * (r - k) * (r - k);
+    2.5 * 1.9 * 3.6 - shared
+}
+
+/// A square bar of side 1 from `x = 1.5` to `4`, turned an eighth of a turn
+/// about `x` so it stands on an edge, its middle on `z = 1`. Its four long
+/// edges lie on the lines `y = 0, z = 1 ± √½` and `y = ±√½, z = 1`.
+fn a_diamond_brace_along_x(model: &mut Model) -> SolidKey {
+    let square = ProfileBuilder::new(vec![[1.5, -0.5], [4.0, -0.5], [4.0, 0.5], [1.5, 0.5]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+    let up = Isometry::translation(Vector::new(0.0, 0.0, 1.0)).expect("a finite shift");
+    let about_x = Isometry::rotation(&Axis::x(), FRAC_PI_4).expect("a finite turn");
     let half_down = Isometry::translation(Vector::new(0.0, 0.0, -0.5)).expect("a finite shift");
     model
-        .add_extrusion(
-            &rectangle,
-            1.0,
-            &centre.compose(&about_x).compose(&half_down),
-        )
+        .add_extrusion(&square, 1.0, &up.compose(&about_x).compose(&half_down))
         .expect("a positive height")
+}
+
+/// The same square bar standing on an edge, from `y = 1.5` to `4`, its middle
+/// on `x = 0, z = 1`: its faces are on the planes `|x| + |z - 1| = √½`.
+fn a_diamond_brace_along_y(model: &mut Model) -> SolidKey {
+    let diamond = ProfileBuilder::new(vec![
+        [0.0, -FRAC_1_SQRT_2],
+        [FRAC_1_SQRT_2, 0.0],
+        [0.0, FRAC_1_SQRT_2],
+        [-FRAC_1_SQRT_2, 0.0],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a square standing on a corner");
+    let up = Isometry::translation(Vector::new(0.0, 0.0, 1.0)).expect("a finite shift");
+    let lying_along_y = Isometry::rotation(&Axis::x(), -FRAC_PI_2).expect("a finite turn");
+    let out = Isometry::translation(Vector::new(0.0, 0.0, 1.5)).expect("a finite shift");
+    model
+        .add_extrusion(&diamond, 2.5, &up.compose(&lying_along_y).compose(&out))
+        .expect("a positive height")
+}
+
+/// The name of the predicate a refusal gave up on.
+fn what_it_gave_up_on(why: &Error) -> &str {
+    the_last_record(why).predicate()
+}
+
+/// The points the refusal's last decision was asked about, each as a box.
+fn the_points_it_could_not_order(why: &Error) -> Vec<[[f64; 2]; 3]> {
+    the_last_record(why)
+        .inputs()
+        .iter()
+        .map(|point| point.enclosure().map(|along| [along.lo(), along.hi()]))
+        .collect()
+}
+
+fn the_last_record(why: &Error) -> &Record {
+    let Error::Undecidable { records } = why else {
+        panic!("expected `Undecidable`, got {why:?}");
+    };
+    records
+        .records()
+        .last()
+        .expect("a refusal names the decision it gave up on")
+}
+
+/// Whether the box lies within `reach` of `point` along every axis.
+fn lies_within(node: [[f64; 2]; 3], point: [f64; 3], reach: f64) -> bool {
+    (0..3).all(|axis| node[axis][0] - reach <= point[axis] && point[axis] <= node[axis][1] + reach)
 }
 
 fn a_box(model: &mut Model, [x, y, z]: [[f64; 2]; 3]) -> SolidKey {
