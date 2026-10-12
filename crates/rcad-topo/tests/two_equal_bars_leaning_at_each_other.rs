@@ -175,18 +175,24 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
 /// rounds the cap, and the cap as stored misses both points by a rounding
 /// (`the_near_cap_as_the_model_hands_it_out_misses_both_points_the_pipes_touch_at`).
 ///
-/// **A gap, by §16.10**: the answer is `1/(24 sin a)` shared. Naming the
-/// cap's meet with the two pipes as the node where the four halves meet
-/// (`place_where_two_halves_meet`) is the family of fixes, but only once the
-/// arrangement is told the cap holds `c`. That is the second bar's own
-/// incidence, cap through the start of its axis, kept by its move as a seam
-/// corner's is on the seam plane (§294.9), and `fuse/bake.rs` is where it
-/// can be read; the stored cap proves itself off both points, so nothing
-/// exact asked of the stored surfaces names them as the meet. The corner at
-/// `c − r·ẑ` needs the same: it is on the cap's circle by
-/// construction, and that circle meets the first pipe at `c ± r·ẑ` because
-/// the cap holds `c`. Then the cells of the pipes meet the
-/// half-planes of the test above.
+/// **A gap, by §16.10**: the answer is `1/(24 sin a)` shared. The stored cap
+/// proves itself off both points, so nothing exact asked of the stored
+/// surfaces names them as the meet; the cap holding `c` is the second bar's
+/// own incidence, cap through the start of its axis, kept by its move as a
+/// seam corner's is on the seam plane (§294.9). Since Q1814 `fuse/bake.rs`
+/// reads it on the numbers before the move and carries it, moved, on the
+/// second bar's near cap and wall (`caps_through_the_start_of_their_axis`).
+/// A first bar's wall told it names the cap's meet with the two pipes as the
+/// node where the four halves meet, and is split in six at 50° to 100°
+/// (`a_wall_told_a_cap_holds_where_the_axes_meet_is_split_where_the_cap_meets_the_halves`
+/// in `fuse/arrange.rs`). **The first bar's wall is not told yet**: gathering
+/// the cuts in `fuse/cuts.rs` does not copy it from the face that cuts onto
+/// the face cut, so the refusal with the first bar first stands. At 120° a
+/// wall told it is refused on the order round the cap's crossing instead,
+/// which starts inside the box round `c − r·n̂`. The corner at `c − r·ẑ`
+/// needs the same: it is on the cap's circle by construction, and that circle
+/// meets the first pipe at `c ± r·ẑ` because the cap holds `c`. Then the
+/// cells of the pipes meet the half-planes of the test above.
 #[test]
 fn a_bar_starting_where_it_crosses_another_at_a_slant_is_refused() {
     for degrees in [50.0, 60.0, 70.0, 100.0, 120.0] {
