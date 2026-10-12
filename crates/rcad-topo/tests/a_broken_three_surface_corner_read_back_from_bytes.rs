@@ -29,9 +29,14 @@
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
 
-use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector, WHERE_THREE_SURFACES_MEET};
+use rcad_geom::{
+    Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
+    WHERE_THREE_SURFACES_MEET,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{
+    DraftEdge, DraftStep, Error, Invalid, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+};
 
 /// The box's footprint runs from `-SIDE` to `SIDE` in `x` and in `y`.
 const SIDE: f64 = 3.0;
@@ -54,6 +59,31 @@ const INTO_THE_BOX: [f64; 3] = [SIDE - 1.0, SIDE - 1.0, HEIGHT - 1.0];
 const OFF_ALL_THREE: [f64; 3] = [SIDE + 1.0, SIDE + 1.0, HEIGHT + 1.0];
 
 const EVERY_MOVE: [[f64; 3]; 4] = [OFF_A_WALL, OFF_THE_TOP, INTO_THE_BOX, OFF_ALL_THREE];
+
+/// Where the pyramid on the box's footprint puts its apex, where its four side
+/// planes meet.
+const WHERE_THE_PYRAMID_PUTS_ITS_APEX: [f64; 3] = [0.0, 0.0, HEIGHT];
+
+/// A millimetre above the apex, off all four planes.
+const ABOVE_THE_APEX: [f64; 3] = [0.0, 0.0, HEIGHT + 1.0];
+
+/// A millimetre down into the pyramid, off all four planes.
+const DOWN_INTO_THE_PYRAMID: [f64; 3] = [0.0, 0.0, HEIGHT - 1.0];
+
+/// A millimetre down the edge to the base corner `(3, 3, 0)`, still on the two
+/// planes either side of it to a rounding of `0.3`, off the other two.
+const DOWN_AN_EDGE: [f64; 3] = [0.3, 0.3, HEIGHT - 1.0];
+
+/// A millimetre down the `+x` face, on its plane to a rounding of `0.3`, off
+/// the other three.
+const DOWN_A_FACE: [f64; 3] = [0.3, 0.0, HEIGHT - 1.0];
+
+const EVERY_MOVE_OF_THE_APEX: [[f64; 3]; 4] = [
+    ABOVE_THE_APEX,
+    DOWN_INTO_THE_PYRAMID,
+    DOWN_AN_EDGE,
+    DOWN_A_FACE,
+];
 
 /// A block, as the two corners of its footprint, the height of its floor and
 /// how tall it stands. The blocks are §294.2's and keep its names, which speak
@@ -257,6 +287,79 @@ fn every_fuse_of_a_box_whose_top_corner_is_moved_refuses_where_three_surfaces_me
     }
 }
 
+#[test]
+fn probe_the_pyramid() {
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        for placement in every_placement() {
+            let (sound, _) = the_pyramid_read_back(placement, WHERE_THE_PYRAMID_PUTS_ITS_APEX);
+            eprintln!(
+                "SOUND {policy:?} {placement:?} validate {:?}",
+                sound.validate(&policy, &mut ProvenanceLog::new())
+            );
+            for moved_to in EVERY_MOVE_OF_THE_APEX {
+                let (model, _) = the_pyramid_read_back(placement, moved_to);
+                eprintln!(
+                    "MOVED {moved_to:?} validate {:?}",
+                    model.validate(&policy, &mut ProvenanceLog::new())
+                );
+            }
+            for (partner, rule) in EVERY_PARTNER {
+                for moved_to in
+                    std::iter::once(WHERE_THE_PYRAMID_PUTS_ITS_APEX).chain(EVERY_MOVE_OF_THE_APEX)
+                {
+                    let (mut model, solid) = the_pyramid_read_back(placement, moved_to);
+                    let block = a_block(&mut model, partner, &placement);
+                    let outcome =
+                        model.fuse(&[solid], &[block], rule, &policy, &mut ProvenanceLog::new());
+                    let said = match outcome {
+                        Ok(answer) => {
+                            let volume: f64 = answer
+                                .solids()
+                                .iter()
+                                .map(|&piece| {
+                                    model
+                                        .solid(piece)
+                                        .expect("a solid the fuse just wrote")
+                                        .measure(
+                                            Deflection::for_scale(model.scale()),
+                                            &policy,
+                                            &mut ProvenanceLog::new(),
+                                        )
+                                        .map(|measured| measured.volume())
+                                        .unwrap_or(f64::NAN)
+                                })
+                                .sum();
+                            format!(
+                                "Ok {} solids, volume {volume}, expected {:?}, validates {:?}",
+                                answer.solids().len(),
+                                what_the_pyramid_and_a_block_hold(partner, rule),
+                                model.validate(&policy, &mut ProvenanceLog::new()).is_ok()
+                            )
+                        }
+                        Err(Error::Undecidable { records }) => format!(
+                            "Undecidable {:?}",
+                            records
+                                .records()
+                                .iter()
+                                .map(|record| format!(
+                                    "{} at {:?} enclosure {:e}",
+                                    record.predicate(),
+                                    record.inputs(),
+                                    record.enclosure()
+                                ))
+                                .collect::<Vec<_>>()
+                        ),
+                        Err(other) => format!("Err {other:?}"),
+                    };
+                    eprintln!(
+                        "FUSE {policy:?} {placement:?} {moved_to:?} {partner:?} {rule:?}: {said}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn every_placement() -> [Isometry; 4] {
     let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a plain translation");
     let turn = Isometry::rotation(&Axis::x(), 0.4).expect("a turn about x");
@@ -282,9 +385,29 @@ fn read_back(placement: Isometry, moved_to: [f64; 3]) -> (Model, SolidKey) {
     model
         .add_extrusion(&footprint, HEIGHT, &placement)
         .expect("a box");
-    let mut bytes = postcard::to_allocvec(&model).expect("a model writes out");
+    moved_in_its_bytes(&model, WHERE_THE_BOX_PUTS_IT, moved_to)
+}
 
-    let stored = the_bytes_of(WHERE_THE_BOX_PUTS_IT);
+/// The pyramid at `placement`, written out with postcard, its apex overwritten
+/// in the bytes with `moved_to`, and read back.
+///
+/// The placement goes on the pyramid's shell, as on the box's, so the file
+/// stores the apex at [`WHERE_THE_PYRAMID_PUTS_ITS_APEX`] at every placement.
+fn the_pyramid_read_back(placement: Isometry, moved_to: [f64; 3]) -> (Model, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let pyramid = a_pyramid(&mut model);
+    model
+        .place_solid(pyramid, &placement)
+        .expect("this model made the key");
+    moved_in_its_bytes(&model, WHERE_THE_PYRAMID_PUTS_ITS_APEX, moved_to)
+}
+
+/// `model` written out with postcard, the one place its bytes hold the corner
+/// `was` overwritten with `moved_to`, and read back, with its one solid.
+fn moved_in_its_bytes(model: &Model, was: [f64; 3], moved_to: [f64; 3]) -> (Model, SolidKey) {
+    let mut bytes = postcard::to_allocvec(model).expect("a model writes out");
+
+    let stored = the_bytes_of(was);
     let places: Vec<usize> = bytes
         .windows(stored.len())
         .enumerate()
@@ -348,4 +471,122 @@ fn what_the_two_boxes_hold(partner: Block, rule: Rule) -> (usize, f64) {
 
 fn overlap(one: [f64; 2], other: [f64; 2]) -> f64 {
     (one[1].min(other[1]) - one[0].max(other[0])).max(0.0)
+}
+
+/// A pyramid on the box's footprint with its apex at
+/// [`WHERE_THE_PYRAMID_PUTS_ITS_APEX`], over the middle, so four planes meet
+/// there, built face by face with each side face's plane written through the
+/// apex.
+fn a_pyramid(model: &mut Model) -> SolidKey {
+    let points = [
+        WHERE_THE_PYRAMID_PUTS_ITS_APEX,
+        [-SIDE, -SIDE, 0.0],
+        [SIDE, -SIDE, 0.0],
+        [SIDE, SIDE, 0.0],
+        [-SIDE, SIDE, 0.0],
+    ]
+    .map(|[x, y, z]| Point::new(x, y, z));
+    // Counter-clockwise seen from outside, the apex first on every side face.
+    let faces: [&[usize]; 5] = [
+        &[0, 1, 2],
+        &[0, 2, 3],
+        &[0, 3, 4],
+        &[0, 4, 1],
+        &[1, 4, 3, 2],
+    ];
+
+    let mut builder = SolidBuilder::new();
+    let vertices = points.map(|point| builder.add_vertex(point).expect("a finite corner"));
+    let mut edges: Vec<([usize; 2], DraftEdge)> = Vec::new();
+    let drafted = faces.map(|face| {
+        let steps: Vec<DraftStep> = (0..face.len())
+            .map(|position| {
+                let (from, to) = (face[position], face[(position + 1) % face.len()]);
+                let (edge, orientation) = match edges.iter().find(|(ends, _)| *ends == [to, from]) {
+                    Some(&(_, edge)) => (edge, Orientation::Reversed),
+                    None => {
+                        let edge = builder
+                            .add_edge(vertices[from], vertices[to], EdgeRun::Straight)
+                            .expect("a side between two corners");
+                        edges.push(([from, to], edge));
+                        (edge, Orientation::Forward)
+                    }
+                };
+                DraftStep::Along(
+                    builder
+                        .add_coedge(edge, orientation)
+                        .expect("one use of a side"),
+                )
+            })
+            .collect();
+        let wire = builder.add_wire(&steps).expect("a closed boundary");
+        let plane = Plane::through_three_points(points[face[0]], points[face[1]], points[face[2]])
+            .expect("three corners of a face not in a line");
+        builder
+            .add_face(Surface::Plane(plane), &[wire])
+            .expect("a face of a pyramid")
+    });
+    builder
+        .add_shell(&drafted.map(|face| (face, Orientation::Forward)))
+        .expect("five faces close a pyramid");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a pyramid is a sound solid")
+}
+
+/// How many solids and how much volume the sound pyramid and `partner` give
+/// under `rule`.
+fn what_the_pyramid_and_a_block_hold(partner: Block, rule: Rule) -> (usize, f64) {
+    let the_pyramid = (2.0 * SIDE) * (2.0 * SIDE) * HEIGHT / 3.0;
+    let the_block =
+        (partner.high[0] - partner.low[0]) * (partner.high[1] - partner.low[1]) * partner.tall;
+    let shared = what_the_pyramid_shares_with(partner);
+    match rule {
+        Rule::Union if shared == 0.0 => (2, the_pyramid + the_block),
+        Rule::Union => (1, the_pyramid + the_block - shared),
+        Rule::Intersection if shared == 0.0 => (0, 0.0),
+        Rule::Intersection => (1, shared),
+        Rule::Difference => {
+            assert!(
+                shared < the_pyramid,
+                "no partner here holds the whole pyramid"
+            );
+            (1, the_pyramid - shared)
+        }
+        _ => panic!("no partner here is fused under {rule:?}"),
+    }
+}
+
+/// The volume the pyramid and `block` hold in common.
+///
+/// At height `z` the pyramid is a square `SIDE·(1 − z/HEIGHT)` either way of
+/// its middle, so what it shares with the block there is a product of two
+/// overlaps, each straight in `z` between the heights where the square's edge
+/// passes one of the block's sides. Between those heights the product is a
+/// quadratic, and Simpson's rule is exact for it.
+fn what_the_pyramid_shares_with(block: Block) -> f64 {
+    let [bottom, top] = [block.floor.max(0.0), (block.floor + block.tall).min(HEIGHT)];
+    if bottom >= top {
+        return 0.0;
+    }
+    let mut heights = vec![bottom, top];
+    for side in [block.low[0], block.high[0], block.low[1], block.high[1]] {
+        let height = HEIGHT * (1.0 - side.abs() / SIDE);
+        if bottom < height && height < top {
+            heights.push(height);
+        }
+    }
+    heights.sort_by(f64::total_cmp);
+    let across = |z: f64| {
+        let half = SIDE * (1.0 - z / HEIGHT);
+        overlap([-half, half], [block.low[0], block.high[0]])
+            * overlap([-half, half], [block.low[1], block.high[1]])
+    };
+    heights
+        .windows(2)
+        .map(|pair| {
+            let [from, to] = [pair[0], pair[1]];
+            (to - from) / 6.0 * (across(from) + 4.0 * across(f64::midpoint(from, to)) + across(to))
+        })
+        .sum()
 }
