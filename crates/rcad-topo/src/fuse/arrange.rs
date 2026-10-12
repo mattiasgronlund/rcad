@@ -8170,9 +8170,12 @@ fn the_start_is_a_rounding_off(
 /// ∇T`. A point `p` then lies in the half turn ahead of the start where
 /// `w·((from − c) × (p − c))` has that sign, and in the half turn behind where
 /// it has the other. A point ahead comes before a point behind, and of two in
-/// one half turn the one the other is turned ahead of comes first. Nothing
-/// here forms the loop's centre: any point of the axis is as good as `c`, and
-/// what lies along `w` drops out of each determinant.
+/// one half turn the one the other is turned ahead of comes first. Where two
+/// are too nearly over one point of the circle for that turn to be proved, its
+/// sign is read from how far apart they are up the axis instead
+/// (`turned_as_far_apart_up_the_axis`). Nothing here forms the loop's centre:
+/// any point of the axis is as good as `c`, and what lies along `w` drops out
+/// of each determinant.
 ///
 /// **Where the sweep cannot say, this can, for a point a rounding past the
 /// start.** A square bar standing on an edge, its top edge on the plane `y = 0`
@@ -8203,8 +8206,8 @@ fn round_a_closed_crossing_by_its_angle(
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Option<Decision> {
-    let ([Surface::Plane(_), Surface::Cylinder(pipe)]
-    | [Surface::Cylinder(pipe), Surface::Plane(_)]) = pair
+    let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
+    | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = pair
     else {
         return None;
     };
@@ -8232,8 +8235,55 @@ fn round_a_closed_crossing_by_its_angle(
     if one_ahead != other_ahead {
         return Some(one_ahead);
     }
-    let other_past_one = (the_way_it_turns * turned(off_the_axis(one), off_the_axis(other))).sign();
-    proved(other_past_one).then_some(other_past_one)
+    let [first, second] = [one, other].map(off_the_axis);
+    let other_past_one = (the_way_it_turns * turned(first, second)).sign();
+    if proved(other_past_one) {
+        return Some(other_past_one);
+    }
+    let other_up_past_one =
+        (the_way_it_turns * turned_as_far_apart_up_the_axis(flat, along, first, second)).sign();
+    proved(other_up_past_one).then_some(other_up_past_one)
+}
+
+/// How far `second` is turned past `first` about `along`, `w`, as
+/// `w·(first × second)` reads it, times a factor that is positive wherever the
+/// answer's sign is proved: read off how far apart the two are up the axis
+/// rather than round it. Both are taken from a point of the pipe's axis, and
+/// both lie on the loop `flat` cuts the pipe in.
+///
+/// With `a` and `b` the two, `u = b − a` and `s = a + b`: `a` and `b` are as far
+/// from the axis as each other, so `u` with its part along `w` taken off is
+/// square to `s` with its part taken off, and so it is `μ·(w × s)` for some
+/// `μ`. Then `w·(a × b) = ½·w·(s × u)`, which is `½·μ·|w × s|²` and has the
+/// sign of `μ`. Both are on the plane, so `n·u = 0`, and `n·u` less its part
+/// along `w` is `−(n·w)(u·w)/|w|²`, which is also `μ·n·(w × s)`. So what this
+/// hands back, `−(n·w)(u·w)·n·(w × s)`, is `μ·(n·(w × s))²·|w|²`.
+///
+/// **It is what parts two points the angle cannot.** A square bar standing on
+/// an edge, lying along `y` from `y = 1.5` and turned a quarter turn about `x`
+/// to lie there, has its inner end stored as `−y − 2⁻⁵²·z =
+/// −1.5000000000000002`, since `cos(π/2)` rounds to `6.1e-17`. That plane
+/// crosses a round bar of radius 2 up `z` in an ellipse `1.8e16` long, walked
+/// from `(2, 0, 6755399441055745)`, and two corners on it, `(−√1.75, 1.5, 1 +
+/// √1.75 − √½)` and `(−√1.75, 1.5, 2)`, are `0.38` apart up the axis and `2⁻⁵²
+/// · 0.38` apart in `y`, under an ulp of `1.5`. Their boxes overlap seen down
+/// the axis, so `w·(a × b)` is not proved either way, and the sweep from that
+/// start came out with an enclosure of `15`. Here `−(n·w)(u·w)` is
+/// `2⁻⁵²·0.38`, proved by `u·w` alone, and `n·(w × s)` is `2√1.75`, so the two
+/// are in order (Q1818). The union is refused later, walking that ellipse
+/// (`a_square_bar_standing_on_an_edge_along_y_is_refused_walking_its_long_ellipse`
+/// in `two_bars_on_one_pipe_and_a_box_united_in_one_call.rs`).
+fn turned_as_far_apart_up_the_axis(
+    flat: &Plane,
+    along: [Interval; 3],
+    first: [Interval; 3],
+    second: [Interval; 3],
+) -> Interval {
+    let normal = flat.normal().components().map(Interval::exactly);
+    let step = [0, 1, 2].map(|axis| second[axis] - first[axis]);
+    let both = [0, 1, 2].map(|axis| first[axis] + second[axis]);
+    let climbs = -(dot_of(normal, along) * dot_of(step, along));
+    climbs * dot_of(normal, cross_of_intervals(along, both))
 }
 
 /// Whether two nodes whose boxes share a point are that one point.
