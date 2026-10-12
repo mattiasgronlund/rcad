@@ -4,8 +4,8 @@
 rows at a higher Tier, e.g. Tier 5?" The answer below ended in a proposal: a
 check that refuses it, the waiting row moved down as the usual fix, and §403.2
 changed to let a row with no class sit in tier 5. He answered "yes, write the
-section and file the row". This amends §403.2 and §403.3. The tooling is not
-built yet; 435.9 names the row that builds it.*
+section and file the row". This amends §403.2 and §403.3. Q1736 built the
+tooling; 435.10 says what it built and where it went another way.*
 
 ### 435.1 What is there
 
@@ -178,7 +178,8 @@ line does not count).
 The rows of 435.1 move in the same push as the check, as §403.9 moved the C and
 D rows with §403's: without the move, the new `check-queue` refuses `main`'s
 file. The lane counts again on its own base and moves what it finds there, with
-`tier` steps in one `apply`.
+`tier` steps in one `apply`. They went as `after` steps instead; 435.10 says
+why.
 
 ### 435.9 What this leaves
 
@@ -204,3 +205,55 @@ file. The lane counts again on its own base and moves what it finds there, with
   (`tooling/land/land.py`, `apply_queue`), so a lane that writes `add 1` and
   then `after @1 Q8` lands its row in tier 5 and the report calls it tier 1.
   Same cause, not fixed here.
+
+### 435.10 What Q1736 built — 2026-10-12
+
+**`check-queue` holds 435.3's rule.** It refuses an open row with `after:` that
+sits in a tier the fill reaches before an open row it names, and names both
+rows and both tiers. A row with no class and no pin is told the verb that moves
+it: `move it down with just queue tier <id> <tier> (§435)`. That is `tier`, as
+§403.2's refusals name it, and not `after`, which would need the row's whole
+list typed again. A row whose class or pin keeps it where it is is told the
+order is Mattias's to set (435.4). A closed blocker passes, and so does a `Q`
+row this copy does not hold (§263.5).
+
+**It holds 435.5 too.** An open tier 5 row with no class passes only if its
+`after:` names a tier 5 row, open or closed, or a `Q` row this copy does not
+hold.
+
+**The verbs keep the rule as 435.6 says.** `after`, `tier`, `tag` and `pin` all
+move a row through one function, `move_row` in `tooling/queue/queue.py`. The
+measure line gains `N with no class` in its tier 5 half (435.7), and the
+`queue` recipe's comment gives tier 5's walk with those rows between `refuses/C`
+and `wrong/D`. `lane.md` says in one sentence beside its `after` step where
+`after` lands a new row. `check-queue-selftest` pins each refusal and each pass
+of the check. `check-queue-api-selftest` pins each move and refusal of the verbs,
+and the merged queue of two copies refused for a row whose blocker only the
+other copy held, until `tier` moves it.
+
+The lane decided these itself:
+
+- **The 12 rows of 435.1 move as 12 `after` land steps, not as `tier` steps on
+  the branch** (435.8 said `tier`). A lane's land steps take only `add`, `after`
+  and `tag` (`STEP_ARGS` in `tooling/land/land.py`), and a lane does not edit
+  `docs/queue.md` (§230.2). Each step names the row's own `after:` list again,
+  and the new `after` moves the row down. So the branch's own gate fails on
+  `check-queue` alone, with the 12 rows in 13 refusals (Q1541 waits on two),
+  until `just land` runs the steps: `land_one` runs `queue apply` on the merge
+  before its `check-queue`. The rows, counted again by the new check on the base
+  `789396ef`: Q343, Q1398 (to tier 2), Q1466, Q1541, Q333, Q486, Q594, Q608,
+  Q653, Q779, Q1564 and Q1565. That is 435.1's list. 435.9's thirteenth pair,
+  Q1731 on Q1728, no longer counts, because Q1728 is done.
+- **Each step names the row's whole list, not only the blocker 435.1 names.**
+  `after` writes the list it is given, so Q653's step names Q557 and Q639,
+  where 435.1's table names only Q557, and Q1541's names Q1539 and Q1538 in
+  the row's own order.
+- **A row that a lane holds, or a parked one, passes in tier 5 with no class.**
+  `take` and `park` write over the `after:` that said why the row is there.
+  Refusing it would stop every `take` of such a row.
+- **A row taken up out of tier 5 goes to the latest tier among the open rows it
+  still waits on**, not to "the blocker's new tier" (435.6). A row that waits on
+  two rows must sit no higher than either of them. This holds for every verb
+  that moves a row out of tier 5, not only `tag`. So `pin` of a tier 5 row with
+  no class takes up with it the rows that wait on it, and 435.6 did not say
+  that.

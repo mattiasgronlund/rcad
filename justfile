@@ -12050,7 +12050,9 @@ _queue-rows file:
 # may start with a class: how bad the defect is, then how likely a user's model
 # meets it. A and B are tier 1 and C and D tier 5, so the fill walks tier 1 as
 # wrong/A, wrong/B, crash/A, crash/B, refuses/A, refuses/B, then the rows with
-# no class, and tier 5 as wrong/C, crash/C, refuses/C, then the same for D. The
+# no class, and tier 5 as wrong/C, crash/C, refuses/C, then the rows with no
+# class that wait on a tier 5 row (§435.5), then the same for D. The measure
+# line counts the rows with no class in each of the two tiers (§435.7). The
 # file's order only breaks ties inside one class. The line order cannot carry
 # it: the merge driver keeps the frame side's order within a block, so a merge
 # across a re-tag would undo it.
@@ -12317,10 +12319,11 @@ queue mode="" *args:
                 else if (cl[i] ~ /\/C$/) inc++
                 else if (cl[i] ~ /\/D$/) ind++
                 else if (tier[i] == "1") unclassed++
+                else if (tier[i] == "5") unclassed5++
             }
             for (x = 1; x <= w; x++) if (small[walk[x]]) smallready++
-            printf "tier 1, open and not parked: %d in A or B (%d wrong, %d crash, %d refuses), %d with no class; tier 5: %d in C, %d in D; %d small row%s ready, and a bundle is %d\n", \
-                ab, abof["wrong"], abof["crash"], abof["refuses"], unclassed, inc, ind, smallready, (smallready == 1 ? "" : "s"), bundle
+            printf "tier 1, open and not parked: %d in A or B (%d wrong, %d crash, %d refuses), %d with no class; tier 5: %d in C, %d in D, %d with no class; %d small row%s ready, and a bundle is %d\n", \
+                ab, abof["wrong"], abof["crash"], abof["refuses"], unclassed, inc, ind, unclassed5, smallready, (smallready == 1 ? "" : "s"), bundle
         }
         function refuse(line, msg) {
             printf "queue: %s:%s: cannot read %s; just check-queue says what is wrong\n", file, line, msg > "/dev/stderr"
@@ -12898,9 +12901,17 @@ check-queue-page-selftest:
 # crash or refuses, then `/` and a bucket A to D. A first word shaped like a
 # class that is none of them is refused as a typo, and so is a class on a row of
 # a tier other than 1 and 5, since the fill ranks only those by class. The class
-# names an open row's tier (§403): A and B sit in tier 1, C and D in tier 5,
-# and a tier 5 row with no class is refused. A closed row keeps the tier it
-# closed in. `small` has nothing to check: any tier may carry it.
+# names an open row's tier (§403): A and B sit in tier 1, C and D in tier 5.
+# A tier 5 row with no class is refused unless its `after:` names a tier 5 row,
+# open or closed, or a `Q` row this copy does not hold (§435.5); one a lane
+# holds, or a parked one, passes, since `take` and `park` write over the
+# `after:` that said why it is there. A closed row keeps the tier it closed in.
+# `small` has nothing to check: any tier may carry it.
+#
+# **A row that waits sits in no tier the fill reaches before an open row it
+# waits on** (§435): 1, 2, 2.2, 2.5, 3, 4, then 5. The refusal names both rows
+# and their tiers. A row with no class and no pin is told to move down; one
+# whose class or pin keeps it where it is is left to Mattias (§435.4).
 #
 # **A pin comes before the class** (§430): `pinned/<n>`, n a number from 1,
 # then the class or `small` if the row has one, and the class rules above read
@@ -13044,7 +13055,9 @@ _queue-check file decisions:
                 want = (tag ~ /\/[CD]$/) ? "5" : "1"
                 if (tier != want) err(line, id ": the class " tag " puts an open row in tier " want ", and this row is tier " tier "; move it with just queue tier " id " " want " (§403)")
             }
-            if (tier == "5" && !closed && !isclass) err(line, id ": an open tier 5 row carries a class C or D (§403), and this one has none; give it one with just queue tag, or move it with just queue tier")
+            tierof[id] = tier
+            keeps[id] = (pinned && !closed) ? "pin " w[1] : isclass ? "class " tag : ""
+            if (tier == "5" && (kind == "todo" || kind == "after") && !isclass) { five[++n5] = id; fiveline[id] = line }
             fpos = (pinned ? 2 : 1) + ((isclass || tag == "small") ? 1 : 0)
             if (w[fpos] ~ /^(from|was)\//) {
                 if (w[fpos] !~ /^(from\/([TDQ][0-9]+|-|(fuzz|step):[^ ]+)|was\/[TDQ][0-9]+)$/) err(line, id ": \"" w[fpos] "\" is not where a row came from: from/<id>, was/<id>, from/-, from/fuzz:<target> or from/step:<file> (§432, §433)")
@@ -13073,6 +13086,26 @@ _queue-check file decisions:
                 }
                 if (ok) ready++
                 else waiting++
+            }
+            for (i = 1; i <= nw; i++) {
+                id = wid[i]
+                if (!(tierof[id] in istier)) continue
+                m = split(waits[id], a, ",")
+                for (j = 1; j <= m; j++) {
+                    b = a[j]
+                    if (!(b in at) || kindof[b] == "done" || kindof[b] == "dropped" || !(tierof[b] in istier)) continue
+                    if (rank[tierof[id]] >= rank[tierof[b]]) continue
+                    if (keeps[id] == "") err(wline[id], id ": waits on " b ", which is tier " tierof[b] ", and sits in tier " tierof[id] ", which the fill reaches first; move it down with just queue tier " id " " tierof[b] " (§435)")
+                    else err(wline[id], id ": waits on " b ", which is tier " tierof[b] ", and its " keeps[id] " keeps it in tier " tierof[id] ", which the fill reaches first: which of the two moves is Mattias\047s to set (§435.4)")
+                }
+            }
+            for (i = 1; i <= n5; i++) {
+                id = five[i]; ok = 0
+                if (kindof[id] == "after") {
+                    m = split(waits[id], a, ",")
+                    for (j = 1; j <= m; j++) if ((a[j] in at) ? tierof[a[j]] == "5" : a[j] ~ /^Q/) ok = 1
+                }
+                if (!ok) err(fiveline[id], id ": an open tier 5 row carries a class C or D (§403), or waits on a tier 5 row (§435.5), and this one does neither; give it a class with just queue tag, or move it with just queue tier")
             }
             for (i = 1; i <= nfrom; i++) {
                 id = fromid[i]; src = fromsrc[id]
@@ -13130,7 +13163,7 @@ _queue-check file decisions:
 # and on a done one, and a tier the fill does not know refused. §403 adds tier 5
 # taken last though written first, a class naming the wrong tier for an open
 # row refused while a closed row keeps its tier, and a tier 5 row with no class
-# refused. §352 adds tiers 1 and 5 in class order against the order in the file,
+# that waits on nothing refused. §352 adds tiers 1 and 5 in class order against the order in the file,
 # with the measure line counted by hand; a full bundle of small rows going ahead
 # of tier 1, and a lone small row
 # still printed as a bundle; a partial bundle waiting for its tier and pulling the
@@ -13157,7 +13190,14 @@ _queue-check file decisions:
 # with the space written `_`, the colon tripping no refusal of a class; and
 # refuses a target that is not there, an unknown kind, a name two paths end in,
 # a name cut inside a file name, a name longer than it needs, `was/fuzz:`, and
-# a class with punctuation behind the word.
+# a class with punctuation behind the word. §435 adds a row in a tier the fill
+# reaches before an open row it waits on, refused: with no class and told to
+# move down, and with a pin or a class left to Mattias; and a tier 5 row with
+# no class that waits on a tier 1 row, refused. A tier 5 row with no class
+# passes when it waits on an open tier 5 row, a closed one, or a Q row this
+# copy does not hold, and when a lane holds it or it is parked; a row waiting on
+# a row in an earlier tier, or on a done row in a later one, passes too. The
+# classes fixture's measure line counts its tier 5 row with no class.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -13334,6 +13374,31 @@ check-queue-selftest:
     refused step-empty  's/from\/T9 a defect/from\/step: a defect/'  '"from/step:" is not where a row came from'
     refused was-input   's/was\/D1 the/was\/fuzz:where_two_surfaces_cross the/' '"was/fuzz:where_two_surfaces_cross" is not where a row came from'
     refused fuzz-first  's/wrong\/A from\/T9/from\/fuzz:where_two_surfaces_cross wrong\/A/' 'the tag wrong/A goes before from/fuzz:where_two_surfaces_cross'
+    refused waits-above 's/after:Q2/after:Q7/'                      'Q5: waits on Q7, which is tier 5, and sits in tier 3, which the fill reaches first; move it down with just queue tier Q5 5 (§435)'
+    refused pin-above   's/^T1  1  todo /T1  1  after:Q7 /'         "T1: waits on Q7, which is tier 5, and its pin pinned/1 keeps it in tier 1, which the fill reaches first: which of the two moves is Mattias's to set (§435.4)"
+    refused class-above 's/^T1  1  todo  opus  justfile#queue  pinned\/1 /T1  1  after:Q7  opus  justfile#queue  /' "T1: waits on Q7, which is tier 5, and its class refuses/B keeps it in tier 1, which the fill reaches first: which of the two moves is Mattias's to set (§435.4)"
+    refused five-on-one 's/^Q7  5  todo  opus  tooling\/queue\/queue.py  wrong\/C a defect/Q7  5  after:Q8  opus  tooling\/queue\/queue.py  a defect/' 'Q7: an open tier 5 row carries a class C or D (§403), or waits on a tier 5 row (§435.5), and this one does neither'
+
+    passes() {
+        sed "$2" "$dir/good.md" > "$dir/$1.md"
+        cmp -s "$dir/good.md" "$dir/$1.md" && fail "$1: the fixture did not change the good queue"
+        got=$(q _queue-check "$dir/$1.md" "$decisions" 2>&1) || fail "$1: $3"
+    }
+    nofive='s/^Q7  5  todo  opus  tooling\/queue\/queue.py  wrong\/C a defect/Q7  5  STATE  opus  tooling\/queue\/queue.py  a defect/'
+    passes five-on-open   "/^Q7 /a Q10  5  after:Q7  sonnet  -  no class, waiting on a tier 5 defect §230" \
+        'a tier 5 row with no class that waits on an open tier 5 row was refused'
+    passes five-on-closed "${nofive/STATE/after:D5}; /^D4 /a D5  5  done:42df376e  opus  -  wrong/C a defect closed in tier 5 §230" \
+        'a tier 5 row with no class that waits on a closed tier 5 row was refused'
+    passes five-on-unheld "${nofive/STATE/after:Q999}" \
+        'a tier 5 row with no class that waits on a Q row this copy does not hold was refused'
+    passes five-held      "${nofive/STATE/lane:lane-q7}" \
+        'a tier 5 row with no class that a lane holds was refused, though take writes over its after:'
+    passes five-parked    "${nofive/STATE/parked:§230}" \
+        'a parked tier 5 row with no class was refused, though park writes over its after:'
+    passes waits-below    's/^Q3  2  after:T9 /Q3  2  after:Q8 /' \
+        'a tier 2 row that waits on a tier 1 row was refused'
+    passes waits-on-done  "s/^Q3  2  after:T9 /Q3  2  after:D5 /; /^D4 /a D5  5  done:42df376e  opus  -  wrong/C a defect closed in tier 5 §230" \
+        'a tier 2 row that waits on a done tier 5 row was refused, though the fill reaches it as soon as it is ready'
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
@@ -13377,13 +13442,15 @@ check-queue-selftest:
     Q9  1  parked:§230  opus  docs/i.md  wrong/A parked, so out of the measure §230
     Q10  5  todo  opus  docs/j.md  refuses/C a refusal only a probe builds §230
     Q11  4  todo  opus  docs/k.md  tier four §230
+    Q12  5  after:Q13  opus  docs/l.md  no class, ready in tier 5 since the row it waits on is done §230
+    Q13  5  done:42df376e  opus  docs/m.md  wrong/C closed, and Q12 waited on it §230
     MD
-    drive classes next 10
-    [ "$(takes)" = "Q5 Q7 Q3 Q1 Q8 Q11 Q4 Q10 Q6 Q2 " ] \
-        || fail "tiers 1 and 5 were not each taken wrong before crash before refuses, A before B and C before D, with no class after B"
+    drive classes next 11
+    [ "$(takes)" = "Q5 Q7 Q3 Q1 Q8 Q11 Q4 Q10 Q12 Q6 Q2 " ] \
+        || fail "tiers 1 and 5 were not each taken wrong before crash before refuses, A before B and C before D, with no class after B and between C and D"
     drive classes
-    grep -qxF 'tier 1, open and not parked: 3 in A or B (2 wrong, 0 crash, 1 refuses), 1 with no class; tier 5: 2 in C, 2 in D; 0 small rows ready, and a bundle is 5' <<<"$got" \
-        || fail "the measure line does not count the classes fixture's tier 1 and tier 5 rows"
+    grep -qxF 'tier 1, open and not parked: 3 in A or B (2 wrong, 0 crash, 1 refuses), 1 with no class; tier 5: 2 in C, 2 in D, 1 with no class; 0 small rows ready, and a bundle is 5' <<<"$got" \
+        || fail "the measure line does not count the classes fixture's tier 1 and tier 5 rows, the tier 5 row with no class among them"
 
     bundled() {
         got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 --set queue_bundle "$2" queue "${@:3}" 2>&1) \
@@ -13423,7 +13490,7 @@ check-queue-selftest:
     grep -qxF "skip Q7 (tier 1): its docs/f.md meets Q6's docs/f.md, held by lane:lane-q6" <<<"$got" \
         || fail "a pinned row a running lane holds back was not skipped with the lane named"
     bundled pinned 2
-    grep -qxF 'tier 1, open and not parked: 2 in A or B (2 wrong, 0 crash, 0 refuses), 3 with no class; tier 5: 0 in C, 0 in D; 2 small rows ready, and a bundle is 2' <<<"$got" \
+    grep -qxF 'tier 1, open and not parked: 2 in A or B (2 wrong, 0 crash, 0 refuses), 3 with no class; tier 5: 0 in C, 0 in D, 0 with no class; 2 small rows ready, and a bundle is 2' <<<"$got" \
         || fail "the measure line did not read the class after a pin"
 
     fence partial <<'MD'
@@ -13860,7 +13927,15 @@ check-queue-merge-driver:
 # `was/T1` naming a closed row and `from/Q1` an open one; `tag` putting a class
 # or `small` in front of that word and `tag -` taking it off again; `unpin`
 # leaving the word first; and `add` refusing a pin before it looks for the
-# word. The
+# word. §435's: the merged queue refused for Q3, which waits on a tier 2 row
+# from the other side, until `tier` moves it down; `after` moving a row with no
+# class down beside the latest row it names, and taking its own waiters along,
+# and refusing a B row; `tier` and `tag` taking the rows with no class that wait
+# on a row down the chain with it, refusing to move a row up past a row it waits
+# on, and refusing a B row that would have to follow; `tag` taking up out of tier
+# 5 only the waiters whose `after:` names no other tier 5 row; and `pin`
+# refusing a row that waits outside tier 1 and taking a tier 5 row's waiters up
+# with it. The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -14041,10 +14116,16 @@ check-queue-api-selftest:
     g "$two" commit -qam "two's queue"
     g "$hub" merge -q --no-edit one || fail "main did not take one"
     got=$(g "$hub" merge --no-edit two 2>&1) || fail "one and two changed different rows and did not merge through the driver"
-    got=$(check "$hub") || fail "the merged queue fails check-queue"
     for row in '^Q1  1  done:' '^Q2  1  lane:lane-q2 ' "^Q3  1  after:$in_two " 'added in one, 1 ' 'added in one, 2 ' 'added in two, 1 ' 'added in two, 2 '; do
         grep -q "$row" "$hub/docs/queue.md" || fail "the merge lost the row matching $row"
     done
+    # §435: one copy could not see the tier of the row Q3 waits on; the merge can.
+    got=$(check "$hub") && fail "the merged queue passed with Q3 in tier 1 waiting on $in_two, a tier 2 row"
+    grep -qF "Q3: waits on $in_two, which is tier 2, and sits in tier 1, which the fill reaches first; move it down with just queue tier Q3 2 (§435)" <<<"$got" \
+        || fail "check-queue did not name Q3 and $in_two, and their tiers, once the merge showed both"
+    got=$(q "$hub" tier Q3 2 2>&1) || fail "tier refused to move Q3 down beside the row it waits on"
+    g "$hub" commit -qam "Q3 down to tier 2"
+    got=$(check "$hub") || fail "the merged queue fails check-queue"
 
     g "$hub" switch -q -c three
     got=$(q "$hub" park Q3 §230 2>&1) || fail "park refused Q3"
@@ -14060,7 +14141,7 @@ check-queue-api-selftest:
     grep -q '^<<<<<<< ours: Q3$' "$hub/docs/queue.md" || fail "the row in conflict is not marked in the file"
     got=$(q "$hub" park Q2 §230 2>&1) && fail "a verb wrote a file that still holds a conflict"
     got=$(q "$hub" pick Q3 theirs 2>&1) || fail "pick could not settle Q3"
-    awk '/^## Closed/ { c = 1 } c && /^Q3  1  dropped:§230 / { f = 1 } END { exit !f }' "$hub/docs/queue.md" \
+    awk '/^## Closed/ { c = 1 } c && /^Q3  2  dropped:§230 / { f = 1 } END { exit !f }' "$hub/docs/queue.md" \
         || fail "pick theirs did not keep four's drop under ## Closed"
     got=$(check "$hub") || fail "the file pick settled fails check-queue"
 
@@ -14304,7 +14385,7 @@ check-queue-api-selftest:
     got=$(q "$pin_wt" pin "$first" "$second" 2>&1) || fail "pin refused a tier 1 row and a tier 2 row"
     [ "$(pinword "$first")" = "1 pinned/1" ] || fail "pin did not put pinned/1 on $first"
     [ "$(pinword "$second")" = "1 pinned/2" ] || fail "pin did not move $second to tier 1 as pinned/2"
-    [ "$(tier1)" = "$first $second Q2 Q3 $classed " ] || fail "pin did not put the pinned rows first in tier 1, in the order pinned"
+    [ "$(tier1)" = "$first $second Q2 $classed " ] || fail "pin did not put the pinned rows first in tier 1, in the order pinned"
     got=$(q "$pin_wt" ready 2>&1) || fail "ready failed with pinned rows"
     [ "$(first_three)" = "$first $second $classed " ] || fail "ready did not list the pinned rows first, by number, ahead of wrong/A"
     got=$(q "$pin_wt" rank "$classed" before "$first" 2>&1) || fail "rank refused to move a row that is not pinned above a pinned one"
@@ -14326,13 +14407,91 @@ check-queue-api-selftest:
     grep -qF "$fifth carries the class crash/C, which puts it in tier 5" <<<"$got" || fail "pin did not say a C row belongs in tier 5"
     got=$(q "$pin_wt" unpin "$second" 2>&1) || fail "unpin refused $second"
     [ "$(pinword "$second")" = "1 from/-" ] || fail "unpin did not take the pin off and leave $second in tier 1"
-    [ "$(tier1)" = "$classed $first $second Q2 Q3 " ] || fail "unpin moved $second from where it stood"
+    [ "$(tier1)" = "$classed $first $second Q2 " ] || fail "unpin moved $second from where it stood"
     got=$(q "$pin_wt" take "$first" lane-pinned 2>&1) || fail "take refused a pinned row"
     pinned_sha=$(g "$pin_wt" rev-parse HEAD)
     got=$(q "$pin_wt" done "$first" "$pinned_sha" 2>&1) || fail "done refused a pinned row"
     awk -v id="$first" '/^## Closed/ { c = 1 } c && $1 == id && $6 == "pinned/1" { f = 1 } END { exit !f }' "$pin_wt/docs/queue.md" \
         || fail "done did not move the pinned row under ## Closed with its pin"
     got=$(check "$pin_wt") || fail "the file the pin verbs wrote fails check-queue"
+
+    # §435.6: the verbs keep a row that waits in no tier the fill reaches before
+    # an open row it waits on.
+    wait_wt="$root/rcad-worktrees/wait"
+    g "$hub" worktree add -q -b wait "$wait_wt" main
+    sits() { awk -v id="$1" '/^## / { h = $0 } $1 == id { print h ": " $2 " " $3 }' "$wait_wt/docs/queue.md"; }
+    mattias="which of the two moves is Mattias's to set (§435.4)"
+    x=$(q "$wait_wt" add 1 opus - "from/- a row that comes to wait on a tier 5 row §230") || fail "add for the row to wait failed"
+    c5=$(q "$wait_wt" add 5 opus - "refuses/C from/- a tier 5 row other rows wait on §230") || fail "add for the tier 5 row failed"
+    got=$(q "$wait_wt" after "$x" "$c5" 2>&1) || fail "after refused a row with no class waiting on a tier 5 row"
+    grep -qxF "$x: todo -> after:$c5, tier 1 -> 5, beside $c5, which it waits on" <<<"$got" \
+        || fail "after did not say it moved the row down beside the tier 5 row it waits on"
+    [ "$(sits "$x")" = "## Tier 5: 5 after:$c5" ] || fail "after did not move the row under ## Tier 5"
+    w=$(q "$wait_wt" add 1 opus - "wrong/B from/- a defect that may not wait on a tier 5 row §230") || fail "add for the B row failed"
+    got=$(q "$wait_wt" after "$w" "$c5" 2>&1) && fail "after moved a row of class B to wait on a tier 5 row"
+    grep -qxF "queue after: $w carries the class wrong/B, which keeps it in tier 1, and it would wait on $c5, which is tier 5: $mattias" <<<"$got" \
+        || fail "after did not name both rows and leave the order to Mattias"
+    [ "$(sits "$w")" = "## Tier 1: 1 todo" ] || fail "a refused after wrote the file anyway"
+
+    p=$(q "$wait_wt" add 2 opus - "from/- a tier 2 row two rows wait on in a chain §230") || fail "add for the head of the chain failed"
+    f=$(q "$wait_wt" add 2 opus - "from/- a tier 2 row that waits on the head §230") || fail "add for the second of the chain failed"
+    gg=$(q "$wait_wt" add 2 opus - "from/- a tier 2 row that waits on the second §230") || fail "add for the third of the chain failed"
+    got=$(q "$wait_wt" apply after "$f" "$p" + after "$gg" "$f" 2>&1) || fail "after refused a wait within one tier"
+    grep -qxF "$f: todo -> after:$p" <<<"$got" || fail "after moved a row that waits on a row of its own tier"
+    got=$(q "$wait_wt" tier "$p" 3 2>&1) || fail "tier refused to move the head of a chain down"
+    grep -qxF "$p: tier 2 -> 3, at the foot of ## Tier 3, takes $f along, tier 2 -> 3, takes $gg along, tier 2 -> 3" <<<"$got" \
+        || fail "tier did not take the rows that wait on the moved row along, down the chain"
+    [ "$(sits "$gg")" = "## Tier 3: 3 after:$f" ] || fail "tier did not move the foot of the chain under ## Tier 3"
+
+    r=$(q "$wait_wt" add 1 opus - "from/- a tier 1 row a tag moves to tier 5 and back §230") || fail "add for the row to tag failed"
+    s=$(q "$wait_wt" add 1 opus - "from/- a tier 1 row that waits on the row a tag moves §230") || fail "add for its follower failed"
+    got=$(q "$wait_wt" after "$s" "$r" 2>&1) || fail "after refused a wait within tier 1"
+    got=$(q "$wait_wt" tag "$r" crash/C 2>&1) || fail "tag refused a C class on a row another row waits on"
+    grep -qxF "$r: tag - -> crash/C, tier 1 -> 5, at the foot of ## Tier 5, takes $s along, tier 1 -> 5" <<<"$got" \
+        || fail "tag did not take the row that waits on it along to tier 5"
+    both=$(q "$wait_wt" add 1 opus - "from/- a tier 1 row that waits on two tier 5 rows §230") || fail "add for the row to wait on two failed"
+    got=$(q "$wait_wt" after "$both" "$r,$c5" 2>&1) || fail "after refused a wait on two tier 5 rows"
+    grep -qxF "$both: todo -> after:$r,$c5, tier 1 -> 5, beside $r and $c5, which it waits on" <<<"$got" \
+        || fail "after did not name both tier 5 rows it moved the row beside"
+    got=$(q "$wait_wt" tag "$r" wrong/B 2>&1) || fail "tag refused a B class on a tier 5 row others wait on"
+    grep -qxF "$r: tag crash/C -> wrong/B, tier 5 -> 1, at the foot of ## Tier 1, takes $s along, tier 5 -> 1" <<<"$got" \
+        || fail "tag did not take up only the row whose after: names no other tier 5 row"
+    [ "$(sits "$both")" = "## Tier 5: 5 after:$r,$c5" ] || fail "tag took up a row that still waits on a tier 5 row"
+
+    got=$(q "$wait_wt" tier "$x" 2 2>&1) && fail "tier moved a row up past the tier 5 row it waits on"
+    grep -qxF "queue tier: $x waits on $c5, which is tier 5, so in tier 2 it would sit in a tier the fill reaches first (§435)" <<<"$got" \
+        || fail "tier did not name the row the moved row waits on"
+    got=$(q "$wait_wt" tag "$x" refuses/B 2>&1) && fail "tag moved a row up past the tier 5 row it waits on"
+    grep -qxF "queue tag: $x waits on $c5, which is tier 5, so in tier 1 it would sit in a tier the fill reaches first (§435): $mattias" <<<"$got" \
+        || fail "tag did not leave a class against a wait to Mattias"
+    [ "$(sits "$x")" = "## Tier 5: 5 after:$c5" ] || fail "a refused tag or tier moved the row anyway"
+
+    t=$(q "$wait_wt" add 1 opus - "from/- a tier 1 row the B row waits on §230") || fail "add for the B row's blocker failed"
+    got=$(q "$wait_wt" after "$w" "$t" 2>&1) || fail "after refused a B row waiting on a tier 1 row"
+    got=$(q "$wait_wt" tag "$t" crash/C 2>&1) && fail "tag moved a row to tier 5 past a B row that waits on it"
+    grep -qxF "queue tag: $w waits on $t and carries the class wrong/B, so it cannot follow $t to tier 5: $mattias" <<<"$got" \
+        || fail "tag did not name the B row that cannot follow"
+    [ "$(sits "$t")" = "## Tier 1: 1 todo" ] || fail "a refused tag moved the row anyway"
+
+    z=$(q "$wait_wt" add 2 opus - "from/- a tier 2 row that waits on a tier 3 row §230") || fail "add for the row to pin failed"
+    got=$(q "$wait_wt" after "$z" "$p" 2>&1) || fail "after refused a tier 2 row waiting on a tier 3 row"
+    grep -qxF "$z: todo -> after:$p, tier 2 -> 3, beside $p, which it waits on" <<<"$got" || fail "after did not move the row down to tier 3"
+    got=$(q "$wait_wt" pin "$z" 2>&1) && fail "pin moved a row to tier 1 past the tier 3 row it waits on"
+    grep -qxF "queue pin: $z waits on $p, which is tier 3, and a pinned row is tier 1, which the fill reaches first (§435)" <<<"$got" \
+        || fail "pin did not name the row the pinned row would wait on"
+
+    gone5=$(q "$wait_wt" add 5 opus - "crash/C from/- a tier 5 row done while a row waits on it §230") || fail "add for the tier 5 row to close failed"
+    y=$(q "$wait_wt" add 1 opus - "from/- a row that sits in tier 5 with no class until a pin §230") || fail "add for the row to pin out of tier 5 failed"
+    y2=$(q "$wait_wt" add 1 opus - "from/- a row that follows it out of tier 5 §230") || fail "add for its follower failed"
+    gone5_sha=$(g "$wait_wt" rev-parse HEAD)
+    got=$(q "$wait_wt" apply after "$y2" "$y" + after "$y" "$gone5" + done "$gone5" "$gone5_sha" 2>&1) || fail "the steps that leave a tier 5 row with no class failed"
+    grep -qxF "$y: todo -> after:$gone5, tier 1 -> 5, beside $gone5, which it waits on, takes $y2 along, tier 1 -> 5" <<<"$got" \
+        || fail "after did not take the row that waits on the moved row along"
+    [ "$(sits "$y2")" = "## Tier 5: 5 after:$y" ] || fail "the follower did not go to tier 5 with the row it waits on"
+    got=$(q "$wait_wt" pin "$y" 2>&1) || fail "pin refused a tier 5 row with no class that waits on a closed row"
+    grep -qxF "$y: pinned/1, tier 5 -> 1, takes $y2 along, tier 5 -> 1, taken ahead of every row not pinned" <<<"$got" \
+        || fail "pin did not take the row that waits on it up out of tier 5"
+    got=$(check "$wait_wt") || fail "the file the verbs of §435 wrote fails check-queue"
     exit 0
 
 # The fuzz half of `status`: for the night `latest` names, how many of the
