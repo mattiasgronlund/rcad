@@ -219,6 +219,8 @@ def running_rows(verbs, here, tip):
             "agent": agent_of(tree) if tree else None,
             "tier": tier_taken_from(hold, row),
             "taken_by": os.path.basename(hold["tree"]),
+            "write_set": hold["write_set"],
+            "taken": hold["taken"],
             "what": row.text if row else f"{row_id}  -  -  -  {hold['write_set']}  (not merged into main yet)",
         })
     return rows
@@ -712,10 +714,17 @@ def running_section(rows):
         return "<p>nothing running</p>"
     items = (
         f"<li><code>{html.escape(row['id'])}</code> on <code>{html.escape(row['branch'])}</code> "
-        f"at <code>{html.escape(row['where'])}</code> — {row_html_text(row['what'])}</li>"
+        f"at <code>{html.escape(row['where'])}</code> — {row_html_text(row['what'])}{narrowed_html(row)}</li>"
         for row in rows
     )
     return "<ul>" + "".join(items) + "</ul>"
+
+
+def narrowed_html(row):
+    """What a lane narrowed its hold to (§424.7), since the row's text still names the set it was taken with."""
+    if row["write_set"] == row["taken"]:
+        return ""
+    return f" — narrowed to <code>{html.escape(row['write_set'])}</code>"
 
 
 def closed_section(rows):
