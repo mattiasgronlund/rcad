@@ -8806,6 +8806,79 @@ mod tests {
         }
     }
 
+    /// The two loops a ball on a pipe's axis crosses it in are two names, and
+    /// so are the two a thin pipe crosses a fat one in; each loop is one name
+    /// with every axis written either way round and every pipe's origin slid
+    /// along its axis, in either order (Q1394).
+    ///
+    /// The ball of radius `2.5` at `(0, 0, 1)` crosses the pipe of radius `1.5`
+    /// about `z` where `(z − 1)² = 4`, at `z = 3` and at `z = −1`. The pipe of
+    /// radius one along `x` at `z = 5` crosses the pipe of radius four about `z`
+    /// in a loop either side of `x = 0`, through `(4, 0, 6)` and `(−4, 0, 6)`.
+    #[test]
+    fn each_loop_a_ball_on_a_pipes_axis_or_a_thin_pipe_through_a_fat_one_crosses_is_one_name_however_the_two_are_spelled()
+     {
+        let pipes = |origins: [Point; 2], direction: Vector, radius: f64| -> Vec<Surface> {
+            origins
+                .into_iter()
+                .flat_map(|origin| {
+                    let axis = Axis::new(origin, direction).expect("a direction with length");
+                    [axis, axis.reversed()]
+                })
+                .map(|axis| {
+                    Surface::Cylinder(Cylinder::new(axis, radius).expect("a positive radius"))
+                })
+                .collect()
+        };
+        let up_z = Vector::new(0.0, 0.0, 1.0);
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(0.0, 0.0, 1.0), 2.5).expect("a ball of radius 2.5"),
+        );
+        let pairs = [
+            (
+                "a ball and a pipe on its centre",
+                vec![ball],
+                pipes([Point::origin(), Point::new(0.0, 0.0, 7.0)], up_z, 1.5),
+                [[1.5, 0.0, 3.0], [1.5, 0.0, -1.0]],
+            ),
+            (
+                "a thin pipe and a fat one",
+                pipes(
+                    [Point::new(0.0, 0.0, 5.0), Point::new(-10.0, 0.0, 5.0)],
+                    Vector::new(1.0, 0.0, 0.0),
+                    1.0,
+                ),
+                pipes([Point::origin(), Point::new(0.0, 0.0, 5.0)], up_z, 4.0),
+                [[4.0, 0.0, 6.0], [-4.0, 0.0, 6.0]],
+            ),
+        ];
+        for (pair, ones, others, through) in pairs {
+            let names_through = |point: [f64; 3]| -> BTreeSet<_> {
+                let mut names = BTreeSet::new();
+                for &one in &ones {
+                    for &other in &others {
+                        for carried_by in [[one, other], [other, one]] {
+                            names.insert(
+                                name_of_the_closed_crossing_through(
+                                    &carried_by,
+                                    PredicatePoint::from(point),
+                                    &Policy::certified(),
+                                    &mut ProvenanceLog::new(),
+                                )
+                                .unwrap_or_else(|why| panic!("{pair} cross in two loops: {why:?}")),
+                            );
+                        }
+                    }
+                }
+                names
+            };
+            let [one, other] = through.map(names_through);
+            assert_eq!(one.len(), 1, "{pair}: {one:?}");
+            assert_eq!(other.len(), 1, "{pair}: {other:?}");
+            assert_ne!(one, other, "{pair}: two loops named as one");
+        }
+    }
+
     /// The two circles a bar of radius one down a cone's axis crosses the
     /// cone's surface in, at `z = 1` and `z = −1`, start at corners of two
     /// names, and each starts at a corner of one name whichever face asks,
