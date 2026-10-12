@@ -37,7 +37,10 @@
 use std::collections::BTreeMap;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Surface, Vector};
-use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::expansion::{
+    expansion_sign, expansion_sum, product_is_exact, scale_expansion, two_product,
+};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Containment, Error, Invalid, Model, OnAFace, ProfileBuilder, Rule, SolidKey};
 
 mod cones;
@@ -1023,13 +1026,26 @@ fn a_turned_corner_up_cube_centred_three_and_a_half_above_a_steep_pointed_cones_
 
 /// Twenty slabs `14` deep across the steep cone's axis, each `a_slab`'s own
 /// 2 by 12 box turned `0`, `0.5`, `1` or `1.5` about it. At `low = −14` the
-/// slab's top runs through the apex, a touch ([`APART`]). Every slab answers
-/// every rule right turned `0`, with the cone in two solids either side of the
-/// slab from `low = −8` to `0`, and the intersection and the block less the
-/// cone answer right every turn. The union and the cone less the block refuse
-/// the other three turns: from `−14` on `side of a half-space` all three, and
-/// from every other `low` on `ACurvedFaceGoesRightRoundWithNoSeam` turned
-/// `0.5` and `1` and on `side of a half-space` turned `1.5`. Until Q1537 the
+/// slab's top runs through the apex, a touch ([`APART`]), and every rule
+/// answers right every turn. Every other slab answers every rule right turned
+/// `0` and `1.5`, with the cone in two solids either side of the slab from
+/// `low = −8` to `0`, and the intersection and the block less the cone answer
+/// right every turn. Turned `0.5` and `1` the union and the cone less the block
+/// refuse `ACurvedFaceGoesRightRoundWithNoSeam`.
+///
+/// **Turned `1.5` the cone less the block keeps one solid more than the ideal
+/// slab would leave.** The stored end at `−y` stands `3.6e−16` inside the
+/// cap rim, and the cone pokes out past it in a lens `1.3e−7` across
+/// ([`a_slabs_solids`],
+/// [`the_steep_cone_less_a_slab_turned_one_and_a_half_keeps_a_lens_past_the_end_its_rim_comes_inside`]).
+/// Turned `0.5` and `1` the end at `+y` stands inside the rim the same way
+/// ([`which_end_of_a_turned_slab_the_steep_cones_rim_comes_inside_is_decided_exactly`]),
+/// so the two rules that refuse there have a lens to find too.
+///
+/// Until Q1837's fix to `walk.rs`, which keeps the arc of a cap rim it holds
+/// when the other arc cannot be told, the union and the cone less the block
+/// refused `side of a half-space` from `−14` turned `0.5`, `1` and `1.5`, and
+/// from every other `low` turned `1.5`: fourteen fuses (Q1743). Until Q1537 the
 /// slabs from `−14`, `−8` and `−3` answered `18` right and refused `24` on
 /// `a point inside a piece of a face`, every rule of the slab from `−14` the
 /// other three turns among them (§35.6). This test holds the slabs from
@@ -1039,12 +1055,8 @@ fn a_slab_fourteen_deep_from_below_the_apex_across_a_steep_pointed_cone_answers_
     assert_eq!(
         tally_on_every_second_point(&slabs(THE_STEEP_CONE, &[-14.0, -8.0, -3.0])),
         Tally {
-            right: 30,
-            refused: [
-                ("ACurvedFaceGoesRightRoundWithNoSeam", 8),
-                ("side of a half-space", 10),
-            ]
-            .into()
+            right: 40,
+            refused: [("ACurvedFaceGoesRightRoundWithNoSeam", 8)].into()
         }
     );
 }
@@ -1054,14 +1066,120 @@ fn a_slab_fourteen_deep_from_the_apex_up_across_a_steep_pointed_cone_answers_rig
     assert_eq!(
         tally_on_every_second_point(&slabs(THE_STEEP_CONE, &[0.0, 2.0])),
         Tally {
-            right: 20,
-            refused: [
-                ("ACurvedFaceGoesRightRoundWithNoSeam", 8),
-                ("side of a half-space", 4),
-            ]
-            .into()
+            right: 24,
+            refused: [("ACurvedFaceGoesRightRoundWithNoSeam", 8)].into()
         }
     );
+}
+
+/// Which end of a turned slab, as the model stores it, a cap rim comes inside,
+/// decided exactly ([`the_cap_rim_against_each_end`]). Unturned, both ends
+/// stand exactly `6` from the axis, and the steep cone's rim of radius `6`
+/// touches each at one point. The rounding of a turn moves each stored end a
+/// few `1e−16` in or out: turned `0.5` and `1` the end at `+y` comes inside the
+/// rim, and turned `1.5` the end at `−y`. The unit cone's rim, of radius `3`,
+/// stays clear of both ends every turn.
+#[test]
+fn which_end_of_a_turned_slab_the_steep_cones_rim_comes_inside_is_decided_exactly() {
+    use Decision::{Neg, Pos, Zero};
+    let turns = [0.0, 0.5, 1.0, 1.5];
+    let against = |cone| {
+        turns.map(|turn| {
+            the_cap_rim_against_each_end(cone, a_slab(0.0, turn)).map(|end| end.rim_inside)
+        })
+    };
+    assert_eq!(
+        against(THE_STEEP_CONE),
+        [[Zero, Zero], [Neg, Pos], [Neg, Pos], [Pos, Neg]]
+    );
+    assert_eq!(against(THE_UNIT_CONE), [[Neg, Neg]; 4]);
+}
+
+/// Turned `1.5`, the stored end at `−y` stands inside the steep cone's rim, so
+/// the cone less each slab from `−8` to `2` keeps a lens past that end beside
+/// the solids the ideal slab leaves, and every answer validates.
+///
+/// The lens is the smallest piece, with three faces: a piece of the cap, of the
+/// end and of the cone's side. Its volume is held to a closed form, within the
+/// bound `measure` gives with it. At height `z` the cone is a disc of radius
+/// `ρ = slope · z`, and the part of it past the end's plane, `d` from the axis,
+/// is a segment of height `h = ρ − d` and area `(4√2/3) · √d · h^(3/2)`, to a
+/// part in `h/d` of it. `h` climbs from `0` to `δ = rim − d` at the cap, with
+/// `dz = dh / slope`, so the lens holds
+///
+/// `V = (8√2 / (15 · slope)) · √rim · δ^(5/2)`,
+///
+/// and `δ = c² / (2 · rim)` to a part in `δ/rim` of it, where `c` is half the
+/// chord the stored end cuts from the rim. Round the steep cone that is
+/// `(8√3/15) · δ^(5/2)`, with `δ ≈ 3.6e−16`, so `V ≈ 2.3e−39`. `measure` gives
+/// `8.5e−39` and a bound of `1.1e−35`.
+#[test]
+fn the_steep_cone_less_a_slab_turned_one_and_a_half_keeps_a_lens_past_the_end_its_rim_comes_inside()
+{
+    let cone = THE_STEEP_CONE;
+    let rim = cone.slope * cone.far;
+    let policy = Policy::certified();
+    for (low, want_solids) in [(-8.0, 3), (-3.0, 3), (0.0, 3), (2.0, 2)] {
+        let case = Case {
+            cone,
+            block: a_slab(low, 1.5),
+            solids: a_slabs_solids(cone, low, 1.5),
+        };
+        assert_eq!(case.solids[2], want_solids, "low {low}");
+        let [behind, ahead] = the_cap_rim_against_each_end(cone, case.block);
+        assert_eq!(
+            (behind.rim_inside, ahead.rim_inside),
+            (Decision::Pos, Decision::Neg),
+            "low {low}"
+        );
+
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let (cone_key, slab_key) = build(&mut model, &case);
+        let answer = model
+            .fuse(
+                &[cone_key],
+                &[slab_key],
+                Rule::Difference,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|error| panic!("low {low}: the cone less the slab refused: {error:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|error| panic!("low {low}: the answer does not validate: {error:?}"));
+        assert_eq!(answer.solids().len(), want_solids, "low {low}");
+
+        let pieces: Vec<_> = answer
+            .solids()
+            .iter()
+            .map(|&piece| {
+                let solid = model.solid(piece).expect("this model made the key");
+                let measured = solid
+                    .measure(
+                        Deflection::of(0.002).expect("a positive length"),
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!("low {low}: a piece does not measure: {error:?}")
+                    });
+                (solid.faces().count(), measured)
+            })
+            .collect();
+        let (faces, lens) = pieces
+            .iter()
+            .min_by(|one, other| one.1.volume().total_cmp(&other.1.volume()))
+            .expect("the answer has pieces");
+        assert_eq!(*faces, 3, "low {low}: the lens's faces");
+        let delta = behind.half_chord_squared / (2.0 * rim);
+        let closed_form = 8.0 * 2.0f64.sqrt() / (15.0 * cone.slope) * rim.sqrt() * delta.powf(2.5);
+        assert!(
+            (lens.volume() - closed_form).abs() <= lens.volume_error(),
+            "low {low}: the lens measures {} ± {}, where the closed form says {closed_form}",
+            lens.volume(),
+            lens.volume_error()
+        );
+    }
 }
 
 /// The same leaning block round a cone of slope `1` instead of `2` — §350.1
@@ -1324,7 +1442,7 @@ fn slabs(cone: ConeShape, lows: &[f64]) -> Vec<Case> {
             cases.push(Case {
                 cone,
                 block: a_slab(low, turn),
-                solids: a_slabs_solids(cone, low),
+                solids: a_slabs_solids(cone, low, turn),
             });
         }
     }
@@ -1651,7 +1769,7 @@ fn how_far_a_corner_up_cubes_section_reaches(side: f64, zeta: f64) -> Option<f64
 }
 
 /// How many solids each rule leaves for [`a_slab`] round a pointed cone,
-/// worked out by hand.
+/// turned `turn`, worked out by hand for the slab as the model stores it.
 ///
 /// A slab whose top is not above the apex shares no volume with the cone: at
 /// `low = −14` its top runs through the apex, a touch, [`APART`].
@@ -1659,21 +1777,31 @@ fn how_far_a_corner_up_cubes_section_reaches(side: f64, zeta: f64) -> Option<f64
 /// Otherwise the union and the intersection are one solid each, both shapes
 /// being convex, and so is the slab less the cone: the slab runs past the cap,
 /// and a point of it outside the cone moved along `y` reaches an end of the
-/// slab, which no rim up to `6` comes inside, and the two ends meet above the
-/// cap. The cone less the slab is the cone either side of it, two solids
-/// unless the tip below the slab joins them, when `low` is above zero. The
-/// steep cone's rim of radius `6` touches the slab's ends and joins nothing.
-fn a_slabs_solids(cone: ConeShape, low: f64) -> Solids {
+/// slab, and the two ends meet above the cap. A rim that comes inside an end
+/// takes a notch out of it narrower than the slab, so what is left of that end
+/// is still one piece. The cone less the slab is the cone either side of it,
+/// two solids unless the tip below the slab joins them, when `low` is above
+/// zero.
+///
+/// **Each end the rim comes inside adds a lens to the cone less the slab.**
+/// The rim of radius `6` of [`THE_STEEP_CONE`] meets each end of the ideal slab
+/// at one point, which joins nothing. But the rounding of a turn moves each
+/// stored end a few `1e−16` in or out ([`the_cap_rim_against_each_end`]), and
+/// past an end that stands inside the rim the cone keeps a lens: the part of it
+/// beyond the end's plane, as wide as the chord the end cuts from the rim,
+/// `1.3e−7` turned `1.5`. That touches neither half, since the slab is `2`
+/// wide, so it is a solid of its own.
+fn a_slabs_solids(cone: ConeShape, low: f64, turn: f64) -> Solids {
     assert_eq!(cone.near, 0.0, "a rule for a pointed cone");
     let top = low + 14.0;
     if top <= 0.0 {
         return APART;
     }
     assert!(
-        low < cone.far && top > cone.far && cone.slope * cone.far <= 6.0,
-        "a slab that stops short of the cap, or a rim past the slab's ends"
+        low < cone.far && top > cone.far,
+        "a slab that stops short of the cap"
     );
-    if low > 0.0 {
+    let [union, intersection, cone_less_slab, slab_less_cone] = if low > 0.0 {
         assert!(
             cone.slope * low > 1.0,
             "a tip below the slab that does not reach past both its sides"
@@ -1681,7 +1809,106 @@ fn a_slabs_solids(cone: ConeShape, low: f64) -> Solids {
         OVERLAPPING
     } else {
         [1, 1, 2, 1]
+    };
+    let mut lenses = 0;
+    for end in the_cap_rim_against_each_end(cone, a_slab(low, turn)) {
+        match end.rim_inside {
+            Decision::Pos => {
+                assert!(
+                    end.half_chord_squared < 1.0,
+                    "a rim that comes inside an end as far as the slab's sides"
+                );
+                lenses += 1;
+            }
+            Decision::Zero | Decision::Neg => {}
+            Decision::Undecidable { .. } | _ => {
+                panic!("the_cap_rim_against_each_end decides every end")
+            }
+        }
     }
+    [union, intersection, cone_less_slab + lenses, slab_less_cone]
+}
+
+/// Where `cone`'s cap rim stands against each end of `slab` as the model
+/// stores it: the end at `−y` before the turn first, then the one at `+y`.
+///
+/// Each end lies on its stored plane `a·x + b·y = offset`, upright and facing
+/// away from the axis, and the rim comes inside it when `rim²·(a² + b²)` is
+/// more than `offset²`. That is decided exactly: every square goes in as its
+/// rounded value and the exact amount the rounding lost, and the sum is an
+/// expansion, so its sign is the true value's. No tolerance comes into it.
+fn the_cap_rim_against_each_end(cone: ConeShape, slab: BoxShape) -> [TheRimAgainstAnEnd; 2] {
+    let rim = cone.slope * cone.far;
+    assert_eq!(
+        two_product(cone.slope, cone.far).1,
+        0.0,
+        "a rim f64 does not hold exactly"
+    );
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let key = a_block(&mut model, slab);
+    let solid = model.solid(key).expect("this model made the key");
+    [-1.0, 1.0].map(|along_y| {
+        let out = slab.placed.apply_to_vector(Vector::new(0.0, along_y, 0.0));
+        let ends: Vec<_> = solid
+            .faces()
+            .filter(|face| face.outward_normal().dot(out) > 0.5)
+            .collect();
+        let [end] = ends[..] else {
+            panic!("{} faces of the slab face {out:?}", ends.len());
+        };
+        let plane = end.plane();
+        assert_eq!(
+            end.outward_normal(),
+            plane.normal(),
+            "an end used the way its plane faces"
+        );
+        let [a, b, c] = plane.normal().components();
+        let offset = plane.offset();
+        assert!(
+            c == 0.0 && offset > 0.0,
+            "an end that leans, or faces the axis"
+        );
+        assert!(
+            [a, b, offset]
+                .into_iter()
+                .all(|it| product_is_exact(it, it)),
+            "a square whose rounding f64 cannot hold exactly"
+        );
+        let (aa, aa_lost) = two_product(a, a);
+        let (bb, bb_lost) = two_product(b, b);
+        let (oo, oo_lost) = two_product(offset, offset);
+        let mut normal_squared = [0.0; 4];
+        let n = expansion_sum(&[aa_lost, aa], &[bb_lost, bb], &mut normal_squared);
+        let mut once = [0.0; 8];
+        let n = scale_expansion(&normal_squared[..n], rim, &mut once);
+        let mut twice = [0.0; 16];
+        let n = scale_expansion(&once[..n], rim, &mut twice);
+        let mut difference = [0.0; 18];
+        let n = expansion_sum(&twice[..n], &[-oo_lost, -oo], &mut difference);
+        let rim_inside = expansion_sign(&difference[..n]);
+        assert!(
+            rim_inside.is_certified(),
+            "an exact sum of finite entries has a sign"
+        );
+        TheRimAgainstAnEnd {
+            rim_inside,
+            half_chord_squared: difference[..n].iter().sum::<f64>() / (aa + bb),
+        }
+    })
+}
+
+/// What [`the_cap_rim_against_each_end`] finds for one end.
+#[derive(Clone, Copy, Debug)]
+struct TheRimAgainstAnEnd {
+    /// [`Decision::Pos`] when the rim comes inside the end, [`Decision::Zero`]
+    /// when it touches it at one point, and [`Decision::Neg`] when it stays
+    /// clear of it.
+    rim_inside: Decision,
+    /// The square of half the chord the end's plane cuts from the rim,
+    /// `rim² − d²` for an end `d` from the axis, to within the rounding of the
+    /// sum of the exact value's entries and of one division. Below zero when the
+    /// rim stays clear.
+    half_chord_squared: f64,
 }
 
 /// How many solids each rule leaves, in the order [`RULES`] runs them.
@@ -1816,14 +2043,13 @@ fn moved([x, y, z]: [f64; 3]) -> Isometry {
 /// Every way a fuse in this file refuses today, and the two ways an answer
 /// that holds every grid point it is asked about can still not be checked:
 /// a mesh finer than the mesher reaches, and a face it cannot mesh.
-const REFUSALS: [&str; 11] = [
+const REFUSALS: [&str; 10] = [
     "a point inside a piece of a face",
     "the answer does not measure: DeflectionBelowWhatAMeshCanReach",
     "the answer does not measure: CannotMeshAFace",
     "Geometry(CannotNameWhichPieceOfACrossingThisIs)",
     "order along a crossing",
     "ACurvedFaceGoesRightRoundWithNoSeam",
-    "side of a half-space",
     "CannotTellTheCellsOfAFaceApart",
     "AWireWillNotLieFlatOnItsFace",
     "the answer does not measure: TwoPatchesOfTheMeshDrewTheSameSide",
@@ -2154,108 +2380,4 @@ fn shared_volume(case: &Case) -> f64 {
         }
     }
     total
-}
-
-#[test]
-fn probe_q1851_steep_cone_slabs() {
-    use rcad_predicates::expansion::{expansion_sign, expansion_sum, scale_expansion, two_product};
-    let lows: Vec<f64> = std::env::var("PROBE_LOWS")
-        .map(|it| it.split(',').map(|x| x.parse().unwrap()).collect())
-        .unwrap_or_else(|_| vec![-14.0, -8.0, -3.0, 0.0, 2.0]);
-    let cone_shape = if std::env::var("PROBE_UNIT").is_ok() {
-        THE_UNIT_CONE
-    } else {
-        THE_STEEP_CONE
-    };
-    for turn in [0.0, 0.5, 1.0, 1.5] {
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let key = a_block(&mut model, a_slab(0.0, turn));
-        for face in model.solid(key).unwrap().faces() {
-            let plane = face.plane();
-            let [a, b, c] = plane.normal().components();
-            let off = plane.offset();
-            if c != 0.0 || off.abs() < 3.0 {
-                continue;
-            }
-            let (aa, aa_lo) = two_product(a, a);
-            let (bb, bb_lo) = two_product(b, b);
-            let (oo, oo_lo) = two_product(off, off);
-            let mut sum = [0.0; 4];
-            let n = expansion_sum(&[aa_lo, aa], &[bb_lo, bb], &mut sum);
-            let mut scaled = [0.0; 8];
-            let m = scale_expansion(&sum[..n], 36.0, &mut scaled);
-            let mut total = [0.0; 10];
-            let k = expansion_sum(&scaled[..m], &[-oo_lo, -oo], &mut total);
-            let e: f64 = total[..k].iter().sum();
-            println!(
-                "PROBE turn {turn}: end plane n=({a:e},{b:e},{c:e}) off={off:e} orient={:?} outward={:?} sign(36|n|^2-off^2)={:?} E={e:e} delta~{:e}",
-                face.orientation(),
-                face.outward_normal(),
-                expansion_sign(&total[..k]),
-                e / 12.0
-            );
-            let naive = a_slab(0.0, turn)
-                .placed
-                .apply_to_point(Point::new(0.0, 0.0, 0.0));
-            println!("PROBE   naive corner {naive:?}");
-        }
-    }
-    let policy = Policy::certified();
-    for &low in &lows {
-        for turn in [0.0, 0.5, 1.0, 1.5] {
-            for (rule, cone_first) in RULES {
-                let case = Case {
-                    cone: cone_shape,
-                    block: a_slab(low, turn),
-                    solids: a_slabs_solids(cone_shape, low),
-                };
-                let mut model =
-                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-                let (cone, block) = build(&mut model, &case);
-                let (arguments, tools) = if cone_first {
-                    ([cone], [block])
-                } else {
-                    ([block], [cone])
-                };
-                let line = match model.fuse(
-                    &arguments,
-                    &tools,
-                    rule,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                ) {
-                    Err(Error::Undecidable { records }) => {
-                        format!("refused {}", records.records().last().unwrap().predicate())
-                    }
-                    Err(other) => format!("refused {other:?}"),
-                    Ok(answer) => {
-                        let pieces = answer.solids().to_vec();
-                        let valid = model.validate(&policy, &mut ProvenanceLog::new());
-                        let mut vols = Vec::new();
-                        for &piece in &pieces {
-                            let m = model.solid(piece).unwrap().measure(
-                                Deflection::of(0.002).unwrap(),
-                                &policy,
-                                &mut ProvenanceLog::new(),
-                            );
-                            vols.push(match m {
-                                Ok(m) => format!("{:e}±{:e}", m.volume(), m.volume_error()),
-                                Err(e) => format!("{e:?}"),
-                            });
-                        }
-                        format!(
-                            "{} solids (want {}), validate {:?}, volumes {vols:?}",
-                            pieces.len(),
-                            case.solids[RULES
-                                .iter()
-                                .position(|it| *it == (rule, cone_first))
-                                .unwrap()],
-                            valid.is_ok()
-                        )
-                    }
-                };
-                println!("PROBE low {low} turn {turn} {rule:?} cone_first {cone_first}: {line}");
-            }
-        }
-    }
 }
