@@ -25,6 +25,11 @@
 //! (§325.4). Now all four unions — one spelling and two, each either way round
 //! — answer one bar of three faces with the volume worked out by hand.
 //!
+//! **A pin in the upper bar is where it still costs the answer.** With a thin
+//! bar in the upper bar, the union with the lower bar is refused where one
+//! spelling unites, because the fuse asks where the two spellings and the
+//! pin's wall meet (§231.5).
+//!
 //! The comparison is not vacuous: the two bars really are two spellings, and
 //! `two_bars_stacked_on_one_pipe_are_one_pipe_written_twice` proves it before
 //! the fuse is asked — the stored numbers differ and `intersect` calls them one
@@ -312,31 +317,293 @@ fn the_stacked_bars_unite_into_one_bar_however_the_wall_is_written() {
     }
 }
 
-/// Where the pinned bar's wall says its axis passes through when it is written
-/// apart from the lower bar's: the height the pin crosses that axis at.
+/// **A pin in the upper bar is where the second spelling still costs the
+/// answer.**
 ///
-/// Thirteen above the plane the two bars meet on, so that a refusal of the
-/// union is not about the pin being near the lower bar.
-const PINNED_ORIGIN: f64 = 15.0;
+/// Two bars stacked on one pipe, with a pin in the upper one, unite into one
+/// solid when the upper wall is written about the lower bar's origin. Written
+/// about a point of its own, the same union is refused
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in both orders, for a pin along
+/// `−x` right through the upper bar and for a slanted one starting on its
+/// axis. For the pin right through, a probe print showed what was asked:
+/// where the lower wall, the pin's wall and the upper wall meet, which
+/// `where_three_curved_surfaces_meet` in `rcad-geom` refuses because two of
+/// the three are one surface written twice. One spelling answering is the
+/// demonstration that the answer exists (§16.10), since the two spellings are
+/// the same points ([`two_bars_stacked_on_one_pipe_are_one_pipe_written_twice`]).
+///
+/// **The routes are built for a branch no fuse reaches yet.** Each pin's wall
+/// sorts between the two spellings, so each closed crossing of the pin and
+/// the upper wall is stored the pin's way, and joining the walls onto the
+/// lower spelling makes it the wall's to name: the branch of
+/// `turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way` for
+/// two different surfaces, which only an assembly built by hand reaches today
+/// (§231.5). Worked by hand and not run: for the pin right through, at
+/// `(−2, 0, 15.5)` the wall's longitude is `z × (−1, 0, 0) = (0, −1, 0)` and
+/// the pin's `(−1, 0, 0) × z = (0, 1, 0)`, so that crossing turns round, and
+/// at `(2, 0, 15.5)` both are `(0, 1, 0)` and it does not. Once the refusal
+/// lifts, two spellings are to answer here what one answers.
+#[test]
+fn two_bars_on_one_pipe_written_twice_with_a_pin_in_one_are_refused_where_one_spelling_unites() {
+    for pinned in [a_pin_right_through(), a_slanted_pin_from_the_axis()] {
+        let route = format!("{:?}", pinned.pin);
+        let lower_wall = Surface::Cylinder(a_wall_naming_its_axis_at(LOWER_ORIGIN));
+        let pin_wall = Surface::Cylinder(pinned.pin);
+        let upper_wall = Surface::Cylinder(a_wall_naming_its_axis_at(pinned.written_apart_at));
+        assert_eq!(
+            [
+                lower_wall.how_it_sorts_against(&pin_wall),
+                pin_wall.how_it_sorts_against(&upper_wall)
+            ],
+            [std::cmp::Ordering::Less; 2],
+            "{route}: the pin's wall has to sort between the two spellings or the branch is \
+             not reached"
+        );
+
+        let one_spelling = pinned.united_with_the_lower_bar(LOWER_ORIGIN);
+        for (lower_first, said) in [true, false].into_iter().zip(one_spelling) {
+            let walls = said.unwrap_or_else(|refused| {
+                panic!("{route}, one spelling, lower first {lower_first}: {refused:?}")
+            });
+            assert_eq!(
+                (
+                    walls.len(),
+                    [lower_wall, pin_wall]
+                        .map(|wall| walls.iter().filter(|&&face| face == wall).count())
+                ),
+                (1 + pinned.pin_pieces, [1, pinned.pin_pieces]),
+                "{route}, one spelling, lower first {lower_first}: the wall is one face: \
+                 {walls:?}"
+            );
+        }
+
+        let two_spellings = pinned.united_with_the_lower_bar(pinned.written_apart_at);
+        for (lower_first, said) in [true, false].into_iter().zip(two_spellings) {
+            assert!(
+                matches!(
+                    said,
+                    Err(Error::Geometry(
+                        rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
+                    ))
+                ),
+                "{route}, two spellings, lower first {lower_first}: {said:?}"
+            );
+        }
+    }
+}
+
+/// **A slanted pin starting on a bar's axis is refused already where the bar
+/// ends beside where the pin would come out the other side.**
+///
+/// A thin pipe through a fat one crosses it in two loops. A pin that starts
+/// on the fat bar's axis makes only one of them, round `(−2, 0, 5.5)` here.
+/// The other, round `(2, 0, 2.5)`, is where the pin would come out if it ran
+/// on through the axis, and in the plane `y = 0` it spans `z = 1.875` to
+/// `3.125`, worked by hand. The pin and the bar are refused
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in both orders with the bar's
+/// end at `z = 1.5`, `2` or `2.5`, and unite with it at `−2`, `1` or `3.25`,
+/// though no face of the pin comes near that loop. Which three surfaces are
+/// asked is not traced. Q528's route put the bar's end at `z = 2`, which is
+/// why [`a_slanted_pin_from_the_axis`] moves the joint down to `1`.
+#[test]
+fn a_slanted_pin_from_a_bars_axis_is_refused_where_the_bar_ends_beside_where_it_would_come_out() {
+    let policy = Policy::certified();
+    let pinned = a_slanted_pin_from_the_axis();
+    let [from, to] = pinned.along_the_pin;
+    let the_pin_and_a_bar_from = |bottom: f64| {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = a_bar_whose_wall_names_its_axis_at(
+            &mut model,
+            bottom,
+            pinned.top,
+            pinned.written_apart_at,
+        );
+        let pin = a_bar_along(&mut model, pinned.pin, from, to);
+        [[bar, pin], [pin, bar]].map(|[arguments, tools]| {
+            let mut model = model.clone();
+            let fused = model.fuse(
+                &[arguments],
+                &[tools],
+                Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )?;
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|broken| {
+                    panic!("the bar from {bottom}, came back broken: {broken:?}")
+                });
+            Ok::<usize, Error>(fused.solids().len())
+        })
+    };
+
+    for bottom in [1.5, 2.0, 2.5] {
+        for said in the_pin_and_a_bar_from(bottom) {
+            assert!(
+                matches!(
+                    said,
+                    Err(Error::Geometry(
+                        rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
+                    ))
+                ),
+                "the bar from {bottom}: {said:?}"
+            );
+        }
+    }
+    for bottom in [-2.0, 1.0, 3.25] {
+        for said in the_pin_and_a_bar_from(bottom) {
+            assert_eq!(
+                said.unwrap_or_else(|refused| panic!("the bar from {bottom}: {refused:?}")),
+                1,
+                "the bar from {bottom}"
+            );
+        }
+    }
+}
 
 const PIN_RADIUS: f64 = 0.5;
 
-/// How far the pin runs each way from the pinned bar's axis: past its wall, so
-/// that it goes right through. Along `−x` every corner of it is exact.
+/// How far the pin along `−x` runs each way from the axis of the bar it is in:
+/// past its wall, so that it goes right through. Along `−x` every corner of
+/// it is exact.
 const PIN_REACH: f64 = 4.0;
 
-/// The pin's wall, along `−x` through the pinned bar's axis at
-/// [`PINNED_ORIGIN`].
-fn the_pin_wall() -> Cylinder {
+/// How far along its own axis the slanted pin runs, from the axis of the bar
+/// it is in.
+///
+/// Both corners of a bar's seam have to sit exactly on its wall, and on a
+/// slanted wall that needs `4 + t·0.6` to come out exact. Sixteen does, and
+/// zero is the other end, where nothing rounds.
+const SLANTED_LENGTH: f64 = 16.0;
+
+/// The upper of two bars stacked on one pipe, with a pin in it.
+struct APinnedBar {
+    /// Where the lower bar, up from `z = 0`, meets it.
+    joint: f64,
+    top: f64,
+    /// Where its wall names the axis when it is written apart from the lower
+    /// bar's: where the pin's axis leaves the axis from.
+    written_apart_at: f64,
+    pin: Cylinder,
+    /// Where the pin starts and stops along its own axis.
+    along_the_pin: [f64; 2],
+    /// How many faces the pin's wall is left as once the two bars unite.
+    pin_pieces: usize,
+}
+
+/// The bars meet at `z = 2`, and a pin along `−x` runs right through the
+/// upper one at `z = 15`.
+///
+/// Thirteen above the joint, so that a refusal of the union is not about the
+/// pin being near the lower bar. The pin's wall is left in two pieces, one
+/// each side of the bar.
+fn a_pin_right_through() -> APinnedBar {
+    APinnedBar {
+        joint: 2.0,
+        top: 20.0,
+        written_apart_at: 15.0,
+        pin: a_pin_wall(Point::new(0.0, 0.0, 15.0), Vector::new(-1.0, 0.0, 0.0)),
+        along_the_pin: [-PIN_REACH, PIN_REACH],
+        pin_pieces: 2,
+    }
+}
+
+/// The bars meet at `z = 1`, and a pin slanting up and out along
+/// `(−0.8, 0, 0.6)` starts on the upper one's axis at `(0, 0, 4)` and leaves
+/// it round `(−2, 0, 5.5)`.
+///
+/// The route Q528 named, with the joint moved down from `z = 2`, where the
+/// pin is refused before the lower bar comes into it
+/// ([`a_slanted_pin_from_a_bars_axis_is_refused_where_the_bar_ends_beside_where_it_would_come_out`]).
+fn a_slanted_pin_from_the_axis() -> APinnedBar {
+    APinnedBar {
+        joint: 1.0,
+        top: 8.0,
+        written_apart_at: 4.0,
+        pin: a_pin_wall(Point::new(0.0, 0.0, 4.0), Vector::new(-0.8, 0.0, 0.6)),
+        along_the_pin: [0.0, SLANTED_LENGTH],
+        pin_pieces: 1,
+    }
+}
+
+fn a_pin_wall(origin: Point, direction: Vector) -> Cylinder {
     Cylinder::new(
-        Axis::new(
-            Point::new(0.0, 0.0, PINNED_ORIGIN),
-            Vector::new(-1.0, 0.0, 0.0),
-        )
-        .expect("a direction with a length"),
+        Axis::new(origin, direction).expect("a direction with a length"),
         PIN_RADIUS,
     )
     .expect("a positive radius")
+}
+
+impl APinnedBar {
+    /// The lower bar united with this one, both ways round, with this one's
+    /// wall naming its axis at `axis_origin`: the curved surfaces of the
+    /// answer's faces, or the refusal.
+    ///
+    /// An answer is checked as far as it goes before it comes back: it is one
+    /// solid, it validates, and its volume is the lower bar's worked out by
+    /// hand and the pinned bar's as measured, since the two meet only on the
+    /// plane of the joint.
+    fn united_with_the_lower_bar(&self, axis_origin: f64) -> [Result<Vec<Surface>, Error>; 2] {
+        let policy = Policy::certified();
+        let route = format!("{:?}, wall at {axis_origin}", self.pin);
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, self.joint, LOWER_ORIGIN);
+        let upper =
+            a_bar_whose_wall_names_its_axis_at(&mut model, self.joint, self.top, axis_origin);
+        let [from, to] = self.along_the_pin;
+        let pin = a_bar_along(&mut model, self.pin, from, to);
+        let pinned = model
+            .fuse(
+                &[upper],
+                &[pin],
+                Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| panic!("{route}: the pin in the bar: {refused:?}"));
+        let [pinned] = pinned.solids() else {
+            panic!(
+                "{route}: a pin in a bar is one solid: {:?}",
+                pinned.solids()
+            );
+        };
+        let pinned = *pinned;
+        let (pinned_volume, pinned_bound) = volume_of(&model, pinned);
+        let lower_by_hand = std::f64::consts::PI * RADIUS * RADIUS * self.joint;
+
+        [[lower, pinned], [pinned, lower]].map(|[arguments, tools]| {
+            let mut model = model.clone();
+            let fused = model.fuse(
+                &[arguments],
+                &[tools],
+                Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )?;
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|broken| panic!("{route}: came back broken: {broken:?}"));
+            let [solid] = fused.solids() else {
+                panic!(
+                    "{route}: the two bars end to end are one solid: {:?}",
+                    fused.solids()
+                );
+            };
+            let (volume, bound) = volume_of(&model, *solid);
+            assert!(
+                (volume - lower_by_hand - pinned_volume).abs() <= bound + pinned_bound,
+                "{route}: {volume} ± {bound} against {lower_by_hand} and {pinned_volume} ± \
+                 {pinned_bound}"
+            );
+            Ok(model
+                .solid(*solid)
+                .expect("this model made the key")
+                .faces()
+                .map(|face| face.surface())
+                .filter(|surface| surface.as_plane().is_none())
+                .collect())
+        })
+    }
 }
 
 /// A round bar on `wall` from `from` to `to` along its axis, with its seam
@@ -346,7 +613,7 @@ fn the_pin_wall() -> Cylinder {
 /// with nothing rounded: `(point − origin) × direction` is the radius times
 /// `y × direction`, whose length is the direction's own, so the wall's sign
 /// there is exactly zero — as long as `origin + t·direction` is exact
-/// ([`THIN_LENGTH`]).
+/// ([`SLANTED_LENGTH`]).
 fn a_bar_along(model: &mut Model, wall: Cylinder, from: f64, to: f64) -> SolidKey {
     let [ox, oy, oz] = wall.axis().origin().coordinates();
     let along = wall.axis().direction();
@@ -436,149 +703,4 @@ fn volume_of(model: &Model, solid: SolidKey) -> (f64, f64) {
         )
         .expect("a bar measures");
     (measured.volume(), measured.volume_error())
-}
-
-/// **A pin through the upper bar is where the second spelling still costs the
-/// answer.**
-///
-/// The lower bar from `z = 0` to `2`, and the upper bar from `2` to `20` with
-/// a thin bar along `−x` right through it at `z = 15`, unite into one solid
-/// when the upper wall is written about the lower bar's origin. Written about
-/// `(0, 0, 15)` instead, the same union is refused
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in both orders: the fuse asks
-/// where the lower wall, the pin's wall and the upper wall meet, and
-/// `where_three_curved_surfaces_meet` in `rcad-geom` refuses any three of which
-/// two are one surface written twice. One spelling answering is the
-/// demonstration that the answer exists (§16.10), since the two spellings are
-/// the same points
-/// ([`two_bars_stacked_on_one_pipe_are_one_pipe_written_twice`]).
-///
-/// **The route is built for a branch no fuse reaches yet.** The pin's wall
-/// sorts between the two spellings, so each closed crossing of the pin and
-/// the upper wall is stored the pin's way, and joining the walls onto the
-/// lower spelling makes it the wall's to name: the branch of
-/// `turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way` for
-/// two different surfaces, which only an assembly built by hand reaches today
-/// (§231.5). Worked by hand and not run: at `(−2, 0, 15.5)` the wall's
-/// longitude is `z × (−1, 0, 0) = (0, −1, 0)` and the pin's `(−1, 0, 0) × z =
-/// (0, 1, 0)`, so that crossing turns round, and at `(2, 0, 15.5)` both are
-/// `(0, 1, 0)` and it does not. Once the refusal lifts, two spellings are to
-/// answer here what one answers.
-#[test]
-fn two_bars_on_one_pipe_written_twice_with_a_pin_through_one_are_refused_where_one_spelling_unites()
-{
-    let lower_wall = Surface::Cylinder(a_wall_naming_its_axis_at(LOWER_ORIGIN));
-    let pin_wall = Surface::Cylinder(the_pin_wall());
-    let upper_wall = Surface::Cylinder(a_wall_naming_its_axis_at(PINNED_ORIGIN));
-    assert_eq!(
-        [
-            lower_wall.how_it_sorts_against(&pin_wall),
-            pin_wall.how_it_sorts_against(&upper_wall)
-        ],
-        [std::cmp::Ordering::Less; 2],
-        "the pin's wall has to sort between the two spellings or the branch is not reached"
-    );
-
-    let one_spelling = the_lower_bar_and_the_pinned_bar_united(LOWER_ORIGIN);
-    for (lower_first, said) in [true, false].into_iter().zip(one_spelling) {
-        let walls = said.unwrap_or_else(|refused| {
-            panic!("one spelling, lower first {lower_first}: {refused:?}")
-        });
-        assert_eq!(
-            (
-                walls.len(),
-                [lower_wall, pin_wall]
-                    .map(|wall| walls.iter().filter(|&&face| face == wall).count())
-            ),
-            (3, [1, 2]),
-            "one spelling, lower first {lower_first}: the wall is one face and the pin two, \
-             one each side of it: {walls:?}"
-        );
-    }
-
-    let two_spellings = the_lower_bar_and_the_pinned_bar_united(PINNED_ORIGIN);
-    for (lower_first, said) in [true, false].into_iter().zip(two_spellings) {
-        assert!(
-            matches!(
-                said,
-                Err(Error::Geometry(
-                    rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                ))
-            ),
-            "two spellings, lower first {lower_first}: {said:?}"
-        );
-    }
-}
-
-/// The lower bar united with the pinned bar, both ways round, with the pinned
-/// bar's wall naming its axis at `pinned_axis_origin`: the curved surfaces of
-/// the answer's faces, or the refusal.
-///
-/// An answer is checked as far as it goes before it comes back: it is one
-/// solid, it validates, and its volume is the lower bar's worked out by hand
-/// and the pinned bar's as measured, since the two meet only on the plane
-/// `z = 2`.
-fn the_lower_bar_and_the_pinned_bar_united(
-    pinned_axis_origin: f64,
-) -> [Result<Vec<Surface>, Error>; 2] {
-    let policy = Policy::certified();
-    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-    let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, 2.0, LOWER_ORIGIN);
-    let upper = a_bar_whose_wall_names_its_axis_at(&mut model, 2.0, 20.0, pinned_axis_origin);
-    let pin = a_bar_along(&mut model, the_pin_wall(), -PIN_REACH, PIN_REACH);
-    let pinned = model
-        .fuse(
-            &[upper],
-            &[pin],
-            Rule::Union,
-            &policy,
-            &mut ProvenanceLog::new(),
-        )
-        .unwrap_or_else(|refused| {
-            panic!("the pin through the bar, wall at {pinned_axis_origin}: {refused:?}")
-        });
-    let [pinned] = pinned.solids() else {
-        panic!(
-            "a pin through a bar is one solid, wall at {pinned_axis_origin}: {:?}",
-            pinned.solids()
-        );
-    };
-    let pinned = *pinned;
-    let (pinned_volume, pinned_bound) = volume_of(&model, pinned);
-    let lower_by_hand = std::f64::consts::PI * RADIUS * RADIUS * 2.0;
-
-    [[lower, pinned], [pinned, lower]].map(|[arguments, tools]| {
-        let mut model = model.clone();
-        let fused = model.fuse(
-            &[arguments],
-            &[tools],
-            Rule::Union,
-            &policy,
-            &mut ProvenanceLog::new(),
-        )?;
-        model
-            .validate(&policy, &mut ProvenanceLog::new())
-            .unwrap_or_else(|broken| {
-                panic!("wall at {pinned_axis_origin}, came back broken: {broken:?}")
-            });
-        let [solid] = fused.solids() else {
-            panic!(
-                "the two bars end to end are one solid, wall at {pinned_axis_origin}: {:?}",
-                fused.solids()
-            );
-        };
-        let (volume, bound) = volume_of(&model, *solid);
-        assert!(
-            (volume - lower_by_hand - pinned_volume).abs() <= bound + pinned_bound,
-            "wall at {pinned_axis_origin}: {volume} ± {bound} against {lower_by_hand} and \
-             {pinned_volume} ± {pinned_bound}"
-        );
-        Ok(model
-            .solid(*solid)
-            .expect("this model made the key")
-            .faces()
-            .map(|face| face.surface())
-            .filter(|surface| surface.as_plane().is_none())
-            .collect())
-    })
 }
