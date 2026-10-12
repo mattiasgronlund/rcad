@@ -311,3 +311,245 @@ fn the_stacked_bars_unite_into_one_bar_however_the_wall_is_written() {
         }
     }
 }
+
+/// Where the pierced bar's wall says its axis passes through: the point the
+/// thin bar's axis leaves the axis from.
+const PIERCED_ORIGIN: f64 = 15.0;
+
+const THIN_RADIUS: f64 = 0.5;
+
+/// How far along its own axis the thin bar runs, from `(0, 0, 4)`.
+///
+/// Sixteen and not something shorter because both corners of a bar's seam
+/// have to sit exactly on its wall, and on a slanted wall that needs
+/// `4 + t·0.6` to come out exact: `0.6`'s last mantissa bit is a one, so
+/// `t` is a power of two whose product shares a binade with the sum, and
+/// sixteen is the smallest. Zero is the other end, where nothing rounds.
+const THIN_LENGTH: f64 = 4.0;
+
+/// The thin bar's wall, slanting up and out from the pierced bar's axis.
+///
+/// Its numbers sort between the two spellings of the wall it pierces: its
+/// origin is above the lower spelling's and level with the upper one's, and
+/// its axis starts `−0.8` where theirs starts `0`.
+fn the_thin_slanted_wall() -> Cylinder {
+    Cylinder::new(
+        Axis::new(
+            Point::new(0.0, 0.0, PIERCED_ORIGIN),
+            Vector::new(-1.0, 0.0, 0.0),
+        )
+        .expect("a direction with a length"),
+        THIN_RADIUS,
+    )
+    .expect("a positive radius")
+}
+
+/// A round bar on `wall` from `from` to `to` along its axis, with its seam
+/// where the wall meets the plane `y = radius`.
+///
+/// That seam is the one place on a slanted wall where a corner sits on it
+/// with nothing rounded: `(point − origin) × direction` is the radius times
+/// `y × direction`, whose length is the direction's own, so the wall's sign
+/// there is exactly zero — as long as `origin + t·direction` is exact
+/// ([`THIN_LENGTH`]).
+fn a_bar_along(model: &mut Model, wall: Cylinder, from: f64, to: f64) -> SolidKey {
+    let [ox, oy, oz] = wall.axis().origin().coordinates();
+    let along = wall.axis().direction();
+    let [dx, dy, dz] = along.components();
+    assert_eq!(dy, 0.0, "the seam is put square to the axis along y");
+    let on_the_axis = |t: f64| Point::new(ox + t * dx, oy, oz + t * dz);
+    let on_the_seam = |t: f64| Point::new(ox + t * dx, oy + wall.radius(), oz + t * dz);
+
+    let mut builder = SolidBuilder::new();
+    let low = builder
+        .add_vertex(on_the_seam(from))
+        .expect("a finite corner");
+    let high = builder
+        .add_vertex(on_the_seam(to))
+        .expect("a finite corner");
+    let seam = builder
+        .add_edge(low, high, EdgeRun::Straight)
+        .expect("the seam up the wall");
+    let low_circle = builder
+        .add_edge(low, low, EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("the bottom cap circle");
+    let high_circle = builder
+        .add_edge(high, high, EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("the top cap circle");
+
+    let cap = |builder: &mut SolidBuilder, t: f64, outward: Vector, edge, turn| {
+        let plane = Plane::from_point_and_normal(on_the_axis(t), outward)
+            .expect("an axis direction is a normal");
+        let coedge = builder.add_coedge(edge, turn).expect("one use of the rim");
+        let wire = builder
+            .add_wire(&[DraftStep::Along(coedge)])
+            .expect("a cap is bounded by one whole circle");
+        builder
+            .add_face(Surface::Plane(plane), &[wire])
+            .expect("a flat cap")
+    };
+    let bottom_cap = cap(
+        &mut builder,
+        from,
+        -along,
+        low_circle,
+        Orientation::Reversed,
+    );
+    let top_cap = cap(&mut builder, to, along, high_circle, Orientation::Forward);
+
+    let round_the_wall = [
+        (low_circle, Orientation::Forward),
+        (seam, Orientation::Forward),
+        (high_circle, Orientation::Reversed),
+        (seam, Orientation::Reversed),
+    ]
+    .map(|(edge, turn)| {
+        DraftStep::Along(
+            builder
+                .add_coedge(edge, turn)
+                .expect("a use of the wall's edge"),
+        )
+    });
+    let wire = builder
+        .add_wire(&round_the_wall)
+        .expect("the wall's one wire");
+    let side = builder
+        .add_face(Surface::Cylinder(wall), &[wire])
+        .expect("the curved wall");
+
+    builder
+        .add_shell(&[
+            (bottom_cap, Orientation::Forward),
+            (top_cap, Orientation::Forward),
+            (side, Orientation::Forward),
+        ])
+        .expect("a closed skin");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a bar described face by face")
+}
+
+/// What one bar's measuring says: its volume and the bound on it.
+fn volume_of(model: &Model, solid: SolidKey) -> (f64, f64) {
+    let measured = model
+        .solid(solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar measures");
+    (measured.volume(), measured.volume_error())
+}
+
+/// **A real fuse reaches the circle a thin pipe names until the wall is
+/// joined onto a spelling sorting below it.**
+///
+/// The upper bar's wall, written about `(0, 0, 4)`, is pierced by a thin
+/// slanted bar whose wall sorts between it and the lower spelling. The
+/// closed crossing between the two walls is stored running the way the
+/// lower of them by bits winds, which is the thin pipe's. Uniting the
+/// pierced bar with the lower bar joins the two walls onto the lower
+/// spelling, which sorts below the thin pipe, so the crossing is then the
+/// wall's to name, and the two wind it opposite ways: at the top of the
+/// crossing, `(−2, 0, 6.125)`, the wall's longitude is `z × (−1, 0, 0) =
+/// (0, −1, 0)` and the thin pipe's `(−0.8, 0, 0.6) × (0.6, 0, 0.8) =
+/// (0, 1, 0)`. Both sides of it have to turn round, which is the branch of
+/// `turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way`
+/// for two different surfaces, and which only an assembly built by hand
+/// had reached (§231.5).
+///
+/// Both orders give one solid that validates, with the wall one face on the
+/// lower spelling, and its volume is the lower bar's worked out by hand and
+/// the pierced bar's as measured, since the two meet only on the plane
+/// `z = 2`.
+#[test]
+fn a_wall_joined_below_a_thin_pipe_through_it_turns_the_crossing_round() {
+    let policy = Policy::certified();
+    let lower_wall = Surface::Cylinder(a_wall_naming_its_axis_at(LOWER_ORIGIN));
+    let upper_wall = Surface::Cylinder(a_wall_naming_its_axis_at(PIERCED_ORIGIN));
+    let thin_wall = Surface::Cylinder(the_thin_slanted_wall());
+    assert_eq!(
+        [
+            lower_wall.how_it_sorts_against(&thin_wall),
+            thin_wall.how_it_sorts_against(&upper_wall)
+        ],
+        [std::cmp::Ordering::Less; 2],
+        "the thin pipe has to sort between the two spellings or the branch is not reached"
+    );
+
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, 2.0, LOWER_ORIGIN);
+    let upper = a_bar_whose_wall_names_its_axis_at(&mut model, 2.0, 20.0, PIERCED_ORIGIN);
+    let thin = a_bar_along(
+        &mut model,
+        the_thin_slanted_wall(),
+        -THIN_LENGTH,
+        THIN_LENGTH,
+    );
+    let pierced = model
+        .fuse(
+            &[upper],
+            &[thin],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|refused| panic!("the thin bar through the upper bar: {refused:?}"));
+    let [pierced] = pierced.solids() else {
+        panic!(
+            "a thin bar through a bar is one solid: {:?}",
+            pierced.solids()
+        );
+    };
+    let (pierced_volume, pierced_bound) = volume_of(&model, *pierced);
+    let by_hand = std::f64::consts::PI * RADIUS * RADIUS * 2.0;
+
+    for lower_first in [true, false] {
+        let mut model = model.clone();
+        let [arguments, tools] = if lower_first {
+            [lower, *pierced]
+        } else {
+            [*pierced, lower]
+        };
+        let fused = model
+            .fuse(
+                &[arguments],
+                &[tools],
+                Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| panic!("lower first {lower_first}: {refused:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| {
+                panic!("lower first {lower_first}, came back broken: {broken:?}")
+            });
+        let [solid] = fused.solids() else {
+            panic!(
+                "the two bars end to end are one solid, lower first {lower_first}: {:?}",
+                fused.solids()
+            );
+        };
+        let walls: Vec<Surface> = model
+            .solid(*solid)
+            .expect("this model made the key")
+            .faces()
+            .map(|face| face.surface())
+            .filter(|surface| surface.as_plane().is_none())
+            .collect();
+        assert_eq!(
+            walls,
+            [lower_wall, thin_wall],
+            "the wall is one face on the lower spelling, lower first {lower_first}"
+        );
+        let (volume, bound) = volume_of(&model, *solid);
+        assert!(
+            (volume - by_hand - pierced_volume).abs() <= bound + pierced_bound,
+            "lower first {lower_first}: {volume} ± {bound} against {by_hand} and \
+             {pierced_volume} ± {pierced_bound}"
+        );
+    }
+}
