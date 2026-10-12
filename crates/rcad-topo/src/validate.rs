@@ -29,7 +29,7 @@ use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
 use crate::model::{ModelData, WireData, WireStep};
 use crate::view::{CoedgeView, FaceView, SolidView, WireStepView, WireView};
-use crate::{EdgeView, Error, Invalid, Model, Result, SolidKey};
+use crate::{EdgeView, Error, FaceKey, Invalid, Model, Result, SolidKey};
 
 impl Model {
     /// Check every invariant in the model, from top to bottom.
@@ -2479,18 +2479,21 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(view, policy, log)?;
     every_side_of_the_skin_is_used_both_ways(&coarsest)?;
     let enclosed = signed_volume_over(&coarsest);
-    if enclosed != 0.0 && !it_lies_flat(&coarsest) {
+    if the_sum_answers(view, &coarsest, enclosed) {
         return Ok(enclosed);
     }
     let mut room = how_far_across(&coarsest) / 2.0;
     while let Ok(less) = Deflection::of(room) {
         let mut this_rung = ProvenanceLog::new();
         match view.mesh(less, policy, &mut this_rung) {
-            Ok(finer) if !it_lies_flat(&finer) => {
-                this_rung.drain_into(log);
-                return Ok(signed_volume_over(&finer));
+            Ok(finer) => {
+                let finer_encloses = signed_volume_over(&finer);
+                if the_sum_answers(view, &finer, finer_encloses) {
+                    this_rung.drain_into(log);
+                    return Ok(finer_encloses);
+                }
             }
-            Ok(_) | Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
+            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
             Err(why) => {
                 let handed_on = hand_on_a_refusal_that_found_the_space(why);
                 if handed_on.is_err() {
@@ -2503,6 +2506,67 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         room /= 2.0;
     }
     Ok(enclosed)
+}
+
+/// Whether what a mesh of this solid encloses says which way the solid's faces
+/// point: it is not zero, and either the mesh does not lie flat or the sum is
+/// larger than all the space the mesh can leave out.
+fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64) -> bool {
+    enclosed != 0.0
+        && (!it_lies_flat(mesh) || enclosed.abs() > how_much_space_hides_under(view, mesh))
+}
+
+/// The most space there can be between a mesh of this solid and the solid,
+/// on either side.
+///
+/// Each curved face is charged `area · d · (r / (r − d))²`, with `area` its
+/// triangles' area, `d` the mesh's [`Mesh::deviation`] and `r` the smallest
+/// radius the face bends at, and a flat face nothing. That is
+/// `Measurement::volume_error`'s charge loosened: `Mesh::deviation`'s doc
+/// shows `(r³ − (r − d)³) / (3(r − d)²) ≤ d · (r / (r − d))²`.
+///
+/// **A cone is charged without end.** Its radius runs down to nothing at the
+/// apex, and how near a face comes to it takes a walk over the mesh that
+/// `measure::bend_of_each_face` already makes; a second copy of that walk is
+/// not worth what it buys here. So a solid with a cone face is answered by a
+/// mesh that does not lie flat, as before.
+fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> f64 {
+    let deviation = mesh.deviation().magnitude();
+    let radius_of: HashMap<FaceKey, Option<f64>> = view
+        .faces()
+        .map(|face| (face.key(), the_smallest_radius_it_bends_at(&face.surface())))
+        .collect();
+    let mut hidden = 0.0;
+    for triangle in mesh.triangles() {
+        let Some(radius) = radius_of[&triangle.face()] else {
+            continue;
+        };
+        let [a, b, c] = triangle
+            .corners()
+            .map(|corner| mesh.points()[corner as usize]);
+        let area = (b - a).cross(c - a).length() / 2.0;
+        if area == 0.0 {
+            continue;
+        }
+        let inner = radius - deviation;
+        if inner <= 0.0 {
+            return f64::INFINITY;
+        }
+        hidden += area * deviation * (radius / inner) * (radius / inner);
+    }
+    hidden
+}
+
+/// `None` for a plane, which does not bend.
+fn the_smallest_radius_it_bends_at(surface: &Surface) -> Option<f64> {
+    match surface {
+        Surface::Plane(_) => None,
+        Surface::Sphere(ball) => Some(ball.radius()),
+        Surface::Cylinder(pipe) => Some(pipe.radius()),
+        Surface::Torus(ring) => Some(ring.tube_radius()),
+        Surface::Cone(_) => Some(0.0),
+        _ => Some(0.0),
+    }
 }
 
 /// Whether every point of the mesh lies within a rounding of one plane, so
