@@ -2507,14 +2507,14 @@ fn text(string: &str) -> String {
 
 #[cfg(test)]
 mod plane_round_trip_tests {
-    use core::f64::consts::{SQRT_2, TAU};
+    use core::f64::consts::{FRAC_PI_2, SQRT_2, TAU};
 
     use rcad_geom::{
-        Axis, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Scale, Sphere, Surface,
-        Torus, Vector,
+        Axis, Cylinder, EdgeRun, HalfSpace, Isometry, NEAREST_F64_POINT_ROUNDOFF, Orientation,
+        Picker, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
     };
     use rcad_predicates::{Policy, ProvenanceLog};
-    use rcad_topo::{Model, WireView};
+    use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey, WireView};
 
     use super::{
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, CannotWrite, Shape, a_centre_its_plane_reads_back_from,
@@ -2877,6 +2877,272 @@ mod plane_round_trip_tests {
         assert!((units - 15.9998).abs() < 1e-4, "{units}");
         assert!(units <= A_CIRCLE_MAY_MISS_ITS_FACE_BY, "{units}");
         assert!(a_surface_holds_the_circle(&skin, centre, normal, across));
+    }
+
+    /// A bar of radius just over `16` and length `3561`, with a dome of radius
+    /// `29.7` on top, moved to just off `(0, −2, 4096)` and turned
+    /// `2.97` about a line mostly along `y`: the rim where the dome meets the
+    /// bar comes back cut from its own plane (Q1792).
+    ///
+    /// **Walking `y` alone left the rim further off the dome than the reader
+    /// allows.** The finest coordinate was `y`, and fifteen `f64`s of it put
+    /// the dot on the plane's offset, with the circle `16.31` units off the
+    /// ball where the reader allows sixteen. So the reader named the rim by
+    /// the pipe and the ball instead, and the volume read back moved from
+    /// `2865724.56` to `2865939.99`. One `f64` of `z` lands on the offset too,
+    /// and there both faces hold the circle.
+    #[test]
+    fn a_dome_on_a_long_bar_turned_a_long_way_comes_back_with_its_rim_cut_from_its_plane() {
+        let axis = Axis::new(
+            Point::origin(),
+            Vector::new(
+                -0.018_298_610_974_051_055,
+                0.374_487_539_909_369_2,
+                -0.017_226_945_673_374_46,
+            ),
+        )
+        .expect("a direction with a length");
+        the_rim_comes_back_cut_from_its_plane(
+            (
+                16.000_000_000_000_007,
+                3561.383_252_900_813,
+                29.695_524_847_710_807,
+            ),
+            Vector::new(0.0, -1.999_999_999_999_999_8, 4_095.999_999_999_999_5),
+            &Isometry::rotation(&axis, 2.972_547_828_691_298_3).expect("a finite turn"),
+        );
+    }
+
+    /// A bar of radius just under one and length `480`, with a dome of radius
+    /// `1.84` on top, moved to just off `(512, −1, −4)` and turned by quarter
+    /// turns and a small wobble: the rim comes back cut from its own plane
+    /// (Q1792).
+    ///
+    /// **The walk landed ten `f64`s of `x` out**, with the circle `16.91` units
+    /// off the ball, and the reader named the rim by the pipe and the ball
+    /// instead. The nearest centre both faces hold is ten `f64`s of `x` and
+    /// sixteen of `z` out, past the four each way that the walk of two
+    /// coordinates tries.
+    #[test]
+    fn a_dome_on_a_long_bar_turned_a_little_comes_back_with_its_rim_cut_from_its_plane() {
+        the_rim_comes_back_cut_from_its_plane(
+            (
+                0.999_999_999_999_999_8,
+                479.722_701_923_535_57,
+                1.844_030_436_432_878_6,
+            ),
+            Vector::new(
+                511.999_999_999_999_94,
+                -0.999_999_999_999_999_8,
+                -4.000_000_000_000_002,
+            ),
+            &a_small_turn_then_quarter_turns(
+                Vector::new(
+                    -0.229_389_415_830_124_18,
+                    -0.324_935_301_137_225_35,
+                    0.004_735_058_071_504_095,
+                ),
+                0.001_509_429_458_854_325,
+                3.0,
+                1.0,
+            ),
+        );
+    }
+
+    /// A bar of radius `1/8` and length `1955`, with half a ball of the same
+    /// radius on top, moved to just off `(2048, 0, −64)` and turned
+    /// by quarter turns and a small wobble: it is read back, with the rim cut
+    /// from its own plane (Q1792).
+    ///
+    /// **Our own reader refused it.** The walk landed four `f64`s of `x` out,
+    /// with the circle `17.41` units off the ball, so the reader named the rim
+    /// by the pipe and the ball; and a ball of the bar's own radius only
+    /// touches the pipe there, so that names no curve, and the reader refused
+    /// the solid. A centre both faces hold is four `f64`s down in `x` and
+    /// three up in `z`.
+    #[test]
+    fn a_half_ball_on_a_long_thin_bar_placed_far_out_and_turned_is_read_back() {
+        the_rim_comes_back_cut_from_its_plane(
+            (0.125, 1955.404_019_307_245_3, 0.125),
+            Vector::new(2_048.000_000_000_001, 0.0, -64.000_000_000_000_01),
+            &a_small_turn_then_quarter_turns(
+                Vector::new(
+                    0.309_067_010_740_284_86,
+                    -0.090_860_775_388_262_43,
+                    -0.313_017_443_317_269_2,
+                ),
+                3.785_505_033_375_922_5e-6,
+                1.0,
+                3.0,
+            ),
+        );
+    }
+
+    /// Builds a bar with a dome on top ([`a_dome_on_a_bar`]), places it by
+    /// `place` after `turn`, writes it and reads it back, and asks that the
+    /// read solid is sound and that each use of the two halves of its rim is
+    /// cut from the plane the rim was built in, placed, bit for bit.
+    fn the_rim_comes_back_cut_from_its_plane(
+        (radius, length, dome_radius): (f64, f64, f64),
+        place: Vector,
+        turn: &Isometry,
+    ) {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
+        let solid = a_dome_on_a_bar(&mut model, radius, length, dome_radius);
+        let moved = Isometry::translation(place)
+            .expect("a finite move")
+            .compose(turn);
+        model
+            .place_solid(solid, &moved)
+            .expect("the key came from this model");
+        let went_in = what_its_rim_is_cut_from(&model);
+        assert_eq!(went_in.len(), 4, "{went_in:?}");
+        assert!(
+            went_in.iter().all(|and| matches!(and, Surface::Plane(_))),
+            "{went_in:?}"
+        );
+        let text = write(&model, "a dome on a long bar").expect("the dome is written");
+        let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+        let back = Import::read(&file, &policy, &mut log)
+            .unwrap_or_else(|why| panic!("the dome this writer wrote is refused: {why}"));
+        back.model()
+            .validate(&policy, &mut log)
+            .expect("the dome read back is sound");
+        assert_eq!(what_its_rim_is_cut_from(back.model()), went_in);
+    }
+
+    /// A bar of `radius` standing on the origin along `z`, `length` tall, with
+    /// a dome of `dome_radius` on top whose rim is the bar's top circle: a flat
+    /// foot, the bar's skin with one straight seam, and a ball's cap with no
+    /// pole on it. The rim is two halves, each cut from the plane `z = length`
+    /// and picked by a half-space through the rim's centre.
+    fn a_dome_on_a_bar(model: &mut Model, radius: f64, length: f64, dome_radius: f64) -> SolidKey {
+        let below_the_rim = ((dome_radius - radius) * (dome_radius + radius)).sqrt();
+        let top = Point::new(0.0, 0.0, length);
+        let half_of_the_rim = |facing: Vector| EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(
+                Plane::from_point_and_normal(top, Vector::new(0.0, 0.0, 1.0))
+                    .expect("the z axis is a unit normal"),
+            ),
+            picked_by: [Picker::from(
+                HalfSpace::through_a_point_facing(top, facing).expect("a facing with a length"),
+            )]
+            .into(),
+        };
+        let mut builder = SolidBuilder::new();
+        let [foot, near, far] = [
+            Point::new(radius, 0.0, 0.0),
+            Point::new(radius, 0.0, length),
+            Point::new(-radius, 0.0, length),
+        ]
+        .map(|at| builder.add_vertex(at).expect("a corner"));
+        let [round_the_foot, up_the_seam, rim_in_front, rim_behind] = [
+            (foot, foot, EdgeRun::RightRoundWhereItsFacesCross),
+            (foot, near, EdgeRun::Straight),
+            (near, far, half_of_the_rim(Vector::new(0.0, 1.0, 0.0))),
+            (far, near, half_of_the_rim(Vector::new(0.0, -1.0, 0.0))),
+        ]
+        .map(|(from, to, run)| builder.add_edge(from, to, run).expect("an edge"));
+        let [
+            under,
+            round_the_bar,
+            up,
+            behind_backwards,
+            in_front_backwards,
+            down,
+            in_front,
+            behind,
+        ] = [
+            (round_the_foot, Orientation::Reversed),
+            (round_the_foot, Orientation::Forward),
+            (up_the_seam, Orientation::Forward),
+            (rim_behind, Orientation::Reversed),
+            (rim_in_front, Orientation::Reversed),
+            (up_the_seam, Orientation::Reversed),
+            (rim_in_front, Orientation::Forward),
+            (rim_behind, Orientation::Forward),
+        ]
+        .map(|(edge, way)| DraftStep::Along(builder.add_coedge(edge, way).expect("a coedge")));
+        let foot_wire = builder.add_wire(&[under]).expect("a wire");
+        let bar_wire = builder
+            .add_wire(&[
+                round_the_bar,
+                up,
+                behind_backwards,
+                in_front_backwards,
+                down,
+            ])
+            .expect("a wire");
+        let dome_wire = builder.add_wire(&[in_front, behind]).expect("a wire");
+        let skin = [
+            (
+                Surface::Plane(
+                    Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                        .expect("the z axis is a unit normal"),
+                ),
+                foot_wire,
+            ),
+            (
+                Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius")),
+                bar_wire,
+            ),
+            (
+                Surface::Sphere(
+                    Sphere::new(Point::new(0.0, 0.0, length - below_the_rim), dome_radius)
+                        .expect("a radius"),
+                ),
+                dome_wire,
+            ),
+        ]
+        .map(|(surface, wire)| {
+            (
+                builder.add_face(surface, &[wire]).expect("a face"),
+                Orientation::Forward,
+            )
+        });
+        builder.add_shell(&skin).expect("a shell");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a sound dome on a bar")
+    }
+
+    /// What each use of an edge cut from a surface is cut from, face by face,
+    /// in the model's one solid.
+    fn what_its_rim_is_cut_from(model: &Model) -> Vec<Surface> {
+        model
+            .solids()
+            .next()
+            .expect("the model holds one solid")
+            .faces()
+            .flat_map(|face| face.wires().flat_map(WireView::coedges).collect::<Vec<_>>())
+            .filter_map(|coedge| {
+                let EdgeRun::PartOfWhereItCrosses { and, .. } = coedge.edge().run() else {
+                    return None;
+                };
+                Some(and)
+            })
+            .collect()
+    }
+
+    /// A turn of `small` about `direction`, after `about_z` quarter turns about
+    /// `z` that follow `about_x` about `x`.
+    fn a_small_turn_then_quarter_turns(
+        direction: Vector,
+        small: f64,
+        about_z: f64,
+        about_x: f64,
+    ) -> Isometry {
+        let quarter = |axis: Axis, times: f64| {
+            Isometry::rotation(&axis, times * FRAC_PI_2).expect("a finite turn")
+        };
+        Isometry::rotation(
+            &Axis::new(Point::origin(), direction).expect("a direction with a length"),
+            small,
+        )
+        .expect("a finite turn")
+        .compose(&quarter(Axis::z(), about_z).compose(&quarter(Axis::x(), about_x)))
     }
 
     fn the_plane_its_seam_is_cut_from(model: &Model) -> Plane {
