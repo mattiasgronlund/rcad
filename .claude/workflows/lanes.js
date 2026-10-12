@@ -821,7 +821,7 @@ function rowsNote() {
 }
 
 function testsNote() {
-  return 'Test names in tests_that_fail_without_the_change are bare nextest names matching ^name(::name)*$, never `<binary> <name>` with a space (Q1347).'
+  return 'Test names in tests_that_fail_without_the_change are bare nextest names matching ^name(::name)*$, never `<binary> <name>` with a space (Q1347). A tooling lane whose test is a `check-*-selftest` recipe names it there too, by its recipe name, not by a nextest path (§287).'
 }
 
 function reportSchema(lane, relay) {
@@ -858,11 +858,7 @@ function reportSchema(lane, relay) {
     core.decisions_section = { type: 'string', description: 'the section number you claimed with just claim-section, if any' }
     core.files_changed = { type: 'array', items: { type: 'string' } }
     core.tests_that_fail_without_the_change = { type: 'array', items: { type: 'string' }, description: 'empty for a lane that changed only .md files and comments (§375)' }
-    core.rows = {
-      type: 'array',
-      items: { type: 'array', items: { type: 'string' } },
-      description: 'the just queue apply steps that add the rows your work leaves, each a list of words: ["add", "<tier>", "<model>", "<write set>", "<what, ending in §N>"], ["tag", "@1", "<class>|small"], ["after", "@1", "<id>[,<id>]"]; @1, @2 are this list\'s own adds, since ids come from a shared counter; empty when you leave nothing to add (§383.4, lane.md)',
-    }
+    core.rows = rowsSchema()
     required.push('landed_sha', 'files_changed', 'tests_that_fail_without_the_change', 'rows')
     if (lane.sameBehaviour === true) {
       core.tests_that_reach_the_change = { type: 'array', items: { type: 'string' }, description: 'the tests that run the lines you changed and pass before and after; your row keeps the behaviour, so no test fails without it and tests_that_fail_without_the_change stays empty (§399)' }
@@ -874,12 +870,26 @@ function reportSchema(lane, relay) {
     }
   } else {
     core.outcome = { type: 'string', enum: ['answered', 'partial', 'blocked'] }
+    core.rows = rowsSchema()
+    required.push('rows')
   }
   const extra = lane.report || {}
   return {
     type: 'object',
     required: required.concat(Array.isArray(extra.required) ? extra.required : []),
     properties: Object.assign(core, extra.properties || {}),
+  }
+}
+
+// A read-only lane can turn up the same rows a writing one does -- the
+// nightly triage row (§418.3) hands back one `add` per fault and found no
+// field for them until Q1754, and its rows went into `remaining` as pasted
+// JSON a dispatcher then filed by hand.
+function rowsSchema() {
+  return {
+    type: 'array',
+    items: { type: 'array', items: { type: 'string' } },
+    description: 'the just queue apply steps that add the rows your work leaves, each a list of words: ["add", "<tier>", "<model>", "<write set>", "<what, ending in §N>"], ["tag", "@1", "<class>|small"], ["after", "@1", "<id>[,<id>]"]; @1, @2 are this list\'s own adds, since ids come from a shared counter; empty when you leave nothing to add (§383.4, lane.md)',
   }
 }
 

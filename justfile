@@ -3265,6 +3265,11 @@ check-skills-selftest:
 # not confirm stops the row, and that `merger.md` closes a confirmed one at the
 # base. Like the five before them, these three do not stop at the first that
 # fails.
+#
+# **Arm thirty-one checks that a read-only report carries the same `rows`
+# field a writing one does, required the same way** (§418.3). Without it a
+# read-only lane has no way to hand back the rows its work leaves, and pastes
+# them into `remaining` instead, for a dispatcher to file by hand.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -3383,6 +3388,7 @@ check-lanes-workflow:
     both_forms='  if (lane.notes !== undefined && full.length) throw new Error(`lanes: ${lane.label} gives fields of both forms'
     rows_note='no `tag` step when the add text already starts with the class'
     tests_note='never `<binary> <name>` with a space (Q1347)'
+    tests_note_recipe='by its recipe name, not by a nextest path (§287)'
     report_default='Write `none` when every test you added or changed is in a tests/ directory.'
     rows_note_use='${rowsNote()}'
     tests_note_use='${testsNote()}'
@@ -3395,6 +3401,8 @@ check-lanes-workflow:
     gone_steps='## Does not reproduce'
     gone_refusal="    if (check.verdict !== 'confirm') return stopped(lane, out, "
     gone_done='mise exec -- just queue done <id> <base sha>'
+    readonly_rows_schema='    core.rows = rowsSchema()'
+    readonly_rows_required="    required.push('rows')"
     settings=.claude/settings.json
     script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
@@ -3770,7 +3778,7 @@ check-lanes-workflow:
             echo "$1 does not refuse a lane that gives fields of both forms, notes beside a brief or a field prep would answer (§396.4)"
             [ "$failed" != 0 ] || failed=26
         fi
-        if ! grep -qF -- "$rows_note" "$1" || ! grep -qF -- "$tests_note" "$1" || ! grep -qF -- "$report_default" "$1" \
+        if ! grep -qF -- "$rows_note" "$1" || ! grep -qF -- "$tests_note" "$1" || ! grep -qF -- "$tests_note_recipe" "$1" || ! grep -qF -- "$report_default" "$1" \
             || ! grep -qxF -- "$rows_note_use" "$1" || ! grep -qxF -- "$tests_note_use" "$1" || ! grep -qxF -- "$report_set" "$1"; then
             echo "$1 does not give a brief built from a row the two notes every brief the dispatcher wrote carried (Q1047, Q1505, Q1347), or a writing lane the for_the_verifier field by default"
             [ "$failed" != 0 ] || failed=27
@@ -3791,6 +3799,11 @@ check-lanes-workflow:
         if ! grep -qF -- "$gone_refusal" "$1" || ! grep -qF -- "$gone_done" "$2/merger.md"; then
             echo "$1 does not stop a does_not_reproduce lane whose verifier did not confirm ('$gone_refusal'), or $2/merger.md does not close a confirmed one with '$gone_done'; a fault that still shows would close its row (§433.8)"
             [ "$failed" != 0 ] || failed=30
+        fi
+        n=$(grep -cxF -- "$readonly_rows_schema" "$1" || true)
+        if [ "$n" != 2 ] || ! grep -qxF -- "$readonly_rows_required" "$1"; then
+            echo "$1 does not give a read-only report the same rows field, required the same way, as a writing lane's ('$readonly_rows_schema' want twice, found $n; '$readonly_rows_required' missing); a read-only lane would then have no way to hand back the rows it leaves, and paste them into remaining instead (§418.3)"
+            [ "$failed" != 0 ] || failed=31
         fi
         return "$failed"
     }
@@ -4028,6 +4041,8 @@ check-lanes-workflow:
     grep -vF -- "$rows_note" "$file" > "$dir/no-rows-note/lanes.js"
     fresh no-tests-note
     grep -vF -- "$tests_note" "$file" > "$dir/no-tests-note/lanes.js"
+    fresh no-tests-note-recipe
+    swap "$file" "$tests_note_recipe" '' > "$dir/no-tests-note-recipe/lanes.js"
     fresh no-report-default
     grep -vF -- "$report_default" "$file" > "$dir/no-report-default/lanes.js"
     fresh dnr-not-an-outcome
@@ -4046,7 +4061,9 @@ check-lanes-workflow:
     grep -vF -- "$gone_refusal" "$file" > "$dir/dnr-refused-merges/lanes.js"
     fresh dnr-close-unsaid
     grep -vF -- "$gone_done" "$agents/merger.md" > "$dir/dnr-close-unsaid/agents/merger.md"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-widened:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30)
+    fresh readonly-no-rows
+    grep -vxF -- "$readonly_rows_required" "$file" > "$dir/readonly-no-rows/lanes.js"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-widened:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
@@ -4591,6 +4608,12 @@ claim-section what:
         echo "claim it for what? the claims file says who holds each number" >&2
         exit 2
     fi
+    case "$1" in
+        -*)
+            echo "a title starting with '-' looks like a flag, not a title; \`just recipe claim-section\` prints the recipe's doc" >&2
+            exit 2
+            ;;
+    esac
     claims="{{section_claims}}"
     if [ -z "$claims" ]; then
         claims="$(git rev-parse --path-format=absolute --git-common-dir)/rcad-section-claims"
@@ -5057,6 +5080,17 @@ check-claim-section-selftest:
     if claim '' >/dev/null 2>&1; then
         echo "claim-section accepted a claim for nothing"; exit 1
     fi
+
+    # A title starting with '-' looks like a flag typed by hand, as
+    # '--help' was on 2026-10-12 and got a real section number for it
+    # (§159). The refusal must happen before the claim is written, or
+    # the next real claim would skip a number for nothing.
+    if claim '--help' >/dev/null 2>&1; then
+        echo "claim-section accepted a claim for '--help'"; exit 1
+    fi
+    got=$(claim 'after the refused --help')
+    [ "$got" = "62" ] || {
+        echo "a claim after the refused '--help' got '$got', want 62: the refusal must not have written a claim"; exit 1; }
 
 # One item of Rust source, by its name, with its doc comment and attributes.
 #

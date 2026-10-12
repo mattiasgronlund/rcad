@@ -105,9 +105,12 @@ impl BSplineCurve {
     /// margin is a factor of `2⁵³`, so the few ulps a stage can drift are
     /// nowhere near it.
     ///
-    /// Refusing costs the caller nothing. A rational spline depends on its
-    /// weights only through their ratios, so multiplying every weight by a power
-    /// of two hands back the identical curve with no bits lost.
+    /// A rational spline depends on its weights only through their ratios, so
+    /// multiplying every weight by a power of two hands back the identical
+    /// curve with no bits lost — but only while the weights span less than
+    /// `f64`'s normal range. Weights of `5e-324` and `1e300` have no power of
+    /// two that brings both into that range: `2⁵²` is needed to make `5e-324`
+    /// normal, and `1e300 · 2⁵²` is past `f64::MAX`.
     ///
     /// # Errors
     ///
@@ -1236,9 +1239,12 @@ mod tests {
     /// nothing. The constructor used to accept these — "finite and above zero"
     /// was its whole rule — and then `evaluate` panicked on the way back out.
     ///
-    /// It is refused at construction now, which loses no curve: weights count
-    /// only through their ratios, so scaling every one of them up by a power of
-    /// two gives the identical curve exactly.
+    /// It is refused at construction now. Weights count only through their
+    /// ratios, so scaling every one of them up by a power of two gives the
+    /// identical curve exactly — here it does, since `2¹⁰⁰⁰` leaves the scaled
+    /// weight well inside `f64`'s normal range. That scaling does not always
+    /// recover the curve: weights of `5e-324` and `1e300` have no power of two
+    /// that brings both into the normal range at once.
     #[test]
     fn weights_small_enough_to_blend_away_to_nothing_are_refused_up_front() {
         let smallest = f64::from_bits(1);
@@ -1255,6 +1261,47 @@ mod tests {
         let curve = BSplineCurve::new(knots, &ends, &[scaled_up; 2])
             .expect("the same curve, with the weights carried somewhere f64 can blend them");
         assert_eq!(curve.evaluate(0.5).unwrap(), Point::new(1.0, 0.0, 0.0));
+    }
+
+    /// Scaling every weight by the same power of two only ever recovers the
+    /// curve when the whole group of weights still fits `f64`'s normal range
+    /// afterwards. `5e-324` and `1e300` together do not: `2⁵²` is the only
+    /// power that lifts `5e-324` into the normal range, and at that power
+    /// `1e300` is already past `f64::MAX`.
+    #[test]
+    fn no_power_of_two_rescues_both_a_subnormal_weight_and_an_astronomical_one() {
+        let subnormal = f64::from_bits(1);
+        let huge = 1e300;
+
+        let normal_at = |exponent: i32| (subnormal * 2f64.powi(exponent)).is_normal();
+        let fits_at = |exponent: i32| (huge * 2f64.powi(exponent)).is_finite();
+
+        assert!(normal_at(52), "2^52 is the power that normalizes 5e-324");
+        assert!(
+            !fits_at(52),
+            "and at that power 1e300 is already past f64::MAX"
+        );
+
+        for exponent in -1074..=1023 {
+            assert!(
+                !(normal_at(exponent) && fits_at(exponent)),
+                "exponent {exponent} would bring both weights into range at once"
+            );
+        }
+    }
+
+    /// The old message promised scaling always recovers the curve. It does
+    /// not, and the message says so now.
+    #[test]
+    fn weight_too_small_to_blend_message_says_scaling_is_not_always_enough() {
+        let message = Error::WeightTooSmallToBlend {
+            weight: f64::from_bits(1),
+        }
+        .to_string();
+        assert!(
+            message.contains("but only if the largest weight still has room to grow"),
+            "message was: {message}"
+        );
     }
 
     /// The same refusal reaches the routes that went through `.expect()` rather
