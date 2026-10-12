@@ -2642,9 +2642,9 @@ mod plane_round_trip_tests {
     use super::{
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, CannotWrite, Shape, a_centre_its_plane_reads_back_from,
         a_point_this_reader_reads_back_as, a_surface_holds_the_circle,
-        how_far_off_the_circle_can_be, stepped, the_nearest_centre_its_faces_hold_the_circle_at,
-        triple, where_a_plane_crosses_a_ball, where_a_plane_crosses_a_pipe,
-        where_a_plane_square_to_a_ring_crosses_it_nearest, write,
+        how_far_off_the_circle_can_be, real, stepped,
+        the_nearest_centre_its_faces_hold_the_circle_at, triple, where_a_plane_crosses_a_ball,
+        where_a_plane_crosses_a_pipe, where_a_plane_square_to_a_ring_crosses_it_nearest, write,
     };
     use crate::geometry::plane_through;
     use crate::{Import, StepFile};
@@ -3042,6 +3042,7 @@ mod plane_round_trip_tests {
             Vector::new(0.0, -1.999_999_999_999_999_8, 4_095.999_999_999_999_5),
             &Isometry::rotation(&axis, 2.972_547_828_691_298_3).expect("a finite turn"),
             [-4, 0, 0],
+            RimRadius::TheBars,
         );
     }
 
@@ -3080,6 +3081,7 @@ mod plane_round_trip_tests {
                 1.0,
             ),
             [10, 0, -16],
+            RimRadius::TheBars,
         );
     }
 
@@ -3110,6 +3112,7 @@ mod plane_round_trip_tests {
                 3.0,
             ),
             [-4, 0, 3],
+            RimRadius::TheBars,
         );
     }
 
@@ -3147,6 +3150,74 @@ mod plane_round_trip_tests {
                 1.0,
             ),
             [-11, 12, -709],
+            RimRadius::TheBars,
+        );
+    }
+
+    /// A bar of radius just under `32` and length `3957`, with a dome of radius
+    /// `43.98` on top, moved to just off `(4096, 256, 8)` and turned by quarter
+    /// turns and a small wobble: it is read back, with the rim cut from its own
+    /// plane (Q1819).
+    ///
+    /// **Our own reader refused it.** No circle of the bar's radius in the
+    /// rim's plane is held by both faces, so the rim was written where the
+    /// walk landed, the reader named it by the pipe and the ball, and refused
+    /// what that made: "what #62 describes is not a solid this kernel can
+    /// hold".
+    #[test]
+    fn a_dome_on_a_long_bar_placed_far_out_is_read_back_with_its_rim_at_the_balls_own_radius() {
+        the_rim_comes_back_cut_from_its_plane(
+            (
+                31.999_999_999_999_993,
+                3_956.598_862_010_99,
+                43.983_278_386_448_92,
+            ),
+            Vector::new(4_096.000_000_000_002, 256.0, 8.0),
+            &a_small_turn_then_quarter_turns(
+                Vector::new(
+                    0.210_184_775_367_739_6,
+                    0.335_338_531_012_728_9,
+                    0.237_842_307_057_614_22,
+                ),
+                3.894_296_696_994_240_5e-5,
+                1.0,
+                3.0,
+            ),
+            [0, 0, 0],
+            RimRadius::TheBallsOwn,
+        );
+    }
+
+    /// A bar of radius just over one and length `326`, with a dome of radius
+    /// `1.83` on top, moved to just off `(−1, 0, 256)` and turned `3.41` about
+    /// a line leaning off every axis: the rim comes back cut from its own
+    /// plane (Q1819).
+    ///
+    /// **The reader named the rim by the ball instead.** No circle of the
+    /// bar's radius in the rim's plane is held by both faces, so the rim was
+    /// written where the walk landed, and the reader named it by the pipe and
+    /// the ball.
+    #[test]
+    fn a_dome_on_a_bar_turned_about_a_leaning_line_comes_back_with_its_rim_cut_from_its_plane() {
+        let axis = Axis::new(
+            Point::origin(),
+            Vector::new(
+                0.374_803_843_596_869_47,
+                -0.286_807_347_850_211_9,
+                0.018_618_166_210_250_697,
+            ),
+        )
+        .expect("a direction with a length");
+        the_rim_comes_back_cut_from_its_plane(
+            (
+                1.000_000_000_000_000_4,
+                325.558_039_398_955_43,
+                1.826_416_411_750_435_6,
+            ),
+            Vector::new(-0.999_999_999_999_999_9, 0.0, 256.000_000_000_000_06),
+            &Isometry::rotation(&axis, 3.411_132_783_974_842).expect("a finite turn"),
+            [0, 0, 0],
+            RimRadius::HalfwayBetween,
         );
     }
 
@@ -3154,13 +3225,15 @@ mod plane_round_trip_tests {
     /// `place` after `turn`, writes it and reads it back, and asks that the
     /// read solid is sound and that each use of the two halves of its rim is
     /// cut from the plane the rim was built in, placed, bit for bit; and that
-    /// the rim was written centred `centred_out` `f64`s of `x`, `y` and `z`
-    /// from where that plane meets the bar's axis.
+    /// the rim was written as circles centred `centred_out` `f64`s of `x`, `y`
+    /// and `z` from where that plane meets the bar's axis, of the radius
+    /// `written_at` names.
     fn the_rim_comes_back_cut_from_its_plane(
         (radius, length, dome_radius): (f64, f64, f64),
         place: Vector,
         turn: &Isometry,
         centred_out: [i32; 3],
+        written_at: RimRadius,
     ) {
         let policy = Policy::certified();
         let mut log = ProvenanceLog::new();
@@ -3208,10 +3281,63 @@ mod plane_round_trip_tests {
             .coordinates();
         let centre: [f64; 3] =
             core::array::from_fn(|axis| stepped(on_the_axis[axis], centred_out[axis]));
+        let lines: Vec<&str> = text.lines().collect();
+        let circles: Vec<[&str; 4]> = lines
+            .windows(4)
+            .filter(|four| four[3].contains("=CIRCLE('',#"))
+            .map(|four| [four[0], four[1], four[2], four[3]])
+            .collect();
+        let point = format!("=CARTESIAN_POINT('',{});", triple(centre));
+        let rim: Vec<&str> = circles
+            .iter()
+            .filter(|four| four[0].ends_with(&point))
+            .map(|four| four[3])
+            .collect();
         assert!(
-            text.contains(&triple(centre)),
-            "the rim is not written centred at {centre:?}"
+            !rim.is_empty(),
+            "no circle is written centred at {centre:?}: {circles:?}"
         );
+
+        let ball = model
+            .solids()
+            .next()
+            .expect("the model holds one solid")
+            .faces()
+            .find_map(|face| {
+                let Surface::Sphere(ball) = face.surface() else {
+                    return None;
+                };
+                Some(ball)
+            })
+            .expect("the dome's skin is a ball");
+        let Shape::Circle {
+            radius: the_balls_own,
+        } = where_a_plane_crosses_a_ball(&cut, &ball)
+            .expect("the rim's plane crosses the ball")
+            .shape
+        else {
+            unreachable!("a plane crosses a ball in a circle");
+        };
+        let across = match written_at {
+            RimRadius::TheBars => radius,
+            RimRadius::TheBallsOwn => the_balls_own,
+            RimRadius::HalfwayBetween => 0.5 * (the_balls_own + radius),
+        };
+        let ends = format!(",{});", real(across));
+        assert!(
+            rim.iter().all(|circle| circle.ends_with(&ends)),
+            "the rim is not written at radius {across}, the bar's being {radius} and the \
+             ball's own {the_balls_own}: {rim:?}"
+        );
+    }
+
+    /// Which radius the rim of [`the_rim_comes_back_cut_from_its_plane`] is
+    /// written at: the bar's, the one the rim's plane crosses the ball in, or
+    /// halfway between the two.
+    enum RimRadius {
+        TheBars,
+        TheBallsOwn,
+        HalfwayBetween,
     }
 
     /// A bar of `radius` standing on the origin along `z`, `length` tall, with
