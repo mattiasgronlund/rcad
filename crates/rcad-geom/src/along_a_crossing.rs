@@ -15,13 +15,18 @@
 //! determinant of three vectors, which is [`orient3d`] with the fourth point put
 //! one normal away from the first (§15.5).
 //!
+//! The one loop a ball off a pipe's axis crosses it in, where the ball reaches
+//! into the pipe's side, is not read that way. It is ordered by how far round
+//! a line each point is, and that comes down to determinants too, with no
+//! angle worked out (`HowTwoPointsSitRoundALine`).
+//!
 //! # Which way round is "forward"
 //!
 //! The crossing of `S` and `T` runs along `∇S × ∇T`, which is §17.4's
 //! derivation and the same fact §31.3 leans on for a closed edge's direction. So
 //! the pair is ordered and the answer flips when the two surfaces are swapped —
 //! that is the geometry and not a convention. For each pair the direction
-//! `∇S × ∇T` points anticlockwise about the plane normal named below:
+//! `∇S × ∇T` points anticlockwise about the direction named below:
 //!
 //! | The pair | Anticlockwise about |
 //! |---|---|
@@ -31,6 +36,7 @@
 //! | a plane square to a torus's axis, the circle inside the ring | the same normal negated |
 //! | a ball and a pipe whose whole cross-section it swallows, the circle or loop ahead of the centre along the axis | the pipe's stored axis direction |
 //! | the same, the circle or loop behind the centre | the same direction negated |
+//! | a ball off a pipe's axis that reaches into its side, the one loop | the step from the ball's centre back to the axis, going round the line along that step |
 //! | a cone and a pipe, a shallower cone or a ball on its axis, the circle ahead of the picker | the cone's stored axis direction negated |
 //! | the same, the circle behind the picker | the cone's stored axis direction |
 //! | any of those the other way round | the same answer negated |
@@ -78,8 +84,12 @@
 //! that does not change which way it reads (Q1554).
 //! `the_way_a_loop_round_a_pipe_through_a_ball_winds` has the product. A ball
 //! that reaches into the pipe's side crosses it in one loop that runs back and
-//! forth round the axis, and is refused. Whether the ball is off the axis, and
-//! whether it swallows the pipe, are both asked exactly.
+//! forth round the axis. Every half-plane edged by the line through the ball's
+//! centre square to the axis crosses that loop once, so it is ordered by how
+//! far round that line each point is (Q1767).
+//! `the_way_the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in_winds` has the
+//! argument. Whether the ball is off the axis, whether it swallows the pipe,
+//! and whether it reaches into its side are each asked exactly.
 //!
 //! # So is a cone on one axis with a pipe, a second cone or a ball
 //!
@@ -138,6 +148,10 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// of them are the same place on it — a line meets a conic twice, so three
 /// *different* points on one are never in a line.
 ///
+/// On the one loop a ball off a pipe's axis crosses it in, which is ordered
+/// round a line, a point at `from`'s own angle round the line comes first, and
+/// [`Decision::Zero`] means `one` and `other` are the same place on the loop.
+///
 /// All three points may be boxes, and usually are: a corner where three surfaces
 /// meet is one. Where a box is wide enough to straddle another point's the
 /// honest answer is [`Decision::Undecidable`], and the caller decides what to do
@@ -147,11 +161,13 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair whose crossing is
 /// not one closed curve lying in a plane, nor one of the two loops a fat pipe
-/// crosses a thin one it swallows whole in, nor one of the two a ball crosses
-/// a pipe it swallows whole in: two planes, a plane along a pipe's axis, two
-/// pipes of one radius, two running the same way, two whose crossing is one
-/// loop, a ball off a pipe's axis that does not swallow its whole
-/// cross-section, a plane cutting a torus in a quartic, every pair with a torus
+/// crosses a thin one it swallows whole in, nor one of the two loops a ball
+/// crosses a pipe it swallows whole in, nor the one loop a ball off a pipe's
+/// axis crosses it in where it reaches into its side: two planes, a plane
+/// along a pipe's axis, two pipes of one radius, two running the same way, two
+/// whose crossing is one loop, a ball off a pipe's axis that misses it,
+/// touches it at one point, or touches it from inside in a figure of eight, a
+/// plane cutting a torus in a quartic, every pair with a torus
 /// on it but a plane, a cone against a pipe, a second cone or a ball off its
 /// axis, two cones of one apex, and a ball on a cone's axis that misses it or
 /// runs through its apex.
@@ -247,7 +263,8 @@ struct RoundALine {
     backwards: bool,
 }
 
-/// The normal the crossing of these two surfaces runs anticlockwise about.
+/// The normal the crossing of these two surfaces runs anticlockwise about, or
+/// the line it runs round.
 ///
 /// `from` is a point on the crossing, and only the rows with two curves read
 /// it: a plane square to a torus's axis, a ball on a pipe's axis, and a cone on
@@ -259,8 +276,10 @@ struct RoundALine {
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair that does not cross
-/// in one closed curve lying in a plane, or in one of the two loops round a
-/// pipe's axis that a fat pipe or a ball swallowing it crosses it in, and
+/// in one closed curve lying in a plane, in one of the two loops round a
+/// pipe's axis that a fat pipe or a ball swallowing it crosses it in, or in
+/// the one loop round a line that a ball off a pipe's axis reaching into its
+/// side crosses it in, and
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
 /// resting on a torus's tube and a ball inscribed in a pipe or a cone.
 ///
@@ -304,10 +323,11 @@ fn the_way_this_crossing_winds(
             return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
         }
         // A ball centred on a pipe's axis crosses it in two circles square to
-        // the axis, and a ball off it that swallows the pipe's whole
-        // cross-section in two loops round the axis. Every other ball off it
-        // that crosses it does so in one loop that runs back and forth round
-        // the axis, or in a figure of eight, refused inside.
+        // the axis, a ball off it that swallows the pipe's whole cross-section
+        // in two loops round the axis, and a ball off it that reaches into its
+        // side in one loop round a line through the ball's centre. A ball off
+        // it that misses it, touches it at one point, or touches it from
+        // inside in a figure of eight is refused inside.
         [Surface::Sphere(ball), Surface::Cylinder(pipe)] => {
             return the_way_a_circle_round_a_pipes_axis_winds(ball, pipe, from);
         }
@@ -499,14 +519,15 @@ fn the_way_a_circle_round_the_axis_winds(
 /// arrangement asks before it lets the pair through to be ordered.
 ///
 /// A centre off the axis, by however little, crosses the pipe in quartic loops
-/// and not circles, and [`the_way_a_loop_round_a_pipe_through_a_ball_winds`]
-/// orders those.
+/// and not circles, two where the ball swallows the pipe's whole cross-section
+/// and one where it reaches into its side, and
+/// [`the_way_a_loop_round_a_pipe_through_a_ball_winds`] orders both.
 ///
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a ball whose centre is off
-/// the axis and that does not swallow the pipe's whole cross-section, from
-/// [`the_way_a_loop_round_a_pipe_through_a_ball_winds`].
+/// the axis and that touches the pipe from inside, misses it, or touches it at
+/// one point, from [`the_way_a_loop_round_a_pipe_through_a_ball_winds`].
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for `from` on the
 /// plane through the centre, which is on the crossing only where the ball is

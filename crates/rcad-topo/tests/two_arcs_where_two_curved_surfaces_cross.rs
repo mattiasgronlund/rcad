@@ -19,12 +19,17 @@
 //! leaves too, and the mesh the fuse checks its answer with cuts it since
 //! Q1590.
 //!
-//! The rest of what a ball and a pipe cross in does not reach that function
-//! with two corners on one curve. A wall or a cap through a loop off the axis
-//! has its corners placed where the three surfaces meet since Q1591, and then
-//! the one loop a ball reaching into a bar's side leaves is refused before its
-//! arcs are named: since Q1661 by `rcad-geom`, putting the two corners in order
-//! round the loop, where with only the bar's seam through it every rule answers
+//! A wall or a cap through a loop off the axis has its corners placed where
+//! the three surfaces meet since Q1591. The one loop a ball reaching into a
+//! bar's side leaves was then refused before its arcs were named, from Q1661
+//! by `rcad-geom` putting the two corners in order round the loop. It puts
+//! them in order since Q1767, by their angle round the line through the
+//! ball's centre square to the bar's axis, and the loop reaches that function
+//! between two corners: a wall through it answers every rule, a cap at `z = 4`
+//! every rule, and a cap at `z = 6` every rule but one, which the mesh the
+//! fuse checks its answer with refuses. A cap through the ball's centre is
+//! refused one step past the order, for want of a point inside a piece of a
+//! face. With only the bar's seam through the loop every rule answers
 //! (`two_curves_of_one_pair_that_meet.rs`). The circle a ball touches its bar
 //! round is refused before its arcs are named.
 //!
@@ -40,9 +45,10 @@
 //! crosses a loop twice, sent no side of two pipes to that function between
 //! two corners when run with a print in it before Q1643. The one loop a thin
 //! bar reaching out of a fat one's side leaves, cut by a wall through the loop,
-//! does not reach it: it is refused before its arcs are named, as the ball's
-//! one loop is, since Q1685 by `rcad-geom` when asked to put the two corners in
-//! order round it, and by `fuse/arrange.rs` before that (Q1683). Whole, the
+//! does not reach it: it is refused before its arcs are named, since Q1685 by
+//! `rcad-geom` when asked to put the two corners in order round it, and by
+//! `fuse/arrange.rs` before that (Q1683). `rcad-geom` puts the ball's one loop
+//! in order since Q1767, and two pipes' one loop not yet. Whole, the
 //! thin bar answers both intersections and the fat bar less it, and the rules
 //! that keep its skin outside the fat bar are refused by the mesh the fuse
 //! checks its answer with.
@@ -568,8 +574,8 @@ fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_answers_every_rule() 
 /// name of where the walk starts on it, and **every rule both ways round is
 /// refused one step further on**, by name, out of `rcad-geom`:
 /// `TheseTwoSurfacesDoNotCrossInAConic`, as `rcad-geom` declines to say which
-/// of the two corners comes first round the loop, as it does for the ball's
-/// one loop above.
+/// of the two corners comes first round the loop. It says which for the
+/// ball's one loop above since Q1767.
 #[test]
 fn a_half_thin_bar_reaching_out_of_a_fat_ones_side_is_refused_ordering_the_one_loop_they_cross_in()
 {
