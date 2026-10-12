@@ -16,17 +16,15 @@
 //! by how far off the crossing it can be, which reaches the start, and the
 //! start is left out, as Q1690 did for a closed edge's corner.
 //!
-//! Of the cut at the origin and a thousand from it, with the bar cut by the
-//! block first or by the ball, both cuts a thousand from the origin answer. At
-//! the origin it is refused ordering two ends of a loop along it, which the
-//! last test pins. So the answer is checked against its closed form, and not
-//! against the origin's.
+//! The cut at the origin and a thousand from it, with the bar cut by the block
+//! first or by the ball, each answer is checked against its closed form, since
+//! the origin's was refused until Q1701 and so could not stand in for it.
 
 use std::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 const BALL: f64 = 5.0;
 const BAR: f64 = 4.0;
@@ -48,7 +46,7 @@ const EITHER_SIDE: [(&str, [f64; 3], [f64; 3]); 2] = [
 #[test]
 fn a_ball_and_a_bar_cut_by_a_wall_through_where_their_loops_are_walked_from_measure_half_of_what_they_share()
  {
-    measures_half_of_what_the_ball_and_the_bar_share(Cuts::BlockFirst);
+    measures_half_of_what_the_ball_and_the_bar_share(1000.0, Cuts::BlockFirst);
 }
 
 /// The same cut with the bar cut by the ball first measures the same half,
@@ -62,40 +60,34 @@ fn a_ball_and_a_bar_cut_by_a_wall_through_where_their_loops_are_walked_from_meas
 /// refused the cap `AFaceMissesPartOfWhereItsSurfacesCross`.
 #[test]
 fn the_same_cut_with_the_ball_first_measures_the_same_half() {
-    measures_half_of_what_the_ball_and_the_bar_share(Cuts::BallFirst);
+    measures_half_of_what_the_ball_and_the_bar_share(1000.0, Cuts::BallFirst);
 }
 
-/// The same cut at the origin is refused ordering two corners the wall puts on
-/// one loop, `(−4, 0, 7.18)` and `(4, 0, 8.57)`, whichever side of the wall the
-/// block is on and whichever the bar is cut by first. The answer exists: a
-/// thousand from the origin it measures half of what the ball and the bar
-/// share. Pinned as it stands, to move with the fix.
+/// The same cut at the origin measures the same half, whichever side of the
+/// wall the block is on and whichever the bar is cut by first.
+///
+/// It was refused ordering the two corners the wall puts on one loop,
+/// `(−4, 0, 7.18)` and `(4, 0, 8.57)` (Q1701). The walk starts on that loop at
+/// `(4 − 2⁻⁵¹, 0, 8.57)`, an ulp inside the bar, so the corner at `x = 4` is a
+/// rounding off the start and its box misses it. The loop runs straight across
+/// the wall there, and both corners lie on the wall, so neither is ahead of the
+/// start or behind it. The corner at `x = 4` lies outside the line the loop
+/// runs along from the start, and the one at `x = −4` inside it, across the
+/// loop.
 #[test]
-fn the_same_cut_at_the_origin_is_refused_ordering_two_ends_of_a_loop_along_it() {
-    for (side, low, high) in EITHER_SIDE {
-        for cuts in [Cuts::BlockFirst, Cuts::BallFirst] {
-            let (_, said) = cut(0.0, low, high, cuts);
-            let Err(Error::Undecidable { records }) = said else {
-                panic!("{side}, {cuts:?}: {said:?}");
-            };
-            let first = &records.records()[0];
-            eprintln!("{side}, {cuts:?}: {first:?}");
-            assert_eq!(
-                first.predicate(),
-                "order along a crossing",
-                "{side}, {cuts:?}"
-            );
-        }
+fn the_same_cut_at_the_origin_measures_the_same_half() {
+    for cuts in [Cuts::BlockFirst, Cuts::BallFirst] {
+        measures_half_of_what_the_ball_and_the_bar_share(0.0, cuts);
     }
 }
 
-/// The cut a thousand from the origin, in the order `cuts` names, measures half
-/// of what the ball and the bar share, within the error the measurement gives,
+/// The cut `far` along every axis, in the order `cuts` names, measures half of
+/// what the ball and the bar share, within the error the measurement gives,
 /// whichever side of the wall the block is on.
-fn measures_half_of_what_the_ball_and_the_bar_share(cuts: Cuts) {
+fn measures_half_of_what_the_ball_and_the_bar_share(far: f64, cuts: Cuts) {
     let half = what_a_ball_off_a_bars_axis_shares(BALL, BAR, OFF) / 2.0;
     for (side, low, high) in EITHER_SIDE {
-        let (model, answer) = cut(1000.0, low, high, cuts);
+        let (model, answer) = cut(far, low, high, cuts);
         let answer = answer.unwrap_or_else(|why| panic!("{side}, {cuts:?}: {why:?}"));
         let [solid] = answer[..] else {
             panic!("one solid on {side}, {cuts:?}, got {answer:?}");
