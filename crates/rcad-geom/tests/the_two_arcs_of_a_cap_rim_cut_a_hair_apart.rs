@@ -111,7 +111,7 @@ fn walked_with(half_spaces: &[HalfSpace]) -> (Result<Vec<Point>, Error>, Vec<Rec
     let skin = Surface::Cone(Cone::new(Axis::z(), 0.5).expect("a positive slope"));
     let run = NamedRun::new(
         EdgeRun::PartOfWhereItCrosses {
-            and: skin.clone(),
+            and: skin,
             picked_by: half_spaces.iter().copied().map(Picker::from).collect(),
         },
         ENDS.map(PredicatePoint::from),
