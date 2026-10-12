@@ -14,7 +14,8 @@ it. It folds the file into its target's persistent corpus with libFuzzer's
 `-merge=1`, which keeps it only if it takes the code down a path no kept file
 takes, and removes it from the night's tree. Every night replays its corpus
 before it fuzzes, so the files kept are tested again each night for nothing. A
-file that adds no path is dropped. Not built yet: Q1731 builds it.
+file that adds no path is dropped. Q1731 built it in `fuzz-triage`, with a cap
+of 2000 files a target each morning (434.7).
 
 ### 434.1 Nobody decided to keep every crash file
 
@@ -120,6 +121,10 @@ After the replay:
    `~/rcad-fuzz-logs/<night>/artifacts/<target>/`.
 7. **The triage says what it did:** per target, how many files it folded, how
    many the merge kept, and how many stay for the next morning.
+8. **At most 2000 of a target's passing files a morning**
+   (`RCAD_FUZZ_FOLD_AT_MOST`). The rest are not handed to the merge, so they
+   stay and count among those left. A cap that is not a whole number above 0
+   is refused. 434.7 says why the cap is needed.
 
 ### 434.4 When a fault comes back
 
@@ -180,17 +185,59 @@ is found by the night's first pass over its corpus, and not by luck later.
 
 ### 434.6 What this leaves
 
-- **Q1731**, after Q1728, builds 434.3 in `fuzz-triage`, pins each rule in
-  `check-fuzz-triage-selftest`, extends Q1728's prep fact, and shows 434.4's
-  first case once. It measures what is not measured here: how many passing
-  files the first fold reads and keeps, per target, and how long it takes. The
-  first fold is the largest there will be, about 68 000 files. The triage's
-  `TimeoutStartSec=14400` and `check-triage-waits-for-the-night` bound the
-  morning, and the lane may run the first fold once by hand rather than leave
-  it to 08:30.
+- **Q1731**, after Q1728, built 434.3 in `fuzz-triage`, pinned each rule in
+  `check-fuzz-triage-selftest`, extended Q1728's prep fact, and showed 434.4's
+  first case once. It measured the first fold on copies, not for real (434.7),
+  and that measurement is what added 434.3's eighth rule.
+- **The first real fold** is the first morning triage that runs this recipe:
+  the morning after the first night that stands on a `main` holding it. What
+  it folds and how long it takes are read from `journalctl --user -u
+  rcad-fuzz-triage` (the `fold:` lines, the `removed:` line, the wall time
+  against `TimeoutStartSec=14400`) by a row filed for it.
 - **13 092 timeout files and 6 718 slow-unit files** are carried the same way
   and never replayed (10-11's `artifacts/`). Not this section's: §436 keeps
   them.
 - **The night directories' own copies.** 3.7 GB, and nothing prunes them. Not
   this section's either, and 434.3's record needs them. §436 has the nights
   share their files instead of pruning them.
+
+### 434.7 The first fold, measured on copies
+
+Q1731 ran the fold once, on 2026-10-11 from 22:46:33Z, without the cap of
+434.3's eighth rule, which this measurement is the reason for. Everything it
+read and wrote was a copy: `~/rcad-fuzz-corpus`, 10-11's `artifacts/`, and the
+fuzz binaries of that night's commit cc97ce85, in a worktree of its own on
+cc97ce85. The night of 10-12 was running beside it, with other lanes' gates,
+and the load average was between 24 and 66 on 24 cores. The replay ran
+against 41d96a4e, the `main` of that hour, not 10-11's a5d31701. So these
+numbers are slower than a morning's: 10-11's own triage replayed the same
+79 359 files from 08:30 to 08:46:33 (434.1). The first real fold is the first
+morning triage that runs this recipe (434.6).
+
+- **The replay** took 2251 s, for 79 359 of 79 359 files: 40 groups, 27 of
+  them still failing on `main`. It handed the writer
+  (`no_model_makes_the_writer_panic`) 68 013 passing files, the same count as
+  on a5d31701.
+- **The writer's merge reruns its whole corpus first.** libFuzzer reads the
+  copy of the corpus, 25 710 files, before any new file, smallest first. It
+  began at 23:25:21Z; 25 168 files had started at 49 minutes and 25 880 at
+  59, so the corpus took about 57 minutes. 15 corpus files ran past the
+  ten-second timeout under that load, and each restarted the merge's inner
+  process. Every morning that gives the writer a passing file pays this again,
+  however few the files.
+- **Then the new files, at about 1.4 a second**: 418 started between 00:24:13Z
+  and 00:29:10Z. Those were the smallest; the writer's crash files run from a
+  median of 1206 bytes to 4092. All 68 013 would take at least 13 hours, past
+  the triage's `TimeoutStartSec=14400`.
+- **A merge cut off keeps nothing.** The merge was stopped at 00:29:19Z with
+  `SIGTERM`, 599 new files in. libFuzzer exited 72, and the fold printed
+  `none — the merge failed (exit 72), so the corpus is as it was and all 68013
+  passing file(s) stay`, removed its copy, and went on to the next target. At
+  `TimeoutStartSec` systemd sends `SIGTERM` to every process of the triage, the
+  recipe's shell too, and that shell runs its `EXIT` trap, which removes the
+  copy, and stops (a probe of the same trap in scratch: exit 143, nothing
+  left). So an uncapped fold would be killed every morning in the writer's
+  merge, with nothing folded and the targets after it never reached. Hence the
+  cap: 2000 new files at 1.4 a second is about 24 minutes, which puts the
+  writer's morning near 81 minutes at that load, and its pile folds over about
+  34 mornings.
