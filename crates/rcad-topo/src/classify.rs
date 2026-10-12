@@ -83,11 +83,11 @@ pub enum Containment {
     /// [`SolidView::face_holds_the_point`] cannot follow, so no ray was ever
     /// counted. A point another face holds is [`Containment::OnBoundary`]
     /// instead, as it is on the same solid without that face (Q1722). A box
-    /// whose every ray a face that answered grazes, as a box straddling a
-    /// flat face is grazed by it, is [`Containment::Undecidable`]: no answer
-    /// from the trimming would have counted those rays either (Q1727). The
-    /// face whose trimming nothing follows is not one that answered where it
-    /// grazes a ray only for want of showing it holds none of the box (Q1740).
+    /// whose every ray another face grazes, as a box straddling a flat face is
+    /// grazed by it, is [`Containment::Undecidable`]: no answer from the
+    /// trimming would have counted those rays either (Q1727). The face whose
+    /// trimming nothing follows throws no ray away where it grazes it only for
+    /// want of showing it holds none of the box (Q1740).
     ///
     /// Deliberately not [`Containment::Undecidable`]. That one means every
     /// predicate was asked and none could prove an answer; this means the
@@ -117,10 +117,14 @@ pub enum Containment {
     /// of the solid is shown to meet the box round both (`docs/decisions.md`
     /// §323). This is what is left: a point no point beside it speaks for,
     /// since a face meets it or every such ray grazes something, and whose own
-    /// ray no face but the ring's threw away. A point another face holds is
-    /// [`Containment::OnBoundary`], and a box whose every ray another face
-    /// grazes is [`Containment::Undecidable`], as they are on the same solid
-    /// without the ring, even where the box meets the ring too (Q1716, Q1739).
+    /// rays only the ring threw away, for want of being fired at. A point
+    /// another face holds is [`Containment::OnBoundary`], and a box whose every
+    /// ray another face grazes is [`Containment::Undecidable`], as they are on
+    /// the same solid without the ring, even where the box meets the ring too
+    /// (Q1716, Q1739). So is a box the ring's own sign cannot place and its
+    /// face holds some of, as the same box on a ball's wall is: the ring
+    /// grazes every ray from it before any is fired, so firing one would not
+    /// answer it (`docs/decisions.md` §323.3, Q1763).
     ///
     /// Deliberately its own answer and not
     /// [`Containment::CannotFollowAFacesTrimming`], which says a *trimming*
@@ -658,7 +662,7 @@ impl SolidView<'_> {
     /// grazes the ray, since neither depends on that face (Q1716, Q1722).
     ///
     /// Each face is tallied on its own and then added in, so that a graze is
-    /// known to come from a face that answered or from one that did not
+    /// known to stand or to be for want of an answer the face held back
     /// ([`Crossings::add`], Q1727).
     fn count_crossings(
         self,
@@ -822,8 +826,9 @@ impl SolidView<'_> {
             // answered rather than refused. The other faces are still counted:
             // one that holds the point puts it on the skin, and one that grazes
             // the ray throws it away, whatever this face would have added
-            // (Q1716), even where this face's own sign straddled the point and
-            // grazed it above (Q1739).
+            // (Q1716, Q1739). So does this face's own graze above, if it made
+            // one: every graze in its tally is from before this firing, which
+            // could not have undone it (Q1763).
             Err(_) if matches!(surface, Surface::Torus(_)) => {
                 tally.unfired(face.key());
                 return;
@@ -1377,9 +1382,10 @@ struct Crossings {
     winding: i64,
     on_boundary: bool,
     grazed_something: bool,
-    /// Whether a face the ray was fired at, and whose trimming was followed
-    /// wherever the ray asked it, grazed the ray.
-    a_face_that_answered_grazed_it: bool,
+    /// Whether a face whose trimming was followed wherever the ray asked it
+    /// grazed the ray: one the ray was fired at, or a ring it could not be
+    /// fired at grazing from its own sign before the firing.
+    a_graze_that_stands: bool,
     worst_enclosure: f64,
     /// The first flat face whose corners and stored plane read the point
     /// differently ([`Hit::ReadingsPart`]).
@@ -1389,39 +1395,42 @@ struct Crossings {
     unfired_at: Option<FaceKey>,
     /// The first face whose trimming nothing could follow where the ray asked
     /// it, so that no count of this ray is to be trusted, and no other ray
-    /// gets past it unless a face that answered threw it away.
+    /// gets past it unless a graze that stands threw it away.
     unfollowed_at: Option<FaceKey>,
 }
 
 impl Crossings {
     /// Add in one face's own tally.
     ///
-    /// **Only a graze from a face that answered throws the ray away whatever
-    /// the faces that did not answer would add.** A face whose trimming
-    /// nothing follows grazes a ray where it cannot show it holds none of the
-    /// box the ray starts from or meets it in, and that is for want of the
-    /// answer it refused; following its trimming might have put the box off
-    /// it. A ring the ray could not be fired at grazes it from its own sign,
-    /// before any firing, so that graze would stand whatever a ray fired at
-    /// the ring said. It is left out all the same, so that a box on the ring's
-    /// wall that no other face grazes stays refused, as `docs/decisions.md`
-    /// §323.3 keeps it (Q1739).
+    /// **Only a graze that stands throws the ray away whatever the answers
+    /// held back would add.** A face whose trimming nothing follows grazes a
+    /// ray where it cannot show it holds none of the box the ray starts from
+    /// or meets it in, and that is for want of the answer it refused;
+    /// following its trimming might have put the box off it. Every other
+    /// graze stands. A ring the ray could not be fired at grazes it only
+    /// before the firing, from its own sign and what its face holds of the
+    /// point, since [`SolidView::count_where_the_ray_meets_it`] stops at the
+    /// refusal; a ray fired at the ring could not undo that graze, so it
+    /// throws the ray away as a ball's own sign would, and a box on the ring's
+    /// wall is [`Containment::Undecidable`], as one on a ball's wall is
+    /// (`docs/decisions.md` §323.3, Q1763). Until Q1763 it was left out, and
+    /// such a box was refused.
     fn add(&mut self, face: Self) {
         let Self {
             winding,
             on_boundary,
             grazed_something,
-            a_face_that_answered_grazed_it: _,
+            a_graze_that_stands: _,
             worst_enclosure,
             parted_at,
             unfired_at,
             unfollowed_at,
         } = face;
-        let it_answered = unfired_at.is_none() && unfollowed_at.is_none();
+        let its_trimming_was_followed = unfollowed_at.is_none();
         self.winding += winding;
         self.on_boundary |= on_boundary;
         self.grazed_something |= grazed_something;
-        self.a_face_that_answered_grazed_it |= grazed_something && it_answered;
+        self.a_graze_that_stands |= grazed_something && its_trimming_was_followed;
         self.worst_enclosure = self.worst_enclosure.max(worst_enclosure);
         self.parted_at = self.parted_at.or(parted_at);
         self.unfired_at = self.unfired_at.or(unfired_at);
@@ -1446,12 +1455,13 @@ impl Crossings {
 
     /// Whether this ray is thrown away whatever the faces it could not be
     /// fired at, or whose trimming nothing could follow, would add to it: a
-    /// face that answered grazed it (Q1716, Q1727). That holds where the box
-    /// straddles the sign of the ring left unfired, too (Q1739). A ray fired
-    /// at the ring would add crossings, grazes or a trimming nothing follows,
-    /// and a ray another face grazed is thrown away whichever it added.
+    /// graze that stands threw it away (Q1716, Q1727). That holds where the
+    /// box straddles the sign of the ring left unfired, too (Q1739), and where
+    /// that ring's own graze is the one (Q1763). A ray fired at the ring would
+    /// add crossings, grazes or a trimming nothing follows, and a ray a graze
+    /// that stands threw away is thrown away whichever it added.
     fn is_thrown_away_without_them(&self) -> bool {
-        self.a_face_that_answered_grazed_it && self.parted_at.is_none()
+        self.a_graze_that_stands && self.parted_at.is_none()
     }
 
     /// Take in what a face said about a point on its own surface.
@@ -1459,8 +1469,8 @@ impl Crossings {
     /// On the face or on its boundary both put the point on the solid's skin,
     /// because a face's boundary is part of the face. A sign nobody could settle
     /// is a graze and the next ray gets a go; a face whose trimming nothing can
-    /// follow is noted, and another ray gets past it only where a face that
-    /// answered threw this one away.
+    /// follow is noted, and another ray gets past it only where a graze that
+    /// stands threw this one away.
     fn take_in(&mut self, held: crate::Result<OnAFace>, face: FaceKey) {
         match held {
             Ok(OnAFace::Held | OnAFace::OnItsBoundary) => self.on_boundary = true,
@@ -1476,11 +1486,11 @@ impl Crossings {
     /// Only none of the box lets the ray by, and anything else grazes it. **A
     /// face whose trimming nothing follows is noted as well**: its graze is
     /// for want of the answer it refused, and [`Crossings::add`] keeps such a
-    /// graze from throwing the ray away. Taken as one from a face that
-    /// answered, it threw away a ray no face that answered grazed, and a box
-    /// on the ball under the floor of a half ball whose cap nothing follows
-    /// came back [`Containment::Undecidable`], where the half ball alone puts
-    /// it outside (Q1740).
+    /// graze from throwing the ray away. Taken as a graze that stands, it
+    /// threw away a ray no other face grazed, and a box on the ball under the
+    /// floor of a half ball whose cap nothing follows came back
+    /// [`Containment::Undecidable`], where the half ball alone puts it outside
+    /// (Q1740).
     fn grazed_unless_it_holds_none(
         &mut self,
         held: crate::Result<OnAFace>,

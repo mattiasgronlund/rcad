@@ -18,7 +18,9 @@
 //! A box a face of the block meets is asked of the block alone too, which has
 //! no torus face, and the two answers must agree, since what the face says of
 //! the box does not depend on the ring (Q1716), and under a certified policy
-//! they agree where the ring meets the box too (Q1739).
+//! they agree where the ring meets the box too (Q1739). A box on the ring's
+//! wall that no face of the block meets is asked of a ball whose wall it is on
+//! too, and both say `Undecidable` (Q1763).
 
 use std::collections::BTreeMap;
 
@@ -572,9 +574,8 @@ const ON_THE_CAP_CIRCLE: [[f64; 3]; 4] = [
 /// and the bend `Undecidable`, as it does of a box on the same side away from
 /// the circle. That is a gap of its own, not traced yet.
 ///
-/// A box on the bend's wall that no face of the block meets, `(3, 4, 0)` on
-/// its outer equator, is still refused: there only the ring throws the rays
-/// away (`docs/decisions.md` §323.3).
+/// A box on the bend's wall that no face of the block meets is
+/// [`a_box_on_a_bends_wall_that_no_face_of_the_block_meets_is_undecidable_as_on_a_ball`].
 #[test]
 fn a_box_on_the_circle_a_bend_grows_out_of_is_undecidable_as_on_the_block_alone() {
     let policy = Policy::certified();
@@ -593,21 +594,58 @@ fn a_box_on_the_circle_a_bend_grows_out_of_is_undecidable_as_on_the_block_alone(
             "{at:?}, with the bend and without it: {placed:?}"
         );
     }
+}
 
-    let the_wall = with_the_bend
-        .faces()
-        .find(|face| matches!(face.surface(), Surface::Torus(_)))
-        .expect("the bend's wall is on a torus")
-        .key();
-    let on_the_wall = with_the_bend.classify_uncertain_point(
-        a_box_round([3.0, 4.0, 0.0]),
-        &policy,
-        &mut ProvenanceLog::new(),
-    );
+/// A box on the bend's wall that no face of the block meets, round `(3, 4, 0)`
+/// on the wall's outer equator, is `Undecidable` under either policy, as the
+/// same box is on the wall of a ball of radius five about the origin, which
+/// `(3, 4, 0)` is on too.
+///
+/// `(3, 4, 0)` is on both surfaces exactly, so the box holds points inside
+/// and outside each solid, and no one answer is right for all of it. Neither
+/// surface's own sign can place the box, and each face holds some of it, so
+/// each grazes every ray from it before the ray is put to the surface. A ray
+/// fired at the ring could not change that, so the ring's refusal to have a
+/// ray fired at it is not why there is no answer (`docs/decisions.md`
+/// §323.3). Until Q1763 it was refused `CannotFireARayAtAFacesSurface`
+/// whatever the policy, and the block alone says `Outside`.
+#[test]
+fn a_box_on_a_bends_wall_that_no_face_of_the_block_meets_is_undecidable_as_on_a_ball() {
+    let on_the_wall = [3.0, 4.0, 0.0];
+    let (model, built) = the_bend_out_of(&THE_BLOCK);
+    let the_bend = model.solid(built).expect("this model made the key");
+    let mut elsewhere = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let ball = elsewhere
+        .add_ball(5.0, &Isometry::identity())
+        .expect("a ball of radius five");
+    let the_ball = elsewhere.solid(ball).expect("this model made the key");
+    let (alone, block) = the_block_alone(&THE_BLOCK);
     assert_eq!(
-        on_the_wall,
-        Containment::CannotFireARayAtAFacesSurface { face: the_wall }
+        alone
+            .solid(block)
+            .expect("this model made the key")
+            .classify_uncertain_point(
+                a_box_round(on_the_wall),
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            ),
+        Containment::Outside
     );
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        let placed = [the_bend, the_ball].map(|solid| {
+            solid.classify_uncertain_point(
+                a_box_round(on_the_wall),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+        });
+        assert!(
+            placed
+                .iter()
+                .all(|answer| matches!(answer, Containment::Undecidable { .. })),
+            "{policy:?}, the bend and the ball: {placed:?}"
+        );
+    }
 }
 
 /// A new model holding [`a_bend_out_of`] `outline`, walked the way that builds,
