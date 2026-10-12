@@ -521,10 +521,12 @@ fn a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar() {
 /// `walk.rs`, on the wall's edge from `(√1.75, 1.5, 1 - √1.75 + √½)` to
 /// `(√1.75, 1.5, 1 + √1.75 - √½)`, `1.23` long on that ellipse. Its ends come
 /// out at one angle round the ellipse, `0.8480620789814812` and
-/// `0.8480620789814809`, so the end comes before the start, points placed from
-/// the ellipse's centre are about `1` off it, and the plane `assemble.rs`
-/// names the arc by, through its chord, has a normal of rounding,
-/// `(-2.2e-16, -4.5e-16, 0)`, so both arcs of the ellipse are picked.
+/// `0.8480620789814809`, so the end comes before the start. The middle of the
+/// short arc between them, placed from the ellipse's centre `6.8e15` up the
+/// axis, lands at `z = -1`, `2` below the edge's own middle. The plane
+/// `assemble.rs` names the arc by, through its chord, has a normal of
+/// rounding, `(-2.2e-16, -4.5e-16, 0)`, so both arcs of the ellipse are
+/// picked.
 #[test]
 fn a_square_bar_standing_on_an_edge_along_y_is_refused_walking_its_long_ellipse() {
     for wall in EVERY_WALL {
