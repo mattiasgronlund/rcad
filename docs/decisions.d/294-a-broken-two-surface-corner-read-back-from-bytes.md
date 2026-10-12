@@ -183,8 +183,9 @@ the fold's cost against a fuse's other work.
 
 - **A three-or-more-surface corner moved the same way.** A corner with three
   planes round it is tried now, and refuses before the partner is looked at;
-  §294.16 records what Q794 found. A corner with four or more surfaces round
-  it, and one with a curved surface among its three, are not tried yet.
+  §294.16 records what Q794 found. A corner with four planes round it, a
+  pyramid's apex, is tried too and refuses the same way; §294.17 records what
+  Q1812 found. One with a curved surface among its three is not tried yet.
   §286.4's own gap beside this one, a three-plane corner refused for sitting
   as far off a plane as `validate` allows, was closed by §368, which grows the
   stored corner by `validate`'s room and not by a rounding alone
@@ -1094,15 +1095,12 @@ stored corner by a rounding alone. §368 grew it by `validate`'s room, and
 t -E 'binary(a_corner_its_own_surfaces_place_somewhere_else)'`, 5 tests run, 5
 passed. The corner here is a millimetre off, past any room, and not that gap.
 
-**What this leaves.** Two corners not tried, each with no class, since nobody
-has run them (§360.5):
+**What this leaves.** Two corners not tried when this was written, each with
+no class, since nobody had run them (§360.5):
 
-- **A corner with four or more surfaces round it**, a pyramid's apex from
-  `a_corner_with_four_planes_round_it.rs`, moved in its bytes. Its planes all
-  cross at one point, so every triple places a moved apex nowhere, and the
-  guess is the box's refusal. The re-check's `Invalid` wants a stored corner
-  where three planes cross and off a fourth, which a moved plane gives and a
-  moved corner does not. A row, tier 2.
+- **A corner with four or more surfaces round it**, a pyramid's apex moved in
+  its bytes. Tried by Q1812: it refuses as the box's corner does, and §294.17
+  records it.
 - **A corner with a curved surface among its three.** The round bar less
   `THE_HALF_PAST_THE_SEAM` keeps a corner at `(−3, 0, 10)` where the cap's
   plane, the wall's cylinder and the plane `y = 0` meet. Those three meet at two
@@ -1110,3 +1108,102 @@ has run them (§360.5):
   guessed to refuse as the box's does. Moved onto the other place, the chord's
   other end, `the_place_the_model_points_at` would pick that place, which is
   the one move here that could come back a wrong `Ok`. A row, tier 2.
+
+### 294.17 Q1812: a pyramid's apex moved in its bytes is refused as the box's corner is, and the sound pyramid cut through its apex refuses — 2026-10-12
+
+*Queue row Q1812, from §294.16. Lane
+`lane-q1812-a-pyramid-apex-moved-in-its-bytes`, base `302aea8c`, carried on by
+a second lane after the first passed its budget (§416). Pinned in
+`crates/rcad-topo/tests/a_broken_three_surface_corner_read_back_from_bytes.rs`
+beside §294.16's box. No code changed.*
+
+**The corner.** A square pyramid on the box's footprint, base `x` and `y` from
+−3 to 3 at `z = 0` and apex `(0, 0, 10)`, built face by face with
+`SolidBuilder`, each side face's plane written through the apex. Four distinct
+planes meet at the apex. The row named the pyramid of
+`a_corner_with_four_planes_round_it.rs`, whose base is bent at one corner so
+two side faces fold by only a little. Its brief proposed fold 0, where those
+two faces lie in one plane and the apex has three distinct planes round it, so
+the square pyramid was used instead. It is placed with `place_solid` at §294.8's four
+placements, so the file stores the apex at `(0, 0, 10)` at every placement, and
+the test overwrites the one place the bytes hold it with one of four moves: a
+millimetre above, `(0, 0, 11)`; a millimetre down into the pyramid,
+`(0, 0, 9)`; a millimetre down the edge towards `(3, 3, 0)`, `(0.3, 0.3, 9)`;
+and a millimetre down the `+x` face, `(0.3, 0, 9)`. The last two stay on the
+planes they slide along to a rounding of the `0.3`.
+
+`Model::validate` refuses every move under both policies at every placement
+with `VertexOffItsFacePlane`. A side plane rises 10 over 3, so a millimetre up
+or down is `3/√109 ≈ 0.287` off it, and that is the distance named for the
+moves above, into and down the face. Down the edge it names `6/√109 ≈ 0.575`.
+The distance is to one plane the apex is off and not the farthest: down the
+face the apex is `3/√109` off the `±y` planes and `6/√109` off the `−x` plane,
+and `validate` names `3/√109`. The sound bytes validate.
+
+**What comes back.** All 352 fuses of a moved apex, four moves against §294.16's
+eleven partner and rule pairs at four placements under two policies, refuse
+`Error::Undecidable` with one record, "where three surfaces meet", and leave
+the model byte for byte as it was. **No wrong `Ok` and no panic.** That was the
+row's guess, and the reason is §294.16's: each three of the four side planes
+cross at the apex alone, since their normals `(0, ±10, 3)` and `(±10, 0, 3)`
+are three by three independent, so `derive_a_corner` in `fuse/bake.rs` finds
+every triple's meet at `(0, 0, 10)`. A millimetre is far past the `1e-9` of
+room `the_place_the_model_points_at` grows the stored apex by, so no triple
+places it, and `derive_a_corner` gives up before its re-check runs. The
+re-check's `Invalid` still wants a stored corner where three surfaces cross and
+off a further one, which a moved plane gives and a moved corner does not
+(§294.16).
+
+**The control, and one partner it does not answer.** The sound pyramid answers
+nine of the eleven pairs at every placement under both policies, 72 fuses, the
+model validates after each, and each answer holds what the pyramid and the
+block hold, to `1e-12` relative: 128 in two solids for `FAR_AWAY` ∪; 61.44 for
+`OVER_THE_BOTTOM` −; 0.96 for `OVER_THE_TOP` ∩ and 119.04 for −. Above
+`z = 8` the pyramid is 1.2 across, so the rim and notch blocks miss it: 120 for
+`OVER_THE_RIM_BY_THE_SEAM` −, `OVER_THE_RIM_AWAY_FROM_THE_SEAM` − and
+`A_NOTCH_A_QUARTER_TURN_ROUND` −, 270 in two solids for
+`OVER_THE_RIM_BY_THE_SEAM` ∪, and `Ok` with no solid for its ∩.
+
+The two pairs left out are `THE_HALF_PAST_THE_SEAM` − and ∩, whose face
+`y = 0` runs exactly through the apex. **Under `certified` both refuse
+`Undecidable` at every placement**, with one record, "side of plane", asked of
+the box `bake` solved round the apex: at no placement `x` from `−8.4e-16` to
+`8.4e-16` and `y` from `−4.2e-16` to `4.2e-16`, which straddles the cut. Under
+`tolerant(100)` both answer half the pyramid, 60, with no placement, and the
+model validates; at the other three placements both refuse with four "side of
+plane" records round the apex and one "a point inside a piece of a face". The
+answer exists and has no feature smaller than a millimetre, so this is a gap
+(§16.10), and halving a pyramid through its apex is a shape designers make:
+class `refuses/B`, a row of its own. The pin
+`a_sound_pyramid_cut_through_its_apex_cannot_tell_which_side_of_the_cut_its_apex_is_on`
+holds it as it stands, so the row that closes it turns the pin round. Where
+the fuse asks the question was not traced. Q397, dropped, once proposed
+deciding "side of plane" exactly for a corner where three planes cross, by the
+signs of two determinants.
+
+**A tetrahedron cut through its apex fails differently.** To see whether the
+fault needs four planes, a probe that was not kept built a tetrahedron with
+apex `(0, 0, 10)` over the base `(−3, −3, 0)`, `(3, −3, 0)`, `(0, 3, 0)`, three
+slanted planes round its apex, and fused it with the block `x` from −5 to 5,
+`y` from 0 to 5, `z` from −1 to 11, placed as the pyramid is. Each of the 11
+of its 16 fuses that answered holds the right volume to a few ulps: the `y ≥ 0` half
+is the cone from the apex over its half of the base, 15, and the rest is 45.
+Under `tolerant(100)` all eight answer. Under `certified` five of eight refuse
+`Invalid::DynamicRangeTooWide`, at ratios from `1.3e15` to `4.5e16`: −
+at every placement but none, ∩ at none and at the shift. No "side of plane"
+refusal comes back. So the pyramid's refusal is not every slanted corner on a
+cut, and the tetrahedron's is a second gap, since its answer has no small
+feature either: class `refuses/B`, a row of its own.
+
+`mise exec -- just t -E
+'binary(a_broken_three_surface_corner_read_back_from_bytes)'` runs the box's
+three pins and the pyramid's four: 7 tests run, 7 passed.
+
+**What this leaves.**
+
+- The pyramid cut through its apex refusing "side of plane", above. A row,
+  tier 1, `refuses/B`.
+- The tetrahedron cut through its apex refusing `DynamicRangeTooWide` under
+  `certified`, above. A row, tier 1, `refuses/B`.
+- A corner with a curved surface among its three, §294.16's second item, is
+  still not tried. It is Q1813.
