@@ -3374,21 +3374,33 @@ mod probe_q1792 {
     }
 
     fn a_turn(rng: &mut Rng) -> Isometry {
+        a_turn_told(rng).0
+    }
+
+    fn a_turn_told(rng: &mut Rng) -> (Isometry, String) {
         let quarter = |axis: Axis, times: i64| {
             Isometry::rotation(&axis, times as f64 * FRAC_PI_2).expect("a finite turn")
         };
         let direction = Vector::new(rng.unit() - 0.5, rng.unit() - 0.5, rng.unit() - 0.5);
         let Ok(axis) = Axis::new(Point::origin(), direction) else {
-            return Isometry::identity();
+            return (Isometry::identity(), "identity".into());
         };
         if rng.next() % 4 == 0 {
-            return Isometry::rotation(&axis, rng.unit() * TAU).expect("a finite turn");
+            let angle = rng.unit() * TAU;
+            return (
+                Isometry::rotation(&axis, angle).expect("a finite turn"),
+                format!("whole: direction {direction:?} angle {angle:?}"),
+            );
         }
         let small = 10_f64.powf(-6.0 + 4.0 * rng.unit());
         let wobble = Isometry::rotation(&axis, small).expect("a finite turn");
-        let about_z = quarter(Axis::z(), rng.range(0, 3));
-        let about_x = quarter(Axis::x(), rng.range(0, 3));
-        wobble.compose(&about_z.compose(&about_x))
+        let (qz, qx) = (rng.range(0, 3), rng.range(0, 3));
+        let about_z = quarter(Axis::z(), qz);
+        let about_x = quarter(Axis::x(), qx);
+        (
+            wobble.compose(&about_z.compose(&about_x)),
+            format!("wobble: direction {direction:?} small {small:?} qz {qz} qx {qx}"),
+        )
     }
 
     fn a_place(rng: &mut Rng, low: i64, high: i64) -> Vector {
@@ -3417,6 +3429,65 @@ mod probe_q1792 {
             };
             ordered(b[i]) - ordered(a[i])
         })
+    }
+
+    fn a_held_centre(
+        cut: &Plane,
+        faces: [&Surface; 2],
+        near: Point,
+        radius: f64,
+    ) -> Option<(Point, [i64; 3])> {
+        use super::{A_CIRCLE_MAY_MISS_ITS_FACE_BY, a_surface_holds_the_circle};
+        use crate::geometry::plane_through;
+        let normal = cut.normal();
+        let components = normal.components();
+        let start = near.coordinates();
+        let short = cut.offset() - plane_through(near, normal).ok()?.offset();
+        let largest = faces
+            .iter()
+            .filter_map(|face| how_far_off_the_circle_can_be(face, near, normal, radius))
+            .map(|(_, largest)| largest)
+            .fold(0.0_f64, f64::max);
+        let reach = 2.0 * A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF * largest;
+        let leaning: Vec<usize> = (0..3).filter(|&axis| components[axis] != 0.0).collect();
+        let mut nearest: Option<(f64, Point)> = None;
+        for &walked in &leaning {
+            for &solved in leaning.iter().filter(|&&solved| solved != walked) {
+                for step in [f64::next_up as fn(f64) -> f64, f64::next_down] {
+                    let mut at = start;
+                    for _ in 0..=64 {
+                        let moved = at[walked] - start[walked];
+                        if moved.abs() > reach {
+                            break;
+                        }
+                        let landing = start[solved]
+                            + (short - components[walked] * moved) / components[solved];
+                        for tried in [landing.next_down(), landing, landing.next_up()] {
+                            let mut centre = at;
+                            centre[solved] = tried;
+                            let centre = Point::new(centre[0], centre[1], centre[2]);
+                            let reads_back = plane_through(centre, normal).is_ok_and(|back| {
+                                back.normal() == normal
+                                    && back.offset().to_bits() == cut.offset().to_bits()
+                            });
+                            if !reads_back
+                                || !faces.iter().all(|face| {
+                                    a_surface_holds_the_circle(face, centre, normal, radius)
+                                })
+                            {
+                                continue;
+                            }
+                            let off = (centre - near).length();
+                            if nearest.is_none_or(|(nearest_off, _)| off < nearest_off) {
+                                nearest = Some((off, centre));
+                            }
+                        }
+                        at[walked] = step(at[walked]);
+                    }
+                }
+            }
+        }
+        nearest.map(|(_, centre)| (centre, steps(near, centre)))
     }
 
     struct Tally {
@@ -3516,6 +3587,7 @@ mod probe_q1792 {
         let mut pipe_worst = 0.0_f64;
         let mut ball_worst = 0.0_f64;
         let (mut start_past, mut walk_past) = (0_u64, 0_u64);
+        let (mut held_start_past, mut held_walk_past, mut same_radius_past) = (0_u64, 0_u64, 0_u64);
         for _ in 0..3_000_000 {
             let radius = near_a_power_of_two(&mut rng, -3, 5).abs();
             let length = if rng.next() % 2 == 0 {
@@ -3531,7 +3603,7 @@ mod probe_q1792 {
             let ball_radius = radius * bigger;
             let above = ((ball_radius - radius) * (ball_radius + radius)).sqrt();
             let place = a_place(&mut rng, -2, 12);
-            let turn = a_turn(&mut rng);
+            let (turn, told) = a_turn_told(&mut rng);
             let moved = Isometry::translation(place)
                 .expect("a finite move")
                 .compose(&turn);
@@ -3572,16 +3644,32 @@ mod probe_q1792 {
                 across,
             ));
             if on_the_pipe.max(on_the_ball) > 16.0 {
+                let held = a_held_centre(&cut, [&pipe, &ball], crossing.centre, across);
+                if held.is_some() {
+                    if before > 16.0 {
+                        held_start_past += 1;
+                    } else {
+                        held_walk_past += 1;
+                    }
+                    if held_start_past + held_walk_past <= 6 {
+                        println!(
+                            "HELD: {held:?} before {before} radius {radius:?} length {length:?} \
+                             ball radius {ball_radius:?} place {place:?} turn {told}"
+                        );
+                    }
+                }
+                if bigger == 1.0 {
+                    same_radius_past += 1;
+                }
                 if before > 16.0 {
                     start_past += 1;
                 } else {
                     walk_past += 1;
-                    if walk_past <= 5 {
+                    if walk_past <= 12 {
                         println!(
                             "WALK PAST: pipe {on_the_pipe} ball {on_the_ball} before {before} \
                              radius {radius:?} length {length:?} ball radius {ball_radius:?} \
-                             place {place:?} turn {:?} steps {:?}",
-                            turn.rotation_quaternion(),
+                             place {place:?} turn {told} steps {:?}",
                             steps(crossing.centre, centre)
                         );
                     }
@@ -3602,7 +3690,340 @@ mod probe_q1792 {
             "dome: pipe worst {pipe_worst} ball worst {ball_worst} start past {start_past} \
              walk past {walk_past}"
         );
+        println!(
+            "dome: a held centre for start past {held_start_past} walk past {held_walk_past}; \
+             one radius past {same_radius_past}"
+        );
         tally.report();
+    }
+
+    fn a_dome_on_a_bar(
+        model: &mut rcad_topo::Model,
+        radius: f64,
+        length: f64,
+        ball_radius: f64,
+        with_a_pole: bool,
+    ) -> rcad_topo::SolidKey {
+        use rcad_geom::{EdgeRun, HalfSpace, Orientation, Picker};
+        use rcad_predicates::{Policy, ProvenanceLog};
+        use rcad_topo::{DraftStep, SolidBuilder};
+
+        let above = ((ball_radius - radius) * (ball_radius + radius)).sqrt();
+        let centre = Point::new(0.0, 0.0, length);
+        let part_of = |and: Surface, facing: Vector| EdgeRun::PartOfWhereItCrosses {
+            and,
+            picked_by: [Picker::from(
+                HalfSpace::through_a_point_facing(centre, facing).expect("a facing"),
+            )]
+            .into(),
+        };
+        let rim = Surface::Plane(
+            Plane::from_point_and_normal(centre, Vector::new(0.0, 0.0, 1.0)).expect("a plane"),
+        );
+        let up = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("a plane"),
+        );
+        let mut builder = SolidBuilder::new();
+        let mut corners: Vec<_> = [
+            Point::new(radius, 0.0, 0.0),
+            Point::new(radius, 0.0, length),
+            Point::new(-radius, 0.0, length),
+        ]
+        .iter()
+        .map(|&at| builder.add_vertex(at).expect("a corner"))
+        .collect();
+        if with_a_pole {
+            corners.push(
+                builder
+                    .add_vertex(Point::new(0.0, 0.0, length - above + ball_radius))
+                    .expect("a corner"),
+            );
+        }
+        let mut runs = vec![
+            (0, 0, EdgeRun::RightRoundWhereItsFacesCross),
+            (0, 1, EdgeRun::Straight),
+            (1, 2, part_of(rim.clone(), Vector::new(0.0, 1.0, 0.0))),
+            (2, 1, part_of(rim, Vector::new(0.0, -1.0, 0.0))),
+        ];
+        if with_a_pole {
+            runs.push((1, 3, part_of(up, Vector::new(1.0, 0.0, 0.0))));
+        }
+        let edges: Vec<_> = runs
+            .into_iter()
+            .map(|(from, to, run)| {
+                builder
+                    .add_edge(corners[from], corners[to], run)
+                    .expect("an edge")
+            })
+            .collect();
+        let mut along = |which: usize, way: Orientation| {
+            DraftStep::Along(builder.add_coedge(edges[which], way).expect("a coedge"))
+        };
+        let [f0r, p0f, p1f, p3r, p2r, p1r, b2f, b3f] = [
+            (0, Orientation::Reversed),
+            (0, Orientation::Forward),
+            (1, Orientation::Forward),
+            (3, Orientation::Reversed),
+            (2, Orientation::Reversed),
+            (1, Orientation::Reversed),
+            (2, Orientation::Forward),
+            (3, Orientation::Forward),
+        ]
+        .map(|(which, way)| along(which, way));
+        let top_steps = if with_a_pole {
+            let b4f = along(4, Orientation::Forward);
+            let b4r = along(4, Orientation::Reversed);
+            vec![b2f, b3f, b4f, DraftStep::Pole(corners[3]), b4r]
+        } else {
+            vec![b2f, b3f]
+        };
+        let cap = builder.add_wire(&[f0r]).expect("a wire");
+        let side = builder
+            .add_wire(&[p0f, p1f, p3r, p2r, p1r])
+            .expect("a wire");
+        let top = builder.add_wire(&top_steps).expect("a wire");
+        let faces = [
+            (
+                Surface::Plane(
+                    Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                        .expect("a plane"),
+                ),
+                cap,
+            ),
+            (
+                Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius")),
+                side,
+            ),
+            (
+                Surface::Sphere(
+                    Sphere::new(Point::new(0.0, 0.0, length - above), ball_radius)
+                        .expect("a radius"),
+                ),
+                top,
+            ),
+        ];
+        let skin: Vec<_> = faces
+            .into_iter()
+            .map(|(surface, wire)| {
+                (
+                    builder.add_face(surface, &[wire]).expect("a face"),
+                    Orientation::Forward,
+                )
+            })
+            .collect();
+        builder.add_shell(&skin).expect("a shell");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a sound dome")
+    }
+
+    fn what_the_reader_does_with(
+        (radius, length, ball_radius): (f64, f64, f64),
+        place: Vector,
+        turn: Isometry,
+    ) {
+        use rcad_geom::{Deflection, Scale};
+        use rcad_predicates::{Policy, ProvenanceLog};
+
+        let moved = Isometry::translation(place)
+            .expect("a finite move")
+            .compose(&turn);
+        let mut model = rcad_topo::Model::new(Scale::millimetres(10_000.0).expect("a size"));
+        let with_a_pole = place == Vector::new(0.0, 0.0, 0.0) && radius == 2.0 && length == 4.0;
+        let built = a_dome_on_a_bar(&mut model, radius, length, ball_radius, with_a_pole);
+        {
+            let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius"))
+                .transformed(&moved);
+            let above = ((ball_radius - radius) * (ball_radius + radius)).sqrt();
+            let ball = Surface::Sphere(
+                Sphere::new(Point::new(0.0, 0.0, length - above), ball_radius).expect("a radius"),
+            )
+            .transformed(&moved);
+            let cut = Plane::from_point_and_normal(
+                Point::new(0.0, 0.0, length),
+                Vector::new(0.0, 0.0, 1.0),
+            )
+            .expect("a plane");
+            let Surface::Plane(cut) = Surface::Plane(cut).transformed(&moved) else {
+                unreachable!()
+            };
+            let Surface::Cylinder(round) = pipe else {
+                unreachable!()
+            };
+            let crossing = where_a_plane_crosses_a_pipe(&cut, &round).expect("a crossing");
+            let Shape::Circle { radius: across } = crossing.shape else {
+                unreachable!()
+            };
+            let centre = a_centre_its_plane_reads_back_from(&cut, crossing.centre);
+            println!(
+                "walk: {:?} steps {:?} pipe {:?} ball {:?}",
+                centre,
+                centre.map(|c| steps(crossing.centre, c)),
+                centre.map(|c| units(&pipe, c, cut.normal(), across)),
+                centre.map(|c| units(&ball, c, cut.normal(), across)),
+            );
+        }
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let deflection = Deflection::of(0.01).expect("a deflection");
+        let here = model
+            .solid(built)
+            .expect("a key")
+            .measure(deflection, &policy, &mut log)
+            .map(|it| it.volume());
+        println!("built unplaced: volume {here:?}");
+        model.place_solid(built, &moved).expect("a key");
+        let here = model
+            .solid(built)
+            .expect("a key")
+            .measure(deflection, &policy, &mut log)
+            .map(|it| it.volume());
+        println!("built placed: volume {here:?}");
+        let text = match super::write(&model, "a dome on a bar") {
+            Ok(text) => text,
+            Err(why) => {
+                println!("WRITE REFUSED: {why}");
+                return;
+            }
+        };
+        let file = crate::StepFile::read(text.as_bytes()).expect("it parses");
+        match crate::Import::read(&file, &policy, &mut log) {
+            Err(why) => println!("READ REFUSED: {why}"),
+            Ok(import) => {
+                let [(_, came)] = import.solids() else {
+                    println!("READ: {} solids", import.solids().len());
+                    return;
+                };
+                let there = import.model();
+                for face in there.solids().next().expect("a solid").faces() {
+                    for coedge in face.wires().flat_map(rcad_topo::WireView::coedges) {
+                        let kind = match coedge.edge().run() {
+                            rcad_geom::EdgeRun::PartOfWhereItCrosses { and, .. } => {
+                                format!(
+                                    "part of where it crosses a {}",
+                                    match and {
+                                        Surface::Plane(_) => "plane",
+                                        Surface::Sphere(_) => "ball",
+                                        Surface::Cylinder(_) => "pipe",
+                                        _ => "other",
+                                    }
+                                )
+                            }
+                            other => format!("{other:?}").chars().take(40).collect(),
+                        };
+                        println!("READ: edge {kind}");
+                    }
+                }
+                println!("READ: validate {:?}", there.validate(&policy, &mut log));
+                let back = there
+                    .solid(*came)
+                    .expect("a key")
+                    .measure(deflection, &policy, &mut log)
+                    .map(|it| it.volume());
+                println!("READ: volume {back:?}");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "Q1792 relay probe: run by hand with --run-ignored, remove before the row lands"]
+    fn probe_q1792_read_back() {
+        let wobble = |direction: [f64; 3], small: f64, qz: f64, qx: f64| {
+            let [x, y, z] = direction;
+            let axis = Axis::new(Point::origin(), Vector::new(x, y, z)).expect("an axis");
+            let quarter = |axis: Axis, times: f64| {
+                Isometry::rotation(&axis, times * FRAC_PI_2).expect("a finite turn")
+            };
+            Isometry::rotation(&axis, small)
+                .expect("a turn")
+                .compose(&quarter(Axis::z(), qz).compose(&quarter(Axis::x(), qx)))
+        };
+        println!("== plain dome, radius 2 under a ball of 3");
+        what_the_reader_does_with(
+            (2.0, 4.0, 3.0),
+            Vector::new(0.0, 0.0, 0.0),
+            Isometry::identity(),
+        );
+        println!("== one radius, held at [-4, 0, 3]");
+        what_the_reader_does_with(
+            (0.125, 1955.4040193072453, 0.125),
+            Vector::new(2048.000000000001, 0.0, -64.00000000000001),
+            wobble(
+                [
+                    0.30906701074028486,
+                    -0.09086077538826243,
+                    -0.3130174433172692,
+                ],
+                3.7855050333759225e-6,
+                1.0,
+                3.0,
+            ),
+        );
+        println!("== walk past 5, not moved");
+        what_the_reader_does_with(
+            (2.0, 1112.2883773153553, 2.9825792169961787),
+            Vector::new(0.0, 0.0, 0.0),
+            Isometry::identity(),
+        );
+        println!("== walk past 5, a quarter turn");
+        what_the_reader_does_with(
+            (2.0, 1112.2883773153553, 2.9825792169961787),
+            Vector::new(-1023.9999999999999, 0.0, 0.0),
+            wobble([0.0, 0.0, 1.0], 0.0, 1.0, 1.0),
+        );
+        println!("== walk past 5, short");
+        what_the_reader_does_with(
+            (2.0, 12.288377315355, 2.9825792169961787),
+            Vector::new(-1023.9999999999999, 0.0, 0.0),
+            wobble(
+                [0.27529806651941413, 0.16569388549971065, 0.3089406781626052],
+                0.009278730274298288,
+                1.0,
+                1.0,
+            ),
+        );
+        println!("== walk past 5");
+        what_the_reader_does_with(
+            (2.0, 1112.2883773153553, 2.9825792169961787),
+            Vector::new(-1023.9999999999999, 0.0, 0.0),
+            wobble(
+                [0.27529806651941413, 0.16569388549971065, 0.3089406781626052],
+                0.009278730274298288,
+                1.0,
+                1.0,
+            ),
+        );
+        println!("== walk past 2");
+        what_the_reader_does_with(
+            (0.9999999999999998, 479.72270192353557, 1.8440304364328786),
+            Vector::new(511.99999999999994, -0.9999999999999998, -4.000000000000002),
+            wobble(
+                [
+                    -0.22938941583012418,
+                    -0.32493530113722535,
+                    0.004735058071504095,
+                ],
+                0.001509429458854325,
+                3.0,
+                1.0,
+            ),
+        );
+        println!("== walk past 4 (whole turn)");
+        let axis = Axis::new(
+            Point::origin(),
+            Vector::new(
+                -0.018298610974051055,
+                0.3744875399093692,
+                -0.01722694567337446,
+            ),
+        )
+        .expect("an axis");
+        what_the_reader_does_with(
+            (16.000000000000007, 3561.383252900813, 29.695524847710807),
+            Vector::new(0.0, -1.9999999999999998, 4095.9999999999995),
+            Isometry::rotation(&axis, 2.9725478286912983).expect("a turn"),
+        );
     }
 
     #[test]
