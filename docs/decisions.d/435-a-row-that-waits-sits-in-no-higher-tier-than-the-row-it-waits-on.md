@@ -111,6 +111,23 @@ he pins (§430.5), and `pin` refuses a C or D row (§430.4), so the answer may
 need that rule changed too. None of the 12 has a class, so this case does not
 occur today.
 
+*It occurred on 2026-10-12, and Mattias moved the blocker up.* Q1845
+(`wrong/B`) waited on Q1860, the walk fix for Q859's bar of radius 1 + 2^-51
+grazing a turned block. Q1860's lane found the walk's arc right and both faults
+in the mesher: Q1868 (the fin 2^-51 thick meshes to no triangle) and Q1869 (the
+fold ladder retries about 53 rungs and never finishes), both `refuses/C`, so
+both in tier 5, with the landing Q1870 waiting on them. Mattias chose to move
+Q1868 and Q1869 to tier 1: the walk fix answers about 20 shapes, and a ladder
+that never ends meets any shape that folds at every rung. `tier` refuses a row
+with a class outside its class's tier, and C is what the rows are by §352.3
+(only a probe builds the fin), so tagging them B would have been false. They
+went up as `tag <id> -` then `tier <id> 1`: they lost their class, not their
+grade, which this note keeps. `tier` took Q1870 and Q1871 along, and Q1871, a
+small docs row, then went on to tier 2. Q1868, Q1869 and Q1870 were ranked
+ahead of tier 1's other rows with no class, so the fill reaches them first. Q1845, Q1846, Q1465 and Q1852 now wait on Q1870, and Q1860 is dropped.
+No verb keeps a C class in tier 1. That waits for a second case, which would
+then be the rule's consumer (§13).
+
 **A pinned waiting row is the same case.** A pinned row sits in tier 1 and no
 verb but `take`, `done` and `pick` moves it (§430.4), so it cannot go down.
 
