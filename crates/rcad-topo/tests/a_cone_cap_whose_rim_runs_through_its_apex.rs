@@ -736,9 +736,11 @@ fn the_corners_and_where_their_planes_meet(
                             .any(|coedge| coedge.start().point() == corner)
                     })
                 })
-                .map(|face| match face.surface() {
-                    Surface::Plane(plane) => plane,
-                    other => panic!("a face at {corner:?} on {other:?}"),
+                .map(|face| {
+                    let Surface::Plane(plane) = face.surface() else {
+                        panic!("a face at {corner:?} on {:?}", face.surface())
+                    };
+                    plane
                 })
                 .collect();
             let [first, second, third] = planes[..] else {
