@@ -16,17 +16,20 @@
 //! **No fuse found gives a different answer for it.** The arm is reached only
 //! where a point of a piece is a rounding or so off the cap's ball, so its box
 //! straddles the cap's sign: by a ball centred on the half ball's centre with a
-//! radius one or four roundings off 5, 16 times in each fuse, and by a bowl,
-//! that ball kept below a plane `z = top`, 4 to 34 times. Q1760's lanes turned
-//! the arm back to what it was before Q1740, through a probe edit that is not
-//! kept, and every fuse here answered the same with it either way: all 192 of
-//! them and 120 more of balls and half balls shifted by `1e-15`. Across all of
-//! `rcad-topo`'s tests the arm was reached only by three tests of
-//! `a_point_on_a_face_beside_a_trimming_nothing_follows.rs`, none of them a
-//! fuse, and 25 more shapes fused with the capped half ball (blocks and balls
-//! over the cap and the floor, copies of it turned and placed apart) never
-//! reached it. So the pins below are what each fuse answers today; they are
-//! not a check that the arm is there.
+//! radius one or four roundings off 5, and by a bowl, that ball kept below a
+//! plane `z = top`. The 288 fuses pinned here reach it 1428 times, all of them
+//! with the capped half ball: 384 times in the 24 fuses with a ball, 1044 in
+//! the 120 with a bowl. Q1760's lanes turned the arm back to what it was before
+//! Q1740, through a probe edit to `classify.rs` that is not kept, and every
+//! fuse pinned here answered the same with it either way. So did 372 more that
+//! are not pinned: balls of other radii and centres, bowls of radius 5 and
+//! `5(1 ± 2⁻⁴⁰)`, and copies of the half ball, capped or not, moved by up to
+//! `1e-15`. Across the rest of `rcad-topo`'s tests the arm was reached only by
+//! three tests of `a_point_on_a_face_beside_a_trimming_nothing_follows.rs`,
+//! none of them a fuse, and 25 more shapes fused with the capped half ball
+//! (blocks and balls over the cap and the floor, copies of it turned and placed
+//! apart) never reached it. So the pins below are what each fuse answers
+//! today; they are not a check that the arm is there.
 //!
 //! **The ring was not run.** The row asked for a ring whose wall nothing
 //! follows too, and none was found that can be built: `holds.rs` follows every
@@ -42,7 +45,8 @@
 use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftStep, Error, FaceKey, Invalid, Model, Rule, SolidBuilder, SolidKey, SolidView,
+    DraftEdge, DraftStep, DraftWire, Error, FaceKey, Invalid, Model, Rule, SolidBuilder, SolidKey,
+    SolidView,
 };
 
 use Answer::{CannotMesh, EnclosesNothing, NamesTheCap, Solids, Undecidable};
@@ -82,8 +86,8 @@ enum Half {
 }
 
 /// The ball one rounding bigger is refused under every rule both ways round,
-/// and so is the one four roundings bigger. Each shell they leave between the
-/// two balls is under `4e-15` thick.
+/// and so is the one four roundings bigger, where the half ball alone answers
+/// all six. Each shell they leave between the two balls is under `4e-15` thick.
 #[test]
 fn a_ball_just_bigger_is_undecidable_against_the_capped_half_ball() {
     for radius in roundings_up() {
@@ -135,10 +139,10 @@ fn a_ball_just_smaller_names_the_cap() {
 }
 
 /// A bowl one or four roundings off the cap's ball. Kept below `z = 3` it is
-/// refused naming the cap, and so it is kept below `z = -3`, clear of the half
+/// refused naming the cap, and so is it kept below `z = -3`, clear of the half
 /// ball; kept below `z = 1`, or `z = -1`, it is `Undecidable`. Kept below the
-/// floor it names the cap, but for the bowl a rounding smaller with the half
-/// ball listed second.
+/// floor it names the cap, but the bowl a rounding smaller is `Undecidable`
+/// whenever the half ball is listed first.
 #[test]
 fn a_bowl_just_off_the_caps_ball_names_the_cap_or_is_undecidable() {
     let [one_up, four_up] = roundings_up();
@@ -185,11 +189,11 @@ fn a_bowl_just_off_the_caps_ball_names_the_cap_or_is_undecidable() {
 
 /// The same bowls against the half ball alone. Kept below `z = 1` or
 /// `z = -1` they are still `Undecidable`, the second though the bowl is 1
-/// clear of the half ball and is two solids with it. Kept below the floor,
-/// the bowls a rounding off are `Undecidable` and those four off answer. Kept
-/// below `z = 3`, the half ball less the bowl four roundings smaller is
-/// refused for enclosing nothing, and the union with the bowl a rounding
-/// smaller cannot be meshed.
+/// clear of the half ball and is two solids with it. Kept below `z = -3` they
+/// answer. Kept below the floor, the bowls a rounding off are `Undecidable`
+/// and those four off answer. Kept below `z = 3`, the bowls bigger answer, the
+/// half ball less the bowl four roundings smaller is refused for enclosing
+/// nothing, and the union with the bowl a rounding smaller cannot be meshed.
 #[test]
 fn a_bowl_just_off_the_half_ball_alone_answers_or_is_undecidable() {
     let [one_up, four_up] = roundings_up();
@@ -276,12 +280,11 @@ fn six_answers(other: Other, half: Half) -> [Answer; 6] {
         for half_first in [true, false] {
             let mut model = Model::new(Scale::millimetres(125.0).expect("a positive size"));
             let half_ball = a_half_ball(&mut model, half);
+            let cap = (half == Half::Capped)
+                .then(|| the_cap(model.solid(half_ball).expect("this model made the key")));
             let other = match other {
                 Other::Ball(radius) => model
-                    .add_ball(
-                        radius,
-                        &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("no shift"),
-                    )
+                    .add_ball(radius, &Isometry::identity())
                     .expect("a ball"),
                 Other::Bowl { radius, top } => a_bowl(&mut model, radius, top),
             };
@@ -297,7 +300,6 @@ fn six_answers(other: Other, half: Half) -> [Answer; 6] {
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             );
-            let cap = (half == Half::Capped).then(|| the_cap(model.solid(half_ball)));
             *at.next().expect("six answers") = match fused {
                 Ok(answer) => Solids(answer.solids().len()),
                 Err(Error::Undecidable { .. }) => Undecidable,
@@ -421,11 +423,7 @@ fn a_bowl(model: &mut Model, radius: f64, top: f64) -> SolidKey {
 }
 
 /// A wire that walks once round the closed `edge`.
-fn walking(
-    builder: &mut SolidBuilder,
-    edge: rcad_topo::EdgeKey,
-    orientation: Orientation,
-) -> rcad_topo::WireKey {
+fn walking(builder: &mut SolidBuilder, edge: DraftEdge, orientation: Orientation) -> DraftWire {
     let coedge = builder
         .add_coedge(edge, orientation)
         .expect("an edge of this builder");
