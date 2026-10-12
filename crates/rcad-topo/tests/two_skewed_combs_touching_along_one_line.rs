@@ -29,6 +29,17 @@
 //! §417's 2026-10-11 note). The prism's six corners all round onto `y = 2`, so
 //! it is left out, and nothing is left. That is the exact answer: the two
 //! combs share a line, and a line holds no space.
+//!
+//! **Under a tolerant policy each difference is now the comb it starts from**
+//! (queue row Q1710). Until Q1710 each comb less the other kept the prism as a
+//! notch in its own shell, whose floor, a triangle of the other comb's bottom
+//! or top, had all three corners rounded onto `y = 2` and so wound neither
+//! way: refused `OuterWireWindsAgainstTheNormal`. The shell fold above takes
+//! only a shell of its own. Now the fuse asks the same question of what the
+//! intersection would keep before it keeps anything, and reads each piece of
+//! the prism as lying on the other comb facing the other way, which is what
+//! two solids touching from outside do (`fuse/select.rs`, §417's 2026-10-12
+//! note). The intersection still keeps none of it, and logs the one record.
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 mod cones;
@@ -71,7 +82,7 @@ fn every_certified_fuse_of_the_two_combs_is_refused_for_the_range() {
 }
 
 /// Under `Policy::tolerant(25.0)` the range is only a warning, so moving where
-/// it is asked moved nothing here. Queue row Q1615 owns the refusals.
+/// it is asked moved nothing here.
 ///
 /// The union answers one solid, both ways round, holding what the two combs
 /// hold between them, with the one record the range warns with. The
@@ -80,16 +91,25 @@ fn every_certified_fuse_of_the_two_combs_is_refused_for_the_range() {
 /// their rounded planes close is a shell whose corners all lie within the
 /// policy's wobble of one of its planes, so the fuse leaves it out and logs
 /// that once, `7.9e−15`, and logs nothing else. Until Q1687 it was refused
-/// `VolumeIsNotPositive { volume: 0.0 }`. Either difference is refused as an
-/// outline winding against its face, once the answer is written with its
-/// corners rounded.
+/// `VolumeIsNotPositive { volume: 0.0 }`.
+///
+/// Either difference is the comb it starts from, corner for corner as a fuse
+/// writes that comb less a block far away, with that one record and no other
+/// (queue row Q1710). Until Q1710 each was refused as
+/// an outline winding against its face: the comb less the other kept a notch
+/// the shape of the prism, whose floor is a triangle of the other comb's
+/// bottom or top with all three corners rounded onto `y = 2`, and so no
+/// winding at all. Neither fold reached it. The prism there is no shell of
+/// its own, only a notch in the comb's, and each of its corners has two meets
+/// of three planes near it, not three (`docs/decisions.md` §417).
 #[test]
-fn under_a_tolerant_policy_the_union_answers_the_intersection_is_nothing_and_each_difference_is_refused()
+fn under_a_tolerant_policy_the_union_answers_the_intersection_is_nothing_and_each_difference_is_the_comb_it_starts_from()
  {
     let policy = Policy::tolerant(25.0);
     let (model, combs) = the_combs().build();
     let both = volume_of(&model, &combs);
-    for [first, second] in [[combs[0], combs[1]], [combs[1], combs[0]]] {
+    for [mine, other] in [[0, 1], [1, 0]] {
+        let [first, second] = [combs[mine], combs[other]];
         let mut union = model.clone();
         let mut log = ProvenanceLog::new();
         let answer = union
@@ -128,23 +148,82 @@ fn under_a_tolerant_policy_the_union_answers_the_intersection_is_nothing_and_eac
         );
 
         let mut difference = model.clone();
-        let refused = difference.fuse(
-            &[first],
-            &[second],
-            Rule::Difference,
-            &policy,
-            &mut ProvenanceLog::new(),
+        let mut log = ProvenanceLog::new();
+        let answer = difference
+            .fuse(&[first], &[second], Rule::Difference, &policy, &mut log)
+            .unwrap_or_else(|why| panic!("the difference, {first:?} first: {why:?}"));
+        let [left] = answer.solids() else {
+            panic!("the difference, {first:?} first: {:?}", answer.solids());
+        };
+        difference
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("the difference, {first:?} first: {why:?}"));
+        let (written, alone) = the_comb_less_a_block_far_away(mine, &policy);
+        assert_eq!(
+            corners_of(&difference, *left),
+            corners_of(&written, alone),
+            "the difference, {first:?} first"
         );
-        assert!(
-            matches!(
-                refused,
-                Err(Error::TheFuseWroteABrokenAnswer {
-                    broken: Invalid::OuterWireWindsAgainstTheNormal
-                })
-            ),
-            "the difference, {first:?} first: {refused:?}"
+        assert_eq!(
+            difference
+                .solid(*left)
+                .expect("a key the fuse made")
+                .faces()
+                .count(),
+            model
+                .solid(first)
+                .expect("a key the combs made")
+                .faces()
+                .count(),
+            "the difference, {first:?} first"
+        );
+        assert_eq!(
+            volume_of(&difference, answer.solids()),
+            volume_of(&written, &[alone]),
+            "the difference, {first:?} first"
+        );
+        let predicates: Vec<&str> = log
+            .records()
+            .iter()
+            .map(|record| record.predicate())
+            .collect();
+        assert_eq!(
+            predicates,
+            ["a shell within the wobble of one of its planes taken as flat"],
+            "the difference, {first:?} first"
         );
     }
+}
+
+/// The model a difference of the comb at `index` in [`the_combs`], less a block
+/// far from it, leaves, and the one solid it answers.
+///
+/// A fuse writes each corner where its planes meet in `f64`, not where the
+/// input put it, so this is the comb as any fuse writes it. Comb 1's two
+/// corners at `(−1, 2, z)` come out at `x = −1.000_000_000_000_000_4` here,
+/// under either policy, with no other comb anywhere near.
+fn the_comb_less_a_block_far_away(index: usize, policy: &Policy) -> (Model, SolidKey) {
+    let mut configuration = the_combs();
+    configuration.solids[1 - index] = Placed {
+        shape: Shape::Block { width: 1, depth: 1 },
+        skew: Skew { x_per_y: 0 },
+        height: 1,
+        at: [20, 20, 20],
+    };
+    let (mut model, solids) = configuration.build();
+    let answer = model
+        .fuse(
+            &[solids[index]],
+            &[solids[1 - index]],
+            Rule::Difference,
+            policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("comb {index} less a block far away: {why:?}"));
+    let [alone] = answer.solids() else {
+        panic!("comb {index} less a block far away: {:?}", answer.solids());
+    };
+    (model, *alone)
 }
 
 fn the_combs() -> Configuration {
@@ -172,6 +251,21 @@ fn the_combs() -> Configuration {
         turn: None,
         elsewhere: Elsewhere::here(),
     }
+}
+
+/// Every corner of `solid`'s faces, sorted, each once.
+fn corners_of(model: &Model, solid: SolidKey) -> Vec<[f64; 3]> {
+    let mut corners: Vec<[f64; 3]> = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .flat_map(|face| face.wires())
+        .flat_map(|wire| wire.points())
+        .map(|point| point.coordinates())
+        .collect();
+    corners.sort_by(|one, other| one.partial_cmp(other).expect("a corner is a number"));
+    corners.dedup();
+    corners
 }
 
 fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {

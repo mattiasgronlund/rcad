@@ -647,3 +647,80 @@ open. Nothing else.
 > one below the floor, 417.7's wide rule of `6ffbb172`: reasoned, not run, to
 > give the block less the tipped cube an edge with four faces along it, as
 > 417.8 (a) records the wide rule doing.
+
+> **2026-10-12 note (Q1710): a tolerant intersection or difference reads a
+> flat shell both groups hold as two sides lying on each other.** The skewed
+> combs of Q1612, under `Policy::tolerant(25.0)`, either difference, either
+> way round, were refused `TheFuseWroteABrokenAnswer { broken:
+> OuterWireWindsAgainstTheNormal }` after Q1687.
+>
+> *What winds.* Each comb less the other kept the prism of `3.08e−32` as a
+> notch in its own shell. The face that winds is the notch's floor: comb 1's
+> bottom at `z = 1`, turned round, with comb 0 first, and comb 0's top at
+> `z = 2` with comb 1 first. It is a triangle whose three corners all round
+> onto `y = 2`, so its winding is `Zero`. Measured by the first lane with a
+> temporary print in `validate.rs`'s `check_flat_face`, since taken out
+> (`ba0a5ce5`'s message).
+>
+> *Why neither fold reached it.* The shell fold of the note above takes a
+> whole shell. In the intersection the prism is a shell of its own, but in a
+> difference it is a notch in the comb's shell, whose other corners lie a
+> comb's width from any one plane of it. 417.7's corner fold takes three meets
+> of three planes near one input corner, and each corner of the prism has two
+> near it, not three, as 417.8's *What this leaves* says.
+>
+> *The rule.* In `fuse/select.rs`, `choose` now places every piece before it
+> keeps any. Then, under a tolerant policy, for a rule that keeps a piece
+> buried in the other group otherwise than one lying on it facing the other
+> way (an intersection or a difference, not a union, which drops both), it
+> puts together the pieces the intersection keeps as `assemble` does
+> (`Assembly::joined_into_shells`), and asks of each shell the shell fold's
+> own test, `Assembly::takes_as_flat`
+> (`the_pieces_of_each_shell_both_hold_taken_as_flat` in `fuse/assemble.rs`).
+> Each piece of a shell taken as flat, every piece of which is buried in the
+> other group and which holds pieces of both groups, is read as
+> `Placement::On { same_way: false }` against a solid of the other group in
+> that shell. The selection table then drops all of it in an intersection, and
+> in a difference keeps the arguments' pieces (`KeepIfItComesFirst`, and the
+> arguments come first) and drops the tools'. That is what the two sides of a
+> sheet with no inside are: two solids touching from outside. It is asked over
+> what the intersection keeps, whichever rule was asked for, because only
+> there is the prism a shell of its own.
+>
+> *The log.* The put-together's own records and each shell's record go into
+> the fuse's log only when some shell is taken as flat, since only then does
+> the answer rest on them. A put-together that is refused takes no shell as
+> flat, and the fuse goes on as it did before. Under `Policy::certified()`
+> nothing is asked.
+>
+> *The corners.* Comb 1 less comb 0 writes comb 1's two corners at
+> `(−1, 2, z)` at `x = −1.0000000000000004`. So does comb 1 less a block one
+> wide at `(20, 20, 20)`, under the certified policy and the tolerant one alike:
+> a fuse writes each corner where its planes meet in `f64`, and comb 0 is
+> nowhere near. So the test compares each difference with its comb less that
+> far block, corner for corner and volume for volume, and the face count with
+> the input comb's.
+>
+> *Before and after.* Before, both differences were refused as above. After,
+> each answers one solid that validates, the comb it starts from, with one
+> record of *"a shell within the wobble of one of its planes taken as flat"*
+> and no other. The intersection still answers no solid with that one record,
+> which now comes from `choose` and no longer from the shell fold. A temporary
+> print in both, over all of `rcad-topo` (`mise exec -- just t -p rcad-topo
+> --no-fail-fast`, 2001 passed), found the new rule reached by the combs' test
+> alone, four times (two rules, either way round), and the shell fold only by
+> `the_tipped_cube_less_the_block_is_one_solid_where_its_corner_rounds_below_the_floor_tolerant`.
+> `under_a_tolerant_policy_the_union_answers_the_intersection_is_nothing_and_each_difference_is_the_comb_it_starts_from`
+> pins it.
+>
+> *Considered and not taken.* A new `Placement` for a piece of a flat shell:
+> `Placement` is matched with every case named in many places, and
+> `On { same_way: false }` gives each rule the fate wanted. Mapping faces back
+> to pieces without a `pieces` field on `Face`: faces are left out as the
+> assembly goes, and their places move.
+>
+> *What this leaves.* A tolerant intersection or difference with a piece
+> held by both groups now puts the intersection's pieces together once more
+> before it keeps any. A shape whose intersection's put-together panics
+> would now panic in its difference too: not seen in `rcad-topo`'s tests, and
+> not run.
