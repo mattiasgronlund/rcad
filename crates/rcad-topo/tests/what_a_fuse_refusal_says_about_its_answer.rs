@@ -142,11 +142,16 @@ fn a_key_that_names_nothing_here_is_a_limit() {
     }
 }
 
+/// Too much skin to measure is both kinds, so it says not known.
+///
 /// An area past the largest `f64` has no `f64` to be handed back in: a face of
 /// a cube of side `1e200` is `1e400`, and a slab `1e154` wide and one thick
-/// holds `1e308` of space inside `2e308` of skin.
+/// holds `1e308` of space inside `2e308` of skin. Those are limits. A
+/// parallelogram whose area is under `f64::MAX`, worked out exactly here from
+/// its corners, is refused too, top and bottom alike, because the rounded sum
+/// of its fan comes out past it: a gap.
 #[test]
-fn an_area_past_the_largest_f64_is_a_limit() {
+fn an_area_too_large_to_measure_is_not_known_because_a_face_under_f64_max_is_refused_too() {
     let mut model = a_model();
     let huge = a_cube(&mut model, 1e200);
     let solid = model.solid(huge).expect("this model made the key");
@@ -172,13 +177,77 @@ fn an_area_past_the_largest_f64_is_a_limit() {
         )
         .expect_err("2e308 of skin");
 
-    for refusal in [one_face, whole] {
+    let mut refusals = vec![one_face, whole];
+    refusals.extend(the_faces_of_a_parallelogram_just_under_f64_max_refused());
+    for refusal in &refusals {
         assert!(
             matches!(refusal, Error::SurfaceAreaTooLargeToMeasure),
             "{refusal:?}"
         );
-        assert_eq!(refusal.limit_or_gap().to_string(), "limit");
+        assert_eq!(refusal.limit_or_gap().to_string(), "not known");
     }
+}
+
+/// What measuring the top and the bottom of a thin prism gives, when the
+/// prism's cross-section is a parallelogram with an area just under
+/// `f64::MAX`.
+///
+/// The corners are whole numbers times `2^460`, so the area is
+/// `(p·s − q·r)·2^920` exactly, and `f64::MAX` is `(2^104 − 2^51)·2^920`. The
+/// numbers were found by a search over such parallelograms, which met 30 of
+/// 3200 faces refused like this.
+fn the_faces_of_a_parallelogram_just_under_f64_max_refused() -> Vec<Error> {
+    let [p, q, r, s]: [i64; 4] = [
+        4_755_221_860_500_385,
+        4_426_005_373_008_903,
+        -2_708_312_355_644_458,
+        1_744_483_182_727_879,
+    ];
+    let area_over_two_to_the_920 = i128::from(p) * i128::from(s) - i128::from(q) * i128::from(r);
+    assert!(
+        area_over_two_to_the_920 < (1i128 << 104) - (1i128 << 51),
+        "the area is under f64::MAX"
+    );
+    let corners = [[0, 0], [p, q], [p + r, q + s], [r, s]];
+    let unit = two_to_the(460);
+    let profile =
+        ProfileBuilder::new(corners.map(|corner| corner.map(|whole| exactly(whole) * unit)))
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a parallelogram");
+    let mut model = Model::new(Scale::millimetres(two_to_the(513)).expect("a working size"));
+    let prism = model
+        .add_extrusion(&profile, 0.5, &Isometry::identity())
+        .expect("building a prism needs no decision");
+    let solid = model.solid(prism).expect("this model made the key");
+    let ends: Vec<_> = solid
+        .faces()
+        .filter(|face| {
+            face.surface()
+                .as_plane()
+                .is_some_and(|plane| plane.normal().components()[2] != 0.0)
+        })
+        .map(|face| face.key())
+        .collect();
+    assert_eq!(ends.len(), 2, "a prism has a top and a bottom");
+    ends.into_iter()
+        .map(|end| {
+            solid
+                .measure_one_face(
+                    end,
+                    a_deflection(),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect_err("an area just under f64::MAX")
+        })
+        .collect()
+}
+
+/// `whole` as an `f64`, which must hold it with nothing rounded.
+fn exactly(whole: i64) -> f64 {
+    let held = whole as f64;
+    assert_eq!(held as i64, whole, "{whole} is not an f64");
+    held
 }
 
 /// Too long to measure is both kinds, so it says not known.
