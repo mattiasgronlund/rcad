@@ -1803,6 +1803,13 @@ impl Assembly {
     /// here, which depend on the order the solids were handed over — the same
     /// rule [`Assembly::which_to_keep_first`] keeps a corner by.
     ///
+    /// **A group joined only across whole closed curves needs no seam either**,
+    /// since each piece lay flat without one and the joining opens nothing up
+    /// ([`Assembly::joined_only_across_whole_rings`]): a long pipe cut right
+    /// round where it crosses another bar's cap planes, far off the caps
+    /// (Q1660). That is asked only where some ring cannot be counted, as a
+    /// ring of half ellipses cannot.
+    ///
     /// Anything else that goes right round — a group with other than two such
     /// rings, neither an edge nor a chain of rulings across, or a seam that
     /// still leaves a ring going round — and a group whose rings cannot be
@@ -1831,7 +1838,10 @@ impl Assembly {
                 }
                 continue;
             }
-            if self.needs_no_seam(&members, along, dissolved) {
+            if self.needs_no_seam(&members, along, dissolved)
+                || (self.joined_only_across_whole_rings(&inside, along)
+                    && self.a_ring_cannot_be_counted(&members, along, dissolved))
+            {
                 continue;
             }
             let seam = self.a_seam_across_the_band(&members, along, dissolved, &inside);
@@ -1857,8 +1867,10 @@ impl Assembly {
     /// `a_cone_united_with_what_it_shares_with_a_block_is_the_cone`).
     ///
     /// A ring of several sides that goes right round beside a second ring is
-    /// not covered: the band between them does need a seam, and
-    /// [`Assembly::a_seam_across_the_band`] finds it.
+    /// not covered: the band between them does need a seam where the joining
+    /// cut it open across, and [`Assembly::a_seam_across_the_band`] finds it.
+    /// Where it joined only across whole closed curves it does not
+    /// ([`Assembly::joined_only_across_whole_rings`]).
     ///
     /// **One ring right round a cone and nothing else is a cap round its
     /// apex**, and needs no seam either, however many sides it has. The other
@@ -1884,6 +1896,54 @@ impl Assembly {
         rings.iter().all(|ring| {
             ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(false)
         })
+    }
+
+    /// Whether every edge dissolved inside one group, `inside`, is a whole
+    /// ring of one side in both pieces it lies between.
+    ///
+    /// **Joining across such an edge opens nothing up**, whatever the other
+    /// rings are, so it needs no seam. Each piece lay flat as the arrangement
+    /// made it, with no seam, and the joined face's rings are the pieces'
+    /// other rings unchanged: a band between a closed curve and a ring of
+    /// several sides, joined to a band between that curve and a second one,
+    /// is a band between the second curve and the ring of several sides, the
+    /// shape the first band already was. A long bar through another at a
+    /// slant has its wall cut where it crosses the other bar's cap planes, far
+    /// off the caps, and each piece outside the other bar came back in two,
+    /// between its own cap circle and that cut and between the cut and the
+    /// two half ellipses (`two_equal_bars_leaning_at_each_other.rs`, Q1660).
+    /// [`Assembly::needs_no_seam`] asks of the rings left instead, and a ring
+    /// of half ellipses has no plane to say whether it goes right round.
+    ///
+    /// **It is asked only where a ring cannot be counted**
+    /// ([`Assembly::a_ring_cannot_be_counted`]), the case the rules before it
+    /// had no answer for. Where every ring can be counted those rules decide,
+    /// and a frustum beside a block keeps the circle the block's floor cut
+    /// round its wall: asked there too, this joined it back, and the three
+    /// tests of `a_rim_a_fuse_cut_round_one_cone.rs` and
+    /// `a_frustum_shared_with_its_union_with_a_block_beside_it_keeps_the_circle_the_union_cut`
+    /// in `fuse_laws_over_a_cone.rs` that pin that circle failed. Whether it
+    /// stays is row Q1051's.
+    fn joined_only_across_whole_rings(&self, inside: &[usize], along: &[[Dart; 2]]) -> bool {
+        inside.iter().all(|&edge| {
+            along[edge]
+                .iter()
+                .all(|dart| self.faces[dart.face].wires[dart.wire].len() == 1)
+        })
+    }
+
+    /// Whether some ring of the face `members` join into is one
+    /// [`Assembly::a_ring_goes_right_round`] cannot count.
+    fn a_ring_cannot_be_counted(
+        &self,
+        members: &[usize],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+    ) -> bool {
+        let surface = self.faces[members[0]].surface;
+        self.rings_of_a_curved_face(members, along, dissolved)
+            .iter()
+            .any(|ring| self.a_ring_goes_right_round(ring, &surface).is_none())
     }
 
     /// The dissolved edges to keep as the seam across a band, where keeping
@@ -3242,6 +3302,12 @@ impl Assembly {
             straight_through.remove(&(lump, corner));
             still_a_corner[corner] = true;
         }
+        for (lump, corner) in
+            self.the_corners_of_each_run_between_two_tangent_points(&leaving, &straight_through)
+        {
+            straight_through.remove(&(lump, corner));
+            still_a_corner[corner] = true;
+        }
         let runs = runs_through(self.edges.len(), &leaving, &straight_through);
 
         let corner_now = numbered(still_a_corner.into_iter());
@@ -3384,6 +3450,69 @@ impl Assembly {
             }
         }
         kept
+    }
+
+    /// Every corner walked straight through on a run of edges whose two ends
+    /// are both points where the two surfaces it runs along are tangent, so
+    /// that the run stays in the pieces it was cut into.
+    ///
+    /// **Such a run cannot be named as one edge.** An arc is told from its
+    /// sibling by the way `∇S × ∇T` runs at one of its ends
+    /// ([`Edge::the_way_across_the_chord_into_the_arc`]), and at a point where
+    /// the two surfaces are tangent that is exactly nought. Two pipes of one
+    /// width whose axes meet cross in four half ellipses that all run between
+    /// the two points their walls touch at, and the arrangement cuts each half
+    /// at its middle so that it has a corner of its own
+    /// (`place_the_middle_of_each_half` in `fuse/arrange.rs`). Folded at that
+    /// middle, every fuse that joined some other face as well was refused
+    /// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`: a long bar through
+    /// another at a slant, whose wall is cut where it crosses the other bar's
+    /// cap planes (`two_equal_bars_leaning_at_each_other.rs`, Q1660). Kept,
+    /// the answer is the one the fuse gives where nothing is joined.
+    ///
+    /// The test is the same exact one the naming makes, so a run is kept in
+    /// pieces exactly where it could not be named whole. A run that closes up
+    /// has one corner at both ends and goes right round, which needs no
+    /// naming, and a straight one is named by its two ends alone.
+    fn the_corners_of_each_run_between_two_tangent_points(
+        &self,
+        leaving: &BTreeMap<(usize, usize), Vec<usize>>,
+        straight_through: &BTreeSet<(usize, usize)>,
+    ) -> Vec<(usize, usize)> {
+        let runs = runs_through(self.edges.len(), leaving, straight_through);
+        let mut corners_of_run: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
+        let mut ends_of_run: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for (&(lump, corner), by) in leaving {
+            if straight_through.contains(&(lump, corner)) {
+                corners_of_run
+                    .entry(runs.leader(by[0]))
+                    .or_default()
+                    .push((lump, corner));
+            } else {
+                for &edge in by {
+                    ends_of_run
+                        .entry(runs.leader(edge))
+                        .or_default()
+                        .push(corner);
+                }
+            }
+        }
+        corners_of_run
+            .into_iter()
+            .filter(|(run, _)| {
+                let Some(&[one, other]) = ends_of_run.get(run).map(Vec::as_slice) else {
+                    return false;
+                };
+                let edge = &self.edges[*run];
+                let [mine, partner] = edge.carried_by;
+                let tangent_at = |corner: usize| {
+                    let at = self.corners[corner].point;
+                    gradient_of(&mine, at).cross(gradient_of(&partner, at)) == Vector::zero()
+                };
+                one != other && !edge.lies_on_two_planes() && tangent_at(one) && tangent_at(other)
+            })
+            .flat_map(|(_, corners)| corners)
+            .collect()
     }
 
     fn which_to_keep_first(&self, one: usize, other: usize) -> core::cmp::Ordering {
@@ -4718,6 +4847,13 @@ impl Edge {
     /// the tangent, and a frustum through a block got both arcs of one circle
     /// the same picker that way (§312.6).
     ///
+    /// **Unless the two surfaces are tangent there**, where `∇S × ∇T` is
+    /// exactly nought and says nothing: then it is read at the other end. Two
+    /// bars of one radius whose axes meet cross in two ellipses that touch at
+    /// two such points, and every arc of them runs from one (Q1660). Whether
+    /// the cross is nought does not follow the order of the fuse's arguments,
+    /// since swapping them only turns its sign.
+    ///
     /// A dot of exactly zero is `None`: either the named direction lay along
     /// its chord, which the old code refused too, or the crossing's direction
     /// at the chosen end does.
@@ -4731,18 +4867,25 @@ impl Edge {
             let chord = corners[self.other_end_than(corner)].point - corners[corner].point;
             direction * chord.dot(chord) - chord * chord.dot(direction)
         };
-        let [one, other] = self.ends;
-        let from = if corners[one].point.coordinates() <= corners[other].point.coordinates() {
-            one
-        } else {
-            other
-        };
-        let at = corners[from].point;
         let [mine, partner] = self.carried_by;
-        let across = squared_off_from(
-            from,
-            gradient_of(&mine, at).cross(gradient_of(&partner, at)),
-        );
+        let crossing_at = |corner: usize| {
+            let at = corners[corner].point;
+            gradient_of(&mine, at).cross(gradient_of(&partner, at))
+        };
+        let [one, other] = self.ends;
+        let [first, second] =
+            if corners[one].point.coordinates() <= corners[other].point.coordinates() {
+                [one, other]
+            } else {
+                [other, one]
+            };
+        let mut from = first;
+        let mut crossing = crossing_at(first);
+        if crossing == Vector::zero() {
+            from = second;
+            crossing = crossing_at(second);
+        }
+        let across = squared_off_from(from, crossing);
         let agreement = across.dot(squared_off_from(named_from, towards));
         if agreement > 0.0 {
             Some(across)
@@ -7145,7 +7288,6 @@ impl Edges {
                     .any(|surface| surface.as_plane().is_none()),
             "a piece of a flat face has a side with no length"
         );
-        let at = middle_of(meet.ends[0].point());
         let named = which_curve_it_is(from, to, meet, policy, log)?
             .map(|curve| corners.curve_goes_by(curve));
         let key = (
@@ -7170,7 +7312,7 @@ impl Edges {
                 let arc = if from == to {
                     WhichArc::TheOnlyOne
                 } else {
-                    which_arc_this_is(meet, from, at)?
+                    which_arc_this_is(meet, [from, to])?
                 };
                 self.made.push(Edge {
                     ends: [from.min(to), from.max(to)],
@@ -7354,6 +7496,11 @@ struct Lid {
 /// that direction exactly when its material is inside the partner — which
 /// [`FaceMeet::material_side`] already holds. **No point on the arc is built.**
 ///
+/// **Where the two surfaces are tangent at the first corner** `∇S × ∇T` is
+/// exactly nought there, so the arc is named from the corner it stops at
+/// instead, leaving it backwards along the same signed direction (Q1660: the
+/// two points two bars of one radius whose axes meet touch at).
+///
 /// # Errors
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] when
@@ -7371,21 +7518,32 @@ struct Lid {
 /// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`].
 /// [`FaceMeet::material_side`] is written from which way round the arrangement
 /// walked the arc and costs no arithmetic, so anything else is a bug here.
-fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> Result<WhichArc> {
+fn which_arc_this_is(meet: &FaceMeet, [starts_at, stops_at]: [usize; 2]) -> Result<WhichArc> {
     match the_crossing_of_these_runs_straight(&meet.carried_by) {
         Some(true) => return Ok(WhichArc::TheOnlyOne),
         Some(false) => {}
         None => return Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
     let [mine, partner] = meet.carried_by;
-    let along_the_crossing = gradient_of(&mine, from).cross(gradient_of(&partner, from));
+    let along_the_crossing_at = |end: &MeetPoint| {
+        let at = middle_of(end.point());
+        gradient_of(&mine, at).cross(gradient_of(&partner, at))
+    };
+    let forwards = match meet.material_side {
+        Decision::Neg => 1.0,
+        Decision::Pos => -1.0,
+        other => panic!("a side of a face was walked with no material side: {other:?}"),
+    };
+    let leaving_the_start = along_the_crossing_at(&meet.ends[0]);
+    if leaving_the_start != Vector::zero() {
+        return Ok(WhichArc::LeavingACorner {
+            corner: starts_at,
+            towards: leaving_the_start * forwards,
+        });
+    }
     Ok(WhichArc::LeavingACorner {
-        corner: starts_at,
-        towards: match meet.material_side {
-            Decision::Neg => along_the_crossing,
-            Decision::Pos => along_the_crossing * -1.0,
-            other => panic!("a side of a face was walked with no material side: {other:?}"),
-        },
+        corner: stops_at,
+        towards: along_the_crossing_at(&meet.ends[1]) * -forwards,
     })
 }
 
