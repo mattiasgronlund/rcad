@@ -874,12 +874,15 @@ impl Writing {
     /// `EDGE_CURVE.same_sense` rather than by turning the curve over, which
     /// would read back as the plane reversed.
     ///
-    /// **A seam with one ring on both sides may have its centre further out**
-    /// than [`a_centre_its_plane_reads_back_from`] steps, and then
-    /// [`the_nearest_centre_a_ring_holds_its_circle_at`] looks as far as the
-    /// reader would still hold the circle on the ring. A pipe or a ball beside
-    /// the edge has no such second search, since the reader's rule for those
-    /// is not copied here.
+    /// **The centre is one both faces hold the circle at**, where a pipe or a
+    /// ball is beside the edge with another face
+    /// ([`a_centre_for_an_arc_between`]): the reader asks every face before it
+    /// names such an arc by its plane, and the walk alone can land a dome's
+    /// rim further off the ball than it allows (Q1792). **A seam with one ring on
+    /// both sides may have its centre further out** than
+    /// [`a_centre_its_plane_reads_back_from`] steps, and then
+    /// [`the_nearest_centre_its_faces_hold_the_circle_at`] looks as far as the
+    /// reader would still hold the circle on the ring.
     fn an_arc_its_own_plane_names(
         &mut self,
         first: &Surface,
@@ -1465,13 +1468,18 @@ fn the_arc_its_own_plane_names(
 /// `a_dome_on_a_long_bar_turned_a_long_way_comes_back_with_its_rim_cut_from_its_plane`).
 ///
 /// **Where neither finds a centre both faces hold, the walk's own is
-/// written**, as it was before both were asked: a dome wider than its bar
-/// is then read back named by its faces, which cross, and is still the same
-/// solid. Refusing it here would lose a file that reads back today.
+/// written**, as it was before both were asked. A dome wider than its bar is
+/// then read back named by its faces, which cross: sound, but not the solid
+/// that was written. Turned and placed far out, one measured `13968.30`
+/// built and `13974.48` read back. That is a defect of its own, left to a
+/// row of its own (Q1792); writing the walk's centre keeps it as it was.
 ///
 /// **A seam, one face on both sides, and an ellipse are not asked**: the
-/// reader names a seam by the plane its run carries without asking the face,
-/// and holds an ellipse by a rule of its own this writer has no copy of.
+/// reader names a seam by the plane its run carries without asking the face
+/// (`Walk::the_surface_that_names_the_curve` asks only where
+/// `a_face_where_curved_faces_meet` names a face, and faces that are all one
+/// surface name none), and holds an ellipse by a rule in `brep.rs` this
+/// writer does not share.
 fn a_centre_for_an_arc_between(
     first: &Surface,
     second: &Surface,
@@ -1932,8 +1940,13 @@ fn where_a_cap_holding_a_rings_axis_crosses_it(
 }
 
 /// A point near `near` from which the reader's [`plane_through`] gives back
-/// `cut`, normal and offset bit for bit, or `None` where none of the few tried
-/// does.
+/// `cut`, normal and offset bit for bit, and which `held` takes, or `None`
+/// where none of the few tried does.
+///
+/// **`held` is what the faces beside the edge ask of the circle's centre**
+/// ([`a_centre_for_an_arc_between`]); a point that reads back as `cut` but
+/// is not held is stepped past, as if it had missed. Every other caller
+/// takes every point (`|_| true`).
 ///
 /// `near` is where a pipe's axis or a ball's centre meets `cut`, worked out in
 /// `f64`, so it can miss the offset by a rounding or two. The reader dots the
@@ -1961,6 +1974,11 @@ fn where_a_cap_holding_a_rings_axis_crosses_it(
 /// centre, is stepped all fifteen along `y` and the reader's bound reads
 /// `15.9998` (Q1789,
 /// `a_ball_cut_near_its_middle_is_stepped_fifteen_times_to_the_edge_of_what_the_reader_holds`).
+/// **That measurement is of a ball alone, and does not hold for a ball
+/// beside a pipe**: a dome on a long bar, turned, was stepped fifteen along
+/// `y` to `16.31` units off its ball, which is why an arc between two faces
+/// passes a `held` that asks them (Q1792,
+/// `a_dome_on_a_long_bar_turned_a_long_way_comes_back_with_its_rim_cut_from_its_plane`).
 ///
 /// **Then the two finest coordinates are stepped together**, nearest first
 /// and at most [`MOST_STEPS_OF_TWO_COORDINATES`] each way. Where the offset is
@@ -2060,8 +2078,9 @@ fn stepped(from: f64, steps: i32) -> f64 {
 
 /// The centre nearest `crossing`'s own from which the reader's
 /// [`plane_through`] gives back `cut` bit for bit and the reader still holds
-/// the circle on `ring`, with two coordinates moved; `None` where this finds
-/// none.
+/// the circle on every face of `either_side`, with two coordinates moved;
+/// `None` where this finds none, or where a face has no bound the reader
+/// could hold the circle to.
 ///
 /// **Where the offset is much smaller than the coordinates, a step of one
 /// coordinate moves the dot by dozens of ulps of it**, so the dot lands on the
@@ -2079,15 +2098,22 @@ fn stepped(from: f64, steps: i32) -> f64 {
 /// other is put where the dot comes back**, then the `f64`s either side of
 /// that are tried too, since the dot is not worked out exactly here and
 /// [`plane_through`] is what decides. Every pair of the coordinates the normal
-/// leans along is walked both ways, out to twice the reader's allowance or
-/// [`MOST_STEPS_OF_ONE_COORDINATE`], whichever comes first.
+/// leans along is walked both ways, out to twice the reader's allowance for
+/// the face whose bound is largest, or [`MOST_STEPS_OF_ONE_COORDINATE`],
+/// whichever comes first.
 ///
 /// **What the reader holds is asked here, not trusted to a bound on the
 /// steps** ([`a_surface_holds_the_circle`] in `brep.rs`, shared with the
-/// reader rather than copied, since Q957). A centre that reads back as the
-/// plane but sits further off the ring's axis than the reader allows is read
-/// as a curve off its faces, and the file is then refused, where this
-/// refuses by name.
+/// reader rather than copied, since Q957). Between two faces, a centre that
+/// reads back as the plane but sits further off a face than the reader
+/// allows has the arc named by its faces instead: a turned dome on a bar,
+/// centred where the walk lands ten `f64`s of `x` out, came back with its
+/// rim cut from the ball, and this finds the centre ten of `x` and sixteen
+/// of `z` out that both faces hold (Q1792,
+/// `a_dome_on_a_long_bar_turned_a_little_comes_back_with_its_rim_cut_from_its_plane`).
+/// A ring's seam has one face on both sides, which the reader does not ask
+/// ([`a_centre_for_an_arc_between`]); it is asked here all the same, so the
+/// circle the file carries lies on the face it bounds.
 fn the_nearest_centre_its_faces_hold_the_circle_at(
     cut: &Plane,
     either_side: &[&Surface],
@@ -2146,7 +2172,7 @@ fn the_nearest_centre_its_faces_hold_the_circle_at(
     nearest.map(|(_, centre)| centre)
 }
 
-/// How many `f64`s either way [`the_nearest_centre_a_ring_holds_its_circle_at`]
+/// How many `f64`s either way [`the_nearest_centre_its_faces_hold_the_circle_at`]
 /// walks one coordinate at most.
 ///
 /// An `f64` is at least `ε/2` of itself, so sixty-four steps of the largest
