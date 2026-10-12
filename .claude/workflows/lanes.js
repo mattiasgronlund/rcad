@@ -60,6 +60,13 @@
 // false`. A lane giving `notes` beside any of the full form's own fields is
 // refused.
 //
+// `args.lanes` with more than one entry throws at the start unless
+// `args.shareOneRun` is `true`: five times from 2026-10-03 to 2026-10-05 a
+// dispatcher put a fill of several rows into one run this way, each time
+// stopped and relaunched as one run per row (§230.4). A bundle of small rows
+// (§352.4) is one `lanes` entry with several `queueId`s, so it still passes
+// with no flag.
+//
 // Both forms: `label` (required and unique in a run, names the branch and the
 // progress row), `queueId` (the docs/queue.md row this lane does; required for
 // the short form, and for the full form when it writes, because its merger
@@ -130,6 +137,7 @@ const BASE = args.base
 if (typeof BASE !== 'string' || BASE.length < 7) throw new Error('lanes: args.base must be a full sha of the tree the lanes start from')
 const LANES = Array.isArray(args.lanes) ? args.lanes : []
 if (!LANES.length) throw new Error('lanes: args.lanes is empty')
+if (LANES.length > 1 && args.shareOneRun !== true) throw new Error('lanes: args.lanes has more than one entry; launch one Workflow call per row, or set args.shareOneRun to true to share this run on purpose (§230.4)')
 const labels = new Set()
 for (const lane of LANES) {
   if (!lane || !lane.label) throw new Error('lanes: every lane needs a label')
