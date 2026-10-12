@@ -3002,7 +3002,7 @@ mod plane_round_trip_tests {
         the_rim_comes_back_cut_from_its_plane(
             (
                 16.000_000_000_000_007,
-                3561.383_252_900_813,
+                3_561.383_252_900_813,
                 29.695_524_847_710_807,
             ),
             Vector::new(0.0, -1.999_999_999_999_999_8, 4_095.999_999_999_999_5),
@@ -3063,7 +3063,7 @@ mod plane_round_trip_tests {
     #[test]
     fn a_half_ball_on_a_long_thin_bar_placed_far_out_and_turned_is_read_back() {
         the_rim_comes_back_cut_from_its_plane(
-            (0.125, 1955.404_019_307_245_3, 0.125),
+            (0.125, 1_955.404_019_307_245_3, 0.125),
             Vector::new(2_048.000_000_000_001, 0.0, -64.000_000_000_000_01),
             &a_small_turn_then_quarter_turns(
                 Vector::new(
