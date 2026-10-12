@@ -1467,12 +1467,26 @@ fn the_arc_its_own_plane_names(
 /// touches the bar, refuses the file (Q1792,
 /// `a_dome_on_a_long_bar_turned_a_long_way_comes_back_with_its_rim_cut_from_its_plane`).
 ///
+/// **Both start where `crossing` is centred, then where each face's own
+/// crossing with `cut` is.** A pipe's and a ball's crossings are worked out
+/// from different numbers, and where those were placed from much larger ones
+/// the two centres can be further apart than either search reaches. A dome
+/// on a bar standing at `−1024` with its rim cut near `88` has the ball's
+/// centre's foot `3.5e-13` from where the plane meets the bar's axis, and
+/// only near the foot does the ball hold the circle; the foot is held by
+/// both (Q1794,
+/// `a_dome_on_a_bar_from_far_out_to_near_the_origin_comes_back_with_its_rim_cut_from_its_plane`).
+/// Over the 3,000,000 domes of the Q1792 probe (`probe_q1792_domes_on_long_bars`
+/// in `9fa1f329`, seed `17920`, run again by a probe not kept), 240 had no
+/// centre both faces hold from `crossing`'s own, and 57 of them have one from
+/// the foot.
+///
 /// **Where neither finds a centre both faces hold, the walk's own is
 /// written**, as it was before both were asked. A dome wider than its bar is
 /// then read back named by its faces, which cross: sound, but not the solid
-/// that was written. Turned and placed far out, one measured `13968.30`
-/// built and `13974.48` read back. That is a defect of its own, left to a
-/// row of its own (Q1794); writing the walk's centre keeps it as it was.
+/// that was written. Of the 183 domes the probe left so, 182 have the ball
+/// more than sixteen units off a circle of the pipe's radius even at the
+/// foot, where the circle is as near the ball as the plane lets it be.
 ///
 /// **A seam, one face on both sides, and an ellipse are not asked**: the
 /// reader names a seam by the plane its run carries without asking the face
@@ -1497,9 +1511,29 @@ fn a_centre_for_an_arc_between(
             .iter()
             .all(|face| a_surface_holds_the_circle(face, centre, cut.normal(), radius))
     };
-    a_centre_its_plane_reads_back_from(cut, crossing.centre, both_hold)
-        .or_else(|| {
-            the_nearest_centre_its_faces_hold_the_circle_at(cut, &[first, second], crossing)
+    let where_each_face_crosses = [first, second].map(|face| {
+        if let Surface::Cylinder(pipe) = face {
+            return where_a_plane_crosses_a_pipe(cut, pipe).map(|it| it.centre);
+        }
+        let Surface::Sphere(ball) = face else {
+            return None;
+        };
+        where_a_plane_crosses_a_ball(cut, ball).map(|it| it.centre)
+    });
+    core::iter::once(crossing.centre)
+        .chain(where_each_face_crosses.into_iter().flatten())
+        .find_map(|near| {
+            a_centre_its_plane_reads_back_from(cut, near, both_hold).or_else(|| {
+                the_nearest_centre_its_faces_hold_the_circle_at(
+                    cut,
+                    &[first, second],
+                    &Crossing {
+                        centre: near,
+                        turning: crossing.turning,
+                        shape: Shape::Circle { radius },
+                    },
+                )
+            })
         })
         .or_else(|| a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true))
 }
@@ -3076,6 +3110,43 @@ mod plane_round_trip_tests {
                 3.0,
             ),
             [-4, 0, 3],
+        );
+    }
+
+    /// A bar of radius `2` and length `1112`, with a dome of radius `2.98` on
+    /// top, standing on just off `(−1024, 0, 0)` and turned by quarter turns
+    /// and a small wobble so it runs along `x` back to near the origin: the rim
+    /// comes back cut from its own plane (Q1794).
+    ///
+    /// **The reader named the rim by the ball instead**, and the volume read
+    /// back at a deflection of `0.01` was `13974.48` against `13968.30` built.
+    /// The rim is written near `(88, 7, −4)`, but the plane, the pipe and the
+    /// ball were each placed from numbers near `1024`, and their roundings
+    /// leave the ball's centre's foot on the plane `3.5e-13` from where the
+    /// plane meets the bar's axis. The ball holds a circle centred on the
+    /// axis at `15.48` units, and no centre either walk reaches from there
+    /// both reads back as the plane and is held by the ball. The foot itself
+    /// reads back, eleven `f64`s down in `x`, twelve up in `y` and `709` down
+    /// in `z` from the axis, and both faces hold the circle there: the ball
+    /// at `10.56` units, and the pipe, whose axis starts at `−1024`, at
+    /// `1.55`.
+    #[test]
+    fn a_dome_on_a_bar_from_far_out_to_near_the_origin_comes_back_with_its_rim_cut_from_its_plane()
+    {
+        the_rim_comes_back_cut_from_its_plane(
+            (2.0, 1_112.288_377_315_355_3, 2.982_579_216_996_178_7),
+            Vector::new(-1_023.999_999_999_999_9, 0.0, 0.0),
+            &a_small_turn_then_quarter_turns(
+                Vector::new(
+                    0.275_298_066_519_414_13,
+                    0.165_693_885_499_710_65,
+                    0.308_940_678_162_605_2,
+                ),
+                0.009_278_730_274_298_288,
+                1.0,
+                1.0,
+            ),
+            [-11, 12, -709],
         );
     }
 
