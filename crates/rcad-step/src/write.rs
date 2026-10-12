@@ -1960,10 +1960,17 @@ fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point>
 /// each of two coordinates together.
 ///
 /// **The reader has to find the circle on the ball still**, and it allows a
-/// centre `16·ε` of the largest number off (`A_CIRCLE_MAY_MISS_ITS_FACE_BY`
-/// in `brep.rs`). Four steps of a coordinate are at most `8ε` of it, so
-/// two coordinates stepped four each move the centre at most `√2·8ε ≈ 11.3ε`
-/// of the larger.
+/// circle `16·ε` of the largest number off (`A_CIRCLE_MAY_MISS_ITS_FACE_BY`
+/// in `brep.rs`). One step of a coordinate is at most `ε` of it, the most
+/// where it stands on a power of two and steps away from zero, so four steps
+/// are at most `4ε` of it, and two coordinates stepped four each move the
+/// centre at most `√2·4ε ≈ 5.66ε` of the larger. Every point of the circle
+/// moves with its centre, so the circle moves off the ball by no more than
+/// that, and the reader's sixteen leave ten for its roundings. The seam of a
+/// ball of radius one at `(2, 2 + one ulp, 0)` turned `0.8178` about `z` is
+/// stepped the full four up both coordinates from `2`, and the reader's bound
+/// reads `5.75` (Q838,
+/// `a_ball_seam_stepped_four_each_way_from_a_power_of_two_is_still_read_back_as_its_plane`).
 const MOST_STEPS_OF_TWO_COORDINATES: i32 = 4;
 
 /// `from` moved `steps` `f64`s up, or down for a negative count.
