@@ -60,6 +60,22 @@ outside them goes in `out_of_write_set_needs`, and you do not make it. A brief
 that names no files makes you read-only: write no tracked file and make no
 commit.
 
+**Narrow your hold once you know where you work** (§424.3, §424.7). Your row
+holds every file its write set names until it lands, and the fill holds back
+each ready row that meets it, so a row on a whole directory blocks that
+directory for your whole run. At your first edit under `src/`, run `mise exec
+-- just queue narrow <id> <entries>` to the files or items you now know you
+will change, and again before you report, to the entries your branch changed.
+Write each entry inside the set your row was taken with and the way that set
+names it: `justfile#queue`, not `justfile`, for a row taken on
+`justfile#queue`. A bundle narrows each of its rows. `narrow` writes the claims
+file alone and never `docs/queue.md`, so it is yours to run from your own tree.
+It refuses a widening back, to an entry inside the taken set but outside the
+current one, while another lane's hold meets that entry: you may still change
+it, since your write set is still the one you were sent with, but name the
+entry and the hold it quotes in `remaining`, since the two branches may meet
+at merge.
+
 Run `mise exec -- just fmt` before each commit. It reformats the whole tree,
 but staging by explicit path already keeps that harmless — only your own
 files get added. The gate checks formatting but does not fix it: skip

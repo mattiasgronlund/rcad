@@ -12734,8 +12734,8 @@ _queue-rows file:
 #
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
 # `done`, `drop`, `park`, `after`, `rank`, `tier`, `tag`, `pick`, `pin` and
-# `unpin`, with `show`
-# and `running` to read. `tier` moves an open row to another tier and, like
+# `unpin`, with `show` and `running` to read, and `narrow`, which changes a hold
+# and no row. `tier` moves an open row to another tier and, like
 # `add`, writes that tier's heading when the file has none (§307). `tag` sets,
 # replaces or removes a row's class or `small` (§352.2), and a class moves the
 # row to the tier it names (§403.4). `pin` and `unpin` are Mattias's alone
@@ -12761,8 +12761,20 @@ _queue-rows file:
 # tree yet. `lane:` rows in this copy still say which write sets are busy, and so
 # do rows another dispatcher holds, from its hold or its own copy.
 #
+# **A lane narrows its hold once it knows where it works** (§424.3, §424.7).
+# `narrow <id> <write set>` writes the claims file alone, so a lane runs it from
+# its own tree, and the fill reads the narrowed set in place of the one the row
+# was taken with: from the hold for a row held elsewhere, and from the claims
+# file's `narrowed` records for this copy's own `lane:` rows, which the plain
+# listing marks `narrowed to`. Every entry lies inside the taken set. One inside
+# it but outside the current set widens the hold back, and `narrow` asks `meets
+# <id> <write set>` whether that meets another hold: `meets` reads holds in
+# `elsewhere`'s records from its input and prints the skip line of the first
+# one the write set meets, so the rule for when two write sets meet stays here
+# alone.
+#
 # **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
-# `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply` — also runs `queue-page` after it**, so the page
+# `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`, `narrow` — also runs `queue-page` after it**, so the page
 # stays current as a side effect instead of needing its own trigger (Q254). Its
 # own exit code is what this returns; a render that fails says so on stderr and
 # fails nothing, since a bad page is not a reason to lose a queue write that
@@ -12773,7 +12785,7 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|rank|tier|tag|pick|pin|unpin|apply)
+        take|add|done|drop|park|after|rank|tier|tag|pick|pin|unpin|apply|narrow)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@"
             status=$?
@@ -12790,6 +12802,8 @@ queue mode="" *args:
                 'just queue next [N]                          what N free slots take; N defaults to the free slots on this machine' \
                 'just queue show <id>                         one row, its hold, and its state in other worktrees' \
                 'just queue running                           what holds a slot on this machine, one line each' \
+                'just queue narrow <id> <write set>           narrow a held row to entries inside the set it was taken with; a lane runs it (§424.7)' \
+                'just queue meets <id> <write set>            the skip line for the first hold read from input that the write set meets; narrow asks it' \
                 'just queue take <id> <branch>                dispatch a ready row to <branch>: state lane:<branch>, held until done, drop or park' \
                 'just queue add <tier> <model> <write set> <what ending in §N>   a new todo row at the foot of its tier; prints the id. <what> starts with from/<id>, was/<id>, from/-, from/fuzz:<target> or from/step:<file>: where the row came from (§432, §433)' \
                 'just queue done <id> <merge sha>             close a row as done:<sha>, moved under Closed' \
@@ -12805,11 +12819,15 @@ queue mode="" *args:
                 'just queue apply <verb> <args> [+ <verb> <args>]...   run several of the verbs above as one all-or-nothing batch' \
                 'just queue help                              this list'
             exit 0 ;;
-        ""|ready|blocked|next) ;;
+        ""|ready|blocked|next|meets) ;;
         *) echo "queue: '$mode' is not a mode or a verb; run 'just queue help' for every mode and verb it takes" >&2; exit 1 ;;
     esac
     n="${2:-}"
-    if [ $# -gt 2 ]; then echo "queue: $mode takes at most one count" >&2; exit 1; fi
+    if [ "$mode" = meets ]; then
+        [ $# -eq 3 ] || { echo "queue: meets takes an id and a write set" >&2; exit 1; }
+        [ ! -t 0 ] || { echo "queue: meets reads the holds it tests from its input, and its input is a terminal" >&2; exit 1; }
+        n=""
+    elif [ $# -gt 2 ]; then echo "queue: $mode takes at most one count" >&2; exit 1; fi
     if [ -n "$n" ]; then
         [ "$mode" = next ] || { echo "queue: a count goes with next, and only with next" >&2; exit 1; }
         case "$n" in *[!0-9]*) echo "queue: '$n' is not a number of slots" >&2; exit 1 ;; esac
@@ -12823,16 +12841,24 @@ queue mode="" *args:
         fi
         [ -z "$triage" ] || echo "$triage"
     fi
-    rows=$({{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" _queue-rows '{{ queue_file }}') || exit 1
-    machine='{{ queue_running }}'
+    rows=""
+    machine=0
     elsewhere=""
-    if [ -z "$machine" ]; then
-        tool='{{ justfile_directory() }}/tooling/queue/queue.py'
-        machine=$(QUEUE_FILE='{{ queue_file }}' python3 "$tool" running --count) || exit 1
-        elsewhere=$(QUEUE_FILE='{{ queue_file }}' python3 "$tool" elsewhere) || exit 1
+    narrowed=""
+    if [ "$mode" = meets ]; then
+        elsewhere=$(cat)
+    else
+        rows=$({{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" _queue-rows '{{ queue_file }}') || exit 1
+        machine='{{ queue_running }}'
+        if [ -z "$machine" ]; then
+            tool='{{ justfile_directory() }}/tooling/queue/queue.py'
+            machine=$(QUEUE_FILE='{{ queue_file }}' python3 "$tool" running --count) || exit 1
+            elsewhere=$(QUEUE_FILE='{{ queue_file }}' python3 "$tool" elsewhere) || exit 1
+            narrowed=$(QUEUE_FILE='{{ queue_file }}' python3 "$tool" narrowed) || exit 1
+        fi
     fi
-    { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; } \
-        | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" \
+    { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; [ -z "$narrowed" ] || printf '%s\n' "$narrowed"; } \
+        | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" -v cand_id="${2:-}" -v cand_ws="${3:-}" \
         -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' '
         BEGIN {
             FS = "\037"
@@ -12847,6 +12873,7 @@ queue mode="" *args:
         $1 != "R" { next }
         $2 == "elsewhere" { e++; eid[e] = $5; est[e] = $7; ews[e] = $9; eraw[e] = $11; heldelse[$5] = e; next }
         $2 == "closedelsewhere" { c++; cst[c] = $7; craw[c] = $11; closedelse[$5] = c; next }
+        $2 == "narrowed" { nws[$5] = $9; next }
         $4 < 6 { refuse($2, "a row of " $4 " fields"); next }
         !($6 in known) { refuse($2, "the tier \"" $6 "\""); next }
         {
@@ -12862,10 +12889,18 @@ queue mode="" *args:
         END {
             if (bad) exit 1
             running = machine + 0
+            if (mode == "meets") {
+                r++; id[r] = cand_id; tier[r] = "-"; ws[r] = cand_ws
+                blocked(r, 1)
+                exit 0
+            }
             for (i = 1; i <= r; i++) {
                 s = st[i]
                 if (s == "todo") kind[i] = "ready"
-                else if (s ~ /^lane:/) { kind[i] = "running"; lanes++ }
+                else if (s ~ /^lane:/) {
+                    kind[i] = "running"; lanes++
+                    if (id[i] in nws) { ws[i] = nws[id[i]]; narrowedrow[i] = 1 }
+                }
                 else if (s ~ /^after:/) {
                     kind[i] = "ready"
                     m = split(substr(s, 7), a, ",")
@@ -12930,7 +12965,11 @@ queue mode="" *args:
             }
             printf "running, %d of %d slots on this machine (`just queue running` names them); the rows held:\n", running, slots
             if (!lanes && !e) print "    none"
-            for (i = 1; i <= r; i++) if (kind[i] == "running") print "    " raw[i]
+            for (i = 1; i <= r; i++)
+                if (kind[i] == "running") {
+                    print "    " raw[i]
+                    if (i in narrowedrow) print "      narrowed to " ws[i]
+                }
             for (j = 1; j <= e; j++) print "    " eraw[j]
             print "waiting:"
             none = 1
@@ -13838,7 +13877,12 @@ _queue-check file decisions:
 # passes when it waits on an open tier 5 row, a closed one, or a Q row this
 # copy does not hold, and when a lane holds it or it is parked; a row waiting on
 # a row in an earlier tier, or on a done row in a later one, passes too. The
-# classes fixture's measure line counts its tier 5 row with no class.
+# classes fixture's measure line counts its tier 5 row with no class. §424.7
+# adds `narrow`, on a claims file of its own: a directory narrowed to a file
+# under it, written to the claims file and read back by `running`; an id
+# nobody holds, an entry outside the set the row was taken with and a
+# directory written without its `/`, refused; and a widening back refused
+# while another hold meets the entry it widens to, and passed when none does.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -14404,6 +14448,44 @@ check-queue-selftest:
         grep -qF "queue $m " <<<"$got" || fail "queue help names no line for '$m', which the recipe dispatches"
     done
 
+    # §424.7 (Q1530): `narrow` writes a held row's narrower write set to the
+    # claims file, and only inside the set the row was taken with. It reads a
+    # claims file of its own here, so no hold of this machine's reaches it.
+    claims="$dir/narrow-claims"
+    printf 'take\tQ1\t2026-10-12T00:00:00Z\t/a/dispatcher\tlane-q1\ttooling/,justfile\t1\n' > "$claims"
+    nq() {
+        QUEUE_CLAIMS="$claims" "$j" --justfile '{{ justfile() }}' --working-directory "$repo" \
+            --set queue_file "$dir/good.md" queue "$@"
+    }
+    got=$(nq narrow Q1 tooling/queue/queue.py 2>&1) || fail "narrow refused a file under the directory Q1 was taken with"
+    [ "$(tail -n 1 "$claims" | cut -f 1,2,5)" = "$(printf 'narrow\tQ1\ttooling/queue/queue.py')" ] \
+        || fail "narrow did not append its event to the claims file"
+    got=$(nq running 2>&1) || fail "running failed on a narrowed hold"
+    grep -qxF 'Q1 narrowed to tooling/queue/queue.py (taken with tooling/,justfile)' <<<"$got" \
+        || fail "running did not say what Q1 was narrowed to"
+    got=$(nq show Q1 2>&1) || fail "show failed on a narrowed hold"
+    grep -qxF 'narrowed to tooling/queue/queue.py, taken with tooling/,justfile' <<<"$got" \
+        || fail "show did not say what Q1 was narrowed to"
+    got=$(nq narrow Q9 justfile 2>&1) && fail "narrow accepted Q9, which nobody holds"
+    grep -qF 'Q9 is not held, so it has no write set to narrow' <<<"$got" || fail "narrow did not say Q9 is not held"
+    got=$(nq narrow Q1 tooling/queue/queue.py,docs/decisions.d/sections.md 2>&1) \
+        && fail "narrow accepted an entry outside the set Q1 was taken with"
+    grep -qF 'docs/decisions.d/sections.md is outside tooling/,justfile, the write set Q1 was taken with' <<<"$got" \
+        || fail "narrow did not name the entry outside the taken set"
+    got=$(nq narrow Q1 tooling/queue 2>&1) && fail "narrow accepted tooling/queue, a directory written without its /"
+    grep -qF '"tooling/queue" is a directory; write it as tooling/queue/' <<<"$got" \
+        || fail "narrow did not say tooling/queue needs its /"
+    printf 'take\tQ2\t2026-10-12T00:00:01Z\t/a/dispatcher\tlane-q2\tjustfile#gate\t1\n' >> "$claims"
+    got=$(nq narrow Q1 tooling/queue/queue.py,justfile 2>&1) \
+        && fail "narrow widened Q1 back to the whole justfile while Q2 holds an item in it"
+    grep -qF "skip Q1 (tier -): its justfile meets Q2's justfile#gate, held elsewhere by lane:lane-q2" <<<"$got" \
+        || fail "narrow did not quote the fill's line for the hold the widening meets"
+    [ "$(tail -n 1 "$claims" | cut -f 1,2)" = "$(printf 'take\tQ2')" ] || fail "a refused narrow wrote the claims file anyway"
+    got=$(nq narrow Q1 tooling/queue/queue.py,justfile#queue 2>&1) \
+        || fail "narrow refused to widen Q1 back to an item no other hold meets"
+    [ "$(tail -n 1 "$claims" | cut -f 1,2,5)" = "$(printf 'narrow\tQ1\ttooling/queue/queue.py,justfile#queue')" ] \
+        || fail "narrow did not append the widening it passed"
+
     # §418.2, §418.3: `queue next` refuses while the latest fuzz night has
     # left a group no row names and no triage row is open, naming
     # `just fuzz-triage-row`; it fills as usual once a triage row is open, or
@@ -14576,7 +14658,11 @@ check-queue-merge-driver:
 # on, and refusing a B row that would have to follow; `tag` taking up out of tier
 # 5 only the waiters whose `after:` names no other tier 5 row; and `pin`
 # refusing a row that waits outside tier 1 and taking a tier 5 row's waiters up
-# with it. The
+# with it. §424.7's: a row taken on a directory holding back a row on a file
+# under it, in the copy that took it and in another, until `narrow` takes the
+# hold down to another file; then `next` offers the row in both copies,
+# `blocked` drops it, and the plain listing, `elsewhere` and the page say what
+# the hold was narrowed to. The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -15133,6 +15219,43 @@ check-queue-api-selftest:
     grep -qxF "$y: pinned/1, tier 5 -> 1, takes $y2 along, tier 5 -> 1, taken ahead of every row not pinned" <<<"$got" \
         || fail "pin did not take the row that waits on it up out of tier 5"
     got=$(check "$wait_wt") || fail "the file the verbs of §435 wrote fails check-queue"
+
+    # §424.7 (Q1530): a hold narrowed to the files its lane changes frees the
+    # rest of the set it was taken with, for the fill in the copy that took it
+    # and in another copy that sees it only through the claims file.
+    narrow_wt="$root/rcad-worktrees/narrow"
+    g "$hub" worktree add -q -b narrow "$narrow_wt" main
+    wide=$(q "$narrow_wt" add 2 opus tooling/queue/ "from/- a row taken on a whole directory §230") \
+        || fail "add for the row to narrow failed"
+    beside=$(q "$narrow_wt" add 2 opus tooling/queue/rows.py "from/- a row on one file under that directory §230") \
+        || fail "add for the row beside it failed"
+    g "$narrow_wt" commit -qam "two rows, one on a directory and one on a file under it"
+    far="$root/rcad-worktrees/narrow-far"
+    g "$hub" worktree add -q -b narrow-far "$far" narrow
+    got=$(q "$narrow_wt" take "$wide" lane-wide 2>&1) || fail "take of the row on tooling/queue/ was refused"
+    got=$(q "$narrow_wt" next 20 2>&1) || fail "next failed in the copy that took the wide row"
+    grep -qxF "skip $beside (tier 2): its tooling/queue/rows.py meets $wide's tooling/queue/, held by lane:lane-wide" <<<"$got" \
+        || fail "next in the copy that took the wide row did not skip the row on a file under it"
+    got=$(q "$far" next 20 2>&1) || fail "next failed in the other copy"
+    grep -qxF "skip $beside (tier 2): its tooling/queue/rows.py meets $wide's tooling/queue/, held elsewhere by lane:lane-wide" <<<"$got" \
+        || fail "next in the other copy did not skip the row on a file under the wide hold"
+    got=$(q "$narrow_wt" narrow "$wide" tooling/queue/queue.py 2>&1) \
+        || fail "narrow refused a file under the directory the row was taken with"
+    got=$(q "$narrow_wt" next 20 2>&1) || fail "next failed in the taking copy after the narrow"
+    grep -q "^take $beside " <<<"$got" || fail "next in the taking copy still skipped a row the narrowed hold no longer meets"
+    got=$(q "$far" next 20 2>&1) || fail "next failed in the other copy after the narrow"
+    grep -q "^take $beside " <<<"$got" || fail "next in the other copy still skipped a row the narrowed hold no longer meets"
+    got=$(q "$narrow_wt" blocked 2>&1) || fail "blocked failed after the narrow"
+    grep -q "^skip $beside " <<<"$got" && fail "blocked still holds back a row the narrowed hold no longer meets"
+    got=$(q "$narrow_wt" 2>&1) || fail "the plain listing failed after the narrow"
+    grep -qxF "      narrowed to tooling/queue/queue.py" <<<"$got" \
+        || fail "the plain listing did not say what the taking copy's own lane: row was narrowed to"
+    got=$(q "$far" 2>&1) || fail "the plain listing failed in the other copy after the narrow"
+    grep -qF "  -  lane:lane-wide  -  tooling/queue/queue.py  (held in " <<<"$got" \
+        || fail "the other copy's listing did not show the narrowed write set of the hold"
+    grep -qF ", narrowed from tooling/queue/)" <<<"$got" || fail "the other copy's listing did not say what the hold was taken with"
+    grep -qF "narrowed to <code>tooling/queue/queue.py</code>" "$page_dir/index.html" \
+        || fail "the queue page did not say what the hold was narrowed to"
     exit 0
 
 # The fuzz half of `status`: for the night `latest` names, how many of the
