@@ -5500,9 +5500,17 @@ fn runs_through(
 /// ([`corners_one_wire_walks_past`]).
 ///
 /// **A wire every side of which would start at one of the second kind keeps
-/// them.** It goes right round one closed curve with nothing else on it, so
-/// read through it would be one side with no corner to start at. Those
-/// vertices then stay, and the answer is refused as it was before Q1302.
+/// the least of them**, and is one closed side starting there. It goes right
+/// round one closed curve with nothing else on it, so read through all of them
+/// it would be one side with no corner to start at. Before Q1571 it kept them
+/// all, and a round bar cut in two through its axis and united again, on a
+/// tube whose hole is the bar's bottom rim, kept the rim in two arcs where the
+/// tube's side was one closed side; the two solids touching along the circle
+/// were answered as two solids where §80.1 refuses them. Kept as one closed
+/// side, the rim is the tube's curve by
+/// [`Corners::with_each_closed_curve_started_once`], which gives the two one
+/// corner. The wires of one solid round one closed curve all start at that
+/// solid's vertices on it, so they keep the same one.
 fn vertices_read_through(
     model: &Model,
     wires: Vec<&Vec<FaceMeet>>,
@@ -5512,6 +5520,7 @@ fn vertices_read_through(
     let mut read_past = vertices_that_only_start_a_closed_edge(model, wires.iter().copied());
     let mut walked_past =
         corners_one_wire_walks_past(model, &wires, names_of_one_point, on_three_planes);
+    let mut kept: BTreeSet<VertexSlot> = BTreeSet::new();
     for wire in &wires {
         let starts: Vec<Option<VertexSlot>> = wire
             .iter()
@@ -5526,12 +5535,17 @@ fn vertices_read_through(
         let read = |start: &Option<VertexSlot>| {
             start.is_some_and(|slot| read_past.contains(&slot) || walked_past.contains(&slot))
         };
-        if starts.iter().all(read) {
-            for slot in starts.into_iter().flatten() {
-                walked_past.remove(&slot);
-            }
+        if starts.iter().all(read)
+            && let Some(&least) = starts
+                .iter()
+                .flatten()
+                .filter(|slot| !read_past.contains(slot))
+                .min()
+        {
+            kept.insert(least);
         }
     }
+    walked_past.retain(|slot| !kept.contains(slot));
     read_past.append(&mut walked_past);
     read_past
 }
@@ -5539,7 +5553,8 @@ fn vertices_read_through(
 /// The input vertices where every kept side that ends there is one of two
 /// sides of a wire arriving along one curve and leaving along the same curve,
 /// and no other side ends under any name the point goes by: one wire, on any
-/// two surfaces, or any number of wires on the same two planes.
+/// two surfaces, or any number of wires on the same two planes or the same
+/// plane and pipe.
 ///
 /// **One wire alone cannot make such a vertex a corner of the answer**, since
 /// each of the two edges either side of it would have that one wire along it
@@ -5556,10 +5571,18 @@ fn vertices_read_through(
 /// had two edges of two faces each along the line and the other box one, and
 /// was answered as two solids. The cube in its place is refused
 /// `ResultIsNotManifold { count: 4 }`, as §80.1 and §80.9 keep it, and read
-/// past, the block with the corner is refused the same (Q1568). Two curved
-/// surfaces can meet in curves that cross, so for them the same two surfaces
-/// do not show one curve, and several wires on them stay a corner; no test
-/// reaches one.
+/// past, the block with the corner is refused the same (Q1568).
+///
+/// **Several wires on a plane and a pipe walk one curve too**, and the vertex
+/// is a point in the middle of it. A round bar cut in two through its axis and
+/// united again keeps a corner either side of its bottom rim, and its cap and
+/// its wall both walk past each. Kept, they cut the rim in two arcs, and on a
+/// tube whose hole is that rim the tube's side was one closed side, so the
+/// two solids touching along the circle were answered as two solids where the
+/// bar built whole is refused `ResultIsNotManifold { count: 4 }` (Q1571). Other
+/// pairs can meet in curves that cross ([`meet_in_curves_that_never_cross`]),
+/// so for them the same two surfaces do not show one curve, and several wires
+/// on them stay a corner; no test reaches one.
 ///
 /// **It is where pieces of one curved surface met in an earlier fuse.** The
 /// joiner keeps such a corner on purpose (`what_is_left`), and the next fuse
@@ -5638,18 +5661,43 @@ fn corners_one_wire_walks_past(
 
 /// Whether the wires that walk on past a vertex, carried by `walks`, are all
 /// of the `ending` sides that end there, and walk one curve: one wire on any
-/// two surfaces, or any number on the same two planes, which meet in one line.
+/// two surfaces, or any number on the same two surfaces where those
+/// [`meet_in_curves_that_never_cross`].
 fn every_side_ending_walks_on(walks: &[&[Surface; 2]], ending: usize) -> bool {
     let (&&[one, other], rest) = walks
         .split_first()
         .expect("a vertex is counted as walked past once a wire walks past it");
     walks.len() * 2 == ending
         && (rest.is_empty()
-            || (one.as_plane().is_some()
-                && other.as_plane().is_some()
+            || (meet_in_curves_that_never_cross(&one, &other)
                 && rest
                     .iter()
                     .all(|&&walk| walk == [one, other] || walk == [other, one])))
+}
+
+/// Whether through any point the two surfaces share there is one curve they
+/// share and no more: two planes, which meet in one line, or a plane and a
+/// pipe, which meet in one ellipse, in two lines along the pipe or in one.
+///
+/// A plane through a cone's apex cuts it in two lines that cross there, and a
+/// plane against a ring or two curved surfaces can cross in curves that cross,
+/// so those pairs say no.
+fn meet_in_curves_that_never_cross(one: &Surface, other: &Surface) -> bool {
+    match [one, other] {
+        [Surface::Plane(_), Surface::Plane(_) | Surface::Cylinder(_)]
+        | [Surface::Cylinder(_), Surface::Plane(_)] => true,
+        [
+            Surface::Plane(_)
+            | Surface::Cylinder(_)
+            | Surface::Cone(_)
+            | Surface::Sphere(_)
+            | Surface::Torus(_),
+            _,
+        ] => false,
+        // A kind added to `rcad-geom` after this has not been shown to meet a
+        // plane in curves that never cross.
+        _ => false,
+    }
 }
 
 /// The input vertices where the kept pieces do nothing but walk along one
@@ -5766,18 +5814,30 @@ fn the_closed_edge_it_only_starts(
 /// Whether a wire arrives at `vertex` along `arriving` and leaves it along
 /// `leaving` as though the vertex were not there.
 fn walks_straight_through(arriving: &FaceMeet, leaving: &FaceMeet, vertex: VertexKey) -> bool {
-    walks_on_along_one_curve(arriving, leaving, vertex) && arriving.along == leaving.along
+    walks_on_along_one_curve(arriving, leaving, vertex)
+        && arriving.along == leaving.along
+        && arriving.ends[0] != leaving.ends[1]
 }
 
 /// Whether a wire arrives at `vertex` along `arriving` and leaves it along
 /// `leaving` on the same two surfaces with the material on the same side,
-/// along whichever input edges, and the two do not come back round to where
-/// the first started, which would make them one closed side.
+/// along whichever input edges, where `arriving` is not a closed side that
+/// starts and ends there on its own.
+///
+/// **The two may come back round to where the first started**, and read past,
+/// `vertex` then leaves one closed side starting there. A round bar cut in two
+/// through its axis and united again keeps a corner either side of each rim,
+/// and its cap walks the rim in two arcs from one to the other and back. Set
+/// on a tube whose hole is its rim, the arcs were kept where the tube's side
+/// of the rim was one closed side, so no edge had the four faces round it,
+/// and the two solids touching along that circle were answered as two solids
+/// where §80.1 refuses them (Q1571). [`walks_straight_through`] keeps them
+/// apart, as it was built to.
 fn walks_on_along_one_curve(arriving: &FaceMeet, leaving: &FaceMeet, vertex: VertexKey) -> bool {
     matches!(&leaving.ends[0], MeetPoint::Existing { vertex: from, .. } if *from == vertex)
+        && !closes_on_itself(arriving)
         && arriving.carried_by == leaving.carried_by
         && arriving.material_side == leaving.material_side
-        && arriving.ends[0] != leaving.ends[1]
 }
 
 /// One wire of a kept piece, with the two sides either side of every vertex in
@@ -5792,8 +5852,8 @@ fn walks_on_along_one_curve(arriving: &FaceMeet, leaving: &FaceMeet, vertex: Ver
 /// one where a closed edge starts runs along that edge, so it can only stop
 /// somewhere that edge is cut, and a vertex it could stop at would be where
 /// another closed edge starts: then one side would run along two input edges.
-/// And [`vertices_read_through`] keeps every vertex the wires walk past in a
-/// wire where this would happen.
+/// And [`vertices_read_through`] keeps one of the vertices the wires walk past
+/// in a wire where this would happen.
 fn read_through<'a>(
     wire: &'a [FaceMeet],
     walked_through: &BTreeSet<VertexSlot>,
