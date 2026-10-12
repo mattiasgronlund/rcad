@@ -8,8 +8,8 @@
 //! `ResultIsNotManifold`, and §80.9 keeps refusing. The union of the bar as
 //! `Model::add_round_bar` builds it is refused so, `count: 4`.
 //!
-//! The bar is also built cut in two by a plane through its axis or beside it
-//! and united again ([`Bar`]). That union keeps a corner on each rim wherever
+//! The bar is also built cut in two by a plane through its axis and united
+//! again ([`Bar`]). That union keeps a corner on each rim wherever
 //! the cut crossed it, as `assemble.rs` does on purpose (`what_is_left`), and
 //! nothing of the bar passes through those corners any more. Queue row Q1571
 //! guessed that such a bar on the tube would be answered as two solids, its
@@ -28,7 +28,7 @@ const THE_BAR: f64 = PI * 2.0;
 
 const THE_TUBE: f64 = PI * (4.0 - 1.0) * 2.0;
 
-const EVERY_BAR: [Bar; 2] = [Bar::Whole, Bar::CutThroughItsAxis];
+const EVERY_BAR: [Bar; 3] = [Bar::Whole, Bar::CutOnXIsZero, Bar::CutOnYIsZero];
 
 /// **The bar and the tube cannot be united**, whichever is the argument and
 /// however the bar was built: `ResultIsNotManifold { count: 4 }`, the bar's
@@ -80,15 +80,18 @@ fn a_bar_standing_on_a_tubes_hole_shares_nothing_with_it() {
 
 /// **A bar cut in two through its axis and united again keeps a corner on its
 /// bottom rim where the cut crossed it, and nothing else there**:
-/// `(0, ±1, 2)`. That is the shape Q1571 asked for.
+/// `(0, ±1, 2)` cut on `x = 0` and `(±1, 0, 2)` cut on `y = 0`. That is the
+/// shape Q1571 asked for.
 #[test]
 fn a_bar_cut_in_two_and_united_again_keeps_a_corner_where_the_cut_crossed_its_rim() {
-    let mut model = a_model();
-    let solid = Bar::CutThroughItsAxis.build(&mut model);
-    assert_eq!(
-        corners_on_its_bottom_rim(&model, solid),
-        [[0.0, -1.0, RIM], [0.0, 1.0, RIM]]
-    );
+    for (bar, corners) in [
+        (Bar::CutOnXIsZero, [[0.0, -1.0, RIM], [0.0, 1.0, RIM]]),
+        (Bar::CutOnYIsZero, [[-1.0, 0.0, RIM], [1.0, 0.0, RIM]]),
+    ] {
+        let mut model = a_model();
+        let solid = bar.build(&mut model);
+        assert_eq!(corners_on_its_bottom_rim(&model, solid), corners, "{bar:?}");
+    }
 }
 
 /// How the bar of radius 1 from `z = 2` to `z = 4` is built.
@@ -97,7 +100,9 @@ enum Bar {
     /// `Model::add_round_bar`, its rims whole circles.
     Whole,
     /// The bar less a block over `x < 0`, united with the bar's other half.
-    CutThroughItsAxis,
+    CutOnXIsZero,
+    /// The bar less a block over `y < 0`, united with the bar's other half.
+    CutOnYIsZero,
 }
 
 impl Bar {
@@ -107,10 +112,11 @@ impl Bar {
                 .add_round_bar(1.0, 2.0, &at(RIM))
                 .expect("a bar of radius one")
         };
-        if let Self::Whole = self {
-            return a_bar(model);
-        }
-        let below = [[-10.0, 0.0], [-10.0, 10.0], [-10.0, 10.0]];
+        let below = match self {
+            Self::Whole => return a_bar(model),
+            Self::CutOnXIsZero => [[-10.0, 0.0], [-10.0, 10.0], [-10.0, 10.0]],
+            Self::CutOnYIsZero => [[-10.0, 10.0], [-10.0, 0.0], [-10.0, 10.0]],
+        };
         let [one, other] = [a_bar(model), a_bar(model)];
         let [block, its_copy] = [a_box(model, below), a_box(model, below)];
         let one = the_one_solid(model, one, block, Rule::Difference);
