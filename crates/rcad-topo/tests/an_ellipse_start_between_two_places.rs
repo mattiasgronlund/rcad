@@ -167,10 +167,11 @@ fn the_one_ahead_of_the_start_comes_before_the_point_across_the_ellipse_and_the_
 ///
 /// **Why this says the arm gave an order.** Every fuse here goes through
 /// `the_one_ahead_of_the_start`, and goes there from `the_one_the_start_is`'s
-/// `(false, false)` arm: a run under `gdb` with no change to the source, a
-/// breakpoint on each, counted 72 hits of the function and 72 of the arm over
-/// the twelve fuses, and none of the overlap arm or of the line that answers
-/// `Undecidable`. That is a run and not a test. The rest is this file: the
+/// `(false, false)` arm: a run of this test under `gdb` with no change to the
+/// source, a breakpoint on each and one on `Model::fuse`, counted six hits of
+/// the function and six of the arm in each of the twelve fuses, and none of the
+/// overlap arm or of the line that answers `Undecidable`. That is a run and not
+/// a test. The rest is this file: the
 /// sweep is a proved zero, neither place is a rounding off the start, the
 /// boxes are apart and neither holds the start, which is the only way to that
 /// arm. Had the arm left the pair `Undecidable`, a certified fuse would have
