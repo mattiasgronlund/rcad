@@ -670,26 +670,35 @@ fn holds_what_pappus_gives_the_top_half_of_a_ring(
     }
 }
 
+/// The crown of a ring with a slot across its top, its whole torus skin one
+/// face with a seam across the tube, is refused
+/// `CurvedFaceWithAHoleGoesTooFarRound` by `cut_what_reaches_right_round_the_ring`
+/// in `mesh.rs`: the skin's outer wire passes the seam a whole turn apart round
+/// the ring, and nothing there cuts a patch that has a hole in it.
+///
+/// This is the shape `docs/decisions.md` §390.5's second bullet reasoned about
+/// and had not built (Q825). The crown is narrower than a quarter turn round
+/// the tube, so nothing cuts the patch before it reaches the ring's cut whole.
 #[test]
-fn probe_q825_crown_with_a_slot() {
+fn a_crown_of_a_ring_with_a_slot_across_its_top_in_one_face_is_refused() {
     let mut model = Model::new(Scale::millimetres(250.0).expect("a positive size"));
-    let built = a_crown_of_a_ring_with_a_slot_across_its_top(&mut model);
-    println!("build: {built:?}");
-    if let Ok(crown) = built {
-        let policy = Policy::certified();
-        let mut log = ProvenanceLog::new();
-        println!("validate: {:?}", model.validate(&policy, &mut log));
-        for deflection in [1.0, 0.5, 0.1] {
-            let measured = model.solid(crown).expect("key").measure(
-                Deflection::of(deflection).expect("pos"),
-                &policy,
-                &mut log,
-            );
-            println!("at {deflection}: {measured:?}");
-        }
-    }
+    let refused = a_crown_of_a_ring_with_a_slot_across_its_top(&mut model);
+    assert!(
+        matches!(
+            refused,
+            Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
+        ),
+        "the crown with a slot in one face came back {refused:?}"
+    );
+    assert_eq!(model.solid_count(), 0, "a refused build writes nothing");
 }
 
+/// The crown of the torus of ring `100` and tube `25` above `z = 20`, with a
+/// slot `4` deep across its top for a quarter turn round the ring, from the
+/// plane `x = 0` on the side `y > 0` to the plane `y = 0` on the side `x < 0`.
+///
+/// Every corner is exactly on the torus: the floor's from the 15-20-25
+/// triangle and the slot's from the 7-24-25 one.
 fn a_crown_of_a_ring_with_a_slot_across_its_top(model: &mut Model) -> Result<SolidKey> {
     let (ring, tube) = (100.0, 25.0);
     let skin =
