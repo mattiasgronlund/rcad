@@ -8170,9 +8170,12 @@ fn the_start_is_a_rounding_off(
 /// ∇T`. A point `p` then lies in the half turn ahead of the start where
 /// `w·((from − c) × (p − c))` has that sign, and in the half turn behind where
 /// it has the other. A point ahead comes before a point behind, and of two in
-/// one half turn the one the other is turned ahead of comes first. Nothing
-/// here forms the loop's centre: any point of the axis is as good as `c`, and
-/// what lies along `w` drops out of each determinant.
+/// one half turn the one the other is turned ahead of comes first. Where two
+/// are too nearly over one point of the circle for that turn to be proved, its
+/// sign is read from how far apart they are up the axis instead
+/// (`turned_as_far_apart_up_the_axis`). Nothing here forms the loop's centre:
+/// any point of the axis is as good as `c`, and what lies along `w` drops out
+/// of each determinant.
 ///
 /// **Where the sweep cannot say, this can, for a point a rounding past the
 /// start.** A square bar standing on an edge, its top edge on the plane `y = 0`
@@ -8264,10 +8267,12 @@ fn round_a_closed_crossing_by_its_angle(
 /// from `(2, 0, 6755399441055745)`, and two corners on it, `(−√1.75, 1.5, 1 +
 /// √1.75 − √½)` and `(−√1.75, 1.5, 2)`, are `0.38` apart up the axis and `2⁻⁵²
 /// · 0.38` apart in `y`, under an ulp of `1.5`. Their boxes overlap seen down
-/// the axis, so `w·(a × b)` straddles nothing, and the sweep from that start
-/// came out with an enclosure of `15`. Here `−(n·w)(u·w)` is `2⁻⁵²·0.38`,
-/// proved by `u·w` alone, and `n·(w × s)` is `2√1.75`, so the two are in order
-/// (Q1818).
+/// the axis, so `w·(a × b)` is not proved either way, and the sweep from that
+/// start came out with an enclosure of `15`. Here `−(n·w)(u·w)` is
+/// `2⁻⁵²·0.38`, proved by `u·w` alone, and `n·(w × s)` is `2√1.75`, so the two
+/// are in order (Q1818). The union is refused later, walking that ellipse
+/// (`a_square_bar_standing_on_an_edge_along_y_is_refused_walking_its_long_ellipse`
+/// in `two_bars_on_one_pipe_and_a_box_united_in_one_call.rs`).
 fn turned_as_far_apart_up_the_axis(
     flat: &Plane,
     along: [Interval; 3],
