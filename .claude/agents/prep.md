@@ -137,7 +137,13 @@ the lane would otherwise spend twenty minutes finding again:
   the lane runs them on its base first, and may close the row without a fix
   (`lane.md`). A night with no `fuzz-triage-members.tsv` or no
   `fuzz-triage-replayed-main.txt` was not triaged that way, and gives no such
-  fact;
+  fact. A named crash file that is not under the latest night's `artifacts/`
+  but is listed in `removed-crash-files.tsv` under the same root passed on the
+  sha its line names: the morning folded it into the corpus and removed it
+  (§434.3). That file's columns are `night`, `target`, `file`,
+  `replayed_main`, `kept`. Count such a file as passing, give the sha from its
+  own line, and its night's copy at `<root>/<night>/artifacts/<target>/<file>`
+  for the lane to replay;
 - nothing about the context hook for a writing row. A lane that sees "Lane
   budget passed" is past 150k of its own context; it commits, hands its branch
   over, and `lanes.js` starts a fresh lane on it, up to three times a row
