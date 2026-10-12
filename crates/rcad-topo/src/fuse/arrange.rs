@@ -7979,6 +7979,21 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// from a start one rounding off a pole refused every union of a turned ball
 /// and block at radius 3 that way (§195.2).
 ///
+/// **A node the start is a rounding off comes first too**, before the sweep is
+/// read. A ball of radius 5 at `(0.5, 0, 5)` crosses a bar of radius 4 up `z` in
+/// a loop walked from `(4 − 2⁻⁵¹, 0, 8.57)`, an ulp inside the bar, and a wall
+/// `y = 0` cuts that loop at `(4, 0, 8.57)` and `(−4, 0, 7.18)`. The corner at
+/// `x = 4` is where the loop starts, but its box misses the walked start, and
+/// seen down the bar the start and both corners lie on one line, square to the
+/// way the loop runs there. So the sweep is exactly zero, neither corner is
+/// ahead of the start or behind it, and the pair was refused (Q1701).
+/// [`the_start_is_a_rounding_off`] reads the corner at `x = 4` as lying
+/// outside the line the loop runs along from the start, which only the place
+/// the start was rounded off can. Read only where the sweep is zero, that would
+/// put the corner before the corner across, while the sweep puts the corner
+/// across before every node on the way back to the start, and those before the
+/// corner at `x = 4`: three nodes in a ring, none of them first.
+///
 /// **A node can be the start without being named it.** A circle a ball and
 /// a plane cross in starts where the walk starts, and a third surface can
 /// cross the circle right there: the half ball `x ≥ 0` cut by `z ≤ 0.5` has the
@@ -8038,7 +8053,18 @@ fn round_a_closed_crossing_and_what_it_measures(
     if other == from || other == node {
         return Ok((Decision::Neg, Measures::Length));
     }
+    // The sweep is asked first so that a pair it has no way round is refused
+    // by it, before the reading below takes a gradient of either surface.
     let decided = which_comes_first_round_a_crossing(pair, from, one, other)?;
+    let rounded_off = [
+        the_start_is_a_rounding_off(pair, from, one)?,
+        the_start_is_a_rounding_off(pair, from, other)?,
+    ];
+    match rounded_off {
+        [true, false] => return Ok((Decision::Pos, Measures::Length)),
+        [false, true] => return Ok((Decision::Neg, Measures::Length)),
+        [true, true] | [false, false] => {}
+    }
     // Compared rather than matched: only a proved zero is re-read, and every
     // other answer goes back as it came (§40).
     if decided != Decision::Zero {
@@ -8057,6 +8083,45 @@ fn round_a_closed_crossing_and_what_it_measures(
         the_one_the_start_is(pair, from, one, other),
         Measures::Length,
     ))
+}
+
+/// Whether the walked start is a rounding off `place`: the start lies a
+/// rounding inside the crossing, and `place` is the point of the crossing
+/// straight out from it, square to the way the crossing runs there.
+///
+/// The crossing runs along `∇S × ∇T` and turns to one side of that line, the
+/// side [`which_comes_first_round_a_crossing`] winds to. From a start on the
+/// crossing every other point of it lies on that side, since a conic is
+/// convex, and so is the shadow of a loop seen down the axis it winds about.
+/// From a start a rounding inside it, a short stretch round the place it was
+/// rounded off lies on the other side, and that place is where the counting
+/// begins. So the sweep from the start, a step along the run and `place`, read
+/// as [`Decision::Neg`], says `place` is on that stretch, and a step from the
+/// start square to the run says it is the point of the stretch straight out
+/// from the start. A start on the crossing reads `false` for every place.
+///
+/// Every other point of that stretch, a hair ahead of the place or behind it,
+/// reads `false` and is left to the sweep.
+///
+/// # Errors
+///
+/// What [`which_comes_first_round_a_crossing`] refuses, which is the pair, and
+/// which it has already been asked about.
+fn the_start_is_a_rounding_off(
+    pair: [&Surface; 2],
+    from: PredicatePoint,
+    place: PredicatePoint,
+) -> rcad_geom::Result<bool> {
+    let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
+    let start = from.enclosure();
+    let step = [0, 1, 2].map(|axis| place.enclosure()[axis] - start[axis]);
+    if dot_of(step, runs).sign() != Decision::Zero {
+        return Ok(false);
+    }
+    let ahead = PredicatePoint::Constructed([0, 1, 2].map(|axis| start[axis] + runs[axis]));
+    // Compared rather than matched: only a proved `Neg` puts `place` outside
+    // the line, and every other answer leaves it where the sweep puts it (§40).
+    Ok(which_comes_first_round_a_crossing(pair, from, ahead, place)? == Decision::Neg)
 }
 
 /// Whether two nodes whose boxes share a point are that one point.
@@ -8090,8 +8155,10 @@ fn one_point_if_both_are_exact(one: PredicatePoint, other: PredicatePoint) -> De
 /// start, and the answer is [`Decision::Undecidable`] as wide as the wider box.
 ///
 /// **Where neither does, the start is off the conic**, which a walked start
-/// can be by a rounding, and then neither point is the start.
-/// [`the_one_ahead_of_the_start`] says which comes first. A block edge grazing
+/// can be by a rounding, and then neither point is the start: a point the start
+/// is a rounding off was put first before the sweep was asked
+/// ([`the_start_is_a_rounding_off`]). [`the_one_ahead_of_the_start`] says which
+/// comes first. A block edge grazing
 /// a ball at `x = 0` is the shape: both circles start at `(0, 1, −2⁻²⁵)`,
 /// `2⁻¹⁰³` inside the ball, on the edge halfway between the two exact places
 /// it cuts the ball at, `(±2⁻⁵¹, 1, −2⁻²⁵)`. That was refused here until Q449
