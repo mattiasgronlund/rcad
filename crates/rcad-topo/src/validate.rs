@@ -2479,27 +2479,89 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(view, policy, log)?;
     every_side_of_the_skin_is_used_both_ways(&coarsest)?;
     let enclosed = signed_volume_over(&coarsest);
-    if enclosed != 0.0 {
+    if enclosed != 0.0 && !it_lies_flat(&coarsest) {
         return Ok(enclosed);
     }
     let mut room = how_far_across(&coarsest) / 2.0;
     while let Ok(less) = Deflection::of(room) {
-        match view.mesh(less, policy, log) {
-            Ok(finer) => {
-                let enclosed = signed_volume_over(&finer);
-                if enclosed != 0.0 {
-                    return Ok(enclosed);
-                }
+        let mut this_rung = ProvenanceLog::new();
+        match view.mesh(less, policy, &mut this_rung) {
+            Ok(finer) if !it_lies_flat(&finer) => {
+                this_rung.drain_into(log);
+                return Ok(signed_volume_over(&finer));
             }
-            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
+            Ok(_) | Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
             Err(why) => {
-                hand_on_a_refusal_that_found_the_space(why)?;
+                let handed_on = hand_on_a_refusal_that_found_the_space(why);
+                if handed_on.is_err() {
+                    this_rung.drain_into(log);
+                }
+                handed_on?;
                 break;
             }
         }
         room /= 2.0;
     }
-    Ok(0.0)
+    Ok(enclosed)
+}
+
+/// Whether every point of the mesh lies within a rounding of one plane, so
+/// that what it encloses is a rounding too and says nothing about the solid.
+///
+/// **Why a flat mesh's sum is no answer.** Turn the frame so the plane is
+/// `z = h`. By the divergence theorem over the field `(0, 0, z)`, a closed mesh
+/// encloses `Σ Aₜ · z̄ₜ`, exactly: each triangle's area seen from above, signed
+/// by which way it faces, times the mean height of its three corners. A closed
+/// mesh's areas seen from above add to zero, so `h` drops out: a mesh whose
+/// points stray at most `δ` from a plane encloses at most `δ` times its area.
+///
+/// The rounding is `64` ulps of the largest coordinate in the mesh. Not yet
+/// published by a test (row Q1849 is unfinished).
+fn it_lies_flat(mesh: &Mesh) -> bool {
+    const ROUNDINGS_OFF_THE_PLANE: f64 = 64.0;
+    how_far_it_strays_from_one_plane(mesh)
+        <= ROUNDINGS_OFF_THE_PLANE * f64::EPSILON * largest_coordinate_of(mesh)
+}
+
+fn largest_coordinate_of(mesh: &Mesh) -> f64 {
+    mesh.points()
+        .iter()
+        .flat_map(|point| point.coordinates())
+        .fold(0.0, |largest: f64, coordinate| {
+            largest.max(coordinate.abs())
+        })
+}
+
+fn how_far_it_strays_from_one_plane(mesh: &Mesh) -> f64 {
+    let points = mesh.points();
+    let Some(&start) = points.first() else {
+        return 0.0;
+    };
+    let farthest_from = |from: Point| {
+        points
+            .iter()
+            .copied()
+            .max_by(|one, other| (*one - from).length().total_cmp(&(*other - from).length()))
+            .unwrap_or(from)
+    };
+    let one_end = farthest_from(start);
+    let other_end = farthest_from(one_end);
+    let along = other_end - one_end;
+    let off_the_line = |point: Point| along.cross(point - one_end).length();
+    let third = points
+        .iter()
+        .copied()
+        .max_by(|one, other| off_the_line(*one).total_cmp(&off_the_line(*other)))
+        .unwrap_or(one_end);
+    let normal = along.cross(third - one_end);
+    let length = normal.length();
+    if length == 0.0 {
+        return 0.0;
+    }
+    points
+        .iter()
+        .map(|point| (normal.dot(*point - one_end) / length).abs())
+        .fold(0.0, f64::max)
 }
 
 /// `Err(why)` when a finer mesh of the zero ladder was refused because it found
