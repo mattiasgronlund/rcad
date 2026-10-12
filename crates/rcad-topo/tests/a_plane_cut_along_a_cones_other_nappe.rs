@@ -2155,3 +2155,107 @@ fn shared_volume(case: &Case) -> f64 {
     }
     total
 }
+
+#[test]
+fn probe_q1851_steep_cone_slabs() {
+    use rcad_predicates::expansion::{expansion_sign, expansion_sum, scale_expansion, two_product};
+    let lows: Vec<f64> = std::env::var("PROBE_LOWS")
+        .map(|it| it.split(',').map(|x| x.parse().unwrap()).collect())
+        .unwrap_or_else(|_| vec![-14.0, -8.0, -3.0, 0.0, 2.0]);
+    let cone_shape = if std::env::var("PROBE_UNIT").is_ok() {
+        THE_UNIT_CONE
+    } else {
+        THE_STEEP_CONE
+    };
+    for turn in [0.0, 0.5, 1.0, 1.5] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let key = a_block(&mut model, a_slab(0.0, turn));
+        for face in model.solid(key).unwrap().faces() {
+            let plane = face.plane();
+            let [a, b, c] = plane.normal().components();
+            let off = plane.offset();
+            if c != 0.0 || off.abs() < 3.0 {
+                continue;
+            }
+            let (aa, aa_lo) = two_product(a, a);
+            let (bb, bb_lo) = two_product(b, b);
+            let (oo, oo_lo) = two_product(off, off);
+            let mut sum = [0.0; 4];
+            let n = expansion_sum(&[aa_lo, aa], &[bb_lo, bb], &mut sum);
+            let mut scaled = [0.0; 8];
+            let m = scale_expansion(&sum[..n], 36.0, &mut scaled);
+            let mut total = [0.0; 10];
+            let k = expansion_sum(&scaled[..m], &[-oo_lo, -oo], &mut total);
+            let e: f64 = total[..k].iter().sum();
+            println!(
+                "PROBE turn {turn}: end plane n=({a:e},{b:e},{c:e}) off={off:e} orient={:?} outward={:?} sign(36|n|^2-off^2)={:?} E={e:e} delta~{:e}",
+                face.orientation(),
+                face.outward_normal(),
+                expansion_sign(&total[..k]),
+                e / 12.0
+            );
+            let naive = a_slab(0.0, turn)
+                .placed
+                .apply_to_point(Point::new(0.0, 0.0, 0.0));
+            println!("PROBE   naive corner {naive:?}");
+        }
+    }
+    let policy = Policy::certified();
+    for &low in &lows {
+        for turn in [0.0, 0.5, 1.0, 1.5] {
+            for (rule, cone_first) in RULES {
+                let case = Case {
+                    cone: cone_shape,
+                    block: a_slab(low, turn),
+                    solids: a_slabs_solids(cone_shape, low),
+                };
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let (cone, block) = build(&mut model, &case);
+                let (arguments, tools) = if cone_first {
+                    ([cone], [block])
+                } else {
+                    ([block], [cone])
+                };
+                let line = match model.fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                ) {
+                    Err(Error::Undecidable { records }) => {
+                        format!("refused {}", records.records().last().unwrap().predicate())
+                    }
+                    Err(other) => format!("refused {other:?}"),
+                    Ok(answer) => {
+                        let pieces = answer.solids().to_vec();
+                        let valid = model.validate(&policy, &mut ProvenanceLog::new());
+                        let mut vols = Vec::new();
+                        for &piece in &pieces {
+                            let m = model.solid(piece).unwrap().measure(
+                                Deflection::of(0.002).unwrap(),
+                                &policy,
+                                &mut ProvenanceLog::new(),
+                            );
+                            vols.push(match m {
+                                Ok(m) => format!("{:e}±{:e}", m.volume(), m.volume_error()),
+                                Err(e) => format!("{e:?}"),
+                            });
+                        }
+                        format!(
+                            "{} solids (want {}), validate {:?}, volumes {vols:?}",
+                            pieces.len(),
+                            case.solids[RULES
+                                .iter()
+                                .position(|it| *it == (rule, cone_first))
+                                .unwrap()],
+                            valid.is_ok()
+                        )
+                    }
+                };
+                println!("PROBE low {low} turn {turn} {rule:?} cone_first {cone_first}: {line}");
+            }
+        }
+    }
+}
