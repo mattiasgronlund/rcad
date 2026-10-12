@@ -335,6 +335,48 @@ fn the_turned_wedges_edge_is_on_the_turned_blocks_top_at_every_turn() {
     assert!(off.is_empty(), "{}", off.join("\n"));
 }
 
+/// **The resting prism and the block turned by `0.625` unite as they stand**,
+/// both ways round, as the intersection and both differences at that turn
+/// already answer (queue row Q1582).
+///
+/// There the edge's end at `z = 2` is a rounding inside the turned top and the
+/// end at `z = 8` a rounding above it. The sliver at `z = 2` closes up as
+/// `docs/decisions.md` §417.4 writes it, and the four darts along the edge from
+/// where it crosses the top to that end are the top's two pieces and the
+/// prism's two walls. The union was refused `ResultIsNotManifold { count: 4 }`:
+/// `rest_on_the_outer_side_of` in `fuse/assemble.rs` read the wall's corner at
+/// `z = 8`, the meet of the two walls and that end, by the point it is written
+/// down as, `(3.36e-16, −4.680778183523698, 6.487704956041742)`, a rounding
+/// inside the top, where the three planes meet strictly above it.
+#[test]
+fn a_resting_prism_with_one_end_a_rounding_inside_a_turned_top_unites_as_they_stand() {
+    let turn = a_turn(25);
+    let planes = planes_round_the_edge_turned(&turned_by(turn), |model| {
+        a_turned_block_and_resting_prism(model, turn)
+    });
+    assert!(
+        sides_of_the_edge(&planes).contains(&Decision::Neg)
+            && sides_of_the_edge(&planes).contains(&Decision::Pos),
+        "{:?}",
+        sides_of_the_edge(&planes)
+    );
+    let [block, prism] = {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        a_turned_block_and_resting_prism(&mut model, turn)
+            .map(|solid| AsItStands::of(&model, solid))
+    };
+    let mut wrong = Vec::new();
+    for swapped in [false, true] {
+        let (model, answer) = fuse(swapped, Rule::Union, |model| {
+            a_turned_block_and_resting_prism(model, turn)
+        });
+        if let Some(why) = differs_from_as_they_stand(&model, answer, &[&prism, &block]) {
+            wrong.push(format!("prism first {swapped}: {why}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// The prism turned over and moved into the block, its edge on the top face
 /// from below: the triangle `(0, 0)`, `(−1, −2)`, `(3, −2)`, from `z = 2` to
 /// `z = 8`. The union is the block, the intersection the prism, and the prism
@@ -785,6 +827,17 @@ fn a_turned_block_and_wedge(model: &mut Model, turn: f64) -> [SolidKey; 2] {
     [
         a_placed_prism(model, THE_BLOCKS_OUTLINE, &turning, 10.0),
         a_placed_prism(model, WEDGE, &turning.compose(&shift), 6.0),
+    ]
+}
+
+/// The block and the resting prism of [`RESTING`], six long, both turned about
+/// `x` by `turn`, the prism moved to `z = 2` before it is turned.
+fn a_turned_block_and_resting_prism(model: &mut Model, turn: f64) -> [SolidKey; 2] {
+    let turning = turned_by(turn);
+    let shift = Isometry::translation(Vector::new(0.0, 0.0, 2.0)).expect("a finite shift");
+    [
+        a_placed_prism(model, THE_BLOCKS_OUTLINE, &turning, 10.0),
+        a_placed_prism(model, RESTING, &turning.compose(&shift), 6.0),
     ]
 }
 
