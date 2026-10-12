@@ -69,6 +69,18 @@ The pile is cumulative, so the replay grows with it: 22 633 crash files on
 2026-09-26, 69 879 ten nights later. `TimeoutStartSec=14400` is four hours,
 about fifteen times today's run, and ends at 12:33, far from the next night.
 
+> **2026-10-12 note (Q1731): a crash file now leaves the pile once it has
+> passed (§434).** After the replay, the morning folds each crash file that
+> passed on `main`, and that the merge read to the end, into its target's
+> corpus, and removes it from the tree's `fuzz/artifacts/` (§434.3). So the
+> sentence in bold above now reads: every night's `artifacts/` holds every
+> crash file of the nights before it that has not yet been seen to pass and
+> been read by the merge. A missed morning still costs nothing, since a file
+> leaves only after a morning has replayed it. The pile is no longer
+> cumulative, and the replay shrinks with it. Each removed file has a line in
+> `~/rcad-fuzz-logs/removed-crash-files.tsv`, and each night's directory keeps
+> its own copy.
+
 ### 410.4 The check reads the files and refuses what it cannot read
 
 `check-triage-waits-for-the-night` reads the two timers and two services in
