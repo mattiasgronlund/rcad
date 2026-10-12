@@ -234,9 +234,14 @@ pub enum Error {
     /// A weight was positive but down among the subnormal numbers, where a
     /// blend of two of them can round away to nothing.
     ///
-    /// Refusing loses no curve. A rational spline depends on its weights only
-    /// through their ratios, so multiplying every weight by a power of two
-    /// gives back the identical curve, exactly and with no bits lost.
+    /// A rational spline depends on its weights only through their ratios, so
+    /// multiplying every weight by a power of two gives back the identical
+    /// curve, exactly and with no bits lost. That makes refusing lose no curve
+    /// **only while the weights span less than `f64`'s normal range**:
+    /// weights of `5e-324` and `1e300` need `2⁵²` to bring the smaller up to a
+    /// normal number, and `1e300 · 2⁵²` is past `f64::MAX`. Whether the curve
+    /// such weights name can be held some other way is not shown, so the class
+    /// is **not known** (§437.6).
     #[error(
         "the weight {weight:e} is too small to blend; scale every weight up by a power of two \
          for the same curve"
@@ -305,8 +310,10 @@ pub enum Error {
     ///
     /// **A gap** (§16.10, §31.9). [`EdgeRun`](crate::EdgeRun) *can* say this:
     /// the two loops of a pinch are the two sides of one half-space through the
-    /// tangent point. Writing that plane down is the same gap
-    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] is about.
+    /// tangent point. Writing that plane down is the question
+    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] is about, and for the
+    /// ball and pipe in `what_a_geometry_refusal_says_about_its_answer.rs` the
+    /// tangent point `(-2, 0, 0)` is one `f64` holds exactly.
     ///
     /// The reason to refuse here rather than there is the evaluator. Where a
     /// crossing runs through itself the two surfaces are **tangent**, so the
@@ -327,10 +334,17 @@ pub enum Error {
     /// A crossing came in two pieces and no half-space could be written down
     /// that picks one of them out and holds along the whole of it.
     ///
-    /// A **gap** and not a limit (§16.10): the two pieces are there and they are
-    /// tellable apart, and what runs out is `f64`'s supply of unit vectors
-    /// exactly square to a given direction. The families of fixes weighed are on
-    /// `two_lines_along_a_pipe`.
+    /// **Not known** (§437.6), though the two pieces are there and they are
+    /// tellable apart. What runs out is `f64`'s supply of unit vectors exactly
+    /// square to a given direction, and that is sometimes a picker not found
+    /// and sometimes no picker at all. `two_pipes_of_one_width_on_crossing_axes.rs`
+    /// shows both: bores on `(3, 4, 0)` and `(4, 0, 3)` have no flat surface
+    /// written in `f64` that picks their halves, which is a limit of today's
+    /// [`HalfSpace`](crate::HalfSpace), while the same file's count of named
+    /// pairs, raised from 32 to 1096 of 1224 by searching harder, shows pickers
+    /// that existed and were not found, which is a gap. This variant carries
+    /// nothing that tells the two apart. The families of fixes
+    /// weighed are on `two_lines_along_a_pipe`.
     #[error(
         "this crossing comes in two pieces and no half-space square to both surfaces can be \
          written down in f64 to tell them apart"
@@ -757,9 +771,15 @@ pub enum Error {
     /// sign to evaluate anywhere near a root, so the search has nothing to
     /// bisect on.
     ///
-    /// A **gap** and not a limit: the roots exist, and where the line's own six
-    /// numbers each name an `f64` — which is what a corner on the lattice comes
-    /// to — they are found. The family of fixes is (a) bisecting on interval
+    /// **Not known** (§437.6). Where the line's own six numbers each name an
+    /// `f64` — which is what a corner on the lattice comes to — the roots are
+    /// found, so a box that holds one line is a gap. But a box can hold lines
+    /// that meet the tube and lines that miss it, and for such a box there is
+    /// no single answer to give: the ball refuses a ray whose box straddles
+    /// its skin for that reason (`where_a_line_meets_a_surface.rs`,
+    /// `a_ray_whose_box_straddles_the_skin_is_refused_rather_than_guessed`).
+    /// This variant carries nothing that says which kind of box it was handed.
+    /// The family of fixes is (a) bisecting on interval
     /// signs and handing back the stretches where the sign is undecided, which
     /// is [`MeetsAt::MaybeATouch`](crate::MeetsAt::MaybeATouch)'s shape applied
     /// to a whole bracket rather than to a turning point, and is a lane;
@@ -838,6 +858,105 @@ impl Error {
             surfaces[1] = surfaces[1].transformed(movement);
         }
         self
+    }
+
+    /// Whether the answer this refusal stands in for exists (§16.10).
+    ///
+    /// `docs/decisions.md` §437.6. A **limit** says no answer this kernel can
+    /// hold exists, a **gap** that one exists and the arithmetic did not reach
+    /// it, and **not known** that nobody has shown either. Every limit and gap
+    /// claimed here is reached and asserted by
+    /// `what_a_geometry_refusal_says_about_its_answer.rs`.
+    ///
+    /// A variant that can be either kind, and carries nothing that tells them
+    /// apart, says not known: [`Error::NotFinite`] is a `NaN` the caller
+    /// handed over, or a weighted circle of radius `2e307` whose control point
+    /// overflowed while the circle itself is representable. Bad input with no
+    /// shape behind it is a limit, and so is what today's kernel cannot hold,
+    /// such as a degree past [`MAX_DEGREE`](crate::MAX_DEGREE) (§437.6).
+    ///
+    /// One match and no wildcard, so a new variant does not compile until it is
+    /// given a class.
+    #[must_use]
+    pub fn limit_or_gap(&self) -> LimitOrGap {
+        match self {
+            Self::QuarterTurnsNeedAnAxisAlongXYOrZ { .. }
+            | Self::RadiusNotPositive { .. }
+            | Self::SlopeNotPositive { .. }
+            | Self::HalfAngleIsNotACone { .. }
+            | Self::ATorusThatRunsThroughItself { .. }
+            | Self::DeflectionNotPositive { .. }
+            | Self::SegmentHasNoLength
+            | Self::ParameterOutsideSegment { .. }
+            | Self::NominalSizeNotPositive { .. }
+            | Self::FeatureSizeNotPositive { .. }
+            | Self::DynamicRangeTooWide { .. }
+            | Self::DegreeNotSupported { .. }
+            | Self::TooFewKnots { .. }
+            | Self::KnotsGoBackwards { .. }
+            | Self::KnotRepeatedTooOften { .. }
+            | Self::KnotVectorHasNoSpan
+            | Self::WrongNumberOfControlPoints { .. }
+            | Self::WeightNotPositive { .. }
+            | Self::ParameterOutsideDomain { .. }
+            | Self::CannotRepeatKnotAgain { .. }
+            | Self::NothingOnOneSideOfTheSplit { .. }
+            | Self::AnEndOfARunNamesNoPlace
+            | Self::AClosedRunDoesNotComeBackToWhereItStarted { .. }
+            | Self::ACrossingPieceHasNoEndsAndNothingPickingIt
+            | Self::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces
+            | Self::TheCrossingOfTheseTwoSurfacesIsNotClosed
+            | Self::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing => LimitOrGap::Limit,
+            Self::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo
+            | Self::ACrossingBetweenAPlaneAndATorusThatIsAQuartic
+            | Self::ACrossingBetweenATorusAndAnotherCurvedSurface
+            | Self::CannotWorkOutHowBigACrossingIs
+            | Self::WhereThreeSurfacesMeetNeedsTwoOfThemFlat => LimitOrGap::Gap,
+            Self::NotFinite { .. }
+            | Self::ZeroLength { .. }
+            | Self::PointsAreInALine
+            | Self::KnotsTooFarApart { .. }
+            | Self::KnotVectorNotClamped
+            | Self::WeightTooSmallToBlend { .. }
+            | Self::CannotNameWhichPieceOfACrossingThisIs
+            | Self::ACrossingBetweenAConeAndAnotherCurvedSurface
+            | Self::CannotPlaceAPointThatCloseToACrossing { .. }
+            | Self::CannotFollowACrossingWhereItsSurfacesAreTangent { .. }
+            | Self::CannotFollowACrossingBecauseNoStepStaysOnIt { .. }
+            | Self::TooManyPointsAlongOneCrossing { .. }
+            | Self::TheseTwoSurfacesDoNotCrossInAConic
+            | Self::WhereALineMeetsARingNeedsTheLineExactly
+            | Self::Predicate(..)
+            | Self::Undecidable { .. } => LimitOrGap::NotKnown,
+        }
+    }
+}
+
+/// What a refusal says about the answer it stands in for: none to be had, one
+/// not reached, or not known (`docs/decisions.md` §16.10, §437.6).
+///
+/// Its words come from [`Display`](core::fmt::Display), so a caller outside
+/// this crate reads the class without matching this enum and keeping a
+/// wildcard arm for its next variant.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LimitOrGap {
+    /// No answer this kernel can hold exists, so there is nothing to fix.
+    Limit,
+    /// An answer exists, and the arithmetic did not reach it.
+    Gap,
+    /// Nobody has shown which of the two it is, or the refusal carries nothing
+    /// that tells them apart.
+    NotKnown,
+}
+
+impl core::fmt::Display for LimitOrGap {
+    fn fmt(&self, into: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        into.write_str(match self {
+            Self::Limit => "limit",
+            Self::Gap => "gap",
+            Self::NotKnown => "not known",
+        })
     }
 }
 
