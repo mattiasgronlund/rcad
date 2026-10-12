@@ -28,7 +28,7 @@
 //! either side of `z = 0`, and it holds `8π²`. Against a bar it touches
 //! nowhere, nothing cuts it, and a fuse has to hand it back whole (row Q1588).
 //! Turned about six axes a fortieth of a turn at a time, it is handed back at
-//! all but seven of the 234 turns.
+//! every one of the 234 turns (row Q1632).
 
 use core::f64::consts::{PI, TAU};
 
@@ -36,12 +36,17 @@ use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Invalid, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Model, Rule, SolidBuilder, SolidKey};
 
 mod rings;
 
 /// How fine a mesh every volume here is read off.
 const DEFLECTION: f64 = 0.01;
+
+/// How fine a mesh the 1404 answers of the turned whole ring are read off:
+/// at [`DEFLECTION`] they take two minutes, and the ring and the bar are
+/// still told apart.
+const A_COARSE_DEFLECTION: f64 = 0.1;
 
 /// Half of a ring of four round a tube of one.
 const THE_HALF_RING: f64 = 4.0 * PI * PI;
@@ -257,13 +262,16 @@ fn a_whole_ring_turned_a_quarter_about_a_slant_and_a_bar_far_from_it_fuse_to_the
 
 /// The whole ring turned about six axes a fortieth of a turn at a time, and
 /// the bar twenty out, fused under every rule both ways round: 1404 fuses.
-/// Each one that answers gives the two apart, nothing, or its first argument,
-/// and validates. The rest, 21, are refused `VolumeIsNotPositive`, a ring of
-/// volume `8π²` read as enclosing about `−4·10⁻¹⁶`. They are the three fuses
-/// whose answer holds the ring, at seven of the 234 turns, and that is a
-/// defect pinned at its count: the answer exists (row Q1588).
+/// Each one gives the two apart, nothing, or its first argument, validates,
+/// and measures as the ring's `8π²` and the bar's two units.
+///
+/// 21 of them, the three whose answer holds the ring at seven of the 234
+/// turns, were refused `VolumeIsNotPositive`, a ring of volume `8π²` read as
+/// enclosing about `−4·10⁻¹⁶` (row Q1632).
 #[test]
-fn a_whole_ring_turned_any_way_and_a_bar_far_from_it_answer_or_are_refused_as_enclosing_nothing() {
+fn a_whole_ring_turned_any_way_and_a_bar_far_from_it_fuse_to_the_two_apart() {
+    let the_bar = 2.0 * A_UNIT_OF_THE_BAR;
+    let the_two_apart = [THE_WHOLE_RING, the_bar];
     let mut refused = Vec::new();
     for direction in [
         Vector::new(1.0, 2.0, 3.0),
@@ -277,13 +285,13 @@ fn a_whole_ring_turned_any_way_and_a_bar_far_from_it_answer_or_are_refused_as_en
         for fortieths in 1..40 {
             let turn = Isometry::rotation(&axis, f64::from(fortieths) * TAU / 40.0)
                 .expect("a finite turn");
-            for (rule, ring_first, solids) in [
-                (Rule::Union, true, 2),
-                (Rule::Union, false, 2),
-                (Rule::Intersection, true, 0),
-                (Rule::Intersection, false, 0),
-                (Rule::Difference, true, 1),
-                (Rule::Difference, false, 1),
+            for (rule, ring_first, truths) in [
+                (Rule::Union, true, &the_two_apart[..]),
+                (Rule::Union, false, &the_two_apart[..]),
+                (Rule::Intersection, true, &[][..]),
+                (Rule::Intersection, false, &[][..]),
+                (Rule::Difference, true, &[THE_WHOLE_RING][..]),
+                (Rule::Difference, false, &[the_bar][..]),
             ] {
                 let what = format!(
                     "{rule:?}, ring first {ring_first}, {fortieths}/40 about {direction:?}"
@@ -307,22 +315,18 @@ fn a_whole_ring_turned_any_way_and_a_bar_far_from_it_answer_or_are_refused_as_en
                     &mut ProvenanceLog::new(),
                 ) {
                     Ok(answer) => {
-                        assert_eq!(answer.solids().len(), solids, "{what}");
+                        let answer = answer.solids().to_vec();
                         model
                             .validate(&Policy::certified(), &mut ProvenanceLog::new())
                             .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                        the_solids_measure(&model, &answer, truths, A_COARSE_DEFLECTION, &what);
                     }
-                    Err(Error::Invalid(Invalid::VolumeIsNotPositive { volume }))
-                        if volume.abs() < 1e-12 =>
-                    {
-                        refused.push(what);
-                    }
-                    Err(why) => panic!("{what}: refused {why:?}"),
+                    Err(why) => refused.push(format!("{what}: {why:?}")),
                 }
             }
         }
     }
-    assert_eq!(refused.len(), 21, "{refused:#?}");
+    assert!(refused.is_empty(), "{refused:#?}");
 }
 
 fn a_whole_ring_and_a_bar_clear_of_it_fuse_to_the_two_apart(shape: &str, out: f64) {
@@ -432,7 +436,7 @@ fn every_fuse_of_the_two_answers(
         model
             .validate(&Policy::certified(), &mut ProvenanceLog::new())
             .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-        the_solids_measure(&model, &answer, truths, &what);
+        the_solids_measure(&model, &answer, truths, DEFLECTION, &what);
     }
 }
 
@@ -516,8 +520,14 @@ fn a_plate(model: &mut Model, top: f64) -> SolidKey {
 }
 
 /// One solid for each of `truths`, each measuring as its own one inside the
-/// error its measurement gives.
-fn the_solids_measure(model: &Model, answer: &[SolidKey], truths: &[f64], what: &str) {
+/// error its measurement off a mesh as fine as `deflection` gives.
+fn the_solids_measure(
+    model: &Model,
+    answer: &[SolidKey],
+    truths: &[f64],
+    deflection: f64,
+    what: &str,
+) {
     assert_eq!(
         answer.len(),
         truths.len(),
@@ -529,7 +539,7 @@ fn the_solids_measure(model: &Model, answer: &[SolidKey], truths: &[f64], what: 
             .solid(solid)
             .expect("this model made the key")
             .measure(
-                Deflection::of(DEFLECTION).expect("a positive length"),
+                Deflection::of(deflection).expect("a positive length"),
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             )
