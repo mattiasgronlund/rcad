@@ -13104,11 +13104,15 @@ queue mode="" *args:
             for (y = 1; y <= m; y++) print "    " raw[pick[y]]
             lanes_n++
         }
-        function sets_meet(x, y,    ex, ey, nx, ny, i, j) {
+        function sets_meet(x, y,    ex, ey, nx, ny, i, j, shmine, shtheirs, sharedfound) {
             nx = split(x, ex, ","); ny = split(y, ey, ",")
             for (i = 1; i <= nx; i++)
                 for (j = 1; j <= ny; j++)
-                    if (entries_meet(ex[i], ey[j])) { mine = ex[i]; theirs = ey[j]; meet_shared = shared_match; return 1 }
+                    if (entries_meet(ex[i], ey[j])) {
+                        if (!shared_match) { mine = ex[i]; theirs = ey[j]; meet_shared = 0; return 1 }
+                        if (!sharedfound) { sharedfound = 1; shmine = ex[i]; shtheirs = ey[j] }
+                    }
+            if (sharedfound) { mine = shmine; theirs = shtheirs; meet_shared = 1; return 1 }
             return 0
         }
         function entries_meet(x, y,    px, py, ix, iy, h, m) {
