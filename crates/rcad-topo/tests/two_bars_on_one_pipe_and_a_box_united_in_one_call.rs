@@ -96,12 +96,14 @@
 //!   answered yet. One call reaches the union
 //!   ([`a_box_turned_an_eighth_of_a_turn_unites_with_the_lower_bar_and_with_both_bars`]).
 //! - **A square bar standing on an edge, pushed through the lower bar's wall,
-//!   cannot be united with that bar alone lying along `y`**, either way round:
-//!   `Undecidable` at "order along a crossing"
-//!   ([`a_square_bar_standing_on_an_edge_along_y_cannot_be_united_with_the_bar`]).
-//!   Lying along `x` it was refused the same way until Q1817, on a corner a
-//!   hair past where a loop round the pipe starts
-//!   ([`a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar`]). Each
+//!   unites with that bar alone**, either way round, lying along `x` since
+//!   Q1817 and along `y` since Q1818. Each was refused `Undecidable` at "order
+//!   along a crossing" before: along `x` on a corner a hair past where a loop
+//!   round the pipe starts
+//!   ([`a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar`]), and
+//!   along `y` on two points `0.38` apart up the ellipse its inner end's plane,
+//!   a rounding off the pipe's axis, crosses the pipe in
+//!   ([`a_square_bar_standing_on_an_edge_along_y_unites_with_the_bar`]). Each
 //!   was built as a shape a designer draws with what Q1406's box has, side
 //!   faces slanting across the wall.
 
@@ -485,46 +487,36 @@ fn a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar() {
 }
 
 /// **A square bar standing on an edge along `y`, pushed through the lower
-/// bar's wall, cannot be united with it**, either way round, by any spelling
-/// of the wall ([`a_diamond_brace_along_y`]). It is refused `Undecidable` at
-/// "order along a crossing", on two points `0.38` apart, so this is no
-/// rounding: `(-√1.75, 1.5, 1 + √1.75 - √½)` and `(-√1.75, 1.5, 2)`. Both are
-/// on the line where the plane `y = 1.5` of the brace's inner end crosses the
-/// pipe, on the side away from the brace: the first where that line meets the
-/// plane `x + z = 1 - √½` of one of its faces, the second on the bar's top cap.
+/// bar's wall, unites with it**, either way round, by any spelling of the wall
+/// ([`a_diamond_brace_along_y`]): one solid, `8π` and what of the brace is
+/// outside the bar, which is what [`the_diamond_brace_outside_the_bar`] works
+/// out for the brace along `x`, since swapping `x` and `y` carries one brace
+/// onto the other and the bar onto itself.
 ///
-/// Built for the same reason as
-/// [`a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar`], which was
-/// refused on a corner a rounding past where its loop starts, where these two
-/// points are `0.38` apart. The answer exists, so this is a gap.
+/// It was refused `Undecidable` at "order along a crossing" until Q1818, on
+/// two points `0.38` apart: `(-√1.75, 1.5, 1 + √1.75 - √½)` and `(-√1.75,
+/// 1.5, 2)`. The brace is turned a quarter turn about `x`, and `cos(π/2)`
+/// rounds to `6.1e-17`, so the plane of its inner end is stored as `-y -
+/// 2.2e-16·z = -1.5000000000000002`: not quite along the pipe's axis. It
+/// crosses the pipe in an ellipse `1.8e16` long, where `y = 1.5` would cross
+/// it in two lines, and the walk starts it at `(2, 0, 6755399441055745)`. The
+/// two points are on the side of it away from the brace, the first where it
+/// meets the plane `x + z = 1 - √½` of one of the brace's faces, the second on
+/// the bar's top cap. On that plane their `y` differ by `2.2e-16 · 0.38`,
+/// under an ulp of `1.5`, so seen down the axis their boxes overlap, and the
+/// area they sweep with that start came out with an enclosure of `15`. Read
+/// off how far apart they are along the axis instead, they are proved in order
+/// (`round_a_closed_crossing_by_its_angle` in `fuse/arrange.rs`).
 #[test]
-fn a_square_bar_standing_on_an_edge_along_y_cannot_be_united_with_the_bar() {
-    let x = -1.75_f64.sqrt();
-    let on_its_inner_end = [[x, 1.5, 1.0 - x - FRAC_1_SQRT_2], [x, 1.5, MEETING]];
+fn a_square_bar_standing_on_an_edge_along_y_unites_with_the_bar() {
+    let one_bar = PI * RADIUS * RADIUS * MEETING;
+    let outside = the_diamond_brace_outside_the_bar();
     for wall in EVERY_WALL {
         for call in [Call::LowerWithTheBoxAlone, Call::TheBoxWithTheLowerAlone] {
-            let asked = format!("{wall:?}, {call:?}");
-            let (_, said) = unite_with(wall, call, a_diamond_brace_along_y);
-            let Err(why) = &said else {
-                panic!("{asked}: answered {said:?}");
-            };
-            assert_eq!(
-                what_it_gave_up_on(why),
-                "order along a crossing",
-                "{asked}: {why:?}"
-            );
-            let points = the_points_it_could_not_order(why);
-            assert_eq!(points.len(), 2, "{asked}: {why:?}");
-            for crossing in on_its_inner_end {
-                assert!(
-                    points
-                        .iter()
-                        .any(|&point| lies_within(point, crossing, 1e-12)),
-                    "{asked}: {crossing:?} among {points:?}"
-                );
-            }
-            let enclosure = the_last_record(why).enclosure();
-            assert!(enclosure > 1.0, "{asked}: {enclosure}");
+            let asked = format!("the diamond brace along y, {wall:?}, {call:?}");
+            let (model, said) = unite_with(wall, call, a_diamond_brace_along_y);
+            let united = said.unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+            is_the_solid_worked_out(&model, &united, (1, one_bar + outside), &asked);
         }
     }
 }
