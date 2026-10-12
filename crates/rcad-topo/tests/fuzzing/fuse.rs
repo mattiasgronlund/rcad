@@ -273,13 +273,19 @@ pub fn two_models_split_and_fused_keeping_the_provenance(
 /// that gave up in its records (§253.3, §253.7) — nothing else here reads that
 /// far in, so this is the one door that hands it out.
 ///
+/// **[`WhichFuse`] comes with it**: the half, the rule, the policy and which
+/// way round, as the draw itself chose them. The morning refusal replay
+/// (§437.5) groups refusals by them, and a copy of the draw in that replay
+/// would be a second draw that could drift from this one. The draw is the same
+/// whether anybody listens or not (§29.9).
+///
 /// # Panics
 ///
 /// As [`two_models_split_and_fused`] does.
 #[must_use]
 pub fn two_models_split_and_fused_noting_refusals(
     data: &[u8],
-    on_refusal: &mut dyn FnMut(&Error),
+    on_refusal: &mut dyn FnMut(&Error, WhichFuse),
 ) -> Reached {
     two_models_split_and_fused_noting_everything(
         data,
@@ -287,6 +293,42 @@ pub fn two_models_split_and_fused_noting_refusals(
         &mut |_, _| {},
         on_refusal,
     )
+}
+
+/// Which of a draw's fuses refused.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WhichFuse {
+    /// The half of the draw the model was decoded from.
+    pub half: Half,
+    /// The rule that half's header chose.
+    pub rule: Rule,
+    /// The policy that half's header chose.
+    pub policy: Policy,
+    /// The first call, or the second with the two sides swapped.
+    pub way_round: WayRound,
+}
+
+/// The half of a draw a model was decoded from.
+///
+/// **Exhaustive on purpose**: a draw is cut in two, and only in two.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Half {
+    /// The bytes before the cut, read with the header as it is.
+    First,
+    /// The bytes after it, read with the header's two nibbles swapped.
+    Second,
+}
+
+/// Which of one model's calls to `Model::fuse` this was.
+///
+/// **Exhaustive on purpose**: a union or an intersection is asked a second
+/// time with the sides swapped, and there is no third way round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WayRound {
+    /// The call every fuse gets.
+    First,
+    /// The second call, with the two sides swapped.
+    Other,
 }
 
 /// The body [`two_models_split_and_fused_keeping_the_provenance`] and
@@ -297,7 +339,7 @@ fn two_models_split_and_fused_noting_everything(
     data: &[u8],
     log: &mut ProvenanceLog,
     note: &mut dyn FnMut(&[SolidKey], &[SolidKey]),
-    on_refusal: &mut dyn FnMut(&Error),
+    on_refusal: &mut dyn FnMut(&Error, WhichFuse),
 ) -> Reached {
     let Some((&header, rest)) = data.split_first() else {
         return Reached::default();
@@ -306,12 +348,18 @@ fn two_models_split_and_fused_noting_everything(
     let (first_half, second_half) = rest.split_at(half);
 
     how_one_model_is_fused_noting_which_way_the_second_call_went(
-        first_half, header, log, note, on_refusal,
+        first_half,
+        header,
+        Half::First,
+        log,
+        note,
+        on_refusal,
     )
     .and(
         how_one_model_is_fused_noting_which_way_the_second_call_went(
             second_half,
             header.rotate_left(4),
+            Half::Second,
             log,
             note,
             on_refusal,
@@ -347,12 +395,14 @@ pub fn how_one_model_is_fused_keeping_the_provenance(
     header: u8,
     log: &mut ProvenanceLog,
 ) -> Reached {
+    // Read with its header as it is, which is how a draw reads its first half.
     how_one_model_is_fused_noting_which_way_the_second_call_went(
         bytes,
         header,
+        Half::First,
         log,
         &mut |_, _| {},
-        &mut |_| {},
+        &mut |_, _| {},
     )
 }
 
@@ -368,9 +418,8 @@ pub fn how_one_model_is_fused_keeping_the_provenance(
 ///
 /// `on_refusal` is told the same way: it is handed the `Error` of every call
 /// to `Model::fuse` here — the forward one always, the swapped one too when
-/// there is one — right where the refusal is caught, so a caller that wants to
-/// know which predicate gave up does not have to guess which of the two calls
-/// it came from.
+/// there is one — right where the refusal is caught, with the [`WhichFuse`]
+/// of that call, `half` being which half of the draw `bytes` are.
 ///
 /// # Panics
 ///
@@ -378,9 +427,10 @@ pub fn how_one_model_is_fused_keeping_the_provenance(
 fn how_one_model_is_fused_noting_which_way_the_second_call_went(
     bytes: &[u8],
     header: u8,
+    half: Half,
     log: &mut ProvenanceLog,
     note: &mut dyn FnMut(&[SolidKey], &[SolidKey]),
-    on_refusal: &mut dyn FnMut(&Error),
+    on_refusal: &mut dyn FnMut(&Error, WhichFuse),
 ) -> Reached {
     let mut reached = Reached {
         halves: 1,
@@ -461,7 +511,15 @@ fn how_one_model_is_fused_noting_which_way_the_second_call_went(
                 before.len()
             );
             let came_back = WhatCameBack::from_refusal(&why);
-            on_refusal(&why);
+            on_refusal(
+                &why,
+                WhichFuse {
+                    half,
+                    rule,
+                    policy,
+                    way_round: WayRound::First,
+                },
+            );
             came_back
         }
     };
@@ -479,7 +537,15 @@ fn how_one_model_is_fused_noting_which_way_the_second_call_went(
             Ok(fused) => WhatCameBack::Answered(the_answer_written_out(&unfused, fused.solids())),
             Err(why) => {
                 let came_back = WhatCameBack::from_refusal(&why);
-                on_refusal(&why);
+                on_refusal(
+                    &why,
+                    WhichFuse {
+                        half,
+                        rule,
+                        policy,
+                        way_round: WayRound::Other,
+                    },
+                );
                 came_back
             }
         };
@@ -621,9 +687,10 @@ fn the_second_call_asks_the_pair_the_other_way_round() {
     let reached = how_one_model_is_fused_noting_which_way_the_second_call_went(
         &bytes,
         0x01,
+        Half::First,
         &mut ProvenanceLog::new(),
         &mut |arguments, tools| asked.push((arguments.to_vec(), tools.to_vec())),
-        &mut |_| {},
+        &mut |_, _| {},
     );
 
     assert_eq!(

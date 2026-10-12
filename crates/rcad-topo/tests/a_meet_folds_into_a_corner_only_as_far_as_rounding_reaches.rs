@@ -52,7 +52,7 @@ const THE_DRAW: &[u8] =
 #[test]
 fn a_tolerant_union_of_two_blocks_apart_answers_with_the_two_of_them() {
     let mut refusals = Vec::new();
-    let reached = two_models_split_and_fused_noting_refusals(THE_DRAW, &mut |why| {
+    let reached = two_models_split_and_fused_noting_refusals(THE_DRAW, &mut |why, _| {
         refusals.push(why.to_string());
     });
     assert_eq!(

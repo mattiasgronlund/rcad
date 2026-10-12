@@ -55,6 +55,13 @@ mod reading;
 #[path = "../../rcad-step/tests/fuzzing/writer.rs"]
 mod writing;
 
+mod refusals;
+pub use refusals::{
+    CorpusReplay, RefusalGroup, SECONDS_ONE_FILE_IS_GIVEN,
+    THE_SETTLED_DECISIONS_ADDED_UP_PAST_THE_BUDGET, as_faults_tsv, as_refusals_tsv,
+    every_refusal_in,
+};
+
 /// The name the artifact of a pair of planes, balls and pipes belongs to.
 pub const WHERE_TWO_SURFACES_CROSS: &str = "where_two_surfaces_cross";
 /// The name the artifact of a pair with a cone or a torus in it belongs to.
