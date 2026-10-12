@@ -925,13 +925,22 @@ impl BuildingAMesh {
         // corner of a face: [`the_way_the_faces_along_a_closed_edge_walk_it`].
         if edge.is_closed()? {
             let corner = ends[0];
-            let read_at_the_corner = the_way_a_closed_edge_is_stored_running(&along, corner)
-                .or_else(|| the_way_a_closed_edge_where_its_faces_touch_runs(&along, corner));
-            let read_off_the_faces = match read_at_the_corner {
+            let read_off_the_faces = match the_way_a_closed_edge_is_stored_running(&along, corner) {
                 Some(way) => Some(way),
-                None => {
-                    the_way_the_faces_along_a_closed_edge_walk_it(solid, face, edge, &back, corner)?
+                None if the_two_surfaces_cross_at(&along, corner) => {
+                    match the_way_the_faces_along_a_closed_edge_walk_it(
+                        solid, face, edge, &back, corner,
+                    )? {
+                        Some(way) => Some(way),
+                        None => the_way_a_closed_edge_where_its_faces_touch_runs(&along, corner),
+                    }
                 }
+                None => match the_way_a_closed_edge_where_its_faces_touch_runs(&along, corner) {
+                    Some(way) => Some(way),
+                    None => the_way_the_faces_along_a_closed_edge_walk_it(
+                        solid, face, edge, &back, corner,
+                    )?,
+                },
             };
             // **A flat face whose one wire is the whole of this edge holds the
             // disk inside the ball across it**, so it has a side with no corner
@@ -6549,6 +6558,13 @@ fn the_way_a_closed_edge_is_stored_running(along: &[Surface; 2], at: Point) -> O
     } else {
         -forward
     })
+}
+
+/// Whether the two surfaces either side of a closed edge cross at `at` rather
+/// than touch: whether `∇S × ∇T`, the direction
+/// [`the_way_a_closed_edge_is_stored_running`] names a way along, has a length.
+fn the_two_surfaces_cross_at(along: &[Surface; 2], at: Point) -> bool {
+    gradient_of(&along[0], at).cross(gradient_of(&along[1], at)) != Vector::zero()
 }
 
 /// Which way a closed edge runs where its two faces touch at its corner rather
