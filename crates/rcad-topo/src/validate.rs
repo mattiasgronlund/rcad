@@ -2378,6 +2378,14 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// own boundary and nothing else — flat. Closed off by the flat face on the
 /// other side of that boundary it encloses zero, to the last bit.
 ///
+/// **On a turned plane a flat mesh can enclose a rounding instead, and that is
+/// taken for the answer.** A whole ring turned `3/40` of a turn about
+/// `(1, 2, 3)` came back meshed as its two equators alone, enclosed a little
+/// under zero, and was refused [`Invalid::VolumeIsNotPositive`] (row Q1632,
+/// `a_half_ring_standing_on_a_round_plate.rs`). That flat mesh was the
+/// mesher's to mend: it had walked half a turn round the tube in one step,
+/// against the quarter-turn rule above, and walks it in two now.
+///
 /// A ball cut by a plane is exactly that, and it is `docs/decisions.md` §41.6: a
 /// cap under `h/r = 1 − cos(π/4) = 0.2929` spans under a quarter turn, and on a
 /// ball of radius four that is a cap of 15.52 and 5.8% of the ball. **Cut square

@@ -267,7 +267,11 @@ fn a_whole_ring_turned_a_quarter_about_a_slant_and_a_bar_far_from_it_fuse_to_the
 ///
 /// 21 of them, the three whose answer holds the ring at seven of the 234
 /// turns, were refused `VolumeIsNotPositive`, a ring of volume `8π²` read as
-/// enclosing about `−4·10⁻¹⁶` (row Q1632).
+/// enclosing about `−4·10⁻¹⁶` (row Q1632). The mesher cut each of the ring's
+/// two bands across, from one equator over the tube to the other, in one step,
+/// so its coarsest mesh lay flat on the two equators and enclosed a rounding.
+/// A step on a torus is now charged its turn round the tube, and half a turn
+/// is two steps (`how_many_steps` in `src/mesh.rs`).
 #[test]
 fn a_whole_ring_turned_any_way_and_a_bar_far_from_it_fuse_to_the_two_apart() {
     let the_bar = 2.0 * A_UNIT_OF_THE_BAR;
