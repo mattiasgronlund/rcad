@@ -1960,10 +1960,17 @@ fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point>
 /// each of two coordinates together.
 ///
 /// **The reader has to find the circle on the ball still**, and it allows a
-/// centre `16·ε` of the largest number off (`A_CIRCLE_MAY_MISS_ITS_FACE_BY`
-/// in `brep.rs`). Four steps of a coordinate are at most `8ε` of it, so
-/// two coordinates stepped four each move the centre at most `√2·8ε ≈ 11.3ε`
-/// of the larger.
+/// circle `16·ε` of the largest number off (`A_CIRCLE_MAY_MISS_ITS_FACE_BY`
+/// in `brep.rs`). One step of a coordinate is at most `ε` of it, the most
+/// where it stands on a power of two and steps away from zero, so four steps
+/// are at most `4ε` of it, and two coordinates stepped four each move the
+/// centre at most `√2·4ε ≈ 5.66ε` of the larger. Every point of the circle
+/// moves with its centre, so the circle moves off the ball by no more than
+/// that, and the reader's sixteen leave ten for its roundings. The seam of a
+/// ball of radius one at `(2, 2 + one ulp, 0)` turned `0.8178` about `z` is
+/// stepped the full four up both coordinates from `2`, and the reader's bound
+/// reads `5.75` (Q838,
+/// `a_ball_seam_stepped_four_each_way_from_a_power_of_two_is_still_read_back_as_its_plane`).
 const MOST_STEPS_OF_TWO_COORDINATES: i32 = 4;
 
 /// `from` moved `steps` `f64`s up, or down for a negative count.
@@ -2484,19 +2491,23 @@ fn text(string: &str) -> String {
 
 #[cfg(test)]
 mod plane_round_trip_tests {
-    use core::f64::consts::TAU;
+    use core::f64::consts::{SQRT_2, TAU};
 
     use rcad_geom::{
-        Axis, Isometry, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Sphere, Surface, Torus, Vector,
+        Axis, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Scale, Sphere, Surface,
+        Torus, Vector,
     };
+    use rcad_predicates::{Policy, ProvenanceLog};
+    use rcad_topo::{Model, WireView};
 
     use super::{
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, CannotWrite, Shape, a_centre_its_plane_reads_back_from,
-        a_point_this_reader_reads_back_as, a_surface_holds_the_circle, stepped,
-        the_nearest_centre_a_ring_holds_its_circle_at,
-        where_a_plane_square_to_a_ring_crosses_it_nearest,
+        a_point_this_reader_reads_back_as, a_surface_holds_the_circle,
+        how_far_off_the_circle_can_be, stepped, the_nearest_centre_a_ring_holds_its_circle_at,
+        triple, where_a_plane_square_to_a_ring_crosses_it_nearest, write,
     };
     use crate::geometry::plane_through;
+    use crate::{Import, StepFile};
 
     /// The point `Writing::surface` used to write, the foot of the
     /// perpendicular, read back through the reader's own function, misses the
@@ -2688,6 +2699,122 @@ mod plane_round_trip_tests {
             a_centre_its_plane_reads_back_from(&cut, ball.centre()),
             None
         );
+    }
+
+    /// The seam of a ball of radius one at `(2, 2 + one ulp, 0)`, turned
+    /// `0.8178` about `z`: the writer centres its circle four `f64`s up from
+    /// the ball's centre in both `x` and `y`, the furthest
+    /// [`MOST_STEPS_OF_TWO_COORDINATES`](super::MOST_STEPS_OF_TWO_COORDINATES)
+    /// lets it go, and the reader still names the seam by its plane (Q838).
+    ///
+    /// **Only four up in both lands on the offset.** The plane is
+    /// `−0.0917` from the origin, and the reader's dot of the ball's centre
+    /// rounds to `6` ulps of it away. A step of `x` moves that dot about `23`
+    /// ulps one way and a step of `y` about `22` the other, so no step of one
+    /// coordinate lands on it, and a step of each moves it about `1.5`.
+    ///
+    /// **This is the most four steps of each can move a centre.** `x` stands
+    /// on `2`, a power of two, and steps away from zero, so each step is `ε`
+    /// of it, the largest a step of any coordinate is. The centre moves
+    /// `√2·4ε` of `2`, and the reader's bound for the circle on the ball
+    /// (`how_far_off_the_circle_can_be` in `brep.rs`) reads `5.75` of the
+    /// sixteen units it allows.
+    #[test]
+    fn a_ball_seam_stepped_four_each_way_from_a_power_of_two_is_still_read_back_as_its_plane() {
+        let turned = Isometry::translation(Vector::new(2.0, 2.0_f64.next_up(), 0.0))
+            .and_then(|moved| {
+                Isometry::rotation(&Axis::z(), 0.817_814_089_933_346_3)
+                    .map(|turn| moved.compose(&turn))
+            })
+            .expect("a finite move and turn");
+        let add_balls_cut =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis is a unit normal");
+        let Surface::Plane(cut) = Surface::Plane(add_balls_cut).transformed(&turned) else {
+            unreachable!("a plane moves as a plane");
+        };
+        let Surface::Sphere(ball) =
+            Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a radius of one"))
+                .transformed(&turned)
+        else {
+            unreachable!("a ball moves as a ball");
+        };
+        let normal = cut.normal();
+        let [x, y, z] = ball.centre().coordinates();
+        assert_eq!(cut.offset(), -0.091_670_029_559_456_13);
+        let read_back = plane_through(ball.centre(), normal)
+            .expect("a finite point")
+            .offset();
+        assert_eq!(read_back.to_bits().abs_diff(cut.offset().to_bits()), 6);
+        let ulp_of_the_offset = cut.offset().abs().next_up() - cut.offset().abs();
+        let [along_x, along_y, _] = normal
+            .components()
+            .map(|component| component / ulp_of_the_offset);
+        let dot_moved_by_a_step = [along_x * (x.next_up() - x), along_y * (y.next_up() - y)];
+        assert_eq!(dot_moved_by_a_step.map(f64::round), [-23.0, 22.0]);
+
+        let centre =
+            a_centre_its_plane_reads_back_from(&cut, ball.centre()).expect("a centre is found");
+        assert_eq!(centre, Point::new(stepped(x, 4), stepped(y, 4), z));
+        assert_eq!(x, 2.0);
+        assert_eq!(x.next_up() - x, NEAREST_F64_POINT_ROUNDOFF * x);
+        let (off, largest) =
+            how_far_off_the_circle_can_be(&Surface::Sphere(ball), centre, normal, ball.radius())
+                .expect("a ball has a bound");
+        let moved = (centre - ball.centre()).length() / (NEAREST_F64_POINT_ROUNDOFF * largest);
+        let units = off / (NEAREST_F64_POINT_ROUNDOFF * largest);
+        println!("the centre moved {moved} roundings, and the reader's bound reads {units}");
+        assert!((moved - 4.0 * SQRT_2).abs() < 1e-12, "{moved}");
+        assert!((units - 5.75).abs() < 0.01, "{units}");
+        assert!(a_surface_holds_the_circle(
+            &Surface::Sphere(ball),
+            centre,
+            normal,
+            ball.radius()
+        ));
+
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let solid = model
+            .add_ball(1.0, &Isometry::identity())
+            .expect("a ball of radius one fits");
+        model
+            .place_solid(solid, &turned)
+            .expect("the key came from this model");
+        let went_in = the_plane_its_seam_is_cut_from(&model);
+        assert_eq!(format!("{went_in:?}"), format!("{cut:?}"));
+        let text = write(&model, "a ball turned near a power of two").expect("the ball is written");
+        assert!(text.contains(&triple(centre.coordinates())), "{text}");
+        let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+        let back = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a ball this writer wrote is read back");
+        assert_eq!(
+            format!("{:?}", the_plane_its_seam_is_cut_from(back.model())),
+            format!("{went_in:?}")
+        );
+    }
+
+    fn the_plane_its_seam_is_cut_from(model: &Model) -> Plane {
+        let run = model
+            .solids()
+            .next()
+            .expect("the model holds one solid")
+            .faces()
+            .next()
+            .expect("a ball has one face")
+            .wires()
+            .flat_map(WireView::coedges)
+            .next()
+            .expect("a ball's one wire runs down its seam")
+            .edge()
+            .run();
+        let EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(cut),
+            ..
+        } = run
+        else {
+            panic!("a ball's seam is cut from a plane, not {run:?}");
+        };
+        cut
     }
 
     /// Every plane on which the foot of the perpendicular misses, and every
