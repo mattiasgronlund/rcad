@@ -122,6 +122,76 @@ fn the_order_of_the_two_places_is_decided_and_the_slivers_between_them_are_place
     }
 }
 
+#[test]
+fn probe_q1844_table() {
+    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        for rule in EVERY_RULE {
+            for ball_first in [true, false] {
+                let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm"));
+                let ball = model
+                    .add_ball(1.0 + f64::powi(2.0, -51), &Isometry::identity())
+                    .expect("r");
+                let square =
+                    ProfileBuilder::new(vec![[-2.0, -2.0], [2.0, -2.0], [2.0, 1.0], [-2.0, 1.0]])
+                        .build(&Policy::certified(), &mut ProvenanceLog::new())
+                        .expect("sq");
+                let top = -f64::powi(2.0, -25);
+                let block = model
+                    .add_extrusion(
+                        &square,
+                        2.0,
+                        &Isometry::translation(Vector::new(0.0, 0.0, top - 2.0)).expect("s"),
+                    )
+                    .expect("h");
+                let mut log = ProvenanceLog::new();
+                let fused = if ball_first {
+                    model.fuse(&[ball], &[block], rule, &policy, &mut log)
+                } else {
+                    model.fuse(&[block], &[ball], rule, &policy, &mut log)
+                };
+                let records: Vec<_> = match &fused {
+                    Err(Error::Undecidable { records }) => records.records().to_vec(),
+                    _ => log.records().to_vec(),
+                };
+                let recs: Vec<_> = records
+                    .iter()
+                    .map(|r| (r.predicate(), r.level(), r.outcome()))
+                    .collect();
+                let what = match &fused {
+                    Ok(fused) => {
+                        let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                        let vols: Vec<_> = fused
+                            .solids()
+                            .iter()
+                            .map(|s| {
+                                model
+                                    .solid(*s)
+                                    .expect("k")
+                                    .measure(
+                                        rcad_geom::Deflection::of(0.001).expect("d"),
+                                        &Policy::certified(),
+                                        &mut ProvenanceLog::new(),
+                                    )
+                                    .map(|m| (m.volume(), m.volume_error()))
+                            })
+                            .collect();
+                        format!("Ok {vols:?} validate {valid:?}")
+                    }
+                    Err(e) => format!("Err {e:?}"),
+                };
+                println!(
+                    "PROBE x {} {rule:?} ball_first {ball_first}: {what} records {recs:?}",
+                    if policy == Policy::certified() {
+                        "certified"
+                    } else {
+                        "tolerant"
+                    }
+                );
+            }
+        }
+    }
+}
+
 /// No point with `f64` coordinates is inside the sliver the two places fence
 /// off, so no point the fuse builds is (§346).
 ///

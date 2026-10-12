@@ -203,6 +203,80 @@ fn the_slivers_no_point_is_inside_are_placed_by_their_sides_and_each_answer_is_r
     }
 }
 
+#[test]
+fn probe_q1844_table() {
+    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        for rule in EVERY_RULE {
+            for ball_first in [true, false] {
+                let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm"));
+                let ball = model
+                    .add_ball(1.0 + f64::powi(2.0, -51), &Isometry::identity())
+                    .expect("r");
+                let edge = f64::powi(2.0, -25);
+                let square = ProfileBuilder::new(vec![
+                    [-4.0, edge],
+                    [-1.0, edge],
+                    [-1.0, edge + 3.0],
+                    [-4.0, edge + 3.0],
+                ])
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("sq");
+                let block = model
+                    .add_extrusion(
+                        &square,
+                        4.0,
+                        &Isometry::translation(Vector::new(0.0, 0.0, -2.0)).expect("s"),
+                    )
+                    .expect("h");
+                let mut log = ProvenanceLog::new();
+                let fused = if ball_first {
+                    model.fuse(&[ball], &[block], rule, &policy, &mut log)
+                } else {
+                    model.fuse(&[block], &[ball], rule, &policy, &mut log)
+                };
+                let records: Vec<_> = match &fused {
+                    Err(Error::Undecidable { records }) => records.records().to_vec(),
+                    _ => log.records().to_vec(),
+                };
+                let recs: Vec<_> = records
+                    .iter()
+                    .map(|r| (r.predicate(), r.level(), r.outcome()))
+                    .collect();
+                let what = match &fused {
+                    Ok(fused) => {
+                        let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                        let vols: Vec<_> = fused
+                            .solids()
+                            .iter()
+                            .map(|s| {
+                                model
+                                    .solid(*s)
+                                    .expect("k")
+                                    .measure(
+                                        rcad_geom::Deflection::of(0.001).expect("d"),
+                                        &Policy::certified(),
+                                        &mut ProvenanceLog::new(),
+                                    )
+                                    .map(|m| (m.volume(), m.volume_error()))
+                            })
+                            .collect();
+                        format!("Ok {vols:?} validate {valid:?}")
+                    }
+                    Err(e) => format!("Err {e:?}"),
+                };
+                println!(
+                    "PROBE z {} {rule:?} ball_first {ball_first}: {what} records {recs:?}",
+                    if policy == Policy::certified() {
+                        "certified"
+                    } else {
+                        "tolerant"
+                    }
+                );
+            }
+        }
+    }
+}
+
 /// No point with `f64` coordinates is inside any of the three pieces the two
 /// places fence off at `h = 0`, so no point `select` builds is (§346).
 ///

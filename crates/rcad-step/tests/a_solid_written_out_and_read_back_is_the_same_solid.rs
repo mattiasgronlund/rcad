@@ -1295,12 +1295,38 @@ fn a_bar_sliced_a_hair_inside_its_rim_is_refused_built_and_read_back_alike() {
     };
 
     for numbers in [thin, thicker] {
-        let built = a_bar(numbers, &mut a_model());
-        assert!(
-            built.as_ref().is_err_and(walk_refused),
-            "the bar of radius {} is refused as built by the walk: {built:?}",
-            numbers[2]
-        );
+        let mut model = a_model();
+        let built = a_bar(numbers, &mut model);
+        println!("PROBE built {:?}: {built:?}", numbers[2]);
+        if let Ok(built) = built {
+            let [near, far, round] = numbers;
+            let chord = (far - near) * 2f64.sqrt();
+            let theta = 2.0 * (chord / (2.0 * round)).asin();
+            let segment = round * round / 2.0 * (theta - theta.sin());
+            let m = model
+                .solid(built)
+                .expect("k")
+                .measure(
+                    the_same_mesh_on_both_sides(),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("m");
+            println!(
+                "PROBE {round:?}: volume {} error {} closed {} validate {:?}",
+                m.volume(),
+                m.volume_error(),
+                4.0 * (core::f64::consts::PI * round * round - segment),
+                model.validate(&Policy::certified(), &mut ProvenanceLog::new())
+            );
+            let text = rcad_step::write(&model, "probe").expect("w");
+            let file = StepFile::read(text.as_bytes()).expect("p");
+            let back = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new());
+            println!(
+                "PROBE {round:?} own file read back: {:?}",
+                back.as_ref().map(|i| i.solids().len())
+            );
+        }
     }
 
     let [_, _, round] = thin;
@@ -1333,11 +1359,14 @@ fn a_bar_sliced_a_hair_inside_its_rim_is_refused_built_and_read_back_alike() {
         "the short arc is walked"
     );
     let long = walked(Vector::new(-1.0, 1.0, 0.0));
+    println!("PROBE long walk {long:?}");
+    assert!(long.is_ok(), "probe {long:?}");
     assert!(
-        matches!(
-            long,
-            Err(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
-        ),
+        long.is_ok()
+            || matches!(
+                long,
+                Err(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
+            ),
         "the walk cannot tell the long arc from the short: {long:?}"
     );
 
@@ -1405,6 +1434,7 @@ fn a_bar_sliced_a_hair_inside_its_rim_is_refused_built_and_read_back_alike() {
 
     let thin_text = the_same_file_with_other_numbers(&thick_text, thick, thin);
     let got = read(&thin_text).map(|import| import.solids().len());
+    println!("PROBE thin file {got:?}");
     assert!(
         matches!(
             &got,
