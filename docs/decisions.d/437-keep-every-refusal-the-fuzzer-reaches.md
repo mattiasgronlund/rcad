@@ -107,6 +107,23 @@ lattice and turned families refuse nothing. So the families pin a rate for a few
 kinds of refusal, and the fuzzer reaches many kinds without pinning any rate.
 Neither does the other's job.
 
+*Added 2026-10-12, after Mattias asked how the replay could be so much faster
+than the night: the counts above are corpus files, not how often the night met a
+refusal. libFuzzer keeps an input only when it reaches code, or takes a branch a
+number of times, that no kept input does, and it swaps a kept input for a
+smaller one with the same coverage. A refusal reached the same way a million
+times is in the corpus once. One reached along many paths is in it many times.
+On 2026-10-11 the fuse target ran 7 432 655 inputs in 28 675 s and kept 401: the
+last progress line of `~/rcad-fuzz-logs/2026-10-11/fuzz-fuse.log`, and the
+corpus going from 15 047 names to 15 448 in `corpus-names/` of that night and
+the next. That is also why the replay takes 95 s: it runs each kept file once,
+about 480 times fewer inputs than a night, at a similar rate per input. So the
+corpus says which kinds of refusal the fuzzer reaches, and a count moves when a
+fix lands, but the counts do not rank the groups by how often a user would meet
+them. Counting every input during the night would not give that rank either: it
+would count what the fuzzer's mutator draws, which is not what users model. What
+is collected is not changed.*
+
 ### 437.4 The key: the variant, and the predicates that gave up
 
 **What `Error::Undecidable` carries.** `must_decide` and `gave_up`, in
