@@ -232,7 +232,10 @@ instead.
 
 Several rows off one base can share a run, and their merges then wait for one
 another. But a slot refills when its run returns (§230.4), so a shared run
-holds every slot in it until the slowest row is merged.
+holds every slot in it until the slowest row is merged. `lanes.js` refuses more
+than one entry in `args.lanes` unless the call also sets `args.shareOneRun` to
+`true`: launch one `Workflow` call per row, and reach for that flag only when
+sharing the run is the point.
 
 **Never `SendMessage` an agent a run is running.** It does not reach the live
 agent: it starts a second copy from the transcript, in the same tree and on the
