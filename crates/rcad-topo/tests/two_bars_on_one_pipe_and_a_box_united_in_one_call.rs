@@ -96,16 +96,19 @@
 //!   answered yet. One call reaches the union
 //!   ([`a_box_turned_an_eighth_of_a_turn_unites_with_the_lower_bar_and_with_both_bars`]).
 //! - **A square bar standing on an edge, pushed through the lower bar's wall,
-//!   unites with that bar alone**, either way round, lying along `x` since
-//!   Q1817 and along `y` since Q1818. Each was refused `Undecidable` at "order
-//!   along a crossing" before: along `x` on a corner a hair past where a loop
-//!   round the pipe starts
-//!   ([`a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar`]), and
-//!   along `y` on two points `0.38` apart up the ellipse its inner end's plane,
-//!   a rounding off the pipe's axis, crosses the pipe in
-//!   ([`a_square_bar_standing_on_an_edge_along_y_unites_with_the_bar`]). Each
-//!   was built as a shape a designer draws with what Q1406's box has, side
-//!   faces slanting across the wall.
+//!   unites with that bar alone lying along `x`**, either way round, since
+//!   Q1817 ([`a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar`]).
+//!   It was refused `Undecidable` at "order along a crossing" before, on a
+//!   corner a hair past where a loop round the pipe starts. **Lying along `y`
+//!   it is refused** `CannotNameWhichPieceOfACrossingThisIs`, either way round,
+//!   while the result is meshed
+//!   ([`a_square_bar_standing_on_an_edge_along_y_is_refused_walking_its_long_ellipse`]).
+//!   Its inner end's plane is stored a rounding off the pipe's axis and crosses
+//!   the pipe in an ellipse `1.8e16` long. Until Q1818 two corners `0.38` apart
+//!   up that ellipse could not be put in order; now they are, and walking a
+//!   `1.23`-long arc of it is what fails. Each brace was built as a shape a
+//!   designer draws with what Q1406's box has, side faces slanting across the
+//!   wall.
 
 use core::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI, SQRT_2};
 
@@ -487,36 +490,56 @@ fn a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar() {
 }
 
 /// **A square bar standing on an edge along `y`, pushed through the lower
-/// bar's wall, unites with it**, either way round, by any spelling of the wall
-/// ([`a_diamond_brace_along_y`]): one solid, `8π` and what of the brace is
-/// outside the bar, which is what [`the_diamond_brace_outside_the_bar`] works
-/// out for the brace along `x`, since swapping `x` and `y` carries one brace
-/// onto the other and the bar onto itself.
+/// bar's wall, gets its corners put in order and is then refused walking the
+/// long ellipse its inner end cuts the pipe in**:
+/// `CannotNameWhichPieceOfACrossingThisIs`, either way round, by any spelling
+/// of the wall ([`a_diamond_brace_along_y`]). The answer exists, since
+/// swapping `x` and `y` carries the brace onto [`a_diamond_brace_along_x`] and
+/// the bar onto itself, and that brace unites: `8π` and
+/// [`the_diamond_brace_outside_the_bar`]. So this is a gap.
 ///
-/// It was refused `Undecidable` at "order along a crossing" until Q1818, on
-/// two points `0.38` apart: `(-√1.75, 1.5, 1 + √1.75 - √½)` and `(-√1.75,
-/// 1.5, 2)`. The brace is turned a quarter turn about `x`, and `cos(π/2)`
-/// rounds to `6.1e-17`, so the plane of its inner end is stored as `-y -
-/// 2.2e-16·z = -1.5000000000000002`: not quite along the pipe's axis. It
-/// crosses the pipe in an ellipse `1.8e16` long, where `y = 1.5` would cross
-/// it in two lines, and the walk starts it at `(2, 0, 6755399441055745)`. The
-/// two points are on the side of it away from the brace, the first where it
-/// meets the plane `x + z = 1 - √½` of one of the brace's faces, the second on
-/// the bar's top cap. On that plane their `y` differ by `2.2e-16 · 0.38`,
-/// under an ulp of `1.5`, so seen down the axis their boxes overlap, and the
-/// area they sweep with that start came out with an enclosure of `15`. Read
-/// off how far apart they are along the axis instead, they are proved in order
+/// The brace is turned a quarter turn about `x`, and `cos(π/2)` rounds to
+/// `6.1e-17`, so the plane of its inner end is stored as `-y - 2.2e-16·z =
+/// -1.5000000000000002`: not quite along the pipe's axis. It crosses the pipe
+/// in an ellipse `1.8e16` long, where `y = 1.5` would cross it in two lines
+/// `x = ±√1.75`, and the walk starts it at `(2, 0, 6755399441055745)`.
+///
+/// Until Q1818 it was refused `Undecidable` at "order along a crossing", on
+/// two corners of that ellipse `0.38` apart up the axis, `(-√1.75, 1.5, 1 +
+/// √1.75 - √½)` and `(-√1.75, 1.5, 2)`: the first where it meets the plane
+/// `x + z = 1 - √½` of one of the brace's faces, the second on the bar's top
+/// cap. Their `y` differ by `2.2e-16 · 0.38`, under an ulp of `1.5`, so seen
+/// down the axis their boxes overlap, and the area they sweep with that start
+/// came out with an enclosure of `15`. Read off how far apart they are along
+/// the axis instead, they are proved in order
 /// (`round_a_closed_crossing_by_its_angle` in `fuse/arrange.rs`).
+///
+/// The arrangement after that is the brace along `x`'s with `x` and `y`
+/// swapped, `28` faces. Asked as `lower ∪ brace` with the wall spelled once,
+/// the fuse gives up when `nest_the_shells` meshes it to measure how much
+/// space it holds, in `Conic::the_stretch_this_run_covers` in `rcad-geom`'s
+/// `walk.rs`, on the wall's edge from `(√1.75, 1.5, 1 - √1.75 + √½)` to
+/// `(√1.75, 1.5, 1 + √1.75 - √½)`, `1.23` long on that ellipse. Its ends come
+/// out at one angle round the ellipse, `0.8480620789814812` and
+/// `0.8480620789814809`, so the end comes before the start, points placed from
+/// the ellipse's centre are about `1` off it, and the plane `assemble.rs`
+/// names the arc by, through its chord, has a normal of rounding,
+/// `(-2.2e-16, -4.5e-16, 0)`, so both arcs of the ellipse are picked.
 #[test]
-fn a_square_bar_standing_on_an_edge_along_y_unites_with_the_bar() {
-    let one_bar = PI * RADIUS * RADIUS * MEETING;
-    let outside = the_diamond_brace_outside_the_bar();
+fn a_square_bar_standing_on_an_edge_along_y_is_refused_walking_its_long_ellipse() {
     for wall in EVERY_WALL {
         for call in [Call::LowerWithTheBoxAlone, Call::TheBoxWithTheLowerAlone] {
             let asked = format!("the diamond brace along y, {wall:?}, {call:?}");
-            let (model, said) = unite_with(wall, call, a_diamond_brace_along_y);
-            let united = said.unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
-            is_the_solid_worked_out(&model, &united, (1, one_bar + outside), &asked);
+            let (_, said) = unite_with(wall, call, a_diamond_brace_along_y);
+            assert!(
+                matches!(
+                    said,
+                    Err(Error::Geometry(
+                        rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+                    ))
+                ),
+                "{asked}: {said:?}"
+            );
         }
     }
 }
