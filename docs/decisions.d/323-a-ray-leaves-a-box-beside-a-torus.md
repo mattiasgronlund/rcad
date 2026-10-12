@@ -189,6 +189,18 @@ One thing a fuse does see: `settle_against_each` keeps the ray's records only wh
 answer is not `Undecidable`, so such a point now adds no records to the fuse's
 log.*
 
+*2026-10-12, read from the code at `7f18451b` and not measured: a third
+caller, where the two answers do not end the same way.* `overlap.rs`'s
+`a_corner_of_one_is_inside_the_other` asks exact corners through
+`classify_point` as `one_shell_is_inside_another` does, so it reaches only the
+same corner, exactly on a ring's wall that the face's trimming cannot place.
+But it skips the refusal and widens on `Undecidable`. For that corner,
+`shares_space_with` now says `Undecidable` where it said `NothingFound`, and
+`Model::check_no_two_solids_share_space` refuses
+`CannotTellWhetherTwoSolidsShareSpace` where it passed. That is a refusal where
+there was a search that came up empty, never a wrong answer, and no shape is
+known to reach it.
+
 A box on the plane of a straight-sided face's fan triangle and off the
 triangle is answered now (row Q342). It was refused, because only the plane
 was asked; `misses_the_triangle` first holds the box and the triangle up
