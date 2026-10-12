@@ -2504,7 +2504,8 @@ mod plane_round_trip_tests {
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, CannotWrite, Shape, a_centre_its_plane_reads_back_from,
         a_point_this_reader_reads_back_as, a_surface_holds_the_circle,
         how_far_off_the_circle_can_be, stepped, the_nearest_centre_a_ring_holds_its_circle_at,
-        triple, where_a_plane_square_to_a_ring_crosses_it_nearest, write,
+        triple, where_a_plane_crosses_a_ball, where_a_plane_square_to_a_ring_crosses_it_nearest,
+        write,
     };
     use crate::geometry::plane_through;
     use crate::{Import, StepFile};
@@ -2791,6 +2792,75 @@ mod plane_round_trip_tests {
             format!("{:?}", the_plane_its_seam_is_cut_from(back.model())),
             format!("{went_in:?}")
         );
+    }
+
+    /// A ball one `f64` under `32` in radius at `(3, −32, 0)`, turned
+    /// `1.5709511621` about `z` and cut a sixteenth of its radius off its
+    /// centre: the writer centres the circle the plane cuts it in fifteen
+    /// `f64`s along `y` from where the plane meets the line through the
+    /// centre, and the reader's bound for the circle on the ball reads
+    /// `15.9998` of the sixteen units it allows (Q1789).
+    ///
+    /// **Fifteen is the most one coordinate is stepped**, and each step is at
+    /// most `ε` of the largest number: `y` is just past `−32` and steps away
+    /// from zero, so each step is `ε` of `32`. The turn leaves the normal
+    /// `1.55e-4` off `x`, so a step of `y` moves the dot a small part of an ulp
+    /// of the offset, and `y` is tried first.
+    ///
+    /// **The rest of the sixteen is roundings**: the circle's centre and
+    /// radius as the crossing works them out, and the reader's own. A radius
+    /// one `f64` under a power of two puts the reader's root on the finer side
+    /// of it, where it rounds in half units. A probe that swept some twelve
+    /// million balls placed and sized near powers of two and turned near a
+    /// quarter turn about `z` found none past sixteen and the furthest at
+    /// `15.9999993`, with a radius and a place one `f64` off; this one, with
+    /// whole numbers for its place, is the furthest of those it tried with
+    /// that radius. So sixteen holds this walk by measurement, with nothing to
+    /// spare, and not by an argument.
+    #[test]
+    fn a_ball_cut_near_its_middle_is_stepped_fifteen_times_to_the_edge_of_what_the_reader_holds() {
+        let radius = 32_f64.next_down();
+        let turned = Isometry::translation(Vector::new(3.0, -32.0, 0.0))
+            .and_then(|moved| {
+                Isometry::rotation(&Axis::z(), 1.570_951_162_100_365_8)
+                    .map(|turn| moved.compose(&turn))
+            })
+            .expect("a finite move and turn");
+        let a_sixteenth_off =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .and_then(|plane| plane.moved_to(radius / 16.0))
+                .expect("the y axis is a unit normal");
+        let Surface::Plane(cut) = Surface::Plane(a_sixteenth_off).transformed(&turned) else {
+            unreachable!("a plane moves as a plane");
+        };
+        let Surface::Sphere(ball) =
+            Surface::Sphere(Sphere::new(Point::origin(), radius).expect("a radius under 32"))
+                .transformed(&turned)
+        else {
+            unreachable!("a ball moves as a ball");
+        };
+        let crossing = where_a_plane_crosses_a_ball(&cut, &ball).expect("the plane cuts the ball");
+        let Shape::Circle { radius: across } = crossing.shape else {
+            unreachable!("a plane crosses a ball in a circle");
+        };
+        let normal = cut.normal();
+        let [along_x, along_y, _] = normal.components();
+        assert!((along_x + 1.0).abs() < 1e-7 && (along_y + 1.55e-4).abs() < 1e-6);
+
+        let centre =
+            a_centre_its_plane_reads_back_from(&cut, crossing.centre).expect("a centre is found");
+        let [x, y, z] = crossing.centre.coordinates();
+        assert_eq!(centre, Point::new(x, stepped(y, -15), z));
+        assert!(y < -32.0 && stepped(y, -15) > -64.0);
+        assert_eq!(y - y.next_down(), NEAREST_F64_POINT_ROUNDOFF * 32.0);
+        let skin = Surface::Sphere(ball);
+        let (off, largest) = how_far_off_the_circle_can_be(&skin, centre, normal, across)
+            .expect("a ball has a bound");
+        let units = off / (NEAREST_F64_POINT_ROUNDOFF * largest);
+        println!("the reader's bound reads {units}");
+        assert!((units - 15.9998).abs() < 1e-4, "{units}");
+        assert!(units <= A_CIRCLE_MAY_MISS_ITS_FACE_BY, "{units}");
+        assert!(a_surface_holds_the_circle(&skin, centre, normal, across));
     }
 
     fn the_plane_its_seam_is_cut_from(model: &Model) -> Plane {
