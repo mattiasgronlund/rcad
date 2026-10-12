@@ -398,13 +398,21 @@ fn two_bars_on_one_pipe_written_twice_with_a_pin_in_one_are_refused_where_one_sp
 /// A thin pipe through a fat one crosses it in two loops. A pin that starts
 /// on the fat bar's axis makes only one of them, round `(−2, 0, 5.5)` here.
 /// The other, round `(2, 0, 2.5)`, is where the pin would come out if it ran
-/// on through the axis, and in the plane `y = 0` it spans `z = 1.875` to
-/// `3.125`, worked by hand. The pin and the bar are refused
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in both orders with the bar's
-/// end at `z = 1.5`, `2` or `2.5`, and unite with it at `−2`, `1` or `3.25`,
-/// though no face of the pin comes near that loop. Which three surfaces are
-/// asked is not traced. Q528's route put the bar's end at `z = 2`, which is
-/// why [`a_slanted_pin_from_the_axis`] moves the joint down to `1`.
+/// on through the axis, and it spans `z = 1.875` to `3.125`, worked by hand:
+/// the point `(2 cos θ, 2 sin θ, 4 + w)` of the bar's wall is on the pin's
+/// where `w² + 3w cos θ − 4 cos² θ + 5.859375 = 0`, and `w` is furthest out at
+/// `cos θ = 1`, `−2.125` and `−0.875`.
+///
+/// With the bar's end in that span, its two ends included, the pin and the bar
+/// are refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in both orders,
+/// though no face of the pin comes near the loop. The end's plane and the two
+/// walls are the three surfaces that meet there, but which three the fuse asks
+/// is not traced. Just below the span, from `z = 1.5` to `1.8125`, they are
+/// refused `CurvedFaceWithAHoleGoesTooFarRound` in both orders instead, also
+/// untraced. Further out, at `−2`, `1`, `1.25`, `3.1875` and `3.25`, they
+/// unite into one solid that validates. Q528's route put the bar's end at
+/// `z = 2`, which is why [`a_slanted_pin_from_the_axis`] moves the joint down
+/// to `1`.
 #[test]
 fn a_slanted_pin_from_a_bars_axis_is_refused_where_the_bar_ends_beside_where_it_would_come_out() {
     let policy = Policy::certified();
@@ -437,7 +445,7 @@ fn a_slanted_pin_from_a_bars_axis_is_refused_where_the_bar_ends_beside_where_it_
         })
     };
 
-    for bottom in [1.5, 2.0, 2.5] {
+    for bottom in [1.875, 1.9375, 2.0, 2.5, 3.0, 3.0625, 3.125] {
         for said in the_pin_and_a_bar_from(bottom) {
             assert!(
                 matches!(
@@ -446,11 +454,19 @@ fn a_slanted_pin_from_a_bars_axis_is_refused_where_the_bar_ends_beside_where_it_
                         rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
                     ))
                 ),
-                "the bar from {bottom}: {said:?}"
+                "the bar from {bottom}, whose end crosses the loop: {said:?}"
             );
         }
     }
-    for bottom in [-2.0, 1.0, 3.25] {
+    for bottom in [1.5, 1.75, 1.8125] {
+        for said in the_pin_and_a_bar_from(bottom) {
+            assert!(
+                matches!(said, Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })),
+                "the bar from {bottom}, just below the loop: {said:?}"
+            );
+        }
+    }
+    for bottom in [-2.0, 1.0, 1.25, 3.1875, 3.25] {
         for said in the_pin_and_a_bar_from(bottom) {
             assert_eq!(
                 said.unwrap_or_else(|refused| panic!("the bar from {bottom}: {refused:?}")),
