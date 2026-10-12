@@ -1270,6 +1270,15 @@ impl Assembly {
     /// on its edge on a block's top, both turned about `x`, was refused united
     /// at 14 of 24 turns for its corner at an end of the edge read that way
     /// (queue row Q1281, `a_prism_lying_on_one_edge.rs`).
+    ///
+    /// **Every other corner is asked where the planes of its edges meet**
+    /// ([`Assembly::side_of_a_corner_of`]), for the same reason: a corner of a
+    /// resting face can be written down a rounding on the inner side too. A
+    /// prism resting on its edge on a block's top, both turned about `x` by
+    /// 0.625, had one end of the edge a rounding inside the top, and its wall's
+    /// far corner, where the two walls and the end meet, read on the inner
+    /// side, so the union was refused with four faces along one edge
+    /// (queue row Q1582).
     fn rest_on_the_outer_side_of(&self, resting: [Dart; 2], on: [Dart; 2]) -> bool {
         let Some(plane) = self.faces[on[0].face].surface.as_plane() else {
             return false;
@@ -1284,17 +1293,16 @@ impl Assembly {
             if face.surface.as_plane().is_none() {
                 return false;
             }
-            let mut off_the_plane = false;
-            for corner in face
+            let corners: BTreeSet<usize> = face
                 .wires
                 .iter()
                 .flatten()
                 .flat_map(|side| self.edges[side.edge].ends)
                 .filter(|corner| !on_the_plane.contains(corner))
-            {
-                match plane.side_of_point(PredicatePoint::from(
-                    self.corners[corner].point.coordinates(),
-                )) {
+                .collect();
+            let mut off_the_plane = false;
+            for corner in corners {
+                match self.side_of_a_corner_of(face, corner, plane) {
                     Decision::Pos => off_the_plane = true,
                     Decision::Zero => {}
                     Decision::Neg | Decision::Undecidable { .. } => return false,
@@ -1306,6 +1314,84 @@ impl Assembly {
             }
             off_the_plane
         })
+    }
+
+    /// Which side of `plane` a corner of `face` lies on: where the planes its
+    /// edges in `face` run along meet, when that is one point inside the box
+    /// the corner was solved as, and otherwise the point it was written down
+    /// as.
+    ///
+    /// The written point is the middle of that box, and a plane passing within
+    /// the box can have the middle on one side and the corner on the other.
+    /// The planes cannot be wrong that way: [`side_of_a_plane_where_three_planes_meet`]
+    /// answers exactly. A corner a tolerant policy moved is not where its
+    /// planes meet (§417.7), so it is read where it was put.
+    fn side_of_a_corner_of(&self, face: &Face, corner: usize, plane: &Plane) -> Decision {
+        let written = &self.corners[corner];
+        if !written.moved_by_the_policy
+            && let Some(three) = self.the_three_planes_meeting_at_a_corner_of(face, corner)
+            && let Ok(side) = side_of_a_plane_where_three_planes_meet(three, plane.coefficients())
+        {
+            return side;
+        }
+        plane.side_of_point(PredicatePoint::from(written.point.coordinates()))
+    }
+
+    /// The three planes the edges of `face` at `corner` run along, as
+    /// coefficients, when there are exactly three, a plane and the same plane
+    /// turned round counted once, and they are proved to meet inside the box
+    /// the corner was solved as; `None` otherwise.
+    ///
+    /// **The box is asked because three planes can meet far from the corner.**
+    /// Where a face's edge runs straight on past a corner from one neighbour
+    /// to another lying in nearly the same plane, the three meet far along
+    /// the edge, and asking there would answer for a point the face does not
+    /// have. The box is the written point give or take the corner's
+    /// [`Corner::wobble`], twice what the middle of one box needs.
+    fn the_three_planes_meeting_at_a_corner_of(
+        &self,
+        face: &Face,
+        corner: usize,
+    ) -> Option<[[f64; 4]; 3]> {
+        let mut planes: Vec<Plane> = Vec::with_capacity(3);
+        for side in face.wires.iter().flatten() {
+            let edge = &self.edges[side.edge];
+            if !edge.ends.contains(&corner) {
+                continue;
+            }
+            for surface in &edge.carried_by {
+                let flat = *surface.as_plane()?;
+                if !planes
+                    .iter()
+                    .any(|seen| *seen == flat || *seen == flat.reversed())
+                {
+                    planes.push(flat);
+                }
+            }
+        }
+        let three: [Plane; 3] = planes.try_into().ok()?;
+        let three = three.map(|flat| flat.coefficients());
+        let written = &self.corners[corner];
+        let inside = written
+            .point
+            .coordinates()
+            .into_iter()
+            .enumerate()
+            .all(|(axis, at)| {
+                let mut lowest = [0.0; 4];
+                lowest[axis] = 1.0;
+                lowest[3] = -(at - written.wobble);
+                let mut highest = lowest;
+                highest[3] = -(at + written.wobble);
+                matches!(
+                    side_of_a_plane_where_three_planes_meet(three, lowest),
+                    Ok(Decision::Pos | Decision::Zero)
+                ) && matches!(
+                    side_of_a_plane_where_three_planes_meet(three, highest),
+                    Ok(Decision::Neg | Decision::Zero)
+                )
+            });
+        inside.then_some(three)
     }
 
     /// An edge parted onto two faces of one solid resting on a face of another
