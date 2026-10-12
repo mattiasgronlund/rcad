@@ -1511,10 +1511,14 @@ fn a_centre_for_an_arc_between(
             .iter()
             .all(|face| a_surface_holds_the_circle(face, centre, cut.normal(), radius))
     };
-    let where_each_face_crosses = [first, second].map(|face| match face {
-        Surface::Cylinder(pipe) => where_a_plane_crosses_a_pipe(cut, pipe).map(|it| it.centre),
-        Surface::Sphere(ball) => where_a_plane_crosses_a_ball(cut, ball).map(|it| it.centre),
-        _ => None,
+    let where_each_face_crosses = [first, second].map(|face| {
+        if let Surface::Cylinder(pipe) = face {
+            return where_a_plane_crosses_a_pipe(cut, pipe).map(|it| it.centre);
+        }
+        let Surface::Sphere(ball) = face else {
+            return None;
+        };
+        where_a_plane_crosses_a_ball(cut, ball).map(|it| it.centre)
     });
     core::iter::once(crossing.centre)
         .chain(where_each_face_crosses.into_iter().flatten())
