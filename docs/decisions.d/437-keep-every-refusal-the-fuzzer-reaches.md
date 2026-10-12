@@ -344,14 +344,13 @@ every way round: both orders of a pair, and all six of a triple.
   give the plane `z = 0` at `s = 1e-160` and are refused at `s = 1e-200`, where
   the cross product underflows to zero.
 
-**What this leaves.** `LimitOrGap` is not exported from `rcad-geom`'s `lib.rs`,
-which was outside this row's files, so `rcad-topo` cannot yet name it in a
-method of its own. `rcad_topo::Error::limit_or_gap`, delegating to
-`rcad_geom::Error::limit_or_gap` for `Geometry` and the two `why` variants, waits
-on that export, and the class column of the refusal report waits on both, since
-`check-fuzz-triage-selftest` pins the report's nine columns. Each not-known
-variant that is both kinds gets a row for the field that would tell its two
-kinds apart (case 2).
+**What this leaves.** `LimitOrGap` was not exported from `rcad-geom`'s `lib.rs`,
+which was outside this row's files. Q1798 exported it and built
+`rcad_topo::Error::limit_or_gap`, delegating to `rcad_geom::Error::limit_or_gap`
+for `Geometry` and the two `why` variants, and Q1799 made the class the refusal
+report's tenth column, which `check-fuzz-triage-selftest` now pins. Each
+not-known variant that is both kinds gets a row for the field that would tell
+its two kinds apart (case 2).
 
 ### 437.7 What is not built
 
