@@ -5577,8 +5577,16 @@ impl<'f> Arrangement<'f> {
     ///   throughout. Every other curved partner is not answered.
     /// - How often a walk goes round is counted as how often it crosses one
     ///   half-plane through the axis, each arc's crossing read off exact signs of
-    ///   the node boxes ([`Arrangement::how_often_an_arc_crosses`]). A half-plane
-    ///   one of the nodes sits on, to within its box, is swapped for another.
+    ///   the node boxes ([`Arrangement::how_often_an_arc_crosses`]). The
+    ///   half-plane is chosen half way across the widest gap round the axis
+    ///   between the nodes the count reads
+    ///   ([`half_way_across_the_widest_gap_between`]); one a node still sits
+    ///   on, to within its box, leaves the count unanswered. Six half-planes
+    ///   along the model's axes were tried before Q1660, and the Steinmetz
+    ///   cross put a node on every one. Any half-plane clear of the nodes
+    ///   gives the same count: three fuses of a frustum beside a block that
+    ///   the six refused here now answer, with the frustum's wall in the
+    ///   pieces `fuse_laws_over_a_cone.rs` pins for four others.
     fn the_one_that_goes_round_the_axis_as_well(
         &self,
         walk: usize,
@@ -5589,6 +5597,13 @@ impl<'f> Arrangement<'f> {
             Surface::Cylinder(pipe) => (pipe.axis().origin(), pipe.axis().direction()),
             Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) | _ => return None,
         };
+        let across = half_way_across_the_widest_gap_between(
+            up,
+            core::iter::once(walk)
+                .chain(candidates.iter().copied())
+                .flat_map(|cycle| &self.cycles[cycle])
+                .map(|&half_edge| middle_of(self.nodes[self.from(half_edge)].point) - centre),
+        );
         let centre = centre.coordinates().map(Interval::exactly);
         let up = up.components().map(Interval::exactly);
         let from_the_axis = |node: usize| -> [Interval; 3] {
@@ -5610,58 +5625,42 @@ impl<'f> Arrangement<'f> {
             }
         }
 
-        let reference_planes = [
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [-1.0, 0.0, 0.0],
-            [0.0, -1.0, 0.0],
-            [0.0, 0.0, -1.0],
-        ];
-        for across in reference_planes {
-            let reference = cross_of_intervals(up, across.map(Interval::exactly));
-            let round = |cycle: usize| -> Option<i32> {
-                self.cycles[cycle].iter().try_fold(0, |so_far, &half_edge| {
-                    Some(
-                        so_far
-                            + self.how_often_an_arc_crosses(
-                                half_edge,
-                                &from_the_axis,
-                                up,
-                                reference,
-                            )?,
-                    )
-                })
-            };
-            let Some(its_own) = round(walk) else {
-                continue;
-            };
-            if its_own == 0 {
-                return None;
-            }
-            let Some(theirs) = candidates
-                .iter()
-                .map(|&candidate| round(candidate))
-                .collect::<Option<Vec<i32>>>()
-            else {
-                continue;
-            };
-            let going_round: Vec<usize> = (0..candidates.len())
-                .filter(|&index| theirs[index] != 0)
-                .collect();
-            if let [only] = going_round[..] {
-                return Some(candidates[only]);
-            }
-            let mut round_the_other_way = going_round
-                .into_iter()
-                .filter(|&index| theirs[index] == -its_own);
-            let only = round_the_other_way.next()?;
-            return round_the_other_way
-                .next()
-                .is_none()
-                .then_some(candidates[only]);
+        let reference = across.map(Interval::exactly);
+        let round = |cycle: usize| -> Option<i32> {
+            self.cycles[cycle].iter().try_fold(0, |so_far, &half_edge| {
+                Some(
+                    so_far
+                        + self.how_often_an_arc_crosses(
+                            half_edge,
+                            &from_the_axis,
+                            up,
+                            reference,
+                        )?,
+                )
+            })
+        };
+        let its_own = round(walk)?;
+        if its_own == 0 {
+            return None;
         }
-        None
+        let theirs = candidates
+            .iter()
+            .map(|&candidate| round(candidate))
+            .collect::<Option<Vec<i32>>>()?;
+        let going_round: Vec<usize> = (0..candidates.len())
+            .filter(|&index| theirs[index] != 0)
+            .collect();
+        if let [only] = going_round[..] {
+            return Some(candidates[only]);
+        }
+        let mut round_the_other_way = going_round
+            .into_iter()
+            .filter(|&index| theirs[index] == -its_own);
+        let only = round_the_other_way.next()?;
+        round_the_other_way
+            .next()
+            .is_none()
+            .then_some(candidates[only])
     }
 
     /// How often one half-edge crosses the half-plane from the axis towards
@@ -7246,6 +7245,57 @@ fn they_agree_about_every_closed_curve(
         }
     }
     agreed > 0
+}
+
+/// A direction square to `up` that is as far round the axis as it can be from
+/// every one of `nodes` and from the way opposite each, each node given from a
+/// point of the axis.
+///
+/// The half-plane through the axis towards it is what
+/// [`Arrangement::the_one_that_goes_round_the_axis_as_well`] counts crossings
+/// of, and a node on the plane, on either side of the axis, leaves a sign of
+/// that count unsettled. Folded onto half a turn, `n` nodes leave a gap of at
+/// least `π/n` between two of them, and this is the middle of the widest gap.
+/// It is only a proposal, worked in `f64`: every sign the count reads off it is
+/// still exact, so a direction nearer a node than its box allows comes back
+/// unsettled rather than wrong.
+fn half_way_across_the_widest_gap_between(
+    up: Vector,
+    nodes: impl Iterator<Item = Vector>,
+) -> [f64; 3] {
+    let up_by_axis = up.components();
+    let least_along_up = (0..3)
+        .min_by(|&one, &other| up_by_axis[one].abs().total_cmp(&up_by_axis[other].abs()))
+        .expect("three axes");
+    let mut away = [0.0; 3];
+    away[least_along_up] = 1.0;
+    let first = up.cross(Vector::new(away[0], away[1], away[2]));
+    let second = up.cross(first);
+    let mut angles: Vec<f64> = nodes
+        .map(|node| {
+            let angle = node.dot(second).atan2(node.dot(first));
+            if angle < 0.0 {
+                angle + core::f64::consts::PI
+            } else {
+                angle
+            }
+        })
+        .collect();
+    angles.sort_by(f64::total_cmp);
+    let half_way = match (angles.first(), angles.last()) {
+        (Some(&lowest), Some(&highest)) => {
+            let mut widest = (lowest + core::f64::consts::PI - highest, highest);
+            for pair in angles.windows(2) {
+                if pair[1] - pair[0] > widest.0 {
+                    widest = (pair[1] - pair[0], pair[0]);
+                }
+            }
+            widest.1 + widest.0 / 2.0
+        }
+        _ => 0.0,
+    };
+    let (first, second) = (first.components(), second.components());
+    core::array::from_fn(|axis| first[axis] * half_way.cos() + second[axis] * half_way.sin())
 }
 
 /// One circle a plane square to a ring's axis cuts the ring's face in, read
