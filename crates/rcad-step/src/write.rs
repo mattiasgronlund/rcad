@@ -2683,11 +2683,11 @@ mod plane_round_trip_tests {
     use core::f64::consts::{FRAC_PI_2, SQRT_2, TAU};
 
     use rcad_geom::{
-        Axis, Cylinder, EdgeRun, HalfSpace, Isometry, NEAREST_F64_POINT_ROUNDOFF, Orientation,
-        Picker, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
+        Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, NEAREST_F64_POINT_ROUNDOFF,
+        Orientation, Picker, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
     };
     use rcad_predicates::{Policy, ProvenanceLog};
-    use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey, WireView};
+    use rcad_topo::{DraftStep, Measurement, Model, SolidBuilder, SolidKey, WireView};
 
     use super::{
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, CannotWrite, Shape, a_centre_its_plane_reads_back_from,
@@ -3280,6 +3280,89 @@ mod plane_round_trip_tests {
         );
     }
 
+    /// A bar of radius just under `4` and length `8.67`, with a dome of radius
+    /// `6.22` on top, moved just under a half down `y`: read back, it stands on
+    /// the surfaces and corners the placed dome stands on, bit for bit, yet
+    /// measures `473.6193176` where the placed one measures `473.6193001`
+    /// (Q1809).
+    ///
+    /// **The gap is the volume measure, not the writer or the reader.** A
+    /// placed face is meshed in the frame it is stored in, and its points are
+    /// moved out after (`the_surface_this_face_is_meshed_on` in `rcad-topo`),
+    /// while a solid read back is stored where it stands and is meshed there.
+    /// So the same dome built where it stands, with no placement, measures
+    /// what the one read back measures, bit for bit. Both answers are within
+    /// the volume errors the measure gives with them, so neither is wrong.
+    ///
+    /// Of a thousand domes on bars placed near powers of two and turned, at a
+    /// deflection of `0.01`, every one came back on the same surfaces and
+    /// corners, bit for bit; none measured bit for bit what was built; none
+    /// was off by more than the two volume errors; and the worst was off by
+    /// `5.9e-5` of its volume. That worst one is this bar, at this place, with
+    /// a turn. The probes that measured it are in `fea9d72d`.
+    #[test]
+    fn a_dome_read_back_measures_what_the_same_dome_built_where_it_stands_measures() {
+        let (radius, length, dome_radius) = (
+            3.999_999_999_999_999_6,
+            8.667_790_572_490_11,
+            6.221_314_647_173_96,
+        );
+        let standing_on = Point::new(0.0, -0.499_999_999_999_999_9, 0.0);
+        let [_, read_back] = a_dome_measured_placed_and_read_back(
+            (radius, length, dome_radius),
+            &Isometry::translation(standing_on - Point::origin()).expect("a finite move"),
+            0.01,
+        );
+        let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
+        a_dome_on_a_bar(&mut model, radius, length, dome_radius, standing_on);
+        let standing = its_measurement(&model, 0.01);
+        println!("built where it stands: {:?}", standing.volume());
+        assert_eq!(
+            read_back.volume().to_bits(),
+            standing.volume().to_bits(),
+            "read back {:?}, built where it stands {:?}",
+            read_back.volume(),
+            standing.volume()
+        );
+    }
+
+    /// The bar of
+    /// [`a_dome_on_a_long_bar_turned_a_long_way_comes_back_with_its_rim_cut_from_its_plane`],
+    /// `3561` long and turned `2.97` about a line mostly along `y`: read back,
+    /// it stands on the surfaces and corners the placed dome stands on, bit
+    /// for bit, and at a deflection of `0.04` measures `3.3e-7` of its volume
+    /// off what the placed one measures. That is the gap Q1792's first relay
+    /// saw (Q1809), and it is the one
+    /// [`a_dome_read_back_measures_what_the_same_dome_built_where_it_stands_measures`]
+    /// traces to the volume measure: nothing the file carries moved.
+    #[test]
+    fn a_turned_dome_on_a_long_bar_reads_back_within_its_volume_errors_but_not_bit_for_bit() {
+        let axis = Axis::new(
+            Point::origin(),
+            Vector::new(
+                -0.018_298_610_974_051_055,
+                0.374_487_539_909_369_2,
+                -0.017_226_945_673_374_46,
+            ),
+        )
+        .expect("a direction with a length");
+        a_dome_measured_placed_and_read_back(
+            (
+                16.000_000_000_000_007,
+                3_561.383_252_900_813,
+                29.695_524_847_710_807,
+            ),
+            &Isometry::translation(Vector::new(
+                0.0,
+                -1.999_999_999_999_999_8,
+                4_095.999_999_999_999_5,
+            ))
+            .expect("a finite move")
+            .compose(&Isometry::rotation(&axis, 2.972_547_828_691_298_3).expect("a finite turn")),
+            0.04,
+        );
+    }
+
     /// Builds a bar with a dome on top ([`a_dome_on_a_bar`]), places it by
     /// `place` after `turn`, writes it and reads it back, and asks that the
     /// read solid is sound and that each use of the two halves of its rim is
@@ -3297,7 +3380,7 @@ mod plane_round_trip_tests {
         let policy = Policy::certified();
         let mut log = ProvenanceLog::new();
         let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
-        let solid = a_dome_on_a_bar(&mut model, radius, length, dome_radius);
+        let solid = a_dome_on_a_bar(&mut model, radius, length, dome_radius, Point::origin());
         let moved = Isometry::translation(place)
             .expect("a finite move")
             .compose(turn);
@@ -3399,14 +3482,104 @@ mod plane_round_trip_tests {
         HalfwayBetween,
     }
 
-    /// A bar of `radius` standing on the origin along `z`, `length` tall, with
-    /// a dome of `dome_radius` on top whose rim is the bar's top circle: a flat
-    /// foot, the bar's skin with one straight seam, and a ball's cap with no
-    /// pole on it. The rim is two halves, each cut from the plane `z = length`
-    /// and picked by a half-space through the rim's centre.
-    fn a_dome_on_a_bar(model: &mut Model, radius: f64, length: f64, dome_radius: f64) -> SolidKey {
+    /// Builds [`a_dome_on_a_bar`] on the origin, places it by `moved`, writes
+    /// it and reads it back, and asks that the solid read back stands on the
+    /// placed one's surfaces and corners bit for bit, and that the two measure
+    /// within the sum of their volume errors of each other but not bit for
+    /// bit. Gives what the placed dome and the one read back measure at
+    /// `deflection`, in that order.
+    fn a_dome_measured_placed_and_read_back(
+        (radius, length, dome_radius): (f64, f64, f64),
+        moved: &Isometry,
+        deflection: f64,
+    ) -> [Measurement; 2] {
+        let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
+        let solid = a_dome_on_a_bar(&mut model, radius, length, dome_radius, Point::origin());
+        model
+            .place_solid(solid, moved)
+            .expect("the key came from this model");
+        let text = write(&model, "a dome on a bar").expect("the dome is written");
+        let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+        let back = Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("the dome this writer wrote is refused: {why}"));
+        assert_eq!(
+            where_its_faces_and_corners_are(back.model()),
+            where_its_faces_and_corners_are(&model)
+        );
+        let [placed, read_back] =
+            [&model, back.model()].map(|model| its_measurement(model, deflection));
+        let gap = (placed.volume() - read_back.volume()).abs();
+        println!(
+            "placed: {:?}, read back: {:?}, off by {:e} of it",
+            placed.volume(),
+            read_back.volume(),
+            gap / placed.volume()
+        );
+        assert!(
+            gap < placed.volume_error() + read_back.volume_error(),
+            "off by {gap}, with volume errors of {} placed and {} read back",
+            placed.volume_error(),
+            read_back.volume_error()
+        );
+        assert_ne!(
+            placed.volume().to_bits(),
+            read_back.volume().to_bits(),
+            "the placed dome measures bit for bit what the one read back does, so a placed \
+             face may no longer be meshed in the frame it is stored in"
+        );
+        [placed, read_back]
+    }
+
+    /// What the model's one solid measures at `deflection`.
+    fn its_measurement(model: &Model, deflection: f64) -> Measurement {
+        model
+            .solids()
+            .next()
+            .expect("the model holds one solid")
+            .measure(
+                Deflection::of(deflection).expect("a deflection above zero"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a dome on a bar is measured")
+    }
+
+    /// The surfaces the faces of the model's one solid stand on, and the
+    /// corners each of its coedges starts from, written out in full so that
+    /// every bit tells, down to the sign of a zero, and sorted so that the
+    /// order the faces were made in does not.
+    fn where_its_faces_and_corners_are(model: &Model) -> [Vec<String>; 2] {
+        let solid = model.solids().next().expect("the model holds one solid");
+        let surfaces = solid
+            .faces()
+            .map(|face| format!("{:?}", face.surface()))
+            .collect();
+        let corners = solid
+            .faces()
+            .flat_map(|face| face.wires().flat_map(WireView::coedges).collect::<Vec<_>>())
+            .map(|coedge| format!("{:?}", coedge.start().point()))
+            .collect();
+        [surfaces, corners].map(|mut written: Vec<String>| {
+            written.sort();
+            written
+        })
+    }
+
+    /// A bar of `radius` standing on `standing_on` along `z`, `length` tall,
+    /// with a dome of `dome_radius` on top whose rim is the bar's top circle: a
+    /// flat foot, the bar's skin with one straight seam, and a ball's cap with
+    /// no pole on it. The rim is two halves, each cut from the plane of the
+    /// bar's top and picked by a half-space through the rim's centre.
+    fn a_dome_on_a_bar(
+        model: &mut Model,
+        radius: f64,
+        length: f64,
+        dome_radius: f64,
+        standing_on: Point,
+    ) -> SolidKey {
         let below_the_rim = ((dome_radius - radius) * (dome_radius + radius)).sqrt();
-        let top = Point::new(0.0, 0.0, length);
+        let [x, y, z] = standing_on.coordinates();
+        let top = Point::new(x, y, z + length);
         let half_of_the_rim = |facing: Vector| EdgeRun::PartOfWhereItCrosses {
             and: Surface::Plane(
                 Plane::from_point_and_normal(top, Vector::new(0.0, 0.0, 1.0))
@@ -3419,9 +3592,9 @@ mod plane_round_trip_tests {
         };
         let mut builder = SolidBuilder::new();
         let [foot, near, far] = [
-            Point::new(radius, 0.0, 0.0),
-            Point::new(radius, 0.0, length),
-            Point::new(-radius, 0.0, length),
+            Point::new(x + radius, y, z),
+            Point::new(x + radius, y, z + length),
+            Point::new(x - radius, y, z + length),
         ]
         .map(|at| builder.add_vertex(at).expect("a corner"));
         let [round_the_foot, up_the_seam, rim_in_front, rim_behind] = [
@@ -3465,18 +3638,25 @@ mod plane_round_trip_tests {
         let skin = [
             (
                 Surface::Plane(
-                    Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                    Plane::from_point_and_normal(standing_on, Vector::new(0.0, 0.0, -1.0))
                         .expect("the z axis is a unit normal"),
                 ),
                 foot_wire,
             ),
             (
-                Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius")),
+                Surface::Cylinder(
+                    Cylinder::new(
+                        Axis::new(standing_on, Vector::new(0.0, 0.0, 1.0))
+                            .expect("the z axis has a length"),
+                        radius,
+                    )
+                    .expect("a radius"),
+                ),
                 bar_wire,
             ),
             (
                 Surface::Sphere(
-                    Sphere::new(Point::new(0.0, 0.0, length - below_the_rim), dome_radius)
+                    Sphere::new(Point::new(x, y, z + (length - below_the_rim)), dome_radius)
                         .expect("a radius"),
                 ),
                 dome_wire,
@@ -3789,720 +3969,6 @@ mod plane_round_trip_tests {
                 plane.transformed(&turn)
             })
             .collect()
-    }
-
-    struct ProbeRng(u64);
-    impl ProbeRng {
-        fn next(&mut self) -> u64 {
-            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-            let mut z = self.0;
-            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-            z ^ (z >> 31)
-        }
-        fn unit(&mut self) -> f64 {
-            (self.next() >> 11) as f64 / (1_u64 << 53) as f64
-        }
-        fn near_a_power_of_two(&mut self, low: i32, high: i32) -> f64 {
-            let span = (high - low + 1) as u64;
-            let power = 2_f64.powi(low + (self.next() % span) as i32);
-            let steps = (self.next() % 5) as i32 - 2;
-            stepped(power, steps)
-        }
-    }
-
-    fn probe_volume(model: &Model, key: SolidKey, deflection: f64) -> (f64, f64) {
-        model
-            .solid(key)
-            .expect("a key")
-            .measure(
-                rcad_geom::Deflection::of(deflection).expect("a deflection"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .map_or((f64::NAN, f64::NAN), |measured| {
-                (measured.volume(), measured.volume_error())
-            })
-    }
-
-    fn probe_exact((radius, length, dome_radius): (f64, f64, f64)) -> f64 {
-        let below = ((dome_radius - radius) * (dome_radius + radius)).sqrt();
-        let h = dome_radius - below;
-        core::f64::consts::PI * radius * radius * length
-            + core::f64::consts::PI * h * h * (3.0 * dome_radius - h) / 3.0
-    }
-
-    #[derive(Debug)]
-    struct ProbeResult {
-        built_unplaced: (f64, f64),
-        built: (f64, f64),
-        back: Option<(f64, f64)>,
-        by_plane: bool,
-        exact: f64,
-        refused: Option<String>,
-        same_geometry: bool,
-        baked: f64,
-        again: f64,
-    }
-
-    fn probe_one(
-        shape: (f64, f64, f64),
-        place: Vector,
-        turn: &Isometry,
-        deflection: f64,
-    ) -> ProbeResult {
-        let policy = Policy::certified();
-        let mut log = ProvenanceLog::new();
-        let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
-        let (radius, length, dome_radius) = shape;
-        let solid = a_dome_on_a_bar(&mut model, radius, length, dome_radius);
-        let built_unplaced = probe_volume(&model, solid, deflection);
-        let moved = Isometry::translation(place)
-            .expect("a finite move")
-            .compose(turn);
-        model.place_solid(solid, &moved).expect("a key");
-        let built = probe_volume(&model, solid, deflection);
-        let went_in = what_its_rim_is_cut_from(&model);
-        let mut result = ProbeResult {
-            built_unplaced,
-            built,
-            back: None,
-            by_plane: false,
-            exact: probe_exact(shape),
-            refused: None,
-            same_geometry: false,
-            baked: f64::NAN,
-            again: f64::NAN,
-        };
-        let text = match write(&model, "probe") {
-            Ok(text) => text,
-            Err(why) => {
-                result.refused = Some(format!("write: {why}"));
-                return result;
-            }
-        };
-        let file = StepFile::read(text.as_bytes()).expect("parses");
-        let back = match Import::read(&file, &policy, &mut log) {
-            Ok(back) => back,
-            Err(why) => {
-                result.refused = Some(format!("read: {why}"));
-                return result;
-            }
-        };
-        let [(_, key)] = back.solids() else {
-            result.refused = Some("not one solid".into());
-            return result;
-        };
-        result.by_plane = what_its_rim_is_cut_from(back.model()) == went_in;
-        result.back = Some(probe_volume(back.model(), *key, deflection));
-        result.same_geometry = probe_geometry(&model) == probe_geometry(back.model());
-        if let Some(baked) = probe_bake(&model) {
-            result.baked = probe_volume(
-                &baked,
-                baked.solids().next().expect("one").key(),
-                deflection,
-            )
-            .0;
-        }
-        let again = probe_round_trip(back.model());
-        result.again = probe_volume(
-            &again,
-            again.solids().next().expect("one").key(),
-            deflection,
-        )
-        .0;
-        result
-    }
-
-    fn probe_geometry(model: &Model) -> (Vec<String>, Vec<String>) {
-        let solid = model.solids().next().expect("one solid");
-        let mut surfaces: Vec<String> = solid
-            .faces()
-            .map(|face| format!("{:?}", face.surface()))
-            .collect();
-        let mut corners: Vec<String> = solid
-            .faces()
-            .flat_map(|face| face.wires().flat_map(WireView::coedges).collect::<Vec<_>>())
-            .map(|coedge| format!("{:?}", coedge.start().point()))
-            .collect();
-        surfaces.sort();
-        corners.sort();
-        corners.dedup();
-        (surfaces, corners)
-    }
-
-    fn probe_describe(label: &str, model: &Model, deflection: f64) {
-        let solid = model.solids().next().expect("one solid");
-        let mesh = solid
-            .mesh(
-                rcad_geom::Deflection::of(deflection).expect("a deflection"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("a mesh");
-        let (volume, _) = probe_volume(model, solid.key(), deflection);
-        println!("{label}: volume {volume:?} points {}", mesh.points().len());
-        for face in solid.faces() {
-            let triangles = mesh
-                .triangles()
-                .iter()
-                .filter(|t| t.face() == face.key())
-                .count();
-            println!(
-                "  face {:?} triangles {triangles} surface {:?}",
-                face.key(),
-                face.surface()
-            );
-            for coedge in face.wires().flat_map(WireView::coedges) {
-                let edge = coedge.edge();
-                let run = format!("{:?}", edge.run());
-                let along: Vec<Point> = mesh
-                    .points_along_edge(edge.key())
-                    .iter()
-                    .map(|&index| mesh.points()[index as usize])
-                    .collect();
-                let mut hash: u64 = 0;
-                for point in &along {
-                    for c in point.coordinates() {
-                        hash = hash.rotate_left(7) ^ c.to_bits();
-                    }
-                }
-                println!(
-                    "    edge {:?} coedge way {:?} points {} hash {hash:x} from {:?} to {:?} \
-                     faces {:?} run {}",
-                    edge.key(),
-                    coedge.orientation_on_its_edge(),
-                    along.len(),
-                    edge.start().point(),
-                    edge.end().point(),
-                    edge.neighbouring_faces().collect::<Vec<_>>(),
-                    run
-                );
-            }
-        }
-    }
-
-    fn probe_bake(model: &Model) -> Option<Model> {
-        use std::collections::HashMap;
-        let solid = model.solids().next().expect("one solid");
-        let mut builder = SolidBuilder::new();
-        let mut vertices = HashMap::new();
-        let mut edges = HashMap::new();
-        let mut skin = Vec::new();
-        for face in solid.faces() {
-            assert!(!face.orientation().is_reversed());
-            let mut wires = Vec::new();
-            for wire in face.wires() {
-                let mut steps = Vec::new();
-                for coedge in wire.coedges() {
-                    let edge = coedge.edge();
-                    let (start, end) = if edge.orientation().is_reversed() {
-                        (edge.end(), edge.start())
-                    } else {
-                        (edge.start(), edge.end())
-                    };
-                    let mut vertex = |view: rcad_topo::VertexView<'_>| {
-                        *vertices
-                            .entry(view.key())
-                            .or_insert_with(|| builder.add_vertex(view.point()).expect("a corner"))
-                    };
-                    let (from, to) = (vertex(start), vertex(end));
-                    let made = *edges.entry(edge.key()).or_insert_with(|| {
-                        builder.add_edge(from, to, edge.run()).expect("an edge")
-                    });
-                    steps.push(DraftStep::Along(
-                        builder
-                            .add_coedge(made, coedge.orientation_on_its_edge())
-                            .expect("a coedge"),
-                    ));
-                }
-                wires.push(builder.add_wire(&steps).expect("a wire"));
-            }
-            skin.push((
-                builder.add_face(face.surface(), &wires).expect("a face"),
-                Orientation::Forward,
-            ));
-        }
-        builder.add_shell(&skin).expect("a shell");
-        let mut baked = Model::new(model.scale());
-        builder
-            .build(&mut baked, &Policy::certified(), &mut ProvenanceLog::new())
-            .ok()?;
-        Some(baked)
-    }
-
-    fn probe_round_trip(model: &Model) -> Model {
-        let text = write(model, "probe").expect("written");
-        let file = StepFile::read(text.as_bytes()).expect("parses");
-        Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new())
-            .expect("read")
-            .model()
-            .clone()
-    }
-
-    fn probe_a_dome(
-        model: &mut Model,
-        (radius, length, dome_radius): (f64, f64, f64),
-        behind_first: bool,
-        minus_zero: bool,
-        y0: f64,
-    ) -> SolidKey {
-        let below_the_rim = ((dome_radius - radius) * (dome_radius + radius)).sqrt();
-        let top = Point::new(0.0, y0, length);
-        let half_of_the_rim = |facing: Vector| EdgeRun::PartOfWhereItCrosses {
-            and: Surface::Plane(
-                Plane::from_point_and_normal(top, Vector::new(0.0, 0.0, 1.0))
-                    .expect("the z axis is a unit normal"),
-            ),
-            picked_by: [Picker::from(
-                HalfSpace::through_a_point_facing(top, facing).expect("a facing with a length"),
-            )]
-            .into(),
-        };
-        let front_z = if minus_zero { -0.0 } else { 0.0 };
-        let mut builder = SolidBuilder::new();
-        let [foot, near, far] = [
-            Point::new(radius, y0, 0.0),
-            Point::new(radius, y0, length),
-            Point::new(-radius, y0, length),
-        ]
-        .map(|at| builder.add_vertex(at).expect("a corner"));
-        let round_the_foot = builder
-            .add_edge(foot, foot, EdgeRun::RightRoundWhereItsFacesCross)
-            .expect("an edge");
-        let up_the_seam = builder
-            .add_edge(foot, near, EdgeRun::Straight)
-            .expect("an edge");
-        let in_front_run = half_of_the_rim(Vector::new(0.0, 1.0, front_z));
-        let behind_run = half_of_the_rim(Vector::new(0.0, -1.0, 0.0));
-        let (rim_in_front, rim_behind) = if behind_first {
-            let behind = builder.add_edge(far, near, behind_run).expect("an edge");
-            let front = builder.add_edge(near, far, in_front_run).expect("an edge");
-            (front, behind)
-        } else {
-            let front = builder.add_edge(near, far, in_front_run).expect("an edge");
-            let behind = builder.add_edge(far, near, behind_run).expect("an edge");
-            (front, behind)
-        };
-        let [
-            under,
-            round_the_bar,
-            up,
-            behind_backwards,
-            in_front_backwards,
-            down,
-            in_front,
-            behind,
-        ] = [
-            (round_the_foot, Orientation::Reversed),
-            (round_the_foot, Orientation::Forward),
-            (up_the_seam, Orientation::Forward),
-            (rim_behind, Orientation::Reversed),
-            (rim_in_front, Orientation::Reversed),
-            (up_the_seam, Orientation::Reversed),
-            (rim_in_front, Orientation::Forward),
-            (rim_behind, Orientation::Forward),
-        ]
-        .map(|(edge, way)| DraftStep::Along(builder.add_coedge(edge, way).expect("a coedge")));
-        let foot_wire = builder.add_wire(&[under]).expect("a wire");
-        let bar_wire = builder
-            .add_wire(&[
-                round_the_bar,
-                up,
-                behind_backwards,
-                in_front_backwards,
-                down,
-            ])
-            .expect("a wire");
-        let dome_wire = builder.add_wire(&[in_front, behind]).expect("a wire");
-        let skin = [
-            (
-                Surface::Plane(
-                    Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
-                        .expect("the z axis is a unit normal"),
-                ),
-                foot_wire,
-            ),
-            (
-                Surface::Cylinder(
-                    Cylinder::new(
-                        Axis::new(Point::new(0.0, y0, 0.0), Vector::new(0.0, 0.0, 1.0))
-                            .expect("an axis"),
-                        radius,
-                    )
-                    .expect("a radius"),
-                ),
-                bar_wire,
-            ),
-            (
-                Surface::Sphere(
-                    Sphere::new(Point::new(0.0, y0, length - below_the_rim), dome_radius)
-                        .expect("a radius"),
-                ),
-                dome_wire,
-            ),
-        ]
-        .map(|(surface, wire)| {
-            (
-                builder.add_face(surface, &[wire]).expect("a face"),
-                Orientation::Forward,
-            )
-        });
-        builder.add_shell(&skin).expect("a shell");
-        builder
-            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a sound dome on a bar")
-    }
-
-    #[test]
-    #[ignore = "Q1809 relay probe: run by hand, remove before the row lands"]
-    fn probe_q1809_which() {
-        let deflection = 0.01;
-        let shape = (
-            3.999_999_999_999_999_6,
-            8.667_790_572_490_11,
-            6.221_314_647_173_96,
-        );
-        let place = Vector::new(0.0, -0.499_999_999_999_999_9, 0.0);
-        let mut volumes = Vec::new();
-        for (behind_first, minus_zero) in
-            [(false, false), (true, false), (false, true), (true, true)]
-        {
-            let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
-            let solid = probe_a_dome(&mut model, shape, behind_first, minus_zero, 0.0);
-            model
-                .place_solid(solid, &Isometry::translation(place).expect("a move"))
-                .expect("a key");
-            let (built, _) = probe_volume(&model, solid, deflection);
-            let back = probe_round_trip(&model);
-            let (read, _) = probe_volume(
-                &back,
-                back.solids().next().expect("a solid").key(),
-                deflection,
-            );
-            println!(
-                "behind first {behind_first} minus zero {minus_zero}: built {built:?} back {read:?}"
-            );
-            volumes.push(built);
-        }
-        let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
-        let solid = probe_a_dome(&mut model, shape, false, false, place.components()[1]);
-        let (at_its_place, _) = probe_volume(&model, solid, deflection);
-        let back = probe_round_trip(&model);
-        let (read, _) = probe_volume(
-            &back,
-            back.solids().next().expect("a solid").key(),
-            deflection,
-        );
-        println!("built where it stands, no placement: built {at_its_place:?} back {read:?}");
-        probe_describe("built where it stands", &model, deflection);
-        let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
-        let solid = a_dome_on_a_bar(&mut model, shape.0, shape.1, shape.2);
-        model
-            .place_solid(solid, &Isometry::translation(place).expect("a move"))
-            .expect("a key");
-        println!(
-            "a_dome_on_a_bar: {:?}",
-            probe_volume(&model, solid, deflection).0
-        );
-    }
-
-    #[test]
-    #[ignore = "Q1809 relay probe: run by hand, remove before the row lands"]
-    fn probe_q1809_detail() {
-        let deflection = 0.01;
-        for (label, shape, place, turn) in [
-            (
-                "plain, unplaced",
-                (2.0, 40.0, 3.0),
-                Vector::zero(),
-                Isometry::identity(),
-            ),
-            (
-                "round 236",
-                (
-                    3.999_999_999_999_999_6,
-                    8.667_790_572_490_11,
-                    6.221_314_647_173_96,
-                ),
-                Vector::new(0.0, -0.499_999_999_999_999_9, 0.0),
-                Isometry::identity(),
-            ),
-        ] {
-            let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
-            let (radius, length, dome_radius) = shape;
-            let solid = a_dome_on_a_bar(&mut model, radius, length, dome_radius);
-            let moved = Isometry::translation(place)
-                .expect("a finite move")
-                .compose(&turn);
-            model.place_solid(solid, &moved).expect("a key");
-            println!("=== {label} exact {:?}", probe_exact(shape));
-            probe_describe("built", &model, deflection);
-            let back = probe_round_trip(&model);
-            probe_describe("back", &back, deflection);
-            let again = probe_round_trip(&back);
-            probe_describe("back again", &again, deflection);
-        }
-    }
-
-    #[test]
-    #[ignore = "Q1809 relay probe: run by hand, remove before the row lands"]
-    fn probe_q1809_volume_gap() {
-        let pinned: Vec<((f64, f64, f64), Vector, Isometry)> = vec![
-            (
-                (
-                    16.000_000_000_000_007,
-                    3_561.383_252_900_813,
-                    29.695_524_847_710_807,
-                ),
-                Vector::new(0.0, -1.999_999_999_999_999_8, 4_095.999_999_999_999_5),
-                Isometry::rotation(
-                    &Axis::new(
-                        Point::origin(),
-                        Vector::new(
-                            -0.018_298_610_974_051_055,
-                            0.374_487_539_909_369_2,
-                            -0.017_226_945_673_374_46,
-                        ),
-                    )
-                    .expect("axis"),
-                    2.972_547_828_691_298_3,
-                )
-                .expect("turn"),
-            ),
-            (
-                (
-                    0.999_999_999_999_999_8,
-                    479.722_701_923_535_57,
-                    1.844_030_436_432_878_6,
-                ),
-                Vector::new(
-                    511.999_999_999_999_94,
-                    -0.999_999_999_999_999_8,
-                    -4.000_000_000_000_002,
-                ),
-                a_small_turn_then_quarter_turns(
-                    Vector::new(
-                        -0.229_389_415_830_124_18,
-                        -0.324_935_301_137_225_35,
-                        0.004_735_058_071_504_095,
-                    ),
-                    0.001_509_429_458_854_325,
-                    3.0,
-                    1.0,
-                ),
-            ),
-            (
-                (0.125, 1_955.404_019_307_245_3, 0.125),
-                Vector::new(2_048.000_000_000_001, 0.0, -64.000_000_000_000_01),
-                a_small_turn_then_quarter_turns(
-                    Vector::new(
-                        0.309_067_010_740_284_86,
-                        -0.090_860_775_388_262_43,
-                        -0.313_017_443_317_269_2,
-                    ),
-                    3.785_505_033_375_922_5e-6,
-                    1.0,
-                    3.0,
-                ),
-            ),
-            (
-                (2.0, 1_112.288_377_315_355_3, 2.982_579_216_996_178_7),
-                Vector::new(-1_023.999_999_999_999_9, 0.0, 0.0),
-                a_small_turn_then_quarter_turns(
-                    Vector::new(
-                        0.275_298_066_519_414_13,
-                        0.165_693_885_499_710_65,
-                        0.308_940_678_162_605_2,
-                    ),
-                    0.009_278_730_274_298_288,
-                    1.0,
-                    1.0,
-                ),
-            ),
-            (
-                (
-                    31.999_999_999_999_993,
-                    3_956.598_862_010_99,
-                    43.983_278_386_448_92,
-                ),
-                Vector::new(4_096.000_000_000_002, 256.0, 8.0),
-                a_small_turn_then_quarter_turns(
-                    Vector::new(
-                        0.210_184_775_367_739_6,
-                        0.335_338_531_012_728_9,
-                        0.237_842_307_057_614_22,
-                    ),
-                    3.894_296_696_994_240_5e-5,
-                    1.0,
-                    3.0,
-                ),
-            ),
-            (
-                (
-                    1.000_000_000_000_000_4,
-                    325.558_039_398_955_43,
-                    1.826_416_411_750_435_6,
-                ),
-                Vector::new(-0.999_999_999_999_999_9, 0.0, 256.000_000_000_000_06),
-                Isometry::rotation(
-                    &Axis::new(
-                        Point::origin(),
-                        Vector::new(
-                            0.374_803_843_596_869_47,
-                            -0.286_807_347_850_211_9,
-                            0.018_618_166_210_250_697,
-                        ),
-                    )
-                    .expect("axis"),
-                    3.411_132_783_974_842,
-                )
-                .expect("turn"),
-            ),
-        ];
-        let report = |label: &str, shape: (f64, f64, f64), place: Vector, r: &ProbeResult| {
-            let Some(back) = r.back else {
-                println!(
-                    "{label}: REFUSED {:?} shape {shape:?} place {place:?}",
-                    r.refused
-                );
-                return 0.0;
-            };
-            let gap = (r.built.0 - back.0).abs();
-            let rel = gap / r.built.0;
-            println!(
-                "{label}: by_plane {} same_geometry {} baked==back {} again==back {} \
-                 rel_gap {rel:e} gap {gap:e} errs {:e} {:e} \
-                 built-exact {:e} back-exact {:e} placed-unplaced {:e} shape {shape:?} place {place:?}",
-                r.by_plane,
-                r.same_geometry,
-                r.baked == back.0,
-                r.again == back.0,
-                r.built.1,
-                back.1,
-                (r.built.0 - r.exact).abs(),
-                (back.0 - r.exact).abs(),
-                (r.built.0 - r.built_unplaced.0).abs() / r.built.0,
-            );
-            rel
-        };
-        for (index, (shape, place, turn)) in pinned.iter().enumerate() {
-            for deflection in [0.04, 0.02, 0.01, 0.005, 0.0025] {
-                let r = probe_one(*shape, *place, turn, deflection);
-                report(
-                    &format!("pinned {index} d={deflection}"),
-                    *shape,
-                    *place,
-                    &r,
-                );
-            }
-        }
-        let mut rng = ProbeRng(1809);
-        let mut worst = (0.0_f64, String::new());
-        let (mut by_plane, mut not_by_plane, mut refused, mut over_bound) = (0, 0, 0, 0);
-        let mut bit_for_bit = 0;
-        let (mut same_geometry, mut baked_is_back, mut baked_is_not_back, mut again_is_back) =
-            (0, 0, 0, 0);
-        let mut worst_same = (0.0_f64, 0);
-        let mut bake_refused = 0;
-        let count: usize = std::env::var("PROBE_N")
-            .ok()
-            .and_then(|n| n.parse().ok())
-            .unwrap_or(300);
-        for round in 0..count {
-            let radius = rng.near_a_power_of_two(-3, 5);
-            let length = radius * (2.0 + rng.unit() * 4000.0 / radius.max(1.0));
-            let bigger = if rng.next() % 4 == 0 {
-                1.0
-            } else {
-                1.0 + rng.unit()
-            };
-            let dome_radius = radius * bigger;
-            let coordinate = |rng: &mut ProbeRng| {
-                if rng.next() % 3 == 0 {
-                    0.0
-                } else {
-                    let sign = if rng.next() % 2 == 0 { 1.0 } else { -1.0 };
-                    sign * rng.near_a_power_of_two(-2, 12)
-                }
-            };
-            let place = Vector::new(
-                coordinate(&mut rng),
-                coordinate(&mut rng),
-                coordinate(&mut rng),
-            );
-            let direction = Vector::new(rng.unit() - 0.5, rng.unit() - 0.5, rng.unit() - 0.5);
-            let turn = if rng.next() % 4 == 0 {
-                Isometry::rotation(
-                    &Axis::new(Point::origin(), direction).expect("axis"),
-                    rng.unit() * TAU,
-                )
-                .expect("turn")
-            } else {
-                let small = 10_f64.powf(-6.0 + 4.0 * rng.unit());
-                let qz = (rng.next() % 4) as f64;
-                let qx = (rng.next() % 4) as f64;
-                a_small_turn_then_quarter_turns(direction, small, qz, qx)
-            };
-            let shape = (radius, length, dome_radius);
-            let r = probe_one(shape, place, &turn, 0.01);
-            let Some(back) = r.back else {
-                refused += 1;
-                continue;
-            };
-            if back.0.is_nan() || r.built.0.is_nan() {
-                refused += 1;
-                continue;
-            }
-            if r.by_plane {
-                by_plane += 1;
-            } else {
-                not_by_plane += 1;
-            }
-            if back.0 == r.built.0 {
-                bit_for_bit += 1;
-            }
-            if r.same_geometry {
-                same_geometry += 1;
-            }
-            if r.baked.is_nan() {
-                bake_refused += 1;
-            } else if r.baked == back.0 {
-                baked_is_back += 1;
-            } else if baked_is_not_back < 5 {
-                baked_is_not_back += 1;
-                report(
-                    &format!("BAKED IS NOT BACK round {round}"),
-                    shape,
-                    place,
-                    &r,
-                );
-                println!("  baked {:?} back {:?} turn {turn:?}", r.baked, back.0);
-            }
-            if r.again == back.0 {
-                again_is_back += 1;
-            }
-            if r.same_geometry && (r.built.0 - back.0).abs() / r.built.0 > worst_same.0 {
-                worst_same = ((r.built.0 - back.0).abs() / r.built.0, round);
-            }
-            if (back.0 - r.built.0).abs() > r.built.1 + back.1 {
-                over_bound += 1;
-            }
-            let rel = (r.built.0 - back.0).abs() / r.built.0;
-            if rel > worst.0 {
-                worst = (rel, format!("round {round} turn {turn:?}"));
-                report(&format!("worst so far round {round}"), shape, place, &r);
-            }
-        }
-        println!(
-            "sweep {count}: by plane {by_plane} not by plane {not_by_plane} refused {refused} \
-             bit for bit {bit_for_bit} gap over the two errors {over_bound} worst {worst:?}"
-        );
-        println!(
-            "same geometry {same_geometry} bake refused {bake_refused} baked measures as read back {baked_is_back} \
-             read back twice measures as once {again_is_back} worst gap with the same \
-             geometry {worst_same:?}"
-        );
     }
 }
 
