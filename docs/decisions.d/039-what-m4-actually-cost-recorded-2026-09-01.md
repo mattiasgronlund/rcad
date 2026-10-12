@@ -522,6 +522,10 @@ moved them.
 >   and forth round the axis, which Q1554 does not order, and it is still
 >   refused `ACrossingThisCannotBeOrderedAlong` before any cell
 >   (`a_small_ball_on_a_bars_wall_is_refused_before_any_cell`), §34.10's gap.
+>   *2026-10-11 (Q1766):* it now gets past the order and is refused
+>   `CannotTellTheCellsOfAFaceApart` on the bar's pipe instead, in
+>   `a_small_ball_on_a_bars_seam_is_refused_telling_the_pipes_cells_apart`;
+>   Q1768 takes it.
 
 > **2026-10-10 note (Q1598): both mesh refusals of the Q1554 note answer
 > now.** Q1598 changes only the march: a trial that settles back onto its start
