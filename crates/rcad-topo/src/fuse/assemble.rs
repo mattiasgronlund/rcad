@@ -7631,7 +7631,12 @@ fn which_of_the_pairs_closed_crossings_it_is(
             Surface::Cone(_),
             Surface::Cone(_) | Surface::Cylinder(_) | Surface::Sphere(_),
         ]
-        | [Surface::Cylinder(_) | Surface::Sphere(_), Surface::Cone(_)] => (),
+        | [Surface::Cylinder(_) | Surface::Sphere(_), Surface::Cone(_)]
+        | [Surface::Sphere(_), Surface::Cylinder(_)]
+        | [
+            Surface::Cylinder(_),
+            Surface::Sphere(_) | Surface::Cylinder(_),
+        ] => (),
         [_, _] => return Ok(None),
     }
     let Some(this_circle) =
