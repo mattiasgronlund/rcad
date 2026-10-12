@@ -115,10 +115,11 @@ pub enum Error {
     /// outwards and classifies points correctly; what it does not have is a
     /// volume of `1e900` that fits in the type it would be returned in.
     ///
-    /// **Both kinds, so [`Error::limit_or_gap`] says not known** (§16.10). From
-    /// [`SolidView::measure`](crate::SolidView::measure) it is a *limit*: the
-    /// answer is that volume, and no ordering and no rescaling of the
-    /// arithmetic reaches a number `f64` cannot represent. From a fuse it is a
+    /// **Both kinds, so [`Error::limit_or_gap`] says not known** (§16.10).
+    /// [`SolidView::measure`](crate::SolidView::measure) of a cube of side
+    /// `1e103` is a *limit*: the answer is a volume of `1e309`, and no ordering
+    /// and no rescaling of the arithmetic reaches a number `f64` cannot
+    /// represent. From a fuse it is a
     /// *gap*: uniting a cube of side `2^342` with its copy is refused, though
     /// the answer is that same cube and the model already holds it, because the
     /// fuse measures every shell it writes and refuses one whose volume
@@ -131,6 +132,13 @@ pub enum Error {
     /// Reachable without [`Error::VolumeTooLargeToMeasure`], because area and
     /// volume grow at different rates: a slab that is wide and thin can run out
     /// of room for its area while its volume still fits.
+    ///
+    /// **Both kinds, so [`Error::limit_or_gap`] says not known** (§16.10). A
+    /// *limit* when the area is past `f64::MAX`: a face of a cube of side
+    /// `1e200` is `1e400`. A *gap* when the area is under it and the rounded
+    /// sum of the face's fan is not: a parallelogram whose area, worked out
+    /// exactly from its corners, is just under `f64::MAX` is refused by
+    /// [`SolidView::measure_one_face`](crate::SolidView::measure_one_face).
     #[error("this solid has more surface area than an f64 can hold")]
     SurfaceAreaTooLargeToMeasure,
 
@@ -1204,7 +1212,9 @@ impl Error {
     /// copy, which the model already holds the answer to.
     /// [`Error::LengthTooLargeToMeasure`] is a limit for a wire `4e308` round,
     /// and a gap for one exactly `f64::MAX` round whose sum, rounded outwards,
-    /// runs past it.
+    /// runs past it. [`Error::SurfaceAreaTooLargeToMeasure`] is a limit for a
+    /// face of `1e400`, and a gap for a parallelogram just under `f64::MAX`
+    /// whose fan, summed with rounding, comes out past it.
     ///
     /// [`Error::Geometry`] and the two refusals that carry a `why` say what the
     /// refusal of geometry they carry says, and [`Error::Invalid`] what
@@ -1232,7 +1242,6 @@ impl Error {
             | Self::RepeatedPoint { .. }
             | Self::HeightNotPositive { .. }
             | Self::ACapOfABarFacesIntoIt { .. }
-            | Self::SurfaceAreaTooLargeToMeasure
             | Self::NoSuchFaceInThisSolid { .. }
             | Self::ADraftHandleCameFromAnotherBuilder { .. }
             | Self::ADraftPointIsNotFinite { .. }
@@ -1253,6 +1262,7 @@ impl Error {
             | Self::ACapDoesNotCutRightRoundABar { .. }
             | Self::TheCapsOfABarMeetInsideIt
             | Self::VolumeTooLargeToMeasure
+            | Self::SurfaceAreaTooLargeToMeasure
             | Self::LengthTooLargeToMeasure
             | Self::TheFuseWroteABrokenAnswer { .. }
             | Self::WrongFormatVersion { .. }
