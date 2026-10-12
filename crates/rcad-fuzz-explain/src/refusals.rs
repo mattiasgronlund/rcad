@@ -22,6 +22,7 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use rcad_geom::LimitOrGap;
 use rcad_predicates::{Decision, Policy};
 use rcad_topo::Error;
 
@@ -79,6 +80,11 @@ pub struct RefusalGroup {
     pub other_way_round: usize,
     /// The first file, in the order they were handed in, that met one.
     pub sample: PathBuf,
+    /// Whether the answer this refusal stands in for is a limit, a gap or not
+    /// known ([`Error::limit_or_gap`], §437.6). The same for every refusal in
+    /// the group, since it is decided by the variant that keys the group, not
+    /// by anything that varies between its files.
+    pub class: LimitOrGap,
 }
 
 /// The key of an `Undecidable` none of whose records is still undecided.
@@ -116,12 +122,12 @@ pub fn every_refusal_in(files: Vec<PathBuf>, workers: usize, time_limit: Duratio
 #[must_use]
 pub fn as_refusals_tsv(replay: &CorpusReplay) -> String {
     let mut out = String::from(
-        "variant\tkey\trefusals\tfiles\tcertified\ttolerant\tfirst_way_round\tother_way_round\tsample\n",
+        "variant\tkey\trefusals\tfiles\tcertified\ttolerant\tfirst_way_round\tother_way_round\tsample\tclass\n",
     );
     for group in &replay.groups {
         let _ = writeln!(
             out,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             group.variant,
             group.key,
             group.refusals,
@@ -130,7 +136,8 @@ pub fn as_refusals_tsv(replay: &CorpusReplay) -> String {
             group.tolerant,
             group.first_way_round,
             group.other_way_round,
-            group.sample.display()
+            group.sample.display(),
+            group.class
         );
     }
     out
@@ -205,6 +212,7 @@ struct Refusal {
     variant: String,
     key: String,
     which: WhichFuse,
+    class: LimitOrGap,
 }
 
 fn what_one_file_did(path: &Path) -> WhatOneFileDid {
@@ -261,6 +269,7 @@ fn keyed(why: &Error, which: WhichFuse) -> Refusal {
         variant,
         key,
         which,
+        class: why.limit_or_gap(),
     }
 }
 
@@ -325,6 +334,7 @@ fn grouped(replayed: Vec<(PathBuf, Option<WhatOneFileDid>)>, time_limit: Duratio
                     first_way_round: 0,
                     other_way_round: 0,
                     sample: file.clone(),
+                    class: refusal.class,
                 });
             group.refusals += 1;
             if met_here.insert((refusal.variant, refusal.key)) {
@@ -560,7 +570,7 @@ mod tests {
             1,
             Duration::from_secs(SECONDS_ONE_FILE_IS_GIVEN),
         );
-        let group = |variant: &str, key: &str, certified, tolerant| RefusalGroup {
+        let group = |variant: &str, key: &str, certified, tolerant, class| RefusalGroup {
             variant: variant.to_owned(),
             key: key.to_owned(),
             refusals: 2,
@@ -570,6 +580,7 @@ mod tests {
             first_way_round: 1,
             other_way_round: 1,
             sample: PathBuf::from(REFUSES_FOUR_WAYS),
+            class,
         };
         assert_eq!(
             replay.groups,
@@ -578,14 +589,16 @@ mod tests {
                     "CannotTellTheCellsOfAFaceApart",
                     "two regions of one face could not be told apart",
                     0,
-                    2
+                    2,
+                    LimitOrGap::NotKnown
                 ),
                 group(
                     "Invalid(DynamicRangeTooWide)",
                     "the model is broken: coordinates span a range of N, which is too wide to \
                      compute in",
                     2,
-                    0
+                    0,
+                    LimitOrGap::Limit
                 ),
             ]
         );
@@ -785,6 +798,7 @@ mod tests {
                 first_way_round: 2,
                 other_way_round: 1,
                 sample: PathBuf::from("two"),
+                class: LimitOrGap::NotKnown,
             }]
         );
         assert_eq!((replay.files, replay.files_that_refused), (5, 2));
@@ -810,7 +824,7 @@ mod tests {
     }
 
     #[test]
-    fn the_refusals_file_has_the_nine_columns_of_section_437_5() {
+    fn the_refusals_file_has_the_ten_columns_of_sections_437_5_and_437_6() {
         let replay = every_refusal_in(
             vec![PathBuf::from(REFUSES_FOUR_WAYS)],
             1,
@@ -822,13 +836,13 @@ mod tests {
             lines.next(),
             Some(
                 "variant\tkey\trefusals\tfiles\tcertified\ttolerant\tfirst_way_round\t\
-                 other_way_round\tsample"
+                 other_way_round\tsample\tclass"
             )
         );
         let rows: Vec<_> = lines.collect();
         assert_eq!(rows.len(), 2, "{tsv}");
         for row in rows {
-            assert_eq!(row.split('\t').count(), 9, "{row}");
+            assert_eq!(row.split('\t').count(), 10, "{row}");
         }
     }
 
