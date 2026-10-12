@@ -3067,10 +3067,6 @@ impl<'f> Arrangement<'f> {
     fn the_nodes_on_each_crossing(&self) -> Vec<Vec<usize>> {
         let mut on_each = vec![Vec::new(); self.crossings.len()];
         let mut set_aside = vec![Vec::new(); self.crossings.len()];
-        let mut along_the_boundary = vec![false; self.crossings.len()];
-        for &crossing in self.crossing_of_edge.iter().flatten() {
-            along_the_boundary[crossing] = true;
-        }
         for (
             node,
             Node {
@@ -3082,17 +3078,15 @@ impl<'f> Arrangement<'f> {
             },
         ) in self.nodes.iter().enumerate()
         {
-            let off_the_face_on_cuts_alone = vertex.is_none()
-                && !half_way_round
-                && self.face.bounds.provably_misses(*point)
-                && crossings.iter().all(|&other| !along_the_boundary[other]);
+            let off_the_face =
+                vertex.is_none() && !half_way_round && self.face.bounds.provably_misses(*point);
             for &crossing in crossings {
                 let crossed_by_nothing_drawn = vertex.is_none()
                     && crossings.len() > 1
                     && crossings
                         .iter()
                         .all(|&other| other == crossing || !self.crossings[other].reaches_the_face);
-                if crossed_by_nothing_drawn || off_the_face_on_cuts_alone {
+                if crossed_by_nothing_drawn || off_the_face {
                     set_aside[crossing].push(node);
                 } else {
                     on_each[crossing].push(node);
