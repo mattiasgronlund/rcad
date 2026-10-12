@@ -185,7 +185,9 @@ the fold's cost against a fuse's other work.
   planes round it is tried now, and refuses before the partner is looked at;
   §294.16 records what Q794 found. A corner with four planes round it, a
   pyramid's apex, is tried too and refuses the same way; §294.17 records what
-  Q1812 found. One with a curved surface among its three is not tried yet.
+  Q1812 found. One with a curved surface among its three, a half bar's corner
+  where its cap, its round wall and its cut meet, is tried too and refuses the
+  same way; §294.18 records what Q1813 found.
   §286.4's own gap beside this one, a three-plane corner refused for sitting
   as far off a plane as `validate` allows, was closed by §368, which grows the
   stored corner by `validate`'s room and not by a rounding alone
@@ -1107,7 +1109,10 @@ no class, since nobody had run them (§360.5):
   places, `(−3, 0, 10)` and `(3, 0, 10)`. A corner moved a millimetre off is
   guessed to refuse as the box's does. Moved onto the other place, the chord's
   other end, `the_place_the_model_points_at` would pick that place, which is
-  the one move here that could come back a wrong `Ok`. A row, tier 2.
+  the one move here that could come back a wrong `Ok`. Tried by Q1813: every
+  millimetre move refuses as the box's corner does, and the move onto the
+  chord's other end is picked there and refused, with no wrong `Ok`; §294.18
+  records it.
 
 ### 294.17 Q1812: a pyramid's apex moved in its bytes is refused as the box's corner is, and the sound pyramid cut through its apex refuses — 2026-10-12
 
@@ -1205,5 +1210,121 @@ three pins and the pyramid's four: 7 tests run, 7 passed.
   tier 1, `refuses/B`.
 - The tetrahedron cut through its apex refusing `DynamicRangeTooWide` under
   `certified`, above. A row, tier 1, `refuses/B`.
-- A corner with a curved surface among its three, §294.16's second item, is
-  still not tried. It is Q1813.
+- A corner with a curved surface among its three, §294.16's second item, was
+  not tried when this was written. Q1813 tried it, and §294.18 records it.
+
+### 294.18 Q1813: a corner where a cap, a round wall and a cut meet, moved in its bytes, is refused at both places they meet — 2026-10-12
+
+*Queue row Q1813, from §294.16. Lane
+`lane-q1813-a-curved-corner-moved-in-its-bytes`, base `86192f96`, carried on by
+a second lane after the first passed its budget (§416). Pinned in
+`crates/rcad-topo/tests/a_broken_three_surface_corner_read_back_from_bytes.rs`
+beside §294.16's box and §294.17's pyramid. No code changed.*
+
+**The corner.** `add_round_bar(3, 10)` less `THE_HALF_PAST_THE_SEAM`, the
+block `x` from −5 to 5, `y` from 0 to 5 and `z` from −1 to 11, fused under
+`certified` with neither placed, and the half bar that comes back placed with
+`place_solid` at §294.8's four placements, as the pyramid is. So the file
+stores its corner at `(−3, 0, 10)` at every placement, found once in the bytes
+at each, where the cap's plane `z = 10`, the wall's cylinder and the cut's
+plane `y = 0` meet. Those three meet at `(3, 0, 10)` too, the other end of the
+cut across the top, where the half bar keeps a corner of its own. The test
+overwrites the stored corner with one of five moves: a millimetre out from the
+wall, `(−4, 0, 10)`; a millimetre above the cap, `(−3, 0, 11)`; into the half
+bar, `(−2, −1, 9)`; out from all three, `(−4, 1, 11)`; and onto the other end
+of the cut, `(3, 0, 10)`. The bar and the block stay in the model beside the
+half bar, since nothing in the API removes a solid and a key does not survive
+the bytes, so the test finds the half bar in the model it reads back by its
+place among the model's solids.
+
+`Model::validate` refuses each millimetre move under both policies at every
+placement with `VertexOffItsFaceSurface`, the move off the cap's plane too:
+the first fuse wrote each edge at the corner as part of where two surfaces
+cross, and `check_edge` asks each end of such an edge about the second surface
+before any face asks about its own. It refuses the move onto `(3, 0, 10)` with
+`EdgeHasNoLength`, since the cut's straight edge across the top now has both
+its ends at one point. The sound bytes validate.
+
+**The control, and one partner it does not answer.** The sound half bar answers
+nine of §294.16's eleven partner and rule pairs at every placement under both
+policies, 72 fuses, the model validates after each, and each answer holds what
+the half bar and the block hold, to `1e-12` relative plus the `volume_error`
+the measure publishes at a deflection of `0.001`. The half bar holds
+`45π ≈ 141.372`. A block reaching right across its half disc between `x = a`
+and `x = b` shares `F(b) − F(a)` per unit of height, with
+`F(x) = (x·√(9 − x²) + 9·asin(x/3))/2`. That gives 149.372 in two solids for
+`FAR_AWAY` ∪; `36π ≈ 113.097` for `OVER_THE_BOTTOM` − and `OVER_THE_TOP` −,
+`9π ≈ 28.274` for `OVER_THE_TOP` ∩; 138.274, 288.274 and 3.0975 for
+`OVER_THE_RIM_BY_THE_SEAM` −, ∪ and ∩; 138.274 for
+`OVER_THE_RIM_AWAY_FROM_THE_SEAM` −; and `45π` for
+`A_NOTCH_A_QUARTER_TURN_ROUND` −, which misses the half bar. `the_volume_of`
+measured at the scale's own deflection with no bound before, which a curved
+answer cannot meet to `1e-12`; it now measures at `0.001` and returns the
+`volume_error` beside the volume. The box's and the pyramid's checks are the
+same as they were, since a flat solid's error is only its sum's rounding.
+
+The two pairs left out are `THE_HALF_PAST_THE_SEAM` − and ∩: the block that
+cut the half bar, fused with it again, flush along its flat face `y = 0`. The
+answers exist, the whole half bar and nothing, and both come back with no
+placement and shifted under both policies, and turned under `tolerant(100)`.
+**Turned, they refuse.** Under `certified` turned both refuse `Undecidable` on
+"orient3d"; turned and shifted, `Undecidable` on "side of plane" under
+`certified` and `TwoCurvesTouchWithoutCrossing` under `tolerant(100)`. Each
+refusal leaves the model as it was. A cut flush along a face is a shape
+designers make, and the answer has nothing small in it, so this is a gap
+(§16.10): class `refuses/B`, a row of its own. Where the fuse refuses was not
+traced. The turned and shifted "side of plane" may be §294.9's sound bar cut
+along its seam
+(`a_turned_sound_bar_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is`),
+which Q1398 is open beside; nobody has run that lead. The pin
+`a_sound_half_bar_cut_flush_along_its_flat_face_refuses_when_turned` holds it
+as it stands, so the row that closes it turns the pin round.
+
+**What comes back from a millimetre move.** All 352 fuses, four moves against
+the eleven pairs at four placements under two policies, refuse
+`Error::Undecidable` with one record, "where three surfaces meet", and leave
+the model byte for byte as it was. **No wrong `Ok` and no panic**, as the row
+guessed, and for §294.16's reason. With three surfaces round the corner,
+`derive_a_corner` in `fuse/bake.rs` has one triple to solve, and its meet is
+the two places `(−3, 0, 10)` and `(3, 0, 10)`. `the_place_the_model_points_at`
+takes a place only where the stored corner, grown by `validate`'s room,
+overlaps it. A millimetre is far past that room, so neither place is taken and
+`derive_a_corner` gives up. The curved wall changes nothing here.
+
+**What comes back from the move onto the other end of the cut.** This is the
+move that could have answered wrong: the stored corner points at
+`(3, 0, 10)`, one of the two places its triple meets, so
+`the_place_the_model_points_at` takes it. All 88 fuses refuse, none comes back
+`Ok`, none panics, and each leaves the model as it was:
+
+- Under `tolerant(100)` at every placement, and under `certified` with no
+  placement and shifted, 66 fuses: `Error::Invalid(EdgeHasNoLength)`, the
+  word `validate` has for these bytes.
+- Under `certified` turned, all eleven pairs: `Undecidable` on "order along a
+  crossing".
+- Under `certified` turned and shifted: nine pairs on "order along a crossing",
+  and `THE_HALF_PAST_THE_SEAM` − and ∩ on "side of plane", as the sound half
+  bar refuses there.
+
+The `EdgeHasNoLength` is `fold_the_nodes`' in `fuse/arrange.rs`, which refuses
+with it when two nodes it folds into one were made from two different corners
+of an input. The moved corner, placed at `(3, 0, 10)`, and the half bar's own
+corner there are those two. So the corner is placed where the row guessed, and
+the fuse finds it on top of another and refuses, rather than answer with a cut
+that has no length. That refusal names the broken input, as `validate` does,
+where the millimetre moves' refusal names the arithmetic (§294.16).
+
+`mise exec -- just t -E
+'binary(a_broken_three_surface_corner_read_back_from_bytes)'` runs the box's
+three pins, the pyramid's four and the half bar's five: 12 tests run, 12
+passed.
+
+**What this leaves.**
+
+- The sound half bar cut flush along its flat face refusing when turned,
+  above. A row, tier 1, `refuses/B`.
+- `Model::fuse`'s doc in `crates/rcad-topo/src/fuse/mod.rs`, at the end of its
+  `# Panics` section, still says a corner with four or more surfaces round it,
+  or with a curved one among three, is untried (§294.7). Both are tried now,
+  in §294.17 and here. A small row, since that file was outside this row's
+  write set.

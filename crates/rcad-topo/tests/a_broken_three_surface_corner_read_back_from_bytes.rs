@@ -1,7 +1,8 @@
-//! A box whose top corner, where three planes meet, and a pyramid whose apex,
-//! where four planes meet, are moved in their file, read back, and fused.
-//! `docs/decisions.md` §294.16 and §294.17 are the record and this file is
-//! their measurement.
+//! A box whose top corner, where three planes meet, a pyramid whose apex,
+//! where four planes meet, and a half bar whose corner, where a cap, a round
+//! wall and a cut meet, are moved in their file, read back, and fused.
+//! `docs/decisions.md` §294.16, §294.17 and §294.18 are the record and this
+//! file is their measurement.
 //!
 //! §294 moved a round bar's top corner, which has only two surfaces round it,
 //! and found no wrong `Ok` and no panic
@@ -36,14 +37,30 @@
 //! cannot say which side of that face the apex is on, which is a defect of its
 //! own and pinned here as it stands.
 //!
+//! The half bar is a round bar of radius 3 and height 10 less the block that
+//! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
+//! the wall's cylinder and the cut's plane `y = 0` round it, and those three
+//! meet at `(3, 0, 10)` as well, where the half bar keeps a corner of its own.
+//! §294.18 moves the corner a millimetre four ways, and **every fuse refuses
+//! as the box's corner does**, though one of its surfaces is curved. It also
+//! moves the corner onto `(3, 0, 10)`, the one move that could pick the other
+//! place and come back a wrong `Ok`. The fuse does put the corner there, on
+//! top of the half bar's own, and **every fuse refuses**, most of them as
+//! `validate` does, with `EdgeHasNoLength`. The sound half bar answers every
+//! partner but the block that cut it, fused again flush along its flat face,
+//! which it refuses when turned: a defect of its own, pinned here as it
+//! stands.
+//!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
+
+use std::f64::consts::PI;
 
 use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, SIDE_OF_PLANE, Scale, Surface,
     Vector, WHERE_THREE_SURFACES_MEET,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{ORIENT3D, Policy, ProvenanceLog};
 use rcad_topo::{
     DraftEdge, DraftStep, Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidBuilder,
     SolidKey,
@@ -52,6 +69,11 @@ use rcad_topo::{
 /// What a fuse's record names when it cannot say whether a point is inside a
 /// piece of a face. `rcad-topo` keeps the name private, in `fuse/select.rs`.
 const A_POINT_INSIDE_A_PIECE_OF_A_FACE: &str = "a point inside a piece of a face";
+
+/// What a fuse's record names when it cannot say which of two points comes
+/// first along a crossing. `rcad-topo` keeps the name private, in
+/// `fuse/arrange.rs`.
+const ALONG_A_CROSSING: &str = "order along a crossing";
 
 /// The box's footprint runs from `-SIDE` to `SIDE` in `x` and in `y`.
 const SIDE: f64 = 3.0;
@@ -98,6 +120,39 @@ const EVERY_MOVE_OF_THE_APEX: [[f64; 3]; 4] = [
     DOWN_INTO_THE_PYRAMID,
     DOWN_AN_EDGE,
     DOWN_A_FACE,
+];
+
+/// The round bar's, which `add_round_bar` stands on the `z` axis with its seam
+/// at `(RADIUS, 0)`.
+const RADIUS: f64 = 3.0;
+
+/// Where the round bar less [`THE_HALF_PAST_THE_SEAM`] keeps the corner the
+/// file moves: the far end of the cut across its top, where the cap's plane
+/// `z = 10`, the wall's cylinder and the cut's plane `y = 0` meet.
+const WHERE_THE_HALF_BAR_PUTS_IT: [f64; 3] = [-RADIUS, 0.0, HEIGHT];
+
+/// The other place those three surfaces meet: the near end of the cut across
+/// the top, where the half bar keeps a corner of its own.
+const THE_OTHER_END_OF_THE_CUT: [f64; 3] = [RADIUS, 0.0, HEIGHT];
+
+/// A millimetre out from the wall, still on the cap and the cut.
+const OFF_THE_ROUND_WALL: [f64; 3] = [-RADIUS - 1.0, 0.0, HEIGHT];
+
+/// A millimetre above the cap, still on the wall and the cut.
+const OFF_THE_CAP: [f64; 3] = [-RADIUS, 0.0, HEIGHT + 1.0];
+
+/// A millimetre into the half bar from the cap and the cut, and in from the
+/// wall.
+const INTO_THE_HALF_BAR: [f64; 3] = [-RADIUS + 1.0, -1.0, HEIGHT - 1.0];
+
+/// A millimetre out from the cap and the cut, and out from the wall.
+const OFF_THE_CAP_THE_WALL_AND_THE_CUT: [f64; 3] = [-RADIUS - 1.0, 1.0, HEIGHT + 1.0];
+
+const EVERY_MOVE_OF_THE_HALF_BAR: [[f64; 3]; 4] = [
+    OFF_THE_ROUND_WALL,
+    OFF_THE_CAP,
+    INTO_THE_HALF_BAR,
+    OFF_THE_CAP_THE_WALL_AND_THE_CUT,
 ];
 
 /// A block, as the two corners of its footprint, the height of its floor and
@@ -183,6 +238,16 @@ const EVERY_PARTNER: [(Block, Rule); 11] = [
     (THE_HALF_PAST_THE_SEAM, Rule::Difference),
     (THE_HALF_PAST_THE_SEAM, Rule::Intersection),
 ];
+
+/// What a fuse of the half bar refused with, as much of it as the pins below
+/// tell apart.
+#[derive(Debug, PartialEq)]
+enum Refused {
+    Invalid(Invalid),
+    /// The predicates the refusal's records name, in order.
+    Undecidable(Vec<&'static str>),
+    TwoCurvesTouchWithoutCrossing,
+}
 
 /// Each move takes the corner a millimetre off at least one of its planes, and
 /// `validate` says so under both policies at every placement. The same bytes
@@ -332,26 +397,17 @@ fn a_sound_pyramid_cut_through_its_apex_cannot_tell_which_side_of_the_cut_its_ap
             );
         }
 
-        let case = format!("tolerant, no placement, {rule:?}");
-        let policy = Policy::tolerant(100.0);
-        let (mut model, solid) = the_pyramid_read_back(identity, WHERE_THE_PYRAMID_PUTS_ITS_APEX);
-        let block = a_block(&mut model, THE_HALF_PAST_THE_SEAM, &identity);
-        let answer = model
-            .fuse(&[solid], &[block], rule, &policy, &mut ProvenanceLog::new())
-            .unwrap_or_else(|error| panic!("{case} refused: {error:?}"));
-        model
-            .validate(&policy, &mut ProvenanceLog::new())
-            .unwrap_or_else(|error| panic!("{case}: the answer does not validate: {error:?}"));
         let half = (2.0 * SIDE) * (2.0 * SIDE) * HEIGHT / 3.0 / 2.0;
         assert_eq!(
             what_the_pyramid_and_a_block_hold(THE_HALF_PAST_THE_SEAM, rule),
             (1, half)
         );
-        assert_eq!(answer.solids().len(), 1, "{case}: how many solids");
-        let measured = the_volume_of(&model, &answer, &policy, &case);
-        assert!(
-            (measured - half).abs() <= 1e-12 * half,
-            "{case}: the answer holds {measured}, half the pyramid {half}"
+        fuses_into_what_the_two_hold(
+            the_pyramid_read_back(identity, WHERE_THE_PYRAMID_PUTS_ITS_APEX),
+            identity,
+            (THE_HALF_PAST_THE_SEAM, rule),
+            &Policy::tolerant(100.0),
+            what_the_pyramid_and_a_block_hold,
         );
     }
 }
@@ -366,9 +422,210 @@ fn every_fuse_of_a_pyramid_whose_apex_is_moved_refuses_where_three_surfaces_meet
     every_fuse_refuses_where_three_surfaces_meet(the_pyramid_read_back, EVERY_MOVE_OF_THE_APEX);
 }
 
+/// Each of the four moves takes the corner a millimetre off at least one of
+/// the three surfaces round it, and `validate` says so under both policies at
+/// every placement. It names a curved surface even for the move off the cap's
+/// plane: the fuse that made the half bar wrote each edge at the corner as
+/// where two surfaces cross, and `validate` asks the ends of such an edge
+/// about the second surface before it asks a face about its own.
+///
+/// Moved onto the other end of the cut, the corner is still on all three
+/// surfaces, and what `validate` finds is the cut's straight edge across the
+/// top, whose two ends are now one point. The same bytes with the corner left
+/// alone validate.
+#[test]
+fn a_half_bar_whose_corner_is_moved_in_its_file_reads_back_and_does_not_validate() {
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        for placement in every_placement() {
+            let each_move = EVERY_MOVE_OF_THE_HALF_BAR
+                .map(|moved_to| (moved_to, Invalid::VertexOffItsFaceSurface))
+                .into_iter()
+                .chain([(THE_OTHER_END_OF_THE_CUT, Invalid::EdgeHasNoLength)]);
+            for (moved_to, invalid) in each_move {
+                let (model, _) = the_half_bar_read_back(placement, moved_to);
+                let case = format!("{policy:?}, {placement:?}, the corner at {moved_to:?}");
+                match model.validate(&policy, &mut ProvenanceLog::new()) {
+                    Err(Error::Invalid(found)) => assert_eq!(found, invalid, "{case}"),
+                    other => panic!("{case} validates as {other:?}"),
+                }
+            }
+            let (sound, _) = the_half_bar_read_back(placement, WHERE_THE_HALF_BAR_PUTS_IT);
+            sound
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{policy:?}, {placement:?}: the sound half bar does not validate: {error:?}"
+                    )
+                });
+        }
+    }
+}
+
+/// The control for the half bar's refusals, as for the box's and the
+/// pyramid's: the same bytes with the corner left alone answer every partner
+/// but one, and the answer holds what the half bar and the block hold, to the
+/// bound the measure publishes for a curved solid. The one left out is the cut
+/// along the half bar's flat face, pinned on its own below.
+#[test]
+fn the_sound_half_bar_answers_every_partner_but_a_cut_along_its_flat_face_with_what_the_two_hold() {
+    let not_along_the_flat_face: Vec<(Block, Rule)> = EVERY_PARTNER
+        .into_iter()
+        .filter(|&(partner, _)| partner != THE_HALF_PAST_THE_SEAM)
+        .collect();
+    assert_eq!(not_along_the_flat_face.len(), 9);
+    answers_with_what_the_two_hold(
+        |placement| the_half_bar_read_back(placement, WHERE_THE_HALF_BAR_PUTS_IT),
+        &not_along_the_flat_face,
+        what_the_half_bar_and_a_block_hold,
+    );
+}
+
+/// **The sound half bar cut again by the block that made it refuses when
+/// turned**, which is a defect and not the moved corner's refusal (§294.18).
+/// `THE_HALF_PAST_THE_SEAM`'s face `y = 0` lies on the half bar's flat face,
+/// and the answers exist: the whole half bar for the difference and nothing
+/// for the intersection. They come back with no placement and shifted under
+/// both policies, and turned under `tolerant(100)`. Turned, `certified` cannot
+/// say the sign of an `orient3d`; turned and shifted, it cannot say which side
+/// of a plane something is on, and `tolerant(100)` finds two curves on a face
+/// that touch without crossing.
+#[test]
+fn a_sound_half_bar_cut_flush_along_its_flat_face_refuses_when_turned() {
+    let [identity, shift, turn, turn_then_shift] = every_placement();
+    let [certified, tolerant] = [Policy::certified(), Policy::tolerant(100.0)];
+    let (solids, volume) =
+        what_the_half_bar_and_a_block_hold(THE_HALF_PAST_THE_SEAM, Rule::Difference);
+    assert_eq!(solids, 1);
+    assert!((volume - 45.0 * PI).abs() <= 1e-12 * volume, "{volume}");
+    assert_eq!(
+        what_the_half_bar_and_a_block_hold(THE_HALF_PAST_THE_SEAM, Rule::Intersection),
+        (0, 0.0)
+    );
+
+    for rule in [Rule::Difference, Rule::Intersection] {
+        let answered = [
+            (identity, &certified),
+            (identity, &tolerant),
+            (shift, &certified),
+            (shift, &tolerant),
+            (turn, &tolerant),
+        ];
+        for (placement, policy) in answered {
+            fuses_into_what_the_two_hold(
+                the_half_bar_read_back(placement, WHERE_THE_HALF_BAR_PUTS_IT),
+                placement,
+                (THE_HALF_PAST_THE_SEAM, rule),
+                policy,
+                what_the_half_bar_and_a_block_hold,
+            );
+        }
+        let refused = [
+            (turn, &certified, Refused::Undecidable(vec![ORIENT3D])),
+            (
+                turn_then_shift,
+                &certified,
+                Refused::Undecidable(vec![SIDE_OF_PLANE]),
+            ),
+            (
+                turn_then_shift,
+                &tolerant,
+                Refused::TwoCurvesTouchWithoutCrossing,
+            ),
+        ];
+        for (placement, policy, refusal) in refused {
+            assert_eq!(
+                the_half_bar_refuses(
+                    WHERE_THE_HALF_BAR_PUTS_IT,
+                    placement,
+                    (THE_HALF_PAST_THE_SEAM, rule),
+                    policy
+                ),
+                refusal,
+                "{policy:?}, {placement:?}, {rule:?}"
+            );
+        }
+    }
+}
+
+/// **Every millimetre move of the half bar's corner gets the box's refusal**,
+/// at every partner, rule, placement and policy, though one of the three
+/// surfaces round the corner is curved and they meet at two places. The
+/// stored corner is further from both than `validate` lets a corner sit off
+/// its surfaces, so neither is picked and nothing else places the corner.
+#[test]
+fn every_fuse_of_a_half_bar_whose_corner_is_moved_a_millimetre_refuses_where_three_surfaces_meet() {
+    every_fuse_refuses_where_three_surfaces_meet(
+        the_half_bar_read_back,
+        EVERY_MOVE_OF_THE_HALF_BAR,
+    );
+}
+
+/// **The corner moved onto the other place its three surfaces meet is refused
+/// by every fuse**, and none comes back a wrong `Ok`, which is what the move
+/// risked: the stored corner now picks the other end of the cut, where the half
+/// bar keeps a corner of its own, so the fuse finds two corners of one solid
+/// at one place. Under `tolerant(100)` at every placement, and under
+/// `certified` with no placement and shifted, it says so as `validate` does,
+/// `EdgeHasNoLength`. Under `certified` turned it cannot order two points
+/// along a crossing, and turned and shifted the same, but for the cut along
+/// the flat face, which it refuses on the side of a plane as the sound half
+/// bar does. Each refusal leaves the model as it was.
+#[test]
+fn a_half_bar_whose_corner_is_moved_onto_the_other_end_of_its_cut_answers_no_fuse() {
+    let [identity, shift, turn, turn_then_shift] = every_placement();
+    let [certified, tolerant] = [Policy::certified(), Policy::tolerant(100.0)];
+    for (partner, rule) in EVERY_PARTNER {
+        let along_the_flat_face = partner == THE_HALF_PAST_THE_SEAM;
+        let refused = [
+            (
+                identity,
+                &tolerant,
+                Refused::Invalid(Invalid::EdgeHasNoLength),
+            ),
+            (shift, &tolerant, Refused::Invalid(Invalid::EdgeHasNoLength)),
+            (turn, &tolerant, Refused::Invalid(Invalid::EdgeHasNoLength)),
+            (
+                turn_then_shift,
+                &tolerant,
+                Refused::Invalid(Invalid::EdgeHasNoLength),
+            ),
+            (
+                identity,
+                &certified,
+                Refused::Invalid(Invalid::EdgeHasNoLength),
+            ),
+            (
+                shift,
+                &certified,
+                Refused::Invalid(Invalid::EdgeHasNoLength),
+            ),
+            (
+                turn,
+                &certified,
+                Refused::Undecidable(vec![ALONG_A_CROSSING]),
+            ),
+            (
+                turn_then_shift,
+                &certified,
+                Refused::Undecidable(vec![if along_the_flat_face {
+                    SIDE_OF_PLANE
+                } else {
+                    ALONG_A_CROSSING
+                }]),
+            ),
+        ];
+        for (placement, policy, refusal) in refused {
+            assert_eq!(
+                the_half_bar_refuses(THE_OTHER_END_OF_THE_CUT, placement, (partner, rule), policy),
+                refusal,
+                "{policy:?}, {placement:?}, {partner:?} {rule:?}"
+            );
+        }
+    }
+}
+
 /// The sound solid from `the_sound_solid` at each placement, fused with each
-/// of `partners` under both policies, answers, validates, and holds what
-/// `what_the_two_hold` says, to `1e-12` relative.
+/// of `partners` under both policies, answers what `what_the_two_hold` says.
 fn answers_with_what_the_two_hold(
     the_sound_solid: impl Fn(Isometry) -> (Model, SolidKey),
     partners: &[(Block, Rule)],
@@ -376,29 +633,47 @@ fn answers_with_what_the_two_hold(
 ) {
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
         for placement in every_placement() {
-            for &(partner, rule) in partners {
-                let case = format!("{policy:?}, {placement:?}, {partner:?} {rule:?}");
-                let (mut model, solid) = the_sound_solid(placement);
-                let block = a_block(&mut model, partner, &placement);
-                let answer = model
-                    .fuse(&[solid], &[block], rule, &policy, &mut ProvenanceLog::new())
-                    .unwrap_or_else(|error| panic!("{case} refused: {error:?}"));
-                model
-                    .validate(&policy, &mut ProvenanceLog::new())
-                    .unwrap_or_else(|error| {
-                        panic!("{case}: the answer does not validate: {error:?}")
-                    });
-
-                let (solids, volume) = what_the_two_hold(partner, rule);
-                assert_eq!(answer.solids().len(), solids, "{case}: how many solids");
-                let measured = the_volume_of(&model, &answer, &policy, &case);
-                assert!(
-                    (measured - volume).abs() <= 1e-12 * volume,
-                    "{case}: the answer holds {measured}, the two {volume}"
+            for &partner in partners {
+                fuses_into_what_the_two_hold(
+                    the_sound_solid(placement),
+                    placement,
+                    partner,
+                    &policy,
+                    what_the_two_hold,
                 );
             }
         }
     }
+}
+
+/// `sound`, a model and the solid in it, fused with the block `partner` names
+/// at `placement` under its rule, answers, validates, and holds what
+/// `what_the_two_hold` says: as many solids, and a volume within `1e-12`
+/// relative and the bound the measure publishes.
+fn fuses_into_what_the_two_hold(
+    sound: (Model, SolidKey),
+    placement: Isometry,
+    (partner, rule): (Block, Rule),
+    policy: &Policy,
+    what_the_two_hold: fn(Block, Rule) -> (usize, f64),
+) {
+    let case = format!("{policy:?}, {placement:?}, {partner:?} {rule:?}");
+    let (mut model, solid) = sound;
+    let block = a_block(&mut model, partner, &placement);
+    let answer = model
+        .fuse(&[solid], &[block], rule, policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|error| panic!("{case} refused: {error:?}"));
+    model
+        .validate(policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|error| panic!("{case}: the answer does not validate: {error:?}"));
+
+    let (solids, volume) = what_the_two_hold(partner, rule);
+    assert_eq!(answer.solids().len(), solids, "{case}: how many solids");
+    let (measured, bound) = the_volume_of(&model, &answer, policy, &case);
+    assert!(
+        (measured - volume).abs() <= 1e-12 * volume + bound,
+        "{case}: the answer holds {measured} to {bound}, the two {volume}"
+    );
 }
 
 /// The sound pyramid at `placement` fused with `THE_HALF_PAST_THE_SEAM` under
@@ -451,6 +726,39 @@ fn the_refusal_cutting_through_the_apex(
         .collect()
 }
 
+/// The half bar with its corner moved to `corner` in its file, at `placement`,
+/// fused with the block `partner` names under its rule, which has to refuse and
+/// leave the model byte for byte as it was. What it refused with.
+fn the_half_bar_refuses(
+    corner: [f64; 3],
+    placement: Isometry,
+    (partner, rule): (Block, Rule),
+    policy: &Policy,
+) -> Refused {
+    let case = format!("{policy:?}, {placement:?}, the corner at {corner:?}, {partner:?} {rule:?}");
+    let (mut model, solid) = the_half_bar_read_back(placement, corner);
+    let block = a_block(&mut model, partner, &placement);
+    let before = postcard::to_allocvec(&model).expect("a model writes out");
+    let refused = match model.fuse(&[solid], &[block], rule, policy, &mut ProvenanceLog::new()) {
+        Err(Error::Invalid(invalid)) => Refused::Invalid(invalid),
+        Err(Error::Undecidable { records }) => Refused::Undecidable(
+            records
+                .records()
+                .iter()
+                .map(|record| record.predicate())
+                .collect(),
+        ),
+        Err(Error::TwoCurvesTouchWithoutCrossing { .. }) => Refused::TwoCurvesTouchWithoutCrossing,
+        other => panic!("{case} came back {other:?}"),
+    };
+    assert_eq!(
+        postcard::to_allocvec(&model).expect("a model writes out"),
+        before,
+        "{case}: a refused fuse leaves the model as it was"
+    );
+    refused
+}
+
 /// For every moved solid `moved` reads back at each placement, under both
 /// policies, every fuse with every partner refuses `Undecidable` with one
 /// record, "where three surfaces meet", and leaves the model byte for byte as
@@ -491,23 +799,26 @@ fn every_fuse_refuses_where_three_surfaces_meet(
     }
 }
 
-fn the_volume_of(model: &Model, answer: &Fused, policy: &Policy, case: &str) -> f64 {
+/// How much the answer's solids hold, measured with their curved faces cut
+/// into triangles no more than a thousandth of a millimetre off them, and how
+/// far that can be from what they really hold. A solid with only flat faces
+/// is measured exactly whatever the deflection, to a rounding.
+fn the_volume_of(model: &Model, answer: &Fused, policy: &Policy, case: &str) -> (f64, f64) {
+    let deflection = Deflection::of(0.001).expect("a thousandth of a millimetre");
     answer
         .solids()
         .iter()
         .map(|&piece| {
-            model
+            let measured = model
                 .solid(piece)
                 .expect("a solid the fuse just wrote")
-                .measure(
-                    Deflection::for_scale(model.scale()),
-                    policy,
-                    &mut ProvenanceLog::new(),
-                )
-                .unwrap_or_else(|error| panic!("{case}: measuring refused: {error:?}"))
-                .volume()
+                .measure(deflection, policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|error| panic!("{case}: measuring refused: {error:?}"));
+            (measured.volume(), measured.volume_error())
         })
-        .sum()
+        .fold((0.0, 0.0), |(volume, bound), (more, more_bound)| {
+            (volume + more, bound + more_bound)
+        })
 }
 
 fn every_placement() -> [Isometry; 4] {
@@ -532,10 +843,10 @@ fn read_back(placement: Isometry, moved_to: [f64; 3]) -> (Model, SolidKey) {
     ])
     .build(&Policy::certified(), &mut ProvenanceLog::new())
     .expect("a square");
-    model
+    let the_box = model
         .add_extrusion(&footprint, HEIGHT, &placement)
         .expect("a box");
-    moved_in_its_bytes(&model, WHERE_THE_BOX_PUTS_IT, moved_to)
+    moved_in_its_bytes(&model, the_box, WHERE_THE_BOX_PUTS_IT, moved_to)
 }
 
 /// The pyramid at `placement`, written out with postcard, its apex overwritten
@@ -549,12 +860,53 @@ fn the_pyramid_read_back(placement: Isometry, moved_to: [f64; 3]) -> (Model, Sol
     model
         .place_solid(pyramid, &placement)
         .expect("this model made the key");
-    moved_in_its_bytes(&model, WHERE_THE_PYRAMID_PUTS_ITS_APEX, moved_to)
+    moved_in_its_bytes(&model, pyramid, WHERE_THE_PYRAMID_PUTS_ITS_APEX, moved_to)
+}
+
+/// The round bar less [`THE_HALF_PAST_THE_SEAM`], at `placement`, written out
+/// with postcard, its corner at [`WHERE_THE_HALF_BAR_PUTS_IT`] overwritten in
+/// the bytes with `moved_to`, and read back.
+///
+/// The bar and the block are cut where they are built and the half bar placed
+/// after, as the pyramid is, so the file stores the corner at the same place
+/// at every placement. The bar and the block stay in the model beside it.
+fn the_half_bar_read_back(placement: Isometry, moved_to: [f64; 3]) -> (Model, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bar = model
+        .add_round_bar(RADIUS, HEIGHT, &Isometry::identity())
+        .expect("a bar of radius three and height ten");
+    let cut = a_block(&mut model, THE_HALF_PAST_THE_SEAM, &Isometry::identity());
+    let answer = model
+        .fuse(
+            &[bar],
+            &[cut],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the bar less the half past its seam");
+    let [half_bar] = answer.solids()[..] else {
+        panic!("the bar less a half is {} solids", answer.solids().len());
+    };
+    model
+        .place_solid(half_bar, &placement)
+        .expect("this model made the key");
+    moved_in_its_bytes(&model, half_bar, WHERE_THE_HALF_BAR_PUTS_IT, moved_to)
 }
 
 /// `model` written out with postcard, the one place its bytes hold the corner
-/// `was` overwritten with `moved_to`, and read back, with its one solid.
-fn moved_in_its_bytes(model: &Model, was: [f64; 3], moved_to: [f64; 3]) -> (Model, SolidKey) {
+/// `was` overwritten with `moved_to`, and read back, with the solid that comes
+/// back where `solid` was among the model's solids.
+fn moved_in_its_bytes(
+    model: &Model,
+    solid: SolidKey,
+    was: [f64; 3],
+    moved_to: [f64; 3],
+) -> (Model, SolidKey) {
+    let position = model
+        .solids()
+        .position(|view| view.key() == solid)
+        .expect("the model holds the solid");
     let mut bytes = postcard::to_allocvec(model).expect("a model writes out");
 
     let stored = the_bytes_of(was);
@@ -573,7 +925,7 @@ fn moved_in_its_bytes(model: &Model, was: [f64; 3], moved_to: [f64; 3]) -> (Mode
         postcard::from_bytes(&bytes).expect("reading back does not ask where a corner is");
     let solid = read_back
         .solids()
-        .next()
+        .nth(position)
         .expect("the solid came back")
         .key();
     (read_back, solid)
@@ -602,21 +954,10 @@ fn a_block(model: &mut Model, block: Block, placement: &Isometry) -> SolidKey {
 /// `rule`, from where the two overlap along each axis.
 fn what_the_two_boxes_hold(partner: Block, rule: Rule) -> (usize, f64) {
     let the_box = (2.0 * SIDE) * (2.0 * SIDE) * HEIGHT;
-    let the_block =
-        (partner.high[0] - partner.low[0]) * (partner.high[1] - partner.low[1]) * partner.tall;
     let shared = overlap([-SIDE, SIDE], [partner.low[0], partner.high[0]])
         * overlap([-SIDE, SIDE], [partner.low[1], partner.high[1]])
         * overlap([0.0, HEIGHT], [partner.floor, partner.floor + partner.tall]);
-    match rule {
-        Rule::Union if shared == 0.0 => (2, the_box + the_block),
-        Rule::Union => (1, the_box + the_block - shared),
-        Rule::Intersection => {
-            assert!(shared > 0.0, "no partner here leaves nothing in common");
-            (1, shared)
-        }
-        Rule::Difference => (1, the_box - shared),
-        _ => panic!("no partner here is fused under {rule:?}"),
-    }
+    what_a_solid_and_a_block_hold(the_box, shared, partner, rule)
 }
 
 /// A pyramid on the box's footprint with its apex at
@@ -684,23 +1025,12 @@ fn a_pyramid(model: &mut Model) -> SolidKey {
 /// under `rule`.
 fn what_the_pyramid_and_a_block_hold(partner: Block, rule: Rule) -> (usize, f64) {
     let the_pyramid = (2.0 * SIDE) * (2.0 * SIDE) * HEIGHT / 3.0;
-    let the_block =
-        (partner.high[0] - partner.low[0]) * (partner.high[1] - partner.low[1]) * partner.tall;
-    let shared = what_the_pyramid_shares_with(partner);
-    match rule {
-        Rule::Union if shared == 0.0 => (2, the_pyramid + the_block),
-        Rule::Union => (1, the_pyramid + the_block - shared),
-        Rule::Intersection if shared == 0.0 => (0, 0.0),
-        Rule::Intersection => (1, shared),
-        Rule::Difference => {
-            assert!(
-                shared < the_pyramid,
-                "no partner here holds the whole pyramid"
-            );
-            (1, the_pyramid - shared)
-        }
-        _ => panic!("no partner here is fused under {rule:?}"),
-    }
+    what_a_solid_and_a_block_hold(
+        the_pyramid,
+        what_the_pyramid_shares_with(partner),
+        partner,
+        rule,
+    )
 }
 
 /// The volume the pyramid and `block` hold in common.
@@ -735,6 +1065,66 @@ fn what_the_pyramid_shares_with(block: Block) -> f64 {
             (to - from) / 6.0 * (across(from) + 4.0 * across(f64::midpoint(from, to)) + across(to))
         })
         .sum()
+}
+
+/// How many solids and how much volume the sound half bar and `partner` give
+/// under `rule`.
+fn what_the_half_bar_and_a_block_hold(partner: Block, rule: Rule) -> (usize, f64) {
+    let the_half_bar = PI * RADIUS * RADIUS * HEIGHT / 2.0;
+    what_a_solid_and_a_block_hold(
+        the_half_bar,
+        what_the_half_bar_shares_with(partner),
+        partner,
+        rule,
+    )
+}
+
+/// The volume the half bar and `block` hold in common.
+///
+/// The half bar stands on the half of a disc of radius `RADIUS` where `y ≤ 0`.
+/// Every block here either keeps to `y ≥ 0` or reaches right across that half
+/// disc, from `y = −RADIUS` to `y = 0`, so what the two footprints share is
+/// the half disc between the block's two `x` sides. The half disc's area left
+/// of `x` is `(x·√(R² − x²) + R²·asin(x/R))/2` plus a constant.
+fn what_the_half_bar_shares_with(block: Block) -> f64 {
+    if block.low[1] >= 0.0 {
+        return 0.0;
+    }
+    assert!(
+        block.low[1] <= -RADIUS && block.high[1] >= 0.0,
+        "{block:?} reaches only part of the way across the half disc"
+    );
+    let left_of = |x: f64| {
+        let x = x.clamp(-RADIUS, RADIUS);
+        (x * (RADIUS * RADIUS - x * x).sqrt() + RADIUS * RADIUS * (x / RADIUS).asin()) / 2.0
+    };
+    (left_of(block.high[0]) - left_of(block.low[0]))
+        * overlap([0.0, HEIGHT], [block.floor, block.floor + block.tall])
+}
+
+/// How many solids and how much volume a solid holding `the_solid` and
+/// `partner` give under `rule`, when the two hold `shared` in common. A union
+/// of two that share nothing is two solids: no partner here fused under
+/// `Union` touches the solid.
+fn what_a_solid_and_a_block_hold(
+    the_solid: f64,
+    shared: f64,
+    partner: Block,
+    rule: Rule,
+) -> (usize, f64) {
+    let the_block =
+        (partner.high[0] - partner.low[0]) * (partner.high[1] - partner.low[1]) * partner.tall;
+    match rule {
+        Rule::Union if shared == 0.0 => (2, the_solid + the_block),
+        Rule::Union => (1, the_solid + the_block - shared),
+        Rule::Intersection if shared == 0.0 => (0, 0.0),
+        Rule::Intersection => (1, shared),
+        Rule::Difference => {
+            assert!(shared < the_solid, "no partner here holds the whole solid");
+            (1, the_solid - shared)
+        }
+        _ => panic!("no partner here is fused under {rule:?}"),
+    }
 }
 
 fn overlap(one: [f64; 2], other: [f64; 2]) -> f64 {
