@@ -7968,7 +7968,10 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// place on it. Two of the three may be **the start**, and then "the same place"
 /// is not what it means: a point at the start comes first, by definition of
 /// where the counting begins. Reading that as "these are one point" would fold
-/// every node of the crossing into the start.
+/// every node of the crossing into the start. On the one loop a ball off a
+/// pipe's axis crosses it in, which `rcad-geom` orders by angle round a line,
+/// a point at the start's own angle already comes first there, and
+/// [`Decision::Zero`] means only that `one` and `other` are one place on it.
 ///
 /// **The start is recognised as either of the two things it is held as**: the
 /// walked triple, and the node a crossing is given there, which is a box round
@@ -8092,16 +8095,41 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// The crossing runs along `∇S × ∇T` and turns to one side of that line, the
 /// side [`which_comes_first_round_a_crossing`] winds to. From a start on the
 /// crossing every other point of it lies on that side, since a conic is
-/// convex, and so is the shadow of a loop seen down the axis it winds about.
-/// From a start a rounding inside it, a short stretch round the place it was
-/// rounded off lies on the other side, and that place is where the counting
-/// begins. So the sweep from the start, a step along the run and `place`, read
-/// as [`Decision::Neg`], says `place` is on that stretch, and a step from the
-/// start square to the run says it is the point of the stretch straight out
-/// from the start. A start on the crossing reads `false` for every place.
+/// convex, and so is the shadow of a loop seen down the axis it winds about:
+/// either of the two loops a ball or a fat pipe crosses a pipe it swallows
+/// whole in. From a start a rounding inside it, a short stretch round the
+/// place it was rounded off lies on the other side, and that place is where
+/// the counting begins. So the sweep from the start, a step along the run and
+/// `place`, read as [`Decision::Neg`], says `place` is on that stretch, and a
+/// step from the start square to the run says it is the point of the stretch
+/// straight out from the start. A start on a conic, or on either of those
+/// loops, reads `false` for every place.
 ///
 /// Every other point of that stretch, a hair ahead of the place or behind it,
 /// reads `false` and is left to the sweep.
+///
+/// **The one loop a ball off a pipe's axis crosses it in has no such side.**
+/// `rcad-geom` orders it by angle round the line through the ball's centre
+/// square to the pipe's axis, so there [`Decision::Neg`] says only that
+/// `place` comes before `start + runs`, going round that line from the start's
+/// own angle, with a point at that angle first. Where the walk rounded the
+/// start off the loop, the place it was rounded off lies a hair to one side of
+/// the start's angle or the other: at that angle or past it, the place reads
+/// `true` and comes first; short of it, it reads `false` and is left to the
+/// sweep, which on this loop is the angle. A place whose box straddles the
+/// start's angle reads `false` too.
+///
+/// The window from the start's angle to that of `start + runs` is not a hair
+/// wide: `runs` grows with the square of the shape's size. A probe of the loop's
+/// geometry alone, not of this code, found loop points square to the run from
+/// a start on the loop that lie inside it: a pipe of radius 4 and a ball of
+/// radius 4.4 centred 0.8 off its axis is one such shape. Such a place is read
+/// only where `(place − start) · runs` comes out exactly zero, since an
+/// interval's sign is [`Decision::Zero`] only for `[0, 0]`. A start on the
+/// plane through the pipe's axis and the ball's centre, or on the plane
+/// through the centre square to the axis, has its one other such point half a
+/// turn round, outside the window, and reads `false`. A start on the loop
+/// anywhere else has not been shown to read `false` for every place.
 ///
 /// # Errors
 ///
