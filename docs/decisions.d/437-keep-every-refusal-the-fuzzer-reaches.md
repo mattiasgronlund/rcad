@@ -204,6 +204,45 @@ before. Four things hold, each because the probe showed it needed:
 - **It lives in `rcad-fuzz-explain`**, beside `--triage`, built in the `test`
   profile for the reason `fuzz-triage`'s own comment gives.
 
+**As built (Q1770).** `rcad-fuzz-explain --refusals <corpus> [--faults <path>]
+[--seconds <n>]` replays every file of `<corpus>` on as many worker threads as
+the machine runs at once, and prints the groups to stdout as tab-separated text, header first: `variant`,
+`key`, `refusals`, `files`, `certified`, `tolerant`, `first_way_round`,
+`other_way_round`, `sample`. `--faults` writes each file it could not finish:
+`fault` (`panicked`, `hung` or `unreadable`), `file`, and `said`, which for a
+panic is its place and its words. A file is given 120 s unless `--seconds` says
+otherwise. `fuzz-triage` runs it on `against`, over
+`fuzz_corpus_root/two_solids_fused_by_a_stranger`, and copies the two into
+`$night/fuzz-refusals.tsv` and `$night/fuzz-refusals-faults.tsv`. It then
+compares the groups, by variant and key, with the latest earlier night that has
+a `fuzz-refusals.tsv`, and prints an `appeared:` or `vanished:` line for each
+group that came or went. Three things the paragraphs above left open:
+
+- **It runs before the fold, and on a night with no crash file.** The corpus is
+  there whether or not the night crashed, and the fold has many ways to stop
+  early. So the replay is never skipped, and what the fold adds to the corpus
+  this morning is replayed the next.
+- **A panic outside a file's replay is not silenced.** A worker's panic is kept
+  for its own thread only while that thread is replaying a file. A panic
+  anywhere else reaches the hook that was there before, so a broken invariant of
+  the replay itself still shows.
+- **The callback is told more than the file keeps.** The harness hands it a
+  `WhichFuse`: the half, the rule, the policy and the way round. The file counts
+  by policy and by way round. The half and the rule are in no column.
+
+*Measured 2026-10-12, on the Q1770 branch over `main` at `5817ca1e`, with 24
+threads.* The checked-in corpus: 1 753 files, 268 refusals in 209 files, 18
+groups, 0 panics, in 0.29 s. The night's corpus at 10:09Z: 15 839 files, **5 003
+refusals in 3 148 files, 40 groups**, 9 panics, 2 hangs, in 126 s. The run
+cannot end before the two hung files' 120 s are up. 3 437 refusals came the
+first way round and 1 566 the other; 1 636 were certified and 3 367 tolerant.
+`Undecidable` has 2 141 of them in 14 groups, and 17 other variants the rest in
+26. All 9 panics are Q1477's, at `fuse/arrange.rs:2926`, "nodes_along proved
+this pair the other way round". The 2 hangs are `d29b6665…` and `e2e383f1…`,
+Q1721's. The three corpus files of 437.9 that panicked at `assemble.rs` on
+`459e76d4` did not panic here: `58cbb42c…` is refused `ResultIsNotManifold`
+through the one-file decoder.
+
 ### 437.6 Limit, gap or not known, said where the refusal is made
 
 Today a refusal's kind is written only in prose: the doc comments on the error
@@ -352,6 +391,10 @@ go when the scratchpad does. Its method is in this subsection.
 
 - **Q1770, the morning refusal replay** (437.5). Tier 2, finding defects better
   (§230.1, as §311 reordered it). Its selftest is `check-fuzz-triage-selftest`.
+  Built as 437.5's "As built" says. The selftest's last arm replays the
+  checked-in corpus for real; the unit tests in
+  `crates/rcad-fuzz-explain/src/refusals.rs` pin the keys, the counts, a hang
+  and the panics.
 - **Q1771, limit, gap or not known on `rcad-topo::Error` and `rcad-geom::Error`**
   (437.6), with a test for each limit or gap claimed, and the class added to the
   report. Tier 2, `after:Q1770`.
