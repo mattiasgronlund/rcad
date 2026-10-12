@@ -8292,8 +8292,12 @@ fn the_one_the_start_is(
 /// here forms the centre, so there is no second spelling of it to disagree with
 /// [`where_a_closed_crossing_is_centred`](crate::holds::where_a_closed_crossing_is_centred)
 /// (§23.8, §211.5). On a pipe's or a cone's ellipse the two are not one
-/// polynomial: this reads the side the curve turns to off the run, and that
-/// would read it off the centre.
+/// polynomial in general: this reads the side the curve turns to off the run,
+/// and that would read it off the centre. But at every walked start of such an
+/// ellipse `from − c` is square to the axis, since the walk starts at the end
+/// of the short axis, and there the two readings are the same up to a factor
+/// of `|w|²`, a positive number. Away from that point they part by
+/// `k (w · (from − c)) n × w` (§244.8).
 ///
 /// **A box that holds the start at one end** is read by which end it is
 /// ([`ahead_by_the_end_of_its_box_the_start_is_at`]), where the box read as a
