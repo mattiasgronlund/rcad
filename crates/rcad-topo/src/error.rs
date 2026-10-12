@@ -113,10 +113,16 @@ pub enum Error {
     ///
     /// Not a broken model. A cube of side `1e300` has its faces pointing
     /// outwards and classifies points correctly; what it does not have is a
-    /// volume of `1e900` that fits in the type it would be returned in. The
-    /// answer does not exist here, which makes this a *limit* and not a §16.10
-    /// gap: no ordering and no rescaling of the arithmetic reaches a number
-    /// `f64` cannot represent.
+    /// volume of `1e900` that fits in the type it would be returned in.
+    ///
+    /// **Both kinds, so [`Error::limit_or_gap`] says not known** (§16.10). From
+    /// [`SolidView::measure`](crate::SolidView::measure) it is a *limit*: the
+    /// answer is that volume, and no ordering and no rescaling of the
+    /// arithmetic reaches a number `f64` cannot represent. From a fuse it is a
+    /// *gap*: uniting a cube of side `2^342` with its copy is refused, though
+    /// the answer is that same cube and the model already holds it, because the
+    /// fuse measures every shell it writes and refuses one whose volume
+    /// overflows.
     #[error("this solid encloses more space than an f64 can hold")]
     VolumeTooLargeToMeasure,
 
@@ -130,11 +136,16 @@ pub enum Error {
 
     /// An edge or a wire is longer than an `f64` can hold.
     ///
-    /// A *limit* for [`Error::VolumeTooLargeToMeasure`]'s reason: two corners at
-    /// `-1e308` and `1e308` are `2e308` apart, and no ordering or rescaling of
-    /// the arithmetic hands back a number `f64` cannot represent.
+    /// **Both kinds, so [`Error::limit_or_gap`] says not known** (§16.10). A
+    /// *limit* when the length is past `f64::MAX`: two corners at `-1e308` and
+    /// `1e308` are `2e308` apart, and no ordering or rescaling of the
+    /// arithmetic hands back a number `f64` cannot represent.
     /// [`EdgeView::length`](crate::EdgeView::length) already rescales by a power
-    /// of two so that nothing short of that overflows on the way.
+    /// of two so that nothing short of that overflows on the way. A *gap* when
+    /// the length is an `f64` the bounds round past: a face of a cube of side
+    /// `f64::MAX / 4` is exactly `f64::MAX` round, and
+    /// [`WireView::length`](crate::WireView::length) rounds the sum of its four
+    /// sides outwards, past `f64::MAX`.
     #[error("this edge or wire is longer than an f64 can hold")]
     LengthTooLargeToMeasure,
 
@@ -1177,6 +1188,111 @@ pub enum Error {
     },
 }
 
+impl Error {
+    /// Whether the answer this refusal stands in for exists (§16.10).
+    ///
+    /// `docs/decisions.md` §437.6. A **limit** says no answer this kernel can
+    /// hold exists, a **gap** that one exists and the arithmetic did not reach
+    /// it, and **not known** that nobody has shown either. Every limit and gap
+    /// claimed here is reached and asserted by
+    /// `what_a_fuse_refusal_says_about_its_answer.rs`.
+    ///
+    /// A variant that can be either kind, and carries nothing that tells them
+    /// apart, says not known. [`Error::VolumeTooLargeToMeasure`] is a limit
+    /// from [`SolidView::measure`](crate::SolidView::measure) of a cube of side
+    /// `1e103`, and a gap from a fuse uniting a cube of side `2^342` with its
+    /// copy, which the model already holds the answer to.
+    /// [`Error::LengthTooLargeToMeasure`] is a limit for a wire `4e308` round,
+    /// and a gap for one exactly `f64::MAX` round whose sum, rounded outwards,
+    /// runs past it.
+    ///
+    /// [`Error::Geometry`] and the two refusals that carry a `why` say what the
+    /// refusal of geometry they carry says, and [`Error::Invalid`] what
+    /// [`Invalid::limit_or_gap`] says.
+    ///
+    /// The solid builder's refusals are limits of the draft as it was handed
+    /// over: a wire of two steps, or a skin open along an edge, describes no
+    /// solid. An importer whose own reading of a file made the draft has its
+    /// own refusal to class, because a file has reached several of them for a
+    /// shape that exists (§43.6, §218.4, §250.7).
+    ///
+    /// One match and no wildcard, so a new variant does not compile until it is
+    /// given a class.
+    #[must_use]
+    pub fn limit_or_gap(&self) -> rcad_geom::LimitOrGap {
+        use rcad_geom::LimitOrGap;
+        match self {
+            Self::Geometry(why) => why.limit_or_gap(),
+            Self::ADraftEdgeHasACrossingThatCannotBeFollowed { why, .. }
+            | Self::ACrossingAlongThisEdgeCouldNotBeFollowed { why, .. } => why.limit_or_gap(),
+            Self::Invalid(invalid) => invalid.limit_or_gap(),
+            Self::KeyFromAnotherModel { .. }
+            | Self::TooFewPoints { .. }
+            | Self::PointNotFinite { .. }
+            | Self::RepeatedPoint { .. }
+            | Self::HeightNotPositive { .. }
+            | Self::ACapOfABarFacesIntoIt { .. }
+            | Self::SurfaceAreaTooLargeToMeasure
+            | Self::NoSuchFaceInThisSolid { .. }
+            | Self::ADraftHandleCameFromAnotherBuilder { .. }
+            | Self::ADraftPointIsNotFinite { .. }
+            | Self::ADraftEdgeHasNoLength { .. }
+            | Self::ADraftWireIsTooShort { .. }
+            | Self::ADraftWireDoesNotClose { .. }
+            | Self::ADraftFaceHasNoWires
+            | Self::ADraftShellHasNoFaces
+            | Self::ADraftEntityIsUsedTwice { .. }
+            | Self::ADraftEntityIsUsedByNothing { .. }
+            | Self::ADraftEdgeIsNotWalkedByTwoCoedges { .. }
+            | Self::ADraftEdgeIsWalkedTheSameWayTwice { .. }
+            | Self::ADraftSolidHasNoShell => LimitOrGap::Limit,
+            Self::CannotYetMeasureHowLongThisCurveIs { .. } => LimitOrGap::Gap,
+            Self::ProfileCrossesItself
+            | Self::HoleNotInsideOutline { .. }
+            | Self::HoleInsideAnotherHole { .. }
+            | Self::ACapDoesNotCutRightRoundABar { .. }
+            | Self::TheCapsOfABarMeetInsideIt
+            | Self::VolumeTooLargeToMeasure
+            | Self::LengthTooLargeToMeasure
+            | Self::TheFuseWroteABrokenAnswer { .. }
+            | Self::WrongFormatVersion { .. }
+            | Self::ArgumentIntersectsItself
+            | Self::ResultIsNotManifold { .. }
+            | Self::CannotMeshAFace { .. }
+            | Self::AWireDoesNotFanIntoALoopToMesh { .. }
+            | Self::DeflectionBelowWhatAMeshCanReach { .. }
+            | Self::AWireWillNotLieFlatOnItsFace { .. }
+            | Self::TwoPatchesOfTheMeshDrewTheSameSide { .. }
+            | Self::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }
+            | Self::AClosedEdgeOfTheAnswerWouldStartAtAPole { .. }
+            | Self::ACurvedFaceGoesRightRoundWithNoSeam { .. }
+            | Self::ACurvedFaceCannotBeCutSmallEnoughToMesh { .. }
+            | Self::CurvedFaceWithAHoleGoesTooFarRound { .. }
+            | Self::AnEdgeWithoutTwoFacesAlongItCannotBeWalked { .. }
+            | Self::AnEdgeBendsButEveryFaceAlongItIsFlat { .. }
+            | Self::MoreMeshPointsThanASolidWillHold { .. }
+            | Self::AFaceTrimmedByACurveThisCannotFollow { .. }
+            | Self::CannotFireARayAtAFacesSurface { .. }
+            | Self::AFaceMissesPartOfWhereItsSurfacesCross { .. }
+            | Self::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { .. }
+            | Self::AFaceMeetsItsNeighbourNowhere { .. }
+            | Self::AFaceMeetsItsNeighbourOnItsOwnSurface { .. }
+            | Self::CannotTellWhichCurveOfACrossingAFaceRunsAlong { .. }
+            | Self::TwoCurvesTouchWithoutCrossing { .. }
+            | Self::CannotTellTheCellsOfAFaceApart { .. }
+            | Self::CannotPlaceTheRingsOfAJoinedFlatFace { .. }
+            | Self::ACrossingThisCannotBeOrderedAlong
+            | Self::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed
+            | Self::ADraftFaceCouldNotBeMeshed { .. }
+            | Self::ASolidBuiltFaceByFaceHasOneShell
+            | Self::TwoSolidsShareSpace { .. }
+            | Self::CannotTellWhetherTwoSolidsShareSpace { .. }
+            | Self::CannotTellWhichWayAClosedEdgeRuns { .. }
+            | Self::Undecidable { .. } => LimitOrGap::NotKnown,
+        }
+    }
+}
+
 /// An undecided *operation* down in `rcad-geom` stays undecided up here rather
 /// than being buried inside [`Error::Geometry`].
 ///
@@ -1609,6 +1725,56 @@ pub enum Invalid {
         /// Largest coordinate magnitude divided by smallest feature size.
         ratio: f64,
     },
+}
+
+impl Invalid {
+    /// Whether the answer the refusal stands in for exists (§16.10), as
+    /// [`Error::limit_or_gap`] says it for the refusals that carry this one.
+    ///
+    /// A model wider than `f64` resolves is a limit of today's kernel, which
+    /// holds every number as one `f64` (§437.6), and
+    /// `what_a_fuse_refusal_says_about_its_answer.rs` reaches it through a
+    /// fuse. Every other invariant here says not known, since nobody has shown
+    /// which kind any of them is.
+    ///
+    /// One match and no wildcard, so a new variant does not compile until it is
+    /// given a class.
+    #[must_use]
+    pub fn limit_or_gap(&self) -> rcad_geom::LimitOrGap {
+        use rcad_geom::LimitOrGap;
+        match self {
+            Self::DynamicRangeTooWide { .. } => LimitOrGap::Limit,
+            Self::DanglingKey { .. }
+            | Self::VertexNotFinite
+            | Self::EdgeHasNoLength
+            | Self::VertexOffItsFaceSurface
+            | Self::APoleStandsWhereTheSurfaceDoesNotPinch { .. }
+            | Self::EdgeOutsideWhatPickedIt
+            | Self::EdgeCoedgeCount { .. }
+            | Self::CoedgesRunTheSameWay
+            | Self::AnEdgeIsWalkedOnceFromEachOfTwoShells
+            | Self::AFlatFaceIsUsedReversed
+            | Self::AFaceUseCarriesAPlacement
+            | Self::ClosedEdgeBetweenTwoFlatFaces
+            | Self::ClosedEdgeBetweenTwoFlatFacesOnDifferentPlanes
+            | Self::AnArcBetweenTwoFlatFacesOnDifferentPlanes
+            | Self::AnEdgeBendsButNothingAlongItIsCurved
+            | Self::AFaceStraddlesSomethingTrimmingIt
+            | Self::AClosedEdgeIsWalkedAgainstItsSurface
+            | Self::WireTooShort { .. }
+            | Self::WireDoesNotClose { .. }
+            | Self::VertexOffItsFacePlane { .. }
+            | Self::FaceHasNoWires
+            | Self::OuterWireWindsAgainstTheNormal
+            | Self::HoleWindsWithTheOuterWire
+            | Self::VolumeIsNotPositive { .. }
+            | Self::FacesDoNotAgreeWhichWayTheyFace
+            | Self::Orphan { .. }
+            | Self::UsedMoreThanOnce { .. }
+            | Self::ApproximationOrdering { .. }
+            | Self::ApproximationIsNotALength { .. } => LimitOrGap::NotKnown,
+        }
+    }
 }
 
 /// The result type this crate returns.
