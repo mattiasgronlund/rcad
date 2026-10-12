@@ -243,8 +243,8 @@ pub enum Error {
     /// such weights name can be held some other way is not shown, so the class
     /// is **not known** (§437.6).
     #[error(
-        "the weight {weight:e} is too small to blend; scale every weight up by a power of two \
-         for the same curve"
+        "the weight {weight:e} is too small to blend; scale every weight up by a power of two, \
+         but only if the largest weight still has room to grow"
     )]
     WeightTooSmallToBlend {
         /// The weight that was refused.
