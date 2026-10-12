@@ -4718,6 +4718,13 @@ impl Edge {
     /// the tangent, and a frustum through a block got both arcs of one circle
     /// the same picker that way (§312.6).
     ///
+    /// **Unless the two surfaces are tangent there**, where `∇S × ∇T` is
+    /// exactly nought and says nothing: then it is read at the other end. Two
+    /// bars of one radius whose axes meet cross in two ellipses that touch at
+    /// two such points, and every arc of them runs from one (Q1660). Whether
+    /// the cross is nought does not follow the order of the fuse's arguments,
+    /// since swapping them only turns its sign.
+    ///
     /// A dot of exactly zero is `None`: either the named direction lay along
     /// its chord, which the old code refused too, or the crossing's direction
     /// at the chosen end does.
@@ -4731,18 +4738,25 @@ impl Edge {
             let chord = corners[self.other_end_than(corner)].point - corners[corner].point;
             direction * chord.dot(chord) - chord * chord.dot(direction)
         };
-        let [one, other] = self.ends;
-        let from = if corners[one].point.coordinates() <= corners[other].point.coordinates() {
-            one
-        } else {
-            other
-        };
-        let at = corners[from].point;
         let [mine, partner] = self.carried_by;
-        let across = squared_off_from(
-            from,
-            gradient_of(&mine, at).cross(gradient_of(&partner, at)),
-        );
+        let crossing_at = |corner: usize| {
+            let at = corners[corner].point;
+            gradient_of(&mine, at).cross(gradient_of(&partner, at))
+        };
+        let [one, other] = self.ends;
+        let [first, second] =
+            if corners[one].point.coordinates() <= corners[other].point.coordinates() {
+                [one, other]
+            } else {
+                [other, one]
+            };
+        let mut from = first;
+        let mut crossing = crossing_at(first);
+        if crossing == Vector::zero() {
+            from = second;
+            crossing = crossing_at(second);
+        }
+        let across = squared_off_from(from, crossing);
         let agreement = across.dot(squared_off_from(named_from, towards));
         if agreement > 0.0 {
             Some(across)
@@ -7145,7 +7159,6 @@ impl Edges {
                     .any(|surface| surface.as_plane().is_none()),
             "a piece of a flat face has a side with no length"
         );
-        let at = middle_of(meet.ends[0].point());
         let named = which_curve_it_is(from, to, meet, policy, log)?
             .map(|curve| corners.curve_goes_by(curve));
         let key = (
@@ -7170,7 +7183,7 @@ impl Edges {
                 let arc = if from == to {
                     WhichArc::TheOnlyOne
                 } else {
-                    which_arc_this_is(meet, from, at)?
+                    which_arc_this_is(meet, [from, to])?
                 };
                 self.made.push(Edge {
                     ends: [from.min(to), from.max(to)],
@@ -7354,6 +7367,11 @@ struct Lid {
 /// that direction exactly when its material is inside the partner — which
 /// [`FaceMeet::material_side`] already holds. **No point on the arc is built.**
 ///
+/// **Where the two surfaces are tangent at the first corner** `∇S × ∇T` is
+/// exactly nought there, so the arc is named from the corner it stops at
+/// instead, leaving it backwards along the same signed direction (Q1660: the
+/// two points two bars of one radius whose axes meet touch at).
+///
 /// # Errors
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] when
@@ -7371,21 +7389,32 @@ struct Lid {
 /// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`].
 /// [`FaceMeet::material_side`] is written from which way round the arrangement
 /// walked the arc and costs no arithmetic, so anything else is a bug here.
-fn which_arc_this_is(meet: &FaceMeet, starts_at: usize, from: Point) -> Result<WhichArc> {
+fn which_arc_this_is(meet: &FaceMeet, [starts_at, stops_at]: [usize; 2]) -> Result<WhichArc> {
     match the_crossing_of_these_runs_straight(&meet.carried_by) {
         Some(true) => return Ok(WhichArc::TheOnlyOne),
         Some(false) => {}
         None => return Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
     let [mine, partner] = meet.carried_by;
-    let along_the_crossing = gradient_of(&mine, from).cross(gradient_of(&partner, from));
+    let along_the_crossing_at = |end: &MeetPoint| {
+        let at = middle_of(end.point());
+        gradient_of(&mine, at).cross(gradient_of(&partner, at))
+    };
+    let forwards = match meet.material_side {
+        Decision::Neg => 1.0,
+        Decision::Pos => -1.0,
+        other => panic!("a side of a face was walked with no material side: {other:?}"),
+    };
+    let leaving_the_start = along_the_crossing_at(&meet.ends[0]);
+    if leaving_the_start != Vector::zero() {
+        return Ok(WhichArc::LeavingACorner {
+            corner: starts_at,
+            towards: leaving_the_start * forwards,
+        });
+    }
     Ok(WhichArc::LeavingACorner {
-        corner: starts_at,
-        towards: match meet.material_side {
-            Decision::Neg => along_the_crossing,
-            Decision::Pos => along_the_crossing * -1.0,
-            other => panic!("a side of a face was walked with no material side: {other:?}"),
-        },
+        corner: stops_at,
+        towards: along_the_crossing_at(&meet.ends[1]) * -forwards,
     })
 }
 
