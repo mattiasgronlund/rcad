@@ -277,14 +277,6 @@ fn the_six_chopped_slivers_the_walk_once_refused_hold_their_volume() {
             format!("the sliver at lean {lean}, turn {turn}, chopped at {across} of its rim");
         let (model, answer) = chopped_sliver(radius, lean, turn, across);
         let answer = answer.unwrap_or_else(|why| panic!("{what}: refused {why:?}"));
-        let probe = measure(&model, &answer, 0.001, &what);
-        println!(
-            "PROBE {what}: solids {} volume {} error {} closed {}",
-            answer.len(),
-            probe.volume(),
-            probe.volume_error(),
-            a_chopped_slivers_volume(lean, turn, across * lean.sin())
-        );
         measures_within_what_it_declares(
             &model,
             &answer,
