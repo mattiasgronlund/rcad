@@ -1494,15 +1494,20 @@ fn the_arc_its_own_plane_names(
 /// `a_dome_on_a_long_bar_placed_far_out_is_read_back_with_its_rim_at_the_balls_own_radius`).
 /// Where the two allowances are nearer, only halfway between is held by
 /// both (`a_dome_on_a_bar_turned_about_a_leaning_line_comes_back_with_its_rim_cut_from_its_plane`).
-/// Of the 183 domes of the probe with no centre both faces hold at the
-/// pipe's radius, 181 have one at the ball's own and the other 2 halfway,
-/// and all 183 then read back with the rim cut from its plane (measured by a
-/// probe not kept, run again with the same seed).
+/// Of the probe's 3,000,000 domes, 2,337 have no centre both faces hold at
+/// the pipe's radius: 2,335 have one at the ball's own and 2 halfway, and all
+/// 2,337 then read back with the rim cut from its plane. Before, 183 of them
+/// were written at the walk's centre, which both faces do not hold, and the
+/// walk found no centre at all for the other 2,154, so this writer refused
+/// them (measured by a probe not kept, run again with the same seed).
 ///
 /// **Where none is found, the walk's own centre is written at `crossing`'s
 /// radius**, as it was before both faces were asked. A dome wider than its
 /// bar is then read back named by its faces, which cross: sound, but not the
 /// solid that was written. None of the probe's 3,000,000 domes is left so.
+/// **Where the walk finds none either, there is no circle** and the arc is
+/// refused: 7,475 of the probe's domes are, each with a cut whose normal
+/// reads back as itself.
 ///
 /// **A seam, one face on both sides, and an ellipse are not asked**: the
 /// reader names a seam by the plane its run carries without asking the face
