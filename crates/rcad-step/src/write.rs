@@ -3079,6 +3079,33 @@ mod plane_round_trip_tests {
         );
     }
 
+    /// A bar of radius `2` and length `1112`, with a dome of radius `2.98` on
+    /// top, standing on just off `(−1024, 0, 0)` and turned by quarter turns
+    /// and a small wobble so it runs along `x` back to near the origin: the rim
+    /// comes back cut from its own plane (Q1794).
+    ///
+    /// **The reader named the rim by the ball instead**, and the volume read
+    /// back at a deflection of `0.01` was `13974.48` against `13968.30` built.
+    #[test]
+    fn a_dome_on_a_bar_from_far_out_to_near_the_origin_comes_back_with_its_rim_cut_from_its_plane()
+    {
+        the_rim_comes_back_cut_from_its_plane(
+            (2.0, 1_112.288_377_315_355_3, 2.982_579_216_996_178_7),
+            Vector::new(-1_023.999_999_999_999_9, 0.0, 0.0),
+            &a_small_turn_then_quarter_turns(
+                Vector::new(
+                    0.275_298_066_519_414_13,
+                    0.165_693_885_499_710_65,
+                    0.308_940_678_162_605_2,
+                ),
+                0.009_278_730_274_298_288,
+                1.0,
+                1.0,
+            ),
+            [0, 0, 0],
+        );
+    }
+
     /// Builds a bar with a dome on top ([`a_dome_on_a_bar`]), places it by
     /// `place` after `turn`, writes it and reads it back, and asks that the
     /// read solid is sound and that each use of the two halves of its rim is
