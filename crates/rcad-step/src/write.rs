@@ -2583,8 +2583,8 @@ mod plane_round_trip_tests {
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, CannotWrite, Shape, a_centre_its_plane_reads_back_from,
         a_point_this_reader_reads_back_as, a_surface_holds_the_circle,
         how_far_off_the_circle_can_be, stepped, the_nearest_centre_its_faces_hold_the_circle_at,
-        triple, where_a_plane_crosses_a_ball, where_a_plane_square_to_a_ring_crosses_it_nearest,
-        write,
+        triple, where_a_plane_crosses_a_ball, where_a_plane_crosses_a_pipe,
+        where_a_plane_square_to_a_ring_crosses_it_nearest, write,
     };
     use crate::geometry::plane_through;
     use crate::{Import, StepFile};
@@ -2959,8 +2959,9 @@ mod plane_round_trip_tests {
     /// the dot on the plane's offset, with the circle `16.31` units off the
     /// ball where the reader allows sixteen. So the reader named the rim by
     /// the pipe and the ball instead, and the volume read back moved from
-    /// `2865724.56` to `2865939.99`. One `f64` of `z` lands on the offset too,
-    /// and there both faces hold the circle.
+    /// `2865724.56` to `2865939.99`. Four `f64`s down in `x` land on the
+    /// offset too, and there both faces hold the circle, the ball at `15.03`
+    /// units.
     #[test]
     fn a_dome_on_a_long_bar_turned_a_long_way_comes_back_with_its_rim_cut_from_its_plane() {
         let axis = Axis::new(
@@ -2980,6 +2981,7 @@ mod plane_round_trip_tests {
             ),
             Vector::new(0.0, -1.999_999_999_999_999_8, 4_095.999_999_999_999_5),
             &Isometry::rotation(&axis, 2.972_547_828_691_298_3).expect("a finite turn"),
+            [-4, 0, 0],
         );
     }
 
@@ -2990,9 +2992,10 @@ mod plane_round_trip_tests {
     ///
     /// **The walk landed ten `f64`s of `x` out**, with the circle `16.91` units
     /// off the ball, and the reader named the rim by the pipe and the ball
-    /// instead. The nearest centre both faces hold is ten `f64`s of `x` and
-    /// sixteen of `z` out, past the four each way that the walk of two
-    /// coordinates tries.
+    /// instead. The nearest centre both faces hold is ten `f64`s up in `x` and
+    /// sixteen down in `z`, past the four each way that the walk of two
+    /// coordinates tries, and the ball holds the circle there at `15.96`
+    /// units.
     #[test]
     fn a_dome_on_a_long_bar_turned_a_little_comes_back_with_its_rim_cut_from_its_plane() {
         the_rim_comes_back_cut_from_its_plane(
@@ -3016,6 +3019,7 @@ mod plane_round_trip_tests {
                 3.0,
                 1.0,
             ),
+            [10, 0, -16],
         );
     }
 
@@ -3029,7 +3033,7 @@ mod plane_round_trip_tests {
     /// by the pipe and the ball; and a ball of the bar's own radius only
     /// touches the pipe there, so that names no curve, and the reader refused
     /// the solid. A centre both faces hold is four `f64`s down in `x` and
-    /// three up in `z`.
+    /// three up in `z`, with the ball at `15.35` units.
     #[test]
     fn a_half_ball_on_a_long_thin_bar_placed_far_out_and_turned_is_read_back() {
         the_rim_comes_back_cut_from_its_plane(
@@ -3045,17 +3049,21 @@ mod plane_round_trip_tests {
                 1.0,
                 3.0,
             ),
+            [-4, 0, 3],
         );
     }
 
     /// Builds a bar with a dome on top ([`a_dome_on_a_bar`]), places it by
     /// `place` after `turn`, writes it and reads it back, and asks that the
     /// read solid is sound and that each use of the two halves of its rim is
-    /// cut from the plane the rim was built in, placed, bit for bit.
+    /// cut from the plane the rim was built in, placed, bit for bit; and that
+    /// the rim was written centred `centred_out` `f64`s of `x`, `y` and `z`
+    /// from where that plane meets the bar's axis.
     fn the_rim_comes_back_cut_from_its_plane(
         (radius, length, dome_radius): (f64, f64, f64),
         place: Vector,
         turn: &Isometry,
+        centred_out: [i32; 3],
     ) {
         let policy = Policy::certified();
         let mut log = ProvenanceLog::new();
@@ -3081,6 +3089,32 @@ mod plane_round_trip_tests {
             .validate(&policy, &mut log)
             .expect("the dome read back is sound");
         assert_eq!(what_its_rim_is_cut_from(back.model()), went_in);
+
+        let Surface::Plane(cut) = went_in[0] else {
+            unreachable!("every half of the rim is cut from a plane, asked above");
+        };
+        let bar = model
+            .solids()
+            .next()
+            .expect("the model holds one solid")
+            .faces()
+            .find_map(|face| {
+                let Surface::Cylinder(bar) = face.surface() else {
+                    return None;
+                };
+                Some(bar)
+            })
+            .expect("the bar's skin is a pipe");
+        let on_the_axis = where_a_plane_crosses_a_pipe(&cut, &bar)
+            .expect("the rim's plane crosses the bar")
+            .centre
+            .coordinates();
+        let centre: [f64; 3] =
+            core::array::from_fn(|axis| stepped(on_the_axis[axis], centred_out[axis]));
+        assert!(
+            text.contains(&triple(centre)),
+            "the rim is not written centred at {centre:?}"
+        );
     }
 
     /// A bar of `radius` standing on the origin along `z`, `length` tall, with
