@@ -403,8 +403,8 @@ fn a_resting_prism_with_one_end_a_rounding_inside_a_turned_top_unites_as_they_st
 /// both inside at 22. "As they stand" with an end inside is §417.4's answer,
 /// the edge taken to lie on the top, and 12 fuses give it: the intersection
 /// both ways round and the block less the prism at `0.225` and `1.175`, both
-/// ends inside, and every rule but the union at `0.625` until the gap below
-/// was fixed. Of the other 246, 213 are refused `DynamicRangeTooWide` and 33
+/// ends inside, and every rule both ways round at `0.625`, one end inside, the
+/// union only since the gap below was fixed. Of the other 246, 213 are refused `DynamicRangeTooWide` and 33
 /// `HoleWindsWithTheOuterWire`, the union both ways round and the block less
 /// the prism at 11 turns. Every refusal comes where an end is inside, and every
 /// exact answer there needs the sliver, which the test below shows is under
