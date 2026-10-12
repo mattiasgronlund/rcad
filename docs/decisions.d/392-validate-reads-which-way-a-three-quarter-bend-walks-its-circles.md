@@ -122,3 +122,12 @@ tests passed.
   band running from one round the tube past the other would come back to the
   plane's other side, as a three-quarter bend does. Reasoned and not run, so
   not classed.
+
+  Run on 2026-10-12, by Q855 on `6e27ef88`, and it holds. The lane built the
+  ring band that one plane square to the axis cuts (ring 4, tube 1.25 about
+  +z, the plane at z = +0.75 and at z = -0.75, facing +z and facing -z), and
+  tried all 8 walks of each. In every case exactly one walk builds and
+  validates, with its volume near what Pappus's theorem gives, and every
+  other walk is refused. Its verifier ran the same probe on the base and got
+  the same lines, so Q855 was closed done at `6e27ef88` with nothing merged
+  (§433.8, `26aedaaf`).
