@@ -23,7 +23,7 @@
 use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
 /// The second bar runs right through the first at 50°, 60°, 70° or 100°, and
@@ -148,22 +148,51 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
 /// **Every fuse is refused**: with the first bar first
 /// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, and with the second first
 /// `Undecidable`, asking which side of a pipe a box round `(11, −3.25, 0.25)`
-/// is on. Neither moved in Q1646, and neither is traced to the function that
-/// asks. At 120° both stand since Q1645 named the crossing there; before it,
-/// `intersect` refused all six `CannotNameWhichPieceOfACrossingThisIs`.
+/// is on. Neither moved in Q1646 or Q1660. At 120° both stand since Q1645
+/// named the crossing there; before it, `intersect` refused all six
+/// `CannotNameWhichPieceOfACrossingThisIs`.
+///
+/// **Where each is refused (Q1663).** With the first bar first,
+/// `place_the_meets` in `fuse/arrange.rs`, splitting the first bar's pipe,
+/// asks `meet_of_three_surfaces` where that pipe, the second bar's near cap
+/// and the second pipe meet: the pair is the cap's cut across the first pipe
+/// and one half ellipse of the two pipes. They do share points, so it is not
+/// waved through as two cuts that share nothing. With the second first,
+/// `place_the_corners`, splitting a face of the second bar, asks through
+/// `passes_through` whether the first pipe runs through the corner of the
+/// near cap. That corner is the bottom of `add_round_bar`'s seam, at `(r, 0,
+/// 0)` before the move, and the turn onto `x` puts it at `c − r·ẑ`, one of the two points where
+/// the pipes touch; its box is `3.1e−13` either way and straddles the first
+/// pipe.
 ///
 /// The second bar's near cap is square to its axis through the meeting point
 /// `c`, so it holds both points `c ± r·ẑ` where the two pipes touch, `(11,
 /// −3.25, 0.25)` and `(11, −3.25, 0.75)`: there the cap and both pipes meet,
 /// two of the three tangent to each other. At 50° to 100° the second pipe's
 /// stored direction lies in `z = 0`, so both points are exact in `f64`; at 120°
-/// it is a hair off `z = 0`, as the test above says.
+/// it is a hair off `z = 0`, as the test above says. **That holds before the
+/// cap is turned, and not in the numbers the arrangement is handed**: the turn
+/// rounds the cap, and the cap as stored misses both points by a rounding
+/// (`the_near_cap_as_the_model_hands_it_out_misses_both_points_the_pipes_touch_at`).
 ///
-/// **A gap, by §16.10**: the three surfaces meet exactly at two points known
-/// from stored numbers, as the node where the four halves meet is
-/// (`place_where_two_halves_meet` in `fuse/arrange.rs`). Naming the cap's meet
-/// with the two pipes as that node is the family of fixes; the cells of the
-/// pipes then meet the half-planes of the test above.
+/// **A gap, by §16.10**: the answer is `1/(24 sin a)` shared. The stored cap
+/// proves itself off both points, so nothing exact asked of the stored
+/// surfaces names them as the meet; the cap holding `c` is the second bar's
+/// own incidence, cap through the start of its axis, kept by its move as a
+/// seam corner's is on the seam plane (§294.9). Since Q1814 `fuse/bake.rs`
+/// reads it on the numbers before the move and carries it, moved, on the
+/// second bar's near cap and wall (`caps_through_the_start_of_their_axis`).
+/// A first bar's wall told it names the cap's meet with the two pipes as the
+/// node where the four halves meet, and is split in six at 50° to 100°
+/// (`a_wall_told_a_cap_holds_where_the_axes_meet_is_split_where_the_cap_meets_the_halves`
+/// in `fuse/arrange.rs`). **The first bar's wall is not told yet**: gathering
+/// the cuts in `fuse/cuts.rs` does not copy it from the face that cuts onto
+/// the face cut, so the refusal with the first bar first stands. At 120° a
+/// wall told it is refused on the order round the cap's crossing instead,
+/// which starts inside the box round `c − r·n̂`. The corner at `c − r·ẑ`
+/// needs the same: it is on the cap's circle by construction, and that circle
+/// meets the first pipe at `c ± r·ẑ` because the cap holds `c`. Then the
+/// cells of the pipes meet the half-planes of the test above.
 #[test]
 fn a_bar_starting_where_it_crosses_another_at_a_slant_is_refused() {
     for degrees in [50.0, 60.0, 70.0, 100.0, 120.0] {
@@ -182,6 +211,40 @@ fn a_bar_starting_where_it_crosses_another_at_a_slant_is_refused() {
             assert!(
                 pinned,
                 "{degrees}° {rule:?} (first first: {first_first}): {said:?}"
+            );
+        }
+    }
+}
+
+/// The second bar's near cap, as the model hands it out, is proved off both
+/// points where the pipes touch, `(11, −3.25, 0.25)` and `(11, −3.25, 0.75)`,
+/// at 50°, 60°, 70° and 100°, where both are exact in `f64`. Before the move
+/// the cap is `z = 0` and holds the start of the bar's axis exactly; the turn
+/// rounds the cap's normal and offset, and the rounded cap misses `c`. So the
+/// meet of the cap with the two pipes cannot be shown to be those two points
+/// from the stored cap (Q1663).
+#[test]
+fn the_near_cap_as_the_model_hands_it_out_misses_both_points_the_pipes_touch_at() {
+    for degrees in [50.0, 60.0, 70.0, 100.0] {
+        let mut model =
+            Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let [_, second] = two_bars(&mut model, degrees, [11.0, -3.25, 0.5]);
+        let near_cap = model
+            .solid(second)
+            .expect("the second bar")
+            .faces()
+            .filter_map(|face| face.surface().as_plane().copied())
+            .find(|cap| {
+                cap.signed_distance_to(rcad_geom::Point::new(11.0, -3.25, 0.5))
+                    .abs()
+                    < 1e-12
+            })
+            .expect("a bar starting at the meeting point has a cap within a rounding of it");
+        for z in [0.25, 0.75] {
+            let side = near_cap.side_of_point(PredicatePoint::from([11.0, -3.25, z]));
+            assert!(
+                matches!(side, Decision::Pos | Decision::Neg),
+                "{degrees}°: the near cap {near_cap:?} at (11, -3.25, {z}): {side:?}"
             );
         }
     }

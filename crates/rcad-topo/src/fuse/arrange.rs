@@ -94,7 +94,8 @@ use crate::mesh::the_surface_pinches_at;
 use crate::validate::{name_of_surface, side_of_surface};
 use crate::{Error, FaceKey, Invalid, Result, VertexKey};
 
-use super::bake::{BakedCorner, BakedFace};
+use super::assemble::one_surface;
+use super::bake::{ACapThroughTheStartOfItsAxis, BakedCorner, BakedFace};
 use super::select::InPlane;
 use super::{
     FaceMeet, MeetPoint, NamesOfOnePoint, Sameness, as_exact_as_it_is, gave_up, middle_of,
@@ -1867,6 +1868,9 @@ impl<'f> Arrangement<'f> {
                     }
                     continue;
                 }
+                if self.place_where_a_cap_meets_two_halves(first, second, log)? {
+                    continue;
+                }
                 let surfaces = [
                     self.surface,
                     self.crossings[first].partner,
@@ -2101,73 +2105,164 @@ impl<'f> Arrangement<'f> {
 
         let middle = where_an_axis_crosses_a_flat_surface(&lesser, &along_the_lesser);
         let [one, two] = pickers.map(|picker| picker.normal().components().map(Interval::exactly));
-        let up = cross_of_intervals(one, two);
-        let reach = quotient_of(
-            Interval::exactly(lesser.radius()),
-            root_enclosing(dot_of(up, up)),
-        );
-        let places = [Interval::exactly(1.0), Interval::exactly(-1.0)].map(|side| {
-            as_exact_as_it_is(PredicatePoint::Constructed(
-                [0, 1, 2].map(|axis| middle[axis] + side * reach * up[axis]),
-            ))
-        });
-
+        let places = where_two_pipes_touch(middle, cross_of_intervals(one, two), lesser.radius());
         let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
-        let across = cross_of(
-            PredicatePoint::from(written_the_one_way(lesser.axis().direction().components())),
-            PredicatePoint::from(written_the_one_way(greater.axis().direction().components())),
-        );
-        let origin = lesser.axis().origin().coordinates().map(Interval::exactly);
         for place in places {
             assert!(
                 nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
                     && nothing_rules_the_point_out(self.crossings[second].picked_by(), place),
                 "each half ellipse holds both places the four halves meet at"
             );
-            let at = place.enclosure();
-            let off_the_axis = [0, 1, 2].map(|axis| at[axis] - origin[axis]);
-            let which = match dot_of(off_the_axis, across).sign() {
-                Decision::Pos => 1,
-                Decision::Neg => 0,
-                Decision::Zero | Decision::Undecidable { .. } | _ => {
-                    return Err(gave_up(
-                        WHICH_WAY_A_CROSSING_RUNS,
-                        &[place, PredicatePoint::Constructed(across)],
-                        Measures::Length,
-                        log,
-                    ));
-                }
-            };
-            let name = (named, which);
-            if let Some(corner) =
-                self.the_corner_that_is_this_place(first, second, place, place, &places)
-            {
-                self.nodes[corner].stands_for_too(name);
-                continue;
-            }
-            if let Some(placed) = self
-                .nodes
-                .iter_mut()
-                .find(|node| node.vertex.is_none() && node.made_of == Some(name))
-            {
-                for crossing in [first, second] {
-                    if !placed.crossings.contains(&crossing) {
-                        placed.crossings.push(crossing);
-                    }
-                }
-                placed.crossings.sort_unstable();
-                continue;
-            }
-            self.nodes.push(Node {
-                point: place,
-                vertex: None,
-                made_of: Some(name),
-                also: Vec::new(),
-                half_way_round: false,
-                crossings: vec![first, second],
-            });
+            let which = which_place_two_pipes_touch_at(place, &lesser, &greater, log)?;
+            self.name_where_two_halves_meet(first, second, place, &places, (named, which));
         }
         Ok(())
+    }
+
+    /// The two nodes where a cap's crossing meets a half ellipse
+    /// ([`HalfAnEllipse`]), for a cap square to its own pipe's axis through
+    /// where the axis starts, as `bake` carries it
+    /// ([`BakedFace::caps_through_the_start_of_their_axis`]), and that start
+    /// exactly on the other pipe's axis: the two places `c ± r·n̂` the walls
+    /// touch at, named as [`Arrangement::place_where_two_halves_meet`] names
+    /// them. Whether it placed them; `false` for every other pair, which
+    /// [`meet_of_three_surfaces`] is asked about.
+    ///
+    /// **Those are the whole meet.** The cap holds `c` and is square to its
+    /// own axis, so it holds `n̂`, which is square to both axes. Each ellipse
+    /// the two pipes cross in lies in a plane through `c` that holds `n̂`, with
+    /// its half axis along `n̂` of length `r`, and the cap crosses that plane
+    /// in the line through `c` along `n̂`, which meets the ellipse at `c ± r·n̂`
+    /// and nowhere else. The cap through `c` is the fact as stored, and the
+    /// moved cap a rounding off it (§294.9's argument, for a cap and its axis);
+    /// the start on the other axis is asked exactly of the moved numbers, so
+    /// the axes are proved to meet at `c` as the arrangement is handed them.
+    ///
+    /// `meet_of_three_surfaces` solves a plane and two pipes only where two
+    /// of the three are flat, and refused the first bar's wall of two bars of
+    /// radius `1/4`, the second starting where the axes meet and turned 50°
+    /// about `z` (Q1663, Q1814). The places are not stored, so they are worked
+    /// out in intervals as the halves' own are.
+    ///
+    /// No name of the cap and the two pipes is added: the meet of three
+    /// surfaces counts `which` its own way, and a node named by the halves'
+    /// rule beside a triple it may also name is two corners called one
+    /// ([`name_of_surface_bits`]).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`](crate::Error::Undecidable) when which side of
+    /// the lesser axis a place is on cannot be told
+    /// ([`which_place_two_pipes_touch_at`]).
+    fn place_where_a_cap_meets_two_halves(
+        &mut self,
+        first: usize,
+        second: usize,
+        log: &mut ProvenanceLog,
+    ) -> Result<bool> {
+        let Surface::Cylinder(face) = self.surface else {
+            return Ok(false);
+        };
+        let (cap_at, half_at) = if self.crossings[first].partner.as_plane().is_some() {
+            (first, second)
+        } else {
+            (second, first)
+        };
+        let (Surface::Plane(flat), Surface::Cylinder(other)) = (
+            self.crossings[cap_at].partner,
+            self.crossings[half_at].partner,
+        ) else {
+            return Ok(false);
+        };
+        if self.crossings[half_at].half_an_ellipse.is_none() {
+            return Ok(false);
+        }
+        let on_this_cap = |known: &&ACapThroughTheStartOfItsAxis| {
+            (known.cap == flat || known.cap == flat.reversed())
+                && [face, other].iter().any(|pipe| {
+                    one_surface(&Surface::Cylinder(known.pipe), &Surface::Cylinder(*pipe))
+                })
+        };
+        let Some(known) = self
+            .face
+            .caps_through_the_start_of_their_axis
+            .iter()
+            .find(on_this_cap)
+        else {
+            return Ok(false);
+        };
+        let start = known.pipe.axis().origin();
+        let across = if one_surface(&Surface::Cylinder(known.pipe), &self.surface) {
+            other
+        } else {
+            face
+        };
+        if lies_exactly_on_the_axis(start, across.axis()) != Some(true) {
+            return Ok(false);
+        }
+
+        let [one, two] =
+            [face, other].map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
+        let places = where_two_pipes_touch(
+            start.coordinates().map(Interval::exactly),
+            cross_of_intervals(one, two),
+            face.radius(),
+        );
+        let mut pipes = [face, other];
+        pipes.sort_by_key(|pipe| name_of_surface_bits(&Surface::Cylinder(*pipe)));
+        let [lesser, greater] = pipes;
+        let named = where_two_halves_meet(&self.surface, &Surface::Cylinder(other));
+        for place in places {
+            if !nothing_rules_the_point_out(self.crossings[cap_at].picked_by(), place)
+                || !nothing_rules_the_point_out(self.crossings[half_at].picked_by(), place)
+            {
+                continue;
+            }
+            let which = which_place_two_pipes_touch_at(place, &lesser, &greater, log)?;
+            self.name_where_two_halves_meet(first, second, place, &places, (named, which));
+        }
+        Ok(true)
+    }
+
+    /// The node named `name`, one of the two places four half ellipses meet
+    /// at, made a node of crossings `first` and `second` too: the corner of
+    /// the face that is the place, if one is, or the node placed under that
+    /// name already, or a new one.
+    fn name_where_two_halves_meet(
+        &mut self,
+        first: usize,
+        second: usize,
+        place: PredicatePoint,
+        places: &[PredicatePoint],
+        name: ([Surface; 3], u8),
+    ) {
+        if let Some(corner) =
+            self.the_corner_that_is_this_place(first, second, place, place, places)
+        {
+            self.nodes[corner].stands_for_too(name);
+            return;
+        }
+        if let Some(placed) = self
+            .nodes
+            .iter_mut()
+            .find(|node| node.vertex.is_none() && node.made_of == Some(name))
+        {
+            for crossing in [first, second] {
+                if !placed.crossings.contains(&crossing) {
+                    placed.crossings.push(crossing);
+                }
+            }
+            placed.crossings.sort_unstable();
+            return;
+        }
+        self.nodes.push(Node {
+            point: place,
+            vertex: None,
+            made_of: Some(name),
+            also: Vec::new(),
+            half_way_round: false,
+            crossings: vec![first, second],
+        });
     }
 
     /// The node half way along each half ellipse ([`HalfAnEllipse`]): where the
@@ -8802,6 +8897,73 @@ fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface; 3] {
     [*lesser, *greater, *greater]
 }
 
+/// The two places two pipes of one radius touch at, whose axes meet at
+/// `middle`: `middle ± radius·up/‖up‖`, for `up` square to both axes.
+fn where_two_pipes_touch(
+    middle: [Interval; 3],
+    up: [Interval; 3],
+    radius: f64,
+) -> [PredicatePoint; 2] {
+    let reach = quotient_of(Interval::exactly(radius), root_enclosing(dot_of(up, up)));
+    [Interval::exactly(1.0), Interval::exactly(-1.0)].map(|side| {
+        as_exact_as_it_is(PredicatePoint::Constructed(
+            [0, 1, 2].map(|axis| middle[axis] + side * reach * up[axis]),
+        ))
+    })
+}
+
+/// Which of the two places two pipes touch at `place` is, as the face on
+/// either pipe counts it: `1` on the side of the lesser pipe's axis that
+/// `d_lesser × d_greater` points to, each direction [`written_the_one_way`],
+/// and `0` on the other.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`](crate::Error::Undecidable) when the side cannot be
+/// told, which takes the two axes all but parallel.
+fn which_place_two_pipes_touch_at(
+    place: PredicatePoint,
+    lesser: &Cylinder,
+    greater: &Cylinder,
+    log: &mut ProvenanceLog,
+) -> Result<u8> {
+    let across = cross_of(
+        PredicatePoint::from(written_the_one_way(lesser.axis().direction().components())),
+        PredicatePoint::from(written_the_one_way(greater.axis().direction().components())),
+    );
+    let origin = lesser.axis().origin().coordinates().map(Interval::exactly);
+    let at = place.enclosure();
+    let off_the_axis = [0, 1, 2].map(|axis| at[axis] - origin[axis]);
+    match dot_of(off_the_axis, across).sign() {
+        Decision::Pos => Ok(1),
+        Decision::Neg => Ok(0),
+        Decision::Zero | Decision::Undecidable { .. } | _ => Err(gave_up(
+            WHICH_WAY_A_CROSSING_RUNS,
+            &[place, PredicatePoint::Constructed(across)],
+            Measures::Length,
+            log,
+        )),
+    }
+}
+
+/// Whether `point` is on the line of `axis`: every component of
+/// `(point − o) × d` exactly nought, for the axis through `o` along `d`.
+/// `None` where a product would round, which proves nothing either way.
+fn lies_exactly_on_the_axis(point: Point, axis: Axis) -> Option<bool> {
+    let at = point.coordinates();
+    let origin = axis.origin().coordinates();
+    let along = axis.direction().components();
+    for (i, j) in [(1, 2), (2, 0), (0, 1)] {
+        let (mine, used) = difference_of_two_products(at[i], along[j], at[j], along[i])?;
+        let (its, its_used) = difference_of_two_products(origin[i], along[j], origin[j], along[i])?;
+        let against: Vec<f64> = its[..its_used].iter().map(|entry| -entry).collect();
+        if expansion_sign(&exactly_added(&mine[..used], &against)) != Decision::Zero {
+            return Some(false);
+        }
+    }
+    Some(true)
+}
+
 /// Whether, of these three surfaces, a flat one cuts a pipe in a curve that
 /// the third is certainly wholly inside or wholly outside of, so that no point
 /// is on all three.
@@ -12094,8 +12256,8 @@ mod curved {
     use super::super::MeetPoint;
     use super::super::bake::{BakedFace, BakedSolid, bake};
     use super::super::cuts;
-    use super::{Piece, split_a_face};
-    use crate::{DraftStep, Model, Rule, SolidBuilder};
+    use super::{ALONG_A_CROSSING, Piece, split_a_face};
+    use crate::{DraftStep, Error, Model, Rule, SolidBuilder};
 
     /// A block eight across sitting on the origin with a round bar of radius
     /// one straight through the middle of it, both already cut against each
@@ -12140,6 +12302,96 @@ mod curved {
             Surface::Cone(_) => "cone",
             Surface::Torus(_) => "ring",
             other => panic!("no {other:?} here"),
+        }
+    }
+
+    /// Two bars of radius `1/4`, the first along `x` through `(11, −3.25,
+    /// 0.5)`, the second two long, starting there and turned `degrees` about
+    /// `z`, both cut against each other: `two_bars` in
+    /// `tests/two_equal_bars_leaning_at_each_other.rs`.
+    fn a_bar_starting_where_it_crosses_another(degrees: f64) -> Vec<BakedSolid> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let onto_x = Isometry::quarter_turns(&Axis::y(), 1).expect("a turn about y");
+        let shift = |by: [f64; 3]| {
+            Isometry::translation(Vector::new(by[0], by[1], by[2])).expect("a finite move")
+        };
+        let first = model
+            .add_round_bar(0.25, 4.0, &shift([9.0, -3.25, 0.5]).compose(&onto_x))
+            .expect("a bar along x");
+        let turned = Isometry::rotation(&Axis::z(), f64::to_radians(degrees))
+            .expect("a turn about z")
+            .compose(&onto_x);
+        let second = model
+            .add_round_bar(0.25, 2.0, &shift([11.0, -3.25, 0.5]).compose(&turned))
+            .expect("a bar starting on the first one's axis");
+        let mut solids = bake(&model, &[first, second], &policy, &mut log).expect("both bake");
+        cuts::gather(&mut solids, &policy, &mut log).expect("they cut each other");
+        solids
+    }
+
+    fn the_wall(bar: &BakedSolid) -> &BakedFace {
+        bar.faces
+            .iter()
+            .find(|face| face.surface.as_plane().is_none())
+            .expect("a bar has a wall")
+    }
+
+    /// The first bar's wall is cut by the second bar's near cap, in an
+    /// ellipse, and by the second pipe, in two ellipses, and all three
+    /// curves pass through the two points `c ± r·n̂` where the walls touch.
+    /// Told that cap holds where the axes meet, as `bake` tells the second
+    /// bar's own wall, the wall is split, with the meet of the cap's crossing
+    /// and each half ellipse named as the node where the halves meet.
+    /// Before, it was handed to `meet_of_three_surfaces`, which solves no
+    /// plane and two pipes, and refused
+    /// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` (Q1814).
+    ///
+    /// **Six pieces**: each curve goes right round the wall through both
+    /// points, so it is two arcs between them, three on each side of the
+    /// wall. Those cut each side into four, and the two outer pieces of the
+    /// two sides are one piece, joined round the points beyond every arc:
+    /// `2 + 2 + 2`.
+    ///
+    /// **At 120° the meets are named, and the order round the cap's crossing
+    /// is refused.** The second pipe's direction is stored `2.2e-16` off
+    /// `z = 0` there, so `n̂` is too, and the place `c − r·n̂` is a box `2e-16`
+    /// wide round `(11, −3.25, 0.25)`. The cap's crossing starts at
+    /// `(11, −3.25, 0.25)` exactly, inside that box, so which of the two
+    /// places comes first round it from there is a sweep that straddles nought,
+    /// and it is refused `Undecidable` on the order along a crossing. At 50°
+    /// to 100° the places are `f64` triples and the start is the one below,
+    /// bit for bit, and named so.
+    ///
+    /// The cap is copied over by hand here, where gathering the cuts would
+    /// carry it.
+    #[test]
+    fn a_wall_told_a_cap_holds_where_the_axes_meet_is_split_where_the_cap_meets_the_halves() {
+        for degrees in [50.0, 60.0, 70.0, 100.0, 120.0] {
+            let solids = a_bar_starting_where_it_crosses_another(degrees);
+            let mut wall = the_wall(&solids[0]).clone();
+            wall.caps_through_the_start_of_their_axis.extend(
+                the_wall(&solids[1])
+                    .caps_through_the_start_of_their_axis
+                    .iter()
+                    .copied(),
+            );
+            assert_eq!(wall.caps_through_the_start_of_their_axis.len(), 2);
+            let split = split_a_face(&wall, &Policy::certified(), &mut ProvenanceLog::new())
+                .map(|split| split.pieces.len());
+            if degrees < 110.0 {
+                assert!(matches!(split, Ok(6)), "{degrees}°: {split:?}");
+                continue;
+            }
+            let Err(Error::Undecidable { records }) = &split else {
+                panic!("{degrees}°: {split:?}");
+            };
+            assert_eq!(
+                records.records().last().map(|record| record.predicate()),
+                Some(ALONG_A_CROSSING),
+                "{degrees}°"
+            );
         }
     }
 

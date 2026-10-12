@@ -54,7 +54,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    EdgeRun, Isometry, MeetOfThree, Orientation, Picker, Plane, Point, Surface,
+    Cylinder, EdgeRun, Isometry, MeetOfThree, Orientation, Picker, Plane, Point, Surface,
     WHERE_THREE_SURFACES_MEET, meet_of_three_surfaces, where_a_corner_lands_after_moving,
     which_two_surfaces_a_run_is_between,
 };
@@ -63,6 +63,7 @@ use rcad_predicates::{
 };
 use smallvec::SmallVec;
 
+use crate::holds::lie_along_one_line;
 use crate::key::{FaceSlot, VertexSlot};
 use crate::validate::{
     CornerRoom, MEASURING_SLACK, a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
@@ -167,6 +168,33 @@ pub(crate) struct BakedFace {
     /// arrangement leaves it out where that splits no edge
     /// (`docs/decisions.md` §422).
     pub(crate) cuts_that_reach_only_its_boundary: Vec<Surface>,
+    /// Each cap this face is, or has a side along, that is square to its own
+    /// pipe's axis through where the axis starts, as stored, with that pipe
+    /// ([`the_cap_through_the_start_of_its_axis`]). Empty for every face but a
+    /// round bar's wall and its near cap.
+    ///
+    /// **Carried because the move breaks it, as a seam corner's plane is**
+    /// ([`BakedCorner::is_on_by_construction`], §294.9). A bar starting where
+    /// its axis crosses another bar's of its width has its near cap through
+    /// that meeting point `c`, and so through both points `c ± r·n̂` where the
+    /// two walls touch. Turned 50° about `z`, the cap as moved misses `c` by
+    /// a rounding, so nothing asked of the moved numbers names its meet with
+    /// the two pipes, and `meet_of_three_surfaces` cannot solve one plane and
+    /// two pipes (Q1663). As stored the cap is `z = 0` and holds the axis's
+    /// start exactly, and a move keeps every incidence, so the arrangement may
+    /// take the moved cap through the moved start.
+    pub(crate) caps_through_the_start_of_their_axis: Vec<ACapThroughTheStartOfItsAxis>,
+}
+
+/// A cap square to its pipe's axis and through where the axis starts, as
+/// stored, both moved into place ([`the_cap_through_the_start_of_its_axis`]).
+///
+/// The pipe's axis starts at the moved start: it is the point the cap is
+/// taken through, and the one point of the axis the cap holds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ACapThroughTheStartOfItsAxis {
+    pub(crate) cap: Plane,
+    pub(crate) pipe: Cylinder,
 }
 
 /// One side of a plane: behind it, its negative side, or in front.
@@ -754,6 +782,7 @@ fn bake_the_joined_faces(
             bounds: round_this_face,
             lies_in: SmallVec::new(),
             cuts_that_reach_only_its_boundary: Vec::new(),
+            caps_through_the_start_of_their_axis: Vec::new(),
         });
     }
     Ok(BakedSolid { key, faces, bounds })
@@ -1406,6 +1435,7 @@ fn bake_one_face(
 
     let mut wires = Vec::new();
     let mut bounds = Bounds::nothing();
+    let mut caps = Vec::new();
     for face in members {
         bounds.take_in(Bounds::round_a_face(solid, *face));
         let mine = face.key().slot_in(model.id());
@@ -1417,6 +1447,12 @@ fn bake_one_face(
                 };
                 if in_the_group.contains(&across) {
                     continue;
+                }
+                if let Some(cap) =
+                    the_cap_through_the_start_of_its_axis(surfaces[&mine], surfaces[&across])
+                    && !caps.contains(&cap)
+                {
+                    caps.push(cap);
                 }
                 walked.push(BakedEdge {
                     keys: core::iter::once(coedge.edge().key()).collect(),
@@ -1458,9 +1494,47 @@ fn bake_one_face(
         bounds,
         lies_in: SmallVec::new(),
         cuts_that_reach_only_its_boundary: Vec::new(),
+        caps_through_the_start_of_their_axis: caps,
     };
     baked.lies_in = the_sides_of_planes_it_lies_in(&baked);
     Ok(baked)
+}
+
+/// The cap and the pipe of a side between a plane and a pipe, moved into
+/// place, when the plane is square to the pipe's axis and holds where the axis
+/// starts, both asked exactly of the stored numbers
+/// ([`BakedFace::caps_through_the_start_of_their_axis`]); `None` for every
+/// other side.
+///
+/// **Asked as stored, and only bit for bit**, as
+/// [`the_seam_plane_a_corner_is_on`] is: a cap that misses the start by a
+/// rounding as stored is a different plane, through a point a rounding from
+/// it. Both faces are at one placement, since the corners of the side between
+/// them are corners of both.
+fn the_cap_through_the_start_of_its_axis(
+    one: PlacedSurface,
+    other: PlacedSurface,
+) -> Option<ACapThroughTheStartOfItsAxis> {
+    let (cap, pipe) = if one.stored.as_plane().is_some() {
+        (one, other)
+    } else {
+        (other, one)
+    };
+    let (Surface::Plane(flat), Surface::Cylinder(round)) = (cap.stored, pipe.stored) else {
+        return None;
+    };
+    let axis = round.axis();
+    let holds_the_start =
+        flat.side_of_point(PredicatePoint::from(axis.origin().coordinates())) == Decision::Zero;
+    if !holds_the_start
+        || !lie_along_one_line(flat.normal().components(), axis.direction().components())
+    {
+        return None;
+    }
+    let (Surface::Plane(cap), Surface::Cylinder(pipe)) = (cap.placed, pipe.placed) else {
+        unreachable!("a surface moved into place is the kind it was stored as")
+    };
+    Some(ACapThroughTheStartOfItsAxis { cap, pipe })
 }
 
 /// The side of each plane across a closed edge of a pipe's or a ring's face
@@ -2112,6 +2186,43 @@ mod tests {
                 };
                 assert_eq!(side.start.seam_plane, expected);
             }
+        }
+    }
+
+    /// A round bar's near cap is `z = 0` as stored, square to its axis
+    /// through where the axis starts, and its far cap `z = 5` is not, so the
+    /// near cap and the wall carry the pair, moved with the bar, and the far
+    /// cap carries nothing
+    /// ([`BakedFace::caps_through_the_start_of_their_axis`](super::BakedFace)).
+    #[test]
+    fn a_bars_near_cap_and_wall_carry_the_cap_through_the_start_of_its_axis() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bar = model.add_round_bar(3.0, 5.0, &a_turn()).expect("a bar");
+        let faces = &baked(&model, &[bar])[0].faces;
+        let wall = faces
+            .iter()
+            .find(|face| face.surface.as_plane().is_none())
+            .expect("a bar has a wall");
+        let [pair] = wall.caps_through_the_start_of_their_axis[..] else {
+            panic!(
+                "the wall carries its near cap and nothing else: {:?}",
+                wall.caps_through_the_start_of_their_axis
+            );
+        };
+        assert_eq!(wall.surface, Surface::Cylinder(pair.pipe));
+        let start = a_turn().apply_to_point(Point::origin());
+        assert_eq!(pair.pipe.axis().origin(), start);
+        for cap in faces
+            .iter()
+            .filter(|face| face.surface.as_plane().is_some())
+        {
+            let Surface::Plane(flat) = cap.surface else {
+                unreachable!("a face whose surface is a plane")
+            };
+            let near = flat.signed_distance_to(start).abs() < 1e-12;
+            assert_eq!(near, flat == pair.cap, "{flat:?} is the near cap");
+            let expected = if near { vec![pair] } else { Vec::new() };
+            assert_eq!(cap.caps_through_the_start_of_their_axis, expected);
         }
     }
 
