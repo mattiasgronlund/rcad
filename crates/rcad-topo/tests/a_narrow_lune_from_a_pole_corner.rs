@@ -255,7 +255,9 @@ fn probe_q1665_seven_under_tolerant() {
         let second = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
         let mut log = ProvenanceLog::new();
         let policy = Policy::tolerant(model.scale().nominal_size());
-        if std::env::var("PROBE_ONLY").is_ok_and(|only| only != format!("{degrees}")) {
+        if std::env::var("PROBE_ONLY")
+            .is_ok_and(|only| only != format!("{degrees}") && only != format!("{degrees}/{radius}"))
+        {
             continue;
         }
         eprintln!("PROBE start {degrees} {radius} {rule:?}");
