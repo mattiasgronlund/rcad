@@ -874,12 +874,15 @@ impl Writing {
     /// `EDGE_CURVE.same_sense` rather than by turning the curve over, which
     /// would read back as the plane reversed.
     ///
-    /// **A seam with one ring on both sides may have its centre further out**
-    /// than [`a_centre_its_plane_reads_back_from`] steps, and then
-    /// [`the_nearest_centre_a_ring_holds_its_circle_at`] looks as far as the
-    /// reader would still hold the circle on the ring. A pipe or a ball beside
-    /// the edge has no such second search, since the reader's rule for those
-    /// is not copied here.
+    /// **The centre is one both faces hold the circle at**, where a pipe or a
+    /// ball is beside the edge with another face
+    /// ([`a_centre_for_an_arc_between`]): the reader asks every face before it
+    /// names such an arc by its plane, and the walk alone can land a dome's
+    /// rim further off the ball than it allows (Q1792). **A seam with one ring on
+    /// both sides may have its centre further out** than
+    /// [`a_centre_its_plane_reads_back_from`] steps, and then
+    /// [`the_nearest_centre_its_faces_hold_the_circle_at`] looks as far as the
+    /// reader would still hold the circle on the ring.
     fn an_arc_its_own_plane_names(
         &mut self,
         first: &Surface,
@@ -938,7 +941,7 @@ impl Writing {
         let Shape::Circle { radius } = touching.shape else {
             return None;
         };
-        let centre = a_centre_its_plane_reads_back_from(cut, touching.centre)?;
+        let centre = a_centre_its_plane_reads_back_from(cut, touching.centre, |_| true)?;
         if !either_side
             .iter()
             .all(|face| a_surface_holds_the_circle(face, centre, cut.normal(), radius))
@@ -1370,7 +1373,7 @@ fn the_half_circle_from_pole_to_pole(
     } else {
         return None;
     };
-    let centre = a_centre_its_plane_reads_back_from(cut, ball.centre())?;
+    let centre = a_centre_its_plane_reads_back_from(cut, ball.centre(), |_| true)?;
     let circle = Crossing {
         centre,
         turning: cut.normal(),
@@ -1422,17 +1425,23 @@ fn the_arc_its_own_plane_names(
     };
     let (crossing, centre) = if let Some(pipe) = a_pipe(first).or_else(|| a_pipe(second)) {
         let crossing = where_a_plane_crosses_a_pipe(cut, &pipe)?;
-        let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)?;
+        let centre = a_centre_for_an_arc_between(first, second, cut, &crossing)?;
         (crossing, centre)
     } else if let Some(ball) = a_ball(first).or_else(|| a_ball(second)) {
         let crossing = where_a_plane_crosses_a_ball(cut, &ball)?;
-        let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)?;
+        let centre = a_centre_for_an_arc_between(first, second, cut, &crossing)?;
         (crossing, centre)
     } else {
         let ring = a_ring(first).or_else(|| a_ring(second))?;
         let crossing = where_a_plane_square_to_a_ring_crosses_it_nearest(cut, &ring, start)?;
-        let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre)
-            .or_else(|| the_nearest_centre_a_ring_holds_its_circle_at(cut, &ring, &crossing))?;
+        let centre =
+            a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true).or_else(|| {
+                the_nearest_centre_its_faces_hold_the_circle_at(
+                    cut,
+                    &[&Surface::Torus(ring)],
+                    &crossing,
+                )
+            })?;
         (crossing, centre)
     };
     let crossing = Crossing {
@@ -1442,6 +1451,57 @@ fn the_arc_its_own_plane_names(
     };
     let the_edge_runs_its_way = crossing.the_arc_runs_its_own_way(run, start, end)?;
     Some((crossing, the_edge_runs_its_way))
+}
+
+/// Where to centre the circle of an arc between `first` and `second`, a pipe
+/// or a ball beside the edge, so that the reader names the arc by `cut`: a
+/// point from which [`plane_through`] gives back `cut`, and where both faces
+/// hold the circle as the reader asks it ([`a_surface_holds_the_circle`],
+/// shared with the reader).
+///
+/// **The walk asks both faces, then the wider search does**, then the walk is
+/// taken without asking. A dome on a long bar, turned, can have the walk land
+/// on the offset more than the reader's sixteen units off the ball, and the
+/// reader then names the rim by the pipe and the ball and comes back with a
+/// different volume, or, for half a ball of the bar's own radius, which only
+/// touches the bar, refuses the file (Q1792,
+/// `a_dome_on_a_long_bar_turned_a_long_way_comes_back_with_its_rim_cut_from_its_plane`).
+///
+/// **Where neither finds a centre both faces hold, the walk's own is
+/// written**, as it was before both were asked. A dome wider than its bar is
+/// then read back named by its faces, which cross: sound, but not the solid
+/// that was written. Turned and placed far out, one measured `13968.30`
+/// built and `13974.48` read back. That is a defect of its own, left to a
+/// row of its own (Q1794); writing the walk's centre keeps it as it was.
+///
+/// **A seam, one face on both sides, and an ellipse are not asked**: the
+/// reader names a seam by the plane its run carries without asking the face
+/// (`Walk::the_surface_that_names_the_curve` asks only where
+/// `a_face_where_curved_faces_meet` names a face, and faces that are all one
+/// surface name none), and holds an ellipse by a rule in `brep.rs` this
+/// writer does not share.
+fn a_centre_for_an_arc_between(
+    first: &Surface,
+    second: &Surface,
+    cut: &Plane,
+    crossing: &Crossing,
+) -> Option<Point> {
+    let Shape::Circle { radius } = crossing.shape else {
+        return a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true);
+    };
+    if first == second {
+        return a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true);
+    }
+    let both_hold = |centre: Point| {
+        [first, second]
+            .iter()
+            .all(|face| a_surface_holds_the_circle(face, centre, cut.normal(), radius))
+    };
+    a_centre_its_plane_reads_back_from(cut, crossing.centre, both_hold)
+        .or_else(|| {
+            the_nearest_centre_its_faces_hold_the_circle_at(cut, &[first, second], crossing)
+        })
+        .or_else(|| a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true))
 }
 
 /// Whether the pole at `position` of `walk` stands where the wire turns back
@@ -1880,8 +1940,13 @@ fn where_a_cap_holding_a_rings_axis_crosses_it(
 }
 
 /// A point near `near` from which the reader's [`plane_through`] gives back
-/// `cut`, normal and offset bit for bit, or `None` where none of the few tried
-/// does.
+/// `cut`, normal and offset bit for bit, and which `held` takes, or `None`
+/// where none of the few tried does.
+///
+/// **`held` is what the faces beside the edge ask of the circle's centre**
+/// ([`a_centre_for_an_arc_between`]); a point that reads back as `cut` but
+/// is not held is stepped past, as if it had missed. Every other caller
+/// takes every point (`|_| true`).
 ///
 /// `near` is where a pipe's axis or a ball's centre meets `cut`, worked out in
 /// `f64`, so it can miss the offset by a rounding or two. The reader dots the
@@ -1909,6 +1974,11 @@ fn where_a_cap_holding_a_rings_axis_crosses_it(
 /// centre, is stepped all fifteen along `y` and the reader's bound reads
 /// `15.9998` (Q1789,
 /// `a_ball_cut_near_its_middle_is_stepped_fifteen_times_to_the_edge_of_what_the_reader_holds`).
+/// **That measurement is of a ball alone, and does not hold for a ball
+/// beside a pipe**: a dome on a long bar, turned, was stepped fifteen along
+/// `y` to `16.31` units off its ball, which is why an arc between two faces
+/// passes a `held` that asks them (Q1792,
+/// `a_dome_on_a_long_bar_turned_a_long_way_comes_back_with_its_rim_cut_from_its_plane`).
 ///
 /// **Then the two finest coordinates are stepped together**, nearest first
 /// and at most [`MOST_STEPS_OF_TWO_COORDINATES`] each way. Where the offset is
@@ -1918,7 +1988,11 @@ fn where_a_cap_holding_a_rings_axis_crosses_it(
 /// radius three at `(10, 7, −15)` that `how_often_a_model_the_mutator_draws_is_refused`
 /// draws has an offset of `0.80`, and a step of either coordinate moves the dot
 /// six ulps of it or more (Q822).
-fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point> {
+fn a_centre_its_plane_reads_back_from(
+    cut: &Plane,
+    near: Point,
+    held: impl Fn(Point) -> bool,
+) -> Option<Point> {
     let normal = cut.normal();
     let read = |at: [f64; 3]| {
         plane_through(Point::new(at[0], at[1], at[2]), normal)
@@ -1937,9 +2011,11 @@ fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point>
         for _ in 0..16 {
             let offset = read(at)?;
             if offset.to_bits() == cut.offset().to_bits() {
-                return Some(Point::new(at[0], at[1], at[2]));
-            }
-            if (offset < cut.offset()) != below {
+                let centre = Point::new(at[0], at[1], at[2]);
+                if held(centre) {
+                    return Some(centre);
+                }
+            } else if (offset < cut.offset()) != below {
                 break;
             }
             at[axis] = if below == (components[axis] > 0.0) {
@@ -1963,8 +2039,9 @@ fn a_centre_its_plane_reads_back_from(cut: &Plane, near: Point) -> Option<Point>
                 let mut at = start;
                 at[first] = stepped(start[first], along_first);
                 at[second] = stepped(start[second], along_second);
-                if reads_back(at) {
-                    return Some(Point::new(at[0], at[1], at[2]));
+                let centre = Point::new(at[0], at[1], at[2]);
+                if reads_back(at) && held(centre) {
+                    return Some(centre);
                 }
             }
         }
@@ -2001,8 +2078,9 @@ fn stepped(from: f64, steps: i32) -> f64 {
 
 /// The centre nearest `crossing`'s own from which the reader's
 /// [`plane_through`] gives back `cut` bit for bit and the reader still holds
-/// the circle on `ring`, with two coordinates moved; `None` where this finds
-/// none.
+/// the circle on every face of `either_side`, with two coordinates moved;
+/// `None` where this finds none, or where a face has no bound the reader
+/// could hold the circle to.
 ///
 /// **Where the offset is much smaller than the coordinates, a step of one
 /// coordinate moves the dot by dozens of ulps of it**, so the dot lands on the
@@ -2020,29 +2098,38 @@ fn stepped(from: f64, steps: i32) -> f64 {
 /// other is put where the dot comes back**, then the `f64`s either side of
 /// that are tried too, since the dot is not worked out exactly here and
 /// [`plane_through`] is what decides. Every pair of the coordinates the normal
-/// leans along is walked both ways, out to twice the reader's allowance or
-/// [`MOST_STEPS_OF_ONE_COORDINATE`], whichever comes first.
+/// leans along is walked both ways, out to twice the reader's allowance for
+/// the face whose bound is largest, or [`MOST_STEPS_OF_ONE_COORDINATE`],
+/// whichever comes first.
 ///
 /// **What the reader holds is asked here, not trusted to a bound on the
 /// steps** ([`a_surface_holds_the_circle`] in `brep.rs`, shared with the
-/// reader rather than copied, since Q957). A centre that reads back as the
-/// plane but sits further off the ring's axis than the reader allows is read
-/// as a curve off its faces, and the file is then refused, where this
-/// refuses by name.
-fn the_nearest_centre_a_ring_holds_its_circle_at(
+/// reader rather than copied, since Q957). Between two faces, a centre that
+/// reads back as the plane but sits further off a face than the reader
+/// allows has the arc named by its faces instead: a turned dome on a bar,
+/// centred where the walk lands ten `f64`s of `x` out, came back with its
+/// rim cut from the ball, and this finds the centre ten of `x` and sixteen
+/// of `z` out that both faces hold (Q1792,
+/// `a_dome_on_a_long_bar_turned_a_little_comes_back_with_its_rim_cut_from_its_plane`).
+/// A ring's seam has one face on both sides, which the reader does not ask
+/// ([`a_centre_for_an_arc_between`]); it is asked here all the same, so the
+/// circle the file carries lies on the face it bounds.
+fn the_nearest_centre_its_faces_hold_the_circle_at(
     cut: &Plane,
-    ring: &Torus,
+    either_side: &[&Surface],
     crossing: &Crossing,
 ) -> Option<Point> {
     let Shape::Circle { radius } = crossing.shape else {
         return None;
     };
     let normal = cut.normal();
-    let surface = Surface::Torus(*ring);
     let components = normal.components();
     let start = crossing.centre.coordinates();
     let short = cut.offset() - plane_through(crossing.centre, normal).ok()?.offset();
-    let (_, largest) = how_far_off_the_circle_can_be(&surface, crossing.centre, normal, radius)?;
+    let largest = either_side.iter().try_fold(0.0_f64, |most, face| {
+        how_far_off_the_circle_can_be(face, crossing.centre, normal, radius)
+            .map(|(_, largest)| most.max(largest))
+    })?;
     let reach = 2.0 * A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF * largest;
     let leaning: Vec<usize> = (0..3).filter(|&axis| components[axis] != 0.0).collect();
     let mut nearest: Option<(f64, Point)> = None;
@@ -2066,7 +2153,9 @@ fn the_nearest_centre_a_ring_holds_its_circle_at(
                                 && back.offset().to_bits() == cut.offset().to_bits()
                         });
                         if !reads_back
-                            || !a_surface_holds_the_circle(&surface, centre, normal, radius)
+                            || !either_side.iter().all(|face| {
+                                a_surface_holds_the_circle(face, centre, normal, radius)
+                            })
                         {
                             continue;
                         }
@@ -2083,7 +2172,7 @@ fn the_nearest_centre_a_ring_holds_its_circle_at(
     nearest.map(|(_, centre)| centre)
 }
 
-/// How many `f64`s either way [`the_nearest_centre_a_ring_holds_its_circle_at`]
+/// How many `f64`s either way [`the_nearest_centre_its_faces_hold_the_circle_at`]
 /// walks one coordinate at most.
 ///
 /// An `f64` is at least `ε/2` of itself, so sixty-four steps of the largest
@@ -2507,21 +2596,21 @@ fn text(string: &str) -> String {
 
 #[cfg(test)]
 mod plane_round_trip_tests {
-    use core::f64::consts::{SQRT_2, TAU};
+    use core::f64::consts::{FRAC_PI_2, SQRT_2, TAU};
 
     use rcad_geom::{
-        Axis, EdgeRun, Isometry, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Scale, Sphere, Surface,
-        Torus, Vector,
+        Axis, Cylinder, EdgeRun, HalfSpace, Isometry, NEAREST_F64_POINT_ROUNDOFF, Orientation,
+        Picker, Plane, Point, Scale, Sphere, Surface, Torus, Vector,
     };
     use rcad_predicates::{Policy, ProvenanceLog};
-    use rcad_topo::{Model, WireView};
+    use rcad_topo::{DraftStep, Model, SolidBuilder, SolidKey, WireView};
 
     use super::{
         A_CIRCLE_MAY_MISS_ITS_FACE_BY, CannotWrite, Shape, a_centre_its_plane_reads_back_from,
         a_point_this_reader_reads_back_as, a_surface_holds_the_circle,
-        how_far_off_the_circle_can_be, stepped, the_nearest_centre_a_ring_holds_its_circle_at,
-        triple, where_a_plane_crosses_a_ball, where_a_plane_square_to_a_ring_crosses_it_nearest,
-        write,
+        how_far_off_the_circle_can_be, stepped, the_nearest_centre_its_faces_hold_the_circle_at,
+        triple, where_a_plane_crosses_a_ball, where_a_plane_crosses_a_pipe,
+        where_a_plane_square_to_a_ring_crosses_it_nearest, write,
     };
     use crate::geometry::plane_through;
     use crate::{Import, StepFile};
@@ -2561,7 +2650,7 @@ mod plane_round_trip_tests {
     /// it, and the writer finds it. Four steps each way of two coordinates, all
     /// [`a_centre_its_plane_reads_back_from`] tries, do not reach it, and the
     /// writer refused the seam until
-    /// [`the_nearest_centre_a_ring_holds_its_circle_at`] (Q843).
+    /// [`the_nearest_centre_its_faces_hold_the_circle_at`] (Q843).
     ///
     /// **The plane is the seam's own, not a rounding off square.** Its normal
     /// and the ring's axis are the same turn of `z`, bit for bit, so the two
@@ -2634,9 +2723,16 @@ mod plane_round_trip_tests {
             }
         }
         assert_eq!(found, [(-23, -19)]);
-        assert_eq!(a_centre_its_plane_reads_back_from(&cut, centre), None);
         assert_eq!(
-            the_nearest_centre_a_ring_holds_its_circle_at(&cut, &ring, &crossing),
+            a_centre_its_plane_reads_back_from(&cut, centre, |_| true),
+            None
+        );
+        assert_eq!(
+            the_nearest_centre_its_faces_hold_the_circle_at(
+                &cut,
+                &[&Surface::Torus(ring)],
+                &crossing
+            ),
             Some(Point::new(stepped(x, -23), y, stepped(z, -19)))
         );
     }
@@ -2713,7 +2809,7 @@ mod plane_round_trip_tests {
         }
         assert_eq!((held, read_back_as_the_offset), (7385, 0));
         assert_eq!(
-            a_centre_its_plane_reads_back_from(&cut, ball.centre()),
+            a_centre_its_plane_reads_back_from(&cut, ball.centre(), |_| true),
             None
         );
     }
@@ -2770,8 +2866,8 @@ mod plane_round_trip_tests {
         let dot_moved_by_a_step = [along_x * (x.next_up() - x), along_y * (y.next_up() - y)];
         assert_eq!(dot_moved_by_a_step.map(f64::round), [-23.0, 22.0]);
 
-        let centre =
-            a_centre_its_plane_reads_back_from(&cut, ball.centre()).expect("a centre is found");
+        let centre = a_centre_its_plane_reads_back_from(&cut, ball.centre(), |_| true)
+            .expect("a centre is found");
         assert_eq!(centre, Point::new(stepped(x, 4), stepped(y, 4), z));
         assert_eq!(x, 2.0);
         assert_eq!(x.next_up() - x, NEAREST_F64_POINT_ROUNDOFF * x);
@@ -2863,8 +2959,8 @@ mod plane_round_trip_tests {
         let [along_x, along_y, _] = normal.components();
         assert!((along_x + 1.0).abs() < 1e-7 && (along_y + 1.55e-4).abs() < 1e-6);
 
-        let centre =
-            a_centre_its_plane_reads_back_from(&cut, crossing.centre).expect("a centre is found");
+        let centre = a_centre_its_plane_reads_back_from(&cut, crossing.centre, |_| true)
+            .expect("a centre is found");
         let [x, y, z] = crossing.centre.coordinates();
         assert_eq!(centre, Point::new(x, stepped(y, -15), z));
         assert!(y < -32.0 && stepped(y, -15) > -64.0);
@@ -2877,6 +2973,306 @@ mod plane_round_trip_tests {
         assert!((units - 15.9998).abs() < 1e-4, "{units}");
         assert!(units <= A_CIRCLE_MAY_MISS_ITS_FACE_BY, "{units}");
         assert!(a_surface_holds_the_circle(&skin, centre, normal, across));
+    }
+
+    /// A bar of radius just over `16` and length `3561`, with a dome of radius
+    /// `29.7` on top, moved to just off `(0, −2, 4096)` and turned
+    /// `2.97` about a line mostly along `y`: the rim where the dome meets the
+    /// bar comes back cut from its own plane (Q1792).
+    ///
+    /// **Walking `y` alone left the rim further off the dome than the reader
+    /// allows.** The finest coordinate was `y`, and fifteen `f64`s of it put
+    /// the dot on the plane's offset, with the circle `16.31` units off the
+    /// ball where the reader allows sixteen. So the reader named the rim by
+    /// the pipe and the ball instead, and the volume read back moved from
+    /// `2865724.56` to `2865939.99`. Four `f64`s down in `x` land on the
+    /// offset too, and there both faces hold the circle, the ball at `15.03`
+    /// units.
+    #[test]
+    fn a_dome_on_a_long_bar_turned_a_long_way_comes_back_with_its_rim_cut_from_its_plane() {
+        let axis = Axis::new(
+            Point::origin(),
+            Vector::new(
+                -0.018_298_610_974_051_055,
+                0.374_487_539_909_369_2,
+                -0.017_226_945_673_374_46,
+            ),
+        )
+        .expect("a direction with a length");
+        the_rim_comes_back_cut_from_its_plane(
+            (
+                16.000_000_000_000_007,
+                3_561.383_252_900_813,
+                29.695_524_847_710_807,
+            ),
+            Vector::new(0.0, -1.999_999_999_999_999_8, 4_095.999_999_999_999_5),
+            &Isometry::rotation(&axis, 2.972_547_828_691_298_3).expect("a finite turn"),
+            [-4, 0, 0],
+        );
+    }
+
+    /// A bar of radius just under one and length `480`, with a dome of radius
+    /// `1.84` on top, moved to just off `(512, −1, −4)` and turned by quarter
+    /// turns and a small wobble: the rim comes back cut from its own plane
+    /// (Q1792).
+    ///
+    /// **The walk landed ten `f64`s of `x` out**, with the circle `16.91` units
+    /// off the ball, and the reader named the rim by the pipe and the ball
+    /// instead. The nearest centre both faces hold is ten `f64`s up in `x` and
+    /// sixteen down in `z`, past the four each way that the walk of two
+    /// coordinates tries, and the ball holds the circle there at `15.96`
+    /// units.
+    #[test]
+    fn a_dome_on_a_long_bar_turned_a_little_comes_back_with_its_rim_cut_from_its_plane() {
+        the_rim_comes_back_cut_from_its_plane(
+            (
+                0.999_999_999_999_999_8,
+                479.722_701_923_535_57,
+                1.844_030_436_432_878_6,
+            ),
+            Vector::new(
+                511.999_999_999_999_94,
+                -0.999_999_999_999_999_8,
+                -4.000_000_000_000_002,
+            ),
+            &a_small_turn_then_quarter_turns(
+                Vector::new(
+                    -0.229_389_415_830_124_18,
+                    -0.324_935_301_137_225_35,
+                    0.004_735_058_071_504_095,
+                ),
+                0.001_509_429_458_854_325,
+                3.0,
+                1.0,
+            ),
+            [10, 0, -16],
+        );
+    }
+
+    /// A bar of radius `1/8` and length `1955`, with half a ball of the same
+    /// radius on top, moved to just off `(2048, 0, −64)` and turned
+    /// by quarter turns and a small wobble: it is read back, with the rim cut
+    /// from its own plane (Q1792).
+    ///
+    /// **Our own reader refused it.** The walk landed four `f64`s of `x` out,
+    /// with the circle `17.41` units off the ball, so the reader named the rim
+    /// by the pipe and the ball; and a ball of the bar's own radius only
+    /// touches the pipe there, so that names no curve, and the reader refused
+    /// the solid. A centre both faces hold is four `f64`s down in `x` and
+    /// three up in `z`, with the ball at `15.35` units.
+    #[test]
+    fn a_half_ball_on_a_long_thin_bar_placed_far_out_and_turned_is_read_back() {
+        the_rim_comes_back_cut_from_its_plane(
+            (0.125, 1_955.404_019_307_245_3, 0.125),
+            Vector::new(2_048.000_000_000_001, 0.0, -64.000_000_000_000_01),
+            &a_small_turn_then_quarter_turns(
+                Vector::new(
+                    0.309_067_010_740_284_86,
+                    -0.090_860_775_388_262_43,
+                    -0.313_017_443_317_269_2,
+                ),
+                3.785_505_033_375_922_5e-6,
+                1.0,
+                3.0,
+            ),
+            [-4, 0, 3],
+        );
+    }
+
+    /// Builds a bar with a dome on top ([`a_dome_on_a_bar`]), places it by
+    /// `place` after `turn`, writes it and reads it back, and asks that the
+    /// read solid is sound and that each use of the two halves of its rim is
+    /// cut from the plane the rim was built in, placed, bit for bit; and that
+    /// the rim was written centred `centred_out` `f64`s of `x`, `y` and `z`
+    /// from where that plane meets the bar's axis.
+    fn the_rim_comes_back_cut_from_its_plane(
+        (radius, length, dome_radius): (f64, f64, f64),
+        place: Vector,
+        turn: &Isometry,
+        centred_out: [i32; 3],
+    ) {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
+        let solid = a_dome_on_a_bar(&mut model, radius, length, dome_radius);
+        let moved = Isometry::translation(place)
+            .expect("a finite move")
+            .compose(turn);
+        model
+            .place_solid(solid, &moved)
+            .expect("the key came from this model");
+        let went_in = what_its_rim_is_cut_from(&model);
+        assert_eq!(went_in.len(), 4, "{went_in:?}");
+        assert!(
+            went_in.iter().all(|and| matches!(and, Surface::Plane(_))),
+            "{went_in:?}"
+        );
+        let text = write(&model, "a dome on a long bar").expect("the dome is written");
+        let file = StepFile::read(text.as_bytes()).expect("this writer's text parses");
+        let back = Import::read(&file, &policy, &mut log)
+            .unwrap_or_else(|why| panic!("the dome this writer wrote is refused: {why}"));
+        back.model()
+            .validate(&policy, &mut log)
+            .expect("the dome read back is sound");
+        assert_eq!(what_its_rim_is_cut_from(back.model()), went_in);
+
+        let Surface::Plane(cut) = went_in[0] else {
+            unreachable!("every half of the rim is cut from a plane, asked above");
+        };
+        let bar = model
+            .solids()
+            .next()
+            .expect("the model holds one solid")
+            .faces()
+            .find_map(|face| {
+                let Surface::Cylinder(bar) = face.surface() else {
+                    return None;
+                };
+                Some(bar)
+            })
+            .expect("the bar's skin is a pipe");
+        let on_the_axis = where_a_plane_crosses_a_pipe(&cut, &bar)
+            .expect("the rim's plane crosses the bar")
+            .centre
+            .coordinates();
+        let centre: [f64; 3] =
+            core::array::from_fn(|axis| stepped(on_the_axis[axis], centred_out[axis]));
+        assert!(
+            text.contains(&triple(centre)),
+            "the rim is not written centred at {centre:?}"
+        );
+    }
+
+    /// A bar of `radius` standing on the origin along `z`, `length` tall, with
+    /// a dome of `dome_radius` on top whose rim is the bar's top circle: a flat
+    /// foot, the bar's skin with one straight seam, and a ball's cap with no
+    /// pole on it. The rim is two halves, each cut from the plane `z = length`
+    /// and picked by a half-space through the rim's centre.
+    fn a_dome_on_a_bar(model: &mut Model, radius: f64, length: f64, dome_radius: f64) -> SolidKey {
+        let below_the_rim = ((dome_radius - radius) * (dome_radius + radius)).sqrt();
+        let top = Point::new(0.0, 0.0, length);
+        let half_of_the_rim = |facing: Vector| EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(
+                Plane::from_point_and_normal(top, Vector::new(0.0, 0.0, 1.0))
+                    .expect("the z axis is a unit normal"),
+            ),
+            picked_by: [Picker::from(
+                HalfSpace::through_a_point_facing(top, facing).expect("a facing with a length"),
+            )]
+            .into(),
+        };
+        let mut builder = SolidBuilder::new();
+        let [foot, near, far] = [
+            Point::new(radius, 0.0, 0.0),
+            Point::new(radius, 0.0, length),
+            Point::new(-radius, 0.0, length),
+        ]
+        .map(|at| builder.add_vertex(at).expect("a corner"));
+        let [round_the_foot, up_the_seam, rim_in_front, rim_behind] = [
+            (foot, foot, EdgeRun::RightRoundWhereItsFacesCross),
+            (foot, near, EdgeRun::Straight),
+            (near, far, half_of_the_rim(Vector::new(0.0, 1.0, 0.0))),
+            (far, near, half_of_the_rim(Vector::new(0.0, -1.0, 0.0))),
+        ]
+        .map(|(from, to, run)| builder.add_edge(from, to, run).expect("an edge"));
+        let [
+            under,
+            round_the_bar,
+            up,
+            behind_backwards,
+            in_front_backwards,
+            down,
+            in_front,
+            behind,
+        ] = [
+            (round_the_foot, Orientation::Reversed),
+            (round_the_foot, Orientation::Forward),
+            (up_the_seam, Orientation::Forward),
+            (rim_behind, Orientation::Reversed),
+            (rim_in_front, Orientation::Reversed),
+            (up_the_seam, Orientation::Reversed),
+            (rim_in_front, Orientation::Forward),
+            (rim_behind, Orientation::Forward),
+        ]
+        .map(|(edge, way)| DraftStep::Along(builder.add_coedge(edge, way).expect("a coedge")));
+        let foot_wire = builder.add_wire(&[under]).expect("a wire");
+        let bar_wire = builder
+            .add_wire(&[
+                round_the_bar,
+                up,
+                behind_backwards,
+                in_front_backwards,
+                down,
+            ])
+            .expect("a wire");
+        let dome_wire = builder.add_wire(&[in_front, behind]).expect("a wire");
+        let skin = [
+            (
+                Surface::Plane(
+                    Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                        .expect("the z axis is a unit normal"),
+                ),
+                foot_wire,
+            ),
+            (
+                Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius")),
+                bar_wire,
+            ),
+            (
+                Surface::Sphere(
+                    Sphere::new(Point::new(0.0, 0.0, length - below_the_rim), dome_radius)
+                        .expect("a radius"),
+                ),
+                dome_wire,
+            ),
+        ]
+        .map(|(surface, wire)| {
+            (
+                builder.add_face(surface, &[wire]).expect("a face"),
+                Orientation::Forward,
+            )
+        });
+        builder.add_shell(&skin).expect("a shell");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a sound dome on a bar")
+    }
+
+    /// What each use of an edge cut from a surface is cut from, face by face,
+    /// in the model's one solid.
+    fn what_its_rim_is_cut_from(model: &Model) -> Vec<Surface> {
+        model
+            .solids()
+            .next()
+            .expect("the model holds one solid")
+            .faces()
+            .flat_map(|face| face.wires().flat_map(WireView::coedges).collect::<Vec<_>>())
+            .filter_map(|coedge| {
+                let EdgeRun::PartOfWhereItCrosses { and, .. } = coedge.edge().run() else {
+                    return None;
+                };
+                Some(and)
+            })
+            .collect()
+    }
+
+    /// A turn of `small` about `direction`, after `about_z` quarter turns about
+    /// `z` that follow `about_x` about `x`.
+    fn a_small_turn_then_quarter_turns(
+        direction: Vector,
+        small: f64,
+        about_z: f64,
+        about_x: f64,
+    ) -> Isometry {
+        let quarter = |axis: Axis, times: f64| {
+            Isometry::rotation(&axis, times * FRAC_PI_2).expect("a finite turn")
+        };
+        Isometry::rotation(
+            &Axis::new(Point::origin(), direction).expect("a direction with a length"),
+            small,
+        )
+        .expect("a finite turn")
+        .compose(&quarter(Axis::z(), about_z).compose(&quarter(Axis::x(), about_x)))
     }
 
     fn the_plane_its_seam_is_cut_from(model: &Model) -> Plane {
