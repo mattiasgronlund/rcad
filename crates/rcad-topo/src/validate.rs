@@ -6879,4 +6879,111 @@ mod tests {
         }
         assert!(outside.is_empty(), "{outside:#?}");
     }
+
+    /// Row Q1849. A cap of a ball of radius 13 cut off one high by the plane
+    /// `x = 0`, its rim of radius 5 written as three arcs between `(0, 3, 4)`,
+    /// `(0, 3, −4)` and `(0, −5, 0)`, as a file that splits a circle into arcs
+    /// writes it. It holds `39.68`.
+    ///
+    /// Each arc spans under half a turn and so is walked in two steps, and the
+    /// cap spans under a quarter turn of the ball and so is handed over whole:
+    /// its coarsest mesh is the rim's six points and nothing else, flat, and
+    /// the lid across the rim is drawn through the same six. At no placement
+    /// that encloses exactly `0`, a finer mesh is asked for, and the cap
+    /// validates. Turned `1/40` of a turn about `(3, −1, 2)` the six points
+    /// land a rounding off one plane, the flat mesh encloses `−1.4e-15`, and
+    /// that was read as the cap's volume and refused
+    /// [`Invalid::VolumeIsNotPositive`].
+    #[test]
+    fn a_cap_whose_rim_is_three_arcs_validates_turned_off_the_axes() {
+        let mut model = an_empty_model();
+        let cap = a_cap_whose_rim_is_three_arcs(&mut model);
+        a_clean_sweep(&model);
+        model
+            .place_solid(
+                cap,
+                &Isometry::rotation(
+                    &rcad_geom::Axis::new(Point::origin(), Vector::new(3.0, -1.0, 2.0))
+                        .expect("a direction with length"),
+                    core::f64::consts::TAU / 40.0,
+                )
+                .expect("a finite turn"),
+            )
+            .expect("this model made the key");
+        a_clean_sweep(&model);
+    }
+
+    /// The cap [`a_cap_whose_rim_is_three_arcs_validates_turned_off_the_axes`]
+    /// builds: every corner is exact, since `5² + 12² = 13²` and `3² + 4² = 5²`,
+    /// and each arc is picked by the planes through the rim's centre and its
+    /// two ends.
+    fn a_cap_whose_rim_is_three_arcs(model: &mut Model) -> crate::SolidKey {
+        let (radius, behind) = (13.0, 12.0);
+        let cuts = [(3.0, 4.0), (3.0, -4.0), (-5.0, 0.0)];
+        a_cap_with_its_rim_in_arcs(model, radius, behind, &cuts)
+            .expect("a cap of a ball is a solid")
+    }
+
+    /// A cap of a ball of `radius` centred `behind` the plane `x = 0`, on the
+    /// far side of it, its rim cut into arcs at `cuts`, each a `(y, z)` on the
+    /// rim, going round from `+z` towards `+y`. Each arc spans under half a
+    /// turn.
+    fn a_cap_with_its_rim_in_arcs(
+        model: &mut Model,
+        radius: f64,
+        behind: f64,
+        cuts: &[(f64, f64)],
+    ) -> crate::Result<crate::SolidKey> {
+        let lid = Plane::from_point_and_normal(Point::origin(), Vector::new(-1.0, 0.0, 0.0))?;
+        let mut builder = SolidBuilder::new();
+        let corners: Vec<_> = cuts
+            .iter()
+            .map(|&(y, z)| builder.add_vertex(Point::new(0.0, y, z)).expect("a point"))
+            .collect();
+        let mut edges = Vec::new();
+        for (at, &(y, z)) in cuts.iter().enumerate() {
+            let (ny, nz) = cuts[(at + 1) % cuts.len()];
+            let mut picked_by: SmallVec<[Picker; 1]> = SmallVec::new();
+            picked_by.push(Picker::from(HalfSpace::through_a_point_facing(
+                Point::origin(),
+                Vector::new(0.0, z, -y),
+            )?));
+            if cuts.len() > 2 {
+                picked_by.push(Picker::from(HalfSpace::through_a_point_facing(
+                    Point::origin(),
+                    Vector::new(0.0, -nz, ny),
+                )?));
+            }
+            let run = EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(lid),
+                picked_by,
+            };
+            edges.push(builder.add_edge(corners[at], corners[(at + 1) % cuts.len()], run)?);
+        }
+        let lid_steps: Vec<_> = edges
+            .iter()
+            .map(|&edge| {
+                DraftStep::Along(builder.add_coedge(edge, Orientation::Forward).expect("e"))
+            })
+            .collect();
+        let skin_steps: Vec<_> = edges
+            .iter()
+            .rev()
+            .map(|&edge| {
+                DraftStep::Along(builder.add_coedge(edge, Orientation::Reversed).expect("e"))
+            })
+            .collect();
+        let lid_wire = builder.add_wire(&lid_steps)?;
+        let skin_wire = builder.add_wire(&skin_steps)?;
+        let skin = builder.add_face(
+            Surface::Sphere(Sphere::new(Point::new(-behind, 0.0, 0.0), radius)?),
+            &[skin_wire],
+        )?;
+        let lid_face = builder.add_face(Surface::Plane(lid), &[lid_wire])?;
+        builder.add_shell(&[
+            (skin, Orientation::Forward),
+            (lid_face, Orientation::Forward),
+        ])?;
+        builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+    }
 }
