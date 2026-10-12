@@ -18,7 +18,7 @@
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Surface};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale};
 use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Containment, Model, Rule, SolidKey};
 
@@ -89,14 +89,18 @@ fn a_point_past_a_bends_cap_is_outside_it_and_one_in_its_tube_is_inside() {
 }
 
 /// A box that no face of the solid meets is answered, and so is an exact point
-/// whose ray has no exact step; a box on the solid's own wall is still
-/// refused.
+/// whose ray has no exact step; a box on the solid's own wall is not, and is
+/// `Undecidable`.
 ///
 /// The first two are the very points the fuse offered: the middle of the tube
 /// at the turned bend's first cap, which is where a ring crossing that cap's
 /// plane was worked out, and a point on the shared torus a fifth of the way
 /// round the first bend's wall. The third is a box on the first bend's own
-/// wall — it meets the wall, so no one point beside it can speak for it.
+/// wall — it meets the wall, so no one point beside it can speak for it, and
+/// the ring's own sign cannot place it, so the ring grazes every ray from it
+/// before any is fired, as a ball's wall grazes a box on it. Until Q1763 it
+/// was refused `CannotFireARayAtAFacesSurface`, naming the wall
+/// (`docs/decisions.md` §323.3).
 #[test]
 fn a_box_no_face_meets_is_answered_and_one_on_the_wall_is_not() {
     let policy = Policy::certified();
@@ -126,17 +130,9 @@ fn a_box_no_face_meets_is_answered_and_one_on_the_wall_is_not() {
 
     let placed =
         bend.classify_uncertain_point(a_fifth_of_the_way_round, &policy, &mut ProvenanceLog::new());
-    let Containment::CannotFireARayAtAFacesSurface { face } = placed else {
-        panic!("a box on the bend's own wall: {placed:?}");
-    };
-    let surface = bend
-        .faces()
-        .find(|each| each.key() == face)
-        .expect("the ray names a face of the solid it was fired at")
-        .surface();
     assert!(
-        matches!(surface, Surface::Torus(_)),
-        "the face the ray cannot be fired at: {surface:?}"
+        matches!(placed, Containment::Undecidable { .. }),
+        "a box on the bend's own wall: {placed:?}"
     );
 }
 
