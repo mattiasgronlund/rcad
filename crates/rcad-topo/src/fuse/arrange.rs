@@ -7968,7 +7968,10 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// place on it. Two of the three may be **the start**, and then "the same place"
 /// is not what it means: a point at the start comes first, by definition of
 /// where the counting begins. Reading that as "these are one point" would fold
-/// every node of the crossing into the start.
+/// every node of the crossing into the start. On the one loop a ball off a
+/// pipe's axis crosses it in, which `rcad-geom` orders by angle round a line,
+/// a point at the start's own angle already comes first there, and
+/// [`Decision::Zero`] means only that `one` and `other` are one place on it.
 ///
 /// **The start is recognised as either of the two things it is held as**: the
 /// walked triple, and the node a crossing is given there, which is a box round
@@ -8097,16 +8100,41 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// The crossing runs along `∇S × ∇T` and turns to one side of that line, the
 /// side [`which_comes_first_round_a_crossing`] winds to. From a start on the
 /// crossing every other point of it lies on that side, since a conic is
-/// convex, and so is the shadow of a loop seen down the axis it winds about.
-/// From a start a rounding inside it, a short stretch round the place it was
-/// rounded off lies on the other side, and that place is where the counting
-/// begins. So the sweep from the start, a step along the run and `place`, read
-/// as [`Decision::Neg`], says `place` is on that stretch, and a step from the
-/// start square to the run says it is the point of the stretch straight out
-/// from the start. A start on the crossing reads `false` for every place.
+/// convex, and so is the shadow of a loop seen down the axis it winds about:
+/// either of the two loops a ball or a fat pipe crosses a pipe it swallows
+/// whole in. From a start a rounding inside it, a short stretch round the
+/// place it was rounded off lies on the other side, and that place is where
+/// the counting begins. So the sweep from the start, a step along the run and
+/// `place`, read as [`Decision::Neg`], says `place` is on that stretch, and a
+/// step from the start square to the run says it is the point of the stretch
+/// straight out from the start. A start on a conic, or on either of those
+/// loops, reads `false` for every place.
 ///
 /// Every other point of that stretch, a hair ahead of the place or behind it,
 /// reads `false` and is left to the sweep.
+///
+/// **The one loop a ball off a pipe's axis crosses it in has no such side.**
+/// `rcad-geom` orders it by angle round the line through the ball's centre
+/// square to the pipe's axis, so there [`Decision::Neg`] says only that
+/// `place` comes before `start + runs`, going round that line from the start's
+/// own angle, with a point at that angle first. Where the walk rounded the
+/// start off the loop, the place it was rounded off lies a hair to one side of
+/// the start's angle or the other: at that angle or past it, the place reads
+/// `true` and comes first; short of it, it reads `false` and is left to the
+/// sweep, which on this loop is the angle. A place whose box straddles the
+/// start's angle reads `false` too.
+///
+/// The window from the start's angle to that of `start + runs` is not a hair
+/// wide: `runs` grows with the square of the shape's size. A probe of the loop's
+/// geometry alone, not of this code, found loop points square to the run from
+/// a start on the loop that lie inside it: a pipe of radius 4 and a ball of
+/// radius 4.4 centred 0.8 off its axis is one such shape. Such a place is read
+/// only where `(place − start) · runs` comes out exactly zero, since an
+/// interval's sign is [`Decision::Zero`] only for `[0, 0]`. A start on the
+/// plane through the pipe's axis and the ball's centre, or on the plane
+/// through the centre square to the axis, has its one other such point half a
+/// turn round, outside the window, and reads `false`. A start on the loop
+/// anywhere else has not been shown to read `false` for every place.
 ///
 /// # Errors
 ///
@@ -8724,11 +8752,13 @@ fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
 /// a thin one in or a ball crosses a pipe in, or the one loop a ball off a
 /// pipe's axis or two pipes cross in. That is a **gap**: the curve is there and
 /// ordering points along it takes the marcher rather than a determinant
-/// (§34.10). Both kinds of one loop pass here and are put in order only by the
-/// name of where the walk starts on them: two places on one neither of which is
-/// the start are refused later, by `rcad-geom`, as
+/// (§34.10). Both kinds of one loop pass here. `rcad-geom` puts places on the
+/// ball's in order by how far round the line through its centre square to the
+/// pipe's axis each one is (Q1767). Two pipes' one loop is put in order only
+/// by the name of where the walk starts on it: two places on it neither of
+/// which is the start are refused later, by `rcad-geom`, as
 /// [`TheseTwoSurfacesDoNotCrossInAConic`](rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic)
-/// (Q1661, Q1685).
+/// (Q1685, Q1857).
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when the shape of the
 /// crossing itself cannot be told — two pipes whose axes cannot be shown to run
@@ -8806,14 +8836,16 @@ fn how_a_crossing_runs(
     // they wind (§34.5). A quartic is ordered by one only where it runs once
     // round an axis, so that looked at down the axis it is a circle: the two
     // loops a fat pipe crosses a thin one in, and the two a ball crosses a pipe
-    // in. The one loop a ball reaching into a pipe's side leaves closes too, and
-    // so does the one a thin pipe reaching out of a fat one's side leaves, so
-    // *finding a place to start* on a quartic says nothing about being able to
-    // order it, and reading the two as the same question is what gave a ball
-    // with a pipe through it four pieces where it has three. Each of those
-    // loops is let through all the same, to be drawn and ordered by the start's
-    // name alone, since every other order on it is asked of `rcad-geom` and
-    // refused there by name (Q1661, Q1685).
+    // in. The one loop a ball reaching into a pipe's side leaves runs once round
+    // a line instead, through the ball's centre square to the pipe's axis, and
+    // `rcad-geom` orders it by how far round that line each point is (Q1767).
+    // The one loop a thin pipe reaching out of a fat one's side leaves closes
+    // too, so *finding a place to start* on a quartic says nothing about being
+    // able to order it, and reading the two as the same question is what gave
+    // a ball with a pipe through it four pieces where it has three. That loop
+    // is let through all the same, to be drawn and ordered by the start's name
+    // alone, since every other order on it is asked of `rcad-geom` and refused
+    // there by name (Q1685).
     if let EdgeRun::RightRoundWhereItCrosses {
         and: level @ Surface::Plane(_),
     } = run.run()
@@ -9261,20 +9293,24 @@ fn one_of_two_loops_round_a_pipe_through_a_ball(
 /// crosses it in, where the ball reaches into the pipe's side rather than
 /// swallowing its whole cross-section.
 ///
-/// **Drawn, and put in order only by name.** The loop runs back and forth round
-/// the pipe's axis, so no determinant orders three points on it, and
-/// [`which_comes_first_round_a_crossing`] refuses to, by name,
-/// [`TheseTwoSurfacesDoNotCrossInAConic`](rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic),
-/// after asking again, exactly, whether the ball swallows the pipe. What it is
-/// never asked is the order of two places one of which is the walk's start:
-/// [`round_a_closed_crossing_and_what_it_measures`] reads that off the start's
-/// name. A loop cut nowhere, or only at its start, has nothing to order. So a
-/// bar whose seam runs through the loop where the walk starts on it gets past
-/// the order, and a loop cut twice away from its start is refused by name and
-/// never ordered wrongly (Q1661). Past the order is the cells' question: the
-/// ball of radius 3 in the side of a bar of 2 answers every rule, and a ball of
-/// a quarter of the bar's radius on its seam, beside a slab that cuts the pipe
-/// in four lines, is refused telling the pipe's cells apart.
+/// **Drawn, and put in order round a line.** The loop runs back and forth round
+/// the pipe's axis, so no determinant reads three points on it down that axis.
+/// It runs once round the line through the ball's centre square to the axis,
+/// and [`which_comes_first_round_a_crossing`] puts places on it in order by how
+/// far round that line each one is (Q1767), after asking again, exactly,
+/// whether the ball swallows the pipe and whether the ball's equator square to
+/// the axis crosses the pipe's circle. The order of two places one of which is
+/// the walk's start is read off the start's name by
+/// [`round_a_closed_crossing_and_what_it_measures`]. A loop cut twice away from
+/// its start was refused by name until Q1767,
+/// [`TheseTwoSurfacesDoNotCrossInAConic`](rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic);
+/// now a wall through the loop a ball of radius 3 in the side of a bar of 2
+/// crosses it in answers every rule
+/// (`tests/two_arcs_where_two_curved_surfaces_cross.rs`). Past the order is the
+/// cells' question: the same ball with the bar's seam through the loop answers
+/// every rule, and a ball of a quarter of the bar's radius on its seam, beside
+/// a slab that cuts the pipe in four lines, is refused telling the pipe's cells
+/// apart.
 ///
 /// The placement is asked here and not left to
 /// [`a_pair_that_crosses_in_a_conic`] answering first: a ball centred on the
@@ -9298,8 +9334,8 @@ fn the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in(
 /// out of a fat one's side rather than the fat one swallowing its whole
 /// cross-section.
 ///
-/// **Drawn, and put in order only by name**, as the ball's one loop is
-/// ([`the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in`]). Looked at down
+/// **Drawn, and put in order only by name**, as the ball's one loop was until
+/// Q1767 ([`the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in`]). Looked at down
 /// either axis the loop runs out along an arc of that pipe's circle and back,
 /// so no determinant orders three points on it, and
 /// [`which_comes_first_round_a_crossing`] refuses to, by name,
@@ -10022,8 +10058,8 @@ fn along_a_bend(
 /// round the pipe's axis, and the ordering reads it down that axis. A ball off
 /// the axis whose crossing is one loop is the whole of the crossing, and
 /// [`the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in`] lets that through
-/// beside this too, to be drawn and put in order only by the name of where it
-/// starts (Q1661).
+/// beside this too (Q1661), and the ordering reads it round the line through
+/// the ball's centre square to the axis (Q1767).
 ///
 /// A ball inscribed in the pipe touches it round one circle rather than
 /// crossing it, and passes this gate as well. Nothing orders along a touch:

@@ -19,12 +19,17 @@
 //! leaves too, and the mesh the fuse checks its answer with cuts it since
 //! Q1590.
 //!
-//! The rest of what a ball and a pipe cross in does not reach that function
-//! with two corners on one curve. A wall or a cap through a loop off the axis
-//! has its corners placed where the three surfaces meet since Q1591, and then
-//! the one loop a ball reaching into a bar's side leaves is refused before its
-//! arcs are named: since Q1661 by `rcad-geom`, putting the two corners in order
-//! round the loop, where with only the bar's seam through it every rule answers
+//! A wall or a cap through a loop off the axis has its corners placed where
+//! the three surfaces meet since Q1591. The one loop a ball reaching into a
+//! bar's side leaves was then refused before its arcs were named, from Q1661
+//! by `rcad-geom` putting the two corners in order round the loop. It puts
+//! them in order since Q1767, by their angle round the line through the
+//! ball's centre square to the bar's axis, and the loop reaches that function
+//! between two corners: a wall through it answers every rule, a cap at `z = 4`
+//! every rule, and a cap at `z = 6` every rule but one, which the mesh the
+//! fuse checks its answer with refuses. A cap through the ball's centre is
+//! refused one step past the order, for want of a point inside a piece of a
+//! face. With only the bar's seam through the loop every rule answers
 //! (`two_curves_of_one_pair_that_meet.rs`). The circle a ball touches its bar
 //! round is refused before its arcs are named.
 //!
@@ -40,9 +45,10 @@
 //! crosses a loop twice, sent no side of two pipes to that function between
 //! two corners when run with a print in it before Q1643. The one loop a thin
 //! bar reaching out of a fat one's side leaves, cut by a wall through the loop,
-//! does not reach it: it is refused before its arcs are named, as the ball's
-//! one loop is, since Q1685 by `rcad-geom` when asked to put the two corners in
-//! order round it, and by `fuse/arrange.rs` before that (Q1683). Whole, the
+//! does not reach it: it is refused before its arcs are named, since Q1685 by
+//! `rcad-geom` when asked to put the two corners in order round it, and by
+//! `fuse/arrange.rs` before that (Q1683). `rcad-geom` puts the ball's one loop
+//! in order since Q1767, and two pipes' one loop not yet. Whole, the
 //! thin bar answers both intersections and the fat bar less it, and the rules
 //! that keep its skin outside the fat bar are refused by the mesh the fuse
 //! checks its answer with.
@@ -53,7 +59,7 @@
 use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 /// What the half of the ball and the bar below share: the ball of radius 5
@@ -298,71 +304,150 @@ fn a_ball_a_bar_holds_round_one_circle_is_refused_where_a_wall_crosses_it() {
     }
 }
 
-/// The ball of radius 3 at `(0, 3, 5)` reaches into the side of a bar of
-/// radius 2 up `z`, and the two cross in one loop. Three planes put two corners
-/// on it: the bar's cap `z = 5` where the bar runs from `z = −1` to `z = 5`,
-/// at `(±4√2/3, 2/3, 5)`; and the wall `x = 0` through the bar's axis and the
-/// ball's centre, at `(0, 2, 5 ± 2√2)`, with the bar to `z = 11` cut to `x ≥ 0`
+/// The ball of radius 3 at `(0, 3, 5)`, `36π`, reaches into the side of a bar
+/// of radius 2 up `z`, and the two cross in one loop. The wall `x = 0` through
+/// the bar's axis and the ball's centre puts two corners on it, at
+/// `(0, 2, 5 ± 2√2)`: the bar from `z = −1` to `z = 11`, `48π`, cut to `x ≥ 0`
 /// against the whole ball, or the ball cut to `x ≥ 0` against the whole bar.
 ///
 /// Until Q1591 each was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`,
-/// before the fuse had a corner. `rcad-geom`'s `three_surfaces.rs` places those
+/// before the fuse had a corner; `rcad-geom`'s `three_surfaces.rs` places those
 /// corners now. Until Q1661 every rule both ways round was then refused
 /// `ACrossingThisCannotBeOrderedAlong` by `fuse/arrange.rs`'s
 /// `how_a_crossing_runs`, which ordered the two loops a ball crosses a pipe it
-/// holds in and not the one a ball reaching into a pipe's side leaves.
+/// holds in and not the one a ball reaching into a pipe's side leaves. That
+/// gate let the one loop through, and until Q1767 every rule was refused one
+/// step on, `TheseTwoSurfacesDoNotCrossInAConic`, as `rcad-geom` declined to
+/// say which of two places comes first round the loop. It orders them now, by
+/// their angle round the line through the ball's centre square to the bar's
+/// axis.
 ///
-/// That gate lets the one loop through now, to be put in order only by the
-/// name of where the walk starts on it, and every rule both ways round is
-/// refused one step further on, by name, out of `rcad-geom`:
-/// `TheseTwoSurfacesDoNotCrossInAConic`, as `rcad-geom` declines to say which
-/// of two places comes first round the loop. The floor's two corners on the
-/// loop of a ball driven into a bar are refused the same way
-/// (`a_ball_driven_into_the_bar_is_refused_ordering_the_loop_they_cross_in` in
-/// `a_ball_and_a_bar_in_one_block.rs`), and Q1767 takes both. So no arc of
-/// this loop reaches `which_arc_of_a_circle_this_is` yet.
+/// **Every rule answers.** The wall halves the `S` the ball and the bar share,
+/// [`what_the_ball_shares_with_the_bar_below`] its north pole, so the half bar
+/// and the ball give a union of `60π − S/2`, an intersection of `S/2`, the half
+/// bar less the ball `24π − S/2` and the ball less the half bar `36π − S/2`;
+/// the bar and the half ball give `66π − S/2`, `S/2`, `48π − S/2` and
+/// `18π − S/2`.
 #[test]
-fn a_plane_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_is_refused_ordering_the_loop() {
-    let pairs: [fn(&mut Model) -> [SolidKey; 2]; 3] = [
+fn a_wall_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_every_rule() {
+    let pairs: [fn(&mut Model) -> [SolidKey; 2]; 2] = [
         |model| {
-            let rod = model
-                .add_round_bar(2.0, 6.0, &at(0.0, 0.0, -1.0))
-                .expect("a bar of radius two");
-            [
-                rod,
-                model.add_ball(3.0, &at(0.0, 3.0, 5.0)).expect("a ball"),
-            ]
-        },
-        |model| {
-            let rod = model
-                .add_round_bar(2.0, 12.0, &at(0.0, 0.0, -1.0))
-                .expect("a bar of radius two");
+            let rod = bar_of_radius_two_up_to(model, 11.0);
             [
                 cut(model, rod, [0.0, -20.0, -20.0], [20.0, 20.0, 20.0]),
-                model.add_ball(3.0, &at(0.0, 3.0, 5.0)).expect("a ball"),
+                ball_in_the_bars_side(model),
             ]
         },
         |model| {
-            let rod = model
-                .add_round_bar(2.0, 12.0, &at(0.0, 0.0, -1.0))
-                .expect("a bar of radius two");
-            let ball = model.add_ball(3.0, &at(0.0, 3.0, 5.0)).expect("a ball");
+            let rod = bar_of_radius_two_up_to(model, 11.0);
+            let ball = ball_in_the_bars_side(model);
             [
                 rod,
                 cut(model, ball, [0.0, -20.0, -20.0], [20.0, 20.0, 20.0]),
             ]
         },
     ];
-    for pair in pairs {
+    let half = what_the_ball_shares_with_the_bar_below(3.0) / 2.0;
+    use Gives::Holds;
+    let wanted = [
+        [
+            Holds(60.0 * PI - half),
+            Holds(60.0 * PI - half),
+            Holds(half),
+            Holds(half),
+            Holds(24.0 * PI - half),
+            Holds(36.0 * PI - half),
+        ],
+        [
+            Holds(66.0 * PI - half),
+            Holds(66.0 * PI - half),
+            Holds(half),
+            Holds(half),
+            Holds(48.0 * PI - half),
+            Holds(18.0 * PI - half),
+        ],
+    ];
+    for (pair, wanted) in pairs.into_iter().zip(wanted) {
         let gives = what_each_rule_gives(pair);
         assert!(
-            gives.iter().all(|answer| matches!(
-                answer,
-                Err(Error::Geometry(
-                    rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic
-                ))
-            )),
+            gives
+                .iter()
+                .zip(&wanted)
+                .all(|(answer, wanted)| wanted.is(answer)),
             "{gives:?}"
+        );
+    }
+}
+
+/// The same ball against the bar of radius 2 from `z = −1` up to a cap at
+/// `z = 4`, `5` or `6`, `20π`, `24π` or `28π`. The cap puts two corners on the
+/// loop, where it crosses the circle the cap cuts the ball in. At `z = 5`,
+/// through the ball's centre, they are `(±4√2/3, 2/3, 5)`, where the loop turns
+/// back round the bar's axis.
+///
+/// Each was refused as the walls above were until Q1767. Now, against what the
+/// ball shares with the bar below the cap, **the cap at `z = 4` answers every
+/// rule**, and **the cap at `z = 6` every rule but the union ball first**,
+/// which the mesh the fuse checks its answer with refuses `CannotMeshAFace`.
+///
+/// **The cap at `z = 5` is refused under every rule both ways**, one step past
+/// the order: `Undecidable`, for want of a point inside a piece of a face whose
+/// two corners are the cap's two on the loop, with nothing measured. The
+/// answers are there: by the halving the wall gives above, a union of
+/// `60π − S/2`, an intersection of `S/2`, the bar less the ball `24π − S/2` and
+/// the ball less the bar `36π − S/2`. The bar from `z = 5` up, and the long bar
+/// cut to `z ≤ 5` by a block, are refused the same way. Which piece it is has
+/// not been traced.
+#[test]
+fn a_cap_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_off_the_balls_middle_and_is_refused_through_it()
+ {
+    let capped_at = |top: f64| {
+        what_each_rule_gives(move |model| {
+            let rod = bar_of_radius_two_up_to(model, top);
+            [rod, ball_in_the_bars_side(model)]
+        })
+    };
+    let union_ball_first = 1;
+    for (top, bar, the_mesh_refuses_the_union_ball_first) in
+        [(4.0, 20.0 * PI, false), (6.0, 28.0 * PI, true)]
+    {
+        let shared = what_the_ball_shares_with_the_bar_below(top - 5.0);
+        let wanted = [
+            Gives::Holds(bar + 36.0 * PI - shared),
+            Gives::Holds(bar + 36.0 * PI - shared),
+            Gives::Holds(shared),
+            Gives::Holds(shared),
+            Gives::Holds(bar - shared),
+            Gives::Holds(36.0 * PI - shared),
+        ];
+        let gives = capped_at(top);
+        for (rule, (answer, wanted)) in gives.iter().zip(&wanted).enumerate() {
+            if the_mesh_refuses_the_union_ball_first && rule == union_ball_first {
+                assert!(
+                    matches!(answer, Err(Error::CannotMeshAFace { .. })),
+                    "cap at {top}: {gives:?}"
+                );
+            } else {
+                assert!(wanted.is(answer), "cap at {top}: {gives:?}");
+            }
+        }
+    }
+    let gives = capped_at(5.0);
+    for answer in &gives {
+        let Err(Error::Undecidable { records }) = answer else {
+            panic!("the cap at 5 is refused: {gives:?}");
+        };
+        assert!(
+            matches!(
+                records.records(),
+                [refused] if refused.predicate() == "a point inside a piece of a face"
+                    && refused.inputs().len() == 2
+                    && matches!(
+                        refused.outcome(),
+                        Decision::Undecidable { enclosure } if enclosure == f64::INFINITY
+                    )
+            ),
+            "{records:?}"
         );
     }
 }
@@ -489,8 +574,8 @@ fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_answers_every_rule() 
 /// name of where the walk starts on it, and **every rule both ways round is
 /// refused one step further on**, by name, out of `rcad-geom`:
 /// `TheseTwoSurfacesDoNotCrossInAConic`, as `rcad-geom` declines to say which
-/// of the two corners comes first round the loop, as it does for the ball's
-/// one loop above.
+/// of the two corners comes first round the loop. It says which for the
+/// ball's one loop above since Q1767.
 #[test]
 fn a_half_thin_bar_reaching_out_of_a_fat_ones_side_is_refused_ordering_the_one_loop_they_cross_in()
 {
@@ -594,6 +679,36 @@ fn thin_bar_out_of_a_fat_ones_side(model: &mut Model) -> SolidKey {
         .expect("a bar of radius one")
 }
 
+/// The bar of radius 2 up `z` from `z = −1` to a cap at `z = top`.
+fn bar_of_radius_two_up_to(model: &mut Model, top: f64) -> SolidKey {
+    model
+        .add_round_bar(2.0, top + 1.0, &at(0.0, 0.0, -1.0))
+        .expect("a bar of radius two")
+}
+
+/// The ball of radius 3 at `(0, 3, 5)`, which reaches into the side of
+/// [`bar_of_radius_two_up_to`].
+fn ball_in_the_bars_side(model: &mut Model) -> SolidKey {
+    model
+        .add_ball(3.0, &at(0.0, 3.0, 5.0))
+        .expect("a ball of radius three")
+}
+
+/// What [`ball_in_the_bars_side`] shares with the bar of radius 2 up `z` below
+/// `z = 5 + up`. At `z = 5 + t` the ball's section is a circle of radius
+/// `√(9 − t²)` whose centre is 3 from the bar's axis, and the two share
+/// [`what_two_circles_share`] of it.
+///
+/// Worked by Simpson's rule up from the ball's south pole. The whole of it,
+/// `up = 3`, is `19.82972688508…` in 200 000 steps; the 1000 steps here come
+/// to `19.8297254`.
+fn what_the_ball_shares_with_the_bar_below(up: f64) -> f64 {
+    by_simpsons_rule(3.0 + up, |above_the_pole| {
+        let t = above_the_pole - 3.0;
+        what_two_circles_share((9.0 - t * t).max(0.0).sqrt(), 2.0, 3.0)
+    })
+}
+
 /// `I = ∫ 2√(16 − y²)·√(1 − (y − 3.5)²) dy` from `y = 2.5` to `y = 4`, what
 /// [`thin_bar_out_of_a_fat_ones_side`] cut to `z ≥ 5` shares with the bar of
 /// radius 4 up `z`: at each `y` the section is `2√(16 − y²)` long along `x` and
@@ -624,6 +739,26 @@ fn by_simpsons_rule(to: f64, integrand: impl Fn(f64) -> f64) -> f64 {
         })
         .sum();
     (integrand(0.0) + inside + integrand(to)) * step / 3.0
+}
+
+/// The area two circles of radius `one` and `other`, with centres `apart`,
+/// share.
+fn what_two_circles_share(one: f64, other: f64, apart: f64) -> f64 {
+    if apart >= one + other {
+        return 0.0;
+    }
+    if apart <= (one - other).abs() {
+        return PI * one.min(other) * one.min(other);
+    }
+    let reach = |near: f64, far: f64| {
+        near * near * ((apart * apart + near * near - far * far) / (2.0 * apart * near)).acos()
+    };
+    let kite = ((-apart + one + other)
+        * (apart + one - other)
+        * (apart - one + other)
+        * (apart + one + other))
+        .sqrt();
+    reach(one, other) + reach(other, one) - kite / 2.0
 }
 
 /// `4∫₀¹ √((16 − y²)(1 − y²)) dy`, the part of the half bar of radius 1 above

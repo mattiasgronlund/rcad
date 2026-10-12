@@ -19,8 +19,8 @@
 //! the floor — the skip does not go through, the floor's two circles touch at
 //! that point, the corner is placed there, and they fuse into the same block.
 //! Where the ball is driven into the bar they cross in a loop the floor runs
-//! through, and putting the floor's two corners in order along that loop is
-//! refused by name.
+//! through, the floor's two corners are put in order along that loop, and they
+//! fuse into one block with the ball and the bar run together under its floor.
 //! Nothing here is compared against a size.
 //!
 //! # One pair at a time, the same block
@@ -318,32 +318,131 @@ fn a_floor_notched_by_a_second_bar_still_follows_the_two_touching_circles() {
     }
 }
 
-/// Where they overlap outright, the fuse refuses to put in order the points on
-/// the loop the ball and the bar cross in, by name.
+/// Where they overlap outright they fuse too, into one block with the ball's
+/// lower half and the bar's lower stub run together under its floor.
 ///
 /// The ball's centre is one and a half units from the bar's axis, so the two
 /// cross in one loop round the bar's wall near `x = 4`, and the floor runs
 /// through the ball's centre and so through that loop, putting two corners on
-/// it. Since Q1661 that loop is drawn, and put in order only where one of the
-/// two places compared is where the walk starts on it. Neither of the floor's
-/// two corners is, so which comes first round the loop is asked of
-/// `rcad-geom`, and `which_comes_first_round_a_crossing` refuses a ball that
-/// reaches into a pipe's side by name, as a pair that does not cross in a
-/// conic. The bar's own seam is at `x = 6`, on the far side; a bar whose seam
-/// runs through the loop is answered, in
+/// it. Since Q1661 that loop is drawn, and neither of the floor's two corners
+/// is where the walk starts on it, so which comes first round the loop is
+/// asked of `rcad-geom`. Since Q1767 `which_comes_first_round_a_crossing`
+/// answers by how far round the line through the ball's centre square to the
+/// bar's axis each corner is. The bar's own seam is at `x = 6`, on the far
+/// side; a bar whose seam runs through the loop is in
 /// `two_curves_of_one_pair_that_meet.rs`.
+///
+/// The faces are the eleven a ball clear of the bar makes: the loop cuts one
+/// arc out of the ball's lower half and one out of the bar's lower wall and
+/// leaves each one face. The volume is that answer's less the lower half of
+/// what the ball and the bar share, [`what_the_ball_and_the_bar_share`]. That
+/// half is `0.245`, less than the measure's own error, so the floor is asked
+/// too: its hole is both circles run together. `classify_point` refuses every
+/// point whose ray crosses the ball's lower half or the bar's lower wall,
+/// `CannotFollowAFacesTrimming`, since the loop trims both, so no point under
+/// the floor is asked.
 #[test]
-fn a_ball_driven_into_the_bar_is_refused_ordering_the_loop_they_cross_in() {
-    let (_, answer) = united_all_at_once(3.5);
+fn a_ball_driven_into_the_bar_fuses_into_one_block() {
+    let (model, answer) = united_all_at_once(3.5);
+    let solids = answer
+        .expect("a ball crossing the bar in a loop the floor runs through unites with the block");
+    let closed_form =
+        SIDE * SIDE * SIDE + 2.0 / 3.0 * PI * RADIUS * RADIUS * RADIUS + 4.0 * PI * RADIUS * RADIUS
+            - what_the_ball_and_the_bar_share(1.5) / 2.0;
+    let measured = it_is_one_solid_of_eleven_faces_measuring(&model, &solids, closed_form);
     assert!(
-        matches!(
-            answer,
-            Err(Error::Geometry(
-                rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic
-            ))
-        ),
-        "a ball crossing the bar in a loop the floor runs through: {answer:?}"
+        measured > SIDE * SIDE * SIDE + 4.0 * PI * RADIUS * RADIUS + 1.5,
+        "the ball's own half, less what the bar already holds of it, is in the answer: \
+         {measured}"
     );
+    let solid = model.solid(solids[0]).expect("this model made the key");
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let floor = solid
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface::Plane(flat)
+                if flat.coefficients() == [0.0, 0.0, -1.0, 0.0])
+        })
+        .expect("the block's floor is still one face")
+        .key();
+    for (at, held, what) in [
+        ([1.0, 1.0, 0.0], OnAFace::Held, "far from both circles"),
+        (
+            [3.0, 3.5, 0.0],
+            OnAFace::NotHeld,
+            "in the ball's circle alone",
+        ),
+        ([4.25, 3.5, 0.0], OnAFace::NotHeld, "in both circles"),
+        (
+            [5.5, 3.5, 0.0],
+            OnAFace::NotHeld,
+            "in the bar's circle alone",
+        ),
+        (
+            [3.5, 4.4, 0.0],
+            OnAFace::NotHeld,
+            "in the ball's circle, off the line between the two",
+        ),
+        (
+            [4.0, 4.4, 0.0],
+            OnAFace::Held,
+            "outside both, in the notch where the circles cross",
+        ),
+    ] {
+        assert_eq!(
+            solid
+                .face_holds_the_point(floor, PredicatePoint::Exact(at), &policy, &mut log)
+                .expect("the floor follows two arcs of circles that cross"),
+            held,
+            "the floor at {at:?}, {what}"
+        );
+    }
+}
+
+/// The volume a ball of [`RADIUS`] and a bar of the same radius share, with the
+/// ball's centre `off` from the bar's axis.
+///
+/// Worked by Simpson's rule over slices square to the bar, each the lens two
+/// circles share: the ball's slice, of radius `√(1 − z²)`, and the bar's, `off`
+/// apart. At `off = 1.5` that is `0.49071`, to five figures from a hundred
+/// slices to a hundred thousand.
+fn what_the_ball_and_the_bar_share(off: f64) -> f64 {
+    let slices = 2_000_u32;
+    let width = 2.0 * RADIUS / f64::from(slices);
+    let total: f64 = (0..=slices)
+        .map(|slice| {
+            let z = -RADIUS + width * f64::from(slice);
+            let weight = match slice {
+                0 => 1.0,
+                last if last == slices => 1.0,
+                odd if odd % 2 == 1 => 4.0,
+                _ => 2.0,
+            };
+            weight * what_two_circles_share((RADIUS * RADIUS - z * z).max(0.0).sqrt(), RADIUS, off)
+        })
+        .sum();
+    total * width / 3.0
+}
+
+/// The area two circles of radius `one` and `other`, with centres `apart`,
+/// share.
+fn what_two_circles_share(one: f64, other: f64, apart: f64) -> f64 {
+    if apart >= one + other {
+        return 0.0;
+    }
+    if apart <= (one - other).abs() {
+        return PI * one.min(other) * one.min(other);
+    }
+    let reach = |near: f64, far: f64| {
+        near * near * ((apart * apart + near * near - far * far) / (2.0 * apart * near)).acos()
+    };
+    let kite = ((-apart + one + other)
+        * (apart + one - other)
+        * (apart - one + other)
+        * (apart + one + other))
+        .sqrt();
+    reach(one, other) + reach(other, one) - kite / 2.0
 }
 
 /// The same three solids fused **one pair at a time** make the same block.
@@ -417,11 +516,33 @@ fn it_is_the_block_with_half_a_ball_and_two_stubs(model: &Model, solids: &[Solid
 /// = 2π/3`, and each stub is a bar of radius 1 two units long, `π · 1² · 2 =
 /// 2π`, so two of them are `4π`. That is `343 + 2π/3 + 4π = 357.661`.
 ///
-/// The volume is held to the closed form within the measure's own
-/// `volume_error` as well, which at [`A_DEFLECTION`] is about `0.61`: the
-/// smallest piece the answer could lose, the half ball's `2π/3 ≈ 2.09`, is
-/// more than three times that.
+/// The smallest piece the answer could lose, the half ball's `2π/3 ≈ 2.09`, is
+/// more than three times the measure's own error.
 fn it_measures_as_the_block_with_half_a_ball_and_two_stubs(model: &Model, solids: &[SolidKey]) {
+    let closed_form =
+        SIDE * SIDE * SIDE + 2.0 / 3.0 * PI * RADIUS * RADIUS * RADIUS + 4.0 * PI * RADIUS * RADIUS;
+    let measured = it_is_one_solid_of_eleven_faces_measuring(model, solids, closed_form);
+    // Leaving the ball's own half out would come to 355.57, which is 0.59% below
+    // the closed form and five times the width of the band above. The measured
+    // 357.59 is 0.019% below it. A count of faces and a volume within half a per
+    // cent are two different claims and this file makes both (§47.2).
+    assert!(
+        measured > SIDE * SIDE * SIDE + 4.0 * PI * RADIUS * RADIUS + 2.0,
+        "the ball's own half is in the answer and not merely a hole in the floor: \
+         {measured}"
+    );
+}
+
+/// The answer is one valid solid of eleven faces, six of the block, the ball's
+/// lower half, and the bar's wall and cap at each end, and its volume is
+/// `closed_form`: within the measure's own `volume_error`, which at
+/// [`A_DEFLECTION`] is about `0.61`, and under it by less than
+/// [`HOW_FAR_A_MESH_MAY_BE`]. Hands back the volume it measured.
+fn it_is_one_solid_of_eleven_faces_measuring(
+    model: &Model,
+    solids: &[SolidKey],
+    closed_form: f64,
+) -> f64 {
     assert_eq!(solids.len(), 1, "one block with two lumps on it");
 
     model
@@ -436,8 +557,6 @@ fn it_measures_as_the_block_with_half_a_ball_and_two_stubs(model: &Model, solids
          at each end"
     );
 
-    let closed_form =
-        SIDE * SIDE * SIDE + 2.0 / 3.0 * PI * RADIUS * RADIUS * RADIUS + 4.0 * PI * RADIUS * RADIUS;
     let measurement = solid
         .measure(
             Deflection::of(A_DEFLECTION).expect("a fiftieth of a millimetre is a length"),
@@ -457,13 +576,5 @@ fn it_measures_as_the_block_with_half_a_ball_and_two_stubs(model: &Model, solids
         "the answer is a block with half a ball and two bar stubs on it, and a \
          mesh inside a round skin under-measures it: {measured} against {closed_form}"
     );
-    // Leaving the ball's own half out would come to 355.57, which is 0.59% below
-    // the closed form and five times the width of the band above. The measured
-    // 357.59 is 0.019% below it. A count of faces and a volume within half a per
-    // cent are two different claims and this file makes both (§47.2).
-    assert!(
-        measured > SIDE * SIDE * SIDE + 4.0 * PI * RADIUS * RADIUS + 2.0,
-        "the ball's own half is in the answer and not merely a hole in the floor: \
-         {measured}"
-    );
+    measured
 }
