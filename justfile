@@ -9499,7 +9499,10 @@ check-gate-fresh-cleanup-selftest:
 # into `fuzz_corpus_root/<target>` with `-merge=1 -timeout=10` by the night's
 # own binary under `fuzz/target/x86_64-unknown-linux-gnu/release/`, into a copy
 # that replaces the corpus only once the merge exits 0. The merge keeps a file
-# only when it takes the code down a path no kept file takes (§434.2). A file
+# only when it takes the code down a path no kept file takes (§434.2). A morning
+# hands it at most `RCAD_FUZZ_FOLD_AT_MOST` (2000) of a target's passing files,
+# so the writer's first 68 013 fold over many mornings instead of running past
+# the service's four hours every morning (§434.7). A file
 # leaves this tree's `fuzz/artifacts/` only when the replay saw it pass and the
 # merge's control file says it was read to the end, so one the night's older
 # binary crashes on, or one that runs past ten seconds, stays for the next
@@ -9688,6 +9691,15 @@ fuzz-triage night="" against="main":
         echo "fold:     none — $fold_refusal"
         exit 0
     fi
+    # At most this many of a target's passing files a morning (§434.7). The
+    # writer's first fold is 68 013 files, merged at about 1.3 a second, and a
+    # merge the service's four hours cut off keeps nothing, so without a cap it
+    # would be killed every morning with nothing folded.
+    at_most=${RCAD_FUZZ_FOLD_AT_MOST:-2000}
+    if ! [[ $at_most =~ ^[1-9][0-9]*$ ]]; then
+        echo "fold:     none — RCAD_FUZZ_FOLD_AT_MOST is '$at_most', and a morning's cap is a whole number above 0"
+        exit 1
+    fi
 
     fold_scratch=$(mktemp -d)
     corpus_root='{{ fuzz_corpus_root }}'
@@ -9716,7 +9728,7 @@ fuzz-triage night="" against="main":
             echo "fold:     $target: none — there is no night binary at $binary, so all $passing passing file(s) stay"
             continue
         fi
-        xargs -d '\n' cp -t "$here/in" -- <"$here/passing"
+        head -n "$at_most" "$here/passing" | xargs -d '\n' cp -t "$here/in" --
         # A copy, swapped in only when the merge succeeded, as the reader's
         # nightly merge does (§295.7). The tracked `fuzz/corpus/<target>` is not
         # handed in, so a file is kept for a path only a tracked file takes.
@@ -10329,6 +10341,11 @@ check-fuzz-triage-selftest:
     put "$reader" 'the second of three, and it adds no path' >/dev/null
     put "$reader" 'the third of three, and it adds no path' >/dev/null
     a_night 2026-10-20 "$(git -C "$tree" rev-parse --short HEAD)"
+    if got=$(RCAD_FUZZ_FOLD_AT_MOST=0 fold); then
+        fail "a cap of 0 was taken, and a fold with nothing to merge would pass for a fold that ran"
+    fi
+    grep -q "^fold:     none — RCAD_FUZZ_FOLD_AT_MOST is '0'" <<<"$got" || fail "a cap of 0 was refused without saying so"
+    [ "$(find "$tree/fuzz/artifacts/$reader" -type f | grep -c .)" = 3 ] || fail "a refused cap still moved files"
     got=$(RCAD_FUZZ_FOLD_AT_MOST=2 fold) || fail "a fold past its cap made the triage itself fail"
     grep -q "^fold:     $reader: 3 passed, 2 folded (0 kept by the merge), 1 left for the next morning$" <<<"$got" \
         || fail "a morning handed the merge more passing files than RCAD_FUZZ_FOLD_AT_MOST, so the first fold would never end inside the service's four hours"
