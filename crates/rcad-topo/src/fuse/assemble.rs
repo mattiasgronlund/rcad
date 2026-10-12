@@ -7527,12 +7527,20 @@ type CurveName = ([[u64; 9]; 2], WhichCurveOfThePair);
 /// half ring's faces was refused `ResultIsNotManifold { count: 4 }`
 /// (`tests/a_half_ring_beside_a_bar_clear_of_it.rs`, Q1513).
 ///
-/// Only those pairs are told apart here. Other pairs that cross in more than
-/// one closed curve — two rings, a ball and a pipe, and a thin pipe through a
-/// fat one — are still named by their surfaces alone. No fuse of two rings
-/// reaches this name, because `intersect` refuses a part of it (§378.8).
-/// Whether a fuse of the last two can hand one loop's start to an input corner
-/// on the other, as the cone's did, has not been asked.
+/// **A ball and a pipe it swallows whole, and a thin pipe right through a fat
+/// one, cross in two loops**, one either side of a flat half-space: through the
+/// ball's centre square to the pipe's axis, or through the fat pipe's axis
+/// square to the thin one's. A bar of radius 3 through the centre of a ball of
+/// radius 5, ending there or running right through, and a bar of radius 1
+/// right through one of radius 4 had every answer that kept a face along both
+/// loops refused fused again with a cube far from it, `ResultIsNotManifold {
+/// count: 4 }` in every order, as the cone's was
+/// (`tests/two_loops_named_apart_across_a_far_cube.rs`, Q1394).
+///
+/// Only those pairs are told apart here. Two rings cross in more than one
+/// closed curve too and are still named by their surfaces alone; no fuse of
+/// two rings reaches this name, because `intersect` refuses a part of it
+/// (§378.8).
 ///
 /// **A plane is named at any scale** ([`name_of_the_plane_at_any_scale`]), as
 /// the arcs of these crossings are, because two turned faces can spell one
@@ -7568,17 +7576,21 @@ fn name_of_the_closed_crossing_through(
     ))
 }
 
-/// Which of the two circles its two surfaces cross in passes through `point`,
-/// for a plane and a ring and for a cone and a second cone, a pipe or a ball on
-/// its axis: what `intersect` picks that circle by, as `holds.rs` looks it up
+/// Which of the two closed curves its two surfaces cross in passes through
+/// `point`, for a plane and a ring, for a cone and a second cone, a pipe or a
+/// ball on its axis, and for a ball and a pipe or two pipes: what `intersect`
+/// picks that curve by, as `holds.rs` looks it up
 /// ([`the_picker_naming_the_circle_through`]), written out by
-/// [`which_curve_of_the_pair`]. A plane through a ring's axis and a cone's pair
-/// pick each circle by a flat half-space. A plane square to a ring's axis picks
-/// its outer circle by the outside of the pipe of the ring's own radius about
-/// the ring's own axis, and its inner circle by the inside (Q1513). `None` for
-/// any other pair of surfaces, and for a point that no one circle certainly
-/// keeps, which leaves the crossing named by its two surfaces alone, as it was
-/// before this was asked.
+/// [`which_curve_of_the_pair`]. A plane through a ring's axis, a cone's pair, a
+/// ball and a pipe it swallows whole, and a thin pipe through a fat one pick
+/// each curve by a flat half-space. A plane square to a ring's axis picks its
+/// outer circle by the outside of the pipe of the ring's own radius about the
+/// ring's own axis, and its inner circle by the inside (Q1513). `None` for any
+/// other pair of surfaces; for a pair that crosses in one closed curve, which
+/// nothing picks; for two pipes of one width, whose four half-ellipses are each
+/// picked by two half-spaces and so by no one picker; and for a point that no
+/// one curve certainly keeps. Each leaves the crossing named by its two
+/// surfaces alone, as it was before this was asked.
 ///
 /// **Every spelling of the two gives one circle the same four numbers, once
 /// each zero is turned the right way up.** The two faces along one circle can
@@ -7603,6 +7615,29 @@ fn name_of_the_closed_crossing_through(
 /// and `each_circle_round_a_cones_axis_is_one_name_however_the_two_are_spelled`
 /// ask every spelling.
 ///
+/// **So is a ball and a pipe's half-space, and two pipes'.** `intersect` hands
+/// a ball and a pipe to one function whichever comes first, and picks their
+/// two loops by the half-space through the ball's centre facing the pipe's
+/// axis direction and its reverse. The pipe's origin is never read, and the
+/// axis turned round negates the direction and so the offset, as above. For
+/// two pipes, which is the thin one and which the fat is a certified sign, the
+/// same in either order. The half-space runs through the fat pipe's origin,
+/// and its normal is whichever of the thin pipe's leaning direction
+/// `across = ŵ₁·‖ŵ₂‖² − ŵ₂·(ŵ₁·ŵ₂)` and the fat direction crossed with each
+/// coordinate axis is exactly square to the fat axis and lines up best with
+/// `across`, turned to lean towards it (`HalfSpace::through_a_point_square_to`).
+/// The thin axis turned round negates `across` exactly. How well a candidate
+/// lines up is read as an absolute value, so the same one wins and is turned
+/// the other way: the two loops swap half-spaces. The fat axis turned round
+/// leaves `across` alone and negates the three crossed candidates, so the same
+/// one wins and is turned the same way: one half-space. A pipe's origin slid
+/// along its axis is one name in [`name_of_the_surface_either_way_round`] only
+/// for an axis along a coordinate axis, and then a normal exactly square to
+/// that axis is zero along it, so the offset never reads the coordinate that
+/// slid.
+/// `each_loop_a_ball_swallowing_a_pipe_or_a_thin_pipe_through_a_fat_one_crosses_is_one_name_however_the_two_are_spelled`
+/// asks every spelling.
+///
 /// **A pipe picker is one name however the two are spelled.** The pipe is
 /// built from the ring alone, its axis and its ring radius, so the plane facing
 /// up or down never reaches it, and the ring's axis written either way round
@@ -7610,8 +7645,8 @@ fn name_of_the_closed_crossing_through(
 /// `each_circle_a_plane_square_to_a_rings_axis_cuts_is_one_name_however_the_two_are_spelled`
 /// asks every spelling.
 ///
-/// The two circles get two different names: two half-spaces, each picking its
-/// own circle and leaving the other out, or the outside and the inside of one
+/// The two curves get two different names: two half-spaces, each picking its
+/// own curve and leaving the other out, or the outside and the inside of one
 /// pipe, which [`which_curve_of_the_pair`] writes with two different numbers
 /// ahead of the pipe's.
 ///
@@ -7631,7 +7666,12 @@ fn which_of_the_pairs_closed_crossings_it_is(
             Surface::Cone(_),
             Surface::Cone(_) | Surface::Cylinder(_) | Surface::Sphere(_),
         ]
-        | [Surface::Cylinder(_) | Surface::Sphere(_), Surface::Cone(_)] => (),
+        | [Surface::Cylinder(_) | Surface::Sphere(_), Surface::Cone(_)]
+        | [Surface::Sphere(_), Surface::Cylinder(_)]
+        | [
+            Surface::Cylinder(_),
+            Surface::Sphere(_) | Surface::Cylinder(_),
+        ] => (),
         [_, _] => return Ok(None),
     }
     let Some(this_circle) =
@@ -8798,6 +8838,90 @@ mod tests {
                 one, other,
                 "the cone and {partner}: two circles named as one"
             );
+        }
+    }
+
+    /// The two loops a ball crosses a pipe it swallows whole in are two names,
+    /// and so are the two a thin pipe crosses a fat one in; each loop is one
+    /// name with every axis written either way round and every pipe's origin
+    /// slid along its axis, in either order (Q1394).
+    ///
+    /// The ball of radius `2.5` at `(0, 0, 1)` crosses the pipe of radius `1.5`
+    /// about `z` where `(z − 1)² = 4`, at `z = 3` and at `z = −1`. Moved to
+    /// `(0.5, 0, 1)`, off the pipe's axis, it still swallows the pipe whole, and
+    /// at `x = −1.5` it crosses where `(z − 1)² = 2.25`, at `z = 2.5` and at
+    /// `z = −0.5`. The pipe of radius one along `x` at `z = 5` crosses the pipe
+    /// of radius four about `z` in a loop either side of `x = 0`, through
+    /// `(4, 0, 6)` and `(−4, 0, 6)`.
+    #[test]
+    fn each_loop_a_ball_swallowing_a_pipe_or_a_thin_pipe_through_a_fat_one_crosses_is_one_name_however_the_two_are_spelled()
+     {
+        let pipes = |origins: [Point; 2], direction: Vector, radius: f64| -> Vec<Surface> {
+            origins
+                .into_iter()
+                .flat_map(|origin| {
+                    let axis = Axis::new(origin, direction).expect("a direction with length");
+                    [axis, axis.reversed()]
+                })
+                .map(|axis| {
+                    Surface::Cylinder(Cylinder::new(axis, radius).expect("a positive radius"))
+                })
+                .collect()
+        };
+        let up_z = Vector::new(0.0, 0.0, 1.0);
+        let ball_at = |x: f64| {
+            Surface::Sphere(
+                Sphere::new(Point::new(x, 0.0, 1.0), 2.5).expect("a ball of radius 2.5"),
+            )
+        };
+        let pairs = [
+            (
+                "a ball and a pipe on its centre",
+                vec![ball_at(0.0)],
+                pipes([Point::origin(), Point::new(0.0, 0.0, 7.0)], up_z, 1.5),
+                [[1.5, 0.0, 3.0], [1.5, 0.0, -1.0]],
+            ),
+            (
+                "a ball and a pipe off its centre",
+                vec![ball_at(0.5)],
+                pipes([Point::origin(), Point::new(0.0, 0.0, 7.0)], up_z, 1.5),
+                [[-1.5, 0.0, 2.5], [-1.5, 0.0, -0.5]],
+            ),
+            (
+                "a thin pipe and a fat one",
+                pipes(
+                    [Point::new(0.0, 0.0, 5.0), Point::new(-10.0, 0.0, 5.0)],
+                    Vector::new(1.0, 0.0, 0.0),
+                    1.0,
+                ),
+                pipes([Point::origin(), Point::new(0.0, 0.0, 5.0)], up_z, 4.0),
+                [[4.0, 0.0, 6.0], [-4.0, 0.0, 6.0]],
+            ),
+        ];
+        for (pair, ones, others, through) in pairs {
+            let names_through = |point: [f64; 3]| -> BTreeSet<_> {
+                let mut names = BTreeSet::new();
+                for &one in &ones {
+                    for &other in &others {
+                        for carried_by in [[one, other], [other, one]] {
+                            names.insert(
+                                name_of_the_closed_crossing_through(
+                                    &carried_by,
+                                    PredicatePoint::from(point),
+                                    &Policy::certified(),
+                                    &mut ProvenanceLog::new(),
+                                )
+                                .unwrap_or_else(|why| panic!("{pair} cross in two loops: {why:?}")),
+                            );
+                        }
+                    }
+                }
+                names
+            };
+            let [one, other] = through.map(names_through);
+            assert_eq!(one.len(), 1, "{pair}: {one:?}");
+            assert_eq!(other.len(), 1, "{pair}: {other:?}");
+            assert_ne!(one, other, "{pair}: two loops named as one");
         }
     }
 
