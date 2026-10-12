@@ -874,9 +874,9 @@ impl Writing {
     /// `EDGE_CURVE.same_sense` rather than by turning the curve over, which
     /// would read back as the plane reversed.
     ///
-    /// **The centre is one both faces hold the circle at**, where a pipe or a
-    /// ball is beside the edge with another face
-    /// ([`a_centre_for_an_arc_between`]): the reader asks every face before it
+    /// **The centre and the radius are ones both faces hold the circle at**,
+    /// where a pipe or a ball is beside the edge with another face
+    /// ([`a_circle_for_an_arc_between`]): the reader asks every face before it
     /// names such an arc by its plane, and the walk alone can land a dome's
     /// rim further off the ball than it allows (Q1792). **A seam with one ring on
     /// both sides may have its centre further out** than
@@ -1423,14 +1423,12 @@ fn the_arc_its_own_plane_names(
             None
         }
     };
-    let (crossing, centre) = if let Some(pipe) = a_pipe(first).or_else(|| a_pipe(second)) {
+    let crossing = if let Some(pipe) = a_pipe(first).or_else(|| a_pipe(second)) {
         let crossing = where_a_plane_crosses_a_pipe(cut, &pipe)?;
-        let centre = a_centre_for_an_arc_between(first, second, cut, &crossing)?;
-        (crossing, centre)
+        a_circle_for_an_arc_between(first, second, cut, crossing)?
     } else if let Some(ball) = a_ball(first).or_else(|| a_ball(second)) {
         let crossing = where_a_plane_crosses_a_ball(cut, &ball)?;
-        let centre = a_centre_for_an_arc_between(first, second, cut, &crossing)?;
-        (crossing, centre)
+        a_circle_for_an_arc_between(first, second, cut, crossing)?
     } else {
         let ring = a_ring(first).or_else(|| a_ring(second))?;
         let crossing = where_a_plane_square_to_a_ring_crosses_it_nearest(cut, &ring, start)?;
@@ -1442,22 +1440,21 @@ fn the_arc_its_own_plane_names(
                     &crossing,
                 )
             })?;
-        (crossing, centre)
+        Crossing { centre, ..crossing }
     };
     let crossing = Crossing {
-        centre,
         turning: cut.normal(),
-        shape: crossing.shape,
+        ..crossing
     };
     let the_edge_runs_its_way = crossing.the_arc_runs_its_own_way(run, start, end)?;
     Some((crossing, the_edge_runs_its_way))
 }
 
-/// Where to centre the circle of an arc between `first` and `second`, a pipe
-/// or a ball beside the edge, so that the reader names the arc by `cut`: a
-/// point from which [`plane_through`] gives back `cut`, and where both faces
-/// hold the circle as the reader asks it ([`a_surface_holds_the_circle`],
-/// shared with the reader).
+/// The circle to write for an arc between `first` and `second`, a pipe or a
+/// ball beside the edge, so that the reader names the arc by `cut`: `crossing`
+/// centred at a point from which [`plane_through`] gives back `cut`, and of a
+/// radius at which both faces hold it there as the reader asks it
+/// ([`a_surface_holds_the_circle`], shared with the reader).
 ///
 /// **The walk asks both faces, then the wider search does**, then the walk is
 /// taken without asking. A dome on a long bar, turned, can have the walk land
@@ -1481,12 +1478,31 @@ fn the_arc_its_own_plane_names(
 /// centre both faces hold from `crossing`'s own, and 57 of them have one from
 /// the foot.
 ///
-/// **Where neither finds a centre both faces hold, the walk's own is
-/// written**, as it was before both were asked. A dome wider than its bar is
-/// then read back named by its faces, which cross: sound, but not the solid
-/// that was written. Of the 183 domes the probe left so, 182 have the ball
-/// more than sixteen units off a circle of the pipe's radius even at the
-/// foot, where the circle is as near the ball as the plane lets it be.
+/// **Each is tried at `crossing`'s radius, then at each face's own crossing's
+/// radius, then halfway between each of those and `crossing`'s.** The rim of
+/// a dome is one circle on both faces, so the radii differ only by how each
+/// was rounded; but the reader allows a circle sixteen units off a face, a
+/// unit being an `ε` of the largest number its bound takes in, and that is
+/// where the axis starts for a pipe and only the two centres for a ball. So
+/// a bar standing further out than its rim lets the pipe hold a circle the
+/// ball's own radius is near, while the ball holds none of the pipe's: a
+/// dome on a bar standing at `4096` with its rim near `139` has the ball
+/// `17.38` units off a circle of the bar's radius even at the ball's foot,
+/// where a circle in the plane is as near the ball as it gets, and both
+/// faces hold the ball's own radius one `f64` of `x` from the axis, the
+/// pipe at `2.03` units and the ball at `2.63` (Q1819,
+/// `a_dome_on_a_long_bar_placed_far_out_is_read_back_with_its_rim_at_the_balls_own_radius`).
+/// Where the two allowances are nearer, only halfway between is held by
+/// both (`a_dome_on_a_bar_turned_about_a_leaning_line_comes_back_with_its_rim_cut_from_its_plane`).
+/// Of the 183 domes of the probe with no centre both faces hold at the
+/// pipe's radius, 181 have one at the ball's own and the other 2 halfway,
+/// and all 183 then read back with the rim cut from its plane (measured by a
+/// probe not kept, run again with the same seed).
+///
+/// **Where none is found, the walk's own centre is written at `crossing`'s
+/// radius**, as it was before both faces were asked. A dome wider than its
+/// bar is then read back named by its faces, which cross: sound, but not the
+/// solid that was written. None of the probe's 3,000,000 domes is left so.
 ///
 /// **A seam, one face on both sides, and an ellipse are not asked**: the
 /// reader names a seam by the plane its run carries without asking the face
@@ -1494,48 +1510,77 @@ fn the_arc_its_own_plane_names(
 /// `a_face_where_curved_faces_meet` names a face, and faces that are all one
 /// surface name none), and holds an ellipse by a rule in `brep.rs` this
 /// writer does not share.
-fn a_centre_for_an_arc_between(
+fn a_circle_for_an_arc_between(
     first: &Surface,
     second: &Surface,
     cut: &Plane,
-    crossing: &Crossing,
-) -> Option<Point> {
+    crossing: Crossing,
+) -> Option<Crossing> {
+    let where_the_walk_lands = |crossing: Crossing| {
+        let centre = a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true)?;
+        Some(Crossing { centre, ..crossing })
+    };
     let Shape::Circle { radius } = crossing.shape else {
-        return a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true);
+        return where_the_walk_lands(crossing);
     };
     if first == second {
-        return a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true);
+        return where_the_walk_lands(crossing);
     }
-    let both_hold = |centre: Point| {
-        [first, second]
-            .iter()
-            .all(|face| a_surface_holds_the_circle(face, centre, cut.normal(), radius))
-    };
     let where_each_face_crosses = [first, second].map(|face| {
         if let Surface::Cylinder(pipe) = face {
-            return where_a_plane_crosses_a_pipe(cut, pipe).map(|it| it.centre);
+            return where_a_plane_crosses_a_pipe(cut, pipe);
         }
         let Surface::Sphere(ball) = face else {
             return None;
         };
-        where_a_plane_crosses_a_ball(cut, ball).map(|it| it.centre)
+        where_a_plane_crosses_a_ball(cut, ball)
     });
-    core::iter::once(crossing.centre)
-        .chain(where_each_face_crosses.into_iter().flatten())
-        .find_map(|near| {
-            a_centre_its_plane_reads_back_from(cut, near, both_hold).or_else(|| {
-                the_nearest_centre_its_faces_hold_the_circle_at(
-                    cut,
-                    &[first, second],
-                    &Crossing {
-                        centre: near,
-                        turning: crossing.turning,
-                        shape: Shape::Circle { radius },
-                    },
-                )
+    let starts: Vec<Point> = core::iter::once(crossing.centre)
+        .chain(where_each_face_crosses.iter().flatten().map(|it| it.centre))
+        .collect();
+    let each_faces_own: Vec<f64> = where_each_face_crosses
+        .iter()
+        .flatten()
+        .filter_map(|it| match it.shape {
+            Shape::Circle { radius } => Some(radius),
+            Shape::Ellipse { .. } => None,
+        })
+        .collect();
+    let mut radii = vec![radius];
+    let halfway = each_faces_own.iter().map(|own| 0.5 * (own + radius));
+    for tried in each_faces_own.iter().copied().chain(halfway) {
+        if !radii.contains(&tried) {
+            radii.push(tried);
+        }
+    }
+    radii
+        .into_iter()
+        .find_map(|radius| {
+            let both_hold = |centre: Point| {
+                [first, second]
+                    .iter()
+                    .all(|face| a_surface_holds_the_circle(face, centre, cut.normal(), radius))
+            };
+            let centre = starts.iter().find_map(|&near| {
+                a_centre_its_plane_reads_back_from(cut, near, both_hold).or_else(|| {
+                    the_nearest_centre_its_faces_hold_the_circle_at(
+                        cut,
+                        &[first, second],
+                        &Crossing {
+                            centre: near,
+                            turning: crossing.turning,
+                            shape: Shape::Circle { radius },
+                        },
+                    )
+                })
+            })?;
+            Some(Crossing {
+                centre,
+                turning: crossing.turning,
+                shape: Shape::Circle { radius },
             })
         })
-        .or_else(|| a_centre_its_plane_reads_back_from(cut, crossing.centre, |_| true))
+        .or_else(|| where_the_walk_lands(crossing))
 }
 
 /// Whether the pole at `position` of `walk` stands where the wire turns back
@@ -1978,7 +2023,7 @@ fn where_a_cap_holding_a_rings_axis_crosses_it(
 /// where none of the few tried does.
 ///
 /// **`held` is what the faces beside the edge ask of the circle's centre**
-/// ([`a_centre_for_an_arc_between`]); a point that reads back as `cut` but
+/// ([`a_circle_for_an_arc_between`]); a point that reads back as `cut` but
 /// is not held is stepped past, as if it had missed. Every other caller
 /// takes every point (`|_| true`).
 ///
@@ -2146,7 +2191,7 @@ fn stepped(from: f64, steps: i32) -> f64 {
 /// of `z` out that both faces hold (Q1792,
 /// `a_dome_on_a_long_bar_turned_a_little_comes_back_with_its_rim_cut_from_its_plane`).
 /// A ring's seam has one face on both sides, which the reader does not ask
-/// ([`a_centre_for_an_arc_between`]); it is asked here all the same, so the
+/// ([`a_circle_for_an_arc_between`]); it is asked here all the same, so the
 /// circle the file carries lies on the face it bounds.
 fn the_nearest_centre_its_faces_hold_the_circle_at(
     cut: &Plane,
@@ -3159,11 +3204,16 @@ mod plane_round_trip_tests {
     /// turns and a small wobble: it is read back, with the rim cut from its own
     /// plane (Q1819).
     ///
-    /// **Our own reader refused it.** No circle of the bar's radius in the
-    /// rim's plane is held by both faces, so the rim was written where the
-    /// walk landed, the reader named it by the pipe and the ball, and refused
-    /// what that made: "what #62 describes is not a solid this kernel can
-    /// hold".
+    /// **Our own reader refused it.** Neither search found a centre where both
+    /// faces hold a circle of the bar's radius, so the rim was written where
+    /// the walk landed, the reader named it by the pipe and the ball, and
+    /// refused what that made: "what #62 describes is not a solid this kernel
+    /// can hold". The bar stands at `4096` and its rim is near `139`, so the
+    /// reader allows the pipe sixteen `ε` of `4096` and the ball sixteen of
+    /// `255.9`, and even at the ball's foot a circle of the bar's radius is
+    /// `17.38` units off the ball. The rim is now written at the ball's own
+    /// radius, one `f64` down in `x` from the axis, with the pipe at `2.03`
+    /// units and the ball at `2.63`.
     #[test]
     fn a_dome_on_a_long_bar_placed_far_out_is_read_back_with_its_rim_at_the_balls_own_radius() {
         the_rim_comes_back_cut_from_its_plane(
@@ -3183,7 +3233,7 @@ mod plane_round_trip_tests {
                 1.0,
                 3.0,
             ),
-            [0, 0, 0],
+            [-1, 0, 0],
             RimRadius::TheBallsOwn,
         );
     }
@@ -3193,10 +3243,14 @@ mod plane_round_trip_tests {
     /// a line leaning off every axis: the rim comes back cut from its own
     /// plane (Q1819).
     ///
-    /// **The reader named the rim by the ball instead.** No circle of the
-    /// bar's radius in the rim's plane is held by both faces, so the rim was
-    /// written where the walk landed, and the reader named it by the pipe and
-    /// the ball.
+    /// **The reader named the rim by the ball instead.** Neither search found
+    /// a centre where both faces hold a circle of the bar's radius, so the rim
+    /// was written where the walk landed, and the reader named it by the pipe
+    /// and the ball. At the ball's foot a circle of the bar's radius is
+    /// `21.59` units off the ball, and one of the ball's own radius `18.93`
+    /// off the pipe. Halfway between the two radii, seven `f64`s up in `x`
+    /// from the axis, the pipe holds it at `13.60` units and the ball at
+    /// `14.13`.
     #[test]
     fn a_dome_on_a_bar_turned_about_a_leaning_line_comes_back_with_its_rim_cut_from_its_plane() {
         let axis = Axis::new(
@@ -3216,7 +3270,7 @@ mod plane_round_trip_tests {
             ),
             Vector::new(-0.999_999_999_999_999_9, 0.0, 256.000_000_000_000_06),
             &Isometry::rotation(&axis, 3.411_132_783_974_842).expect("a finite turn"),
-            [0, 0, 0],
+            [7, 0, 0],
             RimRadius::HalfwayBetween,
         );
     }
@@ -3730,537 +3784,6 @@ mod plane_round_trip_tests {
                 plane.transformed(&turn)
             })
             .collect()
-    }
-
-    mod probe_q1819 {
-        use core::f64::consts::{FRAC_PI_2, TAU};
-
-        use rcad_geom::{
-            Axis, Cylinder, Isometry, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Scale, Sphere,
-            Surface, Vector,
-        };
-        use rcad_predicates::{Policy, ProvenanceLog};
-        use rcad_topo::Model;
-
-        use super::super::{
-            Crossing, Shape, a_centre_for_an_arc_between, a_centre_its_plane_reads_back_from,
-            a_surface_holds_the_circle, how_far_off_the_circle_can_be, stepped,
-            the_nearest_centre_its_faces_hold_the_circle_at, where_a_plane_crosses_a_ball,
-            where_a_plane_crosses_a_pipe, write,
-        };
-        use super::{a_dome_on_a_bar, what_its_rim_is_cut_from};
-        use crate::{Import, StepFile};
-
-        struct Rng(u64);
-        impl Rng {
-            fn next(&mut self) -> u64 {
-                self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
-                let mut z = self.0;
-                z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-                z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-                z ^ (z >> 31)
-            }
-            fn unit(&mut self) -> f64 {
-                (self.next() >> 11) as f64 / (1u64 << 53) as f64
-            }
-            fn range(&mut self, low: i64, high: i64) -> i64 {
-                low + (self.next() % ((high - low + 1) as u64)) as i64
-            }
-        }
-
-        fn near_a_power_of_two(rng: &mut Rng, low: i64, high: i64) -> f64 {
-            let power = 2_f64.powi(rng.range(low, high) as i32);
-            let sign = if rng.next() & 1 == 0 { 1.0 } else { -1.0 };
-            sign * stepped(power, rng.range(-2, 2) as i32)
-        }
-
-        fn a_turn_told(rng: &mut Rng) -> (Isometry, String) {
-            let quarter = |axis: Axis, times: i64| {
-                Isometry::rotation(&axis, times as f64 * FRAC_PI_2).expect("a finite turn")
-            };
-            let direction = Vector::new(rng.unit() - 0.5, rng.unit() - 0.5, rng.unit() - 0.5);
-            let Ok(axis) = Axis::new(Point::origin(), direction) else {
-                return (Isometry::identity(), "identity".into());
-            };
-            if rng.next() % 4 == 0 {
-                let angle = rng.unit() * TAU;
-                return (
-                    Isometry::rotation(&axis, angle).expect("a finite turn"),
-                    format!("whole: direction {direction:?} angle {angle:?}"),
-                );
-            }
-            let small = 10_f64.powf(-6.0 + 4.0 * rng.unit());
-            let wobble = Isometry::rotation(&axis, small).expect("a finite turn");
-            let (qz, qx) = (rng.range(0, 3), rng.range(0, 3));
-            let about_z = quarter(Axis::z(), qz);
-            let about_x = quarter(Axis::x(), qx);
-            (
-                wobble.compose(&about_z.compose(&about_x)),
-                format!("wobble: direction {direction:?} small {small:?} qz {qz} qx {qx}"),
-            )
-        }
-
-        fn a_place(rng: &mut Rng, low: i64, high: i64) -> Vector {
-            let mut one = || {
-                if rng.next() % 5 == 0 {
-                    0.0
-                } else {
-                    near_a_power_of_two(rng, low, high)
-                }
-            };
-            Vector::new(one(), one(), one())
-        }
-
-        fn units(surface: &Surface, centre: Point, axis: Vector, radius: f64) -> f64 {
-            let (off, largest) =
-                how_far_off_the_circle_can_be(surface, centre, axis, radius).expect("a bound");
-            off / (NEAREST_F64_POINT_ROUNDOFF * largest)
-        }
-
-        fn held_with(
-            cut: &Plane,
-            faces: [&Surface; 2],
-            radius: f64,
-            starts: &[Point],
-        ) -> Option<Point> {
-            let both_hold = |centre: Point| {
-                faces
-                    .iter()
-                    .all(|face| a_surface_holds_the_circle(face, centre, cut.normal(), radius))
-            };
-            starts.iter().find_map(|&near| {
-                a_centre_its_plane_reads_back_from(cut, near, both_hold).or_else(|| {
-                    the_nearest_centre_its_faces_hold_the_circle_at(
-                        cut,
-                        &faces,
-                        &Crossing {
-                            centre: near,
-                            turning: cut.normal(),
-                            shape: Shape::Circle { radius },
-                        },
-                    )
-                })
-            })
-        }
-
-        fn round_trip(radius: f64, length: f64, ball_radius: f64, moved: &Isometry) -> String {
-            let policy = Policy::certified();
-            let mut log = ProvenanceLog::new();
-            let mut model = Model::new(Scale::millimetres(10_000.0).expect("a working size"));
-            let solid = a_dome_on_a_bar(&mut model, radius, length, ball_radius);
-            model.place_solid(solid, moved).expect("a key");
-            let text = match write(&model, "a dome") {
-                Ok(text) => text,
-                Err(why) => return format!("WRITE REFUSED {why}"),
-            };
-            let file = StepFile::read(text.as_bytes()).expect("it parses");
-            match Import::read(&file, &policy, &mut log) {
-                Err(why) => format!("READ REFUSED {why}"),
-                Ok(back) => {
-                    let kinds: Vec<&str> = what_its_rim_is_cut_from(back.model())
-                        .iter()
-                        .map(|and| match and {
-                            Surface::Plane(_) => "plane",
-                            Surface::Sphere(_) => "ball",
-                            Surface::Cylinder(_) => "pipe",
-                            _ => "other",
-                        })
-                        .collect();
-                    format!("READ rim cut from {kinds:?}")
-                }
-            }
-        }
-
-        struct Dome {
-            radius: f64,
-            length: f64,
-            ball_radius: f64,
-            place: Vector,
-            told: String,
-            moved: Isometry,
-            pipe: Surface,
-            ball: Surface,
-            sphere: Sphere,
-            cut: Plane,
-            crossing: Crossing,
-            across: f64,
-        }
-
-        fn draw(rng: &mut Rng) -> Option<Dome> {
-            let radius = near_a_power_of_two(rng, -3, 5).abs();
-            let length = if rng.next() % 2 == 0 {
-                near_a_power_of_two(rng, 0, 12).abs()
-            } else {
-                2_f64.powi(rng.range(0, 12) as i32) * (1.0 + rng.unit())
-            };
-            let bigger = if rng.next() % 2 == 0 {
-                1.0
-            } else {
-                1.0 + rng.unit()
-            };
-            let ball_radius = radius * bigger;
-            let above = ((ball_radius - radius) * (ball_radius + radius)).sqrt();
-            let place = a_place(rng, -2, 12);
-            let (turn, told) = a_turn_told(rng);
-            let moved = Isometry::translation(place)
-                .expect("a finite move")
-                .compose(&turn);
-            let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius"))
-                .transformed(&moved);
-            let ball = Surface::Sphere(
-                Sphere::new(Point::new(0.0, 0.0, length - above), ball_radius).expect("a radius"),
-            )
-            .transformed(&moved);
-            let cut = Plane::from_point_and_normal(
-                Point::new(0.0, 0.0, length),
-                Vector::new(0.0, 0.0, 1.0),
-            )
-            .ok()?;
-            let Surface::Plane(cut) = Surface::Plane(cut).transformed(&moved) else {
-                unreachable!()
-            };
-            let Surface::Cylinder(round) = pipe else {
-                unreachable!()
-            };
-            let Surface::Sphere(sphere) = ball else {
-                unreachable!()
-            };
-            let crossing = where_a_plane_crosses_a_pipe(&cut, &round)?;
-            let Shape::Circle { radius: across } = crossing.shape else {
-                return None;
-            };
-            Some(Dome {
-                radius,
-                length,
-                ball_radius,
-                place,
-                told,
-                moved,
-                pipe,
-                ball,
-                sphere,
-                cut,
-                crossing,
-                across,
-            })
-        }
-
-        fn written(dome: &Dome) -> Option<(Point, f64)> {
-            a_centre_for_an_arc_between(&dome.pipe, &dome.ball, &dome.cut, &dome.crossing)
-                .map(|centre| (centre, dome.across))
-        }
-
-        #[derive(Default)]
-        struct Counts {
-            not_held: u64,
-            far_at_foot: u64,
-            near_at_foot: u64,
-            own_held: u64,
-            own_held_far: u64,
-            halfway_held: u64,
-            halfway_held_far: u64,
-            halfway_not_own: u64,
-        }
-
-        fn look(dome: &Dome, counts: &mut Counts) -> bool {
-            let Some((centre, written_radius)) = written(dome) else {
-                return false;
-            };
-            let normal = dome.cut.normal();
-            if [&dome.pipe, &dome.ball]
-                .iter()
-                .all(|face| a_surface_holds_the_circle(face, centre, normal, written_radius))
-            {
-                return false;
-            }
-            counts.not_held += 1;
-            let foot = where_a_plane_crosses_a_ball(&dome.cut, &dome.sphere).expect("crosses");
-            let Shape::Circle { radius: own } = foot.shape else {
-                unreachable!()
-            };
-            let at_foot = units(&dome.ball, foot.centre, normal, dome.across);
-            let far = at_foot > 16.0;
-            if far {
-                counts.far_at_foot += 1;
-            } else {
-                counts.near_at_foot += 1;
-            }
-            let starts = [dome.crossing.centre, foot.centre];
-            let own_found = held_with(&dome.cut, [&dome.pipe, &dome.ball], own, &starts);
-            if own_found.is_some() {
-                counts.own_held += 1;
-                if far {
-                    counts.own_held_far += 1;
-                }
-            }
-            let halfway = 0.5 * (own + dome.across);
-            let halfway_found = held_with(&dome.cut, [&dome.pipe, &dome.ball], halfway, &starts);
-            if halfway_found.is_some() {
-                counts.halfway_held += 1;
-                if far {
-                    counts.halfway_held_far += 1;
-                }
-                if own_found.is_none() {
-                    counts.halfway_not_own += 1;
-                }
-            }
-            println!(
-                "CASE radius {:?} length {:?} ball {:?} place {:?} turn {} at foot {at_foot} \
-                 own {own:?} pipe-with-own-at-foot {} own found {} halfway found {}",
-                dome.radius,
-                dome.length,
-                dome.ball_radius,
-                dome.place,
-                dome.told,
-                units(&dome.pipe, foot.centre, normal, own),
-                own_found.is_some(),
-                halfway_found.is_some(),
-            );
-            true
-        }
-
-        fn report(counts: &Counts) {
-            let Counts {
-                not_held,
-                far_at_foot,
-                near_at_foot,
-                own_held,
-                own_held_far,
-                halfway_held,
-                halfway_held_far,
-                halfway_not_own,
-            } = counts;
-            println!(
-                "not held {not_held} far at foot {far_at_foot} near at foot {near_at_foot}; own \
-                 radius held {own_held} (far {own_held_far}) halfway held {halfway_held} (far \
-                 {halfway_held_far}) halfway not own {halfway_not_own}"
-            );
-        }
-
-        #[test]
-        #[ignore = "Q1819 relay probe: run by hand with --run-ignored only, remove before the row lands"]
-        fn probe_q1819_domes_whose_ball_is_far_off_at_its_foot() {
-            let mut rng = Rng(17920);
-            let mut counts = Counts::default();
-            let mut tried = 0;
-            let mut states = Vec::new();
-            for _ in 0..3_000_000 {
-                let state = rng.0;
-                let Some(dome) = draw(&mut rng) else {
-                    continue;
-                };
-                tried += 1;
-                if look(&dome, &mut counts) {
-                    states.push(state);
-                }
-            }
-            println!("tried {tried}");
-            report(&counts);
-            println!("STATES {states:?}");
-        }
-
-        const STATES: &[u64] = &[
-            3168959767257606720,
-            13233567512045390276,
-            13094203359367936782,
-            3397402411482425728,
-            10514819992189034799,
-            5374005340413058923,
-            16070540646762951470,
-            15833028045495322469,
-            396682087910927445,
-            6622301509773995276,
-            6449300319549315137,
-            14199729003862987080,
-            5414641507263850733,
-            8295473136692703241,
-            12066177928328938415,
-            18432924625677421571,
-            9608856467157215794,
-            16377554790939524640,
-            13325093388361259543,
-            6872027076341056462,
-            6760150754871861952,
-            10033492177860005204,
-            3700456603909675313,
-            5711408236600764081,
-            2731224743109291084,
-            4457392779858401151,
-            9975827937242909428,
-            17553323389408202027,
-            12677781002413317316,
-            14237960680367655912,
-            10415630895976286186,
-            279964700299266001,
-            15345935156208301816,
-            17897490901797440840,
-            10612525713717000852,
-            17764595915939489654,
-            1664862358286151420,
-            14562219028088687083,
-            9725783304216988728,
-            14052997080670685587,
-            16803278724884801903,
-            16245482323793483952,
-            1176011579944119628,
-            7116417486907667674,
-            16657839451719307368,
-            9123319039273395748,
-            1757607692799576158,
-            17431278420147808287,
-            17468428001184615091,
-            6803640608371870432,
-            15600185063057737408,
-            3750273580301958686,
-            902027531825599920,
-            13687575838235241868,
-            16202715839500539330,
-            1959564387658445765,
-            15444226542747379871,
-            149589738483653335,
-            8307643549036013064,
-            2621262950770353764,
-            2087997757557372648,
-            13214412355457375617,
-            13958536198969213765,
-            3596678443958693618,
-            17781201986566228627,
-            5733748190756948267,
-            960834251635140841,
-            1001888081894222085,
-            18012293549189686787,
-            11348416715045958141,
-            4870097613983704633,
-            8647705278572842038,
-            13880409214123019323,
-            17593411551917311918,
-            17786981657672238321,
-            15678023620318201461,
-            10654141039354949211,
-            5335787154945575287,
-            10186600587607846603,
-            11421806464452066261,
-            6409364798850434151,
-            7094007022987257400,
-            7993305975344064523,
-            14505953950265804276,
-            7025487532019653486,
-            17707965090059507719,
-            4230955687361551575,
-            7884780323536253429,
-            13345257237498726436,
-            7368163753906133648,
-            12884877788883385736,
-            16434482643155729881,
-            2166874069286226101,
-            4371793641239561378,
-            8193961551802734361,
-            6794290692116722861,
-            15668938514571956112,
-            11331875156785919537,
-            2162254366674863894,
-            8815553910547913407,
-            8431402407818203728,
-            17929509542528958468,
-            11509352559117642615,
-            11411330111729584034,
-            9965675673643079100,
-            525119033896554860,
-            2483194130184732627,
-            18166850355017906062,
-            8562964189825734167,
-            17547107460480867117,
-            3210413560533616749,
-            4555030884776324822,
-            17593368998961189556,
-            15791610596688750776,
-            18256736769129163438,
-            2865458849503130535,
-            576904453902794302,
-            6821181496786293326,
-            5767832978030176751,
-            17813947442214410539,
-            7641917417564739098,
-            16027796121880584855,
-            1080109323958570888,
-            11774357672791064572,
-            3027073380316147826,
-            14883919821475049757,
-            3471236464904935261,
-            12722599167477054264,
-            4635086100879119957,
-            8538685878373306317,
-            2826340824852367662,
-            10460794979196152934,
-            12352071706923982976,
-            14896488619881096406,
-            5590198383067790902,
-            9277921974144437917,
-            5263687503878348832,
-            13738204865833534355,
-            16115058128691706379,
-            6856520720861481965,
-            7140608693315342227,
-            8961198845985660593,
-            17582261193651030846,
-            4987986120528431774,
-            8799890573526834446,
-            15419934870634866931,
-            3399774946755427834,
-            11077721847753405292,
-            7907804539652979537,
-            1868046768626811002,
-            12916070123727134027,
-            15628830311072718586,
-            3086290189182260503,
-            18061930609896154355,
-            11685622206245645152,
-            814892209149112148,
-            2301134685911077425,
-            10760338968732589346,
-            8997111479522709584,
-            1652376797036941028,
-            2669911279205438532,
-            1534309268828073215,
-            15690481355136408233,
-            17071436550676172409,
-            5454353795676218525,
-            8913990575634660996,
-            15613289740633314432,
-            12151601962836596461,
-            17962415425428245270,
-            7065543056523125679,
-            1910408739082392973,
-            152304957292343122,
-            9176978223497120284,
-            8681688023187040176,
-            4539702104383799144,
-            13547862663158316561,
-            16616496982785337428,
-            9191539976615626302,
-            8861568469287794379,
-            16319896808474154795,
-            15393523901141519283,
-            7808439867485690678,
-            3519433256438159351,
-        ];
-
-        #[test]
-        #[ignore = "Q1819 relay probe: run by hand with --run-ignored only, remove before the row lands"]
-        fn probe_q1819_the_domes_again() {
-            let mut counts = Counts::default();
-            for (index, &state) in STATES.iter().enumerate() {
-                let dome = draw(&mut Rng(state)).expect("a dome");
-                look(&dome, &mut counts);
-                if index < 3 {
-                    println!(
-                        "ROUND TRIP {}",
-                        round_trip(dome.radius, dome.length, dome.ball_radius, &dome.moved)
-                    );
-                }
-            }
-            report(&counts);
-        }
     }
 }
 
