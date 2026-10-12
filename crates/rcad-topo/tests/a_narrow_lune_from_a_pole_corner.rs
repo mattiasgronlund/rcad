@@ -197,7 +197,9 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
 /// were named, before the range was asked. The fuse now asks the range first,
 /// of the answer's corners and edges as they are once its pieces are joined,
 /// and a chord a rounding long beside a coordinate of 1 is the limit §87.3
-/// names.
+/// names. A tolerant policy only warns of the range, and there the seven are
+/// still refused that name
+/// ([`two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy`]).
 #[test]
 fn two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range() {
     for (degrees, radius, rule, ratio) in [
@@ -233,18 +235,43 @@ fn two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range() {
     }
 }
 
+/// The same nine cases under a tolerant policy, where a range too wide is only
+/// a warning, so each goes on past the range check and is refused by name
+/// further on.
+///
+/// **The seven Q1664 moved are refused
+/// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`**, as all seven were under
+/// every policy before Q1664: the arc of `x = 0` from a pole to a corner a
+/// rounding off it has its chord along the tangent at the pole. **Q1614's two
+/// are refused `CannotNameWhichPieceOfACrossingThisIs`**, where they were
+/// refused before Q1614.
+///
+/// **Naming that arc by the tangent at the pole answered none of them** (Q1665,
+/// commit `e5dcff60`, taken back), the shorter arc when the way the edge leaves
+/// the pole and its chord point the same way. The four 90 degree differences
+/// were then refused
+/// `CannotMeshAFace` for corners that coincide, the 45 degree one at radius
+/// 0.001 and the 10 degree one at radius 1000 were refused
+/// `FacesDoNotAgreeWhichWayTheyFace`, and Q1614's two were refused as here.
+/// The 10 degree intersection at radius 1 did not finish: `validate.rs`'s
+/// `the_coarsest_mesh_whose_sides_do_not_cross` halved its deflection rung
+/// after rung down towards half the closest corner pair, `1.28e−15`, and every
+/// rung was refused `LoopsTouch` at the same corner, `(0, −6.4e−16, −1)`, where
+/// the two knives' line meets the ball a rounding past the south pole.
 #[test]
-fn probe_q1665_seven_under_tolerant() {
-    for (degrees, radius, rule) in [
-        (90.0, 1.0, Rule::Difference),
-        (90.0, 0.001, Rule::Difference),
-        (90.0, 1000.0, Rule::Difference),
-        (90.0, 3.0, Rule::Difference),
-        (45.0, 0.001, Rule::Difference),
-        (45.0, 1000.0, Rule::Difference),
-        (10.0, 1.0, Rule::Intersection),
-        (10.0, 0.001, Rule::Difference),
-        (10.0, 1000.0, Rule::Difference),
+fn two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy() {
+    const UNNAMED_ARC: &str = "ACurvedEdgeThatIsPartOfACrossingCannotBeNamed";
+    const UNNAMED_PIECE: &str = "CannotNameWhichPieceOfACrossingThisIs";
+    for (degrees, radius, rule, refused) in [
+        (90.0, 1.0, Rule::Difference, UNNAMED_ARC),
+        (90.0, 0.001, Rule::Difference, UNNAMED_ARC),
+        (90.0, 1000.0, Rule::Difference, UNNAMED_ARC),
+        (90.0, 3.0, Rule::Difference, UNNAMED_ARC),
+        (45.0, 0.001, Rule::Difference, UNNAMED_ARC),
+        (45.0, 1000.0, Rule::Difference, UNNAMED_PIECE),
+        (10.0, 1.0, Rule::Intersection, UNNAMED_ARC),
+        (10.0, 0.001, Rule::Difference, UNNAMED_PIECE),
+        (10.0, 1000.0, Rule::Difference, UNNAMED_ARC),
     ] {
         let mut model = a_model(radius);
         let ball = model
@@ -253,49 +280,16 @@ fn probe_q1665_seven_under_tolerant() {
         let first = a_knife_through_the_axis(&mut model, radius, 0.0);
         let half = fused(&mut model, &[ball], &[first], Rule::Intersection);
         let second = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
-        let mut log = ProvenanceLog::new();
         let policy = Policy::tolerant(model.scale().nominal_size());
-        if std::env::var("PROBE_ONLY")
-            .is_ok_and(|only| only != format!("{degrees}") && only != format!("{degrees}/{radius}"))
-        {
-            continue;
-        }
-        eprintln!("PROBE start {degrees} {radius} {rule:?}");
-        let outcome = model.fuse(&half, &[second], rule, &policy, &mut log);
-        eprintln!("PROBE fused {degrees} {radius} {rule:?}");
-        match outcome {
-            Ok(fused) => {
-                let answer = fused.solids().to_vec();
-                let valid = model.validate(&policy, &mut ProvenanceLog::new());
-                eprintln!("PROBE validated {valid:?}");
-                let volume: Vec<_> = answer
-                    .iter()
-                    .map(|&solid| {
-                        model
-                            .solid(solid)
-                            .unwrap()
-                            .measure(
-                                Deflection::of(DEFLECTION_PER_RADIUS * radius).unwrap(),
-                                &policy,
-                                &mut ProvenanceLog::new(),
-                            )
-                            .map(|m| m.volume())
-                    })
-                    .collect();
-                let closed = what_two_knives_leave()
-                    .iter()
-                    .find(|(r, _)| *r == rule)
-                    .map(|(_, f)| f(degrees, radius))
-                    .unwrap();
-                eprintln!(
-                    "PROBE {degrees} {radius} {rule:?}: answered {} solids, valid {:?}, volumes {volume:?}, closed {closed}, log {}",
-                    answer.len(),
-                    valid.is_ok(),
-                    log.records().len()
-                );
-            }
-            Err(why) => eprintln!("PROBE {degrees} {radius} {rule:?}: refused {why:?}"),
-        }
+        let outcome = model.fuse(&half, &[second], rule, &policy, &mut ProvenanceLog::new());
+        let Err(why) = outcome else {
+            panic!("{degrees} degrees, radius {radius}, {rule:?}: answered {outcome:?}");
+        };
+        assert_eq!(
+            which_refusal(&why),
+            refused,
+            "{degrees} degrees, radius {radius}, {rule:?}: {why:?}"
+        );
     }
 }
 
