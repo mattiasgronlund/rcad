@@ -50,6 +50,14 @@ use rcad_topo::{Error, Model, Rule, SolidKey};
 /// every fuse was refused `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` in
 /// `fuse/assemble.rs`, where the way along an edge out of a point the two
 /// pipes are tangent at was read as nought.
+///
+/// The long pipe is also cut where it crosses the first bar's cap planes,
+/// `x = 9` and `x = 13`, far off either cap. Those cuts are joined back, since
+/// each runs right round the pipe as one closed curve
+/// (`joined_only_across_whole_rings` in `fuse/assemble.rs`), so the faces
+/// counted below are those of the bars and nothing more. The joining keeps the
+/// middle of each half ellipse as a corner, since a half folded into one edge
+/// from touch point to touch point cannot be named.
 #[test]
 fn a_long_bar_through_another_at_a_slant_answers_every_fuse() {
     let (first, second) = (PI / 4.0, 2.0 * PI);
@@ -81,15 +89,25 @@ fn a_long_bar_through_another_at_a_slant_answers_every_fuse() {
 /// the flat `z = 0`.
 ///
 /// **Every fuse gets past the arrangement and is refused making the faces into
-/// triangles or building their wires**: `CannotMeshAFace { why: CornersCoincide
-/// }`, `AWireWillNotLieFlatOnItsFace` or `ACurvedFaceGoesRightRoundWithNoSeam`,
+/// triangles, building their wires or naming a joined edge**: `CannotMeshAFace
+/// { why: CornersCoincide }`, `AWireWillNotLieFlatOnItsFace`,
+/// `ACurvedFaceGoesRightRoundWithNoSeam` or `CannotNameWhichPieceOfACrossingThisIs`,
 /// as pinned below. Before Q1646 all six were refused
 /// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, at the far caps. Not traced
 /// further. A lead, not run: the pipe's direction is off `z = 0`, so the two
 /// points the halves meet at are off the `±z` half-planes and the count of how
-/// often each walk goes round the axis settles, where at 50° it cannot; and
-/// the way out of those two points is read in `fuse/assemble.rs` off the cross
-/// of the two pipes' gradients, which is nought there but for rounding.
+/// often each walk goes round the axis settles, where at 50° it cannot.
+///
+/// **The unions moved in Q1660.** They were refused `CornersCoincide` with the
+/// first bar first and `AWireWillNotLieFlatOnItsFace` with the second. Q1660
+/// joins back the cuts the other bar's cap planes make in the long pipe, and
+/// that joining walks straight through the middle of each half ellipse unless
+/// both of the half's ends are points where the pipes are tangent, read as
+/// `∇S × ∇T` exactly nought. Here the two points sit at `y = ±6.4e−17`, and the
+/// cross there is `(1.6e−17, 0, 0)` at both, measured with a probe in
+/// `the_corners_of_each_run_between_two_tangent_points`, so each half is
+/// folded into one edge from touch point to touch point, which cannot be
+/// named. Either way it is refused.
 ///
 /// **A gap, by §16.10**: the answer is `1/(12 sin 120°)` shared, inside the
 /// range a model holds.
@@ -98,7 +116,13 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
     for (rule, first_first) in six_fuses() {
         let said = fuse(120.0, [11.0, 0.0, 0.0], rule, first_first);
         let pinned = match (rule, first_first) {
-            (Rule::Union, true) | (Rule::Intersection, false) | (Rule::Difference, true) => {
+            (Rule::Union, _) => matches!(
+                said,
+                Err(Error::Geometry(
+                    rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+                ))
+            ),
+            (Rule::Intersection, false) | (Rule::Difference, true) => {
                 matches!(
                     said,
                     Err(Error::CannotMeshAFace {
@@ -107,7 +131,7 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
                     })
                 )
             }
-            (Rule::Union | Rule::Difference, false) => {
+            (Rule::Difference, false) => {
                 matches!(said, Err(Error::AWireWillNotLieFlatOnItsFace { .. }))
             }
             (Rule::Intersection, true) => {

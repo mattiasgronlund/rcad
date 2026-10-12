@@ -1803,6 +1803,13 @@ impl Assembly {
     /// here, which depend on the order the solids were handed over — the same
     /// rule [`Assembly::which_to_keep_first`] keeps a corner by.
     ///
+    /// **A group joined only across whole closed curves needs no seam either**,
+    /// since each piece lay flat without one and the joining opens nothing up
+    /// ([`Assembly::joined_only_across_whole_rings`]): a long pipe cut right
+    /// round where it crosses another bar's cap planes, far off the caps
+    /// (Q1660). That is asked only where some ring cannot be counted, as a
+    /// ring of half ellipses cannot.
+    ///
     /// Anything else that goes right round — a group with other than two such
     /// rings, neither an edge nor a chain of rulings across, or a seam that
     /// still leaves a ring going round — and a group whose rings cannot be
@@ -1832,7 +1839,8 @@ impl Assembly {
                 continue;
             }
             if self.needs_no_seam(&members, along, dissolved)
-                || self.joined_only_across_whole_rings(&inside, along)
+                || (self.joined_only_across_whole_rings(&inside, along)
+                    && self.a_ring_cannot_be_counted(&members, along, dissolved))
             {
                 continue;
             }
@@ -1906,12 +1914,36 @@ impl Assembly {
     /// two half ellipses (`two_equal_bars_leaning_at_each_other.rs`, Q1660).
     /// [`Assembly::needs_no_seam`] asks of the rings left instead, and a ring
     /// of half ellipses has no plane to say whether it goes right round.
+    ///
+    /// **It is asked only where a ring cannot be counted**
+    /// ([`Assembly::a_ring_cannot_be_counted`]), the case the rules before it
+    /// had no answer for. Where every ring can be counted those rules decide,
+    /// and a frustum beside a block keeps the circle the block's floor cut
+    /// round its wall: asked there too, this joined it back, and the three
+    /// tests of `a_rim_a_fuse_cut_round_one_cone.rs` and
+    /// `a_frustum_shared_with_its_union_with_a_block_beside_it_keeps_the_circle_the_union_cut`
+    /// in `fuse_laws_over_a_cone.rs` that pin that circle failed. Whether it
+    /// stays is row Q1051's.
     fn joined_only_across_whole_rings(&self, inside: &[usize], along: &[[Dart; 2]]) -> bool {
         inside.iter().all(|&edge| {
             along[edge]
                 .iter()
                 .all(|dart| self.faces[dart.face].wires[dart.wire].len() == 1)
         })
+    }
+
+    /// Whether some ring of the face `members` join into is one
+    /// [`Assembly::a_ring_goes_right_round`] cannot count.
+    fn a_ring_cannot_be_counted(
+        &self,
+        members: &[usize],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+    ) -> bool {
+        let surface = self.faces[members[0]].surface;
+        self.rings_of_a_curved_face(members, along, dissolved)
+            .iter()
+            .any(|ring| self.a_ring_goes_right_round(ring, &surface).is_none())
     }
 
     /// The dissolved edges to keep as the seam across a band, where keeping
