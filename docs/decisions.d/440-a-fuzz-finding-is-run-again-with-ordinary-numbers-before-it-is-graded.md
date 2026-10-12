@@ -71,8 +71,7 @@ any D row (§403.3). It does not by itself find the likely case Mattias worried
 about. 440.3 and 440.4 are for that.
 
 The rule applies to rows filed from now on. The open D rows that came from a
-fuzz crash file were graded without the try. A row of its own runs it for them
-(440.5).
+fuzz crash file were graded without the try. Q1786 runs it for them (440.5).
 
 ### 440.3 The lane that finds the trigger grades the row again
 
@@ -158,6 +157,6 @@ is B on arrival.
 - `lane.md`'s grading paragraph and the `remaining` description in
   `.claude/workflows/lanes.js` carry 440.2 and 440.3, which were changed in the
   same commit as this section.
-- A row, tier 1 with no class: run 440.2's try for every open D row that came
-  from a fuzz crash file, and re-tag each one that fails the same way.
-- A row, tier 2: build 440.4's target.
+- **Q1786**, tier 1 with no class: run 440.2's try for every open D row that
+  came from a fuzz crash file, and re-tag each one that fails the same way.
+- **Q1787**, tier 2: build 440.4's target.
