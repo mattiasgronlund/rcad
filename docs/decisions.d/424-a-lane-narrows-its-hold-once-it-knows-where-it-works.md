@@ -163,7 +163,8 @@ rows outside the directory name one of these two files.
   dropped and added again, because rows have no edit verb. And it only pays if
   the new files' borders fall where fixes land, which is not measured. If
   424.4's bars send it back, the split is next, starting from where in the two
-  files the fixes of 424.1 landed.
+  files the fixes of 424.1 landed. §441 measured that for `arrange.rs` and
+  wrote down the ten files.
 - **Narrowing rows to items before the work.** 59 of the 125 merges changed
   six or more items, by git's hunk labels. An item guessed before the trace
   would often be too narrow, and the lane would report
