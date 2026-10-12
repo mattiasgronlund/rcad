@@ -67,9 +67,9 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 /// and so does the 10 degree one at radii 0.001 and 1000. The union needed one
 /// more step: the knife's face then has a half disk hole, two corners that
 /// wind round nothing, and `assemble.rs`'s `rings_round` panicked on it. The
-/// difference is refused at 90 degrees, by name. It panicked in `arrange.rs`'s
-/// `cut_the_crossings_into_arcs` until that walked round a closed crossing,
-/// §197.
+/// difference is refused at 90 degrees, for the range since Q1664. It panicked
+/// in `arrange.rs`'s `cut_the_crossings_into_arcs` until that walked round a
+/// closed crossing, §197.
 ///
 /// Since the fuse steps a curved piece's point towards every cut's material
 /// (§200), the cases in `answered` get past the curved pieces and answer, and
@@ -88,16 +88,19 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 /// **Ten of those twelve answer since Q1019**, which places a piece no point
 /// was found in by a corner the other solid's ray puts strictly inside or
 /// outside it (`docs/decisions.md` §365.7). Each is one solid that validates
-/// and measures its closed form. The difference at radius 0.001 is refused
-/// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`, and at radius 1000 for the
-/// range.
+/// and measures its closed form. The difference at radii 0.001 and 1000 is
+/// refused for the range.
 ///
 /// **Q1614 moved two differences**, the 45 degree wedge's at radius 1000 and
 /// the 10 degree wedge's at radius 0.001, from
 /// `CannotNameWhichPieceOfACrossingThisIs` to `DynamicRangeTooWide`, by asking
 /// the range before nesting the answer's shells (`docs/decisions.md` §87.3).
+/// **Q1664 moved seven more**, from
+/// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` to `DynamicRangeTooWide`, by
+/// asking the range before the answer's edges are named, so no case is refused
+/// that name now and it is no longer one this file accepts.
 /// [`two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range`]
-/// pins both by ratio.
+/// pins all nine by ratio.
 #[test]
 fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name() {
     let answered = [
@@ -175,18 +178,38 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
     assert!(moved.is_empty(), "{}", moved.join("\n"));
 }
 
-/// Two of the differences [`a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name`]
-/// lets through as refused by name are refused for the range: the 45 degree
-/// wedge's at radius 1000, and the 10 degree wedge's at radius 0.001.
+/// Nine of the cases [`a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name`]
+/// lets through as refused by name are refused for the range: the 90 degree
+/// wedge's difference at every radius, the 45 degree wedge's at radii 0.001
+/// and 1000, and the 10 degree wedge's intersection at radius 1 and its
+/// difference at radii 0.001 and 1000.
 ///
-/// **Q1614 moved both.** Until then the fuse nested the answer's shells before
-/// it asked the range, and both were refused
+/// **Q1614 moved two of them**, the 45 degree difference at radius 1000 and
+/// the 10 degree one at radius 0.001. Until then the fuse nested the answer's
+/// shells before it asked the range, and both were refused
 /// `CannotNameWhichPieceOfACrossingThisIs` there (`docs/decisions.md` §87.3).
+///
+/// **Q1664 moved the other seven.** The arc where the ball crosses the first
+/// knife's plane `x = 0` runs from a pole to a corner a rounding off it, such
+/// as `(0, 0, −1)` to `(0, 4.4e−16, −1)`, so its chord lies along the tangent
+/// at the pole and nothing could say which way the arc leaves it. Each was
+/// refused `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` while the edges
+/// were named, before the range was asked. The fuse now asks the range first,
+/// of the answer's corners and edges as they are once its pieces are joined,
+/// and a chord a rounding long beside a coordinate of 1 is the limit §87.3
+/// names.
 #[test]
 fn two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range() {
-    for (degrees, radius, ratio) in [
-        (45.0, 1000.0, 1.319_413_953_331_200_8e16),
-        (10.0, 0.001, 5_566_224_631_575_426.0),
+    for (degrees, radius, rule, ratio) in [
+        (90.0, 1.0, Rule::Difference, 1.351_079_888_211_149e16),
+        (90.0, 0.001, Rule::Difference, 1.290_583_773_813_634_8e16),
+        (90.0, 1000.0, Rule::Difference, 1.419_201_563_247_005_2e16),
+        (90.0, 3.0, Rule::Difference, 4.053_239_664_633_447e16),
+        (45.0, 0.001, Rule::Difference, 6_917_529_027_641_085.0),
+        (45.0, 1000.0, Rule::Difference, 1.319_413_953_331_200_8e16),
+        (10.0, 1.0, Rule::Intersection, 5_435_766_241_772_876.0),
+        (10.0, 0.001, Rule::Difference, 5_566_224_631_575_426.0),
+        (10.0, 1000.0, Rule::Difference, 5_308_365_470_481_324.0),
     ] {
         let mut model = a_model(radius);
         let ball = model
@@ -196,21 +219,15 @@ fn two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range() {
         let half = fused(&mut model, &[ball], &[first], Rule::Intersection);
         let second = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
         let mut log = ProvenanceLog::new();
-        let outcome = model.fuse(
-            &half,
-            &[second],
-            Rule::Difference,
-            &Policy::certified(),
-            &mut log,
-        );
+        let outcome = model.fuse(&half, &[second], rule, &Policy::certified(), &mut log);
         let Err(Error::Invalid(rcad_topo::Invalid::DynamicRangeTooWide { ratio: found })) = outcome
         else {
-            panic!("{degrees} degrees, radius {radius}: {outcome:?}");
+            panic!("{degrees} degrees, radius {radius}, {rule:?}: {outcome:?}");
         };
-        assert_eq!(found, ratio, "{degrees} degrees, radius {radius}");
+        assert_eq!(found, ratio, "{degrees} degrees, radius {radius}, {rule:?}");
         assert!(
             log.records().is_empty(),
-            "{degrees} degrees, radius {radius}: a certified fuse logs nothing: {:#?}",
+            "{degrees} degrees, radius {radius}, {rule:?}: a certified fuse logs nothing: {:#?}",
             log.records()
         );
     }
@@ -574,7 +591,6 @@ fn moved_from_its_pin(
                         | "CannotTellTheCellsOfAFaceApart"
                         | "ResultIsNotManifold"
                         | "CannotMeshAFace"
-                        | "ACurvedEdgeThatIsPartOfACrossingCannotBeNamed"
                         | "CannotNameWhichPieceOfACrossingThisIs"
                         | "DynamicRangeTooWide"
                 ),
