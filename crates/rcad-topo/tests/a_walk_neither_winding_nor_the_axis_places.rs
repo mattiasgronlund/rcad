@@ -1266,19 +1266,26 @@ fn the_ball_inside_a_hole(radius: f64, off: f64) -> f64 {
 }
 
 /// A bar of radius 2, height 10, against a slab `|x| < 1` along it and a ball
-/// of radius `0.5` on its wall at `(2, 0, 5)`, which was to be a walk going
-/// round nothing on a pipe. It never reaches the arrangement's cells, under
-/// every rule both ways round.
+/// of radius `0.5` on its seam at `(2, 0, 5)`, which was to be a walk going
+/// round nothing on a pipe. Every rule both ways round is refused telling the
+/// cells of the bar's pipe apart.
 ///
 /// The ball's centre is on the bar's wall, so it reaches into the bar's side
 /// and crosses it in one quartic loop that runs back and forth round the axis,
-/// which nothing orders (§34.10). Q1554 ordered only the two loops of a ball
-/// that swallows a pipe's whole cross-section, which a ball of `0.5` against a
-/// bar of 2 cannot: the rod holed off its axis,
+/// which no determinant orders (§34.10). Q1554 ordered only the two loops of a
+/// ball that swallows a pipe's whole cross-section, which a ball of `0.5`
+/// against a bar of 2 cannot: the rod holed off its axis,
 /// [`a_ball_against_a_square_rod_holed_off_its_axis_is_answered_under_every_rule`],
-/// was pinned here beside it until then.
+/// was pinned here beside it until then. Until Q1661 every rule was refused
+/// `ACrossingThisCannotBeOrderedAlong` before any cell, by `fuse/arrange.rs`'s
+/// `how_a_crossing_runs`. That lets the one loop through now, to be put in
+/// order only by the name of where the walk starts on it, and the fuse gets as
+/// far as the cells, where it is refused `CannotTellTheCellsOfAFaceApart` on
+/// the pipe. Why is not traced; Q1768 takes it.
+///
+/// Named `a_small_ball_on_a_bars_wall_is_refused_before_any_cell` until Q1766.
 #[test]
-fn a_small_ball_on_a_bars_wall_is_refused_before_any_cell() {
+fn a_small_ball_on_a_bars_seam_is_refused_telling_the_pipes_cells_apart() {
     for (rule, first) in every_rule_both_ways() {
         let mut model = a_model();
         let bar = model
@@ -1300,10 +1307,19 @@ fn a_small_ball_on_a_bars_wall_is_refused_before_any_cell() {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         );
+        let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = refused else {
+            panic!(
+                "the bar, the slab and the ball, {rule:?}, the bar first {first}: {:?}",
+                refused.map(|fused| fused.solids().to_vec())
+            );
+        };
+        let surface = model
+            .face(face)
+            .expect("the refusal names a face of the model")
+            .surface();
         assert!(
-            matches!(refused, Err(Error::ACrossingThisCannotBeOrderedAlong)),
-            "the bar, the slab and the ball, {rule:?}, the bar first {first}: {:?}",
-            refused.map(|fused| fused.solids().to_vec())
+            matches!(surface, Surface::Cylinder(_)),
+            "the bar, the slab and the ball, {rule:?}, the bar first {first}: refused on {surface:?}"
         );
     }
 }
