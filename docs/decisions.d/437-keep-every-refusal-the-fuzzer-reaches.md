@@ -289,6 +289,70 @@ which. Filing those rows, as §418 files crash rows, is decided when this lands.
 Second, a caller, who can tell "no answer exists" from "the arithmetic gave up".
 The first is enough under §13, so the row waits for the replay (437.10).
 
+**As built for `rcad-geom` (Q1771).** `rcad_geom::Error::limit_or_gap` returns a
+new `#[non_exhaustive]` `LimitOrGap`, from one match with no wildcard arm. Its
+`Display` gives `limit`, `gap` or `not known`, so a caller outside the crate
+reads the class from the words and needs no wildcard arm of its own. Of the 48
+variants, 27 are limits, 5 are gaps and 16 are not known.
+`what_a_geometry_refusal_says_about_its_answer.rs` reaches all 32 limits and
+gaps through the public API and asserts each one. Every gap there is refused
+every way round: both orders of a pair, and all six of a triple.
+
+- **Limits.** Twenty variants refuse numbers that describe no shape: a radius,
+  slope, half-angle, deflection, size or weight that is not one, a knot vector
+  that is not one, a parameter or split off the curve, and a run that names no
+  place or no curve. Four are limits of today's kernel: `DegreeNotSupported`,
+  `ATorusThatRunsThroughItself`, `DynamicRangeTooWide` (case 1 above), and
+  `QuarterTurnsNeedAnAxisAlongXYOrZ`, since only a turn about `x`, `y` or `z`
+  moves each coordinate onto another, and `Isometry::rotation` holds the rest
+  with rounding. The last three, `ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`,
+  `TheCrossingOfTheseTwoSurfacesIsNotClosed` and
+  `TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`, are limits by their own
+  demonstrations.
+- **Gaps.** `ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`, whose tangent
+  point `(-2, 0, 0)` is one `f64` holds exactly;
+  `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`;
+  `ACrossingBetweenATorusAndAnotherCurvedSurface`;
+  `CannotWorkOutHowBigACrossingIs`, refused at `1e300` and answered at `1e200`;
+  and `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, whose corners `(±12, 0, 0)`
+  are on all three surfaces exactly.
+- **Not known.** `Predicate` and `Undecidable` are case 3. The rest are both
+  kinds, or nobody has shown which, and five of them differ from what the
+  record said before:
+  - `CannotNameWhichPieceOfACrossingThisIs` was **gap** in its doc comment, and
+    §30.5 filed one cause gap and another limit. Bores on `(3, 4, 0)` and `(4,
+    0, 3)` have no flat surface written in `f64` that picks their halves
+    (`two_pipes_of_one_width_on_crossing_axes.rs`), while that file's count of
+    named pairs, raised from 32 to 1096 of 1224 by searching harder, shows
+    pickers that existed and were not found.
+  - `WhereALineMeetsARingNeedsTheLineExactly` was **gap** in its doc comment and
+    in §43.6. A box can hold lines that meet the tube and lines that miss it,
+    and then there is no single answer, as the ball's own refusal of a ray
+    whose box straddles its skin says.
+  - `WeightTooSmallToBlend`'s doc comment said refusing loses no curve. Weights
+    of `5e-324` and `1e300` have no power of two that makes the smaller one
+    normal while the larger stays below `f64::MAX`.
+  - `CannotPlaceAPointThatCloseToACrossing` was **limit** in §30.5, but its
+    `closest` is what the arithmetic could prove, not how close the nearest
+    `f64` point is.
+  - `TooManyPointsAlongOneCrossing` was a **limit of the request** in §30.5.
+    §94 met the same cap from a marcher crawling towards a point on a loop it
+    could not walk, so the cap does not say which happened.
+
+  `PointsAreInALine` is both kinds, measured: `Plane::through_three_points`
+  crosses the two edges unscaled, so `(0, 0, 0)`, `(s, s, 0)` and `(s, 2s, 0)`
+  give the plane `z = 0` at `s = 1e-160` and are refused at `s = 1e-200`, where
+  the cross product underflows to zero.
+
+**What this leaves.** `LimitOrGap` is not exported from `rcad-geom`'s `lib.rs`,
+which was outside this row's files, so `rcad-topo` cannot yet name it in a
+method of its own. `rcad_topo::Error::limit_or_gap`, delegating to
+`rcad_geom::Error::limit_or_gap` for `Geometry` and the two `why` variants, waits
+on that export, and the class column of the refusal report waits on both, since
+`check-fuzz-triage-selftest` pins the report's nine columns. Each not-known
+variant that is both kinds gets a row for the field that would tell its two
+kinds apart (case 2).
+
 ### 437.7 What is not built
 
 - **Nothing is collected during the night, and there is no cargo feature.**
