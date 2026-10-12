@@ -16,6 +16,39 @@ enum Other {
     CopyOfTheHoled,
     HoledTurned(f64),
     HoledFloorFirst,
+    HoledShifted([f64; 3]),
+    HalfBallShifted([f64; 3]),
+}
+
+#[test]
+fn probe_q1760_near() {
+    let up = RADIUS.next_up();
+    let down = RADIUS.next_down();
+    let tangent = 1.0 / 10f64.sqrt();
+    let others = [
+        Other::Ball(up, [0.0, 0.0, 0.0]),
+        Other::Ball(down, [0.0, 0.0, 0.0]),
+        Other::Ball(up.next_up().next_up().next_up(), [0.0, 0.0, 0.0]),
+        Other::Ball(down.next_down().next_down().next_down(), [0.0, 0.0, 0.0]),
+        Other::Ball(RADIUS * (1.0 + 2f64.powi(-40)), [0.0, 0.0, 0.0]),
+        Other::Ball(RADIUS * (1.0 - 2f64.powi(-40)), [0.0, 0.0, 0.0]),
+        Other::Ball(RADIUS, [0.0, 0.0, 1e-15]),
+        Other::Ball(RADIUS, [0.0, 0.0, -1e-15]),
+        Other::Ball(RADIUS, [1e-15, 0.0, 0.0]),
+        Other::Ball(RADIUS, [0.0, 1e-15, 3e-15]),
+        Other::Ball(RADIUS, [0.0, -1e-15, -3e-15]),
+        Other::Ball(1.0, [0.0, 6.0 * tangent, 18.0 * tangent]),
+        Other::Ball(1.0, [0.0, 4.0 * tangent, 12.0 * tangent]),
+        Other::HoledShifted([0.0, 0.0, 1e-15]),
+        Other::HoledShifted([0.0, 0.0, -1e-15]),
+        Other::HoledShifted([1e-15, 0.0, 0.0]),
+        Other::HoledShifted([0.0, 1e-15, 3e-15]),
+        Other::HalfBallShifted([0.0, 0.0, 1e-15]),
+        Other::HalfBallShifted([0.0, 0.0, -1e-15]),
+        Other::HalfBallShifted([1e-15, 0.0, 0.0]),
+    ];
+    sweep(&others, true);
+    sweep(&others, false);
 }
 
 #[test]
@@ -47,12 +80,16 @@ fn probe_q1760_sweep() {
         Other::HoledTurned(core::f64::consts::PI),
         Other::HoledFloorFirst,
     ];
+    sweep(&others, true);
+}
+
+fn sweep(others: &[Other], capped: bool) {
     let before = std::env::var_os("Q1760_BEFORE").is_some();
-    for other in others {
+    for &other in others {
         for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
             for holed_first in [true, false] {
                 let mut model = Model::new(Scale::millimetres(125.0).expect("a positive size"));
-                let holed = a_half_ball(&mut model, true, false);
+                let holed = a_half_ball(&mut model, capped, false);
                 let other_key = match other {
                     Other::Cube(side, corner) => {
                         let cube = model
@@ -79,6 +116,18 @@ fn probe_q1760_sweep() {
                     Other::HalfBallAlone => a_half_ball(&mut model, false, false),
                     Other::CopyOfTheHoled => a_half_ball(&mut model, true, false),
                     Other::HoledFloorFirst => a_half_ball(&mut model, true, true),
+                    Other::HoledShifted(by) | Other::HalfBallShifted(by) => {
+                        let holed = matches!(other, Other::HoledShifted(_));
+                        let shifted = a_half_ball(&mut model, holed, false);
+                        model
+                            .place_solid(
+                                shifted,
+                                &Isometry::translation(Vector::new(by[0], by[1], by[2]))
+                                    .expect("a shift"),
+                            )
+                            .expect("key");
+                        shifted
+                    }
                     Other::HoledTurned(angle) => {
                         let turned = a_half_ball(&mut model, true, false);
                         model
@@ -100,19 +149,22 @@ fn probe_q1760_sweep() {
                 } else {
                     ([other_key], [holed])
                 };
-                let fused = model.fuse(
-                    &arguments,
-                    &tools,
-                    rule,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                );
+                let fused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    model.fuse(
+                        &arguments,
+                        &tools,
+                        rule,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                }));
                 let said = match fused {
-                    Ok(answer) => format!("Ok({} solids)", answer.solids().len()),
-                    Err(why) => format!("Err({why:?})"),
+                    Ok(Ok(answer)) => format!("Ok({} solids)", answer.solids().len()),
+                    Ok(Err(why)) => format!("Err({why:?})"),
+                    Err(_) => "PANICKED".to_owned(),
                 };
                 println!(
-                    "Q1760 before={before} {other:?} {rule:?} holed_first={holed_first}: {said}"
+                    "Q1760 before={before} capped={capped} {other:?} {rule:?} holed_first={holed_first}: {said}"
                 );
             }
         }
