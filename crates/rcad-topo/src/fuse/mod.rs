@@ -151,15 +151,20 @@ impl Model {
     /// [`Error::ArgumentIntersectsItself`] when one of the input solids runs
     /// through itself. [`Error::ResultIsNotManifold`] when the answer would have
     /// an edge with other than two faces along it — two cubes meeting along one
-    /// edge united, say. [`Error::Invalid`] when an input's corners and its own
-    /// planes disagree by more than the corners' boxes, when a shell of the
-    /// answer encloses no space, or when the answer's own shortest edge is too
-    /// small to resolve beside its own coordinates — which is
-    /// [`Invalid::DynamicRangeTooWide`] about a feature the inputs did not have
-    /// and the fuse built (see `Assembly::check_dynamic_range`), or when cutting
-    /// a face left a piece bounded by two straight sides, which enclose no area
-    /// and so describe no face — [`Invalid::WireTooShort`], and §67 for why that
-    /// is the input's fault and not the splitter's.
+    /// edge united, say. [`Error::Invalid`] when three of the surfaces round an
+    /// input's corner place it and another surface round it is certified off
+    /// that place by more than [`Model::validate`] lets a corner sit off its
+    /// surface, which takes a corner with four or more surfaces round it. A
+    /// corner with three is placed only where they cross, and one further from
+    /// there than that room is placed by nothing: [`Error::Undecidable`], on
+    /// "where three surfaces meet", and not this (§294.16). [`Error::Invalid`]
+    /// also when a shell of the answer encloses no space, or when the answer's
+    /// own shortest edge is too small to resolve beside its own coordinates —
+    /// which is [`Invalid::DynamicRangeTooWide`] about a feature the inputs did
+    /// not have and the fuse built (see `Assembly::check_dynamic_range`), or
+    /// when cutting a face left a piece bounded by two straight sides, which
+    /// enclose no area and so describe no face — [`Invalid::WireTooShort`], and
+    /// §67 for why that is the input's fault and not the splitter's.
     ///
     /// [`Error::KeyFromAnotherModel`] when one of `arguments` or `tools` was
     /// made by a different model. It is asked of every key in both lists
@@ -219,8 +224,14 @@ impl Model {
     /// `under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_touches_without_crossing`,
     /// `a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer`, and
     /// `a_frustum_whose_top_corner_is_moved_gives_what_the_bar_gives`
-    /// (§294.8). Only a corner with three or more surfaces round it is still
-    /// untried (§294.7).
+    /// (§294.8). A box whose top corner, where three planes meet, was moved a
+    /// millimetre the same way was fused against the same partners at four
+    /// placements under both policies, and every fuse refused with
+    /// [`Error::Undecidable`] on "where three surfaces meet", the partner cut
+    /// the corner away or not, and left the model as it was
+    /// (`a_broken_three_surface_corner_read_back_from_bytes.rs`, §294.16). A
+    /// corner with four or more surfaces round it, or with a curved one among
+    /// three, is still untried (§294.7).
     pub fn fuse(
         &mut self,
         arguments: &[SolidKey],
