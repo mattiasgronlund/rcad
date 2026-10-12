@@ -1343,11 +1343,14 @@ impl Assembly {
     /// the corner was solved as; `None` otherwise.
     ///
     /// **The box is asked because three planes can meet far from the corner.**
-    /// Where a face's edge runs straight on past a corner from one neighbour
-    /// to another lying in nearly the same plane, the three meet far along
-    /// the edge, and asking there would answer for a point the face does not
-    /// have. The box is the written point give or take the corner's
-    /// [`Corner::wobble`], twice what the middle of one box needs.
+    /// Where a face's side runs on nearly straight past a corner, from one
+    /// wall to another lying in nearly the same plane, the three meet far
+    /// along the side, and asking there would answer for a point the face
+    /// does not have (`a_corner_whose_planes_meet_far_outside_its_box_is_read_where_it_was_written`).
+    /// No fuse in this crate's tests meets that, and the corner is then read
+    /// as it was before queue row Q1582. The box is the written point give or
+    /// take the corner's [`Corner::wobble`], twice what the middle of one box
+    /// needs.
     fn the_three_planes_meeting_at_a_corner_of(
         &self,
         face: &Face,
@@ -8701,7 +8704,9 @@ mod tests {
     };
     use std::collections::BTreeSet;
 
-    use rcad_predicates::{Decision, Policy, ProvenanceLog};
+    use rcad_predicates::{
+        Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet,
+    };
 
     use crate::{DraftStep, Invalid, Rule, SolidBuilder};
 
@@ -10129,6 +10134,88 @@ mod tests {
             .map(|corner| assembly.is_the_apex_of_a_cone_along(corner, 0))
             .collect();
         assert_eq!(read, [true, true, false, false]);
+    }
+
+    /// A corner where a face's side runs on nearly straight, from one wall to
+    /// another, is read where it was written when the planes of its two edges
+    /// meet the face far outside the corner's box (queue row Q1582).
+    ///
+    /// The face is the triangle `(0, 0)`, `(2, 0)`, `(0, 2)` on `z = 0`,
+    /// resting on `y = 0` along its side from `(0, 0)` to `(2, 0)`. Its long
+    /// side has a corner at `(1, 1)`, its box `2^-30` wide, where the wall
+    /// `x + y = 2` gives way to a wall turned `2^-41` from it and passing
+    /// through `(1 − 2^-32, 1)`. The face and the two walls meet at about
+    /// `(257, −255, 0)`, below `y = 0`, while the corner is a whole unit above
+    /// it, so asking the planes there would refuse a face that rests on the
+    /// outer side.
+    #[test]
+    fn a_corner_whose_planes_meet_far_outside_its_box_is_read_where_it_was_written() {
+        let plane = |coefficients| Plane::from_coefficients(coefficients).expect("a plane");
+        let flat = plane([0.0, 0.0, 1.0, 0.0]);
+        let rested_on = plane([0.0, 1.0, 0.0, 0.0]);
+        let one_wall = plane([1.0, 1.0, 0.0, -2.0]);
+        let (turned, off) = (2.0_f64.powi(-40), -(2.0_f64.powi(-32)));
+        let the_next_wall = plane([1.0, 1.0 + turned, 0.0, -(2.0 + turned + off)]);
+        let upright = plane([-1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(
+            side_of_a_plane_where_three_planes_meet(
+                [flat, the_next_wall, one_wall].map(|plane| plane.coefficients()),
+                rested_on.coefficients()
+            ),
+            Ok(Decision::Neg),
+            "the face and its two walls meet below the plane it rests on"
+        );
+        let corner = |x: f64, y: f64, wobble: f64| Corner {
+            point: Point::new(x, y, 0.0),
+            wobble,
+            from: None,
+            moved_by_the_policy: false,
+        };
+        let edge = |ends: [usize; 2], wall: Plane| Edge {
+            ends,
+            carried_by: [Surface::Plane(flat), Surface::Plane(wall)],
+            arc: WhichArc::TheOnlyOne,
+            from: Vec::new(),
+        };
+        let face = |surface: Plane, sides: Vec<Side>| Face {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(surface),
+            used: Orientation::Forward,
+            wires: vec![sides],
+            is_a_whole_closed_surface: false,
+        };
+        let side = |edge: usize, forward: bool| Side {
+            edge,
+            forward,
+            read_against: None,
+        };
+        let assembly = Assembly {
+            corners: vec![
+                corner(0.0, 0.0, 0.0),
+                corner(2.0, 0.0, 0.0),
+                corner(1.0, 1.0, 2.0_f64.powi(-30)),
+                corner(0.0, 2.0, 0.0),
+            ],
+            edges: vec![
+                edge([0, 1], rested_on),
+                edge([1, 2], the_next_wall),
+                edge([2, 3], one_wall),
+                edge([3, 0], upright),
+            ],
+            runs: Vec::new(),
+            faces: vec![
+                face(flat, (0..4).map(|edge| side(edge, true)).collect()),
+                face(rested_on, vec![side(0, false)]),
+            ],
+            shells: Vec::new(),
+            solids: Vec::new(),
+        };
+        let dart = |face: usize| Dart {
+            face,
+            wire: 0,
+            position: 0,
+        };
+        assert!(assembly.rest_on_the_outer_side_of([dart(0); 2], [dart(1); 2]));
     }
 
     /// A broken answer is refused, and the caller's model does not so much as
