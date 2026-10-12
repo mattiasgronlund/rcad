@@ -2772,7 +2772,12 @@ impl Assembly {
     /// - **Two different surfaces**, which is a curved partner whose bits sort
     ///   between two spellings of the wall: the two stored ways are read with
     ///   the rule itself, [`a_closed_crossing_is_walked_the_way_it_is_stored`],
-    ///   along the crossing the edge was cut as.
+    ///   along the crossing the edge was cut as. Both fuses built to reach
+    ///   this branch, in
+    ///   `two_bars_on_one_pipe_written_twice_with_a_pin_in_one_are_refused_where_one_spelling_unites`,
+    ///   are refused before it (§231.5), so only the edges built by hand in
+    ///   `a_circle_the_joined_spelling_names_instead_of_a_thin_pipe_is_turned_round`
+    ///   run it.
     ///
     /// # Errors
     ///
