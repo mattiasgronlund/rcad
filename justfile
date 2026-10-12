@@ -13104,11 +13104,15 @@ queue mode="" *args:
             for (y = 1; y <= m; y++) print "    " raw[pick[y]]
             lanes_n++
         }
-        function sets_meet(x, y,    ex, ey, nx, ny, i, j) {
+        function sets_meet(x, y,    ex, ey, nx, ny, i, j, shmine, shtheirs, sharedfound) {
             nx = split(x, ex, ","); ny = split(y, ey, ",")
             for (i = 1; i <= nx; i++)
                 for (j = 1; j <= ny; j++)
-                    if (entries_meet(ex[i], ey[j])) { mine = ex[i]; theirs = ey[j]; meet_shared = shared_match; return 1 }
+                    if (entries_meet(ex[i], ey[j])) {
+                        if (!shared_match) { mine = ex[i]; theirs = ey[j]; meet_shared = 0; return 1 }
+                        if (!sharedfound) { sharedfound = 1; shmine = ex[i]; shtheirs = ey[j] }
+                    }
+            if (sharedfound) { mine = shmine; theirs = shtheirs; meet_shared = 1; return 1 }
             return 0
         }
         function entries_meet(x, y,    px, py, ix, iy, h, m) {
@@ -14296,6 +14300,18 @@ check-queue-selftest:
     [ "$(takes)" = "Q2 " ] || fail "a shared file with one running lane did not let a second lane in"
     grep -qxF "skip Q3 (tier 1): its crates/rcad-topo/src/fuse/arrange.rs is shared, and Q1 (held by lane:lane-q1) and Q2 (taken above) already hold it" <<<"$got" \
         || fail "a shared file already held by a running lane and a row taken above did not keep a third out, naming both"
+
+    # §424.8's bug (Q1850): a shared meet on the first entry a candidate lists
+    # must not stop the fill short of a plain meet on a later entry. Both rows
+    # hold `arrange.rs` and the same test file, `arrange.rs` listed first.
+    fence sharedplus <<'MD'
+    Q1  1  lane:lane-q1  opus  crates/rcad-topo/src/fuse/arrange.rs,crates/rcad-topo/tests/two_arcs_where_two_curved_surfaces_cross.rs  the first lane, on the shared file and a test file §424
+    Q2  1  todo  opus  crates/rcad-topo/src/fuse/arrange.rs,crates/rcad-topo/tests/two_arcs_where_two_curved_surfaces_cross.rs  lists the shared file first, but shares the test file too §424
+    MD
+    drive sharedplus next 1
+    [ "$(takes)" = "" ] || fail "a shared meet on the first entry hid a plain meet on an entry later in the list"
+    grep -qxF "skip Q2 (tier 1): its crates/rcad-topo/tests/two_arcs_where_two_curved_surfaces_cross.rs meets Q1's crates/rcad-topo/tests/two_arcs_where_two_curved_surfaces_cross.rs, held by lane:lane-q1" <<<"$got" \
+        || fail "a shared meet did not let the fill go on to check the write sets' other entries"
 
     # A directory above a shared file is not itself a shared entry: it still
     # meets every row under it at once, both files on the list included.
