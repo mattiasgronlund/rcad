@@ -23,6 +23,7 @@ side by side.
   424.5   What is not done, and why
   424.6   The rows
   424.7   What Q1530 built
+  424.8   What Q1531 built
 
 ### 424.1 What was measured
 
@@ -227,3 +228,46 @@ widening back to that row's file before the take, lets both lanes hold the
 file. The same gap was there before, between two dispatchers' fills and takes;
 widening back adds a third way in. Q1530 files a row for `take` to ask
 `meets` too.
+
+### 424.8 What Q1531 built
+
+424.4 as written: `queue_shared_files` and the one rule for when two sets meet,
+in the `queue` recipe's `blocked()`.
+
+- **The list.** `queue_shared_files` is a plain justfile variable, a
+  comma-separated list fed to the fill's awk the same way `queue_slots` and
+  `queue_bundle` are: `crates/rcad-topo/src/fuse/arrange.rs,crates/rcad-topo/src/fuse/assemble.rs`
+  to start. The `BEGIN` block splits it into an array, keyed by the exact path.
+- **Where the exception lives.** `entries_meet(x, y)` already told two entries
+  apart into three cases: the same path (meeting unless both name an item and
+  the items differ), one a directory holding the other, or neither. Only the
+  first case can ever match a `queue_shared_files` path exactly — a directory
+  match is a prefix match, not an equality, so it never sets the new flag. So
+  `entries_meet` sets a second output, `shared_match`, exactly when the match
+  it found was that first case *and* the matched path is on the list. "The same
+  item in it" needs no extra code: the item comparison already in that case
+  decides it, the list membership is the only thing layered on top.
+- **The count.** `sets_meet` carries `shared_match` out as `meet_shared`, next
+  to the `mine`/`theirs` it already carries. `blocked()` now walks all three
+  kinds of existing holder — running lanes, `elsewhere`'s records, rows taken
+  above — keeping one counter across all three rather than returning on the
+  first match: an ordinary (non-shared) match still blocks at once, as before,
+  but a shared match only increments the counter, and blocks only once a
+  second one is found, naming both by id and where each is held. A candidate
+  row's own two entries (say, naming both `arrange.rs` and `assemble.rs`) are
+  counted separately, since each is checked against the others' write set as
+  its own `sets_meet` call.
+- **What this does not touch.** §424.7's `meets <id> <write set>`, which
+  `narrow`'s widening check calls, runs this same `blocked()` on the widened
+  entries, so the new rule reaches it with no separate edit, as 424.7 said it
+  would.
+- **The tests.** `check-queue-selftest` gained three fixtures: one lane on
+  `arrange.rs` lets a second in and only blocks a third, once the running lane
+  and the row taken above both count toward it; a directory holding
+  `arrange.rs` and `assemble.rs` still blocks a row on either at once, since a
+  directory match is never a shared match; and a file left off the list
+  (`select.rs`) keeps one holder blocking the next, as before. The existing
+  `items` fixture, which tested two different items of one file against the
+  same item twice, moved off `assemble.rs` onto `select.rs`, since `assemble.rs`
+  is now shared and a same-item repeat there would not block until the second
+  holder — a different fact, not the one that fixture was written to show.
