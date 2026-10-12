@@ -679,10 +679,23 @@ fn holds_what_pappus_gives_the_top_half_of_a_ring(
 /// This is the shape `docs/decisions.md` §390.5's second bullet reasoned about
 /// and had not built (Q825). The crown is narrower than a quarter turn round
 /// the tube, so nothing cuts the patch before it reaches the ring's cut whole.
+///
+/// **The refusal is a gap, not a limit.** The same solid with its skin cut by
+/// a second seam across the tube, a meridian the slot does not reach, builds
+/// and holds what Pappus gives
+/// ([`a_crown_of_a_ring_with_a_slot_across_its_top_in_two_faces_holds_what_pappus_gives`]).
+/// So a cut across the tube at such a meridian, made by the mesher, would mesh
+/// this face too.
+///
+/// A fuse does not make this face yet: the crown less the block
+/// `[-200, 0] × [0, 200] × [24, 100]` is refused
+/// `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` before anything is meshed.
+/// The block's only walls neither through the ring's axis nor square to it are
+/// `x = -200` and `y = 200`, and both miss the torus.
 #[test]
 fn a_crown_of_a_ring_with_a_slot_across_its_top_in_one_face_is_refused() {
     let mut model = Model::new(Scale::millimetres(250.0).expect("a positive size"));
-    let refused = a_crown_of_a_ring_with_a_slot_across_its_top(&mut model);
+    let refused = a_crown_of_a_ring_with_a_slot_across_its_top(&mut model, false);
     assert!(
         matches!(
             refused,
@@ -693,13 +706,64 @@ fn a_crown_of_a_ring_with_a_slot_across_its_top_in_one_face_is_refused() {
     assert_eq!(model.solid_count(), 0, "a refused build writes nothing");
 }
 
+/// The same crown with its skin cut by a second seam across the tube, a
+/// quarter turn round the ring short of the first, builds and holds what
+/// Pappus gives. Neither of its two faces reaches a whole turn round the ring.
+///
+/// **Pappus, on the tube's cross-section.** The part of the tube's disc above
+/// `z = 20` is a segment of area `625 acos(4/5) − 300`, and above `z = 24` one
+/// of area `625 acos(24/25) − 168`. Each is cut square to the axis through the
+/// disc's centre line, so its centroid is on the ring's own circle, `100` from
+/// the axis: the crown sweeps the first a whole turn and the slot takes the
+/// second away for a quarter of one.
+#[test]
+fn a_crown_of_a_ring_with_a_slot_across_its_top_in_two_faces_holds_what_pappus_gives() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let mut model = Model::new(Scale::millimetres(250.0).expect("a positive size"));
+    let crown = a_crown_of_a_ring_with_a_slot_across_its_top(&mut model, true)
+        .unwrap_or_else(|why| panic!("the crown with a slot in two faces was refused {why:?}"));
+    model
+        .validate(&policy, &mut log)
+        .expect("the model holding the crown is sound");
+    let crown_section = 625.0 * (0.8_f64).acos() - 300.0;
+    let slot_section = 625.0 * (0.96_f64).acos() - 168.0;
+    let pappus = 2.0 * PI * 100.0 * crown_section - PI / 2.0 * 100.0 * slot_section;
+    for deflection in [1.0, 0.25, 0.05] {
+        let measured = model
+            .solid(crown)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(deflection).expect("a positive length"),
+                &policy,
+                &mut log,
+            )
+            .unwrap_or_else(|why| panic!("the crown at {deflection} was refused {why:?}"));
+        assert!(
+            (measured.volume() - pappus).abs() <= measured.volume_error(),
+            "at {deflection} the crown measured {} where Pappus gives {pappus}, allowed {}",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
+}
+
 /// The crown of the torus of ring `100` and tube `25` above `z = 20`, with a
 /// slot `4` deep across its top for a quarter turn round the ring, from the
 /// plane `x = 0` on the side `y > 0` to the plane `y = 0` on the side `x < 0`.
 ///
 /// Every corner is exactly on the torus: the floor's from the 15-20-25
 /// triangle and the slot's from the 7-24-25 one.
-fn a_crown_of_a_ring_with_a_slot_across_its_top(model: &mut Model) -> Result<SolidKey> {
+///
+/// The torus skin has a seam across the tube in the plane `y = 0` on the side
+/// `x > 0`. With `a_second_seam` it has another in the plane `x = 0` on the
+/// side `y < 0`, and is two faces: the one with the slot in it goes three
+/// quarters of a turn round the ring and the other one quarter. Without, it is
+/// one face that goes the whole turn.
+fn a_crown_of_a_ring_with_a_slot_across_its_top(
+    model: &mut Model,
+    a_second_seam: bool,
+) -> Result<SolidKey> {
     let (ring, tube) = (100.0, 25.0);
     let skin =
         Surface::Torus(Torus::new(Axis::z(), ring, tube).expect("a tube narrower than its ring"));
@@ -724,16 +788,6 @@ fn a_crown_of_a_ring_with_a_slot_across_its_top(model: &mut Model) -> Result<Sol
     let slot_outer_end = builder.add_vertex(Point::new(-107.0, 0.0, 24.0))?;
     let slot_inner_end = builder.add_vertex(Point::new(-93.0, 0.0, 24.0))?;
 
-    let outer_circle = builder.add_edge(
-        outer_corner,
-        outer_corner,
-        EdgeRun::RightRoundWhereItsFacesCross,
-    )?;
-    let inner_circle = builder.add_edge(
-        inner_corner,
-        inner_corner,
-        EdgeRun::RightRoundWhereItsFacesCross,
-    )?;
     let seam = builder.add_edge(
         outer_corner,
         inner_corner,
@@ -745,6 +799,91 @@ fn a_crown_of_a_ring_with_a_slot_across_its_top(model: &mut Model) -> Result<Sol
             ],
         },
     )?;
+    let (round_the_slot_side, round_the_other_side, outer_rim, inner_rim) = if a_second_seam {
+        let far_outer_corner = builder.add_vertex(Point::new(0.0, -115.0, 20.0))?;
+        let far_inner_corner = builder.add_vertex(Point::new(0.0, -85.0, 20.0))?;
+        let far_seam = builder.add_edge(
+            far_outer_corner,
+            far_inner_corner,
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(start_wall),
+                picked_by: smallvec::smallvec![
+                    side(Vector::new(0.0, -1.0, 0.0), 0.0),
+                    side(Vector::new(0.0, 0.0, 1.0), 0.0),
+                ],
+            },
+        )?;
+        let along_the_crown_floor = |round: Picker, chord: Picker| EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(crown_floor),
+            picked_by: smallvec::smallvec![round, chord],
+        };
+        let the_long_way = |radius: f64| side(Vector::new(-1.0, 1.0, 0.0), -radius);
+        let the_short_way = |radius: f64| side(Vector::new(1.0, -1.0, 0.0), radius);
+        let outer_long = builder.add_edge(
+            outer_corner,
+            far_outer_corner,
+            along_the_crown_floor(Picker::OutsideAPipe(pipe), the_long_way(115.0)),
+        )?;
+        let outer_short = builder.add_edge(
+            far_outer_corner,
+            outer_corner,
+            along_the_crown_floor(Picker::OutsideAPipe(pipe), the_short_way(115.0)),
+        )?;
+        let inner_long = builder.add_edge(
+            inner_corner,
+            far_inner_corner,
+            along_the_crown_floor(Picker::InsideAPipe(pipe), the_long_way(85.0)),
+        )?;
+        let inner_short = builder.add_edge(
+            far_inner_corner,
+            inner_corner,
+            along_the_crown_floor(Picker::InsideAPipe(pipe), the_short_way(85.0)),
+        )?;
+        (
+            vec![
+                (outer_long, Orientation::Forward),
+                (far_seam, Orientation::Forward),
+                (inner_long, Orientation::Reversed),
+                (seam, Orientation::Reversed),
+            ],
+            Some(vec![
+                (outer_short, Orientation::Forward),
+                (seam, Orientation::Forward),
+                (inner_short, Orientation::Reversed),
+                (far_seam, Orientation::Reversed),
+            ]),
+            vec![
+                (outer_short, Orientation::Reversed),
+                (outer_long, Orientation::Reversed),
+            ],
+            vec![
+                (inner_long, Orientation::Forward),
+                (inner_short, Orientation::Forward),
+            ],
+        )
+    } else {
+        let outer_circle = builder.add_edge(
+            outer_corner,
+            outer_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )?;
+        let inner_circle = builder.add_edge(
+            inner_corner,
+            inner_corner,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )?;
+        (
+            vec![
+                (outer_circle, Orientation::Forward),
+                (seam, Orientation::Forward),
+                (inner_circle, Orientation::Reversed),
+                (seam, Orientation::Reversed),
+            ],
+            None,
+            vec![(outer_circle, Orientation::Reversed)],
+            vec![(inner_circle, Orientation::Forward)],
+        )
+    };
     let along_the_slot_floor = |inside: Picker| EdgeRun::PartOfWhereItCrosses {
         and: Surface::Plane(slot_floor),
         picked_by: smallvec::smallvec![
@@ -796,15 +935,7 @@ fn a_crown_of_a_ring_with_a_slot_across_its_top(model: &mut Model) -> Result<Sol
         }
         builder.add_wire(&along)
     };
-    let round_the_crown = a_wire(
-        &mut builder,
-        &[
-            (outer_circle, Orientation::Forward),
-            (seam, Orientation::Forward),
-            (inner_circle, Orientation::Reversed),
-            (seam, Orientation::Reversed),
-        ],
-    )?;
+    let round_the_crown = a_wire(&mut builder, &round_the_slot_side)?;
     let round_the_slot = a_wire(
         &mut builder,
         &[
@@ -814,11 +945,22 @@ fn a_crown_of_a_ring_with_a_slot_across_its_top(model: &mut Model) -> Result<Sol
             (outer_side, Orientation::Reversed),
         ],
     )?;
-    let crown = builder.add_face(skin, &[round_the_crown, round_the_slot])?;
+    let mut faces = vec![(
+        builder.add_face(skin, &[round_the_crown, round_the_slot])?,
+        Orientation::Forward,
+    )];
+    if let Some(steps) = round_the_other_side {
+        let round_the_rest = a_wire(&mut builder, &steps)?;
+        faces.push((
+            builder.add_face(skin, &[round_the_rest])?,
+            Orientation::Forward,
+        ));
+    }
 
-    let outer_rim = a_wire(&mut builder, &[(outer_circle, Orientation::Reversed)])?;
-    let inner_rim = a_wire(&mut builder, &[(inner_circle, Orientation::Forward)])?;
+    let outer_rim = a_wire(&mut builder, &outer_rim)?;
+    let inner_rim = a_wire(&mut builder, &inner_rim)?;
     let floor = builder.add_face(Surface::Plane(crown_floor), &[outer_rim, inner_rim])?;
+    faces.push((floor, Orientation::Forward));
 
     let slot_floor_wire = a_wire(
         &mut builder,
@@ -846,14 +988,13 @@ fn a_crown_of_a_ring_with_a_slot_across_its_top(model: &mut Model) -> Result<Sol
         ],
     )?;
     let end_wall_face = builder.add_face(Surface::Plane(end_wall), &[end_wall_wire])?;
-
-    builder.add_shell(&[
-        (crown, Orientation::Forward),
-        (floor, Orientation::Forward),
+    faces.extend([
         (slot_floor_face, Orientation::Forward),
         (start_wall_face, Orientation::Forward),
         (end_wall_face, Orientation::Forward),
-    ])?;
+    ]);
+
+    builder.add_shell(&faces)?;
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
