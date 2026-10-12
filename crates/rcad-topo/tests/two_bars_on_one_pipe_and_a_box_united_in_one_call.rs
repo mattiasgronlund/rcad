@@ -96,11 +96,13 @@
 //!   answered yet. One call reaches the union
 //!   ([`a_box_turned_an_eighth_of_a_turn_unites_with_the_lower_bar_and_with_both_bars`]).
 //! - **A square bar standing on an edge, pushed through the lower bar's wall,
-//!   cannot be united with that bar alone**, lying along `x` or along `y`,
-//!   either way round: `Undecidable` at "order along a crossing"
-//!   ([`a_square_bar_standing_on_an_edge_along_x_cannot_be_united_with_the_bar`],
-//!   [`a_square_bar_standing_on_an_edge_along_y_cannot_be_united_with_the_bar`]).
-//!   Each was built as a shape a designer draws with what Q1406's box has, side
+//!   cannot be united with that bar alone lying along `y`**, either way round:
+//!   `Undecidable` at "order along a crossing"
+//!   ([`a_square_bar_standing_on_an_edge_along_y_cannot_be_united_with_the_bar`]).
+//!   Lying along `x` it was refused the same way until Q1817, on a corner a
+//!   hair past where a loop round the pipe starts
+//!   ([`a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar`]). Each
+//!   was built as a shape a designer draws with what Q1406's box has, side
 //!   faces slanting across the wall.
 
 use core::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI, SQRT_2};
@@ -446,58 +448,38 @@ fn the_turned_box_and_the_lower_bar_cannot_be_fused_with_the_upper_bar() {
 }
 
 /// **A square bar standing on an edge along `x`, pushed through the lower
-/// bar's wall, cannot be united with it**, either way round, by any spelling
-/// of the wall ([`a_diamond_brace_along_x`]). It is refused `Undecidable` at
-/// "order along a crossing", on two of the points where the lines its long
-/// edges lie on cross the pipe, `(±√(4 - y²), y, z)` with `(y, z)` one of
-/// `(0, 1 ± √½)` and `(±√½, 1)`, and what it worked out to order them has an
-/// enclosure under `10⁻¹⁴`.
+/// bar's wall, unites with it**, either way round, by any spelling of the wall
+/// ([`a_diamond_brace_along_x`]): one solid, `8π` and what of the brace is
+/// outside the bar ([`the_diamond_brace_outside_the_bar`]).
+///
+/// It was refused `Undecidable` at "order along a crossing" until Q1817. The
+/// brace's top edge `y = 0, z = 1 + √½` lies on the bar's seam plane, and the
+/// loop where the plane of its face `z - y = 1 + √½` cuts the pipe is walked
+/// from `(2, 0, 1 + √½)`: exactly on the pipe, `6.8e-17` off that plane. The
+/// top edge meets the pipe at `y = -1.3e-16`, a hair past the start, and the
+/// area the start, that corner and the next one round, `(√3.5, -√½, 1)`, sweep
+/// is about `3.5e-17`, which the corner's box, `2.2e-15` wide along `x`,
+/// swamps. Read as an angle about the bar's axis instead, the corner is a
+/// certified hair past the start, since the start's `y` is exactly nothing,
+/// and the next corner is past it (`round_a_closed_crossing_by_its_angle` in
+/// `fuse/arrange.rs`). The brace's face `z - y = 1 - √½`, with the brace as
+/// the argument, was refused the same way, from `(-2, 0, 1 - √½)`.
 ///
 /// Built as a shape a designer draws with what Q1406's box has, side faces
 /// slanting across the wall, to see whether that box's refusal
 /// ([`the_turned_box_and_the_lower_bar_cannot_be_fused_with_the_upper_bar`])
-/// meets designers. It does not reach that fuse: it is refused one fuse
-/// earlier. The answer exists, the bar and the brace less what they share, so
-/// this is a gap.
+/// meets designers. It did not reach that fuse: it was refused one fuse
+/// earlier.
 #[test]
-fn a_square_bar_standing_on_an_edge_along_x_cannot_be_united_with_the_bar() {
-    let off_the_middle = [
-        (0.0, 1.0 + FRAC_1_SQRT_2),
-        (0.0, 1.0 - FRAC_1_SQRT_2),
-        (FRAC_1_SQRT_2, 1.0),
-        (-FRAC_1_SQRT_2, 1.0),
-    ];
-    let where_its_edges_cross_the_pipe: Vec<[f64; 3]> = off_the_middle
-        .into_iter()
-        .flat_map(|(y, z)| {
-            let x = (RADIUS * RADIUS - y * y).sqrt();
-            [[x, y, z], [-x, y, z]]
-        })
-        .collect();
+fn a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar() {
+    let one_bar = PI * RADIUS * RADIUS * MEETING;
+    let outside = the_diamond_brace_outside_the_bar();
     for wall in EVERY_WALL {
         for call in [Call::LowerWithTheBoxAlone, Call::TheBoxWithTheLowerAlone] {
-            let asked = format!("{wall:?}, {call:?}");
-            let (_, said) = unite_with(wall, call, a_diamond_brace_along_x);
-            let Err(why) = &said else {
-                panic!("{asked}: answered {said:?}");
-            };
-            assert_eq!(
-                what_it_gave_up_on(why),
-                "order along a crossing",
-                "{asked}: {why:?}"
-            );
-            let points = the_points_it_could_not_order(why);
-            assert_eq!(points.len(), 2, "{asked}: {why:?}");
-            for point in points {
-                assert!(
-                    where_its_edges_cross_the_pipe
-                        .iter()
-                        .any(|&crossing| lies_within(point, crossing, 1e-12)),
-                    "{asked}: {point:?}"
-                );
-            }
-            let enclosure = the_last_record(why).enclosure();
-            assert!(enclosure < 1e-14, "{asked}: {enclosure}");
+            let asked = format!("the diamond brace along x, {wall:?}, {call:?}");
+            let (model, said) = unite_with(wall, call, a_diamond_brace_along_x);
+            let united = said.unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+            is_the_solid_worked_out(&model, &united, (1, one_bar + outside), &asked);
         }
     }
 }
@@ -512,8 +494,9 @@ fn a_square_bar_standing_on_an_edge_along_x_cannot_be_united_with_the_bar() {
 /// plane `x + z = 1 - √½` of one of its faces, the second on the bar's top cap.
 ///
 /// Built for the same reason as
-/// [`a_square_bar_standing_on_an_edge_along_x_cannot_be_united_with_the_bar`].
-/// The answer exists, so this is a gap.
+/// [`a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar`], which was
+/// refused on a corner a rounding past where its loop starts, where these two
+/// points are `0.38` apart. The answer exists, so this is a gap.
 #[test]
 fn a_square_bar_standing_on_an_edge_along_y_cannot_be_united_with_the_bar() {
     let x = -1.75_f64.sqrt();
@@ -945,6 +928,23 @@ fn the_turned_box_outside_the_bars() -> f64 {
         - k * (under_the_circle(r) - under_the_circle(k))
         - 0.75 * (r - k) * (r - k);
     2.5 * 1.9 * 3.6 - shared
+}
+
+/// How much of [`a_diamond_brace_along_x`] is outside the lower bar: all of
+/// it, `2.5`, less what it shares with the bar.
+///
+/// The brace stays between `z = 1 - √½` and `1 + √½`, inside the bar's height,
+/// so what it shares is where `x ≥ 1.5` and `x² + y² ≤ 4`. At each `y` its
+/// cross-section is `2·(h - |y|)` tall, with `h = √½`, and reaches into the
+/// bar from `x = 1.5` to `√(4 - y²)`. So it shares the integral of
+/// `(√(4 - y²) - 1.5)·2·(h - |y|)` over `|y| ≤ h`, which is four times that
+/// of `(√(4 - y²) - 1.5)·(h - y)` from `0` to `h`.
+fn the_diamond_brace_outside_the_bar() -> f64 {
+    let h = FRAC_1_SQRT_2;
+    let under_the_circle = h * (4.0 - h * h).sqrt() / 2.0 + 2.0 * (h / 2.0).asin();
+    let its_moment = (8.0 - (4.0 - h * h).powf(1.5)) / 3.0;
+    let shared = 4.0 * (h * under_the_circle - its_moment - 0.75 * h * h);
+    2.5 - shared
 }
 
 /// A square bar of side 1 from `x = 1.5` to `4`, turned an eighth of a turn
