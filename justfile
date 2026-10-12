@@ -9741,6 +9741,24 @@ check-gate-fresh-cleanup-selftest:
 # none. That input is counted as untellable instead, apart from every bucket
 # that was actually decoded.
 #
+# **Then the fuse fuzzer's corpus is replayed for its refusals (§437.5).** The
+# fuzzer counts a refusal and drops it, and keeps the input that reached it, so
+# the refusals come back out of `fuzz_corpus_root/two_solids_fused_by_a_stranger`
+# the morning after. `rcad-fuzz-explain --refusals` replays every file of it on
+# `against`, in one process, giving each file 120 s; a file still running then
+# is left behind and counted hung, and the rest carry on. Two files land in the
+# night's directory. `$night/fuzz-refusals.tsv` has one row per group: `variant`,
+# `key` (an `Undecidable`'s predicates still undecided, any other refusal's
+# words with every number written `N`), `refusals`, `files`, `certified`,
+# `tolerant`, `first_way_round`, `other_way_round` and one `sample` file.
+# `$night/fuzz-refusals-faults.tsv` names each file that `panicked`, `hung` or
+# was `unreadable`: `fault`, `file`, `said`. The `since:` line compares the
+# groups with the latest earlier night that has a `fuzz-refusals.tsv`, and an
+# `appeared:` or `vanished:` line names each group that came or went. It runs
+# on a night with no crash file too, since the corpus is there either way, and
+# before the fold, so what the fold adds this morning is replayed the next. No
+# row is filed from it: §437.5 says why.
+#
 # **Then a crash file that passed on `main` is folded into the corpus, and the
 # tree stops carrying it (§434.3).** Each target's passing files are merged
 # into `fuzz_corpus_root/<target>` with `-merge=1 -timeout=10` by the night's
@@ -9767,6 +9785,7 @@ fuzz-triage night="" against="main":
     #!/usr/bin/env bash
     set -uo pipefail
     root='{{ fuzz_log_root }}'
+    corpus_root='{{ fuzz_corpus_root }}'
     latest="$root/latest"
     night='{{ night }}'
     if [ -z "$night" ]; then
@@ -9808,12 +9827,14 @@ fuzz-triage night="" against="main":
         artifacts="$rescued"
     else
         echo "inputs:   none — neither $artifacts nor $rescued exists"
-        exit 0
+        artifacts=""
     fi
-    files=$(find "$artifacts" -type f | sort)
-    if [ -z "$files" ]; then
-        echo "no files under $artifacts, so there is nothing to decode"
-        exit 0
+    files=""
+    if [ -n "$artifacts" ]; then
+        files=$(find "$artifacts" -type f | sort)
+        if [ -z "$files" ]; then
+            echo "no files under $artifacts, so there is nothing to decode"
+        fi
     fi
 
     at=$(git rev-parse --verify --quiet '{{ against }}^{commit}')
@@ -9826,10 +9847,13 @@ fuzz-triage night="" against="main":
     manifest=$(mktemp)
     report=$(mktemp)
     members=$(mktemp)
+    refusals=$(mktemp)
+    refusal_faults=$(mktemp)
+    refusals_said=$(mktemp)
     fold_scratch=""
     fold_copy=""
     cleanup() {
-        rm -f "$manifest" "$report" "$members"
+        rm -f "$manifest" "$report" "$members" "$refusals" "$refusal_faults" "$refusals_said"
         [ -z "$fold_scratch" ] || rm -rf "$fold_scratch"
         [ -z "$fold_copy" ] || rm -rf "$fold_copy"
         if [ -n "$borrowed" ]; then
@@ -9850,6 +9874,66 @@ fuzz-triage night="" against="main":
         work="$borrowed/tree"
     fi
     echo "replayed: {{ against }} ($(git rev-parse --short "$at")) in $work"
+
+    # The morning refusal replay, §437.5. Run whether or not the night left a
+    # crash file, since the corpus is there either way, and before the fold, so
+    # what the fold adds this morning is replayed the next.
+    replay_the_corpus() {
+        echo
+        local corpus="$corpus_root/two_solids_fused_by_a_stranger"
+        if [ ! -d "$corpus" ]; then
+            echo "refusals: none — $corpus is not there"
+            return 0
+        fi
+        local replay=(cargo run -q --profile test -p rcad-fuzz-explain -- --refusals "$corpus" --faults "$refusal_faults")
+        echo "\$ ${replay[*]}"
+        (cd "$work" && "${replay[@]}") >"$refusals" 2>"$refusals_said"
+        local status=$?
+        if [ "$status" -ne 0 ]; then
+            echo "fuzz-triage: the refusal replay itself failed (exit $status); it ended:"
+            tail -5 "$refusals_said" | sed 's/^/          /'
+            exit 1
+        fi
+        cp "$refusals" "$night/fuzz-refusals.tsv"
+        cp "$refusal_faults" "$night/fuzz-refusals-faults.tsv"
+        echo "refusals: $night/fuzz-refusals.tsv"
+        sed -n 's/^--refusals: /          /p' "$refusals_said"
+        awk -F'\t' 'NR > 1 { print "fault:    " $1 " " $2 ": " $3 }' "$refusal_faults"
+
+        local this_night before changes
+        this_night=$(basename "$night")
+        before=$(for earlier in "$(dirname "$night")"/*/fuzz-refusals.tsv; do
+                [ -f "$earlier" ] && basename "$(dirname "$earlier")"
+            done | LC_ALL=C awk -v this="$this_night" '$0 < this' | LC_ALL=C sort | tail -n 1)
+        if [ -z "$before" ]; then
+            echo "since:    no night before $this_night has a fuzz-refusals.tsv, so there is nothing to compare"
+            return 0
+        fi
+        changes=$(LC_ALL=C awk -F'\t' -v before="$before" '
+            FNR == 1 { next }
+            FILENAME == ARGV[1] { old[$1 FS $2] = $0; next }
+            { now[$1 FS $2] = 1 }
+            !(($1 FS $2) in old) { print "appeared: " $1 ": " $2 " (" $3 " refusals in " $4 " file(s), " $9 ")" }
+            END {
+                for (key in old) {
+                    if (key in now) continue
+                    split(old[key], was, FS)
+                    print "vanished: " was[1] ": " was[2] " (" was[3] " refusals in " was[4] " file(s) on " before ")"
+                }
+            }
+        ' "$(dirname "$night")/$before/fuzz-refusals.tsv" "$night/fuzz-refusals.tsv" | LC_ALL=C sort)
+        if [ -z "$changes" ]; then
+            echo "since:    $before, no group appeared or vanished"
+        else
+            echo "since:    $before"
+            printf '%s\n' "$changes"
+        fi
+    }
+
+    if [ -z "$files" ]; then
+        replay_the_corpus
+        exit 0
+    fi
 
     valid_targets=""
     for target_rs in "$work"/fuzz/fuzz_targets/*.rs; do
@@ -9919,6 +10003,8 @@ fuzz-triage night="" against="main":
         echo "$untellable of $total input(s) could not be told which target they came from, and are not in the groups above"
     fi
 
+    replay_the_corpus
+
     # The fold, §434.3. What it removes is this tree's own `fuzz/artifacts/`
     # and what it merges with is this tree's own build, so both have to be the
     # night's, and each guard says why it folds nothing.
@@ -9949,7 +10035,6 @@ fuzz-triage night="" against="main":
     fi
 
     fold_scratch=$(mktemp -d)
-    corpus_root='{{ fuzz_corpus_root }}'
     record="$root/removed-crash-files.tsv"
     tree=$(pwd)
     awk -F'\t' 'FILENAME == ARGV[1] { if (FNR > 1) failing[$NF] = 1; next } !($2 in failing)' \
@@ -10134,6 +10219,14 @@ fuzz-promote target file name="":
 # of the timer's first two mornings, 2026-10-07 and 10-08, ended on `mise:
 # command not found` with nothing replayed. Every arm passed on a session's
 # PATH, so none of them could have caught it.
+#
+# **The refusal replay (§437.5) runs for real on the checked-in fuse corpus,
+# in the last arm only.** Every other arm points `RCAD_FUZZ_CORPUS` at a
+# directory with no fuse corpus in it, and checks the morning says so and goes
+# on. Which refusals that corpus meets is the kernel's business, so the last
+# arm checks only what the recipe owes: one call, the two files and their
+# headers, counts that add up, a sample from the corpus for every group, and
+# which groups appeared or vanished since the night before.
 [private]
 check-fuzz-triage-selftest:
     #!/usr/bin/env bash
@@ -10165,8 +10258,9 @@ check-fuzz-triage-selftest:
     printf '#!/bin/sh\necho "mise: command not found (the 08:30 timer has no mise on its PATH)" >&2\nexit 127\n' \
         >"$no_mise/mise"
     chmod +x "$no_mise/mise"
+    triage_corpus="$dir/corpus"
     triage() {
-        PATH="$no_mise:$PATH" RCAD_FUZZ_LOGS="$logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        PATH="$no_mise:$PATH" RCAD_FUZZ_LOGS="$logs" RCAD_FUZZ_CORPUS="$triage_corpus" \
             just fuzz-triage "$1" HEAD 2>&1
     }
 
@@ -10235,6 +10329,10 @@ check-fuzz-triage-selftest:
     [ -f "$replayed_main" ] || fail "no replayed-main file landed beside the verdicts"
     [ "$(cat "$replayed_main")" = "$(git rev-parse HEAD)" ] \
         || fail "the replayed-main file did not hold the full sha of the commit this replayed against"
+    grep -qxF "refusals: none — $dir/corpus/two_solids_fused_by_a_stranger is not there" <<<"$got" \
+        || fail "a night with crash files did not go on to the refusal replay, or did not say the corpus is missing"
+    [ ! -e "$night/fuzz-refusals.tsv" ] \
+        || fail "a corpus that is not there still got a fuzz-refusals.tsv written for it"
 
     # Two: the nights before §91's copy-out landed keep their inputs in a
     # rescued directory beside the night, and 2026-09-14 is one of them.
@@ -10262,6 +10360,8 @@ check-fuzz-triage-selftest:
         || fail "a night that kept nothing did not say so"
     [ ! -e "$other/fuzz-triage-verdicts.tsv" ] \
         || fail "a night with nothing to decode still got a verdict file written into it"
+    grep -q '^refusals: none — ' <<<"$got" \
+        || fail "a night with no artifacts stopped before the refusal replay"
 
     # Four: a directory that is not there is a failure and not an empty report.
     if triage "$logs/2026-01-01" >/dev/null 2>&1; then
@@ -10549,6 +10649,8 @@ check-fuzz-triage-selftest:
     a_night 2026-10-16 "$(git -C "$tree" rev-parse --short HEAD)"
     got=$(fold "$fold_logs/2026-10-15") || fail "an older night made the triage itself fail"
     grep -q "^fold:     none — .* describes another night" <<<"$got" || fail "a night that is not the latest was folded"
+    grep -qxF "refusals: none — $fold_corpus/two_solids_fused_by_a_stranger is not there" <<<"$got" \
+        || fail "a morning that folds nothing skipped the refusal replay, which runs before the fold"
     a_night 2026-10-17 BUILD
     got=$(fold) || fail "a night that did not build made the triage itself fail"
     grep -q "^fold:     none — the night's targets did not build" <<<"$got" \
@@ -10598,6 +10700,64 @@ check-fuzz-triage-selftest:
         || fail "a morning handed the merge more passing files than RCAD_FUZZ_FOLD_AT_MOST, so the first fold would never end inside the service's four hours"
     [ "$(find "$tree/fuzz/artifacts/$reader" -type f | grep -c .)" = 1 ] \
         || fail "the file past the cap did not stay in fuzz/artifacts/ for the next morning"
+
+    # Eighteen: the fuse fuzzer's corpus is replayed for its refusals on a night
+    # with no crash file too (§437.5), every file of it in one call, into a file
+    # whose counts add up both ways; and the next night names each group that
+    # came or went since the latest night before it with such a file. The
+    # checked-in corpus stands in for the night's: it meets refusals of many
+    # kinds, and the whole of it replays in under a second.
+    triage_corpus="$PWD/fuzz/corpus"
+    fuse_corpus="$triage_corpus/two_solids_fused_by_a_stranger"
+    corpus_files=$(find "$fuse_corpus" -maxdepth 1 -type f | grep -c .)
+    first_night="$logs/2026-09-20"
+    mkdir -p "$first_night"
+    got=$(triage "$first_night") || fail "a night with a corpus to replay and no crash file made the triage itself fail"
+    grep -qF "inputs:   none" <<<"$got" || fail "a night that kept no crash file did not say so"
+    [ ! -e "$first_night/fuzz-triage-verdicts.tsv" ] \
+        || fail "a night with no crash file got a verdict file for the refusal replay's sake"
+    calls=$(grep -c "cargo run -q --profile test -p rcad-fuzz-explain -- --refusals $fuse_corpus " <<<"$got" || true)
+    [ "$calls" = 1 ] || fail "the corpus cost $calls replay call(s), not the one it is replayed in"
+    refusals_file="$first_night/fuzz-refusals.tsv"
+    [ -f "$refusals_file" ] || fail "no fuzz-refusals.tsv landed in the night's own directory"
+    [ "$(head -1 "$refusals_file")" = "$(printf 'variant\tkey\trefusals\tfiles\tcertified\ttolerant\tfirst_way_round\tother_way_round\tsample')" ] \
+        || fail "fuzz-refusals.tsv's header does not name the nine columns of §437.5"
+    groups=$(tail -n +2 "$refusals_file" | grep -c . || true)
+    [ "$groups" -gt 0 ] || fail "the checked-in corpus met no refusal, and every_model_the_fuse_fuzzer_kept_is_fused_again says it meets many"
+    not_adding_up=$(awk -F'\t' 'NR > 1 && (NF != 9 || $5 + $6 != $3 || $7 + $8 != $3 || $4 < 1 || $4 > $3)' "$refusals_file")
+    [ -z "$not_adding_up" ] \
+        || fail "a group's certified and tolerant, or its two ways round, do not add up to its refusals: $not_adding_up"
+    while IFS= read -r sample; do
+        [ "$(dirname "$sample")" = "$fuse_corpus" ] && [ -f "$sample" ] \
+            || fail "a group's sample is not a file of the corpus it came from: $sample"
+    done < <(tail -n +2 "$refusals_file" | cut -f9)
+    refusals=$(awk -F'\t' 'NR > 1 { n += $3 } END { print n + 0 }' "$refusals_file")
+    grep -q "^          $corpus_files files replayed, $refusals refusals in [0-9]* files, $groups groups, " <<<"$got" \
+        || fail "the replay's own tally did not say every one of the corpus's $corpus_files files was replayed, into the $refusals refusals and $groups groups of fuzz-refusals.tsv"
+    [ "$(head -1 "$first_night/fuzz-refusals-faults.tsv")" = "$(printf 'fault\tfile\tsaid')" ] \
+        || fail "fuzz-refusals-faults.tsv's header does not name its three columns"
+    grep -qx 'since:    no night before 2026-09-20 has a fuzz-refusals.tsv, so there is nothing to compare' <<<"$got" \
+        || fail "the first night with a fuzz-refusals.tsv was compared with something"
+
+    dropped=$(tail -n 1 "$refusals_file")
+    { head -n -1 "$refusals_file"; printf 'NoSuchRefusal\tnever\t1\t1\t1\t0\t1\t0\tnowhere\n'; } >"$dir/edited"
+    mv "$dir/edited" "$refusals_file"
+    second_night="$logs/2026-09-21"
+    mkdir -p "$second_night"
+    got=$(triage "$second_night") || fail "a second night's refusal replay made the triage itself fail"
+    grep -qx 'since:    2026-09-20' <<<"$got" || fail "the second night was not compared with the night before it"
+    grep -qxF "$(awk -F'\t' '{ print "appeared: " $1 ": " $2 " (" $3 " refusals in " $4 " file(s), " $9 ")" }' <<<"$dropped")" <<<"$got" \
+        || fail "a group the night before did not have was not named as appeared: $dropped"
+    grep -qxF 'vanished: NoSuchRefusal: never (1 refusals in 1 file(s) on 2026-09-20)' <<<"$got" \
+        || fail "a group the night before had and this night did not was not named as vanished"
+    [ "$(grep -c '^appeared: \|^vanished: ' <<<"$got")" = 2 ] \
+        || fail "a group both nights had was named as having come or gone"
+
+    third_night="$logs/2026-09-22"
+    mkdir -p "$third_night"
+    got=$(triage "$third_night") || fail "a third night's refusal replay made the triage itself fail"
+    grep -qx 'since:    2026-09-21, no group appeared or vanished' <<<"$got" \
+        || fail "a night was not compared with the latest night before it, or two nights alike were said to differ"
 
 # Each timer's two unit files are tracked here and **copied** into
 # `~/.config/systemd/user/`. That is two records of one thing, which §60 says is
