@@ -8746,7 +8746,8 @@ fn how_a_crossing_runs(
     if !(a_pair_that_crosses_in_a_conic(surface, partner, log)?
         || one_of_two_loops_round_a_thin_pipe(surface, partner, run)
         || one_of_two_loops_round_a_pipe_through_a_ball(surface, partner, run)
-        || the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in(surface, partner, run))
+        || the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in(surface, partner, run)
+        || the_one_loop_two_pipes_cross_in(surface, partner, run))
     {
         return Err(Error::ACrossingThisCannotBeOrderedAlong);
     }
@@ -9206,6 +9207,17 @@ fn the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in(
     };
     matches!(run.run(), EdgeRun::RightRoundWhereItsFacesCross)
         && how_far_a_ball_sits_off_a_pipes_axis(ball, pipe) == Decision::Pos
+}
+
+fn the_one_loop_two_pipes_cross_in(surface: &Surface, partner: &Surface, run: &NamedRun) -> bool {
+    matches!(
+        (surface, partner, run.run()),
+        (
+            Surface::Cylinder(_),
+            Surface::Cylinder(_),
+            EdgeRun::RightRoundWhereItsFacesCross
+        )
+    )
 }
 
 /// How points along a circle a ring shares with a ball, a pipe or a cone on

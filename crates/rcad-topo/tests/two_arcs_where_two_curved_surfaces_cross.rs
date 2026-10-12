@@ -503,15 +503,16 @@ fn a_thin_bar_reaching_out_of_a_fat_ones_side_is_refused_ordering_the_one_loop_t
             [thin, fat]
         },
     ];
-    for pair in pairs {
-        let gives = what_each_rule_gives(pair);
-        assert!(
-            gives
-                .iter()
-                .all(|answer| matches!(answer, Err(Error::ACrossingThisCannotBeOrderedAlong))),
-            "{gives:?}"
-        );
-    }
+    let gives = pairs.map(what_each_rule_gives);
+    assert!(
+        gives.iter().flatten().all(|answer| matches!(
+            answer,
+            Err(Error::Geometry(
+                rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic
+            ))
+        )),
+        "{gives:?}"
+    );
 }
 
 /// The bar of radius 1 along `x` from `x = −10` to `x = 10` at `y = 3.5`,
