@@ -3336,3 +3336,310 @@ mod cone_round_trip_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod probe_q1792 {
+    use core::f64::consts::{FRAC_PI_2, TAU};
+
+    use rcad_geom::{
+        Axis, Cylinder, Isometry, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Sphere, Surface, Vector,
+    };
+
+    use super::{
+        Shape, a_centre_its_plane_reads_back_from, how_far_off_the_circle_can_be, stepped,
+        where_a_plane_crosses_a_ball, where_a_plane_crosses_a_pipe,
+    };
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            z ^ (z >> 31)
+        }
+        fn unit(&mut self) -> f64 {
+            (self.next() >> 11) as f64 / (1u64 << 53) as f64
+        }
+        fn range(&mut self, low: i64, high: i64) -> i64 {
+            low + (self.next() % ((high - low + 1) as u64)) as i64
+        }
+    }
+
+    fn near_a_power_of_two(rng: &mut Rng, low: i64, high: i64) -> f64 {
+        let power = 2_f64.powi(rng.range(low, high) as i32);
+        let sign = if rng.next() & 1 == 0 { 1.0 } else { -1.0 };
+        sign * stepped(power, rng.range(-2, 2) as i32)
+    }
+
+    fn a_turn(rng: &mut Rng) -> Isometry {
+        let quarter = |axis: Axis, times: i64| {
+            Isometry::rotation(&axis, times as f64 * FRAC_PI_2).expect("a finite turn")
+        };
+        let direction = Vector::new(rng.unit() - 0.5, rng.unit() - 0.5, rng.unit() - 0.5);
+        let Ok(axis) = Axis::new(Point::origin(), direction) else {
+            return Isometry::identity();
+        };
+        if rng.next() % 4 == 0 {
+            return Isometry::rotation(&axis, rng.unit() * TAU).expect("a finite turn");
+        }
+        let small = 10_f64.powf(-6.0 + 4.0 * rng.unit());
+        let wobble = Isometry::rotation(&axis, small).expect("a finite turn");
+        let about_z = quarter(Axis::z(), rng.range(0, 3));
+        let about_x = quarter(Axis::x(), rng.range(0, 3));
+        wobble.compose(&about_z.compose(&about_x))
+    }
+
+    fn a_place(rng: &mut Rng, low: i64, high: i64) -> Vector {
+        let mut one = || {
+            if rng.next() % 5 == 0 {
+                0.0
+            } else {
+                near_a_power_of_two(rng, low, high)
+            }
+        };
+        Vector::new(one(), one(), one())
+    }
+
+    fn units(surface: &Surface, centre: Point, axis: Vector, radius: f64) -> f64 {
+        let (off, largest) =
+            how_far_off_the_circle_can_be(surface, centre, axis, radius).expect("a bound");
+        off / (NEAREST_F64_POINT_ROUNDOFF * largest)
+    }
+
+    fn steps(from: Point, to: Point) -> [i64; 3] {
+        let [a, b] = [from, to].map(|point| point.coordinates());
+        core::array::from_fn(|i| {
+            let ordered = |value: f64| {
+                let bits = value.to_bits() as i64;
+                if bits < 0 { i64::MIN - bits } else { bits }
+            };
+            ordered(b[i]) - ordered(a[i])
+        })
+    }
+
+    struct Tally {
+        name: &'static str,
+        tried: u64,
+        found: u64,
+        worst: f64,
+        past: u64,
+    }
+
+    impl Tally {
+        fn new(name: &'static str) -> Self {
+            Self {
+                name,
+                tried: 0,
+                found: 0,
+                worst: 0.0,
+                past: 0,
+            }
+        }
+        fn count(&mut self, units: f64, describe: impl FnOnce() -> String) {
+            self.found += 1;
+            if units > self.worst {
+                self.worst = units;
+                println!("{} new worst {units}: {}", self.name, describe());
+            }
+            if units > 16.0 {
+                self.past += 1;
+            }
+        }
+        fn report(&self) {
+            println!(
+                "{}: tried {} found {} worst {} past sixteen {}",
+                self.name, self.tried, self.found, self.worst, self.past
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "Q1792 relay probe: run by hand with --run-ignored, remove before the row lands"]
+    fn probe_q1792_balls_cut_off_their_middle_turned_every_way() {
+        let mut rng = Rng(1792);
+        let mut tally = Tally::new("ball");
+        for _ in 0..3_000_000 {
+            let radius = near_a_power_of_two(&mut rng, -2, 9).abs();
+            let place = a_place(&mut rng, -2, 9);
+            let turn = a_turn(&mut rng);
+            let moved = Isometry::translation(place)
+                .expect("a finite move")
+                .compose(&turn);
+            let fraction = match rng.range(0, 5) {
+                0 => 1.0 / 16.0,
+                1 => 0.5,
+                2 => -0.25,
+                _ => rng.unit() * 1.9 - 0.95,
+            };
+            let Ok(cut) = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .and_then(|plane| plane.moved_to(radius * fraction))
+            else {
+                continue;
+            };
+            let Surface::Plane(cut) = Surface::Plane(cut).transformed(&moved) else {
+                unreachable!()
+            };
+            let skin = Surface::Sphere(Sphere::new(Point::origin(), radius).expect("a radius"))
+                .transformed(&moved);
+            let Surface::Sphere(ball) = skin else {
+                unreachable!()
+            };
+            tally.tried += 1;
+            let Some(crossing) = where_a_plane_crosses_a_ball(&cut, &ball) else {
+                continue;
+            };
+            let Shape::Circle { radius: across } = crossing.shape else {
+                unreachable!()
+            };
+            let Some(centre) = a_centre_its_plane_reads_back_from(&cut, crossing.centre) else {
+                continue;
+            };
+            let units = units(&skin, centre, cut.normal(), across);
+            tally.count(units, || {
+                format!(
+                    "radius {radius:?} place {place:?} turn {:?} fraction {fraction:?} steps {:?}",
+                    turn.rotation_quaternion(),
+                    steps(crossing.centre, centre)
+                )
+            });
+        }
+        tally.report();
+    }
+
+    #[test]
+    #[ignore = "Q1792 relay probe: run by hand with --run-ignored, remove before the row lands"]
+    fn probe_q1792_domes_on_long_bars() {
+        let mut rng = Rng(17920);
+        let mut tally = Tally::new("dome");
+        let mut pipe_worst = 0.0_f64;
+        let mut ball_worst = 0.0_f64;
+        let (mut start_past, mut walk_past) = (0_u64, 0_u64);
+        for _ in 0..3_000_000 {
+            let radius = near_a_power_of_two(&mut rng, -3, 5).abs();
+            let length = if rng.next() % 2 == 0 {
+                near_a_power_of_two(&mut rng, 0, 12).abs()
+            } else {
+                2_f64.powi(rng.range(0, 12) as i32) * (1.0 + rng.unit())
+            };
+            let bigger = if rng.next() % 2 == 0 {
+                1.0
+            } else {
+                1.0 + rng.unit()
+            };
+            let ball_radius = radius * bigger;
+            let above = ((ball_radius - radius) * (ball_radius + radius)).sqrt();
+            let place = a_place(&mut rng, -2, 12);
+            let turn = a_turn(&mut rng);
+            let moved = Isometry::translation(place)
+                .expect("a finite move")
+                .compose(&turn);
+            let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius"))
+                .transformed(&moved);
+            let ball = Surface::Sphere(
+                Sphere::new(Point::new(0.0, 0.0, length - above), ball_radius).expect("a radius"),
+            )
+            .transformed(&moved);
+            let Ok(cut) = Plane::from_point_and_normal(
+                Point::new(0.0, 0.0, length),
+                Vector::new(0.0, 0.0, 1.0),
+            ) else {
+                continue;
+            };
+            let Surface::Plane(cut) = Surface::Plane(cut).transformed(&moved) else {
+                unreachable!()
+            };
+            let Surface::Cylinder(round) = pipe else {
+                unreachable!()
+            };
+            tally.tried += 1;
+            let Some(crossing) = where_a_plane_crosses_a_pipe(&cut, &round) else {
+                continue;
+            };
+            let Shape::Circle { radius: across } = crossing.shape else {
+                continue;
+            };
+            let Some(centre) = a_centre_its_plane_reads_back_from(&cut, crossing.centre) else {
+                continue;
+            };
+            let on_the_pipe = units(&pipe, centre, cut.normal(), across);
+            let on_the_ball = units(&ball, centre, cut.normal(), across);
+            let before = units(&pipe, crossing.centre, cut.normal(), across).max(units(
+                &ball,
+                crossing.centre,
+                cut.normal(),
+                across,
+            ));
+            if on_the_pipe.max(on_the_ball) > 16.0 {
+                if before > 16.0 {
+                    start_past += 1;
+                } else {
+                    walk_past += 1;
+                    if walk_past <= 5 {
+                        println!(
+                            "WALK PAST: pipe {on_the_pipe} ball {on_the_ball} before {before} \
+                             radius {radius:?} length {length:?} ball radius {ball_radius:?} \
+                             place {place:?} turn {:?} steps {:?}",
+                            turn.rotation_quaternion(),
+                            steps(crossing.centre, centre)
+                        );
+                    }
+                }
+            }
+            pipe_worst = pipe_worst.max(on_the_pipe);
+            ball_worst = ball_worst.max(on_the_ball);
+            tally.count(on_the_pipe.max(on_the_ball), || {
+                format!(
+                    "pipe {on_the_pipe} ball {on_the_ball} radius {radius:?} length {length:?} \
+                     ball radius {ball_radius:?} place {place:?} turn {:?} steps {:?}",
+                    turn.rotation_quaternion(),
+                    steps(crossing.centre, centre)
+                )
+            });
+        }
+        println!(
+            "dome: pipe worst {pipe_worst} ball worst {ball_worst} start past {start_past} \
+             walk past {walk_past}"
+        );
+        tally.report();
+    }
+
+    #[test]
+    #[ignore = "Q1792 relay probe: run by hand with --run-ignored, remove before the row lands"]
+    fn probe_q1792_seams_alone() {
+        let mut rng = Rng(179200);
+        let mut tally = Tally::new("seam");
+        for _ in 0..3_000_000 {
+            let radius = near_a_power_of_two(&mut rng, -2, 9).abs();
+            let place = a_place(&mut rng, -2, 9);
+            let turn = a_turn(&mut rng);
+            let moved = Isometry::translation(place)
+                .expect("a finite move")
+                .compose(&turn);
+            let cut = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("a plane");
+            let Surface::Plane(cut) = Surface::Plane(cut).transformed(&moved) else {
+                unreachable!()
+            };
+            let skin = Surface::Sphere(Sphere::new(Point::origin(), radius).expect("a radius"))
+                .transformed(&moved);
+            let Surface::Sphere(ball) = skin else {
+                unreachable!()
+            };
+            tally.tried += 1;
+            let Some(centre) = a_centre_its_plane_reads_back_from(&cut, ball.centre()) else {
+                continue;
+            };
+            let units = units(&skin, centre, cut.normal(), radius);
+            tally.count(units, || {
+                format!(
+                    "radius {radius:?} place {place:?} turn {:?} steps {:?}",
+                    turn.rotation_quaternion(),
+                    steps(ball.centre(), centre)
+                )
+            });
+        }
+        tally.report();
+    }
+}
