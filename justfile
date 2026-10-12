@@ -4608,6 +4608,12 @@ claim-section what:
         echo "claim it for what? the claims file says who holds each number" >&2
         exit 2
     fi
+    case "$1" in
+        -*)
+            echo "a title starting with '-' looks like a flag, not a title; \`just recipe claim-section\` prints the recipe's doc" >&2
+            exit 2
+            ;;
+    esac
     claims="{{section_claims}}"
     if [ -z "$claims" ]; then
         claims="$(git rev-parse --path-format=absolute --git-common-dir)/rcad-section-claims"
@@ -5074,6 +5080,17 @@ check-claim-section-selftest:
     if claim '' >/dev/null 2>&1; then
         echo "claim-section accepted a claim for nothing"; exit 1
     fi
+
+    # A title starting with '-' looks like a flag typed by hand, as
+    # '--help' was on 2026-10-12 and got a real section number for it
+    # (§159). The refusal must happen before the claim is written, or
+    # the next real claim would skip a number for nothing.
+    if claim '--help' >/dev/null 2>&1; then
+        echo "claim-section accepted a claim for '--help'"; exit 1
+    fi
+    got=$(claim 'after the refused --help')
+    [ "$got" = "62" ] || {
+        echo "a claim after the refused '--help' got '$got', want 62: the refusal must not have written a claim"; exit 1; }
 
 # One item of Rust source, by its name, with its doc comment and attributes.
 #
