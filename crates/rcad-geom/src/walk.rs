@@ -2836,6 +2836,21 @@ impl Conic {
     /// middle of each arc, of the box that point is really known to be inside,
     /// so a witness that came out of trigonometry cannot certify a confident
     /// sign about noise (§27.7).
+    ///
+    /// **One arc told is enough.** The half-spaces are there to pick one of the
+    /// two arcs, so an arc one of them surely rules out leaves the other, and an
+    /// arc every one of them surely holds is the run when the other cannot be
+    /// told. A sliver is where that matters: its middle can sit nearer a
+    /// half-space's flat surface than its box is wide. The cap rim in
+    /// `the_two_arcs_of_a_cap_rim_cut_a_hair_apart.rs` is cut by a block's
+    /// floor that is `1.5e-15` from the middle of a sliver `2.5e-7` long, under
+    /// one ulp of the rim's size of eight, so no box round a point placed by
+    /// trigonometry tells which side it is on, and the long arc's middle eight
+    /// away is told outright. Nothing is recorded for a sign the answer did not
+    /// need. Only when neither arc is told from the other — both held, both
+    /// ruled out, or both untold — are the signs asked again through
+    /// [`which_side_of`], which records each one nobody could tell, and the run
+    /// is refused.
     fn the_stretch_this_run_covers(
         &self,
         run: &NamedRun,
@@ -2867,30 +2882,57 @@ impl Conic {
         // The two arcs between the same two ends, going each way round.
         let onwards = from + wrapped(to - from);
         let backwards = from + wrapped(to - from) - core::f64::consts::TAU;
-        let mut picked: Vec<(f64, f64)> = Vec::new();
-        for end in [onwards, backwards] {
-            if self.picked_by_all(picked_by, (from + end) / 2.0, deviation, policy, log)? {
-                picked.push((from, end));
+        let middles = [onwards, backwards]
+            .map(|end| somewhere_within(self.at((from + end) / 2.0), deviation));
+        let [Some(onwards_middle), Some(backwards_middle)] = middles else {
+            return Err(Error::CannotWorkOutHowBigACrossingIs);
+        };
+        let onwards_arc = what_the_half_spaces_say(picked_by, onwards_middle);
+        let backwards_arc = what_the_half_spaces_say(picked_by, backwards_middle);
+        match (onwards_arc, backwards_arc) {
+            (HalfSpacesSay::Hold, HalfSpacesSay::CannotTell | HalfSpacesSay::RuleOut)
+            | (HalfSpacesSay::CannotTell, HalfSpacesSay::RuleOut) => Ok((from, onwards)),
+            (HalfSpacesSay::CannotTell | HalfSpacesSay::RuleOut, HalfSpacesSay::Hold)
+            | (HalfSpacesSay::RuleOut, HalfSpacesSay::CannotTell) => Ok((from, backwards)),
+            (HalfSpacesSay::Hold, HalfSpacesSay::Hold)
+            | (HalfSpacesSay::CannotTell, HalfSpacesSay::CannotTell)
+            | (HalfSpacesSay::RuleOut, HalfSpacesSay::RuleOut) => {
+                for middle in [onwards_middle, backwards_middle] {
+                    for picker in picked_by {
+                        which_side_of(picker, middle, policy, log);
+                    }
+                }
+                Err(Error::CannotNameWhichPieceOfACrossingThisIs)
             }
         }
-        match picked.as_slice() {
-            [only] => Ok(*only),
-            _ => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    }
+}
+
+/// What the half-spaces on a run say about one arc of it, asked of the box
+/// round its middle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HalfSpacesSay {
+    /// Every one of them surely holds it.
+    Hold,
+    /// None surely rules it out, and at least one could not tell.
+    CannotTell,
+    /// At least one surely rules it out.
+    RuleOut,
+}
+
+/// What `picked_by` says about the box `at`, with nothing recorded: only the
+/// caller knows whether a sign nobody could tell was needed for its answer.
+fn what_the_half_spaces_say(picked_by: &[Picker], at: PredicatePoint) -> HalfSpacesSay {
+    let mut said = HalfSpacesSay::Hold;
+    for picker in picked_by {
+        match picker.side_of_point(at) {
+            Decision::Neg => return HalfSpacesSay::RuleOut,
+            Decision::Undecidable { .. } => said = HalfSpacesSay::CannotTell,
+            Decision::Zero | Decision::Pos => {}
+            other => panic!("a half-space came back with a decision nothing knows: {other:?}"),
         }
     }
-
-    /// Whether the point half way along an arc is on or outside every one of
-    /// `picked_by`.
-    fn picked_by_all(
-        &self,
-        picked_by: &[Picker],
-        middle: f64,
-        deviation: f64,
-        policy: &Policy,
-        log: &mut ProvenanceLog,
-    ) -> Result<bool> {
-        every_half_space_holds(picked_by, self.at(middle), deviation, policy, log)
-    }
+    said
 }
 
 /// A piece of the ellipse a plane cuts a cone in, walked round the cone and not
@@ -3230,10 +3272,12 @@ impl AnArcRoundACone {
 /// Which side of a half-space the box `at` is on, spending the policy's budget
 /// on the answer when nothing could tell and recording it either way.
 ///
-/// A half-space that could not tell rules out neither piece, so both come back
-/// picked and the caller is refused rather than handed a coin toss. It is
-/// recorded because it happened, and because the refusal that follows says
-/// nothing about which half-space gave up.
+/// A half-space that could not tell rules out neither piece, so a caller with
+/// nothing else to go on picks both and is refused rather than handed a coin
+/// toss. It is recorded because it happened, and because the refusal that
+/// follows says nothing about which half-space gave up.
+/// [`Conic::the_stretch_this_run_covers`] has something else to go on — the
+/// other arc, told outright — and asks here only when it has not.
 ///
 /// **A tolerant caller is not refused before its budget is looked at.** The box
 /// handed in is `deviation` wide on every side, so "undecided" here means the
