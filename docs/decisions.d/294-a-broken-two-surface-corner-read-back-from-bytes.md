@@ -181,10 +181,14 @@ the fold's cost against a fuse's other work.
 
 ### 294.7 Not tried
 
-- **A three-or-more-surface corner moved the same way**, which §286.4 already
-  named as a separate, unmeasured gap (`Undecidable` from
-  `the_place_the_model_points_at`'s narrower rounding, not this file's
-  question).
+- **A three-or-more-surface corner moved the same way.** A corner with three
+  planes round it is tried now, and refuses before the partner is looked at;
+  §294.16 records what Q794 found. A corner with four or more surfaces round
+  it, and one with a curved surface among its three, are not tried yet.
+  §286.4's own gap beside this one, a three-plane corner refused for sitting
+  as far off a plane as `validate` allows, was closed by §368, which grows the
+  stored corner by `validate`'s room and not by a rounding alone
+  (`a_corner_its_own_surfaces_place_somewhere_else.rs`).
 
 The three items this section used to list beside that one — a non-identity
 placement, balls and cones, and a tolerant policy — are now tried; §294.8
@@ -1002,3 +1006,107 @@ was `0.355` either way.
 - Q1195's shape with the half disc first builds and validates but does not
   measure, on the bound above. Whether that bound can be had smaller for a
   hyperbola so near a parabola is a row of its own, tier 5, after Q1195.
+
+### 294.16 Q794: a broken three-plane corner read back from bytes is refused before any partner is looked at — 2026-10-12
+
+*Queue row Q794, from §294.7. Lane
+`lane-q794-a-broken-three-surface-corner-read-back`, base `2af38de7`, carried
+on by a second lane after the first passed its budget (§416). Pinned in
+`crates/rcad-topo/tests/a_broken_three_surface_corner_read_back_from_bytes.rs`.
+No code changed but `Model::fuse`'s doc comment.*
+
+**The corner.** A box, `x` and `y` from −3 to 3 and `z` from 0 to 10, built
+with `add_extrusion` at §294.8's four placements: none, the shift
+`(7, −5, 2.5)`, the turn 0.4 about `x`, and the turn then the shift. The
+placement goes on the shell, so the file stores the top corner at `(3, 3, 10)`
+at every placement, where the planes `x = 3`, `y = 3` and `z = 10` meet. As
+in §294.1, the test overwrites the one place the bytes hold it, found once at
+every placement, with one of four moves: a millimetre off the `x = 3` wall,
+`(4, 3, 10)`; a millimetre above the top, `(3, 3, 11)`; a millimetre into the
+box from all three planes, `(2, 2, 9)`; and a millimetre out from all three,
+`(4, 4, 11)`. `Model::validate` refuses every one, under `certified` and
+`tolerant(100)` at every placement, with `VertexOffItsFacePlane { distance:
+1.0 }`, and the same bytes with the corner left alone validate.
+
+**The partners.** §294.2's ten partner and rule pairs and `OVER_THE_TOP` −,
+eleven, each block placed as the box is. As the control, the sound box answers
+all 88 (two policies, four placements, eleven pairs) `Ok`, the model validates
+after each, and each answer holds what box arithmetic says the two boxes hold,
+to `1e-12` relative: 368 in two solids for `FAR_AWAY` ∪; 288 for
+`OVER_THE_BOTTOM` − and for `OVER_THE_TOP` −, 72 for `OVER_THE_TOP` ∩; 348,
+498 and 12 for `OVER_THE_RIM_BY_THE_SEAM` −, ∪ and ∩; 348 for
+`OVER_THE_RIM_AWAY_FROM_THE_SEAM` −; 356 for `A_NOTCH_A_QUARTER_TURN_ROUND` −;
+180 for `THE_HALF_PAST_THE_SEAM` − and ∩. At the turned placements some are a
+few ulps off, `287.99999999999994` for one.
+
+**What comes back.** All 352 fuses of a moved box, four moves against those
+88, refuse `Error::Undecidable` with one record, whose predicate is "where
+three surfaces meet", and leave the model byte for byte as it was. **No wrong
+`Ok` and no panic.** Unlike §294.2's bar, whose moved corner gave the sound
+answer wherever the partner cut it away, the box refuses with every partner,
+`FAR_AWAY` and the partners that cut the corner away among them, and with every
+move, placement and policy. `mise exec -- just t -E
+'binary(a_broken_three_surface_corner_read_back_from_bytes)'` runs the three
+pins: 3 tests run, 3 passed.
+
+**Why the partner does not matter.** `bake` places every corner of every input
+in `corner_of_every_vertex` before the arrangement sees the partner. A corner
+with three or more distinct surfaces round it goes to `derive_a_corner`, which
+solves each triple's meet and keeps a place only where
+`the_place_the_model_points_at` says the stored corner points at it: the
+stored corner, grown by what writing it down cost and by the room `validate`
+grants a corner off a plane, `1e-9` of the solid's size (§368), has to overlap
+the meet. The box's three planes cross at `(3, 3, 10)` alone, a millimetre is
+far outside that room, so no triple places the moved corner, and
+`derive_a_corner` gives up on `WHERE_THREE_SURFACES_MEET`. §294's two-surface
+corner is not asked at all (§286), which is why the bar's fuse got as far as
+its partner.
+
+**Why that is not a defect.** It is §294.4's blame question from the other
+side: the refusal says the arithmetic gave up, where `validate` says the file
+is broken. It is safe, since the model is untouched and nothing wrong comes
+back, and §294.5 already found that asking at the door buys attribution and not
+correctness. Turning `the_place_the_model_points_at`'s `None` into `Invalid` in
+place would not even buy that. It says `None` for §70.3's corner too: three
+planes at a `1e-14` graze, with a corner `1.414` from where they cross, which
+`validate` accepts because the corner is within a rounding of each plane
+(`a_corner_near_three_grazing_planes_but_far_from_where_they_cross_is_refused`
+in `bake.rs`). Calling that corner `Invalid` would call a solid `validate`
+accepts broken. A corner `validate` refuses and one it accepts reach the same
+`None`, and telling them apart there means asking `validate`'s own question of
+the stored corner, which is §294.5's option (c).
+
+**`Model::fuse`'s `# Errors` said otherwise, and is changed.** It said
+`Error::Invalid` comes when an input's corners and its own planes disagree by
+more than the corners' boxes. A three-plane corner a millimetre off gives
+`Undecidable`. The `Invalid` is `derive_a_corner`'s re-check, which asks the
+solved corner, grown by the same room, against every surface round it, after
+some triple has placed it. The triple's own three surfaces hold the meet they
+solved to, so the re-check can only find a further surface off it, and that
+takes four or more surfaces round the corner. The doc now says so, and its
+`# Panics` paragraph, which ended on the three-surface corner being untried,
+now gives this result.
+
+§286.4 named a three-plane corner refused `Undecidable` for sitting as far off
+a plane as `validate` allows, because `the_place_the_model_points_at` grew the
+stored corner by a rounding alone. §368 grew it by `validate`'s room, and
+`a_corner_its_own_surfaces_place_somewhere_else.rs` pins it: `mise exec -- just
+t -E 'binary(a_corner_its_own_surfaces_place_somewhere_else)'`, 5 tests run, 5
+passed. The corner here is a millimetre off, past any room, and not that gap.
+
+**What this leaves.** Two corners not tried, each with no class, since nobody
+has run them (§360.5):
+
+- **A corner with four or more surfaces round it**, a pyramid's apex from
+  `a_corner_with_four_planes_round_it.rs`, moved in its bytes. Its planes all
+  cross at one point, so every triple places a moved apex nowhere, and the
+  guess is the box's refusal. The re-check's `Invalid` wants a stored corner
+  where three planes cross and off a fourth, which a moved plane gives and a
+  moved corner does not. A row, tier 2.
+- **A corner with a curved surface among its three.** The round bar less
+  `THE_HALF_PAST_THE_SEAM` keeps a corner at `(−3, 0, 10)` where the cap's
+  plane, the wall's cylinder and the plane `y = 0` meet. Those three meet at two
+  places, `(−3, 0, 10)` and `(3, 0, 10)`. A corner moved a millimetre off is
+  guessed to refuse as the box's does. Moved onto the other place, the chord's
+  other end, `the_place_the_model_points_at` would pick that place, which is
+  the one move here that could come back a wrong `Ok`. A row, tier 2.
