@@ -145,15 +145,85 @@ pub(crate) fn assemble(
     log: &mut ProvenanceLog,
     range_warning: &mut ProvenanceLog,
 ) -> Result<Assembly> {
-    let mut assembly = Assembly::from_the_pieces(model, scratch, chosen, policy, log)?;
-    assembly.join_up_what_is_one_face(policy, log)?;
-    assembly.shells = assembly.group_into_shells()?;
+    let mut assembly = Assembly::joined_into_shells(model, scratch, chosen, policy, log)?;
     assembly.leave_out_each_shell_thinner_than_the_wobble(policy, log)?;
     if let Some(inputs_reach) = inputs_reach {
         assembly.check_dynamic_range(inputs_reach, policy, range_warning)?;
     }
     assembly.runs = assembly.how_each_edge_runs()?;
     Ok(assembly)
+}
+
+/// The pieces of each shell of `held_by_both` a tolerant policy takes as flat,
+/// one list to a shell, where every piece of the shell is `buried` in the
+/// other group and the shell holds pieces of both groups.
+///
+/// `held_by_both` is what the intersection keeps, and is put together as
+/// [`assemble`] would put it together, so a shell here is a shell the
+/// intersection would answer, and taken as flat when
+/// [`Assembly::leave_out_each_shell_thinner_than_the_wobble`] would leave it
+/// out. **A difference needs it asked here, before anything is kept.** Two
+/// skewed combs touching along one line close a prism of `3.1e−32` between
+/// them. Their intersection is that prism alone, a shell of its own, and is
+/// left out whole. The comb less the other kept the prism as a notch in its
+/// own shell, which no fold of a shell reaches, and the notch's floor is a
+/// triangle whose three corners all round onto one line, so the difference was
+/// refused as a face winding against its normal (queue row Q1710,
+/// `two_skewed_combs_touching_along_one_line.rs`, `docs/decisions.md` §417).
+/// `select` reads each piece listed here as lying on the other group facing
+/// the other way, which is what a flat shell's two sides do, so the difference
+/// keeps the comb whole and the intersection keeps nothing, as before.
+///
+/// **Only a shell every piece of which is buried**, so the pieces it reads
+/// another way are each a piece the rule placed inside the other group, and
+/// of both groups, so there is another group's piece for each to lie on.
+///
+/// Under a certified policy, or with nothing held by both, nothing is asked.
+/// **A put-together that is refused takes no shell as flat**: the fuse then
+/// keeps what it kept before Q1710, and its own assembly asks what it asked
+/// before. The records of the put-together go into `log`, ahead of each
+/// shell's record, only when a shell is taken as flat, since only then does
+/// the answer rest on them.
+pub(crate) fn the_pieces_of_each_shell_both_hold_taken_as_flat(
+    model: &Model,
+    scratch: &Scratch,
+    held_by_both: &[Chosen],
+    buried: &[bool],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Vec<Vec<usize>> {
+    let Strictness::TolerantFallback { .. } = policy.strictness() else {
+        return Vec::new();
+    };
+    if held_by_both.is_empty() {
+        return Vec::new();
+    }
+    let mut mine = ProvenanceLog::new();
+    let Ok(assembly) =
+        Assembly::joined_into_shells(model, scratch, held_by_both, policy, &mut mine)
+    else {
+        return Vec::new();
+    };
+    let arguments = scratch.arguments.len();
+    let mut flat = Vec::new();
+    for shell in &assembly.shells {
+        let pieces: Vec<usize> = shell
+            .iter()
+            .flat_map(|&face| assembly.faces[face].pieces.iter().copied())
+            .collect();
+        let of_an_argument = |piece: &usize| scratch.cut_from[*piece] < arguments;
+        if pieces.iter().all(|&piece| buried[piece])
+            && pieces.iter().any(of_an_argument)
+            && !pieces.iter().all(of_an_argument)
+            && assembly.takes_as_flat(shell, policy, &mut mine)
+        {
+            flat.push(pieces);
+        }
+    }
+    if !flat.is_empty() {
+        mine.drain_into(log);
+    }
+    flat
 }
 
 /// The faces of one input solid with any that are really one flat region joined
@@ -658,6 +728,29 @@ impl Assembly {
         Ok(written)
     }
 
+    /// The kept pieces as faces, with what is one face joined, grouped into
+    /// shells: the part of [`assemble`] that
+    /// [`the_pieces_of_each_shell_both_hold_taken_as_flat`] asks of the pieces
+    /// both groups hold, so that the two see the same shells.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Assembly::from_the_pieces`],
+    /// [`Assembly::join_up_what_is_one_face`] and
+    /// [`Assembly::group_into_shells`] give.
+    fn joined_into_shells(
+        model: &Model,
+        scratch: &Scratch,
+        chosen: &[Chosen],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Self> {
+        let mut assembly = Self::from_the_pieces(model, scratch, chosen, policy, log)?;
+        assembly.join_up_what_is_one_face(policy, log)?;
+        assembly.shells = assembly.group_into_shells()?;
+        Ok(assembly)
+    }
+
     /// One face per kept piece, and the corners and edges they share.
     ///
     /// A vertex that only starts a closed input edge is not a corner of the
@@ -745,6 +838,7 @@ impl Assembly {
             };
             faces.push(Face {
                 ancestors: piece.ancestors.clone(),
+                pieces: vec![kept.piece],
                 surface,
                 used,
                 wires,
@@ -1009,6 +1103,7 @@ impl Assembly {
             let plane = face.plane();
             faces.push(Face {
                 ancestors: vec![face.key()],
+                pieces: Vec::new(),
                 surface: Surface::Plane(if face.orientation().is_reversed() {
                     plane.reversed()
                 } else {
@@ -2717,6 +2812,11 @@ impl Assembly {
                             .iter()
                             .flat_map(|&member| self.faces[member].ancestors.iter().copied()),
                     ),
+                    pieces: face
+                        .members
+                        .iter()
+                        .flat_map(|&member| self.faces[member].pieces.iter().copied())
+                        .collect(),
                     surface: face.surface,
                     used: face.used,
                     is_a_whole_closed_surface: face.is_a_whole_closed_surface,
@@ -3565,9 +3665,12 @@ impl Assembly {
     /// At `t = 0.142` the shell's four corners all round onto the floor
     /// itself, so it measured `0.0` and the fuse was refused
     /// [`Invalid::VolumeIsNotPositive`]. A shell like that can be the whole
-    /// answer: two skewed combs touching along one line share a prism of
-    /// `3.1e−32` and no space, and their intersection now answers no solid
-    /// (`two_skewed_combs_touching_along_one_line.rs`, queue row Q1615).
+    /// intersection: two skewed combs touching along one line share a prism of
+    /// `3.1e−32` and no space (`two_skewed_combs_touching_along_one_line.rs`,
+    /// queue row Q1615). Since Q1710 that prism is taken as flat before
+    /// anything is kept, by [`the_pieces_of_each_shell_both_hold_taken_as_flat`],
+    /// which asks [`Assembly::takes_as_flat`] as this does, so the intersection
+    /// keeps none of it and this fold no longer meets it.
     ///
     /// **Only flat faces with straight edges between two corners**, since only
     /// then is every point of the shell between its corners: a half ball's
@@ -3599,28 +3702,10 @@ impl Assembly {
         };
         let mut gone = vec![false; self.faces.len()];
         for shell in &self.shells {
-            let Some((far, corners)) =
-                self.how_far_a_shell_of_flat_faces_is_from_flat(shell, policy)
-            else {
-                continue;
-            };
-            let inputs: Vec<PredicatePoint> = corners
-                .iter()
-                .map(|&corner| PredicatePoint::from(self.corners[corner].point.coordinates()))
-                .collect();
-            let record = Record::new(
-                "a shell within the wobble of one of its planes taken as flat",
-                &inputs,
-                Level::Float,
-                far,
-                Measures::Length,
-            );
-            assert!(
-                policy.take_as_one_point(record, log),
-                "a shell within the wobble of a plane is taken as flat"
-            );
-            for &face in shell {
-                gone[face] = true;
+            if self.takes_as_flat(shell, policy, log) {
+                for &face in shell {
+                    gone[face] = true;
+                }
             }
         }
         if !gone.contains(&true) {
@@ -3632,6 +3717,41 @@ impl Assembly {
         self.leave_out_what_no_wire_walks();
         self.shells = self.group_into_shells()?;
         Ok(())
+    }
+
+    /// Whether `shell` is of flat faces whose corners all lie within
+    /// [`Policy::max_wobble`] of the plane of one of its own faces, and so
+    /// taken as flat, which logs it once.
+    ///
+    /// Asked by [`Assembly::leave_out_each_shell_thinner_than_the_wobble`] and
+    /// by [`the_pieces_of_each_shell_both_hold_taken_as_flat`], so the two
+    /// folds take the same shells as flat and log them alike.
+    ///
+    /// # Panics
+    ///
+    /// If the policy refuses a record no further than its own
+    /// [`Policy::max_wobble`], which it accepts by what that bound means.
+    fn takes_as_flat(&self, shell: &[usize], policy: &Policy, log: &mut ProvenanceLog) -> bool {
+        let Some((far, corners)) = self.how_far_a_shell_of_flat_faces_is_from_flat(shell, policy)
+        else {
+            return false;
+        };
+        let inputs: Vec<PredicatePoint> = corners
+            .iter()
+            .map(|&corner| PredicatePoint::from(self.corners[corner].point.coordinates()))
+            .collect();
+        let record = Record::new(
+            "a shell within the wobble of one of its planes taken as flat",
+            &inputs,
+            Level::Float,
+            far,
+            Measures::Length,
+        );
+        assert!(
+            policy.take_as_one_point(record, log),
+            "a shell within the wobble of a plane is taken as flat"
+        );
+        true
     }
 
     /// The furthest any corner of `shell` may be from the plane of the one of
@@ -4691,6 +4811,11 @@ struct Face {
     /// one, because nothing in the fuse invents geometry with no ancestor, and
     /// more than one where coplanar pieces were joined.
     ancestors: Vec<FaceKey>,
+    /// Which of [`Scratch::pieces`] it was made of: one, or more where pieces
+    /// on one plane were joined, and none for a face of an input solid. Only
+    /// [`the_pieces_of_each_shell_both_hold_taken_as_flat`] reads it, since
+    /// faces are left out as the assembly goes and their places move.
+    pieces: Vec<usize>,
     /// The surface it sits on, inherited from the ancestor bit for bit (§17.1).
     ///
     /// **A plane is stored already turned round** where the rule turned the face
@@ -9908,6 +10033,7 @@ mod tests {
             runs: Vec::new(),
             faces: vec![Face {
                 ancestors: Vec::new(),
+                pieces: Vec::new(),
                 surface: down,
                 used: Orientation::Forward,
                 wires: vec![vec![Side {
@@ -9969,6 +10095,7 @@ mod tests {
             );
             let face = |surface, forward| Face {
                 ancestors: Vec::new(),
+                pieces: Vec::new(),
                 surface,
                 used: Orientation::Forward,
                 wires: vec![vec![Side {
@@ -10053,6 +10180,7 @@ mod tests {
         };
         let face = |surface: Plane, forward: bool| Face {
             ancestors: Vec::new(),
+            pieces: Vec::new(),
             surface: Surface::Plane(surface),
             used: Orientation::Forward,
             wires: vec![
@@ -10179,6 +10307,7 @@ mod tests {
         };
         let face = |surface: Plane, sides: Vec<Side>| Face {
             ancestors: Vec::new(),
+            pieces: Vec::new(),
             surface: Surface::Plane(surface),
             used: Orientation::Forward,
             wires: vec![sides],
