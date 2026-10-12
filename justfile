@@ -13838,7 +13838,12 @@ _queue-check file decisions:
 # passes when it waits on an open tier 5 row, a closed one, or a Q row this
 # copy does not hold, and when a lane holds it or it is parked; a row waiting on
 # a row in an earlier tier, or on a done row in a later one, passes too. The
-# classes fixture's measure line counts its tier 5 row with no class.
+# classes fixture's measure line counts its tier 5 row with no class. §424.7
+# adds `narrow`, on a claims file of its own: a directory narrowed to a file
+# under it, written to the claims file and read back by `running`; an id
+# nobody holds, an entry outside the set the row was taken with and a
+# directory written without its `/`, refused; and a widening back refused
+# while another hold meets the entry it widens to, and passed when none does.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -14404,6 +14409,44 @@ check-queue-selftest:
         grep -qF "queue $m " <<<"$got" || fail "queue help names no line for '$m', which the recipe dispatches"
     done
 
+    # §424.7 (Q1530): `narrow` writes a held row's narrower write set to the
+    # claims file, and only inside the set the row was taken with. It reads a
+    # claims file of its own here, so no hold of this machine's reaches it.
+    claims="$dir/narrow-claims"
+    printf 'take\tQ1\t2026-10-12T00:00:00Z\t/a/dispatcher\tlane-q1\ttooling/,justfile\t1\n' > "$claims"
+    nq() {
+        QUEUE_CLAIMS="$claims" "$j" --justfile '{{ justfile() }}' --working-directory "$repo" \
+            --set queue_file "$dir/good.md" queue "$@"
+    }
+    got=$(nq narrow Q1 tooling/queue/queue.py 2>&1) || fail "narrow refused a file under the directory Q1 was taken with"
+    [ "$(tail -n 1 "$claims" | cut -f 1,2,5)" = "$(printf 'narrow\tQ1\ttooling/queue/queue.py')" ] \
+        || fail "narrow did not append its event to the claims file"
+    got=$(nq running 2>&1) || fail "running failed on a narrowed hold"
+    grep -qxF 'Q1 narrowed to tooling/queue/queue.py (taken with tooling/,justfile)' <<<"$got" \
+        || fail "running did not say what Q1 was narrowed to"
+    got=$(nq show Q1 2>&1) || fail "show failed on a narrowed hold"
+    grep -qxF 'narrowed to tooling/queue/queue.py, taken with tooling/,justfile' <<<"$got" \
+        || fail "show did not say what Q1 was narrowed to"
+    got=$(nq narrow Q9 justfile 2>&1) && fail "narrow accepted Q9, which nobody holds"
+    grep -qF 'Q9 is not held, so it has no write set to narrow' <<<"$got" || fail "narrow did not say Q9 is not held"
+    got=$(nq narrow Q1 tooling/queue/queue.py,docs/decisions.d/sections.md 2>&1) \
+        && fail "narrow accepted an entry outside the set Q1 was taken with"
+    grep -qF 'docs/decisions.d/sections.md is outside tooling/,justfile, the write set Q1 was taken with' <<<"$got" \
+        || fail "narrow did not name the entry outside the taken set"
+    got=$(nq narrow Q1 tooling/queue 2>&1) && fail "narrow accepted tooling/queue, a directory written without its /"
+    grep -qF '"tooling/queue" is a directory; write it as tooling/queue/' <<<"$got" \
+        || fail "narrow did not say tooling/queue needs its /"
+    printf 'take\tQ2\t2026-10-12T00:00:01Z\t/a/dispatcher\tlane-q2\tjustfile#gate\t1\n' >> "$claims"
+    got=$(nq narrow Q1 tooling/queue/queue.py,justfile 2>&1) \
+        && fail "narrow widened Q1 back to the whole justfile while Q2 holds an item in it"
+    grep -qF "skip Q1 (tier -): its justfile meets Q2's justfile#gate, held elsewhere by lane:lane-q2" <<<"$got" \
+        || fail "narrow did not quote the fill's line for the hold the widening meets"
+    [ "$(tail -n 1 "$claims" | cut -f 1,2)" = "$(printf 'take\tQ2')" ] || fail "a refused narrow wrote the claims file anyway"
+    got=$(nq narrow Q1 tooling/queue/queue.py,justfile#queue 2>&1) \
+        || fail "narrow refused to widen Q1 back to an item no other hold meets"
+    [ "$(tail -n 1 "$claims" | cut -f 1,2,5)" = "$(printf 'narrow\tQ1\ttooling/queue/queue.py,justfile#queue')" ] \
+        || fail "narrow did not append the widening it passed"
+
     # §418.2, §418.3: `queue next` refuses while the latest fuzz night has
     # left a group no row names and no triage row is open, naming
     # `just fuzz-triage-row`; it fills as usual once a triage row is open, or
@@ -14576,7 +14619,11 @@ check-queue-merge-driver:
 # on, and refusing a B row that would have to follow; `tag` taking up out of tier
 # 5 only the waiters whose `after:` names no other tier 5 row; and `pin`
 # refusing a row that waits outside tier 1 and taking a tier 5 row's waiters up
-# with it. The
+# with it. §424.7's: a row taken on a directory holding back a row on a file
+# under it, in the copy that took it and in another, until `narrow` takes the
+# hold down to another file; then `next` offers the row in both copies,
+# `blocked` drops it, and the plain listing, `elsewhere` and the page say what
+# the hold was narrowed to. The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -15133,6 +15180,43 @@ check-queue-api-selftest:
     grep -qxF "$y: pinned/1, tier 5 -> 1, takes $y2 along, tier 5 -> 1, taken ahead of every row not pinned" <<<"$got" \
         || fail "pin did not take the row that waits on it up out of tier 5"
     got=$(check "$wait_wt") || fail "the file the verbs of §435 wrote fails check-queue"
+
+    # §424.7 (Q1530): a hold narrowed to the files its lane changes frees the
+    # rest of the set it was taken with, for the fill in the copy that took it
+    # and in another copy that sees it only through the claims file.
+    narrow_wt="$root/rcad-worktrees/narrow"
+    g "$hub" worktree add -q -b narrow "$narrow_wt" main
+    wide=$(q "$narrow_wt" add 2 opus tooling/queue/ "from/- a row taken on a whole directory §230") \
+        || fail "add for the row to narrow failed"
+    beside=$(q "$narrow_wt" add 2 opus tooling/queue/rows.py "from/- a row on one file under that directory §230") \
+        || fail "add for the row beside it failed"
+    g "$narrow_wt" commit -qam "two rows, one on a directory and one on a file under it"
+    far="$root/rcad-worktrees/narrow-far"
+    g "$hub" worktree add -q -b narrow-far "$far" narrow
+    got=$(q "$narrow_wt" take "$wide" lane-wide 2>&1) || fail "take of the row on tooling/queue/ was refused"
+    got=$(q "$narrow_wt" next 20 2>&1) || fail "next failed in the copy that took the wide row"
+    grep -qxF "skip $beside (tier 2): its tooling/queue/rows.py meets $wide's tooling/queue/, held by lane:lane-wide" <<<"$got" \
+        || fail "next in the copy that took the wide row did not skip the row on a file under it"
+    got=$(q "$far" next 20 2>&1) || fail "next failed in the other copy"
+    grep -qxF "skip $beside (tier 2): its tooling/queue/rows.py meets $wide's tooling/queue/, held elsewhere by lane:lane-wide" <<<"$got" \
+        || fail "next in the other copy did not skip the row on a file under the wide hold"
+    got=$(q "$narrow_wt" narrow "$wide" tooling/queue/queue.py 2>&1) \
+        || fail "narrow refused a file under the directory the row was taken with"
+    got=$(q "$narrow_wt" next 20 2>&1) || fail "next failed in the taking copy after the narrow"
+    grep -q "^take $beside " <<<"$got" || fail "next in the taking copy still skipped a row the narrowed hold no longer meets"
+    got=$(q "$far" next 20 2>&1) || fail "next failed in the other copy after the narrow"
+    grep -q "^take $beside " <<<"$got" || fail "next in the other copy still skipped a row the narrowed hold no longer meets"
+    got=$(q "$narrow_wt" blocked 2>&1) || fail "blocked failed after the narrow"
+    grep -q "^skip $beside " <<<"$got" && fail "blocked still holds back a row the narrowed hold no longer meets"
+    got=$(q "$narrow_wt" 2>&1) || fail "the plain listing failed after the narrow"
+    grep -qxF "      narrowed to tooling/queue/queue.py" <<<"$got" \
+        || fail "the plain listing did not say what the taking copy's own lane: row was narrowed to"
+    got=$(q "$far" 2>&1) || fail "the plain listing failed in the other copy after the narrow"
+    grep -qF "  -  lane:lane-wide  -  tooling/queue/queue.py  (held in " <<<"$got" \
+        || fail "the other copy's listing did not show the narrowed write set of the hold"
+    grep -qF ", narrowed from tooling/queue/)" <<<"$got" || fail "the other copy's listing did not say what the hold was taken with"
+    grep -qF "narrowed to <code>tooling/queue/queue.py</code>" "$page_dir/index.html" \
+        || fail "the queue page did not say what the hold was narrowed to"
     exit 0
 
 # The fuzz half of `status`: for the night `latest` names, how many of the
