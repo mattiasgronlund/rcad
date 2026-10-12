@@ -7136,13 +7136,13 @@ fn the_short_way_round(angle: f64, whole_turn: f64) -> f64 {
 fn how_many_steps(stored: &Surface, leaving: [f64; 2], arriving: [f64; 2], room: f64) -> usize {
     let round = arriving[0] - leaving[0];
     let up = arriving[1] - leaving[1];
-    let (radius, share, turns_over) = match stored {
+    let (radius, share, turns_over, turned) = match stored {
         Surface::Plane(_) => return 1,
         // A ball bends both ways, so both count towards the turn as well.
-        Surface::Sphere(ball) => (ball.radius(), 3.0, round.hypot(up)),
+        Surface::Sphere(ball) => (ball.radius(), 3.0, round.hypot(up), round.hypot(up)),
         // A pipe is flat along its axis, so a piece stretched up one bends by
         // nothing at all and only the turn counts.
-        Surface::Cylinder(pipe) => (pipe.radius(), 3.0, round.abs()),
+        Surface::Cylinder(pipe) => (pipe.radius(), 3.0, round.abs(), round.abs()),
         // A cone is flat along its rulings too. Its radius of normal curvature
         // at the widest end of this step is `slope·v·√(1 + slope²)`, and the
         // chord bound over it is `C²/(2R)` rather than `C²/(3R)` —
@@ -7150,6 +7150,7 @@ fn how_many_steps(stored: &Surface, leaving: [f64; 2], arriving: [f64; 2], room:
         Surface::Cone(cone) => (
             cone.radius_at(leaving[1].abs().max(arriving[1].abs())) * cone.slope().hypot(1.0),
             2.0,
+            round.abs(),
             round.abs(),
         ),
         // **A torus bends both ways and by two different amounts**, which no
@@ -7160,15 +7161,23 @@ fn how_many_steps(stored: &Surface, leaving: [f64; 2], arriving: [f64; 2], room:
         // stretching is in `ρ`. `turns_over` is then the arc length divided by
         // that radius, so that `radius · turns_over` is the arc length the way
         // it is for every arm above.
+        //
+        // **That length is no turn, so the turn round the tube is charged
+        // apart.** `r / ρ` is under seven twelfths for every ring that does not
+        // run through itself, so half a turn round the tube came back one step:
+        // a ring of four round a tube of one cut across its band from the outer
+        // equator over the top to the inner had nothing between the two, its
+        // coarsest mesh lay flat on the two equators, and enclosing `-6e-17`
+        // it was refused `VolumeIsNotPositive` at seven turns of 234
+        // (`a_half_ring_standing_on_a_round_plate.rs`, row Q1632). Round the
+        // ring the length already overcharges the angle, by `S / ρ`, over
+        // seven sixths.
         Surface::Torus(ring) => {
             let widest = ring.ring_radius() + ring.tube_radius();
             let tube = ring.tube_radius();
             let effective = 6.0 * tube * widest / (2.0 * widest + 3.0 * tube);
-            (
-                effective,
-                1.0,
-                (tube * round).hypot(widest * up) / effective,
-            )
+            let length = (tube * round).hypot(widest * up) / effective;
+            (effective, 1.0, length, length.max(round.abs()))
         }
         other => panic!("this crate cannot walk along {other:?}"),
     };
@@ -7180,7 +7189,7 @@ fn how_many_steps(stored: &Surface, leaving: [f64; 2], arriving: [f64; 2], room:
     }
     let longest_chord = (share * radius * room * WHAT_THE_BOUNDARY_TAKES_OF_THE_BUDGET).sqrt();
     let by_bending = (radius * turns_over / longest_chord).ceil();
-    let by_turning = (turns_over / (core::f64::consts::TAU / 4.0)).ceil();
+    let by_turning = (turned / (core::f64::consts::TAU / 4.0)).ceil();
     let steps = by_bending.max(by_turning).max(1.0);
     // One past the cap, which is what refuses it a moment later. Said this way
     // round rather than cast, because `as` on a number this size — or on one
