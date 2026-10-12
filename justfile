@@ -9767,6 +9767,7 @@ fuzz-triage night="" against="main":
     #!/usr/bin/env bash
     set -uo pipefail
     root='{{ fuzz_log_root }}'
+    corpus_root='{{ fuzz_corpus_root }}'
     latest="$root/latest"
     night='{{ night }}'
     if [ -z "$night" ]; then
@@ -9808,12 +9809,14 @@ fuzz-triage night="" against="main":
         artifacts="$rescued"
     else
         echo "inputs:   none — neither $artifacts nor $rescued exists"
-        exit 0
+        artifacts=""
     fi
-    files=$(find "$artifacts" -type f | sort)
-    if [ -z "$files" ]; then
-        echo "no files under $artifacts, so there is nothing to decode"
-        exit 0
+    files=""
+    if [ -n "$artifacts" ]; then
+        files=$(find "$artifacts" -type f | sort)
+        if [ -z "$files" ]; then
+            echo "no files under $artifacts, so there is nothing to decode"
+        fi
     fi
 
     at=$(git rev-parse --verify --quiet '{{ against }}^{commit}')
@@ -9826,10 +9829,13 @@ fuzz-triage night="" against="main":
     manifest=$(mktemp)
     report=$(mktemp)
     members=$(mktemp)
+    refusals=$(mktemp)
+    refusal_faults=$(mktemp)
+    refusals_said=$(mktemp)
     fold_scratch=""
     fold_copy=""
     cleanup() {
-        rm -f "$manifest" "$report" "$members"
+        rm -f "$manifest" "$report" "$members" "$refusals" "$refusal_faults" "$refusals_said"
         [ -z "$fold_scratch" ] || rm -rf "$fold_scratch"
         [ -z "$fold_copy" ] || rm -rf "$fold_copy"
         if [ -n "$borrowed" ]; then
@@ -9850,6 +9856,66 @@ fuzz-triage night="" against="main":
         work="$borrowed/tree"
     fi
     echo "replayed: {{ against }} ($(git rev-parse --short "$at")) in $work"
+
+    # The morning refusal replay, §437.5. Run whether or not the night left a
+    # crash file, since the corpus is there either way, and before the fold, so
+    # what the fold adds this morning is replayed the next.
+    replay_the_corpus() {
+        echo
+        local corpus="$corpus_root/two_solids_fused_by_a_stranger"
+        if [ ! -d "$corpus" ]; then
+            echo "refusals: none — $corpus is not there"
+            return 0
+        fi
+        local replay=(cargo run -q --profile test -p rcad-fuzz-explain -- --refusals "$corpus" --faults "$refusal_faults")
+        echo "\$ ${replay[*]}"
+        (cd "$work" && "${replay[@]}") >"$refusals" 2>"$refusals_said"
+        local status=$?
+        if [ "$status" -ne 0 ]; then
+            echo "fuzz-triage: the refusal replay itself failed (exit $status); it ended:"
+            tail -5 "$refusals_said" | sed 's/^/          /'
+            exit 1
+        fi
+        cp "$refusals" "$night/fuzz-refusals.tsv"
+        cp "$refusal_faults" "$night/fuzz-refusals-faults.tsv"
+        echo "refusals: $night/fuzz-refusals.tsv"
+        sed -n 's/^--refusals: /          /p' "$refusals_said"
+        awk -F'\t' 'NR > 1 { print "fault:    " $1 " " $2 ": " $3 }' "$refusal_faults"
+
+        local this_night before changes
+        this_night=$(basename "$night")
+        before=$(for earlier in "$(dirname "$night")"/*/fuzz-refusals.tsv; do
+                [ -f "$earlier" ] && basename "$(dirname "$earlier")"
+            done | LC_ALL=C awk -v this="$this_night" '$0 < this' | LC_ALL=C sort | tail -n 1)
+        if [ -z "$before" ]; then
+            echo "since:    no night before $this_night has a fuzz-refusals.tsv, so there is nothing to compare"
+            return 0
+        fi
+        changes=$(LC_ALL=C awk -F'\t' -v before="$before" '
+            FNR == 1 { next }
+            FILENAME == ARGV[1] { old[$1 FS $2] = $0; next }
+            { now[$1 FS $2] = 1 }
+            !(($1 FS $2) in old) { print "appeared: " $1 ": " $2 " (" $3 " refusals in " $4 " file(s), " $9 ")" }
+            END {
+                for (key in old) {
+                    if (key in now) continue
+                    split(old[key], was, FS)
+                    print "vanished: " was[1] ": " was[2] " (" was[3] " refusals in " was[4] " file(s) on " before ")"
+                }
+            }
+        ' "$(dirname "$night")/$before/fuzz-refusals.tsv" "$night/fuzz-refusals.tsv" | LC_ALL=C sort)
+        if [ -z "$changes" ]; then
+            echo "since:    $before, no group appeared or vanished"
+        else
+            echo "since:    $before"
+            printf '%s\n' "$changes"
+        fi
+    }
+
+    if [ -z "$files" ]; then
+        replay_the_corpus
+        exit 0
+    fi
 
     valid_targets=""
     for target_rs in "$work"/fuzz/fuzz_targets/*.rs; do
@@ -9919,6 +9985,8 @@ fuzz-triage night="" against="main":
         echo "$untellable of $total input(s) could not be told which target they came from, and are not in the groups above"
     fi
 
+    replay_the_corpus
+
     # The fold, §434.3. What it removes is this tree's own `fuzz/artifacts/`
     # and what it merges with is this tree's own build, so both have to be the
     # night's, and each guard says why it folds nothing.
@@ -9949,7 +10017,6 @@ fuzz-triage night="" against="main":
     fi
 
     fold_scratch=$(mktemp -d)
-    corpus_root='{{ fuzz_corpus_root }}'
     record="$root/removed-crash-files.tsv"
     tree=$(pwd)
     awk -F'\t' 'FILENAME == ARGV[1] { if (FNR > 1) failing[$NF] = 1; next } !($2 in failing)' \
