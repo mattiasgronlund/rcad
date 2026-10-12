@@ -24,7 +24,11 @@
 //! fuse pinned here answered the same with it either way. So did 372 more that
 //! are not pinned: balls of other radii and centres, bowls of radius 5 and
 //! `5(1 ± 2⁻⁴⁰)`, and copies of the half ball, capped or not, moved by up to
-//! `1e-15`. Across the rest of `rcad-topo`'s tests the arm was reached only by
+//! `1e-15`. In the 288, with the arm off as with it on, `settle_against_each`
+//! is handed `CannotFollowAFacesTrimming` 210 times and `place_the_piece`
+//! refuses naming the cap 93 times, so the arm's mark is never what makes them
+//! refuse; `fuse/assemble.rs`'s `one_shell_is_inside_another`, which reads the
+//! same refusal, meets it in none of them. Across the rest of `rcad-topo`'s tests the arm was reached only by
 //! three tests of `a_point_on_a_face_beside_a_trimming_nothing_follows.rs`,
 //! none of them a fuse, and 25 more shapes fused with the capped half ball
 //! (blocks and balls over the cap and the floor, copies of it turned and placed
@@ -39,7 +43,8 @@
 //! The half ball with no hole and no cap is beside each pin, to show which of
 //! the refusals are the cap's. Against a ball just bigger the capped one says
 //! `Undecidable` where the half ball alone answers, so that refusal does not
-//! name the face that caused it. Against a bowl clear of the half ball, `z ≤
+//! name the face that caused it, though `place_the_piece` refuses naming the
+//! cap 12 times in those 12 fuses. Against a bowl clear of the half ball, `z ≤
 //! -1`, both say `Undecidable`, though the two solids are 1 apart.
 
 use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
