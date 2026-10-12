@@ -59,7 +59,10 @@
 //! rule, and since Q1537 each of the six fuses answers. Q1581's fuses, run
 //! with the arm made to print, printed nothing. The ball and the cone joined
 //! to a ring printed nothing again at Q1757, after Q1566 let them past the
-//! meet of three that refused them before.
+//! meet of three that refused them before. The quarter of a bar placed round
+//! a bend got past the cut at Q1817 and has not been run with the arm made to
+//! print since; none of its fuses is refused `Undecidable`, so every piece of
+//! each was placed.
 //!
 //! Q1125's run, of all 1755 tests of this crate's suite with the arm made to
 //! print, printed nine times, all in the placed bends' test, and each piece it
@@ -76,7 +79,7 @@ use rcad_geom::{
     Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Invalid, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 use smallvec::smallvec;
 
 mod rings;
@@ -314,11 +317,20 @@ fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
 /// Placed round a quarter turn either way, or half a turn, its flat faces lie
 /// on planes through the ring's axis a rounding off the bend's caps, as the
 /// placed bend's caps do in
-/// `a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule`.
-/// Every rule both ways round is then refused `Undecidable` at `order along a
-/// crossing` while the pieces are cut, before any point is put to a ray.
+/// `a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule`. Until
+/// Q1817 every rule both ways round was then refused `Undecidable` at `order
+/// along a crossing` while the pieces were cut. Q1817 orders those crossings
+/// by their angle round the pipe, so every fuse now gets past the cut.
+///
+/// Turned a quarter either way, the intersection answers a sliver and the bend
+/// less the quarter answers the bend, each validating. Turned half a turn, the
+/// intersection answers nothing, and the bend less the quarter is refused
+/// `CannotMeshAFace`. The union and the quarter less the bend are refused
+/// `DynamicRangeTooWide`: the answer's largest coordinate over its shortest
+/// edge is `3.7e15` a quarter turn round and `8.2e15` half a turn round, an
+/// edge a few roundings long (row Q1865).
 #[test]
-fn a_quarter_of_a_bar_placed_round_from_a_bend_in_it_is_refused_before_a_ray() {
+fn a_quarter_of_a_bar_placed_round_from_a_bend_in_it_answers_or_keeps_an_edge_a_rounding_long() {
     for rule in EVERY_RULE {
         for the_bend_first in [true, false] {
             let what = format!("where it sits, {rule:?}, the bend first {the_bend_first}");
@@ -335,7 +347,14 @@ fn a_quarter_of_a_bar_placed_round_from_a_bend_in_it_is_refused_before_a_ray() {
             assert_eq!(solids, expected, "{what}");
         }
     }
+    let one_bend = PI * PI * 4.0 / 2.0;
     for turn in [FRAC_PI_2, -FRAC_PI_2, PI] {
+        let half_a_turn = turn == PI;
+        let too_wide = if half_a_turn {
+            8_165_619_676_597_685.0
+        } else {
+            3_747_221_395_533_424.5
+        };
         for rule in EVERY_RULE {
             for the_bend_first in [true, false] {
                 let what = format!("{turn} round, {rule:?}, the bend first {the_bend_first}");
@@ -348,8 +367,43 @@ fn a_quarter_of_a_bar_placed_round_from_a_bend_in_it_is_refused_before_a_ray() {
                         &Isometry::rotation(&Axis::z(), turn).expect("a real angle"),
                     )
                     .expect("this model made the key");
-                let refused = fused_or_refused(&mut model, bend, quarter, rule, the_bend_first);
-                expect(refused, Some("order along a crossing"), &what);
+                let measured = fused_and_measured(&mut model, bend, quarter, rule, the_bend_first);
+                match (rule, the_bend_first, half_a_turn) {
+                    (Rule::Intersection, _, true) => assert!(
+                        matches!(&measured, Ok(solids) if solids.is_empty()),
+                        "{what}: {measured:?}"
+                    ),
+                    (Rule::Intersection, _, false) => {
+                        let measured = measured.unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                        let [(volume, _)] = measured[..] else {
+                            panic!("{what}: one solid, not {measured:?}");
+                        };
+                        assert!(volume < one_bend * 1e-12, "{what}: {volume}");
+                    }
+                    (Rule::Difference, true, true) => assert!(
+                        matches!(measured, Err(Error::CannotMeshAFace { .. })),
+                        "{what}: {measured:?}"
+                    ),
+                    (Rule::Difference, true, false) => {
+                        let measured = measured.unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                        let [(volume, error)] = measured[..] else {
+                            panic!("{what}: one solid, not {measured:?}");
+                        };
+                        assert!(
+                            (volume - one_bend).abs() <= error,
+                            "{what}: {volume} ± {error}, a bend {one_bend}"
+                        );
+                    }
+                    (Rule::Union | Rule::Difference, _, _) => assert!(
+                        matches!(
+                            measured,
+                            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio }))
+                                if ratio == too_wide
+                        ),
+                        "{what}: {measured:?}"
+                    ),
+                    (other, _, _) => panic!("not a rule this tries: {other:?}"),
+                }
             }
         }
     }
@@ -554,14 +608,39 @@ fn a_bend_and_a_copy_moved_a_rounding_off_it_are_refused_when_crossed() {
 /// with, so the wedge's face a hair off the cap would be the piece whose
 /// points sit a rounding off the bend.
 ///
-/// The wedge's face is not stored on a plane through the axis, so the fuse is
-/// refused `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` from a hair of
-/// `1e-3` down to `1e-14` at a reach of ten; at `1e-15` and below the wedge
-/// itself, the prism less what is outside the bar, is refused `Undecidable`
-/// at `order along a crossing`.
+/// The wedge itself, the prism less what is outside the bar, validates and
+/// measures `18π − 72 atan(hair / 10)` within the measure's own error for
+/// every hair from `1e-3` down to `1e-20`; until Q1817 it was refused
+/// `Undecidable` at `order along a crossing` from `1e-15` down. The wedge's
+/// face is not stored on a plane through the axis, so the fuse is refused
+/// `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` at every hair, at a reach
+/// of ten.
 #[test]
 fn a_wedge_a_hair_below_a_bends_cap_is_refused_before_a_ray() {
-    for hair in [1e-3, 1e-9, 1e-12, 1e-14] {
+    let policy = Policy::certified();
+    for hair in [1e-3, 1e-9, 1e-12, 1e-14, 1e-15, 1e-16, 1e-20] {
+        let mut model = a_model();
+        let wedge = a_wedge(&mut model, hair)
+            .unwrap_or_else(|why| panic!("a hair of {hair:e}: the wedge {why:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("a hair of {hair:e}: {why:?}"));
+        let measured = model
+            .solid(wedge)
+            .expect("this model made the key")
+            .measure(
+                rcad_geom::Deflection::of(0.01).expect("a deflection"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("a hair of {hair:e}: {why:?}"));
+        let expected = 18.0 * PI - 72.0 * (hair / 10.0).atan();
+        assert!(
+            (measured.volume() - expected).abs() <= measured.volume_error(),
+            "a hair of {hair:e}: {} ± {}, against {expected}",
+            measured.volume(),
+            measured.volume_error()
+        );
         for rule in EVERY_RULE {
             for the_bend_first in [true, false] {
                 let what = format!("a hair of {hair:e}, {rule:?}, the bend first {the_bend_first}");
@@ -581,21 +660,6 @@ fn a_wedge_a_hair_below_a_bends_cap_is_refused_before_a_ray() {
                 );
             }
         }
-    }
-    for hair in [1e-15, 1e-16, 1e-20] {
-        let mut model = a_model();
-        let refused = a_wedge(&mut model, hair).map(|_| ());
-        let said = match &refused {
-            Err(Error::Undecidable { records }) => {
-                records.records().last().map(|record| record.predicate())
-            }
-            _ => None,
-        };
-        assert_eq!(
-            said,
-            Some("order along a crossing"),
-            "a hair of {hair:e}: {refused:?}"
-        );
     }
 }
 
