@@ -122,7 +122,8 @@ A ray from the exact point that says `OnBoundary` would contradict the proof,
 and is asserted against rather than answered.
 
 What is not answered, and stays refused: a box a face meets — the new test
-pins a box on the first bend's own wall refused against that bend — and a box
+pinned a box on the first bend's own wall refused against that bend, and
+since Q1764 pins it `Undecidable` — and a box
 with an infinite end, which has no finite middle. **A box only the ring's own
 wall meets is not refused any more but `Undecidable`** (queue row Q1763,
 below).
@@ -135,7 +136,12 @@ equator of the glued bend's wall, which no face of the block meets; the block
 alone says `Outside`. At `b8c4892c` the bend refused that box
 `CannotFireARayAtAFacesSurface` under the certified policy, and a ball of
 radius 5 about the origin, whose wall `(3, 4, 0)` is on too, said
-`Undecidable`. The tolerant policy was not measured at that base.
+`Undecidable`. The tolerant policy was not measured at that base. Q1764
+measured it at `7b257c32`, the `main` it merged this row's branch onto, with
+a probe test it did not keep: under `Policy::certified()` and under
+`Policy::tolerant(100.0)` alike the bend said
+`CannotFireARayAtAFacesSurface`, the ball `Undecidable` and the block alone
+`Outside`. So the box was refused whatever the policy.
 
 The decision is `Undecidable`. `classify.rs` keeps the two answers apart,
 citing §4.2: `Undecidable` says the predicates were asked and none could
@@ -169,7 +175,10 @@ one pin moved, not a fuse's:
 `a_box_no_face_meets_is_answered_and_one_on_the_wall_is_not`, the test the
 paragraph above says pins a box on the first bend's own wall refused, and
 323.6 names. That box now gets `Undecidable { enclosure: 9.84755388344638e-10 }`,
-and the pin moves with this row. Read from the code and not measured:
+and the pin moves with this row. It moved in Q1764, which merged this row's
+branch at `24274fa5` rather than rebasing it, so the shas above still name what they
+named: the pin asserts `Undecidable` of the box now, where it asserted the
+refusal naming the wall. Read from the code and not measured:
 `fuse/select.rs`'s `settle_against_each` gives up on the point for either
 answer. `fuse/assemble.rs`'s `one_shell_is_inside_another` asks exact corners
 through `classify_point`, and `Torus::side_of` decides an exact point unless a product overflows or
