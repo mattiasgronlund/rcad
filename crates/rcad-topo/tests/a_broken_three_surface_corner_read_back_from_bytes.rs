@@ -100,6 +100,39 @@ const EVERY_MOVE_OF_THE_APEX: [[f64; 3]; 4] = [
     DOWN_A_FACE,
 ];
 
+/// The round bar's, which `add_round_bar` stands on the `z` axis with its seam
+/// at `(RADIUS, 0)`.
+const RADIUS: f64 = 3.0;
+
+/// Where the round bar less [`THE_HALF_PAST_THE_SEAM`] keeps the corner the
+/// file moves: the far end of the cut across its top, where the cap's plane
+/// `z = 10`, the wall's cylinder and the cut's plane `y = 0` meet.
+const WHERE_THE_HALF_BAR_PUTS_IT: [f64; 3] = [-RADIUS, 0.0, HEIGHT];
+
+/// The other place those three surfaces meet: the near end of the cut across
+/// the top, where the half bar keeps a corner of its own.
+const THE_OTHER_END_OF_THE_CUT: [f64; 3] = [RADIUS, 0.0, HEIGHT];
+
+/// A millimetre out from the wall, still on the cap and the cut.
+const OFF_THE_ROUND_WALL: [f64; 3] = [-RADIUS - 1.0, 0.0, HEIGHT];
+
+/// A millimetre above the cap, still on the wall and the cut.
+const OFF_THE_CAP: [f64; 3] = [-RADIUS, 0.0, HEIGHT + 1.0];
+
+/// A millimetre into the half bar from the cap and the cut, and in from the
+/// wall.
+const INTO_THE_HALF_BAR: [f64; 3] = [-RADIUS + 1.0, -1.0, HEIGHT - 1.0];
+
+/// A millimetre out from the cap and the cut, and out from the wall.
+const OFF_THE_CAP_THE_WALL_AND_THE_CUT: [f64; 3] = [-RADIUS - 1.0, 1.0, HEIGHT + 1.0];
+
+const EVERY_MOVE_OF_THE_HALF_BAR: [[f64; 3]; 4] = [
+    OFF_THE_ROUND_WALL,
+    OFF_THE_CAP,
+    INTO_THE_HALF_BAR,
+    OFF_THE_CAP_THE_WALL_AND_THE_CUT,
+];
+
 /// A block, as the two corners of its footprint, the height of its floor and
 /// how tall it stands. The blocks are §294.2's and keep its names, which speak
 /// of the bar's seam: the box has no seam, and the bar's seam corner and the
@@ -366,6 +399,66 @@ fn every_fuse_of_a_pyramid_whose_apex_is_moved_refuses_where_three_surfaces_meet
     every_fuse_refuses_where_three_surfaces_meet(the_pyramid_read_back, EVERY_MOVE_OF_THE_APEX);
 }
 
+#[test]
+fn probe_q1813_half_bar() {
+    let mut moves = EVERY_MOVE_OF_THE_HALF_BAR.to_vec();
+    moves.push(THE_OTHER_END_OF_THE_CUT);
+    moves.push(WHERE_THE_HALF_BAR_PUTS_IT);
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        for (index, placement) in every_placement().into_iter().enumerate() {
+            for &moved_to in &moves {
+                let (model, solid) = the_half_bar_read_back(placement, moved_to);
+                let faces = model.solid(solid).expect("key").faces().count();
+                let valid = model.validate(&policy, &mut ProvenanceLog::new());
+                eprintln!(
+                    "VALIDATE {:?} p{index} {moved_to:?} faces {faces}: {valid:?}",
+                    policy.max_wobble()
+                );
+                for (which, (partner, rule)) in EVERY_PARTNER.into_iter().enumerate() {
+                    let (mut model, solid) = the_half_bar_read_back(placement, moved_to);
+                    let block = a_block(&mut model, partner, &placement);
+                    let outcome =
+                        model.fuse(&[solid], &[block], rule, &policy, &mut ProvenanceLog::new());
+                    let said = match &outcome {
+                        Ok(answer) => {
+                            let volume: f64 = answer
+                                .solids()
+                                .iter()
+                                .map(|&piece| {
+                                    model
+                                        .solid(piece)
+                                        .expect("piece")
+                                        .measure(
+                                            Deflection::of(0.001).expect("fine"),
+                                            &policy,
+                                            &mut ProvenanceLog::new(),
+                                        )
+                                        .map(|m| m.volume())
+                                        .unwrap_or(f64::NAN)
+                                })
+                                .sum();
+                            format!("Ok {} solids, volume {volume}", answer.solids().len())
+                        }
+                        Err(Error::Undecidable { records }) => format!(
+                            "Undecidable {:?}",
+                            records
+                                .records()
+                                .iter()
+                                .map(|record| record.predicate())
+                                .collect::<Vec<_>>()
+                        ),
+                        Err(other) => format!("Err {other:?}"),
+                    };
+                    eprintln!(
+                        "FUSE {:?} p{index} {moved_to:?} partner{which} {rule:?}: {said}",
+                        policy.max_wobble()
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// The sound solid from `the_sound_solid` at each placement, fused with each
 /// of `partners` under both policies, answers, validates, and holds what
 /// `what_the_two_hold` says, to `1e-12` relative.
@@ -532,10 +625,10 @@ fn read_back(placement: Isometry, moved_to: [f64; 3]) -> (Model, SolidKey) {
     ])
     .build(&Policy::certified(), &mut ProvenanceLog::new())
     .expect("a square");
-    model
+    let the_box = model
         .add_extrusion(&footprint, HEIGHT, &placement)
         .expect("a box");
-    moved_in_its_bytes(&model, WHERE_THE_BOX_PUTS_IT, moved_to)
+    moved_in_its_bytes(&model, the_box, WHERE_THE_BOX_PUTS_IT, moved_to)
 }
 
 /// The pyramid at `placement`, written out with postcard, its apex overwritten
@@ -549,12 +642,53 @@ fn the_pyramid_read_back(placement: Isometry, moved_to: [f64; 3]) -> (Model, Sol
     model
         .place_solid(pyramid, &placement)
         .expect("this model made the key");
-    moved_in_its_bytes(&model, WHERE_THE_PYRAMID_PUTS_ITS_APEX, moved_to)
+    moved_in_its_bytes(&model, pyramid, WHERE_THE_PYRAMID_PUTS_ITS_APEX, moved_to)
+}
+
+/// The round bar less [`THE_HALF_PAST_THE_SEAM`], at `placement`, written out
+/// with postcard, its corner at [`WHERE_THE_HALF_BAR_PUTS_IT`] overwritten in
+/// the bytes with `moved_to`, and read back.
+///
+/// The bar and the block are cut where they are built and the half bar placed
+/// after, as the pyramid is, so the file stores the corner at the same place
+/// at every placement. The bar and the block stay in the model beside it.
+fn the_half_bar_read_back(placement: Isometry, moved_to: [f64; 3]) -> (Model, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bar = model
+        .add_round_bar(RADIUS, HEIGHT, &Isometry::identity())
+        .expect("a bar of radius three and height ten");
+    let cut = a_block(&mut model, THE_HALF_PAST_THE_SEAM, &Isometry::identity());
+    let answer = model
+        .fuse(
+            &[bar],
+            &[cut],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the bar less the half past its seam");
+    let [half_bar] = answer.solids()[..] else {
+        panic!("the bar less a half is {} solids", answer.solids().len());
+    };
+    model
+        .place_solid(half_bar, &placement)
+        .expect("this model made the key");
+    moved_in_its_bytes(&model, half_bar, WHERE_THE_HALF_BAR_PUTS_IT, moved_to)
 }
 
 /// `model` written out with postcard, the one place its bytes hold the corner
-/// `was` overwritten with `moved_to`, and read back, with its one solid.
-fn moved_in_its_bytes(model: &Model, was: [f64; 3], moved_to: [f64; 3]) -> (Model, SolidKey) {
+/// `was` overwritten with `moved_to`, and read back, with the solid that comes
+/// back where `solid` was among the model's solids.
+fn moved_in_its_bytes(
+    model: &Model,
+    solid: SolidKey,
+    was: [f64; 3],
+    moved_to: [f64; 3],
+) -> (Model, SolidKey) {
+    let position = model
+        .solids()
+        .position(|view| view.key() == solid)
+        .expect("the model holds the solid");
     let mut bytes = postcard::to_allocvec(model).expect("a model writes out");
 
     let stored = the_bytes_of(was);
@@ -573,7 +707,7 @@ fn moved_in_its_bytes(model: &Model, was: [f64; 3], moved_to: [f64; 3]) -> (Mode
         postcard::from_bytes(&bytes).expect("reading back does not ask where a corner is");
     let solid = read_back
         .solids()
-        .next()
+        .nth(position)
         .expect("the solid came back")
         .key();
     (read_back, solid)
