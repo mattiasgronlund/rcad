@@ -22,6 +22,7 @@ side by side.
   424.4   Then: two lanes may share arrange.rs or assemble.rs (amends §230.3 and §230.6)
   424.5   What is not done, and why
   424.6   The rows
+  424.7   What Q1530 built
 
 ### 424.1 What was measured
 
@@ -187,3 +188,42 @@ Both are tier 2.2 (§307.1): they change the queue and the lanes' roles.
 Q1530 and Q1531 each record what they built here, as a new subsection. The
 change to `lane.md` reaches only dispatchers started after it lands: `/clear`
 does not reload agent types.
+
+### 424.7 What Q1530 built
+
+424.3 as written, in `tooling/queue/queue.py` and the `queue` recipe.
+
+- **The verb.** `just queue narrow <id> <write set>` appends
+  `narrow <id> <time> <worktree> <write set>` under the claims lock and writes
+  no copy of the queue. It refuses an id with no hold; an entry `check-queue`
+  would refuse, a directory written without its `/` among them; an entry no
+  entry of the taken set holds; and a widening back that meets another hold.
+  `-` alone narrows a hold to nothing.
+- **The hold.** `Claims.holds()` keeps the set a row was taken with as
+  `taken`, and the last `narrow` since the take as `write_set`. A new take
+  starts again from the row's set, and a release drops the hold, narrow and all.
+- **One rule for when two sets meet.** The widening check does not copy it.
+  `narrow` hands the other holds, in `elsewhere`'s records, to a new mode,
+  `just queue meets <id> <write set>`, which runs the fill's own `blocked()` on
+  the widened entries and prints its skip line, the one `narrow` quotes when it
+  refuses. So Q1531's change to that rule reaches the widening check as well.
+  The holds on the narrowing row's own branch, a bundle's, are left out, as
+  the rows of one bundle may overlap (§352.4).
+- **Who reads it.** `elsewhere` gave the hold's set for a row held from
+  another tree already, so it now gives the narrowed one and says
+  `narrowed from <taken>`. A row this copy shows as `lane:` is read from the
+  copy, so a new reader, `narrowed`, hands the fill the claims file's set for
+  it, and the plain listing writes `narrowed to <set>` under it. `next` and
+  `blocked` read both; `running` and `show` add a line for a narrowed hold; the
+  queue page adds `narrowed to <set>` to its line under Running.
+- **lane.md** says when to run it, as 424.3 does, and what a lane does when a
+  widening back is refused: it keeps working inside the set it was sent with,
+  and names the entry and the hold in `remaining`.
+
+What it does not close: **`take` does not check write sets.** The fill decides
+which rows meet a running hold, and `take` writes what the dispatcher read off
+it. A fill that offers a row because a hold was narrowed, followed by a
+widening back to that row's file before the take, lets both lanes hold the
+file. The same gap was there before, between two dispatchers' fills and takes;
+widening back adds a third way in. Q1530 files a row for `take` to ask
+`meets` too.
