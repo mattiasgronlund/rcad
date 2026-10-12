@@ -80,6 +80,11 @@ whose likelihood nobody has judged waits behind the ones judged likely. The
 faults the nights have found so far mostly came out D: Q1204, Q1205, Q1206,
 Q1283, Q1313 and Q1364 are all in tier 5.
 
+*§440.2, 2026-10-12: before the triage lane grades a fault C or D, it runs the
+shape again with each out-of-range number made ordinary and every relation
+kept. The same failure makes it at least C, and a row it files without that try
+has no class.*
+
 ### 418.4 A row names a group by one of its crash files
 
 Q1217 counts a group as named when an open row names its sample's file name, or

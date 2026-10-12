@@ -128,7 +128,14 @@ the write set goes in `out_of_write_set_needs`.
 `crash` or `refuses`, then `/A` when a real input met it, `/B` for a shape
 designers make on purpose, `/C` when only a probe builds it, `/D` when it lies
 outside §3.5's scale envelope, with the number that puts it there. A hypothesis
-nobody has run gets no class at all (§360.5). Mark an item `small` when it
+nobody has run gets no class at all (§360.5). A fault from a fuzz crash file is
+C or D only once you have run its shape again with every out-of-range number
+made ordinary and every relation kept: a scale by a power of two, a part near
+zero set to zero. The same failure makes it at least C. Name the ordinary shape
+you ran beside the crash file. Untried, it has no class (§440.2). When your
+work finds which feature of a shape a fault needs, build a shape designers
+make with that feature and run it. If it fails the same way, the rows you leave
+for that fault are B (§440.3). Mark an item `small` when it
 needs no trace, its place is known, and it takes about ten minutes. A defect is
 never small.
 

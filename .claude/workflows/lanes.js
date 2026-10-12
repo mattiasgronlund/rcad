@@ -833,7 +833,7 @@ function reportSchema(lane, relay) {
     summary: { type: 'string', description: 'plain words, at most 10 lines' },
     numbers: { type: 'array', items: numberSchema(), description: 'every figure you report, with its command' },
     out_of_write_set_needs: { type: 'array', items: { type: 'string' } },
-    remaining: { type: 'string', description: 'what is left, including what you learned about work you were told not to attempt; each defect with its class (wrong, crash or refuses, then /A to /D, §352.3), each defect you guess at and did not run with no class (§360.5), and each item of about ten minutes whose place is known marked small' },
+    remaining: { type: 'string', description: 'what is left, including what you learned about work you were told not to attempt; each defect with its class (wrong, crash or refuses, then /A to /D, §352.3), each defect you guess at and did not run with no class (§360.5), a fault from a fuzz crash file graded C or D only after its shape was run again with ordinary numbers and no class until then (§440.2), and each item of about ten minutes whose place is known marked small' },
   }
   const required = ['start_sha', 'base_sha', 'branch', 'worktree_path', 'outcome', 'summary', 'numbers', 'remaining']
   if (writes(lane)) {

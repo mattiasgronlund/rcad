@@ -114,6 +114,11 @@ run is C at most", and every guess came in as C, so the walk took guesses
 ahead of every refusal a user meets and the A-or-B count stood still. A guess
 now has no class until a lane runs it, and 19 open rows lost their class.*
 
+*§440.2, 2026-10-12: a fault filed from a fuzz crash file is graded C or D only
+after its shape has been run again with ordinary numbers. Until then it has no
+class. The input the fuzzer keeps is the first to reach the code, and that is
+often the least likely one.*
+
 The file's line order breaks ties only inside one class. **The fill sorts by
 class; the lines do not have to be in class order.** They could not be kept
 that way: the merge driver (`tooling/queue/merge.py`, `assemble`) keeps the
