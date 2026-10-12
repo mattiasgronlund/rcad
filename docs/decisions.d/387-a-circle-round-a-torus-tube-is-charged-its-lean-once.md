@@ -102,3 +102,25 @@ checks it still carries those decimals; on `c82e221f` it is refused.
 - Measure the furthest any circle sits off its face, in these units, over
   every file that imports, now that the cone and the torus have bounds: the
   only figure for the whole corpus is `b3701c4c`'s, from before them.
+
+**2026-10-12, Q812:** Measured.
+`the_furthest_a_circle_sits_off_its_face_over_the_whole_corpus` in `brep.rs`
+(`mise exec -- just t the_furthest_a_circle_sits_off_its_face_over_the_whole_corpus`)
+sweeps every `CIRCLE` that bounds an `ADVANCED_FACE`, read straight off the
+file rather than through `A_CIRCLE_MAY_MISS_ITS_FACE_BY`, over the 166 of 367
+corpus files that import, and prints `29.43` roundings:
+`nist_ctc_03_asme1_ap242-e2.stp` circle `#1681` on plane `#1291` by edge
+`#2757`. The file still imports — this is a figure about the file, not about
+a refusal.
+
+That is because `A_CIRCLE_MAY_MISS_ITS_FACE_BY` only enters a decision
+through `Walk::every_face_holds_the_curve`'s two call sites (`round_run`,
+`describe_the_halves_of_a_circle`) and `Walk::the_surface_that_names_the_curve`,
+and each of those, read directly rather than from the doc comment, only ever
+picks which `EdgeRun` or `Option` comes back on `false` — never `Err`. So a
+circle the allowance does not cover, however far off, is named by its faces
+instead of refusing the import. The one other direct read of this constant,
+`Walk::a_whole_ball_off_its_chart` (§404), does feed a refusal when missed —
+but that branch has never fired on a real corpus file (§404.4: twice across
+all of `rcad-step`'s tests, both the new slit tests, never the corpus), so
+this measurement does not reach it either way.

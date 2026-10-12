@@ -2724,8 +2724,26 @@ pub(crate) fn a_surface_holds_the_circle(
 /// allowance under `13.74` refuses a file the corpus imports, and sixteen
 /// clears it by less than a sixth.
 /// `the_relays_two_circles_round_their_tubes_are_inside_the_allowance` holds
-/// both. Nobody has measured the furthest over the whole corpus since the
-/// cone and the torus got their bounds.
+/// both.
+///
+/// **That `13.74` is still the furthest a circle whose naming this allowance
+/// decides ever needs** (§387.5), but it is not the furthest circle the
+/// corpus writes. `the_furthest_a_circle_sits_off_its_face_over_the_whole_corpus`
+/// (`mise exec -- just t the_furthest_a_circle_sits_off_its_face_over_the_whole_corpus`)
+/// sweeps every `CIRCLE` that bounds an `ADVANCED_FACE` in a file that
+/// imports, read straight off the file rather than through this allowance,
+/// and finds `29.43` roundings: `nist_ctc_03_asme1_ap242-e2.stp`'s circle
+/// `#1681` sits that far off the plane `#1291` its edge `#2757` bounds. That
+/// circle's own axis is the plane's normal turned end for end, almost
+/// exactly, and its centre misses the plane by `1.1e-12` of a unit `193.8`
+/// across — the file's own digits, not this reader's arithmetic. The file
+/// still imports: nothing here asks whether that circle lies on that plane,
+/// because the edge is named by the plane and vertices that already close
+/// it, and this allowance only ever chooses between two ways to *name* a
+/// run that reaches it in the first place (see `every_face_holds_the_curve`'s
+/// doc comment) — never a reason to refuse one. So `29.43` is the furthest a
+/// circle sits off its face anywhere in the corpus, and `13.74` is still the
+/// furthest one whose naming sixteen has to cover.
 pub(crate) const A_CIRCLE_MAY_MISS_ITS_FACE_BY: f64 = 16.0;
 
 /// The furthest any point of the circle can be from `surface`, and the
@@ -3046,18 +3064,23 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
 #[cfg(test)]
 mod tests {
     use std::f64::consts::{PI, SQRT_2};
+    use std::path::{Path, PathBuf};
+    use std::{env, fs};
 
     use rcad_geom::{
         Axis, Cone, Cylinder, NEAREST_F64_POINT_ROUNDOFF, Plane, Point, Sphere, Surface, Torus,
         Vector,
     };
-    use rcad_predicates::{Decision, Point as PredicatePoint};
+    use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 
     use super::{
-        A_CIRCLE_MAY_MISS_ITS_FACE_BY, Ellipse, a_half_space_holding_both,
-        a_half_space_naming_the_arc, a_surface_holds_the_circle, a_surface_holds_the_ellipse,
-        how_far_off, how_far_off_the_circle_can_be, how_far_off_the_ellipse_can_be,
+        A_CIRCLE_MAY_MISS_ITS_FACE_BY, ADVANCED_FACE, CIRCLE, EDGE_CURVE, EDGE_LOOP, Ellipse,
+        FACE_BOUND, FACE_OUTER_BOUND, FACE_SURFACE, ORIENTED_EDGE, Reading,
+        a_half_space_holding_both, a_half_space_naming_the_arc, a_surface_holds_the_circle,
+        a_surface_holds_the_ellipse, how_far_off, how_far_off_the_circle_can_be,
+        how_far_off_the_ellipse_can_be, plane_through,
     };
+    use crate::{EntityId, Import, StepFile};
 
     /// The LED body's circle, written as the file writes it: on its dome
     /// exactly, and `2.1e-16` off its body's axis. Both hold it, and a circle a
@@ -3202,6 +3225,194 @@ mod tests {
             "the allowance no longer covers the furthest circle an imported file needs"
         );
         assert!(a_surface_holds_the_circle(&pipe, centre, axis, 1.0));
+    }
+
+    /// The measurement `A_CIRCLE_MAY_MISS_ITS_FACE_BY`'s doc comment asks for
+    /// (§387.5): over every file that imports, every `CIRCLE` that bounds an
+    /// `ADVANCED_FACE`, held against that face's own surface and turned into
+    /// roundings of the unit the allowance is counted in. The furthest one
+    /// found, and the file and entities it came from, are printed so the
+    /// doc comment can be updated from this test's own output.
+    ///
+    /// **This reads the file's entities directly, not through `Walk`**,
+    /// because `Walk` only ever checks the faces one edge's own naming
+    /// needs — never every face a circle happens to bound. So this sweep is
+    /// wider than the reader itself walks, which is the point: it is asking
+    /// what the allowance would need to cover, not what the reader happened
+    /// to check on its way to a solid.
+    ///
+    /// Point `RCAD_STEP_CORPUS` at a directory holding `nist/` and `kicad/`;
+    /// this **fails** rather than skips when it is missing
+    /// (`docs/decisions.md` §44.10).
+    #[test]
+    fn the_furthest_a_circle_sits_off_its_face_over_the_whole_corpus() {
+        let root = corpus();
+        let mut furthest = 0.0_f64;
+        let mut worst = String::new();
+        let (mut files, mut imported) = (0usize, 0usize);
+
+        for source in ["nist", "kicad"] {
+            for path in files_under(&root.join(source)) {
+                files += 1;
+                let Ok(bytes) = fs::read(&path) else { continue };
+                let Ok(file) = StepFile::read(&bytes) else {
+                    continue;
+                };
+                if Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()).is_err() {
+                    continue;
+                }
+                imported += 1;
+                let reading = Reading::of(&file);
+                for face in file.instances_named(ADVANCED_FACE.name()) {
+                    for (roundings, what) in circle_roundings_on_a_face(&reading, face.id()) {
+                        if roundings > furthest {
+                            furthest = roundings;
+                            worst = format!("{} {what}", name_of(&path));
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!(
+            files > 0,
+            "the walk found no STEP files, so this measurement did nothing"
+        );
+        assert!(
+            imported > 0,
+            "no corpus file imported at all, so this measurement says nothing"
+        );
+        println!(
+            "furthest a circle sits off its face over {imported} of {files} files that import: \
+             {furthest} roundings, at {worst}"
+        );
+        // `A_CIRCLE_MAY_MISS_ITS_FACE_BY` only ever picks between two ways to
+        // *name* a run; nothing here refuses a file over it (see
+        // `every_face_holds_the_curve`'s doc comment), so the furthest circle
+        // over the whole corpus is free to sit past the allowance without
+        // that allowance being wrong. This pins the figure found rather than
+        // holding it under the allowance, so a corpus that moves is noticed.
+        assert!(
+            (furthest - 29.43).abs() < 0.5,
+            "the furthest a circle sits off its face over the corpus moved to {furthest} \
+             ({worst}), where 29.43 was measured; update A_CIRCLE_MAY_MISS_ITS_FACE_BY's doc \
+             comment from this test's own output"
+        );
+    }
+
+    /// Every `CIRCLE` that bounds `face`, each as its roundings off the
+    /// face's own surface and the `#id`s of the circle and its edge. A
+    /// circle, an edge or a face this cannot read through is dropped rather
+    /// than refused: this is a measurement over whatever the file happens to
+    /// hold, not a second copy of the reader's own refusals.
+    fn circle_roundings_on_a_face(reading: &Reading<'_>, face: EntityId) -> Vec<(f64, String)> {
+        let mut found = Vec::new();
+        let Ok(keyword) = reading.keyword_of(face, face, &[ADVANCED_FACE, FACE_SURFACE]) else {
+            return found;
+        };
+        let Ok(sits_on) = reading.reference_at(face, keyword, 2) else {
+            return found;
+        };
+        let Ok(surface) = reading.surface_at(face, sits_on, || None) else {
+            return found;
+        };
+        let Ok(bounds) = reading.references_at(face, keyword, 1) else {
+            return found;
+        };
+        for bound in bounds {
+            let Ok(bound_keyword) =
+                reading.keyword_of(face, bound, &[FACE_OUTER_BOUND, FACE_BOUND])
+            else {
+                continue;
+            };
+            let Ok(loop_id) = reading.reference_at(bound, bound_keyword, 1) else {
+                continue;
+            };
+            let Ok(oriented) = reading.references_at(loop_id, EDGE_LOOP, 1) else {
+                continue;
+            };
+            for oriented_edge in oriented {
+                let Ok(edge_curve) = reading.reference_at(oriented_edge, ORIENTED_EDGE, 3) else {
+                    continue;
+                };
+                let Ok(curve) = reading.reference_at(edge_curve, EDGE_CURVE, 3) else {
+                    continue;
+                };
+                let Ok(position) = reading.reference_at(curve, CIRCLE, 1) else {
+                    continue;
+                };
+                let Ok(place) = reading.placement_at(curve, position) else {
+                    continue;
+                };
+                let Ok(radius) = reading.real_at(curve, CIRCLE, 2) else {
+                    continue;
+                };
+                let Ok(its_plane) = plane_through(place.origin, place.axis) else {
+                    continue;
+                };
+                let Some((off, largest)) = how_far_off_the_circle_can_be(
+                    &surface,
+                    place.origin,
+                    its_plane.normal(),
+                    radius,
+                ) else {
+                    continue;
+                };
+                found.push((
+                    off / (NEAREST_F64_POINT_ROUNDOFF * largest),
+                    format!("circle {curve} on edge {edge_curve} of face {face}"),
+                ));
+            }
+        }
+        found
+    }
+
+    fn corpus() -> PathBuf {
+        let root = env::var_os("RCAD_STEP_CORPUS").unwrap_or_else(|| {
+            panic!(
+                "RCAD_STEP_CORPUS is not set. Point it at a directory holding nist/ and kicad/ \
+                 — this test does not skip on a missing corpus."
+            )
+        });
+        let root = PathBuf::from(root);
+        assert!(
+            root.is_dir(),
+            "RCAD_STEP_CORPUS points at {}, which is not a directory",
+            root.display()
+        );
+        root
+    }
+
+    fn files_under(directory: &Path) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        let Ok(entries) = fs::read_dir(directory) else {
+            return found;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                found.extend(files_under(&path));
+                continue;
+            }
+            let is_step = path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| {
+                    extension.eq_ignore_ascii_case("stp") || extension.eq_ignore_ascii_case("step")
+                });
+            if is_step {
+                found.push(path);
+            }
+        }
+        found.sort();
+        found
+    }
+
+    fn name_of(path: &Path) -> String {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("a file with no name")
+            .to_owned()
     }
 
     /// A NaN in the numbers holds no circle. `f64::max` would drop it and
