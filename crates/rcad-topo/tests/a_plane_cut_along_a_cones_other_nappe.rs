@@ -1149,7 +1149,7 @@ fn a_unit_pointed_cones_lean_four_cases_away_from_the_range_refusals() -> Vec<Ca
 }
 
 #[test]
-fn a_unit_pointed_cone_with_a_lean_of_four_answers_right_or_refuses_away_from_the_known_defect() {
+fn a_unit_pointed_cone_with_a_lean_of_four_answers_right_away_from_the_range_refusals() {
     assert_eq!(
         tally_on_every_second_point(
             &a_unit_pointed_cones_lean_four_cases_away_from_the_range_refusals()

@@ -298,8 +298,13 @@ fn the_same_face_twice_in_one_shell_is_refused_by_name() {
 }
 
 /// A void inside a solid, and a solid in two separate lumps, are both a second
-/// shell. Neither is built, meshed or measured anywhere in this kernel, so it
-/// is refused by name rather than written and hoped for.
+/// shell, and `SolidBuilder::add_shell` refuses either by name here rather
+/// than write and hope for it. A fuse builds one freely:
+/// `a_cube_with_a_smaller_one_taken_out_of_the_middle_is_one_solid_with_a_void`
+/// in `fusing_solids.rs` cuts a cube out of a block's middle and measures the
+/// result, two shells and all. So the refusal is this builder's own — the
+/// face-by-face path a caller walks by hand — not a claim that a void goes
+/// unbuilt anywhere in this kernel.
 ///
 /// **`Model::validate` does not refuse it**, which is why the refusal has to
 /// live here. `the_sweep_does_not_refuse_a_solid_with_two_shells` in

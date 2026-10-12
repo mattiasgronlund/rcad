@@ -314,6 +314,16 @@ tangent against a margin of 0.4 ulp. So whoever moves that refusal needs Q623's
 exact reading first; `every_sliver_the_union_builds_holds_both_down_to_where_the_fuse_refuses`
 fails when the refusal moves, which is what sends them here.
 
+**2026-10-12 note (Q1632): the 21 of 1404 refusals above are fixed.**
+`how_many_steps` in `mesh.rs` charged a torus step its arc length over one
+effective radius alone, so half a turn round the tube came back one step and
+the coarsest mesh of a whole ring lay flat on its two equators. It now also
+charges the turn round the tube, taking the larger of the two. All 1404
+fuses of a whole ring turned about six axes with a bar far from it now answer
+and measure `8π²` and the bar apart
+(`a_whole_ring_turned_any_way_and_a_bar_far_from_it_fuse_to_the_two_apart` in
+`a_half_ring_standing_on_a_round_plate.rs`).
+
 ### 191.6 What is left
 
 `ignored_tests` goes 2 → 6 and `wildcard_arms` 87 → 88 (the justfile says which

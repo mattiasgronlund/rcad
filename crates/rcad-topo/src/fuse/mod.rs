@@ -229,9 +229,15 @@ impl Model {
     /// placements under both policies, and every fuse refused with
     /// [`Error::Undecidable`] on "where three surfaces meet", the partner cut
     /// the corner away or not, and left the model as it was
-    /// (`a_broken_three_surface_corner_read_back_from_bytes.rs`, §294.16). A
-    /// corner with four or more surfaces round it, or with a curved one among
-    /// three, is still untried (§294.7).
+    /// (`a_broken_three_surface_corner_read_back_from_bytes.rs`, §294.16). Both
+    /// kinds that paragraph once called untried are tried now. A pyramid apex,
+    /// four planes round the corner, moved the same four ways against the
+    /// same partners: all 352 fuses refuse the same `Undecidable` on "where
+    /// three surfaces meet", no wrong `Ok`, no panic (§294.17). A corner where
+    /// a cap, a round wall and a cut meet, one surface curved among three, got
+    /// the same millimetre moves and refused the same way; moved onto the
+    /// cut's other end it refuses `Error::Invalid(EdgeHasNoLength)` or, turned,
+    /// `Undecidable`, still with no wrong `Ok` and no panic (§294.18).
     pub fn fuse(
         &mut self,
         arguments: &[SolidKey],
