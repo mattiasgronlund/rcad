@@ -4886,49 +4886,11 @@ impl Edge {
             crossing = crossing_at(second);
         }
         let across = squared_off_from(from, crossing);
-        let named = squared_off_from(named_from, towards);
-        let agreement = across.dot(named);
+        let agreement = across.dot(squared_off_from(named_from, towards));
         if agreement > 0.0 {
             Some(across)
         } else if agreement < 0.0 {
             Some(-across)
-        } else {
-            self.the_way_into_an_arc_whose_chord_lies_along_its_tangent(
-                corners, from, named_from, towards,
-            )
-        }
-    }
-
-    fn the_way_into_an_arc_whose_chord_lies_along_its_tangent(
-        &self,
-        corners: &[Corner],
-        from: usize,
-        named_from: usize,
-        towards: Vector,
-    ) -> Option<Vector> {
-        let flat = self.carried_by.iter().find_map(Surface::as_plane)?;
-        let round = self
-            .carried_by
-            .iter()
-            .find(|surface| surface.as_plane().is_none())?;
-        where_a_closed_crossing_is_centred(round, &flat)?;
-        let at = corners[from].point;
-        let chord = corners[self.other_end_than(from)].point - at;
-        let square = flat.normal().cross(chord);
-        let reading = square.dot(gradient_of(round, at));
-        let outwards = if reading > 0.0 {
-            square
-        } else if reading < 0.0 {
-            -square
-        } else {
-            return None;
-        };
-        let heading =
-            towards.dot(corners[self.other_end_than(named_from)].point - corners[named_from].point);
-        if heading > 0.0 {
-            Some(outwards)
-        } else if heading < 0.0 {
-            Some(-outwards)
         } else {
             None
         }
