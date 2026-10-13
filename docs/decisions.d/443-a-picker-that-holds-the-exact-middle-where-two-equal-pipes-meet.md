@@ -96,5 +96,21 @@ again through `intersect`, so it gets the new picker from the namer itself.
   places that find where two halves meet and the middle of each, read a flat
   picker's facing and where an axis crosses it. For the new arm the facing is
   `facing` and the axes cross it at `through`, exactly.
-- **`validate.rs`** asks a flat picker of a crossing which side a point is on,
-  and does the same for the new arm.
+- **`validate.rs`** asks every picker of a crossing which side each end of
+  the edge is on, through `Picker::side_of_point`, and refuses an end behind
+  one as `EdgeOutsideWhatPickedIt`; the new arm answers that as a half-space
+  does (`an_edge_outside_a_flat_surface_holding_its_point_that_picked_it_is_caught`).
+  `what_a_corner_past_the_picker_says` keeps its `let … else` on `InFrontOf`
+  alone (§190.1). It reads the one picker that names a whole circle, through
+  `the_picker_naming_the_circle_through`, which takes a run picked by exactly
+  one picker, and `intersect` builds the new arm in one place only, as one of
+  the pair that picks a half ellipse.
+- **Matches outside `rcad-geom`** that sent the new arm to a wildcard
+  (`holds.rs`, `fuse/assemble.rs`) name it in the arm the wildcard gave it, so
+  nothing they answer moves (§40): `which_side_of_a_rings_circle` refuses,
+  `how_a_side_runs_round` and `the_way_into_an_arc` find nothing, and
+  `what_the_disk_of_a_rings_circle_holds` and `which_curve_of_the_pair` panic.
+  Each reads the one picker of a closed curve or of an arc, which `intersect`
+  never makes the new arm. That is a reading of the code and not a
+  demonstration: a model built by hand, or read from a file, can put the new
+  arm there, and what it gets then is untried.
