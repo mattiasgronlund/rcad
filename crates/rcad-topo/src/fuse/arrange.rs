@@ -8711,7 +8711,13 @@ fn turned_as_far_apart_up_the_axis(
 /// are on one ruling to a rounding. Every fuse of the two was refused on them
 /// (§246.6). Between those two places the loop runs along the bar to within a
 /// rounding, so the way it runs at each has a dot with `d` of order one, and
-/// the start is `10¹⁶` outside either plane.
+/// the start is `10¹⁶` outside either plane. With them in order, and the node
+/// `4e16` off put in order by [`Arrangement::as_the_pipes_axis_says`], every
+/// fuse of the two is now refused later, naming which piece of a crossing an
+/// edge is (Q1885). A block resting `2e-10` above a round bar tipped `1e-9`
+/// has a side that leans by the tip, and the block's bottom and the bar's top
+/// cut its loop `3e-10` apart; every fuse of those two was refused there with
+/// an enclosure of `4.4e-7`, and each now answers (§346.7).
 ///
 /// **It reads the start where it is held, as the sweep does.** The order it
 /// gives is the one from every point of the loop outside the two planes, so a
