@@ -25,9 +25,10 @@
 //! by `rcad-geom` putting the two corners in order round the loop. It puts
 //! them in order since Q1767, by their angle round the line through the
 //! ball's centre square to the bar's axis, and the loop reaches that function
-//! between two corners: a wall through it answers every rule, a cap at `z = 4`
-//! every rule, and a cap at `z = 6` every rule but one, which the mesh the
-//! fuse checks its answer with refuses. A cap through the ball's centre, and a
+//! between two corners: a wall through it answers every rule, and so does a
+//! cap at `z = 4` or `z = 6`, the second since Q1862, when the mesh the fuse
+//! checks its answer with stopped cutting the bar's wall straight through the
+//! hole the ball leaves in it. A cap through the ball's centre, and a
 //! bar from there up or cut down to there, answer every rule since Q1861: they
 //! were refused one step past the order, for want of a point inside a piece of
 //! a face, until `fuse/select.rs` took its steps across a curved piece from one
@@ -402,10 +403,11 @@ fn a_wall_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_every_ru
 /// ring between the circle at `z = −1` and a loop that runs round the cap and
 /// dips down the U the ball cuts in the wall. The mesh cut that ring at its
 /// quarters with straight lines across, and the one at the quarter `u = 0` ran
-/// from the circle at `u = 0` to the cap's corner at `u = 0.43` while the U's side
-/// bulges out to `u = 0.34` at `z = 6` below it: the cut crossed the hole, and
-/// the piece it cut off crossed itself. The bar first was cut the same way,
-/// and a finer mesh happened to put the U's corners clear of the cut.
+/// from the circle at `u = 0` to the cap's corner at `u = 0.43`, which puts it
+/// at `u = 0.37` at `z = 5`, where the U's side reaches back to `u = 0.34`: the
+/// cut crossed the hole, and the piece it cut off crossed itself. The bar first
+/// was cut the same way, and a finer mesh happened to put the U's corners clear
+/// of the cut.
 ///
 /// The cap at `z = 5` was refused under every rule both ways one step past the
 /// order, `Undecidable` for want of a point inside a piece of a face, until
