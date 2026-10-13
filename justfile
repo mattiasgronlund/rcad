@@ -14422,6 +14422,41 @@ check-queue-selftest:
     grep -qxF "skip Q2 (tier 2): its docs/a.md meets Q1's docs/a.md, held by lane:lane-q1" <<<"$got" \
         || fail "a small row meeting a running lane was not skipped with the lane named"
 
+    # Q1932, §447.3: one of the free slots is kept for a Sonnet row while one
+    # is ready and no running lane is a Sonnet row. Without the rule, three
+    # ready Opus rows across three tiers fill all three slots; with it, the
+    # last slot goes to the ready Sonnet row instead.
+    fence sonnetkept <<'MD'
+    Q1  1  todo  opus  docs/a.md  tier one §230
+    Q2  2  todo  opus  docs/b.md  tier two §230
+    Q3  3  todo  opus  docs/c.md  tier three §230
+    Q4  4  todo  sonnet  docs/d.md  tier four, the sonnet row §230
+    MD
+    drive sonnetkept next 3
+    [ "$(takes)" = "Q1 Q2 Q4 " ] \
+        || fail "the last free slot did not go to the ready Sonnet row ahead of the third Opus row"
+
+    fence nosonnetkept <<'MD'
+    Q1  1  todo  opus  docs/a.md  tier one §230
+    Q2  2  todo  opus  docs/b.md  tier two §230
+    Q3  3  todo  opus  docs/c.md  tier three §230
+    MD
+    drive nosonnetkept next 3
+    [ "$(takes)" = "Q1 Q2 Q3 " ] \
+        || fail "with no Sonnet row ready, the old all-Opus fill was not restored"
+
+    # A lane already running a Sonnet row satisfies 447.3 on its own; the rule
+    # does not then reserve a second slot for another ready Sonnet row.
+    fence sonnetrunning <<'MD'
+    Q1  1  lane:lane-q1  sonnet  docs/a.md  running §230
+    Q2  2  todo  opus  docs/b.md  tier two §230
+    Q3  3  todo  opus  docs/c.md  tier three §230
+    Q4  4  todo  sonnet  docs/d.md  tier four, the sonnet row §230
+    MD
+    drive sonnetrunning next 2
+    [ "$(takes)" = "Q2 Q3 " ] \
+        || fail "a running Sonnet lane still had a second slot reserved for a ready Sonnet row"
+
     fence badtier <<'MD'
     Q1  1  todo  opus  docs/a.md  a row the fill knows §230
     Q2  7  todo  opus  docs/b.md  a tier the fill does not know §230
