@@ -129,15 +129,38 @@ refusal is not traced yet.**
 | Q1897 | at the origin, (1,0,0) and (11,0,0), six fuses: 18 | `AWireWillNotLieFlatOnItsFace` 9, `ACurvedFaceGoesRightRoundWithNoSeam` 4, `CannotMeshAFace` `BoundaryCrossesItself` 5 | the same line in every one |
 | Q1897 | at (11,-3.25,0.5), six fuses: 6 | `Geometry(CannotNameWhichPieceOfACrossingThisIs)` | the same |
 | Q1903 | the bar at (3,2,1) and at (1,2,1), D block first: 2 | `Undecidable`, "one shell inside another", enclosure infinite | the same |
+| Q104 | no fuse: the puck the two `src/holds.rs` tests build, asked `face_holds_the_point` of the rim at (3,0,0) and (5,0,0) and of the lid at (0,0,1), (2,0,1) and (5,0,1): 5 | rim `AFaceMissesPartOfWhereItsSurfacesCross`, lid `AFaceTrimmedByACurveThisCannotFollow`, no records | the same |
+| Q1734 | ring 4, tube 1, the copy turned pi/2, six fuses, each fuse then validate then measure: 6 | U ab, D ab and D ba answer 1 solid, validate and measure; U ba, I ab and I ba `CannotMeshAFace` `CornersCoincide`, from the fuse itself | the same |
+| Q1734 | the copy turned pi, six fuses: 6 | I both ways answers 0 solids; U and D both ways `CannotMeshAFace` `CornersCoincide`, from the fuse | the same |
+| Q1737 | 5 mm model, both notches, U, I and D, bar first: 6 | `Undecidable`, "order along a crossing", `2.0e-13` (seam notch) and `8.2e-13` (wall notch) | `tolerant(5)`: `CannotTellTheCellsOfAFaceApart` |
+| Q1777 | six fuses: 6 | `CannotTellTheCellsOfAFaceApart` | the same |
+| Q1793 | six fuses: 6 | U both ways `Geometry(CannotNameWhichPieceOfACrossingThisIs)`, I ab `ACurvedFaceGoesRightRoundWithNoSeam`, I ba and D ab `CannotMeshAFace` `CornersCoincide`, D ba `AWireWillNotLieFlatOnItsFace` | the same in each |
+| Q1929 | six fuses: 6 | U and D both ways `AWireWillNotLieFlatOnItsFace`, I both ways `ACurvedFaceGoesRightRoundWithNoSeam` | the same in each |
+| Q1909 | U both ways, the bar's end at 1.875, 1.9375, 2, 2.5, 3, 3.0625 and 3.125: 14 | `Geometry(WhereThreeSurfacesMeetNeedsTwoOfThemFlat)` | the same |
+| Q1867 | the nine two-knife wedges, the half cut certified first: 9 | `Invalid(DynamicRangeTooWide)`, ratio `5.3e15` to `4.1e16` | `tolerant(25r)`, the model's size: `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` 7, `Geometry(CannotNameWhichPieceOfACrossingThisIs)` 2 (45 degrees at radius 1000, 10 degrees at 0.001) |
+| Q1842 | the sound half bar read back, unplaced and shifted, D and I: 4 | answers: the half bar, `141.257` (45 pi), for D, nothing for I | the same |
+| Q1842 | turned, D and I: 2 | `Undecidable`, "orient3d", `5.8e-13` | answers as above, 1 record |
+| Q1842 | turned then shifted, D and I: 2 | `Undecidable`, "side of plane", `3.6e-15` | `TwoCurvesTouchWithoutCrossing` |
+| Q1936 | the sound pyramid read back, shifted, turned and turned then shifted, D and I: 6 | `Undecidable`, "a point inside a piece of a face", enclosure infinite | the same |
+| Q1839 | the tetrahedron at the four placements, D and I: 8 | answers 3 (D unplaced, 45; I turned and I turned then shifted, 15); `Invalid(DynamicRangeTooWide)` 5 (D shifted, turned, turned then shifted; I unplaced and shifted), ratio `1.3e15` to `4.5e16` | all 8 answer, 45 for D and 15 for I, 1 record each |
+
+The rows from Q104 on were run by a second set of scratch tests, also deleted
+before the commit: `zz_q1930_more.rs` (Q1734, Q1737, Q1777, Q1793, Q1929), and
+copies of the rows' own test files with one `q1930_probe_` test added,
+`zz_q1930_pipe.rs` (Q1909), `zz_q1930_lune.rs` (Q1867) and `zz_q1930_corner.rs`
+(Q1842, Q1936, Q1839), run with the same command; 9 tests passed and printed
+162 lines. Q104's puck is built by crate-private calls, so it was run by a
+print put beside each assert of
+`a_pucks_rounded_rim_is_refused_rather_than_holding_the_inside_of_its_ring` and
+`a_pucks_lid_is_refused_rather_than_holding_nothing_but_its_rim` in
+`src/holds.rs`, run with `just t a_pucks_`, and taken out again. The prints are
+kept at `/tmp/q1930-probes/more.txt` and `q104.txt`.
 
 The Q1896 and Q1897 counts come from the probe's print, one line per run, by
 `grep -E '^Q1930\|Q1896\|.*\|certified\|'` and `uniq -c` on the variant. Every
 one of their 156 lines matches its partner under the other policy once the
 model id is taken out. The print is kept at `/tmp/q1930-probes/simple.txt`,
 with the script that groups it, `short.py`.
-
-Not run yet: Q104, Q1734, Q1737, Q1777, Q1793, Q1839, Q1842, Q1867, Q1909,
-Q1929 and Q1936.
 
 Q1718, Q1749 and Q1791 answer at this base under both policies, where their
 rows say refused. Q1791's cube may not be the shape its crash file built, since
