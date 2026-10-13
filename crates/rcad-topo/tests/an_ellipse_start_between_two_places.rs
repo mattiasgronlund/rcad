@@ -38,12 +38,12 @@
 //! everywhere, but at an end of the short axis it is, and here it is bit for bit.
 
 use rcad_geom::{
-    Axis, Error as GeometryError, Isometry, MeetOfThree, Point, Scale, Surface, SurfaceMeet,
-    Vector, intersect, meet_of_three_surfaces, where_a_closed_crossing_starts,
+    Axis, Deflection, Error as GeometryError, Isometry, MeetOfThree, Point, Scale, Surface,
+    SurfaceMeet, Vector, intersect, meet_of_three_surfaces, where_a_closed_crossing_starts,
     which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{Decision, Interval, Level, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 /// The name `order_along` records a refusal under.
 const ALONG_A_CROSSING: &str = "order along a crossing";
@@ -225,35 +225,114 @@ fn every_fuse_gets_past_the_order_of_the_two_places_and_is_refused_naming_a_piec
 /// `2⁻⁵¹` thick, so every point of it rounds to `x = −17`, and its bottom and top
 /// faces are each three corners on one line: `(−17, ±2⁻²⁵)` and the bar's rim
 /// corner `(−17, ∓6.1e-17)`. The triangulator hands such a face back with no
-/// triangles, and the chord and both halves of the arc round it were then used
-/// by one triangle each, so the union and the bar less the block, under either
-/// policy, were refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)` by
-/// `every_side_of_the_skin_is_used_both_ways` on the coarsest mesh.
+/// triangles, and until the mesher drew them itself the chord and both halves
+/// of the arc round each were used by one triangle only, so every fuse here was
+/// refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)` by
+/// `every_side_of_the_skin_is_used_both_ways` on the coarsest mesh (Q1928).
+///
+/// Drawn, the tolerant union answers either way round with the block, `576`:
+/// the fin adds about `1.7e-22`, which `576` cannot hold.
+#[test]
+fn the_fin_a_bar_leaves_beside_an_upright_block_is_drawn_and_the_tolerant_union_is_the_block() {
+    let policy = Policy::tolerant(25.0);
+    for bar_first in [true, false] {
+        let (mut model, bar, block) = the_bar_and_an_upright_block();
+        let fused = fuse_the_bar_and_an_upright_block(
+            &mut model,
+            [bar, block],
+            Rule::Union,
+            bar_first,
+            &policy,
+        )
+        .unwrap_or_else(|why| panic!("bar first {bar_first}: {why:?}"));
+        let [union] = fused.solids()[..] else {
+            panic!("bar first {bar_first}: {:?}", fused.solids())
+        };
+        let measured = model
+            .solid(union)
+            .expect("the fuse made it")
+            .measure(
+                Deflection::of(0.01).expect("a positive deflection"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("bar first {bar_first}: {why:?}"));
+        assert!(
+            (measured.volume() - 576.0).abs() <= measured.volume_error(),
+            "bar first {bar_first}: {measured:?}"
+        );
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("bar first {bar_first}: {why:?}"));
+    }
+}
+
+/// What the same fuses meet once the fin's ends are drawn: the certified union
+/// is refused `Undecidable` on two `side of a half-space` records at
+/// `Interval`, boxes round the rim corner at each end of the fin, written in
+/// the bar's own frame as `(−1, 0, 0)` and `(−1, 0, 10)`; and the bar less the
+/// block, which is the fin alone, is refused `VolumeIsNotPositive` at exactly
+/// `0` under either policy, since every point of it rounds onto `x = −17`.
+/// Before, all six were refused `FacesDoNotAgreeWhichWayTheyFace`. Neither
+/// refusal has been traced.
 ///
 /// The intersection, and the block less the bar, are refused
 /// `CannotNameWhichPieceOfACrossingThisIs` before any mesh, and are not this.
 #[test]
-fn the_fin_a_bar_leaves_beside_an_upright_block_is_drawn_and_the_fuse_answers() {
+fn past_the_fin_the_certified_union_and_the_fin_alone_are_still_refused() {
+    for bar_first in [true, false] {
+        let (mut model, bar, block) = the_bar_and_an_upright_block();
+        let fused = fuse_the_bar_and_an_upright_block(
+            &mut model,
+            [bar, block],
+            Rule::Union,
+            bar_first,
+            &Policy::certified(),
+        );
+        let Err(Error::Undecidable { records }) = fused else {
+            panic!("bar first {bar_first}: {fused:?}")
+        };
+        assert_eq!(
+            records
+                .records()
+                .iter()
+                .map(|record| (record.predicate(), record.level()))
+                .collect::<Vec<_>>(),
+            vec![("side of a half-space", Level::Interval); 2],
+            "bar first {bar_first}: {records:#?}"
+        );
+    }
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
-        for (rule, bar_first) in [
-            (Rule::Union, true),
-            (Rule::Union, false),
-            (Rule::Difference, true),
-        ] {
-            let case = format!("{policy:?} {rule:?}, bar first {bar_first}");
-            let (mut model, bar, block) = the_bar_and_an_upright_block();
-            let mut log = ProvenanceLog::new();
-            let fused = if bar_first {
-                model.fuse(&[bar], &[block], rule, &policy, &mut log)
-            } else {
-                model.fuse(&[block], &[bar], rule, &policy, &mut log)
-            };
-            let fused = fused.unwrap_or_else(|why| panic!("{case}: {why:?}"));
-            assert_eq!(fused.solids().len(), 1, "{case}");
-            model
-                .validate(&policy, &mut ProvenanceLog::new())
-                .unwrap_or_else(|why| panic!("{case}: {why:?}"));
-        }
+        let (mut model, bar, block) = the_bar_and_an_upright_block();
+        let fused = fuse_the_bar_and_an_upright_block(
+            &mut model,
+            [bar, block],
+            Rule::Difference,
+            true,
+            &policy,
+        );
+        assert!(
+            matches!(
+                fused,
+                Err(Error::Invalid(Invalid::VolumeIsNotPositive { volume })) if volume == 0.0
+            ),
+            "{policy:?}: {fused:?}"
+        );
+    }
+}
+
+fn fuse_the_bar_and_an_upright_block(
+    model: &mut Model,
+    [bar, block]: [SolidKey; 2],
+    rule: Rule,
+    bar_first: bool,
+    policy: &Policy,
+) -> rcad_topo::Result<Fused> {
+    let mut log = ProvenanceLog::new();
+    if bar_first {
+        model.fuse(&[bar], &[block], rule, policy, &mut log)
+    } else {
+        model.fuse(&[block], &[bar], rule, policy, &mut log)
     }
 }
 
