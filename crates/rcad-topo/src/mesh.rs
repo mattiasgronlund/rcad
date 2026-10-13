@@ -2691,6 +2691,118 @@ impl BuildingAMesh {
         Ok(Some(patches))
     }
 
+    /// Cut a face on a pipe whose outline does not go right round, with one
+    /// hole in it, into two pieces with one loop each, or `None` when the face
+    /// is not that shape or a leg cannot be shown to stay on it.
+    ///
+    /// A slanted pin starting on a bar's axis leaves one, when the bar ends
+    /// beside where the pin would come out the other side. The plane of the
+    /// pin's end cuts the bar's wall in an ellipse that crosses the bar's end,
+    /// so the wall below it does not go right round, and the loop round where
+    /// the pin's pipe would come out is a hole in it
+    /// (`one_pipe_whose_origin_sits_at_two_places.rs`). Nothing could cut a
+    /// pipe's patch with a hole, and it was refused
+    /// `CurvedFaceWithAHoleGoesTooFarRound`.
+    ///
+    /// **Two legs, one from the hole's highest corner up to the outline and one
+    /// from its lowest down to it**, leave a piece either side, each walked
+    /// round once: the outline's stretch from the top leg to the bottom one,
+    /// up the bottom leg, the hole's side between them, and up the top leg;
+    /// and the other way round for the other piece. Each leg lands on a corner
+    /// of the outline, the nearer end of the first side the line straight up
+    /// or down from the hole meets, since a cut has to end on points both
+    /// pieces already have (the rule [`where_to_cut`] keeps).
+    ///
+    /// **A leg that is not shown to stay inside the face is refused rather
+    /// than drawn** ([`where_a_leg_from_a_hole_lands`]). It lands strictly
+    /// above the hole's highest corner, or strictly below its lowest, so it
+    /// meets no side of the hole but at the corner it leaves from, and the two
+    /// legs are a latitude apart and cannot meet. That leaves the outline, and
+    /// a leg meeting a side of it anywhere but at the corner it lands on is
+    /// `None`. Last, each piece has to enclose some of the chart the way the
+    /// face's material does, which is what a piece walked inside out would
+    /// not.
+    fn cut_a_hole_out_to_its_outline(
+        &mut self,
+        face: FaceView<'_>,
+        stored: &Surface,
+        walked: &[WalkedLoop],
+        room: f64,
+    ) -> Result<Option<(WalkedLoop, WalkedLoop)>> {
+        let (Some(whole), None, None) = (
+            how_far_the_longitude_wraps(stored),
+            stored.where_it_pinches(),
+            how_far_the_second_coordinate_wraps(stored),
+        ) else {
+            return Ok(None);
+        };
+        let [first, second] = walked else {
+            return Ok(None);
+        };
+        if [first, second]
+            .iter()
+            .any(|around| around.goes_right_round || !it_passes_each_of_its_points_once(around))
+        {
+            return Ok(None);
+        }
+        let (outline, hole) = match [first, second].map(how_much_of_the_chart_this_loop_encloses) {
+            [one, other] if one > 0.0 && other < 0.0 => (first, second),
+            [one, other] if one < 0.0 && other > 0.0 => (second, first),
+            _ => return Ok(None),
+        };
+        let (least, most) = longitudes_of(outline);
+        let hole = in_the_turn_nearest(hole, (least + most) / 2.0, whole);
+        let (highest, lowest) = (
+            the_corner_furthest(&hole, 1.0),
+            the_corner_furthest(&hole, -1.0),
+        );
+        let (Some(up_at), Some(down_at)) = (
+            where_a_leg_from_a_hole_lands(outline, hole.corners[highest], 1.0),
+            where_a_leg_from_a_hole_lands(outline, hole.corners[lowest], -1.0),
+        ) else {
+            return Ok(None);
+        };
+
+        let to_the_top = self.points_along_a_cut(
+            face,
+            stored,
+            Chart::Upright,
+            hole.corners[highest],
+            outline.corners[up_at],
+            room,
+        )?;
+        let from_the_bottom = self.points_along_a_cut(
+            face,
+            stored,
+            Chart::Upright,
+            outline.corners[down_at],
+            hole.corners[lowest],
+            room,
+        )?;
+        let mut one = outline.between(up_at, down_at);
+        one.take_in(&from_the_bottom);
+        one.take_in(&hole.between(lowest, highest));
+        one.take_in(&to_the_top);
+        let mut other = outline.between(down_at, up_at);
+        other.take_in(&to_the_top.the_other_way());
+        other.take_in(&hole.between(highest, lowest));
+        other.take_in(&from_the_bottom.the_other_way());
+
+        if [&one, &other]
+            .iter()
+            .any(|piece| how_much_of_the_chart_this_loop_encloses(piece) <= 0.0)
+        {
+            return Ok(None);
+        }
+        self.on_a_cut.extend([
+            hole.points[highest],
+            hole.points[lowest],
+            outline.points[up_at],
+            outline.points[down_at],
+        ]);
+        Ok(Some((one, other)))
+    }
+
     /// Cut a face on a ball whose outer loop reaches both poles and whose one
     /// hole reaches neither into two pieces with one loop each, or `None` when
     /// the face is not that shape or a cut cannot be shown to stay on it.
