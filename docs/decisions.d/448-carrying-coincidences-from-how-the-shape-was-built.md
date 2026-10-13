@@ -15,6 +15,16 @@ The kernel already does this for the faces round a corner
 fact was known and where it was lost, and files one writing row if one way of
 carrying it covers three or more of them.
 
+**Result.** The theory holds for (c), one movement both solids share. It
+knew the coincidence on three open rows, Q1765, Q1842 and Q1936, and on
+Q1958's shape, and Q1954 files one row to carry it to the fuse, after Q1962
+(448.6). (b), a crossing's own surfaces, knew it for one row, Q1854. (a), one
+solid's own faces, was lost in the build itself for Q1839, which stores a
+face proved off its own corner. A fifth place the theory did not name, the
+fuse's own choice of a test point, an aim or where a walk starts, explains
+Q1834 and is how Q1958 was fixed. Q1867 and Q1734 touch only where the user
+put them, (d), which the theory does not reach.
+
 ### 448.1 The theory
 
 A refusal of 446.7's first or third kind asks a question whose exact answer is
@@ -146,12 +156,6 @@ as it grows, so that a relay picks up from the file.
 
 ### 448.5 The nine rows at the base
 
-*Being written. Q1954's first lane ran step 1 for all nine. Its third wrote
-steps 2 to 4 below for Q1834, Q1765, Q1854, Q1842, Q1839 and Q1867, and its
-fourth checked Q1842's aim. Q1936, Q1958's fix and Q1734 are measured, in
-the fourth lane's handoff, and still to write here, and so are 448.6 and the
-Result.*
-
 **Step 1, run at `283ddff8`.** Q1930's probes from `/tmp/q1930-probes/` were
 copied into `crates/rcad-topo/tests/` unchanged, but for a report that prints
 every input of each record still `Undecidable`, run with `mise exec -- just t
@@ -181,7 +185,9 @@ kept (`/tmp/q1930-probes/gdb-all-*.txt`, read with `lasthit.py`). The rest
 comes from probes added to the copied files and run at `283ddff8`
 (`q1954_probe_q1834`, `_q1765`, `_q1854` in `zz_q1930_simple.rs`;
 `_q1842`, `_q1936`, `_q1839` in `zz_q1930_corner.rs`; `_q1867` in
-`zz_q1930_lune.rs`). They are kept in `/tmp/q1954-probes/`.
+`zz_q1930_lune.rs`). They are kept in `/tmp/q1954-probes/`, with the last
+relay's `q1936_apex.py`, which works the pyramid's planes out in exact
+rationals, and `relay3/zz_q1954_tetra.rs`.
 
 - **Q1834.** *The question*: does the other half's cut face hold the point
   chosen inside a piece of the cut? `select::coincident_face` asks
@@ -273,15 +279,23 @@ comes from probes added to the copied files and run at `283ddff8`
   `(0, 2.458e-16, 10)` to `(0, 0, 10)`, and `11 / 2.458e-16` is the record's
   `4.47e16`. Shifted: `8.9e-16` to `2.2e-15`, a speck at `(7, -5, 12.5)`.
   Turned: `3.8e-15`. Turned then shifted: `1.1e-14`. The three that answer
-  have no edge shorter than `3`. *Its exact answer*: the block's face runs
-  exactly through the apex, so the tetrahedron's three side planes and that
-  face meet in the one point, and no edge is there. *Which*: likely **(a)**.
+  have no edge shorter than `3`. *Its exact answer*: in the shape the user
+  built, the block's face runs exactly through the apex, so the
+  tetrahedron's three side planes and that face meet in the one point, and
+  no edge is there. *Which*: **(a)**, and it was lost in the build itself.
   The apex is a corner of all three side faces (`BakedCorner::around`), and
   the block's face is exactly through the stored apex unplaced and shifted.
-  It is lost where the crossings of the block's face with each side plane
-  are worked out from side planes whose normals rounded, so they miss each
-  other near the apex. This is not yet checked function by function.
-  Turned, (c) is needed as well.
+  But `Plane::through_three_points` builds the `−y` side face as `[0,
+  -0.9578262852211514, 0.28734788556634544, -2.8734788556634543]`, which is
+  `Pos` at `(0, 0, 10)`, and the other two side faces are `Zero` there
+  (`zz_q1954_tetra.rs`, kept in `/tmp/q1954-probes/relay3/` and run from
+  `crates/rcad-geom/tests/`). So the face is stored proved off its own
+  corner, and 448.3 makes that a refusal: the fact (a) would carry is false
+  of the stored face, so it cannot be carried. (c) would answer 3 of the 5
+  refusals: the difference shifted, turned, and turned then shifted, since
+  the difference unplaced answers. It does not answer the intersection
+  unplaced, which no movement placed, nor shifted, which before the shift is
+  the unplaced intersection.
 - **Q1867.** *The small feature*: the second knife's face through the axis
   is stored with offset `4.440892098500626e-16` at 90 degrees and radius 1
   (`4.5e-13` at 45 degrees and radius 1000, `-2.2e-16` at 10 degrees and
@@ -299,3 +313,97 @@ comes from probes added to the copied files and run at `283ddff8`
   refuses by name (`ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`, and
   `CannotNameWhichPieceOfACrossingThisIs` at 45 degrees and radius 1000), so
   no answer was there to measure.
+- **Q1936.** *The question*: which side of the pyramid is a piece of the
+  block's face on? At the base `select::choose` finds no point inside piece
+  31 of 53 of the block's face, shifted: a triangle bounded by the `−x`,
+  `+y` and `+x` side planes, with every corner within `5e-15` of the apex
+  (§294.21). *Its exact answer*: shifted, the stored apex `(7, -5, 12.5)`
+  is exactly on the block's face `y = -5` (`Zero`), and the four side
+  planes, `−y`, `+x`, `+y` and `−x`, are `Pos`, `Neg`, `Pos` and `Pos`
+  there. The shift rounds each plane's offset on its own, exact minus
+  stored `-1.14e-15`, `6.4e-16`, `-2.5e-16` and `-2.5e-16`, so the four
+  triples of side planes meet at `y + 5 = 4.6e-16` (two of them),
+  `-4.6e-16` and `1.39e-15`, four points and not one, and those are the
+  specks (`python3 /tmp/q1954-probes/q1936_apex.py`). Unplaced, each side
+  plane is `1.11e-16` off `(0, 0, 10)`, because `10 × 0.28734788556634544`
+  rounds, yet all four triples meet in one point with `x = y = 0` exactly.
+  So the cut `y = 0` holds it, and unplaced the pyramid answers 60
+  (§294.21). *Which*: **(c)**. The block is built at `(-5, 0, -1)`, and
+  both solids are moved by one placement, which composes with the block's
+  shift exactly to `(2, -5, 1.5)`: shifted, the block's face stays exact
+  and only the pyramid's planes round. Turned, and turned then shifted, the
+  block's face is `Pos` at the turned apex as well. In the frame before the
+  movement the shape is the unplaced one, which answers. (a) alone cannot
+  answer: `around` holds the four planes at the apex, but the stored
+  shifted planes prove the stored apex off them, and 448.3 makes that a
+  refusal. The fact is lost where the placement rounds each plane again,
+  §17.3's bake into world coordinates. *After the base*: Q1936 landed at
+  `3c4dbce5`, where `by_a_plane` reads `BakedCorner::solved_from` and
+  places every speck. The fuse now refuses `DynamicRangeTooWide` on an edge
+  a rounding long, which §294.21 calls the right answer for the placed
+  numbers, and Q1962, after Q1954, carries (c) for it.
+- **Q1737 / Q1958.** Answers at the base: Q1737's lane fixed it at
+  `a53f0a15`, and Q1958 landed that at `e30afa64`. *The question it
+  refused*: the order round the bar's bottom cap circle of the bar's seam
+  corner against the nodes where the notch's sides cross that circle. Both
+  solids are turned by `Isometry::rotation(y, π)`, and `sin π` rounds to
+  `1.2e-16`, so the seam corner is a box `±8.5e-14` round `(-3, 0, 0)`. The
+  circle is walked from the marcher's seed (`where_the_crossing_starts`,
+  `fuse/arrange.rs` 8476 at `e68881ca`), at `(-3, 0, -3.7e-16)`, inside
+  that box (the doc of `count_each_loop_from_the_node_round_its_start`,
+  3326-3333). *The fix*: `the_node_round_the_start` (3349-3393) counts the
+  loop from the one node whose box holds the start, only where the ellipse
+  a plane cuts in a pipe turns on a radius at least 4 times the diagonal of
+  the box round both and no other node is near. It reads the two surfaces
+  only to bound the curve. *Which*: the fix carries no fact from the build.
+  It makes the fuse's own choice of where the walk starts not matter, the
+  fifth place in 448.6, as in Q1834. (c) would have answered it too: one
+  `rotation(y, π)` moves both solids, and Q1737's row has the shape answer
+  when two quarter turns move it instead.
+- **Q1734.** Answers at the base: `zip_up_a_band` in `rcad-mesh`
+  (`c35c5eb3`, `e43c8b14`, `45f6bca5`) meshes the band of torus wall a
+  rounding wide instead of refusing it. *The coincidence behind the band*:
+  the first bend is unplaced, its caps exactly on `y = 0` and `x = 0`
+  (`a_quarter_bend` and `WhereABendSits::quarter` in
+  `crates/rcad-topo/tests/rings/mod.rs`). The copy is placed by
+  `Isometry::rotation(z, FRAC_PI_2)` or `rotation(z, PI)`, so the two bends
+  are at two placements, and `FRAC_PI_2` is not `π/2`. In the stored input
+  the copy's cap is a rounding off the first bend's. *Which*: **(d)**. The
+  touch is only in what the user meant, and nothing the kernel built knew
+  it. So here the two ways of 448.4 do not meet: the theory has nothing to
+  carry, and coping with the band answers.
+
+### 448.6 The count, and the row it files
+
+One more place turned up that 448.1 did not list: **the fuse's own choice**.
+The fuse makes a coincidence itself, by where it puts a test point, an aim or
+the start of a walk, and the numbers then miss it. It is no fact of the
+shape, so there is nothing to carry. The cure is to choose so that the
+coincidence is not made, or so that it does not matter.
+
+| Where the coincidence was known | Rows |
+|---|---|
+| (a) one solid's own faces | Q1839's intersection, unplaced and so shifted. It cannot be carried: the build stored a face proved off its own corner |
+| (b) a crossing's own surfaces | Q1854 |
+| (c) one movement for both solids | Q1765; Q1842 at both placements that refuse; Q1936 at all six; Q1958's shape, fixed another way; 3 of Q1839's 5 |
+| (d) where the user put the two solids | Q1867, Q1734 |
+| the fuse's own choice | Q1834; Q1842 turned; Q1958, fixed by making it not matter |
+
+(c) covers three rows still open, Q1765, Q1842 and Q1936, and Q1958's shape
+besides, so by 448.4 Q1954 files one writing row, tier 1, `opus`. Q1962,
+filed by §294.21 to wait on Q1954, already carries (c) for Q1936's pyramid.
+So the row filed here carries it for the other two: it waits on Q1962 and
+reuses what that builds, closes Q1765 with a pin in
+`a_bar_lying_along_a_plane_or_a_bar.rs` and Q1842 by turning round
+`a_sound_half_bar_cut_flush_along_its_flat_face_refuses_when_turned`, and
+says what Q1839's difference gives at the three placements (c) answers.
+Q1765 and Q1842 wait on it, so that neither is taken alone with another
+cure.
+
+(b) covers one row, Q1854, where the fact is in hand when the question is
+asked, and (a) none that can be carried; neither reaches three, and neither
+gets a row. (d) is where the theory does not reach. The fuse's own choice
+gets no row either: Q1834's own row keeps its cure, an aim or a test point
+off the piece's diagonal (`holds.rs` 260-265, or `select::candidate_points`),
+and Q1958 is fixed. 446.8, the trace of the two-thin-bars family, has not
+landed, so the row names none of that family.
