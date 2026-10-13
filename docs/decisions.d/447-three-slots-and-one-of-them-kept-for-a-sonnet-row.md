@@ -79,6 +79,15 @@ The percentiles are the sample at rank `p * (n - 1)` of the sorted user cores.
   samples was 0.0 to 1.7%, and 4.0% on 10-08. At 18:01 UTC on 10-13 no niced
   process was using CPU (`ps -eo ni,pcpu`), and the one-minute load was 51
   with four lanes out.
+- **Today alone says the same.** Mattias asked whether the changes of 10-12
+  had brought the load down, so that only 10-13 should count. Each busy sample
+  was put beside the `lanes` rows in flight over its ten minutes, read from
+  every run record under `~/.claude/projects/*/*/workflows/` (a row is in
+  flight from its first agent's start to its last agent's end). On 10-13, to
+  19:50 UTC, rows in flight never passed 4.0, so the cap was kept. With 3.5 to
+  4 rows in flight the load was 24 or more in 39 of 55 samples (71%), and with
+  fewer in 9 of 25 (36%). The same split on 10-12 was 16 of 58 (28%) and 7 of
+  25 (28%); on 10-05 to 10-11 the share at 3.5 to 4 rows ran from 33% to 68%.
 - **Four slots load the machine more than six did.** The mean user cores went
   from 8.1 at six slots to 11.7 at four. So something other than the slot count
   moved too, and three slots may not bring the share back to 12%. What moved is
