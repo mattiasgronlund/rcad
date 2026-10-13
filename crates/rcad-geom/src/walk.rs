@@ -6026,6 +6026,80 @@ mod tests {
         }
     }
 
+    /// Both halves of the relays' rim, cut at `#2404 = (10.05, 1.15, 16.5)` and
+    /// at `(10.05, 1.15, 16.3)` across from it, are refused at every deflection,
+    /// as `rcad-step`'s pin end cuts it.
+    ///
+    /// The leaning pipe misses the ball's centre by `q = 7.64e-14` in `x`, so
+    /// the two cross in one thin loop where `x − 10.05 ≤ q/2`, two strands
+    /// `1.2e-7` either side of the rim that meet at the two corners (§335.5).
+    /// The corners are where the two surfaces turn tangent: they lean `7.6e-13`
+    /// apart there. No piece of the crossing runs along the half with
+    /// `x > 10.05`, and two run along the other half.
+    ///
+    /// Before Q1889 the half with `x > 10.05` was walked at `f64::MAX`: the
+    /// march crossed it where the ball and the pipe are within `1e-13` of each
+    /// other, and handed back points `0.044` to `0.1` off the crossing, each
+    /// certified outside the ball, under a bound of `7.9e-7`. That bound takes
+    /// both surfaces as flat, and over its own reach the ball bends away from
+    /// its tangent plane by more than the gap it rests on. Asked of the corners
+    /// with the bend counted ([`settled_with_a_bound_where_they_bend`]), it does
+    /// not hold, and the run is refused before the march.
+    #[test]
+    fn both_halves_of_a_rim_where_a_ball_and_a_pipe_off_its_centre_turn_tangent_are_refused() {
+        let ball =
+            Surface::Sphere(Sphere::new(Point::new(10.05, 1.15, 16.4), 0.1).expect("a radius"));
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(
+                    Point::new(10.05, -19.75, 16.4),
+                    Vector::new(3.663_735_981_263e-15, 1.0, 0.0),
+                )
+                .expect("a direction"),
+                0.1,
+            )
+            .expect("a radius"),
+        );
+        let corners = [Point::new(10.05, 1.15, 16.5), Point::new(10.05, 1.15, 16.3)];
+        for facing in [Vector::new(1.0, 0.0, 0.0), Vector::new(-1.0, 0.0, 0.0)] {
+            let half = Picker::from(
+                crate::HalfSpace::through_a_point_facing(corners[0], facing).expect("a direction"),
+            );
+            let run = NamedRun::new(
+                EdgeRun::PartOfWhereItCrosses {
+                    and: ball,
+                    picked_by: smallvec![half],
+                },
+                corners.map(|end| PredicatePoint::from(end.coordinates())),
+            )
+            .expect("a run between two corners");
+            for (surfaces, deflection) in [[&ball, &pipe], [&pipe, &ball]]
+                .into_iter()
+                .flat_map(|surfaces| [f64::MAX, 1.0, 0.1, 0.01].map(|asked| (surfaces, asked)))
+            {
+                let walked = walk(
+                    &run,
+                    surfaces,
+                    Deflection::of(deflection).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .map(|walked| (walked.points().to_vec(), walked.deviation()));
+                assert!(
+                    matches!(
+                        walked,
+                        Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                            at: crate::WhereFollowingACrossingGaveUp::BoundingHowFarOffTheCrossingAPointIs,
+                            ..
+                        })
+                    ),
+                    "the half of the rim facing {facing:?} ends where the ball and the pipe \
+                     turn tangent, and was walked along {surfaces:?} at {deflection} as {walked:?}"
+                );
+            }
+        }
+    }
+
     /// A run between two corners with a corner further off the crossing than
     /// half the deflection is refused, since the caller draws its corners too:
     /// the thin pipe through the fat one above, from `(−4, 0, 4)` to a corner
