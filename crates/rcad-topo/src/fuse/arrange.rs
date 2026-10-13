@@ -2049,15 +2049,17 @@ impl<'f> Arrangement<'f> {
     /// through it.
     ///
     /// **The places are worked out here and not by [`meet_of_three_surfaces`]**,
-    /// because the picking surfaces are half-spaces, and a [`Plane`] built from
-    /// one is scaled to length one, which rounds wherever the pipe's direction
-    /// is slanted, and puts the solved place off the half. `c` is the point
-    /// of the lesser pipe's axis on the picking surface that leans towards that
-    /// axis, which passes exactly through `c` (`intersect` proves that before
-    /// it names the halves) and is not along the axis, since it leans towards
-    /// it. `n̂` is along the two pickers' normals crossed, since both lie
-    /// exactly in the flat of the two axes. The enclosure is then of the true
-    /// places.
+    /// because the picking surfaces are flat pickers and not planes, and a
+    /// [`Plane`] built from one is scaled to length one, which rounds wherever
+    /// the pipe's direction is slanted, and puts the solved place off the half.
+    /// `c` is the point of the lesser pipe's axis on the picking surface that
+    /// leans towards that axis, which passes exactly through `c` (`intersect`
+    /// proves that before it names the halves) and is not along the axis, since
+    /// it leans towards it. A picker that is a half-space gives `c` as where the
+    /// axis crosses it, in intervals; one that holds its point holds `c` itself
+    /// (`docs/decisions.md` §443.5). `n̂` is along the two pickers' facings
+    /// crossed, since both lie exactly in the flat of the two axes. The
+    /// enclosure is then of the true places.
     ///
     /// **Each node is named by `[a, b, b]`** for the lesser pipe `a` and the
     /// greater `b`, by [`name_of_surface_bits`], so that the face on either
@@ -2073,7 +2075,7 @@ impl<'f> Arrangement<'f> {
     /// # Panics
     ///
     /// If a picker of either half rules a place out. Both picking surfaces
-    /// pass exactly through `c`, and `n̂` is square to both their normals, so
+    /// pass exactly through `c`, and `n̂` is square to both their facings, so
     /// both places are on both; a `Neg` there is that broken.
     fn place_where_two_halves_meet(
         &mut self,
@@ -2283,7 +2285,10 @@ impl<'f> Arrangement<'f> {
     /// picker leaning towards it**, and that is exactly `c` whichever way the
     /// picker faces: `intersect` proves `c` on the axis and the surface
     /// through `c`, both exactly, and a picker leaning towards the axis reads
-    /// more than nought against it, so the axis crosses the surface once.
+    /// more than nought against it, so the axis crosses the surface once. A
+    /// picker that holds its point, which `intersect` builds where no
+    /// half-space written in `f64` passes exactly through `c`, holds `c`
+    /// itself, and that is taken as it is (`docs/decisions.md` §443.5).
     ///
     /// **Without it the four halves were one edge.** Every half runs between
     /// the same two nodes ([`Arrangement::place_where_two_halves_meet`]) and
@@ -8937,7 +8942,7 @@ fn how_a_crossing_runs(
 /// it picked out by one half-space only there: one loop is the whole of the
 /// crossing, two pipes running the same way cross in lines, and two of one
 /// width on axes that meet cross in four halves of two ellipses, each picked
-/// out by two half-spaces ([`a_half_of_an_ellipse`]). Each of those two loops
+/// out by two flat surfaces ([`a_half_of_an_ellipse`]). Each of those two loops
 /// runs once round the thin pipe's axis, and
 /// [`which_comes_first_round_a_crossing`] orders it round that axis, asking
 /// again, exactly, whether the fat pipe swallows the thin one before it does
@@ -8967,6 +8972,12 @@ fn one_of_two_loops_round_a_thin_pipe(
 /// in. The facings are not the axes in general: bars at 50 degrees through
 /// `(11, 0, 0)` are picked by `(0, 1, 0)` and `(1, 0, 0)` (Q1646).
 ///
+/// Each surface is a half-space, or, where no half-space written in `f64`
+/// passes exactly through that point, a surface that holds the point itself,
+/// as for bars on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)`. Only
+/// a picker's facing is read here, and both kinds hold it exactly as
+/// `intersect` asked it (`docs/decisions.md` §443.5).
+///
 /// # Which pipe a picker leans towards
 ///
 /// A picker `n = aê + bû` in that flat, for unit `ê` and `û` at an angle `θ`
@@ -8982,7 +8993,7 @@ fn one_of_two_loops_round_a_thin_pipe(
 /// anything else here is that broken.
 ///
 /// So `facing` is `s₀E` and `s₁U` for the pipes the two pickers lean towards,
-/// with `s₀` and `s₁` the ways they lean: the picker normals themselves where
+/// with `s₀` and `s₁` the ways they lean: the picker facings themselves where
 /// those are `±E` and `±U`, and always the same halves.
 ///
 /// # Which way it runs
