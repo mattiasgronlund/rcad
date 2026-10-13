@@ -5,10 +5,10 @@ use std::collections::{HashMap, VecDeque};
 use spade::handles::FixedVertexHandle;
 use spade::{ConstrainedDelaunayTriangulation, InsertionError, Point2, Triangulation};
 
-use rcad_geom::{Cone, Point, Surface, Torus};
+use rcad_geom::{Cone, Deflection, Point, Surface, Torus};
 use rcad_predicates::{Approximation, Cause, Decision, orient2d};
 
-use crate::domain::TrimmedDomain;
+use crate::domain::{Loop, TrimmedDomain};
 
 /// A patch cut into triangles.
 ///
@@ -276,6 +276,125 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
     })
 }
 
+/// Cut the band between two loops that each go once right round the first
+/// coordinate, the outline one way and the hole the other, into one strip of
+/// triangles, each standing on a side of one loop and reaching across to the
+/// other.
+///
+/// **For a band the chart cannot draw**: one whose two loops it reads at one
+/// value of the second coordinate, or within a rounding of one, so that
+/// [`triangulate`] sees one loop on top of the other. A torus wall between a
+/// bend's cap rim and a meridian circle a rounding round from it is one: both
+/// circles go right round the tube at the same angle round the ring, read a
+/// whole turn apart, and cut across they named one place twice and were refused
+/// [`CannotTriangulate::CornersCoincide`] (Q1734). Saying that a band is such a
+/// band is the caller's, which sees the loops as two curves where this sees
+/// corners. Nothing here reads the second coordinate except to measure how far a
+/// triangle strays.
+///
+/// **Which loop steps next is read off how far round each has got**, both
+/// counted from the outline's corner 0 the way the outline goes: the step
+/// whose far end comes first goes next, the outline's on a tie. Ordered by
+/// their far ends, the steps of the two loops interleave so that a triangle
+/// standing on one side of one loop reaches a corner of the other no further
+/// round than that side's far end and no further back than its near end, or
+/// lies within one side of the other loop. So no triangle is wider round the
+/// first coordinate than the widest side either loop has, and each side was
+/// walked by the caller to stay within the deflection.
+///
+/// The corners are the outline's and then the hole's, numbered as [`Patch`]
+/// numbers them, and nothing is put inside: a band a rounding wide has no inside
+/// to put a point in. The triangles use each side of either loop the way its
+/// loop runs, and each rung across once each way ([`a_strip_round_a_ring`]).
+/// They are not turned any way in the chart, since a band a rounding wide has
+/// no turn there to go by: a caller drawing them on a solid takes them as they
+/// are, the way its wires run.
+///
+/// # Errors
+///
+/// [`CannotTriangulate::BoundaryCrossesItself`] when either loop does not go
+/// once round, a step at a time, the outline either way and the hole the
+/// other: `at` is the corner the first side that does not go that way leaves
+/// from, which is folded back over the sides before it, or the loop's corner 0
+/// when every side goes the right way and the loop goes round more than once.
+///
+/// [`CannotTriangulate::BoundarySideStraysFurtherThanTheDeflection`] when a side
+/// of either loop strays further than `deflection`, or the triangle standing on
+/// it does.
+pub fn zip_up_a_band(
+    surface: &Surface,
+    outline: &Loop,
+    hole: &Loop,
+    deflection: Deflection,
+) -> Result<Patch, CannotTriangulate> {
+    let (outline, hole) = (outline.corners(), hole.corners());
+    let (out, back) = (outline.len(), hole.len());
+    let way = outline
+        .iter()
+        .enumerate()
+        .map(|(at, corner)| within_half_a_turn(outline[(at + 1) % out][0] - corner[0]))
+        .sum::<f64>()
+        .signum();
+    let round_the_outline = how_far_round_each_corner_is(outline, way)
+        .map_err(|at| CannotTriangulate::BoundaryCrossesItself { at })?;
+
+    let across = the_corner_of_the_hole_nearest_round(outline[0], hole);
+    let hole_backwards: Vec<[f64; 2]> = (0..back)
+        .map(|step| hole[(across + back - step) % back])
+        .collect();
+    let from_the_outlines_first = way * within_half_a_turn(hole[across][0] - outline[0][0]);
+    let round_the_hole: Vec<f64> = how_far_round_each_corner_is(&hole_backwards, way)
+        .map_err(|step| CannotTriangulate::BoundaryCrossesItself {
+            at: out + (across + back - step % back) % back,
+        })?
+        .into_iter()
+        .map(|round| from_the_outlines_first + round)
+        .collect();
+
+    let triangles = a_strip_round_a_ring(out, back, across, |one, other| {
+        round_the_outline[one + 1] <= round_the_hole[other + 1]
+    });
+
+    let corners: Vec<[f64; 2]> = outline.iter().chain(hole).copied().collect();
+    let slop = how_far_a_point_lands_off_its_surface(surface, &corners);
+    let strays = |piece: &[[f64; 2]]| {
+        how_far_a_flat_piece_strays(surface, the_range_of_each_coordinate(piece), piece, slop)
+    };
+    let mut worst = 0.0_f64;
+    for triangle in &triangles {
+        let [first, second, third] = triangle.map(|corner| corners[corner as usize]);
+        let near_the_first = |corner: [f64; 2]| {
+            [
+                first[0] + within_half_a_turn(corner[0] - first[0]),
+                corner[1],
+            ]
+        };
+        let piece = [first, near_the_first(second), near_the_first(third)];
+        let (side, its_ends) = if (triangle[1] as usize) < out {
+            (triangle[0], [piece[0], piece[1]])
+        } else {
+            (triangle[1], [piece[1], piece[2]])
+        };
+        for strays in [strays(&its_ends), strays(&piece)] {
+            if strays > deflection.length() {
+                return Err(
+                    CannotTriangulate::BoundarySideStraysFurtherThanTheDeflection {
+                        side: side as usize,
+                        strays,
+                    },
+                );
+            }
+            worst = worst.max(strays);
+        }
+    }
+
+    Ok(Patch {
+        corners,
+        triangles,
+        deviation: Approximation::new(worst, Cause::FlatStandIn),
+    })
+}
+
 /// The triangles of a patch cut by the order of its corners, when the caller
 /// asked for that ([`TrimmedDomain::cut_by_corner_order`]) and the patch is one
 /// it can be done to: flat, with an outline that turns the same way at every
@@ -390,28 +509,52 @@ fn every_other_corner_cut_off(count: usize) -> Vec<[u32; 3]> {
 ///
 /// **Why they are a triangulation of the ring when every one of them turns the
 /// way the outline does**, which [`cut_by_corner_order`] settles with
-/// [`orient2d`] before it takes them. A triangle's sides are one side of a loop
-/// and two rungs across: the rung it starts from, and the one it hands to the
-/// next triangle, and the last hands back the first. So the triangles' sides
-/// taken together run every rung once each way, and what is left is the
-/// outline once round its way and the hole once round the other. That pair
-/// winds once round every point of the ring and not at all round a point of
-/// the hole or outside, and a triangle that turns the outline's way winds once
-/// round each point inside it and not at all round any other. So every point
-/// of the ring is under exactly one triangle, and no point outside the ring
-/// under any; every side of either loop is a side of exactly one triangle. No
-/// corner lies along another triangle's side either: the triangles at a corner
-/// run round it in order from one of its loop's sides to the other, and so
-/// already cover the ring beside it once.
+/// [`orient2d`] before it takes them. [`a_strip_round_a_ring`] says why the
+/// triangles' sides taken together are the outline once round its way and the
+/// hole once round the other. That pair winds once round every point of the
+/// ring and not at all round a point of the hole or outside, and a triangle
+/// that turns the outline's way winds once round each point inside it and not
+/// at all round any other. So every point of the ring is under exactly one
+/// triangle, and no point outside the ring under any. No corner lies along
+/// another triangle's side either: the triangles at a corner run round it in
+/// order from one of its loop's sides to the other, and so already cover the
+/// ring beside it once.
 ///
 /// Any other ring turns some triangle the wrong way or none, and is left to the
 /// Delaunay triangulation: a hole far off to one side, say, or two loops that
 /// touch, where the rung between the two corners in one place has no length.
+fn in_step_round_a_ring(outline: usize, hole: usize, across: usize) -> Vec<[u32; 3]> {
+    a_strip_round_a_ring(outline, hole, across, |one, other| {
+        comes_no_later_round(one, outline, other, hole)
+    })
+}
+
+/// The triangles between an outline of `outline` corners and a hole of `hole`
+/// corners, numbered as [`every_corner`] numbers them, stepping round both
+/// loops together from the outline's corner 0 and the hole's corner `across`:
+/// the outline the way it runs and the hole the other way, so that both go
+/// round the same way. Each triangle stands on one side of one loop and
+/// reaches across to the corner the other loop has got to.
+/// `the_outline_steps_next(one, other)`, asked with the outline's `one` steps
+/// and the hole's `other` taken and some of each left, says which loop steps.
+///
+/// **Whatever it says, each side of either loop is a side of exactly one
+/// triangle, the way its loop runs, and each rung across is a side of two,
+/// once each way.** A triangle's sides are one side of a loop and two rungs:
+/// the rung it starts from, and the one it hands to the next triangle, and the
+/// last hands back the first. So the triangles' sides taken together run every
+/// rung once each way, and what is left is the outline once round its way and
+/// the hole once round the other.
 ///
 /// **No side joins two corners of one loop**, only a corner of the outline to
 /// a corner of the hole, so a face across either rim draws none of them unless
 /// it reaches the other rim too (§187.4).
-fn in_step_round_a_ring(outline: usize, hole: usize, across: usize) -> Vec<[u32; 3]> {
+fn a_strip_round_a_ring(
+    outline: usize,
+    hole: usize,
+    across: usize,
+    the_outline_steps_next: impl Fn(usize, usize) -> bool,
+) -> Vec<[u32; 3]> {
     let on_the_outline = |step: usize| a_corner_number(step % outline);
     let on_the_hole = |step: usize| a_corner_number(outline + (across + hole - step % hole) % hole);
     let (mut round_the_outline, mut round_the_hole) = (0, 0);
@@ -419,7 +562,7 @@ fn in_step_round_a_ring(outline: usize, hole: usize, across: usize) -> Vec<[u32;
     while round_the_outline < outline || round_the_hole < hole {
         let the_outline_steps = round_the_hole == hole
             || (round_the_outline < outline
-                && comes_no_later_round(round_the_outline, outline, round_the_hole, hole));
+                && the_outline_steps_next(round_the_outline, round_the_hole));
         if the_outline_steps {
             triangles.push([
                 on_the_outline(round_the_outline),
@@ -446,6 +589,46 @@ fn in_step_round_a_ring(outline: usize, hole: usize, across: usize) -> Vec<[u32;
 fn comes_no_later_round(one: usize, ones: usize, other: usize, others: usize) -> bool {
     let wide = |count: usize| u128::from(a_corner_number(count));
     (2 * wide(one) + 1) * wide(others) <= (2 * wide(other) + 1) * wide(ones)
+}
+
+/// How far round the first coordinate each of `corners` is from the first,
+/// stepping the short way round from each corner to the next and on back to
+/// the first, counted the way `way` says: `corners.len() + 1` numbers, from
+/// `0` to about a whole turn.
+///
+/// `Err` with the corner a step leaves from when that step does not go `way`,
+/// and with corner 0 when every step does and they go round more than once.
+fn how_far_round_each_corner_is(corners: &[[f64; 2]], way: f64) -> Result<Vec<f64>, usize> {
+    let count = corners.len();
+    let mut so_far = Vec::with_capacity(count + 1);
+    so_far.push(0.0);
+    for into in 1..=count {
+        let step = way * within_half_a_turn(corners[into % count][0] - corners[into - 1][0]);
+        if step <= 0.0 {
+            return Err(into - 1);
+        }
+        so_far.push(so_far[into - 1] + step);
+    }
+    if (so_far[count] / core::f64::consts::TAU).round() != 1.0 {
+        return Err(0);
+    }
+    Ok(so_far)
+}
+
+/// The corner of `hole` nearest `first` round the first coordinate.
+fn the_corner_of_the_hole_nearest_round(first: [f64; 2], hole: &[[f64; 2]]) -> usize {
+    (0..hole.len())
+        .min_by(|&one, &other| {
+            let how_far = |at: usize| within_half_a_turn(hole[at][0] - first[0]).abs();
+            how_far(one).total_cmp(&how_far(other))
+        })
+        .expect("a loop has corners")
+}
+
+/// `turn` moved by whole turns to within half a turn of nothing.
+fn within_half_a_turn(turn: f64) -> f64 {
+    let whole = core::f64::consts::TAU;
+    turn - whole * (turn / whole).round()
 }
 
 /// The corner of `hole` that [`in_step_round_a_ring`] starts from beside the
@@ -2059,6 +2242,11 @@ pub enum CannotTriangulate {
     /// **About the request and never about the surface.** The fix is at the
     /// caller, which walks the boundary and is the only one that can see both
     /// sides of it: hand over more corners, or ask for a coarser mesh.
+    ///
+    /// From [`zip_up_a_band`] it is that side or the triangle standing on it,
+    /// which reaches across the band to a corner of the other loop and is no
+    /// wider round the band than the widest side either loop has. A refused
+    /// triangle is fixed the same way, by more corners on either loop.
     #[error(
         "the side leaving corner {side} strays {strays} from the surface, \
          which is further than the deflection allows"

@@ -222,7 +222,7 @@ const PLACED_RINGS: [(f64, f64); 3] = [(4.0, 1.0), (1.0, 0.5), (2.0, 1.0)];
 /// `CornersCoincide`.
 #[test]
 fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
-    for (which, (ring, tube)) in PLACED_RINGS.into_iter().enumerate() {
+    for (ring, tube) in PLACED_RINGS {
         let one_bend = PI * PI * ring * tube * tube / 2.0;
         for turn in [FRAC_PI_2, -FRAC_PI_2] {
             for rule in EVERY_RULE {
@@ -235,19 +235,8 @@ fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
                     let first = a_quarter_bend(&mut model, ring, tube);
                     let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, turn);
                     let measured =
-                        fused_and_measured(&mut model, first, placed, rule, the_first_first);
-                    let not_meshed = which == 0
-                        && turn > 0.0
-                        && (rule == Rule::Intersection
-                            || (rule == Rule::Union && !the_first_first));
-                    if not_meshed {
-                        assert!(
-                            matches!(measured, Err(Error::CannotMeshAFace { .. })),
-                            "{what}: {measured:?}"
-                        );
-                        continue;
-                    }
-                    let measured = measured.unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                        fused_and_measured(&mut model, first, placed, rule, the_first_first)
+                            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
                     let [(volume, error)] = measured[..] else {
                         panic!("{what}: one solid, not {measured:?}");
                     };
@@ -284,6 +273,7 @@ fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
 #[test]
 fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
     for (ring, tube) in PLACED_RINGS {
+        let one_bend = PI * PI * ring * tube * tube / 2.0;
         for rule in EVERY_RULE {
             for the_first_first in [true, false] {
                 let what = format!(
@@ -292,17 +282,71 @@ fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
                 let mut model = a_model();
                 let first = a_quarter_bend(&mut model, ring, tube);
                 let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, PI);
-                let measured = fused_and_measured(&mut model, first, placed, rule, the_first_first);
-                match rule {
-                    Rule::Intersection => assert!(
-                        matches!(&measured, Ok(solids) if solids.is_empty()),
-                        "{what}: {measured:?}"
-                    ),
-                    Rule::Union | Rule::Difference => assert!(
-                        matches!(measured, Err(Error::CannotMeshAFace { .. })),
-                        "{what}: {measured:?}"
-                    ),
+                let measured = fused_and_measured(&mut model, first, placed, rule, the_first_first)
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                let bends = match rule {
+                    Rule::Union => 2,
+                    Rule::Difference => 1,
+                    Rule::Intersection => 0,
                     other => panic!("not a rule this tries: {other:?}"),
+                };
+                assert_eq!(measured.len(), bends, "{what}: {measured:?}");
+                for (volume, error) in measured {
+                    assert!(
+                        (volume - one_bend).abs() <= error,
+                        "{what}: {volume} ± {error}, a bend {one_bend}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The two tests above measure every answer, and a band of wall a rounding
+/// wide encloses no volume whichever way its triangles turn: drawn inside out,
+/// it would still measure. So every side of each answer's mesh, ring 4 and
+/// tube 1 placed each of the three ways round, is checked to be used once each
+/// way, which a band turned the wrong way fails along both its rims.
+#[test]
+fn every_side_of_a_bend_placed_round_from_another_is_used_once_each_way() {
+    let policy = Policy::certified();
+    let deflection = rcad_geom::Deflection::of(0.01).expect("a deflection");
+    for turn in [FRAC_PI_2, -FRAC_PI_2, PI] {
+        for rule in EVERY_RULE {
+            for the_first_first in [true, false] {
+                let what = format!("{turn} round, {rule:?}, the first first {the_first_first}");
+                let mut model = a_model();
+                let first = a_quarter_bend(&mut model, 4.0, 1.0);
+                let placed = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, turn);
+                let (arguments, tools) = if the_first_first {
+                    ([first], [placed])
+                } else {
+                    ([placed], [first])
+                };
+                let answer = model
+                    .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                for &solid in answer.solids() {
+                    let mesh = model
+                        .solid(solid)
+                        .and_then(|solid| {
+                            solid.mesh(deflection, &policy, &mut ProvenanceLog::new())
+                        })
+                        .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                    let mut used: BTreeMap<(u32, u32), u32> = BTreeMap::new();
+                    for triangle in mesh.triangles() {
+                        let [one, two, three] = triangle.corners();
+                        for side in [(one, two), (two, three), (three, one)] {
+                            *used.entry(side).or_default() += 1;
+                        }
+                    }
+                    for (&(from, to), &times) in &used {
+                        assert_eq!(
+                            (times, used.get(&(to, from))),
+                            (1, Some(&1)),
+                            "{what}: the side from {from} to {to}"
+                        );
+                    }
                 }
             }
         }
