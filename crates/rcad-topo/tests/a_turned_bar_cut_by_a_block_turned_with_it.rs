@@ -131,35 +131,11 @@ fn the_seam_corner_is_a_box_after_rotation_by_pi_and_a_point_after_two_quarter_t
 
 /// Q885's case on a designer's shape: the bottom cap circle starts inside the
 /// seam corner's box, and a side's line crosses the circle a little way round.
-/// Every certified fuse of either notch is refused on ordering the two.
+/// Every fuse of either notch, under either policy, answers what it holds by
+/// hand and logs nothing, as the exact half turn does.
 #[test]
-fn turned_half_a_turn_by_rotation_every_certified_fuse_is_refused_at_the_seam_corners_box() {
-    let turn = half_a_turn_by_rotation();
-    for notch in BOTH_NOTCHES {
-        for rule in RULES {
-            let what = format!("notch at {notch:?}, {rule:?}");
-            let (_, fused, _) = notched_and_fused(&turn, notch, &Isometry::identity(), rule, false);
-            let on_the_circle =
-                refused_between_the_seam_corner_and_the_bottom_circle(fused, &turn, &what);
-            assert!(
-                on_a_side_of(notch, on_the_circle),
-                "{what}: {on_the_circle:?} is on no side of the notch"
-            );
-        }
-    }
-}
-
-#[test]
-fn turned_half_a_turn_by_rotation_every_tolerant_fuse_cannot_tell_the_cells_of_a_face_apart() {
-    let turn = half_a_turn_by_rotation();
-    for notch in BOTH_NOTCHES {
-        for rule in RULES {
-            let (_, fused, _) = notched_and_fused(&turn, notch, &Isometry::identity(), rule, true);
-            let Err(Error::CannotTellTheCellsOfAFaceApart { .. }) = fused else {
-                panic!("notch at {notch:?}, {rule:?}: {fused:?}");
-            };
-        }
-    }
+fn turned_half_a_turn_by_rotation_every_fuse_answers_what_it_holds_by_hand() {
+    answers_every_fuse_by_hand("half a turn by rotation", &half_a_turn_by_rotation());
 }
 
 /// The seam notch tilted off the bar's axis, so that no side of it runs along
@@ -493,17 +469,4 @@ fn where_it_was_before_the_turn(point: PredicatePoint, turn: &Isometry) -> [f64;
 
 fn on_the_wall([x, y, _]: [f64; 3]) -> bool {
     ((x * x + y * y).sqrt() - RADIUS).abs() < CLOSE
-}
-
-/// Whether a point, in the bar's own frame, lies on the plane of one of the
-/// untilted notch's four sides.
-fn on_a_side_of([corner_x, corner_y, _]: [f64; 3], [x, y, _]: [f64; 3]) -> bool {
-    [
-        (x, corner_x),
-        (x, corner_x + SIDE),
-        (y, corner_y),
-        (y, corner_y + SIDE),
-    ]
-    .into_iter()
-    .any(|(at, side)| (at - side).abs() < CLOSE)
 }
