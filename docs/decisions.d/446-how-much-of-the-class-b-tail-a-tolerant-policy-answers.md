@@ -334,8 +334,8 @@ for three things:
 ### 446.8 The two-thin-bars family, traced
 
 *Unfinished: Q1953's first lane measured what follows and handed over at its
-budget. The first step that goes wrong is not traced yet, and no row is filed
-yet.*
+budget, and its second traced the first step that goes wrong where the hair is
+the cause and handed over too. No row is filed yet.*
 
 Run at `10a716f3` by a scratch test, `crates/rcad-topo/tests/zz_q1953_probe.rs`,
 deleted before the commit and kept at `/tmp/q1953-probes/`, with
@@ -390,6 +390,61 @@ are not numbers `f64` holds. Q1793's row has the fuse asking `∇S × ∇T` for
 exactly nought at those points. Whether the touch points are the one cause of
 all four rows is what the trace has to show next.
 
-**Not yet done:** the first step that goes wrong in each row; which rows share
-it; gap or limit; which of 448.1's (a) to (d) knew the bar lay in z = 0; and the
-rows to file.
+**The first step that goes wrong, where the hair is the cause: `assemble`
+names an arc from a touch point by a direction that is rounding.** Run at
+`448acd99` by a scratch module at the end of `crates/rcad-topo/src/fuse/assemble.rs`,
+removed before the commit and kept as `/tmp/q1953-probes/assemble-trace.patch`
+(`git apply` it, then `mise exec -- just t -p rcad-topo -E
+'test(/q1953_trace_/)' --no-capture`; its print is kept beside it as
+`zz_trace_at_448acd99.txt`). It runs `Scratch::split_both_groups`, `choose`,
+`assemble` and `Assembly::nest_the_shells` one at a time for the union,
+intersection and difference, each shape with the hair and without: Q1929's at
+120 degrees against 120 degrees + 1 ulp, and Q1897's at the origin and at
+(11, −3.25, 0.5), against the same bars laid flat.
+
+- **Everything before the arcs is the same.** The split gives the same pieces,
+  the same corner names along every wire, and no record. `choose` keeps the
+  same pieces. `assemble` makes the same corners and the same edges between
+  them.
+- **The arcs differ.** On every edge between a touch point and another corner,
+  the flat build names the arc from the other corner, since `∇S × ∇T` reads
+  exactly nought at the touch point. With the hair it reads
+  `(1.2e-17, 6.9e-18, 0)` there in Q1929, not nought, so `which_arc_this_is`
+  (`assemble.rs:7966`) names the arc from the touch point with that rounding as
+  its direction. `Edge::the_way_across_the_chord_into_the_arc`
+  (`assemble.rs:4808`) reads the crossing at whichever end compares first, the
+  same way, so an arc named from its good end still gets a rounding for its
+  side where the touch point compares first.
+- **So the picker is wrong.** In Q1929's union, the arcs from the top touch
+  point to (10.57, −3, 0.5) and from the bottom one to (10.86, −3.5, 0.5) are
+  picked by half-spaces facing exactly the other way from the flat build's:
+  `(0.00586, −0.00338, −0.0135)` against `(−0.00586, 0.00338, 0.0135)`. That
+  is the other arc of the ellipse. Four more are picked by half-spaces whose
+  normals are about `1e-18` long, which is rounding.
+- **Then the mesher gives up**, in `nest_the_shells`, which meshes each shell
+  to measure it: `AWireWillNotLieFlatOnItsFace`, `ACurvedFaceGoesRightRoundWithNoSeam`
+  or `CannotNameWhichPieceOfACrossingThisIs`. Every flat build nests.
+
+Q1793's intersection and difference differ the same way. Its union differs
+earlier: with the hair `assemble` makes 2 new corners, not 6, and three
+pipe-to-pipe edges all between the same two corners, where the flat build has
+seven. Pieces and `choose` are the same. That fits Q1793's row, which
+has `the_corners_of_each_run_between_two_tangent_points` (`assemble.rs:3420`)
+asking for `∇S × ∇T` exactly nought at both ends. This was not traced
+further.
+
+**A reading, not yet argued in full.** The cause is one test, "the two
+surfaces are tangent here", made as an `f64` nought of `∇S × ∇T` at a corner's
+rounded point. It holds only where the touch point is an `f64` triple. The
+two stored pipes still have one radius and axes that meet exactly, so they
+still touch, and `intersect` still splits them by
+`four_half_ellipses_where_two_pipes_of_one_width_meet`. The answer exists, so
+this reads as a gap. The fact the code needs is that the corner is a touch
+point, which is a fact of the crossing's own two surfaces, 448.1's (b), and the
+turn does not take it away. What the turn takes away is only how exact the
+point is.
+
+**Not yet done:** check the reading above against `assemble.rs:3420`; Q1896,
+whose cause is not the hair; Q1793's flat-angle refusals at 80, 112 and 116
+degrees and at 120 degrees + 4 ulp; Q1929's `Undecidable` at 85 and 95
+degrees; and the rows to file.
