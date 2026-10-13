@@ -34,8 +34,9 @@ a sha's tally changes only when the list of tiers does, and `load_cache` drops
 an entry taken under another list. Measured through `just queue-page` against
 the real history (600 first-parent commits touching docs/queue.md,
 2026-10-04): 19s cold, 1.7s warm. The lineage cache is the dearer one cold:
-`just lineage` read 3472 copies of a 1.7 MB file on every run, 6m28s at
-3ca67d02, and an empty cache costs the render one such walk, once (§444).
+with it empty the render took 235 s at c8a9eda5, since lineage then parses
+every copy of the 1.7 MB file that main's history holds. With all three caches
+full it took 3.4 s, 0.64 s of it the lineage and 0.26 s the row pages (§444).
 
 A failure here — no `main` here, no commit ever touched the file — is said on
 stderr and returned as a nonzero exit, never raised past `main`: the caller
@@ -816,10 +817,26 @@ def write_row_pages(directory, tip, graph):
     os.makedirs(directory, exist_ok=True)
     for row in tip.rows:
         assert ANY_ROW_ID.match(row.id), f"{row.id!r} cannot name a page, and check-queue refuses an id of that shape"
-        write_atomically(os.path.join(directory, f"{row.id}.html"), row_page(row, graph, links))
+        write_if_changed(os.path.join(directory, f"{row.id}.html"), row_page(row, graph, links))
     for name in os.listdir(directory):
         if name.endswith(".html") and name[: -len(".html")] not in links.ids:
             os.remove(os.path.join(directory, name))
+
+
+def write_if_changed(path, text):
+    """Write `text` unless `path` holds it already.
+
+    A queue write changes a row or two. For the 1827 rows main held at
+    c8a9eda5, writing every page took 0.30 s of a 4.0 s render, and reading
+    each back to compare takes 0.08 s.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            if f.read() == text:
+                return
+    except FileNotFoundError:
+        pass
+    write_atomically(path, text)
 
 
 def row_page(row, graph, links):
