@@ -288,6 +288,18 @@ pub(crate) struct BakedCorner {
     /// within [`BakedCorner::room_its_planes_were_asked_with`] of it (§356,
     /// §395.8).
     pub(crate) around: Vec<Surface>,
+    /// The three surfaces of `around` whose meet [`derive_a_corner`] placed the
+    /// corner at, so that `point`'s box holds where exactly those three meet.
+    /// `None` for a corner read out of the model, which nothing solved.
+    ///
+    /// **Kept because with four or more round a corner, which three is not
+    /// written down anywhere else.** The others pass through the box only give
+    /// or take a rounding, and four planes written down in `f64` rarely meet in
+    /// one point: a square pyramid placed by a shift has its four side planes
+    /// meet three by three at points either side of a plane through the apex
+    /// (§294.19). A question the box cannot settle is asked of these three, the
+    /// point the box was worked out round, and never of another three.
+    pub(crate) solved_from: Option<[Surface; 3]>,
     /// How far the corner was grown before each plane in `around` was asked
     /// about it: the room `Model::validate_solid` grants a corner off a plane
     /// plus [`what_writing_the_corner_down_cost`], the sum [`derive_a_corner`]
@@ -1020,6 +1032,7 @@ fn place_a_corner(
         vertex,
         point: where_the_model_puts_it,
         around: distinct,
+        solved_from: None,
         seam_plane: the_seam_plane_a_corner_is_on(model, slot, around),
         room_its_planes_were_asked_with: None,
     })
@@ -1192,7 +1205,7 @@ fn derive_a_corner(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedCorner> {
-    let mut best: Option<PredicatePoint> = None;
+    let mut best: Option<(PredicatePoint, [Surface; 3])> = None;
     'every_triple: for first in 0..around.len() {
         for second in (first + 1)..around.len() {
             for third in (second + 1)..around.len() {
@@ -1214,8 +1227,8 @@ fn derive_a_corner(
                     continue;
                 };
                 let point = as_exact_as_it_is(place);
-                if best.is_none_or(|best| point.uncertainty() < best.uncertainty()) {
-                    best = Some(point);
+                if best.is_none_or(|(best, _)| point.uncertainty() < best.uncertainty()) {
+                    best = Some((point, triple));
                 }
                 if point.uncertainty() == 0.0 {
                     break 'every_triple;
@@ -1223,7 +1236,7 @@ fn derive_a_corner(
             }
         }
     }
-    let Some(point) = best else {
+    let Some((point, solved_from)) = best else {
         return Err(gave_up(
             WHERE_THREE_SURFACES_MEET,
             &[middle_of_the_places(&around)],
@@ -1258,6 +1271,7 @@ fn derive_a_corner(
         vertex,
         point,
         around,
+        solved_from: Some(solved_from),
         seam_plane: None,
         room_its_planes_were_asked_with: Some(writing_it_down + validate_allows.off_a_plane),
     })
