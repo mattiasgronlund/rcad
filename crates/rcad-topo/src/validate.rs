@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rcad_geom::{
     Cone, Deflection, DynamicRange, EdgeRun, HalfSpace, Isometry, NEAREST_F64_POINT_ROUNDOFF,
@@ -26,7 +26,7 @@ use crate::holds::{
 };
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::measure::signed_volume_over_and_how_far_it_rounded;
-use crate::mesh::Mesh;
+use crate::mesh::{Fold, Mesh, the_surface_this_face_is_meshed_on};
 use crate::model::{ModelData, WireData, WireStep};
 use crate::view::{CoedgeView, FaceView, SolidView, WireStepView, WireView};
 use crate::{EdgeView, Error, FaceKey, Invalid, Model, Result, SolidKey};
@@ -2819,9 +2819,14 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Mesh> {
-    let mut finest_refusal = match view.mesh(as_coarse_as_a_mesh_gets(), policy, log) {
-        Err(why) if a_finer_mesh_may_clear(&why) => why,
-        answer => return answer,
+    let mut finest_refusal = match a_mesh_or_what_a_finer_one_may_clear(
+        view,
+        as_coarse_as_a_mesh_gets(),
+        policy,
+        log,
+    )? {
+        Ok(mesh) => return Ok(mesh),
+        Err(why) => why,
     };
     let Some((low, high)) = view.box_around_it() else {
         return Err(finest_refusal);
@@ -2849,9 +2854,9 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
         let Ok(less) = Deflection::of(room) else {
             break;
         };
-        match view.mesh(less, policy, log) {
-            Ok(mesh) => return Ok(mesh),
-            Err(why) if a_finer_mesh_may_clear(&why) => finest_refusal = why,
+        match a_mesh_or_what_a_finer_one_may_clear(view, less, policy, log) {
+            Ok(Ok(mesh)) => return Ok(mesh),
+            Ok(Err(why)) => finest_refusal = why,
             Err(
                 Error::DeflectionBelowWhatAMeshCanReach { .. }
                 | Error::MoreMeshPointsThanASolidWillHold { .. }
@@ -2867,11 +2872,165 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     Err(finest_refusal)
 }
 
-/// Whether a finer mesh may clear what refused this one, because it is about
-/// where the mesh's own chords and cuts fell and not about the solid: its sides
-/// crossing, or two of its patches drawing one side through their insides.
-fn a_finer_mesh_may_clear(why: &Error) -> bool {
-    its_sides_cross(why) || matches!(why, Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })
+/// The solid meshed at `deflection`, or what refused it when a finer mesh may
+/// clear that, because it is about where the mesh's own chords and cuts fell
+/// and not about the solid: its sides crossing, or two of its patches drawing
+/// one side through their insides.
+///
+/// Every other refusal is the outer error, and so is a fold
+/// [`no_mesh_of_it_splits`] says no finer mesh takes away.
+fn a_mesh_or_what_a_finer_one_may_clear(
+    view: SolidView<'_>,
+    deflection: Deflection,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<core::result::Result<Mesh, Error>> {
+    match view.mesh_or_where_it_folds(deflection, policy, log) {
+        Ok(Ok(mesh)) => Ok(Ok(mesh)),
+        Ok(Err(fold)) if no_mesh_of_it_splits(view, &fold) => Err(fold.refusal()),
+        Ok(Err(fold)) => Ok(Err(fold.refusal())),
+        Err(why) if its_sides_cross(&why) => Ok(Err(why)),
+        Err(why) => Err(why),
+    }
+}
+
+/// Whether every mesh of the solid, at whatever deflection the mesher cuts it
+/// at, draws the side `fold` names the same way, as far as the model under
+/// "What stops a fold" in [`the_coarsest_mesh_whose_sides_do_not_cross`] goes.
+///
+/// It needs every triangle using the side to have only corners of the model
+/// for corners, and those triangles to lie on two faces or more: one face cut
+/// into pieces has cut points that move with the deflection. Then each of
+/// those triangles has to stay as it is:
+///
+/// - **On a plane**, every edge of the face is straight. Such a face is handed
+///   over with no point but the model's own corners and the fixed middles
+///   [`SolidView::mesh`] puts on some straight edges, and a flat patch gets no
+///   point inside, so it is cut the same way at every deflection.
+/// - **On a pipe or a ball**, no edge that bends runs between two of the
+///   triangle's corners, since the walk puts points along it, and
+///   [`the_most_a_piece_of_a_curved_face_is_charged`] is at or under
+///   [`SolidView::the_least_room_a_face_of_it_is_cut_in`]. `rcad-mesh` puts a
+///   point inside a triangle only when its charge is over the room the patch
+///   was handed.
+/// - **On anything else**, it is not worked out, and a finer mesh is asked.
+fn no_mesh_of_it_splits(view: SolidView<'_>, fold: &Fold) -> bool {
+    let faces: HashSet<FaceKey> = fold.triangles.iter().map(|&(face, _)| face).collect();
+    if !fold.every_corner_is_one_of_the_model || faces.len() < 2 {
+        return false;
+    }
+    let least_room = view.the_least_room_a_face_of_it_is_cut_in();
+    fold.triangles.iter().all(|&(key, corners)| {
+        let face = view
+            .faces()
+            .find(|face| face.key() == key)
+            .expect("a triangle of a solid's mesh lies on one of the solid's faces");
+        let edges = || {
+            face.wires()
+                .flat_map(WireView::coedges)
+                .map(CoedgeView::edge)
+        };
+        if face.surface().as_plane().is_some() {
+            return edges().all(|edge| *edge.stored_run() == EdgeRun::Straight);
+        }
+        let no_bent_edge_joins_two_of_its_corners = edges().all(|edge| {
+            *edge.stored_run() == EdgeRun::Straight
+                || ![edge.start().point(), edge.end().point()]
+                    .iter()
+                    .all(|end| corners.contains(end))
+        });
+        no_bent_edge_joins_two_of_its_corners
+            && the_most_a_piece_of_a_curved_face_is_charged(view, face, corners)
+                .is_some_and(|charge| charge <= least_room)
+    })
+}
+
+/// The most `rcad-mesh` charges a flat piece of `face` with these three corners
+/// for how far it strays, at any deflection, or `None` on a surface this has
+/// not been worked out for.
+///
+/// `rcad-mesh`'s `how_far_a_flat_piece_strays` charges a piece on a pipe
+/// `(C + 2s)²/(3r) + s`, with `C` the longest chord across the axis between two
+/// of its corners and `s` how far its points land off the surface: `8ε` of the
+/// surface's origin, its radius and how far along the axis the patch reaches,
+/// in the frame the face is meshed in. On a ball `C` is the whole chord and `s`
+/// is `8ε` of the centre and the radius.
+///
+/// - **`C` is read off the corners where the mesh has them**, and the
+///   triangulator's chord is between those corners put back on the surface.
+///   Moving each end onto the surface moves it by how far that corner is off
+///   the surface, so the chord is at most the distance here plus twice the
+///   furthest a corner is off.
+/// - **How far along the axis the patch reaches** is bounded by the box round
+///   the solid, since the axis coordinate of a point is linear and so is
+///   largest at a corner of any box the face lies in. That is the same along
+///   the axis in any frame the face is moved to.
+/// - **What this rounds** is under `8ε` of the largest number it subtracts, and
+///   is added to `s`.
+fn the_most_a_piece_of_a_curved_face_is_charged(
+    view: SolidView<'_>,
+    face: FaceView<'_>,
+    corners: [Point; 3],
+) -> Option<f64> {
+    const HOW_FAR_THE_EVALUATOR_ROUNDS: f64 = 8.0 * f64::EPSILON;
+    let (low, high) = view.box_around_it()?;
+    let [low, high] = [low, high].map(|corner| corner.coordinates());
+    let corners_of_the_box = (0..8).map(|which: usize| {
+        let pick = |axis: usize| {
+            if which >> axis & 1 == 0 {
+                low[axis]
+            } else {
+                high[axis]
+            }
+        };
+        Point::new(pick(0), pick(1), pick(2))
+    });
+    let largest_corner = corners
+        .iter()
+        .map(Point::largest_coordinate_magnitude)
+        .fold(0.0, f64::max);
+    let longest = |lengths: [f64; 3]| lengths.into_iter().fold(0.0, f64::max);
+    let pairs = [(0, 1), (1, 2), (2, 0)];
+    let (radius, chord, off, landed_off, rounded_here) =
+        match (face.surface(), the_surface_this_face_is_meshed_on(face)) {
+            (Surface::Cylinder(pipe), Surface::Cylinder(meshed)) => {
+                let axis = pipe.axis();
+                let up = axis.direction() * axis.direction().length().recip();
+                let across = |point: Point| {
+                    let out = point - axis.origin();
+                    out - up * up.dot(out)
+                };
+                let reach = corners_of_the_box
+                    .map(|corner| up.dot(corner - axis.origin()).abs())
+                    .fold(0.0, f64::max);
+                let radius = pipe.radius();
+                (
+                    radius,
+                    longest(pairs.map(|(one, other)| {
+                        (across(corners[one]) - across(corners[other])).length()
+                    })),
+                    longest(corners.map(|corner| (across(corner).length() - radius).abs())),
+                    meshed.axis().origin().largest_coordinate_magnitude() + radius + reach,
+                    axis.origin().largest_coordinate_magnitude() + largest_corner + reach,
+                )
+            }
+            (Surface::Sphere(ball), Surface::Sphere(meshed)) => {
+                let radius = ball.radius();
+                (
+                    radius,
+                    longest(pairs.map(|(one, other)| corners[one].distance_to(corners[other]))),
+                    longest(
+                        corners.map(|corner| (corner.distance_to(ball.centre()) - radius).abs()),
+                    ),
+                    meshed.centre().largest_coordinate_magnitude() + radius,
+                    ball.centre().largest_coordinate_magnitude() + largest_corner,
+                )
+            }
+            _ => return None,
+        };
+    let slop = HOW_FAR_THE_EVALUATOR_ROUNDS * (landed_off + rounded_here);
+    let chord = chord + 2.0 * off + 2.0 * slop;
+    Some(chord * chord / (3.0 * radius) + slop)
 }
 
 /// The distance between the two closest corners of the solid that are not in
