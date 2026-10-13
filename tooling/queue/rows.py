@@ -37,6 +37,11 @@ def tier_of_class(tag):
     return "5" if tag.endswith(("/C", "/D")) else "1"
 
 
+# The queue page keeps lineage's summary of every commit on disk, and that
+# summary is read through this: which lines are rows, a row's id and text, and
+# which states close it. A change to any of those bumps `SUMMARY_SHAPE` in
+# tooling/lineage/lineage.py, or the page goes on serving summaries read the
+# old way (§444).
 class Row:
     def __init__(self, index, text, block):
         self.index = index
