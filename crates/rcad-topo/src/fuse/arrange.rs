@@ -1630,7 +1630,7 @@ impl<'f> Arrangement<'f> {
                         ) {
                         nothing_rules_the_point_out(crossing.picked_by(), at)
                     } else {
-                        self.passes_through(index, at, &corner.around, policy, log)?
+                        self.passes_through(index, &corner, policy, log)?
                     };
                     if on_it {
                         through.push(index);
@@ -1756,9 +1756,8 @@ impl<'f> Arrangement<'f> {
             == 1
     }
 
-    /// Whether a corner of the face, at `point` with the surfaces `around` it,
-    /// is on one crossing: on its partner surface, and picked by whichever
-    /// curve of the pair this crossing is.
+    /// Whether a corner of the face is on one crossing: on its partner surface,
+    /// and picked by whichever curve of the pair this crossing is.
     ///
     /// **A corner three planes meet at is asked about the planes, not its box.**
     /// The box is where the three meet give or take a rounding, so a plane of
@@ -1768,6 +1767,14 @@ impl<'f> Arrangement<'f> {
     /// ([`side_of_a_plane_where_three_planes_meet`](rcad_predicates::side_of_a_plane_where_three_planes_meet)),
     /// and the box is asked first because it is cheaper and nearly always
     /// enough.
+    ///
+    /// **With four or more planes round the corner, the three asked are the
+    /// three bake solved it from** ([`BakedCorner::solved_from`]), since the box
+    /// is sure to hold their meet and holds another three's only give or take
+    /// a rounding. A block face run exactly through a square pyramid's apex
+    /// straddles the apex's box, which reaches `4.2e−16` either side of it, and
+    /// was refused here under `certified` while only a corner with exactly
+    /// three planes round it was asked about its planes (§294.19).
     ///
     /// **The pickers are asked before the side.** A corner they rule out is off
     /// the crossing whatever side of the partner it is on, so the answer is the
@@ -1781,11 +1788,11 @@ impl<'f> Arrangement<'f> {
     fn passes_through(
         &self,
         crossing: usize,
-        point: PredicatePoint,
-        around: &[Surface],
+        corner: &BakedCorner,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
+        let point = corner.point;
         let (partner, picked_by) = (
             self.crossings[crossing].partner,
             self.crossings[crossing].picked_by(),
@@ -1795,7 +1802,10 @@ impl<'f> Arrangement<'f> {
         }
         let side = match (side_of_surface(&partner, point), partner.as_plane()) {
             (undecided @ Decision::Undecidable { .. }, Some(plane)) => {
-                match Self::the_three_planes_a_point_is_the_meet_of(around) {
+                match corner
+                    .solved_from
+                    .and_then(|three| Self::the_three_planes_a_point_is_the_meet_of(&three))
+                {
                     Some(three) => rcad_predicates::side_of_a_plane_where_three_planes_meet(
                         three.map(|flat| flat.coefficients()),
                         plane.coefficients(),
@@ -1803,7 +1813,7 @@ impl<'f> Arrangement<'f> {
                     .expect("bake solved this corner as the one point where its three planes meet"),
                     None => {
                         let on: SmallVec<[Surface; 4]> = core::iter::once(self.surface)
-                            .chain(around.iter().copied())
+                            .chain(corner.around.iter().copied())
                             .collect();
                         Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
                             .unwrap_or(undecided)
@@ -1824,14 +1834,15 @@ impl<'f> Arrangement<'f> {
     }
 
     /// The three planes a point of the arrangement is the one meeting point of,
-    /// read off the `surfaces` that placed it: the ones round a corner, or the
+    /// read off the `surfaces` that placed it: the three bake solved a corner
+    /// from ([`BakedCorner::solved_from`]), the ones round a corner, or the
     /// three a meet of three was solved from. Its box holds where they meet.
     ///
-    /// Bake solved a corner with exactly three surfaces round it from those
-    /// three ([`BakedCorner::around`](super::bake::BakedCorner)). `None` for a
-    /// corner with more round it, because bake does not say which three it
-    /// solved from and the others pass through the box only give or take a
-    /// rounding, and `None` where any of them is not a plane.
+    /// `None` unless there are exactly three and every one is a plane. Round a
+    /// corner with four or more, that is `None`, since the others pass through
+    /// the box only give or take a rounding: [`Arrangement::passes_through`]
+    /// reads the three bake solved from, and
+    /// [`Arrangement::as_the_planes_say`] does not (§294.19).
     fn the_three_planes_a_point_is_the_meet_of(surfaces: &[Surface]) -> Option<[Plane; 3]> {
         match surfaces {
             [

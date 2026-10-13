@@ -1,8 +1,8 @@
 //! A box whose top corner, where three planes meet, a pyramid whose apex,
 //! where four planes meet, and a half bar whose corner, where a cap, a round
 //! wall and a cut meet, are moved in their file, read back, and fused.
-//! `docs/decisions.md` §294.16, §294.17 and §294.18 are the record and this
-//! file is their measurement.
+//! `docs/decisions.md` §294.16, §294.17, §294.18 and §294.19 are the record
+//! and this file is their measurement.
 //!
 //! §294 moved a round bar's top corner, which has only two surfaces round it,
 //! and found no wrong `Ok` and no panic
@@ -33,9 +33,11 @@
 //! four ways. **Every fuse of a moved apex refuses as the box's corner does.**
 //! Each three of the four planes cross at the apex alone, so no three of them
 //! place an apex a millimetre away. The sound pyramid answers every partner
-//! but one: cut by a block whose face runs exactly through the apex, it
-//! cannot say which side of that face the apex is on, which is a defect of its
-//! own and pinned here as it stands.
+//! but one, a block whose face runs exactly through the apex. Cut by that, it
+//! answers where it stands. Placed, it cannot say which of two points comes
+//! first along an edge, the apex and where the cut crosses the edge a rounding
+//! from it, which is a defect of its own and pinned here as it stands
+//! (§294.19).
 //!
 //! The half bar is a round bar of radius 3 and height 10 less the block that
 //! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
@@ -350,7 +352,7 @@ fn a_pyramid_whose_apex_is_moved_a_millimetre_in_its_file_reads_back_and_does_no
 /// The control for the pyramid's refusals, as for the box's: the same bytes
 /// with the apex left alone answer every partner but one, and the answer holds
 /// what the pyramid and the block hold. The one left out is the cut through
-/// the apex, pinned on its own below.
+/// the apex, which answers only where the pyramid stands, below.
 #[test]
 fn the_sound_pyramid_answers_every_partner_but_a_cut_through_its_apex_with_what_the_two_hold() {
     let not_through_the_apex: Vec<(Block, Rule)> = EVERY_PARTNER
@@ -365,50 +367,61 @@ fn the_sound_pyramid_answers_every_partner_but_a_cut_through_its_apex_with_what_
     );
 }
 
-/// **The sound pyramid cut through its apex refuses**, which is a defect and
-/// not the moved apex's refusal (§294.17). `THE_HALF_PAST_THE_SEAM`'s face
-/// `y = 0` runs exactly through the apex, and under `certified` the fuse asks
-/// which side of a plane a box round the apex is on, a few ulps across, and
-/// cannot say, at every placement. Under `tolerant(100)` it answers half the
-/// pyramid with no placement, and refuses with each of the other three on four
-/// such questions and one about a point inside a piece of a face.
+/// **The sound pyramid cut through its apex where it stands answers half the
+/// pyramid, under both policies** (§294.19). `THE_HALF_PAST_THE_SEAM`'s face
+/// `y = 0` runs exactly through the apex, and each three of the four side
+/// planes meet exactly on it. The box bake solved round the apex reaches
+/// `4.2e−16` either side of the face, so the fuse asks the three planes bake
+/// solved the apex from, and they put it on the face. Asking the box alone,
+/// `certified` refused "side of plane".
 #[test]
-fn a_sound_pyramid_cut_through_its_apex_cannot_tell_which_side_of_the_cut_its_apex_is_on() {
-    let [identity, shift, turn, turn_then_shift] = every_placement();
+fn a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it() {
+    let [identity, ..] = every_placement();
+    let half = (2.0 * SIDE) * (2.0 * SIDE) * HEIGHT / 3.0 / 2.0;
     for rule in [Rule::Difference, Rule::Intersection] {
-        for placement in every_placement() {
-            assert_eq!(
-                the_refusal_cutting_through_the_apex(placement, rule, &Policy::certified()),
-                [SIDE_OF_PLANE],
-                "certified, {placement:?}, {rule:?}"
-            );
-        }
-        for placement in [shift, turn, turn_then_shift] {
-            assert_eq!(
-                the_refusal_cutting_through_the_apex(placement, rule, &Policy::tolerant(100.0)),
-                [
-                    SIDE_OF_PLANE,
-                    SIDE_OF_PLANE,
-                    SIDE_OF_PLANE,
-                    SIDE_OF_PLANE,
-                    A_POINT_INSIDE_A_PIECE_OF_A_FACE
-                ],
-                "tolerant, {placement:?}, {rule:?}"
-            );
-        }
-
-        let half = (2.0 * SIDE) * (2.0 * SIDE) * HEIGHT / 3.0 / 2.0;
         assert_eq!(
             what_the_pyramid_and_a_block_hold(THE_HALF_PAST_THE_SEAM, rule),
             (1, half)
         );
-        fuses_into_what_the_two_hold(
-            the_pyramid_read_back(identity, WHERE_THE_PYRAMID_PUTS_ITS_APEX),
-            identity,
-            (THE_HALF_PAST_THE_SEAM, rule),
-            &Policy::tolerant(100.0),
-            what_the_pyramid_and_a_block_hold,
-        );
+        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            fuses_into_what_the_two_hold(
+                the_pyramid_read_back(identity, WHERE_THE_PYRAMID_PUTS_ITS_APEX),
+                identity,
+                (THE_HALF_PAST_THE_SEAM, rule),
+                &policy,
+                what_the_pyramid_and_a_block_hold,
+            );
+        }
+    }
+}
+
+/// **Placed, the sound pyramid cut through its apex refuses**, which is a
+/// defect and not the moved apex's refusal (§294.19). Shifted, turned, or
+/// turned and then shifted, the four side planes as written meet three by
+/// three at points a rounding apart, and the three bake solved the apex from
+/// put it a rounding off the cut: inside the block shifted, outside it turned.
+/// The cut then crosses an edge at the apex a rounding from the apex, and under
+/// `certified` the fuse cannot say which of the two comes first along the
+/// edge. Under `tolerant(100)` it takes twenty such orders and then cannot say
+/// whether a point is inside a piece of a face.
+#[test]
+fn a_sound_pyramid_placed_and_cut_through_its_apex_cannot_order_two_points_by_the_apex() {
+    let [_, shift, turn, turn_then_shift] = every_placement();
+    let mut twenty_orders_and_a_point = vec![ALONG_A_CROSSING; 20];
+    twenty_orders_and_a_point.push(A_POINT_INSIDE_A_PIECE_OF_A_FACE);
+    for rule in [Rule::Difference, Rule::Intersection] {
+        for placement in [shift, turn, turn_then_shift] {
+            assert_eq!(
+                the_refusal_cutting_through_the_apex(placement, rule, &Policy::certified()),
+                [ALONG_A_CROSSING],
+                "certified, {placement:?}, {rule:?}"
+            );
+            assert_eq!(
+                the_refusal_cutting_through_the_apex(placement, rule, &Policy::tolerant(100.0)),
+                twenty_orders_and_a_point,
+                "tolerant, {placement:?}, {rule:?}"
+            );
+        }
     }
 }
 
@@ -678,8 +691,9 @@ fn fuses_into_what_the_two_hold(
 
 /// The sound pyramid at `placement` fused with `THE_HALF_PAST_THE_SEAM` under
 /// `rule`, which has to refuse and leave the model as it was. Returns the
-/// predicates the refusal's records name, each "side of plane" one checked to
-/// have been asked of one box, and that box round the placed apex.
+/// predicates the refusal's records name, each "order along a crossing" one
+/// checked to have been asked of two points, each within `1e-12` of the placed
+/// apex.
 fn the_refusal_cutting_through_the_apex(
     placement: Isometry,
     rule: Rule,
@@ -704,20 +718,27 @@ fn the_refusal_cutting_through_the_apex(
     for record in records
         .records()
         .iter()
-        .filter(|record| record.predicate() == SIDE_OF_PLANE)
+        .filter(|record| record.predicate() == ALONG_A_CROSSING)
     {
-        let [asked] = record.inputs() else {
-            panic!("{case}: side of plane asked of {:?}", record.inputs());
+        let [one, other] = record.inputs() else {
+            panic!(
+                "{case}: order along a crossing asked of {:?}",
+                record.inputs()
+            );
         };
-        let holds_the_apex = asked
-            .enclosure()
-            .iter()
-            .zip(apex)
-            .all(|(side, coordinate)| side.lo() <= coordinate && coordinate <= side.hi());
-        assert!(
-            holds_the_apex,
-            "{case}: side of plane asked of {asked:?}, not round the apex {apex:?}"
-        );
+        for asked in [one, other] {
+            let by_the_apex = asked
+                .enclosure()
+                .iter()
+                .zip(apex)
+                .all(|(side, coordinate)| {
+                    coordinate - 1e-12 <= side.lo() && side.hi() <= coordinate + 1e-12
+                });
+            assert!(
+                by_the_apex,
+                "{case}: order along a crossing asked of {asked:?}, not by the apex {apex:?}"
+            );
+        }
     }
     records
         .records()
