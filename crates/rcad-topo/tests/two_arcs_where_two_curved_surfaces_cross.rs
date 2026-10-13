@@ -392,12 +392,20 @@ fn a_wall_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_every_ru
 /// back round the bar's axis.
 ///
 /// Each was refused as the walls above were until Q1767. Now, against what the
-/// ball shares with the bar below the cap, **the caps at `z = 4` and `z = 5`
-/// answer every rule**, and **the cap at `z = 6` every rule but the union ball
-/// first**, which the mesh the fuse checks its answer with refuses
-/// `CannotMeshAFace`. At `z = 5` that is, by the halving the wall gives above, a
-/// union of `60π − S/2`, an intersection of `S/2`, the bar less the ball
-/// `24π − S/2` and the ball less the bar `36π − S/2`.
+/// ball shares with the bar below the cap, **every cap answers every rule**. At
+/// `z = 5` that is, by the halving the wall gives above, a union of `60π − S/2`,
+/// an intersection of `S/2`, the bar less the ball `24π − S/2` and the ball
+/// less the bar `36π − S/2`.
+///
+/// The union ball first with the cap at `z = 6` was refused `CannotMeshAFace`
+/// by the mesh the fuse checks its answer with until Q1862. The bar's wall is a
+/// ring between the circle at `z = −1` and a loop that runs round the cap and
+/// dips down the U the ball cuts in the wall. The mesh cut that ring at its
+/// quarters with straight lines across, and the one at the quarter `u = 0` ran
+/// from the circle at `u = 0` to the cap's corner at `u = 0.43` while the U's side
+/// bulges out to `u = 0.34` at `z = 6` below it: the cut crossed the hole, and
+/// the piece it cut off crossed itself. The bar first was cut the same way,
+/// and a finer mesh happened to put the U's corners clear of the cut.
 ///
 /// The cap at `z = 5` was refused under every rule both ways one step past the
 /// order, `Undecidable` for want of a point inside a piece of a face, until
@@ -411,19 +419,14 @@ fn a_wall_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_every_ru
 /// and the step along `x` comes back at `(1.86, 1.55, 3.14)` or
 /// `(1.86, 1.55, 6.86)`, outside the bar.
 #[test]
-fn a_cap_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_every_rule_but_one_at_z_6() {
+fn a_cap_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_every_rule() {
     let capped_at = |top: f64| {
         what_each_rule_gives(move |model| {
             let rod = bar_of_radius_two_up_to(model, top);
             [rod, ball_in_the_bars_side(model)]
         })
     };
-    let union_ball_first = 1;
-    for (top, bar, the_mesh_refuses_the_union_ball_first) in [
-        (4.0, 20.0 * PI, false),
-        (5.0, 24.0 * PI, false),
-        (6.0, 28.0 * PI, true),
-    ] {
+    for (top, bar) in [(4.0, 20.0 * PI), (5.0, 24.0 * PI), (6.0, 28.0 * PI)] {
         let shared = what_the_ball_shares_with_the_bar_below(top - 5.0);
         let wanted = [
             Gives::Holds(bar + 36.0 * PI - shared),
@@ -434,15 +437,8 @@ fn a_cap_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_every_rul
             Gives::Holds(36.0 * PI - shared),
         ];
         let gives = capped_at(top);
-        for (rule, (answer, wanted)) in gives.iter().zip(&wanted).enumerate() {
-            if the_mesh_refuses_the_union_ball_first && rule == union_ball_first {
-                assert!(
-                    matches!(answer, Err(Error::CannotMeshAFace { .. })),
-                    "cap at {top}: {gives:?}"
-                );
-            } else {
-                assert!(wanted.is(answer), "cap at {top}: {gives:?}");
-            }
+        for (answer, wanted) in gives.iter().zip(&wanted) {
+            assert!(wanted.is(answer), "cap at {top}: {gives:?}");
         }
     }
 }
