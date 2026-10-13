@@ -1770,10 +1770,11 @@ impl<'f> Arrangement<'f> {
     ///
     /// **With four or more planes round the corner, the three asked are the
     /// three bake solved it from** ([`BakedCorner::solved_from`]), since the box
-    /// holds their meet and no other three's. A block face run exactly through
-    /// a square pyramid's apex straddles the apex's box, `8.4e−16` across, and
-    /// was refused here under `certified` while only exactly three planes were
-    /// asked (§294.19).
+    /// is sure to hold their meet and holds another three's only give or take
+    /// a rounding. A block face run exactly through a square pyramid's apex
+    /// straddles the apex's box, which reaches `4.2e−16` either side of it, and
+    /// was refused here under `certified` while only a corner with exactly
+    /// three planes round it was asked about its planes (§294.19).
     ///
     /// **The pickers are asked before the side.** A corner they rule out is off
     /// the crossing whatever side of the partner it is on, so the answer is the

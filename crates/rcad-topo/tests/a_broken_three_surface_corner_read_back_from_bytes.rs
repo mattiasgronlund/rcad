@@ -1,8 +1,8 @@
 //! A box whose top corner, where three planes meet, a pyramid whose apex,
 //! where four planes meet, and a half bar whose corner, where a cap, a round
 //! wall and a cut meet, are moved in their file, read back, and fused.
-//! `docs/decisions.md` §294.16, §294.17 and §294.18 are the record and this
-//! file is their measurement.
+//! `docs/decisions.md` §294.16, §294.17, §294.18 and §294.19 are the record
+//! and this file is their measurement.
 //!
 //! §294 moved a round bar's top corner, which has only two surfaces round it,
 //! and found no wrong `Ok` and no panic
@@ -33,9 +33,11 @@
 //! four ways. **Every fuse of a moved apex refuses as the box's corner does.**
 //! Each three of the four planes cross at the apex alone, so no three of them
 //! place an apex a millimetre away. The sound pyramid answers every partner
-//! but one: cut by a block whose face runs exactly through the apex, it
-//! cannot say which side of that face the apex is on, which is a defect of its
-//! own and pinned here as it stands.
+//! but one, a block whose face runs exactly through the apex. Cut by that, it
+//! answers where it stands. Placed, it cannot say which of two points comes
+//! first along an edge, the apex and where the cut crosses the edge a rounding
+//! from it, which is a defect of its own and pinned here as it stands
+//! (§294.19).
 //!
 //! The half bar is a round bar of radius 3 and height 10 less the block that
 //! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
@@ -350,7 +352,7 @@ fn a_pyramid_whose_apex_is_moved_a_millimetre_in_its_file_reads_back_and_does_no
 /// The control for the pyramid's refusals, as for the box's: the same bytes
 /// with the apex left alone answer every partner but one, and the answer holds
 /// what the pyramid and the block hold. The one left out is the cut through
-/// the apex, pinned on its own below.
+/// the apex, which answers only where the pyramid stands, below.
 #[test]
 fn the_sound_pyramid_answers_every_partner_but_a_cut_through_its_apex_with_what_the_two_hold() {
     let not_through_the_apex: Vec<(Block, Rule)> = EVERY_PARTNER
@@ -368,8 +370,8 @@ fn the_sound_pyramid_answers_every_partner_but_a_cut_through_its_apex_with_what_
 /// **The sound pyramid cut through its apex where it stands answers half the
 /// pyramid, under both policies** (§294.19). `THE_HALF_PAST_THE_SEAM`'s face
 /// `y = 0` runs exactly through the apex, and each three of the four side
-/// planes meet exactly on it. The box bake solved round the apex is `8.4e−16`
-/// across in `x` and straddles the face, so the fuse asks the three planes bake
+/// planes meet exactly on it. The box bake solved round the apex reaches
+/// `4.2e−16` either side of the face, so the fuse asks the three planes bake
 /// solved the apex from, and they put it on the face. Asking the box alone,
 /// `certified` refused "side of plane".
 #[test]

@@ -294,10 +294,10 @@ pub(crate) struct BakedCorner {
     ///
     /// **Kept because with four or more round a corner, which three is not
     /// written down anywhere else.** The others pass through the box only give
-    /// or take a rounding, and four planes written down in `f64` rarely meet in
-    /// one point: a square pyramid placed by a shift has its four side planes
-    /// meet three by three at points either side of a plane through the apex
-    /// (§294.19). A question the box cannot settle is asked of these three, the
+    /// or take a rounding, since four planes written down in `f64` need not
+    /// meet in one point: a square pyramid placed by a shift has its four side
+    /// planes meet three by three at points either side of a plane through the
+    /// apex (§294.19). A question the box cannot settle is asked of these three, the
     /// point the box was worked out round, and never of another three.
     pub(crate) solved_from: Option<[Surface; 3]>,
     /// How far the corner was grown before each plane in `around` was asked

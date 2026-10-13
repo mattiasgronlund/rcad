@@ -1328,3 +1328,95 @@ passed.
   or with a curved one among three, is untried (§294.7). Both are tried now,
   in §294.17 and here. A small row, since that file was outside this row's
   write set.
+
+### 294.19 Q1838: the sound pyramid cut through its apex answers where it stands, and placed cannot order two points by the apex — 2026-10-13
+
+*Queue row Q1838, from §294.17. Lane
+`lane-q1838-a-pyramid-apex-on-a-block-face-read-back`, base `9d421909`,
+carried on by a second and a third lane as each passed its budget (§416).
+Code changed in `fuse/bake.rs` and `fuse/arrange.rs`; pinned in
+`crates/rcad-topo/tests/a_broken_three_surface_corner_read_back_from_bytes.rs`
+beside §294.17's pyramid.*
+
+**Where the fuse asked.** §294.17 left the sound pyramid fused with
+`THE_HALF_PAST_THE_SEAM`, whose face `y = 0` runs exactly through the apex,
+refusing "side of plane" under `certified` at all four placements. The record
+comes from `Arrangement::passes_through` in `fuse/arrange.rs`, called from
+`place_the_corners`, from `Arrangement::of`, `split_a_face` and
+`split_both_groups`. It asks whether the apex is on the line where a side face
+meets the cut. The box bake solved round the apex reaches `4.2e−16` either side
+of `y = 0`, so the box cannot say. For a corner with exactly three planes round
+it, `passes_through` then asks the three planes, exactly, with
+`side_of_a_plane_where_three_planes_meet`. The apex has four, and
+`the_three_planes_a_point_is_the_meet_of` gave `None` for four, because bake
+did not say which three it solved the apex from. The other way out,
+`side_of_a_plane_holding_a_rings_axis`, is for a corner on a ring's axis, so
+the `Undecidable` stood.
+
+**The change.** `BakedCorner` keeps `solved_from`, the three surfaces
+`derive_a_corner` placed the corner from: of the threes whose meet the stored
+corner points at, the first whose box is least uncertain. `passes_through` asks
+those three
+where the box cannot say. They are the three to ask because the box is sure to
+hold their meet, and holds another three's only give or take a rounding. Every
+face round the apex reads the same `BakedCorner`, so each asks the same three
+and the faces cannot disagree about which side the apex is on. A corner with
+exactly three round it is solved from those three, so it is asked as before. A
+corner with fewer is read out of the model and has none.
+
+**Four planes as written need not meet in one point.** A print the second lane
+put in and took out showed, for each three of the four side planes, which side
+of the cut their meet is on:
+
+- With no placement, every three meets exactly on the cut. All four fuses, −
+  and ∩ under both policies, answer half the pyramid, 60, in one solid, and the
+  model validates after each.
+- Shifted, the threes disagree: planes 0, 1 and 2, 0, 1 and 3, and 0, 2 and 3
+  meet on the negative side of the cut, and 1, 2 and 3 on the positive side.
+  Bake solved the apex from planes 0, 1 and 2, whose offsets are
+  `−8.380979995685074`, `−10.296632566127379` and `1.1972828565264395`, and
+  against the cut, `(0, −1, 0, −5)`, that puts it on the negative side, inside
+  the block.
+- Turned, the three bake solved from put the apex on the positive side,
+  outside the block.
+- Turned and then shifted, the three bake solved from have offsets
+  `−7.573228205953318`, `−0.6160395235268386` and `2.6101501318079823`, and put
+  the apex on the positive side.
+
+**What comes back placed.** Shifted, turned, and turned then shifted, − and ∩
+both refuse `Undecidable` and leave the model as it was. Under `certified` it
+is one record, "order along a crossing". Under `tolerant(100)` it is twenty of
+those and then "a point inside a piece of a face"; before the change it was
+four "side of plane" and that one. Every "order along a crossing" record was
+asked of two points each within `1e-12` of the placed apex in every
+coordinate. A print the second lane put in and took out found the first of
+them, shifted: on the `−y` side face, along its edge with the `−x` side face,
+between the apex and the point where the cut crosses that edge.
+`Arrangement::order_along` refuses, called from `nodes_along`, from
+`merge_points_that_are_one_point` in `Arrangement::of`. The apex is a rounding
+off the cut, so the cut crosses that edge a rounding from the apex, and the
+apex, solved from planes 0, 1 and 2, is not exactly on that edge's line, which
+is where planes 0 and 3 meet. `as_the_planes_say` reads `.start.around`; made
+to read `solved_from` instead, it changed none of the results, since planes 0,
+1 and 2 do not hold both planes of that edge, so it was put back.
+
+A pyramid halved through its apex is a shape designers make, and the answer,
+60, has nothing small in it. Whether the arithmetic can reach it is not
+settled. Taking the apex as a rounding off the cut, the cut would take a
+triangle a rounding across off the top of a side face, so deciding these
+orders exactly may only move the refusal on to that sliver; nobody has run
+that. So it is `refuses/B` and a row, not yet a limit or a gap.
+
+The pins: `a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it`
+and `a_sound_pyramid_placed_and_cut_through_its_apex_cannot_order_two_points_by_the_apex`,
+which replace §294.17's
+`a_sound_pyramid_cut_through_its_apex_cannot_tell_which_side_of_the_cut_its_apex_is_on`.
+`mise exec -- just t -E
+'binary(a_broken_three_surface_corner_read_back_from_bytes)'` runs the box's
+three pins, the pyramid's five and the half bar's five: 13 tests run, 13
+passed.
+
+**What this leaves.**
+
+- The pyramid placed and cut through its apex refusing "order along a
+  crossing", above. A row, tier 1, `refuses/B`.
