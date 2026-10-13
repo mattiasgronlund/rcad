@@ -96,7 +96,12 @@ wide rather than refusing it. That is the other way to meet the third kind,
 coping with the sliver instead of not making it. So for Q1734, step 1 will
 find it answers; say as well whether the coincidence behind the band was known
 from the build, since the two ways can then be set side by side. Q1936 was
-taken into a lane at `743fbe6f`.
+taken into a lane at `743fbe6f`. Q1737 was dropped and filed again as Q1958 at
+`c6962861`, on the same shape: Q1737's lane had fixed it at `a53f0a15` with
+`Arrangement::the_node_round_the_start` in `fuse/arrange.rs`, and stopped on a
+stale pin outside its write set, which Q1958 adds. Run the shape both rows
+name. If it answers at the base, say, as for Q1734, which of (a) to (d) that
+fix used.
 
 **Each row** is run on the shape it names, under `Policy::certified()`, at the
 lane's base. For each, write down:
