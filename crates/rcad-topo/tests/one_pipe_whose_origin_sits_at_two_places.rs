@@ -335,7 +335,7 @@ fn the_stacked_bars_unite_into_one_bar_however_the_wall_is_written() {
 /// wall, the pin's wall and the upper wall meet, which
 /// `where_three_curved_surfaces_meet` in `rcad-geom` refuses because two of
 /// the three are one surface written twice. Two crossings whose partners are
-/// one surface are two crossings of one pair, and are placed as such.
+/// one pipe are two crossings of one pair, and are placed as such.
 ///
 /// **The routes are built for a branch no other fuse reaches.** Each pin's
 /// wall sorts between the two spellings, so each closed crossing of the pin
