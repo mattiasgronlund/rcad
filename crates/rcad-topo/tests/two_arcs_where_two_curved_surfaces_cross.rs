@@ -27,9 +27,12 @@
 //! ball's centre square to the bar's axis, and the loop reaches that function
 //! between two corners: a wall through it answers every rule, a cap at `z = 4`
 //! every rule, and a cap at `z = 6` every rule but one, which the mesh the
-//! fuse checks its answer with refuses. A cap through the ball's centre is
-//! refused one step past the order, for want of a point inside a piece of a
-//! face. With only the bar's seam through the loop every rule answers
+//! fuse checks its answer with refuses. A cap through the ball's centre, and a
+//! bar from there up or cut down to there, answer every rule since Q1861: they
+//! were refused one step past the order, for want of a point inside a piece of
+//! a face, until `fuse/select.rs` took its steps across a curved piece from one
+//! radius off the cap's plane too. With only the bar's seam through the loop
+//! every rule answers
 //! (`two_curves_of_one_pair_that_meet.rs`). The circle a ball touches its bar
 //! round is refused before its arcs are named.
 //!
@@ -389,21 +392,26 @@ fn a_wall_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_every_ru
 /// back round the bar's axis.
 ///
 /// Each was refused as the walls above were until Q1767. Now, against what the
-/// ball shares with the bar below the cap, **the cap at `z = 4` answers every
-/// rule**, and **the cap at `z = 6` every rule but the union ball first**,
-/// which the mesh the fuse checks its answer with refuses `CannotMeshAFace`.
+/// ball shares with the bar below the cap, **the caps at `z = 4` and `z = 5`
+/// answer every rule**, and **the cap at `z = 6` every rule but the union ball
+/// first**, which the mesh the fuse checks its answer with refuses
+/// `CannotMeshAFace`. At `z = 5` that is, by the halving the wall gives above, a
+/// union of `60π − S/2`, an intersection of `S/2`, the bar less the ball
+/// `24π − S/2` and the ball less the bar `36π − S/2`.
 ///
-/// **The cap at `z = 5` is refused under every rule both ways**, one step past
-/// the order: `Undecidable`, for want of a point inside a piece of a face whose
-/// two corners are the cap's two on the loop, with nothing measured. The
-/// answers are there: by the halving the wall gives above, a union of
-/// `60π − S/2`, an intersection of `S/2`, the bar less the ball `24π − S/2` and
-/// the ball less the bar `36π − S/2`. The bar from `z = 5` up, and the long bar
-/// cut to `z ≤ 5` by a block, are refused the same way. Which piece it is has
-/// not been traced.
+/// The cap at `z = 5` was refused under every rule both ways one step past the
+/// order, `Undecidable` for want of a point inside a piece of a face, until
+/// Q1861. The cap's plane and the loop cut the ball's skin into four pieces,
+/// all four between the two corners above, and the middle of those corners is
+/// on the plane, as the ball's centre is. Every step the fuse took from that
+/// middle, put back onto the ball, landed on the circle at `z = 5` or inside
+/// the bar, and none in the two pieces outside the bar. `fuse/select.rs`'s
+/// `steps_from_a_reach_into_the_planes_material` takes the same steps from one
+/// radius below the middle, or above it, the way the piece lies off the plane,
+/// and the step along `x` comes back at `(1.86, 1.55, 3.14)` or
+/// `(1.86, 1.55, 6.86)`, outside the bar.
 #[test]
-fn a_cap_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_off_the_balls_middle_and_is_refused_through_it()
- {
+fn a_cap_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_every_rule_but_one_at_z_6() {
     let capped_at = |top: f64| {
         what_each_rule_gives(move |model| {
             let rod = bar_of_radius_two_up_to(model, top);
@@ -436,6 +444,54 @@ fn a_cap_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_off_the_b
                 assert!(wanted.is(answer), "cap at {top}: {gives:?}");
             }
         }
+    }
+}
+
+/// The same ball against the bar of radius 2 from `z = 5` up to `z = 11`, and
+/// against the bar up to `z = 11` cut by a block to `z ≤ 5`, both `24π`: the
+/// bar ends at the ball's centre as the cap at `z = 5` above does, the one with
+/// its own end and the other with a block's wall, and the ball's skin is cut
+/// into the same four pieces. Both were refused under every rule both ways as
+/// that cap was, and both answer since Q1861. The ball is the same either side
+/// of its centre, so the bar shares `S/2` with it either way: a union of
+/// `60π − S/2`, an intersection of `S/2`, the bar less the ball `24π − S/2` and
+/// the ball less the bar `36π − S/2`.
+#[test]
+fn a_bar_from_the_balls_middle_up_or_cut_down_to_it_answers_every_rule() {
+    let pairs: [fn(&mut Model) -> [SolidKey; 2]; 2] = [
+        |model| {
+            let rod = model
+                .add_round_bar(2.0, 6.0, &at(0.0, 0.0, 5.0))
+                .expect("a bar of radius two");
+            [rod, ball_in_the_bars_side(model)]
+        },
+        |model| {
+            let rod = bar_of_radius_two_up_to(model, 11.0);
+            [
+                cut(model, rod, [-20.0, -20.0, -20.0], [20.0, 20.0, 5.0]),
+                ball_in_the_bars_side(model),
+            ]
+        },
+    ];
+    let half = what_the_ball_shares_with_the_bar_below(0.0);
+    use Gives::Holds;
+    let wanted = [
+        Holds(60.0 * PI - half),
+        Holds(60.0 * PI - half),
+        Holds(half),
+        Holds(half),
+        Holds(24.0 * PI - half),
+        Holds(36.0 * PI - half),
+    ];
+    for pair in pairs {
+        let gives = what_each_rule_gives(pair);
+        assert!(
+            gives
+                .iter()
+                .zip(&wanted)
+                .all(|(answer, wanted)| wanted.is(answer)),
+            "{gives:?}"
+        );
     }
 }
 
