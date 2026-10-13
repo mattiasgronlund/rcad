@@ -404,19 +404,6 @@ impl SolidView<'_> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Mesh> {
-        self.mesh_or_where_it_folds(deflection, policy, log)?
-            .map_err(|fold| fold.refusal())
-    }
-
-    /// [`SolidView::mesh`], with a fold handed back as where it is rather than
-    /// as [`Error::TwoPatchesOfTheMeshDrewTheSameSide`], for the ladder in
-    /// `validate.rs` that asks whether any finer mesh can clear it.
-    pub(crate) fn mesh_or_where_it_folds(
-        self,
-        deflection: Deflection,
-        policy: &Policy,
-        log: &mut ProvenanceLog,
-    ) -> Result<core::result::Result<Mesh, Fold>> {
         let along_each_edge = self.surfaces_along_each_edge();
         let deflection = self.room_a_mesh_has_to_work_in(deflection, policy, &along_each_edge)?;
         let mut building = BuildingAMesh::new(deflection, along_each_edge);
@@ -427,36 +414,14 @@ impl SolidView<'_> {
             building.cut_up(face, self, log)?;
         }
         let made = core::mem::take(&mut building.made);
-        let mesh = match building.finish() {
-            Ok(mesh) => mesh,
-            Err(fold) => return Ok(Err(fold)),
-        };
+        let mesh = building.finish()?;
         if self
             .faces()
             .all(|face| face.location() == Isometry::identity())
         {
-            return Ok(Ok(mesh));
+            return Ok(mesh);
         }
-        Self::unless_placing_it_took_away_its_space(mesh, made).map(Ok)
-    }
-
-    /// The least room any face of this solid is handed to cut its patches in,
-    /// whatever deflection the mesh is asked for.
-    ///
-    /// [`SolidView::room_a_mesh_has_to_work_in`] never hands back less than
-    /// the floor where a point can be placed: it returns the deflection asked
-    /// for when it is at least that, and otherwise refuses or uses twice
-    /// [`the_finest_deflection_the_walk_will_take`], which is that floor with a
-    /// term added. Each face's patches are then handed that less what moving
-    /// the face rounds.
-    pub(crate) fn the_least_room_a_face_of_it_is_cut_in(self) -> f64 {
-        let along_each_edge = self.surfaces_along_each_edge();
-        let floor = self.the_closest_a_mesh_point_of_it_is_placed(&along_each_edge);
-        let moving = self
-            .faces()
-            .map(|face| how_far_moving_this_face_rounds(face, &along_each_edge))
-            .fold(0.0, f64::max);
-        floor - moving
+        Self::unless_placing_it_took_away_its_space(mesh, made)
     }
 
     /// `mesh`, unless it encloses space where its points were made and none
@@ -571,7 +536,10 @@ impl SolidView<'_> {
         policy: &Policy,
         along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
     ) -> Result<Deflection> {
-        let closest = self.the_closest_a_mesh_point_of_it_is_placed(along_each_edge);
+        let closest = self
+            .faces()
+            .map(|face| how_far_a_mesh_point_of_this_face_rounds(face, along_each_edge))
+            .fold(0.0, f64::max);
         if asked.length() >= closest {
             return Ok(asked);
         }
@@ -586,40 +554,6 @@ impl SolidView<'_> {
             });
         }
         Ok(Deflection::of(workable * ROOM_ABOVE_THE_FLOOR)?)
-    }
-
-    /// The floor under a caller's own deflection: the most
-    /// [`how_far_a_mesh_point_of_this_face_rounds`] says of any face.
-    fn the_closest_a_mesh_point_of_it_is_placed(
-        self,
-        along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
-    ) -> f64 {
-        self.faces()
-            .map(|face| how_far_a_mesh_point_of_this_face_rounds(face, along_each_edge))
-            .fold(0.0, f64::max)
-    }
-}
-
-/// Where a mesh folded: the side two patches both drew, as
-/// [`BuildingAMesh::finish`] picks it, and every triangle that uses it.
-#[derive(Debug)]
-pub(crate) struct Fold {
-    drawn: u32,
-    used: u32,
-    /// Each triangle using the side, as its face and its three corners where
-    /// they landed.
-    pub(crate) triangles: Vec<(FaceKey, [Point; 3])>,
-    /// Whether every corner of every one of those triangles is a corner of the
-    /// model, and so a point no deflection moves.
-    pub(crate) every_corner_is_one_of_the_model: bool,
-}
-
-impl Fold {
-    pub(crate) fn refusal(&self) -> Error {
-        Error::TwoPatchesOfTheMeshDrewTheSameSide {
-            drawn: self.drawn,
-            used: self.used,
-        }
     }
 }
 
@@ -3943,7 +3877,7 @@ impl BuildingAMesh {
     /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] says what it is for both.
     /// The side reported is the lowest-numbered one, so the same model is
     /// refused the same way every time.
-    fn finish(self) -> core::result::Result<Mesh, Fold> {
+    fn finish(self) -> Result<Mesh> {
         let mut times_used: HashMap<(u32, u32), u32> = HashMap::new();
         for triangle in &self.triangles {
             let [first, second, third] = triangle.corners;
@@ -3957,34 +3891,8 @@ impl BuildingAMesh {
             .map(|(&side, &drawn)| (side, drawn, times_used[&side]))
             .filter(|&(_, drawn, used)| drawn != 2 || used != 2)
             .min_by_key(|&(side, _, _)| side);
-        if let Some(((one, other), drawn, used)) = folded {
-            let using_it: Vec<&MeshTriangle> = self
-                .triangles
-                .iter()
-                .filter(|triangle| {
-                    triangle.corners.contains(&one) && triangle.corners.contains(&other)
-                })
-                .collect();
-            let corners_of_the_model: HashSet<u32> = self.at_vertex.values().copied().collect();
-            return Err(Fold {
-                drawn,
-                used,
-                every_corner_is_one_of_the_model: using_it.iter().all(|triangle| {
-                    triangle
-                        .corners
-                        .iter()
-                        .all(|corner| corners_of_the_model.contains(corner))
-                }),
-                triangles: using_it
-                    .iter()
-                    .map(|triangle| {
-                        (
-                            triangle.face,
-                            triangle.corners.map(|corner| self.points[corner as usize]),
-                        )
-                    })
-                    .collect(),
-            });
+        if let Some((_, drawn, used)) = folded {
+            return Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn, used });
         }
         Ok(Mesh {
             points: self.points,
@@ -8280,7 +8188,7 @@ fn back_out_of_the_frame_this_face_is_cut_up_in(face: FaceView<'_>) -> Isometry 
 ///
 /// A face at no placement at all is a different thing: there is nothing to undo,
 /// and the movement is [`a_shift_that_loses_nothing`], which is exact.
-pub(crate) fn the_surface_this_face_is_meshed_on(face: FaceView<'_>) -> Surface {
+fn the_surface_this_face_is_meshed_on(face: FaceView<'_>) -> Surface {
     if face.location() != Isometry::identity() {
         return face.stored_surface();
     }
