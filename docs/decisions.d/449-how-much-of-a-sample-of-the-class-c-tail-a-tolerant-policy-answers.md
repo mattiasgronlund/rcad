@@ -115,6 +115,32 @@ groups a print by shape and outcome.
 | Q1020 | ball of 1 and the cube of 4 turned 30 degrees, directions 0, 30, 180, 250, roundings ±1.01, ±0.99, ±0.5, six fuses each, 100 mm: 144; then `classify_point` at the file's 4 points on each answer | 132 answer one solid, valid; all 528 points classified right, no `CannotFollowAFacesTrimming`; 12 `CannotMeshAFace` `LoopsTouch` | `tolerant(100)`: the same, run for run |
 | Q1133 | no fuse: `face_holds_the_point` on the cap at the file's 5 points, the four spellings by hole first, 125 mm: 8 | `NothingSaysWhichSideOfItsTrimmingAFaceLiesOn` at every point; the solid validates and measures `261.53 ± 1.57` against `261.80` | `tolerant(125)`: the same |
 | Q1674 | no fuse: the bar whose lid is split by the half disc `1e-14` off it, its arc naming the parabola cone, half first and second, built, 10 mm: 2 | the build refuses `Invalid(AnArcBetweenTwoFlatFacesOnDifferentPlanes)` | `tolerant(10)`, the build under it: the same |
+| Q1350 | no fuse: `is_a_family_this_follows` on the row's families, `x ≥ 3`, `x ≥ z`, `y ≤ 4` on the ball of 5, `x ≥ 1`, `y ≥ 2`, `x + y + z ≤ 5.1` on the ball of 3, `x, y ≥ 4`, `z ≤ 7` on the ball of 9, and the control `x, y ≥ 3`, `x + y ≤ 7` on the ball of 5, by the row's own two pins as they stand: 4 | all four refused; the grid counts one piece, one, one and two | takes no `Policy`: not run under one |
+| Q1292 | no fuse: `meet_of_three_surfaces` of the ball of 5 at the origin written twice with the pipe of 3 up `z`, and with the ball of 5 at (6, 0, 0), the repeat first and last: 4 | `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, empty log | `tolerant(100)` and `tolerant(10)`: the same |
+| Q1132 | no fuse: `intersect` of the cone of slope 1 about `z` with its apex at the origin and three balls through the apex, 2 at (0, 0, 2), 5 at (0, 0, 5) and 5 at (0, 0, −5), each order: 6 | `ACrossingBetweenAConeAndAnotherCurvedSurface` | `tolerant(100)` and `tolerant(10)`: the same |
+| Q1680 | no fuse: `walk` of the short run of the thin pipe through the fat one in the row's test, picked by `y ≥ 0` alone and by `y ≥ 0` with `z ≤ 4.5`, at deflections 1 and 0.01, each order: 8 | `y ≥ 0` alone: `CannotNameWhichPieceOfACrossingThisIs`, all 4; with `z ≤ 4.5`: walked, no point between the corners, but 1 at deflection 1 thin pipe first | `tolerant(100)` and `tolerant(10)`: the same, run for run |
+| Q768 | the bar of 2, 8 tall, leaning `4.78e-299`, `6.2e-320` and `8e-323` off its caps, less and with the block 2 at (1, −1, 3), six fuses each, built and read back from its own file, 8 mm: 36 | `4.78e-299` and `8e-323`: `Geometry(CannotNameWhichPieceOfACrossingThisIs)`, all 24; `6.2e-320`: `Undecidable`, 1 record, "where two planes cross", `5e-324`, all 12 | `tolerant(8)`: `CannotNameWhichPieceOfACrossingThisIs`, all 36, so at `6.2e-320` tolerance swaps the refusal for the row's |
+| Q1105 | half the bar of 2 whose edge across the floor is named by the pipe, and the block of side 2 at (−1, −1, −1), six fuses, 4 mm: 6; then the same read back from its own file, that edge straight: 6 | built: `AFaceTrimmedByACurveThisCannotFollow`, all 6; read back: all 6 answer, valid, U `31.1035 ± 0.25`, I `2`, D half first `23.1035 ± 0.25`, D block first `6`, against `31.1327`, `2`, `23.1327` and `6` | `tolerant(4)`: the same, run for run |
+| Q1021 | no fuse: `Import::read` of the pointed cone whose half-angle is written `26.5650511771` degrees, and the control written `0.463647609001` radians: 2 | degrees: `ALoopThisReaderDoesNotWalk`, `VERTEX_LOOP` #132 on face #135; radians: imports, valid, `133.9746 ± 0.60` against `134.0413` | `tolerant(8)` and `tolerant(100)`: the same |
+| Q1315 | no fuse: the round bar of 5 by 13 turned `-1.793662034335766e-43` about `y` at (8, −28, 39), `1e-27` about `y` at the origin and `1e-43` about `x` at (8, −28, 39), measured, written, read and measured at `Deflection::for_scale`, 100 mm: 6 | built: valid, `1016.12 ± 19.7` against `1021.02`, all 3; read back at (8, −28, 39), both turns: valid, measure refused `CannotMeshAFace` `CoordinateOutOfRange { TooSmall }`; `1e-27` at the origin: valid, `1020.36 ± 2.64` | `tolerant(100)`, the read under it too: the same, run for run |
+
+Q1350, Q1292, Q1132 and Q1680 take no model. Q1350 was run by its own pins,
+`mise exec -- just t -p rcad-topo
+a_circle_touching_or_biting_what_two_planes_keep_is_refused
+a_plane_just_past_the_corner_two_others_meet_at_cuts_its_tip_off`, which
+assert the refusals and the grid counts. Q1292, Q1132 and Q1680 were run by
+one scratch test added to `walk.rs`'s tests, kept as
+`/tmp/q1955-probes/zz_q1955_geom_walk.patch`, with `mise exec -- just t -p
+rcad-geom --lib q1955_probe_geom --no-capture`, print `run-5.txt`. Q768,
+Q1105, Q1021 and Q1315 were run by copies of their two `rcad-step` test
+files, print `run-6.txt`. Where no model names a size, the tolerant runs take
+`tolerant(100)` and `tolerant(10)`.
+
+Q1105's built solid is refused `AFaceTrimmedByACurveThisCannotFollow`, not
+the "edge that runs along part of a curve" the row names, and the solid read
+back cuts, as the row says. Q1315's bar turned `1e-27` about `y` at the origin
+measures at this base; the row's two shapes moved to (8, −28, 39) still
+refuse.
 
 Q1096's panic is not met at this base: neither ring panics, and both answer
 as the row says they should. Its second case, pair 3's fuse past Q618, is not
