@@ -1314,7 +1314,9 @@ fn the_planes_meeting_at_each_corner_of_a_solid(solid: &BakedSolid) -> Option<Ve
         .faces
         .iter()
         .flat_map(|face| face.wires.iter().flatten())
-        .map(|edge| Some(three_planes(&edge.start.around)?.map(|plane| plane.coefficients())))
+        .map(|edge| {
+            Some(three_planes(edge.start.solved_from.as_ref()?)?.map(|plane| plane.coefficients()))
+        })
         .collect()
 }
 
