@@ -666,6 +666,56 @@ fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_both_intersections_a
     }
 }
 
+/// The whole thin bar of the test above against the same bar of radius 4,
+/// turned about its own axis by every number of quarter turns, so that where
+/// its walk starts round its wall lies inside the window the fat bar cuts in
+/// that wall and outside it. Every rule both ways round answers: the union
+/// `180π − 2I` in six faces, both intersections `2I` in two, the thin bar less
+/// the fat one `20π − 2I` in four and the fat bar less the thin one
+/// `160π − 2I` in four.
+///
+/// The thin bar's wall outside the fat bar is a ring between its two caps with
+/// one island, the window, which reaches `4.1` of the `2π` round the thin bar,
+/// so two or three of the four cuts across the ring meet it (Q1858).
+#[test]
+fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_every_rule_however_it_is_turned() {
+    let shared = 2.0 * what_a_half_thin_bar_out_of_a_fat_ones_side_shares_with_it();
+    let wanted = [
+        (180.0 * PI - shared, 6),
+        (180.0 * PI - shared, 6),
+        (shared, 2),
+        (shared, 2),
+        (20.0 * PI - shared, 4),
+        (160.0 * PI - shared, 4),
+    ];
+    for quarters in 0..4 {
+        let gives = what_each_rule_gives(|model| {
+            let thin = model
+                .add_round_bar(
+                    1.0,
+                    20.0,
+                    &at(-10.0, 3.5, 5.0)
+                        .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("y is an axis"))
+                        .compose(
+                            &Isometry::quarter_turns(&Axis::z(), quarters).expect("z is an axis"),
+                        ),
+                )
+                .expect("a bar of radius one");
+            let fat = model
+                .add_round_bar(4.0, 10.0, &Isometry::identity())
+                .expect("a bar of radius four");
+            [thin, fat]
+        });
+        let answers = gives.iter().zip(wanted).all(|(answer, (volume, faces))| {
+            matches!(
+                answer.as_deref(),
+                Ok([solid]) if solid.faces == faces && (solid.volume - volume).abs() <= solid.error
+            )
+        });
+        assert!(answers, "turned {quarters} quarters: {gives:?}");
+    }
+}
+
 /// The bar of radius 1 along `x` from `x = −10` to `x = 10` at `y = 3.5`,
 /// `z = 5`, which reaches from `y = 2.5` to `y = 4.5`.
 fn thin_bar_out_of_a_fat_ones_side(model: &mut Model) -> SolidKey {
