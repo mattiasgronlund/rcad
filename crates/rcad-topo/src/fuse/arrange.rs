@@ -8155,30 +8155,46 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// point are two places.
 ///
 /// **A node whose box holds the start comes before one whose box is clear of
-/// both**, where nothing above can say. The sweep cannot: the step from the
-/// start to that node may be nothing, so it straddles nought however far round
-/// the other node is. The node may be a hair ahead of the start, and then it
-/// comes first. It may be a hair behind, and then it comes last, and reading it
-/// first instead turns the whole order round to start from it, which is the
-/// same order round the loop, as long as no node lies between it and the start.
-/// The stretch of the crossing from the start to it runs between two points of
-/// its box, bent off the straight line between them by about `κd²/8`, for `κ`
-/// how sharply the crossing turns and `d` the box's width. At the shape below
-/// the start is an end of the ellipse's short axis, where `κ` is at most `4`,
-/// and `d` is `2e-16`, so the bend is at most `2e-32`, while a box clear of
-/// this one is at least an ulp of `0.25`, `5.5e-17`, away from it. Two floats
-/// are as close as that bend only within about `1e-16` of nought, so only a
-/// box with a side that near nought could sit inside the bend, and such a box
-/// has not been shown clear of the stretch. Two nodes whose boxes share a point
-/// are left as they were.
+/// both, where every point of its box is at the start or ahead of it.** The
+/// sweep cannot say: the step from the start to that node may be nothing, so
+/// it straddles nought however far round the other node is. Read along the
+/// way the crossing runs at the start, `∇S × ∇T`, the step to every point of
+/// the box is nought or more instead, and more for some. A point of the
+/// crossing a short way behind the start, or behind the place the start was
+/// rounded off, reads less than nought, so the node is there or a hair ahead,
+/// and it comes first unless the other node lies on the stretch of the
+/// crossing between. That stretch runs between two points of the node's box,
+/// bent off the straight line between them by about `κd²/8`, for `κ` how
+/// sharply the crossing turns and `d` the box's width. At the shape below the
+/// start is an end of the ellipse's short axis, where `κ` is at most `4`, and
+/// `d` is under `5e-16`, so the bend is under `1.3e-31`. The other node's box
+/// is clear of this one, so it is at least an ulp away along some axis, and
+/// two floats are as close as that bend only within about `1e-15` of nought.
+/// No side of this box is that near nought, so the other node is not on the
+/// stretch. The arm does not check either number: a box with a side that near
+/// nought, or a crossing turning on a radius near `d`, has not been shown
+/// clear of the stretch.
+///
+/// **A box reaching behind the start is left as it was**, since its node may
+/// be a hair behind and come last: the `3.1e-13` box of the second bar's near
+/// cap corner in `a_bar_starting_where_it_crosses_another_at_a_slant_is_refused`
+/// is one. So is a box every point of which reads exactly nought. Its node is
+/// square to the run from the start, so it is the start or the place the start
+/// was rounded off, and [`the_start_is_a_rounding_off`] has already declined
+/// it. The lid of `a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model`
+/// has such a node on its rim, exactly the start; read first there, the fuse
+/// goes on to a half disc leaning `2e-12` off the lid, whose arc and chord run
+/// along one stretch of its crossing with the lid, and panics. Two nodes whose
+/// boxes share a point are left as they were too.
 ///
 /// Two bars of radius `1/4`, the second starting where their axes meet and
-/// turned 120° about `z`, are the shape (Q1900). The second bar's near cap
-/// crosses the first bar's wall in an ellipse walked from `(11, −3.25, 0.25)`,
-/// exactly where the two pipes touch, and the node there is `c − r·n̂`, a box
-/// `2e-16` wide round it, as the second pipe's direction is stored `2.2e-16`
-/// off `z = 0`. The node where they touch across the ellipse is clear of it,
-/// and the two were refused on the order until this arm.
+/// turned 120° about `z`, are the shape (Q1900, Q1907). The second bar's near
+/// cap crosses the first bar's wall in an ellipse walked from `(11, −3.25,
+/// 0.25)`, exactly where the two pipes touch, and the node there is `c − r·n̂`,
+/// a box under `5e-16` wide holding the start, as the second pipe's direction
+/// is stored `2.2e-16` off `z = 0`. Read along the run, the step to it is
+/// `[0, 5.6e-17]`. The node where they touch across the ellipse is clear of
+/// it, and the two were refused on the order until this arm.
 ///
 /// **Every arm but the sweep answers as wide as a box**, which is a length:
 /// [`one_point_if_both_are_exact`], [`the_one_the_start_is`] and the
@@ -8226,10 +8242,17 @@ fn round_a_closed_crossing_and_what_it_measures(
         return Ok((read, Measures::Volume));
     }
     if matches!(decided, Decision::Undecidable { .. }) && !boxes_overlap(one, other) {
+        let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
+        let start = from.enclosure();
+        let a_hair_ahead = |place: PredicatePoint| {
+            let step = [0, 1, 2].map(|axis| place.enclosure()[axis] - start[axis]);
+            let along = dot_of(step, runs);
+            along.lo() >= 0.0 && along.hi() > 0.0
+        };
         match (boxes_overlap(one, from), boxes_overlap(other, from)) {
-            (true, false) => return Ok((Decision::Pos, Measures::Length)),
-            (false, true) => return Ok((Decision::Neg, Measures::Length)),
-            (true, true) | (false, false) => {}
+            (true, false) if a_hair_ahead(one) => return Ok((Decision::Pos, Measures::Length)),
+            (false, true) if a_hair_ahead(other) => return Ok((Decision::Neg, Measures::Length)),
+            (true, false) | (false, true) | (true, true) | (false, false) => {}
         }
     }
     // Compared rather than matched: only a proved zero is re-read, and every
