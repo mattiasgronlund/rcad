@@ -327,6 +327,50 @@ fn past_the_fin_the_certified_union_and_the_fin_alone_are_still_refused() {
     }
 }
 
+/// A bar `2⁻⁴⁰` wider than `1`, less the tilted block, reaches the ladder in
+/// `validate.rs` on `main` without the walk fix: the ellipse's start is
+/// `−17 − 2⁻⁴⁰`, off the block's side, so the walk is not refused. The fin it
+/// leaves outside `x = −17` is `2⁻⁴⁰` thick and `2.7e-6` across, and its
+/// coarsest mesh folds `drawn 4, used 4` on the side from
+/// `(−17, −1.3486991523489155e-6, 0)` to `(−17, 1.3486991523489157e-6, 2.558)`:
+/// the bar's wall and the block's flat strip of side between those two corners
+/// both draw it (Q1869).
+///
+/// The strip's edges are all straight, so its mesh is the same at every
+/// deflection, and the wall would only stop drawing that side once a mesh
+/// charges it `2.7e-6² / 3 ≈ 2.4e-12`, under the `3.8e-12` no mesh of this solid
+/// is cut finer than. Before Q1869 the ladder still asked mesh after mesh: on
+/// `main` at `a14d3018` both policies were still walking it after 465 s, the
+/// fold the same at every rung from 5 down to `1.2e-3` and 24672 points. This
+/// bounds the wait well under that, rather than timing it.
+#[test]
+fn a_fold_across_a_fin_too_narrow_for_any_mesh_to_split_is_refused_without_the_ladder() {
+    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        let (answer, answered) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut model, bar, block) = the_block_and_a_bar_of_radius(1.0 + f64::powi(2.0, -40));
+            let fused = model.fuse(
+                &[bar],
+                &[block],
+                Rule::Difference,
+                &policy,
+                &mut ProvenanceLog::new(),
+            );
+            let folded = matches!(
+                fused,
+                Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 })
+            );
+            answer
+                .send((folded, format!("{fused:?}")))
+                .expect("the test waits for the answer");
+        });
+        let (folded, fused) = answered
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .unwrap_or_else(|_| panic!("{policy:?}: still meshing after 30 s"));
+        assert!(folded, "{policy:?}: {fused}");
+    }
+}
+
 fn fuse_the_bar_and_an_upright_block(
     model: &mut Model,
     [bar, block]: [SolidKey; 2],
@@ -494,10 +538,14 @@ fn dot(one: [Interval; 3], other: [Interval; 3]) -> Interval {
 }
 
 fn the_bar_and_the_block() -> (Model, SolidKey, SolidKey) {
+    the_block_and_a_bar_of_radius(1.0 + f64::powi(2.0, -51))
+}
+
+fn the_block_and_a_bar_of_radius(radius: f64) -> (Model, SolidKey, SolidKey) {
     let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
     let bar = model
         .add_round_bar(
-            1.0 + f64::powi(2.0, -51),
+            radius,
             10.0,
             &Isometry::translation(Vector::new(-16.0, 0.0, 0.0)).expect("a finite shift"),
         )
