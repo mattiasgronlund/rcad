@@ -1600,7 +1600,10 @@ impl<'f> Arrangement<'f> {
     /// and the corner
     /// ([`BakedCorner::is_on_by_construction`](super::bake::BakedCorner::is_on_by_construction)).
     /// Only a cut has to be *asked*, and asking is
-    /// [`Arrangement::passes_through`].
+    /// [`Arrangement::passes_through`]. One cut is not asked: a pipe of the
+    /// same radius touching a cap's circle at the corner, where the cap holds
+    /// the start of its axis and the other axis runs through that start
+    /// ([`Arrangement::a_corner_on_a_cap_circle_is_where_two_pipes_touch`]).
     fn place_the_corners(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         for wire in 0..self.face.wires.len() {
             let mut corners = Vec::new();
@@ -1670,6 +1673,32 @@ impl<'f> Arrangement<'f> {
     /// ([`BakedFace::caps_through_the_start_of_their_axis`]), and is one of the
     /// two places `c ± r·n̂` where that pipe touches `partner`, a pipe of the
     /// same radius whose axis runs exactly through the start `c`.
+    ///
+    /// **Asked, it cannot be told.** Two bars of radius `1/4`, the second
+    /// starting where the axes meet and turned 50° about `z`, put the bottom
+    /// of the second bar's seam, `(r, 0, 0)` as stored, at `c − r·ẑ`. That is
+    /// one of the two places, and its box, `3.1e−13` either way, straddles the
+    /// first pipe, so [`Arrangement::passes_through`] refused `side of
+    /// cylinder` on the near cap and on the wall (Q1815).
+    ///
+    /// **Sound because the corner is only a sample of the circle.** With the
+    /// cap and its own pipe the only surfaces round it, the corner is a
+    /// cached sample of the circle the two share (§17.1): the cap and the
+    /// wall are bounded by the whole circle and the seam is no boundary, so
+    /// taking the corner as another point of the circle, a rounding from
+    /// where it was written, moves no point of the solid. That is
+    /// [`BakedCorner::is_on_by_construction`]'s argument for the seam plane
+    /// (§294.9). The circle meets `partner` at `c ± r·n̂` and nowhere else
+    /// ([`Arrangement::place_where_a_cap_meets_two_halves`] says why). A place
+    /// whose box lies inside the corner's box is within the corner's rounding,
+    /// so the corner is taken as it. Where both lie inside, as for a pipe
+    /// narrower than the rounding, nothing says which one the corner is, and
+    /// it is asked as before.
+    ///
+    /// **The facts are the ones the walls are named by.** The cap through `c`
+    /// is the fact as stored, and the start on the other axis is asked exactly
+    /// of the moved numbers, as in
+    /// [`Arrangement::place_where_a_cap_meets_two_halves`].
     fn a_corner_on_a_cap_circle_is_where_two_pipes_touch(
         &self,
         corner: &BakedCorner,
