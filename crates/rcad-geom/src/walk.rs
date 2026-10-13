@@ -476,12 +476,28 @@ pub fn walk(
     if let Some(arc) = AnArcRoundACone::of(pair, run) {
         return arc.walk(&conic, deviation, deflection, policy, log);
     }
+    if let Some(arc) = AnArcAlongAPipe::of(pair, run) {
+        return arc.walk(&conic, run, deviation, deflection, policy, log);
+    }
+    walk_round_the_conic(&conic, run, deviation, deflection, policy, log)
+}
+
+/// The run's points round the conic it lies on, from the stretch its
+/// half-spaces pick.
+fn walk_round_the_conic(
+    conic: &Conic,
+    run: &NamedRun,
+    deviation: f64,
+    deflection: Deflection,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<PointsAlongACrossing> {
     let Some(room) = room_left_over(deflection, deviation, policy, log)? else {
         return Ok(nothing_walked(deviation));
     };
 
     let stretch = conic.the_stretch_this_run_covers(run, deviation, policy, log)?;
-    points_round_a_conic(&conic, stretch, deviation, room)
+    points_round_a_conic(conic, stretch, deviation, room)
 }
 
 /// Points along `stretch` of a conic, `room` apart from the curve at most.
