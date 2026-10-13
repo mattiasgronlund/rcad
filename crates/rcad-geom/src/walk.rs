@@ -95,11 +95,12 @@ use crate::{
 /// **An error in the angle does not come into it.** Getting `angle` wrong slides
 /// the point *along* the curve, and this is how far it can sit *off* it.
 ///
-/// **An arc of a plane's ellipse that [`walk`] places round a cone is charged
-/// this too**, against the arc's own size and not the ellipse's. Its chain is a
-/// different one, derived at `AnArcRoundACone`, and comes to under a tenth of
-/// this; one constant for both is what lets `rcad-topo`'s floor under a mesh,
-/// a multiple of it, hold whichever way a run was walked.
+/// **An arc of a plane's ellipse that [`walk`] places round a cone or up a
+/// pipe is charged this too**, against the arc's own size and not the
+/// ellipse's. Their chains are different ones, derived at `AnArcRoundACone`
+/// and `AnArcAlongAPipe`, and each comes to under a seventh of this; one
+/// constant for all three is what lets `rcad-topo`'s floor under a mesh, a
+/// multiple of it, hold whichever way a run was walked.
 ///
 /// `every_point_along_a_crossing_is_on_both_surfaces.rs` measures the worst a
 /// search can find and prints the figure.
@@ -236,9 +237,10 @@ pub struct PointsAlongACrossing {
 }
 
 impl PointsAlongACrossing {
-    /// How many times further up a cone's axis the ellipse a plane cuts it in
-    /// has to reach than a run's two ends do before [`walk`] places that run's
-    /// points round the cone and not round the ellipse.
+    /// How many times further up a cone's or a pipe's axis the ellipse a plane
+    /// cuts it in has to reach than a run's two ends do before [`walk`] places
+    /// that run's points round the cone or up the pipe, and not round the
+    /// ellipse.
     ///
     /// **Either way is a bound, and this only says which bound is published.**
     /// Round the ellipse, a point rounds against the ellipse's own centre and
@@ -250,21 +252,35 @@ impl PointsAlongACrossing {
     /// plane cuts at an ordinary lean reaches a few times further than its arcs
     /// and keeps the points it always had: a million is far from both.
     ///
+    /// **Up a pipe the reach is `(|s₀| + r·m) / |k|`**, with `k` how far the
+    /// plane's normal leans along the axis, `m` the length of the rest of it,
+    /// `s₀` the plane's signed distance to the axis origin and `r` the radius,
+    /// and it is held against this times the largest of the ends' two heights
+    /// up the axis and `r`. A plane a rounding off parallel to the axis of a
+    /// pipe of radius `2` cuts an ellipse `1.8e16` long whose arc between two
+    /// walls is `1.23` long, and placed from the ellipse's centre its middle
+    /// came out `2` off (`an_arc_of_a_plane_cut_nearly_along_a_pipes_axis.rs`).
+    ///
     /// Public because `rcad-topo`'s mesher has to charge such a run by its
     /// ends where this walks it by them, and it does so past **twice** this,
-    /// so that the two never disagree about a run on the line between them.
-    /// Which of the two arcs the run is, the mesher asks
+    /// so that the two never disagree about a run on the line between them;
+    /// `rcad-topo`'s fuse names an arc up a pipe across its chord by the pipe
+    /// past **half** this, so that every arc walked up the pipe was named that
+    /// way. Which of the two arcs the run is, the mesher asks
     /// [`PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of`].
     pub const WALKED_ROUND_THE_CONE_PAST: f64 = 1_048_576.0;
 
-    /// Whether [`walk`] places `run`'s points round a cone from its two ends,
-    /// so that no point of it is further from the apex than one of them.
+    /// Whether [`walk`] places `run`'s points round a cone or up a pipe from
+    /// its two ends, so that no point of it is further out than one of them:
+    /// from the apex round a cone, and up the axis from where it is measured
+    /// on a pipe.
     ///
-    /// **That is the arc that misses the ellipse's far end, and only that
-    /// one.** Past [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`], the
-    /// walk asks the run's half-spaces which of the two arcs between its ends
-    /// they pick; the other arc is walked round the ellipse and charged at the
-    /// ellipse's size, since it runs out to the far end. A mesher that charged
+    /// **That is the arc that misses the ellipse's far end round a cone, and
+    /// the one that misses both its tips up a pipe, and only those.** Past
+    /// [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`], the walk asks the
+    /// run's half-spaces which of the two arcs between its ends they pick; the
+    /// other arc is walked round the ellipse and charged at the ellipse's size,
+    /// since it runs out to the far end or the tips. A mesher that charged
     /// that arc by its ends would hand the walk a deflection under what it can
     /// place a point to: a face on a cone of slope a half, cut by a lid `2⁻²⁴`
     /// off a ruling and a wall square to it, whose one curved edge runs from
@@ -274,9 +290,12 @@ impl PointsAlongACrossing {
     ///
     /// **Asked under a certified policy, and `false` whenever that does not
     /// settle it**: a run the walk could not name, a half-space it could not
-    /// decide, a crossing that is not a plane's long ellipse round a cone. So a
-    /// mesher that charges by the ends only on `true` can charge more than the
-    /// walk needs, and never less.
+    /// decide, a crossing that is not a plane's long ellipse round a cone or a
+    /// pipe. So a mesher that charges by the ends only on `true` can charge
+    /// more than the walk needs, and never less.
+    ///
+    /// The name is the cone's because the cone came first; the pipe's arc is
+    /// asked here too so that the mesher has one question for both.
     ///
     /// `along` is the surfaces of the two faces either side, as [`walk`] takes
     /// them, and `run` and `along` are in one frame.
@@ -286,11 +305,20 @@ impl PointsAlongACrossing {
         along: [&Surface; 2],
     ) -> bool {
         let pair = which_two_surfaces_a_run_is_between(run.run(), along);
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        if let Some(arc) = AnArcAlongAPipe::of(pair, run) {
+            return matches!(
+                what_a_run_between_these_two_lies_on(pair, run, &policy, &mut log),
+                Ok(WhatARunLiesOn::Conic(_))
+            ) && matches!(
+                arc.which_arc(&policy, &mut log),
+                Ok(WhichArcAlongAPipe::Near)
+            );
+        }
         let Some(arc) = AnArcRoundACone::of(pair, run) else {
             return false;
         };
-        let policy = Policy::certified();
-        let mut log = ProvenanceLog::new();
         let Ok(WhatARunLiesOn::Conic(conic)) =
             what_a_run_between_these_two_lies_on(pair, run, &policy, &mut log)
         else {
@@ -426,6 +454,12 @@ impl PointsAlongACrossing {
 /// cone's axis than the run's two ends do, the arc that misses the ellipse's far
 /// end is placed along the cone's rulings instead, and charged and counted by
 /// its own size and bend. `AnArcRoundACone` says how.
+///
+/// **Up a pipe the same is done by height.** A plane a rounding off parallel
+/// to a pipe's axis cuts it in an ellipse whose centre can be `6.75e15` up,
+/// and past the same multiple of the ends' heights and the radius the arc that
+/// misses both of its tips is placed up the axis instead. `AnArcAlongAPipe`
+/// says how.
 ///
 /// # A run with no ends keeps the two points at the ends of what was walked
 ///
@@ -1894,8 +1928,9 @@ fn walk_an_endless_bend(
 /// [`FEWEST_STEPS_THAT_SHOW_A_BEND`], whose `1 − 1/n²` is an equality for this
 /// shape rather than a limit.
 ///
-/// **An arc walked round a cone is counted here too**, with a bound on `‖p″‖`
-/// in place of its value; `AnArcRoundACone` derives the bound.
+/// **An arc walked round a cone or up a pipe is counted here too**, with a
+/// bound on `‖p″‖` in place of its value; `AnArcRoundACone` and
+/// `AnArcAlongAPipe` derive the bounds.
 ///
 /// # Errors
 ///
@@ -3251,9 +3286,8 @@ impl AnArcRoundACone {
 /// A plane a rounding off parallel to a pipe's axis cuts it in an ellipse that
 /// reaches `1.6e16` up the axis, while an arc of it between two walls is `1.2`
 /// long. [`Conic::at`] places a point of that arc from the ellipse's centre,
-/// `6.75e15` up, so every point is the difference of two numbers that size, and
-/// the half-space that picks the arc, built through its chord, is a rounding of
-/// those points and cannot tell the two arcs apart (Q1882).
+/// `6.75e15` up, so every point is the difference of two numbers that size and
+/// the arc's middle came out `2` off it (Q1882).
 ///
 /// Up the pipe nothing is that big. Write `ŵ` for the axis direction scaled to
 /// length one, `k = n·ŵ` for how far the plane's normal leans along it, `m` for
@@ -3314,12 +3348,15 @@ impl AnArcRoundACone {
 ///
 /// The other arc runs out to both tips, and its points are out where the
 /// ellipse's own numbers are. So it is walked round the ellipse as before, by
-/// [`Conic::the_stretch_this_run_covers`]. Which of the two arcs a run is, is
-/// asked at both arcs' middle height, one on each side of the pipe, and both
-/// placed up the pipe. **A far arc cannot be named by a half-space through its
-/// chord**, which is what `rcad-topo` builds: the near arc lies on that
-/// half-space's plane to within a rounding, so both arcs hold and the walk
-/// refuses it, as it did before.
+/// [`Conic::the_stretch_this_run_covers`], and `rcad-topo`'s mesher asks which
+/// of the two a run is through
+/// [`PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of`] before
+/// it charges a face by the ends. Which of the two arcs a run is, is asked at
+/// both arcs' middle height, one on each side of the pipe, and both placed up
+/// the pipe. **A far arc cannot be named by a half-space through its chord**,
+/// which is what `rcad-topo` builds: the near arc lies on that half-space's
+/// plane to within a rounding, so both arcs hold and the walk refuses it, as
+/// it did before.
 #[derive(Clone, Debug)]
 struct AnArcAlongAPipe {
     flat: Plane,
