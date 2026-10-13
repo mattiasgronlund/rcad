@@ -144,7 +144,9 @@ pub(crate) struct Marched {
 /// the whole crossing and then the first question decides nothing
 /// ([`SAGITTA_MAY_TAKE_OF_ITS_CHORD`]). **How far it turns**: no step may turn
 /// the tangent by more than a quarter turn, because past a half turn a step
-/// cannot be told from one the other way.
+/// cannot be told from one the other way. And a trial the settling pulled back
+/// from far off has to land ahead of where it set out, not behind it
+/// ([`one_step`]).
 ///
 /// A step whose sagitta is comfortably inside the budget grows for the next one,
 /// so a large gentle loop does not get walked at the step a tight corner needed.
@@ -484,10 +486,41 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 }
 
 /// One step along the crossing, shortened until the straight piece it leaves
-/// behind stays inside `room`, stays straighter than it is long, and turns no
-/// more than a quarter turn.
+/// behind stays inside `room`, stays straighter than it is long, turns no more
+/// than a quarter turn, and, on a trial that came back short, goes forward.
 ///
 /// Returns where the step landed and how long it turned out to be.
+///
+/// # A trial that came back short behind `here` is not kept
+///
+/// A trial that covered less than half of its ask was pulled onto the curve by
+/// the settling from a long way off, and the settling can land it anywhere on
+/// the loop, behind `here` as well as ahead. Kept, such a point is out of
+/// order: every step after it goes forward, so it belongs near the end of the
+/// walk, not at its start. So a trial that came back short and whose chord
+/// does not go along `tangent` is shortened, from its chord as any other trial
+/// that came back short is, since how far away the loop was found is still
+/// the one thing it measured.
+///
+/// Measured, on a pipe of radius 1 along `x` reaching out of the side of one
+/// of radius 4 up `z`, walked with the `1.7e307` of room a fuse of the two
+/// asked: the first trial, `1.7e307`, settled onto the loop `1.13` away and
+/// `0.87` behind the seed along the tangent, and was kept. The thin pipe's
+/// outline on its own wall then crossed itself, and the mesh refused it
+/// (Q1889, `a_trial_that_settles_behind_its_start_is_shortened_and_not_kept`).
+/// Now the next ask is half that chord, `0.56`, which lands ahead, and the walk
+/// goes round one way.
+///
+/// **Only a trial that came back short is asked.** Asked of every trial, the
+/// same rule turned away 76 715 trials over `rcad-geom`'s tests that had
+/// covered half their ask or more, nearly all on crossings a few last bits from
+/// tangency, where a step of `1e-15` settles `2e-8` away and the side it lands
+/// on is the settling's own noise; shortening those cost the band one of its
+/// 79 runs and the quartic headline one of its 303, in
+/// `every_point_along_a_crossing_is_on_both_surfaces.rs`. Asked only of a
+/// trial that came back short, it turned away 96 trials, every one in a coarse
+/// walk of `1.7e307` or `2.2e307` of room and asked `2.2e4` or more, and every
+/// share, run count and refusal rate `rcad-geom`'s tests print is what it was.
 ///
 /// # What a rejected trial is retried at
 ///
@@ -598,10 +631,13 @@ fn one_step(
                     continue;
                 }
             };
+        let came_back_short = chord * 2.0 < step;
+        let came_back_behind = came_back_short && (next - here).dot(tangent) <= 0.0;
         if sagitta <= room * SAGITTA_MAY_TAKE
             && sagitta <= chord * SAGITTA_MAY_TAKE_OF_ITS_CHORD
             && turned >= 0.0
             && !settled_back
+            && !came_back_behind
         {
             return Ok((next, chord));
         }
@@ -617,7 +653,7 @@ fn one_step(
         // under.
         step = if settled_back {
             shortened_by_its_exponent(step)
-        } else if chord * 2.0 < step {
+        } else if came_back_short {
             chord * 0.5
         } else {
             step * 0.5
@@ -1055,14 +1091,16 @@ mod tests {
     /// `x = 0, z = 1`. Seen down that line, the loop goes once round it, and
     /// the angle about it only ever grows the one way along the loop.
     ///
-    /// This is the frame the mesh walks a whole thin bar out of a fat bar's
-    /// side in, and the seed and the room are the ones its coarse walk asks:
-    /// `(√9.75, 0, 1)` and half the budget. The walk leaves the seed along
+    /// This is the frame a fuse of a whole thin bar out of a fat bar's side
+    /// walks the two in, and the seed and the room are the ones it asks:
+    /// `(3.1225, 0, 1)` and `1.7e307`. The walk leaves the seed along
     /// `+z`, and it used to keep a first trial that settled onto the loop at
     /// `z = 0.13`, behind the seed. Every step after it went forward, so that
     /// first point belonged between the walk's last two, and the thin bar's
     /// outline on its own wall crossed itself. The mesh refused it as a wire
-    /// that will not lie flat on its face (Q1889).
+    /// that will not lie flat on its face (Q1889). Now that trial is shortened
+    /// to half its chord, the first point kept is at `z = 1.46`, ahead of the
+    /// seed, and all ten points go round one way.
     #[test]
     fn a_trial_that_settles_behind_its_start_is_shortened_and_not_kept() {
         let thin = a_pipe([1.0, 0.0, 0.0], [-10.0, 1.0, 1.0], 1.0);
