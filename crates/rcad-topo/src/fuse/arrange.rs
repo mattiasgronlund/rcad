@@ -2269,26 +2269,33 @@ impl<'f> Arrangement<'f> {
         second: usize,
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
-        let is_half = |crossing: usize| self.crossings[crossing].half_an_ellipse.is_some();
-        let (flat, pipes) = match (
-            self.surface,
-            self.crossings[first].partner,
-            self.crossings[second].partner,
-        ) {
-            (Surface::Cylinder(face), Surface::Plane(cap), Surface::Cylinder(other))
-                if is_half(second) =>
-            {
-                (cap, [face, other])
+        let (flat, pipes) = if let Surface::Plane(cap) = self.surface {
+            let (Surface::Cylinder(one), Surface::Cylinder(other)) = (
+                self.crossings[first].partner,
+                self.crossings[second].partner,
+            ) else {
+                return Ok(false);
+            };
+            (cap, [one, other])
+        } else {
+            let Surface::Cylinder(face) = self.surface else {
+                return Ok(false);
+            };
+            let (cap_at, half_at) = if self.crossings[first].partner.as_plane().is_some() {
+                (first, second)
+            } else {
+                (second, first)
+            };
+            let (Surface::Plane(cap), Surface::Cylinder(other)) = (
+                self.crossings[cap_at].partner,
+                self.crossings[half_at].partner,
+            ) else {
+                return Ok(false);
+            };
+            if self.crossings[half_at].half_an_ellipse.is_none() {
+                return Ok(false);
             }
-            (Surface::Cylinder(face), Surface::Cylinder(other), Surface::Plane(cap))
-                if is_half(first) =>
-            {
-                (cap, [face, other])
-            }
-            (Surface::Plane(cap), Surface::Cylinder(one), Surface::Cylinder(other)) => {
-                (cap, [one, other])
-            }
-            _ => return Ok(false),
+            (cap, [face, other])
         };
         let [one, other] = pipes.map(Surface::Cylinder);
         if pipes[0].radius() != pipes[1].radius() || one_surface(&one, &other) {
