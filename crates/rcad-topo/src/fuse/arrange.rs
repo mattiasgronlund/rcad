@@ -8161,12 +8161,14 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// same order round the loop, as long as no node lies between it and the start.
 /// The stretch of the crossing from the start to it runs between two points of
 /// its box, bent off the straight line between them by about `κd²/8`, for `κ`
-/// how sharply the crossing turns and `d` the box's width: `2e-32` at the shape
-/// below, where the nearest side another box clear of this one can have is an
-/// ulp of `0.25`, `5.5e-17`, away. A box within that bend of a side, which
-/// takes a side within about `1e-15` of nought at that size, has not been
-/// shown to be clear of the stretch. Two nodes whose boxes share a point are
-/// left as they were.
+/// how sharply the crossing turns and `d` the box's width. At the shape below
+/// the start is an end of the ellipse's short axis, where `κ` is at most `4`,
+/// and `d` is `2e-16`, so the bend is at most `2e-32`, while a box clear of
+/// this one is at least an ulp of `0.25`, `5.5e-17`, away from it. Two floats
+/// are as close as that bend only within about `1e-16` of nought, so only a
+/// box with a side that near nought could sit inside the bend, and such a box
+/// has not been shown clear of the stretch. Two nodes whose boxes share a point
+/// are left as they were.
 ///
 /// Two bars of radius `1/4`, the second starting where their axes meet and
 /// turned 120° about `z`, are the shape (Q1900). The second bar's near cap
