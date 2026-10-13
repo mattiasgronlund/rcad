@@ -102,6 +102,12 @@ use super::{
 /// Work out the result's corners, edges, faces and shells, and ask the range
 /// of the answer they make.
 ///
+/// `names_of_one_point` are the points the pieces are joined at as one. The
+/// fuse passes [`Scratch::names_of_one_point`] first, and only when that
+/// answer is refused passes them again with the ends of edges
+/// [`fold_each_end_of_an_edge_one_plane_runs_beside_a_rounding_from_it`]
+/// takes (`Model::fused_under`, `docs/decisions.md` §417.9).
+///
 /// **The range is asked here, once, of the corners and edges as they are once
 /// the pieces are joined and any shell a tolerant policy takes as flat is left
 /// out, and before the edges are named.** `inputs_reach` is
@@ -6393,7 +6399,18 @@ fn how_far_apart_two_boxes_may_be(one: PredicatePoint, other: PredicatePoint) ->
 
 /// Under a tolerant policy, the two meets where one plane cuts the two faces
 /// of an edge it runs beside a rounding from it, at a point that ends the
-/// edge, as one point with that end (`docs/decisions.md` §417).
+/// edge, as one point with that end (`docs/decisions.md` §417.9).
+///
+/// **Taken only for an answer refused without them.** The fuse keeps what
+/// this returns apart from [`Scratch::names_of_one_point`], in
+/// [`Scratch::ends_of_edges`] with `log` their own, puts the answer together
+/// without them first, and again with them only when that is refused
+/// (`Model::fused_under`). Only the answer that uses them gets their records.
+/// Taken in every answer, they pinched the block less the tipped cube along
+/// the edge into one refused as not a solid. Taken first, and dropped only
+/// when that answer was refused, they gave the union of two skewed combs
+/// touching along one line two records beside the one its answer rests on.
+/// `select` never reads them: read there, they had that union refused.
 ///
 /// **An edge lying along a face.** A cube tipped onto one of its edges, with
 /// that edge along another cube's floor, is the case. Its bottom and its side

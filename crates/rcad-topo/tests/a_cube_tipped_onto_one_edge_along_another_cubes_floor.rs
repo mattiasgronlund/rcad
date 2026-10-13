@@ -48,6 +48,19 @@
 //! within the policy's wobble of one of its own planes
 //! (`leave_out_each_shell_thinner_than_the_wobble` in `fuse/assemble.rs`).
 //!
+//! **The union and the intersection were refused**, under a tolerant policy,
+//! either way round, at the four tilts of
+//! [`TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT`], and the union at
+//! `t = 0.142`, as a face whose outline winds against its normal (queue rows
+//! Q1686 and Q1711). There the cube's bottom and its side meet in an edge
+//! parallel to the floor and a rounding below it, so the floor cuts both
+//! faces in lines a rounding either side of the edge, and the strip between
+//! them winds no way. A tolerant fuse refused otherwise now takes the two
+//! meets where the floor cuts those lines at each end of the edge as that
+//! end, and the strip is one edge walked out and back
+//! (`fold_each_end_of_an_edge_one_plane_runs_beside_a_rounding_from_it` in
+//! `fuse/assemble.rs`, `docs/decisions.md` §417.9).
+//!
 //! What the two cubes share is the cube's square cross-section, clipped to
 //! the block, along the five of its ten that lie over the block:
 //! [`what_the_two_share`] works it out from the tilt.
@@ -100,7 +113,8 @@ const TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT: [[f64; 4]; 4] = [
 /// give them. The tipped cube's bottom and its side `y = 5` meet in an edge
 /// parallel to the floor, `3.7e−18` below it at `t = 0.024`, so the floor
 /// cuts the cube in a strip `7.8e−17` wide whose corners all round onto
-/// `y = 5`, and the strip, a face of the intersection, winds `Zero`.
+/// `y = 5`, and the strip, a face of the intersection, winds `Zero`. Both
+/// answer since Q1711, with the floor taken through both ends of the edge.
 const TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT: [[f64; 4]; 4] = [
     [0.0, 0.0, 0.023_997_696_066_354_29, 0.999_712_013_823_734_5],
     [0.0, 0.0, 0.095_354_902_203_049_7, 0.995_443_339_736_545_1],
