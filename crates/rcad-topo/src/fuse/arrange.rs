@@ -2144,15 +2144,17 @@ impl<'f> Arrangement<'f> {
     /// through it.
     ///
     /// **The places are worked out here and not by [`meet_of_three_surfaces`]**,
-    /// because the picking surfaces are half-spaces, and a [`Plane`] built from
-    /// one is scaled to length one, which rounds wherever the pipe's direction
-    /// is slanted, and puts the solved place off the half. `c` is the point
-    /// of the lesser pipe's axis on the picking surface that leans towards that
-    /// axis, which passes exactly through `c` (`intersect` proves that before
-    /// it names the halves) and is not along the axis, since it leans towards
-    /// it. `n̂` is along the two pickers' normals crossed, since both lie
-    /// exactly in the flat of the two axes. The enclosure is then of the true
-    /// places.
+    /// because the picking surfaces are flat pickers and not planes, and a
+    /// [`Plane`] built from one is scaled to length one, which rounds wherever
+    /// the pipe's direction is slanted, and puts the solved place off the half.
+    /// `c` is the point of the lesser pipe's axis on the picking surface that
+    /// leans towards that axis, which passes exactly through `c` (`intersect`
+    /// proves that before it names the halves) and is not along the axis, since
+    /// it leans towards it. A picker that is a half-space gives `c` as where the
+    /// axis crosses it, in intervals; one that holds its point holds `c` itself
+    /// (`docs/decisions.md` §443.5). `n̂` is along the two pickers' facings
+    /// crossed, since both lie exactly in the flat of the two axes. The
+    /// enclosure is then of the true places.
     ///
     /// **Each node is named by `[a, b, b]`** for the lesser pipe `a` and the
     /// greater `b`, by [`name_of_surface_bits`], so that the face on either
@@ -2168,7 +2170,7 @@ impl<'f> Arrangement<'f> {
     /// # Panics
     ///
     /// If a picker of either half rules a place out. Both picking surfaces
-    /// pass exactly through `c`, and `n̂` is square to both their normals, so
+    /// pass exactly through `c`, and `n̂` is square to both their facings, so
     /// both places are on both; a `Neg` there is that broken.
     fn place_where_two_halves_meet(
         &mut self,
@@ -2184,10 +2186,8 @@ impl<'f> Arrangement<'f> {
         else {
             unreachable!("a half ellipse is a crossing of two pipes")
         };
-        let [Picker::InFrontOf(one), Picker::InFrontOf(two)] =
-            self.crossings[first].picked_by()[..]
-        else {
-            unreachable!("a half ellipse is picked out by two half-spaces")
+        let [one, two] = self.crossings[first].picked_by()[..] else {
+            unreachable!("a half ellipse is picked out by two flat surfaces")
         };
         let on_the_face = usize::from(half.forward_runs_with_the_bend);
         let pickers = [one, two];
@@ -2198,8 +2198,14 @@ impl<'f> Arrangement<'f> {
         pipes.sort_by_key(|(pipe, _)| name_of_surface_bits(&Surface::Cylinder(*pipe)));
         let [(lesser, along_the_lesser), (greater, _)] = pipes;
 
-        let middle = where_an_axis_crosses_a_flat_surface(&lesser, &along_the_lesser);
-        let [one, two] = pickers.map(|picker| picker.normal().components().map(Interval::exactly));
+        let middle = where_an_axis_crosses_a_flat_picker(&lesser, &along_the_lesser);
+        let [one, two] = pickers.map(|picker| {
+            picker
+                .facing_of_a_flat()
+                .expect("a half ellipse is picked out by two flat surfaces")
+                .components()
+                .map(Interval::exactly)
+        });
         let places = where_two_pipes_touch(middle, cross_of_intervals(one, two), lesser.radius());
         let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
         for place in places {
@@ -2402,7 +2408,10 @@ impl<'f> Arrangement<'f> {
     /// picker leaning towards it**, and that is exactly `c` whichever way the
     /// picker faces: `intersect` proves `c` on the axis and the surface
     /// through `c`, both exactly, and a picker leaning towards the axis reads
-    /// more than nought against it, so the axis crosses the surface once.
+    /// more than nought against it, so the axis crosses the surface once. A
+    /// picker that holds its point, which `intersect` builds where no
+    /// half-space written in `f64` passes exactly through `c`, holds `c`
+    /// itself, and that is taken as it is (`docs/decisions.md` §443.5).
     ///
     /// **Without it the four halves were one edge.** Every half runs between
     /// the same two nodes ([`Arrangement::place_where_two_halves_meet`]) and
@@ -2440,10 +2449,8 @@ impl<'f> Arrangement<'f> {
             else {
                 unreachable!("a half ellipse is a crossing of two pipes")
             };
-            let [Picker::InFrontOf(one), Picker::InFrontOf(two)] =
-                self.crossings[crossing].picked_by()[..]
-            else {
-                unreachable!("a half ellipse is picked out by two half-spaces")
+            let [one, two] = self.crossings[crossing].picked_by()[..] else {
+                unreachable!("a half ellipse is picked out by two flat surfaces")
             };
             let on_the_face = usize::from(half.forward_runs_with_the_bend);
             let pickers = [one, two];
@@ -2461,7 +2468,7 @@ impl<'f> Arrangement<'f> {
                 (greater, _, along_the_greater),
             ] = pipes;
 
-            let middle = where_an_axis_crosses_a_flat_surface(&lesser, &picking_the_lesser);
+            let middle = where_an_axis_crosses_a_flat_picker(&lesser, &picking_the_lesser);
             let [one, two] = half
                 .facing
                 .map(|direction| direction.map(Interval::exactly));
@@ -4820,17 +4827,12 @@ impl<'f> Arrangement<'f> {
         {
             return false;
         }
-        let (
-            [Picker::InFrontOf(my_first), Picker::InFrontOf(my_second)],
-            [
-                Picker::InFrontOf(their_first),
-                Picker::InFrontOf(their_second),
-            ],
-        ) = (mine.picked_by(), theirs.picked_by())
+        let ([my_first, my_second], [their_first, their_second]) =
+            (mine.picked_by(), theirs.picked_by())
         else {
             return false;
         };
-        *their_first == my_first.reversed() && *their_second == my_second.reversed()
+        Some(*their_first) == my_first.reversed() && Some(*their_second) == my_second.reversed()
     }
 
     /// Whether a crossing's way out of `node` is a line it carries, rather than
@@ -9063,7 +9065,7 @@ fn how_a_crossing_runs(
 /// it picked out by one half-space only there: one loop is the whole of the
 /// crossing, two pipes running the same way cross in lines, and two of one
 /// width on axes that meet cross in four halves of two ellipses, each picked
-/// out by two half-spaces ([`a_half_of_an_ellipse`]). Each of those two loops
+/// out by two flat surfaces ([`a_half_of_an_ellipse`]). Each of those two loops
 /// runs once round the thin pipe's axis, and
 /// [`which_comes_first_round_a_crossing`] orders it round that axis, asking
 /// again, exactly, whether the fat pipe swallows the thin one before it does
@@ -9093,6 +9095,12 @@ fn one_of_two_loops_round_a_thin_pipe(
 /// in. The facings are not the axes in general: bars at 50 degrees through
 /// `(11, 0, 0)` are picked by `(0, 1, 0)` and `(1, 0, 0)` (Q1646).
 ///
+/// Each surface is a half-space, or, where no half-space written in `f64`
+/// passes exactly through that point, a surface that holds the point itself,
+/// as for bars on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)`. Only
+/// a picker's facing is read here, and both kinds hold it exactly as
+/// `intersect` asked it (`docs/decisions.md` §443.5).
+///
 /// # Which pipe a picker leans towards
 ///
 /// A picker `n = aê + bû` in that flat, for unit `ê` and `û` at an angle `θ`
@@ -9108,7 +9116,7 @@ fn one_of_two_loops_round_a_thin_pipe(
 /// anything else here is that broken.
 ///
 /// So `facing` is `s₀E` and `s₁U` for the pipes the two pickers lean towards,
-/// with `s₀` and `s₁` the ways they lean: the picker normals themselves where
+/// with `s₀` and `s₁` the ways they lean: the picker facings themselves where
 /// those are `±E` and `±U`, and always the same halves.
 ///
 /// # Which way it runs
@@ -9146,12 +9154,16 @@ fn a_half_of_an_ellipse(
     let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
         return None;
     };
-    let [Picker::InFrontOf(first), Picker::InFrontOf(second)] = picked_by[..] else {
+    let [first, second] = picked_by[..] else {
+        return None;
+    };
+    let [Some(first), Some(second)] = [first, second].map(|picker| picker.facing_of_a_flat())
+    else {
         return None;
     };
     let ways = [mine, theirs].map(|pipe| pipe.axis().direction().components());
     let [Some(one), Some(other)] =
-        [first, second].map(|picker| the_way_a_picker_leans(picker.normal().components(), ways))
+        [first, second].map(|facing| the_way_a_picker_leans(facing.components(), ways))
     else {
         return None;
     };
@@ -9392,6 +9404,28 @@ fn a_box_round_where_a_flat_surface_cuts_a_pipe(
             Interval::new(-reach, reach).expect("a reach is a length, never less than nought");
         origin[axis] + direction[axis] * slide + either_side
     }))
+}
+
+/// An enclosure of where `pipe`'s axis crosses the flat surface of `picker`,
+/// one of the two that pick out a half ellipse ([`a_half_of_an_ellipse`]).
+///
+/// A picker holding its point holds where the axes meet: `intersect` builds it
+/// through that point only after asking it exactly of both axes, so the
+/// crossing is that point, exactly (`docs/decisions.md` §443.5).
+///
+/// # Panics
+///
+/// If `picker` is curved, which [`a_half_of_an_ellipse`] rules out.
+fn where_an_axis_crosses_a_flat_picker(pipe: &Cylinder, picker: &Picker) -> [Interval; 3] {
+    match picker {
+        Picker::InFrontOf(facing) => where_an_axis_crosses_a_flat_surface(pipe, facing),
+        Picker::InFrontOfAFlatThrough(facing) => {
+            facing.through().coordinates().map(Interval::exactly)
+        }
+        Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) | _ => {
+            unreachable!("a half ellipse is picked out by two flat surfaces, not {picker:?}")
+        }
+    }
 }
 
 /// An enclosure of where `pipe`'s axis crosses the flat surface of `facing`,
@@ -12650,7 +12684,8 @@ mod tests {
 #[cfg(test)]
 mod curved {
     use rcad_geom::{
-        Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
+        Axis, Cone, EdgeRun, Isometry, Orientation, Picker, Plane, Point, Scale, Surface,
+        SurfaceMeet, Torus, Vector,
     };
     use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 
@@ -12730,6 +12765,146 @@ mod curved {
         let mut solids = bake(&model, &[first, second], &policy, &mut log).expect("both bake");
         cuts::gather(&mut solids, &policy, &mut log).expect("they cut each other");
         solids
+    }
+
+    /// Two bars of radius `1/4` along `ways`, each cut off `1` either side of
+    /// `middle` along its own axis, so their axes meet at `middle` exactly,
+    /// both cut against each other.
+    fn two_bars_crossing_at(middle: Point, ways: [Vector; 2]) -> Vec<BakedSolid> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let caps = [-1.0, 1.0].map(|z| {
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, z))
+                .expect("a cap")
+        });
+        let bars = ways.map(|way| {
+            let way = way.normalized().expect("a way");
+            let up = Vector::new(0.0, 0.0, 1.0);
+            let turn = Isometry::rotation(
+                &Axis::new(Point::origin(), up.cross(way)).expect("an axis"),
+                up.dot(way).acos(),
+            )
+            .expect("a turn");
+            let at = Isometry::translation(middle - Point::origin())
+                .expect("a move")
+                .compose(&turn);
+            model
+                .add_bar_cut_off_by(0.25, caps, &at, &policy, &mut log)
+                .expect("a bar")
+        });
+        let mut solids = bake(&model, &bars, &policy, &mut log).expect("both bake");
+        cuts::gather(&mut solids, &policy, &mut log).expect("they cut each other");
+        solids
+    }
+
+    /// Bars on `(3, 4, 0)` and `(4, 0, 3)` cut each other's wall into the same
+    /// four pieces whether their axes meet at the origin or at `(11, −3.25,
+    /// 0.5)`.
+    ///
+    /// Where the walls cross is four half ellipses, and each is picked out by
+    /// two flat surfaces through where the axes meet. At the origin those are
+    /// half-spaces. At `(11, −3.25, 0.5)` no half-space written in `f64` passes
+    /// exactly through that point, so `intersect` picks them by flat surfaces
+    /// that hold the point itself (§443). The arrangement used to read only
+    /// half-spaces there, and could not order the corners along a crossing
+    /// picked the other way.
+    ///
+    /// **Four pieces, the same four**: each wall keeps two pieces with a cap's
+    /// circle and four sides of half ellipses, and two pieces of four sides,
+    /// and every side starts at the same corner in both places: a cap's own
+    /// corner, or the same one of the six corners where three surfaces meet.
+    #[test]
+    fn two_bars_on_3_4_0_and_4_0_3_crossing_where_no_half_space_holds_the_middle_cut_each_wall_in_four()
+     {
+        let ways = [Vector::new(3.0, 4.0, 0.0), Vector::new(4.0, 0.0, 3.0)];
+        let shapes = [Point::origin(), Point::new(11.0, -3.25, 0.5)].map(|middle| {
+            let solids = two_bars_crossing_at(middle, ways);
+            let walls = [the_wall(&solids[0]), the_wall(&solids[1])];
+            for [one, other] in [walls, [walls[1], walls[0]]] {
+                let crossing = rcad_geom::intersect(
+                    &one.surface,
+                    &other.surface,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                let Ok(SurfaceMeet::Curves(runs)) = &crossing else {
+                    panic!("{middle:?}: {crossing:?}");
+                };
+                assert_eq!(runs.len(), 4, "{middle:?}: four half ellipses");
+                for run in runs {
+                    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                        panic!("{middle:?}: {run:?}");
+                    };
+                    let held = if middle == Point::origin() {
+                        matches!(picked_by[..], [Picker::InFrontOf(_), Picker::InFrontOf(_)])
+                    } else {
+                        matches!(
+                            picked_by[..],
+                            [
+                                Picker::InFrontOfAFlatThrough(_),
+                                Picker::InFrontOfAFlatThrough(_)
+                            ]
+                        )
+                    };
+                    assert!(held, "{middle:?}: {picked_by:?}");
+                }
+            }
+            solids
+                .iter()
+                .map(the_pieces_of_the_wall)
+                .collect::<Vec<_>>()
+        });
+
+        let wire_lengths: Vec<Vec<usize>> = shapes[0][0]
+            .iter()
+            .map(|piece| piece.iter().map(Vec::len).collect())
+            .collect();
+        assert_eq!(
+            wire_lengths,
+            [vec![1, 4], vec![1, 4], vec![4], vec![4]],
+            "{:?}",
+            shapes[0]
+        );
+        assert_eq!(shapes[0], shapes[1]);
+    }
+
+    /// Each piece a bar's wall is cut into, as its wires, each wire as the
+    /// corner every side starts at and the two surfaces that carry it.
+    fn the_pieces_of_the_wall(bar: &BakedSolid) -> Vec<Vec<Vec<String>>> {
+        let split = split_a_face(
+            the_wall(bar),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the wall is split");
+        split
+            .pieces
+            .iter()
+            .map(|piece| {
+                piece
+                    .wires
+                    .iter()
+                    .map(|wire| {
+                        wire.iter()
+                            .map(|side| {
+                                let start = match &side.ends[0] {
+                                    MeetPoint::Existing { .. } => "old".to_owned(),
+                                    MeetPoint::OfThreeSurfaces { which, .. } => format!("#{which}"),
+                                    end @ (MeetPoint::WhereAClosedCurveStarts { .. }
+                                    | MeetPoint::HalfWayRoundAClosedCurve { .. }
+                                    | MeetPoint::APoleOfAClosedSurface { .. }) => {
+                                        panic!("no closed curve or pole on these walls: {end:?}")
+                                    }
+                                };
+                                let [one, other] = side.carried_by.map(|surface| kind(&surface));
+                                format!("{start} {one}/{other}")
+                            })
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect()
     }
 
     fn the_wall(bar: &BakedSolid) -> &BakedFace {

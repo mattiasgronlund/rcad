@@ -133,6 +133,11 @@ use crate::model::{Model, ModelData};
 /// describing the same flat surface, so the tag is the only thing that can catch
 /// it, and it cannot on its own: `Surface::Plane` and `Picker::InFrontOf` are
 /// both the leading arm. Hence this number.
+///
+/// **Still three since the picker that holds its point** (§443.4). It is the
+/// last arm, so it writes a tag no file before it holds, and every arm before
+/// it keeps its tag: old bytes parse as they did, and new bytes read by old
+/// code fail on the tag rather than parse into a different solid.
 pub const FORMAT_VERSION: u32 = 3;
 
 impl Serialize for Model {
@@ -189,8 +194,8 @@ struct Payload {
 #[cfg(test)]
 mod tests {
     use rcad_geom::{
-        Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
-        Surface, Vector,
+        Axis, Cylinder, EdgeRun, HalfSpace, HalfSpaceThroughAPoint, Isometry, Orientation, Picker,
+        Plane, Point, Scale, Surface, Vector,
     };
     use rcad_predicates::{Policy, ProvenanceLog};
 
@@ -593,6 +598,52 @@ mod tests {
             plane.normal(),
             facing,
             "and a plane scales it to length one"
+        );
+    }
+
+    /// **A picker holding its point writes out under its own tag, and the
+    /// version stays.** It is the last arm, so it writes tag 4, then its point
+    /// and its facing, six numbers as they were handed over, and the four arms
+    /// before it keep tags 0 to 3. A file written before it parses as it did,
+    /// and one holding it, read by code from before it, meets a tag it does not
+    /// know and fails, so [`FORMAT_VERSION`] has nothing to catch
+    /// (`docs/decisions.md` §443.4).
+    #[test]
+    fn a_flat_surface_holding_its_point_writes_tag_four_and_six_numbers_and_reads_back() {
+        let through = Point::new(11.0, -3.25, 0.5);
+        let facing = Vector::new(3.0, 4.0, 0.0);
+        let picker = Picker::from(HalfSpaceThroughAPoint::new(through, facing).expect("a facing"));
+
+        let bytes = postcard::to_allocvec(&picker).expect("a picker writes out");
+        let numbers: Vec<f64> = bytes[1..]
+            .chunks(8)
+            .map(|number| f64::from_le_bytes(number.try_into().expect("eight bytes")))
+            .collect();
+
+        assert_eq!(FORMAT_VERSION, 3);
+        assert_eq!(bytes[0], 4);
+        assert_eq!(bytes.len(), 1 + 6 * 8);
+        assert_eq!(numbers, [11.0, -3.25, 0.5, 3.0, 4.0, 0.0]);
+        assert_eq!(
+            postcard::from_bytes::<Picker>(&bytes).expect("and reads back"),
+            picker
+        );
+    }
+
+    /// A file holding a picker that faces nowhere is refused on read, by the
+    /// same check that refuses to build one.
+    #[test]
+    fn a_flat_surface_holding_its_point_with_no_facing_never_reads_back() {
+        let mut bytes = vec![4];
+        for number in [11.0_f64, -3.25, 0.5, 0.0, 0.0, 0.0] {
+            bytes.extend_from_slice(&number.to_le_bytes());
+        }
+        assert!(postcard::from_bytes::<Picker>(&bytes).is_err());
+
+        bytes[1 + 3 * 8..1 + 4 * 8].copy_from_slice(&1.0_f64.to_le_bytes());
+        assert!(
+            postcard::from_bytes::<Picker>(&bytes).is_ok(),
+            "the same bytes with a facing read back"
         );
     }
 }

@@ -822,9 +822,10 @@ fn the_one_flat_picker(run: &NamedRun, other: &Cylinder) -> Result<HalfSpace, St
     };
     match only {
         Picker::InFrontOf(half_space) => Ok(*half_space),
-        Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) => {
-            Err(format!("picked by {only:?}"))
-        }
+        Picker::OutsideABall(_)
+        | Picker::OutsideAPipe(_)
+        | Picker::InsideAPipe(_)
+        | Picker::InFrontOfAFlatThrough(_) => Err(format!("picked by {only:?}")),
         _ => Err(format!("picked by {only:?}")),
     }
 }

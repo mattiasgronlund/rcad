@@ -540,7 +540,7 @@ fn which_side_of_a_rings_circle(
         Picker::InsideAPipe(_) => {
             what_a_circle_round_the_axis_encloses(&this_circle, false, side, point)
         }
-        Picker::OutsideABall(_) | _ => Err(cannot()),
+        Picker::OutsideABall(_) | Picker::InFrontOfAFlatThrough(_) | _ => Err(cannot()),
     }
 }
 
@@ -2251,6 +2251,7 @@ fn how_a_side_runs_round(
             Some(RunsRound::AlongTheLoop { half: *half })
         }
         Picker::InFrontOf(_)
+        | Picker::InFrontOfAFlatThrough(_)
         | Picker::OutsideABall(_)
         | Picker::OutsideAPipe(_)
         | Picker::InsideAPipe(_)
@@ -4211,7 +4212,11 @@ pub(crate) fn the_way_into_an_arc(
 
     let mut halves = picked_by.iter().filter_map(|picker| match picker {
         Picker::InFrontOf(half) => Some(half),
-        Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) | _ => None,
+        Picker::InFrontOfAFlatThrough(_)
+        | Picker::OutsideABall(_)
+        | Picker::OutsideAPipe(_)
+        | Picker::InsideAPipe(_)
+        | _ => None,
     });
     let by_its_normal = halves.clone().find_map(|half| {
         let tells_them_apart = match &centred {

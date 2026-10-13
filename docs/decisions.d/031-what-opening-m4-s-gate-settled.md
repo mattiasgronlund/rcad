@@ -790,6 +790,13 @@ between "cannot" and "we chose not to", which §24.17 is about.
 > temporary print before the namer's `Ok(None)` and sorted by a scratch script;
 > neither is kept.
 
+> **2026-10-13 note (Q1892): the picker that holds the exact middle is built.**
+> Where no facing the namer tries passes exactly through the middle, a surface
+> is now `Picker::InFrontOfAFlatThrough`, which holds the middle and the pipe's
+> own direction and asks its side exactly, with no offset to round. §443 says
+> what it is, why it is a new arm rather than a change to `HalfSpace`, and how
+> a model and a STEP file write it out.
+
 ### 31.10 What this gate does not know
 
 §30.3's whole lesson is that a settling document written before anyone has read
