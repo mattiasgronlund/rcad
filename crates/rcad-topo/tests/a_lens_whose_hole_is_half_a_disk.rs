@@ -340,7 +340,7 @@ fn a_half_bar_whose_flat_side_is_the_whole_chord_answers_against_either_bar_alon
             (Rule::Union, false, Some(116.0 * PI)),
             (Rule::Intersection, true, Some(24.0 * PI)),
             (Rule::Intersection, false, Some(24.0 * PI)),
-            (Rule::Difference, true, None),
+            (Rule::Difference, true, Some(76.0 * PI)),
             (Rule::Difference, false, Some(16.0 * PI)),
         ],
     );
@@ -519,7 +519,7 @@ fn a_half_bar_whose_corner_is_the_lens_corner_mostly_answers() {
             (Rule::Union, false, Some(101.0 * PI)),
             (Rule::Intersection, true, Some(1.5 * PI)),
             (Rule::Intersection, false, Some(1.5 * PI)),
-            (Rule::Difference, true, None),
+            (Rule::Difference, true, Some(98.5 * PI)),
             (Rule::Difference, false, Some(PI)),
         ],
     );
