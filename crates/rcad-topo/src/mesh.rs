@@ -9171,6 +9171,38 @@ mod tests {
         );
     }
 
+    /// A leg into a ring from its first corner meets no side of the ring, with
+    /// that corner off longitude zero.
+    ///
+    /// The side that closes the ring ends a whole `climbed` on from the first
+    /// corner, and its copy a whole turn back has to end on the first corner bit
+    /// for bit, or the leg is taken to cross it a few ulps above where it sets
+    /// off. Taken a turn on and then a turn back in two steps, `2.786…693`
+    /// came back `2.786…697`. These are a rim of the round bar's wall that a
+    /// slanted pin from its axis comes out through, with the bar ending at
+    /// `z = 1.5`, and the leg the first cut across that wall takes to the pin's
+    /// hole (Q1879).
+    #[test]
+    fn a_leg_from_a_rings_first_corner_meets_no_side_of_it_off_longitude_zero() {
+        let whole = 2.0 * core::f64::consts::PI;
+        let mut walk = WalkingAWire::new(Some(whole), None, false, true);
+        for (at, corner) in (0..).zip([
+            (2.7861714518995693, -2.5),
+            (3.141592653589793, -2.5),
+            (3.497013855279817, -2.5),
+            (4.890099581229602, 0.47140452079103223),
+            (6.283185307179586, 2.6666666666666665),
+            (7.676271033129371, 0.47140452079103223),
+        ]) {
+            walk.arrive(at, corner, false);
+        }
+
+        let rim = walk.finish().expect("a ring lies flat");
+        assert_eq!(rim.climbed, whole, "once right round");
+        let leg = [rim.corners[0], [3.046340398985479, 0.9151951304479633]];
+        assert!(!a_leg_meets_the_rim(&rim, leg, whole));
+    }
+
     /// The same walk over a wire that uses one of its edges twice will not lie
     /// flat, exactly as it did not before.
     ///
