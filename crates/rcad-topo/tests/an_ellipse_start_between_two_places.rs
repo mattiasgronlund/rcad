@@ -337,14 +337,16 @@ fn past_the_fin_the_certified_union_and_the_fin_alone_are_still_refused() {
 /// both draw it (Q1869).
 ///
 /// The strip's edges are all straight, so its mesh is the same at every
-/// deflection, and the wall would only stop drawing that side once a mesh
-/// charges it `2.7e-6² / 3 ≈ 2.4e-12`, under the `3.8e-12` no mesh of this solid
-/// is cut finer than. Before Q1869 the ladder still asked mesh after mesh: on
-/// `main` at `a14d3018` both policies were still walking it after 465 s, the
-/// fold the same at every rung from 5 down to `1.2e-3` and 24672 points. This
-/// bounds the wait well under that, rather than timing it.
+/// deflection. Before Q1869 the ladder still asked mesh after mesh, down to a
+/// floor some 53 halvings under its top: on `main` at `a14d3018` both policies
+/// were still walking it after 465 s, the fold the same at every rung from 5
+/// down to `1.2e-3` and 24672 points. Q1869 ends a fold's ladder thirteen
+/// halvings under its top, at `6.1e-4` here, and refuses the fold that mesh
+/// draws. That is a cost bound and not a claim that no finer mesh would clear
+/// the fold; `validate.rs` says why under "What stops a fold". This bounds the
+/// wait well under the old one, rather than timing it.
 #[test]
-fn a_fold_across_a_fin_too_narrow_for_any_mesh_to_split_is_refused_without_the_ladder() {
+fn a_fold_across_a_thin_fin_is_refused_in_seconds_at_the_ladders_last_rung() {
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
         let (answer, answered) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
