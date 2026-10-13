@@ -37,13 +37,18 @@
 //! # And where a point is asked
 //!
 //! `SolidView::classify_point` answers a point in the middle of the block, in
-//! the bar's stubs and beside them, whether the ball stands clear of the bar
-//! or rests against it. Where it rests against it, the floor's two round holes
-//! touch, and the floor's one inner wire is both circles closing at the touch
-//! point. Each circle is read against the round surface across it, so a ray
-//! that crosses the floor is answered there too. A second bar notching the
-//! floor's edge gives the floor an arc among its sides, which sends it down
-//! another path, and that path reads the two touching circles the same way.
+//! the bar's stubs and beside them, whether the ball stands clear of the bar,
+//! rests against it or is driven into it. Where it rests against it, the
+//! floor's two round holes touch, and the floor's one inner wire is both
+//! circles closing at the touch point. Each circle is read against the round
+//! surface across it, so a ray that crosses the floor is answered there too. A
+//! second bar notching the floor's edge gives the floor an arc among its sides,
+//! which sends it down another path, and that path reads the two touching
+//! circles the same way. Where the ball is driven into the bar, its lower half
+//! and the bar's lower wall are each cut by a piece of the one loop the sphere
+//! and the pipe cross in, and each is read as the part of its surface in front
+//! of all its cuts: the floor, the bar's bottom cap and the other round surface
+//! (row Q1863).
 
 use core::f64::consts::PI;
 
@@ -337,10 +342,10 @@ fn a_floor_notched_by_a_second_bar_still_follows_the_two_touching_circles() {
 /// leaves each one face. The volume is that answer's less the lower half of
 /// what the ball and the bar share, [`what_the_ball_and_the_bar_share`]. That
 /// half is `0.245`, less than the measure's own error, so the floor is asked
-/// too: its hole is both circles run together. `classify_point` refuses every
-/// point whose ray crosses the ball's lower half or the bar's lower wall,
-/// `CannotFollowAFacesTrimming`, since the loop trims both, so no point under
-/// the floor is asked.
+/// too: its hole is both circles run together. Points round the block are asked
+/// in [`every_point_round_a_ball_driven_into_the_bar_is_answered`], and the
+/// ball's lower half and the bar's lower wall, which the loop trims, in
+/// [`the_loop_leaves_the_ball_and_the_bar_wall_what_is_outside_the_other`].
 #[test]
 fn a_ball_driven_into_the_bar_fuses_into_one_block() {
     let (model, answer) = united_all_at_once(3.5);
@@ -437,6 +442,16 @@ fn every_point_round_a_ball_driven_into_the_bar_is_answered() {
             "half a unit under the floor, inside the half ball",
         ),
         (
+            Point::new(4.25, 3.5, -0.5),
+            Containment::Inside,
+            "half a unit under the floor, inside both the half ball and the bar stub",
+        ),
+        (
+            Point::new(3.5, 3.5, -1.25),
+            Containment::Outside,
+            "a quarter of a unit under the half ball's lowest point",
+        ),
+        (
             Point::new(1.5, 1.5, -1.5),
             Containment::Outside,
             "under the floor, clear of everything",
@@ -456,6 +471,129 @@ fn every_point_round_a_ball_driven_into_the_bar_is_answered() {
                 "nothing but the bar reaches past the block at ({x}, {y}, {z})"
             );
         }
+    }
+}
+
+/// The two faces the loop trims hold what it leaves them: the ball's lower half
+/// holds what is under the floor and outside the bar, and the bar's lower wall
+/// what is between its bottom cap and the floor and outside the ball.
+///
+/// Each point is on the face's surface, or a rounding off it, and is asked of
+/// that face alone, so a side of any one cut read the wrong way round shows
+/// here even where no ray `classify_point` fires meets the face near it. Both
+/// faces were refused, `AFaceTrimmedByACurveThisCannotFollow`, before row
+/// Q1863.
+#[test]
+fn the_loop_leaves_the_ball_and_the_bar_wall_what_is_outside_the_other() {
+    let (model, answer) = united_all_at_once(3.5);
+    let solids = answer
+        .expect("a ball crossing the bar in a loop the floor runs through unites with the block");
+    let solid = model.solid(solids[0]).expect("this model made the key");
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let ball = solid
+        .faces()
+        .find(|face| matches!(face.surface(), Surface::Sphere(_)))
+        .expect("the ball's lower half is one face")
+        .key();
+    let lower_wall = solid
+        .faces()
+        .find(|face| {
+            matches!(face.surface(), Surface::Cylinder(_))
+                && face
+                    .wires()
+                    .flat_map(|wire| wire.points())
+                    .any(|corner| corner.coordinates()[2] < -1.0)
+        })
+        .expect("the bar's wall under the floor is one face")
+        .key();
+    for (face, at, held, what) in [
+        (
+            ball,
+            [3.5, 3.5, -1.0],
+            OnAFace::Held,
+            "the ball's lowest point",
+        ),
+        (
+            ball,
+            [3.5, 4.1, -0.8],
+            OnAFace::Held,
+            "the ball under the floor, clear of the bar",
+        ),
+        (
+            ball,
+            [4.1, 3.5, -0.8],
+            OnAFace::NotHeld,
+            "the ball inside the bar",
+        ),
+        (
+            ball,
+            [3.5, 3.5, 1.0],
+            OnAFace::NotHeld,
+            "the ball's highest point, above the floor",
+        ),
+        (
+            ball,
+            [3.5, 2.5, 0.0],
+            OnAFace::OnItsBoundary,
+            "where the floor cuts the ball, clear of the bar",
+        ),
+        (
+            ball,
+            [4.5, 3.5, 0.0],
+            OnAFace::NotHeld,
+            "where the floor cuts the ball, inside the bar",
+        ),
+        (
+            lower_wall,
+            [6.0, 3.5, -1.0],
+            OnAFace::Held,
+            "the side of the wall away from the ball",
+        ),
+        (
+            lower_wall,
+            [4.0, 3.5, -1.5],
+            OnAFace::Held,
+            "the side of the wall facing the ball, under it",
+        ),
+        (
+            lower_wall,
+            [4.0, 3.5, -0.5],
+            OnAFace::NotHeld,
+            "the side of the wall facing the ball, inside it",
+        ),
+        (
+            lower_wall,
+            [6.0, 3.5, -3.0],
+            OnAFace::NotHeld,
+            "below the bar's bottom cap",
+        ),
+        (
+            lower_wall,
+            [6.0, 3.5, 1.0],
+            OnAFace::NotHeld,
+            "above the floor",
+        ),
+        (
+            lower_wall,
+            [6.0, 3.5, -2.0],
+            OnAFace::OnItsBoundary,
+            "on the bar's bottom cap",
+        ),
+        (
+            lower_wall,
+            [5.0, 4.5, 0.0],
+            OnAFace::OnItsBoundary,
+            "on the floor, clear of the ball",
+        ),
+    ] {
+        assert_eq!(
+            solid
+                .face_holds_the_point(face, PredicatePoint::Exact(at), &policy, &mut log)
+                .expect("a face the loop trims is followed"),
+            held,
+            "{what}, at {at:?}"
+        );
     }
 }
 
