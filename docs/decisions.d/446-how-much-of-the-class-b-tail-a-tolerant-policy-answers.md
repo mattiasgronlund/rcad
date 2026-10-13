@@ -566,11 +566,14 @@ the four causes is.
   right volume. It is the pattern of §187.4's first defect, where a cap and a
   wall cut off the same ear near the tip of an ellipse.
 - **Q1793's shape at 14 angles, `CannotNameWhichPieceOfACrossingThisIs` in the
-  split: untraced, so neither a gap nor a limit yet.** It refuses at 80, 112
-  and 116 degrees with the direction exactly in z = 0, even at the base, so the
-  hair is not its cause. Nothing here says whether a coincidence is lost.
+  split: untraced, so neither a gap nor a limit yet.** The split comes before
+  `assemble`, so the base refuses the same way: all six fuses at each of the 14
+  angles, in relay 0's sweep with `ZZ_TOL` unset. At 80, 112 and 116 degrees
+  the direction lies exactly in z = 0, so the hair is not its cause. Nothing
+  here says whether a coincidence is lost.
 - **Q1929's shape at 85, 90 and 95 degrees, `Undecidable` "order along a
-  crossing" in the split: untraced.** One coincidence is there at every angle:
+  crossing" in the split: untraced.** The base refuses the same way, all six
+  fuses at each of the three. One coincidence is there at every angle:
   the second bar's cap plane passes through `c` square to its axis, and `n̂` is
   square to that axis, so both touch points lie on the cap plane and three
   surfaces meet at each. The build made that coincidence, since the bar starts
