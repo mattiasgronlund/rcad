@@ -15,7 +15,7 @@
 //! crossing is.
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, EdgeRun, HalfSpace, NamedRun, Picker, Plane, Point, Surface,
+    Axis, Cylinder, Deflection, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Surface,
     Vector, walk,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -150,6 +150,36 @@ fn walked_under_a_certified_policy_the_arc_logs_nothing() {
             log.is_empty(),
             "a certified walk logged {:?}",
             log.records()
+        );
+    }
+}
+
+/// A run whose half-space has both arcs between its ends plainly behind it
+/// names neither, and is refused rather than walked up the pipe for having
+/// ruled out the far one.
+#[test]
+fn a_half_space_past_both_arcs_is_refused() {
+    let past_both = HalfSpace::new(Vector::new(1.0, 0.0, 0.0), 1.5).expect("a half-space");
+    let run = NamedRun::new(
+        EdgeRun::PartOfWhereItCrosses {
+            and: Surface::Plane(the_wall()),
+            picked_by: smallvec![Picker::InFrontOf(past_both)],
+        },
+        the_ends().map(|end| rcad_predicates::Point::from(end.coordinates())),
+    )
+    .expect("a run with two ends");
+    let [pipe, wall] = [Surface::Cylinder(the_pipe()), Surface::Plane(the_wall())];
+    for along in [[&pipe, &wall], [&wall, &pipe]] {
+        let walked = walk(
+            &run,
+            along,
+            Deflection::of(1e-3).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(walked, Err(Error::CannotNameWhichPieceOfACrossingThisIs)),
+            "{walked:?}"
         );
     }
 }
