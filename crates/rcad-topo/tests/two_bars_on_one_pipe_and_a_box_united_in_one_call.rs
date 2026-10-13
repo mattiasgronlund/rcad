@@ -100,15 +100,15 @@
 //!   Q1817 ([`a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar`]).
 //!   It was refused `Undecidable` at "order along a crossing" before, on a
 //!   corner a hair past where a loop round the pipe starts. **Lying along `y`
-//!   it is refused** `CannotNameWhichPieceOfACrossingThisIs`, either way round,
-//!   while the result is meshed
-//!   ([`a_square_bar_standing_on_an_edge_along_y_is_refused_walking_its_long_ellipse`]).
-//!   Its inner end's plane is stored a rounding off the pipe's axis and crosses
+//!   it unites too**, either way round, since Q1882
+//!   ([`a_square_bar_standing_on_an_edge_along_y_unites_with_the_bar`]). Its
+//!   inner end's plane is stored a rounding off the pipe's axis and crosses
 //!   the pipe in an ellipse `1.8e16` long. Until Q1818 two corners `0.38` apart
-//!   up that ellipse could not be put in order; now they are, and walking a
-//!   `1.23`-long arc of it is what fails. Each brace was built as a shape a
-//!   designer draws with what Q1406's box has, side faces slanting across the
-//!   wall.
+//!   up that ellipse could not be put in order, and until Q1882 a `1.23`-long
+//!   arc of it could not be walked while the result was meshed
+//!   (`CannotNameWhichPieceOfACrossingThisIs`); now such an arc is walked up
+//!   the pipe by height. Each brace was built as a shape a designer draws with
+//!   what Q1406's box has, side faces slanting across the wall.
 
 use core::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI, SQRT_2};
 
@@ -523,7 +523,10 @@ fn a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar() {
 /// named the arc by, through its chord, had a normal of rounding,
 /// `(-2.2e-16, -4.5e-16, 0)`, so both arcs of the ellipse were picked. Such an
 /// arc is now named by the plane through its chord and the end plane's
-/// normal, and walked up the pipe by height.
+/// normal, and walked up the pipe by height. The walk tells which arc that
+/// plane picks by a point of the other arc, across the pipe and plainly
+/// behind it: the arc's own middle is within a rounding of the plane, and the
+/// record of asking there undecided refused a certified union `Undecidable`.
 #[test]
 fn a_square_bar_standing_on_an_edge_along_y_unites_with_the_bar() {
     let one_bar = PI * RADIUS * RADIUS * MEETING;
