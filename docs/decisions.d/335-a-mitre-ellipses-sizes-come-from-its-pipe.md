@@ -334,4 +334,4 @@ pieces it cannot tell apart. This is the circle arm's row, not this one.
 > strands, `1.2e-7` either side of the rim, and the file says which neither
 > is. Elsewhere the flat bound is left as it was: an open run's corners are
 > the only points the bend is counted at. Counting it at every marched point
-> is filed as a row of its own.
+> is row Q1678.
