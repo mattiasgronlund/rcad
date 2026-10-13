@@ -1936,7 +1936,11 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::place_where_two_rulings_cross`]), and two half ellipses
     /// of two pipes of one width whose axes meet meet at the two places their
     /// walls touch ([`Arrangement::place_where_two_halves_meet`]); every other
-    /// two crossings of one pair get no node (§347.9).
+    /// two crossings of one pair get no node (§347.9). Two crossings whose
+    /// partners are one pipe written twice, which [`intersect`] calls
+    /// [`SurfaceMeet::SameSurface`], are two crossings of one pair too, and are
+    /// placed as one once [`meet_of_three_surfaces`] has refused them
+    /// ([`Arrangement::the_two_partners_are_one_pipe`], Q1877).
     ///
     /// Three surfaces can meet at two points, and both are nodes.
     /// [`MeetOfThree::MoreThanAPoint`] is an answer and not a refusal (§34.9):
@@ -1965,13 +1969,7 @@ impl<'f> Arrangement<'f> {
                     continue;
                 }
                 if self.crossings[first].partner == self.crossings[second].partner {
-                    if self.crossings[first].half_an_ellipse.is_some()
-                        && self.crossings[second].half_an_ellipse.is_some()
-                    {
-                        self.place_where_two_halves_meet(first, second, log)?;
-                    } else {
-                        self.place_where_two_rulings_cross(first, second);
-                    }
+                    self.place_where_two_crossings_of_one_pair_meet(first, second, log)?;
                     continue;
                 }
                 if self.place_where_a_cap_meets_two_halves(first, second, log)? {
@@ -1988,6 +1986,10 @@ impl<'f> Arrangement<'f> {
                     Ok(meet) => meet,
                     Err(gave_up_on_it) => {
                         if self.two_crossings_provably_share_nothing(first, second, policy, log) {
+                            continue;
+                        }
+                        if self.the_two_partners_are_one_pipe(first, second, policy, log) {
+                            self.place_where_two_crossings_of_one_pair_meet(first, second, log)?;
                             continue;
                         }
                         return Err(gave_up_on_it.into());
@@ -2054,6 +2056,25 @@ impl<'f> Arrangement<'f> {
         }
         self.place_the_middle_of_each_half();
         Ok(())
+    }
+
+    /// The nodes where two crossings of one pair meet: where two half
+    /// ellipses meet, or where two rulings cross, and none for every other two
+    /// ([`Arrangement::place_the_meets`]).
+    fn place_where_two_crossings_of_one_pair_meet(
+        &mut self,
+        first: usize,
+        second: usize,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        if self.crossings[first].half_an_ellipse.is_some()
+            && self.crossings[second].half_an_ellipse.is_some()
+        {
+            self.place_where_two_halves_meet(first, second, log)
+        } else {
+            self.place_where_two_rulings_cross(first, second);
+            Ok(())
+        }
     }
 
     /// Whether some corner of the face is on both crossings, which is where
@@ -2558,6 +2579,48 @@ impl<'f> Arrangement<'f> {
             intersect(&one, &other, policy, log),
             Ok(SurfaceMeet::Nothing)
         ) || a_cut_of_a_pipe_is_clear_of_the_third([self.surface, one, other])
+    }
+
+    /// Whether the two crossings' partners are one pipe written twice, so that
+    /// the two are crossings of one pair, as [`intersect`] decides it.
+    ///
+    /// **Two bars stacked on one pipe whose walls name its axis at two points,
+    /// with a pin in the upper one, are the shape** (Q1877). The pin's wall
+    /// crosses the wall in two loops, and its arrangement in their union drew
+    /// one as a crossing with the upper spelling and the other as a crossing
+    /// with the lower. [`meet_of_three_surfaces`] was then asked where the
+    /// pin's wall and the two spellings meet, and refused, since two of the
+    /// three are one surface: what the three share is what one pair does,
+    /// whole loops, which it has no road to.
+    ///
+    /// **Pipes only**, because a pipe is what the fuse joins into one face
+    /// further on however it is written, and it goes by bits for a cone and
+    /// keeps the pieces of a ring apart
+    /// (`one_cone_pipe_or_ball_the_same_way_round` in `fuse/assemble.rs`).
+    /// Let a ring in and two quarter bends on one ring, the second about `−z`,
+    /// get past this meet only for the fuse to write a broken answer,
+    /// `AClosedEdgeIsWalkedAgainstItsSurface`, where they are refused here
+    /// by name
+    /// (`two_quarter_bends_on_one_ring_turned_round_get_past_the_crossing_either_way_round`,
+    /// Q758).
+    ///
+    /// Asked only once that meet has refused, as
+    /// [`Arrangement::two_crossings_provably_share_nothing`] is, so a pair
+    /// whose meet answers costs nothing more. An `Err` from [`intersect`] is
+    /// no proof, and the refusal in hand stands.
+    fn the_two_partners_are_one_pipe(
+        &self,
+        first: usize,
+        second: usize,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        let [one, other] = [first, second].map(|crossing| &self.crossings[crossing].partner);
+        matches!((one, other), (Surface::Cylinder(_), Surface::Cylinder(_)))
+            && matches!(
+                intersect(one, other, policy, log),
+                Ok(SurfaceMeet::SameSurface)
+            )
     }
 
     /// The node of the corner of the face that already is `place`, one of the
