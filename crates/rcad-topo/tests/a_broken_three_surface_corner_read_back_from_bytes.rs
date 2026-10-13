@@ -417,7 +417,11 @@ fn a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it() {
 fn a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut() {
     let [_, shift, turn, turn_then_shift] = every_placement();
     let [certified, tolerant] = [Policy::certified(), Policy::tolerant(100.0)];
-    for rule in [Rule::Difference, Rule::Intersection] {
+    let where_it_winds_against_its_normal = [
+        (Rule::Difference, turn_then_shift),
+        (Rule::Intersection, shift),
+    ];
+    for (rule, where_it_winds) in where_it_winds_against_its_normal {
         for placement in [shift, turn, turn_then_shift] {
             let case = format!("{placement:?}, {rule:?}");
             match the_cut_through_the_apex(placement, rule, &certified) {
@@ -426,10 +430,7 @@ fn a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut() {
                 }
                 other => panic!("certified, {case} came back {other:?}"),
             }
-            let wound_against_its_normal = match rule {
-                Rule::Difference => placement == turn_then_shift,
-                _ => placement == shift,
-            };
+            let wound_against_its_normal = placement == where_it_winds;
             match the_cut_through_the_apex(placement, rule, &tolerant) {
                 Ok(named) if !wound_against_its_normal => {
                     assert_eq!(named, [DYNAMIC_RANGE_CHECK], "tolerant, {case}");
