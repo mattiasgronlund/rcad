@@ -164,7 +164,8 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    MeetOfThree, PlaneAgreement, Surface, SurfaceMeet, intersect, meet_of_three_surfaces,
+    EdgeRun, MeetOfThree, NamedRun, PlaneAgreement, Surface, SurfaceMeet, intersect,
+    meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 
@@ -1235,9 +1236,9 @@ fn cuts_between(
     match how_two_faces_meet(&face.surface, &against.surface, policy, log)? {
         HowTwoFacesMeet::OnOneSurface => Ok((boundary_of(against), boundary_of(face))),
         HowTwoFacesMeet::Nowhere => Ok((Vec::new(), Vec::new())),
-        HowTwoFacesMeet::AtOnePoint | HowTwoFacesMeet::AlongCurves => {
-            Ok((vec![against.surface], vec![face.surface]))
-        }
+        HowTwoFacesMeet::AtOnePoint
+        | HowTwoFacesMeet::AlongALineTheyRestOn
+        | HowTwoFacesMeet::AlongCurves => Ok((vec![against.surface], vec![face.surface])),
     }
 }
 
@@ -1262,6 +1263,12 @@ fn boundary_of(face: &BakedFace) -> Vec<Surface> {
 /// them, and that is what a solid is. Two coplanar faces of one solid are
 /// skipped too — the pair carries no line to compare, so an overlap between them
 /// would have to be found some other way, and nothing here does.
+///
+/// **Two faces resting on each other along a line are skipped**, because they
+/// only touch there ([`HowTwoFacesMeet::AlongALineTheyRestOn`]): a block's
+/// wall and a bar standing against it, united into one solid touching itself
+/// along that line (queue row Q1902). That is the answer a fuse now writes
+/// (§39.4, the Q1901 note), and this used to refuse every fuse after it.
 ///
 /// Only a *proved* overlap is an error. Two stretches whose enclosures merely
 /// touch have not been shown to run through each other, and refusing them would
@@ -1308,8 +1315,8 @@ fn share_a_corner(face: &BakedFace, against: &BakedFace) -> bool {
     })
 }
 
-/// What two faces' surfaces do to each other, in the three words the cutting
-/// here is written in.
+/// What two faces' surfaces do to each other, in the words the cutting here is
+/// written in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HowTwoFacesMeet {
     /// The two are one surface, so the boundary of each is what cuts the other.
@@ -1326,12 +1333,24 @@ enum HowTwoFacesMeet {
     /// face runs through the point nothing is split: two tangent balls united
     /// come back as two shells that share no vertex.
     AtOnePoint,
+    /// They rest against each other along one straight line and cross nowhere:
+    /// a plane or a pipe against a pipe's side, or a plane along a cone's
+    /// ruling.
+    ///
+    /// Each is handed the other's surface as a cut, as for a crossing, and the
+    /// arrangement runs the line along the pipe's axis or the cone's ruling
+    /// (`AlongATouch`). **It is no crossing**, so two faces of one solid on
+    /// such a pair are not checked for running through each other. Off the
+    /// line the two surfaces share no point, and along it they are tangent,
+    /// with a pipe wholly on one side of a plane or of another pipe and each
+    /// nappe of a cone on one side of a plane. So they cross along no curve,
+    /// and two faces that run through each other cross along one.
+    AlongALineTheyRestOn,
     /// They cross along one curve, or two.
     AlongCurves,
 }
 
-/// Read a crossing in those three words, and refuse a shape that has no word
-/// here.
+/// Read a crossing in those words, and refuse a shape that has no word here.
 ///
 /// The one place in this file that looks at a [`SurfaceMeet`]. There used to be
 /// two, and each drew its own wrong conclusion from a shape it did not know: one
@@ -1358,9 +1377,37 @@ fn how_two_faces_meet(
         SurfaceMeet::SameSurface => Ok(HowTwoFacesMeet::OnOneSurface),
         SurfaceMeet::Nothing => Ok(HowTwoFacesMeet::Nowhere),
         SurfaceMeet::TouchAtOnePoint { .. } => Ok(HowTwoFacesMeet::AtOnePoint),
+        SurfaceMeet::Curves(runs) if a_line_they_rest_on(face, against, &runs) => {
+            Ok(HowTwoFacesMeet::AlongALineTheyRestOn)
+        }
         SurfaceMeet::Curves(_) => Ok(HowTwoFacesMeet::AlongCurves),
         _ => Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
+}
+
+/// Whether `runs` is the one straight line a plane or a pipe rests on a pipe
+/// along, or a plane on a cone.
+///
+/// **[`intersect`] has already told a touch from a cut**, and this reads its
+/// answer the way the arrangement's `the_line_one_surface_rests_on_another_along`
+/// does. Those three pairs come back as one bare [`EdgeRun::Straight`] where
+/// they rest on each other, and as two lines a half-space picks apart, a closed
+/// curve or nothing where they do not. Two planes cross in a bare straight run
+/// too, and are none of these.
+fn a_line_they_rest_on(face: &Surface, against: &Surface, runs: &[NamedRun]) -> bool {
+    let [run] = runs else {
+        return false;
+    };
+    *run.run() == EdgeRun::Straight
+        && matches!(
+            (face, against),
+            (
+                Surface::Plane(_) | Surface::Cylinder(_),
+                Surface::Cylinder(_)
+            ) | (Surface::Cylinder(_), Surface::Plane(_))
+                | (Surface::Plane(_), Surface::Cone(_))
+                | (Surface::Cone(_), Surface::Plane(_))
+        )
 }
 
 #[cfg(test)]
@@ -1884,6 +1931,90 @@ mod tests {
             matches!(refusal, Err(Error::ArgumentIntersectsItself)),
             "expected a refusal, got {refusal:?}"
         );
+    }
+
+    /// A bar standing against a block's wall touches it along a line and
+    /// crosses it nowhere, so one solid made of both does not run through
+    /// itself. It is what a union of the two answers (§39.4, the Q1901 note),
+    /// and refusing it refused every fuse after that union (queue row Q1902).
+    #[test]
+    fn a_solid_whose_bar_rests_on_its_blocks_wall_is_not_refused() {
+        let answer = a_block_and_a_bar_as_one(5.0);
+
+        assert!(answer.is_ok(), "expected no refusal, got {answer:?}");
+    }
+
+    #[test]
+    fn a_solid_whose_bar_reaches_into_its_blocks_wall_is_refused() {
+        let answer = a_block_and_a_bar_as_one(4.75);
+
+        assert!(
+            matches!(answer, Err(Error::ArgumentIntersectsItself)),
+            "expected a refusal, got {answer:?}"
+        );
+    }
+
+    #[test]
+    fn a_solid_of_two_bars_side_by_side_is_not_refused() {
+        let answer = two_bars_as_one(2.0);
+
+        assert!(answer.is_ok(), "expected no refusal, got {answer:?}");
+    }
+
+    #[test]
+    fn a_solid_of_two_bars_that_overlap_is_refused() {
+        let answer = two_bars_as_one(1.5);
+
+        assert!(
+            matches!(answer, Err(Error::ArgumentIntersectsItself)),
+            "expected a refusal, got {answer:?}"
+        );
+    }
+
+    /// A block of side four and a bar of radius one standing at `x`, `y = 2`
+    /// from height one to three, wired into one solid by hand and gathered.
+    /// At `x = 5` the bar's wall rests on the block's wall `x = 4`.
+    fn a_block_and_a_bar_as_one(x: f64) -> Result<(), Error> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let block = model.add_cube(4.0, &policy, &mut log).expect("a block");
+        let bar = model
+            .add_round_bar(
+                1.0,
+                2.0,
+                &Isometry::translation(Vector::new(x, 2.0, 1.0)).expect("a finite shift"),
+            )
+            .expect("a bar of radius one");
+        let both = both_solids_as_one(&mut model, block, bar);
+
+        let mut solids =
+            bake(&model, &[both], &policy, &mut ProvenanceLog::new()).expect("it bakes");
+        gather(&mut solids, &policy, &mut log)
+    }
+
+    /// Two bars of radius one and two high, the second standing `apart` from
+    /// the first along y, wired into one solid by hand and gathered. Two apart
+    /// they rest on each other along a line, away from either bar's seam.
+    fn two_bars_as_one(apart: f64) -> Result<(), Error> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let one = model
+            .add_round_bar(1.0, 2.0, &Isometry::identity())
+            .expect("a bar of radius one");
+        let other = model
+            .add_round_bar(
+                1.0,
+                2.0,
+                &Isometry::translation(Vector::new(0.0, apart, 0.0)).expect("a finite shift"),
+            )
+            .expect("another bar of radius one");
+        let both = both_solids_as_one(&mut model, one, other);
+
+        let mut solids =
+            bake(&model, &[both], &policy, &mut ProvenanceLog::new()).expect("it bakes");
+        gather(&mut solids, &policy, &mut log)
     }
 
     /// Two solids handed over on the *same* side still cut each other. `A` is

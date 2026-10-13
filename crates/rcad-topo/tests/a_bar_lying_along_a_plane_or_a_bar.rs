@@ -308,6 +308,188 @@ fn two_bars_side_by_side_answer_every_rule() {
     );
 }
 
+/// **A solid resting on itself along a line fuses on** (queue row Q1902). The
+/// stepped block and the bar resting on its wall
+/// ([`the_bar_resting_on_a_stepped_blocks_wall`]) are one solid whose wall
+/// `x = 4` and whose bar's skin touch each other along `(4, 1.75, z)`. Fused
+/// with a cube of one far from it, every rule both ways round, the union is the
+/// two as they stand, the intersection no solid, and each difference its first
+/// solid whole.
+///
+/// Every one of the six used to be refused `ArgumentIntersectsItself`: the
+/// check that no two faces of an input run through each other read the wall
+/// and the skin meeting along a line as two faces crossing there. They only
+/// touch, and the bar slid a quarter clear of the wall fused on all along.
+#[test]
+fn a_bar_resting_on_a_stepped_blocks_wall_fuses_on_with_a_far_cube() {
+    every_fuse_of_the_bar_resting_on_the_step_with(
+        |model| a_cube_of_one_at(model, [20.0, 20.0, 20.0]),
+        |rule, it_first| match (rule, it_first) {
+            (Rule::Union, _) => vec![1.0, the_bar_resting_on_the_step()],
+            (Rule::Intersection, _) => vec![],
+            (Rule::Difference, false) => vec![the_bar_resting_on_the_step()],
+            (Rule::Difference, true) => vec![1.0],
+            _ => unreachable!("only the three rules are asked"),
+        },
+        "a far cube",
+    );
+}
+
+/// The same solid against a slab over its top half, `z` from 2 to 5, which
+/// cuts the touching line through at `(4, 1.75, 2)` and keeps it below or above
+/// that in every answer but the slab less the solid. Below the slab's floor the
+/// solid is the step `18 × 2` and the bar's disc out of the step, `π` less the
+/// quarter-deep piece of it inside, one high; above it, `18 × 2` and the same
+/// disc one high again.
+#[test]
+fn a_bar_resting_on_a_stepped_blocks_wall_fuses_with_a_slab_across_the_touch() {
+    every_fuse_of_the_bar_resting_on_the_step_with(
+        |model| {
+            let slab = a_block(model, [8.0, 6.0, 3.0]);
+            model
+                .place_solid(
+                    slab,
+                    &Isometry::translation(Vector::new(-1.0, -1.0, 2.0)).expect("whole numbers"),
+                )
+                .expect("this model made the key");
+            slab
+        },
+        |rule, it_first| {
+            let half = 36.0 + the_bars_disc_out_of_the_step();
+            match (rule, it_first) {
+                (Rule::Union, _) => vec![144.0 + half],
+                (Rule::Intersection, _) | (Rule::Difference, false) => vec![half],
+                (Rule::Difference, true) => vec![144.0 - half],
+                _ => unreachable!("only the three rules are asked"),
+            }
+        },
+        "a slab across the top half",
+    );
+}
+
+/// Every rule, both ways round, of the stepped block united with the bar
+/// resting on its wall against the solid `other` builds: never refused, the
+/// model validates, and the answer's solids have the volumes `should` gives
+/// for the rule and whether `other` came first.
+///
+/// Volumes are compared both ways within [`HOW_FAR_A_MESH_MAY_BE`]: a mesh is
+/// short of a bar but over a solid with a bar taken out of it.
+fn every_fuse_of_the_bar_resting_on_the_step_with(
+    other: fn(&mut Model) -> SolidKey,
+    should: fn(Rule, bool) -> Vec<f64>,
+    against: &str,
+) {
+    let mut wrong: Vec<String> = Vec::new();
+    for it_first in [false, true] {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let touching = the_bar_resting_on_a_stepped_blocks_wall(&mut model);
+            let other = other(&mut model);
+            let [first, second] = if it_first {
+                [other, touching]
+            } else {
+                [touching, other]
+            };
+            let what = format!("{against}, {rule:?}, it first {it_first}");
+            let answer = match model.fuse(
+                &[first],
+                &[second],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            ) {
+                Ok(answer) => answer,
+                Err(why) => {
+                    wrong.push(format!("{what}: refused {why:?}"));
+                    continue;
+                }
+            };
+            if let Err(why) = model.validate(&Policy::certified(), &mut ProvenanceLog::new()) {
+                wrong.push(format!("{what}: the model does not validate: {why:?}"));
+                continue;
+            }
+            let mut found: Vec<f64> = answer
+                .solids()
+                .iter()
+                .map(|&solid| volume_of(&model, solid))
+                .collect();
+            found.sort_by(f64::total_cmp);
+            let mut expected = should(rule, it_first);
+            expected.sort_by(f64::total_cmp);
+            let near = found.len() == expected.len()
+                && found.iter().zip(&expected).all(|(found, expected)| {
+                    ((expected - found) / expected).abs() < HOW_FAR_A_MESH_MAY_BE
+                });
+            if !near {
+                wrong.push(format!(
+                    "{what}: measured {found:?}, and the answer is {expected:?}"
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The stepped block, the outline `(0, 0)`, `(6, 0)`, `(6, 1)`, `(4, 1)`,
+/// `(4, 4)`, `(0, 4)` four high, united with a bar of radius one, two high, at
+/// `(5, 1.75, 1)`. The bar rests on the wall `x = 4` along `(4, 1.75, z)` for
+/// `z` from 1 to 3 and reaches a quarter into the step below `y = 1`, so the
+/// union is one solid touching itself along that line (§39.4, the Q1901 note).
+fn the_bar_resting_on_a_stepped_blocks_wall(model: &mut Model) -> SolidKey {
+    let outline = ProfileBuilder::new(vec![
+        [0.0, 0.0],
+        [6.0, 0.0],
+        [6.0, 1.0],
+        [4.0, 1.0],
+        [4.0, 4.0],
+        [0.0, 4.0],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a step");
+    let block = model
+        .add_extrusion(&outline, 4.0, &Isometry::identity())
+        .expect("building a step needs no decision");
+    let bar = a_bar(model, 1.0, 2.0, [5.0, 1.75, 1.0]);
+    let united = model
+        .fuse(
+            &[block],
+            &[bar],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar resting on a wall and reaching into a step unites with it");
+    let [solid] = united.solids() else {
+        panic!("the bar reaches into the step, so the union is one solid")
+    };
+    *solid
+}
+
+/// The volume of [`the_bar_resting_on_a_stepped_blocks_wall`]: the step's
+/// `18 × 4` and the bar's disc out of the step two high.
+fn the_bar_resting_on_the_step() -> f64 {
+    72.0 + 2.0 * the_bars_disc_out_of_the_step()
+}
+
+/// The bar's disc of radius one at `y = 1.75` less the piece of it below
+/// `y = 1`, a quarter deep: `π − (acos 0.75 − 0.75·√(1 − 0.75²))`.
+fn the_bars_disc_out_of_the_step() -> f64 {
+    PI - (0.75_f64.acos() - 0.75 * (1.0 - 0.75 * 0.75_f64).sqrt())
+}
+
+/// A cube of side one with its low corner at `at`.
+fn a_cube_of_one_at(model: &mut Model, at: [f64; 3]) -> SolidKey {
+    let cube = a_block(model, [1.0, 1.0, 1.0]);
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(at[0], at[1], at[2])).expect("whole numbers"),
+        )
+        .expect("this model made the key");
+    cube
+}
+
 /// Every rule, both ways round, of a pair whose insides are apart: both solids
 /// as they stand for the union, no solid for the intersection, and the first
 /// solid for each difference.
