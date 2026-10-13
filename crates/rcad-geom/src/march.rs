@@ -252,11 +252,11 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
 /// sine `s` is small the two normals can turn parallel inside the reach, and
 /// the crossing the bound promises need not be there at all. Measured on the
 /// Fujitsu relays' pin end (§335.5): a ball of radius `0.1` and a pipe of the
-/// same radius whose axis misses the ball's centre by `7.6e-14` cross only on
-/// one half of the rim, and on the other half they are within `1e-13` of each
-/// other and lean about `1e-7` apart. The march crossed that half, and the
-/// flat bound put its points within `7.9e-7` of the crossing. They were `0.044`
-/// to `0.1` from it, each certified outside the ball (Q1889).
+/// same radius whose axis misses the ball's centre by `q = 7.6e-14` cross only
+/// on one half of the rim, and on the other half they are within `q` of each
+/// other and do not cross. The march crossed that half, and the flat bound put
+/// its points within `7.9e-7` of the crossing. They were `0.044` to `0.1` from
+/// it, each certified outside the ball (Q1889).
 ///
 /// # The bound that bends
 ///
@@ -271,8 +271,9 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
 /// the settled one, which is the flat bound to within a factor of two, and that
 /// is what comes back. Every step of it is enclosed, as the flat bound's are.
 ///
-/// At the pin end's corners `s` is `7.6e-13`, where the two strands of the thin
-/// loop meet, and `h` comes out near `1e12`.
+/// At the pin end's corner `#2404`, where the two strands of the thin loop
+/// meet, `s` is `7.6e-13`, the two distances off are under `1.5e-15`, the flat
+/// bound is `3.7e-3`, and `h` comes out at `1.5e11`.
 ///
 /// # Errors
 ///
@@ -1225,6 +1226,43 @@ mod tests {
              turns {turns:?} from {start:?} through {:?}",
             walked.points
         );
+    }
+
+    /// **The bound with the two surfaces' bend counted holds, and is the flat
+    /// bound to within a factor of two, where a ball and a pipe nearly touch.**
+    /// A ball of radius 1 and a pipe on its centre `2⁻⁴⁰` thinner cross in two
+    /// circles `1.35e-6` either side of its equator, and the two lean only that
+    /// far apart there. Each circle is the pipe's radius from the axis, at a
+    /// height of `√((R − r)(R + r))`, which `f64` holds to a rounding, so how
+    /// far a settled point is off the crossing is known to a rounding or two.
+    #[test]
+    fn the_bound_with_the_bend_counted_holds_where_a_ball_and_a_pipe_nearly_touch() {
+        let thinner = 1.0 - f64::powi(2.0, -40);
+        let ball = a_ball([0.0, 0.0, 0.0], 1.0);
+        let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], thinner);
+        let up = f64::sqrt((1.0 - thinner) * (1.0 + thinner));
+        for seed in [
+            Point::new(thinner, 0.0, up),
+            Point::new(0.0, -thinner, -up),
+            Point::new(0.6, 0.8, 1.5 * up),
+        ] {
+            let (settled, bent) =
+                settled_with_a_bound_where_they_bend([&ball, &pipe], seed, [1.0, thinner])
+                    .expect("the two lean far enough apart for a bound");
+            let (_, flat) = settled_with_a_bound([&ball, &pipe], seed).expect("a bound");
+            let off = f64::hypot(
+                f64::hypot(settled.x(), settled.y()) - thinner,
+                settled.z().abs() - up,
+            );
+            assert!(
+                off <= bent,
+                "{settled:?}, settled from {seed:?}, is {off:e} off the crossing, past {bent:e}"
+            );
+            assert!(
+                flat <= bent && bent <= 2.0 * flat,
+                "the bound with the bend counted is {bent:e} and the flat one {flat:e}"
+            );
+        }
     }
 
     /// Two surfaces tangent along their crossing have no direction to follow,
