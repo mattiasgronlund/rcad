@@ -94,3 +94,52 @@ Nothing in `src/` changes, and nothing is fixed.
 
 The table should be committed as it grows, so that a relay picks up from the
 file rather than from the start.
+
+At `704063f0`, the base Q1930 ran at, the command gives 21 rows, all
+`refuses/B`: Q104, Q1718, Q1734, Q1737, Q1748, Q1749, Q1765, Q1777, Q1791,
+Q1793, Q1834, Q1839, Q1842, Q1854, Q1867, Q1909, Q1896, Q1897, Q1903, Q1929
+and Q1936. Q1889 and Q1911 were done by then. Q1724 had been dropped and
+filed again as Q1943, with no class.
+
+### 446.4 Each row, run under both policies
+
+Run at `704063f0` by a scratch test, `crates/rcad-topo/tests/zz_q1930_simple.rs`
+with a shared `zz_q1930_report/mod.rs`, deleted before the commit, with
+`mise exec -- just t -p rcad-topo -E 'test(/q1930_probe/)' --no-capture`. A run
+is one shape and one fuse. "ab" is the first-named solid first, "ba" the other
+way round. U, I and D are union, intersection and difference. The tolerant
+column is `tolerant(100)`, the model's size, unless it says otherwise. The site
+is the predicate of each record still `Undecidable`, with its enclosure, or the
+`Error` variant where no record names one. **Which function raises each
+refusal is not traced yet.**
+
+| Row | Runs | Certified | Tolerant |
+|---|---|---|---|
+| Q1718 | lens of the thin bar (stored direction `(0, -1, 2.2e-16)`, as the row says) and the fat bar, then U with the far block both ways, D and I lens first: 4 | answers: 2, 2, 1 and 0 solids | the same |
+| Q1748 | thin bar on the seam, three placements, six fuses: 18 | `Undecidable`, "a point inside a piece of a face", enclosure infinite | the same |
+| Q1749 | thin bar off the seam, six placements, six fuses: 36 | answers: 1 solid in 30, none in the 6 thin-less-thick | the same |
+| Q1765 | turned pi/6, wall 4 and 2 high, U and D both ways: 8 | `Undecidable`, "side of plane", `1.45e-13` | `CannotTellTheCellsOfAFaceApart` |
+| Q1765 | turned 1 radian, the same 8 | `Undecidable`, "side of plane", `1.75e-13` | answers: 2 solids for U, 1 for D, 2 records |
+| Q1791 | the cube less the turned cube, corner at the origin, six fuses: 6 | answers, 1 solid | answers, 1 solid |
+| Q1834 | the two halves united, 5 cuts, 3 bars, both ways: 30 | `Undecidable`, "orient3d", `1.9e-16` to `8.9e-16` | answers, 1 solid, 2 records |
+| Q1854 | six fuses: 6 | `Undecidable`, "orient3d", `8.5e-16` | `tolerant(25)`, the row's: answers, 1 solid, 10 records |
+| Q1896 | axes meeting at the origin, U and I both ways and D ab: 5 | answers: 1, 1, 1, 1 and 2 solids | the same |
+| Q1896 | at the origin D ba, at (0,1,0) D ba, at (1,1,1) D ba: 3 | `TwoPatchesOfTheMeshDrewTheSameSide` | the same |
+| Q1896 | the other 8 meeting points' other fuses: 46 | `AWireWillNotLieFlatOnItsFace` 23, `ACurvedFaceGoesRightRoundWithNoSeam` 9, `CannotMeshAFace` 13 (`ASideCutsOffOneCornerOfACurvedPatch` 4, `BoundaryCrossesItself` 5, `CornersCoincide` 4), `Invalid(FacesDoNotAgreeWhichWayTheyFace)` 1 | the same line in every one of the 46 |
+| Q1897 | at the origin, (1,0,0) and (11,0,0), six fuses: 18 | `AWireWillNotLieFlatOnItsFace` 9, `ACurvedFaceGoesRightRoundWithNoSeam` 4, `CannotMeshAFace` `BoundaryCrossesItself` 5 | the same line in every one |
+| Q1897 | at (11,-3.25,0.5), six fuses: 6 | `Geometry(CannotNameWhichPieceOfACrossingThisIs)` | the same |
+| Q1903 | the bar at (3,2,1) and at (1,2,1), D block first: 2 | `Undecidable`, "one shell inside another", enclosure infinite | the same |
+
+The Q1896 and Q1897 counts come from the probe's print, one line per run, by
+`grep -E '^Q1930\|Q1896\|.*\|certified\|'` and `uniq -c` on the variant. Every
+one of their 156 lines matches its partner under the other policy once the
+model id is taken out. The print is kept at `/tmp/q1930-probes/simple.txt`,
+with the script that groups it, `short.py`.
+
+Not run yet: Q104, Q1734, Q1737, Q1777, Q1793, Q1839, Q1842, Q1867, Q1909,
+Q1929 and Q1936.
+
+Q1718, Q1749 and Q1791 answer at this base under both policies, where their
+rows say refused. Q1791's cube may not be the shape its crash file built, since
+the crash file is not in the tree: the probe built both cubes from a square
+with a corner at the origin, as the row reads.
