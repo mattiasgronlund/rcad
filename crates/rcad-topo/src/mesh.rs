@@ -4816,15 +4816,21 @@ fn a_cut_up_meets_the_rim(
 
 /// Every side of a cap's rim, a whole turn either side as well, with the side
 /// that closes it run on to its first corner a whole `climbed` on.
+///
+/// **The closing side's end is moved by `climbed` and the turn in one
+/// addition.** `climbed` is a whole number of turns exactly, so the copy that
+/// takes it back off ends on the first corner bit for bit, which is what
+/// [`a_leg_meets_the_rim`] asks of a side to leave it out. Added in two steps,
+/// the first corner of a pipe's ring at `2.7861714518995693` came back
+/// `2.7861714518995697`, and a leg from it was read as crossing the side that
+/// closes on it (Q1879).
 fn the_sides_of_a_rim(cap: &WalkedLoop, whole: f64) -> impl Iterator<Item = [[f64; 2]; 2]> + '_ {
     let count = cap.corners.len();
     (0..count).flat_map(move |at| {
         let here = cap.corners[at];
-        let mut there = cap.corners[(at + 1) % count];
-        if at + 1 == count {
-            there[0] += cap.climbed;
-        }
-        [-whole, 0.0, whole].map(|by| [[here[0] + by, here[1]], [there[0] + by, there[1]]])
+        let there = cap.corners[(at + 1) % count];
+        let on = if at + 1 == count { cap.climbed } else { 0.0 };
+        [-whole, 0.0, whole].map(|by| [[here[0] + by, here[1]], [there[0] + (on + by), there[1]]])
     })
 }
 

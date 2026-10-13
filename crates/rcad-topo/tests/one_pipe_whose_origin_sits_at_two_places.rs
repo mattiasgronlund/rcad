@@ -417,7 +417,12 @@ fn two_bars_on_one_pipe_written_twice_with_a_pin_in_one_are_refused_where_one_sp
 /// pin's bottom cap cuts the bar's wall in an ellipse that crosses the bar's
 /// end, so the wall below it is a patch that does not go right round, more
 /// than a quarter turn wide, with the loop round `(2, 0, 2.5)` as a hole in
-/// it, and the mesher had no cut for a hole in such a patch.
+/// it, and the mesher had no cut for a hole in such a patch. The wall above
+/// the ellipse is a ring with the pin's own loop as an island, and the first
+/// cut across it goes round that island from a corner at longitude
+/// `2.7861714518995693`. That longitude did not come back bit for bit from a
+/// whole turn on and back, so the mesher read the cut as crossing the ring's
+/// rim where it sets off.
 ///
 /// The pin's lowest point is `z = 3.6`, above every end tried, so the part of
 /// the pin outside the bar is the same in every answer, and each volume less
