@@ -8999,13 +8999,10 @@ fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
 /// a thin one in or a ball crosses a pipe in, or the one loop a ball off a
 /// pipe's axis or two pipes cross in. That is a **gap**: the curve is there and
 /// ordering points along it takes the marcher rather than a determinant
-/// (§34.10). Both kinds of one loop pass here. `rcad-geom` puts places on the
-/// ball's in order by how far round the line through its centre square to the
-/// pipe's axis each one is (Q1767). Two pipes' one loop is put in order only
-/// by the name of where the walk starts on it: two places on it neither of
-/// which is the start are refused later, by `rcad-geom`, as
-/// [`TheseTwoSurfacesDoNotCrossInAConic`](rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic)
-/// (Q1685, Q1857).
+/// (§34.10). Both kinds of one loop pass here, and `rcad-geom` puts places on
+/// each in order by how far round a line each one is: on the ball's, the line
+/// through its centre square to the pipe's axis (Q1767), and on two pipes',
+/// the line that meets both axes square to both (Q1880).
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when the shape of the
 /// crossing itself cannot be told — two pipes whose axes cannot be shown to run
@@ -9086,13 +9083,12 @@ fn how_a_crossing_runs(
     // in. The one loop a ball reaching into a pipe's side leaves runs once round
     // a line instead, through the ball's centre square to the pipe's axis, and
     // `rcad-geom` orders it by how far round that line each point is (Q1767).
-    // The one loop a thin pipe reaching out of a fat one's side leaves closes
-    // too, so *finding a place to start* on a quartic says nothing about being
-    // able to order it, and reading the two as the same question is what gave
-    // a ball with a pipe through it four pieces where it has three. That loop
-    // is let through all the same, to be drawn and ordered by the start's name
-    // alone, since every other order on it is asked of `rcad-geom` and refused
-    // there by name (Q1685).
+    // So does the one loop a thin pipe reaching out of a fat one's side leaves,
+    // round the line that meets both axes square to both (Q1880). *Finding a
+    // place to start* on a quartic is still not the same question as ordering
+    // it, and reading the two as one is what gave a ball with a pipe through
+    // it four pieces where it has three, so the gate below names each loop it
+    // lets through.
     if let EdgeRun::RightRoundWhereItCrosses {
         and: level @ Surface::Plane(_),
     } = run.run()
@@ -9609,20 +9605,23 @@ fn the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in(
         && how_far_a_ball_sits_off_a_pipes_axis(ball, pipe) == Decision::Pos
 }
 
-/// Whether `run` is the one loop two pipes cross in, where a thin pipe reaches
-/// out of a fat one's side rather than the fat one swallowing its whole
-/// cross-section.
+/// Whether `run` is the one loop two pipes cross in, where neither swallows the
+/// other's whole cross-section: a thin pipe reaching out of a fat one's side,
+/// or two of one radius whose axes neither meet nor run the same way.
 ///
-/// **Drawn, and put in order only by name**, as the ball's one loop was until
-/// Q1767 ([`the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in`]). Looked at down
+/// **Drawn, and put in order round a line**, as the ball's one loop is
+/// ([`the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in`]). Looked at down
 /// either axis the loop runs out along an arc of that pipe's circle and back,
-/// so no determinant orders three points on it, and
-/// [`which_comes_first_round_a_crossing`] refuses to, by name,
-/// [`TheseTwoSurfacesDoNotCrossInAConic`](rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic),
-/// after asking again, exactly, whether the fat pipe swallows the thin one. A
-/// bar of radius 1 reaching out of the side of a bar of radius 4 and cut by a
-/// wall through the loop is refused that way under every rule both ways; whole,
-/// it answers both intersections and the fat bar less it (Q1685).
+/// so no determinant reads three points on it down an axis. It runs once round
+/// the line that meets both axes square to both, and
+/// [`which_comes_first_round_a_crossing`] puts places on it in order by how far
+/// round that line each one is (Q1880), after asking again, exactly, whether
+/// one pipe swallows the other and whether the two reach each other. A
+/// loop cut twice away from its start was refused by name until Q1880,
+/// [`TheseTwoSurfacesDoNotCrossInAConic`](rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic);
+/// now a bar of radius 1 reaching out of the side of a bar of radius 4 and cut
+/// by a wall through the loop answers every rule both ways
+/// (`tests/two_arcs_where_two_curved_surfaces_cross.rs`).
 ///
 /// No placement is asked here, unlike the ball's: [`intersect`](rcad_geom::intersect)
 /// names two pipes' crossing [`EdgeRun::RightRoundWhereItsFacesCross`] only

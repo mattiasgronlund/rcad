@@ -1120,9 +1120,10 @@ impl HowFarApartTwoAxesAre {
 /// one root between and crosses there rather than touching. At `φ = 0` and
 /// `φ = π`, where `k` is not there, `one` is the two lines `z = ±r` of the
 /// half-plane, and only `z = r` reaches `other`, since
-/// `t² sin² b = R² − (δ ∓ r)²` is above nothing for `−` alone. So the loop is a smooth graph over the angle round the line, the line
-/// misses it, and the loop runs in the order of that angle. Nothing there
-/// asks which pipe is the fatter.
+/// `t² sin² b = R² − (δ ∓ r)²` is above nothing for `−` alone. So the loop is
+/// a smooth graph over the angle round the line, the line misses it, and the
+/// loop runs in the order of that angle. Nothing there asks which pipe is the
+/// fatter.
 ///
 /// # Which way round
 ///
