@@ -436,11 +436,11 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// points, and the rows that cut account for their inputs' closed-form volumes
 /// by inclusion and exclusion, the same whichever way round they are asked.
 ///
-/// **And the corner-up rate is not the cone's rate.** A round bar of the same
-/// size in the same place, against the same cubes, answers exactly as often —
-/// `a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike`
-/// is that control, and without it these numbers read as a cone's fault when
-/// they are the family's.
+/// **And what the frustum refuses of the corner-up cubes is the cone's.** A
+/// round bar of the same size in the same place, against the same cubes,
+/// answers every fuse since Q1737, and the frustum refuses 12 —
+/// [`a_bar_answers_every_corner_up_cube_so_what_a_frustum_refuses_there_is_the_cones`]
+/// is that control, and Q1956 traces the 12.
 #[test]
 fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
     let mut every = Vec::new();
@@ -820,70 +820,62 @@ fn a_grid_of_points_is_classified_the_way_the_cone_says() {
     assert!(counted > 1000, "only {counted} points were decided");
 }
 
-/// **The control that says the rate above is the family's and not the cone's.**
+/// **The control that says which of a frustum's corner-up refusals are the
+/// cone's own.**
 ///
-/// A frustum against a corner-up cube answers 9 of 96, which reads like a
-/// damning number for a cone until the same cubes are put to a **round bar** of
-/// the same size in the same place. It answers **9 of 96 too**, and refuses in
-/// the same two ways in nearly the same proportions:
+/// The same cubes, stood on their corners in the same places, are put to a
+/// frustum and to a round bar as wide as the frustum's wide end and as tall.
+/// A cube's planes cut the bar in ellipses as they cut the cone, so what the
+/// bar refuses is what this family costs any curved solid, and what the
+/// frustum refuses past that is the cone's. Over the sixteen draws:
 ///
-/// | | answered | wire will not lie flat | a decision nobody could settle |
-/// |---|---:|---:|---:|
-/// | a frustum | 9 | 27 | 60 |
-/// | a round bar of the same size | 9 | 21 | 66 |
+/// | | answered | refused |
+/// |---|---:|---:|
+/// | a frustum | 84 | 12 |
+/// | a round bar of the same size | 96 | 0 |
 ///
-/// So what those 87 refusals measure is **a hard family**, not a hard surface: a
-/// cube stood on its corner brings six planes at an awkward angle to a curved
-/// solid, and the arrangement gives up at about the same rate on a cylinder,
-/// which has been in this kernel since M2. A cone's own cost is the row above
-/// it in `how_often_a_certified_fuse_with_a_cone_in_it_refuses` — the upright
-/// block, refused **90 of 96** because a hyperbola branch never closes.
+/// **This control used to say the opposite**: the bar refused about as often
+/// as the frustum, so the frustum's refusals were read as the family's. Q1737
+/// taught the arrangement to count a loop a plane cuts round a bar from the
+/// one corner whose box holds the loop's start, where that corner and the start
+/// lie too close to put in order, and the bar now answers every fuse. So the
+/// frustum's 12 are the cone's: all six fuses of draws 1 and 14 (slope a half,
+/// far 8, near 4 and 3, a cube of 7 and of 8 at height 4), each refused as
+/// *"could not settle 1 decisions the answer depends on"*. Q1956 traces them.
 ///
-/// **That row used to say 96 of 96, and used to say a bar answers it
-/// completely. Neither is true and neither ever was checked here.** The row is
-/// 90 of 96 since the hyperbola landed, which
-/// `how_often_a_certified_fuse_with_a_cone_in_it_refuses` does assert a floor
-/// on; and a round bar of radius `slope · far` standing where the frustum
-/// stands, against the same upright blocks over the same sixteen draws, answers
-/// **72 of 96** and refuses 24 for *"could not settle 1 decisions the answer
-/// depends on"*. So the hyperbola row does cost a cone something a bar does not
-/// pay — about 66 fuses of it — but "completely" was a guess, and the 24 a bar
-/// still loses is the part of that row this family was already measuring.
+/// **Every answer is checked, not only counted**, because a fuse that wrote the
+/// wrong solid would raise the count as much as one that wrote the right one.
+/// [`the_six_fuses_held_to_their_inputs`] says how. Every draw's cube reaches
+/// into the bar, so every one of the bar's 32 intersections holds something,
+/// and so do the frustum's 28.
 ///
-/// That 72 is a measurement and not a test: nothing in this suite stands an
-/// upright block against a bar. What would settle it is the control this file
-/// already has for corner-up cubes, run once more over
-/// `Family::AFrustumAgainstABlock`'s draws.
-///
-/// Without this control the cone's number would have been read as the cone's
-/// fault and the next lane would have gone looking in the wrong place.
-///
-/// **What is checked is a floor, not a band.** The bar is the floor the frustum
-/// has to stand on; the frustum answering *more* is not a failure of the claim
-/// but this kernel learning a crossing with a cone on it. The bar has no
-/// hyperbola row to gain, so it cannot follow that gain, and a band on both
-/// sides would report a cone as the family's problem exactly when the cone had
-/// stopped being one.
+/// **The frustum is held to a floor at the 84 measured**, in the shape §19.1
+/// asks for: fewer is a regression, and more is Q1956's work, when the floor is
+/// re-derived rather than left behind.
 #[test]
-fn a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike() {
+fn a_bar_answers_every_corner_up_cube_so_what_a_frustum_refuses_there_is_the_cones() {
     let policy = Policy::certified();
     let mut gave_up: [BTreeMap<String, usize>; 2] = [BTreeMap::new(), BTreeMap::new()];
     let mut answered = [0usize; 2];
-    let mut tries = 0;
+    let mut tries = [0usize; 2];
+    let mut cut = [0usize; 2];
     let mut draw = Draw(0x5EED);
 
-    for _ in 0..DRAWS {
+    for at in 0..DRAWS {
         let slope = 2.0_f64.powi(i32::try_from(draw.next() % 3).expect("a small number") - 3);
         let far = draw.whole(6, 12);
         let near = draw.whole(1, 4);
         let side = draw.whole(4, 9);
         let up = draw.whole(1, far as i64 - 1);
+        let placed = Isometry::translation(Vector::new(0.0, 0.0, up))
+            .expect("a finite shift")
+            .compose(&stood_on_its_corner());
 
         for which in 0..2 {
             let mut model =
                 Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
             // A bar as wide as the frustum's wide end and as tall as it is, so
-            // the cube meets the same amount of curved surface either way.
+            // the cube meets at least as much curved surface either way.
             let solid = if which == 0 {
                 a_frustum(&mut model, slope, near, far)
             } else {
@@ -896,56 +888,251 @@ fn a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike() 
                     )
                     .expect("a bar of that radius")
             };
-            let Some(cube) = a_block(&mut model, [side; 3], Vector::new(0.0, 0.0, 0.0)) else {
-                continue;
+            let wide_at = |height: f64| {
+                if which == 0 {
+                    slope * height
+                } else {
+                    slope * far
+                }
             };
+            let cube = a_block(&mut model, [side; 3], Vector::new(0.0, 0.0, 0.0))
+                .expect("a cube of a whole side");
             model
-                .place_solid(
-                    cube,
-                    &Isometry::translation(Vector::new(0.0, 0.0, up))
-                        .expect("a finite shift")
-                        .compose(&stood_on_its_corner()),
-                )
+                .place_solid(cube, &placed)
                 .expect("this model made the key");
-            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-                for (arguments, tools) in [([solid], [cube]), ([cube], [solid])] {
-                    if which == 0 {
-                        tries += 1;
+            let back = placed.inverse();
+            let in_both = |at: Point| {
+                let in_the_solid =
+                    at.z() > near && at.z() < far && at.x().hypot(at.y()) < wide_at(at.z());
+                in_the_solid
+                    && back
+                        .apply_to_point(at)
+                        .coordinates()
+                        .iter()
+                        .all(|&along| along > 0.0 && along < side)
+            };
+            let what = format!(
+                "draw {at} ({}, slope {slope}, near {near}, far {far}, a cube of {side} at {up})",
+                ["a frustum", "a bar"][which]
+            );
+            let sampled = sampled_volume(
+                [slope * far, near, far],
+                in_both,
+                &mut Draw(0x5A3D + at as u64),
+            );
+
+            for (rule, answer) in
+                the_six_fuses_held_to_their_inputs(&model, [solid, cube], sampled, &what, &policy)
+            {
+                tries[which] += 1;
+                match answer {
+                    Ok((volume, error)) => {
+                        answered[which] += 1;
+                        if matches!(rule, Rule::Intersection) && volume > error {
+                            cut[which] += 1;
+                        }
                     }
-                    match model.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new()) {
-                        Ok(_) => answered[which] += 1,
-                        Err(why) => *gave_up[which].entry(format!("{why}")).or_default() += 1,
-                    }
+                    Err(why) => *gave_up[which].entry(why).or_default() += 1,
                 }
             }
         }
     }
 
-    println!("over {tries} fuses each:");
-    println!("  a frustum: {} answered, {:?}", answered[0], gave_up[0]);
     println!(
-        "  a bar of the same size: {} answered, {:?}",
-        answered[1], gave_up[1]
+        "a frustum: {} of {} answered, {:?}",
+        answered[0], tries[0], gave_up[0]
     );
-    assert!(tries >= 90, "only {tries} fuses were drawn");
-    // **A floor and not a band.** The bar is a floor on the frustum: a cone is
-    // not what makes this family hard, so the frustum must not answer *fewer*
-    // than the bar by more than a quarter. It may answer more, and a two-sided
-    // band would go red saying the opposite of what had happened — the bar has
-    // no hyperbola row to gain, so every crossing a cone learns to name is a
-    // gain the control cannot follow.
-    let shortfall = answered[1] as f64 - answered[0] as f64;
+    println!(
+        "a bar of the same size: {} of {} answered, {:?}",
+        answered[1], tries[1], gave_up[1]
+    );
+    println!("intersections with something in them, frustum and bar: {cut:?}");
+    assert_eq!(
+        tries,
+        [6 * DRAWS; 2],
+        "every draw asks all six fuses of both pairs"
+    );
+    assert_eq!(
+        (answered[1], &gave_up[1]),
+        (tries[1], &BTreeMap::new()),
+        "a bar against a corner-up cube was measured answering every fuse since Q1737, each \
+         adding up with its inputs and its intersection where points drawn at random put it. \
+         Re-derive this rather than relax it (§19.1)"
+    );
+    assert_eq!(
+        cut[1],
+        2 * DRAWS,
+        "every draw's cube reaches into the bar, so no check above passed for want of a cut"
+    );
     assert!(
-        shortfall <= 0.25 * (answered[1] as f64).max(4.0),
-        "a bar answered {} of these and a frustum only {}, so a cone *is* what makes this \
-         family hard, and the note above is wrong",
-        answered[1],
+        answered[0] >= 84,
+        "a frustum against a corner-up cube was measured answering 84 of 96, every answer \
+         checked as the bar's are, and it answered {} here. The 12 it refused are all six fuses \
+         of draws 1 and 14, which Q1956 traces. Fewer is a regression; more is Q1956's work, \
+         and then this floor is re-derived rather than left (§19.1)",
         answered[0]
     );
+}
+
+/// Union, intersection and difference of `solid` and `cube`, each both ways
+/// round, every answer validated and measured, and every sum the answers
+/// make up held to the inputs' own measured volumes:
+///
+/// - the union and the intersection make up the two inputs;
+/// - the solid less the cube, and the intersection, make up the solid;
+/// - the cube less the solid, and the intersection, make up the cube.
+///
+/// Those three hold whatever the intersection holds, so the intersection is
+/// held as well to `sampled`, the volume points drawn at random say it has, and
+/// its standard deviation: within five of those and its own declared error.
+/// A fuse that refused is handed back by what it said, and checks nothing.
+fn the_six_fuses_held_to_their_inputs(
+    model: &Model,
+    [solid, cube]: [SolidKey; 2],
+    (sampled, sigma): (f64, f64),
+    what: &str,
+    policy: &Policy,
+) -> Vec<(Rule, Result<(f64, f64), String>)> {
+    let fused = |rule, arguments, tools| {
+        let answer = fused_and_measured(model, rule, arguments, tools, policy)
+            .map_err(|why| format!("{why}"));
+        if let Err(why) = &answer {
+            let first = if arguments == cube {
+                "the cube"
+            } else {
+                "the solid"
+            };
+            println!("{what}: the {rule:?} with {first} first refused {why}");
+        }
+        answer
+    };
+    let one_solid = measured(model, &[solid], policy);
+    let one_cube = measured(model, &[cube], policy);
+    let solid_less = fused(Rule::Difference, solid, cube);
+    let cube_less = fused(Rule::Difference, cube, solid);
+    let mut all = vec![
+        (Rule::Difference, solid_less.clone()),
+        (Rule::Difference, cube_less.clone()),
+    ];
+    for (one, other) in [(solid, cube), (cube, solid)] {
+        let union = fused(Rule::Union, one, other);
+        let both = fused(Rule::Intersection, one, other);
+        if let Ok(both) = both {
+            assert!(
+                (both.0 - sampled).abs() <= 5.0 * sigma + both.1,
+                "{what}: the intersection measures {} ± {}, and points drawn at random say \
+                 {sampled} ± {sigma}",
+                both.0,
+                both.1
+            );
+            if let Ok(union) = union {
+                within(
+                    what,
+                    "union and intersection make up the two inputs",
+                    [union, both],
+                    [one_solid, one_cube],
+                );
+            }
+            if let Ok(solid_less) = solid_less {
+                within(
+                    what,
+                    "the solid less the cube, and the intersection, make up the solid",
+                    [solid_less, both],
+                    [one_solid, (0.0, 0.0)],
+                );
+            }
+            if let Ok(cube_less) = cube_less {
+                within(
+                    what,
+                    "the cube less the solid, and the intersection, make up the cube",
+                    [cube_less, both],
+                    [one_cube, (0.0, 0.0)],
+                );
+            }
+        }
+        all.push((Rule::Union, union));
+        all.push((Rule::Intersection, both));
+    }
+    all
+}
+
+/// One fuse on a copy of `model`, validated, with the volume of every solid
+/// it hands back added up and the sum of their errors.
+fn fused_and_measured(
+    model: &Model,
+    rule: Rule,
+    arguments: SolidKey,
+    tools: SolidKey,
+    policy: &Policy,
+) -> Result<(f64, f64), Error> {
+    let mut model = model.clone();
+    let answer = model.fuse(
+        &[arguments],
+        &[tools],
+        rule,
+        policy,
+        &mut ProvenanceLog::new(),
+    )?;
+    model
+        .validate(policy, &mut ProvenanceLog::new())
+        .expect("a fuse hands back a sound model or refuses");
+    Ok(measured(&model, answer.solids(), policy))
+}
+
+fn measured(model: &Model, solids: &[SolidKey], policy: &Policy) -> (f64, f64) {
+    solids.iter().fold((0.0, 0.0), |(volume, error), &solid| {
+        let it = model
+            .solid(solid)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("every solid here measures");
+        (volume + it.volume(), error + it.volume_error())
+    })
+}
+
+/// Two measured volumes against two others, within the errors all four
+/// declare and the rounding of the three steps that take the difference.
+fn within(what: &str, sum: &str, parts: [(f64, f64); 2], whole: [(f64, f64); 2]) {
+    let off_by = parts[0].0 + parts[1].0 - whole[0].0 - whole[1].0;
+    let sizes = parts[0].0.abs() + parts[1].0.abs() + whole[0].0.abs() + whole[1].0.abs();
+    let bound =
+        parts[0].1 + parts[1].1 + whole[0].1 + whole[1].1 + 3.0 * (f64::EPSILON / 2.0) * sizes;
     assert!(
-        answered[1] > 0 && answered[1] < tries,
-        "the bar has to answer some and refuse some, or it is not a control"
+        off_by.abs() <= bound,
+        "{what}: {sum}, and are out by {off_by:e} against {bound:e}: {parts:?} against {whole:?}"
     );
+}
+
+/// The volume inside `holds`, from points drawn at random over the box
+/// `[-radius, radius]² × [near, far]`, and one standard deviation of it.
+fn sampled_volume(
+    [radius, near, far]: [f64; 3],
+    holds: impl Fn(Point) -> bool,
+    draw: &mut Draw,
+) -> (f64, f64) {
+    const POINTS: u32 = 400_000;
+    let mut uniform = |low: f64, high: f64| low + (high - low) * draw.next() as f64 / 2f64.powi(31);
+    let mut inside = 0u32;
+    for _ in 0..POINTS {
+        let at = Point::new(
+            uniform(-radius, radius),
+            uniform(-radius, radius),
+            uniform(near, far),
+        );
+        if holds(at) {
+            inside += 1;
+        }
+    }
+    let the_box = 4.0 * radius * radius * (far - near);
+    let share = f64::from(inside) / f64::from(POINTS);
+    (
+        the_box * share,
+        the_box * (share * (1.0 - share) / f64::from(POINTS)).sqrt(),
+    )
 }
 
 /// `A ∪ B` is `B ∪ A` and `A ∩ B` is `B ∩ A`, over every cone pair that answers.
