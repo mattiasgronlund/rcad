@@ -114,3 +114,12 @@ again through `intersect`, so it gets the new picker from the namer itself.
   never makes the new arm. That is a reading of the code and not a
   demonstration: a model built by hand, or read from a file, can put the new
   arm there, and what it gets then is untried.
+- **Two test files did the same.** `the_one_flat_picker` in
+  `where_two_leaning_pipes_far_out_cross.rs` refuses the new arm as it refuses
+  every picker but `InFrontOf`. `Picking::of` in `tests/fuzzing/comparison.rs`
+  panics on it, as its wildcard did: a `Picking` of its own for it needs an arm
+  in `Picking::moved_by` in `fuses_that_must_agree.rs` too, since that match
+  names every `Picking`, and that file was outside this row. So a fuse whose
+  answer holds the new arm cannot yet be compared. None that answers is known:
+  Q1896 and Q1897, the two pairs of bars crossing at `(11, −3.25, 0.5)`, say
+  each of their fuses is refused.
