@@ -35,11 +35,14 @@
 //! None of the shapes that hold the plate and the ring reaches that question,
 //! under any rule either way round:
 //!
-//! - the plate and the ring are refused *"a point inside a piece of a face"*,
-//!   on the plate top's half annulus, corners `(0, ±3.134, 1/2)` and
-//!   `(0, ±4.866, 1/2)`; a model of that piece on `z = 0` in `select.rs`'s
-//!   tests holds three points offered for it, so the cause lies in something
-//!   the real piece has and that model does not, and is not traced;
+//! - the plate and the ring answer one solid that validates, with the volumes
+//!   below, but the ring alone cannot show the wrong answer. They were refused
+//!   *"a point inside a piece of a face"* until Q1861, and the piece refused
+//!   was not the plate top's half annulus, as this file said, but the ring's
+//!   skin above the plate's top: two pieces of the torus with corners
+//!   `(0, ±3.134, 1/2)` and `(0, ±4.866, 1/2)`, which
+//!   `steps_from_a_reach_into_the_planes_material` in `fuse/select.rs` now
+//!   finds a point in;
 //! - the plate against the ring and the bar together is refused by the same
 //!   predicate, on a piece not traced.
 //!
@@ -89,17 +92,26 @@ const BAR_TOP: f64 = 0.75;
 
 const RULES: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
-/// The predicate the plate top's half annulus is refused by.
+/// The predicate the plate against the ring and the bar is refused by.
 const INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 
 #[test]
-fn a_half_disk_plate_and_a_whole_ring_are_refused_on_the_plates_half_annulus() {
-    every_way(the_plate, the_ring, |_, rule, plate_first, answer| {
-        assert_eq!(
-            refused_by(answer),
-            INSIDE_A_PIECE,
-            "{rule:?}, plate first: {plate_first}"
-        );
+fn a_half_disk_plate_and_a_whole_ring_fuse_to_their_volumes() {
+    let plate = 605.0 * PI / 16.0;
+    let ring = 8.0 * PI * PI;
+    let shared = 8.0 * PI * PI / 3.0 + PI * 3.0_f64.sqrt();
+    every_way(the_plate, the_ring, |model, rule, plate_first, answer| {
+        let what = format!("{rule:?}, plate first: {plate_first}");
+        let solids = answer.unwrap_or_else(|why| panic!("{what} refused: {why:?}"));
+        let volume = match (rule, plate_first) {
+            (Rule::Union, _) => plate + ring - shared,
+            (Rule::Intersection, _) => shared,
+            (Rule::Difference, true) => plate - shared,
+            (Rule::Difference, false) => ring - shared,
+            (other, _) => panic!("a rule this file does not run: {other:?}"),
+        };
+        assert_eq!(solids.len(), 1, "{what}: {solids:?}");
+        assert_measures(model, &solids, volume, &what);
     });
 }
 

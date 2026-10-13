@@ -230,8 +230,9 @@ pub(crate) struct Chosen {
 /// [`INSIDE_A_PIECE`] when no point inside it was found, and under
 /// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be
 /// placed, or only a rung of [`rungs_towards_each_crossing`],
-/// [`shorter_steps_across_a_curved_piece`] or
-/// [`between_the_middles_of_a_cone_pieces_sides`] was found.
+/// [`shorter_steps_across_a_curved_piece`],
+/// [`between_the_middles_of_a_cone_pieces_sides`] or
+/// [`steps_from_a_reach_into_the_planes_material`] was found.
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
 /// a point offered before the rungs was found inside the piece and the ray
 /// from a point tried met a face of a solid that nothing here can follow; none
@@ -597,8 +598,9 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// refusal here: before the rungs it was a piece with no point found, which a
 /// side it shares or a corner could place, and a rung that cannot be
 /// classified must not take that away (`docs/decisions.md` §365.6). A curved
-/// piece's rungs are [`shorter_steps_across_a_curved_piece`] and then
-/// [`between_the_middles_of_a_cone_pieces_sides`], offered only where no
+/// piece's rungs are [`shorter_steps_across_a_curved_piece`],
+/// [`between_the_middles_of_a_cone_pieces_sides`] and then
+/// [`steps_from_a_reach_into_the_planes_material`], offered only where no
 /// earlier point was found inside the piece, so a piece one was found in and
 /// not placed is refused or placed as it was.
 ///
@@ -694,6 +696,7 @@ fn place_the_piece(
     if !one_was_inside {
         rungs.extend(shorter_steps_across_a_curved_piece(piece));
         rungs.extend(between_the_middles_of_a_cone_pieces_sides(piece));
+        rungs.extend(steps_from_a_reach_into_the_planes_material(piece));
     }
     for rung in rungs {
         let Some(settled) = try_one(rung, log)? else {
@@ -723,8 +726,9 @@ enum Search {
     /// No point offered was proved inside the piece.
     NoPointInside,
     /// Only rungs of [`rungs_towards_each_crossing`],
-    /// [`shorter_steps_across_a_curved_piece`] or
-    /// [`between_the_middles_of_a_cone_pieces_sides`] were, and none of them
+    /// [`shorter_steps_across_a_curved_piece`],
+    /// [`between_the_middles_of_a_cone_pieces_sides`] or
+    /// [`steps_from_a_reach_into_the_planes_material`] were, and none of them
     /// could be classified against every solid in the set.
     OnlyRungsInside {
         /// The first face a rung's ray met whose trimming nothing here
@@ -3738,6 +3742,48 @@ fn between_the_middles_of_a_cone_pieces_sides(piece: &Piece) -> Vec<PredicatePoi
     candidates
         .into_iter()
         .filter_map(|candidate| back_onto_the_surface(&piece.surface, candidate))
+        .collect()
+}
+
+/// For a curved piece a plane cut, the steps [`candidate_points`] takes from
+/// the middle of its corners, taken again from one reach on from that middle
+/// towards the side of every plane that cut it that it is on
+/// ([`towards_every_flat_sides_material`]), each put back onto the surface;
+/// offered after [`between_the_middles_of_a_cone_pieces_sides`], under the same
+/// rule.
+///
+/// **A plane through a ball's centre keeps every step along it on the circle
+/// it cuts the ball in.** The ball of radius 3 at `(0, 3, 5)` against the bar
+/// of radius 2 up `z` capped at `z = 5` has its skin cut by the cap's plane and
+/// by the one loop the bar's pipe crosses it in, into four pieces, each between
+/// an arc of the circle at `z = 5` and an arc of the loop, and all four with
+/// the same two corners, `(±4√2/3, 2/3, 5)`. Their middle is on the plane and so
+/// is the ball's centre, so a step along `x` or `y`, put back onto the ball,
+/// lands on that circle, which bounds every piece. The steps along `z`, and the
+/// one towards the plane's material, land above or below the middle, inside
+/// the pipe: in the two pieces inside it and in neither of the two outside it.
+/// No point offered was inside those two, and every rule both ways round was
+/// refused [`INSIDE_A_PIECE`], as it was for the bar from `z = 5` up and the
+/// bar cut down to `z = 5` by a block (row Q1861,
+/// `tests/two_arcs_where_two_curved_surfaces_cross.rs`). From one reach below
+/// the middle the step along `x` comes back as `(1.86, 1.55, 3.14)`, outside the
+/// pipe and below the plane, and from one reach above it as
+/// `(1.86, 1.55, 6.86)`.
+///
+/// Nothing is trusted: the caller proves each point inside the piece or drops
+/// it.
+fn steps_from_a_reach_into_the_planes_material(piece: &Piece) -> Vec<PredicatePoint> {
+    if piece.surface.as_plane().is_some() {
+        return Vec::new();
+    }
+    let Some(towards) = towards_every_flat_sides_material(piece) else {
+        return Vec::new();
+    };
+    let middle = middle_of_the_corners(&corners_of(piece));
+    let reach = how_big_the_surface_is(&piece.surface, middle);
+    steps_from_the_middle(piece, middle + towards * reach, reach)
+        .into_iter()
+        .filter_map(|step| back_onto_the_surface(&piece.surface, step))
         .collect()
 }
 
