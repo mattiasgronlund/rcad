@@ -48,11 +48,16 @@ use pairs::{Configuration, Elsewhere, Placed, Shape, Skew};
 /// side wall above it touch along `x = 2, y = 1`. That line is an edge of both,
 /// the corner of the frame's hole and of the tooth's top, so the four faces
 /// along it are four faces of the two inputs: the hole's walls `y = 1` and
-/// `x + y = 3`, and the tooth's top `y = 1` and its wall `x = 2`. It was
-/// refused `ResultIsNotManifold { count: 4 }` until queue row Q1913. The four
-/// faces are one shell without the line, so the answer is one solid touching
-/// itself, `10 − 2`, and not the two touching solids §80.9 leaves unbuilt
-/// (`docs/decisions.md` §39.4).
+/// `x + y = 3`, and the tooth's top `y = 1` and its wall `x = 2`. The frame
+/// less the comb, `10 − 2`, is three lumps and not one solid: the ring with
+/// the near wall's piece left of the middle tooth, 6.5; the square between
+/// the teeth, `x` from 1 to 2 and `y` from 0 to 1, 1; and the triangle
+/// `(3, 0), (4, 0), (3, 1)` right of the right tooth, 0.5. The square is the
+/// lump that touches the ring along `x = 2, y = 1`, so the two sides of that
+/// line are two solids, and it stays refused
+/// `ResultIsNotManifold { count: 4 }`: §80.9 leaves two touching solids
+/// unbuilt, and since queue row Q1913 only a line with one solid on both
+/// sides is parted (`docs/decisions.md` §39.4).
 #[test]
 fn a_leaning_frame_and_a_comb_meet_in_two_squares() {
     let (model, keys) = frame_and_comb().build();
@@ -67,9 +72,7 @@ fn a_leaning_frame_and_a_comb_meet_in_two_squares() {
     assert_eq!(solids.len(), 1, "the union is one solid");
     holds_exactly(&either, &solids, 10.0 + 11.0 - 2.0, "the union");
 
-    let (less, solids) = fused(&model, keys[0], keys[1], Rule::Difference);
-    assert_eq!(solids.len(), 1, "the frame less the comb is one solid");
-    holds_exactly(&less, &solids, 10.0 - 2.0, "the difference");
+    is_not_a_solid(&model, keys[0], keys[1], Rule::Difference);
 }
 
 /// The same two with the comb first: the comb less the frame holds 9, the
