@@ -9,10 +9,9 @@ argument-hint: "A row id to take first, or nothing to take what `just queue next
 `docs/queue.md` holds every open item as a row, in the tiers of
 `docs/decisions.md` §230.1 and §307. **Every free slot takes the highest ready row that
 fits** (§230.3), and a slot is refilled when its own lane finishes, not when a
-batch does (§230.4). The cap is three slots, with read-only rows, verifiers and
-mergers each counting toward it (§397.7, back to §372's three now that
-one-minute load 24 or more shows up on 43% of busy daytime samples against the
-20% that set four; §230.8 had six).
+batch does (§230.4). The cap is four slots, with read-only rows, verifiers and
+mergers each counting toward it (§447.3, which replaces §397.7's load bar with
+a bar on what the load costs, and four slots pass it; §230.8 had six).
 
 **`just queue` is what to dispatch next, and `just queue next` is what the free
 slots take.** Every open item is a row of `docs/queue.md` — id, tier, state,
