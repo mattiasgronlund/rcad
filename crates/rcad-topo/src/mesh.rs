@@ -8420,9 +8420,10 @@ fn how_far_out_this_face_is_where_its_corners_are(face: FaceView<'_>) -> f64 {
 /// **A piece of a parabola or a hyperbola a plane cuts a cone in is its two
 /// ends as well**, and that is asked before any arithmetic on the plane's lean
 /// is — see [`a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever`]. So is
-/// a piece of an ellipse that reaches millions of times further than the
-/// piece's ends, which the walk places from those ends — see
-/// [`a_plane_cuts_this_cone_in_an_ellipse_its_ends_are_walked_by`].
+/// a piece of an ellipse a plane cuts a cone or a pipe in that reaches millions
+/// of times further than the piece's ends, which the walk places from those
+/// ends — see
+/// [`a_plane_cuts_this_cone_or_pipe_in_an_ellipse_its_ends_are_walked_by`].
 fn how_far_along_its_axis_this_face_runs(
     face: FaceView<'_>,
     axis: &Axis,
@@ -8478,8 +8479,8 @@ fn how_far_along_its_axis_this_face_runs(
                     slope,
                     &other,
                 );
-                if a_plane_cuts_this_cone_in_an_ellipse_its_ends_are_walked_by(
-                    &ours, &other, edge, whole, its_ends,
+                if a_plane_cuts_this_cone_or_pipe_in_an_ellipse_its_ends_are_walked_by(
+                    &ours, &other, edge, whole, its_ends, radius,
                 ) {
                     return Some(its_ends);
                 }
@@ -8528,10 +8529,11 @@ fn a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever(
     cone.is_cut_in_a_closed_curve_by(flat) == Some(false)
 }
 
-/// Whether `other` is a plane that cuts `ours`, a cone, in an ellipse reaching
-/// so much further up the axis than this edge's ends that [`rcad_geom::walk`]
-/// places the edge's points round the cone from its ends — so that the ends,
-/// and not the ellipse, are how far up the axis the edge gets.
+/// Whether `other` is a plane that cuts `ours`, a cone or a pipe, in an
+/// ellipse reaching so much further up the axis than this edge's ends that
+/// [`rcad_geom::walk`] places the edge's points from its ends, round the cone
+/// or up the pipe — so that the ends, and not the ellipse, are how far up the
+/// axis the edge gets.
 ///
 /// Only for an edge that is a piece of the crossing: one that goes right round
 /// is the whole ellipse and is walked round it.
@@ -8540,17 +8542,20 @@ fn a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever(
 /// [`how_far_along_an_axis_a_crossing_with_this_surface_runs`], and `None` is a
 /// lean so near a ruling's that the bottom of that division rounded to nothing,
 /// which reaches for ever. The walk works the same number out the same way and
-/// walks round the cone past
+/// walks from the ends past
 /// [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`](rcad_geom::PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST)
-/// times the ends; this charges by the ends only past **twice** that, so a
+/// times the ends round a cone, and that many times the larger of the ends and
+/// `radius` up a pipe; this charges by the ends only past **twice** that, so a
 /// rounding between the frame the face is stored in and the one it is meshed
-/// in cannot put the two on opposite sides of the line.
+/// in cannot put the two on opposite sides of the line. For a pipe `whole` is
+/// `(|s₀| + r·sideways) / |n·ŵ|`, the walk's own reach with the plane's normal
+/// taken as length one.
 ///
-/// **And only for the arc that misses the ellipse's far end**, which the walk
-/// is asked about through
+/// **And only for the arc that misses the ellipse's far end**, or on a pipe
+/// both its tips, which the walk is asked about through
 /// [`PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of`](rcad_geom::PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of):
 /// the edge's half-spaces pick one of the two arcs between its ends, and the
-/// arc past the far end is walked round the ellipse and runs out to it. Charged
+/// other arc is walked round the ellipse and runs out to a tip. Charged
 /// by its ends, a face on a cone of slope a half whose one curved edge runs from
 /// two ends `1.25` up round the far side to `1.7e7` up had a floor of
 /// `4.5e-11`, and the walk refused every deflection between that and `5.3e-7`:
@@ -8566,20 +8571,24 @@ fn a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever(
 /// are, and not in the frame the face is meshed in; a half-space decides which
 /// arc at each arc's middle, far from both ends, where a shift that loses
 /// nothing moves no answer.
-fn a_plane_cuts_this_cone_in_an_ellipse_its_ends_are_walked_by(
+fn a_plane_cuts_this_cone_or_pipe_in_an_ellipse_its_ends_are_walked_by(
     ours: &Surface,
     other: &Surface,
     edge: EdgeView<'_>,
     whole: Option<f64>,
     its_ends: f64,
+    radius: f64,
 ) -> bool {
-    let (Surface::Cone(_), Surface::Plane(_), EdgeRun::PartOfWhereItCrosses { .. }) =
-        (ours, other, edge.stored_run())
-    else {
+    let EdgeRun::PartOfWhereItCrosses { .. } = edge.stored_run() else {
         return false;
     };
+    let reach_past = match (ours, other) {
+        (Surface::Cone(_), Surface::Plane(_)) => its_ends,
+        (Surface::Cylinder(_), Surface::Plane(_)) => its_ends.max(radius),
+        _ => return false,
+    };
     let reaches_far_past_its_ends = whole.is_none_or(|whole| {
-        whole > 2.0 * rcad_geom::PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST * its_ends
+        whole > 2.0 * rcad_geom::PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST * reach_past
     });
     if !reaches_far_past_its_ends {
         return false;
