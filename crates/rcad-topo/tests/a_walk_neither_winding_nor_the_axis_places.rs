@@ -1278,10 +1278,11 @@ fn the_ball_inside_a_hole(radius: f64, off: f64) -> f64 {
 /// [`a_ball_against_a_square_rod_holed_off_its_axis_is_answered_under_every_rule`],
 /// was pinned here beside it until then. Until Q1661 every rule was refused
 /// `ACrossingThisCannotBeOrderedAlong` before any cell, by `fuse/arrange.rs`'s
-/// `how_a_crossing_runs`. That lets the one loop through now, to be put in
-/// order only by the name of where the walk starts on it, and the fuse gets as
-/// far as the cells, where it is refused `CannotTellTheCellsOfAFaceApart` on
-/// the pipe. Why is not traced; Q1768 takes it.
+/// `how_a_crossing_runs`. That lets the one loop through now, and since Q1767
+/// `rcad-geom` orders it by angle round the line through the ball's centre
+/// square to the bar's axis, so the fuse gets as far as the cells, where it is
+/// refused `CannotTellTheCellsOfAFaceApart` on the pipe. Why is not traced;
+/// Q1768 takes it.
 ///
 /// Named `a_small_ball_on_a_bars_wall_is_refused_before_any_cell` until Q1766.
 #[test]
