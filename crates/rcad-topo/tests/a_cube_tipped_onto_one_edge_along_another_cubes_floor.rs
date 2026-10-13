@@ -36,6 +36,14 @@
 //! (`leave_out_each_pair_of_flat_faces_walking_one_ring_both_ways` in
 //! `fuse/assemble.rs`).
 //!
+//! **The block less the tipped cube was refused** `ResultIsNotManifold {
+//! count: 4 }` at those five tilts, under a tolerant policy, until queue row
+//! Q1901. There the block keeps a thin wedge under the cube's bottom face and
+//! a wide one beside its side, and the two touch along the edge the cube
+//! stands on: one solid touching itself along a line. That is an answer
+//! (`docs/decisions.md` §39.4), and the fuse parts the line into one edge for
+//! each wedge.
+//!
 //! **The tipped cube less the block was two solids**, under a tolerant
 //! policy, at the four tilts of
 //! [`TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT`] (queue row Q1687).
@@ -131,6 +139,29 @@ fn the_union_is_both_cubes_less_what_they_share_where_it_was_refused() {
                 let volume = volume_of_a_fuse(tilt, Rule::Union, order, &policy, &asked);
                 assert_about(volume, 2000.0 - what_the_two_share(tilt), &asked);
             }
+        }
+    }
+}
+
+/// Refused `ResultIsNotManifold { count: 4 }` under a tolerant policy until
+/// queue row Q1901: the block touches itself along the cube's edge there, and
+/// a solid touching itself along a line is an answer (`docs/decisions.md`
+/// §39.4). One solid under either policy since.
+#[test]
+fn the_block_less_the_tipped_cube_is_the_block_less_what_they_share_where_the_union_was_refused() {
+    for tilt in TILTS_THE_UNION_WAS_REFUSED_AT {
+        for policy in [certified(), tolerant()] {
+            let asked = format!("{tilt:?}, {policy:?}");
+            let volumes = volumes_of_a_fuse(
+                tilt,
+                Rule::Difference,
+                Order::BlockFirst,
+                &policy,
+                &mut ProvenanceLog::new(),
+                &asked,
+            );
+            assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
+            assert_about(volumes[0], 1000.0 - what_the_two_share(tilt), &asked);
         }
     }
 }
@@ -316,9 +347,13 @@ fn the_block_less_the_tipped_cube_is_one_solid_where_the_cubes_edge_rounds_below
 }
 
 /// Every tilt of this file, every rule, either way round, under a tolerant
-/// policy, but for the five fuses
-/// [`the_block_less_the_tipped_cube_is_refused_where_the_union_was_refused_tolerant`]
-/// pins: one solid, within §417.8's allowance of the volume worked by hand.
+/// policy: one solid, within §417.8's allowance of the volume worked by hand.
+///
+/// **The block less the tipped cube was refused `ResultIsNotManifold { count:
+/// 4 }` at the five [`TILTS_THE_UNION_WAS_REFUSED_AT`]** until queue row
+/// Q1901, with the fold tried and refused too. There the block touches itself
+/// along the cube's edge, and a solid touching itself along a line is an
+/// answer (`docs/decisions.md` §39.4).
 ///
 /// **The floor is taken as running through the ends of the cube's edge only
 /// where the answer was refused without it** (queue row Q1711,
@@ -348,11 +383,6 @@ fn every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_o
                 (Rule::Intersection, share, refused_without),
                 (Rule::Difference, 1000.0 - share, false),
             ] {
-                if matches!((rule, order), (Rule::Difference, Order::BlockFirst))
-                    && TILTS_THE_UNION_WAS_REFUSED_AT.contains(&tilt)
-                {
-                    continue;
-                }
                 let asked = format!("{tilt:?}, {rule:?}, {order:?}");
                 let mut log = ProvenanceLog::new();
                 let volumes = volumes_of_a_fuse(tilt, rule, order, &tolerant(), &mut log, &asked);
@@ -380,27 +410,6 @@ fn every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_o
                 }
             }
         }
-    }
-}
-
-/// Refused as before Q1711, with the fold tried and refused too: the block
-/// touches itself along the cube's edge, and an edge with four faces along it
-/// is queue row Q1116's to judge, not this file's.
-#[test]
-fn the_block_less_the_tipped_cube_is_refused_where_the_union_was_refused_tolerant() {
-    for tilt in TILTS_THE_UNION_WAS_REFUSED_AT {
-        let asked = format!("{tilt:?}");
-        let why = refusal(
-            tilt,
-            Rule::Difference,
-            Order::BlockFirst,
-            &tolerant(),
-            &asked,
-        );
-        assert!(
-            matches!(why, Error::ResultIsNotManifold { count: 4 }),
-            "{asked}: {why:?}"
-        );
     }
 }
 
