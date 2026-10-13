@@ -2303,26 +2303,42 @@ fn a_bar_with_a_tab_on_it_is_answered_rather_than_left_with_a_hole_in_its_skin()
 // The gaps §36 already named, placed here so the catalogue is where they are
 // looked up rather than four sections apart.
 
-/// A notched bar turned about an awkward axis refuses inside the arrangement,
-/// before any edge is named, and refuses the same way under a tolerant policy.
+/// A notched bar turned about an awkward axis is answered under every rule and
+/// both policies, records nothing, and holds what the unturned bar holds.
 ///
-/// §36.28 records this. What the catalogue adds is that it is the same shape as
-/// [`a_notch_across_the_seam`], which is decided and records nothing where it
-/// stands — so the turn is the whole of the difference.
+/// It is [`a_notch_across_the_seam`] turned 0.4 radian about `(1, 2, 3)`, and it
+/// was §36.28's gap: refused *order along a crossing* inside the arrangement,
+/// before any edge was named, under both policies. Q1884 put in order the places
+/// on a plane's loop round a pipe (`fuse/arrange.rs`), and Q1882 walked an arc of
+/// a plane's very long ellipse up a pipe. With the first and not the second,
+/// every rule was refused `CannotNameWhichPieceOfACrossingThisIs` (Q1924).
+///
+/// A turn moves no material, so the closed forms are the unturned ones. Of the
+/// disc of radius two, the part with `x ≥ 1` and `|y| ≤ 1` is the tab entry's
+/// `4π/3 − √3` less its two corners past `|y| = 1`, each `1 − √3 + π/3`, which
+/// leaves `2π/3 + √3 − 2`. The notch holds that times its height, two.
 #[test]
-fn a_turned_notched_bar_is_refused_for_want_of_an_order_along_a_crossing() {
+fn a_turned_notched_bar_is_answered_under_every_rule() {
+    let held = 2.0 * (2.0 * PI / 3.0 + 3.0_f64.sqrt() - 2.0);
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        let mut model = a_model();
-        let pair = a_notch_across_the_seam(&mut model);
-        let axis = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("an axis");
-        let turn = Isometry::rotation(&axis, 0.4).expect("a share of a turn");
-        for &solid in pair.arguments.iter().chain(&pair.tools) {
-            model
-                .place_solid(solid, &turn)
-                .expect("this model made the key");
+        for (rule, closed_form) in [
+            (Rule::Union, A_BAR + 8.0 - held),
+            (Rule::Intersection, held),
+            (Rule::Difference, A_BAR - held),
+        ] {
+            let mut model = a_model();
+            let pair = a_notch_across_the_seam(&mut model);
+            let axis = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("an axis");
+            let turn = Isometry::rotation(&axis, 0.4).expect("a share of a turn");
+            for &solid in pair.arguments.iter().chain(&pair.tools) {
+                model
+                    .place_solid(solid, &turn)
+                    .expect("this model made the key");
+            }
+            let answer = fused_under(&mut model, &pair, rule, &policy);
+            assert_eq!(answer.solids().len(), 1, "{policy:?}, {rule:?}");
+            measures(volume_of(&model, answer.solids()), closed_form, Side::Under);
         }
-        let why = refusal(&mut model, &pair, Rule::Difference, &policy);
-        assert_eq!(what_it_gave_up_on(&why), "order along a crossing");
     }
 }
 
