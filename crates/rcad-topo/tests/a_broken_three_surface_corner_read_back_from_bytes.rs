@@ -1,7 +1,7 @@
 //! A box whose top corner, where three planes meet, a pyramid whose apex,
 //! where four planes meet, and a half bar whose corner, where a cap, a round
 //! wall and a cut meet, are moved in their file, read back, and fused.
-//! `docs/decisions.md` §294.16, §294.17, §294.18 and §294.19 are the record
+//! `docs/decisions.md` §294.16 to §294.20 are the record
 //! and this file is their measurement.
 //!
 //! §294 moved a round bar's top corner, which has only two surfaces round it,
@@ -34,10 +34,10 @@
 //! Each three of the four planes cross at the apex alone, so no three of them
 //! place an apex a millimetre away. The sound pyramid answers every partner
 //! but one, a block whose face runs exactly through the apex. Cut by that, it
-//! answers where it stands. Placed, it cannot say which of two points comes
-//! first along an edge, the apex and where the cut crosses the edge a rounding
-//! from it, which is a defect of its own and pinned here as it stands
-//! (§294.19).
+//! answers where it stands. Placed, its four side planes cut the cut's face
+//! into specks a rounding across by the apex, and it cannot find a point
+//! inside one of them, which is a defect of its own and pinned here as it
+//! stands (§294.20).
 //!
 //! The half bar is a round bar of radius 3 and height 10 less the block that
 //! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
@@ -396,31 +396,30 @@ fn a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it() {
 }
 
 /// **Placed, the sound pyramid cut through its apex refuses**, which is a
-/// defect and not the moved apex's refusal (§294.19). Shifted, turned, or
+/// defect and not the moved apex's refusal (§294.19, §294.20). Shifted, turned, or
 /// turned and then shifted, the four side planes as written meet three by
 /// three at points a rounding apart, and the three bake solved the apex from
 /// put it a rounding off the cut: inside the block shifted, outside it turned.
-/// The cut then crosses an edge at the apex a rounding from the apex, and under
-/// `certified` the fuse cannot say which of the two comes first along the
-/// edge. Under `tolerant(100)` it takes twenty such orders and then cannot say
-/// whether a point is inside a piece of a face.
+/// The cut crosses each edge at the apex a rounding from the apex, and the
+/// fuse puts the two in order along the edge from the planes (Q1911). But the
+/// four side planes also cross the cut's own face in four lines that pass a
+/// rounding from one another by the apex, and cut it into specks. One of them,
+/// a triangle with every corner within `1e−12` of the apex, has no point inside
+/// it that can be written down, and under both policies the fuse refuses
+/// there, with one record. Before Q1911, `certified` refused the order instead,
+/// and `tolerant(100)` took twenty such orders and then refused the speck.
 #[test]
-fn a_sound_pyramid_placed_and_cut_through_its_apex_cannot_order_two_points_by_the_apex() {
+fn a_sound_pyramid_placed_and_cut_through_its_apex_cannot_place_a_speck_of_the_cut() {
     let [_, shift, turn, turn_then_shift] = every_placement();
-    let mut twenty_orders_and_a_point = vec![ALONG_A_CROSSING; 20];
-    twenty_orders_and_a_point.push(A_POINT_INSIDE_A_PIECE_OF_A_FACE);
     for rule in [Rule::Difference, Rule::Intersection] {
         for placement in [shift, turn, turn_then_shift] {
-            assert_eq!(
-                the_refusal_cutting_through_the_apex(placement, rule, &Policy::certified()),
-                [ALONG_A_CROSSING],
-                "certified, {placement:?}, {rule:?}"
-            );
-            assert_eq!(
-                the_refusal_cutting_through_the_apex(placement, rule, &Policy::tolerant(100.0)),
-                twenty_orders_and_a_point,
-                "tolerant, {placement:?}, {rule:?}"
-            );
+            for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+                assert_eq!(
+                    the_refusal_cutting_through_the_apex(placement, rule, &policy),
+                    [A_POINT_INSIDE_A_PIECE_OF_A_FACE],
+                    "{policy:?}, {placement:?}, {rule:?}"
+                );
+            }
         }
     }
 }
@@ -691,9 +690,8 @@ fn fuses_into_what_the_two_hold(
 
 /// The sound pyramid at `placement` fused with `THE_HALF_PAST_THE_SEAM` under
 /// `rule`, which has to refuse and leave the model as it was. Returns the
-/// predicates the refusal's records name, each "order along a crossing" one
-/// checked to have been asked of two points, each within `1e-12` of the placed
-/// apex.
+/// predicates the refusal's records name, each checked to have been asked of
+/// points within `1e-12` of the placed apex.
 fn the_refusal_cutting_through_the_apex(
     placement: Isometry,
     rule: Rule,
@@ -715,18 +713,13 @@ fn the_refusal_cutting_through_the_apex(
         before,
         "{case}: a refused fuse leaves the model as it was"
     );
-    for record in records
-        .records()
-        .iter()
-        .filter(|record| record.predicate() == ALONG_A_CROSSING)
-    {
-        let [one, other] = record.inputs() else {
-            panic!(
-                "{case}: order along a crossing asked of {:?}",
-                record.inputs()
-            );
-        };
-        for asked in [one, other] {
+    for record in records.records() {
+        assert!(
+            !record.inputs().is_empty(),
+            "{case}: {} asked of no point",
+            record.predicate()
+        );
+        for asked in record.inputs() {
             let by_the_apex = asked
                 .enclosure()
                 .iter()
@@ -736,7 +729,8 @@ fn the_refusal_cutting_through_the_apex(
                 });
             assert!(
                 by_the_apex,
-                "{case}: order along a crossing asked of {asked:?}, not by the apex {apex:?}"
+                "{case}: {} asked of {asked:?}, not by the apex {apex:?}",
+                record.predicate()
             );
         }
     }
