@@ -2673,7 +2673,7 @@ impl Assembly {
             Picker::OutsideAPipe(_) => Some(true),
             Picker::InsideAPipe(_) => Some(false),
             Picker::InFrontOf(_) => None,
-            Picker::OutsideABall(_) | _ => {
+            Picker::OutsideABall(_) | Picker::InFrontOfAFlatThrough(_) | _ => {
                 panic!("intersect names a circle a plane cuts a ring in by {this_circle:?}")
             }
         };
@@ -8483,7 +8483,9 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
         Picker::OutsideABall(ball) => (1, Surface::Sphere(*ball)),
         Picker::OutsideAPipe(pipe) => (2, Surface::Cylinder(*pipe)),
         Picker::InsideAPipe(pipe) => (3, Surface::Cylinder(*pipe)),
-        other => panic!("a picker nothing here can name: {other:?}"),
+        Picker::InFrontOfAFlatThrough(_) | _ => {
+            panic!("a picker nothing here can name: {picker:?}")
+        }
     };
     name[0] = kind;
     name[1..].copy_from_slice(&name_of_the_surface_either_way_round(&surface));
