@@ -1159,12 +1159,13 @@ fn follow_the_quartic(
 /// can end on a crossing that turns back on itself: the relays' pin end cut at
 /// `#2404` and across from it has both corners where the two strands of its
 /// thin loop meet, and the ball and the pipe lean `7.6e-13` apart there. The
-/// flat bound put each corner a few roundings off the crossing, and the march
+/// flat bound put each corner within `3.7e-3` of the crossing, and the march
 /// then crossed the half of the rim where the two do not cross at all
 /// (`both_halves_of_a_rim_where_a_ball_and_a_pipe_off_its_centre_turn_tangent_are_refused`,
 /// Q1889). Once a run is walked its corners are placed among the points by
-/// the flat bound ([`where_on_the_crossing_this_corner_can_be`]), which this
-/// has just shown to be within a factor of two of one that holds.
+/// the flat bound ([`where_on_the_crossing_this_corner_can_be`]). Where this
+/// has passed, the bound with the bend counted holds, and the flat bound is at
+/// most a factor of two under it.
 ///
 /// # Errors
 ///
