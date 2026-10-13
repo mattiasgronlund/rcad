@@ -25,10 +25,15 @@
 //! lands here because this is where an edge with three claimants is *discovered*
 //! rather than searched for. The one edge with four claimants that is not
 //! refused is a line two faces rest against each other along, with both sides
-//! of each kept: it is no edge of either input, or — since Q803 — one input's
-//! own edge resting on a face of the other, kept as that input's edge; either
-//! way [`Assembly::part_each_line_two_faces_rest_against_each_other_along`]
-//! gives each face its own before anything is counted.
+//! of each kept: its four claimants pair off into two that walk it opposite
+//! ways, and one pair is two pieces of one input face, or two flat faces on
+//! one plane facing one way. It is no edge of either input, or — since Q803 —
+//! one input's own edge resting on a face of the other, kept as that input's
+//! edge; either way
+//! [`Assembly::part_each_line_two_faces_rest_against_each_other_along`] gives
+//! each pair its own before anything is counted. What that answers may be one
+//! solid touching itself along the line, which is an answer
+//! (`docs/decisions.md` §39.4).
 //!
 //! # Two pieces on one plane are one face
 //!
@@ -1208,24 +1213,25 @@ impl Assembly {
     /// same with one difference: the prism's two darts are its two faces either
     /// side of its own edge, two input faces and not one. The top face's two
     /// pieces are parted off them, the top face is one face again, and the
-    /// prism keeps its edge. That is parted only where it is two lumps:
+    /// prism keeps its edge.
     ///
-    /// - **The prism's faces lie on the outer side of the face they rest on**
-    ///   ([`Assembly::rest_on_the_outer_side_of`]). Inside it, they are the
-    ///   walls of a prism lying in the block along its edge, kept turned round
-    ///   in the block less the prism, and the answer is one solid pinched along
-    ///   the line, not two.
-    /// - **Nothing else joins the two pairs into one shell**
-    ///   ([`Assembly::a_line_whose_two_sides_are_joined_some_other_way`]). A
-    ///   solid lying on a block along one edge and reaching down into it
-    ///   somewhere else is one solid that touches itself along the line, and a
-    ///   shell that touches itself is what §17.4 refuses.
+    /// **The answer may be one solid touching itself along the line**, and it
+    /// is parted all the same (`docs/decisions.md` §39.4): parted, every edge
+    /// still has two faces along it, which is all §17.4 asks. A prism lying
+    /// inside a block along its edge, its edge on the top face, leaves the
+    /// block less the prism one solid of two shells, the block's six faces round
+    /// a hollow of five that touches the top along the line. A solid lying on
+    /// the top along one edge and reaching down into the block somewhere else
+    /// leaves the union one shell of 13 faces that touches itself along the
+    /// line (`a_prism_lying_on_one_edge.rs`). Parting cannot pass two faces
+    /// through each other: faces round a line alternate in which way they walk
+    /// it, and [`Assembly::the_two_pairs_along`] pairs only darts walking it
+    /// opposite ways, which leaves out the one pairing that would cross.
     ///
     /// **Two flat faces of two input faces on one plane facing one way** are
-    /// parted the same way, with the other two resting on its outer side: two
-    /// combs whose teeth cross a rounding off where their bases meet, the
-    /// floors of their gaps either side of the line and a four-sided part
-    /// standing on them (queue row Q1633,
+    /// parted the same way: two combs whose teeth cross a rounding off where
+    /// their bases meet, the floors of their gaps either side of the line and
+    /// a four-sided part standing on them (queue row Q1633,
     /// `a_sliver_along_an_edge_of_a_face_it_lies_on.rs`). The two on the plane
     /// are one flat floor with an edge across it where it changes owner, and
     /// the line is where the part touches it.
@@ -1300,9 +1306,10 @@ impl Assembly {
     ///
     /// Each pair walks the edge opposite ways, and at least one is pieces of
     /// one input face or two flat faces on one plane facing one way. Where both
-    /// are pieces of one input face, it is a bar's skin on a wall or on another
-    /// bar. Otherwise the other two must rest on the outer side of a pair that
-    /// is either.
+    /// are pieces of one input face, the two are pieces of different ones: a
+    /// bar's skin on a wall or on another bar. Which side of the other pair's
+    /// faces either pair lies on is not asked, so the answer may touch itself
+    /// along the line (`docs/decisions.md` §39.4).
     fn the_two_pairs_along(&self, by: &[Dart]) -> Option<[[Dart; 2]; 2]> {
         let &[first, second, third, fourth] = by else {
             return None;
@@ -6208,7 +6215,9 @@ fn how_far_apart_two_boxes_may_be(one: PredicatePoint, other: PredicatePoint) ->
 /// without them first, and again with them only when that is refused
 /// (`Model::fused_under`). Only the answer that uses them gets their records.
 /// Taken in every answer, they pinched the block less the tipped cube along
-/// the edge into one refused as not a solid. Taken first, and dropped only
+/// the edge, and until queue row Q1901 a solid pinched along a line was
+/// refused as not a solid (`docs/decisions.md` §39.4); the fold has not been
+/// tried in every answer since. Taken first, and dropped only
 /// when that answer was refused, they gave the union of two skewed combs
 /// touching along one line two records beside the one its answer rests on.
 /// `select` never reads them: read there, they had that union refused.
