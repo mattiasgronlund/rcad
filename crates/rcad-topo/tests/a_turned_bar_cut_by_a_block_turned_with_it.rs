@@ -309,6 +309,81 @@ fn turned_one_radian_about_a_diagonal_a_notch_tilted_off_the_axis_answers_every_
     }
 }
 
+#[test]
+fn probe_what_each_fuse_does() {
+    let turn = one_radian_about_a_diagonal();
+    for notch in BOTH_NOTCHES {
+        for tolerant in [false, true] {
+            for rule in RULES {
+                let what = format!("notch at {notch:?}, tolerant {tolerant}, {rule:?}");
+                let (model, fused, log) =
+                    notched_and_fused(&turn, notch, &Isometry::identity(), rule, tolerant);
+                match fused {
+                    Ok(solids) => {
+                        let (v, e) = the_volume_of_the_one_solid(&model, Ok(solids), &what);
+                        eprintln!(
+                            "{what}: volume {v} ± {e}, by hand {}, log {}",
+                            what_it_holds_by_hand(rule),
+                            log.len()
+                        );
+                    }
+                    Err(Error::Undecidable { records }) => {
+                        for record in records.records() {
+                            let points: Vec<[f64; 3]> = record
+                                .inputs()
+                                .iter()
+                                .map(|p| where_it_was_before_the_turn(*p, &turn))
+                                .collect();
+                            eprintln!(
+                                "{what}: refused {} enclosure {:e} at {points:?} boxes {:?}",
+                                record.predicate(),
+                                record.enclosure(),
+                                record.inputs()
+                            );
+                        }
+                    }
+                    Err(other) => eprintln!("{what}: {other:?}"),
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn probe_where_the_start_is() {
+    let turn = one_radian_about_a_diagonal();
+    for notch in BOTH_NOTCHES {
+        let (model, bar, notch_key) = a_notched_bar(&turn, notch, &Isometry::identity());
+        let pipe = the_pipe(&model, bar);
+        let wall = Surface::Cylinder(pipe);
+        for side in the_sides(&model, notch_key, &turn) {
+            let flat = Surface::Plane(side);
+            let SurfaceMeet::Curves(runs) = intersect(
+                &flat,
+                &wall,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap() else {
+                panic!()
+            };
+            let start =
+                where_a_closed_crossing_starts(&runs[0], [&flat, &wall], &mut ProvenanceLog::new())
+                    .unwrap();
+            let back = turn.inverse().apply_to_point(start).coordinates();
+            eprintln!(
+                "notch {notch:?} side n={:?} off={} lean={:e} start={:?} back={back:?} plane {:e} pipe {:e}",
+                side.normal(),
+                side.offset(),
+                side.normal().dot(pipe.axis().direction()),
+                start.coordinates(),
+                side.signed_distance_to(start),
+                pipe.axis().distance_to_point(start) - RADIUS
+            );
+        }
+    }
+}
+
 fn half_a_turn_exactly() -> Isometry {
     Isometry::quarter_turns(&Axis::y(), 2).expect("two quarter turns about y")
 }
