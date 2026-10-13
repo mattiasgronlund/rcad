@@ -2365,10 +2365,11 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 ///
 /// A polyhedron's own fan *is* its volume; a curved solid has no such fan — a
 /// round bar's caps fan into no triangles at all and its wall into two with no
-/// area (§35.4) — so it is summed over a mesh instead. Only the **sign** is read
-/// off this, never the size.
+/// area (§35.4) — so it is summed over a mesh instead. The caller reads only
+/// the **sign** of what comes back; the size of a flat mesh's sum is weighed
+/// here, below, and nowhere else.
 ///
-/// # A coarse mesh that encloses exactly nothing has not answered
+/// # A coarse mesh that lies flat has not answered
 ///
 /// [`as_coarse_as_a_mesh_gets`] leans on the mesher never stepping more than a
 /// quarter turn, which is what keeps a *whole* curved surface from collapsing.
@@ -2376,15 +2377,27 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// there the mesher has no reason to put a point anywhere: the patch is handed
 /// to the triangulator with a budget it already meets, so it comes back as its
 /// own boundary and nothing else — flat. Closed off by the flat face on the
-/// other side of that boundary it encloses zero, to the last bit.
+/// other side of that boundary it encloses nothing, and [`it_lies_flat`] says
+/// why that sum is no answer.
 ///
-/// **On a turned plane a flat mesh can enclose a rounding instead, and that is
-/// taken for the answer.** A whole ring turned `3/40` of a turn about
-/// `(1, 2, 3)` came back meshed as its two equators alone, enclosed a little
-/// under zero, and was refused [`Invalid::VolumeIsNotPositive`] (row Q1632,
-/// `a_half_ring_standing_on_a_round_plate.rs`). That flat mesh was the
-/// mesher's to mend: it had walked half a turn round the tube in one step,
-/// against the quarter-turn rule above, and walks it in two now.
+/// **Square to the axes that nothing is zero to the last bit; turned, it is a
+/// rounding of either sign.** A cap of a ball of radius 13, one high, its rim
+/// written as three arcs, is handed over as its rim's six points at 63 of the
+/// 156 turns `a_cap_whose_rim_is_three_arcs_lies_flat_at_every_turn_and_validates`
+/// puts it through, and the six land a rounding off one plane: the flat mesh
+/// encloses a little below zero at 34 of them and a little above at 29. Only a
+/// zero used to be asked again, so turned `1/40` of a turn about `(3, −1, 2)`
+/// the cap enclosed `−1.4e-15` and a sound solid was refused
+/// [`Invalid::VolumeIsNotPositive`]
+/// (`a_cap_whose_rim_is_three_arcs_validates_turned_off_the_axes`, row Q1849);
+/// and the same cap turned inside out encloses a rounding above zero at 28 of
+/// the turns, and a solid whose faces all point into it passed.
+///
+/// A whole ring turned `3/40` of a turn about `(1, 2, 3)` came back meshed as
+/// its two equators alone, enclosed a little under zero, and was refused the
+/// same way (row Q1632, `a_half_ring_standing_on_a_round_plate.rs`). That flat
+/// mesh was the mesher's to mend: it had walked half a turn round the tube in
+/// one step, against the quarter-turn rule above, and walks it in two now.
 ///
 /// A ball cut by a plane is exactly that, and it is `docs/decisions.md` §41.6: a
 /// cap under `h/r = 1 − cos(π/4) = 0.2929` spans under a quarter turn, and on a
@@ -2394,12 +2407,39 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// a quarter turn apart answered one way round and refused the other, which is
 /// the §19 violation §39.7 item 1 leads with.
 ///
-/// So a zero is asked again with less room. Halving from the mesh's own width
-/// rather than down from [`as_coarse_as_a_mesh_gets`] is what keeps it to a
-/// handful of meshes: the bulge a flat patch is hiding is at most that width, and
-/// every halving that does not find it rules out half of what is left. **The
-/// finer meshes are read for a sign and thrown away**; nothing a caller measures
-/// is worked out here.
+/// So a flat mesh is asked again with less room. Halving from the mesh's own
+/// width rather than down from [`as_coarse_as_a_mesh_gets`] is what keeps it to
+/// a handful of meshes: the bulge a flat patch is hiding is at most that width,
+/// and every halving that does not find it rules out half of what is left. The
+/// three-arc cap turned `1/40` answers `25.7` at room `2.47`, where its mesh
+/// no longer lies flat. **The finer meshes are read and thrown away**; nothing
+/// a caller measures is worked out here.
+///
+/// # A flat sum answers once it is larger than what a mesh can leave out
+///
+/// A sound solid a rounding thick, such as the sliver a fuse leaves where two
+/// curved faces almost meet, lies flat in every mesh of it, so asking again
+/// walked it down to the floor, minutes for one test. But a flat sum is not
+/// always a rounding. The solid's volume is within
+/// [`how_much_space_hides_under`] of what the mesh encloses exactly, and that
+/// is within the second number
+/// [`signed_volume_over_and_how_far_it_rounded`] hands back of the sum. A sum
+/// larger than the two together has the solid's own sign, and answers. That is
+/// what ends the slivers of
+/// `a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule` and
+/// `a_quarter_of_a_bar_placed_round_from_a_bend_in_it_answers_or_keeps_an_edge_a_rounding_long`,
+/// at rooms `0.5` and `0.25`: a probe saw one sum `2.51e-15` against `1.67e-15`
+/// hidden. The same probe, run over the whole `rcad-topo` suite, saw every flat
+/// mesh summed exactly, off by `3e-28` at most, and charging that changed no
+/// answer; it is charged because nothing else bounds a sum kept rounded.
+///
+/// A face of a cone is charged without end (see [`how_much_space_hides_under`]),
+/// so a flat mesh of a solid with one never answers by its size, and a cone
+/// sliver walks to the floor as it did before.
+///
+/// **When no rung answers, the coarse sum comes back**, the zero or the
+/// rounding it was, so a solid flat at every mesh is judged as it was before
+/// this ladder ran for it.
 ///
 /// # A fold is retried; every other refusal but one still stops it
 ///
@@ -2424,28 +2464,25 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// *is* the answer this is looking for. A finer mesh refused that way found the
 /// point off the flat: it encloses space where the solid was made. It is only
 /// where the placement puts it that the space is gone. Stopping there would
-/// return the zero, and the caller would then call a sound solid
+/// return the flat sum, and the caller would then call a sound solid
 /// [`Invalid::VolumeIsNotPositive`], "its faces do not point outwards", which
 /// is the misreport `docs/decisions.md` §333.6 objects to. So it is handed on,
 /// and the caller gets the name [`SolidView::mesh`] gives the same solid.
 ///
 /// **No solid is known to reach that arm, so it is a guard** (§379.5, Q783).
-/// To reach it the coarsest mesh has to enclose exactly nothing both where the
-/// solid was made and where it lands, and a finer one has to enclose space
-/// where it was made. Where it was made, a sound solid's coarsest mesh encloses
-/// exactly nothing when every point of it lies on one plane, and the shape
-/// §41.6 found that way, a cap of a ball, now carries a point off its rim's
-/// plane: a cut across a rim that is one closed edge is charged two steps.
-/// A cap whose rim is **two** half circles, which that charge does not cover,
-/// was built to look for the gap, 0.25 high and put out at `2^52` where the
-/// ulp is 1. Its coarsest mesh still encloses `912.6666666666666` where it was
-/// made, against `0` where it lands, so it is refused by name before this loop
-/// is reached
-/// (`a_thin_cap_placed_where_its_height_rounds_away_is_refused_by_name`). And
-/// with this loop logging every solid that reached it, the whole `rcad-topo`
-/// suite sent one: a model of the fuzz corpus whose coarsest mesh was flat and
-/// whose first rung was refused `DeflectionBelowWhatAMeshCanReach`, its floor
-/// at `1.2e217`. That is a search, not a proof, so the arm stays.
+/// To reach it the coarsest mesh has to lie flat where the solid lands, and a
+/// finer one has to enclose space where it was made and none where it lands.
+/// A cap whose rim is **two** half circles was built to look for that, 0.25
+/// high and put out at `2^52` where the ulp is 1. Its coarsest mesh encloses
+/// `912.6666666666666` where it was made, against `0` where it lands, so it is
+/// refused by name before this loop is reached
+/// (`a_thin_cap_placed_where_its_height_rounds_away_is_refused_by_name`). With
+/// a probe logging every ladder this loop started, the whole `rcad-topo` suite
+/// started 59, in 9 tests, before the three-arc sweep was written: the
+/// three-arc cap, the two slivers above, three pieces of a cone, and a model of
+/// the fuzz corpus whose first rung was refused
+/// `DeflectionBelowWhatAMeshCanReach`, its floor at `1.2e217`. None was
+/// refused that way. That is a search, not a proof, so the arm stays.
 ///
 /// # What stops it
 ///
@@ -2461,9 +2498,9 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// `MoreMeshPointsThanASolidWillHold` while the points are being laid down —
 /// and a fold is only found by `finish`, once the whole mesh is built. So a
 /// solid that folds at every deflection walks the same ladder it would have
-/// walked answering zero at every deflection, and stops on the same rung; what
-/// the retry costs is the meshes between the first fold and that rung, and the
-/// zero stands and the caller refuses it.
+/// walked lying flat at every deflection, and stops on the same rung; what the
+/// retry costs is the meshes between the first fold and that rung, and the
+/// coarse sum stands.
 ///
 /// # Errors
 ///
@@ -2537,7 +2574,8 @@ fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64, rounding: f6
 /// apex, and how near a face comes to it takes a walk over the mesh that
 /// `measure::bend_of_each_face` already makes; a second copy of that walk is
 /// not worth what it buys here. So a solid with a cone face is answered by a
-/// mesh that does not lie flat, as before.
+/// mesh that does not lie flat, as before. Row Q1883 puts measure.rs's own
+/// charge here in place of this copy, and that one reaches the tip.
 fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> f64 {
     let deviation = mesh.deviation().magnitude();
     let radius_of: HashMap<FaceKey, Option<f64>> = view
@@ -2587,8 +2625,16 @@ fn the_smallest_radius_it_bends_at(surface: &Surface) -> Option<f64> {
 /// mesh's areas seen from above add to zero, so `h` drops out: a mesh whose
 /// points stray at most `δ` from a plane encloses at most `δ` times its area.
 ///
-/// The rounding is `64` ulps of the largest coordinate in the mesh. Not yet
-/// published by a test (row Q1849 is unfinished).
+/// The rounding is `64` ulps of the largest coordinate in the mesh. Placing a
+/// solid rounds every coordinate of it, so points that lay on one plane land
+/// an ulp or two off it. Turned through 156 turns
+/// (`a_cap_whose_rim_is_three_arcs_lies_flat_at_every_turn_and_validates`), the
+/// three-arc cap's coarsest mesh is its rim's six points at 63, and they stray
+/// at most `2.1` ulps from one plane; at the other 93 it has a point off the
+/// rim, and strays at least `4e14`. The `64` sits far from both. Read flat,
+/// a mesh is only asked again, or answers by its size, so a bend under `64`
+/// ulps taken for flat costs rungs, and at worst comes back as its coarse sum,
+/// which is what it answered before.
 fn it_lies_flat(mesh: &Mesh) -> bool {
     const ROUNDINGS_OFF_THE_PLANE: f64 = 64.0;
     how_far_it_strays_from_one_plane(mesh)
@@ -7019,13 +7065,13 @@ mod tests {
     /// Row Q1849. A cap of a ball of radius 13 cut off one high by the plane
     /// `x = 0`, its rim of radius 5 written as three arcs between `(0, 3, 4)`,
     /// `(0, 3, −4)` and `(0, −5, 0)`, as a file that splits a circle into arcs
-    /// writes it. It holds `39.68`.
+    /// writes it. It holds `38π/3 = 39.79`.
     ///
     /// Each arc spans under half a turn and so is walked in two steps, and the
     /// cap spans under a quarter turn of the ball and so is handed over whole:
     /// its coarsest mesh is the rim's six points and nothing else, flat, and
-    /// the lid across the rim is drawn through the same six. At no placement
-    /// that encloses exactly `0`, a finer mesh is asked for, and the cap
+    /// the lid across the rim is drawn through the same six. Not placed, that
+    /// encloses exactly `0`, a finer mesh is asked for, and the cap
     /// validates. Turned `1/40` of a turn about `(3, −1, 2)` the six points
     /// land a rounding off one plane, the flat mesh encloses `−1.4e-15`, and
     /// that was read as the cap's volume and refused
