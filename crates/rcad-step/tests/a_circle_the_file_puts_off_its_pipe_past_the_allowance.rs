@@ -13,8 +13,11 @@
 //! (under edge `#2708`; `#2385` under `#2384` in `FTR-F1A`) on the ball. That
 //! is `17.42` roundings of `19.75` off the pipe in `f64`, where the reader
 //! allows `16`, so the reader does not take the circle to be on the pipe and
-//! names the run by the ball. A ball and a pipe that touch leave the walk two
-//! pieces it cannot tell apart, and the solid is refused.
+//! names the run by the ball. The ball and the pipe cross in one thin loop
+//! over the half of the ball with `x < 10.05`, whose two strands meet at the
+//! rim's two corners, and the two surfaces lean `7.6e-13` apart there. No
+//! bound on how far off the crossing a corner is holds once their bend is
+//! counted, and the solid is refused at the rim's first arc.
 //!
 //! The file writes `#2708` as a quarter arc, and the pins cut their rims in
 //! two arcs for that reason. A rim written closed takes another road through
@@ -27,7 +30,10 @@
 //! the last bit wherever between the two the centre is taken, and its circle on
 //! the ball is `17.42` roundings off the pipe while its circle on the pipe is
 //! `20.98` off the ball in `f64` (`21.03` in exact arithmetic).
-//! `how_far_the_file_puts_the_circle_off_its_pipe` holds those figures.
+//! `how_far_the_file_puts_the_circle_off_its_pipe` holds those figures. Nor
+//! does any curve on both faces run along the half of the rim with
+//! `x > 10.05`: every point where the ball and the pipe cross has `x − 10.05`
+//! at most half the miss, `3.8e-14`.
 //!
 //! The two pins hold each side: widening the reader's allowance to `18` lets
 //! the first pin end import and fails the first test, and the second shows
@@ -36,39 +42,60 @@
 
 mod written_by_hand;
 
-use rcad_geom::{Axis, Cylinder, EdgeRun, Plane, Point, Sphere, Surface, Vector};
+use rcad_geom::{
+    Axis, Cylinder, EdgeRun, Plane, Point, Sphere, Surface, Vector, WhereFollowingACrossingGaveUp,
+};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
-use rcad_step::{Import, Refusal, StepFile};
+use rcad_step::{EntityId, Import, Refusal, StepFile};
 use rcad_topo::Error;
 use written_by_hand::a_header;
 
 /// The end of the leaning pipe, rounded by its ball, with the file's circle
 /// `#2709` between them in the file's own decimals. The circle is on the ball
 /// and `17.42` roundings off the pipe, so the reader names each arc by the
-/// ball, and the walk then cannot tell the two pieces of the ball's crossing
-/// with the pipe apart. Widening the reader's allowance to `18` roundings lets
-/// the pin end import, and fails this test.
+/// ball, and the ball and the pipe cross in one thin loop over the half of the
+/// rim with `x < 10.05` (§335.5). The rim's two corners, `#2404` and the point
+/// across from it, are where that loop's two strands meet, and the ball and the
+/// pipe lean `7.6e-13` apart there, so no bound on how far off the crossing a
+/// corner is holds once the two surfaces' bend is counted. The first arc,
+/// `#32`, is refused at its corners before it is walked. Widening the reader's
+/// allowance to `18` roundings lets the pin end import, and fails this test.
+///
+/// Between Q1889's two fixes the pin end imported. The march crossed the half
+/// of the rim with `x > 10.05`, where the ball and the pipe are within `1e-13`
+/// of each other and do not cross, and at `f64::MAX` handed back seven points
+/// `0.044` to `0.1` past `x = 10.05`, each certified outside the ball, under a
+/// bound of `7.9e-7`. Every point of the crossing has `x − 10.05` at most
+/// `q/2 = 3.8e-14`.
 #[test]
-fn a_circle_centred_off_its_leaning_pipe_is_named_by_the_ball() {
+fn a_circle_centred_off_its_leaning_pipe_is_refused_where_its_ball_and_pipe_turn_tangent() {
     let text = a_rounded_pin_end(&ROUND_THE_LEANING_PIPE);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
     let refused = match Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) {
         Ok(_) => panic!(
-            "#2709 is centred 17.42 roundings off its pipe's axis, and was read as on the pipe"
+            "#2709 is centred 17.42 roundings off its pipe's axis, and half its rim runs where \
+             its ball and its pipe do not cross, and the pin end was imported"
         ),
         Err(refused) => refused,
     };
     assert!(
         matches!(
             &refused,
-            Refusal::TheSolidTheFileDescribesIsNotOne { why, .. }
+            Refusal::ThisEntityOfTheSolidWasRefused { entity: EntityId(32), why, .. }
                 if matches!(
-                    **why,
-                    Error::Geometry(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
+                    &**why,
+                    Error::ADraftEdgeHasACrossingThatCannotBeFollowed { why, .. }
+                        if matches!(
+                            **why,
+                            rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                                at: WhereFollowingACrossingGaveUp::BoundingHowFarOffTheCrossingAPointIs,
+                                ..
+                            }
+                        )
                 )
         ),
-        "a pin end whose circle is named by the ball and the pipe is refused for the two \
-         pieces of their crossing, not {refused:?}"
+        "a rim whose corners are where its ball and its pipe turn tangent is refused there, \
+         not {refused:?}"
     );
 }
 

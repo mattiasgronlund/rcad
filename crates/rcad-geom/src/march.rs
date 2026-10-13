@@ -144,7 +144,9 @@ pub(crate) struct Marched {
 /// the whole crossing and then the first question decides nothing
 /// ([`SAGITTA_MAY_TAKE_OF_ITS_CHORD`]). **How far it turns**: no step may turn
 /// the tangent by more than a quarter turn, because past a half turn a step
-/// cannot be told from one the other way.
+/// cannot be told from one the other way. And a trial the settling pulled back
+/// from far off has to land ahead of where it set out, not behind it
+/// ([`one_step`]).
 ///
 /// A step whose sagitta is comfortably inside the budget grows for the next one,
 /// so a large gentle loop does not get walked at the step a tight corner needed.
@@ -236,6 +238,87 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
     let settled = settled(surfaces, seed)?;
     let off = how_far_off_the_crossing(surfaces, settled)?;
     Ok((settled, off))
+}
+
+/// `seed` settled onto both surfaces, with an upper bound on how far off the
+/// crossing it still is that holds however the two surfaces bend, so long as
+/// neither bends tighter than a ball of the smaller of `radii`.
+///
+/// # Why the bound [`settled_with_a_bound`] gives is not enough
+///
+/// [`how_far_off_the_crossing`]'s `(d₁ + d₂)/s` is the widest the region two
+/// slabs leave, so it takes both surfaces as flat over its own reach. A surface
+/// of radius `r` turns its normal by `ρ/r` over a reach of `ρ`, so where the
+/// sine `s` is small the two normals can turn parallel inside the reach, and
+/// the crossing the bound promises need not be there at all. Measured on the
+/// Fujitsu relays' pin end (§335.5): a ball of radius `0.1` and a pipe of the
+/// same radius whose axis misses the ball's centre by `q = 7.6e-14` cross only
+/// on one half of the rim, and on the other half they are within `q` of each
+/// other and do not cross. The march crossed that half, and the flat bound put
+/// its points within `7.9e-7` of the crossing. They were `0.044` to `0.1` from
+/// it, each certified outside the ball (Q1889).
+///
+/// # The bound that bends
+///
+/// Kantorovich's theorem, for Newton on the two distances in the plane the two
+/// normals span at the settled point. There the Jacobian is the two unit
+/// normals, its inverse is at most `√2/s`, and Newton's first move is at most
+/// the flat bound `η`. Within `2η` of the point each unit normal turns by at
+/// most the distance moved over the radius left to it, `r − |d| − 2η`, with
+/// `|d|` the further of the two distances off, so the Jacobian changes by at
+/// most `L = Σ 1/(rᵢ − |d| − 2η)` per unit moved. Where `h = √2·L·η/s` is at
+/// most a half, a point on both surfaces lies within `2η/(1 + √(1 − 2h))` of
+/// the settled one, which is the flat bound to within a factor of two, and that
+/// is what comes back. Every step of it is enclosed, as the flat bound's are.
+///
+/// At the pin end's corner `#2404`, where the two strands of the thin loop
+/// meet, `s` is `7.6e-13`, the two distances off are under `1.5e-15`, the flat
+/// bound is `3.7e-3`, and `h` comes out at `1.5e11`.
+///
+/// # Errors
+///
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when `h` is more
+/// than a half, or the radius left to either surface is not more than nothing:
+/// the two surfaces are too nearly parallel for their bend to leave any bound
+/// on how far off the crossing the point is. And what [`settled_with_a_bound`]
+/// refuses.
+pub(crate) fn settled_with_a_bound_where_they_bend(
+    surfaces: [&Surface; 2],
+    seed: Point,
+    radii: [f64; 2],
+) -> Result<(Point, f64)> {
+    let settled = settled(surfaces, seed)?;
+    let (flat, further_off, leaning) = the_flat_bound_and_what_it_is_made_of(surfaces, settled)?;
+    let cannot_bound = || {
+        gave_up(
+            surfaces,
+            WhereFollowingACrossingGaveUp::BoundingHowFarOffTheCrossingAPointIs,
+        )
+    };
+    let two = Interval::exactly(2.0);
+    let reach = two * flat;
+    let mut turning = Interval::exactly(0.0);
+    for radius in radii {
+        let left = Interval::exactly(radius) - further_off - reach;
+        if left.lo() <= 0.0 {
+            return Err(cannot_bound());
+        }
+        turning = turning + quotient_or_everything(Interval::exactly(1.0), left);
+    }
+    let how_near_newton_comes_to_failing =
+        quotient_or_everything(root_enclosing(two) * turning * flat, leaning);
+    if how_near_newton_comes_to_failing.hi() > 0.5 {
+        return Err(cannot_bound());
+    }
+    let bound = quotient_or_everything(
+        reach,
+        Interval::exactly(1.0)
+            + root_enclosing(Interval::exactly(1.0) - two * how_near_newton_comes_to_failing),
+    );
+    if !bound.hi().is_finite() {
+        return Err(cannot_bound());
+    }
+    Ok((settled, bound.hi()))
 }
 
 /// Whether the settled seed is still so far off one of the two surfaces that no
@@ -367,6 +450,20 @@ fn settled(surfaces: [&Surface; 2], from: Point) -> Result<Point> {
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when the sine
 /// cannot be told from zero, so no bound can be put on the distance at all.
 fn how_far_off_the_crossing(surfaces: [&Surface; 2], at: Point) -> Result<f64> {
+    the_flat_bound_and_what_it_is_made_of(surfaces, at).map(|(reach, _, _)| reach.hi())
+}
+
+/// [`how_far_off_the_crossing`]'s bound as an enclosure, with the further of
+/// the two distances off the surfaces it is made of, and the sine the two lean
+/// apart at.
+///
+/// # Errors
+///
+/// The same as [`how_far_off_the_crossing`]'s.
+fn the_flat_bound_and_what_it_is_made_of(
+    surfaces: [&Surface; 2],
+    at: Point,
+) -> Result<(Interval, Interval, Interval)> {
     let [first, second] = surfaces.map(|surface| {
         let (off, way) = how_far_off_enclosing(surface, at);
         (furthest_from_zero(off), way)
@@ -386,7 +483,8 @@ fn how_far_off_the_crossing(surfaces: [&Surface; 2], at: Point) -> Result<f64> {
             WhereFollowingACrossingGaveUp::TheBoundOnHowFarOffIsBiggerThanAnyNumber,
         ));
     }
-    Ok(reach.hi())
+    let further_off = Interval::exactly(first.0.hi().max(second.0.hi()));
+    Ok((reach, further_off, leaning))
 }
 
 /// Which way the crossing runs at `at`: the two normals crossed together, scaled
@@ -484,10 +582,41 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 }
 
 /// One step along the crossing, shortened until the straight piece it leaves
-/// behind stays inside `room`, stays straighter than it is long, and turns no
-/// more than a quarter turn.
+/// behind stays inside `room`, stays straighter than it is long, turns no more
+/// than a quarter turn, and, on a trial that came back short, goes forward.
 ///
 /// Returns where the step landed and how long it turned out to be.
+///
+/// # A trial that came back short behind `here` is not kept
+///
+/// A trial that covered less than half of its ask was pulled onto the curve by
+/// the settling from a long way off, and the settling can land it anywhere on
+/// the loop, behind `here` as well as ahead. Kept, such a point is out of
+/// order: every step after it goes forward, so it belongs near the end of the
+/// walk, not at its start. So a trial that came back short and whose chord
+/// does not go along `tangent` is shortened, from its chord as any other trial
+/// that came back short is, since how far away the loop was found is still
+/// the one thing it measured.
+///
+/// Measured, on a pipe of radius 1 along `x` reaching out of the side of one
+/// of radius 4 up `z`, walked with the `1.7e307` of room a fuse of the two
+/// asked: the first trial, `1.7e307`, settled onto the loop `1.13` away and
+/// `0.87` behind the seed along the tangent, and was kept. The thin pipe's
+/// outline on its own wall then crossed itself, and the mesh refused it
+/// (Q1889, `a_trial_that_settles_behind_its_start_is_shortened_and_not_kept`).
+/// Now the next ask is half that chord, `0.56`, which lands ahead, and the walk
+/// goes round one way.
+///
+/// **Only a trial that came back short is asked.** Asked of every trial, the
+/// same rule turned away 76 715 trials over `rcad-geom`'s tests that had
+/// covered half their ask or more, nearly all on crossings a few last bits from
+/// tangency, where a step of `1e-15` settles `2e-8` away and the side it lands
+/// on is the settling's own noise; shortening those cost the band one of its
+/// 79 runs and the quartic headline one of its 303, in
+/// `every_point_along_a_crossing_is_on_both_surfaces.rs`. Asked only of a
+/// trial that came back short, it turned away 96 trials, every one in a coarse
+/// walk of `1.7e307` or `2.2e307` of room and asked `2.2e4` or more, and every
+/// share, run count and refusal rate `rcad-geom`'s tests print is what it was.
 ///
 /// # What a rejected trial is retried at
 ///
@@ -598,10 +727,13 @@ fn one_step(
                     continue;
                 }
             };
+        let came_back_short = chord * 2.0 < step;
+        let came_back_behind = came_back_short && (next - here).dot(tangent) <= 0.0;
         if sagitta <= room * SAGITTA_MAY_TAKE
             && sagitta <= chord * SAGITTA_MAY_TAKE_OF_ITS_CHORD
             && turned >= 0.0
             && !settled_back
+            && !came_back_behind
         {
             return Ok((next, chord));
         }
@@ -617,7 +749,7 @@ fn one_step(
         // under.
         step = if settled_back {
             shortened_by_its_exponent(step)
-        } else if chord * 2.0 < step {
+        } else if came_back_short {
             chord * 0.5
         } else {
             step * 0.5
@@ -1046,6 +1178,91 @@ mod tests {
              gaps {gaps:?}, each point known to {:e}",
             walked.deviation
         );
+    }
+
+    /// **A trial that settles onto the loop behind where it set out from is
+    /// shortened, and not kept.** A pipe of radius 1 along `x` through
+    /// `y = 1, z = 1` reaches out of the side of one of radius 4 up `z` through
+    /// `x = 0, y = −2.5`, and the two cross in one loop round the line
+    /// `x = 0, z = 1`. Seen down that line, the loop goes once round it, and
+    /// the angle about it only ever grows the one way along the loop.
+    ///
+    /// This is the frame a fuse of a whole thin bar out of a fat bar's side
+    /// walks the two in, and the seed and the room are the ones it asks:
+    /// `(3.1225, 0, 1)` and `1.7e307`. The walk leaves the seed along
+    /// `+z`, and it used to keep a first trial that settled onto the loop at
+    /// `z = 0.13`, behind the seed. Every step after it went forward, so that
+    /// first point belonged between the walk's last two, and the thin bar's
+    /// outline on its own wall crossed itself. The mesh refused it as a wire
+    /// that will not lie flat on its face (Q1889). Now that trial is shortened
+    /// to half its chord, the first point kept is at `z = 1.46`, ahead of the
+    /// seed, and all ten points go round one way.
+    #[test]
+    fn a_trial_that_settles_behind_its_start_is_shortened_and_not_kept() {
+        let thin = a_pipe([1.0, 0.0, 0.0], [-10.0, 1.0, 1.0], 1.0);
+        let fat = a_pipe([0.0, 0.0, 1.0], [0.0, -2.5, -4.0], 4.0);
+        let start = Point::new(3.122498999199199, 0.0, 1.0);
+
+        let walked = march([&thin, &fat], start, 1.685337313933421e307, 1 << 20)
+            .expect("a thin pipe out of a fat one's side crosses it in one loop");
+
+        let round_the_line = |at: Point| f64::atan2(at.z() - 1.0, at.x());
+        let turns: Vec<f64> = core::iter::once(start)
+            .chain(walked.points.iter().copied())
+            .chain(core::iter::once(start))
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|pair| {
+                let turn = round_the_line(pair[1]) - round_the_line(pair[0]);
+                (turn + core::f64::consts::PI).rem_euclid(core::f64::consts::TAU)
+                    - core::f64::consts::PI
+            })
+            .collect();
+        let whole: f64 = turns.iter().sum();
+        assert!(
+            (whole.abs() - core::f64::consts::TAU).abs() < 1e-9
+                && turns.iter().all(|&turn| turn * whole > 0.0),
+            "each step goes the same way round, and the steps make one whole turn: \
+             turns {turns:?} from {start:?} through {:?}",
+            walked.points
+        );
+    }
+
+    /// **The bound with the two surfaces' bend counted holds, and is the flat
+    /// bound to within a factor of two, where a ball and a pipe nearly touch.**
+    /// A ball of radius 1 and a pipe on its centre `2⁻⁴⁰` thinner cross in two
+    /// circles `1.35e-6` either side of its equator, and the two lean only that
+    /// far apart there. Each circle is the pipe's radius from the axis, at a
+    /// height of `√((R − r)(R + r))`, which `f64` holds to a rounding, so how
+    /// far a settled point is off the crossing is known to a rounding or two.
+    #[test]
+    fn the_bound_with_the_bend_counted_holds_where_a_ball_and_a_pipe_nearly_touch() {
+        let thinner = 1.0 - f64::powi(2.0, -40);
+        let ball = a_ball([0.0, 0.0, 0.0], 1.0);
+        let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], thinner);
+        let up = f64::sqrt((1.0 - thinner) * (1.0 + thinner));
+        for seed in [
+            Point::new(thinner, 0.0, up),
+            Point::new(0.0, -thinner, -up),
+            Point::new(0.6, 0.8, 1.5 * up),
+        ] {
+            let (settled, bent) =
+                settled_with_a_bound_where_they_bend([&ball, &pipe], seed, [1.0, thinner])
+                    .expect("the two lean far enough apart for a bound");
+            let (_, flat) = settled_with_a_bound([&ball, &pipe], seed).expect("a bound");
+            let off = f64::hypot(
+                f64::hypot(settled.x(), settled.y()) - thinner,
+                settled.z().abs() - up,
+            );
+            assert!(
+                off <= bent,
+                "{settled:?}, settled from {seed:?}, is {off:e} off the crossing, past {bent:e}"
+            );
+            assert!(
+                flat <= bent && bent <= 2.0 * flat,
+                "the bound with the bend counted is {bent:e} and the flat one {flat:e}"
+            );
+        }
     }
 
     /// Two surfaces tangent along their crossing have no direction to follow,

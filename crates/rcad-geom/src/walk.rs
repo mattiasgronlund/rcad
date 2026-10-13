@@ -46,7 +46,7 @@ use crate::intersect::{
     whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
     whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
-use crate::march::{Marched, march, settled_with_a_bound};
+use crate::march::{Marched, march, settled_with_a_bound, settled_with_a_bound_where_they_bend};
 use crate::meet::nowhere_in_particular;
 use crate::{
     Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
@@ -748,6 +748,16 @@ enum TwoLoopsHeldApartBy {
     AFatPipesAxis { thin: Cylinder, fat: Cylinder },
 }
 
+impl TwoLoopsHeldApartBy {
+    /// The radii of the two surfaces, which is as tight as either of them bends.
+    fn the_two_radii(self) -> [f64; 2] {
+        match self {
+            Self::ABallsCentre { ball, pipe } => [ball.radius(), pipe.radius()],
+            Self::AFatPipesAxis { thin, fat } => [thin.radius(), fat.radius()],
+        }
+    }
+}
+
 /// Which of those three the crossing of these two surfaces is, and the thing
 /// needed to walk it.
 ///
@@ -1089,7 +1099,7 @@ fn follow_the_quartic(
     let surfaces = [&pair[0], &pair[1]];
     let seed = the_seed_this_run_is_picked_up_at(run, &pair, seeds, held_apart_by, policy, log)?;
     if let Some(ends) = the_two_corners_of_an_open_run(run) {
-        let reach = how_far_off_the_crossing_a_corner_can_be(ends, surfaces)?;
+        let reach = how_far_off_the_crossing_a_corner_can_be(ends, surfaces, held_apart_by)?;
         if reach > half_the_budget && !policy.wobble_is_acceptable(reach) {
             return Err(Error::CannotPlaceAPointThatCloseToACrossing {
                 asked: deflection.length(),
@@ -1144,19 +1154,37 @@ fn follow_the_quartic(
 /// so a corner that cannot be settled at all is refused that way at every
 /// deflection, and not only at the deflections the other corner fits.
 ///
+/// **And bounded with the two surfaces' bend counted**
+/// ([`settled_with_a_bound_where_they_bend`]), since a corner is where a run
+/// can end on a crossing that turns back on itself: the relays' pin end cut at
+/// `#2404` and across from it has both corners where the two strands of its
+/// thin loop meet, and the ball and the pipe lean `7.6e-13` apart there. The
+/// flat bound put each corner within `3.7e-3` of the crossing, and the march
+/// then crossed the half of the rim where the two do not cross at all
+/// (`both_halves_of_a_rim_where_a_ball_and_a_pipe_off_its_centre_turn_tangent_are_refused`,
+/// Q1889). Once a run is walked its corners are placed among the points by
+/// the flat bound ([`where_on_the_crossing_this_corner_can_be`]). Where this
+/// has passed, the bound with the bend counted holds, and the flat bound is at
+/// most a factor of two under it.
+///
 /// # Errors
 ///
-/// What [`settled_with_a_bound`] refuses:
+/// What [`settled_with_a_bound_where_they_bend`] refuses:
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] at a corner where
-/// the two surfaces are tangent, and [`Error::CannotWorkOutHowBigACrossingIs`]
-/// when settling one lands somewhere that is not a point.
+/// the two surfaces are tangent, or too nearly so for their bend to leave a
+/// bound, and [`Error::CannotWorkOutHowBigACrossingIs`] when settling one lands
+/// somewhere that is not a point.
 fn how_far_off_the_crossing_a_corner_can_be(
     ends: [PredicatePoint; 2],
     surfaces: [&Surface; 2],
+    held_apart_by: TwoLoopsHeldApartBy,
 ) -> Result<f64> {
+    let radii = held_apart_by.the_two_radii();
     let mut furthest = 0.0_f64;
     for end in ends {
-        furthest = furthest.max(how_far_off_the_crossing_this_corner_can_be(end, surfaces)?);
+        furthest = furthest.max(how_far_off_the_crossing_this_corner_can_be(end, |at| {
+            settled_with_a_bound_where_they_bend(surfaces, at, radii)
+        })?);
     }
     Ok(furthest)
 }
@@ -1199,7 +1227,9 @@ fn where_on_the_crossing_this_corner_can_be(
     corner: PredicatePoint,
     surfaces: [&Surface; 2],
 ) -> Result<PredicatePoint> {
-    let reach = match how_far_off_the_crossing_this_corner_can_be(corner, surfaces) {
+    let reach = match how_far_off_the_crossing_this_corner_can_be(corner, |at| {
+        settled_with_a_bound(surfaces, at)
+    }) {
         Ok(reach) => reach,
         Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent { .. }) => return Ok(corner),
         Err(other) => return Err(other),
@@ -1210,17 +1240,18 @@ fn where_on_the_crossing_this_corner_can_be(
 
 /// How far off the crossing a corner can be: how far its middle moves settling
 /// onto both surfaces, plus the bound on how far off the crossing it still is
-/// once settled, plus half the diagonal of its box.
+/// once settled, plus half the diagonal of its box. `settle` is what settles
+/// it and bounds it.
 ///
 /// # Errors
 ///
-/// What [`settled_with_a_bound`] refuses.
+/// What `settle` refuses.
 fn how_far_off_the_crossing_this_corner_can_be(
     corner: PredicatePoint,
-    surfaces: [&Surface; 2],
+    settle: impl FnOnce(Point) -> Result<(Point, f64)>,
 ) -> Result<f64> {
     let at = Point::from(corner.enclosure().map(middle_of));
-    let (settled, off) = settled_with_a_bound(surfaces, at)?;
+    let (settled, off) = settle(at)?;
     let [x, y, z] = corner.enclosure().map(|side| side.hi() - side.lo());
     let half_the_box = Vector::new(x, y, z).length() / 2.0;
     Ok((settled - at).length() + off + half_the_box)
@@ -5971,10 +6002,13 @@ mod tests {
     /// `#1030`'s end, with a deviation of about `1e-6` claimed for them, and
     /// both relay files imported a curve their ball and pipe do not cross in
     /// (Q1659). At `0.001`, `0.01` and `0.4` the march gave up instead.
-    /// `#1030` cannot be settled onto both surfaces at all, since they are
-    /// tangent there, so it is asked first and the answer is one refusal at
-    /// every deflection. The ball, the leaning pipe and the half-space on the
-    /// chord are the file's, as the reader names the arc.
+    /// Both corners are now asked first, and the answer is one refusal at
+    /// every deflection. `#1030` cannot be settled onto both surfaces at all,
+    /// since they are tangent there. `#2404`, asked before it, settles, but
+    /// it is where the thin loop's two strands meet and the two surfaces lean
+    /// `7.6e-13` apart, so no bound with their bend counted holds there
+    /// (Q1889). The ball, the leaning pipe and the half-space on the chord are
+    /// the file's, as the reader names the arc.
     #[test]
     fn a_quarter_circle_ending_where_a_ball_and_its_own_pipe_do_not_cross_is_refused() {
         let ball =
@@ -6016,13 +6050,87 @@ mod tests {
                 matches!(
                     walked,
                     Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
-                        at: crate::WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+                        at: crate::WhereFollowingACrossingGaveUp::BoundingHowFarOffTheCrossingAPointIs,
                         ..
                     })
                 ),
-                "#1030 sits where the ball and the pipe are tangent, and the arc to it was \
+                "#2404 sits where the thin loop's two strands meet, and the arc from it was \
                  walked at {deflection} as {walked:?}"
             );
+        }
+    }
+
+    /// Both halves of the relays' rim, cut at `#2404 = (10.05, 1.15, 16.5)` and
+    /// at `(10.05, 1.15, 16.3)` across from it, are refused at every deflection,
+    /// as `rcad-step`'s pin end cuts it.
+    ///
+    /// The leaning pipe misses the ball's centre by `q = 7.64e-14` in `x`, so
+    /// the two cross in one thin loop where `x − 10.05 ≤ q/2`, two strands
+    /// `1.2e-7` either side of the rim that meet at the two corners (§335.5).
+    /// The corners are where the two surfaces turn tangent: they lean `7.6e-13`
+    /// apart there. No piece of the crossing runs along the half with
+    /// `x > 10.05`, and two run along the other half.
+    ///
+    /// Before Q1889 the half with `x > 10.05` was walked at `f64::MAX`: the
+    /// march crossed it where the ball and the pipe are within `1e-13` of each
+    /// other, and handed back points `0.044` to `0.1` off the crossing, each
+    /// certified outside the ball, under a bound of `7.9e-7`. That bound takes
+    /// both surfaces as flat, and over its own reach the ball bends away from
+    /// its tangent plane by more than the gap it rests on. Asked of the corners
+    /// with the bend counted ([`settled_with_a_bound_where_they_bend`]), it does
+    /// not hold, and the run is refused before the march.
+    #[test]
+    fn both_halves_of_a_rim_where_a_ball_and_a_pipe_off_its_centre_turn_tangent_are_refused() {
+        let ball =
+            Surface::Sphere(Sphere::new(Point::new(10.05, 1.15, 16.4), 0.1).expect("a radius"));
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(
+                    Point::new(10.05, -19.75, 16.4),
+                    Vector::new(3.663_735_981_263e-15, 1.0, 0.0),
+                )
+                .expect("a direction"),
+                0.1,
+            )
+            .expect("a radius"),
+        );
+        let corners = [Point::new(10.05, 1.15, 16.5), Point::new(10.05, 1.15, 16.3)];
+        for facing in [Vector::new(1.0, 0.0, 0.0), Vector::new(-1.0, 0.0, 0.0)] {
+            let half = Picker::from(
+                crate::HalfSpace::through_a_point_facing(corners[0], facing).expect("a direction"),
+            );
+            let run = NamedRun::new(
+                EdgeRun::PartOfWhereItCrosses {
+                    and: ball,
+                    picked_by: smallvec![half],
+                },
+                corners.map(|end| PredicatePoint::from(end.coordinates())),
+            )
+            .expect("a run between two corners");
+            for (surfaces, deflection) in [[&ball, &pipe], [&pipe, &ball]]
+                .into_iter()
+                .flat_map(|surfaces| [f64::MAX, 1.0, 0.1, 0.01].map(|asked| (surfaces, asked)))
+            {
+                let walked = walk(
+                    &run,
+                    surfaces,
+                    Deflection::of(deflection).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .map(|walked| (walked.points().to_vec(), walked.deviation()));
+                assert!(
+                    matches!(
+                        walked,
+                        Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                            at: crate::WhereFollowingACrossingGaveUp::BoundingHowFarOffTheCrossingAPointIs,
+                            ..
+                        })
+                    ),
+                    "the half of the rim facing {facing:?} ends where the ball and the pipe \
+                     turn tangent, and was walked along {surfaces:?} at {deflection} as {walked:?}"
+                );
+            }
         }
     }
 
@@ -6362,7 +6470,9 @@ mod tests {
             .expect("a radius"),
         );
         let corner = PredicatePoint::from([2.0, 0.0, 0.0]);
-        let settling = how_far_off_the_crossing_this_corner_can_be(corner, [&ball, &pipe]);
+        let settling = how_far_off_the_crossing_this_corner_can_be(corner, |at| {
+            settled_with_a_bound([&ball, &pipe], at)
+        });
         assert!(
             matches!(
                 settling,
