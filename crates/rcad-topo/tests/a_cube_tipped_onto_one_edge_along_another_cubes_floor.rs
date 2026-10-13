@@ -281,6 +281,23 @@ fn the_tipped_cube_less_the_block_is_one_solid_where_the_cubes_edge_rounds_below
     }
 }
 
+#[test]
+fn the_block_less_the_tipped_cube_is_one_solid_where_the_cubes_edge_rounds_below_the_floor_tolerant()
+ {
+    for tilt in TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT {
+        let asked = format!("{tilt:?}");
+        let volumes = volumes_of_a_fuse(
+            tilt,
+            Rule::Difference,
+            Order::BlockFirst,
+            &tolerant(),
+            &asked,
+        );
+        assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
+        assert_about(volumes[0], 1000.0 - what_the_two_share(tilt), &asked);
+    }
+}
+
 /// The volume the block and the tipped cube share.
 ///
 /// The tipped cube's square cross-section, in `(y, z)`, has its corner at
