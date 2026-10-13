@@ -691,9 +691,11 @@ fn bores_on_0_3_4_and_4_3_0_are_picked_by_a_slide_solved_for() {
     }
 }
 
-/// Bores on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)` are refused,
-/// and no flat surface written in `f64` could pick their halves: each one lying
-/// in their flat misses where the axes meet.
+/// No flat surface written in `f64` picks the halves of bores on `(3, 4, 0)` and
+/// `(4, 0, 3)` through `(11, −3.25, 0.5)`: each one lying in their flat misses
+/// where the axes meet. They were refused for it until Q1892, and are now picked
+/// by surfaces that hold the middle itself
+/// (`bores_on_3_4_0_and_4_0_3_are_picked_by_surfaces_holding_the_exact_middle`).
 ///
 /// A picker has to face a direction `f` lying exactly in the flat of the two
 /// stored directions `a` and `b`, `(3, 4, 0)/5` and `(4, 0, 3)/5` rounded, and
@@ -723,19 +725,6 @@ fn no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3()
         [Vector::new(3.0, 4.0, 0.0), Vector::new(4.0, 0.0, 3.0)],
         0.25,
     );
-    for pair in [[one, other], [other, one]] {
-        let named = intersect(
-            &Surface::Cylinder(pair[0]),
-            &Surface::Cylinder(pair[1]),
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        );
-        assert!(
-            matches!(named, Err(Error::CannotNameWhichPieceOfACrossingThisIs)),
-            "no flat surface in f64 picks the halves, so the pair is refused: {named:?}"
-        );
-    }
-
     let [a, b] = [one, other].map(|pipe| pipe.axis().direction());
     assert_eq!(
         [a, b].map(|way| way.components()),
@@ -801,6 +790,88 @@ fn no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3()
         assert!(
             matches!(side, Decision::Pos | Decision::Neg),
             "the surface facing {facing:?} misses where the axes meet: {side:?}"
+        );
+    }
+}
+
+/// Bores on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)` are named in
+/// four halves, each picked by two surfaces that hold the middle itself and
+/// face the two stored directions, one way or the other, and the walker draws
+/// every half on both pipes.
+///
+/// `no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3`
+/// is why it is these: no surface holding a rounded offset passes exactly
+/// through the middle, and a surface that holds the middle does for every
+/// facing (`docs/decisions.md` §443).
+#[test]
+fn bores_on_3_4_0_and_4_0_3_are_picked_by_surfaces_holding_the_exact_middle() {
+    let middle = Point::new(11.0, -3.25, 0.5);
+    let [one, other] = two_pipes_crossing_at(
+        middle,
+        [Vector::new(3.0, 4.0, 0.0), Vector::new(4.0, 0.0, 3.0)],
+        0.25,
+    );
+    let [a, b] = [one, other].map(|pipe| pipe.axis().direction());
+    let at_the_middle = PredicatePoint::Exact(middle.coordinates());
+
+    for pair in [[one, other], [other, one]] {
+        let named = intersect(
+            &Surface::Cylinder(pair[0]),
+            &Surface::Cylinder(pair[1]),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(halves)) = named else {
+            panic!("surfaces holding the middle name the pair: {named:?}")
+        };
+        assert_eq!(halves.len(), 4, "two ellipses, each in two halves");
+        let mut corners = Vec::new();
+        for half in &halves {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = half.run() else {
+                panic!("a half is a piece of where the two pipes cross: {half:?}")
+            };
+            let facings: Vec<Vector> = picked_by
+                .iter()
+                .map(|picker| {
+                    let Picker::InFrontOfAFlatThrough(surface) = picker else {
+                        panic!("a half is picked by surfaces holding the middle: {picker:?}")
+                    };
+                    assert_eq!(surface.through(), middle);
+                    assert_eq!(picker.side_of_point(at_the_middle), Decision::Zero);
+                    surface.facing()
+                })
+                .collect();
+            assert!(
+                [[a, b], [b, a]].iter().any(|ways| facings
+                    .iter()
+                    .zip(ways)
+                    .all(|(facing, way)| *facing == *way || *facing == -*way)),
+                "each half faces the two stored directions, one way or the other: {facings:?}"
+            );
+            corners.push(facings.iter().map(Vector::components).collect::<Vec<_>>());
+
+            let drawn = walk(
+                half,
+                [&Surface::Cylinder(pair[0]), &Surface::Cylinder(pair[1])],
+                Deflection::of(0.25 * 1e-4).expect("a deflection above zero"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("the walker draws {half:?}: {why:?}"));
+            let allowed = drawn.deviation().magnitude();
+            for point in drawn.points() {
+                for pipe in &pair {
+                    let off = how_far_off_the_pipe(pipe, *point);
+                    assert!(off <= allowed, "{point:?} is {off} off a pipe");
+                }
+            }
+        }
+        corners.sort_by(|one, other| one.partial_cmp(other).expect("finite facings"));
+        corners.dedup();
+        assert_eq!(
+            corners.len(),
+            4,
+            "the four halves sit in four different corners"
         );
     }
 }
