@@ -412,7 +412,7 @@ fn a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it() {
 /// - Under `tolerant(100)` four fuses answer half the pyramid, 60, in one
 ///   solid that validates, and the log's one record is the range check that
 ///   took the short edge. In the other two the half holding the apex is
-///   built, and its speck face has three corners within `3e−15` of one
+///   built, and its speck face has three corners within `5e−15` of one
 ///   another, which wind against its normal: on one line, shifted for the
 ///   intersection, and the wrong way round, turned and shifted for the
 ///   difference. The fuse refuses that and writes nothing.
