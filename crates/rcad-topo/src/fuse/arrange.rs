@@ -12657,8 +12657,8 @@ mod curved {
     use super::super::MeetPoint;
     use super::super::bake::{BakedFace, BakedSolid, bake};
     use super::super::cuts;
-    use super::{ALONG_A_CROSSING, Piece, split_a_face};
-    use crate::{DraftStep, Error, Model, Rule, SolidBuilder};
+    use super::{Piece, split_a_face};
+    use crate::{DraftStep, Model, Rule, SolidBuilder};
 
     /// A block eight across sitting on the origin with a round bar of radius
     /// one straight through the middle of it, both already cut against each
@@ -12755,15 +12755,17 @@ mod curved {
     /// two sides are one piece, joined round the points beyond every arc:
     /// `2 + 2 + 2`.
     ///
-    /// **At 120° the meets are named, and the order round the cap's crossing
-    /// is refused.** The second pipe's direction is stored `2.2e-16` off
-    /// `z = 0` there, so `n̂` is too, and the place `c − r·n̂` is a box `2e-16`
-    /// wide round `(11, −3.25, 0.25)`. The cap's crossing starts at
-    /// `(11, −3.25, 0.25)` exactly, inside that box, so which of the two
-    /// places comes first round it from there is a sweep that straddles nought,
-    /// and it is refused `Undecidable` on the order along a crossing. At 50°
-    /// to 100° the places are `f64` triples and the start is the one below,
-    /// bit for bit, and named so.
+    /// **At 120° the place below holds the start in its box.** The second
+    /// pipe's direction is stored `2.2e-16` off `z = 0` there, so `n̂` is too,
+    /// and the place `c − r·n̂` is a box `2e-16` wide round `(11, −3.25,
+    /// 0.25)`. The cap's crossing starts at `(11, −3.25, 0.25)` exactly, inside
+    /// that box, so which of the two places comes first round it from there is
+    /// a sweep that straddles nought. Until Q1900 that was refused
+    /// `Undecidable` on the order along a crossing; the place whose box holds
+    /// the start now comes first, as the other's box is clear of it
+    /// (`round_a_closed_crossing_and_what_it_measures`). At 50° to 100° the
+    /// places are `f64` triples and the start is the one below, bit for bit,
+    /// and named so.
     ///
     /// Gathering the cuts tells the wall: the second bar's near cap and wall
     /// both cut it and both carry the cap, and the wall is told it once,
@@ -12784,18 +12786,7 @@ mod curved {
             );
             let split = split_a_face(wall, &Policy::certified(), &mut ProvenanceLog::new())
                 .map(|split| split.pieces.len());
-            if degrees < 110.0 {
-                assert!(matches!(split, Ok(6)), "{degrees}°: {split:?}");
-                continue;
-            }
-            let Err(Error::Undecidable { records }) = &split else {
-                panic!("{degrees}°: {split:?}");
-            };
-            assert_eq!(
-                records.records().last().map(|record| record.predicate()),
-                Some(ALONG_A_CROSSING),
-                "{degrees}°"
-            );
+            assert!(matches!(split, Ok(6)), "{degrees}°: {split:?}");
         }
     }
 
