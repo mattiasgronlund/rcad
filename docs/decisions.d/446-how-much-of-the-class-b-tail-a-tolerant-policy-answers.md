@@ -330,3 +330,66 @@ for three things:
   the first and third kinds point at: §448 and Q1954;
 - a sweep of a random sample of 30 class-C rows, done by a lane: §449 and
   Q1955.
+
+### 446.8 The two-thin-bars family, traced
+
+*Unfinished: Q1953's first lane measured what follows and handed over at its
+budget. The first step that goes wrong is not traced yet, and no row is filed
+yet.*
+
+Run at `10a716f3` by a scratch test, `crates/rcad-topo/tests/zz_q1953_probe.rs`,
+deleted before the commit and kept at `/tmp/q1953-probes/`, with
+`mise exec -- just t -p rcad-topo -E 'test(/q1953_probe_/)' --no-capture`. All
+under `Policy::certified()`, at 100 mm, six fuses each. "Stored direction" is
+the pipe's axis direction as the model hands it out.
+
+**The four rows still refuse at the base, as 446.4 has them.** Q1896 answers 5
+of its 54 runs (at the origin, the second bar less the first refused
+`TwoPatchesOfTheMeshDrewTheSameSide`), Q1897 none of 24, Q1793 and Q1929 none
+of 6 at 120 degrees.
+
+**The stored directions are a hair off z = 0 in three of the four rows.** Q1793
+and Q1929's second bar is `(-0.5, 0.866…, -2.2e-16)` at 120 degrees, as their
+rows say. Q1897's two bars, built as `add_bar_cut_off_by` with a turn about
+`ẑ × way`, are `(0.6, 0.8, 1.1e-16)` and `(0.8, -0.6, 1.1e-16)`. Q1896's first
+bar is `(0.6, 0.8, 1.1e-16)`, its second `(0.8, 0, 0.6)` exactly.
+
+**The hair is the cause in Q1897, Q1793 and Q1929.** Three ways round:
+
+- **An angle sweep.** The probe turned the second bar to 41 angles: every 5
+  degrees from 30 to 150, and every degree from 111 to 129. The stored
+  direction is off z = 0 at 24 of them, and at all 24 both shapes refuse all
+  six fuses. It lies in z = 0 at 17. There the bar starting where the axes meet
+  (Q1929's shape) answers all six at 15, and the long bar through (Q1793's)
+  answers all six at 14. The exceptions refuse some other way, in all six
+  fuses: Q1929's shape at 85 and 95 degrees `Undecidable`, and Q1793's at 80,
+  112 and 116 degrees `CannotNameWhichPieceOfACrossingThisIs`.
+- **One ulp of angle.** The first three angles above 120 degrees in radians
+  whose stored direction lies in z = 0 are 1, 4 and 7 ulps on. Q1929's shape
+  answers all six at each of them. Q1793's answers all six at 1 and 7, and
+  refuses all six `CannotNameWhichPieceOfACrossingThisIs` at 4. Moved the other
+  way, the first three angles above 50, 60 and 100 degrees whose direction is
+  off z = 0 refuse all six, both shapes, at all nine.
+- **Q1897 laid flat.** With each bar turned about z from x by the angle of its
+  way, instead of about `ẑ × way`, the stored directions are
+  `(0.6000000000000001, 0.8, 0)` and `(0.8, -0.6000000000000001, 0)`. Then all
+  24 of Q1897's fuses answer, at all four meeting points, including
+  (11, -3.25, 0.5), where with the hair all six refuse
+  `CannotNameWhichPieceOfACrossingThisIs`.
+
+**The hair is not Q1896's cause.** Its first bar laid flat the same way, all 54
+of its fuses refuse, at all nine meeting points, the origin's five included.
+Q1896's two axes span a flat that is no coordinate plane, before any rounding.
+
+**A lead, not run.** Two pipes of one width whose axes meet touch at `c ± r·n̂`,
+`n̂` square to both axes. In the flat cases `n̂` is `ẑ`, and both points are
+exact in `f64`. A unit vector with every coordinate a binary fraction lies along
+a coordinate axis (`a² + b² + c² = 4^k` in whole numbers has only the trivial
+solutions, by halving), so with the hair, and in Q1896 always, the two points
+are not numbers `f64` holds. Q1793's row has the fuse asking `∇S × ∇T` for
+exactly nought at those points. Whether the touch points are the one cause of
+all four rows is what the trace has to show next.
+
+**Not yet done:** the first step that goes wrong in each row; which rows share
+it; gap or limit; which of 448.1's (a) to (d) knew the bar lay in z = 0; and the
+rows to file.
