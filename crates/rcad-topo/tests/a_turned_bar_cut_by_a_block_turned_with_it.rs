@@ -29,9 +29,9 @@
 //! seam notch tilted off the axis, so that no side runs along it, is refused at
 //! the same box when certified, and as two curves touching when tolerant.
 //!
-//! **One radian about `(1, 1, 1)`: refused, and a side a rounding off parallel
-//! to the axis is why.** The turn rounds each side's normal and the bar's axis
-//! apart, so every side leans against the pipe by a rounding. Its plane's
+//! **One radian about `(1, 1, 1)`: answered, though a side lies a rounding off
+//! parallel to the axis.** The turn rounds each side's normal and the bar's
+//! axis apart, so every side leans against the pipe by a rounding. Its plane's
 //! crossing with the pipe is then named a closed one, an ellipse whose sweep
 //! starts more than `1e15` from the bar. Every fuse, under either policy, was
 //! refused *order along a crossing*: first between the two points where one
@@ -39,15 +39,16 @@
 //! past `100`, and then, once those were ordered, between a cap's and where
 //! the line two sides of the notch cross in leaves the pipe, `1e16` off.
 //! `fuse/arrange.rs` orders both now (`along_the_stretch_between_the_two` and
-//! `Arrangement::as_the_pipes_axis_says`), and every fuse is then refused
-//! `CannotNameWhichPieceOfACrossingThisIs` (Q1885). The seam notch tilted off
-//! the axis answers every fuse under the same turn, with the volume it has
-//! unturned.
+//! `Arrangement::as_the_pipes_axis_says`). Every fuse was then refused
+//! `CannotNameWhichPieceOfACrossingThisIs` on a wall edge along a side's
+//! ellipse (Q1885), until Q1882 walked such an arc up the pipe. Every fuse now
+//! answers what it holds by hand under both policies and logs nothing, and so
+//! does the seam notch tilted off the axis, with the volume it has unturned.
 //!
-//! **Both are gaps, not limits** (§16.10). A turn moves no material, so each
-//! answer exists and is the unturned one. The exact half turn reaches it for
-//! the same shape. For one radian the rounding is in the turn itself, and the
-//! tilted notch shows that the rounded turn alone stops nothing.
+//! **The half turn by rotation is a gap, not a limit** (§16.10). A turn moves
+//! no material, so each answer exists and is the unturned one. The exact half
+//! turn reaches it for the same shape, and so does the one-radian turn, whose
+//! rounding is in the turn itself.
 //!
 //! *Where a plane and a pipe cross*, the predicate Q765 named, refuses none of
 //! these fuses.
@@ -82,28 +83,8 @@ const BOTH_NOTCHES: [[f64; 3]; 2] = [THE_SEAM_NOTCH, THE_WALL_NOTCH];
 /// quarter turns, which round nothing.
 #[test]
 fn a_notched_bar_unturned_or_turned_an_exact_half_turn_answers_every_fuse_by_hand() {
-    for (which, turn) in [
-        ("unturned", Isometry::identity()),
-        ("an exact half turn", half_a_turn_exactly()),
-    ] {
-        for notch in BOTH_NOTCHES {
-            for tolerant in [false, true] {
-                for rule in RULES {
-                    let what =
-                        format!("{which}, notch at {notch:?}, tolerant {tolerant}, {rule:?}");
-                    let (model, fused, log) =
-                        notched_and_fused(&turn, notch, &Isometry::identity(), rule, tolerant);
-                    let (volume, error) = the_volume_of_the_one_solid(&model, fused, &what);
-                    let by_hand = what_it_holds_by_hand(rule);
-                    assert!(
-                        (volume - by_hand).abs() <= error,
-                        "{what}: measured {volume} ± {error}, by hand {by_hand}"
-                    );
-                    assert!(log.is_empty(), "{what}: logged {log:?}");
-                }
-            }
-        }
-    }
+    answers_every_fuse_by_hand("unturned", &Isometry::identity());
+    answers_every_fuse_by_hand("an exact half turn", &half_a_turn_exactly());
 }
 
 /// Every side of either notch, turned by `rotation(y, π)` with the bar, runs
@@ -240,31 +221,15 @@ fn turned_one_radian_about_a_diagonal_every_notch_side_leans_by_a_rounding_and_c
     }
 }
 
-/// Every fuse of either notch, under either policy, puts the nodes round each
-/// side's long ellipse in order: where a side meets the caps and the notch's
-/// ends, near the bar, and where the line two sides of the notch cross in
-/// leaves the pipe, `1e16` off. Each is then refused naming which piece of a
-/// crossing an edge is, which Q1885 has as a wall edge on a side's ellipse.
+/// Every fuse of either notch, under either policy, answers what it holds by
+/// hand and logs nothing. It puts the nodes round each side's long ellipse in
+/// order: where a side meets the caps and the notch's ends, near the bar, and
+/// where the line two sides of the notch cross in leaves the pipe, `1e16` off.
+/// It then walks each wall edge on such an ellipse up the pipe (Q1882), where
+/// it was refused `CannotNameWhichPieceOfACrossingThisIs` (Q1885).
 #[test]
-fn turned_one_radian_about_a_diagonal_every_fuse_is_refused_naming_a_piece_of_a_crossing() {
-    let turn = one_radian_about_a_diagonal();
-    for notch in BOTH_NOTCHES {
-        for tolerant in [false, true] {
-            for rule in RULES {
-                let (_, fused, _) =
-                    notched_and_fused(&turn, notch, &Isometry::identity(), rule, tolerant);
-                assert!(
-                    matches!(
-                        fused,
-                        Err(Error::Geometry(
-                            rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
-                        ))
-                    ),
-                    "notch at {notch:?}, tolerant {tolerant}, {rule:?}: {fused:?}"
-                );
-            }
-        }
-    }
+fn turned_one_radian_about_a_diagonal_every_fuse_answers_what_it_holds_by_hand() {
+    answers_every_fuse_by_hand("one radian about (1, 1, 1)", &one_radian_about_a_diagonal());
 }
 
 /// The control for the one-radian turn: the seam notch tilted so that no side
@@ -296,6 +261,31 @@ fn turned_one_radian_about_a_diagonal_a_notch_tilted_off_the_axis_answers_every_
                 (turned - unturned).abs() <= turned_error + unturned_error,
                 "{what}: turned {turned} ± {turned_error}, unturned {unturned} ± {unturned_error}"
             );
+        }
+    }
+}
+
+/// Fuses either notch with the bar, both placed by `turn`, by every rule under
+/// both policies, and checks that each comes back one sound solid holding what
+/// [`what_it_holds_by_hand`] says, with nothing logged.
+fn answers_every_fuse_by_hand(which: &str, turn: &Isometry) {
+    for notch in BOTH_NOTCHES {
+        for tolerant in [false, true] {
+            for rule in RULES {
+                let what = format!("{which}, notch at {notch:?}, tolerant {tolerant}, {rule:?}");
+                let (model, fused, log) =
+                    notched_and_fused(turn, notch, &Isometry::identity(), rule, tolerant);
+                let (volume, error) = the_volume_of_the_one_solid(&model, fused, &what);
+                let by_hand = what_it_holds_by_hand(rule);
+                assert!(
+                    (volume - by_hand).abs() <= error,
+                    "{what}: measured {volume} ± {error}, by hand {by_hand}"
+                );
+                assert!(log.is_empty(), "{what}: logged {log:?}");
+                model
+                    .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            }
         }
     }
 }
