@@ -964,6 +964,11 @@ enum HowItRuns {
     /// which is a box round `from` wherever the two surfaces do not both
     /// certify it ([`where_the_crossing_starts`]).
     ///
+    /// `named_the_start` is a node of the crossing whose box alone holds
+    /// `from`, counted first round it in place of `node`
+    /// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]), and
+    /// `None` where no node is that.
+    ///
     /// `wound_as` is the pair whose crossing is asked which way it winds: the
     /// face's surface and the partner, or, for a circle a ring shares with a
     /// surface on its axis, that surface and the circle's own plane in the
@@ -972,6 +977,7 @@ enum HowItRuns {
     RoundAClosedCurve {
         from: PredicatePoint,
         node: PredicatePoint,
+        named_the_start: Option<PredicatePoint>,
         wound_as: Box<[Surface; 2]>,
     },
     /// It runs on for ever **and bends**, so it has no axis to climb and
@@ -3214,14 +3220,21 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::either_way_round_cuts_the_same_arcs`]):
     /// boxes clear of each other hold two points, so there is nothing to fold,
     /// and asking would hand the policy an order nothing needs.
+    ///
+    /// **Which node each loop is counted from is settled again on every pass**
+    /// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]), since
+    /// a fold can move a node or bring one onto a loop, and the order is asked
+    /// again after it.
     fn merge_points_that_are_one_point(
         &mut self,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
         loop {
+            let on_each = self.the_nodes_on_each_crossing();
+            self.count_each_loop_from_the_node_round_its_start(&on_each);
             let mut same = Sameness::of(self.nodes.len());
-            for (crossing, on_it) in self.the_nodes_on_each_crossing().iter().enumerate() {
+            for (crossing, on_it) in on_each.iter().enumerate() {
                 if !self.crossings[crossing].reaches_the_face
                     || self.either_way_round_cuts_the_same_arcs(crossing, on_it)?
                 {
@@ -3251,6 +3264,116 @@ impl<'f> Arrangement<'f> {
             }
             self.fold_the_nodes(&mut same)?;
         }
+    }
+
+    /// Count each loop a plane cuts a pipe in from the one node whose box
+    /// holds where the loop starts, where no other node can lie between the
+    /// two: the `named_the_start` of [`HowItRuns::RoundAClosedCurve`].
+    ///
+    /// **Nothing else can put that node in order.** The step from the start
+    /// to it may be nothing, so the sweep straddles nought whichever node it
+    /// is asked against, and so does every other reading: the node may be a
+    /// hair ahead of the start and come first, or a hair behind and come last.
+    ///
+    /// **Either answer cuts the loop into the same arcs**, as long as no other
+    /// node lies on the short stretch of the loop between that node and the
+    /// place the start stands for. Arcs join each node to the next one round,
+    /// and the last back to the first
+    /// ([`Arrangement::cut_the_crossings_into_arcs`]), so a node a hair
+    /// behind the start that is counted first only turns the order round.
+    /// Every other pair keeps the order it had. That is why this is settled
+    /// for the whole loop at once, and not pair by pair: a rule that put the
+    /// node first against one node, while another rule proved it last against
+    /// a third, would sort the loop into an order that is no turn of the true
+    /// one.
+    ///
+    /// **That stretch lies inside the box round both boxes, grown by its
+    /// widest side.** Its ends are in the node's box and in the start's
+    /// (`node`, which holds the place of the loop the start was rounded off,
+    /// [`where_the_crossing_starts`]), so the straight line between its ends
+    /// lies in the box round both, whose diagonal is `d`. A loop that turns on
+    /// no radius under `R` leaves that line by `d²/(4R)` at most, between two
+    /// ends no more than `d` apart, with `d` under `R`. The loop a plane cuts a
+    /// pipe of radius `r` in is an ellipse whose half axes are `r` and
+    /// `r / cos θ`, for `θ` the angle between the plane's normal and the
+    /// pipe's axis, so it turns most sharply at the ends of its long axis, on
+    /// a radius of `r cos θ`. Where that radius is proved to be `4d` or more
+    /// ([`turns_on_four_times_the_diagonal_at_least`]), the stretch leaves the
+    /// line by `d/16` at most, which is under the widest side. A node whose box
+    /// is clear of the grown box is not on the stretch.
+    ///
+    /// **Only a plane and a pipe**, since that radius is worked out for them
+    /// alone. A plane leaning against a pipe by a rounding cuts an ellipse
+    /// `1e16` long, whose ends turn on a radius near `1e-15`, far under a box
+    /// hundreds wide out there, and there the radius is not proved.
+    ///
+    /// It leans on what the other rules already do, and only turns their
+    /// order round: the order they give every pair of other nodes is the order
+    /// round the loop from the place the start stands for.
+    ///
+    /// A round bar of radius 3 notched by a block and turned with it by
+    /// `Isometry::rotation(y, π)` is the shape (Q1737). `sin π` rounds to
+    /// `1.2e-16`, so the bar's seam corner on its bottom cap is a box `±8.5e-14`
+    /// round `(−3, 0, 0)`, and the cap's circle is walked from `(−3, 0,
+    /// −3.7e-16)`, inside that box. The nodes where the notch's sides cross the
+    /// circle are `0.17` and more round from it, and every fuse was refused on
+    /// the order of the corner against the first of them.
+    fn count_each_loop_from_the_node_round_its_start(&mut self, on_each: &[Vec<usize>]) {
+        for (crossing, on_it) in on_each.iter().enumerate() {
+            let named = self.the_node_round_the_start(crossing, on_it);
+            if let HowItRuns::RoundAClosedCurve {
+                named_the_start, ..
+            } = &mut self.crossings[crossing].order
+            {
+                *named_the_start = named;
+            }
+        }
+    }
+
+    /// The box of the node a loop is counted from, by
+    /// [`Arrangement::count_each_loop_from_the_node_round_its_start`]'s rule,
+    /// or `None` where no node is that.
+    fn the_node_round_the_start(&self, crossing: usize, on_it: &[usize]) -> Option<PredicatePoint> {
+        if !self.crossings[crossing].reaches_the_face {
+            return None;
+        }
+        let HowItRuns::RoundAClosedCurve {
+            from,
+            node,
+            ref wound_as,
+            ..
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = &**wound_as
+        else {
+            return None;
+        };
+        let place = |each: usize| self.nodes[each].point;
+        if on_it
+            .iter()
+            .any(|&each| place(each) == from || place(each) == node)
+        {
+            return None;
+        }
+        let mut holding = on_it
+            .iter()
+            .copied()
+            .filter(|&each| boxes_overlap(place(each), from));
+        let (Some(held), None) = (holding.next(), holding.next()) else {
+            return None;
+        };
+        let near = the_box_round_both(place(held), node);
+        if !turns_on_four_times_the_diagonal_at_least(flat, pipe, near) {
+            return None;
+        }
+        let reach = grown_by_its_widest_side(near);
+        on_it
+            .iter()
+            .all(|&each| each == held || !boxes_overlap(place(each), reach))
+            .then_some(place(held))
     }
 
     /// The nodes on each crossing, each list in the order the nodes are
@@ -3660,10 +3783,11 @@ impl<'f> Arrangement<'f> {
             HowItRuns::RoundAClosedCurve {
                 from,
                 node,
+                named_the_start,
                 ref wound_as,
             } => round_a_closed_crossing_and_what_it_measures(
                 [&wound_as[0], &wound_as[1]],
-                [from, node],
+                [from, named_the_start.unwrap_or(node)],
                 one,
                 other,
             )?,
@@ -8499,6 +8623,55 @@ fn across_a_circle_that_starts_at_a_pole(
     )))
 }
 
+/// The smallest box holding both boxes.
+fn the_box_round_both(one: PredicatePoint, other: PredicatePoint) -> PredicatePoint {
+    let (mine, theirs) = (one.enclosure(), other.enclosure());
+    PredicatePoint::Constructed([0, 1, 2].map(|axis| {
+        Interval::new(
+            mine[axis].lo().min(theirs[axis].lo()),
+            mine[axis].hi().max(theirs[axis].hi()),
+        )
+        .expect("two boxes' lowest end is below their highest")
+    }))
+}
+
+/// The box grown by its widest side along every axis, rounded outward.
+fn grown_by_its_widest_side(place: PredicatePoint) -> PredicatePoint {
+    let sides = place.enclosure();
+    let widest = sides.iter().map(|side| side.width()).fold(0.0, f64::max);
+    let reach = Interval::new(-widest, widest).expect("a width is nought or more");
+    PredicatePoint::Constructed(sides.map(|side| side + reach))
+}
+
+/// Whether the loop `flat` cuts `pipe` in is proved to turn on no radius
+/// under four times the diagonal of `near`.
+///
+/// That loop turns most sharply on a radius of `r cos θ`, for `r` the pipe's
+/// radius and `θ` the angle between the plane's normal `n` and the pipe's axis
+/// `w` ([`Arrangement::count_each_loop_from_the_node_round_its_start`]), so
+/// this asks whether `r²(n·w)² − 16d²|n|²|w|²` is above nought, for `d²` the
+/// sum of the squares of `near`'s widths. Squared, so that nothing is divided
+/// and no root is taken.
+fn turns_on_four_times_the_diagonal_at_least(
+    flat: &Plane,
+    pipe: &Cylinder,
+    near: PredicatePoint,
+) -> bool {
+    let normal = flat.normal().components().map(Interval::exactly);
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let leans = dot_of(normal, along);
+    let radius = Interval::exactly(pipe.radius());
+    let widths = near
+        .enclosure()
+        .map(|side| Interval::exactly(side.hi()) - Interval::exactly(side.lo()));
+    let room = radius * radius * leans * leans
+        - Interval::exactly(16.0)
+            * dot_of(widths, widths)
+            * dot_of(normal, normal)
+            * dot_of(along, along);
+    room.sign() == Decision::Pos
+}
+
 /// Whether two boxes have any point in common, so that one may be the other.
 ///
 /// *May be*, and never *is*: two boxes that touch can hold two different
@@ -8528,6 +8701,10 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// walked triple, and the node a crossing is given there, which is a box round
 /// that triple wherever the two surfaces do not both certify it. Both name the
 /// one place by construction, so this compares names rather than coordinates.
+/// Where one node's box alone holds the start, and no other node can lie
+/// between the two, that node is handed in as `node` instead, and is counted
+/// first by the same name
+/// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]).
 /// Asked as a sum instead, a box round the start swept against the start
 /// straddles zero however far round the other point is: a circle cut across
 /// from a start one rounding off a pole refused every union of a turned ball
@@ -9740,6 +9917,7 @@ fn how_a_crossing_runs(
         Ok(from) => Ok(HowItRuns::RoundAClosedCurve {
             from: PredicatePoint::from(from.coordinates()),
             node: where_the_crossing_starts(surface, partner, from),
+            named_the_start: None,
             wound_as: Box::new([*surface, *partner]),
         }),
         Err(_) => Err(Error::ACrossingThisCannotBeOrderedAlong),
@@ -10321,6 +10499,7 @@ fn how_a_circle_round_a_rings_axis_runs(
     Ok(HowItRuns::RoundAClosedCurve {
         from: at,
         node: where_the_crossing_starts(surface, partner, from),
+        named_the_start: None,
         wound_as: Box::new(wound_as),
     })
 }
@@ -12949,6 +13128,7 @@ mod tests {
         arrangement.crossings[circle].order = HowItRuns::RoundAClosedCurve {
             from: on_the_circle,
             node: on_the_circle,
+            named_the_start: None,
             wound_as: Box::new([arrangement.surface, arrangement.crossings[circle].partner]),
         };
 
