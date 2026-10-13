@@ -36,6 +36,14 @@
 //! (`leave_out_each_pair_of_flat_faces_walking_one_ring_both_ways` in
 //! `fuse/assemble.rs`).
 //!
+//! **The block less the tipped cube was refused** `ResultIsNotManifold {
+//! count: 4 }` at those five tilts, under a tolerant policy, until queue row
+//! Q1901. There the block keeps a thin wedge under the cube's bottom face and
+//! a wide one beside its side, and the two touch along the edge the cube
+//! stands on: one solid touching itself along a line. That is an answer
+//! (`docs/decisions.md` §39.4), and the fuse parts the line into one edge for
+//! each wedge.
+//!
 //! **The tipped cube less the block was two solids**, under a tolerant
 //! policy, at the four tilts of
 //! [`TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT`] (queue row Q1687).
@@ -131,6 +139,29 @@ fn the_union_is_both_cubes_less_what_they_share_where_it_was_refused() {
                 let volume = volume_of_a_fuse(tilt, Rule::Union, order, &policy, &asked);
                 assert_about(volume, 2000.0 - what_the_two_share(tilt), &asked);
             }
+        }
+    }
+}
+
+/// Refused `ResultIsNotManifold { count: 4 }` under a tolerant policy until
+/// queue row Q1901: the block touches itself along the cube's edge there, and
+/// a solid touching itself along a line is an answer (`docs/decisions.md`
+/// §39.4). One solid under either policy since.
+#[test]
+fn the_block_less_the_tipped_cube_is_the_block_less_what_they_share_where_the_union_was_refused() {
+    for tilt in TILTS_THE_UNION_WAS_REFUSED_AT {
+        for policy in [certified(), tolerant()] {
+            let asked = format!("{tilt:?}, {policy:?}");
+            let volumes = volumes_of_a_fuse(
+                tilt,
+                Rule::Difference,
+                Order::BlockFirst,
+                &policy,
+                &mut ProvenanceLog::new(),
+                &asked,
+            );
+            assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
+            assert_about(volumes[0], 1000.0 - what_the_two_share(tilt), &asked);
         }
     }
 }
