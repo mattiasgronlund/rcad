@@ -2089,10 +2089,8 @@ impl<'f> Arrangement<'f> {
         else {
             unreachable!("a half ellipse is a crossing of two pipes")
         };
-        let [Picker::InFrontOf(one), Picker::InFrontOf(two)] =
-            self.crossings[first].picked_by()[..]
-        else {
-            unreachable!("a half ellipse is picked out by two half-spaces")
+        let [one, two] = self.crossings[first].picked_by()[..] else {
+            unreachable!("a half ellipse is picked out by two flat surfaces")
         };
         let on_the_face = usize::from(half.forward_runs_with_the_bend);
         let pickers = [one, two];
@@ -2103,8 +2101,14 @@ impl<'f> Arrangement<'f> {
         pipes.sort_by_key(|(pipe, _)| name_of_surface_bits(&Surface::Cylinder(*pipe)));
         let [(lesser, along_the_lesser), (greater, _)] = pipes;
 
-        let middle = where_an_axis_crosses_a_flat_surface(&lesser, &along_the_lesser);
-        let [one, two] = pickers.map(|picker| picker.normal().components().map(Interval::exactly));
+        let middle = where_an_axis_crosses_a_flat_picker(&lesser, &along_the_lesser);
+        let [one, two] = pickers.map(|picker| {
+            picker
+                .facing_of_a_flat()
+                .expect("a half ellipse is picked out by two flat surfaces")
+                .components()
+                .map(Interval::exactly)
+        });
         let places = where_two_pipes_touch(middle, cross_of_intervals(one, two), lesser.radius());
         let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
         for place in places {
@@ -2317,10 +2321,8 @@ impl<'f> Arrangement<'f> {
             else {
                 unreachable!("a half ellipse is a crossing of two pipes")
             };
-            let [Picker::InFrontOf(one), Picker::InFrontOf(two)] =
-                self.crossings[crossing].picked_by()[..]
-            else {
-                unreachable!("a half ellipse is picked out by two half-spaces")
+            let [one, two] = self.crossings[crossing].picked_by()[..] else {
+                unreachable!("a half ellipse is picked out by two flat surfaces")
             };
             let on_the_face = usize::from(half.forward_runs_with_the_bend);
             let pickers = [one, two];
@@ -2338,7 +2340,7 @@ impl<'f> Arrangement<'f> {
                 (greater, _, along_the_greater),
             ] = pipes;
 
-            let middle = where_an_axis_crosses_a_flat_surface(&lesser, &picking_the_lesser);
+            let middle = where_an_axis_crosses_a_flat_picker(&lesser, &picking_the_lesser);
             let [one, two] = half
                 .facing
                 .map(|direction| direction.map(Interval::exactly));
@@ -4697,17 +4699,12 @@ impl<'f> Arrangement<'f> {
         {
             return false;
         }
-        let (
-            [Picker::InFrontOf(my_first), Picker::InFrontOf(my_second)],
-            [
-                Picker::InFrontOf(their_first),
-                Picker::InFrontOf(their_second),
-            ],
-        ) = (mine.picked_by(), theirs.picked_by())
+        let ([my_first, my_second], [their_first, their_second]) =
+            (mine.picked_by(), theirs.picked_by())
         else {
             return false;
         };
-        *their_first == my_first.reversed() && *their_second == my_second.reversed()
+        Some(*their_first) == my_first.reversed() && Some(*their_second) == my_second.reversed()
     }
 
     /// Whether a crossing's way out of `node` is a line it carries, rather than
@@ -9023,12 +9020,16 @@ fn a_half_of_an_ellipse(
     let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
         return None;
     };
-    let [Picker::InFrontOf(first), Picker::InFrontOf(second)] = picked_by[..] else {
+    let [first, second] = picked_by[..] else {
+        return None;
+    };
+    let [Some(first), Some(second)] = [first, second].map(|picker| picker.facing_of_a_flat())
+    else {
         return None;
     };
     let ways = [mine, theirs].map(|pipe| pipe.axis().direction().components());
     let [Some(one), Some(other)] =
-        [first, second].map(|picker| the_way_a_picker_leans(picker.normal().components(), ways))
+        [first, second].map(|facing| the_way_a_picker_leans(facing.components(), ways))
     else {
         return None;
     };
@@ -9269,6 +9270,28 @@ fn a_box_round_where_a_flat_surface_cuts_a_pipe(
             Interval::new(-reach, reach).expect("a reach is a length, never less than nought");
         origin[axis] + direction[axis] * slide + either_side
     }))
+}
+
+/// An enclosure of where `pipe`'s axis crosses the flat surface of `picker`,
+/// one of the two that pick out a half ellipse ([`a_half_of_an_ellipse`]).
+///
+/// A picker holding its point holds where the axes meet: `intersect` builds it
+/// through that point only after asking it exactly of both axes, so the
+/// crossing is that point, exactly (`docs/decisions.md` §443.5).
+///
+/// # Panics
+///
+/// If `picker` is curved, which [`a_half_of_an_ellipse`] rules out.
+fn where_an_axis_crosses_a_flat_picker(pipe: &Cylinder, picker: &Picker) -> [Interval; 3] {
+    match picker {
+        Picker::InFrontOf(facing) => where_an_axis_crosses_a_flat_surface(pipe, facing),
+        Picker::InFrontOfAFlatThrough(facing) => {
+            facing.through().coordinates().map(Interval::exactly)
+        }
+        Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) | _ => {
+            unreachable!("a half ellipse is picked out by two flat surfaces, not {picker:?}")
+        }
+    }
 }
 
 /// An enclosure of where `pipe`'s axis crosses the flat surface of `facing`,
@@ -12607,6 +12630,88 @@ mod curved {
         let mut solids = bake(&model, &[first, second], &policy, &mut log).expect("both bake");
         cuts::gather(&mut solids, &policy, &mut log).expect("they cut each other");
         solids
+    }
+
+    fn two_bars_crossing_at(middle: Point, ways: [Vector; 2]) -> Vec<BakedSolid> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let caps = [-1.0, 1.0].map(|z| {
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, z))
+                .expect("a cap")
+        });
+        let bars = ways.map(|way| {
+            let way = way.normalized().expect("a way");
+            let up = Vector::new(0.0, 0.0, 1.0);
+            let turn = Isometry::rotation(
+                &Axis::new(Point::origin(), up.cross(way)).expect("an axis"),
+                up.dot(way).acos(),
+            )
+            .expect("a turn");
+            let at = Isometry::translation(middle - Point::origin())
+                .expect("a move")
+                .compose(&turn);
+            model
+                .add_bar_cut_off_by(0.25, caps, &at, &policy, &mut log)
+                .expect("a bar")
+        });
+        let mut solids = bake(&model, &bars, &policy, &mut log).expect("both bake");
+        cuts::gather(&mut solids, &policy, &mut log).expect("they cut each other");
+        solids
+    }
+
+    #[test]
+    fn probe_q1892_split() {
+        for middle in [Point::new(0.0, 0.0, 0.0), Point::new(11.0, -3.25, 0.5)] {
+            let solids = two_bars_crossing_at(
+                middle,
+                [Vector::new(3.0, 4.0, 0.0), Vector::new(4.0, 0.0, 3.0)],
+            );
+            for solid in &solids {
+                let split = split_a_face(
+                    the_wall(solid),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                match split {
+                    Ok(split) => {
+                        println!("{middle:?}: {} pieces", split.pieces.len());
+                        for piece in &split.pieces {
+                            println!(
+                                "  piece wires {:?} whole {}",
+                                piece.wires.iter().map(Vec::len).collect::<Vec<_>>(),
+                                piece.is_the_whole_surface
+                            );
+                            for wire in &piece.wires {
+                                for meet in wire {
+                                    let ends = meet.ends.clone().map(|end| match end {
+                                        MeetPoint::Existing { point, .. } => {
+                                            format!("old {:?}", point.enclosure().map(|i| i.lo()))
+                                        }
+                                        MeetPoint::OfThreeSurfaces {
+                                            surfaces,
+                                            which,
+                                            point,
+                                        } => format!(
+                                            "three {:?}#{which} {:?}",
+                                            surfaces.map(|s| kind(&s)),
+                                            point.enclosure().map(|i| (i.lo(), i.width()))
+                                        ),
+                                        other => format!("{other:?}"),
+                                    });
+                                    println!(
+                                        "    {:?} side {:?} ends {ends:?}",
+                                        meet.carried_by.map(|s| kind(&s)),
+                                        meet.material_side
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(why) => println!("{middle:?}: refused {why:?}"),
+                }
+            }
+        }
     }
 
     fn the_wall(bar: &BakedSolid) -> &BakedFace {

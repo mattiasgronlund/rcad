@@ -4,7 +4,7 @@ use rcad_predicates::{Decision, Point as PredicatePoint, SideOfSurface};
 use serde::{Deserialize, Serialize};
 
 use crate::exact::Exact;
-use crate::plane::which_side_of_a_flat_surface;
+use crate::plane::{which_side_of_a_flat_surface, which_side_of_a_flat_surface_through};
 use crate::point::{Point, Vector};
 use crate::{Cylinder, Error, Isometry, Result, Sphere};
 
@@ -457,6 +457,16 @@ pub enum Picker {
     ///
     /// [`EdgeRun::PartOfWhereItCrosses`]: crate::EdgeRun::PartOfWhereItCrosses
     InsideAPipe(Cylinder),
+    /// Everything on or in front of a flat surface that passes exactly through
+    /// a point.
+    ///
+    /// The flat arm's [`HalfSpace`] rounds `facing · through` into its offset,
+    /// so it passes exactly through `through` only when `f64` holds that dot.
+    /// Bores on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)` have no
+    /// facing in their flat for which it does, so this arm is what picks their
+    /// halves (`docs/decisions.md` §443). Declared last, so the arms before it
+    /// keep the tags a model is written out with.
+    InFrontOfAFlatThrough(HalfSpaceThroughAPoint),
 }
 
 impl Picker {
@@ -477,6 +487,33 @@ impl Picker {
                 Decision::Neg => Decision::Pos,
                 same => same,
             },
+            Picker::InFrontOfAFlatThrough(half_space) => half_space.side_of_point(point),
+        }
+    }
+
+    /// The other side of the same surface, for the two arms that have one
+    /// written exactly: [`HalfSpace::reversed`] and
+    /// [`HalfSpaceThroughAPoint::reversed`]. `None` for a curved arm, whose
+    /// other side is a different arm and not this one turned round.
+    #[must_use]
+    pub fn reversed(&self) -> Option<Self> {
+        match self {
+            Picker::InFrontOf(half_space) => Some(Picker::InFrontOf(half_space.reversed())),
+            Picker::InFrontOfAFlatThrough(half_space) => {
+                Some(Picker::InFrontOfAFlatThrough(half_space.reversed()))
+            }
+            Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) => None,
+        }
+    }
+
+    /// Which way a flat arm faces, exactly as it was written down, and `None`
+    /// for a curved one.
+    #[must_use]
+    pub fn facing_of_a_flat(&self) -> Option<Vector> {
+        match self {
+            Picker::InFrontOf(half_space) => Some(half_space.normal()),
+            Picker::InFrontOfAFlatThrough(half_space) => Some(half_space.facing()),
+            Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) => None,
         }
     }
 
@@ -506,6 +543,9 @@ impl Picker {
             Picker::OutsideABall(ball) => Picker::OutsideABall(ball.transformed(movement)),
             Picker::OutsideAPipe(pipe) => Picker::OutsideAPipe(pipe.transformed(movement)),
             Picker::InsideAPipe(pipe) => Picker::InsideAPipe(pipe.transformed(movement)),
+            Picker::InFrontOfAFlatThrough(half_space) => {
+                Picker::InFrontOfAFlatThrough(half_space.transformed(movement))
+            }
         }
     }
 
@@ -513,7 +553,7 @@ impl Picker {
     #[must_use]
     pub fn predicate_name(&self) -> &'static str {
         match self {
-            Picker::InFrontOf(_) => SIDE_OF_A_HALF_SPACE,
+            Picker::InFrontOf(_) | Picker::InFrontOfAFlatThrough(_) => SIDE_OF_A_HALF_SPACE,
             Picker::OutsideABall(_) => crate::SIDE_OF_SPHERE,
             Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) => crate::SIDE_OF_CYLINDER,
         }
@@ -535,6 +575,117 @@ impl From<Sphere> for Picker {
 impl From<Cylinder> for Picker {
     fn from(pipe: Cylinder) -> Self {
         Picker::OutsideAPipe(pipe)
+    }
+}
+
+impl From<HalfSpaceThroughAPoint> for Picker {
+    fn from(half_space: HalfSpaceThroughAPoint) -> Self {
+        Picker::InFrontOfAFlatThrough(half_space)
+    }
+}
+
+/// Everything on or in front of the flat surface through `through` facing
+/// `facing`: the points `p` with `facing · (p − through) ≥ 0`, asked with
+/// nothing rounded.
+///
+/// A [`HalfSpace`] holds an offset in place of the point, rounded once from
+/// the exact dot, so its surface misses `through` wherever `f64` cannot hold
+/// `facing · through`. This holds the point, so its surface passes exactly
+/// through it for every `facing`. Like a half-space it is only ever a picker,
+/// never a face's geometry, and its numbers are the caller's, untouched
+/// (`docs/decisions.md` §443).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "(Point, Vector)", into = "(Point, Vector)")]
+pub struct HalfSpaceThroughAPoint {
+    through: Point,
+    facing: Vector,
+}
+
+impl HalfSpaceThroughAPoint {
+    /// The half-space whose flat surface passes exactly through `through`,
+    /// facing `facing`, both stored as given.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotFinite`] if either is not made of finite numbers, and
+    /// [`Error::ZeroLength`] if `facing` has no length to point along.
+    pub fn new(through: Point, facing: Vector) -> Result<Self> {
+        if !(through.is_finite() && facing.is_finite()) {
+            return Err(Error::NotFinite {
+                what: "point or facing of a half-space",
+            });
+        }
+        if facing == Vector::zero() {
+            return Err(Error::ZeroLength {
+                what: "half-space facing",
+            });
+        }
+        Ok(Self { through, facing })
+    }
+
+    /// The point the flat surface passes exactly through.
+    #[must_use]
+    pub fn through(&self) -> Point {
+        self.through
+    }
+
+    /// Which way the half-space faces, exactly as it was written down.
+    #[must_use]
+    pub fn facing(&self) -> Vector {
+        self.facing
+    }
+
+    /// The other half of the same flat surface. Only the facing is negated,
+    /// which rounds nothing.
+    #[must_use]
+    pub fn reversed(&self) -> Self {
+        Self {
+            through: self.through,
+            facing: -self.facing,
+        }
+    }
+
+    /// This half-space, moved by `movement`: the point moved as a point and
+    /// the facing turned as a vector.
+    ///
+    /// A turn rounds both, as it rounds a [`HalfSpace`]'s normal, so the moved
+    /// surface passes exactly through the moved `through` as `f64` holds it,
+    /// and that point is the true moved point only to within the turn's
+    /// rounding. Reversing still commutes with moving: negating a vector
+    /// negates every product of the turn exactly.
+    #[must_use]
+    pub fn transformed(&self, movement: &Isometry) -> Self {
+        Self {
+            through: movement.apply_to_point(self.through),
+            facing: movement.apply_to_vector(self.facing),
+        }
+    }
+
+    /// Which side of the flat surface `point` is on: [`Decision::Pos`] in front
+    /// of the facing, [`Decision::Neg`] behind it, [`Decision::Zero`] exactly
+    /// on it.
+    #[must_use]
+    pub fn side_of_point(&self, point: PredicatePoint) -> Decision {
+        which_side_of_a_flat_surface_through(
+            SIDE_OF_A_HALF_SPACE,
+            self.through.coordinates(),
+            self.facing.components(),
+            point,
+        )
+    }
+}
+
+impl TryFrom<(Point, Vector)> for HalfSpaceThroughAPoint {
+    type Error = Error;
+
+    fn try_from((through, facing): (Point, Vector)) -> Result<Self> {
+        Self::new(through, facing)
+    }
+}
+
+impl From<HalfSpaceThroughAPoint> for (Point, Vector) {
+    fn from(half_space: HalfSpaceThroughAPoint) -> Self {
+        (half_space.through, half_space.facing)
     }
 }
 
@@ -1045,6 +1196,78 @@ mod tests {
         assert_eq!(
             ball.side_of_point(PredicatePoint::from([0.0, 0.0, 0.0])),
             Decision::Neg
+        );
+    }
+
+    /// **What the picker holding a point is for**: the middle of bores on
+    /// `(3, 4, 0)` and `(4, 0, 3)`, facing the first one's stored direction.
+    /// The half-space through it rounds the dot into its offset and misses it;
+    /// the picker holding the point reads it as exactly on its surface.
+    #[test]
+    fn a_flat_surface_holding_its_point_passes_through_it_where_a_half_space_misses() {
+        let middle = Point::new(11.0, -3.25, 0.5);
+        let facing = Vector::new(3.0, 4.0, 0.0).normalized().expect("a length");
+        let at_the_middle = PredicatePoint::from(middle.coordinates());
+
+        let rounded = HalfSpace::through_a_point_facing(middle, facing).expect("a normal");
+        assert_ne!(rounded.side_of_point(at_the_middle), Decision::Zero);
+
+        let held = HalfSpaceThroughAPoint::new(middle, facing).expect("a facing");
+        let picker = Picker::from(held);
+        assert_eq!(picker.side_of_point(at_the_middle), Decision::Zero);
+        assert_eq!(picker.facing_of_a_flat(), Some(facing));
+        assert_eq!(picker.predicate_name(), SIDE_OF_A_HALF_SPACE);
+    }
+
+    #[test]
+    fn the_other_side_of_a_flat_surface_holding_its_point_is_the_other_side() {
+        let middle = Point::new(11.0, -3.25, 0.5);
+        let facing = Vector::new(4.0, 0.0, 3.0).normalized().expect("a length");
+        let picker = Picker::from(HalfSpaceThroughAPoint::new(middle, facing).expect("a facing"));
+        let other_side = picker.reversed().expect("a flat picker has another side");
+        let in_front = PredicatePoint::from((middle + facing).coordinates());
+
+        assert_eq!(picker.side_of_point(in_front), Decision::Pos);
+        assert_eq!(other_side.side_of_point(in_front), Decision::Neg);
+        assert_eq!(other_side.reversed(), Some(picker));
+        assert_eq!(
+            Picker::from(Sphere::new(Point::origin(), 1.0).expect("a radius")).reversed(),
+            None
+        );
+    }
+
+    /// A shift moves the point exactly when nothing rounds, so the moved
+    /// surface still passes exactly through it, and reversing commutes with a
+    /// turn.
+    #[test]
+    fn a_flat_surface_holding_its_point_moves_with_it() {
+        let middle = Point::new(11.0, -3.25, 0.5);
+        let facing = Vector::new(3.0, 4.0, 0.0).normalized().expect("a length");
+        let held = HalfSpaceThroughAPoint::new(middle, facing).expect("a facing");
+
+        let shift = Isometry::translation(Vector::new(1.0, 2.0, -4.0)).expect("a shift");
+        let shifted = Picker::from(held).transformed(&shift);
+        let moved_middle = PredicatePoint::from(Point::new(12.0, -1.25, -3.5).coordinates());
+        assert_eq!(shifted.side_of_point(moved_middle), Decision::Zero);
+
+        let turn = Isometry::rotation(&Axis::z(), 0.3).expect("a turn");
+        assert_eq!(
+            held.reversed().transformed(&turn),
+            held.transformed(&turn).reversed()
+        );
+    }
+
+    #[test]
+    fn a_flat_surface_holding_its_point_needs_a_facing_that_has_some_length() {
+        assert_eq!(
+            HalfSpaceThroughAPoint::new(Point::origin(), Vector::zero()),
+            Err(Error::ZeroLength {
+                what: "half-space facing"
+            })
+        );
+        assert!(
+            HalfSpaceThroughAPoint::new(Point::new(f64::NAN, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .is_err()
         );
     }
 }

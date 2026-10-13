@@ -3256,7 +3256,7 @@ fn which_side_of(
     let decision = picker.side_of_point(at);
     let named = picker.predicate_name();
     let measures = match picker {
-        Picker::InFrontOf(_) => Measures::Length,
+        Picker::InFrontOf(_) | Picker::InFrontOfAFlatThrough(_) => Measures::Length,
         Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) => {
             Measures::Area
         }
