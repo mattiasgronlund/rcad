@@ -1487,3 +1487,112 @@ which replaces §294.19's
 
 - The pyramid placed and cut through its apex refusing "a point inside a piece
   of a face" on a speck of the cut's face, above. A row, tier 1, `refuses/B`.
+
+### 294.21 Q1936: placed, each speck of the cut is placed by the planes, and the half pyramid keeps an edge a rounding long — 2026-10-13
+
+*Queue row Q1936, from §294.20. Lane
+`lane-q1936-a-pyramid-cut-through-its-apex`, base `743fbe6f`, carried on by
+a second lane (§416). Code changed in `fuse/select.rs`; pinned in
+`crates/rcad-topo/tests/a_broken_three_surface_corner_read_back_from_bytes.rs`.*
+
+**Why the speck had no placement.** A print put in `select::choose` and taken
+out found the piece the fuse gave up on at every one of the twelve fuses:
+piece 31 of the block's face shifted, of 53, a triangle bounded by the `−x`,
+`+y` and `+x` side planes with every corner within `5e−15` of the apex. On
+the block's face the `±y` side planes cross it in two parallel lines a
+rounding apart, and the `±x` planes in two lines that cross above both, so
+the speck lies above the `+y` line, outside the pyramid. Naming the sides of
+the pieces folds two corners of the speck into one, and the one side left is
+shared with two other pieces of the block's face and with no piece of the
+pyramid's: the `+y` face is not cut by the block's plane at all. So
+`SidesItShares` cannot place it. `by_a_plane` can, by the `+y` plane, which
+has every corner of the pyramid on or behind it and every corner of the
+speck on or in front, one strictly. But it read each corner of the pyramid as
+the meet of the planes round it, from `BakedCorner::around`, and with four
+round the apex it left the whole pyramid out.
+
+**The change.** `the_planes_meeting_at_each_corner_of_a_solid` reads the
+three bake solved each corner from, `BakedCorner::solved_from`. With exactly
+three planes round a corner bake has only that triple to solve from, so it is
+the same three. A corner with fewer is read out of the model, its
+`solved_from` is `None`, and `around` with fewer than three gave `None` too.
+So only a solid with four or more planes round a corner is asked where it was
+not before. Reading the solved three is sound for the same reason as in the
+arrangement: `passes_through` and `as_the_planes_say` ask those three at that
+corner (§294.19, §294.20), so the pyramid the pieces were cut against has its
+apex at their meet, and `by_a_plane`'s hull argument is about that pyramid.
+It changes nothing of a solid with a curved face, which `by_a_plane` leaves
+out before it reads a corner: Q1748's bars are round, and every test in
+`fuses_that_touch.rs` passes.
+
+**What comes back placed.** Every speck is now placed, and what is built is
+half of a pyramid whose apex is a rounding off the cut, which is where bake
+put it. The pin counts each answer's faces and the sides of their outlines.
+
+| | − shifted | − turned | − turned, shifted | ∩ shifted | ∩ turned | ∩ turned, shifted |
+|---|---|---|---|---|---|---|
+| `certified` | range | range | range | range | range | range |
+| `tolerant(100)` | 60, 5 and 18 | 60, 6 and 22 | broken | broken | 60, 5 and 18 | 60, 5 and 18 |
+
+"range" is `Invalid::DynamicRangeTooWide`, a ratio of `5.1e15` to `1.5e16`,
+which `Assembly::check_dynamic_range` raises on the answer's shortest edge
+before anything is written. "60" is `Ok`, one solid holding 60 to `1e−12`
+relative, which validates, with one record in the log: the same range check,
+which `tolerant` takes. "broken" is `Error::TheFuseWroteABrokenAnswer` with
+`OuterWireWindsAgainstTheNormal`, which the sweep of the throwaway model
+raises, so nothing is written. Each refusal leaves the model byte for byte as
+it was. Where it stands, the pyramid answers 60 under both policies as
+before, with nothing in the log, 5 faces and 16 sides: the half base, the
+triangle of the cut, the two halves of the side faces it cuts and the whole
+side face it does not.
+
+The counts are the two halves of a pyramid whose apex is just off the cut.
+The half without the apex has 18 sides: the cut is a four-sided face, its
+top edge a rounding long where the side face it runs under crosses it, and
+that side face keeps four sides below it. The half with the apex has 22:
+the two side faces the cut crosses keep four sides each, and the side face
+the cut runs under keeps a triangle a rounding across above it, a sixth
+face. Of the three placed halves that hold the apex, one a placement, the
+one turned for the difference answers, and the other two are the broken
+fuses. A print put in `validate::check_flat_face` and taken out found the face whose
+outline winds against its normal in each is that triangle. Shifted, for the
+intersection, its corners are `(7.000000000000001, −5, 12.499999999999996)`,
+`(6.999999999999999, …)` and `(7.000000000000002, …)`, on one line, and it
+winds `Zero`. Turned and shifted, for the difference, they are within
+`4.4e−15` of one another and it winds `Neg`. Turned, for the difference, the
+same triangle comes out the right way round, and the answer validates.
+
+**Whether it is a limit.** For the numbers as placed, the fuse's answer is
+the right one. The three planes bake solved the apex from put it a rounding
+off the cut, and the half pyramids above are what a pyramid with its apex
+there holds: an edge a rounding long, and on the side holding the apex a
+triangle a rounding across. Neither fits beside coordinates near 10 in an
+`f64`. `DynamicRangeTooWide` is a limit of that answer by `LimitOrGap`, and
+a triangle whose three corners are a rounding apart has no winding its
+stored corners can carry, so `tolerant` taking the range check meets the
+same limit one step on. Half the pyramid with nothing small in it is the
+answer of the shape the designer meant, with the cut through the apex, and
+the placed numbers do not say that. What would say it is how the two were
+built: one movement placed both solids, and before it the cut ran through
+the apex exactly. Q1954 traces that kind of fact, carried from how a shape
+was built, for Q1936 among other rows. So folding the specks where the cut
+meets two side planes within a rounding of the apex, which this section's
+first draft named as the next thing to try, takes them as near enough: a
+tolerance, which the theory Q1954 measures rules out. The next step is
+Q1954's trace, and then carrying the coincidence if it finds it in hand. It
+stays `refuses/B`: a shape designers make.
+
+The pin: `a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut`,
+which replaces §294.20's
+`a_sound_pyramid_placed_and_cut_through_its_apex_cannot_place_a_speck_of_the_cut`.
+`mise exec -- just t -E
+'binary(a_broken_three_surface_corner_read_back_from_bytes)'`: 13 tests run,
+13 passed.
+
+**What this leaves.**
+
+- The pyramid placed and cut through its apex keeping an edge a rounding
+  long, refused by `certified` and twice by `tolerant(100)`, above. A row,
+  tier 1, `refuses/B`, after Q1954: carry the fact that one movement placed
+  both solids and the cut ran through the apex before it, if Q1954 finds it
+  in hand, so the cut meets the apex.
