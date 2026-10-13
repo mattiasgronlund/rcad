@@ -666,21 +666,22 @@ fn a_solid_lying_on_a_block_along_an_edge_and_reaching_into_it_answers_every_rul
 /// into its corner square, the unit square at the origin from `z = −1` to
 /// `z = 0.5`, volume 1.5, half of it inside the plate.
 ///
-/// The union is 4, the intersection 0.5, and the pocket less the plate 1, and
-/// each answers. **The plate less the pocket is refused
-/// `ResultIsNotManifold { count: 4 }`**, though its answer exists: the plate's
-/// two arms, joined above the pocket by the top half of the corner square,
-/// `3 − 0.5 = 2.5`, one solid touching itself along `x = 1, y = 1` from
-/// `z = 0` to `z = 0.5`. That line is the plate's inner corner and the
-/// pocket's corner both, an edge of both inputs, so the four faces along it
-/// are four input faces, and §39.4's note of Q1901 leaves such a line refused
-/// (its point 5). Queue row Q1910 ran it as a shape a designer draws on
-/// purpose that meets the refusal of the leaning frame less the comb in
+/// The union is 4, the intersection 0.5, and the pocket less the plate 1.
+/// **The plate less the pocket is the plate's two arms, joined above the
+/// pocket by the top half of the corner square**, `3 − 0.5 = 2.5`, one solid
+/// touching itself along `x = 1, y = 1` from `z = 0` to `z = 0.5`. That line
+/// is the plate's inner corner and the pocket's corner both, an edge of both
+/// inputs, so the four faces along it are four input faces. It was refused
+/// `ResultIsNotManifold { count: 4 }` until queue row Q1913: without the line
+/// the four faces are one shell, joined round the plate's top and the top half
+/// of the corner square, so the answer is one solid and not the two touching
+/// solids §80.9 leaves unbuilt (`docs/decisions.md` §39.4). Queue row Q1910
+/// ran it as a shape a designer draws on purpose that met the refusal of the
+/// leaning frame less the comb in
 /// `a_sliver_along_an_edge_of_a_face_it_lies_on.rs` and of the two bars less a
 /// half bar in `a_lens_whose_hole_is_half_a_disk.rs` (§440.3).
 #[test]
-fn an_l_plate_less_a_pocket_in_its_corner_square_touches_itself_along_an_edge_of_both_and_is_refused()
- {
+fn an_l_plate_less_a_pocket_in_its_corner_square_touches_itself_along_an_edge_of_both() {
     let mut wrong = Vec::new();
     for swapped in [false, true] {
         for rule in EVERY_RULE {
@@ -711,14 +712,7 @@ fn an_l_plate_less_a_pocket_in_its_corner_square_touches_itself_along_an_edge_of
             let outcome = match (rule, swapped) {
                 (Rule::Union, _) => differs(&model, answer, &[4.0]),
                 (Rule::Intersection, _) => differs(&model, answer, &[0.5]),
-                (Rule::Difference, false) => match answer {
-                    Err(Error::ResultIsNotManifold { count: 4 }) => None,
-                    Err(why) => Some(format!("refused {why:?}, not count 4")),
-                    Ok(fused) => Some(format!(
-                        "answers {:?}; pin it as one solid of 2.5",
-                        fused.solids()
-                    )),
-                },
+                (Rule::Difference, false) => differs(&model, answer, &[2.5]),
                 _ => differs(&model, answer, &[1.0]),
             };
             if let Some(why) = outcome {
