@@ -29,7 +29,7 @@ use crate::measure::signed_volume_over;
 use crate::mesh::Mesh;
 use crate::model::{ModelData, WireData, WireStep};
 use crate::view::{CoedgeView, FaceView, SolidView, WireStepView, WireView};
-use crate::{EdgeView, Error, Invalid, Model, Result, SolidKey};
+use crate::{EdgeView, Error, FaceKey, Invalid, Model, Result, SolidKey};
 
 impl Model {
     /// Check every invariant in the model, from top to bottom.
@@ -2479,27 +2479,153 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(view, policy, log)?;
     every_side_of_the_skin_is_used_both_ways(&coarsest)?;
     let enclosed = signed_volume_over(&coarsest);
-    if enclosed != 0.0 {
+    if the_sum_answers(view, &coarsest, enclosed) {
         return Ok(enclosed);
     }
     let mut room = how_far_across(&coarsest) / 2.0;
     while let Ok(less) = Deflection::of(room) {
-        match view.mesh(less, policy, log) {
+        let mut this_rung = ProvenanceLog::new();
+        match view.mesh(less, policy, &mut this_rung) {
             Ok(finer) => {
-                let enclosed = signed_volume_over(&finer);
-                if enclosed != 0.0 {
-                    return Ok(enclosed);
+                let finer_encloses = signed_volume_over(&finer);
+                if the_sum_answers(view, &finer, finer_encloses) {
+                    this_rung.drain_into(log);
+                    return Ok(finer_encloses);
                 }
             }
             Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
             Err(why) => {
-                hand_on_a_refusal_that_found_the_space(why)?;
+                let handed_on = hand_on_a_refusal_that_found_the_space(why);
+                if handed_on.is_err() {
+                    this_rung.drain_into(log);
+                }
+                handed_on?;
                 break;
             }
         }
         room /= 2.0;
     }
-    Ok(0.0)
+    Ok(enclosed)
+}
+
+/// Whether what a mesh of this solid encloses says which way the solid's faces
+/// point: it is not zero, and either the mesh does not lie flat or the sum is
+/// larger than all the space the mesh can leave out.
+fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64) -> bool {
+    enclosed != 0.0
+        && (!it_lies_flat(mesh) || enclosed.abs() > how_much_space_hides_under(view, mesh))
+}
+
+/// The most space there can be between a mesh of this solid and the solid,
+/// on either side.
+///
+/// Each curved face is charged `area · d · (r / (r − d))²`, with `area` its
+/// triangles' area, `d` the mesh's [`Mesh::deviation`] and `r` the smallest
+/// radius the face bends at, and a flat face nothing. That is
+/// `Measurement::volume_error`'s charge loosened: `Mesh::deviation`'s doc
+/// shows `(r³ − (r − d)³) / (3(r − d)²) ≤ d · (r / (r − d))²`.
+///
+/// **A cone is charged without end.** Its radius runs down to nothing at the
+/// apex, and how near a face comes to it takes a walk over the mesh that
+/// `measure::bend_of_each_face` already makes; a second copy of that walk is
+/// not worth what it buys here. So a solid with a cone face is answered by a
+/// mesh that does not lie flat, as before.
+fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> f64 {
+    let deviation = mesh.deviation().magnitude();
+    let radius_of: HashMap<FaceKey, Option<f64>> = view
+        .faces()
+        .map(|face| (face.key(), the_smallest_radius_it_bends_at(&face.surface())))
+        .collect();
+    let mut hidden = 0.0;
+    for triangle in mesh.triangles() {
+        let Some(radius) = radius_of[&triangle.face()] else {
+            continue;
+        };
+        let [a, b, c] = triangle
+            .corners()
+            .map(|corner| mesh.points()[corner as usize]);
+        let area = (b - a).cross(c - a).length() / 2.0;
+        if area == 0.0 {
+            continue;
+        }
+        let inner = radius - deviation;
+        if inner <= 0.0 {
+            return f64::INFINITY;
+        }
+        hidden += area * deviation * (radius / inner) * (radius / inner);
+    }
+    hidden
+}
+
+/// `None` for a plane, which does not bend.
+fn the_smallest_radius_it_bends_at(surface: &Surface) -> Option<f64> {
+    match surface {
+        Surface::Plane(_) => None,
+        Surface::Sphere(ball) => Some(ball.radius()),
+        Surface::Cylinder(pipe) => Some(pipe.radius()),
+        Surface::Torus(ring) => Some(ring.tube_radius()),
+        Surface::Cone(_) => Some(0.0),
+        _ => Some(0.0),
+    }
+}
+
+/// Whether every point of the mesh lies within a rounding of one plane, so
+/// that what it encloses is a rounding too and says nothing about the solid.
+///
+/// **Why a flat mesh's sum is no answer.** Turn the frame so the plane is
+/// `z = h`. By the divergence theorem over the field `(0, 0, z)`, a closed mesh
+/// encloses `Σ Aₜ · z̄ₜ`, exactly: each triangle's area seen from above, signed
+/// by which way it faces, times the mean height of its three corners. A closed
+/// mesh's areas seen from above add to zero, so `h` drops out: a mesh whose
+/// points stray at most `δ` from a plane encloses at most `δ` times its area.
+///
+/// The rounding is `64` ulps of the largest coordinate in the mesh. Not yet
+/// published by a test (row Q1849 is unfinished).
+fn it_lies_flat(mesh: &Mesh) -> bool {
+    const ROUNDINGS_OFF_THE_PLANE: f64 = 64.0;
+    how_far_it_strays_from_one_plane(mesh)
+        <= ROUNDINGS_OFF_THE_PLANE * f64::EPSILON * largest_coordinate_of(mesh)
+}
+
+fn largest_coordinate_of(mesh: &Mesh) -> f64 {
+    mesh.points()
+        .iter()
+        .flat_map(|point| point.coordinates())
+        .fold(0.0, |largest: f64, coordinate| {
+            largest.max(coordinate.abs())
+        })
+}
+
+fn how_far_it_strays_from_one_plane(mesh: &Mesh) -> f64 {
+    let points = mesh.points();
+    let Some(&start) = points.first() else {
+        return 0.0;
+    };
+    let farthest_from = |from: Point| {
+        points
+            .iter()
+            .copied()
+            .max_by(|one, other| (*one - from).length().total_cmp(&(*other - from).length()))
+            .unwrap_or(from)
+    };
+    let one_end = farthest_from(start);
+    let other_end = farthest_from(one_end);
+    let along = other_end - one_end;
+    let off_the_line = |point: Point| along.cross(point - one_end).length();
+    let third = points
+        .iter()
+        .copied()
+        .max_by(|one, other| off_the_line(*one).total_cmp(&off_the_line(*other)))
+        .unwrap_or(one_end);
+    let normal = along.cross(third - one_end);
+    let length = normal.length();
+    if length == 0.0 {
+        return 0.0;
+    }
+    points
+        .iter()
+        .map(|point| (normal.dot(*point - one_end) / length).abs())
+        .fold(0.0, f64::max)
 }
 
 /// `Err(why)` when a finer mesh of the zero ladder was refused because it found
@@ -6878,5 +7004,112 @@ mod tests {
             }
         }
         assert!(outside.is_empty(), "{outside:#?}");
+    }
+
+    /// Row Q1849. A cap of a ball of radius 13 cut off one high by the plane
+    /// `x = 0`, its rim of radius 5 written as three arcs between `(0, 3, 4)`,
+    /// `(0, 3, −4)` and `(0, −5, 0)`, as a file that splits a circle into arcs
+    /// writes it. It holds `39.68`.
+    ///
+    /// Each arc spans under half a turn and so is walked in two steps, and the
+    /// cap spans under a quarter turn of the ball and so is handed over whole:
+    /// its coarsest mesh is the rim's six points and nothing else, flat, and
+    /// the lid across the rim is drawn through the same six. At no placement
+    /// that encloses exactly `0`, a finer mesh is asked for, and the cap
+    /// validates. Turned `1/40` of a turn about `(3, −1, 2)` the six points
+    /// land a rounding off one plane, the flat mesh encloses `−1.4e-15`, and
+    /// that was read as the cap's volume and refused
+    /// [`Invalid::VolumeIsNotPositive`].
+    #[test]
+    fn a_cap_whose_rim_is_three_arcs_validates_turned_off_the_axes() {
+        let mut model = an_empty_model();
+        let cap = a_cap_whose_rim_is_three_arcs(&mut model);
+        a_clean_sweep(&model);
+        model
+            .place_solid(
+                cap,
+                &Isometry::rotation(
+                    &rcad_geom::Axis::new(Point::origin(), Vector::new(3.0, -1.0, 2.0))
+                        .expect("a direction with length"),
+                    core::f64::consts::TAU / 40.0,
+                )
+                .expect("a finite turn"),
+            )
+            .expect("this model made the key");
+        a_clean_sweep(&model);
+    }
+
+    /// The cap [`a_cap_whose_rim_is_three_arcs_validates_turned_off_the_axes`]
+    /// builds: every corner is exact, since `5² + 12² = 13²` and `3² + 4² = 5²`,
+    /// and each arc is picked by the planes through the rim's centre and its
+    /// two ends.
+    fn a_cap_whose_rim_is_three_arcs(model: &mut Model) -> crate::SolidKey {
+        let (radius, behind) = (13.0, 12.0);
+        let cuts = [(3.0, 4.0), (3.0, -4.0), (-5.0, 0.0)];
+        a_cap_with_its_rim_in_arcs(model, radius, behind, &cuts)
+            .expect("a cap of a ball is a solid")
+    }
+
+    /// A cap of a ball of `radius` centred `behind` the plane `x = 0`, on the
+    /// far side of it, its rim cut into arcs at `cuts`, each a `(y, z)` on the
+    /// rim, going round from `+z` towards `+y`. Each arc spans under half a
+    /// turn.
+    fn a_cap_with_its_rim_in_arcs(
+        model: &mut Model,
+        radius: f64,
+        behind: f64,
+        cuts: &[(f64, f64)],
+    ) -> crate::Result<crate::SolidKey> {
+        let lid = Plane::from_point_and_normal(Point::origin(), Vector::new(-1.0, 0.0, 0.0))?;
+        let mut builder = SolidBuilder::new();
+        let corners: Vec<_> = cuts
+            .iter()
+            .map(|&(y, z)| builder.add_vertex(Point::new(0.0, y, z)).expect("a point"))
+            .collect();
+        let mut edges = Vec::new();
+        for (at, &(y, z)) in cuts.iter().enumerate() {
+            let (ny, nz) = cuts[(at + 1) % cuts.len()];
+            let mut picked_by: SmallVec<[Picker; 1]> = SmallVec::new();
+            picked_by.push(Picker::from(HalfSpace::through_a_point_facing(
+                Point::origin(),
+                Vector::new(0.0, z, -y),
+            )?));
+            if cuts.len() > 2 {
+                picked_by.push(Picker::from(HalfSpace::through_a_point_facing(
+                    Point::origin(),
+                    Vector::new(0.0, -nz, ny),
+                )?));
+            }
+            let run = EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(lid),
+                picked_by,
+            };
+            edges.push(builder.add_edge(corners[at], corners[(at + 1) % cuts.len()], run)?);
+        }
+        let lid_steps: Vec<_> = edges
+            .iter()
+            .map(|&edge| {
+                DraftStep::Along(builder.add_coedge(edge, Orientation::Forward).expect("e"))
+            })
+            .collect();
+        let skin_steps: Vec<_> = edges
+            .iter()
+            .rev()
+            .map(|&edge| {
+                DraftStep::Along(builder.add_coedge(edge, Orientation::Reversed).expect("e"))
+            })
+            .collect();
+        let lid_wire = builder.add_wire(&lid_steps)?;
+        let skin_wire = builder.add_wire(&skin_steps)?;
+        let skin = builder.add_face(
+            Surface::Sphere(Sphere::new(Point::new(-behind, 0.0, 0.0), radius)?),
+            &[skin_wire],
+        )?;
+        let lid_face = builder.add_face(Surface::Plane(lid), &[lid_wire])?;
+        builder.add_shell(&[
+            (skin, Orientation::Forward),
+            (lid_face, Orientation::Forward),
+        ])?;
+        builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
     }
 }
