@@ -400,6 +400,65 @@ fn a_ball_driven_into_the_bar_fuses_into_one_block() {
     }
 }
 
+/// Where the ball is driven into the bar, a point is answered wherever it is.
+///
+/// The ball's lower half and the bar's lower wall are each trimmed by the one
+/// loop the sphere and the pipe cross in, and `classify_point` used to refuse
+/// every point whose ray crossed either, `CannotFollowAFacesTrimming`: the
+/// middle of the block, both stubs, the half ball and everything under the
+/// floor (row Q1863, `docs/decisions.md` §35.6).
+#[test]
+fn every_point_round_a_ball_driven_into_the_bar_is_answered() {
+    let (model, answer) = united_all_at_once(3.5);
+    let solids = answer
+        .expect("a ball crossing the bar in a loop the floor runs through unites with the block");
+    let solid = model.solid(solids[0]).expect("this model made the key");
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    for (at, where_it_is, what) in [
+        (
+            Point::new(3.5, 3.5, 3.5),
+            Containment::Inside,
+            "the middle of the block",
+        ),
+        (
+            Point::new(5.0, 3.25, SIDE + 1.5),
+            Containment::Inside,
+            "the stub out of the top of the block",
+        ),
+        (
+            Point::new(5.0, 3.25, -1.5),
+            Containment::Inside,
+            "a unit and a half under the floor, inside the bar stub",
+        ),
+        (
+            Point::new(3.0, 3.5, -0.5),
+            Containment::Inside,
+            "half a unit under the floor, inside the half ball",
+        ),
+        (
+            Point::new(1.5, 1.5, -1.5),
+            Containment::Outside,
+            "under the floor, clear of everything",
+        ),
+    ] {
+        assert_eq!(
+            solid.classify_point(at, &policy, &mut log),
+            where_it_is,
+            "{what}"
+        );
+    }
+    for (x, y) in BESIDE_THE_STUBS {
+        for z in [-1.5, SIDE + 1.5] {
+            assert_eq!(
+                solid.classify_point(Point::new(x, y, z), &policy, &mut log),
+                Containment::Outside,
+                "nothing but the bar reaches past the block at ({x}, {y}, {z})"
+            );
+        }
+    }
+}
+
 /// The volume a ball of [`RADIUS`] and a bar of the same radius share, with the
 /// ball's centre `off` from the bar's axis.
 ///
