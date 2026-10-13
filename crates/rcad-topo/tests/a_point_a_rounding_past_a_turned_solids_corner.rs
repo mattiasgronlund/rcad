@@ -25,7 +25,9 @@
 //! Every solid here is convex, so it holds a point exactly when each of its
 //! surfaces puts the point on the solid's side.
 
-use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Surface, Vector};
+use core::f64::consts::PI;
+
+use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
 use rcad_topo::{Containment, FaceView, Model, Rule, SharedSpace, SolidKey, SolidView};
 
@@ -320,37 +322,76 @@ fn a_block_just_above_a_tipped_bars_box_is_not_called_apart_from_it() {
 /// The fuse of the block and the bar above, under every rule both ways round.
 ///
 /// While the bar's box stopped short, all six gave `ResultIsNotManifold {
-/// count: 1 }`. Now the pair is seen, and all six refuse at the order along
+/// count: 1 }`. Once the pair was seen, all six refused at the order along
 /// the line where the bar's wall meets the plane of the block's side `y =
 /// 0.5`: the block's bottom and the bar's top cut that line about three
-/// ten-billionths apart, and the order's enclosure is wider than that.
-///
-/// The answers exist — the union about `π + 1`, the intersection a sliver
-/// about `1e-10` thick — so this refusal is a gap, kept here until it is
-/// fixed (§346.7).
+/// ten-billionths apart, and the order's enclosure, `4.4e-7`, was wider than
+/// that (§346.7). `fuse/arrange.rs` puts the two in order now, by the way the
+/// loop that plane cuts the wall in runs at each
+/// (`along_the_stretch_between_the_two`) and by how far up the bar's axis
+/// each is (`Arrangement::as_the_pipes_axis_says`); with either taken out the
+/// other still answered all six, and with both out all six were refused as
+/// before. Each fuse now gives one solid that holds what it holds by hand,
+/// and logs nothing.
 #[test]
-fn every_fuse_of_a_block_just_above_a_tipped_bar_refuses_at_the_order_along_a_crossing() {
+fn every_fuse_of_a_block_just_above_a_tipped_bar_holds_what_it_holds_by_hand() {
     let policy = Policy::certified();
     let (model, bar, block) = a_block_just_above_a_tipped_bar();
-    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-        for [one, other] in [[bar, block], [block, bar]] {
-            let bar_first = one == bar;
-            let said =
-                model
-                    .clone()
-                    .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new());
-            let Err(rcad_topo::Error::Undecidable { records }) = said else {
-                panic!("{rule:?} bar first {bar_first}: {said:?}");
-            };
-            let first = &records.records()[0];
-            println!("{rule:?} bar first {bar_first}: {first:?}");
-            assert_eq!(
-                first.predicate(),
-                "order along a crossing",
-                "{rule:?} bar first {bar_first}"
-            );
-        }
+    let sliver = the_sliver_the_block_and_the_bar_share();
+    for (rule, bar_first, by_hand) in [
+        (Rule::Union, true, PI + 1.0 - sliver),
+        (Rule::Union, false, PI + 1.0 - sliver),
+        (Rule::Intersection, true, sliver),
+        (Rule::Intersection, false, sliver),
+        (Rule::Difference, true, PI - sliver),
+        (Rule::Difference, false, 1.0 - sliver),
+    ] {
+        let what = format!("{rule:?} bar first {bar_first}");
+        let [one, other] = if bar_first {
+            [bar, block]
+        } else {
+            [block, bar]
+        };
+        let mut model = model.clone();
+        let mut log = ProvenanceLog::new();
+        let fused = model
+            .fuse(&[one], &[other], rule, &policy, &mut log)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        assert!(log.is_empty(), "{what}: logged {log:?}");
+        let [solid] = fused.solids() else {
+            panic!("{what}: {} solids", fused.solids().len());
+        };
+        let measured = model
+            .solid(*solid)
+            .expect("the fuse made the key")
+            .measure(
+                Deflection::for_scale(model.scale()),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a solid the fuse made can be measured");
+        let (volume, error) = (measured.volume(), measured.volume_error());
+        assert!(
+            (volume - by_hand).abs() <= error,
+            "{what}: measured {volume} ± {error}, by hand {by_hand}"
+        );
     }
+}
+
+/// The volume both the bar and the block above hold.
+///
+/// Tipped `1e-9` about `x`, the bar's top cap is the plane `z = (1 + y sin θ) /
+/// cos θ` for `θ = 1e-9`, which is `1 + 1e-9 · y` to within `1e-18`, and the
+/// block's bottom is at `z = 1 + 2e-10`. Over the block's foot, where `y` is at
+/// least `0.5`, the two are `1e-9 · y − 2e-10` apart, and that is the sliver's
+/// thickness. The part of the foot under the cap is `|x| ≤ 0.5`, `0.5 ≤ y ≤
+/// √(1 − x²)`; the tip moves the wall about `1e-9` in `y` there, where the
+/// sliver is under `1e-9` thick, which moves the volume by under `1e-18`. So
+/// the sliver holds `∫∫ (1e-9 · y − 2e-10) dy dx`, which is `1e-9 / 3 − 2e-10 ·
+/// (√3/4 + π/6 − 1/2)`, about `2.42e-10`.
+fn the_sliver_the_block_and_the_bar_share() -> f64 {
+    let under_the_cap = 3.0_f64.sqrt() / 4.0 + PI / 6.0 - 0.5;
+    1e-9 / 3.0 - 2e-10 * under_the_cap
 }
 
 /// The bar of [`Tipped::Bar`] tipped `1e-9` about `x`, and a block of side 1

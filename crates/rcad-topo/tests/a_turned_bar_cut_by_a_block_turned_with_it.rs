@@ -33,11 +33,16 @@
 //! to the axis is why.** The turn rounds each side's normal and the bar's axis
 //! apart, so every side leans against the pipe by a rounding. Its plane's
 //! crossing with the pipe is then named a closed one, an ellipse whose sweep
-//! starts more than `1e15` from the bar. Every fuse, under either policy, is
-//! refused *order along a crossing* between the two points where one side's
-//! plane crosses the wall at the two caps, `5` apart, with an enclosure past
-//! `100`. The seam notch tilted off the axis answers every fuse under the same
-//! turn, with the volume it has unturned.
+//! starts more than `1e15` from the bar. Every fuse, under either policy, was
+//! refused *order along a crossing*: first between the two points where one
+//! side's plane crosses the wall at the two caps, `5` apart, with an enclosure
+//! past `100`, and then, once those were ordered, between a cap's and where
+//! the line two sides of the notch cross in leaves the pipe, `1e16` off.
+//! `fuse/arrange.rs` orders both now (`along_the_stretch_between_the_two` and
+//! `Arrangement::as_the_pipes_axis_says`), and every fuse is then refused
+//! `CannotNameWhichPieceOfACrossingThisIs` (Q1885). The seam notch tilted off
+//! the axis answers every fuse under the same turn, with the volume it has
+//! unturned.
 //!
 //! **Both are gaps, not limits** (§16.10). A turn moves no material, so each
 //! answer exists and is the unturned one. The exact half turn reaches it for
@@ -45,7 +50,7 @@
 //! tilted notch shows that the rounded turn alone stops nothing.
 //!
 //! *Where a plane and a pipe cross*, the predicate Q765 named, refuses none of
-//! these fuses at this base: every refusal here is *order along a crossing*.
+//! these fuses.
 
 use core::f64::consts::PI;
 
@@ -235,41 +240,27 @@ fn turned_one_radian_about_a_diagonal_every_notch_side_leans_by_a_rounding_and_c
     }
 }
 
-/// The two points the refusal orders, moved back by the turn, are where one
-/// side's plane crosses the wall at the two caps, one above the other. The
-/// side's face stops at `z = 1` and `z = 3` and reaches neither, but its plane
-/// crosses the pipe in one long ellipse, and the sweep from that ellipse's
-/// far-off start cannot tell the two apart.
+/// Every fuse of either notch, under either policy, puts the nodes round each
+/// side's long ellipse in order: where a side meets the caps and the notch's
+/// ends, near the bar, and where the line two sides of the notch cross in
+/// leaves the pipe, `1e16` off. Each is then refused naming which piece of a
+/// crossing an edge is, which Q1885 has as a wall edge on a side's ellipse.
 #[test]
-fn turned_one_radian_about_a_diagonal_every_fuse_is_refused_along_where_a_side_crosses_the_wall() {
+fn turned_one_radian_about_a_diagonal_every_fuse_is_refused_naming_a_piece_of_a_crossing() {
     let turn = one_radian_about_a_diagonal();
     for notch in BOTH_NOTCHES {
         for tolerant in [false, true] {
             for rule in RULES {
-                let what = format!("notch at {notch:?}, tolerant {tolerant}, {rule:?}");
                 let (_, fused, _) =
                     notched_and_fused(&turn, notch, &Isometry::identity(), rule, tolerant);
-                let record = the_one_refusal(fused, &what);
-                assert_eq!(record.predicate(), ALONG_A_CROSSING, "{what}");
-                assert!(record.enclosure() > 100.0, "{what}: {record:?}");
-                let [one, other] = record.inputs() else {
-                    panic!("{what}: {record:?}");
-                };
-                let [[x, y, z], [other_x, other_y, other_z]] =
-                    [one, other].map(|point| where_it_was_before_the_turn(*point, &turn));
                 assert!(
-                    (x - other_x).abs() < CLOSE && (y - other_y).abs() < CLOSE,
-                    "{what}: not on one ruling"
-                );
-                assert!(on_the_wall([x, y, z]), "{what}: ({x}, {y}) is off the wall");
-                assert!(
-                    on_a_side_of(notch, [x, y, z]),
-                    "{what}: ({x}, {y}) is on no side of the notch"
-                );
-                let (low, high) = (z.min(other_z), z.max(other_z));
-                assert!(
-                    low.abs() < CLOSE && (high - HEIGHT).abs() < CLOSE,
-                    "{what}: at z = {z} and {other_z}"
+                    matches!(
+                        fused,
+                        Err(Error::Geometry(
+                            rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+                        ))
+                    ),
+                    "notch at {notch:?}, tolerant {tolerant}, {rule:?}: {fused:?}"
                 );
             }
         }
