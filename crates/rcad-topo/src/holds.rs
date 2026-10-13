@@ -8820,9 +8820,9 @@ mod tests {
     /// bar and then out beyond the other loop: all of it on the far side of
     /// the loop in front, the other end's wall too, though that is outside the
     /// fat bar. Until Q1717 the leaning walls were refused
-    /// `AFaceMissesPartOfWhereItsSurfacesCross`. The leaning union is refused
-    /// `AWireWillNotLieFlatOnItsFace` before anything is asked of it, with or
-    /// without Q1717, so the leaning ends are asked only as a difference.
+    /// `AFaceMissesPartOfWhereItsSurfacesCross`, and until Q1889-b the leaning
+    /// union was refused `AWireWillNotLieFlatOnItsFace` before anything could
+    /// be asked of it.
     ///
     /// Every point asked is on the thin wall, 1 along `x` from its axis: 5
     /// along the axis either way is outside the fat bar, and within 1.5 of the
@@ -8830,6 +8830,7 @@ mod tests {
     #[test]
     fn each_end_of_a_thin_bar_poking_out_of_a_fat_one_holds_its_own_wall_alone() {
         for (turn, rule) in [
+            (LEANING, crate::Rule::Union),
             (LEANING, crate::Rule::Difference),
             (core::f64::consts::FRAC_PI_2, crate::Rule::Union),
             (core::f64::consts::FRAC_PI_2, crate::Rule::Difference),
