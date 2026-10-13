@@ -12907,14 +12907,14 @@ queue mode="" *args:
         }
         $1 == "U" { refuse($2, "a fence is never closed"); next }
         $1 != "R" { next }
-        $2 == "elsewhere" { e++; eid[e] = $5; est[e] = $7; ews[e] = $9; eraw[e] = $11; heldelse[$5] = e; next }
+        $2 == "elsewhere" { e++; eid[e] = $5; est[e] = $7; ews[e] = $9; emodel[e] = $11; eraw[e] = $12; heldelse[$5] = e; next }
         $2 == "closedelsewhere" { c++; cst[c] = $7; craw[c] = $11; closedelse[$5] = c; next }
         $2 == "narrowed" { nws[$5] = $9; next }
         $4 < 6 { refuse($2, "a row of " $4 " fields"); next }
         !($6 in known) { refuse($2, "the tier \"" $6 "\""); next }
         {
             r++
-            ln[r] = $2; id[r] = $5; tier[r] = $6; st[r] = $7; ws[r] = $9; raw[r] = $11
+            ln[r] = $2; id[r] = $5; tier[r] = $6; st[r] = $7; model[r] = $8; ws[r] = $9; raw[r] = $11
             at[$5] = r
             split($10, word, " ")
             pin[r] = (word[1] ~ /^pinned\/[1-9][0-9]*$/) ? substr(word[1], 8) + 0 : 0
@@ -12979,7 +12979,8 @@ queue mode="" *args:
                 n += 0
                 if (running + n > slots)
                     printf "note: %d running and %d more is past the %d slots of §397.7\n", running, n, slots
-                lanes_n = 0; taken_n = 0; skipped = 0
+                lanes_n = 0; taken_n = 0; skipped = 0; sonnet_taken = 0
+                running_sonnet = running_has_sonnet()
                 for (x = 1; x <= pinned_n && lanes_n < n; x++) take_at(x)
                 if (lanes_n < n) take_full_bundle()
                 for (x = pinned_n + 1; x <= w && lanes_n < n; x++) take_at(x)
@@ -13045,12 +13046,17 @@ queue mode="" *args:
             printf "queue: %s:%s: cannot read %s; just check-queue says what is wrong\n", file, line, msg > "/dev/stderr"
             bad = 1
         }
-        function take_at(x,    i, y, m) {
+        function take_at(x,    i, y, m, sp) {
             i = walk[x]
             if (i in took) return
+            if (!pin[i] && model[i] != "sonnet" && !running_sonnet && !sonnet_taken && lanes_n == n - 1 && !blocked(i, 0)) {
+                sp = sonnet_slot_pos()
+                if (sp) { take_at(sp); return }
+            }
             if (blocked(i, 1)) { skipped++; return }
             if (!small[i]) {
                 took[i] = 1; taken[++taken_n] = i; lanes_n++
+                if (model[i] == "sonnet") sonnet_taken = 1
                 print "take " raw[i]
                 return
             }
@@ -13064,6 +13070,45 @@ queue mode="" *args:
             for (x = 1; x <= w && m < bundle; x++)
                 if (small[walk[x]] && !(walk[x] in took) && !blocked(walk[x], 0)) pick[++m] = walk[x]
             if (m == bundle) take_bundle(m)
+        }
+        # Q1932, §447.3: one of the free slots is kept for a Sonnet row while one
+        # is ready and no running lane is a Sonnet row (a bundled lane counts as
+        # Sonnet only when every row in it is). `sonnet_slot_pos` finds the first
+        # such row still available in fill order, skipping a small row whose
+        # bundle would mix in an Opus row, since the bundle it would take is not
+        # a Sonnet take.
+        function running_has_sonnet(    i, j, b) {
+            for (i = 1; i <= r; i++) {
+                if (kind[i] != "running") continue
+                b = st[i]
+                if (!(b in rb_seen)) { rb_seen[b] = 1; rb_all_sonnet[b] = 1 }
+                if (model[i] != "sonnet") rb_all_sonnet[b] = 0
+            }
+            for (j = 1; j <= e; j++) {
+                b = est[j]
+                if (!(b in rb_seen)) { rb_seen[b] = 1; rb_all_sonnet[b] = 1 }
+                if (emodel[j] != "sonnet") rb_all_sonnet[b] = 0
+            }
+            for (b in rb_seen) if (rb_all_sonnet[b]) return 1
+            return 0
+        }
+        function bundle_is_pure_sonnet(x,    y, m, allsonnet) {
+            m = 1; allsonnet = (model[walk[x]] == "sonnet")
+            for (y = x + 1; y <= w && m < bundle; y++)
+                if (small[walk[y]] && !(walk[y] in took) && !blocked(walk[y], 0)) {
+                    m++
+                    if (model[walk[y]] != "sonnet") allsonnet = 0
+                }
+            return allsonnet
+        }
+        function sonnet_slot_pos(    x) {
+            for (x = pinned_n + 1; x <= w; x++) {
+                if (walk[x] in took) continue
+                if (model[walk[x]] != "sonnet") continue
+                if (blocked(walk[x], 0)) continue
+                if (!small[walk[x]] || bundle_is_pure_sonnet(x)) return x
+            }
+            return 0
         }
         function blocked(i, say,    j, sharedcount, h1, h2) {
             sharedcount = 0
@@ -13114,12 +13159,15 @@ queue mode="" *args:
                 }
             return 0
         }
-        function take_bundle(m,    y, ids) {
+        function take_bundle(m,    y, ids, allsonnet) {
             ids = ""
+            allsonnet = 1
             for (y = 1; y <= m; y++) {
                 ids = ids (y > 1 ? "," : "") id[pick[y]]
                 took[pick[y]] = 1; taken[++taken_n] = pick[y]
+                if (model[pick[y]] != "sonnet") allsonnet = 0
             }
+            if (allsonnet) sonnet_taken = 1
             printf "take %s (a bundle of %d small row%s, one lane)\n", ids, m, (m == 1 ? "" : "s")
             for (y = 1; y <= m; y++) print "    " raw[pick[y]]
             lanes_n++
@@ -14320,7 +14368,7 @@ check-queue-selftest:
     T1  1  todo  opus  docs/a.md  wrong/A a wrong answer a real file met §230
     Q1  2  todo  sonnet  docs/b.md  small one test §230
     Q2  2.5  todo  sonnet  docs/b.md  small a stale claim in the same file §230
-    Q3  3  todo  opus  docs/c.md  small a few-line fix §230
+    Q3  3  todo  sonnet  docs/c.md  small a few-line fix §230
     Q4  3  todo  sonnet  docs/d.md  small a fourth, past the bundle §230
     MD
     bundled full 3 next 2
