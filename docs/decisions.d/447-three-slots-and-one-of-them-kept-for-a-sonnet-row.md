@@ -17,6 +17,7 @@ is kept for a Sonnet row while one is ready. There is no fifth slot.
   447.2   The load at four slots
   447.3   What is decided
   447.4   The rows
+  447.5   What Q1932 built
 
 ### 447.1 Why the Sonnet rows were not reached
 
@@ -144,3 +145,45 @@ Filed with this section:
   adds 447.6.
 
 Q853 is closed by this section.
+
+### 447.5 What Q1932 built
+
+The `queue` recipe's `next`-mode awk in `justfile` and `elsewhere()` in
+`tooling/queue/queue.py`, held by `check-queue-selftest` and
+`check-queue-api-selftest`:
+
+- `_queue-rows` now carries each row's own model into the fill (`model[r]`),
+  which it parsed but used to drop; `queue.py`'s `elsewhere()` prints a 12th
+  field so a row another dispatcher holds carries its model too, with a `"-"`
+  placeholder kept in `the_hold_it_meets()`'s synthetic record so the field
+  count still agrees (that path never reads it).
+- `take_at()` carries the guard: before taking a row for what would be the
+  last free slot, if the row is not pinned, is not itself Sonnet, no running
+  lane is Sonnet (`running_has_sonnet()`), and no Sonnet row has been taken yet
+  this fill, it looks for the first ready Sonnet row still available
+  (`sonnet_slot_pos()`) and takes that instead. A row that would be *blocked*
+  anyway still falls through to the normal skip-and-print path, so a row
+  meeting a running lane is still named in the fill's output, not swallowed by
+  the guard.
+- `take_full_bundle()`, which takes a full bundle of small rows ahead of tier
+  order, carries the same guard: a full bundle that is not itself all Sonnet
+  does not take the literal last free slot while a ready Sonnet row sits
+  unblocked; `bundle_is_pure_sonnet()` and the inline check inside
+  `take_full_bundle()` test purity before committing either path.
+- `running_has_sonnet()` groups this copy's own running rows and every other
+  dispatcher's by the branch (or lane) they share, matching 447.3's "a bundle
+  counts by its model" for a lane that is itself a bundle: a branch counts as
+  Sonnet only when every row held under it is.
+- A pinned row is exempt, per 447.3's "pins come first".
+
+`check-queue-selftest`'s `full` fixture had its `Q3` changed from Opus to
+Sonnet, so its bundle (`Q1,Q2,Q3`) stays pure Sonnet; left mixed, the new rule
+reads it as not a Sonnet take and diverts the fixture's own point (a full
+bundle going ahead of tier 1) into exercising the new rule by accident
+instead. `sonnetkept`, `nosonnetkept`, `sonnetrunning`, `sonnetfullbundle` and
+`sonnetfullbundlepure` are the fixtures that hold 447.3 itself: each was
+checked against the rule taken out (`if (0 && ...)` in place of the guard),
+confirmed to fail, and checked again with the guard restored.
+
+The one-sentence summary is in `.claude/skills/dispatch-lanes/SKILL.md`'s
+step 4.

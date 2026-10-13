@@ -96,7 +96,9 @@ It takes the first ready row of the highest tier whose write set meets no
 running `lane:` row and no row taken above it, and names what each skipped row
 met. N defaults to the free slots, counted from the trees agents hold on this
 machine — lanes, verifiers and mergers alike, whoever sent them (§263.4).
-Tiers 1 and 5 go in class order, not file order (§352.3, §403.3).
+Tiers 1 and 5 go in class order, not file order (§352.3, §403.3). While a
+Sonnet row is ready and no running lane holds one, the fill keeps the last
+free slot for it rather than giving every slot to Opus (§447.3).
 
 **If `queue next` refuses, naming `just fuzz-triage-row`**, a fuzz night has
 left groups that no open row names and no triage row is open yet (§418.2).
