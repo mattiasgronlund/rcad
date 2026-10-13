@@ -77,3 +77,34 @@ answers on its shape is named in 449.4; a lane that takes it later closes it
 
 The table should be committed as it grows, so that a relay picks up from the
 file rather than from the start.
+
+### 449.4 Each row, run under both policies
+
+Run at `46e01222` by scratch copies of each row's own test file with one
+`q1955_probe_` test added and a shared `zz_q1955_report/mod.rs`, deleted
+before the commit, with `mise exec -- just t -p rcad-topo --test <copy> -E
+'test(/q1955_probe/)' --no-capture`. Each answer is run through
+`Model::validate_solid` and measured at a deflection of `0.01` under the run's
+own policy. "ab" is the first-named solid first. The tolerant column is
+`tolerant` at the model's declared size, named in the row. The copies and the
+prints are kept at `/tmp/q1955-probes/`; `python3 short.py <print> -s <row>`
+groups a print by shape and outcome.
+
+| Row | Runs | Certified | Tolerant |
+|---|---|---|---|
+| Q1126 | block 10 x 10 x 4 less the ball of 2 at (5, 5, 2), block first, 100 mm: 1 | `Undecidable`, "one shell inside another", enclosure infinite, 1 record | `tolerant(100)`: the same |
+| Q1221 | the near block and the other, 50 mm, six fuses: 6 | U ab answers `2280`, I ba `60`, D ba `840`, each valid; U ba, I ab and D ab `ResultIsNotManifold { count: 1 }` | `tolerant(50)`: the same, run for run |
+| Q1473 | wedge and block, 100 mm, six fuses: 6 | U both ways and D ab (wedge less block) `Undecidable`, 2 "orient3d" records, `1.7e-15`; I both ways and D ba `Invalid(DynamicRangeTooWide)`, ratio `2.7e16` | `tolerant(100)`: all 6 answer and validate: U `4.0878`, I `0.0757`, D ab `3.3878`, D ba `0.6243`, against `4.08782`, `0.07571`, `3.38782` and `0.62429` from the file's closed form |
+| Q1473 | the same on a model declared `1e160`: 6 | U both ways and D ab answer, valid, the same volumes, 2 "orient3d" records left in the log; I both ways and D ba `DynamicRangeTooWide`, `2.7e16` | `tolerant(1e160)`: all 6 answer no solid, "a shell within the wobble of one of its planes taken as flat" |
+| Q1559 | ball of 2 and bar of 1 at x = 1 touching it inside, 100 mm, six fuses: 6 | `Geometry(ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)` | `tolerant(100)`: the same |
+| Q1577 | top half of ring 4 tube 1 and the quarter tube moved `1.1e-16`, `-5.55e-17`, `1e-12`, `0.25` and `-0.25`, six fuses each, 100 mm: 30 | `Undecidable`, "order along a crossing": `4.44e-15` ring first and `0` ring second at the three hairs, `4.41e-15` in all 12 at `±0.25` | `tolerant(100)`: `TwoCurvesTouchWithoutCrossing` 21 (ring first at the hairs, all at `±0.25`), `Invalid(EdgeHasNoLength)` 9 (ring second at the hairs) |
+| Q1584 | quarter bend 4/1 and the ball of 3.5, the ball of 4.5 and the frustum, each turned 5pi/4, six fuses each, 100 mm: 18 | `Undecidable`, "order along a crossing": `3.0e-15`, `7.8e-15` and `3.2e-15` | `tolerant(100)`: `CannotTellTheCellsOfAFaceApart` 9 (bend first), `TwoCurvesTouchWithoutCrossing` 9 (bend second) |
+| Q1096 | no fuse: `classify_point` of (0, 4, 0), (4, 0, 1/2) and (0, 0, 0) on the ring of 4 cut along its equators and along y = 0, 100 mm: 6 | answers `Inside`, `Inside`, `Outside` on both rings; no panic | `tolerant(100)`: the same |
+| Q1097 | rings of 4 and 5, tube 1, about z, 100 mm, six fuses: 6 | `Geometry(ACrossingBetweenATorusAndAnotherCurvedSurface)` | `tolerant(100)`: the same |
+
+Q1096's panic is not met at this base: neither ring panics, and both answer
+as the row says they should. Its second case, pair 3's fuse past Q618, is not
+run: Q618 is open at this base, and pair 3's fuses refuse before `choose`.
+Q1473's `ResultIsNotManifold { count: 4 }` is not met either: the wedge less
+the block is refused `Undecidable` under `Policy::certified()` and answers its
+closed form under `tolerant(100)`.
