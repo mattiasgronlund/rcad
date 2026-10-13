@@ -12,6 +12,19 @@ ran 438.5's probe. The tests are in
 `Assembly::the_three_planes_meeting_at_a_corner_of` in `fuse/assemble.rs`
 (`mise exec -- just src side_of_a_corner_of`).*
 
+> **2026-10-13 note (Q1901): the fix is deleted, with the check it fixed.**
+> Queue row Q1901 dropped `Assembly::rest_on_the_outer_side_of`, the check
+> 438.2 describes, since a solid touching itself along a line is an answer
+> (§39.4's note of the same day). `side_of_a_corner_of` and
+> `the_three_planes_meeting_at_a_corner_of` had no other caller and went with
+> it, and so did 438.2's unit test
+> `a_corner_whose_planes_meet_far_outside_its_box_is_read_where_it_was_written`,
+> which called the check. `git show 0915c33e b6e138f7` has them. No corner of
+> a wall is asked any more, so 438.2's gap has nothing left to come back
+> through: the union at `0.625` and the sweep's counts in 438.1 pass unchanged
+> (`a_resting_prism_with_one_end_a_rounding_inside_a_turned_top_unites_as_they_stand`,
+> `a_resting_prism_on_a_turned_blocks_top_answers_as_they_stand_or_is_refused_by_name`).
+
 ### 438.1 The shape, and how its 360 fuses end
 
 The block of `a_prism_lying_on_one_edge.rs`, `−4 ≤ x ≤ 4`, `−3 ≤ y ≤ 0`,
