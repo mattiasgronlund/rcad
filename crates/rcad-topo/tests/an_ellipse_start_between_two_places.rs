@@ -273,8 +273,14 @@ fn the_fin_a_bar_leaves_beside_an_upright_block_is_drawn_and_the_tolerant_union_
 /// the bar's own frame as `(−1, 0, 0)` and `(−1, 0, 10)`; and the bar less the
 /// block, which is the fin alone, is refused `VolumeIsNotPositive` at exactly
 /// `0` under either policy, since every point of it rounds onto `x = −17`.
-/// Before, all six were refused `FacesDoNotAgreeWhichWayTheyFace`. Neither
-/// refusal has been traced.
+/// Before, all six were refused `FacesDoNotAgreeWhichWayTheyFace`.
+///
+/// The union's two records are pushed by `which_side_of` in `rcad-geom`'s
+/// `walk.rs`, under `Conic::the_stretch_this_run_covers`, while the union's
+/// volume is checked on its mesh (a `gdb` run of this test, not a test). On top
+/// of Q1860's walk fix (`10517374`, which Q1870 lands) the certified union
+/// answers `576` either way round and validates, so Q1870 moves that half of
+/// this pin to an answer. The bar less the block is refused there the same way.
 ///
 /// The intersection, and the block less the bar, are refused
 /// `CannotNameWhichPieceOfACrossingThisIs` before any mesh, and are not this.
