@@ -100,7 +100,7 @@ use arrange::{Piece, split_a_face};
 use assemble::assemble;
 use bake::{BakedSolid, bake};
 use history::history_of;
-use select::choose;
+use select::{Chosen, choose};
 
 impl Model {
     /// Cut two groups of solids against each other and keep the pieces `rule`
@@ -266,6 +266,73 @@ impl Model {
     ) -> Result<Fused> {
         let scratch = Scratch::split_both_groups(self, arguments, tools, policy, log)?;
         let chosen = choose(self, &scratch, rule, policy, log)?;
+        let inputs_reach = the_inputs_fit_in_f64(self, arguments, tools)?;
+        let fused = Answer {
+            scratch: &scratch,
+            chosen: &chosen,
+            arguments,
+            tools,
+            inputs_reach,
+        };
+        if FOLD_FIRST && !scratch.ends_of_edges.names.is_empty() {
+            let mut with_the_fold = log.clone();
+            scratch
+                .ends_of_edges
+                .log
+                .clone()
+                .drain_into(&mut with_the_fold);
+            let names: Vec<NamesOfOnePoint> = scratch
+                .names_of_one_point
+                .iter()
+                .chain(&scratch.ends_of_edges.names)
+                .cloned()
+                .collect();
+            if let Ok(answer) = self.written_from(&fused, &names, policy, &mut with_the_fold) {
+                *log = with_the_fold;
+                return Ok(answer);
+            }
+            return self.written_from(&fused, &scratch.names_of_one_point, policy, log);
+        }
+        let before = (!scratch.ends_of_edges.names.is_empty()).then(|| log.clone());
+        let refused = match self.written_from(&fused, &scratch.names_of_one_point, policy, log) {
+            Ok(answer) => return Ok(answer),
+            Err(refused) => refused,
+        };
+        let Some(mut with_the_fold) = before else {
+            return Err(refused);
+        };
+        scratch
+            .ends_of_edges
+            .log
+            .clone()
+            .drain_into(&mut with_the_fold);
+        let names: Vec<NamesOfOnePoint> = scratch
+            .names_of_one_point
+            .iter()
+            .chain(&scratch.ends_of_edges.names)
+            .cloned()
+            .collect();
+        let answer = self
+            .written_from(&fused, &names, policy, &mut with_the_fold)
+            .map_err(|_| refused)?;
+        *log = with_the_fold;
+        Ok(answer)
+    }
+
+    fn written_from(
+        &mut self,
+        fused: &Answer<'_>,
+        names_of_one_point: &[NamesOfOnePoint],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Fused> {
+        let Answer {
+            scratch,
+            chosen,
+            arguments,
+            tools,
+            inputs_reach,
+        } = *fused;
 
         // The last question the answer itself can be asked, and the only one
         // neither input could have been asked instead: a fuse invents features
@@ -282,12 +349,12 @@ impl Model {
         // below has run: that check judges the decisions this fuse could not
         // prove, a range is not one, and before Q1614 the check ran ahead of
         // the range and never saw it.
-        let inputs_reach = the_inputs_fit_in_f64(self, arguments, tools)?;
         let mut range_warning = ProvenanceLog::new();
         let mut assembly = assemble(
             self,
-            &scratch,
-            &chosen,
+            scratch,
+            chosen,
+            names_of_one_point,
             inputs_reach,
             policy,
             log,
@@ -332,8 +399,20 @@ impl Model {
 
         let inherited = worst_tag_of_the_inputs(self, arguments, tools);
         let written = assembly.commit(self, inherited, policy, log)?;
-        Ok(history_of(self, &scratch, &assembly, &written))
+        Ok(history_of(self, scratch, &assembly, &written))
     }
+}
+
+const FOLD_FIRST: bool = false;
+
+/// What a fuse has settled before it puts its answer together.
+#[derive(Clone, Copy)]
+struct Answer<'a> {
+    scratch: &'a Scratch,
+    chosen: &'a [Chosen],
+    arguments: &'a [SolidKey],
+    tools: &'a [SolidKey],
+    inputs_reach: Option<f64>,
 }
 
 /// The inputs' largest coordinate, when the inputs' own coordinates and their
@@ -469,11 +548,23 @@ pub(crate) struct Scratch {
     /// the one that came second, and `a ∪ a` came back empty.
     pub(crate) cut_from: Vec<usize>,
     /// Every point some face's arrangement found to be more than one name,
-    /// from the faces of both groups, kept piece or not, every meet a tolerant
-    /// policy took as an input corner a rounding from it (§417.7), and every
-    /// meet it took as the end of an edge its plane runs beside a rounding from
-    /// (§417).
+    /// from the faces of both groups, kept piece or not, and every meet a
+    /// tolerant policy took as an input corner a rounding from it (§417.7).
     pub(crate) names_of_one_point: Vec<NamesOfOnePoint>,
+    /// Every pair of meets a tolerant policy would take as the end of an edge
+    /// their plane runs beside a rounding from, and the records of taking
+    /// them. **Kept apart from [`Scratch::names_of_one_point`]**, because only
+    /// an answer that is refused without them is put together with them, and
+    /// `select` never reads them ([`Model::fused_under`], §417.9).
+    pub(crate) ends_of_edges: TakenAsOnePoint,
+}
+
+/// Names a tolerant policy would take as one point, and the records of taking
+/// them, which belong in the log of the answer that uses them and no other.
+#[derive(Debug, Default)]
+pub(crate) struct TakenAsOnePoint {
+    pub(crate) names: Vec<NamesOfOnePoint>,
+    pub(crate) log: ProvenanceLog,
 }
 
 impl Scratch {
@@ -521,20 +612,22 @@ impl Scratch {
             pieces,
             cut_from,
             names_of_one_point,
+            ends_of_edges: TakenAsOnePoint::default(),
         };
         let taken_as_input_corners = assemble::fold_each_corner_one_plane_cuts_a_rounding_from_it(
             model, &scratch, policy, log,
         );
-        let taken_as_ends_of_edges =
+        let mut ends_of_edges = TakenAsOnePoint::default();
+        ends_of_edges.names =
             assemble::fold_each_end_of_an_edge_one_plane_runs_beside_a_rounding_from_it(
                 model,
                 &scratch,
                 &taken_as_input_corners,
                 policy,
-                log,
+                &mut ends_of_edges.log,
             );
         scratch.names_of_one_point.extend(taken_as_input_corners);
-        scratch.names_of_one_point.extend(taken_as_ends_of_edges);
+        scratch.ends_of_edges = ends_of_edges;
         Ok(scratch)
     }
 }

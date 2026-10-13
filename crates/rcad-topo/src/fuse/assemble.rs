@@ -136,16 +136,22 @@ use super::{
 /// coplanar pieces both wind as its outline, and
 /// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] when nothing could say
 /// which of two or more rings that enclose nothing is its outline.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the scratch, what is kept, which points are one, how far the inputs reach, the policy and two logs are each their own input"
+)]
 pub(crate) fn assemble(
     model: &Model,
     scratch: &Scratch,
     chosen: &[Chosen],
+    names_of_one_point: &[NamesOfOnePoint],
     inputs_reach: Option<f64>,
     policy: &Policy,
     log: &mut ProvenanceLog,
     range_warning: &mut ProvenanceLog,
 ) -> Result<Assembly> {
-    let mut assembly = Assembly::joined_into_shells(model, scratch, chosen, policy, log)?;
+    let mut assembly =
+        Assembly::joined_into_shells(model, scratch, chosen, names_of_one_point, policy, log)?;
     assembly.leave_out_each_shell_thinner_than_the_wobble(policy, log)?;
     if let Some(inputs_reach) = inputs_reach {
         assembly.check_dynamic_range(inputs_reach, policy, range_warning)?;
@@ -199,9 +205,14 @@ pub(crate) fn the_pieces_of_each_shell_both_hold_taken_as_flat(
         return Vec::new();
     }
     let mut mine = ProvenanceLog::new();
-    let Ok(assembly) =
-        Assembly::joined_into_shells(model, scratch, held_by_both, policy, &mut mine)
-    else {
+    let Ok(assembly) = Assembly::joined_into_shells(
+        model,
+        scratch,
+        held_by_both,
+        &scratch.names_of_one_point,
+        policy,
+        &mut mine,
+    ) else {
         return Vec::new();
     };
     let arguments = scratch.arguments.len();
@@ -742,10 +753,12 @@ impl Assembly {
         model: &Model,
         scratch: &Scratch,
         chosen: &[Chosen],
+        names_of_one_point: &[NamesOfOnePoint],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Self> {
-        let mut assembly = Self::from_the_pieces(model, scratch, chosen, policy, log)?;
+        let mut assembly =
+            Self::from_the_pieces(model, scratch, chosen, names_of_one_point, policy, log)?;
         assembly.join_up_what_is_one_face(policy, log)?;
         assembly.shells = assembly.group_into_shells()?;
         Ok(assembly)
@@ -768,6 +781,7 @@ impl Assembly {
         model: &Model,
         scratch: &Scratch,
         chosen: &[Chosen],
+        names_of_one_point: &[NamesOfOnePoint],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Self> {
@@ -778,7 +792,7 @@ impl Assembly {
                 .iter()
                 .flat_map(|kept| &scratch.pieces[kept.piece].wires)
                 .collect(),
-            &scratch.names_of_one_point,
+            names_of_one_point,
             &on_three_planes,
         );
         let kept_wires: Vec<Vec<Cow<'_, [FaceMeet]>>> = chosen
@@ -795,7 +809,7 @@ impl Assembly {
         let mut corners = Corners::with_each_closed_curve_started_once(
             model,
             on_three_planes,
-            &scratch.names_of_one_point,
+            names_of_one_point,
             kept_wires.iter().flatten().flat_map(|wire| wire.iter()),
             policy,
             log,
@@ -11024,6 +11038,7 @@ mod tests {
             &busy,
             &scratch,
             &chosen,
+            &scratch.names_of_one_point,
             None,
             &policy,
             &mut log,
