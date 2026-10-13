@@ -16957,3 +16957,133 @@ mod inside_a_curve {
         assert_eq!(inside([2.0, 0.0, 2.0]), None, "on the curve");
     }
 }
+
+#[cfg(test)]
+mod a_rim_wound_round_a_point_off_its_plane {
+    use rcad_geom::Plane;
+    use rcad_predicates::{Decision, Point as PredicatePoint};
+
+    use super::{InPlane, how_often_the_rim_winds_round};
+
+    /// `2²⁰`: how far out along `x + z = 0` the square is.
+    const OUT: f64 = 1_048_576.0;
+
+    /// One spacing of `z` at `2²⁰`, about `2.3e-10`.
+    const SPACING: f64 = 1.0 / 4_294_967_296.0;
+
+    /// `2⁻²⁰`, about `9.5e-7`: how far each foot is from the square's side.
+    const BESIDE: f64 = 1.0 / 1_048_576.0;
+
+    /// A point `2²⁰` out on `x + z = 0`, a spacing off that plane, whose foot is
+    /// `2⁻²⁰` either side of the far side of a square two across, is wound
+    /// round as its foot is or not at all.
+    ///
+    /// [`InPlane`] reads a point off its plane where the line from its
+    /// reference point, one unit off the plane beside the origin, meets the
+    /// plane, and `2²⁰` out that is `2²⁰` times the point's height from its
+    /// foot: about `1.7e-4` in `x`, a hundred times further than the foot is
+    /// from the side. So one of the two heights reads each foot across the side
+    /// (`docs/decisions.md` §346.6, Q1108).
+    #[test]
+    fn a_point_a_rounding_off_a_far_square_is_wound_round_as_its_foot_is() {
+        let square = the_far_square_with_its_far_corner_raised_by(0.0);
+        let mut wrong = Vec::new();
+        for (past_the_side, expected) in [(-BESIDE, Some(1)), (BESIDE, Some(0))] {
+            let x = OUT + 1.0 + past_the_side;
+            assert_eq!(
+                wound(&square, [x, 0.0, -x]),
+                expected,
+                "the foot {past_the_side:e} past the side"
+            );
+            for height in [SPACING, -SPACING] {
+                let point = [x, 0.0, -x + height];
+                assert!(matches!(
+                    off_the_plane(point),
+                    Decision::Pos | Decision::Neg
+                ));
+                let answer = wound(&square, point);
+                if answer.is_some() && answer != expected {
+                    wrong.push(format!(
+                        "foot {past_the_side:e} past the side, {height:e} off: {answer:?}"
+                    ));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "wound round against the foot: {wrong:#?}");
+        assert_eq!(
+            wound(&square, [OUT, 0.0, -OUT + SPACING]),
+            Some(1),
+            "a point a spacing off the square's middle"
+        );
+    }
+
+    /// The same square with its corner `(2²⁰ + 1, 1)` a spacing off the plane,
+    /// and points on the plane `2⁻²⁰` either side of the far side, half way
+    /// from its middle to that corner: each is wound round as the square on the
+    /// plane winds round it, or not at all.
+    ///
+    /// The corner is read about `1.7e-4` from its foot, the way a point is, and
+    /// the side with it, by three quarters of that where the points are.
+    #[test]
+    fn a_far_square_with_a_corner_a_rounding_off_its_plane_winds_round_as_its_foot_does() {
+        let on_the_plane = the_far_square_with_its_far_corner_raised_by(0.0);
+        let mut wrong = Vec::new();
+        for height in [SPACING, -SPACING] {
+            let square = the_far_square_with_its_far_corner_raised_by(height);
+            assert!(matches!(
+                off_the_plane(square[2]),
+                Decision::Pos | Decision::Neg
+            ));
+            for (past_the_side, expected) in [(-BESIDE, Some(1)), (BESIDE, Some(0))] {
+                let x = OUT + 1.0 + past_the_side;
+                let point = [x, 0.5, -x];
+                assert_eq!(wound(&on_the_plane, point), expected);
+                let answer = wound(&square, point);
+                if answer.is_some() && answer != expected {
+                    wrong.push(format!(
+                        "corner {height:e} off, point {past_the_side:e} past the side: {answer:?}"
+                    ));
+                }
+            }
+            assert_eq!(
+                wound(&square, [OUT, 0.0, -OUT]),
+                Some(1),
+                "the square's middle, with its corner {height:e} off"
+            );
+        }
+        assert!(wrong.is_empty(), "wound round against the feet: {wrong:#?}");
+    }
+
+    /// The square with corners `(2²⁰ ± 1, ±1)` in `x` and `y` on `x + z = 0`,
+    /// anticlockwise about the plane's normal `(1, 0, 1)`, its corner
+    /// `(2²⁰ + 1, 1)` `height` off in `z`.
+    fn the_far_square_with_its_far_corner_raised_by(height: f64) -> [[f64; 3]; 4] {
+        let on = |x: f64, y: f64| [x, y, -x];
+        let mut square = [
+            on(OUT - 1.0, -1.0),
+            on(OUT + 1.0, -1.0),
+            on(OUT + 1.0, 1.0),
+            on(OUT - 1.0, 1.0),
+        ];
+        square[2][2] += height;
+        square
+    }
+
+    fn wound(rim: &[[f64; 3]], point: [f64; 3]) -> Option<i32> {
+        let flat = the_plane();
+        let in_plane = InPlane::of(&flat).expect("a plane with a point off it");
+        let rim = [rim
+            .iter()
+            .map(|&corner| PredicatePoint::from(corner))
+            .collect::<Vec<_>>()];
+        how_often_the_rim_winds_round(&in_plane, flat.normal(), &rim, PredicatePoint::from(point))
+    }
+
+    fn off_the_plane(point: [f64; 3]) -> Decision {
+        the_plane().side_of_point(PredicatePoint::from(point))
+    }
+
+    fn the_plane() -> Plane {
+        Plane::from_coefficients([1.0, 0.0, 1.0, 0.0]).expect("a normal")
+    }
+}
