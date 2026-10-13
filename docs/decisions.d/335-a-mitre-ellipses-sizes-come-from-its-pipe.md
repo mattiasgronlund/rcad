@@ -333,4 +333,5 @@ pieces it cannot tell apart. This is the circle arm's row, not this one.
 > `x > 10.05` side, so that arc has no answer. The `x < 10.05` side holds two
 > strands, `1.2e-7` either side of the rim, and the file says which neither
 > is. Elsewhere the flat bound is left as it was: an open run's corners are
-> the only points the bend is counted at, and filed as a row of its own.
+> the only points the bend is counted at. Counting it at every marched point
+> is filed as a row of its own.
