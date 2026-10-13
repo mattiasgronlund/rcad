@@ -214,15 +214,16 @@ const PLACED_RINGS: [(f64, f64); 3] = [(4.0, 1.0), (1.0, 0.5), (2.0, 1.0)];
 /// Every rule both ways round now answers one solid that validates: the union
 /// two bends' worth of ring, the difference one, and the intersection a sliver
 /// under a millionth of a millionth of a bend, each against `π² R r² / 2` a
-/// bend, within the measure's own error. Ring 4 and tube 1 turned `+π/2` is
-/// still refused `CannotMeshAFace` for the union with the placed bend named
-/// first and for the intersection both ways round. Run with a print where the
-/// shells are nested, the face not meshed is each time a band of ring wall
-/// between two meridian circles a rounding apart, a whole circle each, refused
-/// `CornersCoincide`.
+/// bend, within the measure's own error. Ring 4 and tube 1 turned `+π/2` was
+/// refused `CannotMeshAFace` for the union with the placed bend named first
+/// and for the intersection both ways round: run with a print where the shells
+/// are nested, the face not meshed was each time a band of ring wall between
+/// two meridian circles a rounding apart, a whole circle each, cut across and
+/// refused `CornersCoincide`. Such a band is now zipped up from rim to rim
+/// rather than cut across (Q1734).
 #[test]
 fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
-    for (which, (ring, tube)) in PLACED_RINGS.into_iter().enumerate() {
+    for (ring, tube) in PLACED_RINGS {
         let one_bend = PI * PI * ring * tube * tube / 2.0;
         for turn in [FRAC_PI_2, -FRAC_PI_2] {
             for rule in EVERY_RULE {
@@ -235,19 +236,8 @@ fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
                     let first = a_quarter_bend(&mut model, ring, tube);
                     let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, turn);
                     let measured =
-                        fused_and_measured(&mut model, first, placed, rule, the_first_first);
-                    let not_meshed = which == 0
-                        && turn > 0.0
-                        && (rule == Rule::Intersection
-                            || (rule == Rule::Union && !the_first_first));
-                    if not_meshed {
-                        assert!(
-                            matches!(measured, Err(Error::CannotMeshAFace { .. })),
-                            "{what}: {measured:?}"
-                        );
-                        continue;
-                    }
-                    let measured = measured.unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                        fused_and_measured(&mut model, first, placed, rule, the_first_first)
+                            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
                     let [(volume, error)] = measured[..] else {
                         panic!("{what}: one solid, not {measured:?}");
                     };
@@ -276,14 +266,17 @@ fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
 /// cap's circle, half a ring away. Until then every rule both ways round was refused
 /// `Undecidable` at `a point inside a piece of a face`.
 ///
-/// The intersection answers nothing and validates. The union and the
-/// difference keep each band beside the rest of its wall and are refused
-/// `CannotMeshAFace`: run with a print where the shells are nested, the face
-/// not meshed is each time a band of ring wall between two meridian circles a
-/// rounding apart, a whole circle each, refused `CornersCoincide`.
+/// The intersection answers nothing, the union the two bends apart and the
+/// difference the first bend, each against `π² R r² / 2` a bend, and each
+/// validates. The union and the difference keep each band beside the rest of
+/// its wall, and were refused `CannotMeshAFace` until Q1734: run with a print
+/// where the shells are nested, the face not meshed was each time a band of
+/// ring wall between two meridian circles a rounding apart, a whole circle
+/// each, refused `CornersCoincide`.
 #[test]
 fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
     for (ring, tube) in PLACED_RINGS {
+        let one_bend = PI * PI * ring * tube * tube / 2.0;
         for rule in EVERY_RULE {
             for the_first_first in [true, false] {
                 let what = format!(
@@ -292,17 +285,71 @@ fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
                 let mut model = a_model();
                 let first = a_quarter_bend(&mut model, ring, tube);
                 let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, PI);
-                let measured = fused_and_measured(&mut model, first, placed, rule, the_first_first);
-                match rule {
-                    Rule::Intersection => assert!(
-                        matches!(&measured, Ok(solids) if solids.is_empty()),
-                        "{what}: {measured:?}"
-                    ),
-                    Rule::Union | Rule::Difference => assert!(
-                        matches!(measured, Err(Error::CannotMeshAFace { .. })),
-                        "{what}: {measured:?}"
-                    ),
+                let measured = fused_and_measured(&mut model, first, placed, rule, the_first_first)
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                let bends = match rule {
+                    Rule::Union => 2,
+                    Rule::Difference => 1,
+                    Rule::Intersection => 0,
                     other => panic!("not a rule this tries: {other:?}"),
+                };
+                assert_eq!(measured.len(), bends, "{what}: {measured:?}");
+                for (volume, error) in measured {
+                    assert!(
+                        (volume - one_bend).abs() <= error,
+                        "{what}: {volume} ± {error}, a bend {one_bend}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The two tests above measure every answer, and a band of wall a rounding
+/// wide encloses no volume whichever way its triangles turn: drawn inside out,
+/// it would still measure. So every side of each answer's mesh, ring 4 and
+/// tube 1 placed each of the three ways round, is checked to be used once each
+/// way, which a band turned the wrong way fails along both its rims.
+#[test]
+fn every_side_of_a_bend_placed_round_from_another_is_used_once_each_way() {
+    let policy = Policy::certified();
+    let deflection = rcad_geom::Deflection::of(0.01).expect("a deflection");
+    for turn in [FRAC_PI_2, -FRAC_PI_2, PI] {
+        for rule in EVERY_RULE {
+            for the_first_first in [true, false] {
+                let what = format!("{turn} round, {rule:?}, the first first {the_first_first}");
+                let mut model = a_model();
+                let first = a_quarter_bend(&mut model, 4.0, 1.0);
+                let placed = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, turn);
+                let (arguments, tools) = if the_first_first {
+                    ([first], [placed])
+                } else {
+                    ([placed], [first])
+                };
+                let answer = model
+                    .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                for &solid in answer.solids() {
+                    let mesh = model
+                        .solid(solid)
+                        .and_then(|solid| {
+                            solid.mesh(deflection, &policy, &mut ProvenanceLog::new())
+                        })
+                        .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                    let mut used: BTreeMap<(u32, u32), u32> = BTreeMap::new();
+                    for triangle in mesh.triangles() {
+                        let [one, two, three] = triangle.corners();
+                        for side in [(one, two), (two, three), (three, one)] {
+                            *used.entry(side).or_default() += 1;
+                        }
+                    }
+                    for (&(from, to), &times) in &used {
+                        assert_eq!(
+                            (times, used.get(&(to, from))),
+                            (1, Some(&1)),
+                            "{what}: the side from {from} to {to}"
+                        );
+                    }
                 }
             }
         }
@@ -322,10 +369,11 @@ fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
 /// along a crossing` while the pieces were cut. Q1817 orders those crossings
 /// by their angle round the pipe, so every fuse now gets past the cut.
 ///
-/// Turned a quarter either way, the intersection answers a sliver and the bend
-/// less the quarter answers the bend, each validating. Turned half a turn, the
-/// intersection answers nothing, and the bend less the quarter is refused
-/// `CannotMeshAFace`. The union and the quarter less the bend are refused
+/// Turned a quarter either way, the intersection answers a sliver, and turned
+/// half a turn it answers nothing. Turned any of the three ways, the bend less
+/// the quarter answers the bend, `π² R r² / 2`, validating; half a turn round it
+/// was refused `CannotMeshAFace` until a band the chart reads as one line was
+/// zipped up rather than cut across (Q1734). The union and the quarter less the bend are refused
 /// `DynamicRangeTooWide`: the answer's largest coordinate over its shortest
 /// edge is `3.7e15` a quarter turn round and `8.2e15` half a turn round, an
 /// edge a few roundings long (row Q1865).
@@ -380,11 +428,7 @@ fn a_quarter_of_a_bar_placed_round_from_a_bend_in_it_answers_or_keeps_an_edge_a_
                         };
                         assert!(volume < one_bend * 1e-12, "{what}: {volume}");
                     }
-                    (Rule::Difference, true, true) => assert!(
-                        matches!(measured, Err(Error::CannotMeshAFace { .. })),
-                        "{what}: {measured:?}"
-                    ),
-                    (Rule::Difference, true, false) => {
+                    (Rule::Difference, true, _) => {
                         let measured = measured.unwrap_or_else(|why| panic!("{what}: {why:?}"));
                         let [(volume, error)] = measured[..] else {
                             panic!("{what}: one solid, not {measured:?}");

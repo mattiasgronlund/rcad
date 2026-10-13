@@ -24,7 +24,7 @@ use rcad_geom::{
     Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface,
     Vector, which_two_surfaces_a_run_is_between,
 };
-use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate};
+use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate, zip_up_a_band};
 use rcad_predicates::{
     Approximation, Cause, Decision, Level, Measures, Point as PredicatePoint, Policy,
     ProvenanceLog, Record,
@@ -1009,8 +1009,13 @@ impl BuildingAMesh {
         log: &mut ProvenanceLog,
     ) -> Result<()> {
         let surface = the_surface_this_face_is_cut_up_on(face);
-        let by_corner_order = surface.as_plane().is_some()
-            && self.nothing_across_its_rim_joins_two_of_its_points(face, solid);
+        let how = if surface.as_plane().is_some()
+            && self.nothing_across_its_rim_joins_two_of_its_points(face, solid)
+        {
+            HowToCut::TriangulateByCornerOrder
+        } else {
+            HowToCut::Triangulate
+        };
         let room =
             self.deflection.length() - how_far_moving_this_face_rounds(face, &self.along_each_edge);
 
@@ -1080,6 +1085,15 @@ impl BuildingAMesh {
         {
             return Err(Error::AWireWillNotLieFlatOnItsFace { face: face.key() });
         }
+        // **A band the chart reads as one line is never cut across.** Cut
+        // across, its two rims put corners of both in one place of the chart,
+        // and the triangulator refused it `CornersCoincide`: two quarter bends
+        // placed a quarter or half a turn round from each other leave one,
+        // between a cap rim and a meridian circle a rounding round from it
+        // (Q1734).
+        if a_band_the_chart_reads_as_one_line(&surface, &walked) {
+            return self.hand_over(face, &surface, walked, room, HowToCut::ZipUpABand, log);
+        }
         let patches = if round_the_second_way > 0 {
             self.cut_a_band_right_round_the_ring(face, &surface, &walked, room)?
         } else {
@@ -1087,7 +1101,7 @@ impl BuildingAMesh {
             self.cut_what_reaches_right_round_the_ring(face, &surface, patches, room)?
         };
         for patch in patches {
-            self.hand_over(face, &surface, patch, room, by_corner_order, log)?;
+            self.hand_over(face, &surface, patch, room, how, log)?;
         }
         Ok(())
     }
@@ -3475,17 +3489,15 @@ impl BuildingAMesh {
         Ok(Some((one, other)))
     }
 
-    /// Hand one patch to the triangulator and take what comes back into the
-    /// solid's own table, asking for it to be cut by the order of its corners
-    /// when `by_corner_order` says nothing across can share a side with that
-    /// cut ([`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`]).
+    /// Hand one patch to the mesher `how` names and take what comes back into
+    /// the solid's own table.
     fn hand_over(
         &mut self,
         face: FaceView<'_>,
         surface: &Surface,
         patch: Vec<WalkedLoop>,
         room: f64,
-        by_corner_order: bool,
+        how: HowToCut,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
         let mut corner_is = Vec::new();
@@ -3521,17 +3533,28 @@ impl BuildingAMesh {
         }
         let (outer, holes) = loops.split_first().ok_or(Invalid::FaceHasNoWires)?;
 
-        let mut domain = TrimmedDomain::new(
-            *surface,
-            outer.clone(),
-            holes.to_vec(),
-            Deflection::of(room)?,
-        )
-        .with_corners_between_two_edges(between_two_edges);
-        if by_corner_order {
-            domain = domain.cut_by_corner_order();
-        }
-        let cut = match triangulate(&domain) {
+        let cut = match how {
+            HowToCut::Triangulate | HowToCut::TriangulateByCornerOrder => {
+                let mut domain = TrimmedDomain::new(
+                    *surface,
+                    outer.clone(),
+                    holes.to_vec(),
+                    Deflection::of(room)?,
+                )
+                .with_corners_between_two_edges(between_two_edges);
+                if matches!(how, HowToCut::TriangulateByCornerOrder) {
+                    domain = domain.cut_by_corner_order();
+                }
+                triangulate(&domain)
+            }
+            HowToCut::ZipUpABand => {
+                let [hole] = holes else {
+                    unreachable!("a band is handed over whole, as its two rims")
+                };
+                zip_up_a_band(surface, outer, hole, Deflection::of(room)?)
+            }
+        };
+        let cut = match cut {
             Ok(cut) => cut,
             Err(why) => return Err(refusal_for(face, why, &corner_is, &self.points, log)),
         };
@@ -3562,7 +3585,16 @@ impl BuildingAMesh {
         // (for its seam, `Torus::point_at`), so there the chart's turn points
         // into the tube while the torus itself faces out of it, as the standard,
         // the reader and `validate.rs` read it (`docs/decisions.md` §329.1).
-        let inside_out = face.orientation().is_reversed() != matches!(surface, Surface::Torus(_));
+        //
+        // A zipped band is not turned in the chart at all: its triangles use
+        // each side of either rim the way the rim runs, which is the face's way
+        // for the reason the fan below gives.
+        let inside_out = match how {
+            HowToCut::Triangulate | HowToCut::TriangulateByCornerOrder => {
+                face.orientation().is_reversed() != matches!(surface, Surface::Torus(_))
+            }
+            HowToCut::ZipUpABand => false,
+        };
         // **A flat patch handed back with no triangles has every corner on one
         // line**, the one domain `triangulate` lets through with none
         // (`refuse_a_side_with_a_corner_on_it` in `rcad-mesh`). It encloses
@@ -4431,6 +4463,65 @@ fn a_ring_on_a_pipe_with_islands_in_it(stored: &Surface, walked: &[WalkedLoop]) 
             it_passes_each_of_its_points_once(island)
                 && how_much_of_the_chart_this_loop_encloses(island) < 0.0
         })
+}
+
+/// Whether a face's loops are the two rims of a band of torus wall that the
+/// chart reads as one line: two loops right round the tube and neither round
+/// the ring, walked opposite ways, every corner of both read at one angle round
+/// the ring, give or take [`HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF`]. Such a face
+/// is drawn by [`zip_up_a_band`] and never cut across.
+///
+/// **This picks a mesher and decides no answer.** A band wider than the bound
+/// goes to `triangulate`, as every band did before Q1734; a narrower one is
+/// zipped, and the zip measures every triangle against the deflection itself.
+/// Each refuses what it cannot draw and neither draws a band wrong. So a bound
+/// too tight leaves a band the chart reads as one line refused
+/// `CornersCoincide`, and one too wide leaves a band that `triangulate` would
+/// have refined refused `BoundarySideStraysFurtherThanTheDeflection`: a refusal
+/// moved, never a mesh made wrong (`docs/decisions.md` §16.10).
+///
+/// **Why that bound.** It is how far a point's angle can read off round a
+/// circle whose radius is a size of the model, and the angle round the ring is
+/// read round the torus's axis, at least the ring radius less the tube's from
+/// it. Two circles at one angle round the ring read their corners at most two
+/// such roundings apart, one each way, inside the four the bound allows. A torus
+/// whose hole is narrower than a size of the model can read them further apart,
+/// and its band goes to `triangulate` as before.
+///
+/// **Only on a torus**, where it was reached: two quarter bends placed a quarter
+/// or half a turn round from each other leave a band between a cap rim and a
+/// meridian circle a rounding round from it. Two circles of a pipe a rounding
+/// apart, or of a ball, are the same shape and still go to `triangulate`, for
+/// want of a solid that reaches them.
+fn a_band_the_chart_reads_as_one_line(stored: &Surface, walked: &[WalkedLoop]) -> bool {
+    let [one, other] = walked else {
+        return false;
+    };
+    let round_the_ring = || one.corners.iter().chain(&other.corners).map(|&[_, at]| at);
+    let lowest = round_the_ring().fold(f64::INFINITY, f64::min);
+    let highest = round_the_ring().fold(f64::NEG_INFINITY, f64::max);
+    matches!(stored, Surface::Torus(_))
+        && [one, other]
+            .iter()
+            .all(|rim| rim.goes_right_round && !rim.goes_right_round_the_second_way)
+        && one.climbed * other.climbed < 0.0
+        && highest - lowest <= HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF
+}
+
+/// Which mesher [`BuildingAMesh::hand_over`] gives a patch to.
+#[derive(Clone, Copy, Debug)]
+enum HowToCut {
+    /// `triangulate`, the Delaunay cut refined until it lies within the
+    /// deflection.
+    Triangulate,
+    /// `triangulate`, asking for the cut by the order of the patch's corners
+    /// ([`TrimmedDomain::cut_by_corner_order`]), which a flat face takes when
+    /// nothing across its rim can share a side with that cut
+    /// ([`BuildingAMesh::nothing_across_its_rim_joins_two_of_its_points`]).
+    TriangulateByCornerOrder,
+    /// [`zip_up_a_band`], for a band the chart reads as one line
+    /// ([`a_band_the_chart_reads_as_one_line`]).
+    ZipUpABand,
 }
 
 /// Whether a loop that goes right round is walked in the direction the

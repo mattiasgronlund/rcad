@@ -71,4 +71,4 @@ mod domain;
 mod triangulate;
 
 pub use crate::domain::{Loop, NotALoop, TrimmedDomain};
-pub use crate::triangulate::{CannotTriangulate, Patch, triangulate};
+pub use crate::triangulate::{CannotTriangulate, Patch, triangulate, zip_up_a_band};
