@@ -288,7 +288,9 @@ pub struct MeshTriangle {
 
 impl MeshTriangle {
     /// Its three corners, as entries in [`Mesh::points`], wound anticlockwise
-    /// seen from outside the material.
+    /// seen from outside the material. A flat face so thin that every point of
+    /// it rounds onto one line has no anticlockwise, and its triangles run the
+    /// way its wires do, which is the way they would turn if it had width.
     #[must_use]
     pub fn corners(self) -> [u32; 3] {
         self.corners
@@ -3561,7 +3563,33 @@ impl BuildingAMesh {
         // into the tube while the torus itself faces out of it, as the standard,
         // the reader and `validate.rs` read it (`docs/decisions.md` §329.1).
         let inside_out = face.orientation().is_reversed() != matches!(surface, Surface::Torus(_));
-        for triangle in cut.triangles() {
+        // **A flat patch handed back with no triangles has every corner on one
+        // line**, the one domain `triangulate` lets through with none
+        // (`refuse_a_side_with_a_corner_on_it` in `rcad-mesh`). It encloses
+        // nothing, but the faces round it still use each of its sides once, so
+        // left undrawn those sides are used one way only. A round bar of radius
+        // `1 + 2⁻⁵¹` beside a block face one radius from its axis leaves a fin
+        // `2⁻⁵¹` thick outside it, every point of the fin rounds onto that
+        // face, and each of its ends came here as three corners on one line:
+        // the union was refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)`
+        // (Q1928, `an_ellipse_start_between_two_places.rs`).
+        //
+        // So each loop is drawn as a fan from its first corner, the way the wire
+        // runs and not flipped. That is the way a face's triangles use its
+        // loops' sides once flipped below, since the face lies on the left of
+        // its wire seen from outside; with no turn in the chart there is nothing
+        // else to go by. A side inside a fan is used once each way. The
+        // triangles cover nothing in the chart, and lie in the plane as far as
+        // the points of the face do.
+        let fan;
+        let (triangles, inside_out) = if surface.as_plane().is_some() && cut.triangles().is_empty()
+        {
+            fan = a_fan_round_each_loop(loops.iter().map(|one| one.corners().len()));
+            (fan.as_slice(), false)
+        } else {
+            (cut.triangles(), inside_out)
+        };
+        for triangle in triangles {
             let [first, second, third] = triangle.map(|corner| corner_is[corner as usize]);
             // A pole is a *side* of the patch whose two corners are one point in
             // space, so the triangle resting on it covers nothing at all.
@@ -3842,6 +3870,22 @@ impl BuildingAMesh {
             deviation: Approximation::new(self.worst, Cause::FlatStandIn),
         })
     }
+}
+
+/// A fan from the first corner of each loop, `[first, next, next + 1]` in the
+/// order the loop runs, its corners numbered loop after loop the way
+/// [`TrimmedDomain`] numbers them.
+fn a_fan_round_each_loop(lengths: impl Iterator<Item = usize>) -> Vec<[u32; 3]> {
+    let mut fan = Vec::new();
+    let mut first = 0;
+    for length in lengths {
+        let length = u32::try_from(length).expect("the triangulator numbers its corners in u32");
+        for next in first + 1..first + length - 1 {
+            fan.push([first, next, next + 1]);
+        }
+        first += length;
+    }
+    fan
 }
 
 /// Where a face reads the points round it, in the frame it is cut up in: a
