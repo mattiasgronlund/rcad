@@ -46,7 +46,7 @@ use crate::intersect::{
     whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
     whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
-use crate::march::{Marched, march, settled_with_a_bound};
+use crate::march::{Marched, march, settled_with_a_bound, settled_with_a_bound_where_they_bend};
 use crate::meet::nowhere_in_particular;
 use crate::{
     Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
@@ -746,6 +746,16 @@ enum TwoLoopsHeldApartBy {
     /// it. `two_loops_either_side_of_a_pipe` picks with one that leans off it
     /// wherever that way cannot be stored square.
     AFatPipesAxis { thin: Cylinder, fat: Cylinder },
+}
+
+impl TwoLoopsHeldApartBy {
+    /// The radii of the two surfaces, which is as tight as either of them bends.
+    fn the_two_radii(self) -> [f64; 2] {
+        match self {
+            Self::ABallsCentre { ball, pipe } => [ball.radius(), pipe.radius()],
+            Self::AFatPipesAxis { thin, fat } => [thin.radius(), fat.radius()],
+        }
+    }
 }
 
 /// Which of those three the crossing of these two surfaces is, and the thing
@@ -5991,10 +6001,13 @@ mod tests {
     /// `#1030`'s end, with a deviation of about `1e-6` claimed for them, and
     /// both relay files imported a curve their ball and pipe do not cross in
     /// (Q1659). At `0.001`, `0.01` and `0.4` the march gave up instead.
-    /// `#1030` cannot be settled onto both surfaces at all, since they are
-    /// tangent there, so it is asked first and the answer is one refusal at
-    /// every deflection. The ball, the leaning pipe and the half-space on the
-    /// chord are the file's, as the reader names the arc.
+    /// Both corners are now asked first, and the answer is one refusal at
+    /// every deflection. `#1030` cannot be settled onto both surfaces at all,
+    /// since they are tangent there. `#2404`, asked before it, settles, but
+    /// it is where the thin loop's two strands meet and the two surfaces lean
+    /// `7.6e-13` apart, so no bound with their bend counted holds there
+    /// (Q1889). The ball, the leaning pipe and the half-space on the chord are
+    /// the file's, as the reader names the arc.
     #[test]
     fn a_quarter_circle_ending_where_a_ball_and_its_own_pipe_do_not_cross_is_refused() {
         let ball =
@@ -6036,11 +6049,11 @@ mod tests {
                 matches!(
                     walked,
                     Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
-                        at: crate::WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
+                        at: crate::WhereFollowingACrossingGaveUp::BoundingHowFarOffTheCrossingAPointIs,
                         ..
                     })
                 ),
-                "#1030 sits where the ball and the pipe are tangent, and the arc to it was \
+                "#2404 sits where the thin loop's two strands meet, and the arc from it was \
                  walked at {deflection} as {walked:?}"
             );
         }
@@ -6456,7 +6469,9 @@ mod tests {
             .expect("a radius"),
         );
         let corner = PredicatePoint::from([2.0, 0.0, 0.0]);
-        let settling = how_far_off_the_crossing_this_corner_can_be(corner, [&ball, &pipe]);
+        let settling = how_far_off_the_crossing_this_corner_can_be(corner, |at| {
+            settled_with_a_bound([&ball, &pipe], at)
+        });
         assert!(
             matches!(
                 settling,
