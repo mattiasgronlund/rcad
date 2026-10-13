@@ -5,8 +5,8 @@
 //! centred on `through = (11, 0, 0)`, so it runs right through the first, or 2
 //! long and starts at `through = (11, −3.25, 0.5)`, so its near cap passes
 //! through where the axes meet. Each test runs all six fuses — three rules,
-//! each bar first in turn. Through `(11, 0, 0)` at 50° to 100° every one
-//! answers; the rest are still refused, each by the variant pinned here.
+//! each bar first in turn. At 50° to 100° every one answers, through either
+//! point; at 120° they are still refused, each by the variant pinned here.
 //!
 //! **What they should come to**, with `r = 1/4` and `a` the angle: the first
 //! bar is `A = π/4`. What two pipes of one width share where their axes cross at
@@ -143,14 +143,30 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
     }
 }
 
-/// The second bar starts where the axes meet, at 50°, 60°, 70°, 100° or 120°.
+/// The second bar starts where the axes meet, at 50°, 60°, 70° or 100°, and
+/// every fuse answers what the module doc says, with `I = 1/(24 sin a)`: the
+/// union in 9 faces, the shared part in 4, the first bar less the second in 10
+/// and the second less the first in 3.
 ///
-/// **Every fuse is refused `Undecidable` `orient3d` on the second bar's near
-/// cap** (Q1908), asking which way the cap turns at a point where the pipes
-/// touch, from its crossing with the first pipe to its own circle round the
-/// second. The two pipes are tangent there, so their gradients are parallel,
-/// and the determinant of the cap's normal and the two is nought, which their
-/// boxes cannot prove. The two curves touch there too. Not traced further.
+/// The first bar's wall is cut in six by the two ellipses the pipes cross in
+/// and by the near cap's plane, which runs right round it through the two
+/// points the pipes touch at. The piece inside the second bar goes and the
+/// other five stay faces of their own, so the union is those five, the first
+/// bar's two caps, the second bar's wall and its far cap; the first bar less
+/// the second is the same five and two caps, the near cap and the two pieces
+/// of the second pipe inside the first; the shared part is the near cap, one
+/// piece of the first pipe and two of the second.
+///
+/// **Until Q1908 every fuse was refused `Undecidable` `orient3d` on the near
+/// cap**, asking which way the cap turns at a point where the pipes touch,
+/// from its crossing with the first pipe to its own circle round the second.
+/// The two pipes are tangent there, so their gradients are parallel, and the
+/// determinant of the cap's normal and the two is nought, which their boxes
+/// cannot prove. The node is named as one of the two places the pipes touch,
+/// so the turn there is now read as nought and the two curves are ordered by
+/// how they bend (`turns_anticlockwise` in `fuse/arrange.rs`): the circle at
+/// `1/r`, and the crossing with the first pipe, an ellipse with half axes `r`
+/// and `r/|cos a|`, at `cos²a/r`.
 ///
 /// **Until Q1898 every fuse was refused `order along a crossing` on the
 /// near cap**, ordering the two points `c ± r·ẑ` where the pipes touch round
@@ -199,41 +215,67 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
 /// rounds the cap, and the cap as stored misses both points by a rounding
 /// (`the_near_cap_as_the_model_hands_it_out_misses_both_points_the_pipes_touch_at`).
 ///
-/// **A gap, by §16.10**: the answer is `1/(24 sin a)` shared. The stored cap
-/// proves itself off both points, so nothing exact asked of the stored
-/// surfaces names them as the meet; the cap holding `c` is the second bar's
-/// own incidence, cap through the start of its axis, kept by its move as a
-/// seam corner's is on the seam plane (§294.9). Since Q1814 `fuse/bake.rs`
-/// reads it on the numbers before the move and carries it, moved, on the
-/// second bar's near cap and wall (`caps_through_the_start_of_their_axis`),
-/// and since Q1820 gathering the cuts in `fuse/cuts.rs` tells it to every
-/// face those two cut, the first bar's wall among them. That wall names the
-/// cap's meet with the two pipes as the node where the four halves meet.
-/// Since Q1815 the corner at `c − r·ẑ` is that node too: it is on the cap's
-/// circle by construction, and that circle meets the first pipe only at `c ±
-/// r·ẑ` because the cap holds `c`.
+/// **The answer rests on the cap holding `c`.** The stored cap proves itself
+/// off both points, so nothing exact asked of the stored surfaces names them
+/// as the meet; the cap holding `c` is the second bar's own incidence, cap
+/// through the start of its axis, kept by its move as a seam corner's is on
+/// the seam plane (§294.9). Since Q1814 `fuse/bake.rs` reads it on the
+/// numbers before the move and carries it, moved, on the second bar's near
+/// cap and wall (`caps_through_the_start_of_their_axis`), and since Q1820
+/// gathering the cuts in `fuse/cuts.rs` tells it to every face those two cut,
+/// the first bar's wall among them. That wall names the cap's meet with the
+/// two pipes as the node where the four halves meet. Since Q1815 the corner
+/// at `c − r·ẑ` is that node too: it is on the cap's circle by construction,
+/// and that circle meets the first pipe only at `c ± r·ẑ` because the cap
+/// holds `c`.
 #[test]
-fn a_bar_starting_where_it_crosses_another_at_a_slant_is_refused() {
-    for degrees in [50.0, 60.0, 70.0, 100.0, 120.0] {
-        let mut model =
-            Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let [_, second] = two_bars(&mut model, degrees, [11.0, -3.25, 0.5]);
-        let facing = PredicatePoint::from(the_near_cap(&model, second).normal().components());
-        for (rule, first_first) in six_fuses() {
-            let said = fuse(degrees, [11.0, -3.25, 0.5], rule, first_first);
-            let what = format!("{degrees}° {rule:?} (first first: {first_first})");
-            let Err(Error::Undecidable { records }) = &said else {
-                panic!("{what}: {said:?}");
-            };
-            assert_eq!(
-                records
-                    .records()
-                    .last()
-                    .map(|record| (record.predicate(), record.inputs()[0])),
-                Some(("orient3d", facing)),
-                "{what}: {said:?}"
+fn a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse() {
+    let (first, second) = (PI / 4.0, PI / 8.0);
+    for degrees in [50.0_f64, 60.0, 70.0, 100.0] {
+        let shared = 1.0 / (24.0 * degrees.to_radians().sin());
+        let six: [(Rule, bool, f64, &[usize]); 6] = [
+            (Rule::Union, true, first + second - shared, &[9]),
+            (Rule::Union, false, first + second - shared, &[9]),
+            (Rule::Intersection, true, shared, &[4]),
+            (Rule::Intersection, false, shared, &[4]),
+            (Rule::Difference, true, first - shared, &[10]),
+            (Rule::Difference, false, second - shared, &[3]),
+        ];
+        for (rule, first_first, volume, faces) in six {
+            let what = format!(
+                "{degrees}° {rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}"
             );
+            let mut model =
+                Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let solids = fuse_in(&mut model, degrees, [11.0, -3.25, 0.5], rule, first_first)
+                .unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
+            answers(&model, &solids, volume, faces, &what);
         }
+    }
+}
+
+/// The second bar starts where the axes meet at 120°, its stored direction a
+/// hair off `z = 0`. **Every fuse gets past the near cap and is refused
+/// building a wire or a face**: the union and both differences
+/// `AWireWillNotLieFlatOnItsFace`, the shared part
+/// `ACurvedFaceGoesRightRoundWithNoSeam`, two of the refusals the long bar
+/// through the first at 120° meets. Until Q1908 all six were refused
+/// `orient3d` on the near cap, as at the other angles
+/// (`a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse`).
+/// Not traced further.
+///
+/// **A gap, by §16.10**: the answer is `1/(24 sin 120°)` shared, inside the
+/// range a model holds.
+#[test]
+fn a_bar_starting_where_it_crosses_another_at_120_degrees_is_refused_building_a_wire() {
+    for (rule, first_first) in six_fuses() {
+        let said = fuse(120.0, [11.0, -3.25, 0.5], rule, first_first);
+        let pinned = if matches!(rule, Rule::Intersection) {
+            matches!(said, Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }))
+        } else {
+            matches!(said, Err(Error::AWireWillNotLieFlatOnItsFace { .. }))
+        };
+        assert!(pinned, "{rule:?} (first first: {first_first}): {said:?}");
     }
 }
 
