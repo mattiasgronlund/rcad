@@ -62,7 +62,7 @@
 use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
-use rcad_predicates::{Decision, Policy, ProvenanceLog};
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 /// What the half of the ball and the bar below share: the ball of radius 5
@@ -411,9 +411,11 @@ fn a_cap_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_off_the_b
         })
     };
     let union_ball_first = 1;
-    for (top, bar, the_mesh_refuses_the_union_ball_first) in
-        [(4.0, 20.0 * PI, false), (6.0, 28.0 * PI, true)]
-    {
+    for (top, bar, the_mesh_refuses_the_union_ball_first) in [
+        (4.0, 20.0 * PI, false),
+        (5.0, 24.0 * PI, false),
+        (6.0, 28.0 * PI, true),
+    ] {
         let shared = what_the_ball_shares_with_the_bar_below(top - 5.0);
         let wanted = [
             Gives::Holds(bar + 36.0 * PI - shared),
@@ -434,24 +436,6 @@ fn a_cap_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_off_the_b
                 assert!(wanted.is(answer), "cap at {top}: {gives:?}");
             }
         }
-    }
-    let gives = capped_at(5.0);
-    for answer in &gives {
-        let Err(Error::Undecidable { records }) = answer else {
-            panic!("the cap at 5 is refused: {gives:?}");
-        };
-        assert!(
-            matches!(
-                records.records(),
-                [refused] if refused.predicate() == "a point inside a piece of a face"
-                    && refused.inputs().len() == 2
-                    && matches!(
-                        refused.outcome(),
-                        Decision::Undecidable { enclosure } if enclosure == f64::INFINITY
-                    )
-            ),
-            "{records:?}"
-        );
     }
 }
 
