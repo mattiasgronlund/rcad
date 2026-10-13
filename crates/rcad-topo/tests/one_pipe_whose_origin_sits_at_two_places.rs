@@ -317,34 +317,37 @@ fn the_stacked_bars_unite_into_one_bar_however_the_wall_is_written() {
     }
 }
 
-/// **A pin in the upper bar is where the second spelling still costs the
-/// answer.**
+/// **Two bars on one pipe written twice, with a pin in the upper one, unite as
+/// one spelling does.**
 ///
 /// Two bars stacked on one pipe, with a pin in the upper one, unite into one
-/// solid when the upper wall is written about the lower bar's origin. Written
-/// about a point of its own, the same union is refused
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in both orders, for a pin along
-/// `−x` right through the upper bar and for a slanted one starting on its
-/// axis. For the pin right through, a probe print showed what was asked:
-/// where the lower wall, the pin's wall and the upper wall meet, which
-/// `where_three_curved_surfaces_meet` in `rcad-geom` refuses because two of
-/// the three are one surface written twice. One spelling answering is the
-/// demonstration that the answer exists (§16.10), since the two spellings are
-/// the same points ([`two_bars_stacked_on_one_pipe_are_one_pipe_written_twice`]).
+/// solid that validates and measures what the two do apart, whether the upper
+/// wall is written about the lower bar's origin or about a point of its own,
+/// for a pin along `−x` right through the upper bar and for a slanted one
+/// starting on its axis. The wall comes back one face, on the lower spelling,
+/// and the pin's wall as many faces as with one spelling.
 ///
-/// **The routes are built for a branch no fuse reaches yet.** Each pin's wall
-/// sorts between the two spellings, so each closed crossing of the pin and
-/// the upper wall is stored the pin's way, and joining the walls onto the
+/// Written apart, this was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
+/// in both orders (Q1877). The pin's wall was arranged with one of its loops
+/// round the upper wall drawn as a crossing with the upper spelling and the
+/// other as a crossing with the lower one, and the fuse asked where the lower
+/// wall, the pin's wall and the upper wall meet, which
+/// `where_three_curved_surfaces_meet` in `rcad-geom` refuses because two of
+/// the three are one surface written twice. Two crossings whose partners are
+/// one surface are two crossings of one pair, and are placed as such.
+///
+/// **The routes are built for a branch no other fuse reaches.** Each pin's
+/// wall sorts between the two spellings, so each closed crossing of the pin
+/// and the upper wall is stored the pin's way, and joining the walls onto the
 /// lower spelling makes it the wall's to name: the branch of
 /// `turn_round_each_closed_edge_the_joined_spelling_stores_the_other_way` for
-/// two different surfaces, which only an assembly built by hand reaches today
-/// (§231.5). Worked by hand and not run: for the pin right through, at
-/// `(−2, 0, 15.5)` the wall's longitude is `z × (−1, 0, 0) = (0, −1, 0)` and
-/// the pin's `(−1, 0, 0) × z = (0, 1, 0)`, so that crossing turns round, and
-/// at `(2, 0, 15.5)` both are `(0, 1, 0)` and it does not. Once the refusal
-/// lifts, two spellings are to answer here what one answers.
+/// two different surfaces (§231.5). Worked by hand: for the pin right
+/// through, at `(−2, 0, 15.5)` the wall's longitude is
+/// `z × (−1, 0, 0) = (0, −1, 0)` and the pin's `(−1, 0, 0) × z = (0, 1, 0)`,
+/// so that crossing turns round, and at `(2, 0, 15.5)` both are `(0, 1, 0)`
+/// and it does not.
 #[test]
-fn two_bars_on_one_pipe_written_twice_with_a_pin_in_one_are_refused_where_one_spelling_unites() {
+fn two_bars_on_one_pipe_written_twice_with_a_pin_in_one_unite_as_one_spelling_does() {
     for pinned in [a_pin_right_through(), a_slanted_pin_from_the_axis()] {
         let route = format!("{:?}", pinned.pin);
         let lower_wall = Surface::Cylinder(a_wall_naming_its_axis_at(LOWER_ORIGIN));
@@ -360,34 +363,26 @@ fn two_bars_on_one_pipe_written_twice_with_a_pin_in_one_are_refused_where_one_sp
              not reached"
         );
 
-        let one_spelling = pinned.united_with_the_lower_bar(LOWER_ORIGIN);
-        for (lower_first, said) in [true, false].into_iter().zip(one_spelling) {
-            let walls = said.unwrap_or_else(|refused| {
-                panic!("{route}, one spelling, lower first {lower_first}: {refused:?}")
-            });
-            assert_eq!(
-                (
-                    walls.len(),
-                    [lower_wall, pin_wall]
-                        .map(|wall| walls.iter().filter(|&&face| face == wall).count())
-                ),
-                (1 + pinned.pin_pieces, [1, pinned.pin_pieces]),
-                "{route}, one spelling, lower first {lower_first}: the wall is one face: \
-                 {walls:?}"
-            );
-        }
-
-        let two_spellings = pinned.united_with_the_lower_bar(pinned.written_apart_at);
-        for (lower_first, said) in [true, false].into_iter().zip(two_spellings) {
-            assert!(
-                matches!(
-                    said,
-                    Err(Error::Geometry(
-                        rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                    ))
-                ),
-                "{route}, two spellings, lower first {lower_first}: {said:?}"
-            );
+        for (spelled, upper_axis_origin) in [
+            ("one spelling", LOWER_ORIGIN),
+            ("two spellings", pinned.written_apart_at),
+        ] {
+            let said = pinned.united_with_the_lower_bar(upper_axis_origin);
+            for (lower_first, said) in [true, false].into_iter().zip(said) {
+                let walls = said.unwrap_or_else(|refused| {
+                    panic!("{route}, {spelled}, lower first {lower_first}: {refused:?}")
+                });
+                assert_eq!(
+                    (
+                        walls.len(),
+                        [lower_wall, pin_wall]
+                            .map(|wall| walls.iter().filter(|&&face| face == wall).count())
+                    ),
+                    (1 + pinned.pin_pieces, [1, pinned.pin_pieces]),
+                    "{route}, {spelled}, lower first {lower_first}: the wall is one face, on \
+                     the lower spelling: {walls:?}"
+                );
+            }
         }
     }
 }
