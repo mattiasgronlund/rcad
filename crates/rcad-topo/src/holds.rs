@@ -41,13 +41,18 @@
 //! surfaces.
 //!
 //! Where a face is trimmed by something else — an *arc* of a crossing, or one
-//! loop of a crossing that has two — this refuses by name rather than guessing.
-//! Both refusals are gaps and §35 names the consumer that calls each due. One
-//! loop of two is read after all where the half-space [`intersect`] picks it out
-//! by faces along a pipe's or a cone's axis, a ball a pipe cuts in two loops
-//! among them (Q1702), and where two pipes cross in two loops, the half-space
-//! holding the fat one's axis (Q1717): everything of the surface past that
-//! half-space is on one side of the loop ([`what_lies_past_the_picker`]).
+//! loop of a crossing that has two — it is read only in the families below,
+//! each shown to hold of the face in hand, and refused by name everywhere else
+//! rather than guessed at. Those refusals are gaps and §35 names the consumer
+//! that calls each due. One loop of two is read where the half-space
+//! [`intersect`] picks it out by faces along a pipe's or a cone's axis, a ball
+//! a pipe cuts in two loops among them (Q1702), and where two pipes cross in two
+//! loops, the half-space holding the fat one's axis (Q1717): everything of the
+//! surface past that half-space is on one side of the loop
+//! ([`what_lies_past_the_picker`]). A face of a ball or of a pipe cut by pieces
+//! of the one loop the two cross in, and by planes square to the pipe, is read
+//! as the part of its surface in front of all its cuts (Q1863,
+//! [`what_a_face_cut_by_a_ball_and_a_pipe_holds`]).
 //!
 //! **A flat face is the exception, because it has a polygon after all**: put
 //! each arc back as its chord and the sides are one, and what the chord leaves
@@ -1881,6 +1886,17 @@ fn is_one_circle_cut_in_two(
 /// refused every reading, so no face the steps answered is answered
 /// differently now.
 ///
+/// # A face of a ball or a pipe cut by the other in one loop is asked first
+///
+/// [`what_a_face_cut_by_a_ball_and_a_pipe_holds`] is asked before any of the
+/// steps above, and answers only a face with a piece of the loop a ball and a
+/// pipe cross in among its sides (row Q1863). The steps above refuse every such
+/// face: [`the_way_a_side_runs`] reads a piece of a crossing with two ends
+/// through [`the_way_into_an_arc`], which needs one of the two surfaces flat,
+/// or through [`the_way_into_an_arc_that_does_not_close`], which needs a cone,
+/// and [`is_a_piece_of_a_ruling`] needs a plane and a cone, so such a side is
+/// refused by name. So no face the steps answered is answered differently now.
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a face on a ball, a
@@ -1986,9 +2002,10 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
 ///
 /// Each set of heights is where `ρ` is above some number, which, `ρ` rising
 /// and then falling, is one run. A plane square to the axis keeps the heights
-/// past one height, so planes cut that run down to a run. One run of heights
-/// with one arc at each is one piece, on either side of the loop and in front
-/// of or behind any plane. That the ball's radius `R` is between `|d − r|` and
+/// past one height, so planes cut that run down to a run. Each of those arcs is
+/// centred on the plane through the pipe's axis and the ball's centre, which
+/// every slice shares, so one run of heights with one arc at each is one piece,
+/// on either side of the loop and in front of or behind any plane. That the ball's radius `R` is between `|d − r|` and
 /// `d + r` is the loop being one: [`crosses_in_one_loop`].
 ///
 /// # Why each side lies where it is read to
@@ -1998,10 +2015,16 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
 ///   ends are.
 /// - **An arc against the other round surface**: on its own plane the arc's
 ///   circle and the other surface's are two circles with different centres,
-///   which meet in two points at most. So the arc meets the other surface only
-///   at an end it holds, and is on the side it leaves that end on
-///   ([`the_side_an_arc_leaves_its_end_on`]), or, holding neither end, on the
-///   side its ends are when its plane misses the ball altogether.
+///   the ball's centre being off the axis wherever the two cross in one loop,
+///   and two such circles meet in two points at most. An arc holding both its
+///   ends on the other surface meets it nowhere else, so it is on the side it
+///   leaves an end on ([`the_side_an_arc_leaves_its_end_on`]). One holding one
+///   end meets it at one more point at most: crossing there would leave its
+///   other end on the other side from the one it leaves the first end on, and
+///   touching there would make that point the only one the circles share. So it
+///   is on the side it leaves that end on when its other end is on that side
+///   too. One holding neither end, on the pipe, is on the side its ends are
+///   when its plane misses the ball altogether, and so is a whole circle.
 /// - **A piece of the loop against a plane holding both its ends**: the plane
 ///   meets the loop in those two points at most, the slice there being two
 ///   circles, so the loop is two pieces either side of it. The piece's own
@@ -2022,7 +2045,9 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
 /// # Errors
 ///
 /// [`Error::Undecidable`] when which side a side keeps, or which side of a cut
-/// `point` is on, could not be settled, and whatever [`the_face_across`] gives.
+/// `point` is on, could not be settled, whatever
+/// [`which_side_of_its_neighbour_a_side_keeps`] refuses for an arc, and
+/// whatever [`the_face_across`] gives.
 fn what_a_face_cut_by_a_ball_and_a_pipe_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
