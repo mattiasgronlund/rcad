@@ -13065,11 +13065,18 @@ queue mode="" *args:
                 if (small[walk[y]] && !(walk[y] in took) && !blocked(walk[y], 0)) pick[++m] = walk[y]
             take_bundle(m)
         }
-        function take_full_bundle(    x, m) {
+        function take_full_bundle(    x, y, m, sp, allsonnet) {
             m = 0
             for (x = 1; x <= w && m < bundle; x++)
                 if (small[walk[x]] && !(walk[x] in took) && !blocked(walk[x], 0)) pick[++m] = walk[x]
-            if (m == bundle) take_bundle(m)
+            if (m != bundle) return
+            allsonnet = 1
+            for (y = 1; y <= m; y++) if (model[pick[y]] != "sonnet") allsonnet = 0
+            if (!allsonnet && !running_sonnet && !sonnet_taken && lanes_n == n - 1) {
+                sp = sonnet_slot_pos()
+                if (sp) { take_at(sp); return }
+            }
+            take_bundle(m)
         }
         # Q1932, §447.3: one of the free slots is kept for a Sonnet row while one
         # is ready and no running lane is a Sonnet row (a bundled lane counts as
@@ -14456,6 +14463,28 @@ check-queue-selftest:
     drive sonnetrunning next 2
     [ "$(takes)" = "Q2 Q3 " ] \
         || fail "a running Sonnet lane still had a second slot reserved for a ready Sonnet row"
+
+    # The same rule applies to a full bundle taken ahead of tier order: a
+    # bundle of small Opus rows that would exactly fill the single free slot
+    # does not take it while a Sonnet row is ready and no running lane is one.
+    fence sonnetfullbundle <<'MD'
+    Q1  2  todo  opus  docs/a.md  small one test §230
+    Q2  2  todo  opus  docs/b.md  small another test §230
+    Q3  2  todo  opus  docs/c.md  small a third test §230
+    Q4  3  todo  sonnet  docs/d.md  tier three, the sonnet row §230
+    MD
+    bundled sonnetfullbundle 3 next 1
+    [ "$(takes)" = "Q4 " ] \
+        || fail "a full bundle of small Opus rows took the one free slot ahead of a ready Sonnet row"
+
+    fence sonnetfullbundlepure <<'MD'
+    Q1  2  todo  sonnet  docs/a.md  small one test §230
+    Q2  2  todo  sonnet  docs/b.md  small another test §230
+    Q3  2  todo  sonnet  docs/c.md  small a third test §230
+    MD
+    bundled sonnetfullbundlepure 3 next 1
+    [ "$(takes)" = "Q1,Q2,Q3 " ] \
+        || fail "a full bundle that is itself all Sonnet was not taken for the one free slot"
 
     fence badtier <<'MD'
     Q1  1  todo  opus  docs/a.md  a row the fill knows §230
