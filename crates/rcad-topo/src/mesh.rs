@@ -4817,20 +4817,23 @@ fn a_cut_up_meets_the_rim(
 /// Every side of a cap's rim, a whole turn either side as well, with the side
 /// that closes it run on to its first corner a whole `climbed` on.
 ///
-/// **The closing side's end is moved by `climbed` and the turn in one
-/// addition.** `climbed` is a whole number of turns exactly, so the copy that
-/// takes it back off ends on the first corner bit for bit, which is what
-/// [`a_leg_meets_the_rim`] asks of a side to leave it out. Added in two steps,
-/// the first corner of a pipe's ring at `2.7861714518995693` came back
-/// `2.7861714518995697`, and a leg from it was read as crossing the side that
-/// closes on it (Q1879).
+/// **The closing side is moved by `climbed` and then by the turn**, so its
+/// copy a turn back can miss the first corner by an ulp, which
+/// [`a_leg_meets_the_rim`] cannot have. Moved in one addition here instead,
+/// three cone tests moved under [`a_cut_up_meets_the_rim`] (Q1879): in
+/// `meshing_a_plane_cut_along_a_cones_other_nappe`, one face measured that
+/// did not and two shapes of `the_eighteen_held_to_the_familys_four_checks`
+/// were refused `LoopsTouch`, and in `a_plane_cut_along_a_cones_other_nappe`
+/// two of a lean of three eighths were refused. Why is not traced.
 fn the_sides_of_a_rim(cap: &WalkedLoop, whole: f64) -> impl Iterator<Item = [[f64; 2]; 2]> + '_ {
     let count = cap.corners.len();
     (0..count).flat_map(move |at| {
         let here = cap.corners[at];
-        let there = cap.corners[(at + 1) % count];
-        let on = if at + 1 == count { cap.climbed } else { 0.0 };
-        [-whole, 0.0, whole].map(|by| [[here[0] + by, here[1]], [there[0] + (on + by), there[1]]])
+        let mut there = cap.corners[(at + 1) % count];
+        if at + 1 == count {
+            there[0] += cap.climbed;
+        }
+        [-whole, 0.0, whole].map(|by| [[here[0] + by, here[1]], [there[0] + by, there[1]]])
     })
 }
 
@@ -5066,11 +5069,27 @@ fn each_island_a_cut_meets_goes_into_the_patches_once(
 }
 
 /// Whether a straight leg from a rim corner meets a side of the rim other
-/// than at that corner.
+/// than at that corner, a whole turn either side as well.
+///
+/// **The side that closes the rim is moved by `climbed` and the turn in one
+/// addition**, and not in two as [`the_sides_of_a_rim`] moves it. A side is
+/// left out here by an end that is the leg's start bit for bit, and `climbed`
+/// is a whole number of turns exactly, so only the one addition puts the copy
+/// a turn back on the first corner itself. In two, the first corner of a
+/// pipe's ring at `2.7861714518995693` came back `2.7861714518995697`, and the
+/// first cut across the ring was read as crossing the rim where it sets off
+/// (Q1879).
 fn a_leg_meets_the_rim(cap: &WalkedLoop, leg: [[f64; 2]; 2], whole: f64) -> bool {
-    the_sides_of_a_rim(cap, whole)
-        .filter(|side| side[0] != leg[0] && side[1] != leg[0])
-        .any(|side| two_sides_meet(leg, side))
+    let count = cap.corners.len();
+    (0..count).any(|at| {
+        let next = (at + 1) % count;
+        let on = if next == 0 { cap.climbed } else { 0.0 };
+        [-whole, 0.0, whole].iter().any(|&by| {
+            let here = [cap.corners[at][0] + by, cap.corners[at][1]];
+            let there = [cap.corners[next][0] + (on + by), cap.corners[next][1]];
+            here != leg[0] && there != leg[0] && two_sides_meet(leg, [here, there])
+        })
+    })
 }
 
 /// Whether a straight leg meets a side of an island, a whole turn either side
