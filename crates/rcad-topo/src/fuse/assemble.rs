@@ -6628,6 +6628,7 @@ fn the_meets_a_plane_beside_an_edge_cuts(
     (parallel && the_corner_is_off_the_plane(&end.planes, plane)).then_some(tip)
 }
 
+/// Each corner of an input solid with exactly three planes round it, and those
 /// three planes, for [`Corners::of`] to name it by.
 ///
 /// **An input corner can lie on an edge of the other solid**, and then that
