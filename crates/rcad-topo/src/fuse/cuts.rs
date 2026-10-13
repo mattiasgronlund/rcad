@@ -132,6 +132,20 @@
 //! edge learns its neighbour's, and the arrangement leaves the crossing out
 //! only where no node of it splits a crossing that is kept.
 //!
+//! # Each face is told the caps through the start of their axis that cut it
+//!
+//! `bake` reads off a round bar's numbers before its move that its near cap
+//! holds the start of its axis, and hangs that on the bar's own near cap and
+//! wall ([`BakedFace::caps_through_the_start_of_their_axis`]), since the moved
+//! cap misses the moved start by a rounding. The face that needs it is the
+//! other bar's (Q1820): a bar starting where its axis crosses another's of its
+//! width cuts that other's wall with its near cap and its pipe, and the
+//! arrangement names where those three meet only from the fact. So each face
+//! is told, once, every such cap that a face cutting it carries. A fact told
+//! is the cap's and pipe's own and true wherever it is read, and the
+//! arrangement uses it only where the cap crosses the face and the pipe is
+//! the face's own surface or crosses it too.
+//!
 //! # Two gaps, left open on purpose
 //!
 //! A solid is only refused for running through itself when the overlap is
@@ -158,16 +172,17 @@ use crate::{EdgeKey, Error, Result};
 
 use super::Sameness;
 use super::arrange::stretches_of_a_line_inside;
-use super::bake::{BakedFace, BakedSolid};
+use super::bake::{ACapThroughTheStartOfItsAxis, BakedFace, BakedSolid};
 
 /// Work out every cut line, and hang each on the face it cuts.
 ///
 /// Every face is cut against every other face, in its own solid and in every
 /// other, whichever group each came from. The header says why the solid's own
 /// planes are in there, why a crossing that splits nothing and lies where
-/// its face never reaches is then left off, and why each face is told which
+/// its face never reaches is then left off, why each face is told which
 /// cuts meet it only on its boundary, and each edge what the face across it
-/// was told.
+/// was told, and why each face is told the caps through the start of their
+/// axis that the faces cutting it carry.
 ///
 /// # Errors
 ///
@@ -190,6 +205,10 @@ pub(crate) fn gather(
         .iter()
         .map(|solid| vec![Vec::new(); solid.faces.len()])
         .collect();
+    let mut told: Vec<Vec<Vec<ACapThroughTheStartOfItsAxis>>> = solids
+        .iter()
+        .map(|solid| vec![Vec::new(); solid.faces.len()])
+        .collect();
     for one in 0..solids.len() {
         for other in one..solids.len() {
             if within_reach.leader(one) != within_reach.leader(other) {
@@ -201,6 +220,12 @@ pub(crate) fn gather(
                     let face = &solids[one].faces[mine];
                     let against = &solids[other].faces[theirs];
                     let (onto_face, onto_against) = cuts_between(face, against, policy, log)?;
+                    if !onto_face.is_empty() {
+                        told[one][mine].extend(&against.caps_through_the_start_of_their_axis);
+                    }
+                    if !onto_against.is_empty() {
+                        told[other][theirs].extend(&face.caps_through_the_start_of_their_axis);
+                    }
                     found[one][mine].extend(found_on(face, against, onto_face));
                     found[other][theirs].extend(found_on(against, face, onto_against));
                 }
@@ -208,12 +233,17 @@ pub(crate) fn gather(
         }
     }
 
-    for (solid, faces) in found.into_iter().enumerate() {
-        for (face, cuts) in faces.into_iter().enumerate() {
-            let kept = the_cuts_left_on(&solids[solid].faces[face], &cuts);
-            solids[solid].faces[face].cuts.extend(kept);
-            solids[solid].faces[face].cuts_that_reach_only_its_boundary =
-                the_cuts_that_reach_only_its_boundary(&cuts);
+    for (solid, (faces, told)) in found.into_iter().zip(told).enumerate() {
+        for (face, (cuts, told)) in faces.into_iter().zip(told).enumerate() {
+            let face = &mut solids[solid].faces[face];
+            let kept = the_cuts_left_on(face, &cuts);
+            face.cuts.extend(kept);
+            face.cuts_that_reach_only_its_boundary = the_cuts_that_reach_only_its_boundary(&cuts);
+            for cap in told {
+                if !face.caps_through_the_start_of_their_axis.contains(&cap) {
+                    face.caps_through_the_start_of_their_axis.push(cap);
+                }
+            }
         }
     }
     for solid in solids.iter_mut() {

@@ -2121,7 +2121,8 @@ impl<'f> Arrangement<'f> {
 
     /// The two nodes where a cap's crossing meets a half ellipse
     /// ([`HalfAnEllipse`]), for a cap square to its own pipe's axis through
-    /// where the axis starts, as `bake` carries it
+    /// where the axis starts, as `bake` carries it and gathering the cuts
+    /// tells every face it cuts
     /// ([`BakedFace::caps_through_the_start_of_their_axis`]), and that start
     /// exactly on the other pipe's axis: the two places `c ± r·n̂` the walls
     /// touch at, named as [`Arrangement::place_where_two_halves_meet`] names
@@ -12641,21 +12642,24 @@ mod curved {
     /// to 100° the places are `f64` triples and the start is the one below,
     /// bit for bit, and named so.
     ///
-    /// The cap is copied over by hand here, where gathering the cuts would
-    /// carry it.
+    /// Gathering the cuts tells the wall: the second bar's near cap and wall
+    /// both cut it and both carry the cap, and the wall is told it once,
+    /// beside its own near cap. Until Q1820 it was copied over here by hand,
+    /// and the whole fuse was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
+    /// on this wall (`a_bar_starting_where_it_crosses_another_at_a_slant_is_refused`
+    /// in `tests/two_equal_bars_leaning_at_each_other.rs`).
     #[test]
     fn a_wall_told_a_cap_holds_where_the_axes_meet_is_split_where_the_cap_meets_the_halves() {
         for degrees in [50.0, 60.0, 70.0, 100.0, 120.0] {
             let solids = a_bar_starting_where_it_crosses_another(degrees);
-            let mut wall = the_wall(&solids[0]).clone();
-            wall.caps_through_the_start_of_their_axis.extend(
-                the_wall(&solids[1])
-                    .caps_through_the_start_of_their_axis
-                    .iter()
-                    .copied(),
+            let wall = the_wall(&solids[0]);
+            assert_eq!(
+                wall.caps_through_the_start_of_their_axis.len(),
+                2,
+                "{degrees}°: {:?}",
+                wall.caps_through_the_start_of_their_axis
             );
-            assert_eq!(wall.caps_through_the_start_of_their_axis.len(), 2);
-            let split = split_a_face(&wall, &Policy::certified(), &mut ProvenanceLog::new())
+            let split = split_a_face(wall, &Policy::certified(), &mut ProvenanceLog::new())
                 .map(|split| split.pieces.len());
             if degrees < 110.0 {
                 assert!(matches!(split, Ok(6)), "{degrees}°: {split:?}");
