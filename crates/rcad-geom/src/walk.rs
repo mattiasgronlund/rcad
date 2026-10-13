@@ -3351,12 +3351,13 @@ impl AnArcRoundACone {
 /// [`Conic::the_stretch_this_run_covers`], and `rcad-topo`'s mesher asks which
 /// of the two a run is through
 /// [`PointsAlongACrossing::are_placed_round_the_cone_from_the_ends_of`] before
-/// it charges a face by the ends. Which of the two arcs a run is, is asked at
-/// both arcs' middle height, one on each side of the pipe, and both placed up
-/// the pipe. **A far arc cannot be named by a half-space through its chord**,
-/// which is what `rcad-topo` builds: the near arc lies on that half-space's
-/// plane to within a rounding, so both arcs hold and the walk refuses it, as
-/// it did before.
+/// it charges a face by the ends. Which of the two arcs a run is, is asked
+/// half way up between the ends, placed up the pipe: across the pipe from the
+/// ends first, which is on the far arc, and on the ends' side only when that
+/// is not ruled out (`which_arc` says why that order). **A far arc cannot be
+/// named by a half-space through its chord**, which is what `rcad-topo`
+/// builds: the near arc lies on that half-space's plane to within a rounding,
+/// so neither arc is ruled out and the walk refuses it, as it did before.
 #[derive(Clone, Debug)]
 struct AnArcAlongAPipe {
     flat: Plane,
@@ -3487,7 +3488,7 @@ impl AnArcAlongAPipe {
     ///
     /// # Errors
     ///
-    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when they pick both or
+    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when they rule out
     /// neither, and whatever [`room_left_over`], the step count and the walk
     /// round the ellipse refuse.
     fn walk(
@@ -3513,8 +3514,26 @@ impl AnArcAlongAPipe {
     }
 
     /// Which arc the run's half-spaces pick, asked half way up between the two
-    /// ends on either side of the pipe: on the ends' side that is the near
-    /// arc's middle, and on the other it is a point of the far arc.
+    /// ends: first across the pipe from them, which is a point of the far arc,
+    /// and only when that is not ruled out on the ends' side, which is the near
+    /// arc's middle.
+    ///
+    /// **A point of the far arc that some half-space puts strictly behind it is
+    /// all it takes to name the near arc.** The arc a run picks lies wholly on
+    /// or in front of every one of its half-spaces, because that is what a
+    /// picker is, so a point of the crossing behind one is on the other arc
+    /// (`rcad-topo`'s `into_the_arc_away_from_the_centre` reads an arc the same
+    /// way). The near arc is not asked then, and must not be: the half-space
+    /// `rcad-topo` names it by runs through its chord, its middle is within a
+    /// rounding of that half-space's plane, so the ask is never decided, and
+    /// under a certified policy the record of it alone refused the fuse that
+    /// asked `Undecidable` (Q1882).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when neither point is
+    /// ruled out, and [`Error::CannotWorkOutHowBigACrossingIs`] when one is not
+    /// a point.
     fn which_arc(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<WhichArcAlongAPipe> {
         let middle = (self.heights[0] + self.heights[1]) / 2.0;
         let mut held = |side: f64| {
@@ -3526,13 +3545,13 @@ impl AnArcAlongAPipe {
                 log,
             )
         };
-        let near_held = held(self.ends_side)?;
-        let far_held = held(-self.ends_side)?;
-        match (near_held, far_held) {
-            (true, false) => Ok(WhichArcAlongAPipe::Near),
-            (false, true) => Ok(WhichArcAlongAPipe::Far),
-            (true, true) | (false, false) => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+        if !held(-self.ends_side)? {
+            return Ok(WhichArcAlongAPipe::Near);
         }
+        if !held(self.ends_side)? {
+            return Ok(WhichArcAlongAPipe::Far);
+        }
+        Err(Error::CannotNameWhichPieceOfACrossingThisIs)
     }
 
     /// Points up the pipe from the first end's height to the second's, on the
