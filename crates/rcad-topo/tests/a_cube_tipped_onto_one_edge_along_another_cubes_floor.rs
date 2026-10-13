@@ -93,6 +93,21 @@ const TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT: [[f64; 4]; 4] = [
     [0.0, 0.0, 0.141_523_266_230_237_75, 0.989_934_929_738_073_8],
 ];
 
+/// Four tilts at which the union and the intersection, under a tolerant
+/// policy, either way round, were refused `TheFuseWroteABrokenAnswer {
+/// broken: OuterWireWindsAgainstTheNormal }` (queue rows Q1686 and Q1711):
+/// `t = 0.024`, `0.0955`, `0.1015` and `0.154`, as `f64::sin` and `f64::cos`
+/// give them. The tipped cube's bottom and its side `y = 5` meet in an edge
+/// parallel to the floor, `3.7e−18` below it at `t = 0.024`, so the floor
+/// cuts the cube in a strip `7.8e−17` wide whose corners all round onto
+/// `y = 5`, and the strip, a face of the intersection, winds `Zero`.
+const TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT: [[f64; 4]; 4] = [
+    [0.0, 0.0, 0.023_997_696_066_354_29, 0.999_712_013_823_734_5],
+    [0.0, 0.0, 0.095_354_902_203_049_7, 0.995_443_339_736_545_1],
+    [0.0, 0.0, 0.101_325_810_022_482_75, 0.994_853_295_829_735_8],
+    [0.0, 0.0, 0.153_392_010_734_994_53, 0.988_165_416_842_076_7],
+];
+
 #[test]
 fn the_union_is_both_cubes_less_what_they_share_where_it_was_refused() {
     for tilt in TILTS_THE_UNION_WAS_REFUSED_AT {
@@ -211,6 +226,70 @@ fn the_tipped_cube_less_the_block_is_one_solid_where_its_corner_rounds_below_the
             tilt,
             Rule::Difference,
             Order::TippedFirst,
+            &tolerant(),
+            &asked,
+        );
+        assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
+        assert_about(volumes[0], 1000.0 - what_the_two_share(tilt), &asked);
+    }
+}
+
+#[test]
+fn the_union_is_both_cubes_less_what_they_share_where_the_cubes_edge_rounds_below_the_floor_tolerant()
+ {
+    for tilt in TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT {
+        for order in [Order::BlockFirst, Order::TippedFirst] {
+            let asked = format!("{tilt:?}, {order:?}");
+            let volume = volume_of_a_fuse(tilt, Rule::Union, order, &tolerant(), &asked);
+            assert_about(volume, 2000.0 - what_the_two_share(tilt), &asked);
+        }
+    }
+}
+
+#[test]
+fn the_intersection_is_what_they_share_where_the_cubes_edge_rounds_below_the_floor_tolerant() {
+    for tilt in TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT {
+        for order in [Order::BlockFirst, Order::TippedFirst] {
+            let asked = format!("{tilt:?}, {order:?}");
+            let volume = volume_of_a_fuse(tilt, Rule::Intersection, order, &tolerant(), &asked);
+            assert_about(volume, what_the_two_share(tilt), &asked);
+        }
+    }
+}
+
+/// Answered one solid since queue row Q1687, `741.0000015943825` at
+/// `t = 0.024` against `741.0000015943831` worked by hand.
+#[test]
+fn the_tipped_cube_less_the_block_is_one_solid_where_the_cubes_edge_rounds_below_the_floor_tolerant()
+ {
+    for tilt in TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT {
+        let asked = format!("{tilt:?}");
+        let volumes = volumes_of_a_fuse(
+            tilt,
+            Rule::Difference,
+            Order::TippedFirst,
+            &tolerant(),
+            &asked,
+        );
+        assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
+        let worked = 1000.0 - what_the_two_share(tilt);
+        assert!(
+            (volumes[0] - worked).abs() <= 1e-12,
+            "{asked}: measured {}, worked by hand {worked}",
+            volumes[0]
+        );
+    }
+}
+
+#[test]
+fn the_block_less_the_tipped_cube_is_one_solid_where_the_cubes_edge_rounds_below_the_floor_tolerant()
+ {
+    for tilt in TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT {
+        let asked = format!("{tilt:?}");
+        let volumes = volumes_of_a_fuse(
+            tilt,
+            Rule::Difference,
+            Order::BlockFirst,
             &tolerant(),
             &asked,
         );

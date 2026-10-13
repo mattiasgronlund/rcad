@@ -469,8 +469,10 @@ pub(crate) struct Scratch {
     /// the one that came second, and `a ∪ a` came back empty.
     pub(crate) cut_from: Vec<usize>,
     /// Every point some face's arrangement found to be more than one name,
-    /// from the faces of both groups, kept piece or not, and every meet a
-    /// tolerant policy took as an input corner a rounding from it (§417.7).
+    /// from the faces of both groups, kept piece or not, every meet a tolerant
+    /// policy took as an input corner a rounding from it (§417.7), and every
+    /// meet it took as the end of an edge its plane runs beside a rounding from
+    /// (§417).
     pub(crate) names_of_one_point: Vec<NamesOfOnePoint>,
 }
 
@@ -523,7 +525,16 @@ impl Scratch {
         let taken_as_input_corners = assemble::fold_each_corner_one_plane_cuts_a_rounding_from_it(
             model, &scratch, policy, log,
         );
+        let taken_as_ends_of_edges =
+            assemble::fold_each_end_of_an_edge_one_plane_runs_beside_a_rounding_from_it(
+                model,
+                &scratch,
+                &taken_as_input_corners,
+                policy,
+                log,
+            );
         scratch.names_of_one_point.extend(taken_as_input_corners);
+        scratch.names_of_one_point.extend(taken_as_ends_of_edges);
         Ok(scratch)
     }
 }
