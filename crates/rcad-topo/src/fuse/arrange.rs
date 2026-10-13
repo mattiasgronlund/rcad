@@ -12631,6 +12631,88 @@ mod curved {
         solids
     }
 
+    fn two_bars_crossing_at(middle: Point, ways: [Vector; 2]) -> Vec<BakedSolid> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let caps = [-1.0, 1.0].map(|z| {
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, z))
+                .expect("a cap")
+        });
+        let bars = ways.map(|way| {
+            let way = way.normalized().expect("a way");
+            let up = Vector::new(0.0, 0.0, 1.0);
+            let turn = Isometry::rotation(
+                &Axis::new(Point::origin(), up.cross(way)).expect("an axis"),
+                up.dot(way).acos(),
+            )
+            .expect("a turn");
+            let at = Isometry::translation(middle - Point::origin())
+                .expect("a move")
+                .compose(&turn);
+            model
+                .add_bar_cut_off_by(0.25, caps, &at, &policy, &mut log)
+                .expect("a bar")
+        });
+        let mut solids = bake(&model, &bars, &policy, &mut log).expect("both bake");
+        cuts::gather(&mut solids, &policy, &mut log).expect("they cut each other");
+        solids
+    }
+
+    #[test]
+    fn probe_q1892_split() {
+        for middle in [Point::new(0.0, 0.0, 0.0), Point::new(11.0, -3.25, 0.5)] {
+            let solids = two_bars_crossing_at(
+                middle,
+                [Vector::new(3.0, 4.0, 0.0), Vector::new(4.0, 0.0, 3.0)],
+            );
+            for solid in &solids {
+                let split = split_a_face(
+                    the_wall(solid),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                match split {
+                    Ok(split) => {
+                        println!("{middle:?}: {} pieces", split.pieces.len());
+                        for piece in &split.pieces {
+                            println!(
+                                "  piece wires {:?} whole {}",
+                                piece.wires.iter().map(Vec::len).collect::<Vec<_>>(),
+                                piece.is_the_whole_surface
+                            );
+                            for wire in &piece.wires {
+                                for meet in wire {
+                                    let ends = meet.ends.clone().map(|end| match end {
+                                        MeetPoint::Existing { point, .. } => {
+                                            format!("old {:?}", point.enclosure().map(|i| i.lo()))
+                                        }
+                                        MeetPoint::OfThreeSurfaces {
+                                            surfaces,
+                                            which,
+                                            point,
+                                        } => format!(
+                                            "three {:?}#{which} {:?}",
+                                            surfaces.map(|s| kind(&s)),
+                                            point.enclosure().map(|i| (i.lo(), i.width()))
+                                        ),
+                                        other => format!("{other:?}"),
+                                    });
+                                    println!(
+                                        "    {:?} side {:?} ends {ends:?}",
+                                        meet.carried_by.map(|s| kind(&s)),
+                                        meet.material_side
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(why) => println!("{middle:?}: refused {why:?}"),
+                }
+            }
+        }
+    }
+
     fn the_wall(bar: &BakedSolid) -> &BakedFace {
         bar.faces
             .iter()
