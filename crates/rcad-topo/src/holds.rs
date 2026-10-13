@@ -2305,9 +2305,10 @@ fn which_side_a_round_side_keeps(
                 .filter(|corner| corner.key != its_own)
             {
                 let at = PredicatePoint::from(corner.at.coordinates());
-                match side_of_surface(&side.across, at) {
+                let sits = side_of_surface(&side.across, at);
+                match sits {
                     Decision::Zero => {}
-                    sits @ (Decision::Pos | Decision::Neg) => {
+                    Decision::Pos | Decision::Neg => {
                         if found.is_some_and(|known| known != sits) {
                             return Ok(None);
                         }
