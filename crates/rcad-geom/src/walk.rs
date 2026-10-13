@@ -476,12 +476,28 @@ pub fn walk(
     if let Some(arc) = AnArcRoundACone::of(pair, run) {
         return arc.walk(&conic, deviation, deflection, policy, log);
     }
+    if let Some(arc) = AnArcAlongAPipe::of(pair, run) {
+        return arc.walk(&conic, run, deviation, deflection, policy, log);
+    }
+    walk_round_the_conic(&conic, run, deviation, deflection, policy, log)
+}
+
+/// The run's points round the conic it lies on, from the stretch its
+/// half-spaces pick.
+fn walk_round_the_conic(
+    conic: &Conic,
+    run: &NamedRun,
+    deviation: f64,
+    deflection: Deflection,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<PointsAlongACrossing> {
     let Some(room) = room_left_over(deflection, deviation, policy, log)? else {
         return Ok(nothing_walked(deviation));
     };
 
     let stretch = conic.the_stretch_this_run_covers(run, deviation, policy, log)?;
-    points_round_a_conic(&conic, stretch, deviation, room)
+    points_round_a_conic(conic, stretch, deviation, room)
 }
 
 /// Points along `stretch` of a conic, `room` apart from the curve at most.
@@ -3224,6 +3240,329 @@ impl AnArcRoundACone {
             + (2.0 * slope + ruling) * turns / (least * least)
             + 2.0 * ruling * turns * turns / (least * least * least);
         self.apex_off_the_plane.abs() * bends / 8.0
+    }
+}
+
+/// A piece of the ellipse a plane cuts a pipe in, walked up the pipe by height
+/// and not round the ellipse.
+///
+/// # Why along the pipe
+///
+/// A plane a rounding off parallel to a pipe's axis cuts it in an ellipse that
+/// reaches `1.6e16` up the axis, while an arc of it between two walls is `1.2`
+/// long. [`Conic::at`] places a point of that arc from the ellipse's centre,
+/// `6.75e15` up, so every point is the difference of two numbers that size, and
+/// the half-space that picks the arc, built through its chord, is a rounding of
+/// those points and cannot tell the two arcs apart (Q1882).
+///
+/// Up the pipe nothing is that big. Write `ŵ` for the axis direction scaled to
+/// length one, `k = n·ŵ` for how far the plane's normal leans along it, `m` for
+/// the length of the rest of the normal and `out` for that rest scaled to
+/// length one, `side = ŵ × out`, `o` for the axis origin and `s₀` for the
+/// plane's signed distance to it. The point of the pipe `t` up the axis and at
+/// `out·c + side·σ·√(1 − c²)` across it is on the plane where
+/// `s₀ + t·k + r·m·c = 0`, so
+///
+/// ```text
+/// c(t) = −(s₀ + t·k) / (r·m),   p(t) = o + ŵ·t + r·(out·c + side·σ·√(1 − c²))
+/// ```
+///
+/// with `σ` the side of `out` the run's two ends are on. Every height between
+/// the ellipse's two tips, where `c = ±1`, has one point on each side, so the
+/// arc on the ends' side between their two heights is one of the two arcs
+/// between them, and the one that misses both tips. Nothing in the formula is
+/// bigger than the origin, the radius, the plane's offset and the ends' own
+/// heights.
+///
+/// # How far off, derived
+///
+/// With `u = f64::EPSILON / 2` and `L` the largest of the origin's coordinates,
+/// the ends' coordinates, the radius, the ends' heights and the plane's offset,
+/// which is what [`how_big_this_is`] is handed:
+///
+/// - `s₀` rounds by under `8u·max(|o|, |offset|)`, under `14u·L`.
+/// - `ŵ` is within `4u` of length one, so `k` is out by under `4u` and `t·k`
+///   by under `4u·L`. The rest of the normal, `n − ŵ·k`, is out by under `6u`
+///   a coordinate, and `m` and `out`, a length and a division of it, carry
+///   that within `12u`; so `n·out` is `m` to within `16u` and `n·side` is
+///   nought to within `16u`, which moves the point off the plane by under
+///   `32u·r ≤ 32u·L`.
+/// - `r·m·c` is `−(s₀ + t·k)` to within `4u` of itself, and on the arc that is
+///   under `r ≤ L`: `4u·L`.
+/// - Adding `o`, `ŵ·t` and the part across the axis is two sums and two
+///   products a coordinate on terms under `L`: `8u·L` a coordinate, under
+///   `14u·L` along the normal.
+///
+/// That is about `68u·L` off the plane. Off the pipe it is the part across the
+/// axis, whose length is `r` to within the `28u` of `out`, `side` and the
+/// square root, the `2u·L` that `ŵ·t` leans off the axis, and the same `14u·L`
+/// of the sums: about `44u·L`. Both are under `35 · f64::EPSILON · L`, and it
+/// is charged [`POINT_ALONG_A_CROSSING_ROUNDOFF`], as an arc round a cone is
+/// and for the same reason.
+///
+/// # How many steps
+///
+/// `c` is a straight line in `t`, so `p″ = −σ·side·k² / (r·m²·(1 − c²)^{3/2})`,
+/// and `√(1 − c²)` is least at one of the ends. That bound goes to
+/// [`how_many_pieces_an_endless_bend_takes`]. **There is no turning count**,
+/// as the cone's arc has: past [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`]
+/// times the larger of the ends' heights and the radius, `|k|` is under
+/// `2m / PAST`, so `c` changes by under `4 / PAST` over the arc and the arc
+/// turns under `3e-3` radians round the pipe, far short of a quarter turn.
+///
+/// # Only the arc that misses the ellipse's tips
+///
+/// The other arc runs out to both tips, and its points are out where the
+/// ellipse's own numbers are. So it is walked round the ellipse as before, by
+/// [`Conic::the_stretch_this_run_covers`]. Which of the two arcs a run is, is
+/// asked at both arcs' middle height, one on each side of the pipe, and both
+/// placed up the pipe. **A far arc cannot be named by a half-space through its
+/// chord**, which is what `rcad-topo` builds: the near arc lies on that
+/// half-space's plane to within a rounding, so both arcs hold and the walk
+/// refuses it, as it did before.
+#[derive(Clone, Debug)]
+struct AnArcAlongAPipe {
+    flat: Plane,
+    picked_by: SmallVec<[Picker; 1]>,
+    origin: Point,
+    /// `ŵ`, the pipe's axis direction scaled to length one.
+    up: Vector,
+    /// The part of the plane's normal square to the axis, scaled to length
+    /// one.
+    out: Vector,
+    /// `ŵ × out`.
+    side: Vector,
+    /// `k = n·ŵ`.
+    lean: f64,
+    /// `m`, how long the part of the normal square to the axis is.
+    square_on: f64,
+    /// `s₀`, the plane's signed distance to the axis origin.
+    origin_off_the_plane: f64,
+    radius: f64,
+    /// `σ`: `1` when the run's ends are on the side `side` points to, `-1`
+    /// when they are on the other.
+    ends_side: f64,
+    /// How far up the axis each end is, in the order the run is stored.
+    heights: [f64; 2],
+    size: f64,
+}
+
+/// Which of the two arcs between a run's two ends on a pipe its half-spaces
+/// pick.
+enum WhichArcAlongAPipe {
+    /// The arc that misses the ellipse's two tips, walked up the pipe.
+    Near,
+    /// The arc that runs out to them, walked round the ellipse.
+    Far,
+}
+
+impl AnArcAlongAPipe {
+    /// The arc `run` names on the ellipse `pair` crosses in, when `pair` is a
+    /// plane and a pipe, the run is a piece between two named ends, and the
+    /// ellipse reaches more than
+    /// [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`] times further up
+    /// the axis than the larger of the ends' heights and the radius.
+    ///
+    /// **How far up the axis the ellipse reaches is `(|s₀| + r·m) / |k|`**,
+    /// which is `rcad-topo`'s mesher's figure for a plane against a pipe in
+    /// all but how it rounds; the mesher charges by the ends only past twice
+    /// this, so the two never disagree about a run on the line.
+    ///
+    /// `None` too when the ends are not each a rounding clear of the plane
+    /// through the axis square to the normal, on one side of it, or when the
+    /// height of an end puts it at or past a tip: the run is not what it says,
+    /// or it is not this arc, and the walk round the ellipse gets to say so.
+    fn of(pair: [Surface; 2], run: &NamedRun) -> Option<Self> {
+        let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = pair
+        else {
+            return None;
+        };
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+            return None;
+        };
+        if run.is_the_whole_curve() || run.ends().contains(&nowhere_in_particular()) {
+            return None;
+        }
+        let ends = run
+            .ends()
+            .map(|end| Point::from(end.enclosure().map(middle_of)));
+        let origin = pipe.axis().origin();
+        let up = pipe.axis().direction() * pipe.axis().direction().length().recip();
+        let normal = flat.normal();
+        let lean = normal.dot(up);
+        let square = normal - up * lean;
+        let square_on = square.length();
+        if square_on == 0.0 {
+            return None;
+        }
+        let out = square * square_on.recip();
+        let origin_off_the_plane = flat.signed_distance_to(origin);
+        let radius = pipe.radius();
+        let heights = ends.map(|end| up.dot(end - origin));
+        let far = (origin_off_the_plane.abs() + radius * square_on) / lean.abs();
+        let dwarfs_its_ends = far
+            > PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST
+                * heights[0].abs().max(heights[1].abs()).max(radius);
+        if !dwarfs_its_ends {
+            return None;
+        }
+
+        let side = up.cross(out);
+        let size = how_big_this_is(
+            &[origin, ends[0], ends[1]],
+            &[radius, heights[0], heights[1], flat.offset()],
+        );
+        let clear = POINT_ALONG_A_CROSSING_ROUNDOFF * size;
+        let sides = ends.map(|end| side.dot(end - origin));
+        let ends_side = if sides.iter().all(|along| *along > clear) {
+            1.0
+        } else if sides.iter().all(|along| *along < -clear) {
+            -1.0
+        } else {
+            return None;
+        };
+        let arc = Self {
+            flat,
+            picked_by: picked_by.clone(),
+            origin,
+            up,
+            out,
+            side,
+            lean,
+            square_on,
+            origin_off_the_plane,
+            radius,
+            ends_side,
+            heights,
+            size,
+        };
+        let short_of_a_tip = arc
+            .heights
+            .iter()
+            .all(|height| arc.round_at(*height).abs() < 1.0);
+        short_of_a_tip.then_some(arc)
+    }
+
+    /// The run's points, up the pipe when its half-spaces pick the arc that
+    /// misses the ellipse's tips and round the ellipse when they pick the
+    /// other.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when they pick both or
+    /// neither, and whatever [`room_left_over`], the step count and the walk
+    /// round the ellipse refuse.
+    fn walk(
+        &self,
+        conic: &Conic,
+        run: &NamedRun,
+        deviation_round_the_ellipse: f64,
+        deflection: Deflection,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<PointsAlongACrossing> {
+        match self.which_arc(policy, log)? {
+            WhichArcAlongAPipe::Near => self.walk_up_the_pipe(deflection, policy, log),
+            WhichArcAlongAPipe::Far => walk_round_the_conic(
+                conic,
+                run,
+                deviation_round_the_ellipse,
+                deflection,
+                policy,
+                log,
+            ),
+        }
+    }
+
+    /// Which arc the run's half-spaces pick, asked half way up between the two
+    /// ends on either side of the pipe: on the ends' side that is the near
+    /// arc's middle, and on the other it is a point of the far arc.
+    fn which_arc(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<WhichArcAlongAPipe> {
+        let middle = (self.heights[0] + self.heights[1]) / 2.0;
+        let mut held = |side: f64| {
+            every_half_space_holds(
+                &self.picked_by,
+                self.at(middle, side),
+                self.deviation(),
+                policy,
+                log,
+            )
+        };
+        let near_held = held(self.ends_side)?;
+        let far_held = held(-self.ends_side)?;
+        match (near_held, far_held) {
+            (true, false) => Ok(WhichArcAlongAPipe::Near),
+            (false, true) => Ok(WhichArcAlongAPipe::Far),
+            (true, true) | (false, false) => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+        }
+    }
+
+    /// Points up the pipe from the first end's height to the second's, on the
+    /// ends' side.
+    fn walk_up_the_pipe(
+        &self,
+        deflection: Deflection,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<PointsAlongACrossing> {
+        let deviation = self.deviation();
+        let Some(room) = room_left_over(deflection, deviation, policy, log)? else {
+            return Ok(nothing_walked(deviation));
+        };
+        let [from, to] = self.heights;
+        let steps = how_many_pieces_an_endless_bend_takes(
+            self.how_far_a_step_of_one_stands_off_its_chord(),
+            to - from,
+            room,
+        )?;
+        let points = (1..steps)
+            .map(|step| {
+                self.at(
+                    from + (to - from) * (step as f64) / (steps as f64),
+                    self.ends_side,
+                )
+            })
+            .collect();
+
+        Ok(PointsAlongACrossing {
+            points,
+            deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
+        })
+    }
+
+    /// The point of the crossing `height` up the axis, on the side `side`
+    /// says.
+    fn at(&self, height: f64, side: f64) -> Point {
+        let round = self.round_at(height);
+        let across = (1.0 - round * round).max(0.0).sqrt();
+        self.origin
+            + self.up * height
+            + (self.out * round + self.side * (side * across)) * self.radius
+    }
+
+    /// `c(t)`: how far towards `out` the crossing is `height` up the axis, as
+    /// a share of the radius.
+    fn round_at(&self, height: f64) -> f64 {
+        -(self.origin_off_the_plane + height * self.lean) / (self.radius * self.square_on)
+    }
+
+    fn deviation(&self) -> f64 {
+        POINT_ALONG_A_CROSSING_ROUNDOFF * self.size
+    }
+
+    /// How far the arc stands off the chord of a step up the pipe, per square
+    /// unit of height: `‖p″‖ / 8` at its largest, which is at the end nearer
+    /// a tip.
+    fn how_far_a_step_of_one_stands_off_its_chord(&self) -> f64 {
+        let least_across = self
+            .heights
+            .map(|height| (1.0 - self.round_at(height).powi(2)).max(0.0).sqrt())
+            .into_iter()
+            .fold(f64::INFINITY, f64::min);
+        self.lean * self.lean
+            / (self.radius * self.square_on * self.square_on * least_across.powi(3))
+            / 8.0
     }
 }
 
