@@ -235,13 +235,12 @@ fn turned_one_radian_about_a_diagonal_every_notch_side_leans_by_a_rounding_and_c
     }
 }
 
-/// The two points the refusal orders, moved back by the turn, are where one
-/// side's plane crosses the wall at the two caps, one above the other. The
-/// side's face stops at `z = 1` and `z = 3` and reaches neither, but its plane
-/// crosses the pipe in one long ellipse, and the sweep from that ellipse's
-/// far-off start cannot tell the two apart.
+/// Every fuse of either notch, under either policy, puts the nodes round each
+/// side's long ellipse in order: where a side meets the caps and the notch's
+/// ends, near the bar, and where the line two sides of the notch cross in
+/// leaves the pipe, `1e16` off.
 #[test]
-fn turned_one_radian_about_a_diagonal_every_fuse_is_refused_along_where_a_side_crosses_the_wall() {
+fn turned_one_radian_about_a_diagonal_no_fuse_is_refused_ordering_round_a_sides_ellipse() {
     let turn = one_radian_about_a_diagonal();
     for notch in BOTH_NOTCHES {
         for tolerant in [false, true] {
@@ -249,28 +248,14 @@ fn turned_one_radian_about_a_diagonal_every_fuse_is_refused_along_where_a_side_c
                 let what = format!("notch at {notch:?}, tolerant {tolerant}, {rule:?}");
                 let (_, fused, _) =
                     notched_and_fused(&turn, notch, &Isometry::identity(), rule, tolerant);
-                let record = the_one_refusal(fused, &what);
-                assert_eq!(record.predicate(), ALONG_A_CROSSING, "{what}");
-                assert!(record.enclosure() > 100.0, "{what}: {record:?}");
-                let [one, other] = record.inputs() else {
-                    panic!("{what}: {record:?}");
+                let refused_on_the_order = match &fused {
+                    Err(Error::Undecidable { records }) => records
+                        .records()
+                        .iter()
+                        .any(|record| record.predicate() == ALONG_A_CROSSING),
+                    Ok(_) | Err(_) => false,
                 };
-                let [[x, y, z], [other_x, other_y, other_z]] =
-                    [one, other].map(|point| where_it_was_before_the_turn(*point, &turn));
-                assert!(
-                    (x - other_x).abs() < CLOSE && (y - other_y).abs() < CLOSE,
-                    "{what}: not on one ruling"
-                );
-                assert!(on_the_wall([x, y, z]), "{what}: ({x}, {y}) is off the wall");
-                assert!(
-                    on_a_side_of(notch, [x, y, z]),
-                    "{what}: ({x}, {y}) is on no side of the notch"
-                );
-                let (low, high) = (z.min(other_z), z.max(other_z));
-                assert!(
-                    low.abs() < CLOSE && (high - HEIGHT).abs() < CLOSE,
-                    "{what}: at z = {z} and {other_z}"
-                );
+                assert!(!refused_on_the_order, "{what}: {fused:?}");
             }
         }
     }
