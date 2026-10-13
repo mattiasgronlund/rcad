@@ -128,3 +128,28 @@ fn walked_finely_the_arc_is_on_the_wall_and_on_the_pipe() {
     every_point_is_on_both_surfaces_between_the_ends(1e-3, [&pipe, &wall]);
     every_point_is_on_both_surfaces_between_the_ends(1e-3, [&wall, &pipe]);
 }
+
+/// The arc's middle is within a rounding of the half-space that picks it, so
+/// asking there is never decided, and under a certified policy a record of it
+/// makes the fuse that asked refuse `Undecidable` (Q1882). The far arc's point
+/// across the pipe is plainly behind it, which is all the walk needs to know.
+#[test]
+fn walked_under_a_certified_policy_the_arc_logs_nothing() {
+    let [pipe, wall] = [Surface::Cylinder(the_pipe()), Surface::Plane(the_wall())];
+    for along in [[&pipe, &wall], [&wall, &pipe]] {
+        let mut log = ProvenanceLog::new();
+        walk(
+            &the_arc(),
+            along,
+            Deflection::of(1e-3).expect("a positive length"),
+            &Policy::certified(),
+            &mut log,
+        )
+        .expect("the arc is walked");
+        assert!(
+            log.is_empty(),
+            "a certified walk logged {:?}",
+            log.records()
+        );
+    }
+}
