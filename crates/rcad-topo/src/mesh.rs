@@ -4710,8 +4710,8 @@ fn the_sides_of_a_rim(cap: &WalkedLoop, whole: f64) -> impl Iterator<Item = [[f6
 /// island those are the same two corners for each of them**, so each reaches
 /// and leaves it near where its own straight line crosses it instead
 /// ([`the_corners_a_cut_crosses_an_island_near`]). A thin bar reaching out of
-/// a fat one's side leaves an island in the thin bar's wall that reaches
-/// `4.1` of the `2π` round it, which two or three of the four cuts meet
+/// a fat one's side leaves an island in the thin bar's wall that reaches two
+/// thirds of the way round it, which more than one of the four cuts meets
 /// (Q1858).
 ///
 /// `None` overall when a cut meets two islands, a cut that meets one runs

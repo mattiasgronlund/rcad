@@ -48,10 +48,13 @@
 //! does not reach it: it is refused before its arcs are named, since Q1685 by
 //! `rcad-geom` when asked to put the two corners in order round it, and by
 //! `fuse/arrange.rs` before that (Q1683). `rcad-geom` puts the ball's one loop
-//! in order since Q1767, and two pipes' one loop not yet. Whole, the
-//! thin bar answers both intersections and the fat bar less it, and the rules
-//! that keep its skin outside the fat bar are refused by the mesh the fuse
-//! checks its answer with.
+//! in order since Q1767, and two pipes' one loop not yet. Whole and turned
+//! about its own axis, the thin bar answers every rule both ways round since
+//! Q1858, which lets more than one of the cuts the mesh the fuse checks its
+//! answer with makes across the thin bar's skin meet the window the fat bar
+//! leaves in it. Unturned it answers every rule but the union and the thin bar
+//! less the fat one with the thin bar first, which that mesh refuses because
+//! `rcad-geom`'s `walk` hands back the window with a point out of order.
 //!
 //! A ball keeps its poles on the `z` line through its centre however it is
 //! placed, so the bars along `x` below keep them off the wall.
@@ -607,18 +610,26 @@ fn a_half_thin_bar_reaching_out_of_a_fat_ones_side_is_refused_ordering_the_one_l
 ///
 /// Until Q1685 every rule both ways round was refused
 /// `ACrossingThisCannotBeOrderedAlong` in `how_a_crossing_runs`, as the half
-/// was. With the one loop through that gate, **both intersections answer**,
-/// one solid of two faces holding `2I`, and **the fat bar less the thin one
-/// answers** `160π − 2I`, one solid of four faces.
+/// was. With the one loop through that gate both intersections answered, one
+/// solid of two faces holding `2I`, and so did the fat bar less the thin one,
+/// `160π − 2I`, one solid of four faces. The three rules that keep the thin
+/// bar's skin outside the fat bar were refused by the mesh the fuse checks its
+/// answer with. That skin is a ring between the thin bar's two caps with one
+/// island, the window the fat bar cuts in it, and the mesh refused more than
+/// one of its cuts across a ring meeting one island, the union fat bar first
+/// as `CurvedFaceWithAHoleGoesTooFarRound`. It splits the patch between two
+/// such cuts in two since Q1858, and **the union fat bar first answers**
+/// `180π − 2I`, one solid of six faces.
 ///
-/// The three rules that keep the thin bar's skin outside the fat bar are
-/// refused by the mesh the fuse checks its answer with: the union thin bar
-/// first and the thin bar less the fat one, `180π − 2I` and `20π − 2I`, as
-/// `AWireWillNotLieFlatOnItsFace`, and the union fat bar first as
-/// `CurvedFaceWithAHoleGoesTooFarRound`.
+/// **The union thin bar first and the thin bar less the fat one are still
+/// refused `AWireWillNotLieFlatOnItsFace`**, `180π − 2I` and `20π − 2I`.
+/// Handed the thin bar first, `rcad-geom`'s `walk` hands back the window with
+/// one point two places early, so its outline in the thin bar's chart crosses
+/// itself, as a print where the mesh refuses showed (Q1858). Fat bar first
+/// every rule answers, and turned about its own axis the thin bar answers
+/// every rule both ways round, as the test below has it.
 #[test]
-fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_both_intersections_and_the_fat_bar_less_it()
- {
+fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_every_rule_but_two_thin_bar_first() {
     let gives = what_each_rule_gives(|model| {
         let thin = thin_bar_out_of_a_fat_ones_side(model);
         let fat = model
@@ -628,22 +639,19 @@ fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_both_intersections_a
     });
     let [
         union_thin_first,
-        union_fat_first,
+        Ok(union_fat_first),
         Ok(shared_thin_first),
         Ok(shared_fat_first),
         thin_less_fat,
         Ok(fat_less_thin),
     ] = &gives[..]
     else {
-        panic!("both intersections and the fat bar less the thin one answer: {gives:?}");
+        panic!("every rule fat bar first and the intersection thin bar first answer: {gives:?}");
     };
     assert!(
         matches!(
             union_thin_first,
             Err(Error::AWireWillNotLieFlatOnItsFace { .. })
-        ) && matches!(
-            union_fat_first,
-            Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
         ) && matches!(
             thin_less_fat,
             Err(Error::AWireWillNotLieFlatOnItsFace { .. })
@@ -652,6 +660,7 @@ fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_both_intersections_a
     );
     let shared = 2.0 * what_a_half_thin_bar_out_of_a_fat_ones_side_shares_with_it();
     for (solids, volume, faces) in [
+        (union_fat_first, 180.0 * PI - shared, 6),
         (shared_thin_first, shared, 2),
         (shared_fat_first, shared, 2),
         (fat_less_thin, 160.0 * PI - shared, 4),
@@ -667,18 +676,22 @@ fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_both_intersections_a
 }
 
 /// The whole thin bar of the test above against the same bar of radius 4,
-/// turned about its own axis by every number of quarter turns, so that where
-/// its walk starts round its wall lies inside the window the fat bar cuts in
-/// that wall and outside it. Every rule both ways round answers: the union
-/// `180π − 2I` in six faces, both intersections `2I` in two, the thin bar less
-/// the fat one `20π − 2I` in four and the fat bar less the thin one
+/// turned about its own axis by one, two or three quarter turns, which moves
+/// where its seam and the mesh's cuts across its skin lie against the window
+/// the fat bar cuts in that skin. **Every rule both ways round answers**: the
+/// union `180π − 2I` in six faces, both intersections `2I` in two, the thin
+/// bar less the fat one `20π − 2I` in four and the fat bar less the thin one
 /// `160π − 2I` in four.
 ///
-/// The thin bar's wall outside the fat bar is a ring between its two caps with
-/// one island, the window, which reaches `4.1` of the `2π` round the thin bar,
-/// so two or three of the four cuts across the ring meet it (Q1858).
+/// The window reaches two thirds of the way round the thin bar, where its
+/// section crosses `y = 4` at `x = 0`, so more than one of the four cuts
+/// across the ring of skin outside the fat bar meets it. Until Q1858 the mesh
+/// the fuse checks its answer with refused that, and the unions and the thin
+/// bar less the fat one were refused `CurvedFaceWithAHoleGoesTooFarRound`
+/// turned each of these ways. It splits the patch between two such cuts in
+/// two now, one beside each of the thin bar's caps.
 #[test]
-fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_every_rule_however_it_is_turned() {
+fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_turned_about_its_own_axis_answers_every_rule() {
     let shared = 2.0 * what_a_half_thin_bar_out_of_a_fat_ones_side_shares_with_it();
     let wanted = [
         (180.0 * PI - shared, 6),
@@ -688,7 +701,7 @@ fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_every_rule_however_i
         (20.0 * PI - shared, 4),
         (160.0 * PI - shared, 4),
     ];
-    for quarters in 0..4 {
+    for quarters in 1..4 {
         let gives = what_each_rule_gives(|model| {
             let thin = model
                 .add_round_bar(
