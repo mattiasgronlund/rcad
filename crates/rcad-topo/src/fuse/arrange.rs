@@ -8169,9 +8169,10 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// is not what it means: a point at the start comes first, by definition of
 /// where the counting begins. Reading that as "these are one point" would fold
 /// every node of the crossing into the start. On the one loop a ball off a
-/// pipe's axis crosses it in, which `rcad-geom` orders by angle round a line,
-/// a point at the start's own angle already comes first there, and
-/// [`Decision::Zero`] means only that `one` and `other` are one place on it.
+/// pipe's axis crosses it in, or two pipes cross in, each of which `rcad-geom`
+/// orders round a line, a point at the start's own angle already comes first
+/// there, and [`Decision::Zero`] means only that `one` and `other` are one
+/// place on it.
 ///
 /// **The start is recognised as either of the two things it is held as**: the
 /// walked triple, and the node a crossing is given there, which is a box round
@@ -8369,16 +8370,17 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// Every other point of that stretch, a hair ahead of the place or behind it,
 /// reads `false` and is left to the sweep.
 ///
-/// **The one loop a ball off a pipe's axis crosses it in has no such side.**
-/// `rcad-geom` orders it by angle round the line through the ball's centre
-/// square to the pipe's axis, so there [`Decision::Neg`] says only that
-/// `place` comes before `start + runs`, going round that line from the start's
-/// own angle, with a point at that angle first. Where the walk rounded the
-/// start off the loop, the place it was rounded off lies a hair to one side of
-/// the start's angle or the other: at that angle or past it, the place reads
-/// `true` and comes first; short of it, it reads `false` and is left to the
-/// sweep, which on this loop is the angle. A place whose box straddles the
-/// start's angle reads `false` too.
+/// **The one loop a ball off a pipe's axis crosses it in, or two pipes cross
+/// in, has no such side.** `rcad-geom` orders each round a line — the ball's
+/// by angle round the line through its centre square to the pipe's axis, two
+/// pipes' by how far round the line that meets both axes square to both — so
+/// there [`Decision::Neg`] says only that `place` comes before `start + runs`,
+/// going round that line from the start's own angle, with a point at that
+/// angle first. Where the walk rounded the start off the loop, the place it
+/// was rounded off lies a hair to one side of the start's angle or the other:
+/// at that angle or past it, the place reads `true` and comes first; short of
+/// it, it reads `false` and is left to the sweep, which on either loop is the
+/// angle. A place whose box straddles the start's angle reads `false` too.
 ///
 /// The window from the start's angle to that of `start + runs` is not a hair
 /// wide: `runs` grows with the square of the shape's size. A probe of the loop's
@@ -8389,7 +8391,7 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// interval's sign is [`Decision::Zero`] only for `[0, 0]`. A start on the
 /// plane through the pipe's axis and the ball's centre, or on the plane
 /// through the centre square to the axis, has its one other such point half a
-/// turn round, outside the window, and reads `false`. A start on the loop
+/// turn round, outside the window, and reads `false`. A start on either loop
 /// anywhere else has not been shown to read `false` for every place.
 ///
 /// # Errors
@@ -8526,8 +8528,8 @@ fn round_a_closed_crossing_by_its_angle(
 /// the axis, so `w·(a × b)` is not proved either way, and the sweep from that
 /// start came out with an enclosure of `15`. Here `−(n·w)(u·w)` is
 /// `2⁻⁵²·0.38`, proved by `u·w` alone, and `n·(w × s)` is `2√1.75`, so the two
-/// are in order (Q1818). The union is refused later, walking that ellipse
-/// (`a_square_bar_standing_on_an_edge_along_y_is_refused_walking_its_long_ellipse`
+/// are in order (Q1818). The union answers now, walking that ellipse
+/// (`a_square_bar_standing_on_an_edge_along_y_unites_with_the_bar`
 /// in `two_bars_on_one_pipe_and_a_box_united_in_one_call.rs`).
 fn turned_as_far_apart_up_the_axis(
     flat: &Plane,

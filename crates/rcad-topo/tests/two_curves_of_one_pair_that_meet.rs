@@ -282,8 +282,9 @@ fn a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_f
 /// swallows the pipe through. The walk starts on the loop's top, where the
 /// seam crosses it, so the only other place on the loop that anything is cut
 /// is the bottom, and the start comes first by its name. Where neither place
-/// is the start, `rcad-geom` is asked which way the loop runs and refuses by
-/// name (`a_ball_driven_into_the_bar_is_refused_ordering_the_loop_they_cross_in`
+/// is the start, `rcad-geom` is asked which way the loop runs. Since Q1767 it
+/// answers, by how far round the line through the ball's centre square to the
+/// pipe's axis each place is (`a_ball_driven_into_the_bar_fuses_into_one_block`
 /// in `a_ball_and_a_bar_in_one_block.rs`).
 ///
 /// What they share is the ball inside the bar, [`ball_in_the_side_of_a_bar`].

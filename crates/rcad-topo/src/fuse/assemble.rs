@@ -2602,10 +2602,9 @@ impl Assembly {
     ///   the rule itself, [`a_closed_crossing_is_walked_the_way_it_is_stored`],
     ///   along the crossing the edge was cut as. Both fuses built to reach
     ///   this branch, in
-    ///   `two_bars_on_one_pipe_written_twice_with_a_pin_in_one_are_refused_where_one_spelling_unites`,
-    ///   are refused before it (§231.5), so only the edges built by hand in
-    ///   `a_circle_the_joined_spelling_names_instead_of_a_thin_pipe_is_turned_round`
-    ///   run it.
+    ///   `two_bars_on_one_pipe_written_twice_with_a_pin_in_one_unite_as_one_spelling_does`,
+    ///   now reach it and run it (§231.5), alongside the edges built by hand in
+    ///   `a_circle_the_joined_spelling_names_instead_of_a_thin_pipe_is_turned_round`.
     ///
     /// # Errors
     ///
@@ -8694,11 +8693,12 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 ///   `tests/two_curves_of_one_pair_that_meet.rs`).
 ///
 /// So on every loop `intersect` names, and on both circles a ball on the axis
-/// cuts, the cross product runs along the curve and never vanishes. No loop
-/// off the axis has been brought here between two corners: a plane through
-/// one is refused where it meets both curved surfaces
-/// (`a_plane_through_a_loop_off_an_axis_is_refused_where_it_meets_both_curved_surfaces`),
-/// so that half of the argument has no test that fails without it. A pipe
+/// cuts, the cross product runs along the curve and never vanishes. A loop off
+/// the axis is reached here between two corners too: the wall through the loop
+/// a ball off a bar's axis crosses it in puts two corners on it, and every
+/// rule answers
+/// (`a_wall_through_the_loop_a_ball_off_a_bars_axis_crosses_it_in_answers_every_rule`
+/// in `two_arcs_where_two_curved_surfaces_cross.rs`). A pipe
 /// written with its axis turned round or slid along has the same gradient,
 /// and a ball has one spelling, so the two are named either way round and
 /// nothing is turned round for how a face spells them.
