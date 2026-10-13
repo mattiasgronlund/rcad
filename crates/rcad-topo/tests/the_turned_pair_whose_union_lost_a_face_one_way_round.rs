@@ -26,27 +26,35 @@
 //! ring that repeats a corner. **§151 fixed that** — `fuses_that_must_agree`
 //! takes the smallest rotation now, and its own test holds the rule.
 //!
-//! # The union is not a solid now, either way round
+//! # The union is one solid touching itself along an edge
 //!
 //! Upright, the comb's right tooth sits flat against the ell's front and its
 //! left tooth meets the ell along one edge only, from the origin to
-//! `(0, 0, 1)`. So the union is `ResultIsNotManifold { count: 4 }` both ways
-//! round, which §80.9 leaves refused. Turned, the union used to answer, with
-//! the ring through the origin twice. It has been refused the same way as the
-//! upright pair, both ways round, since an input corner with exactly three
-//! planes round it is named by those planes and put where they put it
-//! (`docs/decisions.md` §351.6). The intersection still answers, the same
-//! solid both ways round.
+//! `(0, 0, 1)`, the ell on one side of that line and the tooth on the other.
+//! That line is an edge of both, with four faces along it, and the union was
+//! refused there, `ResultIsNotManifold { count: 4 }` both ways round, as a
+//! line §80.9 leaves refused. Turned, the union used to answer, with the ring
+//! through the origin twice, and it was refused the same way as the upright
+//! pair since an input corner with exactly three planes round it is named by
+//! those planes and put where they put it (`docs/decisions.md` §351.6).
+//!
+//! But the two sides of the line are one solid, joined through the right
+//! tooth, and since queue row Q1913 that is an answer (§39.4): one solid of
+//! `3 + 9 = 12`, one shell of 14 faces, upright and turned, the two orders
+//! the same bit for bit. Its top's ring goes through `(0, 0, 1)` twice and its
+//! bottom's through the origin twice, so the ring §126.5 tripped over is back
+//! in this pair's union. The intersection still answers, the same solid both
+//! ways round.
 //!
 //! # A ring through one corner twice, from another pair
 //!
-//! With this pair's union gone, the ring that repeats a corner comes from an
-//! ell and a frame, and it is not something a turn makes. The ell is five by
-//! four with a three-by-one bite, three high; the frame is four by four, one
-//! high, at `(-3, -3, 0)`. The ell covers the frame's far corner, where two of
-//! its walls meet, so the frame's top face is left a C whose two ends touch at
-//! `(0, 0, 1)`, a corner of its hole. That face's ring goes through
-//! `(0, 0, 1)` twice upright, and through where the turn puts it when turned.
+//! An ell and a frame make such a ring too, and it is not something a turn
+//! makes. The ell is five by four with a three-by-one bite, three high; the
+//! frame is four by four, one high, at `(-3, -3, 0)`. The ell covers the
+//! frame's far corner, where two of its walls meet, so the frame's top face is
+//! left a C whose two ends touch at `(0, 0, 1)`, a corner of its hole. That
+//! face's ring goes through `(0, 0, 1)` twice upright, and through where the
+//! turn puts it when turned.
 //!
 //! §151.5 called §149's pair the only ring with a repeated corner anyone had
 //! produced. The suite's lattice, turned and skew families all draw them,
@@ -56,25 +64,53 @@
 mod cones;
 mod pairs;
 
+use rcad_geom::Deflection;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
 use pairs::{Configuration, Elsewhere, Placed, Shape, Skew, Turn};
 
-/// The turned union is refused as the upright one is: the comb's left tooth
-/// meets the ell along one edge, which then has four faces along it.
+/// The union is one solid of `3 + 9 = 12`, with one shell of 14 faces, upright
+/// and turned, and the two orders give it bit for bit.
+///
+/// The ell has 8 faces and the comb 10. The comb's right tooth sits flat against
+/// the ell's front, so the tooth's top goes inside, which leaves 17. The comb's
+/// wall `x = 2` and the ell's run on from each other, and so do their tops and
+/// their bottoms, and each of those three pairs is one face, which leaves 14.
+/// The left tooth touches the ell along `x = 0, y = 0` only, the ell on one
+/// side of that line and the tooth on the other, so the top's ring goes
+/// through `(0, 0, 1)` twice and the bottom's through the origin twice.
+///
+/// Turned, the corners are rounded, so what the solid holds is 12 only to
+/// within that rounding: about `10^-14` off either way round.
 #[test]
-fn an_ell_and_a_comb_unite_to_no_solid_either_way_round_turned_or_not() {
+fn an_ell_and_a_comb_unite_to_one_solid_touching_itself_along_an_edge_turned_or_not() {
     for turn in [None, Some(half_a_turn())] {
-        let (model, keys) = the_pair_that_disagreed(turn).build();
+        let pair = the_pair_that_disagreed(turn);
+        let union = both_ways_round_agree(&pair, Rule::Union);
+        assert_eq!(
+            union.iter().map(Vec::len).collect::<Vec<_>>(),
+            [14],
+            "turned {}: the faces of each solid of the union",
+            turn.is_some()
+        );
+        assert!(
+            a_ring_visits_one_corner_twice(&union),
+            "turned {}: no ring of the union goes through a corner twice, so the \
+             line the ell and the comb touch along is no longer in it",
+            turn.is_some()
+        );
+
+        let rounding = if turn.is_some() { 1e-12 } else { 0.0 };
+        let (model, keys) = pair.build();
         for (one, other) in [(keys[0], keys[1]), (keys[1], keys[0])] {
-            let refused = fused(&model, &[one], &[other], Rule::Union);
+            let (shells, volume) =
+                shells_and_volume_of_the_one_solid_of_the_union(&model, one, other);
+            assert_eq!(shells, 1, "turned {}: the union's shells", turn.is_some());
             assert!(
-                matches!(refused, Err(Error::ResultIsNotManifold { count: 4 })),
-                "turned {}: the ell and the comb touch along an edge, and their \
-                 union came back {:?}",
-                turn.is_some(),
-                refused.map(|answer| answer.len()),
+                (volume - 12.0).abs() <= rounding,
+                "turned {}: the union holds {volume}, not 12",
+                turn.is_some()
             );
         }
     }
@@ -145,6 +181,42 @@ fn where_they_part(forwards: &[Vec<Face>], backwards: &[Vec<Face>]) -> String {
         }
     }
     "no face in common position differs, so the counts do".to_owned()
+}
+
+/// Unite a copy of `model`, check the answer is one solid that validates, and
+/// say how many shells it has and what it holds.
+fn shells_and_volume_of_the_one_solid_of_the_union(
+    model: &Model,
+    arguments: SolidKey,
+    tools: SolidKey,
+) -> (usize, f64) {
+    let mut model = model.clone();
+    let solids = model
+        .fuse(
+            &[arguments],
+            &[tools],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|refusal| panic!("the union refused: {refusal:?}"))
+        .solids()
+        .to_vec();
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a fuse's answer validates");
+    let [solid] = solids[..] else {
+        panic!("the union is {} solids, not one", solids.len());
+    };
+    let solid = model.solid(solid).expect("this model made the key");
+    let measure = solid
+        .measure(
+            Deflection::of(0.1).expect("a tenth of a millimetre is a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a flat solid this size measures");
+    (solid.shells().count(), measure.volume())
 }
 
 /// The turn the pair that disagreed was drawn with.
