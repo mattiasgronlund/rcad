@@ -431,3 +431,86 @@ fn a_cube(model: &mut Model) -> SolidKey {
         .add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube")
 }
+
+#[test]
+fn probe_q1711() {
+    let all: Vec<[f64; 4]> = TILTS
+        .iter()
+        .chain(&TILTS_THE_UNION_WAS_REFUSED_AT)
+        .chain(&TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT)
+        .chain(&TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT)
+        .copied()
+        .collect();
+    let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
+    let further = 2.0_f64.powi(-30);
+    for tilt in all {
+        let share = what_the_two_share(tilt);
+        for (rule, order, worked) in [
+            (Rule::Union, Order::BlockFirst, 2000.0 - share),
+            (Rule::Union, Order::TippedFirst, 2000.0 - share),
+            (Rule::Intersection, Order::BlockFirst, share),
+            (Rule::Intersection, Order::TippedFirst, share),
+            (Rule::Difference, Order::BlockFirst, 1000.0 - share),
+            (Rule::Difference, Order::TippedFirst, 1000.0 - share),
+        ] {
+            let mut out = Vec::new();
+            for dz in [0.0, further, -further] {
+                let mut model = a_model();
+                let block = a_cube(&mut model);
+                let tipped = a_cube(&mut model);
+                let placement = Isometry::try_from(([5.0, 5.0, dz], tilt)).expect("a placement");
+                model.place_solid(tipped, &placement).expect("a placement");
+                let (one, other) = match order {
+                    Order::BlockFirst => (block, tipped),
+                    Order::TippedFirst => (tipped, block),
+                };
+                let mut log = ProvenanceLog::new();
+                match model.fuse(&[one], &[other], rule, &tolerant(), &mut log) {
+                    Ok(answer) => {
+                        let volumes: Vec<f64> = answer
+                            .solids()
+                            .iter()
+                            .map(|&solid| {
+                                model
+                                    .solid(solid)
+                                    .unwrap()
+                                    .measure(
+                                        Deflection::of(0.1).unwrap(),
+                                        &Policy::certified(),
+                                        &mut ProvenanceLog::new(),
+                                    )
+                                    .unwrap()
+                                    .volume()
+                            })
+                            .collect();
+                        let folds: Vec<_> = log
+                            .records()
+                            .iter()
+                            .filter(|record| {
+                                record.predicate()
+                                    == "two meets of one plane beside an edge taken as its end"
+                            })
+                            .collect();
+                        let off: Vec<f64> = volumes.iter().map(|v| v - worked).collect();
+                        out.push(format!(
+                            "dz {dz:e}: {} solids {volumes:?} off {off:?} (allowed {allowed:e}) folds {} records {}",
+                            volumes.len(),
+                            folds.len(),
+                            log.records().len()
+                        ));
+                        if dz == 0.0 {
+                            for fold in folds {
+                                out.push(format!("    fold {:?}", fold.inputs()));
+                            }
+                        }
+                    }
+                    Err(why) => out.push(format!("dz {dz:e}: refused {why}")),
+                }
+            }
+            println!("t {:.4} {rule:?} {order:?}", tilt[2].asin() * 2.0 / 2.0);
+            for line in out {
+                println!("  {line}");
+            }
+        }
+    }
+}
