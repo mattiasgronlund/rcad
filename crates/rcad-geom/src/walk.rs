@@ -1089,7 +1089,7 @@ fn follow_the_quartic(
     let surfaces = [&pair[0], &pair[1]];
     let seed = the_seed_this_run_is_picked_up_at(run, &pair, seeds, held_apart_by, policy, log)?;
     if let Some(ends) = the_two_corners_of_an_open_run(run) {
-        let reach = how_far_off_the_crossing_a_corner_can_be(ends, surfaces)?;
+        let reach = how_far_off_the_crossing_a_corner_can_be(ends, surfaces, held_apart_by)?;
         if reach > half_the_budget && !policy.wobble_is_acceptable(reach) {
             return Err(Error::CannotPlaceAPointThatCloseToACrossing {
                 asked: deflection.length(),
@@ -1144,19 +1144,36 @@ fn follow_the_quartic(
 /// so a corner that cannot be settled at all is refused that way at every
 /// deflection, and not only at the deflections the other corner fits.
 ///
+/// **And bounded with the two surfaces' bend counted**
+/// ([`settled_with_a_bound_where_they_bend`]), since a corner is where a run
+/// can end on a crossing that turns back on itself: the relays' pin end cut at
+/// `#2404` and across from it has both corners where the two strands of its
+/// thin loop meet, and the ball and the pipe lean `7.6e-13` apart there. The
+/// flat bound put each corner a few roundings off the crossing, and the march
+/// then crossed the half of the rim where the two do not cross at all
+/// (`both_halves_of_a_rim_where_a_ball_and_a_pipe_off_its_centre_turn_tangent_are_refused`,
+/// Q1889). Once a run is walked its corners are placed among the points by
+/// the flat bound ([`where_on_the_crossing_this_corner_can_be`]), which this
+/// has just shown to be within a factor of two of one that holds.
+///
 /// # Errors
 ///
-/// What [`settled_with_a_bound`] refuses:
+/// What [`settled_with_a_bound_where_they_bend`] refuses:
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] at a corner where
-/// the two surfaces are tangent, and [`Error::CannotWorkOutHowBigACrossingIs`]
-/// when settling one lands somewhere that is not a point.
+/// the two surfaces are tangent, or too nearly so for their bend to leave a
+/// bound, and [`Error::CannotWorkOutHowBigACrossingIs`] when settling one lands
+/// somewhere that is not a point.
 fn how_far_off_the_crossing_a_corner_can_be(
     ends: [PredicatePoint; 2],
     surfaces: [&Surface; 2],
+    held_apart_by: TwoLoopsHeldApartBy,
 ) -> Result<f64> {
+    let radii = held_apart_by.the_two_radii();
     let mut furthest = 0.0_f64;
     for end in ends {
-        furthest = furthest.max(how_far_off_the_crossing_this_corner_can_be(end, surfaces)?);
+        furthest = furthest.max(how_far_off_the_crossing_this_corner_can_be(end, |at| {
+            settled_with_a_bound_where_they_bend(surfaces, at, radii)
+        })?);
     }
     Ok(furthest)
 }
@@ -1199,7 +1216,9 @@ fn where_on_the_crossing_this_corner_can_be(
     corner: PredicatePoint,
     surfaces: [&Surface; 2],
 ) -> Result<PredicatePoint> {
-    let reach = match how_far_off_the_crossing_this_corner_can_be(corner, surfaces) {
+    let reach = match how_far_off_the_crossing_this_corner_can_be(corner, |at| {
+        settled_with_a_bound(surfaces, at)
+    }) {
         Ok(reach) => reach,
         Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent { .. }) => return Ok(corner),
         Err(other) => return Err(other),
@@ -1210,17 +1229,18 @@ fn where_on_the_crossing_this_corner_can_be(
 
 /// How far off the crossing a corner can be: how far its middle moves settling
 /// onto both surfaces, plus the bound on how far off the crossing it still is
-/// once settled, plus half the diagonal of its box.
+/// once settled, plus half the diagonal of its box. `settle` is what settles
+/// it and bounds it.
 ///
 /// # Errors
 ///
-/// What [`settled_with_a_bound`] refuses.
+/// What `settle` refuses.
 fn how_far_off_the_crossing_this_corner_can_be(
     corner: PredicatePoint,
-    surfaces: [&Surface; 2],
+    settle: impl FnOnce(Point) -> Result<(Point, f64)>,
 ) -> Result<f64> {
     let at = Point::from(corner.enclosure().map(middle_of));
-    let (settled, off) = settled_with_a_bound(surfaces, at)?;
+    let (settled, off) = settle(at)?;
     let [x, y, z] = corner.enclosure().map(|side| side.hi() - side.lo());
     let half_the_box = Vector::new(x, y, z).length() / 2.0;
     Ok((settled - at).length() + off + half_the_box)

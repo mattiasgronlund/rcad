@@ -240,6 +240,86 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
     Ok((settled, off))
 }
 
+/// `seed` settled onto both surfaces, with an upper bound on how far off the
+/// crossing it still is that holds however the two surfaces bend, so long as
+/// neither bends tighter than a ball of the smaller of `radii`.
+///
+/// # Why the bound [`settled_with_a_bound`] gives is not enough
+///
+/// [`how_far_off_the_crossing`]'s `(d₁ + d₂)/s` is the widest the region two
+/// slabs leave, so it takes both surfaces as flat over its own reach. A surface
+/// of radius `r` turns its normal by `ρ/r` over a reach of `ρ`, so where the
+/// sine `s` is small the two normals can turn parallel inside the reach, and
+/// the crossing the bound promises need not be there at all. Measured on the
+/// Fujitsu relays' pin end (§335.5): a ball of radius `0.1` and a pipe of the
+/// same radius whose axis misses the ball's centre by `7.6e-14` cross only on
+/// one half of the rim, and on the other half they are within `1e-13` of each
+/// other and lean about `1e-7` apart. The march crossed that half, and the
+/// flat bound put its points within `7.9e-7` of the crossing. They were `0.044`
+/// to `0.1` from it, each certified outside the ball (Q1889).
+///
+/// # The bound that bends
+///
+/// Kantorovich's theorem, for Newton on the two distances in the plane the two
+/// normals span at the settled point. There the Jacobian is the two unit
+/// normals, its inverse is at most `√2/s`, and Newton's first move is at most
+/// the flat bound `η`. Within `2η` of the point each unit normal turns by at
+/// most the distance moved over the radius left to it, `r − |d| − 2η`, with
+/// `|d|` the further of the two distances off, so the Jacobian changes by at
+/// most `L = Σ 1/(rᵢ − |d| − 2η)` per unit moved. Where `h = √2·L·η/s` is at
+/// most a half, a point on both surfaces lies within `2η/(1 + √(1 − 2h))` of
+/// the settled one, which is the flat bound to within a factor of two, and that
+/// is what comes back. Every step of it is enclosed, as the flat bound's are.
+///
+/// At the pin end's corners `s` is `7.6e-13`, where the two strands of the thin
+/// loop meet, and `h` comes out near `1e12`.
+///
+/// # Errors
+///
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when `h` is more
+/// than a half, or the radius left to either surface is not more than nothing:
+/// the two surfaces are too nearly parallel for their bend to leave any bound
+/// on how far off the crossing the point is. And what [`settled_with_a_bound`]
+/// refuses.
+pub(crate) fn settled_with_a_bound_where_they_bend(
+    surfaces: [&Surface; 2],
+    seed: Point,
+    radii: [f64; 2],
+) -> Result<(Point, f64)> {
+    let settled = settled(surfaces, seed)?;
+    let (flat, further_off, leaning) = the_flat_bound_and_what_it_is_made_of(surfaces, settled)?;
+    let cannot_bound = || {
+        gave_up(
+            surfaces,
+            WhereFollowingACrossingGaveUp::BoundingHowFarOffTheCrossingAPointIs,
+        )
+    };
+    let two = Interval::exactly(2.0);
+    let reach = two * flat;
+    let mut turning = Interval::exactly(0.0);
+    for radius in radii {
+        let left = Interval::exactly(radius) - further_off - reach;
+        if left.lo() <= 0.0 {
+            return Err(cannot_bound());
+        }
+        turning = turning + quotient_or_everything(Interval::exactly(1.0), left);
+    }
+    let how_near_newton_comes_to_failing =
+        quotient_or_everything(root_enclosing(two) * turning * flat, leaning);
+    if how_near_newton_comes_to_failing.hi() > 0.5 {
+        return Err(cannot_bound());
+    }
+    let bound = quotient_or_everything(
+        reach,
+        Interval::exactly(1.0)
+            + root_enclosing(Interval::exactly(1.0) - two * how_near_newton_comes_to_failing),
+    );
+    if !bound.hi().is_finite() {
+        return Err(cannot_bound());
+    }
+    Ok((settled, bound.hi()))
+}
+
 /// Whether the settled seed is still so far off one of the two surfaces that no
 /// point near it can be on both.
 ///
@@ -369,6 +449,20 @@ fn settled(surfaces: [&Surface; 2], from: Point) -> Result<Point> {
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when the sine
 /// cannot be told from zero, so no bound can be put on the distance at all.
 fn how_far_off_the_crossing(surfaces: [&Surface; 2], at: Point) -> Result<f64> {
+    the_flat_bound_and_what_it_is_made_of(surfaces, at).map(|(reach, _, _)| reach.hi())
+}
+
+/// [`how_far_off_the_crossing`]'s bound as an enclosure, with the further of
+/// the two distances off the surfaces it is made of, and the sine the two lean
+/// apart at.
+///
+/// # Errors
+///
+/// The same as [`how_far_off_the_crossing`]'s.
+fn the_flat_bound_and_what_it_is_made_of(
+    surfaces: [&Surface; 2],
+    at: Point,
+) -> Result<(Interval, Interval, Interval)> {
     let [first, second] = surfaces.map(|surface| {
         let (off, way) = how_far_off_enclosing(surface, at);
         (furthest_from_zero(off), way)
@@ -388,7 +482,8 @@ fn how_far_off_the_crossing(surfaces: [&Surface; 2], at: Point) -> Result<f64> {
             WhereFollowingACrossingGaveUp::TheBoundOnHowFarOffIsBiggerThanAnyNumber,
         ));
     }
-    Ok(reach.hi())
+    let further_off = Interval::exactly(first.0.hi().max(second.0.hi()));
+    Ok((reach, further_off, leaning))
 }
 
 /// Which way the crossing runs at `at`: the two normals crossed together, scaled
